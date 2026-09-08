@@ -1,0 +1,12 @@
+# Google AI Studio writes transient files into this directory while
+# the preview is running (logs, scratch JSON, agent metadata, etc.).
+# They typically start with a leading dot, so we ignore them but
+# keep the folder itself under version control as a placeholder.
+#
+# This folder is intentionally separate from `public/assets/` (which
+# holds the real bundled app icons, screenshots, and sounds).
+# `aistudio/` is just a workspace scratch directory managed by
+# AI Studio's preview runtime.
+.*
+!.gitignore
+!.gitkeep

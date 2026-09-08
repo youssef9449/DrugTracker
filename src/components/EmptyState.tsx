@@ -45,7 +45,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
           <CheckCircle2 className="w-8 h-8" />
         </div>
         <h3 className="text-base font-bold text-emerald-950">
-          رائع! لا توجد أدوية قاربت على النفاد
+          رائع! لا توجد أدوية قاربت على النفاذ
         </h3>
         <p className="text-xs text-emerald-700 mt-1.5 max-w-xs leading-relaxed">
           كافة أدويتك الحالية تتوفر بكميات آمنة وكافية لأكثر من أسبوع بناءً على معدل استهلاكك التلقائي.
@@ -81,7 +81,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
             onClick={() => onFilterChange('alerts')}
             className="mt-4 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-xs"
           >
-            <span>مراجعة الأدوية التي قاربت على النفاد</span>
+            <span>مراجعة الأدوية التي قاربت على النفاذ</span>
             <ArrowRight className="w-3.5 h-3.5 rotate-180" />
           </button>
         )}
@@ -97,7 +97,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
       </div>
       <h3 className="text-base font-bold text-slate-800">لا توجد أدوية مسجلة حالياً</h3>
       <p className="text-xs text-slate-500 mt-1 max-w-xs leading-relaxed">
-        أضف أدويتك اليومية مع عدد الحبوب ومعدل استهلاكك لنقوم بحساب وقت النفاد وتنبيهك تلقائياً بمرور الأيام.
+        أضف أدويتك اليومية مع عدد الحبوب ومعدل استهلاكك لنقوم بحساب وقت النفاذ وتنبيهك تلقائياً بمرور الأيام.
       </p>
       <button
         onClick={onOpenAddModal}

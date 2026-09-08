@@ -49,8 +49,17 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
   const [category, setCategory] = useState('');
   const [notes, setNotes] = useState('');
   const [colorTag, setColorTag] = useState('teal');
-  const [stripsPerBox, setStripsPerBox] = useState<number>(3);
-  const [pillsPerStrip, setPillsPerStrip] = useState<number>(10);
+  // Strips-per-box and pills-per-strip use a STRING state for the
+  // same reason as dailyDose — so the user can clear the field and
+  // type a fresh value (the previous `parseInt(...) || 1` fallback
+  // made it impossible to clear, just like the daily dose bug).
+  // The handlers parse + Math.max(1, ...) the value before
+  // computing packageSize, so an empty field is treated as 1 (the
+  // minimum valid strip/pill count).
+  const [stripsPerBox, setStripsPerBox] = useState<string>('3');
+  const [pillsPerStrip, setPillsPerStrip] = useState<string>('10');
+  // packageSize is derived from stripsPerBox * pillsPerStrip, kept as
+  // number state because it's used in validation + display only.
   const [packageSize, setPackageSize] = useState<number>(30);
   const [showStockHelper, setShowStockHelper] = useState(false);
   const [helperBoxes, setHelperBoxes] = useState<number>(1);
@@ -79,8 +88,8 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
       setColorTag(initialData.colorTag || 'teal');
       const sBox = initialData.stripsPerBox || 3;
       const pStrip = initialData.pillsPerStrip || 10;
-      setStripsPerBox(sBox);
-      setPillsPerStrip(pStrip);
+      setStripsPerBox(String(sBox));
+      setPillsPerStrip(String(pStrip));
       setPackageSize(initialData.packageSize || sBox * pStrip);
       setReminderEnabled(Boolean(initialData.reminderEnabled));
       setReminderTime(initialData.reminderTime || '09:00');
@@ -96,8 +105,8 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
       setCategory('');
       setNotes('');
       setColorTag('teal');
-      setStripsPerBox(3);
-      setPillsPerStrip(10);
+      setStripsPerBox('3');
+      setPillsPerStrip('10');
       setPackageSize(30);
       setHelperBoxes(1);
       setHelperStrips(0);
@@ -115,21 +124,30 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleStripsChange = (newStrips: number) => {
-    const s = Math.max(1, newStrips);
-    setStripsPerBox(s);
-    setPackageSize(s * pillsPerStrip);
+  // Handle strips-per-box change. The input value comes in as a raw
+  // string (per the onChange handler); we parse it to a number with a
+  // Math.max(1, ...) clamp so the package size is always computed
+  // from a valid strip count even when the user has temporarily
+  // cleared the field.
+  const handleStripsChange = (rawStrips: string) => {
+    setStripsPerBox(rawStrips);
+    const s = Math.max(1, parseInt(rawStrips, 10) || 1);
+    const p = Math.max(1, parseInt(pillsPerStrip, 10) || 1);
+    setPackageSize(s * p);
   };
 
-  const handlePillsPerStripChange = (newPills: number) => {
-    const p = Math.max(1, newPills);
-    setPillsPerStrip(p);
-    setPackageSize(stripsPerBox * p);
+  const handlePillsPerStripChange = (rawPills: string) => {
+    setPillsPerStrip(rawPills);
+    const s = Math.max(1, parseInt(stripsPerBox, 10) || 1);
+    const p = Math.max(1, parseInt(rawPills, 10) || 1);
+    setPackageSize(s * p);
   };
 
   const applyStockHelper = () => {
-    const boxSize = stripsPerBox * pillsPerStrip;
-    const computed = helperBoxes * boxSize + helperStrips * pillsPerStrip + helperLoose;
+    const sBox = Math.max(1, parseInt(stripsPerBox, 10) || 1);
+    const pStrip = Math.max(1, parseInt(pillsPerStrip, 10) || 1);
+    const boxSize = sBox * pStrip;
+    const computed = helperBoxes * boxSize + helperStrips * pStrip + helperLoose;
     setCurrentPills(Math.max(0, computed));
     setShowStockHelper(false);
   };
@@ -206,8 +224,9 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
       return;
     }
 
-    const calculatedPkgSize =
-      stripsPerBox > 0 && pillsPerStrip > 0 ? stripsPerBox * pillsPerStrip : Number(packageSize) || 30;
+    const sBoxNum = Math.max(1, parseInt(stripsPerBox, 10) || 1);
+    const pStripNum = Math.max(1, parseInt(pillsPerStrip, 10) || 1);
+    const calculatedPkgSize = sBoxNum * pStripNum;
 
     onSave(
       {
@@ -221,8 +240,8 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
         colorTag,
         lastSyncDate: initialData?.lastSyncDate || getTodayDateString(),
         autoDeductEnabled: initialData?.autoDeductEnabled ?? true,
-        stripsPerBox: Number(stripsPerBox) || 3,
-        pillsPerStrip: Number(pillsPerStrip) || 10,
+        stripsPerBox: sBoxNum,
+        pillsPerStrip: pStripNum,
         packageSize: calculatedPkgSize,
         reminderEnabled,
         reminderTime: reminderEnabled ? reminderTime : undefined,
@@ -335,9 +354,9 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
                 <Calculator className="w-3 h-3 text-teal-600" />
                 <span>{showStockHelper ? 'إخفاء حاسبة الأشرطة' : 'احسب من العلب والأشرطة المتوفرة'}</span>
               </button>
-              {describeStockInStrips(currentPills, pillsPerStrip, stripsPerBox, unit) && (
+              {describeStockInStrips(currentPills, parseInt(pillsPerStrip, 10) || 10, parseInt(stripsPerBox, 10) || 3, unit) && (
                 <span className="text-[11px] text-teal-800 font-medium bg-teal-50 px-2 py-0.5 rounded-md border border-teal-200/60">
-                  يعادل: {describeStockInStrips(currentPills, pillsPerStrip, stripsPerBox, unit)}
+                  يعادل: {describeStockInStrips(currentPills, parseInt(pillsPerStrip, 10) || 10, parseInt(stripsPerBox, 10) || 3, unit)}
                 </span>
               )}
             </div>
@@ -381,7 +400,11 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
                 </div>
                 <div className="flex items-center justify-between pt-1">
                   <span className="text-[11px] text-teal-900 font-mono">
-                    المجموع = {helperBoxes * (stripsPerBox * pillsPerStrip) + helperStrips * pillsPerStrip + helperLoose} {unit}
+                    المجموع = {(() => {
+                      const s = Math.max(1, parseInt(stripsPerBox, 10) || 1);
+                      const p = Math.max(1, parseInt(pillsPerStrip, 10) || 1);
+                      return helperBoxes * (s * p) + helperStrips * p + helperLoose;
+                    })()} {unit}
                   </span>
                   <button
                     type="button"
@@ -412,8 +435,16 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
                   type="number"
                   min="1"
                   max="50"
+                  inputMode="numeric"
+                  // Use string state + step="any" so the user can clear
+                  // the field and type a fresh value (no fallback
+                  // that re-populates the field with "1" when cleared).
+                  // Validation + Math.max(1, ...) is done in the
+                  // handler.
+                  step="any"
                   value={stripsPerBox}
-                  onChange={(e) => handleStripsChange(parseInt(e.target.value) || 1)}
+                  onChange={(e) => handleStripsChange(e.target.value)}
+                  placeholder="مثال: 3"
                   className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
                 />
               </div>
@@ -423,8 +454,11 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
                   type="number"
                   min="1"
                   max="100"
+                  inputMode="numeric"
+                  step="any"
                   value={pillsPerStrip}
-                  onChange={(e) => handlePillsPerStripChange(parseInt(e.target.value) || 1)}
+                  onChange={(e) => handlePillsPerStripChange(e.target.value)}
+                  placeholder="مثال: 10"
                   className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
                 />
               </div>
@@ -437,7 +471,7 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
               <span className="font-bold text-teal-900 font-mono">
                 {packageSize} {unit}{' '}
                 <span className="text-[10px] text-slate-500 font-normal">
-                  ({stripsPerBox} أشرطة × {pillsPerStrip} {unit})
+                  ({stripsPerBox || '—'} أشرطة × {pillsPerStrip || '—'} {unit})
                 </span>
               </span>
             </div>
@@ -472,7 +506,7 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">التنبيه قبل النفاد بـ</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">التنبيه قبل النفاذ بـ</label>
               <input
                 type="number"
                 min="1"

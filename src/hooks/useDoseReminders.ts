@@ -110,7 +110,8 @@ export function useDoseReminders({
         med.dailyDose,
         med.unit,
         med.currentPills,
-        med.reminderTime
+        med.reminderTime,
+        med.customSoundFile
       );
     }
   };

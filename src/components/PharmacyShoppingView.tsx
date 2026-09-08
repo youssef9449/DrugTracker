@@ -110,7 +110,12 @@ export const PharmacyShoppingView: React.FC<PharmacyShoppingViewProps> = ({
         };
       });
     if (itemsToOrder.length === 0) return '';
-    return generatePharmacyOrderMessage(itemsToOrder, settings.customerCode || '14739');
+    return generatePharmacyOrderMessage(
+      itemsToOrder,
+      settings.customerCode || '14739',
+      settings.address,
+      settings.contactPhone
+    );
   };
 
   const handleSendToWhatsApp = () => {

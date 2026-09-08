@@ -45,7 +45,9 @@ export interface OrderItem {
 
 export function generatePharmacyOrderMessage(
   items: OrderItem[],
-  customerCode: string = '14739'
+  customerCode: string = '14739',
+  address?: string,
+  contactPhone?: string
 ): string {
   if (items.length === 0) return '';
 
@@ -70,6 +72,16 @@ export function generatePharmacyOrderMessage(
 
   const code = (customerCode || '14739').trim();
   text += `\nرقم العميل ${code}`;
+
+  // Append address if provided
+  if (address && address.trim()) {
+    text += `\nالعنوان: ${address.trim()}`;
+  }
+
+  // Append contact phone if provided
+  if (contactPhone && contactPhone.trim()) {
+    text += `\nرقم التواصل: ${contactPhone.trim()}`;
+  }
 
   return text;
 }
@@ -107,10 +119,22 @@ export interface CalculatedOrderQuantity {
 }
 
 /**
- * Calculates medication order quantity according to coverage duration (1 month / 30 days vs 2 months / 60 days).
- * - For 30 days (1 month): uses base monthly package / consumption.
- * - For 60 days (2 months): doubles the quantity (x2).
- * - Custom quantities are treated as 1-month base and properly scaled when switching to 2 months.
+ * Calculates medication order quantity according to coverage duration
+ * (1 month / 30 days vs 2 months / 60 days).
+ *
+ * Key insight: the returned `quantity` is the exact number of PILLS
+ * needed (not rounded up to whole boxes). The caller then passes
+ * this quantity to `describeOrderInBoxes()` which breaks it down
+ * into "X boxes + Y strips + Z loose pills" — so the pharmacy order
+ * reads naturally: "علبة واحدة و شريط (30 قرص)" instead of
+ * "علبتان (40 قرص)" when the user only needs 30.
+ *
+ * - If the user set a custom quantity: use that (×2 for 60 days).
+ * - If dailyDose > 0 and monthly consumption exceeds one package:
+ *   order the exact pill count (e.g., 30 pills for 1/day × 30 days).
+ * - If dailyDose > 0 but monthly consumption fits in one package:
+ *   order one full package (the user doesn't need a partial strip).
+ * - If dailyDose is 0 or unset: order one package.
  */
 export function calculateMedicationOrderQuantity(
   med: Medication,
@@ -141,16 +165,23 @@ export function calculateMedicationOrderQuantity(
   }
 
   // 2. Automatic baseline calculation for 1 month (30 days):
-  let baseMonthlyQuantity = packSize;
+  let baseMonthlyQuantity: number;
   if (med.dailyDose > 0) {
-    const monthlyConsumption = med.dailyDose * 30;
-    // If daily dose requires more than 1 package per month:
-    if (monthlyConsumption > packSize * 1.2) {
-      const packsNeeded = Math.ceil(monthlyConsumption / packSize);
-      baseMonthlyQuantity = packsNeeded * packSize;
+    const monthlyConsumption = Math.ceil(med.dailyDose * 30);
+    if (monthlyConsumption > packSize) {
+      // Need more than 1 package — order the EXACT number of pills.
+      // describeOrderInBoxes will break it down into
+      // "X boxes + Y strips + Z loose pills" so the pharmacy can
+      // fulfil the order precisely (e.g., 30 pills = 1 box + 1 strip
+      // when the box holds 20).
+      baseMonthlyQuantity = monthlyConsumption;
     } else {
+      // Need less than 1 package — just order 1 full package.
       baseMonthlyQuantity = packSize;
     }
+  } else {
+    // No daily dose specified — order 1 package.
+    baseMonthlyQuantity = packSize;
   }
 
   return {

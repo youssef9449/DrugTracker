@@ -1,6 +1,9 @@
-import {StrictMode} from 'react';
-import {createRoot} from 'react-dom/client';
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
+// Tailwind CSS — must be imported here (entry point) so it applies globally.
+// The path is relative and explicit so Vite's import resolver finds it
+// unambiguously. See src/index.css for the @import "tailwindcss" source.
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(

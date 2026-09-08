@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Bell, Check, Clock, Volume2, X, AlertTriangle, Play, Sparkles } from 'lucide-react';
+import { Bell, Check, Clock, Volume2, X } from 'lucide-react';
 import { Medication, formatTimeArabic } from '../types';
 import { NOTIFICATION_SOUND_OPTIONS, playNotificationSound } from '../utils/sound';
 
@@ -20,7 +20,6 @@ export const DoseAlarmModal: React.FC<DoseAlarmModalProps> = ({
 }) => {
   useEffect(() => {
     if (isOpen && medication) {
-      // Re-trigger sound when modal opens if needed
       playNotificationSound(medication.notificationSound || 'classic_chime');
     }
   }, [isOpen, medication]);
@@ -32,12 +31,11 @@ export const DoseAlarmModal: React.FC<DoseAlarmModalProps> = ({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
       <div
-        className="w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden border border-teal-200 animate-in zoom-in-95 duration-200"
+        className="w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden border border-teal-200"
         dir="rtl"
       >
-        {/* Top Highlight Banner */}
         <div className="bg-gradient-to-r from-teal-700 via-teal-800 to-emerald-800 p-5 text-white text-center relative overflow-hidden">
           <div className="absolute top-2 left-2">
             <button
@@ -49,7 +47,7 @@ export const DoseAlarmModal: React.FC<DoseAlarmModalProps> = ({
             </button>
           </div>
 
-          <div className="w-16 h-16 rounded-2xl bg-white/10 backdrop-blur-sm border border-white/20 mx-auto flex items-center justify-center shadow-lg mb-3 animate-bounce">
+          <div className="w-16 h-16 rounded-2xl bg-white/10 border border-white/20 mx-auto flex items-center justify-center shadow-lg mb-3 animate-bounce">
             <Bell className="w-8 h-8 text-amber-300" />
           </div>
 
@@ -62,18 +60,13 @@ export const DoseAlarmModal: React.FC<DoseAlarmModalProps> = ({
             </span>
           </span>
 
-          <h3 className="text-xl font-black tracking-tight text-white mt-1">
-            حان الآن موعد الدواء!
-          </h3>
+          <h3 className="text-xl font-black tracking-tight text-white mt-1">حان الآن موعد الدواء!</h3>
         </div>
 
-        {/* Medication Details Card */}
         <div className="p-5 space-y-4">
           <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center space-y-1.5">
             <div className="text-xs font-bold text-slate-500">اسم الدواء</div>
-            <div className="text-lg font-black text-slate-900 leading-tight">
-              {medication.name}
-            </div>
+            <div className="text-lg font-black text-slate-900 leading-tight">{medication.name}</div>
 
             <div className="inline-flex items-center gap-1.5 bg-teal-100/80 text-teal-900 border border-teal-200 px-3 py-1 rounded-xl text-sm font-extrabold mt-1">
               <span>الجرعة المطلوبة:</span>
@@ -86,24 +79,19 @@ export const DoseAlarmModal: React.FC<DoseAlarmModalProps> = ({
             </div>
           </div>
 
-          {/* Sound Info & Replay */}
           <div className="flex items-center justify-between p-2.5 bg-amber-50/60 border border-amber-200/80 rounded-xl text-xs">
             <div className="flex items-center gap-2">
               <span className="text-lg">{currentSoundOption?.icon || '🔔'}</span>
               <div>
                 <span className="text-slate-600">نغمة التنبيه: </span>
-                <span className="font-bold text-amber-950">
-                  {currentSoundOption?.name || 'نغمة كلاسيكية'}
-                </span>
+                <span className="font-bold text-amber-950">{currentSoundOption?.name || 'نغمة كلاسيكية'}</span>
               </div>
             </div>
 
             <button
               type="button"
-              onClick={() =>
-                playNotificationSound(medication.notificationSound || 'classic_chime')
-              }
-              className="px-2.5 py-1 bg-white hover:bg-amber-100 border border-amber-300 rounded-lg text-xs font-bold text-amber-900 flex items-center gap-1 shadow-2xs active:scale-95 transition"
+              onClick={() => playNotificationSound(medication.notificationSound || 'classic_chime')}
+              className="px-2.5 py-1 bg-white hover:bg-amber-100 border border-amber-300 rounded-lg text-xs font-bold text-amber-900 flex items-center gap-1 shadow-xs active:scale-95 transition"
               title="إعادة الاستماع للنغمة"
             >
               <Volume2 className="w-3.5 h-3.5 text-amber-700" />
@@ -111,7 +99,6 @@ export const DoseAlarmModal: React.FC<DoseAlarmModalProps> = ({
             </button>
           </div>
 
-          {/* Action Buttons */}
           <div className="space-y-2 pt-1">
             <button
               type="button"
@@ -119,7 +106,7 @@ export const DoseAlarmModal: React.FC<DoseAlarmModalProps> = ({
               className="w-full py-3 px-4 bg-teal-700 hover:bg-teal-800 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-sm transition active:scale-98"
             >
               <Check className="w-4 h-4" />
-              <span>تناولت الجرعة الآن (تسجيل وخصم)</span>
+              <span>تناولت الجرعة الآن</span>
             </button>
 
             <div className="grid grid-cols-2 gap-2">

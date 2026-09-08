@@ -46,20 +46,24 @@ export function sendMedicineAlert(medicineName: string, daysLeft: number, curren
 }
 
 /**
- * Sends a browser notification for a scheduled daily dose reminder
+ * Sends a browser notification for a scheduled daily dose reminder.
+ * If `reminderTime` is provided, the time is included in the notification body
+ * to remind the user of the exact scheduled time.
  */
 export function sendMedicationDoseReminder(
   medicineName: string,
   dailyDose: number,
   unit: string = 'قرص',
-  currentPills: number
+  currentPills: number,
+  reminderTime?: string
 ) {
   if (!('Notification' in window) || Notification.permission !== 'granted') {
     return;
   }
 
+  const timeHint = reminderTime ? ` الساعة ${reminderTime}` : '';
   const title = `⏰ حان موعد دواء: ${medicineName}`;
-  const bodyText = `جرعتك المقررة: ${dailyDose} ${unit}. (المخزون الحالي: ${currentPills} ${unit}). لا تنسَ تناول الدواء في وقته!`;
+  const bodyText = `موعد الجرعة${timeHint}. جرعتك المقررة: ${dailyDose} ${unit}. (المخزون الحالي: ${currentPills} ${unit}).`;
 
   const options: NotificationOptions = {
     body: bodyText,

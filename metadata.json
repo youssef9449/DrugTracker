@@ -1,6 +1,6 @@
 {
-  "name": "متابع الأدوية - Medication Tracker",
-  "description": "تطبيق بسيط لمتابعة مخزون الأدوية وتنبيهك عند اقتراب نفاد الحبوب بناءً على معدل الاستهلاك اليومي.",
+  "name": "النغنغة",
+  "description": "تطبيق لمتابعة مخزون الأدوية وتنبيهك عند اقتراب نفاد الحبوب بناءً على معدل الاستهلاك اليومي.",
   "requestFramePermissions": ["notifications"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -17,7 +17,6 @@ import {
   Layers,
   Bell,
   Volume2,
-  FileAudio,
 } from 'lucide-react';
 import { Medication, calculateMedicationStatus, describeStockInStrips, formatTimeArabic } from '../types';
 import { getDepletionDate } from '../utils/dateCalculations';

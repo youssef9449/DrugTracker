@@ -11,7 +11,6 @@ import {
 // See that file's header comment for the AI Studio cache-error
 // troubleshooting note.
 import { INITIAL_MEDICATIONS, INITIAL_LOGS } from './data/initialData';
-import { AndroidStatusBar } from './components/AndroidStatusBar';
 import { AndroidNavBar } from './components/AndroidNavBar';
 import { AndroidBottomNav, ActiveTab } from './components/AndroidBottomNav';
 import { AppHeader } from './components/AppHeader';
@@ -26,7 +25,13 @@ import { AndroidFab } from './components/AndroidFab';
 import { EmptyState } from './components/EmptyState';
 import { DoseAlarmModal } from './components/DoseAlarmModal';
 import { playSuccessChime, playAlertChime } from './utils/sound';
-import { requestNotificationPermission, sendMedicineAlert, openNotificationSettings } from './utils/notifications';
+import {
+  requestNotificationPermission,
+  sendMedicineAlert,
+  openNotificationSettings,
+  getNotificationPermission,
+  getNotificationPermissionSync,
+} from './utils/notifications';
 import { getTodayDateString, syncAutoDailyDeductions } from './utils/dateCalculations';
 import { useDoseReminders } from './hooks/useDoseReminders';
 import { initNativeBridge } from './native';
@@ -113,15 +118,24 @@ export default function App() {
     }
 
     try {
-      setSoundEnabled(localStorage.getItem(SOUND_KEY) !== 'false');
+    setSoundEnabled(localStorage.getItem(SOUND_KEY) !== 'false');
     } catch {
       // ignore
     }
 
+    // Initialize the in-app notifications flag from a SYNC snapshot
+    // of the current permission state. On web this is
+    // Notification.permission; on native (Capacitor), the permission
+    // state is async-only, so we default to 'default' and let the
+    // async getNotificationPermission() call below update it.
+    //
+    // Note: this is intentionally a sync snapshot — the React state
+    // needs to be set during the first render so the bell icon
+    // shows the correct initial state. A second pass below (the
+    // async getNotificationPermission) updates it once the native
+    // permission state is known.
     setNotificationsEnabled(
-      typeof window !== 'undefined' &&
-        'Notification' in window &&
-        Notification.permission === 'granted'
+      getNotificationPermissionSync() === 'granted'
     );
 
     // Initialize the Capacitor native bridge (status bar color, back
@@ -129,6 +143,17 @@ export default function App() {
     initNativeBridge().catch((err) => {
       console.warn('[App] Native bridge init failed:', err);
     });
+
+    // On native (Capacitor), get the real async permission state
+    // and update the in-app flag if it differs from the sync
+    // snapshot above.
+    getNotificationPermission()
+      .then((perm) => {
+        setNotificationsEnabled(perm === 'granted');
+      })
+      .catch((err) => {
+        console.warn('[App] getNotificationPermission failed:', err);
+      });
 
     // Auto-request notification permission on the FIRST app open
     // after install. The browser only shows the permission prompt
@@ -142,11 +167,12 @@ export default function App() {
     // spec because it ensures the prompt shows after the user has
     // had a chance to see the app's value (which is now true on
     // first open, since the user has just installed it).
-    if (
-      typeof window !== 'undefined' &&
-      'Notification' in window &&
-      Notification.permission === 'default'
-    ) {
+    //
+    // On Android 13+ (Capacitor), this triggers the OS
+    // POST_NOTIFICATIONS permission dialog via
+    // LocalNotifications.requestPermissions(). On older Android,
+    // this is a no-op (notifications allowed by default).
+    if (getNotificationPermissionSync() === 'default') {
       requestNotificationPermission()
         .then((granted) => {
           setNotificationsEnabled(granted);
@@ -355,10 +381,10 @@ export default function App() {
     if (!notificationsEnabled) {
       // Current state says "off" — but check the real permission
       // because the user may have re-enabled it via OS settings.
-      const currentPerm =
-        typeof window !== 'undefined' && 'Notification' in window
-          ? Notification.permission
-          : 'unsupported';
+      // Use the async getNotificationPermission() which works on
+      // both web (Notification.permission) and native (Capacitor
+      // LocalNotifications.checkPermissions()).
+      const currentPerm = await getNotificationPermission();
 
       if (currentPerm === 'granted') {
         // OS settings already allow it; just turn on the in-app
@@ -377,13 +403,15 @@ export default function App() {
         return;
       }
 
-      // currentPerm === 'default' — show the browser prompt.
+      // currentPerm === 'default' — show the prompt (browser
+      // Notification.requestPermission OR Capacitor
+      // LocalNotifications.requestPermissions on Android 13+).
       const granted = await requestNotificationPermission();
       setNotificationsEnabled(granted);
       showToast(
         granted
           ? 'تم تفعيل إشعارات الهاتف بنجاح'
-          : 'يرجى السماح بالإشعارات في إعدادات المتصفح'
+          : 'يرجى السماح بالإشعارات في إعدادات النظام'
       );
     } else {
       setNotificationsEnabled(false);
@@ -450,7 +478,15 @@ export default function App() {
             : 'max-w-4xl min-h-screen md:min-h-[90vh] md:rounded-3xl md:border md:border-slate-300 md:shadow-xl overflow-hidden'
         }`}
       >
-        <AndroidStatusBar />
+        {/* NOTE: AndroidStatusBar (a fake "time + wifi + battery" bar
+            that was previously rendered here) was removed because the
+            real OS status bar already shows that info on actual
+            Android devices — the in-app fake version was redundant
+            and ate vertical space. The Capacitor StatusBar plugin
+            (configured in capacitor.config.ts + initialized in
+            src/native.ts) sets the OS status bar color to teal-800
+            and overlays the WebView when running as an APK, so the
+            app's content starts directly under AppHeader. */}
         <AppHeader
           activeTab={activeTab}
           filter={filter}

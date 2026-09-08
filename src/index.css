@@ -1,1 +1,20 @@
+/*
+ * Global stylesheet for الننغنغ (Drug Tracker).
+ *
+ * Imports Tailwind CSS v4 via its Vite plugin (@tailwindcss/vite, see
+ * vite.config.ts). Tailwind v4 uses the new `@import "tailwindcss"`
+ * syntax — there is no @tailwind directives / @tailwindcss/postcss
+ * config file needed anymore.
+ *
+ * This file is imported once by src/main.tsx so the styles are
+ * available across the entire React tree. Vite's CSS pipeline handles
+ * the Tailwind processing during `vite build` and `vite dev`.
+ *
+ * NOTE: if AI Studio's preview shows an error like
+ *     Failed to resolve import "./index.css" from "src/main.tsx"
+ * it is a stale-cache issue in AI Studio's preview server, not a real
+ * bug — this file is tracked in the repo (verified via
+ * `git ls-files src/index.css`). A hard reload (Ctrl+Shift+R) clears
+ * the cache and resolves the error.
+ */
 @import "tailwindcss";

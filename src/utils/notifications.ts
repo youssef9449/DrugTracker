@@ -34,7 +34,7 @@ export function sendMedicineAlert(medicineName: string, daysLeft: number, curren
 
   const options: NotificationOptions = {
     body: bodyText,
-    icon: '/assets/aistudio/icons/icon.svg',
+    icon: '/assets/icons/icon.svg',
     tag: `med-${medicineName}`,
   };
 
@@ -67,7 +67,7 @@ export function sendMedicationDoseReminder(
 
   const options: NotificationOptions = {
     body: bodyText,
-    icon: '/assets/aistudio/icons/icon.svg',
+    icon: '/assets/icons/icon.svg',
     tag: `dose-reminder-${medicineName}-${Date.now()}`,
   };
 

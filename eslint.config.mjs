@@ -16,7 +16,8 @@ export default tseslint.config(
     ignores: [
       'dist/**',
       'node_modules/**',
-      'public/assets/aistudio/**',
+      'public/aistudio/**',
+      'public/assets/**',
     ],
   },
   js.configs.recommended,

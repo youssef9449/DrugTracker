@@ -101,7 +101,7 @@ This option is easier if you don't want to install Android Studio, but requires 
 
 The resulting APK will:
 - Show "النغنغ" as the app name on the home screen.
-- Use the bell icon from `public/assets/aistudio/icons/icon.svg` / `icon-192.png` as the launcher icon.
+- Use the bell icon from `public/assets/icons/icon.svg` / `icon-192.png` as the launcher icon.
 - Open in a full-screen Android window (no browser chrome).
 - Use the teal-800 status bar color.
 - Work offline (because of the service worker).

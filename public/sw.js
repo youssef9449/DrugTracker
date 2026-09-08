@@ -10,18 +10,18 @@
  * old cache automatically.
  */
 
-const CACHE_NAME = 'nagnagh-v2';
+const CACHE_NAME = 'nagnagh-v3';
 
 // App shell — files we want available offline.
 const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/assets/aistudio/icons/icon.svg',
-  '/assets/aistudio/icons/icon-192.png',
-  '/assets/aistudio/icons/icon-512.png',
-  '/assets/aistudio/icons/icon-maskable-192.png',
-  '/assets/aistudio/icons/icon-maskable-512.png',
+  '/assets/icons/icon.svg',
+  '/assets/icons/icon-192.png',
+  '/assets/icons/icon-512.png',
+  '/assets/icons/icon-maskable-192.png',
+  '/assets/icons/icon-maskable-512.png',
 ];
 
 self.addEventListener('install', (event) => {

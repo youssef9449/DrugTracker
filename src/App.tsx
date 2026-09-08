@@ -6,6 +6,10 @@ import {
   DEFAULT_PHARMACY_SETTINGS,
   calculateMedicationStatus,
 } from './types';
+// Seed data — default 3 medications + 2 consumption logs shown on fresh
+// install. The file lives at src/data/initialData.ts (relative path).
+// See that file's header comment for the AI Studio cache-error
+// troubleshooting note.
 import { INITIAL_MEDICATIONS, INITIAL_LOGS } from './data/initialData';
 import { AndroidStatusBar } from './components/AndroidStatusBar';
 import { AndroidNavBar } from './components/AndroidNavBar';

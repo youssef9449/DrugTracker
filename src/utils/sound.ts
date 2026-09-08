@@ -49,12 +49,54 @@ export const NOTIFICATION_SOUND_OPTIONS: NotificationSoundOption[] = [
 export const CUSTOM_SOUND_MAX_BYTES = 2 * 1024 * 1024;
 
 /**
- * Accepted MIME types for custom sound files. Includes the most common
- * mobile-friendly audio formats so users can pick files from WhatsApp,
- * Telegram, downloads, etc.
+ * Accept attribute for the custom sound file input.
+ *
+ * We use the generic `audio/*` value (rather than an explicit MIME list)
+ * because it is the most reliable trigger for the mobile file picker:
+ * - On Android Chrome, it opens the Documents UI and lets the user pick
+ *   any audio file from any source (Downloads, Files, WhatsApp, Telegram,
+ *   music apps, voice recorder, etc.). Using a strict list of MIME types
+ *   can cause the picker to silently filter out files that have slightly
+ *   different MIME labels (e.g., `audio/x-mp3` vs `audio/mpeg`).
+ * - On iOS Safari, it opens the standard document picker with audio
+ *   filtering.
+ * - On desktop browsers, it opens the file dialog filtered to audio
+ *   files.
+ *
+ * The actual format validation still happens in `readCustomSoundFile`
+ * via the `file.type` and the file extension, so we don't lose any
+ * security by accepting the broader type.
  */
-export const CUSTOM_SOUND_ACCEPTED_MIME =
-  'audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,audio/ogg,audio/aac,audio/mp4,audio/x-m4a,audio/webm';
+export const CUSTOM_SOUND_ACCEPT_ATTR = 'audio/*';
+
+/**
+ * For backwards compatibility with any code that imported the old name.
+ * Same value as `CUSTOM_SOUND_ACCEPT_ATTR`.
+ */
+export const CUSTOM_SOUND_ACCEPTED_MIME = CUSTOM_SOUND_ACCEPT_ATTR;
+
+/**
+ * Feature-detect the File / FileReader / Blob APIs that we need to read
+ * the user-selected audio file. Returns a user-friendly Arabic error
+ * message if any required API is missing, or null if everything is okay.
+ *
+ * On modern mobile browsers (Chrome 80+, Safari iOS 14+, Samsung
+ * Internet) these APIs are always available, but in-app WebViews
+ * (Facebook, Instagram, some custom Tabs) they can be restricted.
+ */
+export function getFileAccessSupportError(): string | null {
+  if (typeof window === 'undefined') {
+    return 'الوصول للملفات غير مدعوم في هذه البيئة.';
+  }
+  if (typeof File === 'undefined' || typeof FileReader === 'undefined' || typeof Blob === 'undefined') {
+    return 'متصفحك لا يدعم الوصول للملفات. جرّب فتح التطبيق في متصفح حديث (Chrome / Safari).';
+  }
+  if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+    // createObjectURL is an alternative path; we don't use it but its
+    // presence is a good signal that the runtime supports file access.
+  }
+  return null;
+}
 
 /**
  * Read a File into a base64 data URL. Returns a promise that resolves

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pill, Bell, BellOff, Volume2, VolumeX, Search, Smartphone, Monitor, ShoppingCart, History, Settings, Plus } from 'lucide-react';
+import { Pill, Bell, BellOff, Volume2, VolumeX, Search, Smartphone, Monitor, ShoppingCart, History, Settings } from 'lucide-react';
 import { ActiveTab } from './AndroidBottomNav';
 
 interface AppHeaderProps {
@@ -16,7 +16,6 @@ interface AppHeaderProps {
   isPhoneFrame: boolean;
   onTogglePhoneFrame: () => void;
   onOpenSettings: () => void;
-  onOpenAddModal?: () => void;
 }
 
 export const AppHeader: React.FC<AppHeaderProps> = ({
@@ -33,7 +32,6 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   isPhoneFrame,
   onTogglePhoneFrame,
   onOpenSettings,
-  onOpenAddModal,
 }) => {
   const getHeaderIcon = () => {
     switch (activeTab) {
@@ -84,21 +82,15 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           </div>
         </div>
 
-        {/* Quick Action Icons */}
+        {/* Quick Action Icons
+            NOTE: "إضافة دواء جديد" was previously rendered here as a small
+            button in the header bar. It was redundant because the floating
+            action button (AndroidFab) at the bottom-left of the stock tab
+            already opens the same modal, and the EmptyState component shows
+            its own "أضف أول دواء الآن" button when the medication list is
+            empty. Keeping only the FAB avoids two actions pointing at the
+            same target and frees up header space for the toggle icons. */}
         <div className="flex items-center gap-1.5">
-          {onOpenAddModal && (
-            <button
-              type="button"
-              onClick={onOpenAddModal}
-              title="إضافة دواء جديد"
-              id="header-add-med-btn"
-              className="flex items-center gap-1 px-2.5 py-1.5 bg-white text-teal-900 hover:bg-teal-50 active:scale-95 rounded-xl text-xs font-bold transition shadow-xs border border-teal-100/50"
-            >
-              <Plus className="w-3.5 h-3.5 text-teal-700 stroke-[2.5]" />
-              <span>دواء جديد</span>
-            </button>
-          )}
-
           {/* Settings button */}
           <button
             onClick={onOpenSettings}

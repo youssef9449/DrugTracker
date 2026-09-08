@@ -1,0 +1,66 @@
+{
+  "name": "النغنغة",
+  "short_name": "النغنغة",
+  "description": "تطبيق لمتابعة مخزون الأدوية وتنبيهك عند اقتراب نفاد الحبوب بناءً على معدل الاستهلاك اليومي.",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f1f5f9",
+  "theme_color": "#0f766e",
+  "categories": ["health", "medical", "productivity"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "قائمة الأدوية",
+      "short_name": "الأدوية",
+      "description": "عرض كل الأدوية المسجلة وحالة مخزونها",
+      "url": "/?tab=stock"
+    },
+    {
+      "name": "سجل الاستهلاك",
+      "short_name": "السجل",
+      "description": "تتبع الخصم التلقائي عبر مرور الأيام",
+      "url": "/?tab=logs"
+    },
+    {
+      "name": "طلب الصيدلية",
+      "short_name": "الصيدلية",
+      "description": "تجهيز طلب الواتساب وحساب الكميات",
+      "url": "/?tab=shopping"
+    }
+  ]
+}

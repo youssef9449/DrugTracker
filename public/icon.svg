@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f766e"/>
+      <stop offset="100%" stop-color="#115e59"/>
+    </linearGradient>
+  </defs>
+  <!-- Rounded square background (matches Android adaptive icon style) -->
+  <rect x="0" y="0" width="192" height="192" rx="44" fill="url(#bg)"/>
+  <!-- Bell icon representing medication reminders -->
+  <g transform="translate(96 96)" fill="none" stroke="#fef3c7" stroke-width="9" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Bell body -->
+    <path d="M -28 -10 a 28 28 0 0 1 56 0 v 16 l 8 12 h -72 l 8 -12 z" fill="rgba(254, 243, 199, 0.15)"/>
+    <!-- Bell clapper -->
+    <circle cx="0" cy="22" r="6" fill="#fef3c7" stroke="none"/>
+    <!-- Bell top -->
+    <line x1="0" y1="-30" x2="0" y2="-40"/>
+    <circle cx="0" cy="-44" r="4" fill="#fef3c7" stroke="none"/>
+  </g>
+  <!-- Sound waves on the right side (representing "نغنغة" - ringing) -->
+  <g transform="translate(140 96)" fill="none" stroke="#fbbf24" stroke-width="6" stroke-linecap="round">
+    <path d="M 0 -14 a 14 14 0 0 1 0 28"/>
+    <path d="M 8 -22 a 22 22 0 0 1 0 44" opacity="0.7"/>
+  </g>
+  <!-- Sound waves on the left side (mirror) -->
+  <g transform="translate(52 96) scale(-1 1)" fill="none" stroke="#fbbf24" stroke-width="6" stroke-linecap="round">
+    <path d="M 0 -14 a 14 14 0 0 1 0 28"/>
+    <path d="M 8 -22 a 22 22 0 0 1 0 44" opacity="0.7"/>
+  </g>
+</svg>

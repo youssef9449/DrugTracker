@@ -1,5 +1,5 @@
 /**
- * Service Worker for النغنغة (Drug Tracker)
+ * Service Worker for النغنغ (Drug Tracker)
  *
  * Caches the app shell (HTML + JS + CSS + icons) so the app keeps
  * working offline after the first load. Uses a stale-while-revalidate
@@ -10,18 +10,18 @@
  * old cache automatically.
  */
 
-const CACHE_NAME = 'naghnagha-v1';
+const CACHE_NAME = 'nagnagh-v2';
 
 // App shell — files we want available offline.
 const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/icon.svg',
-  '/icon-192.png',
-  '/icon-512.png',
-  '/icon-maskable-192.png',
-  '/icon-maskable-512.png',
+  '/assets/aistudio/icons/icon.svg',
+  '/assets/aistudio/icons/icon-192.png',
+  '/assets/aistudio/icons/icon-512.png',
+  '/assets/aistudio/icons/icon-maskable-192.png',
+  '/assets/aistudio/icons/icon-maskable-512.png',
 ];
 
 self.addEventListener('install', (event) => {

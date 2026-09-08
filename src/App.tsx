@@ -25,6 +25,7 @@ import { playSuccessChime, playAlertChime } from './utils/sound';
 import { requestNotificationPermission, sendMedicineAlert } from './utils/notifications';
 import { getTodayDateString, syncAutoDailyDeductions } from './utils/dateCalculations';
 import { useDoseReminders } from './hooks/useDoseReminders';
+import { initNativeBridge } from './native';
 import { Zap } from 'lucide-react';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
@@ -118,6 +119,12 @@ export default function App() {
         'Notification' in window &&
         Notification.permission === 'granted'
     );
+
+    // Initialize the Capacitor native bridge (status bar color, back
+    // button). No-op on the web — see src/native.ts.
+    initNativeBridge().catch((err) => {
+      console.warn('[App] Native bridge init failed:', err);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

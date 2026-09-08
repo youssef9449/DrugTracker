@@ -14,11 +14,16 @@
  *   - Listen for the Android hardware back button and exit the app
  *     (the SPA's bottom-nav is the primary navigation, so back
  *     button should not navigate the WebView history).
+ *   - Create the Android notification channel(s) used by
+ *     @capacitor/local-notifications so notifications actually fire
+ *     when the app is in the foreground (otherwise Android silently
+ *     drops them if no channel is configured).
  */
 
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { App } from '@capacitor/app';
+import { LocalNotifications } from '@capacitor/local-notifications';
 
 let initialized = false;
 
@@ -47,6 +52,80 @@ export async function initNativeBridge(): Promise<void> {
     });
   } catch (err) {
     console.warn('[native] backButton listener failed:', err);
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Create notification channels (Android 8.0+ requirement)
+  // ─────────────────────────────────────────────────────────────
+  // Without an Android NotificationChannel, scheduled notifications
+  // silently fail on Android 8.0+. Capacitor LocalNotifications
+  // creates a default channel automatically, but the notification
+  // channel id used in `schedule({ channelId: 'dose-reminder' })`
+  // must be created first or Android will fall back to the default
+  // channel (which is acceptable but means we lose the ability to
+  // later customize per-channel importance / sound / vibration).
+  //
+  // We also need to create a separate channel for the "low-stock"
+  // alerts so the user can mute them independently from the dose
+  // reminders.
+  //
+  // On iOS this is a no-op (iOS doesn't have channels — it uses the
+  // notification's category identifier for grouping instead).
+  try {
+    // The TypeScript defs for @capacitor/local-notifications 6.x
+    // don't include createChannel — it's only on the Android plugin
+    // side. Use a cast to access the runtime method.
+    const ChannelExt = LocalNotifications as unknown as {
+      createChannel: (channel: {
+        id: string;
+        name: string;
+        description?: string;
+        importance: number;
+        visibility: number;
+        sound?: string;
+      }) => Promise<void>;
+      listChannels: () => Promise<{ channels: { id: string; name: string }[] }>;
+    };
+
+    try {
+      const existing = await ChannelExt.listChannels();
+      const existingIds = new Set(
+        (existing?.channels || []).map((c) => c.id)
+      );
+
+      // Importance: 4 = HIGH (makes a sound + shows as heads-up
+      // notification briefly). Visibility: 1 = PUBLIC (shows on
+      // the lock screen).
+      const channels = [
+        {
+          id: 'dose-reminder',
+          name: 'تذكير الجرعات',
+          description: 'تذكيرات يومية بمواعيد الأدوية',
+          importance: 4,
+          visibility: 1,
+        },
+        {
+          id: 'low-stock',
+          name: 'تنبيهات النفاد',
+          description: 'تنبيه عند اقتراب نفاد دواء من المخزون',
+          importance: 4,
+          visibility: 1,
+        },
+      ];
+
+      for (const ch of channels) {
+        if (!existingIds.has(ch.id)) {
+          await ChannelExt.createChannel(ch);
+          console.info(
+            `[native] Notification channel created: ${ch.id} (${ch.name})`
+          );
+        }
+      }
+    } catch (err) {
+      console.warn('[native] Notification channel creation failed:', err);
+    }
+  } catch (err) {
+    console.warn('[native] LocalNotifications setup failed:', err);
   }
 }
 

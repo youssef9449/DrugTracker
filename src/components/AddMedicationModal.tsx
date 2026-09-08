@@ -10,6 +10,7 @@ import {
   CUSTOM_SOUND_MAX_BYTES,
   getFileAccessSupportError,
 } from '../utils/sound';
+import { CustomTimePicker } from './CustomTimePicker';
 
 interface AddMedicationModalProps {
   isOpen: boolean;
@@ -33,10 +34,18 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
   initialData,
 }) => {
   const [name, setName] = useState('');
+  // Number inputs use a STRING state so the user can clear the field
+  // and type a fresh value. If we used a number state with a
+  // `parseFloat(value) || 1` fallback, clearing the field would
+  // immediately re-populate it with the fallback, making it
+  // impossible to type e.g. "2" (because "1" was already there,
+  // typing "2" appended "12" instead of replacing). The string
+  // state is converted to a number at submit time and the dailyDose
+  // validation in handleSubmit checks for empty / 0 / NaN.
   const [currentPills, setCurrentPills] = useState<number>(30);
-  const [dailyDose, setDailyDose] = useState<number>(1);
+  const [dailyDose, setDailyDose] = useState<string>('1');
   const [unit, setUnit] = useState('قرص');
-  const [warningThresholdDays, setWarningThresholdDays] = useState<number>(5);
+  const [warningThresholdDays, setWarningThresholdDays] = useState<string>('5');
   const [category, setCategory] = useState('');
   const [notes, setNotes] = useState('');
   const [colorTag, setColorTag] = useState('teal');
@@ -60,9 +69,11 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
     if (initialData) {
       setName(initialData.name);
       setCurrentPills(initialData.currentPills);
-      setDailyDose(initialData.dailyDose);
+      // Convert numeric initial values to STRING state for the
+      // number inputs (see comment on dailyDose declaration above).
+      setDailyDose(String(initialData.dailyDose ?? ''));
       setUnit(initialData.unit || 'قرص');
-      setWarningThresholdDays(initialData.warningThresholdDays || 5);
+      setWarningThresholdDays(String(initialData.warningThresholdDays ?? 5));
       setCategory(initialData.category || '');
       setNotes(initialData.notes || '');
       setColorTag(initialData.colorTag || 'teal');
@@ -79,9 +90,9 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
     } else {
       setName('');
       setCurrentPills(30);
-      setDailyDose(1);
+      setDailyDose('1');
       setUnit('قرص');
-      setWarningThresholdDays(5);
+      setWarningThresholdDays('5');
       setCategory('');
       setNotes('');
       setColorTag('teal');
@@ -174,7 +185,15 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
       setError('عدد الحبوب لا يمكن أن يكون سالباً');
       return;
     }
-    if (dailyDose <= 0) {
+    // Convert the string-typed dailyDose to a number for validation
+    // + save. We need to handle the empty string case explicitly
+    // (NaN fails the > 0 check, but we want a clearer error message).
+    const doseNum = parseFloat(dailyDose);
+    if (dailyDose.trim() === '' || isNaN(doseNum)) {
+      setError('يرجى إدخال معدل الاستهلاك اليومي');
+      return;
+    }
+    if (doseNum <= 0) {
       setError('معدل الاستهلاك يجب أن يكون أكبر من صفر');
       return;
     }
@@ -194,7 +213,7 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
       {
         name: name.trim(),
         currentPills: Number(currentPills),
-        dailyDose: Number(dailyDose),
+        dailyDose: doseNum,
         unit,
         warningThresholdDays: Number(warningThresholdDays) || 5,
         category: category.trim(),
@@ -216,7 +235,14 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
     onClose();
   };
 
-  const previewDays = dailyDose > 0 ? Math.floor(currentPills / dailyDose) : 0;
+  // Compute previewDays from the string-typed dailyDose. We parse
+  // it to a number here; if the user hasn't typed anything valid yet
+  // (empty string or NaN), we just show 0 days.
+  const previewDoseNum = parseFloat(dailyDose);
+  const previewDays =
+    !isNaN(previewDoseNum) && previewDoseNum > 0
+      ? Math.floor(currentPills / previewDoseNum)
+      : 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-xs">
@@ -426,9 +452,15 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
                 type="number"
                 min="0.25"
                 step="0.5"
+                inputMode="decimal"
                 required
                 value={dailyDose}
-                onChange={(e) => setDailyDose(parseFloat(e.target.value) || 1)}
+                // Use a string-typed state so the user can clear the
+                // field and type a fresh value. The submit handler
+                // parses it back to a number with proper validation
+                // (empty / NaN / <= 0).
+                onChange={(e) => setDailyDose(e.target.value)}
+                placeholder="مثال: 1"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
               />
             </div>
@@ -438,8 +470,10 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
                 type="number"
                 min="1"
                 max="30"
+                inputMode="numeric"
                 value={warningThresholdDays}
-                onChange={(e) => setWarningThresholdDays(parseInt(e.target.value) || 5)}
+                onChange={(e) => setWarningThresholdDays(e.target.value)}
+                placeholder="مثال: 5"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
               />
             </div>
@@ -521,16 +555,21 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
                   <Clock className="w-3.5 h-3.5" />
                   <span>وقت التذكير اليومي</span>
                 </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="time"
-                    value={reminderTime}
-                    onChange={(e) => setReminderTime(e.target.value)}
-                    className="flex-1 px-3 py-2 rounded-xl border border-amber-300 bg-white text-sm font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                  />
-                  <span className="text-xs font-bold text-amber-900 bg-white border border-amber-200 px-2.5 py-2 rounded-xl">
-                    {formatTimeArabic(reminderTime)}
-                  </span>
+                {/* Custom time picker (replaces the native <input type="time">
+                    which on Android shows the OS time picker with default
+                    Material colors — text invisible in AM/PM dropdown due
+                    to the OS using the system theme color for the option
+                    text against a same-color background). We use 3
+                    theme-styled <select> dropdowns instead: hour (1-12),
+                    minute (00-59), and AM/PM. The selected value is
+                    converted to/from 24-hour "HH:MM" format used by
+                    reminderTime state. */}
+                <CustomTimePicker
+                  value={reminderTime}
+                  onChange={setReminderTime}
+                />
+                <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 text-center font-bold">
+                  {formatTimeArabic(reminderTime) || 'اختر الوقت'}
                 </div>
               </div>
             )}

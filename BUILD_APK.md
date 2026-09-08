@@ -64,9 +64,65 @@ For a release-signed APK you can share with others, see the official Android doc
 <https://developer.android.com/build/building-apks#sign-manually>
 
 Quick summary:
-1. Generate a keystore: `keytool -genkey -v -keystore nagnagh.keystore -alias nagnagh -keyalg RSA -keysize 2048 -validity 10000`
-2. In Android Studio: **Build → Generate Signed Bundle / APK → APK**, choose your keystore, select "release" build variant.
-3. The signed APK is at `android/app/build/outputs/apk/release/app-release.apk`.
+
+1. **Generate a release keystore** (one-time, save it forever — losing it means you can never publish an update to the same app):
+   ```bash
+   keytool -genkeypair \
+     -keystore nagnagh-release.keystore \
+     -alias nagnagh \
+     -keyalg RSA -keysize 2048 \
+     -validity 36500 \
+     -storepass nagnagh2024release \
+     -keypass nagnagh2024release \
+     -dname "CN=Нагнаг Drug Tracker, OU=Mobile, O=Youssef9449, L=Cairo, ST=Cairo, C=EG"
+   ```
+
+2. **Configure `android/app/build.gradle`** to use the keystore for the release build. Open `android/app/build.gradle` and inside the `android { ... }` block, add:
+   ```gradle
+   signingConfigs {
+       release {
+           storeFile file('<absolute-path-to>/nagnagh-release.keystore')
+           storePassword 'nagnagh2024release'
+           keyAlias 'nagnagh'
+           keyPassword 'nagnagh2024release'
+       }
+   }
+   buildTypes {
+       release {
+           signingConfig signingConfigs.release
+           minifyEnabled false
+           proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+       }
+   }
+   ```
+   Replace `<absolute-path-to>` with the actual path to your keystore file.
+
+3. **Set the Android SDK location** — create `android/local.properties` with the path to your Android SDK:
+   ```bash
+   echo "sdk.dir=/home/youruser/Android/Sdk" > android/local.properties
+   ```
+   This file is gitignored by default. AI Studio doesn't need this because it sets `ANDROID_HOME` automatically, but a local build via `./gradlew` requires it.
+
+4. **Build the signed APK** — either via Android Studio:
+   - Open Android Studio → **Build → Generate Signed Bundle / APK → APK**, choose your keystore, select "release" build variant.
+
+   Or via the command line (faster, no Android Studio UI needed):
+   ```bash
+   cd android
+   ./gradlew assembleRelease \
+     -x lint -x lintVitalAnalyzeRelease -x lintVitalReportRelease -x testReleaseUnitTest
+   ```
+   The `-x lint...` flags skip lint tasks (they take 5+ minutes and aren't needed for a release APK you control yourself).
+
+5. **The signed APK is at**: `android/app/build/outputs/apk/release/app-release.apk`.
+
+6. **Verify the signature**:
+   ```bash
+   # Use the apksigner tool from build-tools/<version>/apksigner
+   $ANDROID_HOME/build-tools/34.0.0/apksigner verify --print-certs \
+     android/app/build/outputs/apk/release/app-release.apk
+   ```
+   You should see "Verified using v1 scheme: true" and "Verified using v2 scheme: true".
 
 ### Updating the app
 
@@ -75,8 +131,12 @@ After editing the web source:
 ```bash
 npm run build && npx cap sync android
 npx cap open android
-# Then rebuild in Android Studio as above.
+# Then rebuild in Android Studio as above, OR:
+cd android
+./gradlew assembleRelease -x lint -x lintVitalAnalyzeRelease -x lintVitalReportRelease -x testReleaseUnitTest
 ```
+
+**IMPORTANT**: Always sign update APKs with the **same keystore** as the original. Android refuses the update if the signing key differs — you'll see "App not installed" / "Signature mismatch" errors. Bump `versionCode` and `versionName` in `android/app/build.gradle` before publishing each update.
 
 ---
 

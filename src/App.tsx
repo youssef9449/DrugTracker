@@ -26,7 +26,7 @@ import { AndroidFab } from './components/AndroidFab';
 import { EmptyState } from './components/EmptyState';
 import { DoseAlarmModal } from './components/DoseAlarmModal';
 import { playSuccessChime, playAlertChime } from './utils/sound';
-import { requestNotificationPermission, sendMedicineAlert } from './utils/notifications';
+import { requestNotificationPermission, sendMedicineAlert, openNotificationSettings } from './utils/notifications';
 import { getTodayDateString, syncAutoDailyDeductions } from './utils/dateCalculations';
 import { useDoseReminders } from './hooks/useDoseReminders';
 import { initNativeBridge } from './native';
@@ -129,6 +129,32 @@ export default function App() {
     initNativeBridge().catch((err) => {
       console.warn('[App] Native bridge init failed:', err);
     });
+
+    // Auto-request notification permission on the FIRST app open
+    // after install. The browser only shows the permission prompt
+    // when the permission state is 'default' (user hasn't been asked
+    // yet). Once the user grants or denies, the browser remembers
+    // the decision and won't re-show the prompt. If the user denied
+    // permission, this becomes a no-op; the bell button in
+    // AppHeader then takes the user to OS settings to re-enable.
+    //
+    // Auto-requesting on mount is recommended by the Web Push API
+    // spec because it ensures the prompt shows after the user has
+    // had a chance to see the app's value (which is now true on
+    // first open, since the user has just installed it).
+    if (
+      typeof window !== 'undefined' &&
+      'Notification' in window &&
+      Notification.permission === 'default'
+    ) {
+      requestNotificationPermission()
+        .then((granted) => {
+          setNotificationsEnabled(granted);
+        })
+        .catch((err) => {
+          console.warn('[App] Auto-request notification permission failed:', err);
+        });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -327,12 +353,41 @@ export default function App() {
 
   const handleToggleNotifications = async () => {
     if (!notificationsEnabled) {
+      // Current state says "off" — but check the real permission
+      // because the user may have re-enabled it via OS settings.
+      const currentPerm =
+        typeof window !== 'undefined' && 'Notification' in window
+          ? Notification.permission
+          : 'unsupported';
+
+      if (currentPerm === 'granted') {
+        // OS settings already allow it; just turn on the in-app
+        // flag.
+        setNotificationsEnabled(true);
+        showToast('تم تفعيل إشعارات الهاتف بنجاح');
+        return;
+      }
+
+      if (currentPerm === 'denied') {
+        // The browser/OS already denied permission and won't show
+        // the prompt again. Open the OS settings page so the user
+        // can re-enable notifications manually.
+        showToast('الإشعارات مقفولة من إعدادات النظام. سيتم فتح صفحة الإعدادات الآن...');
+        openNotificationSettings();
+        return;
+      }
+
+      // currentPerm === 'default' — show the browser prompt.
       const granted = await requestNotificationPermission();
       setNotificationsEnabled(granted);
-      showToast(granted ? 'تم تفعيل إشعارات الهاتف بنجاح' : 'يرجى السماح بالإشعارات في إعدادات المتصفح');
+      showToast(
+        granted
+          ? 'تم تفعيل إشعارات الهاتف بنجاح'
+          : 'يرجى السماح بالإشعارات في إعدادات المتصفح'
+      );
     } else {
       setNotificationsEnabled(false);
-      showToast('تم إيقاف التنبيهات');
+      showToast('تم إيقاف التنبيهات داخل التطبيق');
     }
   };
 

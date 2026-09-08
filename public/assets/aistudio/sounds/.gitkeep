@@ -1,0 +1,10 @@
+# Sounds directory
+#
+# Bundled sound files (e.g., default notification tones that ship with
+# the app). The user's custom sound files (uploaded via the
+# AddMedicationModal) are NOT stored here — they are kept as base64
+# data URLs in localStorage on the user's device.
+#
+# This directory is reserved for future use if we want to ship default
+# MP3/WAV ringtones instead of (or alongside) the synthesized Web
+# Audio sounds in src/utils/sound.ts.

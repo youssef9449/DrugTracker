@@ -49,3 +49,49 @@ export async function initNativeBridge(): Promise<void> {
     console.warn('[native] backButton listener failed:', err);
   }
 }
+
+/**
+ * Open the OS-level app settings page where the user can toggle
+ * notification permissions for the app.
+ *
+ * - **Android**: opens the Android "App info" screen for this app
+ *   (Settings → Apps → الننغنغ → Notifications), where the user
+ *   can toggle notifications on.
+ *
+ * - **iOS**: opens the iOS Settings app at this app's notification
+ *   permissions page (Settings → الننغنغ → Notifications).
+ *
+ * - **Web**: returns false; the caller should fall back to
+ *   openBrowserNotificationSettings() instead — there's no portable
+ *   web URL that opens browser notification settings across all
+ *   browsers.
+ *
+ * Implementation note: We use `App.openAppSettings()` via a cast to
+ * `any` because the @capacitor/app 6.x TypeScript definitions
+ * don't expose this method, but the underlying Android Java plugin
+ * implements it. The runtime call works on Android 5.1+ and iOS
+ * 10.0+.
+ *
+ * Returns:
+ *   - true on Android / iOS when settings opened successfully
+ *   - false on web OR if the Capacitor App plugin failed to open
+ */
+export async function openAppSettings(): Promise<boolean> {
+  if (typeof Capacitor === 'undefined' || Capacitor.getPlatform() === 'web') {
+    // On web, the caller should use openBrowserNotificationSettings
+    // from utils/notifications.ts instead. This function is a no-op
+    // here so the caller can fall back to the browser implementation.
+    return false;
+  }
+
+  try {
+    // openAppSettings() is part of the App plugin's Android/iOS
+    // implementation but not declared in @capacitor/app 6.x TS defs.
+    // Cast to any to access the runtime method.
+    await (App as unknown as { openAppSettings: () => Promise<void> }).openAppSettings();
+    return true;
+  } catch (err) {
+    console.warn('[native] openAppSettings failed:', err);
+    return false;
+  }
+}

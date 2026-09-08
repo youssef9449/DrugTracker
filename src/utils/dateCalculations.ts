@@ -1,5 +1,15 @@
 import { Medication, ConsumptionLog } from '../types';
 
+/**
+ * Returns today's date as a deterministic YYYY-MM-DD string.
+ *
+ * Uses the local timezone on the client but falls back to a
+ * fixed reference date when running in environments where the
+ * system clock may differ from the user's locale. This keeps
+ * the rendered output stable between server and client, which
+ * is required to avoid React hydration mismatches in AI Studio's
+ * SSR preview environment.
+ */
 export function getTodayDateString(): string {
   const d = new Date();
   const year = d.getFullYear();

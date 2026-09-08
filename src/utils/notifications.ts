@@ -213,7 +213,16 @@ export async function sendCriticalStockAlert(
   currentPills: number,
   unit: string = 'قرص'
 ): Promise<void> {
-  const title = `🚨 ${medicineName}: حبتين بس!`;
+  // The title should reflect the ACTUAL pill count, not always say
+  // "حبتين بس" (the user pointed out that when 0 pills remain, the
+  // notification still says "حبتين بس" which is wrong).
+  const title =
+    currentPills <= 0
+      ? `🚨 ${medicineName}: نفد المخزون!`
+      : currentPills === 1
+      ? `🚨 ${medicineName}: حبة واحدة بس!`
+      : `🚨 ${medicineName}: حبتين بس!`;
+
   const body =
     currentPills <= 0
       ? `المخزون نفد تماماً (0 ${unit}). يرجى طلب الدواء فوراً!`

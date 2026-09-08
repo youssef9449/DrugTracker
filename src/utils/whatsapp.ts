@@ -45,7 +45,7 @@ export interface OrderItem {
 
 export function generatePharmacyOrderMessage(
   items: OrderItem[],
-  customerCode: string = '14739',
+  customerCode: string = '',
   address?: string,
   contactPhone?: string
 ): string {
@@ -70,10 +70,16 @@ export function generatePharmacyOrderMessage(
     }
   });
 
-  const code = (customerCode || '14739').trim();
-  text += `\nرقم العميل ${code}`;
+  // Only include "رقم العميل" if the user actually entered a code.
+  // The user explicitly asked for this: "خلي الجزء بتاع رقم العميل
+  // اختياري يعني لو مش مكتوب في الصندوق حاجة ميكتبهوش في الرسالة".
+  const code = (customerCode || '').trim();
+  if (code) {
+    text += `\nرقم العميل ${code}`;
+  }
 
-  // Append address if provided
+  // Append address if provided (same logic — optional, only show
+  // if non-empty).
   if (address && address.trim()) {
     text += `\nالعنوان: ${address.trim()}`;
   }

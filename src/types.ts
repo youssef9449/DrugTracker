@@ -198,7 +198,7 @@ export interface PharmacySettings {
 export const DEFAULT_PHARMACY_SETTINGS: PharmacySettings = {
   pharmacyPhone: '',
   pharmacyName: 'الصيدلية',
-  customerCode: '14739',
+  customerCode: '',
   defaultDurationDays: 30,
   customQuantities: {},
   address: '',

@@ -71,6 +71,11 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
   const [reminderTime, setReminderTime] = useState<string>('09:00');
   const [notificationSound, setNotificationSound] = useState<NotificationSoundType>('classic_chime');
   const [customSoundEnabled, setCustomSoundEnabled] = useState<boolean>(false);
+  // Toggle for medications that come as loose pills in a box without
+  // strips (e.g., Coffiram — 15 pills per box, no blister strips).
+  // When enabled, the strip fields are hidden and the user just
+  // enters the total pills per box.
+  const [noStrips, setNoStrips] = useState<boolean>(false);
   const [customSoundFile, setCustomSoundFile] = useState<CustomSoundFile | null>(null);
   const [isUploadingSound, setIsUploadingSound] = useState<boolean>(false);
 
@@ -86,11 +91,16 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
       setCategory(initialData.category || '');
       setNotes(initialData.notes || '');
       setColorTag(initialData.colorTag || 'teal');
+      // Detect "no strips" medications — if stripsPerBox or pillsPerStrip
+      // is null/0/undefined, treat as loose pills (e.g., Coffiram 15
+      // pills per box, no blister strips).
+      const hasStrips = initialData.stripsPerBox && initialData.pillsPerStrip && initialData.stripsPerBox > 0 && initialData.pillsPerStrip > 0;
+      setNoStrips(!hasStrips);
       const sBox = initialData.stripsPerBox || 3;
       const pStrip = initialData.pillsPerStrip || 10;
       setStripsPerBox(String(sBox));
       setPillsPerStrip(String(pStrip));
-      setPackageSize(initialData.packageSize || sBox * pStrip);
+      setPackageSize(initialData.packageSize || (hasStrips ? sBox * pStrip : 30));
       setReminderEnabled(Boolean(initialData.reminderEnabled));
       setReminderTime(initialData.reminderTime || '09:00');
       setNotificationSound(initialData.notificationSound || 'classic_chime');
@@ -107,6 +117,7 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
       setColorTag('teal');
       setStripsPerBox('3');
       setPillsPerStrip('10');
+      setNoStrips(false);
       setPackageSize(30);
       setHelperBoxes(1);
       setHelperStrips(0);
@@ -224,9 +235,23 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
       return;
     }
 
-    const sBoxNum = Math.max(1, parseInt(stripsPerBox, 10) || 1);
-    const pStripNum = Math.max(1, parseInt(pillsPerStrip, 10) || 1);
-    const calculatedPkgSize = sBoxNum * pStripNum;
+    // Calculate packaging — handle "no strips" medications (loose
+    // pills in a box, e.g., Coffiram 15 pills per box without blister
+    // strips). When noStrips is true, stripsPerBox and pillsPerStrip
+    // are set to undefined and packageSize is used directly.
+    let stripsPerBoxNum: number | undefined;
+    let pillsPerStripNum: number | undefined;
+    let calculatedPkgSize: number;
+
+    if (noStrips) {
+      stripsPerBoxNum = undefined;
+      pillsPerStripNum = undefined;
+      calculatedPkgSize = Math.max(1, parseInt(stripsPerBox, 10) || packageSize || 30);
+    } else {
+      stripsPerBoxNum = Math.max(1, parseInt(stripsPerBox, 10) || 1);
+      pillsPerStripNum = Math.max(1, parseInt(pillsPerStrip, 10) || 1);
+      calculatedPkgSize = stripsPerBoxNum * pillsPerStripNum;
+    }
 
     onSave(
       {
@@ -240,8 +265,8 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
         colorTag,
         lastSyncDate: initialData?.lastSyncDate || getTodayDateString(),
         autoDeductEnabled: initialData?.autoDeductEnabled ?? true,
-        stripsPerBox: sBoxNum,
-        pillsPerStrip: pStripNum,
+        stripsPerBox: stripsPerBoxNum,
+        pillsPerStrip: pillsPerStripNum,
         packageSize: calculatedPkgSize,
         reminderEnabled,
         reminderTime: reminderEnabled ? reminderTime : undefined,
@@ -424,57 +449,104 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
                 <Layers className="w-3.5 h-3.5" />
               </div>
               <div>
-                <h4 className="text-xs font-bold text-slate-800">مواصفات العلبة والأشرطة</h4>
-                <p className="text-[10px] text-slate-500">تحديد عدد الأشرطة والحبوب لطلب علب صحيحة من الصيدلية</p>
+                <h4 className="text-xs font-bold text-slate-800">مواصفات العلبة</h4>
+                <p className="text-[10px] text-slate-500">تحديد عدد الأقراص لطلب علب صحيحة من الصيدلية</p>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+
+            {/* "بدون أشرطة" toggle — for medications like Coffiram that
+                come as loose pills in a box without blister strips.
+                When on, hide the strip-count fields and show just a
+                single "عدد الأقراص في العلبة" input. */}
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={noStrips}
+                onChange={(e) => setNoStrips(e.target.checked)}
+                className="w-4 h-4 accent-teal-600"
+              />
+              <span className="text-[11px] font-bold text-slate-700">
+                بدون أشرطة (أقراص فرط في العلبة)
+              </span>
+            </label>
+
+            {noStrips ? (
+              /* No strips — just enter total pills per box */
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">عدد الأشرطة في العلبة</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  عدد الأقراص في العلبة
+                </label>
                 <input
                   type="number"
                   min="1"
-                  max="50"
+                  max="500"
                   inputMode="numeric"
-                  // Use string state + step="any" so the user can clear
-                  // the field and type a fresh value (no fallback
-                  // that re-populates the field with "1" when cleared).
-                  // Validation + Math.max(1, ...) is done in the
-                  // handler.
                   step="any"
                   value={stripsPerBox}
-                  onChange={(e) => handleStripsChange(e.target.value)}
-                  placeholder="مثال: 3"
+                  onChange={(e) => {
+                    setStripsPerBox(e.target.value);
+                    const v = Math.max(1, parseInt(e.target.value, 10) || 30);
+                    setPackageSize(v);
+                  }}
+                  placeholder="مثال: 15"
                   className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
                 />
+                <div className="mt-1.5 text-xs bg-white p-2 rounded-xl border border-teal-200/80 flex items-center gap-1.5">
+                  <Box className="w-3.5 h-3.5 text-teal-600" />
+                  <span className="text-slate-600 font-medium">حجم العلبة:</span>
+                  <span className="font-bold text-teal-900 font-mono">
+                    {packageSize} {unit}
+                  </span>
+                </div>
               </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">عدد الحبوب في الشريط</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="100"
-                  inputMode="numeric"
-                  step="any"
-                  value={pillsPerStrip}
-                  onChange={(e) => handlePillsPerStripChange(e.target.value)}
-                  placeholder="مثال: 10"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
-                />
+            ) : (
+              /* With strips — show both strip fields */
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">عدد الأشرطة في العلبة</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    inputMode="numeric"
+                    step="any"
+                    value={stripsPerBox}
+                    onChange={(e) => handleStripsChange(e.target.value)}
+                    placeholder="مثال: 3"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">عدد الحبوب في الشريط</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    inputMode="numeric"
+                    step="any"
+                    value={pillsPerStrip}
+                    onChange={(e) => handlePillsPerStripChange(e.target.value)}
+                    placeholder="مثال: 10"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+                  />
+                </div>
               </div>
-            </div>
-            <div className="flex items-center justify-between text-xs bg-white p-2 rounded-xl border border-teal-200/80">
-              <span className="text-slate-600 font-medium flex items-center gap-1.5">
-                <Box className="w-3.5 h-3.5 text-teal-600" />
-                <span>حجم العلبة الكلي:</span>
-              </span>
-              <span className="font-bold text-teal-900 font-mono">
-                {packageSize} {unit}{' '}
-                <span className="text-[10px] text-slate-500 font-normal">
-                  ({stripsPerBox || '—'} أشرطة × {pillsPerStrip || '—'} {unit})
+            )}
+
+            {!noStrips && (
+              <div className="flex items-center justify-between text-xs bg-white p-2 rounded-xl border border-teal-200/80">
+                <span className="text-slate-600 font-medium flex items-center gap-1.5">
+                  <Box className="w-3.5 h-3.5 text-teal-600" />
+                  <span>حجم العلبة الكلي:</span>
                 </span>
-              </span>
-            </div>
+                <span className="font-bold text-teal-900 font-mono">
+                  {packageSize} {unit}{' '}
+                  <span className="text-[10px] text-slate-500 font-normal">
+                    ({stripsPerBox || '—'} أشرطة × {pillsPerStrip || '—'} {unit})
+                  </span>
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -616,171 +688,59 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
             )}
           </div>
 
-          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
-            <div className="flex items-start justify-between gap-3">
+          {/* Per-medication synthesized sound selector — only shown
+              when reminder is enabled. The "custom file" option was
+              removed because custom sound is now a GLOBAL setting
+              (uploaded via AppHeader, applies to all medications).
+              Each medication still gets its own synthesized tone
+              (classic_chime, marimba, etc.). */}
+          {reminderEnabled && (
+            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
               <div className="flex items-start gap-2">
                 <div className="w-8 h-8 rounded-xl bg-teal-100 text-teal-800 flex items-center justify-center shrink-0">
                   <Volume2 className="w-4 h-4" />
                 </div>
                 <div>
-                  <h4 className="text-xs font-bold text-slate-800">صوت إشعار خاص بهذا الدواء</h4>
+                  <h4 className="text-xs font-bold text-slate-800">نغمة تنبيه هذا الدواء</h4>
                   <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
-                    اختياري. اختر نغمة مختلفة لكل دواء حتى تميّز التنبيه من غير ما تشوف الشاشة.
+                    اختر نغمة مختلفة لكل دواء حتى تميّز التنبيه من غير ما تشوف الشاشة.
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={customSoundEnabled || reminderEnabled}
-                onClick={() => setCustomSoundEnabled(!customSoundEnabled)}
-                className={`w-11 h-6 rounded-full relative transition shrink-0 ${
-                  customSoundEnabled || reminderEnabled ? 'bg-teal-600' : 'bg-slate-300'
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition ${
-                    customSoundEnabled || reminderEnabled ? 'right-0.5' : 'right-[22px]'
-                  }`}
-                />
-              </button>
-            </div>
-
-            {(customSoundEnabled || reminderEnabled) && (
-              <>
-                <div className="grid grid-cols-2 gap-2">
-                  {NOTIFICATION_SOUND_OPTIONS.map((opt) => {
-                    const selected = notificationSound === opt.id;
-                    // Hide the "custom" entry when a custom file is already selected
-                    // (it's shown in its own block below with the file name).
-                    if (opt.id === 'custom' && !customSoundFile) {
-                      return null;
-                    }
-                    if (opt.id === 'custom' && customSoundFile) {
-                      // Render the custom option as the "currently selected file" tile.
-                      return (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          onClick={() => {
-                            setNotificationSound('custom');
-                            setCustomSoundEnabled(true);
-                            playNotificationSound('custom', customSoundFile);
-                          }}
-                          className={`text-right p-2.5 rounded-xl border transition ${
-                            selected
-                              ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
-                              : 'bg-white text-slate-700 border-slate-200 hover:border-teal-300 hover:bg-teal-50'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-1">
-                            <FileAudio className="w-4 h-4" />
-                            {selected && <Volume2 className="w-3.5 h-3.5" />}
-                          </div>
-                          <div className="text-[11px] font-bold mt-1 truncate" title={customSoundFile.fileName}>
-                            {customSoundFile.fileName}
-                          </div>
-                          <div className={`text-[10px] mt-0.5 ${selected ? 'text-teal-100' : 'text-slate-500'}`}>
-                            ملفك الخاص — اضغط للاستماع
-                          </div>
-                        </button>
-                      );
-                    }
-                    return (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => {
-                          setNotificationSound(opt.id);
-                          setCustomSoundEnabled(true);
-                          playNotificationSound(opt.id);
-                        }}
-                        className={`text-right p-2.5 rounded-xl border transition ${
-                          selected
-                            ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
-                            : 'bg-white text-slate-700 border-slate-200 hover:border-teal-300 hover:bg-teal-50'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="text-base">{opt.icon}</span>
-                          {selected && <Volume2 className="w-3.5 h-3.5" />}
-                        </div>
-                        <div className="text-[11px] font-bold mt-1">{opt.name}</div>
-                        <div className={`text-[10px] mt-0.5 ${selected ? 'text-teal-100' : 'text-slate-500'}`}>
-                          {opt.description}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Upload custom sound file block */}
-                <div className="p-3 bg-white border border-dashed border-teal-300 rounded-xl space-y-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-start gap-2 min-w-0">
-                      <div className="w-7 h-7 rounded-lg bg-teal-100 text-teal-700 flex items-center justify-center shrink-0">
-                        <FileAudio className="w-3.5 h-3.5" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-[11px] font-bold text-slate-800">
-                          ملف صوتي من جهازك
-                        </p>
-                        <p className="text-[10px] text-slate-500 leading-relaxed">
-                          MP3 / WAV / OGG / M4A. الحد الأقصى {Math.round(CUSTOM_SOUND_MAX_BYTES / 1024 / 1024)} ميجابايت.
-                        </p>
-                      </div>
-                    </div>
-                    {customSoundFile && (
-                      <button
-                        type="button"
-                        onClick={handleRemoveCustomSound}
-                        className="text-[10px] font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2 py-1 rounded-lg flex items-center gap-1 shrink-0 transition"
-                        title="إزالة الملف"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        <span>إزالة</span>
-                      </button>
-                    )}
-                  </div>
-
-                  {fileAccessError ? (
-                    // Browser / WebView doesn't support the File API — show
-                    // a disabled state with an explanatory Arabic message.
-                    <div className="block w-full py-2 px-3 rounded-xl text-xs font-bold text-center bg-slate-100 text-slate-500 border border-slate-200">
-                      {fileAccessError}
-                    </div>
-                  ) : (
-                    <label
-                      className={`block w-full py-2 px-3 rounded-xl text-xs font-bold text-center cursor-pointer transition ${
-                        isUploadingSound
-                          ? 'bg-slate-100 text-slate-400 cursor-wait'
-                          : 'bg-teal-50 text-teal-800 border border-teal-200 hover:bg-teal-100'
+              <div className="grid grid-cols-2 gap-2">
+                {NOTIFICATION_SOUND_OPTIONS.filter((opt) => opt.id !== 'custom').map((opt) => {
+                  const selected = notificationSound === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => {
+                        setNotificationSound(opt.id);
+                        playNotificationSound(opt.id);
+                      }}
+                      className={`text-right p-2.5 rounded-xl border transition ${
+                        selected
+                          ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
+                          : 'bg-white text-slate-700 border-slate-200 hover:border-teal-300 hover:bg-teal-50'
                       }`}
                     >
-                      <input
-                        type="file"
-                        accept={CUSTOM_SOUND_ACCEPT_ATTR}
-                        onChange={handleCustomSoundFilePick}
-                        disabled={isUploadingSound}
-                        className="sr-only"
-                      />
-                      {isUploadingSound
-                        ? 'جاري التحميل...'
-                        : customSoundFile
-                        ? 'اختيار ملف آخر'
-                        : 'اختر ملفاً صوتياً'}
-                    </label>
-                  )}
-
-                  {customSoundFile && (
-                    <div className="text-[10px] text-teal-700 bg-teal-50 border border-teal-200 rounded-lg px-2 py-1.5 truncate" title={customSoundFile.fileName}>
-                      📂 {customSoundFile.fileName}
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-base">{opt.icon}</span>
+                        {selected && <Volume2 className="w-3.5 h-3.5" />}
+                      </div>
+                      <div className="text-[11px] font-bold mt-1">{opt.name}</div>
+                      <div className={`text-[10px] mt-0.5 ${selected ? 'text-teal-100' : 'text-slate-500'}`}>
+                        {opt.description}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="text-[10px] text-slate-500 bg-teal-50/50 border border-teal-200/60 rounded-lg px-2 py-1.5">
+                💡 لاستخدام ملف صوتي مخصص من جهازك، اضغط على أيقونة الصوت في الشريط العلوي وارفع ملفك هناك — الصوت المخصص يُطبّق على كل الأدوية.
+              </div>
+            </div>
+          )}
 
           <div className="p-3 bg-white border border-slate-200 rounded-xl text-xs flex items-center justify-between">
             <span className="text-slate-600">يكفي تقريباً لمدة:</span>

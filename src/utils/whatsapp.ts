@@ -49,7 +49,7 @@ export function generatePharmacyOrderMessage(
 ): string {
   if (items.length === 0) return '';
 
-  let text = `السلام عليكم ورحمة الله،\nأود طلب الأدوية التالية:\n\n`;
+  let text = `السلام عليكم ورحمة الله،\nمن فضلك عايز الأدوية دي:\n\n`;
 
   items.forEach((item, idx) => {
     const packagingDesc = describeOrderInBoxes(

@@ -189,6 +189,50 @@ export async function sendMedicineAlert(
 }
 
 /**
+ * Send a "critical stock" notification — fires when a medication
+ * has only 1 or 2 pills left (or whatever the user-configured
+ * threshold is). The notification is more urgent than
+ * sendMedicineAlert because the medication will run out today or
+ * tomorrow.
+ *
+ * This is the headline feature of the app — the user explicitly
+ * requested it: "عايز اشعار يظهر لو في دواء فاضل فيه حبايتين مع
+ * الاوبشن اني افعل الموضوع دة او اقفله".
+ *
+ * The notification can be turned off via the
+ * `criticalStockAlertsEnabled` toggle in AppHeader. The caller is
+ * responsible for checking the toggle before calling this function.
+ *
+ * @param medicineName The medication name (in the title)
+ * @param currentPills Current pill count (in the body)
+ * @param unit Unit (e.g., 'قرص', 'كبسولة') — used to make the
+ *            body read naturally: "متبقي 2 قرص فقط"
+ */
+export async function sendCriticalStockAlert(
+  medicineName: string,
+  currentPills: number,
+  unit: string = 'قرص'
+): Promise<void> {
+  const title = `🚨 ${medicineName}: حبتين بس!`;
+  const body =
+    currentPills <= 0
+      ? `المخزون نفد تماماً (0 ${unit}). يرجى طلب الدواء فوراً!`
+      : currentPills === 1
+      ? `متبقي ${unit} واحد فقط من "${medicineName}"! يرجى التعبئة اليوم.`
+      : `متبقي ${currentPills} ${unit} فقط من "${medicineName}". هيخلص قريب!`;
+
+  await scheduleNotification({
+    // Use a different notification ID hash from sendMedicineAlert so
+    // the two notifications don't collide / overwrite each other.
+    id: hashCode(`critical-${medicineName}`),
+    title,
+    body,
+    channelId: 'low-stock',
+    smallIcon: 'ic_launcher',
+  });
+}
+
+/**
  * Send a "dose reminder" notification — fires when the user has a
  * medication with `reminderEnabled + reminderTime` set and the
  * current time matches the reminder time.

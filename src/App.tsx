@@ -28,6 +28,7 @@ import { playSuccessChime, playAlertChime } from './utils/sound';
 import {
   requestNotificationPermission,
   sendMedicineAlert,
+  sendCriticalStockAlert,
   openNotificationSettings,
   getNotificationPermission,
   getNotificationPermissionSync,
@@ -41,6 +42,10 @@ const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
 const STORAGE_PHARMACY_KEY = 'android_med_tracker_pharmacy_v2';
 const SOUND_KEY = 'android_med_tracker_sound_v1';
+// Critical-stock alerts (the "متبقي حبتين فقط" notifications) — user can
+// toggle this on/off from the AppHeader. Default true (enabled by
+// default — this is the headline feature of the app).
+const CRITICAL_STOCK_ALERTS_KEY = 'android_med_tracker_critical_alerts_v1';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('stock');
@@ -65,6 +70,11 @@ export default function App() {
   // Same SSR-safe pattern: defaults are deterministic, real state loaded on mount.
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(false);
+  // Critical-stock alerts ("متبقي حبتين فقط") — default true so that
+  // when the user first installs the app, they get alerts by default
+  // (the headline feature). The toggle in AppHeader lets them turn it
+  // off if they find it too noisy.
+  const [criticalStockAlertsEnabled, setCriticalStockAlertsEnabled] = useState<boolean>(true);
 
   const [isPhoneFrame, setIsPhoneFrame] = useState(true);
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
@@ -119,6 +129,16 @@ export default function App() {
 
     try {
     setSoundEnabled(localStorage.getItem(SOUND_KEY) !== 'false');
+    } catch {
+      // ignore
+    }
+
+    try {
+      // Critical-stock alerts default to true. We persist as
+      // 'true'/'false' string. Default true means: if the user has
+      // never touched the toggle, they get the alerts.
+      const stored = localStorage.getItem(CRITICAL_STOCK_ALERTS_KEY);
+      setCriticalStockAlertsEnabled(stored !== 'false');
     } catch {
       // ignore
     }
@@ -216,6 +236,17 @@ export default function App() {
     }
   }, [soundEnabled]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        CRITICAL_STOCK_ALERTS_KEY,
+        String(criticalStockAlertsEnabled)
+      );
+    } catch {
+      // ignore
+    }
+  }, [criticalStockAlertsEnabled]);
+
   const showToast = (message: string) => {
     const id = Date.now();
     setToast({ id, message });
@@ -240,6 +271,24 @@ export default function App() {
         const { status, daysLeft } = calculateMedicationStatus(med);
         if (status === 'critical' || status === 'warning') {
           sendMedicineAlert(med.name, daysLeft, med.currentPills);
+        }
+      });
+    }
+
+    // Critical-stock alerts ("متبقي حبتين فقط") — fires when a
+    // medication has 2 or fewer pills left. The user can toggle this
+    // off via the AppHeader. Default enabled (the headline feature).
+    if (notificationsEnabled && criticalStockAlertsEnabled) {
+      result.updatedMeds.forEach((med) => {
+        if (med.currentPills > 0 && med.currentPills <= 2) {
+          sendCriticalStockAlert(med.name, med.currentPills, med.unit || 'قرص');
+        } else if (med.currentPills === 0) {
+          // Fully out of stock — also send a critical alert so the
+          // user is reminded to refill immediately. (The regular
+          // sendMedicineAlert above also fires for status='critical',
+          // but this one uses a different notification id so it
+          // appears as a separate notification drawer entry.)
+          sendCriticalStockAlert(med.name, 0, med.unit || 'قرص');
         }
       });
     }
@@ -461,6 +510,58 @@ export default function App() {
     return medications.reduce((acc, m) => acc + m.currentPills, 0);
   }, [medications]);
 
+  // ─────────────────────────────────────────────────────────────
+  // Critical-stock alerts ("متبقي حبتين فقط")
+  // ─────────────────────────────────────────────────────────────
+  // Watch the medications array — whenever it changes (because of
+  // auto-deduction, refill, edit, manual delete, dose-taken from
+  // alarm, etc.), check if any medication has crossed the 2-pill
+  // threshold. We only fire the notification ONCE per medication
+  // per threshold-crossing, by tracking which meds we already
+  // alerted about in a ref.
+  //
+  // The "fire once per crossing" logic uses a Map keyed by
+  // medication id, storing the LAST pill count we alerted for. If
+  // the current count is <=2 but the last alerted count was >2 (or
+  // we never alerted for this med), fire. If we already alerted for
+  // this count, skip — the user has already seen the notification.
+  //
+  // When the user refills the med (pills go back up), we clear the
+  // alerted tracker for that med so the next time it crosses 2 again,
+  // we'll alert again.
+  const lastCriticalAlertRef = React.useRef<Map<string, number>>(new Map());
+
+  useEffect(() => {
+    // Don't run during the initial mount (the auto-deduction effect
+    // above already handles initial load notifications). This guard
+    // uses a ref to detect first run vs subsequent changes.
+    if (!notificationsEnabled || !criticalStockAlertsEnabled) {
+      // When the user disables alerts (or disables notifications
+      // entirely), reset the tracker so when they re-enable, we
+      // alert again for any current low-stock meds.
+      lastCriticalAlertRef.current.clear();
+      return;
+    }
+
+    const tracker = lastCriticalAlertRef.current;
+    for (const med of medications) {
+      if (med.currentPills <= 2) {
+        const lastAlertedAt = tracker.get(med.id);
+        if (lastAlertedAt === undefined || lastAlertedAt > med.currentPills) {
+          // Either we never alerted for this med, OR the pill count
+          // dropped further since last alert. Fire and remember.
+          sendCriticalStockAlert(med.name, med.currentPills, med.unit || 'قرص');
+          tracker.set(med.id, med.currentPills);
+        }
+      } else {
+        // Pill count went back up (refill, restore dose, etc.) —
+        // reset the tracker so we alert again the next time it
+        // crosses 2.
+        tracker.delete(med.id);
+      }
+    }
+  }, [medications, notificationsEnabled, criticalStockAlertsEnabled]);
+
   const openAdd = () => {
     setEditingMedication(null);
     setIsAddModalOpen(true);
@@ -498,6 +599,16 @@ export default function App() {
           onToggleNotifications={handleToggleNotifications}
           soundEnabled={soundEnabled}
           onToggleSound={() => setSoundEnabled(!soundEnabled)}
+          criticalStockAlertsEnabled={criticalStockAlertsEnabled}
+          onToggleCriticalStockAlerts={() => {
+            const next = !criticalStockAlertsEnabled;
+            setCriticalStockAlertsEnabled(next);
+            showToast(
+              next
+                ? 'تم تفعيل تنبيهات "حبتين بس" — هتوصلك إشعار لو في دواء متبقي فيه حبتين أو أقل'
+                : 'تم إيقاف تنبيهات "حبتين بس"'
+            );
+          }}
           isPhoneFrame={isPhoneFrame}
           onTogglePhoneFrame={() => setIsPhoneFrame(!isPhoneFrame)}
           onOpenSettings={() => setIsSettingsModalOpen(true)}

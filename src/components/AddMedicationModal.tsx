@@ -450,10 +450,17 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
               </label>
               <input
                 type="number"
-                min="0.25"
-                step="0.5"
+                min="0"
+                // Use step="any" instead of step="0.5" so the browser
+                // doesn't show the "please enter a valid value. The
+                // two nearest valid values are 0.75 and 1.25" error
+                // when the user types integers like 1, 2, 3, etc.
+                // (with step="0.5" + min="0.25", typing "1" produces
+                // that browser-native error because 1 - 0.25 = 0.75,
+                // not a multiple of 0.5). Validation is done in
+                // handleSubmit instead.
+                step="any"
                 inputMode="decimal"
-                required
                 value={dailyDose}
                 // Use a string-typed state so the user can clear the
                 // field and type a fresh value. The submit handler

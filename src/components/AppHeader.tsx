@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pill, Bell, BellOff, Volume2, VolumeX, Search, Smartphone, Monitor, ShoppingCart, History, Settings } from 'lucide-react';
+import { Pill, Bell, BellOff, Volume2, VolumeX, Search, Smartphone, Monitor, ShoppingCart, History, Settings, AlertTriangle } from 'lucide-react';
 import { ActiveTab } from './AndroidBottomNav';
 
 interface AppHeaderProps {
@@ -13,6 +13,13 @@ interface AppHeaderProps {
   onToggleNotifications: () => void;
   soundEnabled: boolean;
   onToggleSound: () => void;
+  /**
+   * Whether the "متبقي حبتين فقط" critical-stock alert is enabled.
+   * Default true (the headline feature). When false, no critical
+   * stock notification is sent by sendCriticalStockAlert().
+   */
+  criticalStockAlertsEnabled: boolean;
+  onToggleCriticalStockAlerts: () => void;
   isPhoneFrame: boolean;
   onTogglePhoneFrame: () => void;
   onOpenSettings: () => void;
@@ -29,6 +36,8 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   onToggleNotifications,
   soundEnabled,
   onToggleSound,
+  criticalStockAlertsEnabled,
+  onToggleCriticalStockAlerts,
   isPhoneFrame,
   onTogglePhoneFrame,
   onOpenSettings,
@@ -123,6 +132,29 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             {alertsCount > 0 && (
               <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-teal-800 animate-pulse" />
             )}
+          </button>
+
+          {/* Critical-stock alerts toggle ("متبقي حبتين فقط")
+              — separate from the master notification toggle because
+              the user explicitly asked for it to be its own switch.
+              When this is ON, the app fires a high-priority
+              notification when any medication drops to 2 pills or
+              fewer. When OFF, no critical stock alert fires (other
+              notifications like dose reminders still work). */}
+          <button
+            onClick={onToggleCriticalStockAlerts}
+            title={
+              criticalStockAlertsEnabled
+                ? 'تنبيه "حبتين بس" مفعّل — هتوصلك إشعار لو في دواء متبقي فيه حبتين أو أقل'
+                : 'فعّل تنبيه "حبتين بس" (مهم جداً)'
+            }
+            className={`p-2 rounded-xl transition active:scale-95 relative ${
+              criticalStockAlertsEnabled
+                ? 'bg-rose-600/40 text-rose-100 ring-1 ring-rose-300/50'
+                : 'text-teal-200 hover:text-white hover:bg-teal-700/80'
+            }`}
+          >
+            <AlertTriangle className={`w-4 h-4 ${criticalStockAlertsEnabled ? 'fill-rose-200/20' : ''}`} />
           </button>
 
           {/* Device Mockup frame toggle (hidden on mobile, visible on larger screens) */}

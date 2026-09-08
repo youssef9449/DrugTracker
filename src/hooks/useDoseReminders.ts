@@ -44,12 +44,14 @@ interface UseDoseRemindersOptions {
   medications: Medication[];
   soundEnabled: boolean;
   notificationsEnabled: boolean;
+  globalCustomSound?: { fileName: string; mimeType: string; dataUrl: string } | null;
 }
 
 export function useDoseReminders({
   medications,
   soundEnabled,
   notificationsEnabled,
+  globalCustomSound,
 }: UseDoseRemindersOptions) {
   const [alarmingMedication, setAlarmingMedication] = useState<Medication | null>(null);
   const queueRef = useRef<string[]>([]);
@@ -111,7 +113,10 @@ export function useDoseReminders({
         med.unit,
         med.currentPills,
         med.reminderTime,
-        med.customSoundFile
+        // Use the GLOBAL custom sound (applies to all medications),
+        // not the per-medication one. Falls back to null if no
+        // global custom sound is set.
+        globalCustomSound
       );
     }
   };

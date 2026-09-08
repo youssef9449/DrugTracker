@@ -112,7 +112,7 @@ export const PharmacyShoppingView: React.FC<PharmacyShoppingViewProps> = ({
     if (itemsToOrder.length === 0) return '';
     return generatePharmacyOrderMessage(
       itemsToOrder,
-      settings.customerCode || '14739',
+      settings.customerCode || '',
       settings.address,
       settings.contactPhone
     );
@@ -175,7 +175,7 @@ export const PharmacyShoppingView: React.FC<PharmacyShoppingViewProps> = ({
               )}
             </div>
             <div className="text-[11px] text-slate-500 mt-0.5">
-              رقم العميل: <strong className="text-teal-800 font-mono">{settings.customerCode || '14739'}</strong>
+              رقم العميل: <strong className="text-teal-800 font-mono">{settings.customerCode || ''}</strong>
             </div>
           </div>
         </div>

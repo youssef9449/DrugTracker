@@ -37,7 +37,7 @@ export const PharmacySettingsModal: React.FC<PharmacySettingsModalProps> = ({
 }) => {
   const [pharmacyPhone, setPharmacyPhone] = useState(settings.pharmacyPhone || '');
   const [pharmacyName, setPharmacyName] = useState(settings.pharmacyName || 'الصيدلية');
-  const [customerCode, setCustomerCode] = useState(settings.customerCode || '14739');
+  const [customerCode, setCustomerCode] = useState(settings.customerCode || '');
   const [defaultDurationDays, setDefaultDurationDays] = useState<30 | 60>(
     settings.defaultDurationDays || 30
   );
@@ -52,7 +52,7 @@ export const PharmacySettingsModal: React.FC<PharmacySettingsModalProps> = ({
     if (isOpen) {
       setPharmacyPhone(settings.pharmacyPhone || '');
       setPharmacyName(settings.pharmacyName || 'الصيدلية');
-      setCustomerCode(settings.customerCode || '14739');
+      setCustomerCode(settings.customerCode || '');
       setDefaultDurationDays(settings.defaultDurationDays || 30);
       setCustomQuantities(settings.customQuantities || {});
       setAddress(settings.address || '');
@@ -84,7 +84,7 @@ export const PharmacySettingsModal: React.FC<PharmacySettingsModalProps> = ({
     onSaveSettings({
       pharmacyPhone: pharmacyPhone.trim(),
       pharmacyName: pharmacyName.trim() || 'الصيدلية',
-      customerCode: customerCode.trim() || '14739',
+      customerCode: customerCode.trim(),
       defaultDurationDays,
       customQuantities,
       address: address.trim(),
@@ -163,7 +163,7 @@ export const PharmacySettingsModal: React.FC<PharmacySettingsModalProps> = ({
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono font-bold focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
               />
               <span className="text-[10px] text-slate-500 mt-1 block">
-                يظهر في نهاية الرسالة: (رقم العميل {customerCode || '14739'})
+                يظهر في نهاية الرسالة: (رقم العميل {customerCode || '—'})
               </span>
             </div>
 

@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Bell, Check, Clock, Volume2, X } from 'lucide-react';
+import { Bell, Check, Clock, Volume2, X, FileAudio } from 'lucide-react';
 import { Medication, formatTimeArabic } from '../types';
 import { NOTIFICATION_SOUND_OPTIONS, playNotificationSound } from '../utils/sound';
 
@@ -20,14 +20,19 @@ export const DoseAlarmModal: React.FC<DoseAlarmModalProps> = ({
 }) => {
   useEffect(() => {
     if (isOpen && medication) {
-      playNotificationSound(medication.notificationSound || 'classic_chime');
+      playNotificationSound(
+        medication.notificationSound || 'classic_chime',
+        medication.customSoundFile
+      );
     }
   }, [isOpen, medication]);
 
   if (!isOpen || !medication) return null;
 
+  const effectiveSoundType = medication.notificationSound || 'classic_chime';
+  const isCustom = effectiveSoundType === 'custom' && medication.customSoundFile;
   const currentSoundOption = NOTIFICATION_SOUND_OPTIONS.find(
-    (s) => s.id === (medication.notificationSound || 'classic_chime')
+    (s) => s.id === effectiveSoundType
   );
 
   return (
@@ -80,18 +85,28 @@ export const DoseAlarmModal: React.FC<DoseAlarmModalProps> = ({
           </div>
 
           <div className="flex items-center justify-between p-2.5 bg-amber-50/60 border border-amber-200/80 rounded-xl text-xs">
-            <div className="flex items-center gap-2">
-              <span className="text-lg">{currentSoundOption?.icon || '🔔'}</span>
-              <div>
+            <div className="flex items-center gap-2 min-w-0">
+              {isCustom ? (
+                <FileAudio className="w-4 h-4 text-amber-700 shrink-0" />
+              ) : (
+                <span className="text-lg shrink-0">{currentSoundOption?.icon || '🔔'}</span>
+              )}
+              <div className="min-w-0">
                 <span className="text-slate-600">نغمة التنبيه: </span>
-                <span className="font-bold text-amber-950">{currentSoundOption?.name || 'نغمة كلاسيكية'}</span>
+                <span className="font-bold text-amber-950 truncate inline-block max-w-[140px] align-bottom">
+                  {isCustom
+                    ? medication.customSoundFile!.fileName
+                    : currentSoundOption?.name || 'نغمة كلاسيكية'}
+                </span>
               </div>
             </div>
 
             <button
               type="button"
-              onClick={() => playNotificationSound(medication.notificationSound || 'classic_chime')}
-              className="px-2.5 py-1 bg-white hover:bg-amber-100 border border-amber-300 rounded-lg text-xs font-bold text-amber-900 flex items-center gap-1 shadow-xs active:scale-95 transition"
+              onClick={() =>
+                playNotificationSound(effectiveSoundType, medication.customSoundFile)
+              }
+              className="px-2.5 py-1 bg-white hover:bg-amber-100 border border-amber-300 rounded-lg text-xs font-bold text-amber-900 flex items-center gap-1 shadow-xs active:scale-95 transition shrink-0"
               title="إعادة الاستماع للنغمة"
             >
               <Volume2 className="w-3.5 h-3.5 text-amber-700" />

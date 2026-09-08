@@ -17,10 +17,22 @@ import {
   Layers,
   Bell,
   Volume2,
+  FileAudio,
 } from 'lucide-react';
 import { Medication, calculateMedicationStatus, describeStockInStrips, formatTimeArabic } from '../types';
 import { getDepletionDate } from '../utils/dateCalculations';
 import { NOTIFICATION_SOUND_OPTIONS, playNotificationSound } from '../utils/sound';
+
+// Helper used to resolve the human-readable name of a medication's
+// notification sound. Returns the user-uploaded file name when the
+// medication uses a custom sound file.
+function resolveSoundName(med: Medication): string {
+  const soundId = med.notificationSound || 'classic_chime';
+  if (soundId === 'custom' && med.customSoundFile) {
+    return med.customSoundFile.fileName;
+  }
+  return NOTIFICATION_SOUND_OPTIONS.find((s) => s.id === soundId)?.name || 'نغمة كلاسيكية';
+}
 
 interface MedicationCardProps {
   medication: Medication;
@@ -181,7 +193,7 @@ export const MedicationCard: React.FC<MedicationCardProps> = ({
                       if (onTriggerAlarm) {
                         onTriggerAlarm(medication);
                       } else {
-                        playNotificationSound(medication.notificationSound || 'classic_chime');
+                        playNotificationSound(medication.notificationSound || 'classic_chime', medication.customSoundFile);
                       }
                     }}
                     className="w-full text-right px-3 py-2 text-slate-700 hover:bg-slate-50 flex items-center gap-2"
@@ -195,7 +207,7 @@ export const MedicationCard: React.FC<MedicationCardProps> = ({
                       if (onTriggerAlarm) {
                         onTriggerAlarm(medication);
                       } else {
-                        playNotificationSound(medication.notificationSound || 'classic_chime');
+                        playNotificationSound(medication.notificationSound || 'classic_chime', medication.customSoundFile);
                       }
                     }}
                     className="w-full text-right px-3 py-2 text-slate-700 hover:bg-slate-50 flex items-center gap-2"
@@ -290,7 +302,7 @@ export const MedicationCard: React.FC<MedicationCardProps> = ({
                 تنبيه يومي: {formatTimeArabic(medication.reminderTime)}
               </span>
               <span className="text-[10px] text-amber-900 bg-amber-100 px-1.5 py-0.2 rounded-md font-medium">
-                {NOTIFICATION_SOUND_OPTIONS.find((s) => s.id === (medication.notificationSound || 'classic_chime'))?.name || 'نغمة كلاسيكية'}
+                {resolveSoundName(medication)}
               </span>
             </div>
 
@@ -300,7 +312,7 @@ export const MedicationCard: React.FC<MedicationCardProps> = ({
                 if (onTriggerAlarm) {
                   onTriggerAlarm(medication);
                 } else {
-                  playNotificationSound(medication.notificationSound || 'classic_chime');
+                  playNotificationSound(medication.notificationSound || 'classic_chime', medication.customSoundFile);
                 }
               }}
               className="px-2 py-0.5 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-200 text-[11px] font-bold text-amber-900 flex items-center gap-1 shrink-0 active:scale-95 transition"
@@ -428,7 +440,7 @@ export const MedicationCard: React.FC<MedicationCardProps> = ({
                       if (onTriggerAlarm) {
                         onTriggerAlarm(medication);
                       } else {
-                        playNotificationSound(medication.notificationSound || 'classic_chime');
+                        playNotificationSound(medication.notificationSound || 'classic_chime', medication.customSoundFile);
                       }
                     }}
                     className="w-full text-right px-3 py-2 text-slate-700 hover:bg-slate-50 flex items-center gap-2"
@@ -536,7 +548,7 @@ export const MedicationCard: React.FC<MedicationCardProps> = ({
                 تنبيه يومي: {formatTimeArabic(medication.reminderTime)}
               </span>
               <span className="text-[10px] text-emerald-900 bg-emerald-100 px-1.5 py-0.2 rounded-md font-medium">
-                {NOTIFICATION_SOUND_OPTIONS.find((s) => s.id === (medication.notificationSound || 'classic_chime'))?.name || 'نغمة كلاسيكية'}
+                {resolveSoundName(medication)}
               </span>
             </div>
 
@@ -546,7 +558,7 @@ export const MedicationCard: React.FC<MedicationCardProps> = ({
                 if (onTriggerAlarm) {
                   onTriggerAlarm(medication);
                 } else {
-                  playNotificationSound(medication.notificationSound || 'classic_chime');
+                  playNotificationSound(medication.notificationSound || 'classic_chime', medication.customSoundFile);
                 }
               }}
               className="px-2 py-0.5 rounded-lg bg-white hover:bg-emerald-100 border border-emerald-300 text-[11px] font-bold text-emerald-900 flex items-center gap-1 shrink-0 active:scale-95 transition"
@@ -775,7 +787,7 @@ export const MedicationCard: React.FC<MedicationCardProps> = ({
               تنبيه يومي: {formatTimeArabic(medication.reminderTime)}
             </span>
             <span className="text-[10px] text-teal-900 bg-teal-100 px-1.5 py-0.2 rounded-md font-medium">
-              {NOTIFICATION_SOUND_OPTIONS.find((s) => s.id === (medication.notificationSound || 'classic_chime'))?.name || 'نغمة كلاسيكية'}
+              {resolveSoundName(medication)}
             </span>
           </div>
 
@@ -785,7 +797,7 @@ export const MedicationCard: React.FC<MedicationCardProps> = ({
               if (onTriggerAlarm) {
                 onTriggerAlarm(medication);
               } else {
-                playNotificationSound(medication.notificationSound || 'classic_chime');
+                playNotificationSound(medication.notificationSound || 'classic_chime', medication.customSoundFile);
               }
             }}
             className="px-2 py-0.5 rounded-lg bg-white hover:bg-teal-100 border border-teal-300 text-[11px] font-bold text-teal-900 flex items-center gap-1 shrink-0 active:scale-95 transition"

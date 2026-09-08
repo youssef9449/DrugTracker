@@ -35,46 +35,15 @@ const SOUND_KEY = 'android_med_tracker_sound_v1';
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('stock');
 
-  const [medications, setMedications] = useState<Medication[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_MEDS_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {
-      // ignore
-    }
-    return INITIAL_MEDICATIONS;
-  });
-
-  const [logs, setLogs] = useState<ConsumptionLog[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_LOGS_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch {
-      // ignore
-    }
-    return INITIAL_LOGS;
-  });
-
-  const [pharmacySettings, setPharmacySettings] = useState<PharmacySettings>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_PHARMACY_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object') {
-          return { ...DEFAULT_PHARMACY_SETTINGS, ...parsed, customerCode: parsed.customerCode || '14739' };
-        }
-      }
-    } catch {
-      // ignore
-    }
-    return DEFAULT_PHARMACY_SETTINGS;
-  });
+  // SSR/hydration-safe initialization: start with the deterministic default
+  // values (no localStorage / window access during initial render), then
+  // hydrate from localStorage in a useEffect after mount. This guarantees
+  // the server-rendered HTML matches the first client render, preventing
+  // React hydration mismatches in AI Studio's SSR preview environment.
+  const [medications, setMedications] = useState<Medication[]>(INITIAL_MEDICATIONS);
+  const [logs, setLogs] = useState<ConsumptionLog[]>(INITIAL_LOGS);
+  const [pharmacySettings, setPharmacySettings] =
+    useState<PharmacySettings>(DEFAULT_PHARMACY_SETTINGS);
 
   const [filter, setFilter] = useState<'all' | 'alerts' | 'sufficient'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -83,17 +52,9 @@ export default function App() {
   const [editingMedication, setEditingMedication] = useState<Medication | null>(null);
   const [refillMedication, setRefillMedication] = useState<Medication | null>(null);
 
-  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(SOUND_KEY) !== 'false';
-    } catch {
-      return true;
-    }
-  });
-
-  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(() => {
-    return typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted';
-  });
+  // Same SSR-safe pattern: defaults are deterministic, real state loaded on mount.
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(false);
 
   const [isPhoneFrame, setIsPhoneFrame] = useState(true);
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
@@ -103,6 +64,62 @@ export default function App() {
     soundEnabled,
     notificationsEnabled,
   });
+
+  // ─────────────────────────────────────────────────────────────
+  // Hydration: load persisted state from localStorage AFTER mount.
+  // This effect runs only on the client and replaces the default
+  // values with whatever the user previously saved, if any.
+  // ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    try {
+      const savedMeds = localStorage.getItem(STORAGE_MEDS_KEY);
+      if (savedMeds) {
+        const parsed = JSON.parse(savedMeds);
+        if (Array.isArray(parsed) && parsed.length > 0) setMedications(parsed);
+      }
+    } catch {
+      // ignore
+    }
+
+    try {
+      const savedLogs = localStorage.getItem(STORAGE_LOGS_KEY);
+      if (savedLogs) {
+        const parsed = JSON.parse(savedLogs);
+        if (Array.isArray(parsed)) setLogs(parsed);
+      }
+    } catch {
+      // ignore
+    }
+
+    try {
+      const savedPharmacy = localStorage.getItem(STORAGE_PHARMACY_KEY);
+      if (savedPharmacy) {
+        const parsed = JSON.parse(savedPharmacy);
+        if (parsed && typeof parsed === 'object') {
+          setPharmacySettings({
+            ...DEFAULT_PHARMACY_SETTINGS,
+            ...parsed,
+            customerCode: parsed.customerCode || '14739',
+          });
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    try {
+      setSoundEnabled(localStorage.getItem(SOUND_KEY) !== 'false');
+    } catch {
+      // ignore
+    }
+
+    setNotificationsEnabled(
+      typeof window !== 'undefined' &&
+        'Notification' in window &&
+        Notification.permission === 'granted'
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     try {
@@ -382,7 +399,6 @@ export default function App() {
           isPhoneFrame={isPhoneFrame}
           onTogglePhoneFrame={() => setIsPhoneFrame(!isPhoneFrame)}
           onOpenSettings={() => setIsSettingsModalOpen(true)}
-          onOpenAddModal={openAdd}
         />
 
         <main className="flex-1 overflow-y-auto pb-24 relative">

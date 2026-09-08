@@ -15,7 +15,7 @@ export function normalizeArabicDigits(input: string): string {
 export function cleanPhoneNumber(rawPhone: string): string {
   if (!rawPhone) return '';
   // Normalize Arabic numerals to standard 0-9 digits and strip spaces, dashes, parens, plus
-  let cleaned = normalizeArabicDigits(rawPhone).replace(/[\s\-\(\)\+]/g, '');
+  let cleaned = normalizeArabicDigits(rawPhone).replace(/[\s\-()+]/g, '');
 
   // If starts with 00, strip 00
   if (cleaned.startsWith('00')) {

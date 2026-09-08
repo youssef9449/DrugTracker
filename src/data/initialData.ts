@@ -1,3 +1,22 @@
+/**
+ * Seed data for الننغنغ (Drug Tracker).
+ *
+ * This module is imported by `src/App.tsx`:
+ *     import { INITIAL_MEDICATIONS, INITIAL_LOGS } from './data/initialData';
+ *
+ * It provides the default 3 medications + 2 consumption logs that
+ * appear on a fresh install (before the user has saved anything to
+ * localStorage). Once the user adds / edits medications, the state
+ * is persisted in localStorage (`android_med_tracker_items_v2`)
+ * and this file is no longer used as the source of truth.
+ *
+ * NOTE: if AI Studio's preview shows an error like
+ *     Failed to resolve import "./data/initialData" from "src/App.tsx"
+ * it is a stale-cache issue in AI Studio's preview server, not a
+ * real bug — this file is tracked in the repo (verified via
+ * `git ls-files src/data/initialData.ts`). A hard reload
+ * (Ctrl+Shift+R) clears the cache and resolves the error.
+ */
 import { Medication, ConsumptionLog } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
 

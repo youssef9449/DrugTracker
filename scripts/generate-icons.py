@@ -28,7 +28,7 @@ from PIL import Image
 
 # Repo root (parent of scripts/)
 REPO_ROOT = Path(__file__).resolve().parent.parent
-ICONS_DIR = REPO_ROOT / "public" / "assets" / "aistudio" / "icons"
+ICONS_DIR = REPO_ROOT / "public" / "assets" / "icons"
 SVG_PATH = ICONS_DIR / "icon.svg"
 
 

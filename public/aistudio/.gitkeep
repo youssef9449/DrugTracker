@@ -1,0 +1,3 @@
+# Placeholder so git tracks this directory even when it's empty.
+# AI Studio uses this folder as a scratch workspace; we keep it
+# under version control so the directory exists on fresh clones.

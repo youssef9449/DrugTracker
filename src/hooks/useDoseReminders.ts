@@ -99,7 +99,10 @@ export function useDoseReminders({
     alarmingIdRef.current = med.id;
     setAlarmingMedication(med);
     if (soundEnabled) {
-      playNotificationSound(med.notificationSound || 'classic_chime');
+      playNotificationSound(
+        med.notificationSound || 'classic_chime',
+        med.customSoundFile
+      );
     }
     if (notificationsEnabled) {
       sendMedicationDoseReminder(

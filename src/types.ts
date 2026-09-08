@@ -15,7 +15,24 @@ export type NotificationSoundType =
   | 'digital_beep'
   | 'harp'
   | 'radar'
-  | 'classic_chime';
+  | 'classic_chime'
+  | 'custom';
+
+/**
+ * Identifier for a user-uploaded custom sound file. We store only the file
+ * name (for display) and the data URL (for playback). The data URL is
+ * generated via URL.createObjectURL or FileReader.readAsDataURL on the
+ * client, then persisted in localStorage so the custom sound survives
+ * page reloads without re-uploading the file.
+ */
+export interface CustomSoundFile {
+  /** Original file name as selected by the user (for display only). */
+  fileName: string;
+  /** MIME type (e.g., 'audio/mpeg', 'audio/wav', 'audio/ogg'). */
+  mimeType: string;
+  /** Base64 data URL of the audio file content. */
+  dataUrl: string;
+}
 
 export interface Medication {
   id: string;
@@ -37,6 +54,7 @@ export interface Medication {
   reminderEnabled?: boolean; // هل تم تفعيل تذكير يومي بموعد محدد
   reminderTime?: string; // وقت التذكير بصيغة 24 ساعة (مثال: "09:00" أو "21:30")
   notificationSound?: NotificationSoundType; // صوت إشعار هذا الدواء بشكل مخصص
+  customSoundFile?: CustomSoundFile; // ملف صوتي مخصص اختاره المستخدم (إذا notificationSound === 'custom')
 }
 
 /**

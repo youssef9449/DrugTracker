@@ -1,5 +1,5 @@
 // Subtle pleasant audio feedback using Web Audio API (Zero external assets needed)
-import { NotificationSoundType } from '../types';
+import { NotificationSoundType, CustomSoundFile } from '../types';
 
 let audioCtx: AudioContext | null = null;
 
@@ -36,7 +36,117 @@ export const NOTIFICATION_SOUND_OPTIONS: NotificationSoundOption[] = [
   { id: 'digital_beep', name: 'نغمة رقمية أندرويد', description: 'تنبيه إلكتروني مزدوج واضح', icon: '📱' },
   { id: 'harp', name: 'قيثارة ناعمة', description: 'عزف أوتار متدرج ومريح', icon: '🎵' },
   { id: 'radar', name: 'رادار طبي', description: 'نبضات طبية دورية دقيقة', icon: '📡' },
+  // The "custom" entry is a placeholder — its name/description is replaced
+  // at render time with the user's uploaded file name.
+  { id: 'custom', name: 'ملف صوتي خاص', description: 'اختر ملفاً من جهازك', icon: '📂' },
 ];
+
+/**
+ * Maximum accepted size for a custom sound file. 2 MB keeps the data URL
+ * well under the ~5 MB localStorage quota on most browsers while still
+ * allowing a high-quality MP3 / WAV / OGG ringtone.
+ */
+export const CUSTOM_SOUND_MAX_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Accepted MIME types for custom sound files. Includes the most common
+ * mobile-friendly audio formats so users can pick files from WhatsApp,
+ * Telegram, downloads, etc.
+ */
+export const CUSTOM_SOUND_ACCEPTED_MIME =
+  'audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,audio/ogg,audio/aac,audio/mp4,audio/x-m4a,audio/webm';
+
+/**
+ * Read a File into a base64 data URL. Returns a promise that resolves
+ * with the file metadata + data URL, ready to be stored on a Medication.
+ */
+export function readCustomSoundFile(file: File): Promise<CustomSoundFile> {
+  return new Promise((resolve, reject) => {
+    if (!file) {
+      reject(new Error('لا يوجد ملف'));
+      return;
+    }
+    if (file.size > CUSTOM_SOUND_MAX_BYTES) {
+      reject(new Error('حجم الملف كبير جداً. الحد الأقصى 2 ميجابايت.'));
+      return;
+    }
+    if (!file.type.startsWith('audio/') && !/\.(mp3|wav|ogg|aac|m4a|webm)$/i.test(file.name)) {
+      reject(new Error('صيغة الملف غير مدعومة. اختر MP3 / WAV / OGG / AAC / M4A.'));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || '');
+      if (!dataUrl) {
+        reject(new Error('تعذّر قراءة الملف'));
+        return;
+      }
+      resolve({
+        fileName: file.name,
+        mimeType: file.type || 'audio/mpeg',
+        dataUrl,
+      });
+    };
+    reader.onerror = () => reject(new Error('تعذّر قراءة الملف'));
+    reader.readAsDataURL(file);
+  });
+}
+
+// Cache of <audio> elements for currently-loaded custom sounds, keyed by
+// the data URL. We reuse the same element so the browser doesn't have to
+// re-decode the file each time the user tests the sound.
+const customAudioCache = new Map<string, HTMLAudioElement>();
+
+/**
+ * Play a custom (user-uploaded) sound file. The audio element is cached
+ * so repeated plays are instant. Returns a promise that rejects if the
+ * file cannot be played (so the caller can fall back to a default sound).
+ */
+function playCustomSound(customFile: CustomSoundFile): Promise<void> {
+  return new Promise((resolve, reject) => {
+    try {
+      if (typeof window === 'undefined') {
+        reject(new Error('window غير متاح'));
+        return;
+      }
+      let audio = customAudioCache.get(customFile.dataUrl);
+      if (!audio) {
+        audio = new Audio(customFile.dataUrl);
+        audio.preload = 'auto';
+        customAudioCache.set(customFile.dataUrl, audio);
+      }
+      // Reset to start so repeat plays don't accumulate position.
+      audio.currentTime = 0;
+      audio.volume = 1;
+
+      const cleanup = () => {
+        audio?.removeEventListener('ended', onEnded);
+        audio?.removeEventListener('error', onError);
+      };
+      const onEnded = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = () => {
+        cleanup();
+        reject(new Error('تعذّر تشغيل الملف الصوتي'));
+      };
+      audio.addEventListener('ended', onEnded);
+      audio.addEventListener('error', onError);
+
+      const playResult = audio.play();
+      if (playResult && typeof playResult.then === 'function') {
+        playResult.then(() => void 0).catch((err) => {
+          cleanup();
+          reject(err);
+        });
+      }
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
 
 export function playSuccessChime() {
   try {
@@ -92,9 +202,32 @@ export function playAlertChime() {
 }
 
 /**
- * Plays a specific synthesized notification sound for a medication
+ * Plays a specific synthesized notification sound for a medication.
+ * If the medication uses a custom uploaded file, plays that file via
+ * the HTMLAudioElement; falls back to the classic chime if the file
+ * fails to play.
  */
-export function playNotificationSound(soundType: NotificationSoundType = 'classic_chime') {
+export function playNotificationSound(
+  soundType: NotificationSoundType = 'classic_chime',
+  customSoundFile?: CustomSoundFile
+) {
+  if (soundType === 'custom') {
+    if (customSoundFile?.dataUrl) {
+      playCustomSound(customSoundFile).catch(() => {
+        // Fall back to the synthesized classic chime if the custom file
+        // cannot be played (e.g., format not supported, file deleted).
+        playSynthesizedSound('classic_chime');
+      });
+      return;
+    }
+    // No custom file set despite the type being 'custom' — fall back.
+    playSynthesizedSound('classic_chime');
+    return;
+  }
+  playSynthesizedSound(soundType);
+}
+
+function playSynthesizedSound(soundType: NotificationSoundType) {
   try {
     const ctx = getAudioContext();
     if (!ctx) return;

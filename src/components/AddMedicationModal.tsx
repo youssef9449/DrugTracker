@@ -1,8 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { X, Pill, ShieldAlert, Check, Zap, Layers, Box, Calculator, Bell, Clock, Volume2 } from 'lucide-react';
-import { Medication, describeStockInStrips, NotificationSoundType, formatTimeArabic } from '../types';
+import { X, Pill, ShieldAlert, Check, Zap, Layers, Box, Calculator, Bell, Clock, Volume2, FileAudio, Trash2 } from 'lucide-react';
+import { Medication, describeStockInStrips, NotificationSoundType, CustomSoundFile, formatTimeArabic } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
-import { NOTIFICATION_SOUND_OPTIONS, playNotificationSound } from '../utils/sound';
+import {
+  NOTIFICATION_SOUND_OPTIONS,
+  playNotificationSound,
+  readCustomSoundFile,
+  CUSTOM_SOUND_ACCEPTED_MIME,
+  CUSTOM_SOUND_MAX_BYTES,
+} from '../utils/sound';
 
 interface AddMedicationModalProps {
   isOpen: boolean;
@@ -46,6 +52,8 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
   const [reminderTime, setReminderTime] = useState<string>('09:00');
   const [notificationSound, setNotificationSound] = useState<NotificationSoundType>('classic_chime');
   const [customSoundEnabled, setCustomSoundEnabled] = useState<boolean>(false);
+  const [customSoundFile, setCustomSoundFile] = useState<CustomSoundFile | null>(null);
+  const [isUploadingSound, setIsUploadingSound] = useState<boolean>(false);
 
   useEffect(() => {
     if (initialData) {
@@ -66,6 +74,7 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
       setReminderTime(initialData.reminderTime || '09:00');
       setNotificationSound(initialData.notificationSound || 'classic_chime');
       setCustomSoundEnabled(Boolean(initialData.notificationSound));
+      setCustomSoundFile(initialData.customSoundFile || null);
     } else {
       setName('');
       setCurrentPills(30);
@@ -85,9 +94,11 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
       setReminderTime('09:00');
       setNotificationSound('classic_chime');
       setCustomSoundEnabled(false);
+      setCustomSoundFile(null);
     }
     setShowStockHelper(false);
     setError('');
+    setIsUploadingSound(false);
   }, [initialData, isOpen]);
 
   if (!isOpen) return null;
@@ -111,6 +122,37 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
     setShowStockHelper(false);
   };
 
+  // File picker handler — uses an <input type="file"> with accept="audio/*"
+  // to let the user pick any audio file from their mobile device. Reads
+  // the file as a base64 data URL and stores it in component state.
+  const handleCustomSoundFilePick = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    // Reset the input value so the same file can be re-picked later if needed.
+    event.target.value = '';
+    if (!file) return;
+
+    setIsUploadingSound(true);
+    setError('');
+    try {
+      const customFile = await readCustomSoundFile(file);
+      setCustomSoundFile(customFile);
+      setNotificationSound('custom');
+      setCustomSoundEnabled(true);
+      // Immediately preview the selected file.
+      playNotificationSound('custom', customFile);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'تعذّر تحميل الملف الصوتي';
+      setError(message);
+    } finally {
+      setIsUploadingSound(false);
+    }
+  };
+
+  const handleRemoveCustomSound = () => {
+    setCustomSoundFile(null);
+    setNotificationSound('classic_chime');
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
@@ -127,6 +169,10 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
     }
     if (reminderEnabled && !reminderTime) {
       setError('اختر وقت التذكير اليومي');
+      return;
+    }
+    if (notificationSound === 'custom' && !customSoundFile) {
+      setError('اختر ملفاً صوتياً أو عُد إلى إحدى النغمات الافتراضية');
       return;
     }
 
@@ -151,6 +197,8 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
         reminderEnabled,
         reminderTime: reminderEnabled ? reminderTime : undefined,
         notificationSound: customSoundEnabled || reminderEnabled ? notificationSound : 'classic_chime',
+        customSoundFile:
+          notificationSound === 'custom' && customSoundFile ? customSoundFile : undefined,
       },
       initialData ? initialData.id : undefined
     );
@@ -508,36 +556,130 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
             </div>
 
             {(customSoundEnabled || reminderEnabled) && (
-              <div className="grid grid-cols-2 gap-2">
-                {NOTIFICATION_SOUND_OPTIONS.map((opt) => {
-                  const selected = notificationSound === opt.id;
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => {
-                        setNotificationSound(opt.id);
-                        setCustomSoundEnabled(true);
-                        playNotificationSound(opt.id);
-                      }}
-                      className={`text-right p-2.5 rounded-xl border transition ${
-                        selected
-                          ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
-                          : 'bg-white text-slate-700 border-slate-200 hover:border-teal-300 hover:bg-teal-50'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="text-base">{opt.icon}</span>
-                        {selected && <Volume2 className="w-3.5 h-3.5" />}
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  {NOTIFICATION_SOUND_OPTIONS.map((opt) => {
+                    const selected = notificationSound === opt.id;
+                    // Hide the "custom" entry when a custom file is already selected
+                    // (it's shown in its own block below with the file name).
+                    if (opt.id === 'custom' && !customSoundFile) {
+                      return null;
+                    }
+                    if (opt.id === 'custom' && customSoundFile) {
+                      // Render the custom option as the "currently selected file" tile.
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => {
+                            setNotificationSound('custom');
+                            setCustomSoundEnabled(true);
+                            playNotificationSound('custom', customSoundFile);
+                          }}
+                          className={`text-right p-2.5 rounded-xl border transition ${
+                            selected
+                              ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
+                              : 'bg-white text-slate-700 border-slate-200 hover:border-teal-300 hover:bg-teal-50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1">
+                            <FileAudio className="w-4 h-4" />
+                            {selected && <Volume2 className="w-3.5 h-3.5" />}
+                          </div>
+                          <div className="text-[11px] font-bold mt-1 truncate" title={customSoundFile.fileName}>
+                            {customSoundFile.fileName}
+                          </div>
+                          <div className={`text-[10px] mt-0.5 ${selected ? 'text-teal-100' : 'text-slate-500'}`}>
+                            ملفك الخاص — اضغط للاستماع
+                          </div>
+                        </button>
+                      );
+                    }
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => {
+                          setNotificationSound(opt.id);
+                          setCustomSoundEnabled(true);
+                          playNotificationSound(opt.id);
+                        }}
+                        className={`text-right p-2.5 rounded-xl border transition ${
+                          selected
+                            ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
+                            : 'bg-white text-slate-700 border-slate-200 hover:border-teal-300 hover:bg-teal-50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-base">{opt.icon}</span>
+                          {selected && <Volume2 className="w-3.5 h-3.5" />}
+                        </div>
+                        <div className="text-[11px] font-bold mt-1">{opt.name}</div>
+                        <div className={`text-[10px] mt-0.5 ${selected ? 'text-teal-100' : 'text-slate-500'}`}>
+                          {opt.description}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Upload custom sound file block */}
+                <div className="p-3 bg-white border border-dashed border-teal-300 rounded-xl space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-2 min-w-0">
+                      <div className="w-7 h-7 rounded-lg bg-teal-100 text-teal-700 flex items-center justify-center shrink-0">
+                        <FileAudio className="w-3.5 h-3.5" />
                       </div>
-                      <div className="text-[11px] font-bold mt-1">{opt.name}</div>
-                      <div className={`text-[10px] mt-0.5 ${selected ? 'text-teal-100' : 'text-slate-500'}`}>
-                        {opt.description}
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-bold text-slate-800">
+                          ملف صوتي من جهازك
+                        </p>
+                        <p className="text-[10px] text-slate-500 leading-relaxed">
+                          MP3 / WAV / OGG / M4A. الحد الأقصى {Math.round(CUSTOM_SOUND_MAX_BYTES / 1024 / 1024)} ميجابايت.
+                        </p>
                       </div>
-                    </button>
-                  );
-                })}
-              </div>
+                    </div>
+                    {customSoundFile && (
+                      <button
+                        type="button"
+                        onClick={handleRemoveCustomSound}
+                        className="text-[10px] font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2 py-1 rounded-lg flex items-center gap-1 shrink-0 transition"
+                        title="إزالة الملف"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>إزالة</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <label
+                    className={`block w-full py-2 px-3 rounded-xl text-xs font-bold text-center cursor-pointer transition ${
+                      isUploadingSound
+                        ? 'bg-slate-100 text-slate-400 cursor-wait'
+                        : 'bg-teal-50 text-teal-800 border border-teal-200 hover:bg-teal-100'
+                    }`}
+                  >
+                    <input
+                      type="file"
+                      accept={CUSTOM_SOUND_ACCEPTED_MIME}
+                      onChange={handleCustomSoundFilePick}
+                      disabled={isUploadingSound}
+                      className="sr-only"
+                    />
+                    {isUploadingSound
+                      ? 'جاري التحميل...'
+                      : customSoundFile
+                      ? 'اختيار ملف آخر'
+                      : 'اختر ملفاً صوتياً'}
+                  </label>
+
+                  {customSoundFile && (
+                    <div className="text-[10px] text-teal-700 bg-teal-50 border border-teal-200 rounded-lg px-2 py-1.5 truncate" title={customSoundFile.fileName}>
+                      📂 {customSoundFile.fileName}
+                    </div>
+                  )}
+                </div>
+              </>
             )}
           </div>
 

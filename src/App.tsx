@@ -626,7 +626,7 @@ export default function App() {
                       </div>
                       <div>
                         <span className="font-bold text-teal-950 block text-[11px]">الخصم التلقائي اليومي نشط</span>
-                        <p className="text-[10px] text-teal-800">يتم احتساب الجرعات بمرور الأيام لتحديث رصيدك وموعد النفاد بدقة.</p>
+                        <p className="text-[10px] text-teal-800">يتم احتساب الجرعات بمرور الأيام لتحديث رصيدك وموعد النفاذ بدقة.</p>
                       </div>
                     </div>
                     <button

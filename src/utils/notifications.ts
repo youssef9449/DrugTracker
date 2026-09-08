@@ -1,5 +1,5 @@
 /**
- * Notification utilities for الننغنغ (Drug Tracker).
+ * Notification utilities for النغنغ (Drug Tracker).
  *
  * Two backends are used depending on platform:
  *
@@ -164,7 +164,7 @@ export async function sendMedicineAlert(
   daysLeft: number,
   currentPills: number
 ): Promise<void> {
-  const title = `⚠️ تنبيه اقتراب نفاد: ${medicineName}`;
+  const title = `⚠️ تنبيه اقتراب نفاذ: ${medicineName}`;
   const daysText =
     daysLeft === 1
       ? 'يوم واحد'
@@ -248,7 +248,8 @@ export async function sendMedicationDoseReminder(
   dailyDose: number,
   unit: string = 'قرص',
   currentPills: number,
-  reminderTime?: string
+  reminderTime?: string,
+  customSoundFile?: { fileName: string; mimeType: string; dataUrl: string } | null
 ): Promise<void> {
   const timeHint = reminderTime ? ` الساعة ${reminderTime}` : '';
   const title = `⏰ حان موعد دواء: ${medicineName}`;
@@ -260,6 +261,7 @@ export async function sendMedicationDoseReminder(
     body,
     channelId: 'dose-reminder',
     smallIcon: 'ic_launcher',
+    customSoundFile,
   });
 }
 
@@ -267,6 +269,17 @@ export async function sendMedicationDoseReminder(
  * Internal helper: schedule a notification on whichever platform
  * the app is running on. Falls back to the browser Notification API
  * when Capacitor isn't available.
+ *
+ * @param opts.customSoundFile — optional user-uploaded custom sound.
+ *   When provided, the file's data URL is stored in the
+ *   notification's `extra` field. A `localNotificationReceived`
+ *   listener in native.ts reads this field and plays the custom
+ *   sound via an HTMLAudioElement when the notification fires in
+ *   the foreground. On Android, the notification channel's default
+ *   sound still plays in the background (when the app is closed) —
+ *   there's no portable way to play a per-notification custom sound
+ *   in background without writing the file to the device's
+ *   `res/raw` directory, which requires native code.
  */
 async function scheduleNotification(opts: {
   id: number;
@@ -274,6 +287,7 @@ async function scheduleNotification(opts: {
   body: string;
   channelId: string;
   smallIcon: string;
+  customSoundFile?: { fileName: string; mimeType: string; dataUrl: string } | null;
 }): Promise<void> {
   if (isNativePlatform()) {
     try {
@@ -291,7 +305,9 @@ async function scheduleNotification(opts: {
             // real notification (not "delivered immediately" which
             // some Android versions treat as a head-up only).
             schedule: { at: new Date(Date.now() + 1000) },
-            // Sound: uses the default Android notification sound.
+            // Sound: uses the default Android notification sound
+            // for the channel. The custom sound is played via the
+            // localNotificationReceived listener in the foreground.
             sound: undefined,
             smallIcon: opts.smallIcon,
             channelId: opts.channelId,
@@ -299,6 +315,20 @@ async function scheduleNotification(opts: {
             // together so they don't clutter the drawer.
             ongoing: false,
             autoCancel: true,
+            // Store the custom sound file in `extra` so the
+            // localNotificationReceived listener can access it when
+            // the notification fires. The `extra` field is an opaque
+            // bag that Capacitor serializes via Gson on Android —
+            // objects with string fields work fine.
+            extra: opts.customSoundFile
+              ? {
+                  customSoundFile: {
+                    fileName: opts.customSoundFile.fileName,
+                    mimeType: opts.customSoundFile.mimeType,
+                    dataUrl: opts.customSoundFile.dataUrl,
+                  },
+                }
+              : undefined,
           },
         ],
       });
@@ -306,11 +336,23 @@ async function scheduleNotification(opts: {
       console.warn('[notifications] Capacitor schedule failed:', err);
       // Fall back to web notification API as a last resort.
       scheduleWebNotification(opts.title, opts.body);
+      // Also play the custom sound in the foreground as a fallback.
+      if (opts.customSoundFile) {
+        import('../utils/sound')
+          .then((m) => m.playNotificationSound('custom', opts.customSoundFile!))
+          .catch(() => void 0);
+      }
     }
     return;
   }
 
   scheduleWebNotification(opts.title, opts.body);
+  // On web, also play the custom sound via the Web Audio API.
+  if (opts.customSoundFile) {
+    import('../utils/sound')
+      .then((m) => m.playNotificationSound('custom', opts.customSoundFile!))
+      .catch(() => void 0);
+  }
 }
 
 /**

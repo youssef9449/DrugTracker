@@ -64,7 +64,7 @@ export const LowStockBanner: React.FC<LowStockBannerProps> = ({
             <h4 className="text-xs font-bold">
               {outOfStockCount > 0
                 ? `تنبيه عاجل: ${outOfStockCount} دواء نفد مخزونه بالكامل!`
-                : `تنبيه: ${lowStockMeds.length} أدوية اقتربت من النفاد`}
+                : `تنبيه: ${lowStockMeds.length} أدوية اقتربت من النفاذ`}
             </h4>
             <p className="text-[11px] mt-0.5 opacity-90 leading-relaxed">
               بناءً على حساب الاستهلاك التلقائي، يُفضل شراء عبوات جديدة قريباً.

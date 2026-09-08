@@ -106,8 +106,8 @@ export async function initNativeBridge(): Promise<void> {
         },
         {
           id: 'low-stock',
-          name: 'تنبيهات النفاد',
-          description: 'تنبيه عند اقتراب نفاد دواء من المخزون',
+          name: 'تنبيهات النفاذ',
+          description: 'تنبيه عند اقتراب نفاذ دواء من المخزون',
           importance: 4,
           visibility: 1,
         },
@@ -127,6 +127,44 @@ export async function initNativeBridge(): Promise<void> {
   } catch (err) {
     console.warn('[native] LocalNotifications setup failed:', err);
   }
+
+  // ─────────────────────────────────────────────────────────────
+  // Foreground notification listener — plays the user's custom sound
+  // ─────────────────────────────────────────────────────────────
+  // When a local notification fires while the app is in the
+  // foreground, Capacitor delivers it to this listener instead of
+  // showing it in the system notification tray. We use this to:
+  //   1. Play the user-uploaded custom sound (stored in the
+  //      notification's `extra` field) — overriding the default
+  //      channel sound.
+  //   2. The notification itself is still delivered to the system
+  //      notification tray by Capacitor, so the user sees the
+  //      notification + hears the custom sound.
+  try {
+    LocalNotifications.addListener(
+      'localNotificationReceived',
+      (notification: { extra?: { customSoundFile?: { dataUrl: string; fileName: string; mimeType: string } } }) => {
+        const customSound = notification?.extra?.customSoundFile;
+        if (customSound?.dataUrl) {
+          // Play the custom sound via an Audio element. We use a
+          // dedicated Audio element (not the Web Audio API) because
+          // custom sounds are MP3/WAV/etc files, not synthesized
+          // tones. The Audio element plays them naturally.
+          try {
+            const audio = new Audio(customSound.dataUrl);
+            audio.volume = 1;
+            audio.play().catch((err) => {
+              console.warn('[native] Custom sound playback failed:', err);
+            });
+          } catch (err) {
+            console.warn('[native] Custom sound Audio() creation failed:', err);
+          }
+        }
+      }
+    );
+  } catch (err) {
+    console.warn('[native] localNotificationReceived listener failed:', err);
+  }
 }
 
 /**
@@ -134,11 +172,11 @@ export async function initNativeBridge(): Promise<void> {
  * notification permissions for the app.
  *
  * - **Android**: opens the Android "App info" screen for this app
- *   (Settings → Apps → الننغنغ → Notifications), where the user
+ *   (Settings → Apps → النغنغ → Notifications), where the user
  *   can toggle notifications on.
  *
  * - **iOS**: opens the iOS Settings app at this app's notification
- *   permissions page (Settings → الننغنغ → Notifications).
+ *   permissions page (Settings → النغنغ → Notifications).
  *
  * - **Web**: returns false; the caller should fall back to
  *   openBrowserNotificationSettings() instead — there's no portable

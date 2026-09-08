@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "النغنغ - تطبيق لمتابعة مخزون الأدوية وتنبيهك عند اقتراب نفاد الحبوب",
+  "description": "النغنغ - تطبيق لمتابعة مخزون الأدوية وتنبيهك عند اقتراب نفاذ الحبوب",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
     "build": "vite build",

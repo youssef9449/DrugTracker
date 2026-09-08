@@ -71,7 +71,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
       case 'logs':
         return 'تتبع الخصم التلقائي عبر مرور الأيام';
       default:
-        return 'حساب استهلاك الحبوب وتنبيهات النفاد تلقائياً';
+        return 'حساب استهلاك الحبوب وتنبيهات النفاذ تلقائياً';
     }
   };
 
@@ -212,7 +212,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                   : 'bg-teal-700/60 text-teal-100 hover:bg-teal-700'
               }`}
             >
-              <span>قارب على النفاد</span>
+              <span>قارب على النفاذ</span>
               {alertsCount > 0 && (
                 <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-600 text-white font-mono font-bold">
                   {alertsCount}

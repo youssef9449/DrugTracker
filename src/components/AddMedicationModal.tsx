@@ -6,8 +6,9 @@ import {
   NOTIFICATION_SOUND_OPTIONS,
   playNotificationSound,
   readCustomSoundFile,
-  CUSTOM_SOUND_ACCEPTED_MIME,
+  CUSTOM_SOUND_ACCEPT_ATTR,
   CUSTOM_SOUND_MAX_BYTES,
+  getFileAccessSupportError,
 } from '../utils/sound';
 
 interface AddMedicationModalProps {
@@ -122,14 +123,19 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
     setShowStockHelper(false);
   };
 
-  // File picker handler — uses an <input type="file"> with accept="audio/*"
-  // to let the user pick any audio file from their mobile device. Reads
-  // the file as a base64 data URL and stores it in component state.
+  // File picker handler — uses an <input type="file" accept="audio/*">
+  // wrapped inside a <label> so the click is treated as a user gesture.
+  // On mobile browsers this triggers the OS file picker (Android Documents
+  // UI / iOS document picker) and the OS handles the storage permission
+  // prompt automatically — no explicit JS permission request is needed.
+  // We still feature-detect File / FileReader / Blob before opening the
+  // picker so we can show a clear Arabic error if the runtime doesn't
+  // support file access (e.g., inside an in-app WebView).
   const handleCustomSoundFilePick = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     // Reset the input value so the same file can be re-picked later if needed.
     event.target.value = '';
-    if (!file) return;
+    if (!file) return; // user cancelled the picker — no error
 
     setIsUploadingSound(true);
     setError('');
@@ -147,6 +153,11 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
       setIsUploadingSound(false);
     }
   };
+
+  // Check file access support before the user opens the picker. If the
+  // runtime doesn't support the File API, we show a hint instead of a
+  // broken button.
+  const fileAccessError = getFileAccessSupportError();
 
   const handleRemoveCustomSound = () => {
     setCustomSoundFile(null);
@@ -652,26 +663,34 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
                     )}
                   </div>
 
-                  <label
-                    className={`block w-full py-2 px-3 rounded-xl text-xs font-bold text-center cursor-pointer transition ${
-                      isUploadingSound
-                        ? 'bg-slate-100 text-slate-400 cursor-wait'
-                        : 'bg-teal-50 text-teal-800 border border-teal-200 hover:bg-teal-100'
-                    }`}
-                  >
-                    <input
-                      type="file"
-                      accept={CUSTOM_SOUND_ACCEPTED_MIME}
-                      onChange={handleCustomSoundFilePick}
-                      disabled={isUploadingSound}
-                      className="sr-only"
-                    />
-                    {isUploadingSound
-                      ? 'جاري التحميل...'
-                      : customSoundFile
-                      ? 'اختيار ملف آخر'
-                      : 'اختر ملفاً صوتياً'}
-                  </label>
+                  {fileAccessError ? (
+                    // Browser / WebView doesn't support the File API — show
+                    // a disabled state with an explanatory Arabic message.
+                    <div className="block w-full py-2 px-3 rounded-xl text-xs font-bold text-center bg-slate-100 text-slate-500 border border-slate-200">
+                      {fileAccessError}
+                    </div>
+                  ) : (
+                    <label
+                      className={`block w-full py-2 px-3 rounded-xl text-xs font-bold text-center cursor-pointer transition ${
+                        isUploadingSound
+                          ? 'bg-slate-100 text-slate-400 cursor-wait'
+                          : 'bg-teal-50 text-teal-800 border border-teal-200 hover:bg-teal-100'
+                      }`}
+                    >
+                      <input
+                        type="file"
+                        accept={CUSTOM_SOUND_ACCEPT_ATTR}
+                        onChange={handleCustomSoundFilePick}
+                        disabled={isUploadingSound}
+                        className="sr-only"
+                      />
+                      {isUploadingSound
+                        ? 'جاري التحميل...'
+                        : customSoundFile
+                        ? 'اختيار ملف آخر'
+                        : 'اختر ملفاً صوتياً'}
+                    </label>
+                  )}
 
                   {customSoundFile && (
                     <div className="text-[10px] text-teal-700 bg-teal-50 border border-teal-200 rounded-lg px-2 py-1.5 truncate" title={customSoundFile.fileName}>

@@ -399,7 +399,6 @@ export default function App() {
           isPhoneFrame={isPhoneFrame}
           onTogglePhoneFrame={() => setIsPhoneFrame(!isPhoneFrame)}
           onOpenSettings={() => setIsSettingsModalOpen(true)}
-          onOpenAddModal={openAdd}
         />
 
         <main className="flex-1 overflow-y-auto pb-24 relative">

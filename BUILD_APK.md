@@ -1,4 +1,4 @@
-# النغنغة — Drug Tracker APK build guide
+# النغنغ — Drug Tracker APK build guide
 
 The web app (Vite + React SPA) is fully functional in any browser. To install it as a native Android APK on a phone, two options are available:
 
@@ -64,7 +64,7 @@ For a release-signed APK you can share with others, see the official Android doc
 <https://developer.android.com/build/building-apks#sign-manually>
 
 Quick summary:
-1. Generate a keystore: `keytool -genkey -v -keystore naghnagha.keystore -alias naghnagha -keyalg RSA -keysize 2048 -validity 10000`
+1. Generate a keystore: `keytool -genkey -v -keystore nagnagh.keystore -alias nagnagh -keyalg RSA -keysize 2048 -validity 10000`
 2. In Android Studio: **Build → Generate Signed Bundle / APK → APK**, choose your keystore, select "release" build variant.
 3. The signed APK is at `android/app/build/outputs/apk/release/app-release.apk`.
 
@@ -89,7 +89,7 @@ This option is easier if you don't want to install Android Studio, but requires 
    npm install -g vercel
    vercel --prod
    ```
-   You'll get a URL like `https://naghnagha.vercel.app`.
+   You'll get a URL like `https://nagnagh.vercel.app`.
 
 2. **Open <https://www.pwabuilder.com>** in your browser.
 
@@ -100,8 +100,8 @@ This option is easier if you don't want to install Android Studio, but requires 
 5. **Download the `.apk`** or `.aab` file. PWABuilder packages the PWA (manifest + service worker) into a TWA (Trusted Web Activity) APK that installs like a native app.
 
 The resulting APK will:
-- Show "النغنغة" as the app name on the home screen.
-- Use the bell icon from `public/icon.svg` / `icon-192.png` as the launcher icon.
+- Show "النغنغ" as the app name on the home screen.
+- Use the bell icon from `public/assets/aistudio/icons/icon.svg` / `icon-192.png` as the launcher icon.
 - Open in a full-screen Android window (no browser chrome).
 - Use the teal-800 status bar color.
 - Work offline (because of the service worker).
@@ -110,7 +110,7 @@ The resulting APK will:
 
 ## Renaming the app
 
-The external display name "النغنغة" is set in three places — keep them in sync:
+The external display name "النغنغ" is set in three places — keep them in sync:
 
 | File | Field | Purpose |
 |------|-------|---------|
@@ -119,7 +119,7 @@ The external display name "النغنغة" is set in three places — keep them 
 | `capacitor.config.ts` | `appName` | Capacitor Android project (the APK's display name) |
 | `metadata.json` | `name` | Google AI Studio preview |
 
-The Android package ID (`app.naghnagha`) is set in `capacitor.config.ts` → `appId`. Changing it after the first build requires deleting `android/` and re-running `npx cap add android`.
+The Android package ID (`app.nagnagh`) is set in `capacitor.config.ts` → `appId`. Changing it after the first build requires deleting `android/` and re-running `npx cap add android`.
 
 ---
 

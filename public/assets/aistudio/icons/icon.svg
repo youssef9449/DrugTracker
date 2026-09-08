@@ -17,7 +17,7 @@
     <line x1="0" y1="-30" x2="0" y2="-40"/>
     <circle cx="0" cy="-44" r="4" fill="#fef3c7" stroke="none"/>
   </g>
-  <!-- Sound waves on the right side (representing "نغنغة" - ringing) -->
+  <!-- Sound waves on the right side (representing "نغنغ" - ringing) -->
   <g transform="translate(140 96)" fill="none" stroke="#fbbf24" stroke-width="6" stroke-linecap="round">
     <path d="M 0 -14 a 14 14 0 0 1 0 28"/>
     <path d="M 8 -22 a 22 22 0 0 1 0 44" opacity="0.7"/>

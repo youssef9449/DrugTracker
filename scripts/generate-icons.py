@@ -28,8 +28,8 @@ from PIL import Image
 
 # Repo root (parent of scripts/)
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SVG_PATH = REPO_ROOT / "public" / "icon.svg"
-PUBLIC_DIR = REPO_ROOT / "public"
+ICONS_DIR = REPO_ROOT / "public" / "assets" / "aistudio" / "icons"
+SVG_PATH = ICONS_DIR / "icon.svg"
 
 
 def render_svg_to_png(svg_path: Path, output_path: Path, size: int) -> None:
@@ -68,7 +68,7 @@ def main() -> int:
         print(f"ERROR: SVG file not found at {SVG_PATH}", file=sys.stderr)
         return 1
 
-    PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
+    ICONS_DIR.mkdir(parents=True, exist_ok=True)
 
     targets = [
         ("icon-192.png", 192, "any"),
@@ -78,7 +78,7 @@ def main() -> int:
     ]
 
     for name, size, purpose in targets:
-        output = PUBLIC_DIR / name
+        output = ICONS_DIR / name
         if purpose == "maskable":
             make_maskable_icon(SVG_PATH, output, size)
         else:

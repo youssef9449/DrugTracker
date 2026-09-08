@@ -18,14 +18,14 @@ import type { CapacitorConfig } from '@capacitor/cli';
  *   cd android && ./gradlew assembleDebug
  *   → android/app/build/outputs/apk/debug/app-debug.apk
  *
- * The bundle ID `app.naghnagha` is used as the Android package name
+ * The bundle ID `app.nagnagh` is used as the Android package name
  * and the iOS bundle identifier. It must be lowercase, contain only
  * letters and dots, and end with a non-numeric segment. We use the
  * `app.` prefix to keep it out of the public DNS namespace.
  */
 const config: CapacitorConfig = {
-  appId: 'app.naghnagha',
-  appName: 'النغنغة',
+  appId: 'app.nagnagh',
+  appName: 'النغنغ',
   webDir: 'dist',
   server: {
     androidScheme: 'https',

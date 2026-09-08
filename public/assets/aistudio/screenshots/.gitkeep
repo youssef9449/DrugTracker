@@ -1,0 +1,15 @@
+# Screenshots directory
+#
+# Place screenshots of the app here (PNG or JPEG). Used by:
+# - PWA listing pages (e.g., when distributing via PWABuilder)
+# - Play Store listing (upload manually via the Play Console)
+# - README / marketing material
+#
+# Naming convention:
+#   home.png         — main medications list
+#   alarm.png        — dose alarm modal
+#   shopping.png     — pharmacy shopping list
+#   logs.png         — consumption log view
+#   settings.png     — pharmacy settings
+#
+# Recommended size: 1080x1920 (portrait) or 1920x1080 (landscape).

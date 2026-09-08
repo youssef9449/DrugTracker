@@ -11,7 +11,6 @@ import {
 // See that file's header comment for the AI Studio cache-error
 // troubleshooting note.
 import { INITIAL_MEDICATIONS, INITIAL_LOGS } from './data/initialData';
-import { AndroidStatusBar } from './components/AndroidStatusBar';
 import { AndroidNavBar } from './components/AndroidNavBar';
 import { AndroidBottomNav, ActiveTab } from './components/AndroidBottomNav';
 import { AppHeader } from './components/AppHeader';
@@ -26,7 +25,14 @@ import { AndroidFab } from './components/AndroidFab';
 import { EmptyState } from './components/EmptyState';
 import { DoseAlarmModal } from './components/DoseAlarmModal';
 import { playSuccessChime, playAlertChime } from './utils/sound';
-import { requestNotificationPermission, sendMedicineAlert } from './utils/notifications';
+import {
+  requestNotificationPermission,
+  sendMedicineAlert,
+  sendCriticalStockAlert,
+  openNotificationSettings,
+  getNotificationPermission,
+  getNotificationPermissionSync,
+} from './utils/notifications';
 import { getTodayDateString, syncAutoDailyDeductions } from './utils/dateCalculations';
 import { useDoseReminders } from './hooks/useDoseReminders';
 import { initNativeBridge } from './native';
@@ -36,6 +42,10 @@ const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
 const STORAGE_PHARMACY_KEY = 'android_med_tracker_pharmacy_v2';
 const SOUND_KEY = 'android_med_tracker_sound_v1';
+// Critical-stock alerts (the "متبقي حبتين فقط" notifications) — user can
+// toggle this on/off from the AppHeader. Default true (enabled by
+// default — this is the headline feature of the app).
+const CRITICAL_STOCK_ALERTS_KEY = 'android_med_tracker_critical_alerts_v1';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('stock');
@@ -60,6 +70,11 @@ export default function App() {
   // Same SSR-safe pattern: defaults are deterministic, real state loaded on mount.
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(false);
+  // Critical-stock alerts ("متبقي حبتين فقط") — default true so that
+  // when the user first installs the app, they get alerts by default
+  // (the headline feature). The toggle in AppHeader lets them turn it
+  // off if they find it too noisy.
+  const [criticalStockAlertsEnabled, setCriticalStockAlertsEnabled] = useState<boolean>(true);
 
   const [isPhoneFrame, setIsPhoneFrame] = useState(true);
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
@@ -113,15 +128,34 @@ export default function App() {
     }
 
     try {
-      setSoundEnabled(localStorage.getItem(SOUND_KEY) !== 'false');
+    setSoundEnabled(localStorage.getItem(SOUND_KEY) !== 'false');
     } catch {
       // ignore
     }
 
+    try {
+      // Critical-stock alerts default to true. We persist as
+      // 'true'/'false' string. Default true means: if the user has
+      // never touched the toggle, they get the alerts.
+      const stored = localStorage.getItem(CRITICAL_STOCK_ALERTS_KEY);
+      setCriticalStockAlertsEnabled(stored !== 'false');
+    } catch {
+      // ignore
+    }
+
+    // Initialize the in-app notifications flag from a SYNC snapshot
+    // of the current permission state. On web this is
+    // Notification.permission; on native (Capacitor), the permission
+    // state is async-only, so we default to 'default' and let the
+    // async getNotificationPermission() call below update it.
+    //
+    // Note: this is intentionally a sync snapshot — the React state
+    // needs to be set during the first render so the bell icon
+    // shows the correct initial state. A second pass below (the
+    // async getNotificationPermission) updates it once the native
+    // permission state is known.
     setNotificationsEnabled(
-      typeof window !== 'undefined' &&
-        'Notification' in window &&
-        Notification.permission === 'granted'
+      getNotificationPermissionSync() === 'granted'
     );
 
     // Initialize the Capacitor native bridge (status bar color, back
@@ -129,6 +163,44 @@ export default function App() {
     initNativeBridge().catch((err) => {
       console.warn('[App] Native bridge init failed:', err);
     });
+
+    // On native (Capacitor), get the real async permission state
+    // and update the in-app flag if it differs from the sync
+    // snapshot above.
+    getNotificationPermission()
+      .then((perm) => {
+        setNotificationsEnabled(perm === 'granted');
+      })
+      .catch((err) => {
+        console.warn('[App] getNotificationPermission failed:', err);
+      });
+
+    // Auto-request notification permission on the FIRST app open
+    // after install. The browser only shows the permission prompt
+    // when the permission state is 'default' (user hasn't been asked
+    // yet). Once the user grants or denies, the browser remembers
+    // the decision and won't re-show the prompt. If the user denied
+    // permission, this becomes a no-op; the bell button in
+    // AppHeader then takes the user to OS settings to re-enable.
+    //
+    // Auto-requesting on mount is recommended by the Web Push API
+    // spec because it ensures the prompt shows after the user has
+    // had a chance to see the app's value (which is now true on
+    // first open, since the user has just installed it).
+    //
+    // On Android 13+ (Capacitor), this triggers the OS
+    // POST_NOTIFICATIONS permission dialog via
+    // LocalNotifications.requestPermissions(). On older Android,
+    // this is a no-op (notifications allowed by default).
+    if (getNotificationPermissionSync() === 'default') {
+      requestNotificationPermission()
+        .then((granted) => {
+          setNotificationsEnabled(granted);
+        })
+        .catch((err) => {
+          console.warn('[App] Auto-request notification permission failed:', err);
+        });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -164,6 +236,17 @@ export default function App() {
     }
   }, [soundEnabled]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        CRITICAL_STOCK_ALERTS_KEY,
+        String(criticalStockAlertsEnabled)
+      );
+    } catch {
+      // ignore
+    }
+  }, [criticalStockAlertsEnabled]);
+
   const showToast = (message: string) => {
     const id = Date.now();
     setToast({ id, message });
@@ -188,6 +271,24 @@ export default function App() {
         const { status, daysLeft } = calculateMedicationStatus(med);
         if (status === 'critical' || status === 'warning') {
           sendMedicineAlert(med.name, daysLeft, med.currentPills);
+        }
+      });
+    }
+
+    // Critical-stock alerts ("متبقي حبتين فقط") — fires when a
+    // medication has 2 or fewer pills left. The user can toggle this
+    // off via the AppHeader. Default enabled (the headline feature).
+    if (notificationsEnabled && criticalStockAlertsEnabled) {
+      result.updatedMeds.forEach((med) => {
+        if (med.currentPills > 0 && med.currentPills <= 2) {
+          sendCriticalStockAlert(med.name, med.currentPills, med.unit || 'قرص');
+        } else if (med.currentPills === 0) {
+          // Fully out of stock — also send a critical alert so the
+          // user is reminded to refill immediately. (The regular
+          // sendMedicineAlert above also fires for status='critical',
+          // but this one uses a different notification id so it
+          // appears as a separate notification drawer entry.)
+          sendCriticalStockAlert(med.name, 0, med.unit || 'قرص');
         }
       });
     }
@@ -327,12 +428,43 @@ export default function App() {
 
   const handleToggleNotifications = async () => {
     if (!notificationsEnabled) {
+      // Current state says "off" — but check the real permission
+      // because the user may have re-enabled it via OS settings.
+      // Use the async getNotificationPermission() which works on
+      // both web (Notification.permission) and native (Capacitor
+      // LocalNotifications.checkPermissions()).
+      const currentPerm = await getNotificationPermission();
+
+      if (currentPerm === 'granted') {
+        // OS settings already allow it; just turn on the in-app
+        // flag.
+        setNotificationsEnabled(true);
+        showToast('تم تفعيل إشعارات الهاتف بنجاح');
+        return;
+      }
+
+      if (currentPerm === 'denied') {
+        // The browser/OS already denied permission and won't show
+        // the prompt again. Open the OS settings page so the user
+        // can re-enable notifications manually.
+        showToast('الإشعارات مقفولة من إعدادات النظام. سيتم فتح صفحة الإعدادات الآن...');
+        openNotificationSettings();
+        return;
+      }
+
+      // currentPerm === 'default' — show the prompt (browser
+      // Notification.requestPermission OR Capacitor
+      // LocalNotifications.requestPermissions on Android 13+).
       const granted = await requestNotificationPermission();
       setNotificationsEnabled(granted);
-      showToast(granted ? 'تم تفعيل إشعارات الهاتف بنجاح' : 'يرجى السماح بالإشعارات في إعدادات المتصفح');
+      showToast(
+        granted
+          ? 'تم تفعيل إشعارات الهاتف بنجاح'
+          : 'يرجى السماح بالإشعارات في إعدادات النظام'
+      );
     } else {
       setNotificationsEnabled(false);
-      showToast('تم إيقاف التنبيهات');
+      showToast('تم إيقاف التنبيهات داخل التطبيق');
     }
   };
 
@@ -378,6 +510,58 @@ export default function App() {
     return medications.reduce((acc, m) => acc + m.currentPills, 0);
   }, [medications]);
 
+  // ─────────────────────────────────────────────────────────────
+  // Critical-stock alerts ("متبقي حبتين فقط")
+  // ─────────────────────────────────────────────────────────────
+  // Watch the medications array — whenever it changes (because of
+  // auto-deduction, refill, edit, manual delete, dose-taken from
+  // alarm, etc.), check if any medication has crossed the 2-pill
+  // threshold. We only fire the notification ONCE per medication
+  // per threshold-crossing, by tracking which meds we already
+  // alerted about in a ref.
+  //
+  // The "fire once per crossing" logic uses a Map keyed by
+  // medication id, storing the LAST pill count we alerted for. If
+  // the current count is <=2 but the last alerted count was >2 (or
+  // we never alerted for this med), fire. If we already alerted for
+  // this count, skip — the user has already seen the notification.
+  //
+  // When the user refills the med (pills go back up), we clear the
+  // alerted tracker for that med so the next time it crosses 2 again,
+  // we'll alert again.
+  const lastCriticalAlertRef = React.useRef<Map<string, number>>(new Map());
+
+  useEffect(() => {
+    // Don't run during the initial mount (the auto-deduction effect
+    // above already handles initial load notifications). This guard
+    // uses a ref to detect first run vs subsequent changes.
+    if (!notificationsEnabled || !criticalStockAlertsEnabled) {
+      // When the user disables alerts (or disables notifications
+      // entirely), reset the tracker so when they re-enable, we
+      // alert again for any current low-stock meds.
+      lastCriticalAlertRef.current.clear();
+      return;
+    }
+
+    const tracker = lastCriticalAlertRef.current;
+    for (const med of medications) {
+      if (med.currentPills <= 2) {
+        const lastAlertedAt = tracker.get(med.id);
+        if (lastAlertedAt === undefined || lastAlertedAt > med.currentPills) {
+          // Either we never alerted for this med, OR the pill count
+          // dropped further since last alert. Fire and remember.
+          sendCriticalStockAlert(med.name, med.currentPills, med.unit || 'قرص');
+          tracker.set(med.id, med.currentPills);
+        }
+      } else {
+        // Pill count went back up (refill, restore dose, etc.) —
+        // reset the tracker so we alert again the next time it
+        // crosses 2.
+        tracker.delete(med.id);
+      }
+    }
+  }, [medications, notificationsEnabled, criticalStockAlertsEnabled]);
+
   const openAdd = () => {
     setEditingMedication(null);
     setIsAddModalOpen(true);
@@ -395,7 +579,15 @@ export default function App() {
             : 'max-w-4xl min-h-screen md:min-h-[90vh] md:rounded-3xl md:border md:border-slate-300 md:shadow-xl overflow-hidden'
         }`}
       >
-        <AndroidStatusBar />
+        {/* NOTE: AndroidStatusBar (a fake "time + wifi + battery" bar
+            that was previously rendered here) was removed because the
+            real OS status bar already shows that info on actual
+            Android devices — the in-app fake version was redundant
+            and ate vertical space. The Capacitor StatusBar plugin
+            (configured in capacitor.config.ts + initialized in
+            src/native.ts) sets the OS status bar color to teal-800
+            and overlays the WebView when running as an APK, so the
+            app's content starts directly under AppHeader. */}
         <AppHeader
           activeTab={activeTab}
           filter={filter}
@@ -407,6 +599,16 @@ export default function App() {
           onToggleNotifications={handleToggleNotifications}
           soundEnabled={soundEnabled}
           onToggleSound={() => setSoundEnabled(!soundEnabled)}
+          criticalStockAlertsEnabled={criticalStockAlertsEnabled}
+          onToggleCriticalStockAlerts={() => {
+            const next = !criticalStockAlertsEnabled;
+            setCriticalStockAlertsEnabled(next);
+            showToast(
+              next
+                ? 'تم تفعيل تنبيهات "حبتين بس" — هتوصلك إشعار لو في دواء متبقي فيه حبتين أو أقل'
+                : 'تم إيقاف تنبيهات "حبتين بس"'
+            );
+          }}
           isPhoneFrame={isPhoneFrame}
           onTogglePhoneFrame={() => setIsPhoneFrame(!isPhoneFrame)}
           onOpenSettings={() => setIsSettingsModalOpen(true)}

@@ -15,8 +15,15 @@ export const AndroidFab: React.FC<AndroidFabProps> = ({ onOpenAddModal, onClick 
     }
   };
 
+  // Position: anchored to the bottom-left, raised above the
+  // AndroidBottomNav (which sits at ~64px tall). Using bottom-[128px]
+  // keeps the FAB clear of both the bottom-nav AND the consumption-log
+  // "smart tool" hint that can appear at the top of the list, so the
+  // "إضافة دواء جديد" button is always reachable without overlap.
+  // Previously bottom-[82px] which sat too close to the bottom-nav
+  // and felt cramped; bumping up 46px gives it more breathing room.
   return (
-    <div className="absolute bottom-[82px] left-4 z-40 pointer-events-auto">
+    <div className="absolute bottom-[128px] left-4 z-40 pointer-events-auto">
       <button
         type="button"
         onClick={handleClick}

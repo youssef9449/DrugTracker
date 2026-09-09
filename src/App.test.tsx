@@ -6,15 +6,20 @@ import { render, screen, cleanup, waitFor } from '@testing-library/react';
 vi.mock('../native', () => ({
   initNativeBridge: vi.fn(() => Promise.resolve()),
   openAppSettings: vi.fn(() => Promise.resolve(false)),
+  registerBackButtonHandler: vi.fn(),
+  cleanupNativeListeners: vi.fn(),
 }));
-vi.mock('../utils/notifications', () => ({
-  requestNotificationPermission: vi.fn(() => Promise.resolve(false)),
+vi.mock('./utils/notifications', () => ({
+  requestNotificationPermission: vi.fn(() => Promise.resolve(true)),
   sendMedicineAlert: vi.fn(),
   sendCriticalStockAlert: vi.fn(),
   sendTestAlertNotification: vi.fn(() => Promise.resolve()),
   openNotificationSettings: vi.fn(),
-  getNotificationPermission: vi.fn(() => Promise.resolve('denied')),
-  getNotificationPermissionSync: vi.fn(() => 'denied'),
+  getNotificationPermission: vi.fn(() => Promise.resolve('granted')),
+  getNotificationPermissionSync: vi.fn(() => 'granted'),
+  scheduleCriticalAlarm: vi.fn(() => Promise.resolve()),
+  cancelCriticalAlarm: vi.fn(() => Promise.resolve()),
+  criticalAlarmId: vi.fn((id: string) => id.length),
 }));
 vi.mock('../utils/sound', () => ({
   playSuccessChime: vi.fn(),
@@ -31,6 +36,10 @@ vi.mock('../utils/audioStore', () => ({
 
 import App from './App';
 import { INITIAL_MEDICATIONS } from './data/initialData';
+import {
+  scheduleCriticalAlarm,
+  cancelCriticalAlarm,
+} from './utils/notifications';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 
@@ -115,5 +124,81 @@ describe('handleToggleAutoDeduct logic (#27)', () => {
     const m = { autoDeductEnabled: false };
     const newState = m.autoDeductEnabled === false;
     expect(newState).toBe(true);
+  });
+});
+
+/**
+ * One-shot critical-alarm reschedule effect (App.tsx).
+ *
+ * When notificationsEnabled + criticalStockAlertsEnabled are both true
+ * and the app has hydrated, the effect must call scheduleCriticalAlarm
+ * for each medication. When either flag flips off, the effect must
+ * cancel all previously-scheduled alarms.
+ */
+describe('App — one-shot critical-alarm reschedule effect', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('schedules a critical alarm for each saved medication when alerts are enabled', async () => {
+    localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([
+      {
+        id: 'med-alarm-1',
+        name: 'Alarm Test Med',
+        currentPills: 30,
+        dailyDose: 1,
+        unit: 'قرص',
+        warningThresholdDays: 5,
+        colorTag: 'teal',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        lastSyncDate: new Date().toISOString().slice(0, 10),
+        autoDeductEnabled: true,
+        reminderEnabled: false,
+      },
+    ]));
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(scheduleCriticalAlarm).toHaveBeenCalled();
+    });
+    expect(cancelCriticalAlarm).toHaveBeenCalledWith('med-alarm-1');
+    expect(scheduleCriticalAlarm).toHaveBeenCalledWith(
+      'med-alarm-1',
+      'Alarm Test Med',
+      expect.any(Number),
+      'قرص'
+    );
+  });
+
+  it('cancels all alarms when the user opts out of critical alerts', async () => {
+    localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([
+      {
+        id: 'med-alarm-2',
+        name: 'Alarm Test Med 2',
+        currentPills: 30,
+        dailyDose: 1,
+        unit: 'قرص',
+        warningThresholdDays: 5,
+        colorTag: 'teal',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        lastSyncDate: new Date().toISOString().slice(0, 10),
+        autoDeductEnabled: true,
+        reminderEnabled: false,
+      },
+    ]));
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(scheduleCriticalAlarm).toHaveBeenCalled();
+    });
+    const initialScheduleCount = vi.mocked(scheduleCriticalAlarm).mock.calls.length;
+    expect(initialScheduleCount).toBeGreaterThan(0);
   });
 });

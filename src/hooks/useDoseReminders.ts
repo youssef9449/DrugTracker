@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Medication } from '../types';
-import { getTodayDateString } from '../utils/dateCalculations';
+import { getTodayDateString, effectiveCurrentPills } from '../utils/dateCalculations';
 import { playNotificationSound } from '../utils/sound';
 import { sendMedicationDoseReminder } from '../utils/notifications';
 
@@ -180,7 +180,9 @@ export function useDoseReminders({
         med.name,
         med.dailyDose,
         med.unit,
-        med.currentPills,
+        // Use the dynamic balance so the dose-reminder body shows the
+        // projected live inventory (not the stale stored snapshot).
+        effectiveCurrentPills(med),
         med.reminderTime,
         // Global custom sound — applies to all medications, played by
         // the system when the notification fires in the background.

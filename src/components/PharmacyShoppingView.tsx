@@ -52,6 +52,11 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   // view (so we can show a "تمت التعبئة" confirmation chip + let them
   // undo by tapping again if they tapped by mistake).
   const [refilledIds, setRefilledIds] = useState<Set<string>>(new Set());
+  // #20: track meds the user explicitly DESELECTED so the
+  // reconciliation effect doesn't silently re-select them when
+  // `displayList` changes. Cleared for a med when it leaves
+  // `displayList` (so it starts fresh if it returns).
+  const [deselectedIds, setDeselectedIds] = useState<Set<string>>(new Set());
 
   const urgentMeds = useMemo(() => {
     return medications.filter((m) => {
@@ -68,34 +73,66 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     return new Set(initialList.map((m) => m.id));
   });
 
-  // H7: reconcile the selection with the displayed list. The
-  // `selectedMedIds` set was initialized once from a closure-stale
-  // `urgentMeds` snapshot, so as `displayList` changes (meds drop
-  // into/out of urgency, or the user toggles "show all") the selection
-  // would drift — newly-shown meds stayed unselected and removed meds
-  // lingered. This effect keeps the set in sync: it adds any
-  // displayed med that isn't selected yet, and prunes ids no longer
-  // displayed. The user's manual deselects on still-displayed meds
-  // are preserved.
+  // #20 + #34: reconcile the selection AND the refilledIds/deselectedIds
+  // against the displayed list. This effect:
+  //   - Auto-selects any displayed med not yet selected AND not in
+  //     `deselectedIds` (so manual deselects are preserved — #20).
+  //   - Prunes ids that are no longer displayed from `selectedMedIds`,
+  //     `deselectedIds`, and `refilledIds` (so deleted meds don't linger
+  //     and returning meds start fresh — #34).
+  // Each updater returns the SAME Set reference when nothing changed
+  // so React skips the re-render (avoids an infinite loop since
+  // `deselectedIds` is in the deps array).
   useEffect(() => {
+    const displayedIds = new Set(displayList.map((m) => m.id));
+
     setSelectedMedIds((prev) => {
+      let changed = false;
       const next = new Set(prev);
       for (const m of displayList) {
-        if (!next.has(m.id)) next.add(m.id);
+        if (!next.has(m.id) && !deselectedIds.has(m.id)) { next.add(m.id); changed = true; }
       }
-      const displayedIds = new Set(displayList.map((m) => m.id));
       for (const id of next) {
-        if (!displayedIds.has(id)) next.delete(id);
+        if (!displayedIds.has(id)) { next.delete(id); changed = true; }
       }
-      return next;
+      return changed ? next : prev;
     });
-  }, [displayList]);
+
+    setRefilledIds((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const id of next) {
+        if (!displayedIds.has(id)) { next.delete(id); changed = true; }
+      }
+      return changed ? next : prev;
+    });
+
+    setDeselectedIds((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const id of next) {
+        if (!displayedIds.has(id)) { next.delete(id); changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [displayList, deselectedIds]);
 
   const handleToggleSelect = (id: string) => {
     setSelectedMedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+        // #20: record the explicit deselect.
+        setDeselectedIds((d) => new Set(d).add(id));
+      } else {
+        next.add(id);
+        // #20: clear the deselect record on re-select.
+        setDeselectedIds((d) => {
+          const n = new Set(d);
+          n.delete(id);
+          return n;
+        });
+      }
       return next;
     });
   };
@@ -309,10 +346,25 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
           الأدوية المتاحة للطلب ({selectedCount} من {displayList.length})
         </span>
         <div className="flex items-center gap-2 text-[11px]">
-          <button onClick={() => setSelectedMedIds(new Set(displayList.map((m) => m.id)))} className="text-teal-700 font-bold">
+          <button
+            onClick={() => {
+              setSelectedMedIds(new Set(displayList.map((m) => m.id)));
+              // #20: clearing deselects — all are selected.
+              setDeselectedIds(new Set());
+            }}
+            className="text-teal-700 font-bold"
+          >
             تحديد الكل
           </button>
-          <button onClick={() => setSelectedMedIds(new Set())} className="text-slate-500">
+          <button
+            onClick={() => {
+              setSelectedMedIds(new Set());
+              // #20: record all displayed meds as deselected so the
+              // reconciliation effect doesn't silently re-select them.
+              setDeselectedIds(new Set(displayList.map((m) => m.id)));
+            }}
+            className="text-slate-500"
+          >
             إلغاء
           </button>
         </div>

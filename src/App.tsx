@@ -43,7 +43,7 @@ import {
 } from './utils/notifications';
 import { getTodayDateString, syncAutoDailyDeductions } from './utils/dateCalculations';
 import { useDoseReminders } from './hooks/useDoseReminders';
-import { initNativeBridge } from './native';
+import { initNativeBridge, registerBackButtonHandler, cleanupNativeListeners } from './native';
 import { migrateSchema } from './lib/migration';
 import { getInitialTab } from './lib/initialTab';
 import { Zap } from 'lucide-react';
@@ -166,6 +166,29 @@ export default function App() {
     hydrated,
     globalCustomSound,
   });
+
+  // #21: register a back-button handler that closes the top modal
+  // instead of exiting the app. The handler returns true (modal was
+  // closed, don't exit) or false (no modal open, exit). Re-registers
+  // whenever any modal state changes so the handler always reads the
+  // latest values.
+  useEffect(() => {
+    registerBackButtonHandler(() => {
+      if (alarmingMedication) { dismissAlarm(); return true; }
+      if (isAddModalOpen) { setIsAddModalOpen(false); setEditingMedication(null); return true; }
+      if (refillMedication) { setRefillMedication(null); return true; }
+      if (isSettingsModalOpen) { setIsSettingsModalOpen(false); return true; }
+      return false;
+    });
+  }, [alarmingMedication, isAddModalOpen, refillMedication, isSettingsModalOpen, dismissAlarm]);
+
+  // #38: on unmount, remove all Capacitor listeners so duplicate
+  // listeners don't accumulate across HMR re-initializations.
+  useEffect(() => {
+    return () => {
+      cleanupNativeListeners().catch(() => {});
+    };
+  }, []);
 
   // ─────────────────────────────────────────────────────────────
   // Hydration: load persisted state from localStorage / IndexedDB

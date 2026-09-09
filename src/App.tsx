@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Medication,
   ConsumptionLog,
@@ -6,6 +6,7 @@ import {
   DEFAULT_PHARMACY_SETTINGS,
   calculateMedicationStatus,
   CustomSoundFile,
+  MedicationStatus,
 } from './types';
 // Seed data — default 3 medications + 2 consumption logs shown on fresh
 // install. The file lives at src/data/initialData.ts (relative path).
@@ -27,6 +28,11 @@ import { EmptyState } from './components/EmptyState';
 import { DoseAlarmModal } from './components/DoseAlarmModal';
 import { playSuccessChime } from './utils/sound';
 import {
+  saveGlobalCustomSound,
+  loadGlobalCustomSound,
+  deleteGlobalCustomSound,
+} from './utils/audioStore';
+import {
   requestNotificationPermission,
   sendMedicineAlert,
   sendCriticalStockAlert,
@@ -43,27 +49,30 @@ const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
 const STORAGE_PHARMACY_KEY = 'android_med_tracker_pharmacy_v2';
 const SOUND_KEY = 'android_med_tracker_sound_v1';
-// Global custom sound — applies to ALL notifications (dose reminders
-// + critical stock alerts), not per-medication. Stored as a
-// CustomSoundFile JSON in localStorage.
-const GLOBAL_CUSTOM_SOUND_KEY = 'android_med_tracker_global_custom_sound_v1';
-// Critical-stock alerts (the "متبقي حبتين فقط" notifications) — user can
+// Critical-stock alerts (the urgent "حرج" notifications) — user can
 // toggle this on/off from the AppHeader. Default true (enabled by
-// default — this is the headline feature of the app).
+// default — this is the headline feature of the app). The critical
+// threshold itself is derived per-medication from warningThresholdDays
+// via getCriticalThresholdDays() — see src/types.ts.
 const CRITICAL_STOCK_ALERTS_KEY = 'android_med_tracker_critical_alerts_v1';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('stock');
 
-  // SSR/hydration-safe initialization: start with the deterministic default
-  // values (no localStorage / window access during initial render), then
-  // hydrate from localStorage in a useEffect after mount. This guarantees
-  // the server-rendered HTML matches the first client render, preventing
-  // React hydration mismatches in AI Studio's SSR preview environment.
+  // Deterministic-first render: we start from the seed defaults (no
+  // localStorage / IndexedDB access during the initial render) and
+  // hydrate from storage in a useEffect after mount. This is a Vite
+  // client SPA (no SSR), so the real goal here is simply to avoid a
+  // flash of stale seed data and to keep localStorage/IDB access out
+  // of the module-evaluation path. `hydrated` flips true once the
+  // hydration effect finishes, which gates the auto-deduction + alert
+  // effects so they operate on the user's REAL saved state (not the
+  // seed defaults) — see H8 in the audit fix.
   const [medications, setMedications] = useState<Medication[]>(INITIAL_MEDICATIONS);
   const [logs, setLogs] = useState<ConsumptionLog[]>(INITIAL_LOGS);
   const [pharmacySettings, setPharmacySettings] =
     useState<PharmacySettings>(DEFAULT_PHARMACY_SETTINGS);
+  const [hydrated, setHydrated] = useState(false);
 
   const [filter, setFilter] = useState<'all' | 'alerts' | 'sufficient'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -72,18 +81,21 @@ export default function App() {
   const [editingMedication, setEditingMedication] = useState<Medication | null>(null);
   const [refillMedication, setRefillMedication] = useState<Medication | null>(null);
 
-  // Same SSR-safe pattern: defaults are deterministic, real state loaded on mount.
+  // Same deterministic-first pattern: defaults loaded on mount.
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(false);
-  // Critical-stock alerts ("متبقي حبتين فقط") — default true so that
-  // when the user first installs the app, they get alerts by default
-  // (the headline feature). The toggle in AppHeader lets them turn it
-  // off if they find it too noisy.
+  // Critical-stock alerts (the urgent "حرج" notifications) — default
+  // true so the user gets alerts by default on first install (the
+  // headline feature). The toggle in AppHeader lets them turn it off.
+  // The critical THRESHOLD is derived per-medication from
+  // warningThresholdDays via getCriticalThresholdDays() — not a fixed
+  // pill count (see C3 in the audit fix).
   const [criticalStockAlertsEnabled, setCriticalStockAlertsEnabled] = useState<boolean>(true);
   // Global custom sound — shared across all notifications (not
-  // per-medication). The user uploads it from the AppHeader. When
-  // present, it overrides the synthesized per-medication sound in
-  // push notifications.
+  // per-medication). The user uploads it from the AppHeader. It is
+  // persisted in IndexedDB (not localStorage) because the base64 data
+  // URL can be up to ~2.7 MB and would blow the localStorage quota —
+  // see C4 in the audit fix.
   const [globalCustomSound, setGlobalCustomSound] = useState<CustomSoundFile | null>(null);
 
   const [isPhoneFrame, setIsPhoneFrame] = useState(true);
@@ -97,9 +109,9 @@ export default function App() {
   });
 
   // ─────────────────────────────────────────────────────────────
-  // Hydration: load persisted state from localStorage AFTER mount.
-  // This effect runs only on the client and replaces the default
-  // values with whatever the user previously saved, if any.
+  // Hydration: load persisted state from localStorage / IndexedDB
+  // AFTER mount. This effect runs only on the client and replaces
+  // the default values with whatever the user previously saved.
   // ─────────────────────────────────────────────────────────────
   useEffect(() => {
     try {
@@ -154,17 +166,22 @@ export default function App() {
       // ignore
     }
 
-    try {
-      const storedSound = localStorage.getItem(GLOBAL_CUSTOM_SOUND_KEY);
-      if (storedSound) {
-        const parsed = JSON.parse(storedSound);
-        if (parsed && parsed.dataUrl) {
-          setGlobalCustomSound(parsed);
+    // Global custom sound is persisted in IndexedDB (not localStorage)
+    // because its base64 data URL can be several MB — see C4. The load
+    // is async; we set `hydrated` after it resolves so the
+    // auto-deduction + alert effects wait for the real saved state.
+    loadGlobalCustomSound()
+      .then((file) => {
+        if (file && file.dataUrl) {
+          setGlobalCustomSound(file);
         }
-      }
-    } catch {
-      // ignore
-    }
+      })
+      .catch((err) => {
+        console.warn('[App] loadGlobalCustomSound failed:', err);
+      })
+      .finally(() => {
+        setHydrated(true);
+      });
 
     // Initialize the in-app notifications flag from a SYNC snapshot
     // of the current permission state. On web this is
@@ -224,7 +241,6 @@ export default function App() {
           console.warn('[App] Auto-request notification permission failed:', err);
         });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -270,19 +286,18 @@ export default function App() {
     }
   }, [criticalStockAlertsEnabled]);
 
-  // Persist global custom sound to localStorage.
+  // Persist global custom sound to IndexedDB (C4: storing the base64
+  // data URL in localStorage risked blowing the ~5 MB quota and silently
+  // dropping other state; IndexedDB has a much larger quota).
   useEffect(() => {
-    try {
-      if (globalCustomSound) {
-        localStorage.setItem(
-          GLOBAL_CUSTOM_SOUND_KEY,
-          JSON.stringify(globalCustomSound)
-        );
-      } else {
-        localStorage.removeItem(GLOBAL_CUSTOM_SOUND_KEY);
-      }
-    } catch {
-      // ignore
+    if (globalCustomSound) {
+      saveGlobalCustomSound(globalCustomSound).catch((err) => {
+        console.warn('[App] saveGlobalCustomSound failed:', err);
+      });
+    } else {
+      deleteGlobalCustomSound().catch((err) => {
+        console.warn('[App] deleteGlobalCustomSound failed:', err);
+      });
     }
   }, [globalCustomSound]);
 
@@ -294,7 +309,23 @@ export default function App() {
     }, 4000);
   };
 
+  // ─────────────────────────────────────────────────────────────
+  // Auto-deduction: runs ONCE per session, AFTER hydration completes
+  // (so it operates on the user's REAL saved medications, not the
+  // seed defaults). This fixes H8, where the old `[]`-dep effect ran
+  // during the mount pass with stale (default) data and silently
+  // skipped deductions for returning users.
+  //
+  // This effect only deducts + logs. Alerting is handled by a
+  // separate effect below that watches `medications` + the permission
+  // flags, so it fires with the correct `notificationsEnabled` value
+  // (which is resolved async after mount).
+  // ─────────────────────────────────────────────────────────────
+  const deductedRef = useRef(false);
   useEffect(() => {
+    if (!hydrated || deductedRef.current) return;
+    deductedRef.current = true;
+
     const today = getTodayDateString();
     const result = syncAutoDailyDeductions(medications, today);
 
@@ -304,35 +335,69 @@ export default function App() {
       const totalPills = result.deductedSummary.reduce((sum, item) => sum + item.pillsDeducted, 0);
       showToast(`تم الخصم التلقائي للاستهلاك: خصم ${totalPills} قرص لمرور الأيام.`);
     }
-
-    if (notificationsEnabled) {
-      result.updatedMeds.forEach((med) => {
-        const { status, daysLeft } = calculateMedicationStatus(med);
-        if (status === 'critical' || status === 'warning') {
-          sendMedicineAlert(med.name, daysLeft, med.currentPills);
-        }
-      });
-    }
-
-    // Critical-stock alerts ("متبقي حبتين فقط") — fires when a
-    // medication has 2 or fewer pills left. The user can toggle this
-    // off via the AppHeader. Default enabled (the headline feature).
-    if (notificationsEnabled && criticalStockAlertsEnabled) {
-      result.updatedMeds.forEach((med) => {
-        if (med.currentPills > 0 && med.currentPills <= 2) {
-          sendCriticalStockAlert(med.name, med.currentPills, med.unit || 'قرص');
-        } else if (med.currentPills === 0) {
-          // Fully out of stock — also send a critical alert so the
-          // user is reminded to refill immediately. (The regular
-          // sendMedicineAlert above also fires for status='critical',
-          // but this one uses a different notification id so it
-          // appears as a separate notification drawer entry.)
-          sendCriticalStockAlert(med.name, 0, med.unit || 'قرص');
-        }
-      });
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [hydrated]);
+
+  // ─────────────────────────────────────────────────────────────
+  // Alert effect: watches the (post-deduction) medications array and
+  // the notification flags, and fires a notification the FIRST time a
+  // medication crosses into a worse status — using the per-medication
+  // critical threshold DERIVED from warningThresholdDays (C3), and a
+  // stable notification id keyed by med.id (H6 — no more collisions
+  // between same-named medications).
+  //
+  // We track the last-alerted status per med in a ref. When the
+  // status worsens (or the med is new and already in an alertable
+  // state), we fire. When it improves back to 'sufficient', we clear
+  // the tracker so the next crossing alerts again.
+  // ─────────────────────────────────────────────────────────────
+  const lastAlertedStatusRef = useRef<Map<string, MedicationStatus>>(new Map());
+  useEffect(() => {
+    if (!hydrated) return;
+
+    // When notifications are off, reset the tracker so the next time
+    // they're turned on, current alertable meds fire again.
+    if (!notificationsEnabled) {
+      lastAlertedStatusRef.current.clear();
+      return;
+    }
+
+    const tracker = lastAlertedStatusRef.current;
+    for (const med of medications) {
+      const { status, daysLeft } = calculateMedicationStatus(med);
+      const prev = tracker.get(med.id);
+
+      // No transition to fire on: med is healthy.
+      if (status === 'sufficient') {
+        tracker.delete(med.id);
+        continue;
+      }
+
+      // Already alerted for this exact status → don't spam.
+      if (prev === status) continue;
+
+      // Fire the appropriate alert(s) for the new status.
+      if (status === 'out_of_stock') {
+        if (criticalStockAlertsEnabled) {
+          sendCriticalStockAlert(med.id, med.name, 0, 0, med.unit || 'قرص');
+        }
+        // Also send the general low-stock alert so it appears as its
+        // own drawer entry (different notification id).
+        sendMedicineAlert(med.id, med.name, 0, 0);
+      } else if (status === 'critical') {
+        if (criticalStockAlertsEnabled) {
+          sendCriticalStockAlert(med.id, med.name, daysLeft, med.currentPills, med.unit || 'قرص');
+        }
+        // Critical is a subset of the warning window — also send the
+        // general alert (separate drawer entry, less urgent wording).
+        sendMedicineAlert(med.id, med.name, daysLeft, med.currentPills);
+      } else if (status === 'warning') {
+        sendMedicineAlert(med.id, med.name, daysLeft, med.currentPills);
+      }
+
+      tracker.set(med.id, status);
+    }
+  }, [medications, notificationsEnabled, criticalStockAlertsEnabled, hydrated]);
 
   const handleRestoreDose = (medicationId: string, reason: string) => {
     const med = medications.find((m) => m.id === medicationId);
@@ -518,58 +583,6 @@ export default function App() {
     return medications.reduce((acc, m) => acc + m.currentPills, 0);
   }, [medications]);
 
-  // ─────────────────────────────────────────────────────────────
-  // Critical-stock alerts ("متبقي حبتين فقط")
-  // ─────────────────────────────────────────────────────────────
-  // Watch the medications array — whenever it changes (because of
-  // auto-deduction, refill, edit, manual delete, dose-taken from
-  // alarm, etc.), check if any medication has crossed the 2-pill
-  // threshold. We only fire the notification ONCE per medication
-  // per threshold-crossing, by tracking which meds we already
-  // alerted about in a ref.
-  //
-  // The "fire once per crossing" logic uses a Map keyed by
-  // medication id, storing the LAST pill count we alerted for. If
-  // the current count is <=2 but the last alerted count was >2 (or
-  // we never alerted for this med), fire. If we already alerted for
-  // this count, skip — the user has already seen the notification.
-  //
-  // When the user refills the med (pills go back up), we clear the
-  // alerted tracker for that med so the next time it crosses 2 again,
-  // we'll alert again.
-  const lastCriticalAlertRef = React.useRef<Map<string, number>>(new Map());
-
-  useEffect(() => {
-    // Don't run during the initial mount (the auto-deduction effect
-    // above already handles initial load notifications). This guard
-    // uses a ref to detect first run vs subsequent changes.
-    if (!notificationsEnabled || !criticalStockAlertsEnabled) {
-      // When the user disables alerts (or disables notifications
-      // entirely), reset the tracker so when they re-enable, we
-      // alert again for any current low-stock meds.
-      lastCriticalAlertRef.current.clear();
-      return;
-    }
-
-    const tracker = lastCriticalAlertRef.current;
-    for (const med of medications) {
-      if (med.currentPills <= 2) {
-        const lastAlertedAt = tracker.get(med.id);
-        if (lastAlertedAt === undefined || lastAlertedAt > med.currentPills) {
-          // Either we never alerted for this med, OR the pill count
-          // dropped further since last alert. Fire and remember.
-          sendCriticalStockAlert(med.name, med.currentPills, med.unit || 'قرص');
-          tracker.set(med.id, med.currentPills);
-        }
-      } else {
-        // Pill count went back up (refill, restore dose, etc.) —
-        // reset the tracker so we alert again the next time it
-        // crosses 2.
-        tracker.delete(med.id);
-      }
-    }
-  }, [medications, notificationsEnabled, criticalStockAlertsEnabled]);
-
   const openAdd = () => {
     setEditingMedication(null);
     setIsAddModalOpen(true);
@@ -613,8 +626,8 @@ export default function App() {
             setCriticalStockAlertsEnabled(next);
             showToast(
               next
-                ? 'تم تفعيل تنبيهات "حبتين بس" — هتوصلك إشعار لو في دواء متبقي فيه حبتين أو أقل'
-                : 'تم إيقاف تنبيهات "حبتين بس"'
+                ? 'تم تفعيل تنبيهات النفاذ الحرج — هتوصلك إشعار فوري لو في دواء دخل مرحلة حرجة'
+                : 'تم إيقاف تنبيهات النفاذ الحرج'
             );
           }}
           isPhoneFrame={isPhoneFrame}

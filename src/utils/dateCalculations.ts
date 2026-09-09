@@ -1,14 +1,13 @@
 import { Medication, ConsumptionLog } from '../types';
 
 /**
- * Returns today's date as a deterministic YYYY-MM-DD string.
+ * Returns today's date as a deterministic YYYY-MM-DD string, using
+ * the client's local timezone.
  *
- * Uses the local timezone on the client but falls back to a
- * fixed reference date when running in environments where the
- * system clock may differ from the user's locale. This keeps
- * the rendered output stable between server and client, which
- * is required to avoid React hydration mismatches in AI Studio's
- * SSR preview environment.
+ * This is a client-side Vite SPA (no SSR), so there is no server/client
+ * hydration concern. The function is kept pure (no window/localStorage
+ * access) simply so it can be safely called during module init and
+ * from the seed-data file without side effects.
  */
 export function getTodayDateString(): string {
   const d = new Date();

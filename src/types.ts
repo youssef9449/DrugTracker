@@ -53,8 +53,27 @@ export interface Medication {
   targetOrderQuantity?: number; // Custom target order quantity specified for pharmacy order
   reminderEnabled?: boolean; // هل تم تفعيل تذكير يومي بموعد محدد
   reminderTime?: string; // وقت التذكير بصيغة 24 ساعة (مثال: "09:00" أو "21:30")
-  notificationSound?: NotificationSoundType; // صوت إشعار هذا الدواء بشكل مخصص
-  customSoundFile?: CustomSoundFile; // ملف صوتي مخصص اختاره المستخدم (إذا notificationSound === 'custom')
+  notificationSound?: NotificationSoundType; // نغمة تنبيه مخصصة لهذا الدواء (synthesized tones فقط)
+}
+
+/**
+ * Critical-stock threshold (in days), derived from the medication's
+ * `warningThresholdDays`.
+ *
+ * The "warning" status fires when `daysLeft <= warningThresholdDays`.
+ * The "critical" status is a more urgent subset that fires at half the
+ * warning window (floored to at least 1 day), so the critical level
+ * scales with the user-configured warning window instead of being a
+ * fixed 2-day constant.
+ *
+ * Examples:
+ *   warningThresholdDays = 5  -> criticalThresholdDays = 2
+ *   warningThresholdDays = 7  -> criticalThresholdDays = 3
+ *   warningThresholdDays = 10 -> criticalThresholdDays = 5
+ *   warningThresholdDays = 1  -> criticalThresholdDays = 1
+ */
+export function getCriticalThresholdDays(med: Medication): number {
+  return Math.max(1, Math.floor((med.warningThresholdDays || 5) / 2));
 }
 
 /**
@@ -238,15 +257,18 @@ export function calculateMedicationStatus(med: Medication): {
   }
 
   const daysLeft = Math.floor(med.currentPills / med.dailyDose);
+  const criticalThresholdDays = getCriticalThresholdDays(med);
 
-  if (daysLeft <= 2) {
+  if (daysLeft <= criticalThresholdDays) {
+    const daysWord =
+      daysLeft === 1 ? 'يوم واحد' : daysLeft === 2 ? 'يومين' : `${daysLeft} أيام`;
     return {
       daysLeft,
       status: 'critical',
-      statusLabel: `حرج (${daysLeft} ${daysLeft === 1 ? 'يوم' : 'يومين'})`,
+      statusLabel: `حرج (${daysWord})`,
       statusColorClass: 'text-rose-600',
       badgeBg: 'bg-rose-50 text-rose-700 border-rose-200',
-      badgeText: `🚨 باقي ${daysLeft} ${daysLeft === 1 ? 'يوم فقط' : 'أيام'}`,
+      badgeText: `🚨 باقي ${daysLeft === 1 ? 'يوم فقط' : `${daysLeft} أيام`}`,
     };
   }
 

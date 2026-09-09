@@ -1,14 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { X, Pill, ShieldAlert, Check, Zap, Layers, Box, Calculator, Bell, Clock, Volume2, FileAudio, Trash2 } from 'lucide-react';
-import { Medication, describeStockInStrips, NotificationSoundType, CustomSoundFile, formatTimeArabic } from '../types';
+import { X, Pill, ShieldAlert, Check, Zap, Layers, Box, Calculator, Bell, Clock, Volume2 } from 'lucide-react';
+import { Medication, describeStockInStrips, NotificationSoundType, formatTimeArabic } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
 import {
   NOTIFICATION_SOUND_OPTIONS,
   playNotificationSound,
-  readCustomSoundFile,
-  CUSTOM_SOUND_ACCEPT_ATTR,
-  CUSTOM_SOUND_MAX_BYTES,
-  getFileAccessSupportError,
 } from '../utils/sound';
 import { CustomTimePicker } from './CustomTimePicker';
 
@@ -70,14 +66,11 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
   const [reminderEnabled, setReminderEnabled] = useState<boolean>(false);
   const [reminderTime, setReminderTime] = useState<string>('09:00');
   const [notificationSound, setNotificationSound] = useState<NotificationSoundType>('classic_chime');
-  const [customSoundEnabled, setCustomSoundEnabled] = useState<boolean>(false);
   // Toggle for medications that come as loose pills in a box without
   // strips (e.g., Coffiram — 15 pills per box, no blister strips).
   // When enabled, the strip fields are hidden and the user just
   // enters the total pills per box.
   const [noStrips, setNoStrips] = useState<boolean>(false);
-  const [customSoundFile, setCustomSoundFile] = useState<CustomSoundFile | null>(null);
-  const [isUploadingSound, setIsUploadingSound] = useState<boolean>(false);
 
   useEffect(() => {
     if (initialData) {
@@ -104,8 +97,6 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
       setReminderEnabled(Boolean(initialData.reminderEnabled));
       setReminderTime(initialData.reminderTime || '09:00');
       setNotificationSound(initialData.notificationSound || 'classic_chime');
-      setCustomSoundEnabled(Boolean(initialData.notificationSound));
-      setCustomSoundFile(initialData.customSoundFile || null);
     } else {
       setName('');
       setCurrentPills(30);
@@ -125,12 +116,9 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
       setReminderEnabled(false);
       setReminderTime('09:00');
       setNotificationSound('classic_chime');
-      setCustomSoundEnabled(false);
-      setCustomSoundFile(null);
     }
     setShowStockHelper(false);
     setError('');
-    setIsUploadingSound(false);
   }, [initialData, isOpen]);
 
   if (!isOpen) return null;
@@ -163,47 +151,6 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
     setShowStockHelper(false);
   };
 
-  // File picker handler — uses an <input type="file" accept="audio/*">
-  // wrapped inside a <label> so the click is treated as a user gesture.
-  // On mobile browsers this triggers the OS file picker (Android Documents
-  // UI / iOS document picker) and the OS handles the storage permission
-  // prompt automatically — no explicit JS permission request is needed.
-  // We still feature-detect File / FileReader / Blob before opening the
-  // picker so we can show a clear Arabic error if the runtime doesn't
-  // support file access (e.g., inside an in-app WebView).
-  const handleCustomSoundFilePick = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    // Reset the input value so the same file can be re-picked later if needed.
-    event.target.value = '';
-    if (!file) return; // user cancelled the picker — no error
-
-    setIsUploadingSound(true);
-    setError('');
-    try {
-      const customFile = await readCustomSoundFile(file);
-      setCustomSoundFile(customFile);
-      setNotificationSound('custom');
-      setCustomSoundEnabled(true);
-      // Immediately preview the selected file.
-      playNotificationSound('custom', customFile);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'تعذّر تحميل الملف الصوتي';
-      setError(message);
-    } finally {
-      setIsUploadingSound(false);
-    }
-  };
-
-  // Check file access support before the user opens the picker. If the
-  // runtime doesn't support the File API, we show a hint instead of a
-  // broken button.
-  const fileAccessError = getFileAccessSupportError();
-
-  const handleRemoveCustomSound = () => {
-    setCustomSoundFile(null);
-    setNotificationSound('classic_chime');
-  };
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
@@ -230,10 +177,6 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
       setError('اختر وقت التذكير اليومي');
       return;
     }
-    if (notificationSound === 'custom' && !customSoundFile) {
-      setError('اختر ملفاً صوتياً أو عُد إلى إحدى النغمات الافتراضية');
-      return;
-    }
 
     // Calculate packaging — handle "no strips" medications (loose
     // pills in a box, e.g., Coffiram 15 pills per box without blister
@@ -253,10 +196,23 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
       calculatedPkgSize = stripsPerBoxNum * pillsPerStripNum;
     }
 
+    // C1: when EDITING, preserve the live inventory (`currentPills`)
+    // rather than letting the form overwrite it. Stock adjustments
+    // must go through the RefillModal (+) or the "restore dose" flow
+    // so auto-deductions and refill logs stay accurate. The form's
+    // currentPills input is disabled in edit mode (see JSX below), so
+    // this value equals initialData.currentPills at submit time — but
+    // we pass it explicitly here to make the intent unambiguous and
+    // guard against any future input-enable change.
+    const isEditing = Boolean(initialData);
+    const savedCurrentPills = isEditing
+      ? initialData!.currentPills
+      : Number(currentPills);
+
     onSave(
       {
         name: name.trim(),
-        currentPills: Number(currentPills),
+        currentPills: savedCurrentPills,
         dailyDose: doseNum,
         unit,
         warningThresholdDays: Number(warningThresholdDays) || 5,
@@ -270,9 +226,11 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
         packageSize: calculatedPkgSize,
         reminderEnabled,
         reminderTime: reminderEnabled ? reminderTime : undefined,
-        notificationSound: customSoundEnabled || reminderEnabled ? notificationSound : 'classic_chime',
-        customSoundFile:
-          notificationSound === 'custom' && customSoundFile ? customSoundFile : undefined,
+        // Per-medication sound is a synthesized tone only (classic_chime,
+        // marimba, ...). Custom sound files are a GLOBAL setting uploaded
+        // via the AppHeader and apply to all notifications — not stored
+        // per-medication (see H3 in the audit fix).
+        notificationSound: reminderEnabled ? notificationSound : 'classic_chime',
       },
       initialData ? initialData.id : undefined
     );
@@ -342,7 +300,12 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  عدد الحبوب المتوفرة حالياً <span className="text-red-500">*</span>
+                  عدد الحبوب المتوفرة حالياً{' '}
+                  {initialData ? (
+                    <span className="text-slate-400 font-normal">(للتعديل استخدم تعبئة الرصيد)</span>
+                  ) : (
+                    <span className="text-red-500">*</span>
+                  )}
                 </label>
                 <input
                   type="number"
@@ -350,8 +313,17 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
                   step="1"
                   required
                   value={currentPills}
+                  // C1: stock adjustments on an EXISTING medication must go
+                  // through the RefillModal (+) or the "restore dose" flow,
+                  // not the edit form — otherwise the form overwrites the
+                  // live inventory (which may have been auto-deducted) and
+                  // loses deductions. Disabled here on edit; the value is
+                  // shown for reference only.
+                  disabled={Boolean(initialData)}
                   onChange={(e) => setCurrentPills(Math.max(0, parseInt(e.target.value) || 0))}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+                  className={`w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white ${
+                    initialData ? 'opacity-60 cursor-not-allowed' : ''
+                  }`}
                 />
               </div>
               <div>

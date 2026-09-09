@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Pill, Bell, BellOff, Volume2, VolumeX, Search, Smartphone, Monitor, ShoppingCart, History, Settings, AlertTriangle, FileAudio, Trash2 } from 'lucide-react';
 import { ActiveTab } from './AndroidBottomNav';
+import { readCustomSoundFile } from '../utils/sound';
 
 interface AppHeaderProps {
   activeTab: ActiveTab;
@@ -42,6 +43,28 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   onSetGlobalCustomSound,
 }) => {
   const [showSoundPanel, setShowSoundPanel] = useState(false);
+
+  // Shared file-picker handler for the global custom sound upload.
+  // Uses readCustomSoundFile() which validates the file size (≤ 2 MB)
+  // and audio type before producing the data URL, so we get consistent
+  // validation + clear Arabic errors instead of silently storing a
+  // huge file that would blow the storage quota (C4).
+  const handleSoundFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Reset so the same file can be re-picked later if needed.
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const customFile = await readCustomSoundFile(file);
+      onSetGlobalCustomSound(customFile);
+    } catch (err) {
+      // Surface the Arabic error message from readCustomSoundFile
+      // via a quick alert — AppHeader has no toast of its own.
+      const message = err instanceof Error ? err.message : 'تعذّر تحميل الملف الصوتي';
+      window.alert(message);
+    }
+  };
+
   const getHeaderIcon = () => {
     switch (activeTab) {
       case 'shopping':
@@ -175,28 +198,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                         type="file"
                         accept="audio/*"
                         className="sr-only"
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          e.target.value = '';
-                          if (!file) return;
-                          try {
-                            const reader = new FileReader();
-                            reader.onload = () => {
-                              const dataUrl = String(reader.result || '');
-                              if (dataUrl) {
-                                onSetGlobalCustomSound({
-                                  fileName: file.name,
-                                  mimeType: file.type || 'audio/mpeg',
-                                  dataUrl,
-                                });
-                              }
-                            };
-                            reader.onerror = () => {};
-                            reader.readAsDataURL(file);
-                          } catch {
-                            // ignore
-                          }
-                        }}
+                        onChange={handleSoundFilePick}
                       />
                       تغيير الملف
                     </label>
@@ -207,28 +209,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                       type="file"
                       accept="audio/*"
                       className="sr-only"
-                      onChange={async (e) => {
-                        const file = e.target.files?.[0];
-                        e.target.value = '';
-                        if (!file) return;
-                        try {
-                          const reader = new FileReader();
-                          reader.onload = () => {
-                            const dataUrl = String(reader.result || '');
-                            if (dataUrl) {
-                              onSetGlobalCustomSound({
-                                fileName: file.name,
-                                mimeType: file.type || 'audio/mpeg',
-                                dataUrl,
-                              });
-                            }
-                          };
-                          reader.onerror = () => {};
-                          reader.readAsDataURL(file);
-                        } catch {
-                          // ignore
-                        }
-                      }}
+                      onChange={handleSoundFilePick}
                     />
                     📂 اختر ملفاً صوتياً من جهازك
                   </label>
@@ -256,19 +237,19 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             )}
           </button>
 
-          {/* Critical-stock alerts toggle ("متبقي حبتين فقط")
-              — separate from the master notification toggle because
-              the user explicitly asked for it to be its own switch.
-              When this is ON, the app fires a high-priority
-              notification when any medication drops to 2 pills or
-              fewer. When OFF, no critical stock alert fires (other
+          {/* Critical-stock alerts toggle — fires a high-priority
+              notification when a medication crosses its critical
+              threshold (derived from warningThresholdDays). Separate
+              from the master notification toggle because the user
+              explicitly asked for it to be its own switch. When ON,
+              critical alerts fire; when OFF they don't (other
               notifications like dose reminders still work). */}
           <button
             onClick={onToggleCriticalStockAlerts}
             title={
               criticalStockAlertsEnabled
-                ? 'تنبيه "حبتين بس" مفعّل — هتوصلك إشعار لو في دواء متبقي فيه حبتين أو أقل'
-                : 'فعّل تنبيه "حبتين بس" (مهم جداً)'
+                ? 'تنبيه النفاذ الحرج مفعّل — هتوصلك إشعار فوري لو في دواء دخل مرحلة حرجة'
+                : 'فعّل تنبيه النفاذ الحرج (مهم جداً)'
             }
             className={`p-2 rounded-xl transition active:scale-95 relative ${
               criticalStockAlertsEnabled

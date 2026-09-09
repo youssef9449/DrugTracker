@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import { useMemo, type FC } from 'react';
 
 /**
  * A theme-styled 3-dropdown time picker (hour / minute / AM-PM)
@@ -51,7 +51,7 @@ const MINUTE_OPTIONS = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 59];
 // an hour too. Common multiples of 5 are listed first for quick
 // selection.
 
-export const CustomTimePicker: React.FC<CustomTimePickerProps> = ({
+export const CustomTimePicker: FC<CustomTimePickerProps> = ({
   value,
   onChange,
 }) => {

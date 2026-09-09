@@ -8,9 +8,16 @@
  *
  * The cache name includes the version so a deploy invalidates the
  * old cache automatically.
+ *
+ * Update flow (M10): a new SW installs in the background but does NOT
+ * `skipWaiting()` automatically — it waits until the app (main.tsx +
+ * UpdatePrompt) sends a `SKIP_WAITING` message. This lets us show a
+ * "تحديث جديد متاح" toast with a refresh button instead of silently
+ * swapping the code under the user (which could break a running alarm
+ * or lose in-progress form state).
  */
 
-const CACHE_NAME = 'nagnagh-v3';
+const CACHE_NAME = 'drug-tracker-v4';
 
 // App shell — files we want available offline.
 const APP_SHELL = [
@@ -38,8 +45,9 @@ self.addEventListener('install', (event) => {
           })
         )
       );
-      // Activate immediately without waiting for old SW to die.
-      self.skipWaiting();
+      // M10: do NOT skipWaiting() automatically. The new SW stays in
+      // the "waiting" state until the app (UpdatePrompt) sends
+      // SKIP_WAITING, so we can prompt the user before swapping.
     })()
   );
 });
@@ -54,10 +62,17 @@ self.addEventListener('activate', (event) => {
           .filter((key) => key !== CACHE_NAME)
           .map((key) => caches.delete(key))
       );
-      // Take control of all clients immediately.
+      // Take control of all clients immediately once activated.
       self.clients.claim();
     })()
   );
+});
+
+// M10: allow the page to trigger the new SW to activate immediately.
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('fetch', (event) => {
@@ -69,9 +84,7 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
-  // Skip cross-origin requests (e.g., Google Fonts CDN) — let the
-  // browser handle them. The app still works without them offline
-  // because Tailwind + Cairo font loading is progressive enhancement.
+  // Skip cross-origin requests — let the browser handle them.
   if (url.origin !== self.location.origin) return;
 
   // Skip the Vite HMR WebSocket and dev-only endpoints in dev mode.

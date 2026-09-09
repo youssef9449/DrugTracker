@@ -18,3 +18,30 @@
  * the cache and resolves the error.
  */
 @import "tailwindcss";
+
+/*
+ * System Arabic-capable font stack (L9).
+ *
+ * Used by the `font-arabic-sans` utility class applied to <body> in
+ * index.html. Cairo is listed first so users who have it installed
+ * locally still get the intended typeface; the rest is a
+ * widely-available system stack with good Arabic coverage on every
+ * major platform (Segoe UI on Windows, the -apple- stack on
+ * macOS/iOS, Tahoma as a last-resort Arabic fallback). No network
+ * request is made.
+ */
+@theme {
+  --font-arabic-sans: "Cairo", "Segoe UI", -apple-system, BlinkMacSystemFont,
+    "Helvetica Neue", Tahoma, "Arial Unicode MS", sans-serif;
+}
+
+/* Hide scrollbars on horizontal chip rows (used by AppHeader filter chips).
+ * The `no-scrollbar` class is referenced in JSX but Tailwind v4 doesn't
+ * ship it by default, so we define it here. */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

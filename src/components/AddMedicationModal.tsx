@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, type FC, type FormEvent } from 'react';
 import { X, Pill, ShieldAlert, Check, Zap, Layers, Box, Calculator, Bell, Clock, Volume2 } from 'lucide-react';
 import { Medication, describeStockInStrips, NotificationSoundType, formatTimeArabic } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
@@ -23,7 +23,7 @@ const COLOR_TAGS = [
   { id: 'violet', label: 'بنفسجي', className: 'bg-violet-500' },
 ];
 
-export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
+export const AddMedicationModal: FC<AddMedicationModalProps> = ({
   isOpen,
   onClose,
   onSave,
@@ -151,7 +151,7 @@ export const AddMedicationModal: React.FC<AddMedicationModalProps> = ({
     setShowStockHelper(false);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
       setError('يرجى إدخال اسم الدواء');

@@ -1,4 +1,4 @@
-import React from 'react';
+import type { FC } from 'react';
 import { Pill, Plus, CheckCircle2, AlertTriangle, ArrowRight } from 'lucide-react';
 
 interface EmptyStateProps {
@@ -9,7 +9,7 @@ interface EmptyStateProps {
   onOpenAddModal: () => void;
 }
 
-export const EmptyState: React.FC<EmptyStateProps> = ({
+export const EmptyState: FC<EmptyStateProps> = ({
   hasSearch,
   onClearSearch,
   filter = 'all',

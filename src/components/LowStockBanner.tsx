@@ -1,4 +1,4 @@
-import React from 'react';
+import type { FC } from 'react';
 import { AlertTriangle, AlertCircle, ShoppingBag, ShoppingCart } from 'lucide-react';
 import { Medication, calculateMedicationStatus } from '../types';
 import { getDepletionDate } from '../utils/dateCalculations';
@@ -8,7 +8,7 @@ interface LowStockBannerProps {
   onNavigateToShopping: () => void;
 }
 
-export const LowStockBanner: React.FC<LowStockBannerProps> = ({
+export const LowStockBanner: FC<LowStockBannerProps> = ({
   medications,
   onNavigateToShopping,
 }) => {

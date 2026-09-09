@@ -159,6 +159,10 @@ export default function App() {
     medications,
     soundEnabled,
     notificationsEnabled,
+    // #24: pass hydrated so the polling effect doesn't fire phantom
+    // alarms for seed medications before the user's real saved state
+    // is loaded from localStorage/IndexedDB.
+    hydrated,
     globalCustomSound,
   });
 

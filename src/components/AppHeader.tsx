@@ -1,5 +1,5 @@
 import { useState, type FC, type ChangeEvent } from 'react';
-import { Pill, Bell, BellOff, Volume2, VolumeX, Search, Smartphone, Monitor, ShoppingCart, History, Settings, AlertTriangle, FileAudio, Trash2 } from 'lucide-react';
+import { Pill, Bell, BellOff, Volume2, VolumeX, Search, Smartphone, Monitor, ShoppingCart, History, Settings, AlertTriangle, FileAudio, Trash2, Type } from 'lucide-react';
 import { ActiveTab } from './AndroidBottomNav';
 import { readCustomSoundFile, CUSTOM_SOUND_ACCEPT_ATTR } from '../utils/sound';
 
@@ -21,6 +21,8 @@ interface AppHeaderProps {
   onOpenSettings: () => void;
   globalCustomSound?: { fileName: string; mimeType: string; dataUrl: string } | null;
   onSetGlobalCustomSound: (file: { fileName: string; mimeType: string; dataUrl: string } | null) => void;
+  fontScale: 'normal' | 'large';
+  onToggleFontScale: () => void;
 }
 
 export const AppHeader: FC<AppHeaderProps> = ({
@@ -41,6 +43,8 @@ export const AppHeader: FC<AppHeaderProps> = ({
   onOpenSettings,
   globalCustomSound,
   onSetGlobalCustomSound,
+  fontScale,
+  onToggleFontScale,
 }) => {
   const [showSoundPanel, setShowSoundPanel] = useState(false);
 
@@ -273,6 +277,21 @@ export const AppHeader: FC<AppHeaderProps> = ({
             className="hidden md:flex p-2 rounded-xl text-teal-100 hover:text-white hover:bg-teal-700/80 transition active:scale-95"
           >
             {isPhoneFrame ? <Monitor className="w-4 h-4" /> : <Smartphone className="w-4 h-4" />}
+          </button>
+
+          {/* Font size toggle — increases all font sizes in the app, or
+              returns to normal. Persisted to localStorage so it survives
+              relaunch. */}
+          <button
+            onClick={onToggleFontScale}
+            title={fontScale === 'large' ? 'إرجاع حجم الخط للطبيعي' : 'تكبير حجم الخط'}
+            className={`p-2 rounded-xl transition active:scale-95 ${
+              fontScale === 'large'
+                ? 'bg-teal-700 text-amber-300'
+                : 'text-teal-100 hover:text-white hover:bg-teal-700/80'
+            }`}
+          >
+            <Type className="w-4 h-4" />
           </button>
         </div>
       </div>

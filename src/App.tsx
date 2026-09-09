@@ -13,7 +13,6 @@ import {
 // See that file's header comment for the AI Studio cache-error
 // troubleshooting note.
 import { INITIAL_MEDICATIONS, INITIAL_LOGS } from './data/initialData';
-import { AndroidNavBar } from './components/AndroidNavBar';
 import { AndroidBottomNav, ActiveTab } from './components/AndroidBottomNav';
 import { AppHeader } from './components/AppHeader';
 import { LowStockBanner } from './components/LowStockBanner';
@@ -52,6 +51,9 @@ const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
 const STORAGE_PHARMACY_KEY = 'android_med_tracker_pharmacy_v2';
 const SOUND_KEY = 'android_med_tracker_sound_v1';
+// Font size preference: 'normal' or 'large'. Persisted so it survives
+// app relaunch. Applied as a CSS class on the phone-frame container.
+const FONT_SIZE_KEY = 'android_med_tracker_font_size_v1';
 // Critical-stock alerts (the urgent "حرج" notifications) — user can
 // toggle this on/off from the AppHeader. Default true (enabled by
 // default — this is the headline feature of the app). The critical
@@ -128,6 +130,10 @@ export default function App() {
   const [pharmacySettings, setPharmacySettings] =
     useState<PharmacySettings>(DEFAULT_PHARMACY_SETTINGS);
   const [hydrated, setHydrated] = useState(false);
+  // First-run detection: when no saved meds exist in localStorage, the
+  // seed data is a demo — don't fire auto-deductions, notifications, or
+  // alarms for it. Set during hydration.
+  const [isFirstRun, setIsFirstRun] = useState(false);
 
   const [filter, setFilter] = useState<'all' | 'alerts' | 'sufficient'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -154,6 +160,9 @@ export default function App() {
   const [globalCustomSound, setGlobalCustomSound] = useState<CustomSoundFile | null>(null);
 
   const [isPhoneFrame, setIsPhoneFrame] = useState(true);
+  // Font size toggle: 'normal' (default) or 'large'. Persisted to
+  // localStorage and applied as a CSS class on the phone-frame.
+  const [fontScale, setFontScale] = useState<'normal' | 'large'>('normal');
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
 
   const { alarmingMedication, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
@@ -163,7 +172,7 @@ export default function App() {
     // #24: pass hydrated so the polling effect doesn't fire phantom
     // alarms for seed medications before the user's real saved state
     // is loaded from localStorage/IndexedDB.
-    hydrated,
+    hydrated: hydrated && !isFirstRun,
     globalCustomSound,
   });
 
@@ -211,6 +220,11 @@ export default function App() {
         // hydration-gated persistence effect overwrites the user's
         // "[]" with the seed meds — the empty-meds state is lost.
         if (Array.isArray(parsed)) setMedications(parsed);
+      } else {
+        // First-ever open: no saved meds. The seed data is a demo —
+        // flag it so the auto-deduction + alert + reminder effects
+        // don't fire ghost notifications/alarms for seed meds.
+        setIsFirstRun(true);
       }
     } catch (err) {
       console.warn('[App] failed to load saved medications:', err);
@@ -246,6 +260,13 @@ export default function App() {
       setSoundEnabled(localStorage.getItem(SOUND_KEY) !== 'false');
     } catch (err) {
       console.warn('[App] failed to load sound flag:', err);
+    }
+
+    try {
+      const savedFont = localStorage.getItem(FONT_SIZE_KEY);
+      if (savedFont === 'large') setFontScale('large');
+    } catch (err) {
+      console.warn('[App] failed to load font size:', err);
     }
 
     try {
@@ -416,6 +437,15 @@ export default function App() {
     }
   }, [soundEnabled, showToast, hydrated]);
 
+  // Persist font size preference so it survives app relaunch.
+  useEffect(() => {
+    if (!hydrated) return;
+    const err = persistString(FONT_SIZE_KEY, fontScale);
+    if (err) {
+      console.warn('[App] failed to persist font size:', err);
+    }
+  }, [fontScale, hydrated]);
+
   const warnedCriticalRef = useRef(false);
   useEffect(() => {
     if (!hydrated) return;
@@ -462,6 +492,11 @@ export default function App() {
   const deductedRef = useRef(false);
   useEffect(() => {
     if (!hydrated || deductedRef.current) return;
+    // First-run: don't auto-deduct or fire notifications for seed data.
+    if (isFirstRun) {
+      deductedRef.current = true;
+      return;
+    }
     deductedRef.current = true;
 
     const today = getTodayDateString();
@@ -497,6 +532,8 @@ export default function App() {
   const lastAlertedStatusRef = useRef<Map<string, MedicationStatus>>(new Map());
   useEffect(() => {
     if (!hydrated) return;
+    // First-run: don't fire ghost notifications for seed data.
+    if (isFirstRun) return;
 
     // When notifications are off, reset the tracker so the next time
     // they're turned on, current alertable meds fire again.
@@ -550,7 +587,7 @@ export default function App() {
 
       tracker.set(med.id, status);
     }
-  }, [medications, notificationsEnabled, criticalStockAlertsEnabled, hydrated]);
+  }, [medications, notificationsEnabled, criticalStockAlertsEnabled, hydrated, isFirstRun]);
 
   const handleRestoreDose = (medicationId: string, reason: string) => {
     const med = medications.find((m) => m.id === medicationId);
@@ -705,14 +742,88 @@ export default function App() {
   };
 
   const handleTakeDoseFromAlarm = (med: Medication) => {
+    // Consume-pill feature: actually subtract the dose from the balance,
+    // mark the med as consumed today (blocks auto-deduction), and log it.
+    const today = getTodayDateString();
+    const doseAmount = Math.min(med.dailyDose, med.currentPills);
+    if (doseAmount > 0) {
+      setMedications((prev) =>
+        prev.map((m) =>
+          m.id === med.id
+            ? {
+                ...m,
+                currentPills: Math.max(0, m.currentPills - doseAmount),
+                lastConsumedDate: today,
+                lastSyncDate: today,
+              }
+            : m
+        )
+      );
+      setLogs((prev) => [
+        {
+          id: 'consume-' + Date.now(),
+          medicationId: med.id,
+          medicationName: med.name,
+          type: 'dose_taken',
+          amount: -doseAmount,
+          date: today,
+          timestamp: new Date().toISOString(),
+          description: `تناول جرعة من التنبيه (-${doseAmount} ${med.unit})`,
+        },
+        ...prev,
+      ]);
+    }
     dismissAlarm();
-    showToast(`تم تسجيل جرعة "${med.name}". الخصم اليومي يتم تلقائياً بمرور اليوم.`);
+    showToast(`تم تسجيل جرعة "${med.name}" (-${doseAmount} ${med.unit}). لن يتم الخصم التلقائي اليوم.`);
     if (soundEnabled) playSuccessChime();
   };
 
   const handleSnoozeFromAlarm = (med: Medication) => {
     snoozeAlarm(10);
     showToast(`تم تأجيل تنبيه "${med.name}" عشر دقائق`);
+  };
+
+  // Consume-pill feature: manually consume a dose from the card.
+  // Subtracts dailyDose from currentPills, marks the med as consumed
+  // today (blocks auto-deduction for today), creates a dose_taken log.
+  const handleConsumeDose = (medicationId: string) => {
+    const med = medications.find((m) => m.id === medicationId);
+    if (!med) return;
+    const today = getTodayDateString();
+    // If already consumed today, don't double-consume.
+    if (med.lastConsumedDate === today) {
+      showToast(`تم تناول جرعة "${med.name}" اليوم بالفعل.`);
+      return;
+    }
+    const doseAmount = Math.min(med.dailyDose, med.currentPills);
+    if (doseAmount <= 0) return;
+    setMedications((prev) =>
+      prev.map((m) =>
+        m.id === medicationId
+          ? {
+              ...m,
+              currentPills: Math.max(0, m.currentPills - doseAmount),
+              lastConsumedDate: today,
+              lastSyncDate: today,
+            }
+          : m
+      )
+    );
+    setLogs((prev) => [
+      {
+        id: 'consume-' + Date.now(),
+        medicationId: med.id,
+        medicationName: med.name,
+        type: 'dose_taken',
+        amount: -doseAmount,
+        date: today,
+        timestamp: new Date().toISOString(),
+        description: `تناول جرعة يدوياً (-${doseAmount} ${med.unit})`,
+      },
+      ...prev,
+    ]);
+    showToast(`تم تناول جرعة "${med.name}" (-${doseAmount} ${med.unit}). لن يتم الخصم التلقائي اليوم.`);
+    if (soundEnabled) playSuccessChime();
   };
 
   const filteredMedications = useMemo(() => {
@@ -761,7 +872,7 @@ export default function App() {
           isPhoneFrame
             ? 'max-w-md h-[100dvh] md:h-[860px] md:max-h-[92vh] md:rounded-[42px] md:border-8 md:border-slate-800 md:shadow-2xl overflow-hidden'
             : 'max-w-4xl min-h-screen md:min-h-[90vh] md:rounded-3xl md:border md:border-slate-300 md:shadow-xl overflow-hidden'
-        }`}
+        } ${fontScale === 'large' ? 'text-lg' : ''}`}
       >
         {/* NOTE: AndroidStatusBar (a fake "time + wifi + battery" bar
             that was previously rendered here) was removed because the
@@ -807,6 +918,12 @@ export default function App() {
             } else {
               showToast('تم إزالة الصوت المخصص');
             }
+          }}
+          fontScale={fontScale}
+          onToggleFontScale={() => {
+            const next = fontScale === 'normal' ? 'large' : 'normal';
+            setFontScale(next);
+            showToast(next === 'large' ? 'تم تكبير حجم الخط' : 'تم إرجاع حجم الخط للطبيعي');
           }}
         />
 
@@ -883,6 +1000,7 @@ export default function App() {
                       onToggleAutoDeduct={handleToggleAutoDeduct}
                       onNavigateToShopping={() => setActiveTab('shopping')}
                       onTriggerAlarm={testAlarm}
+                      onConsumeDose={handleConsumeDose}
                     />
                   ))
                 )}
@@ -913,7 +1031,6 @@ export default function App() {
 
         {activeTab === 'stock' && <AndroidFab onOpenAddModal={openAdd} />}
         <AndroidBottomNav activeTab={activeTab} onTabChange={setActiveTab} alertsCount={alertsCount} />
-        <AndroidNavBar />
 
         {toast && (
           <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-40 max-w-[90%] px-4 py-2.5 bg-slate-900 text-white text-xs font-bold rounded-2xl shadow-xl text-center">

@@ -97,6 +97,19 @@ function persistString(key: string, value: string): string | null {
   }
 }
 
+/**
+ * Severity rank for MedicationStatus, used by the alert effect to
+ * decide whether a status change is a worsening (fire) or an
+ * improvement (don't fire, just update the tracker). Higher = worse.
+ * Declared at module scope so it's stable across renders (no dep needed).
+ */
+const STATUS_RANK: Record<MedicationStatus, number> = {
+  sufficient: 0,
+  warning: 1,
+  critical: 2,
+  out_of_stock: 3,
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('stock');
 
@@ -311,6 +324,12 @@ export default function App() {
   // ─────────────────────────────────────────────────────────────
   const warnedMedsRef = useRef(false);
   useEffect(() => {
+    // H8-adjacent: do NOT persist until hydration has loaded the saved
+    // state. Otherwise on the first mount we'd write the seed
+    // INITIAL_MEDICATIONS to localStorage, briefly overwriting the
+    // user's real data before the hydration effect's setMedications
+    // re-render arrives — a crash in that window would lose data.
+    if (!hydrated) return;
     const err = persistJson(STORAGE_MEDS_KEY, medications);
     if (err && !warnedMedsRef.current) {
       warnedMedsRef.current = true;
@@ -318,10 +337,11 @@ export default function App() {
     } else if (!err) {
       warnedMedsRef.current = false;
     }
-  }, [medications, showToast]);
+  }, [medications, showToast, hydrated]);
 
   const warnedLogsRef = useRef(false);
   useEffect(() => {
+    if (!hydrated) return;
     const err = persistJson(STORAGE_LOGS_KEY, logs);
     if (err && !warnedLogsRef.current) {
       warnedLogsRef.current = true;
@@ -329,7 +349,7 @@ export default function App() {
     } else if (!err) {
       warnedLogsRef.current = false;
     }
-  }, [logs, showToast]);
+  }, [logs, showToast, hydrated]);
 
   // M12: pharmacy settings are written via a 400ms debounce so rapid
   // toggles of the 30/60-day duration (which calls onUpdateSettings on
@@ -337,6 +357,7 @@ export default function App() {
   // value within the debounce window wins.
   const warnedPharmacyRef = useRef(false);
   useEffect(() => {
+    if (!hydrated) return;
     const handle = window.setTimeout(() => {
       const err = persistJson(STORAGE_PHARMACY_KEY, pharmacySettings);
       if (err && !warnedPharmacyRef.current) {
@@ -347,10 +368,11 @@ export default function App() {
       }
     }, 400);
     return () => window.clearTimeout(handle);
-  }, [pharmacySettings, showToast]);
+  }, [pharmacySettings, showToast, hydrated]);
 
   const warnedSoundRef = useRef(false);
   useEffect(() => {
+    if (!hydrated) return;
     const err = persistString(SOUND_KEY, String(soundEnabled));
     if (err && !warnedSoundRef.current) {
       warnedSoundRef.current = true;
@@ -358,10 +380,11 @@ export default function App() {
     } else if (!err) {
       warnedSoundRef.current = false;
     }
-  }, [soundEnabled, showToast]);
+  }, [soundEnabled, showToast, hydrated]);
 
   const warnedCriticalRef = useRef(false);
   useEffect(() => {
+    if (!hydrated) return;
     const err = persistString(CRITICAL_STOCK_ALERTS_KEY, String(criticalStockAlertsEnabled));
     if (err && !warnedCriticalRef.current) {
       warnedCriticalRef.current = true;
@@ -369,12 +392,16 @@ export default function App() {
     } else if (!err) {
       warnedCriticalRef.current = false;
     }
-  }, [criticalStockAlertsEnabled, showToast]);
+  }, [criticalStockAlertsEnabled, showToast, hydrated]);
 
   // Persist global custom sound to IndexedDB (C4: storing the base64
   // data URL in localStorage risked blowing the ~5 MB quota and silently
   // dropping other state; IndexedDB has a much larger quota).
+  // Gated on `hydrated` so we don't `deleteGlobalCustomSound()` on mount
+  // (when globalCustomSound is null) BEFORE the async loadGlobalCustomSound
+  // in the hydration effect has had a chance to read the saved value.
   useEffect(() => {
+    if (!hydrated) return;
     if (globalCustomSound) {
       saveGlobalCustomSound(globalCustomSound).catch((err) => {
         console.warn('[App] saveGlobalCustomSound failed:', err);
@@ -384,7 +411,7 @@ export default function App() {
         console.warn('[App] deleteGlobalCustomSound failed:', err);
       });
     }
-  }, [globalCustomSound]);
+  }, [globalCustomSound, hydrated]);
 
   // ─────────────────────────────────────────────────────────────
   // Auto-deduction: runs ONCE per session, AFTER hydration completes
@@ -418,15 +445,20 @@ export default function App() {
   // ─────────────────────────────────────────────────────────────
   // Alert effect: watches the (post-deduction) medications array and
   // the notification flags, and fires a notification the FIRST time a
-  // medication crosses into a worse status — using the per-medication
-  // critical threshold DERIVED from warningThresholdDays (C3), and a
-  // stable notification id keyed by med.id (H6 — no more collisions
-  // between same-named medications).
+  // medication WORSENS — using the per-medication critical threshold
+  // DERIVED from warningThresholdDays (C3), and a stable notification
+  // id keyed by med.id (H6 — no more collisions between same-named
+  // medications).
   //
-  // We track the last-alerted status per med in a ref. When the
-  // status worsens (or the med is new and already in an alertable
-  // state), we fire. When it improves back to 'sufficient', we clear
-  // the tracker so the next crossing alerts again.
+  // We track the last-alerted status per med in a ref and compare
+  // severity ranks (out_of_stock > critical > warning > sufficient).
+  // We only fire when the new status is STRICTLY WORSE than the
+  // previously-alerted one — so a partial refill that improves a med
+  // from critical→warning does NOT fire a spurious "warning" alert.
+  // When a med improves to 'sufficient', we clear the tracker so the
+  // next crossing alerts again. When notifications are toggled off,
+  // we clear the tracker so re-enabling fires for current alertable
+  // meds again.
   // ─────────────────────────────────────────────────────────────
   const lastAlertedStatusRef = useRef<Map<string, MedicationStatus>>(new Map());
   useEffect(() => {
@@ -444,16 +476,26 @@ export default function App() {
       const { status, daysLeft } = calculateMedicationStatus(med);
       const prev = tracker.get(med.id);
 
-      // No transition to fire on: med is healthy.
+      // Med is healthy → clear its tracker so the next worsening alerts.
       if (status === 'sufficient') {
         tracker.delete(med.id);
         continue;
       }
 
-      // Already alerted for this exact status → don't spam.
-      if (prev === status) continue;
+      // Already alerted for this exact (or a worse) status → don't
+      // re-fire. `prev` records the worst status we've already alerted
+      // for; if the new status is the same or better, skip.
+      if (prev !== undefined && STATUS_RANK[status] <= STATUS_RANK[prev]) {
+        // Update the tracker if the status improved (so a later
+        // worsening from the new, better baseline fires again).
+        if (STATUS_RANK[status] < STATUS_RANK[prev]) {
+          tracker.set(med.id, status);
+        }
+        continue;
+      }
 
-      // Fire the appropriate alert(s) for the new status.
+      // New med (prev undefined) OR status strictly worsened → fire the
+      // appropriate alert(s) for the new status.
       if (status === 'out_of_stock') {
         if (criticalStockAlertsEnabled) {
           sendCriticalStockAlert(med.id, med.name, 0, 0, med.unit || 'قرص');

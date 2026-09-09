@@ -143,7 +143,15 @@ export function syncAutoDailyDeductions(
     const lastDate = med.lastSyncDate || todayStr;
     const daysPassed = getDaysDifference(lastDate, todayStr);
 
-    if (med.autoDeductEnabled !== false && daysPassed > 0 && med.dailyDose > 0) {
+    // Consume-pill feature: if the user manually consumed a dose today
+    // (lastConsumedDate === todayStr) AND the lastSyncDate is today
+    // (meaning the manual consume already updated the sync), skip the
+    // auto-deduction for this med. The manual consume subtracted the
+    // dailyDose already and set lastSyncDate to today, so the auto-
+    // deduction would double-deduct.
+    const consumedToday = med.lastConsumedDate === todayStr;
+
+    if (med.autoDeductEnabled !== false && daysPassed > 0 && med.dailyDose > 0 && !consumedToday) {
       const pillsToDeduct = Math.min(med.currentPills, daysPassed * med.dailyDose);
       const newPills = Math.max(0, med.currentPills - pillsToDeduct);
 

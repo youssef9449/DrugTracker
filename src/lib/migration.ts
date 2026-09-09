@@ -25,7 +25,7 @@
  */
 
 /** Current schema version this build understands. */
-export const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 2;
 
 /** localStorage key recording the last schema version we applied. */
 const SCHEMA_APPLIED_KEY = `android_med_tracker_schema_applied_v${SCHEMA_VERSION}`;

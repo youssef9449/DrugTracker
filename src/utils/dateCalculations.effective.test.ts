@@ -220,30 +220,28 @@ describe('getCriticalAlarmDate', () => {
     expect(getCriticalAlarmDate(med, '2024-09-10', Date.now())).toBeNull();
   });
 
-  it('returns immediate (now) when the med is already at/below critical threshold', () => {
+  it('returns null when the med is already at/below critical threshold (the existing alert effect handles immediate notifications)', () => {
     // warningThresholdDays 5 → critical threshold 2.
-    // currentPills 2, dose 1 → daysLeft 2 → at critical threshold → immediate.
+    // currentPills 2, dose 1 → daysLeft 2 → at critical threshold.
+    // The one-shot alarm is only for FUTURE crossings; returning null
+    // here prevents repeated immediate alerts on every app launch.
     const med = makeMed({
       currentPills: 2,
       dailyDose: 1,
       warningThresholdDays: 5,
       lastSyncDate: '2024-09-10',
     });
-    const now = Date.now();
-    const result = getCriticalAlarmDate(med, '2024-09-10', now);
-    expect(result).toBe(now);
+    expect(getCriticalAlarmDate(med, '2024-09-10', Date.now())).toBeNull();
   });
 
-  it('returns immediate when currentPills is 0 (already out of stock)', () => {
+  it('returns null when currentPills is 0 (already out of stock)', () => {
     const med = makeMed({
       currentPills: 0,
       dailyDose: 1,
       warningThresholdDays: 5,
       lastSyncDate: '2024-09-10',
     });
-    const now = Date.now();
-    const result = getCriticalAlarmDate(med, '2024-09-10', now);
-    expect(result).toBe(now);
+    expect(getCriticalAlarmDate(med, '2024-09-10', Date.now())).toBeNull();
   });
 
   it('returns a future timestamp when the med has enough supply', () => {
@@ -278,8 +276,10 @@ describe('getCriticalAlarmDate', () => {
     expect(getCriticalAlarmDate(med, '2024-09-10', Date.now())).toBeNull();
   });
 
-  it('returns immediate for a frozen med that is ALREADY critical', () => {
-    // Frozen at 2, dose 1, threshold 2 → already critical → immediate.
+  it('returns null for a frozen med that is ALREADY critical', () => {
+    // Frozen at 2, dose 1, threshold 2 → already critical → null
+    // (the existing alert effect handles immediate notifications;
+    // no future crossing to schedule).
     const med = makeMed({
       currentPills: 2,
       dailyDose: 1,
@@ -287,8 +287,7 @@ describe('getCriticalAlarmDate', () => {
       lastSyncDate: '2024-09-10',
       autoDeductEnabled: false,
     });
-    const now = Date.now();
-    expect(getCriticalAlarmDate(med, '2024-09-10', now)).toBe(now);
+    expect(getCriticalAlarmDate(med, '2024-09-10', Date.now())).toBeNull();
   });
 
   it('reschedules when warningThresholdDays changes (the critical threshold shifts)', () => {
@@ -311,15 +310,15 @@ describe('getCriticalAlarmDate', () => {
   });
 
   it('projects the alarm date from the dynamic balance (not the raw snapshot)', () => {
-    // Stored 30, dose 1, lastSync 30 days ago → effective 0 → critical now.
+    // Stored 30, dose 1, lastSync 30 days ago → effective 0 → ALREADY
+    // critical → returns null (no future alarm; existing alert effect
+    // handles the immediate notification on app open).
     const med = makeMed({
       currentPills: 30,
       dailyDose: 1,
       warningThresholdDays: 5,
       lastSyncDate: '2024-08-11', // 30 days before 2024-09-10
     });
-    const now = Date.now();
-    const result = getCriticalAlarmDate(med, '2024-09-10', now);
-    expect(result).toBe(now); // immediate, because effective balance is 0
+    expect(getCriticalAlarmDate(med, '2024-09-10', Date.now())).toBeNull();
   });
 });

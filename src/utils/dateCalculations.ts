@@ -346,16 +346,19 @@ export function settleDoseChange(
  *
  * Returns `null` in cases where scheduling an alarm is meaningless or
  * unsafe — callers should treat null as "do not schedule":
+ *   - `dailyDose <= 0` → no consumption rate → no projected critical
+ *     date. Caller must skip scheduling.
+ *   - `daysLeft <= criticalThresholdDays` → the med is ALREADY at or
+ *     below the critical threshold. The one-shot alarm is only for
+ *     FUTURE crossings; the existing alert effect (which runs when
+ *     the app is open and tracks already-alerted statuses via
+ *     `lastAlertedStatusRef`) handles the "already critical on app
+ *     open" case. Returning null here prevents repeated immediate
+ *     alerts from being scheduled on every app launch.
  *   - `autoDeductEnabled === false` AND effective balance > critical
  *     threshold → the balance is frozen, it will never cross the
  *     critical threshold without a refill. (If it's already below,
- *     we return `Date.now()` to fire immediately.)
- *   - `dailyDose <= 0` → no consumption rate → no projected critical
- *     date. Caller must skip scheduling.
- *
- * Returns `Date.now()` (immediate) when the med is ALREADY at or
- * below the critical threshold — the caller's scheduleCriticalAlarm
- * will fire 1 second later, treating this as an "alert now" signal.
+ *     we still return null — see above.)
  *
  * Otherwise returns a future timestamp computed as:
  *   today + (effectiveDaysLeft - criticalThresholdDays) days
@@ -364,6 +367,14 @@ export function settleDoseChange(
  * fire at midnight, and 9 AM avoids the device's quiet-hours window).
  *
  * The local-time choice is why this returns a Date and not a UTC ms.
+ *
+ * Boot persistence: on Android, the @capacitor/local-notifications
+ * plugin persists scheduled notifications in SharedPreferences and
+ * re-arms them via its `LocalNotificationRestoreReceiver` on
+ * BOOT_COMPLETED (also LOCKED_BOOT_COMPLETED + QUICKBOOT_POWERON).
+ * Past-due notifications are rescheduled to fire ~15 seconds after
+ * boot. So scheduled one-shot critical alarms survive device reboots
+ * without the user opening the app — no extra code required.
  *
  * @param med The medication.
  * @param todayStr Optional "today" override (YYYY-MM-DD) — for tests.
@@ -384,8 +395,12 @@ export function getCriticalAlarmDate(
   const eff = effectiveCurrentPills(med, todayStr);
   const daysLeft = eff <= 0 ? 0 : Math.floor(eff / med.dailyDose);
 
-  // Already at or below the critical threshold → fire immediately.
-  if (daysLeft <= criticalThresholdDays) return nowMs;
+  // Already at or below the critical threshold → the existing alert
+  // effect (which runs when the app is open and tracks already-
+  // alerted statuses) handles this. The one-shot alarm is only for
+  // FUTURE crossings — returning null here prevents repeated
+  // immediate alerts from being scheduled on every app launch.
+  if (daysLeft <= criticalThresholdDays) return null;
 
   // For a frozen med (autoDeduct off) with sufficient balance, the
   // balance won't change over time → no future crossing. The user
@@ -396,7 +411,7 @@ export function getCriticalAlarmDate(
 
   // Days until the med crosses the critical threshold.
   const daysUntilCritical = daysLeft - criticalThresholdDays;
-  if (daysUntilCritical <= 0) return nowMs;
+  if (daysUntilCritical <= 0) return null;
 
   // Compute today + daysUntilCritical at local 09:00 AM.
   const target = new Date(nowMs);

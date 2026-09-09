@@ -39,17 +39,15 @@ import {
   sendTestAlertNotification,
   getNotificationPermission,
   getNotificationPermissionSync,
-  scheduleCriticalAlarm,
-  cancelCriticalAlarm,
 } from './utils/notifications';
 import {
   getTodayDateString,
   syncAutoDailyDeductions,
   effectiveCurrentPills,
   settleDoseChange,
-  getCriticalAlarmDate,
 } from './utils/dateCalculations';
 import { useDoseReminders } from './hooks/useDoseReminders';
+import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
 import { initNativeBridge, registerBackButtonHandler, cleanupNativeListeners } from './native';
 import { migrateSchema } from './lib/migration';
 import { getInitialTab } from './lib/initialTab';
@@ -611,83 +609,25 @@ export default function App() {
   }, [medications, notificationsEnabled, criticalStockAlertsEnabled, hydrated, isFirstRun]);
 
   // ─────────────────────────────────────────────────────────────
-  // One-shot critical-alarm scheduling effect.
-  //
-  // For each medication, computes the projected calendar date the med
-  // will cross the critical threshold (getCriticalAlarmDate) and
-  // schedules a SINGLE one-shot notification at that date via Android's
-  // AlarmManager (Capacitor LocalNotifications). The alarm fires even
-  // if the app is killed — the user sees the alert in their drawer at
-  // the projected critical date without ever opening the app.
-  //
-  // Re-schedule triggers: this effect re-runs (and re-schedules every
-  // med's alarm) whenever any field that affects the critical date
-  // changes:
-  //   - med.id (a med was added or deleted — must cancel old, schedule new)
-  //   - med.currentPills (snapshot changed via refill/consume/restore)
-  //   - med.dailyDose (changed via edit — settlement handled in save)
-  //   - med.lastSyncDate (changed via refill/consume/settlement)
-  //   - med.warningThresholdDays (drives the critical threshold)
-  //   - med.autoDeductEnabled (pausing freezes the projected crossing)
-  //
-  // Gating:
-  //   - Skip entirely before hydration (don't schedule for seed data).
-  //   - Skip when criticalStockAlertsEnabled is false (user opted out).
-  //   - Skip when notificationsEnabled is false (no permission to show).
+  // One-shot critical-alarm scheduling — extracted into a hook for
+  // testability + race protection. See useCriticalAlarmScheduler.ts
+  // for the full doc (boot persistence, reschedule triggers, stale-
+  // async generation guard, edge cases). The hook handles:
+  //   - scheduling a one-shot alarm at each med's projected critical
+  //     date
+  //   - cancel + reschedule when any of the 6 trigger fields change
+  //   - cancel for deleted meds
+  //   - cancel all when the user opts out of either flag
+  //   - per-med generation guard so an older async effect cannot
+  //     recreate a stale alarm after a newer state or after deletion
   // ─────────────────────────────────────────────────────────────
-  // Track previously-scheduled med ids so we can cancel alarms for
-  // deleted meds (the medications array no longer contains them).
-  const scheduledCriticalIdsRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    if (!hydrated || isFirstRun) return;
-    if (!notificationsEnabled || !criticalStockAlertsEnabled) {
-      // User opted out: cancel any previously-scheduled alarms.
-      scheduledCriticalIdsRef.current.forEach((id) => {
-        cancelCriticalAlarm(id).catch(() => void 0);
-      });
-      scheduledCriticalIdsRef.current.clear();
-      return;
-    }
-
-    const today = getTodayDateString();
-    const stillScheduled = new Set<string>();
-
-    for (const med of medications) {
-      const criticalDateMs = getCriticalAlarmDate(med, today);
-      if (criticalDateMs === null) {
-        // No future crossing (dailyDose=0 or frozen+sufficient) — cancel
-        // any previously-scheduled alarm for this med.
-        if (scheduledCriticalIdsRef.current.has(med.id)) {
-          cancelCriticalAlarm(med.id).catch(() => void 0);
-        }
-        continue;
-      }
-      // Schedule (which overwrites any existing alarm with the same
-      // stable id) — Capacitor's schedule() replaces in-flight
-      // notifications with the same id, but we cancel first to be
-      // explicit and to avoid race conditions on rapid changes.
-      cancelCriticalAlarm(med.id)
-        .then(() =>
-          scheduleCriticalAlarm(med.id, med.name, criticalDateMs, med.unit || 'قرص')
-        )
-        .catch(() => void 0);
-      stillScheduled.add(med.id);
-    }
-
-    // Cancel alarms for meds that are no longer in the list (deleted).
-    for (const prevId of scheduledCriticalIdsRef.current) {
-      if (!stillScheduled.has(prevId)) {
-        cancelCriticalAlarm(prevId).catch(() => void 0);
-      }
-    }
-    scheduledCriticalIdsRef.current = stillScheduled;
-  }, [
+  useCriticalAlarmScheduler({
     medications,
     notificationsEnabled,
     criticalStockAlertsEnabled,
     hydrated,
     isFirstRun,
-  ]);
+  });
 
   const handleRestoreDose = (medicationId: string, reason: string) => {
     const med = medications.find((m) => m.id === medicationId);

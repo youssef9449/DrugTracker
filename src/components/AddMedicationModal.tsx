@@ -79,34 +79,29 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       // Convert numeric initial values to STRING state for the
       // number inputs (see comment on dailyDose declaration above).
       setDailyDose(String(initialData.dailyDose ?? ''));
-      setUnit(initialData.unit || 'قرص');
+      const initUnit = initialData.unit || 'قرص';
+      setUnit(initUnit);
       setWarningThresholdDays(String(initialData.warningThresholdDays ?? 5));
       setCategory(initialData.category || '');
       setNotes(initialData.notes || '');
       setColorTag(initialData.colorTag || 'teal');
-      // Detect "no strips" medications — if stripsPerBox or pillsPerStrip
-      // is null/0/undefined, treat as loose pills (e.g., Coffiram 15
-      // pills per box, no blister strips).
-      const hasStrips = initialData.stripsPerBox && initialData.pillsPerStrip && initialData.stripsPerBox > 0 && initialData.pillsPerStrip > 0;
+      const isSolid = initUnit === 'قرص' || initUnit === 'كبسولة';
+      const hasStrips = isSolid && Boolean(
+        initialData.stripsPerBox &&
+          initialData.pillsPerStrip &&
+          initialData.stripsPerBox > 0 &&
+          initialData.pillsPerStrip > 0
+      );
       setNoStrips(!hasStrips);
-      // #14: in noStrips mode the "عدد الأقراص في العلبة" input reuses
-      // the `stripsPerBox` state (it's the only pills-per-box field).
-      // Previously this initialized `stripsPerBox` from
-      // `initialData.stripsPerBox || 3`, which for a noStrips med (where
-      // stripsPerBox is undefined) fell back to 3 — so the input showed
-      // "3" instead of the actual packageSize (e.g. 15), and on save
-      // `parseInt('3')` truthy-overrode packageSize in handleSubmit,
-      // silently rewriting 15 → 3. Now: for noStrips meds initialize
-      // stripsPerBox from packageSize; for strips meds use the real
-      // stripsPerBox/pillsPerStrip.
       if (hasStrips) {
         setStripsPerBox(String(initialData.stripsPerBox));
         setPillsPerStrip(String(initialData.pillsPerStrip));
-        setPackageSize(initialData.packageSize || initialData.stripsPerBox * initialData.pillsPerStrip!);
+        setPackageSize(initialData.packageSize || initialData.stripsPerBox! * initialData.pillsPerStrip!);
       } else {
-        setStripsPerBox(String(initialData.packageSize || 30));
+        const defaultPkg = isSolid ? 30 : initUnit === 'مل' ? 100 : 30;
+        setStripsPerBox(String(initialData.packageSize || defaultPkg));
         setPillsPerStrip(String(initialData.pillsPerStrip || 10));
-        setPackageSize(initialData.packageSize || 30);
+        setPackageSize(initialData.packageSize || defaultPkg);
       }
       setReminderEnabled(Boolean(initialData.reminderEnabled));
       setReminderTime(initialData.reminderTime || '09:00');
@@ -136,6 +131,22 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
   }, [initialData, isOpen]);
 
   if (!isOpen) return null;
+
+  // Handle unit changes: update sensible defaults when switching between solid and liquid
+  const handleUnitChange = (newUnit: string) => {
+    setUnit(newUnit);
+    if (!initialData) {
+      if (newUnit === 'مل') {
+        if (packageSize === 30) setPackageSize(100);
+        if (currentPills === 30) setCurrentPills(100);
+        if (dailyDose === '1') setDailyDose('5');
+      } else if (newUnit === 'قرص' || newUnit === 'كبسولة') {
+        if (packageSize === 100) setPackageSize(30);
+        if (currentPills === 100) setCurrentPills(30);
+        if (dailyDose === '5') setDailyDose('1');
+      }
+    }
+  };
 
   // Handle strips-per-box change. The input value comes in as a raw
   // string (per the onChange handler); we parse it to a number with a
@@ -172,7 +183,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       return;
     }
     if (currentPills < 0) {
-      setError('عدد الحبوب لا يمكن أن يكون سالباً');
+      setError('الكمية المتوفرة لا يمكن أن تكون سالبة');
       return;
     }
     // Convert the string-typed dailyDose to a number for validation
@@ -192,15 +203,20 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       return;
     }
 
-    // Calculate packaging — handle "no strips" medications (loose
-    // pills in a box, e.g., Coffiram 15 pills per box without blister
-    // strips). When noStrips is true, stripsPerBox and pillsPerStrip
-    // are set to undefined and packageSize is used directly.
+    // Calculate packaging — for non-solid types (e.g. liquid / مل),
+    // strips and per-strip counts are completely irrelevant.
+    // For solid types (pills/capsules), handle "no strips" (loose pills)
+    // or standard strips.
+    const isSolid = unit === 'قرص' || unit === 'كبسولة';
     let stripsPerBoxNum: number | undefined;
     let pillsPerStripNum: number | undefined;
     let calculatedPkgSize: number;
 
-    if (noStrips) {
+    if (!isSolid) {
+      stripsPerBoxNum = undefined;
+      pillsPerStripNum = undefined;
+      calculatedPkgSize = Math.max(1, packageSize || (unit === 'مل' ? 100 : 30));
+    } else if (noStrips) {
       stripsPerBoxNum = undefined;
       pillsPerStripNum = undefined;
       calculatedPkgSize = Math.max(1, parseInt(stripsPerBox, 10) || packageSize || 30);
@@ -314,7 +330,11 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  عدد الحبوب المتوفرة حالياً{' '}
+                  {unit === 'مل'
+                    ? 'الكمية المتوفرة حالياً (مل)'
+                    : unit === 'قرص' || unit === 'كبسولة'
+                    ? 'عدد الحبوب المتوفرة حالياً'
+                    : `الكمية المتوفرة حالياً (${unit})`}{' '}
                   {initialData ? (
                     <span className="text-slate-400 font-normal">(للتعديل استخدم تعبئة الرصيد)</span>
                   ) : (
@@ -344,14 +364,14 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">نوع الوحدة</label>
                 <select
                   value={unit}
-                  onChange={(e) => setUnit(e.target.value)}
+                  onChange={(e) => handleUnitChange(e.target.value)}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
                 >
                   <option value="قرص">قرص (حبّة)</option>
                   <option value="كبسولة">كبسولة</option>
-                  <option value="مل">مل (شراب)</option>
-                  <option value="جرعة">جرعة</option>
-                  <option value="كيس">كيس فوار</option>
+                  <option value="مل">مل (دواء شرب / شراب)</option>
+                  <option value="جرعة">جرعة (بخاخ / قطرة / حقنة)</option>
+                  <option value="كيس">كيس (فوار / بودرة)</option>
                 </select>
               </div>
             </div>
@@ -550,8 +570,14 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                 <Box className="w-3.5 h-3.5" />
               </div>
               <div>
-                <h4 className="text-xs font-bold text-slate-800">حجم العبوة</h4>
-                <p className="text-[10px] text-slate-500">حجم العبوة الواحدة بالوحدة المختارة</p>
+                <h4 className="text-xs font-bold text-slate-800">
+                  {unit === 'مل' ? 'حجم زجاجة/عبوة الدواء' : 'حجم العبوة'}
+                </h4>
+                <p className="text-[10px] text-slate-500">
+                  {unit === 'مل'
+                    ? 'سعة الزجاجة بالملل لحساب عدد العبوات المطلوبة عند الشراء والتعبئة'
+                    : `سعة العبوة الواحدة بـ (${unit})`}
+                </p>
               </div>
             </div>
             <div>
@@ -561,12 +587,12 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
               <input
                 type="number"
                 min="1"
-                max="500"
+                max="1000"
                 inputMode="numeric"
                 step="any"
                 value={packageSize || ''}
                 onChange={(e) => setPackageSize(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                placeholder="مثال: 120"
+                placeholder={unit === 'مل' ? 'مثال: 100 أو 120 مل' : 'مثال: 30'}
                 className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
               />
             </div>
@@ -576,7 +602,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                الاستهلاك اليومي التلقائي <span className="text-red-500">*</span>
+                الاستهلاك اليومي التلقائي ({unit}) <span className="text-red-500">*</span>
               </label>
               <input
                 type="number"
@@ -585,7 +611,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                 inputMode="decimal"
                 value={dailyDose}
                 onChange={(e) => setDailyDose(e.target.value)}
-                placeholder="مثال: 1"
+                placeholder={unit === 'مل' ? 'مثال: 5 أو 10 مل' : 'مثال: 1'}
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
               />
             </div>

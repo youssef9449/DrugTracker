@@ -58,7 +58,7 @@ const KNOWN_UNITS: Record<string, ArabicUnitForms> = {
   // مل (milliliter) — invariable (doesn't pluralize like a noun)
   'مل': {
     singular: 'مل',
-    dual: 'مل',
+    dual: '2 مل',
     few: 'مل',
     many: 'مل',
     feminine: false,
@@ -76,7 +76,7 @@ const KNOWN_UNITS: Record<string, ArabicUnitForms> = {
     singular: 'كيس',
     dual: 'كيسين',
     few: 'أكياس',
-    many: 'كيلاً',
+    many: 'كيساً',
     feminine: false,
   },
   // علبة (box) — feminine. Used by describeStockInStrips/describeOrderInBoxes.
@@ -85,6 +85,14 @@ const KNOWN_UNITS: Record<string, ArabicUnitForms> = {
     dual: 'علبتين',
     few: 'علب',
     many: 'علبة',
+    feminine: true,
+  },
+  // عبوة (bottle/package) — feminine. Used for liquid or non-pill medicines.
+  'عبوة': {
+    singular: 'عبوة',
+    dual: 'عبوتين',
+    few: 'عبوات',
+    many: 'عبوة',
     feminine: true,
   },
   // شريط (strip) — masculine. Used by describeStockInStrips/describeOrderInBoxes.

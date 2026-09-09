@@ -1,5 +1,6 @@
 {
   "name": "النغنغ",
   "description": "تطبيق لمتابعة مخزون الأدوية وتنبيهك عند اقتراب نفاذ الحبوب بناءً على معدل الاستهلاك اليومي.",
-  "requestFramePermissions": ["notifications"]
+  "requestFramePermissions": ["notifications"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -175,15 +175,23 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
 
   /** Get the med's packaging constants. */
   function getMedSizes(med: Medication) {
+    const isSolid = med.unit === 'قرص' || med.unit === 'كبسولة';
+    const hasStrips = isSolid && Boolean(
+      med.stripsPerBox &&
+      med.pillsPerStrip &&
+      med.stripsPerBox > 0 &&
+      med.pillsPerStrip > 0
+    );
     const boxSize =
-      med.stripsPerBox && med.pillsPerStrip
-        ? med.stripsPerBox * med.pillsPerStrip
+      hasStrips
+        ? med.stripsPerBox! * med.pillsPerStrip!
         : med.packageSize && med.packageSize > 0
         ? med.packageSize
+        : med.unit === 'مل'
+        ? 100
         : 30;
-    const stripSize = med.pillsPerStrip && med.pillsPerStrip > 0 ? med.pillsPerStrip : 0;
-    const hasStrips = Boolean(med.stripsPerBox && med.pillsPerStrip);
-    return { boxSize, stripSize, hasStrips };
+    const stripSize = hasStrips && med.pillsPerStrip && med.pillsPerStrip > 0 ? med.pillsPerStrip : 0;
+    return { boxSize, stripSize, hasStrips, isSolid };
   }
 
   /** Available order units for a med: pills always, boxes if boxSize
@@ -215,7 +223,10 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   /** Display label for a unit. */
   function unitLabel(unit: 'pills' | 'boxes' | 'strips', med: Medication, count: number): string {
     if (unit === 'pills') return pluralizeArabic(count, med.unit);
-    if (unit === 'boxes') return pluralizeArabic(count, 'علبة');
+    if (unit === 'boxes') {
+      const boxName = med.unit === 'مل' ? 'عبوة' : 'علبة';
+      return pluralizeArabic(count, boxName);
+    }
     return pluralizeArabic(count, 'شريط');
   }
 
@@ -481,7 +492,8 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                     {availableUnits.map((u) => {
                       const isActive = currentUnit === u;
                       const icon = u === 'pills' ? <Pill className="w-3 h-3" /> : u === 'boxes' ? <Box className="w-3 h-3" /> : <Layers className="w-3 h-3" />;
-                      const label = u === 'pills' ? med.unit : u === 'boxes' ? 'علبة' : 'شريط';
+                      const boxLabel = med.unit === 'مل' ? 'عبوة' : 'علبة';
+                      const label = u === 'pills' ? med.unit : u === 'boxes' ? boxLabel : 'شريط';
                       return (
                         <button
                           key={u}

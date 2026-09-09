@@ -23,13 +23,11 @@ import { getDepletionDate } from '../utils/dateCalculations';
 import { NOTIFICATION_SOUND_OPTIONS, playNotificationSound } from '../utils/sound';
 
 // Helper used to resolve the human-readable name of a medication's
-// notification sound. Returns the user-uploaded file name when the
-// medication uses a custom sound file.
+// notification sound. Custom sound files are a GLOBAL setting (no
+// per-med custom file), so here we just map the synthesized sound id
+// to its display name.
 function resolveSoundName(med: Medication): string {
   const soundId = med.notificationSound || 'classic_chime';
-  if (soundId === 'custom' && med.customSoundFile) {
-    return med.customSoundFile.fileName;
-  }
   return NOTIFICATION_SOUND_OPTIONS.find((s) => s.id === soundId)?.name || 'نغمة كلاسيكية';
 }
 
@@ -192,21 +190,7 @@ export const MedicationCard: React.FC<MedicationCardProps> = ({
                       if (onTriggerAlarm) {
                         onTriggerAlarm(medication);
                       } else {
-                        playNotificationSound(medication.notificationSound || 'classic_chime', medication.customSoundFile);
-                      }
-                    }}
-                    className="w-full text-right px-3 py-2 text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                  >
-                    <Volume2 className="w-3.5 h-3.5 text-teal-600" />
-                    <span>تجربة صوت وتنبيه الدواء</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setMenuOpen(false);
-                      if (onTriggerAlarm) {
-                        onTriggerAlarm(medication);
-                      } else {
-                        playNotificationSound(medication.notificationSound || 'classic_chime', medication.customSoundFile);
+                        playNotificationSound(medication.notificationSound || 'classic_chime');
                       }
                     }}
                     className="w-full text-right px-3 py-2 text-slate-700 hover:bg-slate-50 flex items-center gap-2"
@@ -311,7 +295,7 @@ export const MedicationCard: React.FC<MedicationCardProps> = ({
                 if (onTriggerAlarm) {
                   onTriggerAlarm(medication);
                 } else {
-                  playNotificationSound(medication.notificationSound || 'classic_chime', medication.customSoundFile);
+                  playNotificationSound(medication.notificationSound || "classic_chime");
                 }
               }}
               className="px-2 py-0.5 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-200 text-[11px] font-bold text-amber-900 flex items-center gap-1 shrink-0 active:scale-95 transition"
@@ -439,7 +423,7 @@ export const MedicationCard: React.FC<MedicationCardProps> = ({
                       if (onTriggerAlarm) {
                         onTriggerAlarm(medication);
                       } else {
-                        playNotificationSound(medication.notificationSound || 'classic_chime', medication.customSoundFile);
+                        playNotificationSound(medication.notificationSound || "classic_chime");
                       }
                     }}
                     className="w-full text-right px-3 py-2 text-slate-700 hover:bg-slate-50 flex items-center gap-2"
@@ -557,7 +541,7 @@ export const MedicationCard: React.FC<MedicationCardProps> = ({
                 if (onTriggerAlarm) {
                   onTriggerAlarm(medication);
                 } else {
-                  playNotificationSound(medication.notificationSound || 'classic_chime', medication.customSoundFile);
+                  playNotificationSound(medication.notificationSound || "classic_chime");
                 }
               }}
               className="px-2 py-0.5 rounded-lg bg-white hover:bg-emerald-100 border border-emerald-300 text-[11px] font-bold text-emerald-900 flex items-center gap-1 shrink-0 active:scale-95 transition"
@@ -796,7 +780,7 @@ export const MedicationCard: React.FC<MedicationCardProps> = ({
               if (onTriggerAlarm) {
                 onTriggerAlarm(medication);
               } else {
-                playNotificationSound(medication.notificationSound || 'classic_chime', medication.customSoundFile);
+                playNotificationSound(medication.notificationSound || "classic_chime");
               }
             }}
             className="px-2 py-0.5 rounded-lg bg-white hover:bg-teal-100 border border-teal-300 text-[11px] font-bold text-teal-900 flex items-center gap-1 shrink-0 active:scale-95 transition"

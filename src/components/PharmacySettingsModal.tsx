@@ -48,8 +48,12 @@ export const PharmacySettingsModal: FC<PharmacySettingsModalProps> = ({
   onSetGlobalCustomSound,
 }) => {
   const [pharmacyPhone, setPharmacyPhone] = useState(settings.pharmacyPhone || '');
-  const [pharmacyName, setPharmacyName] = useState(settings.pharmacyName || 'الصيدلية');
-  const [customerCode, setCustomerCode] = useState(settings.customerCode || '');
+  const [pharmacyName, setPharmacyName] = useState(
+    (settings.pharmacyName === 'الصيدلية' ? '' : settings.pharmacyName) || ''
+  );
+  const [customerCode, setCustomerCode] = useState(
+    (settings.customerCode === '14739' ? '' : settings.customerCode) || ''
+  );
   const [defaultDurationDays, setDefaultDurationDays] = useState<30 | 60>(
     settings.defaultDurationDays || 30
   );
@@ -63,8 +67,8 @@ export const PharmacySettingsModal: FC<PharmacySettingsModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setPharmacyPhone(settings.pharmacyPhone || '');
-      setPharmacyName(settings.pharmacyName || 'الصيدلية');
-      setCustomerCode(settings.customerCode || '');
+      setPharmacyName((settings.pharmacyName === 'الصيدلية' ? '' : settings.pharmacyName) || '');
+      setCustomerCode((settings.customerCode === '14739' ? '' : settings.customerCode) || '');
       setDefaultDurationDays(settings.defaultDurationDays || 30);
       setCustomQuantities(settings.customQuantities || {});
       setAddress(settings.address || '');
@@ -110,7 +114,7 @@ export const PharmacySettingsModal: FC<PharmacySettingsModalProps> = ({
     e.preventDefault();
     onSaveSettings({
       pharmacyPhone: pharmacyPhone.trim(),
-      pharmacyName: pharmacyName.trim() || 'الصيدلية',
+      pharmacyName: pharmacyName.trim(),
       customerCode: customerCode.trim(),
       defaultDurationDays,
       customQuantities,
@@ -186,7 +190,7 @@ export const PharmacySettingsModal: FC<PharmacySettingsModalProps> = ({
                 type="text"
                 value={customerCode}
                 onChange={(e) => setCustomerCode(e.target.value)}
-                placeholder="مثال: 12345"
+                placeholder="اكتب رقم العميل إن وجد (اختياري)"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono font-bold focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
               />
               {customerCode.trim() ? (
@@ -209,7 +213,7 @@ export const PharmacySettingsModal: FC<PharmacySettingsModalProps> = ({
                 type="text"
                 value={pharmacyName}
                 onChange={(e) => setPharmacyName(e.target.value)}
-                placeholder="مثال: صيدلية الحي"
+                placeholder="اكتب اسم الصيدلية (اختياري)"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
               />
               <span className="text-[10px] text-slate-500 mt-1 block">

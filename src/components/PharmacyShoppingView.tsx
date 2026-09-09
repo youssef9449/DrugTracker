@@ -11,8 +11,12 @@ import {
   ChevronUp,
   RotateCcw,
   PlusCircle,
+  Layers,
+  Box,
+  Pill,
 } from 'lucide-react';
 import { Medication, PharmacySettings, calculateMedicationStatus, describeOrderInBoxes } from '../types';
+import { pluralizeArabic } from '../lib/arabicPlural';
 import { getDepletionDate } from '../utils/dateCalculations';
 import {
   cleanPhoneNumber,
@@ -48,6 +52,9 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   const [copied, setCopied] = useState(false);
   const [showAllForPlanning, setShowAllForPlanning] = useState(false);
   const [showPreviewMessage, setShowPreviewMessage] = useState(false);
+  // Per-med order unit selector: 'pills' | 'boxes' | 'strips'.
+  // Stored per med id so the user's choice persists within the session.
+  const [orderUnits, setOrderUnits] = useState<Record<string, 'pills' | 'boxes' | 'strips'>>({});
   // Track which meds the user has just marked as refilled from this
   // view (so we can show a "تمت التعبئة" confirmation chip + let them
   // undo by tapping again if they tapped by mistake).
@@ -160,6 +167,57 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     delete nextCustom[medId];
     onUpdateSettings({ ...settings, customQuantities: nextCustom });
   };
+
+  // ── Unit-aware quantity helpers ──────────────────────────────
+  // The user picks an order unit (pills/boxes/strips) and a quantity
+  // in that unit. We convert to the total pill count for storage in
+  // customQuantities and for describeOrderInBoxes.
+
+  /** Get the med's packaging constants. */
+  function getMedSizes(med: Medication) {
+    const boxSize =
+      med.stripsPerBox && med.pillsPerStrip
+        ? med.stripsPerBox * med.pillsPerStrip
+        : med.packageSize && med.packageSize > 0
+        ? med.packageSize
+        : 30;
+    const stripSize = med.pillsPerStrip && med.pillsPerStrip > 0 ? med.pillsPerStrip : 0;
+    const hasStrips = Boolean(med.stripsPerBox && med.pillsPerStrip);
+    return { boxSize, stripSize, hasStrips };
+  }
+
+  /** Available order units for a med: pills always, boxes if boxSize
+   *  is known, strips only if the med has strips. */
+  function getAvailableUnits(med: Medication): Array<'pills' | 'boxes' | 'strips'> {
+    const { boxSize, stripSize, hasStrips } = getMedSizes(med);
+    const units: Array<'pills' | 'boxes' | 'strips'> = ['pills'];
+    if (boxSize > 0) units.push('boxes');
+    if (hasStrips && stripSize > 0) units.push('strips');
+    return units;
+  }
+
+  /** Convert pills → the selected unit's quantity. */
+  function pillsToUnitQty(totalPills: number, unit: 'pills' | 'boxes' | 'strips', med: Medication): number {
+    const { boxSize, stripSize } = getMedSizes(med);
+    if (unit === 'boxes') return Math.round(totalPills / boxSize);
+    if (unit === 'strips') return Math.round(totalPills / stripSize);
+    return totalPills;
+  }
+
+  /** Convert the selected unit's quantity → pills. */
+  function unitQtyToPills(qty: number, unit: 'pills' | 'boxes' | 'strips', med: Medication): number {
+    const { boxSize, stripSize } = getMedSizes(med);
+    if (unit === 'boxes') return qty * boxSize;
+    if (unit === 'strips') return qty * stripSize;
+    return qty;
+  }
+
+  /** Display label for a unit. */
+  function unitLabel(unit: 'pills' | 'boxes' | 'strips', med: Medication, count: number): string {
+    if (unit === 'pills') return pluralizeArabic(count, med.unit);
+    if (unit === 'boxes') return pluralizeArabic(count, 'علبة');
+    return pluralizeArabic(count, 'شريط');
+  }
 
   // H1: "mark as refilled after ordering" flow. After the user sends
   // the WhatsApp order and receives the meds from the pharmacy, they
@@ -376,7 +434,11 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
           const { quantity: suggestedPills, isCustom } = getRequestedAmount(med);
           const depletion = getDepletionDate(med);
           const isSelected = selectedMedIds.has(med.id);
-          const boxStep = med.stripsPerBox && med.pillsPerStrip ? med.stripsPerBox * med.pillsPerStrip : med.packageSize || 30;
+          const { boxSize } = getMedSizes(med);
+          const availableUnits = getAvailableUnits(med);
+          const currentUnit = orderUnits[med.id] || 'pills';
+          const unitQty = pillsToUnitQty(suggestedPills, currentUnit, med);
+          const unitStep = currentUnit === 'boxes' ? 1 : currentUnit === 'strips' ? 1 : boxSize;
           return (
             <div
               key={med.id}
@@ -409,42 +471,93 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                     </span>
                   </div>
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => handleDirectQuantityChange(med.id, Math.max(1, suggestedPills - boxStep))}
-                    className="w-7 h-7 rounded-lg bg-slate-50 border border-slate-200 font-bold"
-                  >
-                    -
-                  </button>
-                  <div className="text-center">
-                    <div className="font-mono font-bold text-sm">{suggestedPills}</div>
-                    <div className="text-[9px] text-slate-400">{med.unit}</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleDirectQuantityChange(med.id, suggestedPills + boxStep)}
-                    className="w-7 h-7 rounded-lg bg-slate-50 border border-slate-200 font-bold"
-                  >
-                    +
-                  </button>
-                </div>
               </div>
-              <div className="mt-2 flex items-center justify-between text-[11px] text-teal-800">
-                <span>
-                  {describeOrderInBoxes(suggestedPills, med.stripsPerBox, med.pillsPerStrip, med.packageSize, med.unit)}
-                </span>
+
+              {/* Unit selector + quantity input */}
+              <div className="mt-3 space-y-2">
+                {/* Unit selector chips */}
+                {availableUnits.length > 1 && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {availableUnits.map((u) => {
+                      const isActive = currentUnit === u;
+                      const icon = u === 'pills' ? <Pill className="w-3 h-3" /> : u === 'boxes' ? <Box className="w-3 h-3" /> : <Layers className="w-3 h-3" />;
+                      const label = u === 'pills' ? med.unit : u === 'boxes' ? 'علبة' : 'شريط';
+                      return (
+                        <button
+                          key={u}
+                          type="button"
+                          onClick={() => setOrderUnits((prev) => ({ ...prev, [med.id]: u }))}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition ${
+                            isActive
+                              ? 'bg-teal-700 text-white'
+                              : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          {icon}
+                          <span>{label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Quantity input with +/- in the selected unit */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newQty = Math.max(1, unitQty - unitStep);
+                        const newPills = unitQtyToPills(newQty, currentUnit, med);
+                        handleDirectQuantityChange(med.id, newPills);
+                      }}
+                      className="w-7 h-7 rounded-lg bg-slate-50 border border-slate-200 font-bold"
+                    >
+                      -
+                    </button>
+                    <div className="text-center min-w-[60px]">
+                      <input
+                        type="number"
+                        min="1"
+                        value={unitQty}
+                        onChange={(e) => {
+                          const newQty = Math.max(1, parseInt(e.target.value) || 1);
+                          const newPills = unitQtyToPills(newQty, currentUnit, med);
+                          handleDirectQuantityChange(med.id, newPills);
+                        }}
+                        className="w-16 px-2 py-1 text-center font-mono font-bold text-sm border border-slate-200 rounded-lg focus:ring-1 focus:ring-teal-500"
+                      />
+                      <div className="text-[9px] text-slate-400 mt-0.5">
+                        {unitLabel(currentUnit, med, unitQty)}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newQty = unitQty + unitStep;
+                        const newPills = unitQtyToPills(newQty, currentUnit, med);
+                        handleDirectQuantityChange(med.id, newPills);
+                      }}
+                      className="w-7 h-7 rounded-lg bg-slate-50 border border-slate-200 font-bold"
+                    >
+                      +
+                    </button>
+                  </div>
+
+                  {/* Show the pill-count breakdown */}
+                  <div className="text-[11px] text-teal-800 text-left">
+                    {describeOrderInBoxes(suggestedPills, med.stripsPerBox, med.pillsPerStrip, med.packageSize, med.unit)}
+                  </div>
+                </div>
+
                 {isCustom && (
-                  <button type="button" onClick={() => handleResetToAuto(med.id)} className="text-teal-700 font-bold inline-flex items-center gap-0.5">
+                  <button type="button" onClick={() => handleResetToAuto(med.id)} className="text-teal-700 font-bold inline-flex items-center gap-0.5 text-[11px]">
                     <RotateCcw className="w-3 h-3" /> تلقائي
                   </button>
                 )}
               </div>
 
-              {/* H1: "mark as refilled after ordering" action. Adds the
-                  requested quantity to this med's stock via the shared
-                  onConfirmRefill handler (creates a refill log). Once
-                  tapped, the button turns into a confirmation chip. */}
+              {/* H1: "mark as refilled after ordering" action. */}
               <div className="mt-2.5">
                 {refilledIds.has(med.id) ? (
                   <div className="w-full py-2 px-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center justify-center gap-1.5">

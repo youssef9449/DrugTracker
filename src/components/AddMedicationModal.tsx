@@ -342,21 +342,27 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
               </div>
             </div>
 
-            <div className="mt-1.5 flex items-center justify-between flex-wrap gap-1">
-              <button
-                type="button"
-                onClick={() => setShowStockHelper(!showStockHelper)}
-                className="text-[11px] text-teal-700 hover:text-teal-900 font-bold flex items-center gap-1 transition"
-              >
-                <Calculator className="w-3 h-3 text-teal-600" />
-                <span>{showStockHelper ? 'إخفاء حاسبة الأشرطة' : 'احسب من العلب والأشرطة المتوفرة'}</span>
-              </button>
-              {describeStockInStrips(currentPills, parseInt(pillsPerStrip, 10) || 10, parseInt(stripsPerBox, 10) || 3, unit) && (
-                <span className="text-[11px] text-teal-800 font-medium bg-teal-50 px-2 py-0.5 rounded-md border border-teal-200/60">
-                  يعادل: {describeStockInStrips(currentPills, parseInt(pillsPerStrip, 10) || 10, parseInt(stripsPerBox, 10) || 3, unit)}
-                </span>
-              )}
-            </div>
+            {/* C1: hide the stock helper in edit mode — it would change
+                currentPills, but on edit the save preserves the live
+                inventory (initialData.currentPills) and the input is
+                disabled, so the helper's value wouldn't be saved. */}
+            {!initialData && (
+              <div className="mt-1.5 flex items-center justify-between flex-wrap gap-1">
+                <button
+                  type="button"
+                  onClick={() => setShowStockHelper(!showStockHelper)}
+                  className="text-[11px] text-teal-700 hover:text-teal-900 font-bold flex items-center gap-1 transition"
+                >
+                  <Calculator className="w-3 h-3 text-teal-600" />
+                  <span>{showStockHelper ? 'إخفاء حاسبة الأشرطة' : 'احسب من العلب والأشرطة المتوفرة'}</span>
+                </button>
+                {describeStockInStrips(currentPills, parseInt(pillsPerStrip, 10) || 10, parseInt(stripsPerBox, 10) || 3, unit) && (
+                  <span className="text-[11px] text-teal-800 font-medium bg-teal-50 px-2 py-0.5 rounded-md border border-teal-200/60">
+                    يعادل: {describeStockInStrips(currentPills, parseInt(pillsPerStrip, 10) || 10, parseInt(stripsPerBox, 10) || 3, unit)}
+                  </span>
+                )}
+              </div>
+            )}
 
             {showStockHelper && (
               <div className="mt-2 p-3 bg-teal-50/70 border border-teal-200 rounded-xl space-y-2">

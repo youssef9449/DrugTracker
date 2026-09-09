@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { RefreshCw, X } from 'lucide-react';
 
 /**
  * "New version available" prompt for the service worker (M10).
  *
  * The SW (`public/sw.js`) installs a new version in the background but
- * does NOT `skipWaiting()` on its own — it waits for the page to send
+ * does NOT `skipWaiting()` on its own — it waits until the page sends
  * a `SKIP_WAITING` message. This component:
  *   1. Listens for the `updatefound` → `installed` lifecycle on the
  *      registered ServiceWorkerRegistration.
@@ -16,15 +16,21 @@ import { RefreshCw, X } from 'lucide-react';
  *
  * Only rendered in production (the SW is only registered in prod —
  * see src/main.tsx), so this component is a no-op in dev.
+ *
+ * Reload guard: `controllerchange` also fires on the FIRST visit when
+ * the SW activates and calls `clients.claim()` (controller goes
+ * null → SW). We must NOT reload in that case, or the user gets an
+ * unwanted reload on first load. We track an `activatedRef` that is
+ * set true only when the user actually clicks the update button, and
+ * only reload on `controllerchange` if `activatedRef.current` is true.
  */
 export function UpdatePrompt() {
   const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
   const [dismissed, setDismissed] = useState(false);
+  const activatedRef = useRef(false);
 
   useEffect(() => {
     if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
-
-    let registration: ServiceWorkerRegistration | null = null;
 
     const handleNewWaiter = (reg: ServiceWorkerRegistration) => {
       if (reg.waiting) setWaitingWorker(reg.waiting);
@@ -34,7 +40,6 @@ export function UpdatePrompt() {
       .getRegistration('/sw.js')
       .then((reg) => {
         if (!reg) return;
-        registration = reg;
         handleNewWaiter(reg);
         reg.addEventListener('updatefound', () => {
           const newWorker = reg.installing;
@@ -52,26 +57,26 @@ export function UpdatePrompt() {
         console.warn('[UpdatePrompt] getRegistration failed:', err);
       });
 
-    // Also pick up the case where the user reloads the page while a
-    // new SW is already waiting (the updatefound event won't fire then).
+    // Reload ONLY when a new SW takes over after the user clicked
+    // "تحديث" (activatedRef). On the first visit, `clients.claim()`
+    // fires controllerchange with controller going null→SW; that is
+    // not a user-initiated update, so we skip the reload.
     const onControllerChange = () => {
-      // The new SW just took control — reload to run the new app shell.
+      if (!activatedRef.current) return;
       window.location.reload();
     };
     navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
 
     return () => {
       navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
-      if (registration) {
-        // removeEventListener with the same handler reference isn't
-        // possible for inline closures; the registration is GC'd with
-        // the component unmount so this is safe.
-      }
     };
   }, []);
 
   const handleActivate = () => {
     if (!waitingWorker) return;
+    // Mark that the next controllerchange is user-initiated so the
+    // reload guard above lets it through.
+    activatedRef.current = true;
     waitingWorker.postMessage('SKIP_WAITING');
     // The `controllerchange` listener above will reload once the new
     // SW takes over.

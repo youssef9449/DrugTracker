@@ -12,9 +12,25 @@ function getNowHHMM(): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-function timeToMinutes(timeStr: string): number {
-  const [h, m] = timeStr.split(':').map((n) => parseInt(n, 10));
-  if (Number.isNaN(h) || Number.isNaN(m)) return -1;
+/**
+ * Convert a "HH:MM" 24-hour string to minutes-since-midnight.
+ *
+ * Returns -1 for malformed input (NaN, wrong shape, or out-of-range
+ * hour/minute — #25). Used by the polling effect to compare the current
+ * time against a medication's `reminderTime`; a -1 return causes the
+ * reminder to be skipped rather than firing at an unreachable time.
+ *
+ * Exported so the validation contract can be unit-tested directly.
+ */
+export function timeToMinutes(timeStr: string): number {
+  const parts = timeStr.split(':').map((n) => parseInt(n, 10));
+  const [h, m] = parts;
+  // Missing hour or minute (no colon, or empty side) → NaN or undefined.
+  if (parts.length < 2 || Number.isNaN(h) || Number.isNaN(m)) return -1;
+  // #25: reject out-of-range hours/minutes so a corrupted reminderTime
+  // (e.g. "25:99") doesn't produce an unreachable minute count that
+  // silently never fires.
+  if (h < 0 || h > 23 || m < 0 || m > 59) return -1;
   return h * 60 + m;
 }
 
@@ -44,6 +60,13 @@ interface UseDoseRemindersOptions {
   medications: Medication[];
   soundEnabled: boolean;
   notificationsEnabled: boolean;
+  /**
+   * #24: when false (before App has hydrated persisted state from
+   * localStorage/IndexedDB), the polling effect does NOT run `checkDue`,
+   * so phantom alarms for the SEED medications don't fire before the
+   * user's real saved medications are loaded.
+   */
+  hydrated: boolean;
   globalCustomSound?: { fileName: string; mimeType: string; dataUrl: string } | null;
 }
 
@@ -51,11 +74,17 @@ export function useDoseReminders({
   medications,
   soundEnabled,
   notificationsEnabled,
+  hydrated,
   globalCustomSound,
 }: UseDoseRemindersOptions) {
   const [alarmingMedication, setAlarmingMedication] = useState<Medication | null>(null);
   const queueRef = useRef<string[]>([]);
   const alarmingIdRef = useRef<string | null>(null);
+  // #13: set to true by testAlarm so dismissAlarm knows NOT to write
+  // FIRED_KEY (which would block the real scheduled reminder for the
+  // day). Reset to false at the start of every triggerAlarm call so
+  // subsequent real alarms still mark themselves fired.
+  const isTestAlarmRef = useRef(false);
 
   // Keep the latest sound/notify flags + global custom sound in refs so
   // the stable `triggerAlarm` callback can read them without being
@@ -78,14 +107,22 @@ export function useDoseReminders({
   const dismissAlarm = useCallback(() => {
     const current = alarmingIdRef.current;
     if (current) {
-      const fired = loadJson<Record<string, boolean>>(FIRED_KEY, {});
-      fired[firedKey(current, getTodayDateString())] = true;
-      saveJson(FIRED_KEY, fired);
+      // #13: only mark the reminder as "fired for today" if this alarm
+      // was a REAL scheduled reminder, not a test alarm triggered by
+      // the user clicking "تجربة الصوت". A test alarm would otherwise
+      // poison FIRED_KEY and block the real reminder later that day.
+      if (!isTestAlarmRef.current) {
+        const fired = loadJson<Record<string, boolean>>(FIRED_KEY, {});
+        fired[firedKey(current, getTodayDateString())] = true;
+        saveJson(FIRED_KEY, fired);
+      }
 
       const snooze = loadJson<Record<string, number>>(SNOOZE_KEY, {});
       delete snooze[current];
       saveJson(SNOOZE_KEY, snooze);
     }
+    // Reset the test flag so the next alarm (real or test) starts clean.
+    isTestAlarmRef.current = false;
     alarmingIdRef.current = null;
     setAlarmingMedication(null);
 
@@ -121,12 +158,20 @@ export function useDoseReminders({
       }
       return;
     }
+    // #13: reset the test flag at the start of every alarm so a real
+    // scheduled alarm (from the polling effect) doesn't inherit a stale
+    // `true` from a previous test alarm. testAlarm sets it back to true
+    // AFTER calling triggerAlarm (see below).
+    isTestAlarmRef.current = false;
     alarmingIdRef.current = med.id;
     setAlarmingMedication(med);
     if (soundEnabledRef.current) {
       // In-app chime plays the per-medication synthesized tone (so the
       // user can tell which med is due). The global custom sound, if
       // set, is attached to the push notification (background) below.
+      // #18/#19: this is the SINGLE source of the in-app chime — the
+      // DoseAlarmModal useEffect chime was removed (it played twice and
+      // ignored soundEnabled).
       playNotificationSound(med.notificationSound || 'classic_chime');
     }
     if (notificationsEnabledRef.current) {
@@ -146,6 +191,12 @@ export function useDoseReminders({
 
   const testAlarm = useCallback((med: Medication) => {
     triggerAlarm(med, false);
+    // #13: set the test flag AFTER triggerAlarm (which resets it to
+    // false at the start) so dismissAlarm knows NOT to write FIRED_KEY
+    // for this alarm. Without this, testing an alarm earlier in the day
+    // would mark the reminder as fired and block the real scheduled
+    // reminder from firing later that day.
+    isTestAlarmRef.current = true;
   }, [triggerAlarm]);
 
   useEffect(() => {
@@ -181,6 +232,12 @@ export function useDoseReminders({
       });
     };
 
+    // #24: do NOT poll before App has hydrated persisted state, or the
+    // SEED medications (all reminderEnabled:true) would fire phantom
+    // alarms for meds the user doesn't have. Once `hydrated` flips true
+    // the effect re-runs and starts polling with the user's real meds.
+    if (!hydrated) return;
+
     checkDue();
     // Poll every 5s (down from 15s) so a reminder scheduled for, say,
     // 09:00 fires within ~5s of the minute rather than up to ~15s late.
@@ -189,7 +246,7 @@ export function useDoseReminders({
     // avoiding the perceived "the alarm was late" lag of 15s.
     const timer = window.setInterval(checkDue, 5000);
     return () => window.clearInterval(timer);
-  }, [medications, triggerAlarm]);
+  }, [medications, triggerAlarm, hydrated]);
 
   return {
     alarmingMedication,

@@ -892,8 +892,6 @@ export default function App() {
           alertsCount={alertsCount}
           notificationsEnabled={notificationsEnabled}
           onToggleNotifications={handleToggleNotifications}
-          soundEnabled={soundEnabled}
-          onToggleSound={() => setSoundEnabled(!soundEnabled)}
           criticalStockAlertsEnabled={criticalStockAlertsEnabled}
           onToggleCriticalStockAlerts={() => {
             const next = !criticalStockAlertsEnabled;
@@ -907,18 +905,6 @@ export default function App() {
           isPhoneFrame={isPhoneFrame}
           onTogglePhoneFrame={() => setIsPhoneFrame(!isPhoneFrame)}
           onOpenSettings={() => setIsSettingsModalOpen(true)}
-          globalCustomSound={globalCustomSound}
-          onSetGlobalCustomSound={(file) => {
-            setGlobalCustomSound(file);
-            if (file) {
-              import('./utils/sound')
-                .then((m) => m.playNotificationSound('custom', file))
-                .catch(() => void 0);
-              showToast(`تم تعيين "${file.fileName}" كصوت مخصص لكل الأدوية`);
-            } else {
-              showToast('تم إزالة الصوت المخصص');
-            }
-          }}
           fontScale={fontScale}
           onToggleFontScale={() => {
             const next = fontScale === 'normal' ? 'large' : 'normal';
@@ -1065,6 +1051,20 @@ export default function App() {
         settings={pharmacySettings}
         medications={medications}
         onSaveSettings={handleSavePharmacySettings}
+        soundEnabled={soundEnabled}
+        onToggleSound={() => setSoundEnabled(!soundEnabled)}
+        globalCustomSound={globalCustomSound}
+        onSetGlobalCustomSound={(file) => {
+          setGlobalCustomSound(file);
+          if (file) {
+            import('./utils/sound')
+              .then((m) => m.playNotificationSound('custom', file))
+              .catch(() => void 0);
+            showToast(`تم تعيين "${file.fileName}" كصوت مخصص لكل الأدوية`);
+          } else {
+            showToast('تم إزالة الصوت المخصص');
+          }
+        }}
       />
       <DoseAlarmModal
         isOpen={Boolean(alarmingMedication)}

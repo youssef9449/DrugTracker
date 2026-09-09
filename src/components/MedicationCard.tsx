@@ -235,6 +235,15 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             </button>
           )}
         </div>
+
+        {/* Auto-deduct paused note — shown on every view when the
+            auto-deduction is disabled, with the dose-taken status. */}
+        {!isAutoActive && (
+          <div className="mt-2 text-[11px] bg-amber-50 text-amber-800 p-2 rounded-lg flex items-center gap-1.5 border border-amber-200">
+            <PauseCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+            <span>الخصم التلقائي معلق — الجرعة اليدوية والخصم التلقائي معطلان لهذا اليوم.</span>
+          </div>
+        )}
       </div>
     );
   }
@@ -368,6 +377,14 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           buttonClass="bg-white hover:bg-emerald-100 border border-emerald-300 text-emerald-900"
           onTriggerAlarm={onTriggerAlarm}
         />
+
+        {/* Auto-deduct paused note */}
+        {!isAutoActive && (
+          <div className="mt-2 text-[11px] bg-amber-50 text-amber-800 p-2 rounded-lg flex items-center gap-1.5 border border-amber-200">
+            <PauseCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+            <span>الخصم التلقائي معلق — الجرعة اليدوية والخصم التلقائي معطلان لهذا اليوم.</span>
+          </div>
+        )}
       </div>
     );
   }
@@ -514,7 +531,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
       {!isAutoActive && (
         <div className="mt-2 text-[11px] bg-amber-50 text-amber-800 p-2 rounded-lg flex items-center gap-1.5 border border-amber-200">
           <PauseCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-          <span>الخصم التلقائي معلق مؤقتاً لهذا الدواء.</span>
+          <span>الخصم التلقائي معلق — الجرعة اليدوية والخصم التلقائي معطلان لهذا اليوم.</span>
         </div>
       )}
 

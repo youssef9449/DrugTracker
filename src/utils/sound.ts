@@ -22,7 +22,7 @@ function getAudioContext(): AudioContext | null {
   }
 }
 
-export interface NotificationSoundOption {
+interface NotificationSoundOption {
   id: NotificationSoundType;
   name: string;
   description: string;
@@ -45,8 +45,10 @@ export const NOTIFICATION_SOUND_OPTIONS: NotificationSoundOption[] = [
  * Maximum accepted size for a custom sound file. 2 MB keeps the data URL
  * well under the ~5 MB localStorage quota on most browsers while still
  * allowing a high-quality MP3 / WAV / OGG ringtone.
+ *
+ * Internal to this module — `readCustomSoundFile` is the only caller.
  */
-export const CUSTOM_SOUND_MAX_BYTES = 2 * 1024 * 1024;
+const CUSTOM_SOUND_MAX_BYTES = 2 * 1024 * 1024;
 
 /**
  * Accept attribute for the custom sound file input.
@@ -68,35 +70,6 @@ export const CUSTOM_SOUND_MAX_BYTES = 2 * 1024 * 1024;
  * security by accepting the broader type.
  */
 export const CUSTOM_SOUND_ACCEPT_ATTR = 'audio/*';
-
-/**
- * For backwards compatibility with any code that imported the old name.
- * Same value as `CUSTOM_SOUND_ACCEPT_ATTR`.
- */
-export const CUSTOM_SOUND_ACCEPTED_MIME = CUSTOM_SOUND_ACCEPT_ATTR;
-
-/**
- * Feature-detect the File / FileReader / Blob APIs that we need to read
- * the user-selected audio file. Returns a user-friendly Arabic error
- * message if any required API is missing, or null if everything is okay.
- *
- * On modern mobile browsers (Chrome 80+, Safari iOS 14+, Samsung
- * Internet) these APIs are always available, but in-app WebViews
- * (Facebook, Instagram, some custom Tabs) they can be restricted.
- */
-export function getFileAccessSupportError(): string | null {
-  if (typeof window === 'undefined') {
-    return 'الوصول للملفات غير مدعوم في هذه البيئة.';
-  }
-  if (typeof File === 'undefined' || typeof FileReader === 'undefined' || typeof Blob === 'undefined') {
-    return 'متصفحك لا يدعم الوصول للملفات. جرّب فتح التطبيق في متصفح حديث (Chrome / Safari).';
-  }
-  if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
-    // createObjectURL is an alternative path; we don't use it but its
-    // presence is a good signal that the runtime supports file access.
-  }
-  return null;
-}
 
 /**
  * Read a File into a base64 data URL. Returns a promise that resolves
@@ -212,32 +185,6 @@ export function playSuccessChime() {
 
     osc.start(now);
     osc.stop(now + 0.35);
-  } catch {
-    // Audio not permitted or supported
-  }
-}
-
-export function playAlertChime() {
-  try {
-    const ctx = getAudioContext();
-    if (!ctx) return;
-    const now = ctx.currentTime;
-
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(440, now); // A4
-    osc.frequency.setValueAtTime(349.23, now + 0.12); // F4
-
-    gain.gain.setValueAtTime(0.15, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    osc.start(now);
-    osc.stop(now + 0.3);
   } catch {
     // Audio not permitted or supported
   }

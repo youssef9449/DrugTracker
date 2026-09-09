@@ -157,7 +157,7 @@ export const PharmacySettingsModal: FC<PharmacySettingsModalProps> = ({
                 type="text"
                 value={customerCode}
                 onChange={(e) => setCustomerCode(e.target.value)}
-                placeholder="14739"
+                placeholder="مثال: 12345"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono font-bold focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
               />
               <span className="text-[10px] text-slate-500 mt-1 block">

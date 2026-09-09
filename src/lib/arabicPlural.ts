@@ -38,9 +38,11 @@ interface ArabicUnitForms {
 
 const KNOWN_UNITS: Record<string, ArabicUnitForms> = {
   // قرص (pill) — masculine
+  // dual uses genitive/accusative -ين (not nominative -ان) because
+  // it appears after numbers and in construct state.
   'قرص': {
     singular: 'قرص',
-    dual: 'قرصان',
+    dual: 'قرصين',
     few: 'أقراص',
     many: 'قرصاً',
     feminine: false,
@@ -48,7 +50,7 @@ const KNOWN_UNITS: Record<string, ArabicUnitForms> = {
   // كبسولة (capsule) — feminine
   'كبسولة': {
     singular: 'كبسولة',
-    dual: 'كبسولتان',
+    dual: 'كبسولتين',
     few: 'كبسولات',
     many: 'كبسولةً',
     feminine: true,
@@ -64,7 +66,7 @@ const KNOWN_UNITS: Record<string, ArabicUnitForms> = {
   // جرعة (dose) — feminine
   'جرعة': {
     singular: 'جرعة',
-    dual: 'جرعتان',
+    dual: 'جرعتين',
     few: 'جرعات',
     many: 'جرعةً',
     feminine: true,
@@ -72,7 +74,7 @@ const KNOWN_UNITS: Record<string, ArabicUnitForms> = {
   // كيس (sachet) — masculine
   'كيس': {
     singular: 'كيس',
-    dual: 'كيسان',
+    dual: 'كيسين',
     few: 'أكياس',
     many: 'كيلاً',
     feminine: false,
@@ -80,7 +82,7 @@ const KNOWN_UNITS: Record<string, ArabicUnitForms> = {
   // علبة (box) — feminine. Used by describeStockInStrips/describeOrderInBoxes.
   'علبة': {
     singular: 'علبة',
-    dual: 'علبتان',
+    dual: 'علبتين',
     few: 'علب',
     many: 'علبة',
     feminine: true,
@@ -88,7 +90,7 @@ const KNOWN_UNITS: Record<string, ArabicUnitForms> = {
   // شريط (strip) — masculine. Used by describeStockInStrips/describeOrderInBoxes.
   'شريط': {
     singular: 'شريط',
-    dual: 'شريطان',
+    dual: 'شريطين',
     few: 'أشرطة',
     many: 'شريطاً',
     feminine: false,
@@ -105,7 +107,7 @@ function getUnitForms(unit: string): ArabicUnitForms {
   if (known) return known;
   return {
     singular: unit,
-    dual: `${unit}ان`,
+    dual: `${unit}ين`,
     few: 'وحدات',
     many: `${unit}اً`,
     feminine: false,

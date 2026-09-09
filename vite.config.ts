@@ -26,9 +26,10 @@ export default defineConfig(() => {
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
     build: {
-      // Generate a single chunk to simplify offline caching in the
-      // service worker. The full bundle is ~335 KB which is well
-      // under the SW cache budget.
+      // Target ES2020 for broad browser support. The build produces
+      // multiple chunks (entry + dynamic imports) with content-hashed
+      // names; the service worker parses /index.html on install to
+      // pre-cache them (see public/sw.js #23).
       target: 'es2020',
     },
   };

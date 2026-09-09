@@ -379,6 +379,23 @@ async function scheduleNotification(opts: {
 }
 
 /**
+ * Send a test notification immediately so the user can verify that
+ * notifications and sounds work properly on their device.
+ */
+export async function sendTestAlertNotification(
+  customSoundFile?: { fileName: string; mimeType: string; dataUrl: string } | null
+): Promise<void> {
+  await scheduleNotification({
+    id: hashCode('med-test-notification'),
+    title: '🔔 إشعار تجريبي: متابع الأدوية',
+    body: 'الإشعارات والتنبيهات تعمل بشكل سليم على جهازك!',
+    channelId: 'dose-reminders',
+    smallIcon: 'ic_launcher',
+    customSoundFile,
+  });
+}
+
+/**
  * Web fallback: use the browser Notification API.
  */
 function scheduleWebNotification(title: string, body: string): void {

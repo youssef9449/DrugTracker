@@ -36,7 +36,7 @@ import {
   requestNotificationPermission,
   sendMedicineAlert,
   sendCriticalStockAlert,
-  openNotificationSettings,
+  sendTestAlertNotification,
   getNotificationPermission,
   getNotificationPermissionSync,
 } from './utils/notifications';
@@ -710,45 +710,50 @@ export default function App() {
 
   const handleToggleNotifications = async () => {
     if (!notificationsEnabled) {
-      // Current state says "off" — but check the real permission
-      // because the user may have re-enabled it via OS settings.
-      // Use the async getNotificationPermission() which works on
-      // both web (Notification.permission) and native (Capacitor
-      // LocalNotifications.checkPermissions()).
-      const currentPerm = await getNotificationPermission();
-
-      if (currentPerm === 'granted') {
-        // OS settings already allow it; just turn on the in-app
-        // flag.
-        setNotificationsEnabled(true);
-        showToast('تم تفعيل إشعارات الهاتف بنجاح');
-        return;
+      let pushAllowed = false;
+      try {
+        const currentPerm = await getNotificationPermission();
+        if (currentPerm === 'granted') {
+          pushAllowed = true;
+        } else if (currentPerm === 'default') {
+          pushAllowed = await requestNotificationPermission();
+        }
+      } catch (err) {
+        console.warn('[App] Notification permission error:', err);
       }
 
-      if (currentPerm === 'denied') {
-        // The browser/OS already denied permission and won't show
-        // the prompt again. Open the OS settings page so the user
-        // can re-enable notifications manually.
-        showToast('الإشعارات مقفولة من إعدادات النظام. سيتم فتح صفحة الإعدادات الآن...');
-        openNotificationSettings();
-        return;
+      // Always turn on in-app notifications so in-app chimes,
+      // dose alarm dialogs, and stock depletion tracking function properly.
+      setNotificationsEnabled(true);
+      if (soundEnabled) {
+        playSuccessChime();
       }
 
-      // currentPerm === 'default' — show the prompt (browser
-      // Notification.requestPermission OR Capacitor
-      // LocalNotifications.requestPermissions on Android 13+).
-      const granted = await requestNotificationPermission();
-      setNotificationsEnabled(granted);
-      showToast(
-        granted
-          ? 'تم تفعيل إشعارات الهاتف بنجاح'
-          : 'يرجى السماح بالإشعارات في إعدادات النظام'
-      );
+      if (pushAllowed) {
+        sendTestAlertNotification(globalCustomSound).catch(() => void 0);
+        showToast('تم تفعيل إشعارات الهاتف والتنبيهات الصوتية بنجاح 🔔 (تم إرسال إشعار تجريبي)');
+      } else {
+        showToast('تم تفعيل التنبيهات والأصوات داخل التطبيق بنجاح 🔔 (لإشعارات الهاتف بالخلفية اسمح بها في إعدادات المتصفح)');
+      }
     } else {
       setNotificationsEnabled(false);
-      showToast('تم إيقاف التنبيهات داخل التطبيق');
+      showToast('تم إيقاف التنبيهات داخل التطبيق 🔕');
     }
   };
+
+  const handleSendTestNotification = async () => {
+    if (soundEnabled) {
+      playSuccessChime();
+    }
+    try {
+      await sendTestAlertNotification(globalCustomSound);
+      showToast('تم إرسال إشعار تجريبي وتشغيل صوت التنبيه بنجاح! 🔔');
+    } catch (err) {
+      console.warn('[App] Failed to send test alert notification:', err);
+      showToast('تم تشغيل صوت التنبيه التجريبي بنجاح! 🔔');
+    }
+  };
+
 
   const handleTakeDoseFromAlarm = (med: Medication) => {
     // Consume-pill feature: actually subtract the dose from the balance,
@@ -905,9 +910,13 @@ export default function App() {
           onToggleCriticalStockAlerts={() => {
             const next = !criticalStockAlertsEnabled;
             setCriticalStockAlertsEnabled(next);
+            if (next && !notificationsEnabled) {
+              setNotificationsEnabled(true);
+            }
+            if (soundEnabled) playSuccessChime();
             showToast(
               next
-                ? 'تم تفعيل تنبيهات النفاذ الحرج — هتوصلك إشعار فوري لو في دواء دخل مرحلة حرجة'
+                ? 'تم تفعيل تنبيهات النفاذ الحرج ⚠️ (إشعار فوري عند بقاء 3 أيام أو أقل من أي دواء أو نفاذه)'
                 : 'تم إيقاف تنبيهات النفاذ الحرج'
             );
           }}
@@ -1063,6 +1072,23 @@ export default function App() {
         soundEnabled={soundEnabled}
         onToggleSound={() => setSoundEnabled(!soundEnabled)}
         globalCustomSound={globalCustomSound}
+        notificationsEnabled={notificationsEnabled}
+        onToggleNotifications={handleToggleNotifications}
+        criticalStockAlertsEnabled={criticalStockAlertsEnabled}
+        onToggleCriticalStockAlerts={() => {
+          const next = !criticalStockAlertsEnabled;
+          setCriticalStockAlertsEnabled(next);
+          if (next && !notificationsEnabled) {
+            setNotificationsEnabled(true);
+          }
+          if (soundEnabled) playSuccessChime();
+          showToast(
+            next
+              ? 'تم تفعيل تنبيهات النفاذ الحرج ⚠️ (إشعار فوري عند بقاء 3 أيام أو أقل)'
+              : 'تم إيقاف تنبيهات النفاذ الحرج'
+          );
+        }}
+        onSendTestNotification={handleSendTestNotification}
         onSetGlobalCustomSound={(file) => {
           setGlobalCustomSound(file);
           if (file) {

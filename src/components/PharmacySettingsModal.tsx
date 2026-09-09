@@ -13,6 +13,9 @@ import {
   VolumeX,
   FileAudio,
   Trash2,
+  Bell,
+  BellOff,
+  AlertTriangle,
 } from 'lucide-react';
 import { Medication, PharmacySettings, describeOrderInBoxes } from '../types';
 import {
@@ -34,6 +37,11 @@ interface PharmacySettingsModalProps {
   onToggleSound: () => void;
   globalCustomSound?: { fileName: string; mimeType: string; dataUrl: string } | null;
   onSetGlobalCustomSound: (file: { fileName: string; mimeType: string; dataUrl: string } | null) => void;
+  notificationsEnabled?: boolean;
+  onToggleNotifications?: () => void;
+  criticalStockAlertsEnabled?: boolean;
+  onToggleCriticalStockAlerts?: () => void;
+  onSendTestNotification?: () => void;
 }
 
 export const PharmacySettingsModal: FC<PharmacySettingsModalProps> = ({
@@ -46,6 +54,11 @@ export const PharmacySettingsModal: FC<PharmacySettingsModalProps> = ({
   onToggleSound,
   globalCustomSound,
   onSetGlobalCustomSound,
+  notificationsEnabled = true,
+  onToggleNotifications,
+  criticalStockAlertsEnabled = true,
+  onToggleCriticalStockAlerts,
+  onSendTestNotification,
 }) => {
   const [pharmacyPhone, setPharmacyPhone] = useState(settings.pharmacyPhone || '');
   const [pharmacyName, setPharmacyName] = useState(
@@ -478,6 +491,89 @@ export const PharmacySettingsModal: FC<PharmacySettingsModalProps> = ({
               </button>
             )}
           </div>
+
+          {/* Notifications & Alerts Management Section */}
+          <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className={`p-1.5 rounded-lg ${notificationsEnabled ? 'bg-amber-100 text-amber-600' : 'bg-slate-200 text-slate-500'}`}>
+                  {notificationsEnabled ? (
+                    <Bell className="w-4 h-4 fill-amber-500" />
+                  ) : (
+                    <BellOff className="w-4 h-4" />
+                  )}
+                </div>
+                <div>
+                  <span className="text-xs font-bold text-slate-800">التنبيهات وإشعارات الهاتف</span>
+                  <p className="text-[10px] text-slate-500">منبه مواعيد الجرعات وتنبيهات المخزون</p>
+                </div>
+              </div>
+              {onToggleNotifications && (
+                <button
+                  type="button"
+                  onClick={onToggleNotifications}
+                  className={`w-10 h-5 rounded-full relative transition ${
+                    notificationsEnabled ? 'bg-teal-600' : 'bg-slate-300'
+                  }`}
+                  aria-label="تبديل التنبيهات"
+                >
+                  <span
+                    className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition ${
+                      notificationsEnabled ? 'right-0.5' : 'right-[18px]'
+                    }`}
+                  />
+                </button>
+              )}
+            </div>
+
+            <hr className="border-slate-200" />
+
+            {/* Critical Stock Alerts Toggle */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className={`p-1.5 rounded-lg ${criticalStockAlertsEnabled ? 'bg-rose-100 text-rose-600' : 'bg-slate-200 text-slate-500'}`}>
+                  <AlertTriangle
+                    className={`w-4 h-4 ${
+                      criticalStockAlertsEnabled ? 'fill-rose-500/30' : ''
+                    }`}
+                  />
+                </div>
+                <div>
+                  <span className="text-xs font-bold text-slate-800">تنبيهات النفاذ الحرج للمخزون</span>
+                  <p className="text-[10px] text-slate-500">إشعار فوري عند بقاء 3 أيام أو أقل أو نفاذ الدواء</p>
+                </div>
+              </div>
+              {onToggleCriticalStockAlerts && (
+                <button
+                  type="button"
+                  onClick={onToggleCriticalStockAlerts}
+                  className={`w-10 h-5 rounded-full relative transition ${
+                    criticalStockAlertsEnabled ? 'bg-rose-600' : 'bg-slate-300'
+                  }`}
+                  aria-label="تبديل تنبيهات النفاذ الحرج"
+                >
+                  <span
+                    className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition ${
+                      criticalStockAlertsEnabled ? 'right-0.5' : 'right-[18px]'
+                    }`}
+                  />
+                </button>
+              )}
+            </div>
+
+            {/* Test Notification Button */}
+            {onSendTestNotification && (
+              <button
+                type="button"
+                onClick={onSendTestNotification}
+                className="w-full py-2 px-3 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300/80 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition active:scale-98 shadow-xs"
+              >
+                <Bell className="w-4 h-4 text-amber-600" />
+                <span>🔔 تجربة إشعار وتنبيه صوتي الآن (اختبار فوري)</span>
+              </button>
+            )}
+          </div>
+
 
           {/* Sound management section — moved from AppHeader so all
               settings live in one place. */}

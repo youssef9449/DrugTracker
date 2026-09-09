@@ -11,6 +11,7 @@ vi.mock('../utils/notifications', () => ({
   requestNotificationPermission: vi.fn(() => Promise.resolve(false)),
   sendMedicineAlert: vi.fn(),
   sendCriticalStockAlert: vi.fn(),
+  sendTestAlertNotification: vi.fn(() => Promise.resolve()),
   openNotificationSettings: vi.fn(),
   getNotificationPermission: vi.fn(() => Promise.resolve('denied')),
   getNotificationPermissionSync: vi.fn(() => 'denied'),

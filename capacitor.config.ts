@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 /**
- * Capacitor configuration for النننغة (Drug Tracker).
+ * Capacitor configuration for النغنغ (Drug Tracker).
  *
  * The app is a Vite + React SPA. Capacitor wraps the production
  * build (output of `vite build`, located in `dist/`) in an Android

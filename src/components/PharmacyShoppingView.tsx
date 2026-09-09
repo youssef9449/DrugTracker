@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, type FC } from 'react';
 import {
   Copy,
   Check,
@@ -31,7 +31,7 @@ interface PharmacyShoppingViewProps {
   showToast: (message: string) => void;
 }
 
-export const PharmacyShoppingView: React.FC<PharmacyShoppingViewProps> = ({
+export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   medications,
   settings,
   onUpdateSettings,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, type FC, type FormEvent } from 'react';
 import {
   X,
   Settings,
@@ -26,7 +26,7 @@ interface PharmacySettingsModalProps {
   onSaveSettings: (newSettings: PharmacySettings) => void;
 }
 
-export const PharmacySettingsModal: React.FC<PharmacySettingsModalProps> = ({
+export const PharmacySettingsModal: FC<PharmacySettingsModalProps> = ({
   isOpen,
   onClose,
   settings,
@@ -77,7 +77,7 @@ export const PharmacySettingsModal: React.FC<PharmacySettingsModalProps> = ({
     });
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = (e: FormEvent) => {
     e.preventDefault();
     onSaveSettings({
       pharmacyPhone: pharmacyPhone.trim(),

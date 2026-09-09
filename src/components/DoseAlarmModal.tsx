@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect, useRef, type FC } from 'react';
 import { Bell, Check, Clock, Volume2, X } from 'lucide-react';
 import { Medication, formatTimeArabic } from '../types';
 import { NOTIFICATION_SOUND_OPTIONS, playNotificationSound } from '../utils/sound';
@@ -11,22 +11,30 @@ interface DoseAlarmModalProps {
   onDismiss: () => void;
 }
 
-export const DoseAlarmModal: React.FC<DoseAlarmModalProps> = ({
+export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
   isOpen,
   medication,
   onTakeDose,
   onSnooze,
   onDismiss,
 }) => {
+  // L10: only play the chime on the false→true OPENING transition of
+  // the modal. Previously the effect was keyed on [isOpen, medication],
+  // and because the parent recreates the `medication` object on every
+  // state update, the chime would replay mid-alarm whenever any state
+  // changed. We track the previous `isOpen` with a ref and only play
+  // when it transitions from false to true.
+  const prevIsOpenRef = useRef(false);
   useEffect(() => {
-    if (isOpen && medication) {
-      // Play the per-medication synthesized tone in-app. The global
-      // custom sound (if any) is attached to the *push* notification
-      // via sendMedicationDoseReminder — it plays when the app is in
-      // the background. In the foreground we play the med's own
-      // synthesized tone so the user can distinguish which med is due.
-      playNotificationSound(medication.notificationSound || 'classic_chime');
-    }
+    const justOpened = isOpen && !prevIsOpenRef.current;
+    prevIsOpenRef.current = isOpen;
+    if (!justOpened || !medication) return;
+    // Play the per-medication synthesized tone in-app. The global
+    // custom sound (if any) is attached to the *push* notification
+    // via sendMedicationDoseReminder — it plays when the app is in
+    // the background. In the foreground we play the med's own
+    // synthesized tone so the user can distinguish which med is due.
+    playNotificationSound(medication.notificationSound || 'classic_chime');
   }, [isOpen, medication]);
 
   if (!isOpen || !medication) return null;

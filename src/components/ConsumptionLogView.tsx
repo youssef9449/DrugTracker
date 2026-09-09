@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, type FC } from 'react';
 import { Plus, Clock, ShieldCheck, ArrowUpRight, ArrowDownLeft, RotateCcw } from 'lucide-react';
 import { Medication, ConsumptionLog } from '../types';
 import { getTodayDateString, formatArabicDate } from '../utils/dateCalculations';
@@ -11,7 +11,7 @@ interface ConsumptionLogViewProps {
   showToast: (message: string) => void;
 }
 
-export const ConsumptionLogView: React.FC<ConsumptionLogViewProps> = ({
+export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
   medications,
   logs,
   onRestoreDose,

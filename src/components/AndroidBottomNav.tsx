@@ -1,4 +1,4 @@
-import React from 'react';
+import type { FC } from 'react';
 import { Pill, ShoppingCart, History } from 'lucide-react';
 
 export type ActiveTab = 'stock' | 'shopping' | 'logs';
@@ -9,7 +9,7 @@ interface AndroidBottomNavProps {
   alertsCount: number;
 }
 
-export const AndroidBottomNav: React.FC<AndroidBottomNavProps> = ({
+export const AndroidBottomNav: FC<AndroidBottomNavProps> = ({
   activeTab,
   onTabChange,
   alertsCount,

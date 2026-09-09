@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState, type FC, type ChangeEvent } from 'react';
 import { Pill, Bell, BellOff, Volume2, VolumeX, Search, Smartphone, Monitor, ShoppingCart, History, Settings, AlertTriangle, FileAudio, Trash2 } from 'lucide-react';
 import { ActiveTab } from './AndroidBottomNav';
 import { readCustomSoundFile } from '../utils/sound';
@@ -23,7 +23,7 @@ interface AppHeaderProps {
   onSetGlobalCustomSound: (file: { fileName: string; mimeType: string; dataUrl: string } | null) => void;
 }
 
-export const AppHeader: React.FC<AppHeaderProps> = ({
+export const AppHeader: FC<AppHeaderProps> = ({
   activeTab,
   filter,
   onFilterChange,
@@ -49,7 +49,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   // and audio type before producing the data URL, so we get consistent
   // validation + clear Arabic errors instead of silently storing a
   // huge file that would blow the storage quota (C4).
-  const handleSoundFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSoundFilePick = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     // Reset so the same file can be re-picked later if needed.
     e.target.value = '';

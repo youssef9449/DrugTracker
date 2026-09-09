@@ -51,3 +51,27 @@
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+/* Accessible Large Font Mode (fontScale === 'large')
+ * Scales root rem units gracefully so all Tailwind text classes
+ * (text-xs, text-sm, text-base, text-lg, etc.) enlarge proportionally,
+ * and scales pixel-based utilities like text-[10px] and text-[11px].
+ */
+html.font-scale-large {
+  font-size: 116%;
+}
+
+.font-scale-large .text-\[10px\] {
+  font-size: 0.75rem !important;
+  line-height: 1.15rem !important;
+}
+
+.font-scale-large .text-\[11px\] {
+  font-size: 0.8125rem !important;
+  line-height: 1.25rem !important;
+}
+
+.font-scale-large .text-\[12px\] {
+  font-size: 0.875rem !important;
+  line-height: 1.35rem !important;
+}

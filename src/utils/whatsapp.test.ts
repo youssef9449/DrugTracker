@@ -94,11 +94,16 @@ describe('generatePharmacyOrderMessage', () => {
     expect(msg).toContain('30 قرص');
   });
 
-  it('omits the customer code line when not provided', () => {
-    const msg = generatePharmacyOrderMessage([
+  it('omits the customer code line when not provided or blank', () => {
+    const msgEmpty = generatePharmacyOrderMessage([
       { name: 'كونكور 5 مجم', quantity: 30, unit: 'قرص', packageSize: 30 },
     ], '');
-    expect(msg).not.toContain('رقم العميل');
+    expect(msgEmpty).not.toContain('رقم العميل');
+
+    const msgWhitespace = generatePharmacyOrderMessage([
+      { name: 'كونكور 5 مجم', quantity: 30, unit: 'قرص', packageSize: 30 },
+    ], '   ');
+    expect(msgWhitespace).not.toContain('رقم العميل');
   });
 
   it('includes the customer code line when provided', () => {

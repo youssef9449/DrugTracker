@@ -437,8 +437,11 @@ export default function App() {
     }
   }, [soundEnabled, showToast, hydrated]);
 
-  // Persist font size preference so it survives app relaunch.
+  // Persist font size preference so it survives app relaunch, and toggle root scaling.
   useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.toggle('font-scale-large', fontScale === 'large');
+    }
     if (!hydrated) return;
     const err = persistString(FONT_SIZE_KEY, fontScale);
     if (err) {
@@ -872,7 +875,7 @@ export default function App() {
           isPhoneFrame
             ? 'max-w-md h-[100dvh] md:h-[860px] md:max-h-[92vh] md:rounded-[42px] md:border-8 md:border-slate-800 md:shadow-2xl overflow-hidden'
             : 'max-w-4xl min-h-screen md:min-h-[90vh] md:rounded-3xl md:border md:border-slate-300 md:shadow-xl overflow-hidden'
-        } ${fontScale === 'large' ? 'text-lg' : ''}`}
+        } ${fontScale === 'large' ? 'font-scale-large' : ''}`}
       >
         {/* NOTE: AndroidStatusBar (a fake "time + wifi + battery" bar
             that was previously rendered here) was removed because the

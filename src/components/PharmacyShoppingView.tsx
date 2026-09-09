@@ -325,7 +325,12 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
               )}
             </div>
             <div className="text-[11px] text-slate-500 mt-0.5">
-              رقم العميل: <strong className="text-teal-800 font-mono">{settings.customerCode || ''}</strong>
+              رقم العميل:{' '}
+              {settings.customerCode?.trim() ? (
+                <strong className="text-teal-800 font-mono">{settings.customerCode.trim()}</strong>
+              ) : (
+                <span className="text-slate-400 font-normal">غير محدد (اختياري)</span>
+              )}
             </div>
           </div>
         </div>

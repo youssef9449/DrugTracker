@@ -143,13 +143,17 @@ export const AppHeader: FC<AppHeaderProps> = ({
           <button
             onClick={onToggleFontScale}
             title={fontScale === 'large' ? 'إرجاع حجم الخط للطبيعي' : 'تكبير حجم الخط'}
-            className={`p-2 rounded-xl transition active:scale-95 ${
+            aria-label={fontScale === 'large' ? 'إرجاع حجم الخط للطبيعي' : 'تكبير حجم الخط'}
+            className={`px-2 py-1.5 rounded-xl transition active:scale-95 flex items-center gap-1 font-bold text-xs ${
               fontScale === 'large'
-                ? 'bg-teal-700 text-amber-300'
-                : 'text-teal-100 hover:text-white hover:bg-teal-700/80'
+                ? 'bg-amber-400 text-teal-950 shadow-xs ring-1 ring-amber-300'
+                : 'text-teal-100 hover:text-white hover:bg-teal-700/80 bg-teal-800/40'
             }`}
           >
-            <Type className="w-4 h-4" />
+            <Type className="w-3.5 h-3.5 shrink-0" />
+            <span className="font-mono text-[11px] leading-none">
+              {fontScale === 'large' ? 'A-' : 'A+'}
+            </span>
           </button>
         </div>
       </div>

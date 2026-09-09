@@ -23,6 +23,12 @@ import { RefreshCw, X } from 'lucide-react';
  * unwanted reload on first load. We track an `activatedRef` that is
  * set true only when the user actually clicks the update button, and
  * only reload on `controllerchange` if `activatedRef.current` is true.
+ *
+ * #33: all event listeners (controllerchange, updatefound, statechange)
+ * are tracked in an array and removed on cleanup to prevent leaks if
+ * the component unmounts mid-flight (the async getRegistration().then()
+ * is also guarded by an isMounted flag so setWaitingWorker isn't
+ * called on an unmounted component).
  */
 export function UpdatePrompt() {
   const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
@@ -32,29 +38,38 @@ export function UpdatePrompt() {
   useEffect(() => {
     if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
 
+    let isMounted = true;
+    // #33: track all listeners we add so cleanup can remove every one.
+    const cleanups: Array<() => void> = [];
+
     const handleNewWaiter = (reg: ServiceWorkerRegistration) => {
-      if (reg.waiting) setWaitingWorker(reg.waiting);
+      if (reg.waiting && isMounted) setWaitingWorker(reg.waiting);
     };
 
     navigator.serviceWorker
       .getRegistration('/sw.js')
       .then((reg) => {
-        if (!reg) return;
+        if (!reg || !isMounted) return;
         handleNewWaiter(reg);
-        reg.addEventListener('updatefound', () => {
+
+        const onUpdateFound = () => {
           const newWorker = reg.installing;
           if (!newWorker) return;
-          newWorker.addEventListener('statechange', () => {
+          const onStateChange = () => {
             if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
               // A new version is installed and the old one is controlling
               // the page → the new one is "waiting".
               handleNewWaiter(reg);
             }
-          });
-        });
+          };
+          newWorker.addEventListener('statechange', onStateChange);
+          cleanups.push(() => newWorker.removeEventListener('statechange', onStateChange));
+        };
+        reg.addEventListener('updatefound', onUpdateFound);
+        cleanups.push(() => reg.removeEventListener('updatefound', onUpdateFound));
       })
       .catch((err) => {
-        console.warn('[UpdatePrompt] getRegistration failed:', err);
+        if (isMounted) console.warn('[UpdatePrompt] getRegistration failed:', err);
       });
 
     // Reload ONLY when a new SW takes over after the user clicked
@@ -66,9 +81,15 @@ export function UpdatePrompt() {
       window.location.reload();
     };
     navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+    cleanups.push(() =>
+      navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange)
+    );
 
     return () => {
-      navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
+      isMounted = false;
+      // #33: remove every listener we added (controllerchange, updatefound,
+      // and each per-worker statechange) so nothing leaks on unmount.
+      cleanups.forEach((fn) => fn());
     };
   }, []);
 

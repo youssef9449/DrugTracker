@@ -155,11 +155,15 @@ export async function requestNotificationPermission(): Promise<boolean> {
  *
  * On web: uses new Notification(title, body) directly.
  *
+ * @param medId Stable medication id — used to derive a unique
+ *   notification id so two medications that happen to share a name
+ *   don't collide/overwrite each other in the notification drawer.
  * @param medicineName The medication name (displayed in the title)
  * @param daysLeft Days of supply remaining (in the body)
  * @param currentPills Current pill count (in the body)
  */
 export async function sendMedicineAlert(
+  medId: string,
   medicineName: string,
   daysLeft: number,
   currentPills: number
@@ -180,7 +184,7 @@ export async function sendMedicineAlert(
       : `المتبقي ${currentPills} حبة فقط، تكفي لـ ${daysText}. يرجى الشراء قريباً!`;
 
   await scheduleNotification({
-    id: hashCode(`med-${medicineName}`),
+    id: hashCode(`med-${medId}`),
     title,
     body,
     channelId: 'low-stock',
@@ -190,10 +194,9 @@ export async function sendMedicineAlert(
 
 /**
  * Send a "critical stock" notification — fires when a medication
- * has only 1 or 2 pills left (or whatever the user-configured
- * threshold is). The notification is more urgent than
- * sendMedicineAlert because the medication will run out today or
- * tomorrow.
+ * crosses the critical threshold (derived from warningThresholdDays).
+ * The notification is more urgent than sendMedicineAlert because the
+ * medication will run out within the critical window.
  *
  * This is the headline feature of the app — the user explicitly
  * requested it: "عايز اشعار يظهر لو في دواء فاضل فيه حبايتين مع
@@ -203,37 +206,42 @@ export async function sendMedicineAlert(
  * `criticalStockAlertsEnabled` toggle in AppHeader. The caller is
  * responsible for checking the toggle before calling this function.
  *
+ * @param medId Stable medication id — used to derive a unique
+ *   notification id (avoids collisions with same-named medications).
  * @param medicineName The medication name (in the title)
+ * @param daysLeft Days of supply remaining (drives the urgency wording)
  * @param currentPills Current pill count (in the body)
- * @param unit Unit (e.g., 'قرص', 'كبسولة') — used to make the
- *            body read naturally: "متبقي 2 قرص فقط"
+ * @param unit Unit (e.g., 'قرص', 'كبسولة')
  */
 export async function sendCriticalStockAlert(
+  medId: string,
   medicineName: string,
+  daysLeft: number,
   currentPills: number,
   unit: string = 'قرص'
 ): Promise<void> {
-  // The title should reflect the ACTUAL pill count, not always say
-  // "حبتين بس" (the user pointed out that when 0 pills remain, the
-  // notification still says "حبتين بس" which is wrong).
+  // Title reflects the actual situation: out of stock, or critical
+  // with N days left (the critical threshold is derived from the
+  // medication's warningThresholdDays — see getCriticalThresholdDays).
   const title =
     currentPills <= 0
       ? `🚨 ${medicineName}: نفد المخزون!`
-      : currentPills === 1
-      ? `🚨 ${medicineName}: حبة واحدة بس!`
-      : `🚨 ${medicineName}: حبتين بس!`;
+      : daysLeft <= 1
+      ? `🚨 ${medicineName}: حرج — باقي يوم واحد!`
+      : `🚨 ${medicineName}: حرج — باقي ${daysLeft} أيام!`;
+
+  const daysWord =
+    daysLeft === 1 ? 'يوم واحد' : daysLeft === 2 ? 'يومين' : `${daysLeft} أيام`;
 
   const body =
     currentPills <= 0
       ? `المخزون نفد تماماً (0 ${unit}). يرجى طلب الدواء فوراً!`
-      : currentPills === 1
-      ? `متبقي ${unit} واحد فقط من "${medicineName}"! يرجى التعبئة اليوم.`
-      : `متبقي ${currentPills} ${unit} فقط من "${medicineName}". هيخلص قريب!`;
+      : `متبقي ${currentPills} ${unit} فقط من "${medicineName}"، تكفي لـ ${daysWord}. يرجى التعبئة فوراً!`;
 
   await scheduleNotification({
     // Use a different notification ID hash from sendMedicineAlert so
     // the two notifications don't collide / overwrite each other.
-    id: hashCode(`critical-${medicineName}`),
+    id: hashCode(`critical-${medId}`),
     title,
     body,
     channelId: 'low-stock',
@@ -246,13 +254,19 @@ export async function sendCriticalStockAlert(
  * medication with `reminderEnabled + reminderTime` set and the
  * current time matches the reminder time.
  *
+ * @param medId Stable medication id (for a unique notification id)
  * @param medicineName Medication name (title)
  * @param dailyDose Daily dose amount (body)
  * @param unit Unit (e.g., 'قرص')
  * @param currentPills Current pill count (body)
  * @param reminderTime HH:MM string (24-hour) for the scheduled time
+ * @param customSoundFile Optional global custom sound — when provided,
+ *   its data URL is stored in the notification's `extra` field so the
+ *   foreground listener can play it (and the background channel uses
+ *   the default sound).
  */
 export async function sendMedicationDoseReminder(
+  medId: string,
   medicineName: string,
   dailyDose: number,
   unit: string = 'قرص',
@@ -265,7 +279,7 @@ export async function sendMedicationDoseReminder(
   const body = `موعد الجرعة${timeHint}. جرعتك المقررة: ${dailyDose} ${unit}. (المخزون الحالي: ${currentPills} ${unit}).`;
 
   await scheduleNotification({
-    id: hashCode(`dose-${medicineName}-${Date.now()}`),
+    id: hashCode(`dose-${medId}-${Date.now()}`),
     title,
     body,
     channelId: 'dose-reminder',

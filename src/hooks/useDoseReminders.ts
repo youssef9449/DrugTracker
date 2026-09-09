@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Medication } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
 import { playNotificationSound } from '../utils/sound';
@@ -57,7 +57,25 @@ export function useDoseReminders({
   const queueRef = useRef<string[]>([]);
   const alarmingIdRef = useRef<string | null>(null);
 
-  const dismissAlarm = () => {
+  // Keep the latest sound/notify flags + global custom sound in refs so
+  // the stable `triggerAlarm` callback can read them without being
+  // recreated on every change (which would re-run the polling effect
+  // and reset timers). This fixes the H5 stale-closure bug where the
+  // polling interval kept using an outdated `globalCustomSound`.
+  const soundEnabledRef = useRef(soundEnabled);
+  const notificationsEnabledRef = useRef(notificationsEnabled);
+  const globalCustomSoundRef = useRef(globalCustomSound);
+  useEffect(() => {
+    soundEnabledRef.current = soundEnabled;
+  }, [soundEnabled]);
+  useEffect(() => {
+    notificationsEnabledRef.current = notificationsEnabled;
+  }, [notificationsEnabled]);
+  useEffect(() => {
+    globalCustomSoundRef.current = globalCustomSound;
+  }, [globalCustomSound]);
+
+  const dismissAlarm = useCallback(() => {
     const current = alarmingIdRef.current;
     if (current) {
       const fired = loadJson<Record<string, boolean>>(FIRED_KEY, {});
@@ -78,9 +96,10 @@ export function useDoseReminders({
         triggerAlarm(next, false);
       }
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [medications]);
 
-  const snoozeAlarm = (minutes: number = 10) => {
+  const snoozeAlarm = useCallback((minutes: number = 10) => {
     const current = alarmingIdRef.current;
     if (current) {
       const snooze = loadJson<Record<string, number>>(SNOOZE_KEY, {});
@@ -89,9 +108,13 @@ export function useDoseReminders({
     }
     alarmingIdRef.current = null;
     setAlarmingMedication(null);
-  };
+  }, []);
 
-  const triggerAlarm = (med: Medication, enqueueIfBusy: boolean) => {
+  // triggerAlarm is intentionally a useCallback with a stable signature
+  // (no deps) so it can be referenced by dismissAlarm and the polling
+  // effect without causing re-subscriptions. It reads the latest
+  // sound/notification/global-custom-sound state from refs.
+  const triggerAlarm = useCallback((med: Medication, enqueueIfBusy: boolean) => {
     if (alarmingIdRef.current && alarmingIdRef.current !== med.id) {
       if (enqueueIfBusy && !queueRef.current.includes(med.id)) {
         queueRef.current.push(med.id);
@@ -100,30 +123,30 @@ export function useDoseReminders({
     }
     alarmingIdRef.current = med.id;
     setAlarmingMedication(med);
-    if (soundEnabled) {
-      playNotificationSound(
-        med.notificationSound || 'classic_chime',
-        med.customSoundFile
-      );
+    if (soundEnabledRef.current) {
+      // In-app chime plays the per-medication synthesized tone (so the
+      // user can tell which med is due). The global custom sound, if
+      // set, is attached to the push notification (background) below.
+      playNotificationSound(med.notificationSound || 'classic_chime');
     }
-    if (notificationsEnabled) {
+    if (notificationsEnabledRef.current) {
       sendMedicationDoseReminder(
+        med.id,
         med.name,
         med.dailyDose,
         med.unit,
         med.currentPills,
         med.reminderTime,
-        // Use the GLOBAL custom sound (applies to all medications),
-        // not the per-medication one. Falls back to null if no
-        // global custom sound is set.
-        globalCustomSound
+        // Global custom sound — applies to all medications, played by
+        // the system when the notification fires in the background.
+        globalCustomSoundRef.current
       );
     }
-  };
+  }, []);
 
-  const testAlarm = (med: Medication) => {
+  const testAlarm = useCallback((med: Medication) => {
     triggerAlarm(med, false);
-  };
+  }, [triggerAlarm]);
 
   useEffect(() => {
     const checkDue = () => {
@@ -161,8 +184,7 @@ export function useDoseReminders({
     checkDue();
     const timer = window.setInterval(checkDue, 15000);
     return () => window.clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [medications, soundEnabled, notificationsEnabled]);
+  }, [medications, triggerAlarm]);
 
   return {
     alarmingMedication,

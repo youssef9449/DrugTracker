@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Bell, Check, Clock, Volume2, X, FileAudio } from 'lucide-react';
+import { Bell, Check, Clock, Volume2, X } from 'lucide-react';
 import { Medication, formatTimeArabic } from '../types';
 import { NOTIFICATION_SOUND_OPTIONS, playNotificationSound } from '../utils/sound';
 
@@ -20,17 +20,18 @@ export const DoseAlarmModal: React.FC<DoseAlarmModalProps> = ({
 }) => {
   useEffect(() => {
     if (isOpen && medication) {
-      playNotificationSound(
-        medication.notificationSound || 'classic_chime',
-        medication.customSoundFile
-      );
+      // Play the per-medication synthesized tone in-app. The global
+      // custom sound (if any) is attached to the *push* notification
+      // via sendMedicationDoseReminder — it plays when the app is in
+      // the background. In the foreground we play the med's own
+      // synthesized tone so the user can distinguish which med is due.
+      playNotificationSound(medication.notificationSound || 'classic_chime');
     }
   }, [isOpen, medication]);
 
   if (!isOpen || !medication) return null;
 
   const effectiveSoundType = medication.notificationSound || 'classic_chime';
-  const isCustom = effectiveSoundType === 'custom' && medication.customSoundFile;
   const currentSoundOption = NOTIFICATION_SOUND_OPTIONS.find(
     (s) => s.id === effectiveSoundType
   );
@@ -86,17 +87,11 @@ export const DoseAlarmModal: React.FC<DoseAlarmModalProps> = ({
 
           <div className="flex items-center justify-between p-2.5 bg-amber-50/60 border border-amber-200/80 rounded-xl text-xs">
             <div className="flex items-center gap-2 min-w-0">
-              {isCustom ? (
-                <FileAudio className="w-4 h-4 text-amber-700 shrink-0" />
-              ) : (
-                <span className="text-lg shrink-0">{currentSoundOption?.icon || '🔔'}</span>
-              )}
+              <span className="text-lg shrink-0">{currentSoundOption?.icon || '🔔'}</span>
               <div className="min-w-0">
                 <span className="text-slate-600">نغمة التنبيه: </span>
                 <span className="font-bold text-amber-950 truncate inline-block max-w-[140px] align-bottom">
-                  {isCustom
-                    ? medication.customSoundFile!.fileName
-                    : currentSoundOption?.name || 'نغمة كلاسيكية'}
+                  {currentSoundOption?.name || 'نغمة كلاسيكية'}
                 </span>
               </div>
             </div>
@@ -104,7 +99,7 @@ export const DoseAlarmModal: React.FC<DoseAlarmModalProps> = ({
             <button
               type="button"
               onClick={() =>
-                playNotificationSound(effectiveSoundType, medication.customSoundFile)
+                playNotificationSound(effectiveSoundType)
               }
               className="px-2.5 py-1 bg-white hover:bg-amber-100 border border-amber-300 rounded-lg text-xs font-bold text-amber-900 flex items-center gap-1 shadow-xs active:scale-95 transition shrink-0"
               title="إعادة الاستماع للنغمة"

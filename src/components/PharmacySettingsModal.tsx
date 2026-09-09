@@ -6,10 +6,8 @@ import {
   UserCheck,
   Check,
   Pill,
-  ShoppingCart,
   MessageSquare,
   MessageCircle,
-  AlertCircle,
   RotateCcw,
 } from 'lucide-react';
 import { Medication, PharmacySettings, describeOrderInBoxes } from '../types';

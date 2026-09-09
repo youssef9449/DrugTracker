@@ -180,7 +180,13 @@ export default function App() {
       const savedMeds = localStorage.getItem(STORAGE_MEDS_KEY);
       if (savedMeds) {
         const parsed = JSON.parse(savedMeds);
-        if (Array.isArray(parsed) && parsed.length > 0) setMedications(parsed);
+        // #15: accept an empty array here (don't gate on
+        // parsed.length > 0). Otherwise, when the user deletes all
+        // medications, the persisted "[]" is ignored on next launch,
+        // the seed INITIAL_MEDICATIONS stays in state, and the
+        // hydration-gated persistence effect overwrites the user's
+        // "[]" with the seed meds — the empty-meds state is lost.
+        if (Array.isArray(parsed)) setMedications(parsed);
       }
     } catch (err) {
       console.warn('[App] failed to load saved medications:', err);
@@ -572,10 +578,16 @@ export default function App() {
       prev.map((m) => {
         if (m.id === medicationId) {
           // `autoDeductEnabled` defaults to true when undefined, so the
-          // effective current state is `!== false`. Toggle it. The
-          // previous `=== false` formulation was equivalent but read as
-          // a double-negative and was a readability trap (M5).
-          const newState = !m.autoDeductEnabled;
+          // effective current state is `!== false`. To toggle OFF from the
+          // default-true (undefined) state we must set false explicitly.
+          // #27: the previous `!m.autoDeductEnabled` formulation no-oped
+          // for the undefined case because `!undefined === true` — the
+          // first click on a med with autoDeductEnabled===undefined kept
+          // it ON. `m.autoDeductEnabled === false` correctly maps:
+          //   undefined → false (turn OFF the default-true)
+          //   true      → false (turn OFF)
+          //   false     → true  (turn ON)
+          const newState = m.autoDeductEnabled === false;
           showToast(
             newState ? `تم تفعيل الخصم التلقائي لـ "${m.name}"` : `تم إيقاف الخصم التلقائي مؤقتاً لـ "${m.name}"`
           );
@@ -869,7 +881,6 @@ export default function App() {
             <ConsumptionLogView
               medications={medications}
               logs={logs}
-              onAddLog={(log) => setLogs((prev) => [log, ...prev])}
               onRestoreDose={handleRestoreDose}
               showToast={showToast}
             />

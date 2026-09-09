@@ -89,11 +89,25 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       // pills per box, no blister strips).
       const hasStrips = initialData.stripsPerBox && initialData.pillsPerStrip && initialData.stripsPerBox > 0 && initialData.pillsPerStrip > 0;
       setNoStrips(!hasStrips);
-      const sBox = initialData.stripsPerBox || 3;
-      const pStrip = initialData.pillsPerStrip || 10;
-      setStripsPerBox(String(sBox));
-      setPillsPerStrip(String(pStrip));
-      setPackageSize(initialData.packageSize || (hasStrips ? sBox * pStrip : 30));
+      // #14: in noStrips mode the "عدد الأقراص في العلبة" input reuses
+      // the `stripsPerBox` state (it's the only pills-per-box field).
+      // Previously this initialized `stripsPerBox` from
+      // `initialData.stripsPerBox || 3`, which for a noStrips med (where
+      // stripsPerBox is undefined) fell back to 3 — so the input showed
+      // "3" instead of the actual packageSize (e.g. 15), and on save
+      // `parseInt('3')` truthy-overrode packageSize in handleSubmit,
+      // silently rewriting 15 → 3. Now: for noStrips meds initialize
+      // stripsPerBox from packageSize; for strips meds use the real
+      // stripsPerBox/pillsPerStrip.
+      if (hasStrips) {
+        setStripsPerBox(String(initialData.stripsPerBox));
+        setPillsPerStrip(String(initialData.pillsPerStrip));
+        setPackageSize(initialData.packageSize || initialData.stripsPerBox * initialData.pillsPerStrip!);
+      } else {
+        setStripsPerBox(String(initialData.packageSize || 30));
+        setPillsPerStrip(String(initialData.pillsPerStrip || 10));
+        setPackageSize(initialData.packageSize || 30);
+      }
       setReminderEnabled(Boolean(initialData.reminderEnabled));
       setReminderTime(initialData.reminderTime || '09:00');
       setNotificationSound(initialData.notificationSound || 'classic_chime');

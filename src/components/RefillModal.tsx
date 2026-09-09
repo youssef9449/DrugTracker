@@ -16,6 +16,12 @@ export const RefillModal: FC<RefillModalProps> = ({
   onConfirmRefill,
 }) => {
   const [addedCount, setAddedCount] = useState<number>(30);
+  // Strip/box helper state — lets the user add whole boxes + strips +
+  // loose pills and computes the total pill count.
+  const [helperBoxes, setHelperBoxes] = useState(0);
+  const [helperStrips, setHelperStrips] = useState(0);
+  const [helperLoose, setHelperLoose] = useState(0);
+  const [showHelper, setShowHelper] = useState(false);
 
   // Sync default count with medication's actual package size on open
   useEffect(() => {
@@ -27,6 +33,10 @@ export const RefillModal: FC<RefillModalProps> = ({
           ? medication.packageSize
           : 30;
       setAddedCount(boxSize);
+      setHelperBoxes(1);
+      setHelperStrips(0);
+      setHelperLoose(0);
+      setShowHelper(false);
     }
   }, [medication, isOpen]);
 
@@ -40,6 +50,7 @@ export const RefillModal: FC<RefillModalProps> = ({
       : 30;
 
   const stripSize = medication.pillsPerStrip || 10;
+  const hasStrips = Boolean(medication.stripsPerBox && medication.pillsPerStrip);
 
   const handleSave = (e: FormEvent) => {
     e.preventDefault();
@@ -47,6 +58,14 @@ export const RefillModal: FC<RefillModalProps> = ({
     onConfirmRefill(medication.id, addedCount);
     onClose();
   };
+
+  const applyHelper = () => {
+    const computed = helperBoxes * boxSize + helperStrips * stripSize + helperLoose;
+    setAddedCount(Math.max(0, computed));
+    setShowHelper(false);
+  };
+
+  const helperTotal = helperBoxes * boxSize + helperStrips * stripSize + helperLoose;
 
   const newTotal = medication.currentPills + addedCount;
   const newDays =
@@ -96,7 +115,7 @@ export const RefillModal: FC<RefillModalProps> = ({
                 <span className="text-[11px] text-slate-500 font-medium">({currentStripsDesc})</span>
               )}
             </div>
-            {medication.stripsPerBox && medication.pillsPerStrip && (
+            {hasStrips && (
               <div className="mt-1 text-[11px] text-teal-800 bg-teal-50 px-2 py-0.5 rounded-md border border-teal-200/60 inline-flex items-center gap-1">
                 <Layers className="w-3 h-3 text-teal-600" />
                 <span>مواصفات العلبة: {medication.stripsPerBox} أشرطة × {medication.pillsPerStrip} {medication.unit}</span>
@@ -149,7 +168,7 @@ export const RefillModal: FC<RefillModalProps> = ({
                 <span>+2 علبة ({boxSize * 2})</span>
               </button>
 
-              {medication.pillsPerStrip && (
+              {hasStrips && (
                 <>
                   <button
                     type="button"
@@ -181,6 +200,71 @@ export const RefillModal: FC<RefillModalProps> = ({
             </div>
           </div>
 
+          {/* Strip-aware calculator — add boxes + strips + loose pills
+              and compute the total pill count. Only shown when the med
+              has strip info. */}
+          {hasStrips && (
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setShowHelper(!showHelper)}
+                className="text-[11px] text-teal-700 hover:text-teal-900 font-bold flex items-center gap-1 transition"
+              >
+                <Layers className="w-3 h-3 text-teal-600" />
+                <span>{showHelper ? 'إخفاء حاسبة الأشرطة' : 'احسب من العلب والأشرطة'}</span>
+              </button>
+
+              {showHelper && (
+                <div className="p-3 bg-teal-50/70 border border-teal-200 rounded-xl space-y-2">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-slate-600 mb-0.5">علب كاملة</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={helperBoxes}
+                        onChange={(e) => setHelperBoxes(Math.max(0, parseInt(e.target.value) || 0))}
+                        className="w-full px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs font-mono text-center focus:ring-1 focus:ring-teal-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-600 mb-0.5">أشرطة إضافية</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={helperStrips}
+                        onChange={(e) => setHelperStrips(Math.max(0, parseInt(e.target.value) || 0))}
+                        className="w-full px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs font-mono text-center focus:ring-1 focus:ring-teal-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-600 mb-0.5">حبات فَرط</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={helperLoose}
+                        onChange={(e) => setHelperLoose(Math.max(0, parseInt(e.target.value) || 0))}
+                        className="w-full px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs font-mono text-center focus:ring-1 focus:ring-teal-500"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-[11px] text-teal-900 font-mono">
+                      المجموع = {helperTotal} {medication.unit}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={applyHelper}
+                      className="px-2.5 py-1 bg-teal-700 hover:bg-teal-800 text-white text-[11px] font-bold rounded-lg transition active:scale-95"
+                    >
+                      تطبيق على الرصيد
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* New estimation preview */}
           <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs space-y-1">
             <div className="flex justify-between items-center text-emerald-950 font-medium">
@@ -194,7 +278,7 @@ export const RefillModal: FC<RefillModalProps> = ({
             </div>
             <div className="flex justify-between text-emerald-800 pt-0.5">
               <span>سيكفيك لمدة:</span>
-              <span className="font-bold font-mono">{newDays} يوماً تقريباً</span>
+              <span className="font-bold font-mono">{newDays} يوماً</span>
             </div>
           </div>
 

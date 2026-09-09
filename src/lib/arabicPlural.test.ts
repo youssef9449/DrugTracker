@@ -7,7 +7,7 @@ describe('pluralizeArabic', () => {
       expect(pluralizeArabic(1, 'قرص')).toBe('قرص واحد');
     });
     it('2 → dual', () => {
-      expect(pluralizeArabic(2, 'قرص')).toBe('قرصان');
+      expect(pluralizeArabic(2, 'قرص')).toBe('قرصين');
     });
     it('3-10 → few form', () => {
       expect(pluralizeArabic(3, 'قرص')).toBe('3 أقراص');
@@ -27,7 +27,7 @@ describe('pluralizeArabic', () => {
       expect(pluralizeArabic(1, 'كبسولة')).toBe('كبسولة واحدة');
     });
     it('2 → dual', () => {
-      expect(pluralizeArabic(2, 'كبسولة')).toBe('كبسولتان');
+      expect(pluralizeArabic(2, 'كبسولة')).toBe('كبسولتين');
     });
     it('3-10 → few form', () => {
       expect(pluralizeArabic(5, 'كبسولة')).toBe('5 كبسولات');
@@ -48,13 +48,13 @@ describe('pluralizeArabic', () => {
   describe('packaging nouns', () => {
     it('علبة (box)', () => {
       expect(pluralizeArabic(1, 'علبة')).toBe('علبة واحدة');
-      expect(pluralizeArabic(2, 'علبة')).toBe('علبتان');
+      expect(pluralizeArabic(2, 'علبة')).toBe('علبتين');
       expect(pluralizeArabic(3, 'علبة')).toBe('3 علب');
       expect(pluralizeArabic(15, 'علبة')).toBe('15 علبة');
     });
     it('شريط (strip)', () => {
       expect(pluralizeArabic(1, 'شريط')).toBe('شريط واحد');
-      expect(pluralizeArabic(2, 'شريط')).toBe('شريطان');
+      expect(pluralizeArabic(2, 'شريط')).toBe('شريطين');
       expect(pluralizeArabic(5, 'شريط')).toBe('5 أشرطة');
       expect(pluralizeArabic(12, 'شريط')).toBe('12 شريطاً');
     });
@@ -63,7 +63,7 @@ describe('pluralizeArabic', () => {
   describe('unknown unit fallback', () => {
     it('treats unknown units as masculine with a generic plural', () => {
       expect(pluralizeArabic(1, 'حقنة')).toBe('حقنة واحد');
-      expect(pluralizeArabic(2, 'حقنة')).toBe('حقنةان');
+      expect(pluralizeArabic(2, 'حقنة')).toBe('حقنةين');
       expect(pluralizeArabic(5, 'حقنة')).toBe('5 وحدات');
     });
   });

@@ -121,11 +121,11 @@ describe('describeStockInStrips', () => {
     // 35 pills, 10 per strip, 3 strips per box → 1 box + 0 strips + 5 pills
     expect(describeStockInStrips(35, 10, 3, 'قرص')).toBe('علبة واحدة و 5 أقراص');
     // 25 pills, 10 per strip, 3 strips per box → 0 boxes + 2 strips + 5 pills
-    expect(describeStockInStrips(25, 10, 3, 'قرص')).toBe('شريطان و 5 أقراص');
+    expect(describeStockInStrips(25, 10, 3, 'قرص')).toBe('شريطين و 5 أقراص');
     // 1 pill → "قرص واحد"
     expect(describeStockInStrips(1, 10, 3, 'قرص')).toBe('قرص واحد');
-    // 2 pills → "قرصان"
-    expect(describeStockInStrips(2, 10, 3, 'قرص')).toBe('قرصان');
+    // 2 pills → "قرصين"
+    expect(describeStockInStrips(2, 10, 3, 'قرص')).toBe('قرصين');
   });
 
   it('uses the unit arg for the loose-pill word', () => {
@@ -137,7 +137,7 @@ describe('describeOrderInBoxes', () => {
   it('returns exact box count when target divides evenly', () => {
     // 30 pills, box of 30 → "علبة واحدة (30 قرصاً)" — Arabic 11+ rule
     expect(describeOrderInBoxes(30, 3, 10, 30, 'قرص')).toBe('علبة واحدة (30 قرصاً)');
-    expect(describeOrderInBoxes(60, 3, 10, 30, 'قرص')).toBe('علبتان (60 قرصاً)');
+    expect(describeOrderInBoxes(60, 3, 10, 30, 'قرص')).toBe('علبتين (60 قرصاً)');
   });
 
   it('breaks into boxes + strips when remainder is whole strips', () => {
@@ -148,14 +148,14 @@ describe('describeOrderInBoxes', () => {
   });
 
   it('falls back to ~box count when remainder has loose pills', () => {
-    // 45 pills, box of 30 → 1 box + 15 pills (not whole strips) → "علبة واحدة تقريباً"
+    // 45 pills, box of 30 → 1 box + 1 strip + 5 loose pills
     expect(describeOrderInBoxes(45, 3, 10, 30, 'قرص')).toBe(
-      'علبة واحدة تقريباً (45 قرصاً)'
+      'علبة واحدة و شريط واحد و 5 أقراص (45 قرصاً)'
     );
   });
 
   it('returns the bare plural when target < one box', () => {
-    expect(describeOrderInBoxes(15, 3, 10, 30, 'قرص')).toBe('15 قرصاً');
+    expect(describeOrderInBoxes(15, 3, 10, 30, 'قرص')).toBe('شريط واحد و 5 أقراص (15 قرصاً)');
   });
 });
 

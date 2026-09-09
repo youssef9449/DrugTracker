@@ -3,6 +3,7 @@ import {
   effectiveCurrentPills,
   effectiveDaysLeft,
   settleDoseChange,
+  settleAutoDeductToggle,
   getCriticalAlarmDate,
   getTodayDateString,
 } from './dateCalculations';
@@ -320,5 +321,173 @@ describe('getCriticalAlarmDate', () => {
       lastSyncDate: '2024-08-11', // 30 days before 2024-09-10
     });
     expect(getCriticalAlarmDate(med, '2024-09-10', Date.now())).toBeNull();
+  });
+});
+
+describe('settleAutoDeductToggle', () => {
+  // ─── true → false (turn OFF auto-deduction after elapsed days) ────────
+  it('true → false: deducts the elapsed period at the OLD active rate, sets lastSyncDate=today, flips the flag', () => {
+    // currentPills 60, dose 2/day, lastSync 10 days ago (today=2024-09-10,
+    // lastSync=2024-08-31). Effective balance = 60 - 10*2 = 40.
+    // Toggle OFF → settle at 40, lastSyncDate=2024-09-10, autoDeduct=false.
+    const med = makeMed({
+      currentPills: 60,
+      dailyDose: 2,
+      lastSyncDate: '2024-08-31',
+      autoDeductEnabled: true,
+    });
+    const { updatedMed, log } = settleAutoDeductToggle(med, false, '2024-09-10');
+    expect(updatedMed.currentPills).toBe(40); // 60 - 10*2
+    expect(updatedMed.lastSyncDate).toBe('2024-09-10');
+    expect(updatedMed.autoDeductEnabled).toBe(false);
+    expect(log).not.toBeNull();
+    expect(log!.amount).toBe(-20);
+    expect(log!.type).toBe('auto_daily');
+  });
+
+  it('true → false: clamps the deduction at 0 when the elapsed period exceeds supply', () => {
+    // currentPills 4, dose 2/day, lastSync 10 days ago.
+    // Effective balance = max(0, 4 - 20) = 0. Toggle OFF → settle at 0.
+    const med = makeMed({
+      currentPills: 4,
+      dailyDose: 2,
+      lastSyncDate: '2024-08-31',
+      autoDeductEnabled: true,
+    });
+    const { updatedMed, log } = settleAutoDeductToggle(med, false, '2024-09-10');
+    expect(updatedMed.currentPills).toBe(0);
+    expect(updatedMed.lastSyncDate).toBe('2024-09-10');
+    expect(updatedMed.autoDeductEnabled).toBe(false);
+    expect(log!.amount).toBe(-4); // only 4 pills existed
+  });
+
+  it('true → false: 0 elapsed days → no deduction, no log (snapshot already current)', () => {
+    const med = makeMed({
+      currentPills: 30,
+      dailyDose: 2,
+      lastSyncDate: '2024-09-10',
+      autoDeductEnabled: true,
+    });
+    const { updatedMed, log } = settleAutoDeductToggle(med, false, '2024-09-10');
+    expect(updatedMed.currentPills).toBe(30); // no change
+    expect(updatedMed.lastSyncDate).toBe('2024-09-10');
+    expect(updatedMed.autoDeductEnabled).toBe(false);
+    expect(log).toBeNull(); // no pills deducted → no log
+  });
+
+  it('true → false: treats undefined as default-true (settles at the active rate)', () => {
+    // autoDeductEnabled undefined → default-true → settling on toggle OFF.
+    const med = makeMed({
+      currentPills: 60,
+      dailyDose: 2,
+      lastSyncDate: '2024-08-31',
+      autoDeductEnabled: undefined,
+    });
+    const { updatedMed, log } = settleAutoDeductToggle(med, false, '2024-09-10');
+    expect(updatedMed.currentPills).toBe(40);
+    expect(updatedMed.autoDeductEnabled).toBe(false);
+    expect(log).not.toBeNull();
+  });
+
+  it('true → false: dailyDose <= 0 → no deduction (just flips the flag + bumps lastSyncDate)', () => {
+    const med = makeMed({
+      currentPills: 30,
+      dailyDose: 0,
+      lastSyncDate: '2024-08-31',
+      autoDeductEnabled: true,
+    });
+    const { updatedMed, log } = settleAutoDeductToggle(med, false, '2024-09-10');
+    expect(updatedMed.currentPills).toBe(30); // no rate → no deduction
+    expect(updatedMed.lastSyncDate).toBe('2024-09-10');
+    expect(updatedMed.autoDeductEnabled).toBe(false);
+    expect(log).toBeNull();
+  });
+
+  it('true → false regression: displayed balance stays consistent across the toggle', () => {
+    // The bug this prevents: without settlement, the displayed balance
+    // would jump from effectiveCurrentPills (= 40, projected from
+    // snapshot at lastSyncDate) BACK UP to the stale snapshot (= 60)
+    // the moment the flag flips to false. The settle prevents that by
+    // baking the projected consumption into the snapshot.
+    const med = makeMed({
+      currentPills: 60,
+      dailyDose: 2,
+      lastSyncDate: '2024-08-31',
+      autoDeductEnabled: true,
+    });
+    const beforeToggle = effectiveCurrentPills(med, '2024-09-10'); // 40
+    const { updatedMed } = settleAutoDeductToggle(med, false, '2024-09-10');
+    // After the toggle, effectiveCurrentPills with autoDeduct=false
+    // returns the snapshot unchanged (no projection). The settle
+    // ensures the snapshot equals the pre-toggle effective balance.
+    const afterToggle = effectiveCurrentPills(updatedMed, '2024-09-10');
+    expect(beforeToggle).toBe(40);
+    expect(afterToggle).toBe(40);
+    expect(afterToggle).toBe(beforeToggle); // no jump
+  });
+
+  // ─── false → true (turn ON auto-deduction after a frozen period) ─────
+  it('false → true: does NOT deduct retroactively for the frozen period; keeps currentPills unchanged', () => {
+    // currentPills 60, dose 2/day, lastSync 10 days ago, autoDeduct was OFF.
+    // The user wasn't consuming during the frozen period — we must NOT
+    // retroactively deduct. The frozen balance (60) IS the live balance.
+    // Toggle ON → keep 60, lastSyncDate=today, autoDeduct=true.
+    const med = makeMed({
+      currentPills: 60,
+      dailyDose: 2,
+      lastSyncDate: '2024-08-31',
+      autoDeductEnabled: false,
+    });
+    const { updatedMed, log } = settleAutoDeductToggle(med, true, '2024-09-10');
+    expect(updatedMed.currentPills).toBe(60); // unchanged — no retro-deduction
+    expect(updatedMed.lastSyncDate).toBe('2024-09-10');
+    expect(updatedMed.autoDeductEnabled).toBe(true);
+    expect(log).toBeNull(); // no deduction → no log
+  });
+
+  it('false → true regression: enabling does not retroactively deduct daysPassed*dailyDose for the frozen period', () => {
+    // The bug this prevents: without the lastSyncDate bump, enabling
+    // auto-deduction with the old lastSyncDate would cause
+    // effectiveCurrentPills to instantly deduct 10*2 = 20 pills for the
+    // elapsed period — but the user wasn't consuming during that time.
+    // The settle bumps lastSyncDate to today, so the projection starts
+    // fresh and there's no retroactive deduction.
+    const med = makeMed({
+      currentPills: 60,
+      dailyDose: 2,
+      lastSyncDate: '2024-08-31',
+      autoDeductEnabled: false,
+    });
+    const { updatedMed } = settleAutoDeductToggle(med, true, '2024-09-10');
+    // After the toggle, effectiveCurrentPills with autoDeduct=true and
+    // lastSyncDate=today projects 0 daysPassed → returns the snapshot.
+    const afterToggle = effectiveCurrentPills(updatedMed, '2024-09-10');
+    expect(afterToggle).toBe(60); // unchanged — no retro-deduction
+  });
+
+  it('false → true: still bumps lastSyncDate even when currentPills is unchanged', () => {
+    // The lastSyncDate bump is what prevents the retroactive deduction.
+    const med = makeMed({
+      currentPills: 30,
+      dailyDose: 1,
+      lastSyncDate: '2024-08-31',
+      autoDeductEnabled: false,
+    });
+    const { updatedMed } = settleAutoDeductToggle(med, true, '2024-09-10');
+    expect(updatedMed.lastSyncDate).toBe('2024-09-10');
+  });
+
+  it('false → true: 0 elapsed days → still bumps lastSyncDate (cosmetic but consistent)', () => {
+    const med = makeMed({
+      currentPills: 30,
+      dailyDose: 1,
+      lastSyncDate: '2024-09-10',
+      autoDeductEnabled: false,
+    });
+    const { updatedMed, log } = settleAutoDeductToggle(med, true, '2024-09-10');
+    expect(updatedMed.currentPills).toBe(30);
+    expect(updatedMed.lastSyncDate).toBe('2024-09-10');
+    expect(updatedMed.autoDeductEnabled).toBe(true);
+    expect(log).toBeNull();
   });
 });

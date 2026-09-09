@@ -341,6 +341,100 @@ export function settleDoseChange(
 }
 
 /**
+ * Settlement helper for `autoDeductEnabled` toggling.
+ *
+ * When the user toggles the auto-deduction flag, the snapshot must be
+ * re-settled at the live effective balance before the new state takes
+ * effect — otherwise the displayed balance will silently become
+ * inconsistent with reality.
+ *
+ * Behavior:
+ *   - true → false (turning auto-deduction OFF after it was ON):
+ *     The med was being auto-deducted up to today. Settle the period
+ *     [lastSyncDate, today] at the OLD active rate: deduct
+ *     daysPassed*dailyDose from currentPills (clamped at 0), set
+ *     lastSyncDate=today. THEN flip autoDeductEnabled=false.
+ *     Without this, the displayed balance would jump back UP to the
+ *     stale snapshot value the moment the flag flips (because
+ *     effectiveCurrentPills returns currentPills unchanged when
+ *     autoDeduct is false), undoing all consumption since lastSyncDate.
+ *   - false → true (turning auto-deduction ON after it was OFF):
+ *     The med was FROZEN for the elapsed period — the user wasn't
+ *     consuming during that time, so we must NOT retroactively deduct.
+ *     Keep currentPills unchanged (the frozen balance is the live
+ *     balance). Set lastSyncDate=today so the new auto-deduction
+ *     starts fresh from today forward. THEN flip autoDeductEnabled=true.
+ *     Without the lastSyncDate bump, enabling auto-deduction would
+ *     instantly deduct daysPassed*dailyDose retroactively for the
+ *     frozen period — wrong.
+ *
+ * Edge cases:
+ *   - dailyDose <= 0: no consumption rate → no deduction either way.
+ *     Just bump lastSyncDate and flip the flag.
+ *   - undefined → false (default-true med being turned OFF): treat
+ *     undefined as "auto-deduct was ON" (default), so settle at the
+ *     old active rate.
+ *   - true → true / false → false: no transition, but the caller may
+ *     still want to bump lastSyncDate — left to the caller's discretion
+ *     (this helper is only called when the flag actually changes).
+ *
+ * Returns the settled med + (optionally) a consumption log for the
+ * settlement deduction. The log is only produced for the true→false
+ * transition with a positive dailyDose and elapsed days (i.e. when
+ * pills were actually deducted). The caller is responsible for
+ * persisting both.
+ */
+export function settleAutoDeductToggle(
+  med: Medication,
+  newState: boolean,
+  todayStr: string = getTodayDateString()
+): { updatedMed: Medication; log: ConsumptionLog | null } {
+  const wasActive = med.autoDeductEnabled !== false;
+
+  // Compute daysPassed for the period [lastSyncDate, today] using the
+  // OLD state's projection behavior.
+  const daysPassed = getDaysDifference(med.lastSyncDate || todayStr, todayStr);
+
+  let pillsDeducted = 0;
+  let settledPills = med.currentPills;
+
+  // Only deduct when:
+  //   - the med WAS being auto-deducted (wasActive === true), AND
+  //   - we're turning it OFF (newState === false), AND
+  //   - there's a positive consumption rate, AND
+  //   - days actually passed since lastSyncDate.
+  // For the false→true transition, we explicitly do NOT deduct
+  // retroactively for the frozen period — currentPills stays unchanged.
+  if (wasActive && !newState && med.dailyDose > 0 && daysPassed > 0) {
+    pillsDeducted = Math.min(med.currentPills, daysPassed * med.dailyDose);
+    settledPills = Math.max(0, med.currentPills - pillsDeducted);
+  }
+
+  const updatedMed: Medication = {
+    ...med,
+    currentPills: settledPills,
+    lastSyncDate: todayStr,
+    autoDeductEnabled: newState,
+  };
+
+  const log: ConsumptionLog | null =
+    pillsDeducted > 0
+      ? {
+          id: 'log-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
+          medicationId: med.id,
+          medicationName: med.name,
+          type: 'auto_daily',
+          amount: -pillsDeducted,
+          date: todayStr,
+          timestamp: new Date().toISOString(),
+          description: `تسوية عند إيقاف الخصم التلقائي: خصم ${daysPassed} ${daysPassed === 1 ? 'يوم' : 'أيام'} بالجرعة الحالية (${med.dailyDose}/يوم) (-${pillsDeducted} ${med.unit})`,
+        }
+      : null;
+
+  return { updatedMed, log };
+}
+
+/**
  * Compute the absolute timestamp (epoch ms) at which the medication
  * is projected to cross the critical threshold.
  *

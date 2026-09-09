@@ -8,8 +8,12 @@ import {
   DEFAULT_PHARMACY_SETTINGS,
   type Medication,
 } from './types';
+import { getTodayDateString } from './utils/dateCalculations';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
+  // lastSyncDate defaults to today so effectiveCurrentPills() ===
+  // currentPills (no days have passed). Tests that exercise the
+  // dynamic-balance projection override lastSyncDate explicitly.
   return {
     id: 'med-test',
     name: 'Test',
@@ -19,7 +23,7 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: '2024-01-01',
+    lastSyncDate: getTodayDateString(),
     ...overrides,
   };
 }

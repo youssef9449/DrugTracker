@@ -3,8 +3,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { PharmacyShoppingView } from './PharmacyShoppingView';
 import type { Medication, PharmacySettings } from '../types';
+import { getTodayDateString } from '../utils/dateCalculations';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
+  // lastSyncDate defaults to today so effectiveCurrentPills() ===
+  // currentPills (no projection); tests set their own lastSyncDate to
+  // exercise the dynamic balance.
   return {
     id: 'med-1',
     name: 'Test Med',
@@ -14,7 +18,7 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: '2024-01-01',
+    lastSyncDate: getTodayDateString(),
     ...overrides,
   };
 }

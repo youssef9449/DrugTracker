@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { History, Calendar, RefreshCw, Plus, MinusCircle, Clock, ShieldCheck, ArrowUpRight, ArrowDownLeft, RotateCcw } from 'lucide-react';
+import { History, Calendar, Plus, MinusCircle, Clock, ShieldCheck, ArrowUpRight, ArrowDownLeft, RotateCcw } from 'lucide-react';
 import { Medication, ConsumptionLog } from '../types';
 import { getTodayDateString, formatArabicDate } from '../utils/dateCalculations';
 
@@ -7,7 +7,6 @@ interface ConsumptionLogViewProps {
   medications: Medication[];
   logs: ConsumptionLog[];
   onAddLog: (log: ConsumptionLog) => void;
-  onSimulateDaysPassed: (days: number) => void;
   onRestoreDose: (medicationId: string, reason: string) => void;
   showToast: (message: string) => void;
 }
@@ -15,7 +14,6 @@ interface ConsumptionLogViewProps {
 export const ConsumptionLogView: React.FC<ConsumptionLogViewProps> = ({
   medications,
   logs,
-  onSimulateDaysPassed,
   onRestoreDose,
   showToast,
 }) => {
@@ -142,36 +140,6 @@ export const ConsumptionLogView: React.FC<ConsumptionLogViewProps> = ({
           <Plus className="w-3.5 h-3.5 text-teal-600" />
           <span>إعادة الجرعة المخصومة للمخزون (+1 جرعة)</span>
         </button>
-      </div>
-
-      {/* Simulator tool for testing elapsed days */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-xs">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <h3 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-              <RefreshCw className="w-4 h-4 text-amber-600" />
-              <span>تجربة ومحاكاة مرور الأيام</span>
-            </h3>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              لاختبار كيف يخصم التطبيق الأيام تلقائياً وتحديث التنبيهات
-            </p>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => onSimulateDaysPassed(1)}
-              className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-bold text-[11px] rounded-xl transition active:scale-95"
-            >
-              + مرور يوم
-            </button>
-            <button
-              onClick={() => onSimulateDaysPassed(3)}
-              className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-bold text-[11px] rounded-xl transition active:scale-95"
-            >
-              + مرور 3 أيام
-            </button>
-          </div>
-        </div>
       </div>
 
       {/* Activity Timeline list */}

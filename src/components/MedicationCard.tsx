@@ -87,7 +87,7 @@ export const MedicationCard: React.FC<MedicationCardProps> = ({
   const isAutoActive = medication.autoDeductEnabled !== false;
 
   // -------------------------------------------------------------
-  // VIEW 1: "قارب على النفاد" (ALERTS) - Focus on Urgency & Refill
+  // VIEW 1: "قارب على النفاذ" (ALERTS) - Focus on Urgency & Refill
   // -------------------------------------------------------------
   if (viewFilter === 'alerts') {
     const isOut = statusInfo.status === 'out_of_stock';
@@ -274,7 +274,7 @@ export const MedicationCard: React.FC<MedicationCardProps> = ({
           </div>
 
           <div className="text-left">
-            <span className="text-[11px] text-slate-500 block">تاريخ النفاد التقديري:</span>
+            <span className="text-[11px] text-slate-500 block">تاريخ النفاذ التقديري:</span>
             <span className="font-bold text-slate-900 block mt-0.5 text-xs">
               {depletion.formattedArabic}
             </span>
@@ -742,7 +742,7 @@ export const MedicationCard: React.FC<MedicationCardProps> = ({
       <div className="mt-2.5 p-2 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between text-xs">
         <div className="flex items-center gap-1.5 text-slate-600">
           <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-          <span className="text-[11px]">موعد النفاد المتوقع:</span>
+          <span className="text-[11px]">موعد النفاذ المتوقع:</span>
         </div>
         <span
           className={`font-bold text-[11px] px-2 py-0.5 rounded-md border ${

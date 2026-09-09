@@ -183,14 +183,26 @@ export interface PharmacySettings {
   customerCode: string; // "14739" as requested
   defaultDurationDays: 30 | 60;
   customQuantities: Record<string, number>; // medId -> custom quantity
+  /**
+   * Customer's delivery address — included in the WhatsApp order
+   * message so the pharmacy knows where to deliver.
+   */
+  address: string;
+  /**
+   * Customer's contact phone number — included in the WhatsApp
+   * order message so the pharmacy can call back to confirm.
+   */
+  contactPhone: string;
 }
 
 export const DEFAULT_PHARMACY_SETTINGS: PharmacySettings = {
   pharmacyPhone: '',
   pharmacyName: 'الصيدلية',
-  customerCode: '14739',
+  customerCode: '',
   defaultDurationDays: 30,
   customQuantities: {},
+  address: '',
+  contactPhone: '',
 };
 
 export type MedicationStatus = 'out_of_stock' | 'critical' | 'warning' | 'sufficient';
@@ -242,7 +254,7 @@ export function calculateMedicationStatus(med: Medication): {
     return {
       daysLeft,
       status: 'warning',
-      statusLabel: `اقترب من النفاد (${daysLeft} أيام)`,
+      statusLabel: `اقترب من النفاذ (${daysLeft} أيام)`,
       statusColorClass: 'text-amber-600',
       badgeBg: 'bg-amber-50 text-amber-700 border-amber-200',
       badgeText: `⚠️ يكفي لـ ${daysLeft} أيام فقط`,

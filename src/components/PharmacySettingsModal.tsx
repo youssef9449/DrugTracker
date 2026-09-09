@@ -37,22 +37,26 @@ export const PharmacySettingsModal: React.FC<PharmacySettingsModalProps> = ({
 }) => {
   const [pharmacyPhone, setPharmacyPhone] = useState(settings.pharmacyPhone || '');
   const [pharmacyName, setPharmacyName] = useState(settings.pharmacyName || 'الصيدلية');
-  const [customerCode, setCustomerCode] = useState(settings.customerCode || '14739');
+  const [customerCode, setCustomerCode] = useState(settings.customerCode || '');
   const [defaultDurationDays, setDefaultDurationDays] = useState<30 | 60>(
     settings.defaultDurationDays || 30
   );
   const [customQuantities, setCustomQuantities] = useState<Record<string, number>>(
     settings.customQuantities || {}
   );
+  const [address, setAddress] = useState(settings.address || '');
+  const [contactPhone, setContactPhone] = useState(settings.contactPhone || '');
 
   // Synchronize state whenever modal opens or settings change externally
   useEffect(() => {
     if (isOpen) {
       setPharmacyPhone(settings.pharmacyPhone || '');
       setPharmacyName(settings.pharmacyName || 'الصيدلية');
-      setCustomerCode(settings.customerCode || '14739');
+      setCustomerCode(settings.customerCode || '');
       setDefaultDurationDays(settings.defaultDurationDays || 30);
       setCustomQuantities(settings.customQuantities || {});
+      setAddress(settings.address || '');
+      setContactPhone(settings.contactPhone || '');
     }
   }, [isOpen, settings]);
 
@@ -80,9 +84,11 @@ export const PharmacySettingsModal: React.FC<PharmacySettingsModalProps> = ({
     onSaveSettings({
       pharmacyPhone: pharmacyPhone.trim(),
       pharmacyName: pharmacyName.trim() || 'الصيدلية',
-      customerCode: customerCode.trim() || '14739',
+      customerCode: customerCode.trim(),
       defaultDurationDays,
       customQuantities,
+      address: address.trim(),
+      contactPhone: contactPhone.trim(),
     });
     onClose();
   };
@@ -157,7 +163,7 @@ export const PharmacySettingsModal: React.FC<PharmacySettingsModalProps> = ({
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono font-bold focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
               />
               <span className="text-[10px] text-slate-500 mt-1 block">
-                يظهر في نهاية الرسالة: (رقم العميل {customerCode || '14739'})
+                يظهر في نهاية الرسالة: (رقم العميل {customerCode || '—'})
               </span>
             </div>
 
@@ -175,6 +181,40 @@ export const PharmacySettingsModal: React.FC<PharmacySettingsModalProps> = ({
               />
               <span className="text-[10px] text-slate-500 mt-1 block">
                 لتنظيم اسم الجهة في التطبيق
+              </span>
+            </div>
+
+            {/* Delivery Address */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                عنوان التوصيل (اختياري)
+              </label>
+              <textarea
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="مثال: شارع 15، عمارة 20، الدور الثالث، شقة 8 — مدينة نصر"
+                rows={2}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white resize-none"
+              />
+              <span className="text-[10px] text-slate-500 mt-1 block">
+                يظهر في رسالة الواتساب تحت رقم العميل
+              </span>
+            </div>
+
+            {/* Contact Phone */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                رقم التواصل (اختياري)
+              </label>
+              <input
+                type="tel"
+                value={contactPhone}
+                onChange={(e) => setContactPhone(e.target.value)}
+                placeholder="مثال: 01012345678"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono font-bold focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+              />
+              <span className="text-[10px] text-slate-500 mt-1 block">
+                رقمك الشخصي ليتصلوا بك للتأكيد — يظهر في رسالة الواتساب
               </span>
             </div>
           </div>
@@ -355,7 +395,9 @@ export const PharmacySettingsModal: React.FC<PharmacySettingsModalProps> = ({
                     packageSize: m.packageSize,
                   };
                 }),
-                customerCode
+                customerCode,
+                address,
+                contactPhone
               )}
             </div>
 
@@ -380,7 +422,9 @@ export const PharmacySettingsModal: React.FC<PharmacySettingsModalProps> = ({
                         packageSize: m.packageSize,
                       };
                     }),
-                    customerCode
+                    customerCode,
+                    address,
+                    contactPhone
                   );
                   openWhatsAppLink(pharmacyPhone, msg);
                 }}

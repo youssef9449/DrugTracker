@@ -38,7 +38,9 @@ export const RefillModal: FC<RefillModalProps> = ({
   if (!isOpen || !medication) return null;
 
   const sz = getMedSizes(medication);
+  const isSolid = sz.isSolid;
   const availableUnits = getAvailableUnits(medication, sz);
+  const boxLabel = medication.unit === 'مل' ? 'عبوة' : 'علبة';
 
   // Convert unit qty → pills.
   function unitToPills(qty: number, unit: RefillUnit): number {
@@ -73,19 +75,23 @@ export const RefillModal: FC<RefillModalProps> = ({
   const newDays =
     medication.dailyDose > 0 ? Math.floor(newTotal / medication.dailyDose) : 0;
 
-  const currentStripsDesc = describeStockInStrips(
-    medication.currentPills,
-    medication.pillsPerStrip,
-    medication.stripsPerBox,
-    medication.unit
-  );
+  const currentStripsDesc = isSolid
+    ? describeStockInStrips(
+        medication.currentPills,
+        medication.pillsPerStrip,
+        medication.stripsPerBox,
+        medication.unit
+      )
+    : null;
 
-  const newStripsDesc = describeStockInStrips(
-    newTotal,
-    medication.pillsPerStrip,
-    medication.stripsPerBox,
-    medication.unit
-  );
+  const newStripsDesc = isSolid
+    ? describeStockInStrips(
+        newTotal,
+        medication.pillsPerStrip,
+        medication.stripsPerBox,
+        medication.unit
+      )
+    : null;
 
   const unitStep = refillUnit === 'pills' ? sz.boxSize : 1;
 
@@ -125,6 +131,12 @@ export const RefillModal: FC<RefillModalProps> = ({
                 <span>مواصفات العلبة: {medication.stripsPerBox} أشرطة × {medication.pillsPerStrip} {medication.unit}</span>
               </div>
             )}
+            {!isSolid && medication.packageSize && medication.packageSize > 0 && (
+              <div className="mt-1 text-[11px] text-teal-800 bg-teal-50 px-2 py-0.5 rounded-md border border-teal-200/60 inline-flex items-center gap-1">
+                <Box className="w-3 h-3 text-teal-600" />
+                <span>سعة العبوة: {medication.packageSize} {medication.unit}</span>
+              </div>
+            )}
           </div>
 
           {/* Unit selector chips */}
@@ -133,7 +145,7 @@ export const RefillModal: FC<RefillModalProps> = ({
               {availableUnits.map((u) => {
                 const isActive = refillUnit === u;
                 const icon = u === 'pills' ? <Pill className="w-3 h-3" /> : u === 'boxes' ? <Box className="w-3 h-3" /> : <Layers className="w-3 h-3" />;
-                const label = u === 'pills' ? medication.unit : u === 'boxes' ? 'علبة' : 'شريط';
+                const label = u === 'pills' ? medication.unit : u === 'boxes' ? boxLabel : 'شريط';
                 return (
                   <button
                     key={u}
@@ -171,7 +183,7 @@ export const RefillModal: FC<RefillModalProps> = ({
                 className="w-20 px-2 py-1.5 text-center font-mono font-bold text-base border border-slate-300 rounded-xl focus:ring-2 focus:ring-teal-500"
               />
               <div className="text-[10px] text-slate-400 mt-0.5">
-                {refillUnit === 'pills' ? pluralizeArabic(unitQty, medication.unit) : refillUnit === 'boxes' ? pluralizeArabic(unitQty, 'علبة') : pluralizeArabic(unitQty, 'شريط')}
+                {refillUnit === 'pills' ? pluralizeArabic(unitQty, medication.unit) : refillUnit === 'boxes' ? pluralizeArabic(unitQty, boxLabel) : pluralizeArabic(unitQty, 'شريط')}
               </div>
             </div>
             <button
@@ -216,15 +228,23 @@ export const RefillModal: FC<RefillModalProps> = ({
 // ── Helpers (same pattern as PharmacyShoppingView) ─────────────
 
 function getMedSizes(med: Medication) {
+  const isSolid = med.unit === 'قرص' || med.unit === 'كبسولة';
+  const hasStrips = isSolid && Boolean(
+    med.stripsPerBox &&
+    med.pillsPerStrip &&
+    med.stripsPerBox > 0 &&
+    med.pillsPerStrip > 0
+  );
   const boxSize =
-    med.stripsPerBox && med.pillsPerStrip
-      ? med.stripsPerBox * med.pillsPerStrip
+    hasStrips
+      ? med.stripsPerBox! * med.pillsPerStrip!
       : med.packageSize && med.packageSize > 0
       ? med.packageSize
+      : med.unit === 'مل'
+      ? 100
       : 30;
-  const stripSize = med.pillsPerStrip && med.pillsPerStrip > 0 ? med.pillsPerStrip : 0;
-  const hasStrips = Boolean(med.stripsPerBox && med.pillsPerStrip);
-  return { boxSize, stripSize, hasStrips };
+  const stripSize = hasStrips && med.pillsPerStrip && med.pillsPerStrip > 0 ? med.pillsPerStrip : 0;
+  return { boxSize, stripSize, hasStrips, isSolid };
 }
 
 function getAvailableUnits(med: Medication, sz: ReturnType<typeof getMedSizes>): RefillUnit[] {

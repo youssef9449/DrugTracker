@@ -121,6 +121,8 @@ export function describeStockInStrips(
   stripsPerBox?: number,
   unit: string = 'قرص'
 ): string | null {
+  // Strips only apply to solid medications (pills/capsules)
+  if (unit !== 'قرص' && unit !== 'كبسولة') return null;
   if (!pillsPerStrip || pillsPerStrip <= 0 || pills <= 0) return null;
 
   const totalStrips = Math.floor(pills / pillsPerStrip);
@@ -172,14 +174,19 @@ export function describeOrderInBoxes(
   packageSize?: number,
   unit: string = 'قرص'
 ): string {
+  const isSolid = unit === 'قرص' || unit === 'كبسولة';
+  const effectiveStripsPerBox = isSolid ? stripsPerBox : undefined;
+  const effectivePillsPerStrip = isSolid ? pillsPerStrip : undefined;
+  const boxWordLabel = unit === 'مل' ? 'عبوة' : 'علبة';
+
   const boxSize =
-    stripsPerBox && pillsPerStrip && stripsPerBox > 0 && pillsPerStrip > 0
-      ? stripsPerBox * pillsPerStrip
+    effectiveStripsPerBox && effectivePillsPerStrip && effectiveStripsPerBox > 0 && effectivePillsPerStrip > 0
+      ? effectiveStripsPerBox * effectivePillsPerStrip
       : packageSize && packageSize > 0
       ? packageSize
-      : 30;
+      : unit === 'مل' ? 100 : 30;
 
-  const stripSize = pillsPerStrip && pillsPerStrip > 0 ? pillsPerStrip : null;
+  const stripSize = effectivePillsPerStrip && effectivePillsPerStrip > 0 ? effectivePillsPerStrip : null;
 
   const boxes = Math.floor(targetPills / boxSize);
   const remainderAfterBoxes = targetPills % boxSize;
@@ -188,19 +195,26 @@ export function describeOrderInBoxes(
 
   // Exact match — full boxes only.
   if (boxes > 0 && remainderAfterBoxes === 0) {
-    const boxWord = pluralizeArabic(boxes, 'علبة');
+    const boxWord = pluralizeArabic(boxes, boxWordLabel);
     return `${boxWord} (${pillTotalWord})`;
   }
 
-  // Boxes + strips (and possibly loose pills).
+  // Boxes + strips (and possibly loose pills) for solid medications.
   if (boxes > 0 && stripSize && remainderAfterBoxes > 0) {
     const strips = Math.floor(remainderAfterBoxes / stripSize);
     const loosePills = remainderAfterBoxes % stripSize;
-    const boxWord = pluralizeArabic(boxes, 'علبة');
+    const boxWord = pluralizeArabic(boxes, boxWordLabel);
     const parts: string[] = [boxWord];
     if (strips > 0) parts.push(pluralizeArabic(strips, 'شريط'));
     if (loosePills > 0) parts.push(pluralizeArabic(loosePills, unit));
     return `${parts.join(' و ')} (${pillTotalWord})`;
+  }
+
+  // Boxes + remainder with no strips (e.g. liquid bottles or loose units)
+  if (boxes > 0 && !stripSize && remainderAfterBoxes > 0) {
+    const boxWord = pluralizeArabic(boxes, boxWordLabel);
+    const looseWord = pluralizeArabic(remainderAfterBoxes, unit);
+    return `${boxWord} و ${looseWord} (${pillTotalWord})`;
   }
 
   // Strips only (no boxes), possibly + loose pills.
@@ -214,7 +228,7 @@ export function describeOrderInBoxes(
     }
   }
 
-  // No boxes, no strips — just the pill count.
+  // No boxes, no strips — just the total count in unit.
   return pillTotalWord;
 }
 

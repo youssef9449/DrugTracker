@@ -131,6 +131,11 @@ describe('describeStockInStrips', () => {
   it('uses the unit arg for the loose-pill word', () => {
     expect(describeStockInStrips(5, 10, 3, 'كبسولة')).toBe('5 كبسولات');
   });
+
+  it('returns null for non-solid medication (e.g. مل syrup)', () => {
+    expect(describeStockInStrips(100, 10, 3, 'مل')).toBeNull();
+    expect(describeStockInStrips(50, undefined, undefined, 'مل')).toBeNull();
+  });
 });
 
 describe('describeOrderInBoxes', () => {
@@ -138,6 +143,15 @@ describe('describeOrderInBoxes', () => {
     // 30 pills, box of 30 → "علبة واحدة (30 قرصاً)" — Arabic 11+ rule
     expect(describeOrderInBoxes(30, 3, 10, 30, 'قرص')).toBe('علبة واحدة (30 قرصاً)');
     expect(describeOrderInBoxes(60, 3, 10, 30, 'قرص')).toBe('علبتين (60 قرصاً)');
+  });
+
+  it('handles liquid medication (مل) using عبوة and ignores strips', () => {
+    // 100 ml bottle, ordering 100 ml → "عبوة واحدة (100 مل)"
+    expect(describeOrderInBoxes(100, undefined, undefined, 100, 'مل')).toBe('عبوة واحدة (100 مل)');
+    // 100 ml bottle, ordering 200 ml → "عبوتين (200 مل)"
+    expect(describeOrderInBoxes(200, undefined, undefined, 100, 'مل')).toBe('عبوتين (200 مل)');
+    // 100 ml bottle, ordering 120 ml → "عبوة واحدة و 20 مل (120 مل)"
+    expect(describeOrderInBoxes(120, undefined, undefined, 100, 'مل')).toBe('عبوة واحدة و 20 مل (120 مل)');
   });
 
   it('breaks into boxes + strips when remainder is whole strips', () => {

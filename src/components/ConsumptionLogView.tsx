@@ -75,7 +75,7 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
             <span className="text-lg font-extrabold font-mono text-teal-800">
               {totalMonthlyConsumption}
             </span>
-            <span className="text-[11px] text-slate-600 mr-1">قرص / شهر</span>
+            <span className="text-[11px] text-slate-600 mr-1">جرعة / شهر</span>
           </div>
 
           <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
@@ -91,7 +91,7 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
       <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-xs">
         <h3 className="text-xs font-bold text-slate-800 flex items-center gap-1.5 mb-2">
           <RotateCcw className="w-4 h-4 text-teal-600" />
-          <span>لم تتناول جرعتك اليوم؟ (استرجاع حبة للمخزون)</span>
+          <span>لم تتناول جرعتك اليوم؟ (استرجاع الجرعة للمخزون)</span>
         </h3>
         <p className="text-[11px] text-slate-500 mb-3">
           بما أن التطبيق يخصم الجرعة تلقائياً بمرور اليوم، إذا كنت صائماً أو نسيت أخذ الدواء اليوم، يمكنك إعادة الجرعة للمخزون بسهولة:
@@ -137,7 +137,13 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
           className="mt-3 w-full py-2 px-3 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition active:scale-98"
         >
           <Plus className="w-3.5 h-3.5 text-teal-600" />
-          <span>إعادة الجرعة المخصومة للمخزون (+1 جرعة)</span>
+          <span>
+            إعادة الجرعة المخصومة للمخزون{' '}
+            {(() => {
+              const med = medications.find((m) => m.id === selectedMedId);
+              return med ? `(+${med.dailyDose} ${med.unit})` : '(+1 جرعة)';
+            })()}
+          </span>
         </button>
       </div>
 

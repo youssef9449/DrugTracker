@@ -11,6 +11,7 @@ import {
   Clock,
   ShieldCheck,
   Layers,
+  Box,
 } from 'lucide-react';
 import { Medication, calculateMedicationStatus, describeStockInStrips } from '../types';
 import { getDepletionDate, getTodayDateString } from '../utils/dateCalculations';
@@ -43,12 +44,16 @@ export const MedicationCard: FC<MedicationCardProps> = ({
 }) => {
   const statusInfo = calculateMedicationStatus(medication);
   const depletion = getDepletionDate(medication);
-  const stripsDesc = describeStockInStrips(
-    medication.currentPills,
-    medication.pillsPerStrip,
-    medication.stripsPerBox,
-    medication.unit
-  );
+  const isSolid = medication.unit === 'قرص' || medication.unit === 'كبسولة';
+  const hasStrips = isSolid && Boolean(medication.stripsPerBox && medication.pillsPerStrip);
+  const stripsDesc = isSolid
+    ? describeStockInStrips(
+        medication.currentPills,
+        medication.pillsPerStrip,
+        medication.stripsPerBox,
+        medication.unit
+      )
+    : null;
 
   // Maximum visual scale for progress
   const maxVisualRange = Math.max(medication.warningThresholdDays * 3, 20);
@@ -138,10 +143,16 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   </span>
                 )}
                 <span>معدل الخصم: {medication.dailyDose} {medication.unit}/يوم</span>
-                {medication.stripsPerBox && medication.pillsPerStrip && (
+                {hasStrips && (
                   <span className="text-[10px] text-teal-800 bg-white/90 border border-teal-200 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-medium">
                     <Layers className="w-3 h-3 text-teal-600" />
                     <span>العلبة: {medication.stripsPerBox} أشرطة × {medication.pillsPerStrip} {medication.unit}</span>
+                  </span>
+                )}
+                {!isSolid && medication.packageSize && medication.packageSize > 0 && (
+                  <span className="text-[10px] text-teal-800 bg-white/90 border border-teal-200 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-medium">
+                    <Box className="w-3 h-3 text-teal-600" />
+                    <span>سعة العبوة: {medication.packageSize} {medication.unit}</span>
                   </span>
                 )}
               </div>
@@ -221,7 +232,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             className="flex-1 py-2 px-3 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 shadow-xs"
           >
             <Plus className="w-4 h-4" />
-            <span>تعبئة رصيد (+ علبة)</span>
+            <span>تعبئة رصيد (+ {medication.unit === 'مل' ? 'عبوة' : 'علبة'})</span>
           </button>
 
           {onNavigateToShopping && (
@@ -284,10 +295,16 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                     {medication.category}
                   </span>
                 )}
-                {medication.stripsPerBox && medication.pillsPerStrip && (
+                {hasStrips && (
                   <span className="text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-medium border border-emerald-200/50">
                     <Layers className="w-3 h-3 text-emerald-600" />
                     <span>العلبة: {medication.stripsPerBox} أشرطة × {medication.pillsPerStrip} {medication.unit}</span>
+                  </span>
+                )}
+                {!isSolid && medication.packageSize && medication.packageSize > 0 && (
+                  <span className="text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-medium border border-emerald-200/50">
+                    <Box className="w-3 h-3 text-emerald-600" />
+                    <span>سعة العبوة: {medication.packageSize} {medication.unit}</span>
                   </span>
                 )}
                 {medication.notes && (
@@ -424,10 +441,16 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   {medication.category}
                 </span>
               )}
-              {medication.stripsPerBox && medication.pillsPerStrip && (
+              {hasStrips && (
                 <span className="text-[11px] text-teal-800 bg-teal-50 border border-teal-200/60 px-2 py-0.5 rounded-md flex items-center gap-1 font-medium">
                   <Layers className="w-3 h-3 text-teal-600" />
                   <span>العلبة: {medication.stripsPerBox} أشرطة × {medication.pillsPerStrip} {medication.unit}</span>
+                </span>
+              )}
+              {!isSolid && medication.packageSize && medication.packageSize > 0 && (
+                <span className="text-[11px] text-teal-800 bg-teal-50 border border-teal-200/60 px-2 py-0.5 rounded-md flex items-center gap-1 font-medium">
+                  <Box className="w-3 h-3 text-teal-600" />
+                  <span>سعة العبوة: {medication.packageSize} {medication.unit}</span>
                 </span>
               )}
               {medication.notes && (
@@ -579,7 +602,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           className="w-full py-2 px-3 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 shadow-2xs"
         >
           <Plus className="w-4 h-4 text-teal-600" />
-          <span>تعبئة رصيد عند الشراء (+ عبوة جديدة)</span>
+          <span>تعبئة رصيد عند الشراء (+ {medication.unit === 'مل' ? 'عبوة جديدة' : 'علبة جديدة'})</span>
         </button>
       </div>
     </div>

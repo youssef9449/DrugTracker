@@ -13,9 +13,10 @@ import {
   Layers,
 } from 'lucide-react';
 import { Medication, calculateMedicationStatus, describeStockInStrips } from '../types';
-import { getDepletionDate } from '../utils/dateCalculations';
+import { getDepletionDate, getTodayDateString } from '../utils/dateCalculations';
 import { MedicationMenu } from './MedicationMenu';
 import { ReminderBadge } from './ReminderBadge';
+import { CheckCircle } from 'lucide-react';
 
 interface MedicationCardProps {
   medication: Medication;
@@ -26,6 +27,7 @@ interface MedicationCardProps {
   onToggleAutoDeduct: (id: string) => void;
   onNavigateToShopping?: () => void;
   onTriggerAlarm?: (medication: Medication) => void;
+  onConsumeDose?: (medicationId: string) => void;
 }
 
 export const MedicationCard: FC<MedicationCardProps> = ({
@@ -37,6 +39,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   onToggleAutoDeduct,
   onNavigateToShopping,
   onTriggerAlarm,
+  onConsumeDose,
 }) => {
   const statusInfo = calculateMedicationStatus(medication);
   const depletion = getDepletionDate(medication);
@@ -524,6 +527,33 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         buttonClass="bg-white hover:bg-teal-100 border border-teal-300 text-teal-900"
         onTriggerAlarm={onTriggerAlarm}
       />
+
+      {/* Consume-pill feature: "تناول جرعة" button + consumed-today badge.
+          When the user clicks it, the dailyDose is subtracted from
+          currentPills and the auto-deduction for today is blocked. */}
+      {onConsumeDose && (
+        <div className="mt-2.5">
+          {medication.lastConsumedDate === getTodayDateString() ? (
+            <div className="w-full py-2 px-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center justify-center gap-1.5">
+              <CheckCircle className="w-4 h-4" />
+              <span>تم تناول جرعة اليوم — لن يتم الخصم التلقائي</span>
+            </div>
+          ) : (
+            <button
+              onClick={() => onConsumeDose(medication.id)}
+              disabled={medication.currentPills <= 0 || medication.dailyDose <= 0}
+              className={`w-full py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 ${
+                medication.currentPills <= 0 || medication.dailyDose <= 0
+                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200'
+              }`}
+            >
+              <Pill className="w-4 h-4 text-emerald-600" />
+              <span>تناول جرعة (-{medication.dailyDose} {medication.unit})</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Action: Refill button upon purchasing new medicine */}
       <div className="mt-3 pt-2 flex items-center gap-2">

@@ -33,9 +33,11 @@ export function normalizeArabicDigits(input: string): string {
  */
 export function cleanPhoneNumber(rawPhone: string): string {
   if (!rawPhone) return '';
-  // Normalize Arabic/Persian digits to 0-9, then strip spaces, dashes,
-  // parens, and a leading plus sign.
-  const cleaned = normalizeArabicDigits(rawPhone).replace(/[\s\-()+]/g, '');
+  // #28: normalize Arabic/Persian digits to 0-9, then strip ALL
+  // non-digit characters (not just spaces/dashes/parens/plus — letters,
+  // dots, slashes, colons etc. also leak through and produce invalid
+  // wa.me URLs). The 00 international prefix is handled below.
+  const cleaned = normalizeArabicDigits(rawPhone).replace(/\D/g, '');
 
   // Strip leading 00 (international prefix) → the rest is already the
   // country code + number, keep it verbatim.

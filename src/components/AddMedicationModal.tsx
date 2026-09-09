@@ -356,11 +356,9 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
               </div>
             </div>
 
-            {/* C1: hide the stock helper in edit mode — it would change
-                currentPills, but on edit the save preserves the live
-                inventory (initialData.currentPills) and the input is
-                disabled, so the helper's value wouldn't be saved. */}
-            {!initialData && (
+            {/* C1: hide the stock helper in edit mode AND for non-pill
+                types (liquid, dose, sachet — strips don't apply). */}
+            {!initialData && (unit === 'قرص' || unit === 'كبسولة') && (
               <div className="mt-1.5 flex items-center justify-between flex-wrap gap-1">
                 <button
                   type="button"
@@ -437,6 +435,11 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
             )}
           </div>
 
+          {/* مواصفات العلبة — only shown for pill/capsule types.
+              For liquid (مل), dose (جرعة), or sachet (كيس), strips
+              and per-box pill count don't make sense; the user just
+              enters the package size directly. */}
+          {(unit === 'قرص' || unit === 'كبسولة') && (
           <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-2.5">
             <div className="flex items-center gap-2">
               <div className="w-6 h-6 rounded-lg bg-teal-100 text-teal-800 flex items-center justify-center">
@@ -448,10 +451,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
               </div>
             </div>
 
-            {/* "بدون أشرطة" toggle — for medications like Coffiram that
-                come as loose pills in a box without blister strips.
-                When on, hide the strip-count fields and show just a
-                single "عدد الأقراص في العلبة" input. */}
+            {/* "بدون أشرطة" toggle */}
             <label className="flex items-center gap-2 cursor-pointer select-none">
               <input
                 type="checkbox"
@@ -465,7 +465,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
             </label>
 
             {noStrips ? (
-              /* No strips — just enter total pills per box */
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   عدد الأقراص في العلبة
@@ -494,7 +493,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                 </div>
               </div>
             ) : (
-              /* With strips — show both strip fields */
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">عدد الأشرطة في العلبة</label>
@@ -542,6 +540,38 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
               </div>
             )}
           </div>
+          )}
+
+          {/* For liquid/dose/sachet: just show a package size field. */}
+          {unit !== 'قرص' && unit !== 'كبسولة' && (
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-lg bg-teal-100 text-teal-800 flex items-center justify-center">
+                <Box className="w-3.5 h-3.5" />
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-slate-800">حجم العبوة</h4>
+                <p className="text-[10px] text-slate-500">حجم العبوة الواحدة بالوحدة المختارة</p>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                حجم العبوة ({unit})
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="500"
+                inputMode="numeric"
+                step="any"
+                value={packageSize || ''}
+                onChange={(e) => setPackageSize(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                placeholder="مثال: 120"
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+              />
+            </div>
+          </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -551,21 +581,9 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
               <input
                 type="number"
                 min="0"
-                // Use step="any" instead of step="0.5" so the browser
-                // doesn't show the "please enter a valid value. The
-                // two nearest valid values are 0.75 and 1.25" error
-                // when the user types integers like 1, 2, 3, etc.
-                // (with step="0.5" + min="0.25", typing "1" produces
-                // that browser-native error because 1 - 0.25 = 0.75,
-                // not a multiple of 0.5). Validation is done in
-                // handleSubmit instead.
                 step="any"
                 inputMode="decimal"
                 value={dailyDose}
-                // Use a string-typed state so the user can clear the
-                // field and type a fresh value. The submit handler
-                // parses it back to a number with proper validation
-                // (empty / NaN / <= 0).
                 onChange={(e) => setDailyDose(e.target.value)}
                 placeholder="مثال: 1"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"

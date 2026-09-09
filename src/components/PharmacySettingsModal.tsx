@@ -5,10 +5,8 @@ import {
   Phone,
   UserCheck,
   Check,
-  Pill,
   MessageSquare,
   MessageCircle,
-  RotateCcw,
   Volume2,
   VolumeX,
   FileAudio,
@@ -17,7 +15,7 @@ import {
   BellOff,
   AlertTriangle,
 } from 'lucide-react';
-import { Medication, PharmacySettings, describeOrderInBoxes } from '../types';
+import { Medication, PharmacySettings } from '../types';
 import {
   cleanPhoneNumber,
   generatePharmacyOrderMessage,
@@ -67,46 +65,25 @@ export const PharmacySettingsModal: FC<PharmacySettingsModalProps> = ({
   const [customerCode, setCustomerCode] = useState(
     (settings.customerCode === '14739' ? '' : settings.customerCode) || ''
   );
-  const [defaultDurationDays, setDefaultDurationDays] = useState<30 | 60>(
-    settings.defaultDurationDays || 30
-  );
-  const [customQuantities, setCustomQuantities] = useState<Record<string, number>>(
-    settings.customQuantities || {}
-  );
   const [address, setAddress] = useState(settings.address || '');
   const [contactPhone, setContactPhone] = useState(settings.contactPhone || '');
 
-  // Synchronize state whenever modal opens or settings change externally
+  // Synchronize state whenever modal opens or settings change externally.
+  // NOTE: defaultDurationDays and customQuantities are intentionally
+  // NOT editable here — they are managed in the pharmacy shopping view
+  // where the user actually places an order. The WhatsApp preview
+  // below reads them directly from `settings` (read-only).
   useEffect(() => {
     if (isOpen) {
       setPharmacyPhone(settings.pharmacyPhone || '');
       setPharmacyName((settings.pharmacyName === 'الصيدلية' ? '' : settings.pharmacyName) || '');
       setCustomerCode((settings.customerCode === '14739' ? '' : settings.customerCode) || '');
-      setDefaultDurationDays(settings.defaultDurationDays || 30);
-      setCustomQuantities(settings.customQuantities || {});
       setAddress(settings.address || '');
       setContactPhone(settings.contactPhone || '');
     }
   }, [isOpen, settings]);
 
   if (!isOpen) return null;
-
-  const handleQuantityChange = (medId: string, newDisplayVal: number) => {
-    const monthsMultiplier = defaultDurationDays === 60 ? 2 : 1;
-    const baseMonthly = Math.max(1, Math.round(newDisplayVal / monthsMultiplier));
-    setCustomQuantities((prev) => ({
-      ...prev,
-      [medId]: baseMonthly,
-    }));
-  };
-
-  const handleResetMedQuantity = (medId: string) => {
-    setCustomQuantities((prev) => {
-      const copy = { ...prev };
-      delete copy[medId];
-      return copy;
-    });
-  };
 
   // Sound file picker — moved here from AppHeader so all settings live
   // in one place. Uses readCustomSoundFile for size/type validation.
@@ -129,8 +106,9 @@ export const PharmacySettingsModal: FC<PharmacySettingsModalProps> = ({
       pharmacyPhone: pharmacyPhone.trim(),
       pharmacyName: pharmacyName.trim(),
       customerCode: customerCode.trim(),
-      defaultDurationDays,
-      customQuantities,
+      // Preserve the duration/quantities managed by the shopping view.
+      defaultDurationDays: settings.defaultDurationDays,
+      customQuantities: settings.customQuantities,
       address: address.trim(),
       contactPhone: contactPhone.trim(),
     });
@@ -154,7 +132,7 @@ export const PharmacySettingsModal: FC<PharmacySettingsModalProps> = ({
             <div>
               <h3 className="font-bold text-base">إعدادات الصيدلية والواتساب</h3>
               <p className="text-[11px] text-teal-200">
-                تحديد رقم الصيدلية والكميات المطلوبة ورقم العميل (اختياري)
+                تحديد رقم الصيدلية ورقم العميل (اختياري)
               </p>
             </div>
           </div>
@@ -275,155 +253,10 @@ export const PharmacySettingsModal: FC<PharmacySettingsModalProps> = ({
             </div>
           </div>
 
-          {/* Preferred Duration Default */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1.5">
-              مدة التغطية الافتراضية لحساب النواقص
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setDefaultDurationDays(30)}
-                className={`py-2 px-3 rounded-xl text-xs font-bold border transition ${
-                  defaultDurationDays === 30
-                    ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
-                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                تغطية شهر (30 يوماً)
-              </button>
-              <button
-                type="button"
-                onClick={() => setDefaultDurationDays(60)}
-                className={`py-2 px-3 rounded-xl text-xs font-bold border transition ${
-                  defaultDurationDays === 60
-                    ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
-                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                تغطية شهرين (60 يوماً)
-              </button>
-            </div>
-          </div>
-
-          {/* Section: Custom Requested Quantities Per Medicine */}
-          <div className="space-y-2 pt-2 border-t border-slate-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                  <Pill className="w-4 h-4 text-teal-600" />
-                  <span>تحديد الكمية المطلوبة للشراء من كل دواء</span>
-                </h4>
-                <p className="text-[11px] text-slate-500 mt-0.5">
-                  الكمية المحسوبة حالياً ({defaultDurationDays === 60 ? 'تغطية شهرين مضاعفة' : 'تغطية شهر واحد'}):
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-2 max-h-56 overflow-y-auto pr-0.5">
-              {medications.map((med) => {
-                const { quantity: currentQty, isCustom } =
-                  calculateMedicationOrderQuantity(
-                    med,
-                    defaultDurationDays,
-                    customQuantities
-                  );
-
-                return (
-                  <div
-                    key={med.id}
-                    className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between text-xs"
-                  >
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-bold text-slate-800 block text-xs">
-                          {med.name}
-                        </span>
-                        {isCustom && (
-                          <button
-                            type="button"
-                            onClick={() => handleResetMedQuantity(med.id)}
-                            className="text-[10px] text-teal-700 hover:text-teal-900 bg-teal-100 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5"
-                            title="إعادة ضبط للحساب التلقائي"
-                          >
-                            <RotateCcw className="w-2.5 h-2.5" />
-                            <span>مخصصة (إلغاء التخصيص)</span>
-                          </button>
-                        )}
-                      </div>
-                      <span className="text-[11px] text-slate-500 block">
-                        المخزون الحالي: {med.currentPills} {med.unit} (الاستهلاك:{' '}
-                        {med.dailyDose}/يوم)
-                      </span>
-                      <span className="text-[11px] font-bold text-teal-800 bg-teal-50 px-1.5 py-0.5 rounded border border-teal-200/60 inline-block mt-1">
-                        الطلب: {describeOrderInBoxes(currentQty, med.stripsPerBox, med.pillsPerStrip, med.packageSize, med.unit)}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {(() => {
-                        const boxStep =
-                          med.stripsPerBox && med.pillsPerStrip && med.stripsPerBox > 0 && med.pillsPerStrip > 0
-                            ? med.stripsPerBox * med.pillsPerStrip
-                            : med.packageSize && med.packageSize > 0
-                            ? med.packageSize
-                            : 30;
-
-                        return (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleQuantityChange(
-                                  med.id,
-                                  Math.max(1, currentQty - boxStep)
-                                )
-                              }
-                              className="w-7 h-7 rounded-lg bg-white border border-slate-300 font-bold text-slate-700 hover:bg-slate-100 flex items-center justify-center active:scale-95"
-                              title="تقليل بمقدار علبة"
-                            >
-                              -
-                            </button>
-
-                            <div className="flex items-center gap-1">
-                              <input
-                                type="number"
-                                min="1"
-                                value={currentQty}
-                                onChange={(e) =>
-                                  handleQuantityChange(med.id, parseInt(e.target.value) || 0)
-                                }
-                                className="w-16 px-1.5 py-1 text-center font-mono font-bold text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-teal-500"
-                              />
-                              <span className="text-[11px] text-slate-600 font-medium">
-                                {med.unit}
-                              </span>
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleQuantityChange(
-                                  med.id,
-                                  currentQty + boxStep
-                                )
-                              }
-                              className="w-7 h-7 rounded-lg bg-white border border-slate-300 font-bold text-slate-700 hover:bg-slate-100 flex items-center justify-center active:scale-95"
-                              title="زيادة بمقدار علبة"
-                            >
-                              +
-                            </button>
-                          </>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Live Preview of WhatsApp Message */}
+          {/* Live Preview of WhatsApp Message — read-only.
+              Quantities and coverage duration are managed in the
+              shopping view, not here. This preview just reflects the
+              current saved settings. */}
           <div className="bg-slate-900 text-slate-100 rounded-2xl p-3.5 text-xs space-y-2 font-mono shadow-inner">
             <div className="flex items-center justify-between text-[11px] text-teal-400 font-bold">
               <span className="flex items-center gap-1">
@@ -439,8 +272,8 @@ export const PharmacySettingsModal: FC<PharmacySettingsModalProps> = ({
                 medications.map((m) => {
                   const { quantity } = calculateMedicationOrderQuantity(
                     m,
-                    defaultDurationDays,
-                    customQuantities
+                    settings.defaultDurationDays,
+                    settings.customQuantities
                   );
                   return {
                     name: m.name,
@@ -466,8 +299,8 @@ export const PharmacySettingsModal: FC<PharmacySettingsModalProps> = ({
                     medications.map((m) => {
                       const { quantity } = calculateMedicationOrderQuantity(
                         m,
-                        defaultDurationDays,
-                        customQuantities
+                        settings.defaultDurationDays,
+                        settings.customQuantities
                       );
                       return {
                         name: m.name,
@@ -540,7 +373,7 @@ export const PharmacySettingsModal: FC<PharmacySettingsModalProps> = ({
                 </div>
                 <div>
                   <span className="text-xs font-bold text-slate-800">تنبيهات النفاذ الحرج للمخزون</span>
-                  <p className="text-[10px] text-slate-500">إشعار فوري عند بقاء 3 أيام أو أقل أو نفاذ الدواء</p>
+                  <p className="text-[10px] text-slate-500">إشعار فوري عند اقتراب نفاد الدواء أو نفاذه (حسب إعداد كل دواء)</p>
                 </div>
               </div>
               {onToggleCriticalStockAlerts && (
@@ -648,7 +481,7 @@ export const PharmacySettingsModal: FC<PharmacySettingsModalProps> = ({
               className="w-full py-3 px-4 bg-teal-700 hover:bg-teal-800 active:scale-98 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-sm transition"
             >
               <Check className="w-4 h-4" />
-              <span>حفظ إعدادات الصيدلية والكميات</span>
+              <span>حفظ إعدادات الصيدلية</span>
             </button>
           </div>
         </form>

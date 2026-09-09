@@ -11,9 +11,8 @@
  *   - Set the Android status bar color to match the teal theme.
  *   - Set the status bar style to LIGHT so the icons are visible
  *     on the dark teal background.
- *   - Listen for the Android hardware back button and exit the app
- *     (the SPA's bottom-nav is the primary navigation, so back
- *     button should not navigate the WebView history).
+ *   - Listen for the Android hardware back button and close the
+ *     top modal if one is open, or exit the app if none (#21).
  *   - Create the Android notification channel(s) used by
  *     @capacitor/local-notifications so notifications actually fire
  *     when the app is in the foreground (otherwise Android silently
@@ -23,9 +22,32 @@
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { App } from '@capacitor/app';
-import { LocalNotifications } from '@capacitor/local-notifications';
+import { LocalNotifications, type Channel, type Importance, type Visibility } from '@capacitor/local-notifications';
 
 let initialized = false;
+
+// #21: a callback registered by App.tsx that returns true if it
+// closed a modal (so the back button doesn't exit the app), or false
+// if no modal was open (so the back button exits). Stored at module
+// scope so the backButton listener (added in initNativeBridge) can
+// call it.
+let backPressHandler: (() => boolean) | null = null;
+
+/**
+ * #21: register a handler that closes the top modal on back-button
+ * press. Returns true if a modal was closed (app stays open); false
+ * if no modal was open (app exits). App.tsx calls this during mount
+ * with a handler that checks all 4 modal states.
+ */
+export function registerBackButtonHandler(handler: (() => boolean) | null) {
+  backPressHandler = handler;
+}
+
+// #38: store Capacitor listener handles so they can be removed if
+// needed (e.g. on HMR of native.ts, duplicate listeners would
+// otherwise accumulate and each would play the custom sound).
+let backPressHandle: { remove: () => Promise<void> } | null = null;
+let notificationHandle: { remove: () => Promise<void> } | null = null;
 
 export async function initNativeBridge(): Promise<void> {
   if (initialized) return;
@@ -44,10 +66,18 @@ export async function initNativeBridge(): Promise<void> {
     console.warn('[native] StatusBar setup failed:', err);
   }
 
+  // #21 + #38: await the addListener and store the handle. The back
+  // button now checks `backPressHandler` first — if it returns true
+  // (a modal was open and got closed), the app stays; otherwise
+  // `App.exitApp()` is called.
   try {
-    App.addListener('backButton', () => {
-      // Exit the app on back-button press — the SPA uses bottom-nav
-      // for navigation, not a stack-based browser history.
+    backPressHandle = await App.addListener('backButton', () => {
+      if (backPressHandler && backPressHandler()) {
+        // A modal was open and the handler closed it — don't exit.
+        return;
+      }
+      // No modal open — exit the app (the SPA uses bottom-nav for
+      // navigation, not a stack-based browser history).
       App.exitApp();
     });
   } catch (err) {
@@ -71,61 +101,46 @@ export async function initNativeBridge(): Promise<void> {
   //
   // On iOS this is a no-op (iOS doesn't have channels — it uses the
   // notification's category identifier for grouping instead).
+  //
+  // #37: the Capacitor 6.x TypeScript definitions DO include
+  // `createChannel` and `listChannels` (with proper `Channel`,
+  // `Importance`, and `Visibility` types), so no cast is needed.
   try {
-    // The TypeScript defs for @capacitor/local-notifications 6.x
-    // don't include createChannel — it's only on the Android plugin
-    // side. Use a cast to access the runtime method.
-    const ChannelExt = LocalNotifications as unknown as {
-      createChannel: (channel: {
-        id: string;
-        name: string;
-        description?: string;
-        importance: number;
-        visibility: number;
-        sound?: string;
-      }) => Promise<void>;
-      listChannels: () => Promise<{ channels: { id: string; name: string }[] }>;
-    };
+    const existing = await LocalNotifications.listChannels();
+    const existingIds = new Set(
+      (existing?.channels || []).map((c) => c.id)
+    );
 
-    try {
-      const existing = await ChannelExt.listChannels();
-      const existingIds = new Set(
-        (existing?.channels || []).map((c) => c.id)
-      );
+    // Importance: 4 = HIGH (makes a sound + shows as heads-up
+    // notification briefly). Visibility: 1 = PUBLIC (shows on
+    // the lock screen).
+    const channels: Channel[] = [
+      {
+        id: 'dose-reminder',
+        name: 'تذكير الجرعات',
+        description: 'تذكيرات يومية بمواعيد الأدوية',
+        importance: 4 as Importance,
+        visibility: 1 as Visibility,
+      },
+      {
+        id: 'low-stock',
+        name: 'تنبيهات النفاذ',
+        description: 'تنبيه عند اقتراب نفاذ دواء من المخزون',
+        importance: 4 as Importance,
+        visibility: 1 as Visibility,
+      },
+    ];
 
-      // Importance: 4 = HIGH (makes a sound + shows as heads-up
-      // notification briefly). Visibility: 1 = PUBLIC (shows on
-      // the lock screen).
-      const channels = [
-        {
-          id: 'dose-reminder',
-          name: 'تذكير الجرعات',
-          description: 'تذكيرات يومية بمواعيد الأدوية',
-          importance: 4,
-          visibility: 1,
-        },
-        {
-          id: 'low-stock',
-          name: 'تنبيهات النفاذ',
-          description: 'تنبيه عند اقتراب نفاذ دواء من المخزون',
-          importance: 4,
-          visibility: 1,
-        },
-      ];
-
-      for (const ch of channels) {
-        if (!existingIds.has(ch.id)) {
-          await ChannelExt.createChannel(ch);
-          console.info(
-            `[native] Notification channel created: ${ch.id} (${ch.name})`
-          );
-        }
+    for (const ch of channels) {
+      if (!existingIds.has(ch.id)) {
+        await LocalNotifications.createChannel(ch);
+        console.info(
+          `[native] Notification channel created: ${ch.id} (${ch.name})`
+        );
       }
-    } catch (err) {
-      console.warn('[native] Notification channel creation failed:', err);
     }
   } catch (err) {
-    console.warn('[native] LocalNotifications setup failed:', err);
+    console.warn('[native] Notification channel creation failed:', err);
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -140,8 +155,10 @@ export async function initNativeBridge(): Promise<void> {
   //   2. The notification itself is still delivered to the system
   //      notification tray by Capacitor, so the user sees the
   //      notification + hears the custom sound.
+  // #38: await the addListener and store the handle so it can be
+  // removed if needed (prevents duplicate listeners across HMR).
   try {
-    LocalNotifications.addListener(
+    notificationHandle = await LocalNotifications.addListener(
       'localNotificationReceived',
       (notification: { extra?: { customSoundFile?: { dataUrl: string; fileName: string; mimeType: string } } }) => {
         const customSound = notification?.extra?.customSoundFile;
@@ -165,6 +182,27 @@ export async function initNativeBridge(): Promise<void> {
   } catch (err) {
     console.warn('[native] localNotificationReceived listener failed:', err);
   }
+}
+
+/**
+ * #38: remove all Capacitor listeners added by initNativeBridge.
+ * Called by App.tsx on unmount (or HMR) so duplicate listeners don't
+ * accumulate across re-initializations. Safe to call even if the
+ * handles are null (web platform, or init failed).
+ */
+export async function cleanupNativeListeners(): Promise<void> {
+  try {
+    if (backPressHandle) await backPressHandle.remove();
+  } catch (err) {
+    console.warn('[native] backPressHandle.remove() failed:', err);
+  }
+  try {
+    if (notificationHandle) await notificationHandle.remove();
+  } catch (err) {
+    console.warn('[native] notificationHandle.remove() failed:', err);
+  }
+  backPressHandle = null;
+  notificationHandle = null;
 }
 
 /**

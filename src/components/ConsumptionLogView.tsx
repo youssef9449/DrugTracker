@@ -6,7 +6,6 @@ import { getTodayDateString, formatArabicDate } from '../utils/dateCalculations'
 interface ConsumptionLogViewProps {
   medications: Medication[];
   logs: ConsumptionLog[];
-  onAddLog: (log: ConsumptionLog) => void;
   onRestoreDose: (medicationId: string, reason: string) => void;
   showToast: (message: string) => void;
 }

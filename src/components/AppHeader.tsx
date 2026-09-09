@@ -97,19 +97,33 @@ export const AppHeader: FC<AppHeaderProps> = ({
             <Settings className="w-4 h-4" />
           </button>
 
-          {/* Browser Notification toggle */}
+          {/* Browser / In-App Notification toggle */}
           <button
             onClick={onToggleNotifications}
-            title={notificationsEnabled ? 'التنبيهات مفعلة' : 'تفعيل إشعارات الهاتف'}
-            className={`p-2 rounded-xl transition active:scale-95 relative ${
+            title={
               notificationsEnabled
-                ? 'bg-teal-700 text-amber-300'
-                : 'text-teal-200 hover:text-white hover:bg-teal-700/80'
+                ? 'التنبيهات مفعلة (انقر للإيقاف المؤقت)'
+                : 'التنبيهات متوقفة (انقر لتفعيل التنبيهات والمنبه)'
+            }
+            aria-label={
+              notificationsEnabled
+                ? 'التنبيهات مفعلة — انقر للإيقاف'
+                : 'التنبيهات متوقفة — انقر للتفعيل'
+            }
+            aria-pressed={notificationsEnabled}
+            className={`p-2 rounded-xl transition active:scale-95 relative border ${
+              notificationsEnabled
+                ? 'bg-amber-400/20 text-amber-300 border-amber-400/40 ring-1 ring-amber-400/30 shadow-xs'
+                : 'bg-teal-900/40 text-teal-300/70 hover:text-white hover:bg-teal-700/80 border-teal-700/60'
             }`}
           >
-            {notificationsEnabled ? <Bell className="w-4 h-4 fill-amber-300/30" /> : <BellOff className="w-4 h-4" />}
-            {alertsCount > 0 && (
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-teal-800 animate-pulse" />
+            {notificationsEnabled ? (
+              <>
+                <Bell className="w-4 h-4 fill-amber-300" />
+                <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-emerald-400 ring-1 ring-teal-900 animate-pulse" />
+              </>
+            ) : (
+              <BellOff className="w-4 h-4" />
             )}
           </button>
 
@@ -118,17 +132,35 @@ export const AppHeader: FC<AppHeaderProps> = ({
             onClick={onToggleCriticalStockAlerts}
             title={
               criticalStockAlertsEnabled
-                ? 'تنبيه النفاذ الحرج مفعّل — هتوصلك إشعار فوري لو في دواء دخل مرحلة حرجة'
-                : 'فعّل تنبيه النفاذ الحرج (مهم جداً)'
+                ? alertsCount > 0
+                  ? `تنبيه النفاذ الحرج مفعّل (${alertsCount} أدوية قاربت على النفاذ — انقر للإيقاف)`
+                  : 'تنبيه النفاذ الحرج مفعّل (انقر للإيقاف)'
+                : 'تنبيه النفاذ الحرج متوقف (انقر للتفعيل)'
             }
-            className={`p-2 rounded-xl transition active:scale-95 relative ${
+            aria-label={
               criticalStockAlertsEnabled
-                ? 'bg-rose-600/40 text-rose-100 ring-1 ring-rose-300/50'
-                : 'text-teal-200 hover:text-white hover:bg-teal-700/80'
+                ? `تنبيه النفاذ الحرج مفعّل${alertsCount > 0 ? ` (${alertsCount} أدوية قاربت على النفاذ)` : ''}`
+                : 'تنبيه النفاذ الحرج متوقف'
+            }
+            aria-pressed={criticalStockAlertsEnabled}
+            className={`p-2 rounded-xl transition active:scale-95 relative border ${
+              criticalStockAlertsEnabled
+                ? 'bg-rose-500/25 text-rose-100 border-rose-400/50 ring-1 ring-rose-400/30 shadow-xs'
+                : 'bg-teal-900/40 text-teal-300/70 hover:text-white hover:bg-teal-700/80 border-teal-700/60'
             }`}
           >
-            <AlertTriangle className={`w-4 h-4 ${criticalStockAlertsEnabled ? 'fill-rose-200/20' : ''}`} />
+            <AlertTriangle
+              className={`w-4 h-4 ${
+                criticalStockAlertsEnabled ? 'fill-rose-300/30 text-rose-200' : 'opacity-70'
+              }`}
+            />
+            {alertsCount > 0 && (
+              <span className="absolute -top-1 -right-1 px-1.5 min-w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] font-mono font-bold flex items-center justify-center ring-2 ring-teal-800 shadow-xs animate-pulse">
+                {alertsCount}
+              </span>
+            )}
           </button>
+
 
           {/* Device Mockup frame toggle (hidden on mobile, visible on larger screens) */}
           <button

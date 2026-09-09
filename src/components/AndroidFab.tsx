@@ -1,4 +1,4 @@
-import React from 'react';
+import type { FC } from 'react';
 import { Plus } from 'lucide-react';
 
 interface AndroidFabProps {
@@ -6,7 +6,7 @@ interface AndroidFabProps {
   onClick?: () => void;
 }
 
-export const AndroidFab: React.FC<AndroidFabProps> = ({ onOpenAddModal, onClick }) => {
+export const AndroidFab: FC<AndroidFabProps> = ({ onOpenAddModal, onClick }) => {
   const handleClick = () => {
     if (onOpenAddModal) {
       onOpenAddModal();

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, type FC, type FormEvent } from 'react';
 import { X, PlusCircle, Check, Layers, Box } from 'lucide-react';
 import { Medication, describeStockInStrips } from '../types';
 
@@ -9,7 +9,7 @@ interface RefillModalProps {
   onConfirmRefill: (medicationId: string, addedPills: number) => void;
 }
 
-export const RefillModal: React.FC<RefillModalProps> = ({
+export const RefillModal: FC<RefillModalProps> = ({
   medication,
   isOpen,
   onClose,
@@ -41,7 +41,7 @@ export const RefillModal: React.FC<RefillModalProps> = ({
 
   const stripSize = medication.pillsPerStrip || 10;
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = (e: FormEvent) => {
     e.preventDefault();
     if (addedCount <= 0) return;
     onConfirmRefill(medication.id, addedCount);

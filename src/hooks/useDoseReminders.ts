@@ -182,7 +182,12 @@ export function useDoseReminders({
     };
 
     checkDue();
-    const timer = window.setInterval(checkDue, 15000);
+    // Poll every 5s (down from 15s) so a reminder scheduled for, say,
+    // 09:00 fires within ~5s of the minute rather than up to ~15s late.
+    // 5s is cheap (the check is pure, no network / no DOM), and a
+    // 5-second granularity is imperceptible to the user while still
+    // avoiding the perceived "the alarm was late" lag of 15s.
+    const timer = window.setInterval(checkDue, 5000);
     return () => window.clearInterval(timer);
   }, [medications, triggerAlarm]);
 

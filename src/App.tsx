@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Medication,
   ConsumptionLog,
@@ -26,6 +26,7 @@ import { PharmacySettingsModal } from './components/PharmacySettingsModal';
 import { AndroidFab } from './components/AndroidFab';
 import { EmptyState } from './components/EmptyState';
 import { DoseAlarmModal } from './components/DoseAlarmModal';
+import { UpdatePrompt } from './components/UpdatePrompt';
 import { playSuccessChime } from './utils/sound';
 import {
   saveGlobalCustomSound,
@@ -43,6 +44,7 @@ import {
 import { getTodayDateString, syncAutoDailyDeductions } from './utils/dateCalculations';
 import { useDoseReminders } from './hooks/useDoseReminders';
 import { initNativeBridge } from './native';
+import { migrateSchema } from './lib/migration';
 import { Zap } from 'lucide-react';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
@@ -55,6 +57,45 @@ const SOUND_KEY = 'android_med_tracker_sound_v1';
 // threshold itself is derived per-medication from warningThresholdDays
 // via getCriticalThresholdDays() — see src/types.ts.
 const CRITICAL_STOCK_ALERTS_KEY = 'android_med_tracker_critical_alerts_v1';
+
+/**
+ * Persist a JSON-serializable value to localStorage, returning a
+ * descriptive error string on failure (M1: previously every write was
+ * wrapped in `try { … } catch {}` which silently dropped data on quota
+ * exhaustion — the caller now decides whether to surface the failure).
+ *
+ * Returns null on success, or a short Arabic error message on failure.
+ */
+function persistJson(key: string, value: unknown): string | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return null;
+  } catch (err) {
+    const reason =
+      err instanceof DOMException && err.name === 'QuotaExceededError'
+        ? 'مساحة التخزين ممتلئة'
+        : 'تعذّر حفظ البيانات';
+    console.warn(`[App] localStorage.setItem(${key}) failed:`, err);
+    return reason;
+  }
+}
+
+/** Persist a plain string value with the same error-surfacing contract. */
+function persistString(key: string, value: string): string | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    localStorage.setItem(key, value);
+    return null;
+  } catch (err) {
+    const reason =
+      err instanceof DOMException && err.name === 'QuotaExceededError'
+        ? 'مساحة التخزين ممتلئة'
+        : 'تعذّر حفظ البيانات';
+    console.warn(`[App] localStorage.setItem(${key}) failed:`, err);
+    return reason;
+  }
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('stock');
@@ -114,14 +155,18 @@ export default function App() {
   // the default values with whatever the user previously saved.
   // ─────────────────────────────────────────────────────────────
   useEffect(() => {
+    // M11: run schema migration first so any future key-shape changes
+    // are applied before we read the (possibly migrated) keys.
+    migrateSchema();
+
     try {
       const savedMeds = localStorage.getItem(STORAGE_MEDS_KEY);
       if (savedMeds) {
         const parsed = JSON.parse(savedMeds);
         if (Array.isArray(parsed) && parsed.length > 0) setMedications(parsed);
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn('[App] failed to load saved medications:', err);
     }
 
     try {
@@ -130,8 +175,8 @@ export default function App() {
         const parsed = JSON.parse(savedLogs);
         if (Array.isArray(parsed)) setLogs(parsed);
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn('[App] failed to load saved logs:', err);
     }
 
     try {
@@ -146,14 +191,14 @@ export default function App() {
           });
         }
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn('[App] failed to load saved pharmacy settings:', err);
     }
 
     try {
-    setSoundEnabled(localStorage.getItem(SOUND_KEY) !== 'false');
-    } catch {
-      // ignore
+      setSoundEnabled(localStorage.getItem(SOUND_KEY) !== 'false');
+    } catch (err) {
+      console.warn('[App] failed to load sound flag:', err);
     }
 
     try {
@@ -162,8 +207,8 @@ export default function App() {
       // never touched the toggle, they get the alerts.
       const stored = localStorage.getItem(CRITICAL_STOCK_ALERTS_KEY);
       setCriticalStockAlertsEnabled(stored !== 'false');
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn('[App] failed to load critical-alerts flag:', err);
     }
 
     // Global custom sound is persisted in IndexedDB (not localStorage)
@@ -243,48 +288,88 @@ export default function App() {
     }
   }, []);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify(medications));
-    } catch {
-      // ignore
-    }
-  }, [medications]);
+  // showToast is defined with useCallback BEFORE the persistence
+  // effects so those effects can surface write failures (M1: previously
+  // every catch was empty and a quota-exceeded write silently dropped
+  // data). Stabilizing it via useCallback also keeps the persistence
+  // effects from re-subscribing on every render.
+  const showToast = useCallback((message: string) => {
+    const id = Date.now();
+    setToast({ id, message });
+    setTimeout(() => {
+      setToast((curr) => (curr?.id === id ? null : curr));
+    }, 4000);
+  }, []);
 
+  // ─────────────────────────────────────────────────────────────
+  // Persistence effects (M1): each write goes through persistJson /
+  // persistString, which log the failure and return a short Arabic
+  // error message. We surface that message via a toast so the user
+  // knows their data wasn't saved (instead of silently dropping it).
+  // A per-effect "already warned" ref avoids spamming toasts on every
+  // re-render that re-attempts the same failing write.
+  // ─────────────────────────────────────────────────────────────
+  const warnedMedsRef = useRef(false);
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify(logs));
-    } catch {
-      // ignore
+    const err = persistJson(STORAGE_MEDS_KEY, medications);
+    if (err && !warnedMedsRef.current) {
+      warnedMedsRef.current = true;
+      showToast(`${err} — قد لا يتم حفظ تعديلاتك على الأدوية.`);
+    } else if (!err) {
+      warnedMedsRef.current = false;
     }
-  }, [logs]);
+  }, [medications, showToast]);
 
+  const warnedLogsRef = useRef(false);
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_PHARMACY_KEY, JSON.stringify(pharmacySettings));
-    } catch {
-      // ignore
+    const err = persistJson(STORAGE_LOGS_KEY, logs);
+    if (err && !warnedLogsRef.current) {
+      warnedLogsRef.current = true;
+      showToast(`${err} — قد لا يتم حفظ سجل الاستهلاك.`);
+    } else if (!err) {
+      warnedLogsRef.current = false;
     }
-  }, [pharmacySettings]);
+  }, [logs, showToast]);
 
+  // M12: pharmacy settings are written via a 400ms debounce so rapid
+  // toggles of the 30/60-day duration (which calls onUpdateSettings on
+  // every click) don't fire a localStorage write per click. The last
+  // value within the debounce window wins.
+  const warnedPharmacyRef = useRef(false);
   useEffect(() => {
-    try {
-      localStorage.setItem(SOUND_KEY, String(soundEnabled));
-    } catch {
-      // ignore
-    }
-  }, [soundEnabled]);
+    const handle = window.setTimeout(() => {
+      const err = persistJson(STORAGE_PHARMACY_KEY, pharmacySettings);
+      if (err && !warnedPharmacyRef.current) {
+        warnedPharmacyRef.current = true;
+        showToast(`${err} — قد لا يتم حفظ إعدادات الصيدلية.`);
+      } else if (!err) {
+        warnedPharmacyRef.current = false;
+      }
+    }, 400);
+    return () => window.clearTimeout(handle);
+  }, [pharmacySettings, showToast]);
 
+  const warnedSoundRef = useRef(false);
   useEffect(() => {
-    try {
-      localStorage.setItem(
-        CRITICAL_STOCK_ALERTS_KEY,
-        String(criticalStockAlertsEnabled)
-      );
-    } catch {
-      // ignore
+    const err = persistString(SOUND_KEY, String(soundEnabled));
+    if (err && !warnedSoundRef.current) {
+      warnedSoundRef.current = true;
+      showToast(`${err} — قد لا يتم حفظ تفضيل الصوت.`);
+    } else if (!err) {
+      warnedSoundRef.current = false;
     }
-  }, [criticalStockAlertsEnabled]);
+  }, [soundEnabled, showToast]);
+
+  const warnedCriticalRef = useRef(false);
+  useEffect(() => {
+    const err = persistString(CRITICAL_STOCK_ALERTS_KEY, String(criticalStockAlertsEnabled));
+    if (err && !warnedCriticalRef.current) {
+      warnedCriticalRef.current = true;
+      showToast(`${err} — قد لا يتم حفظ تفضيل تنبيه النفاذ الحرج.`);
+    } else if (!err) {
+      warnedCriticalRef.current = false;
+    }
+  }, [criticalStockAlertsEnabled, showToast]);
 
   // Persist global custom sound to IndexedDB (C4: storing the base64
   // data URL in localStorage risked blowing the ~5 MB quota and silently
@@ -300,14 +385,6 @@ export default function App() {
       });
     }
   }, [globalCustomSound]);
-
-  const showToast = (message: string) => {
-    const id = Date.now();
-    setToast({ id, message });
-    setTimeout(() => {
-      setToast((curr) => (curr?.id === id ? null : curr));
-    }, 4000);
-  };
 
   // ─────────────────────────────────────────────────────────────
   // Auto-deduction: runs ONCE per session, AFTER hydration completes
@@ -448,7 +525,11 @@ export default function App() {
     setMedications((prev) =>
       prev.map((m) => {
         if (m.id === medicationId) {
-          const newState = m.autoDeductEnabled === false;
+          // `autoDeductEnabled` defaults to true when undefined, so the
+          // effective current state is `!== false`. Toggle it. The
+          // previous `=== false` formulation was equivalent but read as
+          // a double-negative and was a readability trap (M5).
+          const newState = !m.autoDeductEnabled;
           showToast(
             newState ? `تم تفعيل الخصم التلقائي لـ "${m.name}"` : `تم إيقاف الخصم التلقائي مؤقتاً لـ "${m.name}"`
           );
@@ -758,6 +839,11 @@ export default function App() {
             {toast.message}
           </div>
         )}
+
+        {/* M10: service-worker "new version available" banner. Renders
+            only in production (the SW is registered only in prod —
+            see src/main.tsx) and only when a new SW is actually waiting. */}
+        <UpdatePrompt />
       </div>
 
       <AddMedicationModal

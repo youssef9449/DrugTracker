@@ -1,3 +1,5 @@
+import { pluralizeArabic } from './lib/arabicPlural';
+
 export interface ConsumptionLog {
   id: string;
   medicationId: string;
@@ -77,14 +79,23 @@ export function getCriticalThresholdDays(med: Medication): number {
 }
 
 /**
- * Formats 24-hour time "HH:mm" into friendly Arabic 12-hour format e.g. "9:00 ص" or "9:30 م"
+ * Formats 24-hour time "HH:mm" into friendly Arabic 12-hour format,
+ * e.g. "9:00 ص" or "9:30 م".
+ *
+ * Strictly validates the input shape `^H?H:MM$` with hour 0–23 and
+ * minute 0–59. Returns the raw string unchanged if invalid so callers
+ * can detect a malformed `reminderTime` (the reminder scheduler's own
+ * `timeToMinutes` validator would then reject it too, skipping the
+ * alarm rather than firing it for a garbage time).
  */
 export function formatTimeArabic(timeStr?: string): string {
   if (!timeStr) return '';
-  const [hStr, mStr] = timeStr.split(':');
-  const h = parseInt(hStr, 10);
-  const m = parseInt(mStr, 10);
-  if (isNaN(h) || isNaN(m)) return timeStr;
+  // Strict shape: one or two digit hour, colon, exactly two digit minute.
+  const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(timeStr);
+  if (!match) return timeStr;
+  const h = parseInt(match[1], 10);
+  const m = parseInt(match[2], 10);
+  if (Number.isNaN(h) || Number.isNaN(m)) return timeStr;
   const isPM = h >= 12;
   const hour12 = h % 12 === 0 ? 12 : h % 12;
   const minutePadded = m < 10 ? `0${m}` : `${m}`;
@@ -95,6 +106,9 @@ export function formatTimeArabic(timeStr?: string): string {
  * Returns human-readable strip and pill breakdown of current inventory.
  * e.g., 35 pills with 10 pills/strip and 3 strips/box -> "علبة واحدة و 5 أقراص"
  * or 25 pills with 10 pills/strip -> "شريطان و 5 أقراص"
+ *
+ * Uses `pluralizeArabic` for correct Arabic noun forms per count
+ * (singular / dual / few 3-10 / many 11+).
  */
 export function describeStockInStrips(
   pills: number,
@@ -107,18 +121,15 @@ export function describeStockInStrips(
   const totalStrips = Math.floor(pills / pillsPerStrip);
   const remainingPills = Math.round(pills % pillsPerStrip);
 
-  const pillWord =
-    remainingPills === 1 ? `${unit} واحد` : remainingPills === 2 ? `2 ${unit}` : `${remainingPills} ${unit}`;
+  const pillWord = pluralizeArabic(remainingPills, unit);
 
   // If strips per box is defined, break down into boxes + strips + pills
   if (stripsPerBox && stripsPerBox > 0) {
     const boxes = Math.floor(totalStrips / stripsPerBox);
     const strips = totalStrips % stripsPerBox;
 
-    const boxWord =
-      boxes === 1 ? 'علبة واحدة' : boxes === 2 ? 'علبتان' : boxes <= 10 ? `${boxes} علب` : `${boxes} علبة`;
-    const stripWord =
-      strips === 1 ? 'شريط واحد' : strips === 2 ? 'شريطان' : strips <= 10 ? `${strips} أشرطة` : `${strips} شريطاً`;
+    const boxWord = pluralizeArabic(boxes, 'علبة');
+    const stripWord = pluralizeArabic(strips, 'شريط');
 
     const parts: string[] = [];
     if (boxes > 0) parts.push(boxWord);
@@ -132,8 +143,7 @@ export function describeStockInStrips(
   }
 
   // If only pillsPerStrip is known
-  const stripWord =
-    totalStrips === 1 ? 'شريط واحد' : totalStrips === 2 ? 'شريطان' : totalStrips <= 10 ? `${totalStrips} أشرطة` : `${totalStrips} شريطاً`;
+  const stripWord = pluralizeArabic(totalStrips, 'شريط');
 
   if (totalStrips > 0 && remainingPills > 0) {
     return `${stripWord} و ${pillWord}`;
@@ -147,6 +157,8 @@ export function describeStockInStrips(
 
 /**
  * Returns packaging breakdown for pharmacy ordering (e.g., "2 علبة (60 قرص)" or "1 علبة و 1 شريط").
+ *
+ * Uses `pluralizeArabic` for correct Arabic noun forms.
  */
 export function describeOrderInBoxes(
   targetPills: number,
@@ -167,33 +179,31 @@ export function describeOrderInBoxes(
   const boxes = Math.floor(targetPills / boxSize);
   const remainderAfterBoxes = targetPills % boxSize;
 
-  const boxWord =
-    boxes === 1 ? 'علبة واحدة' : boxes === 2 ? 'علبتان' : boxes <= 10 ? `${boxes} علب` : `${boxes} علبة`;
+  const boxWord = pluralizeArabic(boxes, 'علبة');
 
   if (boxes > 0 && remainderAfterBoxes === 0) {
-    return `${boxWord} (${targetPills} ${unit})`;
+    return `${boxWord} (${pluralizeArabic(targetPills, unit)})`;
   }
 
   if (stripSize && remainderAfterBoxes > 0) {
     const strips = Math.floor(remainderAfterBoxes / stripSize);
     const loosePills = remainderAfterBoxes % stripSize;
 
-    const stripWord =
-      strips === 1 ? 'شريط' : strips === 2 ? 'شريطان' : `${strips} أشرطة`;
-
     if (boxes > 0 && strips > 0 && loosePills === 0) {
-      return `${boxWord} و ${stripWord} (${targetPills} ${unit})`;
+      const stripWord = pluralizeArabic(strips, 'شريط');
+      return `${boxWord} و ${stripWord} (${pluralizeArabic(targetPills, unit)})`;
     }
     if (boxes === 0 && strips > 0 && loosePills === 0) {
-      return `${stripWord} (${targetPills} ${unit})`;
+      const stripWord = pluralizeArabic(strips, 'شريط');
+      return `${stripWord} (${pluralizeArabic(targetPills, unit)})`;
     }
   }
 
   if (boxes > 0) {
-    return `${boxWord} تقريباً (${targetPills} ${unit})`;
+    return `${boxWord} تقريباً (${pluralizeArabic(targetPills, unit)})`;
   }
 
-  return `${targetPills} ${unit}`;
+  return pluralizeArabic(targetPills, unit);
 }
 
 export interface PharmacySettings {

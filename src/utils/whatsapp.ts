@@ -12,24 +12,50 @@ export function normalizeArabicDigits(input: string): string {
   return res;
 }
 
+/**
+ * Clean a user-entered phone number into the international E.164-ish
+ * format `wa.me` expects (country code + number, no `+`, no spaces).
+ *
+ * The app is targeted at Egyptian users, so Egyptian local numbers are
+ * auto-prefixed with the country code `20`:
+ *   - 01xxxxxxxxx  (11-digit Egyptian mobile)  → 201xxxxxxxxx
+ *   - 0[2-9]xxxxxxx (Egyptian landline)       → 202xxxxxxx…
+ *
+ * Numbers already in international format (with a leading `+` or `00`
+ * or a 1–3 digit country code other than `20`) are preserved as-is, so
+ * non-Egyptian users who enter their full international number (e.g.
+ * `+9665xxxxxxxx`, `009715xxxxxxxx`) are NOT mangled into an Egyptian
+ * number. The caller should encourage international users to include
+ * the country code.
+ *
+ * Returns '' for empty input. Non-digits are stripped (spaces, dashes,
+ * parentheses, leading `+`).
+ */
 export function cleanPhoneNumber(rawPhone: string): string {
   if (!rawPhone) return '';
-  // Normalize Arabic numerals to standard 0-9 digits and strip spaces, dashes, parens, plus
-  let cleaned = normalizeArabicDigits(rawPhone).replace(/[\s\-()+]/g, '');
+  // Normalize Arabic/Persian digits to 0-9, then strip spaces, dashes,
+  // parens, and a leading plus sign.
+  const cleaned = normalizeArabicDigits(rawPhone).replace(/[\s\-()+]/g, '');
 
-  // If starts with 00, strip 00
+  // Strip leading 00 (international prefix) → the rest is already the
+  // country code + number, keep it verbatim.
   if (cleaned.startsWith('00')) {
-    cleaned = cleaned.substring(2);
+    return cleaned.substring(2);
   }
 
-  // Egyptian mobile format: 01xxxxxxxxx (11 digits starting with 010, 011, 012, 015) -> 201xxxxxxxxx
+  // Egyptian mobile format: 01xxxxxxxxx (11 digits starting with 010/011/012/015)
+  // → 201xxxxxxxxx
   if (/^01[0125][0-9]{8}$/.test(cleaned)) {
-    cleaned = '20' + cleaned.substring(1);
-  } else if (/^0[2-9][0-9]{7,8}$/.test(cleaned)) {
-    // Egyptian landlines or area codes (e.g. 02xxxxxxx, 03xxxxxxx) -> 202xxxxxxx
-    cleaned = '20' + cleaned.substring(1);
+    return '20' + cleaned.substring(1);
+  }
+  // Egyptian landlines / area codes (e.g. 02xxxxxxx, 03xxxxxxx) → 202xxxxxxx
+  if (/^0[2-9][0-9]{7,8}$/.test(cleaned)) {
+    return '20' + cleaned.substring(1);
   }
 
+  // Anything else (already-international numbers without a leading 00,
+  // or a leading country code) is returned as-is. wa.me accepts a bare
+  // country-code + number.
   return cleaned;
 }
 
@@ -103,18 +129,35 @@ export function buildWhatsAppUrl(phone: string, message: string): string {
   return `https://wa.me/?text=${encodedText}`;
 }
 
+/**
+ * Open a WhatsApp deep-link (`https://wa.me/…?text=…`) in a new tab /
+ * the WhatsApp app.
+ *
+ * We deliberately use the synthetic-anchor click approach as the
+ * PRIMARY path (not `window.open`). Reasons:
+ *   - `window.open` is blocked by popup blockers when not triggered by
+ *     a direct user gesture, and its return value / `win.closed`
+ *     check is unreliable across mobile browsers (Safari returns null
+ *     for cross-origin popups; in-app WebViews often return a stub).
+ *   - A synthetic `<a target="_blank" rel="noopener noreferrer">` with
+ *     a programmatic `click()` is treated as a user-gesture continuation
+ *     by most browsers and is the most reliable cross-platform way to
+ *     hand a `wa.me` URL to the OS app chooser / a new tab.
+ *
+ * The link is appended to `document.body` (required for Firefox to
+ * dispatch the click), clicked, then removed. `rel="noopener
+ * noreferrer"` prevents the opened page from accessing `window.opener`.
+ */
 export function openWhatsAppLink(phone: string, message: string): void {
   const url = buildWhatsAppUrl(phone, message);
-  const win = window.open(url, '_blank', 'noopener,noreferrer');
-  if (!win || win.closed || typeof win.closed === 'undefined') {
-    const link = document.createElement('a');
-    link.href = url;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }
+  const link = document.createElement('a');
+  link.href = url;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  // Some browsers ignore `click()` on an element that isn't in the DOM.
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
 
 export interface CalculatedOrderQuantity {

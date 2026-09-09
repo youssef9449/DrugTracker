@@ -1,6 +1,6 @@
-import React from 'react';
+import type { FC } from 'react';
 
-export const AndroidNavBar: React.FC = () => {
+export const AndroidNavBar: FC = () => {
   return (
     <div className="w-full h-5 bg-slate-900 flex items-center justify-center select-none shrink-0">
       {/* Android gesture home indicator pill */}

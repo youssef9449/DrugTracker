@@ -1,5 +1,5 @@
 {
-  "name": "nagnagh",
+  "name": "drug-tracker",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -11,6 +11,9 @@
     "clean": "rm -rf dist server.js",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "icons": "python3 scripts/generate-icons.py",
     "cap:sync": "npm run build && npx cap sync android",
     "cap:add": "npx cap add android",
@@ -35,6 +38,7 @@
     "@capacitor/cli": "^6.2.0",
     "@eslint/js": "^9.20.0",
     "@types/node": "^22.14.0",
+    "@vitest/coverage-v8": "^2.1.9",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
     "eslint": "^9.20.0",
@@ -47,7 +51,8 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "typescript-eslint": "^8.56.1",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "vitest": "^2.1.9"
   },
   "engines": {
     "node": ">=20"

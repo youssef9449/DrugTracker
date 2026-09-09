@@ -1,5 +1,5 @@
 /**
- * Seed data for الننغنغ (Drug Tracker).
+ * Seed data for النغنغ (Drug Tracker).
  *
  * This module is imported by `src/App.tsx`:
  *     import { INITIAL_MEDICATIONS, INITIAL_LOGS } from './data/initialData';

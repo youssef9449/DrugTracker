@@ -1,5 +1,5 @@
-import React from 'react';
-import { Pill, Bell, BellOff, Volume2, VolumeX, Search, Smartphone, Monitor, ShoppingCart, History, Settings, AlertTriangle } from 'lucide-react';
+import React, { useState } from 'react';
+import { Pill, Bell, BellOff, Volume2, VolumeX, Search, Smartphone, Monitor, ShoppingCart, History, Settings, AlertTriangle, FileAudio, Trash2 } from 'lucide-react';
 import { ActiveTab } from './AndroidBottomNav';
 
 interface AppHeaderProps {
@@ -13,16 +13,13 @@ interface AppHeaderProps {
   onToggleNotifications: () => void;
   soundEnabled: boolean;
   onToggleSound: () => void;
-  /**
-   * Whether the "متبقي حبتين فقط" critical-stock alert is enabled.
-   * Default true (the headline feature). When false, no critical
-   * stock notification is sent by sendCriticalStockAlert().
-   */
   criticalStockAlertsEnabled: boolean;
   onToggleCriticalStockAlerts: () => void;
   isPhoneFrame: boolean;
   onTogglePhoneFrame: () => void;
   onOpenSettings: () => void;
+  globalCustomSound?: { fileName: string; mimeType: string; dataUrl: string } | null;
+  onSetGlobalCustomSound: (file: { fileName: string; mimeType: string; dataUrl: string } | null) => void;
 }
 
 export const AppHeader: React.FC<AppHeaderProps> = ({
@@ -41,7 +38,10 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   isPhoneFrame,
   onTogglePhoneFrame,
   onOpenSettings,
+  globalCustomSound,
+  onSetGlobalCustomSound,
 }) => {
+  const [showSoundPanel, setShowSoundPanel] = useState(false);
   const getHeaderIcon = () => {
     switch (activeTab) {
       case 'shopping':
@@ -71,7 +71,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
       case 'logs':
         return 'تتبع الخصم التلقائي عبر مرور الأيام';
       default:
-        return 'حساب استهلاك الحبوب وتنبيهات النفاد تلقائياً';
+        return 'حساب استهلاك الحبوب وتنبيهات النفاذ تلقائياً';
     }
   };
 
@@ -109,14 +109,136 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             <Settings className="w-4 h-4" />
           </button>
 
-          {/* Audio toggle */}
+          {/* Audio toggle — clicking it opens the sound panel
+              instead of just toggling sound on/off. The toggle is
+              inside the panel. This lets the user manage the GLOBAL
+              custom sound (upload/remove) from the same place. */}
           <button
-            onClick={onToggleSound}
-            title={soundEnabled ? 'كتم التأثيرات الصوتية' : 'تفعيل التأثيرات الصوتية'}
-            className="p-2 rounded-xl text-teal-100 hover:text-white hover:bg-teal-700/80 transition active:scale-95"
+            onClick={() => setShowSoundPanel(!showSoundPanel)}
+            title={soundEnabled ? 'إدارة الأصوات' : 'الأصوات متوقفة'}
+            className={`p-2 rounded-xl transition active:scale-95 relative ${
+              soundEnabled
+                ? 'text-teal-100 hover:text-white hover:bg-teal-700/80'
+                : 'text-teal-300/60 hover:text-white hover:bg-teal-700/80'
+            } ${globalCustomSound ? 'ring-1 ring-amber-300/40' : ''}`}
           >
-            {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4 text-teal-300/60" />}
+            {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            {globalCustomSound && (
+              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-400 ring-1 ring-teal-800" />
+            )}
           </button>
+
+          {/* Sound panel — drops down below the audio button when
+              open. Lets the user: toggle sound on/off + upload a
+              GLOBAL custom sound + remove the current custom sound. */}
+          {showSoundPanel && (
+            <div className="absolute top-full right-0 mt-1 z-50 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 p-3 space-y-3" dir="rtl">
+              {/* Sound on/off toggle */}
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-700">تأثيرات صوتية في التطبيق</span>
+                <button
+                  onClick={onToggleSound}
+                  className={`w-10 h-5 rounded-full relative transition ${soundEnabled ? 'bg-teal-600' : 'bg-slate-300'}`}
+                >
+                  <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition ${soundEnabled ? 'right-0.5' : 'right-[18px]'}`} />
+                </button>
+              </div>
+
+              <hr className="border-slate-100" />
+
+              {/* Global custom sound section */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <FileAudio className="w-3.5 h-3.5 text-teal-600" />
+                  <span className="text-[11px] font-bold text-slate-700">صوت إشعار مخصص (لكل الأدوية)</span>
+                </div>
+
+                {globalCustomSound ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 bg-teal-50 border border-teal-200 rounded-xl px-2.5 py-1.5">
+                      <FileAudio className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                      <span className="text-[11px] text-teal-800 font-bold truncate flex-1" title={globalCustomSound.fileName}>
+                        {globalCustomSound.fileName}
+                      </span>
+                      <button
+                        onClick={() => {
+                          onSetGlobalCustomSound(null);
+                        }}
+                        className="text-rose-500 hover:text-rose-700 transition shrink-0"
+                        title="إزالة"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <label className="block w-full py-1.5 px-2 rounded-xl text-[11px] font-bold text-center cursor-pointer bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100 transition">
+                      <input
+                        type="file"
+                        accept="audio/*"
+                        className="sr-only"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          e.target.value = '';
+                          if (!file) return;
+                          try {
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                              const dataUrl = String(reader.result || '');
+                              if (dataUrl) {
+                                onSetGlobalCustomSound({
+                                  fileName: file.name,
+                                  mimeType: file.type || 'audio/mpeg',
+                                  dataUrl,
+                                });
+                              }
+                            };
+                            reader.onerror = () => {};
+                            reader.readAsDataURL(file);
+                          } catch {
+                            // ignore
+                          }
+                        }}
+                      />
+                      تغيير الملف
+                    </label>
+                  </div>
+                ) : (
+                  <label className="block w-full py-2 px-2 rounded-xl text-[11px] font-bold text-center cursor-pointer bg-teal-50 text-teal-800 border border-teal-200 hover:bg-teal-100 transition">
+                    <input
+                      type="file"
+                      accept="audio/*"
+                      className="sr-only"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = '';
+                        if (!file) return;
+                        try {
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            const dataUrl = String(reader.result || '');
+                            if (dataUrl) {
+                              onSetGlobalCustomSound({
+                                fileName: file.name,
+                                mimeType: file.type || 'audio/mpeg',
+                                dataUrl,
+                              });
+                            }
+                          };
+                          reader.onerror = () => {};
+                          reader.readAsDataURL(file);
+                        } catch {
+                          // ignore
+                        }
+                      }}
+                    />
+                    📂 اختر ملفاً صوتياً من جهازك
+                  </label>
+                )}
+                <p className="text-[10px] text-slate-500 leading-relaxed">
+                  الصوت المخصص يُطبّق على كل إشعارات الأدوية (تذكير الجرعات + تنبيهات النفاذ). MP3 / WAV / OGG، حد أقصى 2MB.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Browser Notification toggle */}
           <button
@@ -212,7 +334,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                   : 'bg-teal-700/60 text-teal-100 hover:bg-teal-700'
               }`}
             >
-              <span>قارب على النفاد</span>
+              <span>قارب على النفاذ</span>
               {alertsCount > 0 && (
                 <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-600 text-white font-mono font-bold">
                   {alertsCount}

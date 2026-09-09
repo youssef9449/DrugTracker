@@ -5,6 +5,7 @@ import {
   PharmacySettings,
   DEFAULT_PHARMACY_SETTINGS,
   calculateMedicationStatus,
+  CustomSoundFile,
 } from './types';
 // Seed data — default 3 medications + 2 consumption logs shown on fresh
 // install. The file lives at src/data/initialData.ts (relative path).
@@ -24,7 +25,7 @@ import { PharmacySettingsModal } from './components/PharmacySettingsModal';
 import { AndroidFab } from './components/AndroidFab';
 import { EmptyState } from './components/EmptyState';
 import { DoseAlarmModal } from './components/DoseAlarmModal';
-import { playSuccessChime, playAlertChime } from './utils/sound';
+import { playSuccessChime } from './utils/sound';
 import {
   requestNotificationPermission,
   sendMedicineAlert,
@@ -42,6 +43,10 @@ const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
 const STORAGE_PHARMACY_KEY = 'android_med_tracker_pharmacy_v2';
 const SOUND_KEY = 'android_med_tracker_sound_v1';
+// Global custom sound — applies to ALL notifications (dose reminders
+// + critical stock alerts), not per-medication. Stored as a
+// CustomSoundFile JSON in localStorage.
+const GLOBAL_CUSTOM_SOUND_KEY = 'android_med_tracker_global_custom_sound_v1';
 // Critical-stock alerts (the "متبقي حبتين فقط" notifications) — user can
 // toggle this on/off from the AppHeader. Default true (enabled by
 // default — this is the headline feature of the app).
@@ -75,6 +80,11 @@ export default function App() {
   // (the headline feature). The toggle in AppHeader lets them turn it
   // off if they find it too noisy.
   const [criticalStockAlertsEnabled, setCriticalStockAlertsEnabled] = useState<boolean>(true);
+  // Global custom sound — shared across all notifications (not
+  // per-medication). The user uploads it from the AppHeader. When
+  // present, it overrides the synthesized per-medication sound in
+  // push notifications.
+  const [globalCustomSound, setGlobalCustomSound] = useState<CustomSoundFile | null>(null);
 
   const [isPhoneFrame, setIsPhoneFrame] = useState(true);
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
@@ -83,6 +93,7 @@ export default function App() {
     medications,
     soundEnabled,
     notificationsEnabled,
+    globalCustomSound,
   });
 
   // ─────────────────────────────────────────────────────────────
@@ -119,7 +130,7 @@ export default function App() {
           setPharmacySettings({
             ...DEFAULT_PHARMACY_SETTINGS,
             ...parsed,
-            customerCode: parsed.customerCode || '14739',
+            customerCode: parsed.customerCode || '',
           });
         }
       }
@@ -139,6 +150,18 @@ export default function App() {
       // never touched the toggle, they get the alerts.
       const stored = localStorage.getItem(CRITICAL_STOCK_ALERTS_KEY);
       setCriticalStockAlertsEnabled(stored !== 'false');
+    } catch {
+      // ignore
+    }
+
+    try {
+      const storedSound = localStorage.getItem(GLOBAL_CUSTOM_SOUND_KEY);
+      if (storedSound) {
+        const parsed = JSON.parse(storedSound);
+        if (parsed && parsed.dataUrl) {
+          setGlobalCustomSound(parsed);
+        }
+      }
     } catch {
       // ignore
     }
@@ -247,6 +270,22 @@ export default function App() {
     }
   }, [criticalStockAlertsEnabled]);
 
+  // Persist global custom sound to localStorage.
+  useEffect(() => {
+    try {
+      if (globalCustomSound) {
+        localStorage.setItem(
+          GLOBAL_CUSTOM_SOUND_KEY,
+          JSON.stringify(globalCustomSound)
+        );
+      } else {
+        localStorage.removeItem(GLOBAL_CUSTOM_SOUND_KEY);
+      }
+    } catch {
+      // ignore
+    }
+  }, [globalCustomSound]);
+
   const showToast = (message: string) => {
     const id = Date.now();
     setToast({ id, message });
@@ -294,37 +333,6 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const handleSimulateDaysPassed = (days: number) => {
-    if (days <= 0) return;
-    const newLogs: ConsumptionLog[] = [];
-    const today = getTodayDateString();
-
-    setMedications((prev) =>
-      prev.map((med) => {
-        if (med.autoDeductEnabled === false || med.dailyDose <= 0) return med;
-        const pillsToDeduct = Math.min(med.currentPills, days * med.dailyDose);
-        const newPills = Math.max(0, med.currentPills - pillsToDeduct);
-        if (pillsToDeduct > 0) {
-          newLogs.push({
-            id: 'sim-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
-            medicationId: med.id,
-            medicationName: med.name,
-            type: 'auto_daily',
-            amount: -pillsToDeduct,
-            date: today,
-            timestamp: new Date().toISOString(),
-            description: `محاكاة مرور ${days} ${days === 1 ? 'يوم' : 'أيام'} (-${pillsToDeduct} ${med.unit})`,
-          });
-        }
-        return { ...med, currentPills: newPills };
-      })
-    );
-
-    if (newLogs.length > 0) setLogs((prev) => [...newLogs, ...prev]);
-    if (soundEnabled) playAlertChime();
-    showToast(`تمت محاكاة مرور ${days} ${days === 1 ? 'يوم' : 'أيام'} وخصم الاستهلاك تلقائياً`);
-  };
 
   const handleRestoreDose = (medicationId: string, reason: string) => {
     const med = medications.find((m) => m.id === medicationId);
@@ -612,6 +620,18 @@ export default function App() {
           isPhoneFrame={isPhoneFrame}
           onTogglePhoneFrame={() => setIsPhoneFrame(!isPhoneFrame)}
           onOpenSettings={() => setIsSettingsModalOpen(true)}
+          globalCustomSound={globalCustomSound}
+          onSetGlobalCustomSound={(file) => {
+            setGlobalCustomSound(file);
+            if (file) {
+              import('./utils/sound')
+                .then((m) => m.playNotificationSound('custom', file))
+                .catch(() => void 0);
+              showToast(`تم تعيين "${file.fileName}" كصوت مخصص لكل الأدوية`);
+            } else {
+              showToast('تم إزالة الصوت المخصص');
+            }
+          }}
         />
 
         <main className="flex-1 overflow-y-auto pb-24 relative">
@@ -626,7 +646,7 @@ export default function App() {
                       </div>
                       <div>
                         <span className="font-bold text-teal-950 block text-[11px]">الخصم التلقائي اليومي نشط</span>
-                        <p className="text-[10px] text-teal-800">يتم احتساب الجرعات بمرور الأيام لتحديث رصيدك وموعد النفاد بدقة.</p>
+                        <p className="text-[10px] text-teal-800">يتم احتساب الجرعات بمرور الأيام لتحديث رصيدك وموعد النفاذ بدقة.</p>
                       </div>
                     </div>
                     <button
@@ -710,7 +730,6 @@ export default function App() {
               medications={medications}
               logs={logs}
               onAddLog={(log) => setLogs((prev) => [log, ...prev])}
-              onSimulateDaysPassed={handleSimulateDaysPassed}
               onRestoreDose={handleRestoreDose}
               showToast={showToast}
             />

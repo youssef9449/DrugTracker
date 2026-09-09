@@ -45,6 +45,7 @@ import {
   syncAutoDailyDeductions,
   effectiveCurrentPills,
   settleDoseChange,
+  settleAutoDeductToggle,
 } from './utils/dateCalculations';
 import { useDoseReminders } from './hooks/useDoseReminders';
 import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
@@ -705,6 +706,21 @@ export default function App() {
   };
 
   const handleToggleAutoDeduct = (medicationId: string) => {
+    // Settle the snapshot at the live effective balance before the new
+    // auto-deduction state takes effect. This handles BOTH transitions:
+    //   - true → false: deduct the elapsed period at the OLD active
+    //     rate, then flip OFF. Without this, the displayed balance
+    //     would jump back up to the stale snapshot value the moment
+    //     the flag flips (because effectiveCurrentPills returns
+    //     currentPills unchanged when autoDeduct is false), undoing
+    //     all consumption since lastSyncDate.
+    //   - false → true: keep currentPills unchanged (the user wasn't
+    //     consuming during the frozen period), bump lastSyncDate=today
+    //     so the new auto-deduction starts fresh from today. Without
+    //     the lastSyncDate bump, enabling auto-deduction would
+    //     retroactively deduct daysPassed*dailyDose for the frozen
+    //     period.
+    const today = getTodayDateString();
     setMedications((prev) =>
       prev.map((m) => {
         if (m.id === medicationId) {
@@ -719,10 +735,20 @@ export default function App() {
           //   true      → false (turn OFF)
           //   false     → true  (turn ON)
           const newState = m.autoDeductEnabled === false;
+          const { updatedMed, log: settleLog } = settleAutoDeductToggle(
+            m,
+            newState,
+            today
+          );
+          // Persist the settlement consumption log (if any pills were
+          // deducted during the true→false transition).
+          if (settleLog) {
+            setLogs((prevLogs) => [settleLog, ...prevLogs]);
+          }
           showToast(
             newState ? `تم تفعيل الخصم التلقائي لـ "${m.name}"` : `تم إيقاف الخصم التلقائي مؤقتاً لـ "${m.name}"`
           );
-          return { ...m, autoDeductEnabled: newState };
+          return updatedMed;
         }
         return m;
       })

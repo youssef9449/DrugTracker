@@ -438,7 +438,16 @@ function hashCode(str: string): number {
 // via Android's AlarmManager (or iOS's UNUserNotificationCenter), and
 // the user sees the critical alert in their notification drawer.
 //
-// Rescheduling: the caller (App.tsx reschedule effect) cancels the
+// Boot persistence: on Android, the @capacitor/local-notifications
+// plugin persists scheduled notifications to SharedPreferences and
+// re-arms them via its LocalNotificationRestoreReceiver on
+// BOOT_COMPLETED (also LOCKED_BOOT_COMPLETED + QUICKBOOT_POWERON).
+// Past-due notifications are rescheduled to fire ~15 seconds after
+// boot. So scheduled one-shot critical alarms survive device reboots
+// without the user opening the app — no BootReceiver code in our
+// codebase needed.
+//
+// Rescheduling: the caller (useCriticalAlarmScheduler) cancels the
 // existing alarm for a med and schedules a new one whenever any of
 // the fields that affect the critical date change:
 //   - currentPills (snapshot)
@@ -448,21 +457,25 @@ function hashCode(str: string): number {
 //   - autoDeductEnabled
 //   - medication id (med deleted/created)
 //
-// Edge cases:
-//   - dailyDose <= 0 → no consumption rate → no critical date. Don't
-//     schedule. The UI shows "استهلاك غير محدد" anyway.
-//   - effectiveCurrentPills <= 0 → med is already out of stock. Treat
-//     as critical-now: send the notification immediately (at: now+1s)
-//     once, but DON'T schedule a future-dated alarm. The immediate
-//     notification id is the same as the alarm id (so it coalesces if
-//     one already fired today).
-//   - critical date already in the past (e.g. effective pills <
-//     critical threshold * dose at lastSyncDate) → treat as
-//     immediate too.
-//   - autoDeductEnabled === false → the effective balance is frozen
-//     at currentPills. Schedule at the calendar date it WILL cross
-//     the threshold based on that static balance, OR immediately if
-//     it's already critical.
+// Race protection: the hook uses a per-med generation counter so an
+// older async effect cannot recreate a stale alarm after a newer
+// medication state or after the medication is deleted. Each effect
+// run bumps the generation for the med; the .then() callback after
+// cancel() checks the generation and bails if a newer run superseded
+// it.
+//
+// Edge cases (handled by getCriticalAlarmDate, which returns null to
+// signal "do not schedule"):
+//   - dailyDose <= 0 → no consumption rate → no critical date.
+//   - effectiveCurrentPills <= 0 OR daysLeft <= critical threshold →
+//     the med is ALREADY critical. The one-shot alarm is only for
+//     FUTURE crossings; the existing alert effect (which runs when
+//     the app is open and tracks already-alerted statuses via
+//     lastAlertedStatusRef) handles the immediate notification.
+//     Returning null here prevents repeated immediate alerts on
+//     every app launch.
+//   - autoDeductEnabled === false AND not already critical → the
+//     balance is frozen, won't cross the threshold without a refill.
 // ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -497,16 +510,24 @@ export async function cancelCriticalAlarm(medId: string): Promise<void> {
  *
  * This is the single entry point for critical-date scheduling. The
  * caller computes `criticalDateMs` (via getCriticalAlarmDate in
- * dateCalculations) and passes it here.
+ * dateCalculations) and passes it here. In normal operation the
+ * caller only invokes this with a FUTURE timestamp (getCriticalAlarmDate
+ * returns null for already-critical meds, so no immediate alarms are
+ * scheduled). The past-date fallback below is defensive — it covers
+ * edge cases (e.g. the device was off across the projected critical
+ * date and the boot receiver re-arms the alarm with a now-stale date).
  *
- * `criticalDateMs <= Date.now()` is treated as "immediate" — we
- * schedule the notification 1 second in the future so it appears as
- * a real system notification (Capacitor treats `at: now` as
- * "delivered immediately" which some Android versions only show as a
- * head-up that auto-dismisses). This is intentional — if the med is
- * ALREADY critical, we want a one-time alert now, not a future one.
+ * `criticalDateMs <= Date.now()` (within a 1-minute tolerance) is
+ * treated as "immediate" — we schedule the notification 1 second in
+ * the future so it appears as a real system notification (Capacitor
+ * treats `at: now` as "delivered immediately" which some Android
+ * versions only show as a head-up that auto-dismisses).
  *
  * `unit` is included in the notification body for display.
+ *
+ * Boot persistence: scheduled notifications are persisted by the
+ * @capacitor/local-notifications plugin and re-armed on BOOT_COMPLETED.
+ * See the section-header comment above for details.
  */
 export async function scheduleCriticalAlarm(
   medId: string,

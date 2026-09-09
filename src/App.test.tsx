@@ -1,6 +1,6 @@
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 
 // Mock the modules that touch browser/Capacitor APIs before importing App.
 vi.mock('../native', () => ({
@@ -195,10 +195,134 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
 
     render(<App />);
 
+    // Wait for the initial schedule to happen.
     await waitFor(() => {
       expect(scheduleCriticalAlarm).toHaveBeenCalled();
     });
-    const initialScheduleCount = vi.mocked(scheduleCriticalAlarm).mock.calls.length;
-    expect(initialScheduleCount).toBeGreaterThan(0);
+
+    // The critical-alerts toggle button in AppHeader has the title
+    // "تنبيه النفاذ الحرج مفعّل ..." when enabled. Find and click it.
+    // This actually performs the state transition
+    // (criticalStockAlertsEnabled: true → false), which triggers the
+    // reschedule effect to cancel all alarms.
+    const toggle = screen.getByTitle(/تنبيه النفاذ الحرج مفعّل/);
+    fireEvent.click(toggle);
+
+    // The reschedule effect must run with the new state and cancel
+    // the previously-scheduled alarm for the med.
+    await waitFor(() => {
+      expect(cancelCriticalAlarm).toHaveBeenCalledWith('med-alarm-2');
+    });
+  });
+
+  it('re-arms all critical alarms when the app is launched (e.g., after a device reboot)', async () => {
+    // After a device reboot, the Capacitor plugin's BootReceiver
+    // re-arms already-scheduled notifications from its persisted
+    // store. But if for some reason the boot receiver doesn't fire
+    // (e.g., the app was force-stopped before the reboot), opening
+    // the app triggers the reschedule effect to re-arm all alarms
+    // from the current medication state. This test verifies that
+    // re-arming works for multiple meds on app launch.
+    localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([
+      {
+        id: 'med-reboot-1',
+        name: 'Reboot Med 1',
+        currentPills: 30,
+        dailyDose: 1,
+        unit: 'قرص',
+        warningThresholdDays: 5,
+        colorTag: 'teal',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        lastSyncDate: new Date().toISOString().slice(0, 10),
+        autoDeductEnabled: true,
+        reminderEnabled: false,
+      },
+      {
+        id: 'med-reboot-2',
+        name: 'Reboot Med 2',
+        currentPills: 20,
+        dailyDose: 2,
+        unit: 'قرص',
+        warningThresholdDays: 5,
+        colorTag: 'teal',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        lastSyncDate: new Date().toISOString().slice(0, 10),
+        autoDeductEnabled: true,
+        reminderEnabled: false,
+      },
+      {
+        id: 'med-reboot-3',
+        name: 'Reboot Med 3',
+        currentPills: 14,
+        dailyDose: 1,
+        unit: 'قرص',
+        warningThresholdDays: 7,
+        colorTag: 'teal',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        lastSyncDate: new Date().toISOString().slice(0, 10),
+        autoDeductEnabled: true,
+        reminderEnabled: false,
+      },
+    ]));
+
+    render(<App />);
+
+    // All three meds must have a critical alarm scheduled on launch.
+    await waitFor(() => {
+      expect(scheduleCriticalAlarm).toHaveBeenCalledWith(
+        'med-reboot-1',
+        'Reboot Med 1',
+        expect.any(Number),
+        'قرص'
+      );
+      expect(scheduleCriticalAlarm).toHaveBeenCalledWith(
+        'med-reboot-2',
+        'Reboot Med 2',
+        expect.any(Number),
+        'قرص'
+      );
+      expect(scheduleCriticalAlarm).toHaveBeenCalledWith(
+        'med-reboot-3',
+        'Reboot Med 3',
+        expect.any(Number),
+        'قرص'
+      );
+    });
+  });
+
+  it('does NOT schedule a critical alarm for an already-critical med on app launch (no repeated immediate alerts)', async () => {
+    // An already-critical med (daysLeft <= critical threshold) must
+    // NOT trigger an immediate alarm on every app launch. The one-shot
+    // alarm is only for FUTURE crossings. The existing alert effect
+    // (which runs when the app is open and tracks already-alerted
+    // statuses) handles the immediate notification once.
+    localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([
+      {
+        id: 'med-already-critical',
+        name: 'Already Critical Med',
+        currentPills: 1, // dose 1, threshold 5 (critical 2) → daysLeft 1 → already critical
+        dailyDose: 1,
+        unit: 'قرص',
+        warningThresholdDays: 5,
+        colorTag: 'teal',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        lastSyncDate: new Date().toISOString().slice(0, 10),
+        autoDeductEnabled: true,
+        reminderEnabled: false,
+      },
+    ]));
+
+    render(<App />);
+
+    // Give the effect a moment to (incorrectly) schedule, then assert
+    // it did NOT. scheduleCriticalAlarm should never be called for
+    // an already-critical med.
+    await waitFor(() => {
+      // The cancelCriticalAlarm might be called (no-op on web, but
+      // the mock is wired), so we wait for any notification-module
+      // activity to settle. Use a microtask flush.
+      expect(cancelCriticalAlarm).not.toHaveBeenCalledWith('med-already-critical');
+    });
+    expect(scheduleCriticalAlarm).not.toHaveBeenCalled();
   });
 });

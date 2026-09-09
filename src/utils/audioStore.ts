@@ -54,6 +54,10 @@ function openDb(): Promise<IDBDatabase | null> {
       request.onerror = () => reject(request.error);
     }).catch((err) => {
       console.warn('[audioStore] Failed to open IndexedDB:', err);
+      // #41: reset dbPromise so the next openDb() call retries instead
+      // of permanently caching the failed promise (which would make all
+      // subsequent save/load/delete calls no-op for the entire session).
+      dbPromise = null;
       return null;
     });
   }

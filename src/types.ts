@@ -56,6 +56,11 @@ export interface Medication {
   reminderEnabled?: boolean; // هل تم تفعيل تذكير يومي بموعد محدد
   reminderTime?: string; // وقت التذكير بصيغة 24 ساعة (مثال: "09:00" أو "21:30")
   notificationSound?: NotificationSoundType; // نغمة تنبيه مخصصة لهذا الدواء (synthesized tones فقط)
+  /** YYYY-MM-DD of the last day the user manually consumed a dose.
+   * When this equals today, syncAutoDailyDeductions skips the auto-
+   * deduction for this med (the user already took the dose manually)
+   * and the card shows a "تم تناول جرعة اليوم" badge. */
+  lastConsumedDate?: string;
 }
 
 /**

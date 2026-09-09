@@ -13,7 +13,6 @@ import {
 // See that file's header comment for the AI Studio cache-error
 // troubleshooting note.
 import { INITIAL_MEDICATIONS, INITIAL_LOGS } from './data/initialData';
-import { AndroidNavBar } from './components/AndroidNavBar';
 import { AndroidBottomNav, ActiveTab } from './components/AndroidBottomNav';
 import { AppHeader } from './components/AppHeader';
 import { LowStockBanner } from './components/LowStockBanner';
@@ -705,14 +704,88 @@ export default function App() {
   };
 
   const handleTakeDoseFromAlarm = (med: Medication) => {
+    // Consume-pill feature: actually subtract the dose from the balance,
+    // mark the med as consumed today (blocks auto-deduction), and log it.
+    const today = getTodayDateString();
+    const doseAmount = Math.min(med.dailyDose, med.currentPills);
+    if (doseAmount > 0) {
+      setMedications((prev) =>
+        prev.map((m) =>
+          m.id === med.id
+            ? {
+                ...m,
+                currentPills: Math.max(0, m.currentPills - doseAmount),
+                lastConsumedDate: today,
+                lastSyncDate: today,
+              }
+            : m
+        )
+      );
+      setLogs((prev) => [
+        {
+          id: 'consume-' + Date.now(),
+          medicationId: med.id,
+          medicationName: med.name,
+          type: 'dose_taken',
+          amount: -doseAmount,
+          date: today,
+          timestamp: new Date().toISOString(),
+          description: `تناول جرعة من التنبيه (-${doseAmount} ${med.unit})`,
+        },
+        ...prev,
+      ]);
+    }
     dismissAlarm();
-    showToast(`تم تسجيل جرعة "${med.name}". الخصم اليومي يتم تلقائياً بمرور اليوم.`);
+    showToast(`تم تسجيل جرعة "${med.name}" (-${doseAmount} ${med.unit}). لن يتم الخصم التلقائي اليوم.`);
     if (soundEnabled) playSuccessChime();
   };
 
   const handleSnoozeFromAlarm = (med: Medication) => {
     snoozeAlarm(10);
     showToast(`تم تأجيل تنبيه "${med.name}" عشر دقائق`);
+  };
+
+  // Consume-pill feature: manually consume a dose from the card.
+  // Subtracts dailyDose from currentPills, marks the med as consumed
+  // today (blocks auto-deduction for today), creates a dose_taken log.
+  const handleConsumeDose = (medicationId: string) => {
+    const med = medications.find((m) => m.id === medicationId);
+    if (!med) return;
+    const today = getTodayDateString();
+    // If already consumed today, don't double-consume.
+    if (med.lastConsumedDate === today) {
+      showToast(`تم تناول جرعة "${med.name}" اليوم بالفعل.`);
+      return;
+    }
+    const doseAmount = Math.min(med.dailyDose, med.currentPills);
+    if (doseAmount <= 0) return;
+    setMedications((prev) =>
+      prev.map((m) =>
+        m.id === medicationId
+          ? {
+              ...m,
+              currentPills: Math.max(0, m.currentPills - doseAmount),
+              lastConsumedDate: today,
+              lastSyncDate: today,
+            }
+          : m
+      )
+    );
+    setLogs((prev) => [
+      {
+        id: 'consume-' + Date.now(),
+        medicationId: med.id,
+        medicationName: med.name,
+        type: 'dose_taken',
+        amount: -doseAmount,
+        date: today,
+        timestamp: new Date().toISOString(),
+        description: `تناول جرعة يدوياً (-${doseAmount} ${med.unit})`,
+      },
+      ...prev,
+    ]);
+    showToast(`تم تناول جرعة "${med.name}" (-${doseAmount} ${med.unit}). لن يتم الخصم التلقائي اليوم.`);
+    if (soundEnabled) playSuccessChime();
   };
 
   const filteredMedications = useMemo(() => {
@@ -883,6 +956,7 @@ export default function App() {
                       onToggleAutoDeduct={handleToggleAutoDeduct}
                       onNavigateToShopping={() => setActiveTab('shopping')}
                       onTriggerAlarm={testAlarm}
+                      onConsumeDose={handleConsumeDose}
                     />
                   ))
                 )}
@@ -913,7 +987,6 @@ export default function App() {
 
         {activeTab === 'stock' && <AndroidFab onOpenAddModal={openAdd} />}
         <AndroidBottomNav activeTab={activeTab} onTabChange={setActiveTab} alertsCount={alertsCount} />
-        <AndroidNavBar />
 
         {toast && (
           <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-40 max-w-[90%] px-4 py-2.5 bg-slate-900 text-white text-xs font-bold rounded-2xl shadow-xl text-center">

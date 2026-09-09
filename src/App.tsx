@@ -45,6 +45,7 @@ import { getTodayDateString, syncAutoDailyDeductions } from './utils/dateCalcula
 import { useDoseReminders } from './hooks/useDoseReminders';
 import { initNativeBridge } from './native';
 import { migrateSchema } from './lib/migration';
+import { getInitialTab } from './lib/initialTab';
 import { Zap } from 'lucide-react';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
@@ -111,7 +112,7 @@ const STATUS_RANK: Record<MedicationStatus, number> = {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('stock');
+  const [activeTab, setActiveTab] = useState<ActiveTab>(getInitialTab);
 
   // Deterministic-first render: we start from the seed defaults (no
   // localStorage / IndexedDB access during the initial render) and

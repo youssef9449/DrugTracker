@@ -720,38 +720,51 @@ export default function App() {
     //     the lastSyncDate bump, enabling auto-deduction would
     //     retroactively deduct daysPassed*dailyDose for the frozen
     //     period.
+    //
+    // IMPORTANT: the settle calculation + all side effects (setLogs,
+    // showToast) must run OUTSIDE the setMedications updater. React
+    // updater functions must be pure — React may invoke them more than
+    // once in Strict Mode (which would create duplicate settlement
+    // logs and duplicate toasts). We compute the settle result once
+    // here, fire the side effects once, and pass the result into the
+    // updater as a closure value (which the updater only READS).
+    const med = medications.find((m) => m.id === medicationId);
+    if (!med) return;
+
     const today = getTodayDateString();
+    // `autoDeductEnabled` defaults to true when undefined, so the
+    // effective current state is `!== false`. To toggle OFF from the
+    // default-true (undefined) state we must set false explicitly.
+    // #27: the previous `!m.autoDeductEnabled` formulation no-oped
+    // for the undefined case because `!undefined === true` — the
+    // first click on a med with autoDeductEnabled===undefined kept
+    // it ON. `med.autoDeductEnabled === false` correctly maps:
+    //   undefined → false (turn OFF the default-true)
+    //   true      → false (turn OFF)
+    //   false     → true  (turn ON)
+    const newState = med.autoDeductEnabled === false;
+    const { updatedMed, log: settleLog } = settleAutoDeductToggle(
+      med,
+      newState,
+      today
+    );
+
+    // Side effect 1: persist the settlement consumption log (if any
+    // pills were deducted during the true→false transition). Runs
+    // OUTSIDE the medications updater so Strict Mode double-invoke
+    // can't duplicate the log.
+    if (settleLog) {
+      setLogs((prevLogs) => [settleLog, ...prevLogs]);
+    }
+    // Side effect 2: toast the toggle result. Also outside the updater.
+    showToast(
+      newState ? `تم تفعيل الخصم التلقائي لـ "${med.name}"` : `تم إيقاف الخصم التلقائي مؤقتاً لـ "${med.name}"`
+    );
+
+    // Updater: pure — only reads `updatedMed` from the closure and
+    // returns the new medications array. No side effects inside.
     setMedications((prev) =>
-      prev.map((m) => {
-        if (m.id === medicationId) {
-          // `autoDeductEnabled` defaults to true when undefined, so the
-          // effective current state is `!== false`. To toggle OFF from the
-          // default-true (undefined) state we must set false explicitly.
-          // #27: the previous `!m.autoDeductEnabled` formulation no-oped
-          // for the undefined case because `!undefined === true` — the
-          // first click on a med with autoDeductEnabled===undefined kept
-          // it ON. `m.autoDeductEnabled === false` correctly maps:
-          //   undefined → false (turn OFF the default-true)
-          //   true      → false (turn OFF)
-          //   false     → true  (turn ON)
-          const newState = m.autoDeductEnabled === false;
-          const { updatedMed, log: settleLog } = settleAutoDeductToggle(
-            m,
-            newState,
-            today
-          );
-          // Persist the settlement consumption log (if any pills were
-          // deducted during the true→false transition).
-          if (settleLog) {
-            setLogs((prevLogs) => [settleLog, ...prevLogs]);
-          }
-          showToast(
-            newState ? `تم تفعيل الخصم التلقائي لـ "${m.name}"` : `تم إيقاف الخصم التلقائي مؤقتاً لـ "${m.name}"`
-          );
-          return updatedMed;
-        }
-        return m;
-      })
+      prev.map((m) => (m.id === medicationId ? updatedMed : m))
     );
   };
 

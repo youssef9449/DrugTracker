@@ -128,6 +128,244 @@ describe('handleToggleAutoDeduct logic (#27)', () => {
 });
 
 /**
+ * handleToggleAutoDeduct — purity of the setMedications updater.
+ *
+ * The settlement calculation + all side effects (setLogs, showToast)
+ * must run OUTSIDE the setMedications updater. React updater
+ * functions must be pure; React may invoke them more than once in
+ * Strict Mode (which ships in src/main.tsx). If the updater itself
+ * calls setLogs/showToast/settleAutoDeductToggle, Strict Mode's
+ * double-invoke would create DUPLICATE settlement calls, logs, and
+ * toasts.
+ *
+ * The fix: handleToggleAutoDeduct computes the settle result OUTSIDE
+ * the updater (using `medications.find`), fires setLogs + showToast
+ * once from the handler body, and passes the pre-computed `updatedMed`
+ * into the updater as a closure value (which the updater only READS).
+ *
+ * These tests verify the structural property: ONE toggle click calls
+ * the pure `settleAutoDeductToggle` helper EXACTLY ONCE — even under
+ * <StrictMode> (which double-invokes the setMedications updater). If
+ * the settle call were inside the updater, StrictMode would call it
+ * twice; the fix ensures it's called once regardless.
+ *
+ * We also verify the toast side effect fires exactly once per click.
+ */
+describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  /** Open the MedicationMenu dropdown and click the toggle item. */
+  function clickToggleFor(): void {
+    // The MedicationMenu's "خيارات" button (aria-label) opens the dropdown.
+    const menuButton = screen.getByRole('button', { name: 'خيارات' });
+    fireEvent.click(menuButton);
+    // The toggle item text depends on the current state:
+    //   - auto active → "إيقاف الخصم التلقائي مؤقتاً"
+    //   - auto paused → "تفعيل الخصم التلقائي"
+    // Use a regex to match either.
+    const toggleItem = screen.getByText(/إيقاف الخصم التلقائي مؤقتاً|تفعيل الخصم التلقائي/);
+    fireEvent.click(toggleItem);
+  }
+
+  /** Seed a single med in localStorage so App renders one MedicationCard. */
+  function seedMed(overrides: Record<string, unknown> = {}): void {
+    localStorage.setItem(
+      'android_med_tracker_items_v2',
+      JSON.stringify([
+        {
+          id: 'med-toggle',
+          name: 'Toggle Med',
+          currentPills: 60,
+          dailyDose: 2,
+          unit: 'قرص',
+          warningThresholdDays: 5,
+          colorTag: 'teal',
+          createdAt: '2024-01-01T00:00:00.000Z',
+          // lastSyncDate = today so the app-open sync effect is a no-op
+          // (daysPassed = 0). This isolates the test to the toggle's
+          // own settle behavior.
+          lastSyncDate: new Date().toISOString().slice(0, 10),
+          autoDeductEnabled: true,
+          reminderEnabled: false,
+          ...overrides,
+        },
+      ])
+    );
+  }
+
+  it('one toggle click calls settleAutoDeductToggle EXACTLY ONCE (not twice, not zero)', async () => {
+    seedMed();
+
+    // Spy on the pure settle helper. The spy returns a no-op result
+    // (no deduction, no log) so the test doesn't depend on the
+    // sync effect's state — we ONLY care about the call count.
+    const dateCalcModule = await import('./utils/dateCalculations');
+    const settleSpy = vi
+      .spyOn(dateCalcModule, 'settleAutoDeductToggle')
+      .mockReturnValue({
+        updatedMed: {
+          id: 'med-toggle',
+          name: 'Toggle Med',
+          currentPills: 60,
+          dailyDose: 2,
+          unit: 'قرص',
+          warningThresholdDays: 5,
+          colorTag: 'teal',
+          createdAt: '2024-01-01T00:00:00.000Z',
+          lastSyncDate: new Date().toISOString().slice(0, 10),
+          autoDeductEnabled: false,
+        },
+        log: null,
+      });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Toggle Med')).toBeInTheDocument();
+    });
+
+    clickToggleFor();
+
+    // The handler calls settleAutoDeductToggle once (outside the
+    // updater). The setMedications updater only READS the result —
+    // it doesn't call settleAutoDeductToggle itself. So the spy
+    // must be called exactly once.
+    expect(settleSpy).toHaveBeenCalledTimes(1);
+
+    // Verify the call args: the med id matches, newState is false
+    // (was true → false), todayStr is today.
+    expect(settleSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'med-toggle', autoDeductEnabled: true }),
+      false,
+      expect.any(String)
+    );
+  });
+
+  it('one toggle click under <StrictMode> still calls settleAutoDeductToggle EXACTLY ONCE', async () => {
+    // StrictMode double-invokes updater functions in development.
+    // If settleAutoDeductToggle were called INSIDE the setMedications
+    // updater, StrictMode would call it TWICE. The fix ensures the
+    // settle call is OUTSIDE the updater, so it's called once even
+    // under StrictMode.
+    seedMed();
+
+    const dateCalcModule = await import('./utils/dateCalculations');
+    const settleSpy = vi
+      .spyOn(dateCalcModule, 'settleAutoDeductToggle')
+      .mockReturnValue({
+        updatedMed: {
+          id: 'med-toggle',
+          name: 'Toggle Med',
+          currentPills: 60,
+          dailyDose: 2,
+          unit: 'قرص',
+          warningThresholdDays: 5,
+          colorTag: 'teal',
+          createdAt: '2024-01-01T00:00:00.000Z',
+          lastSyncDate: new Date().toISOString().slice(0, 10),
+          autoDeductEnabled: false,
+        },
+        log: null,
+      });
+
+    const { StrictMode } = await import('react');
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Toggle Med')).toBeInTheDocument();
+    });
+
+    clickToggleFor();
+
+    // Exactly ONE call — StrictMode's double-invoke of the updater
+    // did NOT double the settle call (it's outside the updater).
+    expect(settleSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('one toggle (OFF → ON) calls settleAutoDeductToggle EXACTLY ONCE and produces no log', async () => {
+    // Frozen med → toggle to ON. The settle helper is called once
+    // (with newState=true) and returns no log (no retroactive deduction).
+    seedMed({ autoDeductEnabled: false });
+
+    const dateCalcModule = await import('./utils/dateCalculations');
+    const settleSpy = vi
+      .spyOn(dateCalcModule, 'settleAutoDeductToggle')
+      .mockReturnValue({
+        updatedMed: {
+          id: 'med-toggle',
+          name: 'Toggle Med',
+          currentPills: 60,
+          dailyDose: 2,
+          unit: 'قرص',
+          warningThresholdDays: 5,
+          colorTag: 'teal',
+          createdAt: '2024-01-01T00:00:00.000Z',
+          lastSyncDate: new Date().toISOString().slice(0, 10),
+          autoDeductEnabled: true,
+        },
+        log: null,
+      });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Toggle Med')).toBeInTheDocument();
+    });
+
+    clickToggleFor();
+
+    expect(settleSpy).toHaveBeenCalledTimes(1);
+    // newState=true (false→true transition).
+    expect(settleSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'med-toggle', autoDeductEnabled: false }),
+      true,
+      expect.any(String)
+    );
+  });
+
+  it('one toggle click shows the toast EXACTLY ONCE (no duplicate toasts under StrictMode)', async () => {
+    // The toast is also a side effect that was inside the updater in
+    // the buggy version. Verify it fires exactly once per click by
+    // counting the toast message in the DOM. (Toasts auto-dismiss
+    // after 3s, but we check immediately after the click.)
+    seedMed();
+
+    const { StrictMode } = await import('react');
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Toggle Med')).toBeInTheDocument();
+    });
+
+    clickToggleFor();
+
+    // The toast message for "turn OFF" is "تم إيقاف الخصم التلقائي مؤقتاً لـ ...".
+    // It should appear exactly once (not twice — which would happen if
+    // showToast were inside the updater under StrictMode).
+    await waitFor(() => {
+      const toasts = screen.getAllByText(/تم إيقاف الخصم التلقائي مؤقتاً لـ/);
+      expect(toasts.length).toBe(1);
+    });
+  });
+});
+
+/**
  * One-shot critical-alarm reschedule effect (App.tsx).
  *
  * When notificationsEnabled + criticalStockAlertsEnabled are both true

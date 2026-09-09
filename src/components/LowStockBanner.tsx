@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, AlertCircle, ShoppingBag, ShoppingCart, ArrowLeft } from 'lucide-react';
+import { AlertTriangle, AlertCircle, ShoppingBag, ShoppingCart } from 'lucide-react';
 import { Medication, calculateMedicationStatus } from '../types';
 import { getDepletionDate } from '../utils/dateCalculations';
 
@@ -88,7 +88,7 @@ export const LowStockBanner: React.FC<LowStockBannerProps> = ({
       {/* Pill tags with depletion dates */}
       <div className="mt-2.5 pt-2 border-t border-rose-200/50 flex flex-wrap gap-1.5">
         {lowStockMeds.map((med) => {
-          const { status, daysLeft } = calculateMedicationStatus(med);
+          const { status } = calculateMedicationStatus(med);
           const depletion = getDepletionDate(med);
           return (
             <span

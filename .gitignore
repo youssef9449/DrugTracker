@@ -11,3 +11,4 @@ coverage/
 # Users create it on their own machine to build the APK.
 android/
 ios/
+node_modules/

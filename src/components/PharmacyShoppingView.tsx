@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronUp,
   RotateCcw,
+  PlusCircle,
 } from 'lucide-react';
 import { Medication, PharmacySettings, calculateMedicationStatus, describeOrderInBoxes } from '../types';
 import { getDepletionDate } from '../utils/dateCalculations';
@@ -35,6 +36,7 @@ export const PharmacyShoppingView: React.FC<PharmacyShoppingViewProps> = ({
   settings,
   onUpdateSettings,
   onOpenSettings,
+  onConfirmRefill,
   showToast,
 }) => {
   const [durationDays, setDurationDays] = useState<30 | 60>(settings.defaultDurationDays || 30);
@@ -46,6 +48,10 @@ export const PharmacyShoppingView: React.FC<PharmacyShoppingViewProps> = ({
   const [copied, setCopied] = useState(false);
   const [showAllForPlanning, setShowAllForPlanning] = useState(false);
   const [showPreviewMessage, setShowPreviewMessage] = useState(false);
+  // Track which meds the user has just marked as refilled from this
+  // view (so we can show a "تمت التعبئة" confirmation chip + let them
+  // undo by tapping again if they tapped by mistake).
+  const [refilledIds, setRefilledIds] = useState<Set<string>>(new Set());
 
   const urgentMeds = useMemo(() => {
     return medications.filter((m) => {
@@ -61,6 +67,29 @@ export const PharmacyShoppingView: React.FC<PharmacyShoppingViewProps> = ({
     const initialList = urgentMeds.length > 0 ? urgentMeds : medications;
     return new Set(initialList.map((m) => m.id));
   });
+
+  // H7: reconcile the selection with the displayed list. The
+  // `selectedMedIds` set was initialized once from a closure-stale
+  // `urgentMeds` snapshot, so as `displayList` changes (meds drop
+  // into/out of urgency, or the user toggles "show all") the selection
+  // would drift — newly-shown meds stayed unselected and removed meds
+  // lingered. This effect keeps the set in sync: it adds any
+  // displayed med that isn't selected yet, and prunes ids no longer
+  // displayed. The user's manual deselects on still-displayed meds
+  // are preserved.
+  useEffect(() => {
+    setSelectedMedIds((prev) => {
+      const next = new Set(prev);
+      for (const m of displayList) {
+        if (!next.has(m.id)) next.add(m.id);
+      }
+      const displayedIds = new Set(displayList.map((m) => m.id));
+      for (const id of next) {
+        if (!displayedIds.has(id)) next.delete(id);
+      }
+      return next;
+    });
+  }, [displayList]);
 
   const handleToggleSelect = (id: string) => {
     setSelectedMedIds((prev) => {
@@ -93,6 +122,21 @@ export const PharmacyShoppingView: React.FC<PharmacyShoppingViewProps> = ({
     const nextCustom = { ...settings.customQuantities };
     delete nextCustom[medId];
     onUpdateSettings({ ...settings, customQuantities: nextCustom });
+  };
+
+  // H1: "mark as refilled after ordering" flow. After the user sends
+  // the WhatsApp order and receives the meds from the pharmacy, they
+  // tap "تعبئة" on a med's card. This adds the ORDERED quantity to
+  // that med's stock via the shared onConfirmRefill handler (which
+  // creates a refill log + updates inventory), and marks the card
+  // as refilled so the UI confirms the action. If the med was
+  // previously refilled from this view, tapping again is a no-op
+  // (the confirmation chip just stays).
+  const handleMarkRefilled = (med: Medication, orderedQty: number) => {
+    if (orderedQty <= 0) return;
+    onConfirmRefill(med.id, orderedQty);
+    setRefilledIds((prev) => new Set(prev).add(med.id));
+    showToast(`تمت تعبئة "${med.name}" بـ ${orderedQty} ${med.unit} في المخزون.`);
   };
 
   const generateWhatsAppMessage = (): string => {
@@ -130,7 +174,7 @@ export const PharmacyShoppingView: React.FC<PharmacyShoppingViewProps> = ({
       return;
     }
     openWhatsAppLink(settings.pharmacyPhone, message);
-    showToast('جاري فتح محادثة الصيدلية على واتساب...');
+    showToast('تم إرسال الطلب! بعد استلام الأدوية من الصيدلية، اضغط "تعبئة" بجانب كل دواء لإضافته للمخزون.');
   };
 
   const handleCopyOrder = async () => {
@@ -214,6 +258,15 @@ export const PharmacyShoppingView: React.FC<PharmacyShoppingViewProps> = ({
             {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
             {copied ? 'تم النسخ!' : 'نسخ نص الرسالة'}
           </button>
+        </div>
+        {/* Post-order hint (H1): explain the "mark as refilled" flow so
+            the user knows to come back here after picking up the order. */}
+        <div className="flex items-start gap-2 bg-teal-50 border border-teal-200/80 rounded-xl px-3 py-2 text-[11px] text-teal-900 leading-relaxed">
+          <PlusCircle className="w-3.5 h-3.5 text-teal-600 shrink-0 mt-0.5" />
+          <span>
+            بعد استلام الأدوية من الصيدلية، اضغط زر <strong>«تعبئة»</strong> بجانب كل دواء بالأسفل
+            لإضافة الكمية المطلوبة تلقائياً إلى مخزونك (يُسجّل كعملية تعبئة في السجل).
+          </span>
         </div>
         <button
           type="button"
@@ -332,6 +385,29 @@ export const PharmacyShoppingView: React.FC<PharmacyShoppingViewProps> = ({
                 {isCustom && (
                   <button type="button" onClick={() => handleResetToAuto(med.id)} className="text-teal-700 font-bold inline-flex items-center gap-0.5">
                     <RotateCcw className="w-3 h-3" /> تلقائي
+                  </button>
+                )}
+              </div>
+
+              {/* H1: "mark as refilled after ordering" action. Adds the
+                  requested quantity to this med's stock via the shared
+                  onConfirmRefill handler (creates a refill log). Once
+                  tapped, the button turns into a confirmation chip. */}
+              <div className="mt-2.5">
+                {refilledIds.has(med.id) ? (
+                  <div className="w-full py-2 px-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center justify-center gap-1.5">
+                    <Check className="w-4 h-4" />
+                    <span>تمت التعبئة (+{suggestedPills} {med.unit} في المخزون)</span>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleMarkRefilled(med, suggestedPills)}
+                    className="w-full py-2 px-3 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-98"
+                    title="إضافة الكمية المطلوبة إلى مخزون هذا الدواء"
+                  >
+                    <PlusCircle className="w-4 h-4 text-teal-600" />
+                    <span>تعبئة (+{suggestedPills} {med.unit})</span>
                   </button>
                 )}
               </div>

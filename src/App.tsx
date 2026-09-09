@@ -245,10 +245,16 @@ export default function App() {
       if (savedPharmacy) {
         const parsed = JSON.parse(savedPharmacy);
         if (parsed && typeof parsed === 'object') {
+          // Clear legacy default customerCode ('14739') and legacy default pharmacyName ('الصيدلية')
+          const loadedCustomerCode =
+            parsed.customerCode === '14739' ? '' : (parsed.customerCode || '');
+          const loadedPharmacyName =
+            parsed.pharmacyName === 'الصيدلية' ? '' : (parsed.pharmacyName || '');
           setPharmacySettings({
             ...DEFAULT_PHARMACY_SETTINGS,
             ...parsed,
-            customerCode: parsed.customerCode || '',
+            customerCode: loadedCustomerCode,
+            pharmacyName: loadedPharmacyName,
           });
         }
       }

@@ -176,6 +176,8 @@ describe('describeOrderInBoxes', () => {
 describe('DEFAULT_PHARMACY_SETTINGS', () => {
   it('has safe defaults', () => {
     expect(DEFAULT_PHARMACY_SETTINGS.pharmacyPhone).toBe('');
+    expect(DEFAULT_PHARMACY_SETTINGS.pharmacyName).toBe('');
+    expect(DEFAULT_PHARMACY_SETTINGS.customerCode).toBe('');
     expect(DEFAULT_PHARMACY_SETTINGS.defaultDurationDays).toBe(30);
     expect(DEFAULT_PHARMACY_SETTINGS.customQuantities).toEqual({});
   });

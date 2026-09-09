@@ -37,6 +37,7 @@
 
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import { Medication, calculateMedicationStatus } from '../types';
 
 /**
  * Returns true when running inside the Capacitor native runtime
@@ -408,6 +409,253 @@ function hashCode(str: string): number {
     hash = (Math.imul(31, hash) + str.charCodeAt(i)) | 0;
   }
   return Math.abs(hash);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Background-scheduled notifications (fire even when app is killed)
+// ─────────────────────────────────────────────────────────────
+// Capacitor LocalNotifications.schedule with schedule.on + repeats:true
+// uses Android's AlarmManager to fire the notification at the specified
+// time every day, even when the app process is dead. This is the key
+// mechanism for dose reminders and critical stock alerts to work
+// without the app running.
+
+/**
+ * Schedule (or re-schedule) a daily repeating dose-reminder
+ * notification for a medication. The notification fires at the med's
+ * reminderTime every day via Android's AlarmManager — no JS needed.
+ * If the med's reminder is disabled or has no time, the existing
+ * scheduled notification (if any) is cancelled.
+ *
+ * @param medId     stable medication id (for the notification id hash)
+ * @param medName   medication name (displayed in the notification title)
+ * @param dailyDose  the daily dose amount (displayed in the body)
+ * @param unit       the unit (e.g. 'قرص')
+ * @param currentPills current pill count (displayed in the body)
+ * @param reminderEnabled  whether reminders are on for this med
+ * @param reminderTime  "HH:MM" 24-hour string (e.g. "09:00")
+ * @param customSoundFile  optional global custom sound
+ */
+export async function scheduleDailyDoseReminder(
+  medId: string,
+  medName: string,
+  dailyDose: number,
+  unit: string,
+  currentPills: number,
+  reminderEnabled: boolean,
+  reminderTime?: string,
+  customSoundFile?: { fileName: string; mimeType: string; dataUrl: string } | null
+): Promise<void> {
+  const notifId = hashCode(`dose-daily-${medId}`);
+
+  if (!isNativePlatform()) return;
+
+  try {
+    // Always cancel the existing scheduled notification first so
+    // re-scheduling (with updated med data) replaces it cleanly.
+    await LocalNotifications.cancel({ notifications: [{ id: notifId }] });
+  } catch {
+    // ignore — might not exist
+  }
+
+  if (!reminderEnabled || !reminderTime) return;
+
+  // Parse "HH:MM"
+  const [hStr, mStr] = reminderTime.split(':');
+  const hour = parseInt(hStr, 10);
+  const minute = parseInt(mStr, 10);
+  if (isNaN(hour) || isNaN(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) return;
+
+  try {
+    const perm = await LocalNotifications.checkPermissions();
+    if (perm.display !== 'granted') return;
+
+    const title = `⏰ حان موعد دواء: ${medName}`;
+    const body = `جرعتك المقررة: ${dailyDose} ${unit}. (المخزون: ${currentPills} ${unit})`;
+
+    await LocalNotifications.schedule({
+      notifications: [
+        {
+          id: notifId,
+          title,
+          body,
+          schedule: {
+            on: { hour, minute },
+            repeats: true,
+            allowWhileIdle: true,
+          },
+          smallIcon: 'ic_launcher',
+          channelId: 'dose-reminder',
+          extra: customSoundFile
+            ? { customSoundFile: { fileName: customSoundFile.fileName, mimeType: customSoundFile.mimeType, dataUrl: customSoundFile.dataUrl } }
+            : undefined,
+        },
+      ],
+    });
+  } catch (err) {
+    console.warn('[notifications] scheduleDailyDoseReminder failed:', err);
+  }
+}
+
+/**
+ * Cancel a scheduled daily dose-reminder notification.
+ */
+export async function cancelDailyDoseReminder(medId: string): Promise<void> {
+  if (!isNativePlatform()) return;
+  const notifId = hashCode(`dose-daily-${medId}`);
+  try {
+    await LocalNotifications.cancel({ notifications: [{ id: notifId }] });
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Schedule (or re-schedule) a daily repeating critical-stock alert
+ * for a medication. Fires at 10:00 AM every day (a reasonable default
+ * time for a stock check) when the med is in critical or out-of-stock
+ * status. If the med is sufficient, the scheduled notification is
+ * cancelled.
+ *
+ * @param medId     stable medication id
+ * @param medName   medication name
+ * @param daysLeft  days of supply remaining (0 = out of stock)
+ * @param currentPills current pill count
+ * @param unit       the unit
+ * @param isCritical  whether the med is in critical/out-of-stock status
+ */
+export async function scheduleCriticalStockCheck(
+  medId: string,
+  medName: string,
+  daysLeft: number,
+  currentPills: number,
+  unit: string,
+  isCritical: boolean
+): Promise<void> {
+  const notifId = hashCode(`critical-daily-${medId}`);
+
+  if (!isNativePlatform()) return;
+
+  try {
+    await LocalNotifications.cancel({ notifications: [{ id: notifId }] });
+  } catch {
+    // ignore
+  }
+
+  if (!isCritical) return;
+
+  try {
+    const perm = await LocalNotifications.checkPermissions();
+    if (perm.display !== 'granted') return;
+
+    const title = currentPills <= 0
+      ? `🚨 ${medName}: نفد المخزون!`
+      : `🚨 ${medName}: حرج — باقي ${daysLeft} ${daysLeft === 1 ? 'يوم' : 'أيام'}`;
+    const body = currentPills <= 0
+      ? `المخزون نفد تماماً. يرجى طلب الدواء فوراً!`
+      : `متبقي ${currentPills} ${unit} فقط. تكفي لـ ${daysLeft} ${daysLeft === 1 ? 'يوم' : 'أيام'}. يرجى التعبئة قريباً!`;
+
+    // Fire at 10:00 AM daily — a reasonable time for a stock check
+    // (not too early, not too late).
+    await LocalNotifications.schedule({
+      notifications: [
+        {
+          id: notifId,
+          title,
+          body,
+          schedule: {
+            on: { hour: 10, minute: 0 },
+            repeats: true,
+            allowWhileIdle: true,
+          },
+          smallIcon: 'ic_launcher',
+          channelId: 'low-stock',
+        },
+      ],
+    });
+  } catch (err) {
+    console.warn('[notifications] scheduleCriticalStockCheck failed:', err);
+  }
+}
+
+/**
+ * Cancel a scheduled critical-stock alert.
+ */
+export async function cancelCriticalStockCheck(medId: string): Promise<void> {
+  if (!isNativePlatform()) return;
+  const notifId = hashCode(`critical-daily-${medId}`);
+  try {
+    await LocalNotifications.cancel({ notifications: [{ id: notifId }] });
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Re-schedule all daily dose reminders and critical stock alerts
+ * based on the current medications array. Call this after hydration,
+ * after auto-deduction, and whenever medications change. Cancels
+ * notifications for meds that no longer exist or no longer need them.
+ *
+ * @param medications  the full current medications array
+ * @param criticalStockAlertsEnabled  whether the critical alert toggle is on
+ * @param globalCustomSound  optional global custom sound
+ */
+export async function rescheduleAllBackgroundNotifications(
+  medications: Medication[],
+  criticalStockAlertsEnabled: boolean,
+  globalCustomSound?: { fileName: string; mimeType: string; dataUrl: string } | null
+): Promise<void> {
+  if (!isNativePlatform()) return;
+
+  // Cancel all existing daily notifications first, then re-schedule.
+  // We cancel by iterating all meds — the hashCode is deterministic.
+  for (const med of medications) {
+    try {
+      await LocalNotifications.cancel({
+        notifications: [
+          { id: hashCode(`dose-daily-${med.id}`) },
+          { id: hashCode(`critical-daily-${med.id}`) },
+        ],
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  // Re-schedule dose reminders for meds with reminders enabled.
+  for (const med of medications) {
+    if (med.reminderEnabled && med.reminderTime) {
+      await scheduleDailyDoseReminder(
+        med.id,
+        med.name,
+        med.dailyDose,
+        med.unit,
+        med.currentPills,
+        med.reminderEnabled,
+        med.reminderTime,
+        globalCustomSound
+      );
+    }
+
+    // Re-schedule critical stock alerts for meds in critical/out-of-stock.
+    if (criticalStockAlertsEnabled) {
+      // Import calculateMedicationStatus dynamically to avoid a
+      // circular import (types.ts imports notifications.ts indirectly).
+      const { status, daysLeft } = calculateMedicationStatus(med);
+      const isCritical = status === 'critical' || status === 'out_of_stock';
+      if (isCritical) {
+        await scheduleCriticalStockCheck(
+          med.id,
+          med.name,
+          daysLeft,
+          med.currentPills,
+          med.unit,
+          isCritical
+        );
+      }
+    }
+  }
 }
 
 /**

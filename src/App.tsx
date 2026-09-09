@@ -39,6 +39,7 @@ import {
   openNotificationSettings,
   getNotificationPermission,
   getNotificationPermissionSync,
+  rescheduleAllBackgroundNotifications,
 } from './utils/notifications';
 import { getTodayDateString, syncAutoDailyDeductions } from './utils/dateCalculations';
 import { useDoseReminders } from './hooks/useDoseReminders';
@@ -588,6 +589,23 @@ export default function App() {
       tracker.set(med.id, status);
     }
   }, [medications, notificationsEnabled, criticalStockAlertsEnabled, hydrated, isFirstRun]);
+
+  // Background-scheduled notifications: re-schedule all daily dose
+  // reminders and critical stock alerts via Android's AlarmManager so
+  // they fire even when the app is killed. This runs after hydration +
+  // auto-deduction + the alert effect, and whenever medications change
+  // (refill, edit, delete, consume) so the scheduled notifications
+  // always reflect the latest med data.
+  useEffect(() => {
+    if (!hydrated || isFirstRun) return;
+    rescheduleAllBackgroundNotifications(
+      medications,
+      notificationsEnabled && criticalStockAlertsEnabled,
+      globalCustomSound
+    ).catch((err) => {
+      console.warn('[App] rescheduleAllBackgroundNotifications failed:', err);
+    });
+  }, [medications, hydrated, isFirstRun, notificationsEnabled, criticalStockAlertsEnabled, globalCustomSound]);
 
   const handleRestoreDose = (medicationId: string, reason: string) => {
     const med = medications.find((m) => m.id === medicationId);

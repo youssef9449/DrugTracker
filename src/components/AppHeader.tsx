@@ -1,7 +1,6 @@
-import { useState, type FC, type ChangeEvent } from 'react';
-import { Pill, Bell, BellOff, Volume2, VolumeX, Search, Smartphone, Monitor, ShoppingCart, History, Settings, AlertTriangle, FileAudio, Trash2, Type } from 'lucide-react';
+import { type FC } from 'react';
+import { Pill, Bell, BellOff, Search, Smartphone, Monitor, ShoppingCart, History, Settings, AlertTriangle, Type } from 'lucide-react';
 import { ActiveTab } from './AndroidBottomNav';
-import { readCustomSoundFile, CUSTOM_SOUND_ACCEPT_ATTR } from '../utils/sound';
 
 interface AppHeaderProps {
   activeTab: ActiveTab;
@@ -12,15 +11,11 @@ interface AppHeaderProps {
   alertsCount: number;
   notificationsEnabled: boolean;
   onToggleNotifications: () => void;
-  soundEnabled: boolean;
-  onToggleSound: () => void;
   criticalStockAlertsEnabled: boolean;
   onToggleCriticalStockAlerts: () => void;
   isPhoneFrame: boolean;
   onTogglePhoneFrame: () => void;
   onOpenSettings: () => void;
-  globalCustomSound?: { fileName: string; mimeType: string; dataUrl: string } | null;
-  onSetGlobalCustomSound: (file: { fileName: string; mimeType: string; dataUrl: string } | null) => void;
   fontScale: 'normal' | 'large';
   onToggleFontScale: () => void;
 }
@@ -34,41 +29,14 @@ export const AppHeader: FC<AppHeaderProps> = ({
   alertsCount,
   notificationsEnabled,
   onToggleNotifications,
-  soundEnabled,
-  onToggleSound,
   criticalStockAlertsEnabled,
   onToggleCriticalStockAlerts,
   isPhoneFrame,
   onTogglePhoneFrame,
   onOpenSettings,
-  globalCustomSound,
-  onSetGlobalCustomSound,
   fontScale,
   onToggleFontScale,
 }) => {
-  const [showSoundPanel, setShowSoundPanel] = useState(false);
-
-  // Shared file-picker handler for the global custom sound upload.
-  // Uses readCustomSoundFile() which validates the file size (≤ 2 MB)
-  // and audio type before producing the data URL, so we get consistent
-  // validation + clear Arabic errors instead of silently storing a
-  // huge file that would blow the storage quota (C4).
-  const handleSoundFilePick = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    // Reset so the same file can be re-picked later if needed.
-    e.target.value = '';
-    if (!file) return;
-    try {
-      const customFile = await readCustomSoundFile(file);
-      onSetGlobalCustomSound(customFile);
-    } catch (err) {
-      // Surface the Arabic error message from readCustomSoundFile
-      // via a quick alert — AppHeader has no toast of its own.
-      const message = err instanceof Error ? err.message : 'تعذّر تحميل الملف الصوتي';
-      window.alert(message);
-    }
-  };
-
   const getHeaderIcon = () => {
     switch (activeTab) {
       case 'shopping':
@@ -118,118 +86,16 @@ export const AppHeader: FC<AppHeaderProps> = ({
           </div>
         </div>
 
-        {/* Quick Action Icons
-            NOTE: "إضافة دواء جديد" was previously rendered here as a small
-            button in the header bar. It was redundant because the floating
-            action button (AndroidFab) at the bottom-left of the stock tab
-            already opens the same modal, and the EmptyState component shows
-            its own "أضف أول دواء الآن" button when the medication list is
-            empty. Keeping only the FAB avoids two actions pointing at the
-            same target and frees up header space for the toggle icons.
-
-            #12: `relative` is required on THIS row so the sound panel
-            (an `absolute top-full right-0` sibling of the audio button)
-            positions relative to the row, not the phone-frame container
-            (which is `relative overflow-hidden` and would clip the panel
-            off-screen). */}
-        <div className="flex items-center gap-1.5 relative">
+        {/* Quick Action Icons */}
+        <div className="flex items-center gap-1.5">
           {/* Settings button */}
           <button
             onClick={onOpenSettings}
-            title="إعدادات الصيدلية والواتساب"
+            title="الإعدادات"
             className="p-2 rounded-xl text-teal-100 hover:text-white hover:bg-teal-700/80 transition active:scale-95"
           >
             <Settings className="w-4 h-4" />
           </button>
-
-          {/* Audio toggle — clicking it opens the sound panel
-              instead of just toggling sound on/off. The toggle is
-              inside the panel. This lets the user manage the GLOBAL
-              custom sound (upload/remove) from the same place. */}
-          <button
-            onClick={() => setShowSoundPanel(!showSoundPanel)}
-            title={soundEnabled ? 'إدارة الأصوات' : 'الأصوات متوقفة'}
-            className={`p-2 rounded-xl transition active:scale-95 relative ${
-              soundEnabled
-                ? 'text-teal-100 hover:text-white hover:bg-teal-700/80'
-                : 'text-teal-300/60 hover:text-white hover:bg-teal-700/80'
-            } ${globalCustomSound ? 'ring-1 ring-amber-300/40' : ''}`}
-          >
-            {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-            {globalCustomSound && (
-              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-400 ring-1 ring-teal-800" />
-            )}
-          </button>
-
-          {/* Sound panel — drops down below the audio button when
-              open. Lets the user: toggle sound on/off + upload a
-              GLOBAL custom sound + remove the current custom sound. */}
-          {showSoundPanel && (
-            <div className="absolute top-full right-0 mt-1 z-50 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 p-3 space-y-3" dir="rtl">
-              {/* Sound on/off toggle */}
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-700">تأثيرات صوتية في التطبيق</span>
-                <button
-                  onClick={onToggleSound}
-                  className={`w-10 h-5 rounded-full relative transition ${soundEnabled ? 'bg-teal-600' : 'bg-slate-300'}`}
-                >
-                  <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition ${soundEnabled ? 'right-0.5' : 'right-[18px]'}`} />
-                </button>
-              </div>
-
-              <hr className="border-slate-100" />
-
-              {/* Global custom sound section */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-1.5">
-                  <FileAudio className="w-3.5 h-3.5 text-teal-600" />
-                  <span className="text-[11px] font-bold text-slate-700">صوت إشعار مخصص (لكل الأدوية)</span>
-                </div>
-
-                {globalCustomSound ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 bg-teal-50 border border-teal-200 rounded-xl px-2.5 py-1.5">
-                      <FileAudio className="w-3.5 h-3.5 text-teal-600 shrink-0" />
-                      <span className="text-[11px] text-teal-800 font-bold truncate flex-1" title={globalCustomSound.fileName}>
-                        {globalCustomSound.fileName}
-                      </span>
-                      <button
-                        onClick={() => {
-                          onSetGlobalCustomSound(null);
-                        }}
-                        className="text-rose-500 hover:text-rose-700 transition shrink-0"
-                        title="إزالة"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                    <label className="block w-full py-1.5 px-2 rounded-xl text-[11px] font-bold text-center cursor-pointer bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100 transition">
-                      <input
-                        type="file"
-                        accept={CUSTOM_SOUND_ACCEPT_ATTR}
-                        className="sr-only"
-                        onChange={handleSoundFilePick}
-                      />
-                      تغيير الملف
-                    </label>
-                  </div>
-                ) : (
-                  <label className="block w-full py-2 px-2 rounded-xl text-[11px] font-bold text-center cursor-pointer bg-teal-50 text-teal-800 border border-teal-200 hover:bg-teal-100 transition">
-                    <input
-                      type="file"
-                      accept={CUSTOM_SOUND_ACCEPT_ATTR}
-                      className="sr-only"
-                      onChange={handleSoundFilePick}
-                    />
-                    📂 اختر ملفاً صوتياً من جهازك
-                  </label>
-                )}
-                <p className="text-[10px] text-slate-500 leading-relaxed">
-                  الصوت المخصص يُطبّق على كل إشعارات الأدوية (تذكير الجرعات + تنبيهات النفاذ). MP3 / WAV / OGG، حد أقصى 2MB.
-                </p>
-              </div>
-            </div>
-          )}
 
           {/* Browser Notification toggle */}
           <button
@@ -247,13 +113,7 @@ export const AppHeader: FC<AppHeaderProps> = ({
             )}
           </button>
 
-          {/* Critical-stock alerts toggle — fires a high-priority
-              notification when a medication crosses its critical
-              threshold (derived from warningThresholdDays). Separate
-              from the master notification toggle because the user
-              explicitly asked for it to be its own switch. When ON,
-              critical alerts fire; when OFF they don't (other
-              notifications like dose reminders still work). */}
+          {/* Critical-stock alerts toggle */}
           <button
             onClick={onToggleCriticalStockAlerts}
             title={
@@ -279,9 +139,7 @@ export const AppHeader: FC<AppHeaderProps> = ({
             {isPhoneFrame ? <Monitor className="w-4 h-4" /> : <Smartphone className="w-4 h-4" />}
           </button>
 
-          {/* Font size toggle — increases all font sizes in the app, or
-              returns to normal. Persisted to localStorage so it survives
-              relaunch. */}
+          {/* Font size toggle */}
           <button
             onClick={onToggleFontScale}
             title={fontScale === 'large' ? 'إرجاع حجم الخط للطبيعي' : 'تكبير حجم الخط'}

@@ -184,37 +184,44 @@ export function describeOrderInBoxes(
   const boxes = Math.floor(targetPills / boxSize);
   const remainderAfterBoxes = targetPills % boxSize;
 
-  const boxWord = pluralizeArabic(boxes, 'علبة');
+  const pillTotalWord = pluralizeArabic(targetPills, unit);
 
+  // Exact match — full boxes only.
   if (boxes > 0 && remainderAfterBoxes === 0) {
-    return `${boxWord} (${pluralizeArabic(targetPills, unit)})`;
+    const boxWord = pluralizeArabic(boxes, 'علبة');
+    return `${boxWord} (${pillTotalWord})`;
   }
 
-  if (stripSize && remainderAfterBoxes > 0) {
+  // Boxes + strips (and possibly loose pills).
+  if (boxes > 0 && stripSize && remainderAfterBoxes > 0) {
     const strips = Math.floor(remainderAfterBoxes / stripSize);
     const loosePills = remainderAfterBoxes % stripSize;
+    const boxWord = pluralizeArabic(boxes, 'علبة');
+    const parts: string[] = [boxWord];
+    if (strips > 0) parts.push(pluralizeArabic(strips, 'شريط'));
+    if (loosePills > 0) parts.push(pluralizeArabic(loosePills, unit));
+    return `${parts.join(' و ')} (${pillTotalWord})`;
+  }
 
-    if (boxes > 0 && strips > 0 && loosePills === 0) {
-      const stripWord = pluralizeArabic(strips, 'شريط');
-      return `${boxWord} و ${stripWord} (${pluralizeArabic(targetPills, unit)})`;
-    }
-    if (boxes === 0 && strips > 0 && loosePills === 0) {
-      const stripWord = pluralizeArabic(strips, 'شريط');
-      return `${stripWord} (${pluralizeArabic(targetPills, unit)})`;
+  // Strips only (no boxes), possibly + loose pills.
+  if (boxes === 0 && stripSize && remainderAfterBoxes > 0) {
+    const strips = Math.floor(remainderAfterBoxes / stripSize);
+    const loosePills = remainderAfterBoxes % stripSize;
+    if (strips > 0) {
+      const parts: string[] = [pluralizeArabic(strips, 'شريط')];
+      if (loosePills > 0) parts.push(pluralizeArabic(loosePills, unit));
+      return `${parts.join(' و ')} (${pillTotalWord})`;
     }
   }
 
-  if (boxes > 0) {
-    return `${boxWord} تقريباً (${pluralizeArabic(targetPills, unit)})`;
-  }
-
-  return pluralizeArabic(targetPills, unit);
+  // No boxes, no strips — just the pill count.
+  return pillTotalWord;
 }
 
 export interface PharmacySettings {
   pharmacyPhone: string; // e.g., "01012345678"
   pharmacyName: string; // e.g., "صيدلية الإسعاف"
-  customerCode: string; // "14739" as requested
+  customerCode: string; // customer code at the pharmacy (optional)
   defaultDurationDays: 30 | 60;
   customQuantities: Record<string, number>; // medId -> custom quantity
   /**

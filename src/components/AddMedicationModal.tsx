@@ -370,7 +370,9 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                   <Calculator className="w-3 h-3 text-teal-600" />
                   <span>{showStockHelper ? 'إخفاء حاسبة الأشرطة' : 'احسب من العلب والأشرطة المتوفرة'}</span>
                 </button>
-                {describeStockInStrips(currentPills, parseInt(pillsPerStrip, 10) || 10, parseInt(stripsPerBox, 10) || 3, unit) && (
+                {/* Hide "يعادل" when noStrips is selected — strips info is
+                    meaningless for loose-pill medications. */}
+                {!noStrips && describeStockInStrips(currentPills, parseInt(pillsPerStrip, 10) || 10, parseInt(stripsPerBox, 10) || 3, unit) && (
                   <span className="text-[11px] text-teal-800 font-medium bg-teal-50 px-2 py-0.5 rounded-md border border-teal-200/60">
                     يعادل: {describeStockInStrips(currentPills, parseInt(pillsPerStrip, 10) || 10, parseInt(stripsPerBox, 10) || 3, unit)}
                   </span>

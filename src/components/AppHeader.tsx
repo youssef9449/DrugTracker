@@ -1,7 +1,7 @@
 import { useState, type FC, type ChangeEvent } from 'react';
 import { Pill, Bell, BellOff, Volume2, VolumeX, Search, Smartphone, Monitor, ShoppingCart, History, Settings, AlertTriangle, FileAudio, Trash2 } from 'lucide-react';
 import { ActiveTab } from './AndroidBottomNav';
-import { readCustomSoundFile } from '../utils/sound';
+import { readCustomSoundFile, CUSTOM_SOUND_ACCEPT_ATTR } from '../utils/sound';
 
 interface AppHeaderProps {
   activeTab: ActiveTab;
@@ -121,8 +121,14 @@ export const AppHeader: FC<AppHeaderProps> = ({
             already opens the same modal, and the EmptyState component shows
             its own "أضف أول دواء الآن" button when the medication list is
             empty. Keeping only the FAB avoids two actions pointing at the
-            same target and frees up header space for the toggle icons. */}
-        <div className="flex items-center gap-1.5">
+            same target and frees up header space for the toggle icons.
+
+            #12: `relative` is required on THIS row so the sound panel
+            (an `absolute top-full right-0` sibling of the audio button)
+            positions relative to the row, not the phone-frame container
+            (which is `relative overflow-hidden` and would clip the panel
+            off-screen). */}
+        <div className="flex items-center gap-1.5 relative">
           {/* Settings button */}
           <button
             onClick={onOpenSettings}
@@ -196,7 +202,7 @@ export const AppHeader: FC<AppHeaderProps> = ({
                     <label className="block w-full py-1.5 px-2 rounded-xl text-[11px] font-bold text-center cursor-pointer bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100 transition">
                       <input
                         type="file"
-                        accept="audio/*"
+                        accept={CUSTOM_SOUND_ACCEPT_ATTR}
                         className="sr-only"
                         onChange={handleSoundFilePick}
                       />
@@ -207,7 +213,7 @@ export const AppHeader: FC<AppHeaderProps> = ({
                   <label className="block w-full py-2 px-2 rounded-xl text-[11px] font-bold text-center cursor-pointer bg-teal-50 text-teal-800 border border-teal-200 hover:bg-teal-100 transition">
                     <input
                       type="file"
-                      accept="audio/*"
+                      accept={CUSTOM_SOUND_ACCEPT_ATTR}
                       className="sr-only"
                       onChange={handleSoundFilePick}
                     />

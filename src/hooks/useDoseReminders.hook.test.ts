@@ -9,6 +9,7 @@ import { getTodayDateString } from '../utils/dateCalculations';
 // play audio or schedule OS notifications during tests.
 vi.mock('../utils/sound', () => ({
   playNotificationSound: vi.fn(),
+  stopAllSounds: vi.fn(),
 }));
 vi.mock('../utils/notifications', () => ({
   sendMedicationDoseReminder: vi.fn(),

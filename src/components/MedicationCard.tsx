@@ -13,7 +13,7 @@ import {
   Layers,
   Box,
 } from 'lucide-react';
-import { Medication, calculateMedicationStatus, describeStockInStrips } from '../types';
+import { Medication, calculateMedicationStatus, describeStockInStrips, isSolidUnit } from '../types';
 import { getDepletionDate, getTodayDateString, effectiveCurrentPills } from '../utils/dateCalculations';
 import { MedicationMenu } from './MedicationMenu';
 import { ReminderBadge } from './ReminderBadge';
@@ -49,7 +49,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
 }) => {
   const statusInfo = calculateMedicationStatus(medication);
   const depletion = getDepletionDate(medication);
-  const isSolid = medication.unit === 'قرص' || medication.unit === 'كبسولة';
+  const isSolid = isSolidUnit(medication.unit);
   const hasStrips = isSolid && Boolean(medication.stripsPerBox && medication.pillsPerStrip);
   // Use the DYNAMIC balance (projected from currentPills + lastSyncDate)
   // — never the raw snapshot. This keeps the displayed count correct

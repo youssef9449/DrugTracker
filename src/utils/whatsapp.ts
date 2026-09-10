@@ -137,45 +137,43 @@ export function generatePharmacyOrderMessage(
   return text;
 }
 
-export function buildWhatsAppUrl(phone: string, message: string): string {
+/**
+ * Build a WhatsApp deep-link URL in the given format.
+ *
+ * Consolidates the previous 4 near-identical builders
+ * (buildWhatsAppUrl / buildWhatsAppApiUrl / buildWhatsAppAppUrl /
+ * buildWhatsAppWebUrl) which differed only in host/scheme (audit #80).
+ * `buildWhatsAppWebUrl` had zero callers and is dropped.
+ *
+ * @param phone Phone number (will be cleaned via cleanPhoneNumber).
+ * @param message Pre-filled message text.
+ * @param target URL flavor:
+ *   - 'wa.me' (default) — universal deep-link across Android/iOS/Web
+ *   - 'api'              — api.whatsapp.com/send (web fallback)
+ *   - 'app'              — whatsapp://send (native app deep-link)
+ */
+export function buildWhatsAppUrl(
+  phone: string,
+  message: string,
+  target: 'wa.me' | 'api' | 'app' = 'wa.me'
+): string {
   const clean = cleanPhoneNumber(phone);
   const encodedText = encodeURIComponent(message);
 
-  if (clean) {
-    // wa.me format is the most universal WhatsApp deep-link across Android, iOS and Web
-    return `https://wa.me/${clean}?text=${encodedText}`;
+  if (target === 'api') {
+    return clean
+      ? `https://api.whatsapp.com/send?phone=${clean}&text=${encodedText}`
+      : `https://api.whatsapp.com/send?text=${encodedText}`;
   }
-  return `https://wa.me/?text=${encodedText}`;
-}
-
-export function buildWhatsAppApiUrl(phone: string, message: string): string {
-  const clean = cleanPhoneNumber(phone);
-  const encodedText = encodeURIComponent(message);
-
-  if (clean) {
-    return `https://api.whatsapp.com/send?phone=${clean}&text=${encodedText}`;
+  if (target === 'app') {
+    return clean
+      ? `whatsapp://send?phone=${clean}&text=${encodedText}`
+      : `whatsapp://send?text=${encodedText}`;
   }
-  return `https://api.whatsapp.com/send?text=${encodedText}`;
-}
-
-export function buildWhatsAppAppUrl(phone: string, message: string): string {
-  const clean = cleanPhoneNumber(phone);
-  const encodedText = encodeURIComponent(message);
-
-  if (clean) {
-    return `whatsapp://send?phone=${clean}&text=${encodedText}`;
-  }
-  return `whatsapp://send?text=${encodedText}`;
-}
-
-export function buildWhatsAppWebUrl(phone: string, message: string): string {
-  const clean = cleanPhoneNumber(phone);
-  const encodedText = encodeURIComponent(message);
-
-  if (clean) {
-    return `https://web.whatsapp.com/send?phone=${clean}&text=${encodedText}`;
-  }
-  return `https://web.whatsapp.com/send?text=${encodedText}`;
+  // default 'wa.me' — most universal deep-link across Android, iOS, and Web
+  return clean
+    ? `https://wa.me/${clean}?text=${encodedText}`
+    : `https://wa.me/?text=${encodedText}`;
 }
 
 /**

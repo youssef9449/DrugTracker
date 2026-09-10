@@ -5,6 +5,7 @@ import {
   formatTimeArabic,
   describeStockInStrips,
   describeOrderInBoxes,
+  isSolidUnit,
   DEFAULT_PHARMACY_SETTINGS,
   type Medication,
 } from './types';
@@ -184,5 +185,33 @@ describe('DEFAULT_PHARMACY_SETTINGS', () => {
     expect(DEFAULT_PHARMACY_SETTINGS.customerCode).toBe('');
     expect(DEFAULT_PHARMACY_SETTINGS.defaultDurationDays).toBe(30);
     expect(DEFAULT_PHARMACY_SETTINGS.customQuantities).toEqual({});
+  });
+});
+
+describe('isSolidUnit (#72)', () => {
+  it('returns true for قرص (pill)', () => {
+    expect(isSolidUnit('قرص')).toBe(true);
+  });
+
+  it('returns true for كبسولة (capsule)', () => {
+    expect(isSolidUnit('كبسولة')).toBe(true);
+  });
+
+  it('returns false for مل (liquid milliliters)', () => {
+    expect(isSolidUnit('مل')).toBe(false);
+  });
+
+  it('returns false for arbitrary custom units', () => {
+    expect(isSolidUnit('جرعة')).toBe(false);
+    expect(isSolidUnit('كيس')).toBe(false);
+    expect(isSolidUnit('ampule')).toBe(false);
+    expect(isSolidUnit('')).toBe(false);
+  });
+
+  it('is case-sensitive (Arabic strings have no case, but verify no surprises)', () => {
+    // Whitespace / near-miss strings should not match.
+    expect(isSolidUnit(' قرص')).toBe(false);
+    expect(isSolidUnit('قرص ')).toBe(false);
+    expect(isSolidUnit('القرص')).toBe(false);
   });
 });

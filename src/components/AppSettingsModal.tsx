@@ -27,7 +27,6 @@ import {
   calculateMedicationOrderQuantity,
   OrderItem,
   buildWhatsAppUrl,
-  buildWhatsAppAppUrl,
 } from '../utils/whatsapp';
 import { readCustomSoundFile, CUSTOM_SOUND_ACCEPT_ATTR } from '../utils/sound';
 import { normalizeArabicDigits } from '../utils/whatsapp';
@@ -505,7 +504,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
               );
 
               const waUrl = buildWhatsAppUrl(pharmacyPhone, previewMsg);
-              const appUrl = buildWhatsAppAppUrl(pharmacyPhone, previewMsg);
+              const appUrl = buildWhatsAppUrl(pharmacyPhone, previewMsg, 'app');
 
               return (
                 <div className="bg-white text-slate-700 rounded-2xl p-3.5 text-xs space-y-2 font-mono border border-slate-200 shadow-sm">

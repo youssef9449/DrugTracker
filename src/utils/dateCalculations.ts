@@ -1,4 +1,4 @@
-import { Medication, ConsumptionLog } from '../types';
+import { Medication, ConsumptionLog, getCriticalThresholdDays } from '../types';
 import { generateId } from './id';
 
 /**
@@ -507,12 +507,11 @@ export function getCriticalAlarmDate(
   // No consumption rate → no projected crossing. Caller skips.
   if (med.dailyDose <= 0) return null;
 
-  const criticalThresholdDays = Math.max(
-    1,
-    Math.floor((med.warningThresholdDays || 5) / 2)
-  );
-  const eff = effectiveCurrentPills(med, todayStr);
-  const daysLeft = eff <= 0 ? 0 : Math.floor(eff / med.dailyDose);
+  // Reuse the canonical threshold + daysLeft helpers instead of
+  // re-deriving them inline (audit #74). The early-return above means
+  // dailyDose > 0 here, so effectiveDaysLeft won't hit its 999 sentinel.
+  const criticalThresholdDays = getCriticalThresholdDays(med);
+  const daysLeft = effectiveDaysLeft(med, todayStr);
 
   // Already at or below the critical threshold → the existing alert
   // effect (which runs when the app is open and tracks already-

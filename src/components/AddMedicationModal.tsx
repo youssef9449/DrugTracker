@@ -1,4 +1,4 @@
-import { useState, useEffect, type FC, type FormEvent } from 'react';
+import { useState, useEffect, useMemo, type FC, type FormEvent } from 'react';
 import { X, Pill, ShieldAlert, Check, Zap, Layers, Box, Calculator, Bell, Clock, Volume2 } from 'lucide-react';
 import { Medication, describeStockInStrips, NotificationSoundType, formatTimeArabic, isSolidUnit } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
@@ -63,6 +63,12 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
   const [helperBoxes, setHelperBoxes] = useState<number>(1);
   const [helperStrips, setHelperStrips] = useState<number>(0);
   const [helperLoose, setHelperLoose] = useState<number>(0);
+  // #111: extracted from an inline IIFE — the stock-helper total.
+  const helperTotal = useMemo(() => {
+    const s = Math.max(1, parseInt(stripsPerBox, 10) || 1);
+    const p = Math.max(1, parseInt(pillsPerStrip, 10) || 1);
+    return helperBoxes * (s * p) + helperStrips * p + helperLoose;
+  }, [helperBoxes, helperStrips, helperLoose, stripsPerBox, pillsPerStrip]);
   const [error, setError] = useState('');
 
   const [reminderEnabled, setReminderEnabled] = useState<boolean>(false);
@@ -451,11 +457,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                 </div>
                 <div className="flex items-center justify-between pt-1">
                   <span className="text-[11px] text-teal-900 font-mono">
-                    المجموع = {(() => {
-                      const s = Math.max(1, parseInt(stripsPerBox, 10) || 1);
-                      const p = Math.max(1, parseInt(pillsPerStrip, 10) || 1);
-                      return helperBoxes * (s * p) + helperStrips * p + helperLoose;
-                    })()} {unit}
+                    المجموع = {helperTotal} {unit}
                   </span>
                   <button
                     type="button"

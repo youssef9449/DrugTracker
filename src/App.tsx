@@ -739,7 +739,9 @@ export default function App() {
         amount: addedPills,
         date: today,
         timestamp: new Date().toISOString(),
-        description: `شراء وتعبئة مخزون (+${addedPills} ${med.unit})`,
+        description: addedPills >= 0
+          ? `شراء وتعبئة مخزون (+${addedPills} ${med.unit})`
+          : `تراجع عن تعبئة مخزون (${Math.abs(addedPills)} ${med.unit})`,
       },
       ...prev,
     ]);

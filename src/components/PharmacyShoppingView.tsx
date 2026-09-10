@@ -2,7 +2,6 @@ import { useState, useMemo, useEffect, type FC } from 'react';
 import {
   Copy,
   Check,
-  Settings,
   Phone,
   MessageCircle,
   CheckSquare,
@@ -33,7 +32,6 @@ interface PharmacyShoppingViewProps {
   medications: Medication[];
   settings: PharmacySettings;
   onUpdateSettings: (newSettings: PharmacySettings) => void;
-  onOpenSettings: (orderItems?: OrderItem[]) => void;
   showToast: (message: string) => void;
 }
 
@@ -41,7 +39,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   medications,
   settings,
   onUpdateSettings,
-  onOpenSettings,
   showToast,
 }) => {
   type PeriodUnit = 'day' | 'month';
@@ -344,48 +341,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
 
   return (
     <div className="p-4 space-y-4">
-      <div className="bg-white rounded-2xl border border-slate-200/90 p-3.5 shadow-xs flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
-          <div className="w-9 h-9 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
-            <Phone className="w-4 h-4" />
-          </div>
-          <div className="min-w-0 text-xs">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <select
-                value={selectedPharmacy?.id || ''}
-                onChange={(event) => onUpdateSettings({ ...settings, selectedPharmacyId: event.target.value })}
-                className="max-w-[180px] bg-transparent font-bold text-slate-800 truncate outline-none"
-                aria-label="اختيار الصيدلية"
-              >
-                {pharmacies.length === 0 && <option value="">اختر صيدلية</option>}
-                {pharmacies.map((pharmacy) => <option key={pharmacy.id} value={pharmacy.id}>{pharmacy.name}</option>)}
-                {pharmacies.length === 0 && selectedPharmacy && <option value="legacy">{selectedPharmacy.name}</option>}
-              </select>
-              {hasPharmacyPhone ? (
-                <span className="font-mono text-[11px] bg-teal-50 text-teal-800 px-2 py-0.5 rounded-md border border-teal-200 font-bold">
-                  +{displayPhone}
-                </span>
-              ) : (
-                <span className="text-[10px] text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 font-medium">
-                  اكتب رقم الصيدلية لإرسال الطلب
-                </span>
-              )}
-            </div>
-            <div className="text-[11px] text-slate-500 mt-0.5">
-              كود العميل:{' '}
-              {selectedPharmacy?.customerCode?.trim() ? (
-                <strong className="text-teal-800 font-mono">{selectedPharmacy.customerCode.trim()}</strong>
-              ) : (
-                <span className="text-slate-400 font-normal">غير محدد (اختياري)</span>
-              )}
-            </div>
-          </div>
-        </div>
-        <button onClick={() => onOpenSettings(activeOrderItems)} className="shrink-0 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5">
-          <Settings className="w-3.5 h-3.5" /> تعديل
-        </button>
-      </div>
-
       <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-xs space-y-3">
         <div>
           <h2 className="text-base font-bold text-slate-900">قائمة الشراء وتجهيز طلب الصيدلية</h2>

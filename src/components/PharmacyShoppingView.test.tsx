@@ -38,7 +38,6 @@ function renderView(overrides: Record<string, unknown> = {}) {
     medications: [] as Medication[],
     settings: defaultSettings,
     onUpdateSettings: vi.fn(),
-    onOpenSettings: vi.fn(),
     showToast: vi.fn(),
     ...overrides,
   };
@@ -94,7 +93,6 @@ describe('PharmacyShoppingView — deselection preservation (#20)', () => {
         medications={[medA, medB, medC]}
         settings={defaultSettings}
         onUpdateSettings={vi.fn()}
-        onOpenSettings={vi.fn()}
         showToast={vi.fn()}
       />
     );
@@ -120,7 +118,6 @@ describe('PharmacyShoppingView — deselection preservation (#20)', () => {
         medications={[medA, medB]}
         settings={defaultSettings}
         onUpdateSettings={vi.fn()}
-        onOpenSettings={vi.fn()}
         showToast={vi.fn()}
       />
     );
@@ -150,7 +147,6 @@ describe('PharmacyShoppingView — deselection preservation (#20)', () => {
         medications={[medA, medB]}
         settings={defaultSettings}
         onUpdateSettings={vi.fn()}
-        onOpenSettings={vi.fn()}
         showToast={vi.fn()}
       />
     );
@@ -225,19 +221,5 @@ describe('PharmacyShoppingView — refill actions', () => {
     expect(screen.getAllByText('كونكور 5').length).toBeGreaterThanOrEqual(2);
   });
 
-  it('passes analyzed order items when opening settings from the top card', () => {
-    const medA = makeMed({ id: 'med-a', name: 'كونكور 5', currentPills: 2, dailyDose: 1 });
-    const onOpenSettings = vi.fn();
-    renderView({ medications: [medA], onOpenSettings });
-
-    const editBtn = screen.getByRole('button', { name: /تعديل/ });
-    fireEvent.click(editBtn);
-
-    expect(onOpenSettings).toHaveBeenCalledTimes(1);
-    const passedItems = onOpenSettings.mock.calls[0][0];
-    expect(passedItems).toBeDefined();
-    expect(passedItems.length).toBe(1);
-    expect(passedItems[0].name).toBe('كونكور 5');
-  });
 });
 

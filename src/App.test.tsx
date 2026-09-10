@@ -586,7 +586,9 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
 
     render(<App />);
     await waitFor(() => expect(screen.getByRole('button', { name: 'تراجع عن التعبئة' })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: 'تراجع عن التعبئة' }));
+    const undoButton = screen.getByRole('button', { name: 'تراجع عن التعبئة' });
+    fireEvent.click(undoButton);
+    fireEvent.click(undoButton);
 
     await waitFor(() => {
       const savedMedications = JSON.parse(localStorage.getItem('android_med_tracker_items_v2') || '[]');
@@ -595,8 +597,20 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
     const savedLogs = JSON.parse(localStorage.getItem('android_med_tracker_logs_v2') || '[]');
     expect(savedLogs.find((log: { id: string }) => log.id === 'refill-latest').reversedAt).toBeTruthy();
     expect(savedLogs.find((log: { type: string }) => log.type === 'refill_undo').relatedLogId).toBe('refill-latest');
+    expect(savedLogs.filter((log: { type: string }) => log.type === 'refill_undo')).toHaveLength(1);
     // The older +30 refill is now the only remaining undoable refill.
     expect(screen.getByText('آخر تعبئة: +30 قرص')).toBeInTheDocument();
+
+    // Refill the same medication through the UI, then undo that new refill.
+    fireEvent.click(screen.getByRole('button', { name: /تعبئة رصيد/ }));
+    fireEvent.click(screen.getByRole('button', { name: /تأكيد إضافة المخزون/ }));
+    await waitFor(() => expect(screen.getByText(/آخر تعبئة: \+/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'تراجع عن التعبئة' }));
+
+    await waitFor(() => {
+      const finalLogs = JSON.parse(localStorage.getItem('android_med_tracker_logs_v2') || '[]');
+      expect(finalLogs.filter((log: { type: string }) => log.type === 'refill_undo')).toHaveLength(2);
+    });
   });
 
   it('restores a dose once per day and does not restore when auto-deduct is disabled', async () => {

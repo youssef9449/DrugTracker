@@ -174,10 +174,15 @@ export default function App() {
   }, [alarmingMedication, isAddModalOpen, refillMedication, isSettingsModalOpen, dismissAlarm]);
 
   // #38: on unmount, remove all Capacitor listeners so duplicate
-  // listeners don't accumulate across HMR re-initializations.
+  // listeners don't accumulate across HMR re-initializations. Also
+  // #113: clear any pending toast auto-dismiss timer.
   useEffect(() => {
     return () => {
       cleanupNativeListeners().catch(() => {});
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -335,6 +340,10 @@ export default function App() {
     }
   }, []);
 
+  // #113: track the toast auto-dismiss timer so it can be cleared on
+  // unmount (prevents a setToast-after-unmount warning / leak).
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // showToast is defined with useCallback BEFORE the persistence
   // effects so those effects can surface write failures (M1: previously
   // every catch was empty and a quota-exceeded write silently dropped
@@ -343,8 +352,12 @@ export default function App() {
   const showToast = useCallback((message: string) => {
     const id = Date.now();
     setToast({ id, message });
-    setTimeout(() => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = setTimeout(() => {
       setToast((curr) => (curr?.id === id ? null : curr));
+      toastTimerRef.current = null;
     }, 4000);
   }, []);
 
@@ -1020,8 +1033,58 @@ export default function App() {
     if (soundEnabled) playSuccessChime();
   };
 
+  // #79: extracted from two byte-identical inline handlers passed to
+  // AppHeader and AppSettingsModal. useCallback so both props get the
+  // same stable reference.
+  const handleToggleCriticalStockAlerts = useCallback(() => {
+    const next = !criticalStockAlertsEnabled;
+    setCriticalStockAlertsEnabled(next);
+    if (next && !notificationsEnabled) {
+      setNotificationsEnabled(true);
+    }
+    if (soundEnabled) playSuccessChime();
+    showToast(
+      next
+        ? 'تم تفعيل تنبيهات النفاذ الحرج ⚠️ (إشعار فوري عند اقتراب نفاد أي دواء أو نفاذه — حسب إعداد كل دواء)'
+        : 'تم إيقاف تنبيهات النفاذ الحرج'
+    );
+  }, [criticalStockAlertsEnabled, notificationsEnabled, soundEnabled, showToast]);
+
+  // #88: Single memoized medications-with-status array. Previously
+  // calculateMedicationStatus(med) was recomputed in 4 separate memos
+  // (filteredMedications, alertsCount, sufficientCount, totalPillsCount)
+  // + inside LowStockBanner (3x per med). Now all derive from this one.
+  const medicationsWithStatus = useMemo(
+    () =>
+      medications.map((med) => ({
+        med,
+        statusInfo: calculateMedicationStatus(med),
+      })),
+    [medications]
+  );
+
+  // #89: Precompute a Map<medId, lastRefillLog> so the per-card render
+  // doesn't call logs.find() O(meds×logs) per render. Previously this was
+  // an inline IIFE inside the MedicationCard.map.
+  const lastRefillByMed = useMemo(() => {
+    const map = new Map<string, ConsumptionLog>();
+    for (const log of logs) {
+      if (
+        log.type === 'refill' &&
+        log.amount > 0 &&
+        !log.reversedAt
+      ) {
+        // logs are newest-first; keep the FIRST (latest) matching log per med.
+        if (!map.has(log.medicationId)) {
+          map.set(log.medicationId, log);
+        }
+      }
+    }
+    return map;
+  }, [logs]);
+
   const filteredMedications = useMemo(() => {
-    return medications.filter((med) => {
+    return medicationsWithStatus.filter(({ med, statusInfo }) => {
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchName = med.name.toLowerCase().includes(q);
@@ -1029,29 +1092,33 @@ export default function App() {
         const matchNotes = med.notes?.toLowerCase().includes(q) || false;
         if (!matchName && !matchCat && !matchNotes) return false;
       }
-      const { status } = calculateMedicationStatus(med);
+      const { status } = statusInfo;
       if (filter === 'alerts') return status === 'out_of_stock' || status === 'critical' || status === 'warning';
       if (filter === 'sufficient') return status === 'sufficient';
       return true;
-    });
-  }, [medications, searchQuery, filter]);
+    }).map(({ med }) => med);
+  }, [medicationsWithStatus, searchQuery, filter]);
 
-  const alertsCount = useMemo(() => {
-    return medications.filter((m) => {
-      const { status } = calculateMedicationStatus(m);
-      return status === 'out_of_stock' || status === 'critical' || status === 'warning';
-    }).length;
-  }, [medications]);
+  const alertsCount = useMemo(
+    () => medicationsWithStatus.filter(({ statusInfo }) =>
+      statusInfo.status === 'out_of_stock' ||
+      statusInfo.status === 'critical' ||
+      statusInfo.status === 'warning'
+    ).length,
+    [medicationsWithStatus]
+  );
 
-  const sufficientCount = useMemo(() => {
-    return medications.filter((m) => calculateMedicationStatus(m).status === 'sufficient').length;
-  }, [medications]);
+  const sufficientCount = useMemo(
+    () => medicationsWithStatus.filter(({ statusInfo }) => statusInfo.status === 'sufficient').length,
+    [medicationsWithStatus]
+  );
 
-  const totalPillsCount = useMemo(() => {
+  const totalPillsCount = useMemo(
     // Sum the DYNAMIC balances, not the stored snapshots, so the count
     // shown in the UI header / total reflects the projected live state.
-    return medications.reduce((acc, m) => acc + effectiveCurrentPills(m), 0);
-  }, [medications]);
+    () => medications.reduce((acc, m) => acc + effectiveCurrentPills(m), 0),
+    [medications]
+  );
 
   const openAdd = () => {
     setEditingMedication(null);
@@ -1089,19 +1156,7 @@ export default function App() {
           notificationsEnabled={notificationsEnabled}
           onToggleNotifications={handleToggleNotifications}
           criticalStockAlertsEnabled={criticalStockAlertsEnabled}
-          onToggleCriticalStockAlerts={() => {
-            const next = !criticalStockAlertsEnabled;
-            setCriticalStockAlertsEnabled(next);
-            if (next && !notificationsEnabled) {
-              setNotificationsEnabled(true);
-            }
-            if (soundEnabled) playSuccessChime();
-            showToast(
-              next
-                ? 'تم تفعيل تنبيهات النفاذ الحرج ⚠️ (إشعار فوري عند اقتراب نفاد أي دواء أو نفاذه — حسب إعداد كل دواء)'
-                : 'تم إيقاف تنبيهات النفاذ الحرج'
-            );
-          }}
+          onToggleCriticalStockAlerts={handleToggleCriticalStockAlerts}
           isPhoneFrame={isPhoneFrame}
           onTogglePhoneFrame={() => setIsPhoneFrame(!isPhoneFrame)}
           onOpenSettings={() => {
@@ -1243,9 +1298,7 @@ export default function App() {
                       onTriggerAlarm={testAlarm}
                       onConsumeDose={handleConsumeDose}
                       lastRefillQuantity={(() => {
-                        const lastRefill = logs.find(
-                          (log) => log.medicationId === med.id && log.type === 'refill' && log.amount > 0 && !log.reversedAt
-                        );
+                        const lastRefill = lastRefillByMed.get(med.id);
                         return lastRefill && lastRefill.amount > 0 ? lastRefill.amount : undefined;
                       })()}
                       onUndoRefill={() => handleUndoRefill(med.id)}
@@ -1340,19 +1393,7 @@ export default function App() {
         criticalStockAlertsEnabled={criticalStockAlertsEnabled}
         autoDeductEnabled={globalAutoDeductEnabled}
         onToggleAutoDeduct={handleToggleGlobalAutoDeduct}
-        onToggleCriticalStockAlerts={() => {
-          const next = !criticalStockAlertsEnabled;
-          setCriticalStockAlertsEnabled(next);
-          if (next && !notificationsEnabled) {
-            setNotificationsEnabled(true);
-          }
-          if (soundEnabled) playSuccessChime();
-          showToast(
-            next
-              ? 'تم تفعيل تنبيهات النفاذ الحرج ⚠️ (إشعار فوري عند اقتراب نفاد أي دواء أو نفاذه — حسب إعداد كل دواء)'
-              : 'تم إيقاف تنبيهات النفاذ الحرج'
-          );
-        }}
+        onToggleCriticalStockAlerts={handleToggleCriticalStockAlerts}
         onSendTestNotification={handleSendTestNotification}
         onSetGlobalCustomSound={(file) => {
           setGlobalCustomSound(file);

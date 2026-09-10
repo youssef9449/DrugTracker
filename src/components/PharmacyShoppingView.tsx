@@ -14,6 +14,10 @@ import {
   Layers,
   Box,
   Pill,
+  ExternalLink,
+  X,
+  Smartphone,
+  Globe,
 } from 'lucide-react';
 import { Medication, PharmacySettings, calculateMedicationStatus, describeOrderInBoxes } from '../types';
 import { pluralizeArabic } from '../lib/arabicPlural';
@@ -24,13 +28,16 @@ import {
   openWhatsAppLink,
   OrderItem,
   calculateMedicationOrderQuantity,
+  buildWhatsAppUrl,
+  buildWhatsAppAppUrl,
+  buildWhatsAppWebUrl,
 } from '../utils/whatsapp';
 
 interface PharmacyShoppingViewProps {
   medications: Medication[];
   settings: PharmacySettings;
   onUpdateSettings: (newSettings: PharmacySettings) => void;
-  onOpenSettings: () => void;
+  onOpenSettings: (orderItems?: OrderItem[]) => void;
   onConfirmRefill: (medicationId: string, addedPills: number) => void;
   showToast: (message: string) => void;
 }
@@ -245,11 +252,11 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     showToast(`تمت تعبئة "${med.name}" بـ ${orderedQty} ${med.unit} في المخزون.`);
   };
 
-  const generateWhatsAppMessage = (): string => {
-    const itemsToOrder: OrderItem[] = displayList
+  const activeOrderItems = useMemo((): OrderItem[] => {
+    return displayList
       .filter((med) => selectedMedIds.has(med.id))
       .map((med) => {
-        const { quantity } = getRequestedAmount(med);
+        const { quantity } = calculateMedicationOrderQuantity(med, durationDays, settings.customQuantities);
         return {
           name: med.name,
           quantity,
@@ -259,38 +266,80 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
           packageSize: med.packageSize,
         };
       });
-    if (itemsToOrder.length === 0) return '';
+  }, [displayList, selectedMedIds, settings.customQuantities, durationDays]);
+
+  const [isSendModalOpen, setIsSendModalOpen] = useState(false);
+  const [phoneInput, setPhoneInput] = useState(settings.pharmacyPhone || '');
+  const [isEditingPhoneInModal, setIsEditingPhoneInModal] = useState(false);
+
+  useEffect(() => {
+    setPhoneInput(settings.pharmacyPhone || '');
+  }, [settings.pharmacyPhone]);
+
+  const handleSavePhoneFromModal = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = cleanPhoneNumber(phoneInput);
+    if (!clean) {
+      showToast('يرجى إدخال رقم هاتف صحيح.');
+      return;
+    }
+    const updated = { ...settings, pharmacyPhone: clean };
+    onUpdateSettings(updated);
+    setIsEditingPhoneInModal(false);
+    showToast('تم حفظ رقم الصيدلية بنجاح!');
+  };
+
+  const currentWhatsAppMessage = useMemo(() => {
+    if (activeOrderItems.length === 0) return '';
     return generatePharmacyOrderMessage(
-      itemsToOrder,
+      activeOrderItems,
       settings.customerCode || '',
       settings.address,
       settings.contactPhone
     );
-  };
+  }, [activeOrderItems, settings.customerCode, settings.address, settings.contactPhone]);
+
+  const hasPharmacyPhone = Boolean(settings.pharmacyPhone?.trim());
+  const displayPhone = settings.pharmacyPhone ? cleanPhoneNumber(settings.pharmacyPhone) : '';
+  const selectedCount = activeOrderItems.length;
+
+  const targetWaUrl = useMemo(() => {
+    return buildWhatsAppUrl(settings.pharmacyPhone || '', currentWhatsAppMessage);
+  }, [settings.pharmacyPhone, currentWhatsAppMessage]);
+
+  const targetAppUrl = useMemo(() => {
+    return buildWhatsAppAppUrl(settings.pharmacyPhone || '', currentWhatsAppMessage);
+  }, [settings.pharmacyPhone, currentWhatsAppMessage]);
+
+  const targetWebUrl = useMemo(() => {
+    return buildWhatsAppWebUrl(settings.pharmacyPhone || '', currentWhatsAppMessage);
+  }, [settings.pharmacyPhone, currentWhatsAppMessage]);
 
   const handleSendToWhatsApp = () => {
-    if (!settings.pharmacyPhone?.trim()) {
-      showToast('يرجى إدخال رقم هاتف الصيدلية أولاً في الإعدادات.');
-      onOpenSettings();
-      return;
-    }
-    const message = generateWhatsAppMessage();
-    if (!message) {
+    if (selectedCount === 0) {
       showToast('يرجى تحديد دواء واحد على الأقل لإرسال الطلب.');
       return;
     }
-    openWhatsAppLink(settings.pharmacyPhone, message);
-    showToast('تم إرسال الطلب! بعد استلام الأدوية من الصيدلية، اضغط "تعبئة" بجانب كل دواء لإضافته للمخزون.');
+    if (!settings.pharmacyPhone?.trim()) {
+      setIsEditingPhoneInModal(true);
+      setIsSendModalOpen(true);
+      showToast('أدخل رقم واتساب الصيدلية لإرسال الطلب');
+      return;
+    }
+    // Attempt opening WhatsApp directly
+    openWhatsAppLink(settings.pharmacyPhone, currentWhatsAppMessage);
+    // Also open the confirmation & direct-links modal so popup blockers never stop the user!
+    setIsSendModalOpen(true);
+    showToast('جاري فتح محادثة واتساب الصيدلية...');
   };
 
   const handleCopyOrder = async () => {
-    const orderText = generateWhatsAppMessage();
-    if (!orderText) {
+    if (!currentWhatsAppMessage) {
       showToast('يرجى تحديد دواء واحد على الأقل لنسخ الطلب.');
       return;
     }
     try {
-      await navigator.clipboard.writeText(orderText);
+      await navigator.clipboard.writeText(currentWhatsAppMessage);
       setCopied(true);
       showToast('تم نسخ رسالة الواتساب بنجاح!');
       setTimeout(() => setCopied(false), 3000);
@@ -298,11 +347,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       showToast('تعذر النسخ التلقائي.');
     }
   };
-
-  const hasPharmacyPhone = Boolean(settings.pharmacyPhone?.trim());
-  const displayPhone = settings.pharmacyPhone ? cleanPhoneNumber(settings.pharmacyPhone) : '';
-  const selectedCount = displayList.filter((m) => selectedMedIds.has(m.id)).length;
-  const currentWhatsAppMessage = generateWhatsAppMessage();
 
   return (
     <div className="p-4 space-y-4">
@@ -335,7 +379,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
           </div>
         </div>
         <button
-          onClick={onOpenSettings}
+          onClick={() => onOpenSettings(activeOrderItems)}
           className="shrink-0 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5"
         >
           <Settings className="w-3.5 h-3.5" />
@@ -597,6 +641,160 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
           );
         })}
       </div>
+
+      {/* WhatsApp Send Confirmation & Direct Links Modal */}
+      {isSendModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-5 shadow-2xl border border-slate-100 space-y-4 max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-[#25D366]/15 text-[#25D366] flex items-center justify-center">
+                  <MessageCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">إرسال الطلب للصيدلية</h3>
+                  <p className="text-[11px] text-slate-500">تم تجهيز {selectedCount} أدوية بالكميات المطلوبة</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSendModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Pharmacy Phone Box */}
+            <div className="bg-slate-50 rounded-2xl p-3.5 border border-slate-200/80 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                  <Phone className="w-3.5 h-3.5 text-teal-600" />
+                  <span>{settings.pharmacyName || 'الصيدلية'}:</span>
+                </span>
+                {hasPharmacyPhone && !isEditingPhoneInModal && (
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingPhoneInModal(true)}
+                    className="text-[11px] text-teal-700 font-bold hover:underline"
+                  >
+                    تعديل الرقم
+                  </button>
+                )}
+              </div>
+
+              {(!hasPharmacyPhone || isEditingPhoneInModal) ? (
+                <form onSubmit={handleSavePhoneFromModal} className="space-y-2 pt-1">
+                  <label className="block text-[11px] text-slate-600 font-medium">
+                    أدخل رقم واتساب الصيدلية (مثال: 01012345678):
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="tel"
+                      value={phoneInput}
+                      onChange={(e) => setPhoneInput(e.target.value)}
+                      placeholder="01012345678"
+                      dir="ltr"
+                      autoFocus
+                      className="flex-1 px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    />
+                    <button
+                      type="submit"
+                      className="px-3.5 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold shrink-0 shadow-xs"
+                    >
+                      حفظ
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-slate-200">
+                  <span className="text-xs text-slate-500">رقم واتساب:</span>
+                  <span className="font-mono text-xs font-bold text-teal-900" dir="ltr">
+                    +{displayPhone}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Direct Send Action Buttons */}
+            {hasPharmacyPhone && !isEditingPhoneInModal && (
+              <div className="space-y-2">
+                <a
+                  href={targetWaUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => {
+                    openWhatsAppLink(settings.pharmacyPhone, currentWhatsAppMessage);
+                    showToast('تم فتح واتساب!');
+                  }}
+                  className="w-full py-3 px-4 bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-2xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2.5 shadow-md active:scale-98 transition text-center"
+                >
+                  <MessageCircle className="w-5 h-5 shrink-0" />
+                  <span>فتح محادثة واتساب الآن 🚀</span>
+                  <ExternalLink className="w-4 h-4 opacity-80 shrink-0" />
+                </a>
+
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <a
+                    href={targetAppUrl}
+                    className="py-2 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition"
+                  >
+                    <Smartphone className="w-4 h-4 text-slate-600" />
+                    <span>تطبيق الهاتف</span>
+                  </a>
+                  <a
+                    href={targetWebUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="py-2 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition"
+                  >
+                    <Globe className="w-4 h-4 text-slate-600" />
+                    <span>واتساب ويب</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={handleCopyOrder}
+                    className="py-2 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition"
+                  >
+                    {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4 text-slate-600" />}
+                    <span>{copied ? 'تم النسخ!' : 'نسخ النص'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Analyzed Items Breakdown */}
+            <div className="space-y-1.5 pt-1">
+              <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                <span>تفاصيل الأدوية والكميات المطلوبة:</span>
+                <span className="text-teal-700">{activeOrderItems.length} أدوية</span>
+              </div>
+              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-2.5 max-h-40 overflow-y-auto space-y-1.5 text-xs">
+                {activeOrderItems.map((item, idx) => {
+                  const pkg = describeOrderInBoxes(item.quantity, item.unit, item.stripsPerBox, item.pillsPerStrip, item.packageSize);
+                  return (
+                    <div key={idx} className="flex items-center justify-between py-1 border-b border-slate-200/60 last:border-b-0">
+                      <span className="font-bold text-slate-800">{item.name}</span>
+                      <span className="text-[11px] text-teal-800 bg-teal-50 px-2 py-0.5 rounded-lg border border-teal-200/60 font-semibold">
+                        {pkg.packagingDesc || `${item.quantity} ${item.unit}`}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Friendly Refill Reminder */}
+            <div className="flex items-start gap-2 bg-teal-50/80 border border-teal-200/70 rounded-xl p-2.5 text-[11px] text-teal-900 leading-relaxed">
+              <PlusCircle className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
+              <span>
+                تذكير: بعد وصول الأدوية واستلامها من الصيدلية، اضغط زر <strong>«تعبئة»</strong> بجانب كل دواء في صفحة الشراء لتحديث المخزون تلقائياً.
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

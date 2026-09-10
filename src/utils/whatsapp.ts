@@ -37,12 +37,17 @@ export function cleanPhoneNumber(rawPhone: string): string {
   // non-digit characters (not just spaces/dashes/parens/plus — letters,
   // dots, slashes, colons etc. also leak through and produce invalid
   // wa.me URLs). The 00 international prefix is handled below.
-  const cleaned = normalizeArabicDigits(rawPhone).replace(/\D/g, '');
+  let cleaned = normalizeArabicDigits(rawPhone).replace(/\D/g, '');
 
   // Strip leading 00 (international prefix) → the rest is already the
   // country code + number, keep it verbatim.
   if (cleaned.startsWith('00')) {
-    return cleaned.substring(2);
+    cleaned = cleaned.substring(2);
+  }
+
+  // Egyptian mobile with extra 0 after 20 (e.g. +20010..., 20010...) → 201xxxxxxxxx
+  if (/^2001[0125][0-9]{8}$/.test(cleaned)) {
+    return '20' + cleaned.substring(3);
   }
 
   // Egyptian mobile format: 01xxxxxxxxx (11 digits starting with 010/011/012/015)
@@ -50,6 +55,18 @@ export function cleanPhoneNumber(rawPhone: string): string {
   if (/^01[0125][0-9]{8}$/.test(cleaned)) {
     return '20' + cleaned.substring(1);
   }
+
+  // Egyptian mobile without leading 0: 1[0125]xxxxxxxx (10 digits)
+  // → 201xxxxxxxxx
+  if (/^1[0125][0-9]{8}$/.test(cleaned)) {
+    return '20' + cleaned;
+  }
+
+  // Egyptian landlines with extra 0 after 20: 2002xxxxxxx → 202xxxxxxx
+  if (/^200[2-9][0-9]{7,8}$/.test(cleaned)) {
+    return '20' + cleaned.substring(3);
+  }
+
   // Egyptian landlines / area codes (e.g. 02xxxxxxx, 03xxxxxxx) → 202xxxxxxx
   if (/^0[2-9][0-9]{7,8}$/.test(cleaned)) {
     return '20' + cleaned.substring(1);
@@ -131,35 +148,73 @@ export function buildWhatsAppUrl(phone: string, message: string): string {
   return `https://wa.me/?text=${encodedText}`;
 }
 
+export function buildWhatsAppApiUrl(phone: string, message: string): string {
+  const clean = cleanPhoneNumber(phone);
+  const encodedText = encodeURIComponent(message);
+
+  if (clean) {
+    return `https://api.whatsapp.com/send?phone=${clean}&text=${encodedText}`;
+  }
+  return `https://api.whatsapp.com/send?text=${encodedText}`;
+}
+
+export function buildWhatsAppAppUrl(phone: string, message: string): string {
+  const clean = cleanPhoneNumber(phone);
+  const encodedText = encodeURIComponent(message);
+
+  if (clean) {
+    return `whatsapp://send?phone=${clean}&text=${encodedText}`;
+  }
+  return `whatsapp://send?text=${encodedText}`;
+}
+
+export function buildWhatsAppWebUrl(phone: string, message: string): string {
+  const clean = cleanPhoneNumber(phone);
+  const encodedText = encodeURIComponent(message);
+
+  if (clean) {
+    return `https://web.whatsapp.com/send?phone=${clean}&text=${encodedText}`;
+  }
+  return `https://web.whatsapp.com/send?text=${encodedText}`;
+}
+
 /**
- * Open a WhatsApp deep-link (`https://wa.me/…?text=…`) in a new tab /
- * the WhatsApp app.
+ * Open a WhatsApp deep-link in a new tab or the WhatsApp app.
  *
- * We deliberately use the synthetic-anchor click approach as the
- * PRIMARY path (not `window.open`). Reasons:
- *   - `window.open` is blocked by popup blockers when not triggered by
- *     a direct user gesture, and its return value / `win.closed`
- *     check is unreliable across mobile browsers (Safari returns null
- *     for cross-origin popups; in-app WebViews often return a stub).
- *   - A synthetic `<a target="_blank" rel="noopener noreferrer">` with
- *     a programmatic `click()` is treated as a user-gesture continuation
- *     by most browsers and is the most reliable cross-platform way to
- *     hand a `wa.me` URL to the OS app chooser / a new tab.
- *
- * The link is appended to `document.body` (required for Firefox to
- * dispatch the click), clicked, then removed. `rel="noopener
- * noreferrer"` prevents the opened page from accessing `window.opener`.
+ * Robust multi-tier strategy:
+ * 1. Direct window.open (works when called synchronously in click handlers)
+ * 2. Fallback to synthetic anchor appended to document.body and clicked
+ * Returns boolean indicating whether a navigation attempt was made.
  */
-export function openWhatsAppLink(phone: string, message: string): void {
+export function openWhatsAppLink(phone: string, message: string): boolean {
   const url = buildWhatsAppUrl(phone, message);
-  const link = document.createElement('a');
-  link.href = url;
-  link.target = '_blank';
-  link.rel = 'noopener noreferrer';
-  // Some browsers ignore `click()` on an element that isn't in the DOM.
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  let opened = false;
+
+  // Tier 1: Try window.open first (standard browser API for user-initiated gestures)
+  try {
+    const win = window.open(url, '_blank', 'noopener,noreferrer');
+    if (win) {
+      opened = true;
+    }
+  } catch {
+    // window.open blocked by sandbox or browser popup settings
+  }
+
+  // Tier 2: Synthetic anchor click (Firefox & Safari user-gesture fallback)
+  try {
+    const link = document.createElement('a');
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    opened = true;
+  } catch {
+    // anchor click blocked
+  }
+
+  return opened;
 }
 
 export interface CalculatedOrderQuantity {

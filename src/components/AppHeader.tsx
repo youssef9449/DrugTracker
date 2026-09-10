@@ -1,6 +1,7 @@
 import { type FC } from 'react';
 import { Pill, Bell, BellOff, Search, Smartphone, Monitor, ShoppingCart, History, Settings, AlertTriangle, Type } from 'lucide-react';
 import { ActiveTab } from './AndroidBottomNav';
+import { ICON_BUTTON_CLASS } from '../lib/styles';
 
 interface AppHeaderProps {
   activeTab: ActiveTab;
@@ -92,7 +93,7 @@ export const AppHeader: FC<AppHeaderProps> = ({
           <button
             onClick={onOpenSettings}
             title="الإعدادات"
-            className="p-2 rounded-xl text-teal-100 hover:text-white hover:bg-teal-700/80 transition active:scale-95"
+            className={ICON_BUTTON_CLASS}
           >
             <Settings className="w-4 h-4" />
           </button>
@@ -159,7 +160,7 @@ export const AppHeader: FC<AppHeaderProps> = ({
           <button
             onClick={onTogglePhoneFrame}
             title={isPhoneFrame ? 'التبديل إلى وضع الشاشة الكاملة' : 'التبديل إلى مظهر هاتف أندرويد'}
-            className="hidden md:flex p-2 rounded-xl text-teal-100 hover:text-white hover:bg-teal-700/80 transition active:scale-95"
+            className={`hidden md:flex ${ICON_BUTTON_CLASS}`}
           >
             {isPhoneFrame ? <Monitor className="w-4 h-4" /> : <Smartphone className="w-4 h-4" />}
           </button>

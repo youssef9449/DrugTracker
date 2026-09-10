@@ -18,6 +18,7 @@ import { getDepletionDate, getTodayDateString, effectiveCurrentPills } from '../
 import { MedicationMenu } from './MedicationMenu';
 import { ReminderBadge } from './ReminderBadge';
 import { CheckCircle } from 'lucide-react';
+import { AUTO_DEDUCT_PAUSED_NOTE } from '../lib/styles';
 
 interface MedicationCardProps {
   medication: Medication;
@@ -267,7 +268,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         {/* Auto-deduct paused note — shown on every view when the
             auto-deduction is disabled, with the dose-taken status. */}
         {!isAutoActive && (
-          <div className="mt-2 text-[11px] bg-amber-50 text-amber-800 p-2 rounded-lg flex items-center gap-1.5 border border-amber-200">
+          <div className={AUTO_DEDUCT_PAUSED_NOTE}>
             <PauseCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
             <span>الخصم التلقائي معلق — الجرعة اليدوية والخصم التلقائي معطلان لهذا اليوم.</span>
           </div>
@@ -415,7 +416,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
 
         {/* Auto-deduct paused note */}
         {!isAutoActive && (
-          <div className="mt-2 text-[11px] bg-amber-50 text-amber-800 p-2 rounded-lg flex items-center gap-1.5 border border-amber-200">
+          <div className={AUTO_DEDUCT_PAUSED_NOTE}>
             <PauseCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
             <span>الخصم التلقائي معلق — الجرعة اليدوية والخصم التلقائي معطلان لهذا اليوم.</span>
           </div>

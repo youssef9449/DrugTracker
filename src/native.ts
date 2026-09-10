@@ -48,6 +48,14 @@ export function registerBackButtonHandler(handler: (() => boolean) | null) {
 // otherwise accumulate and each would play the custom sound).
 let backPressHandle: { remove: () => Promise<void> } | null = null;
 let notificationHandle: { remove: () => Promise<void> } | null = null;
+let notificationActionHandle: { remove: () => Promise<void> } | null = null;
+let notificationActionHandler: ((actionId: string, medicationId: string) => void) | null = null;
+
+export function registerNotificationActionHandler(
+  handler: ((actionId: string, medicationId: string) => void) | null
+) {
+  notificationActionHandler = handler;
+}
 
 export async function initNativeBridge(): Promise<void> {
   if (initialized) return;
@@ -106,6 +114,21 @@ export async function initNativeBridge(): Promise<void> {
   // `createChannel` and `listChannels` (with proper `Channel`,
   // `Importance`, and `Visibility` types), so no cast is needed.
   try {
+    await LocalNotifications.registerActionTypes({
+      types: [
+        {
+          id: 'dose-reminder',
+          actions: [
+            {
+              id: 'take_dose',
+              title: 'تم أخذ الجرعة',
+              foreground: true,
+            },
+          ],
+        },
+      ],
+    });
+
     const existing = await LocalNotifications.listChannels();
     const existingIds = new Set(
       (existing?.channels || []).map((c) => c.id)
@@ -141,6 +164,20 @@ export async function initNativeBridge(): Promise<void> {
     }
   } catch (err) {
     console.warn('[native] Notification channel creation failed:', err);
+  }
+
+  try {
+    notificationActionHandle = await LocalNotifications.addListener(
+      'localNotificationActionPerformed',
+      (event: { actionId: string; notification?: { extra?: { medicationId?: string } } }) => {
+        const medicationId = event.notification?.extra?.medicationId;
+        if (medicationId && notificationActionHandler) {
+          notificationActionHandler(event.actionId, medicationId);
+        }
+      }
+    );
+  } catch (err) {
+    console.warn('[native] localNotificationActionPerformed listener failed:', err);
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -201,8 +238,15 @@ export async function cleanupNativeListeners(): Promise<void> {
   } catch (err) {
     console.warn('[native] notificationHandle.remove() failed:', err);
   }
+  try {
+    if (notificationActionHandle) await notificationActionHandle.remove();
+  } catch (err) {
+    console.warn('[native] notificationActionHandle.remove() failed:', err);
+  }
   backPressHandle = null;
   notificationHandle = null;
+  notificationActionHandle = null;
+  notificationActionHandler = null;
 }
 
 /**

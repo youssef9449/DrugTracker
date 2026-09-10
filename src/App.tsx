@@ -53,7 +53,12 @@ import { useDoseReminders } from './hooks/useDoseReminders';
 import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
 import { usePersistentEffect } from './hooks/usePersistentEffect';
 import { useStockAlerts } from './hooks/useStockAlerts';
-import { initNativeBridge, registerBackButtonHandler, cleanupNativeListeners } from './native';
+import {
+  initNativeBridge,
+  registerBackButtonHandler,
+  registerNotificationActionHandler,
+  cleanupNativeListeners,
+} from './native';
 import { migrateSchema } from './lib/migration';
 import { getInitialTab } from './lib/initialTab';
 import { generateId } from './utils/id';
@@ -924,7 +929,7 @@ export default function App() {
   };
 
 
-  const handleTakeDoseFromAlarm = (med: Medication) => {
+  const handleTakeDoseFromAlarm = useCallback((med: Medication) => {
     const today = getTodayDateString();
     // Shared consume-dose logic (audit #77): settle at effPills, deduct the
     // dose (clamped at 0), mark lastConsumedDate=today, produce dose_taken log.
@@ -938,7 +943,16 @@ export default function App() {
     dismissAlarm();
     showToast(TOAST_MESSAGES.doseTaken(med.name, doseAmount, med.unit));
     if (soundEnabled) playSuccessChime();
-  };
+  }, [dismissAlarm, soundEnabled]);
+
+  useEffect(() => {
+    registerNotificationActionHandler((actionId, medicationId) => {
+      if (actionId !== 'take_dose') return;
+      const medication = medications.find((med) => med.id === medicationId);
+      if (medication) handleTakeDoseFromAlarm(medication);
+    });
+    return () => registerNotificationActionHandler(null);
+  }, [medications, handleTakeDoseFromAlarm]);
 
   const handleSnoozeFromAlarm = (med: Medication) => {
     snoozeAlarm(DEFAULT_SNOOZE_MINUTES);

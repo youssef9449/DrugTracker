@@ -167,6 +167,19 @@ describe('generatePharmacyOrderMessage', () => {
     expect(msg).not.toContain('العنوان:');
     expect(msg).not.toContain('رقم التواصل:');
   });
+
+  it('includes only the selected additional addresses and contact phones', () => {
+    const msg = generatePharmacyOrderMessage(
+      [{ name: 'M', quantity: 30, unit: 'قرص', packageSize: 30 }],
+      '',
+      '',
+      '',
+      ['البيت: شارع 10'],
+      ['موبايل: 01012345678']
+    );
+    expect(msg).toContain('العنوان: البيت: شارع 10');
+    expect(msg).toContain('رقم التواصل: موبايل: 01012345678');
+  });
 });
 
 describe('buildWhatsAppUrl', () => {

@@ -165,6 +165,19 @@ describe('PharmacyShoppingView — deselection preservation (#20)', () => {
     expect(screen.queryByText('Remove Me')).toBeNull();
     expect(screen.getByText(/0 من 0/)).toBeInTheDocument();
   });
+
+  it('shows previously removed medications when switching to all medications', () => {
+    const med = makeMed({ id: 'med-restore', name: 'Restore Me', currentPills: 1, dailyDose: 1 });
+    renderView({ medications: [med] });
+
+    fireEvent.click(screen.getByRole('button', { name: 'إزالة Restore Me من قائمة الشراء' }));
+    expect(screen.queryByText('Restore Me')).toBeNull();
+
+    fireEvent.click(screen.getByText('كل الأدوية'));
+
+    expect(screen.getByText('Restore Me')).toBeInTheDocument();
+    expect(screen.getByText(/1 من 1/)).toBeInTheDocument();
+  });
 });
 
 describe('PharmacyShoppingView — refill actions', () => {
@@ -229,6 +242,32 @@ describe('PharmacyShoppingView — refill actions', () => {
     expect(screen.getByText('إرسال الطلب للصيدلية')).toBeInTheDocument();
     expect(screen.getByText(/فتح محادثة واتساب الآن/)).toBeInTheDocument();
     expect(screen.getAllByText('كونكور 5').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('includes only checked saved user contact details in the WhatsApp message', () => {
+    const med = makeMed({ id: 'med-contact', name: 'Contact Med', currentPills: 1, dailyDose: 1 });
+    renderView({
+      medications: [med],
+      settings: {
+        ...defaultSettings,
+        whatsappContacts: [
+          { id: 'phone-home', label: 'البيت', phone: '01000000000' },
+          { id: 'phone-work', label: 'العمل', phone: '01111111111' },
+        ],
+        whatsappAddresses: [
+          { id: 'address-home', label: 'البيت', address: 'شارع 10' },
+        ],
+        selectedWhatsappContactIds: ['phone-home'],
+        selectedWhatsappAddressIds: ['address-home'],
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'إرسال طلبية بالواتساب' }));
+
+    expect(screen.getByText(/رقم التواصل: البيت: 01000000000/)).toBeInTheDocument();
+    expect(screen.getByText(/العنوان: البيت: شارع 10/)).toBeInTheDocument();
+    expect(screen.queryByText(/رقم التواصل: العمل: 01111111111/)).toBeNull();
+    expect(screen.getByRole('checkbox', { name: 'إضافة العمل إلى الرسالة' })).not.toBeChecked();
   });
 
 });

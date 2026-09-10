@@ -1,4 +1,4 @@
-import { useState, type FC } from 'react';
+import { useState, type FC, type FormEvent } from 'react';
 import { Check, Pencil, Plus, Store, Trash2, X } from 'lucide-react';
 import type { Pharmacy } from '../types';
 import { cleanPhoneNumber } from '../utils/whatsapp';
@@ -21,7 +21,7 @@ export const PharmacyManagementView: FC<PharmacyManagementViewProps> = ({ pharma
     setIsFormOpen(true);
   };
 
-  const handleSubmit = (event: React.FormEvent) => {
+  const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     const name = form.name.trim();
     const phone = cleanPhoneNumber(form.phone);

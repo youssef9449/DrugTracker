@@ -40,7 +40,7 @@ export const RefillModal: FC<RefillModalProps> = ({
 
   const sz = getMedSizes(medication);
   const isSolid = sz.isSolid;
-  const availableUnits = getAvailableUnits(medication, sz);
+  const availableUnits = getAvailableUnits(sz);
   const boxLabel = medication.unit === 'مل' ? 'عبوة' : 'علبة';
 
   // Convert unit qty → pills.
@@ -254,7 +254,7 @@ function getMedSizes(med: Medication) {
   return { boxSize, stripSize, hasStrips, isSolid };
 }
 
-function getAvailableUnits(med: Medication, sz: ReturnType<typeof getMedSizes>): RefillUnit[] {
+function getAvailableUnits(sz: ReturnType<typeof getMedSizes>): RefillUnit[] {
   const units: RefillUnit[] = ['pills'];
   if (sz.boxSize > 0) units.push('boxes');
   if (sz.hasStrips && sz.stripSize > 0) units.push('strips');

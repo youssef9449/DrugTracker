@@ -775,12 +775,12 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
               </div>
               <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-2.5 max-h-40 overflow-y-auto space-y-1.5 text-xs">
                 {activeOrderItems.map((item, idx) => {
-                  const pkg = describeOrderInBoxes(item.quantity, item.unit, item.stripsPerBox, item.pillsPerStrip, item.packageSize);
+                  const pkg = describeOrderInBoxes(item.quantity, item.stripsPerBox, item.pillsPerStrip, item.packageSize, item.unit);
                   return (
                     <div key={idx} className="flex items-center justify-between py-1 border-b border-slate-200/60 last:border-b-0">
                       <span className="font-bold text-slate-800">{item.name}</span>
                       <span className="text-[11px] text-teal-800 bg-teal-50 px-2 py-0.5 rounded-lg border border-teal-200/60 font-semibold">
-                        {pkg.packagingDesc || `${item.quantity} ${item.unit}`}
+                        {pkg || `${item.quantity} ${item.unit}`}
                       </span>
                     </div>
                   );

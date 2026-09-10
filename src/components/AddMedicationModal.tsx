@@ -7,6 +7,7 @@ import {
   playNotificationSound,
 } from '../utils/sound';
 import { CustomTimePicker } from './CustomTimePicker';
+import { Toggle } from './ui/Toggle';
 
 interface AddMedicationModalProps {
   isOpen: boolean;
@@ -683,21 +684,12 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={reminderEnabled}
-                onClick={() => setReminderEnabled(!reminderEnabled)}
-                className={`w-11 h-6 rounded-full relative transition shrink-0 ${
-                  reminderEnabled ? 'bg-teal-600' : 'bg-slate-300'
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition ${
-                    reminderEnabled ? 'right-0.5' : 'right-[22px]'
-                  }`}
-                />
-              </button>
+              <Toggle
+                checked={reminderEnabled}
+                onChange={() => setReminderEnabled(!reminderEnabled)}
+                label="تفعيل تذكير يومي بموعد محدد"
+                size="md"
+              />
             </div>
 
             {reminderEnabled && (

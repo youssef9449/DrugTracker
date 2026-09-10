@@ -148,7 +148,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
               </h3>
               <p className="text-[11px] text-teal-200">
                 {isPharmacyOnly
-                  ? 'تحديد رقم واتساب الصيدلية، رقم العميل، وبيانات التوصيل'
+                  ? 'تحديد رقم واتساب الصيدلية، كود العميل، وبيانات التوصيل'
                   : 'تخصيص الخصم التلقائي، الإشعارات، وبيانات الصيدلية'}
               </p>
             </div>
@@ -435,22 +435,22 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
                   <UserCheck className="w-4 h-4 text-teal-600" />
-                  <span>رقم العميل في الصيدلية (اختياري)</span>
+                  <span>كود العميل في الصيدلية (اختياري)</span>
                 </label>
                 <input
                   type="text"
                   value={customerCode}
                   onChange={(e) => setCustomerCode(e.target.value)}
-                  placeholder="اكتب رقم العميل إن وجد (اختياري)"
+                  placeholder="اكتب كود العميل إن وجد (اختياري)"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono font-bold focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
                 />
                 {customerCode.trim() ? (
                   <span className="text-[10px] text-teal-700 font-medium mt-1 block">
-                    يظهر في نهاية الرسالة: (رقم العميل {customerCode.trim()})
+                    يظهر في نهاية الرسالة: (كود العميل {customerCode.trim()})
                   </span>
                 ) : (
                   <span className="text-[10px] text-slate-400 mt-1 block">
-                    اختياري — لن يظهر سطر رقم العميل في الرسالة إذا تُرك فارغاً
+                    اختياري — لن يظهر سطر كود العميل في الرسالة إذا تُرك فارغاً
                   </span>
                 )}
               </div>
@@ -485,7 +485,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white resize-none"
                 />
                 <span className="text-[10px] text-slate-500 mt-1 block">
-                  يظهر في رسالة الواتساب {customerCode.trim() ? 'تحت رقم العميل' : 'في نهاية الرسالة'}
+                  يظهر في رسالة الواتساب {customerCode.trim() ? 'تحت كود العميل' : 'في نهاية الرسالة'}
                 </span>
               </div>
 

@@ -1,11 +1,10 @@
 import { type FC } from 'react';
-import { Pill, Bell, BellOff, Search, Smartphone, Monitor, ShoppingCart, History, Settings, AlertTriangle, Type } from 'lucide-react';
+import { Pill, Bell, BellOff, Search, Smartphone, Monitor, ShoppingCart, History, Settings, AlertTriangle, Type, Store } from 'lucide-react';
 import { ActiveTab } from './AndroidBottomNav';
 import { ICON_BUTTON_CLASS } from '../lib/styles';
 
 // #84: Single map replacing the 3 parallel switch statements
-// (getHeaderIcon / getHeaderTitle / getHeaderSubtitle). 'pharmacies'
-// uses the stock values (same as the old default case).
+// (getHeaderIcon / getHeaderTitle / getHeaderSubtitle).
 const HEADER_BY_TAB: Record<ActiveTab, {
   icon: typeof Pill;
   iconClassName: string;
@@ -25,10 +24,10 @@ const HEADER_BY_TAB: Record<ActiveTab, {
     subtitle: 'تجهيز طلب الواتساب وحساب الكميات',
   },
   pharmacies: {
-    icon: Pill,
-    iconClassName: 'w-5 h-5 rotate-45 text-white',
-    title: 'متابع مخزون الأدوية',
-    subtitle: 'حساب استهلاك الحبوب وتنبيهات النفاذ تلقائياً',
+    icon: Store,
+    iconClassName: 'w-5 h-5 text-white',
+    title: 'إدارة الصيدليات',
+    subtitle: 'أرقام وعناوين الصيدليات لطلب الأدوية عبر واتساب',
   },
   logs: {
     icon: History,

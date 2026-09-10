@@ -589,7 +589,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
         type="button"
         onClick={handleSendToWhatsApp}
         aria-label="إرسال طلبية بالواتساب"
-        className="fixed bottom-[128px] left-4 z-40 flex items-center gap-2 rounded-2xl border border-teal-400/40 bg-teal-600 px-4 py-3 text-xs font-bold text-white shadow-xl ring-2 ring-white/60 transition-all duration-200 hover:bg-teal-700 active:scale-95 sm:text-sm md:absolute md:bottom-20 md:left-auto md:right-5 md:rounded-xl md:px-3 md:py-2 md:text-xs"
+        className="fixed bottom-[112px] left-4 z-40 flex items-center gap-2 rounded-2xl border border-teal-400/40 bg-teal-600 px-4 py-3 text-xs font-bold text-white shadow-xl ring-2 ring-white/60 transition-all duration-200 hover:bg-teal-700 active:scale-95 sm:text-sm md:absolute md:bottom-16 md:left-auto md:right-5 md:rounded-xl md:px-3 md:py-2 md:text-xs"
       >
         <MessageCircle className="w-5 h-5" />
         <span>إرسال طلبية بالواتساب</span>

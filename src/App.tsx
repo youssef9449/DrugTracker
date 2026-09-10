@@ -51,6 +51,7 @@ import {
   settleAutoDeductToggle,
 } from './utils/dateCalculations';
 import { OrderItem } from './utils/whatsapp';
+import { consumeDose, settleAndAdjust } from './utils/medActions';
 import { useDoseReminders } from './hooks/useDoseReminders';
 import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
 import { usePersistentEffect } from './hooks/usePersistentEffect';
@@ -611,20 +612,11 @@ export default function App() {
     }
     restoreInFlightRef.current.add(restoreKey);
     const restoredAmount = med.dailyDose;
-    // Settle the snapshot at the current effective balance, then add the
-    // one dose that was skipped today.
-    const effPills = effectiveCurrentPills(med, today);
-    const newSnapshot = effPills + restoredAmount;
+    // Shared settle+adjust logic (audit #78): settle at effPills, add the
+    // restored dose, set lastSyncDate=today.
+    const { updatedMed } = settleAndAdjust(med, restoredAmount, today);
     setMedications((prev) =>
-      prev.map((m) =>
-        m.id === medicationId
-          ? {
-              ...m,
-              currentPills: newSnapshot,
-              lastSyncDate: today,
-            }
-          : m
-      )
+      prev.map((m) => (m.id === medicationId ? updatedMed : m))
     );
     setLogs((prev) => [
       {
@@ -650,22 +642,11 @@ export default function App() {
     // dedup guard that blocked rapid double-undo of the previous refill.
     refillUndoInFlightRef.current.delete(medicationId);
     const today = getTodayDateString();
-    // Settle the snapshot at the current effective balance (deduct the
-    // elapsed days at the OLD dose), then add the refill amount on top.
-    // This way the new snapshot starts projecting from today with the
-    // fresh supply — clean, no retroactive consumption of the new pills.
-    const effPills = effectiveCurrentPills(med, today);
-    const newSnapshot = effPills + addedPills;
+    // Shared settle+adjust logic (audit #78): settle at effPills, add the
+    // refill amount, set lastSyncDate=today.
+    const { updatedMed } = settleAndAdjust(med, addedPills, today);
     setMedications((prev) =>
-      prev.map((m) =>
-        m.id === medicationId
-          ? {
-              ...m,
-              currentPills: newSnapshot,
-              lastSyncDate: today,
-            }
-          : m
-      )
+      prev.map((m) => (m.id === medicationId ? updatedMed : m))
     );
     setLogs((prev) => [
       {
@@ -994,48 +975,15 @@ export default function App() {
 
 
   const handleTakeDoseFromAlarm = (med: Medication) => {
-    // Consume-pill feature: actually subtract the dose from the balance,
-    // mark the med as consumed today (blocks auto-deduction), and log it.
     const today = getTodayDateString();
-    // Use the dynamic balance for the dose-amount calculation: if the
-    // app was closed for many days, the effective balance may already
-    // be 0, in which case the consume action is a no-op.
-    const effPills = effectiveCurrentPills(med, today);
-    const doseAmount = Math.min(med.dailyDose, effPills);
-    if (doseAmount > 0) {
-      // The settle delta: deduct from the stored snapshot, not from
-      // effPills. If the snapshot is 60 but effPills is 42 (18 days
-      // elapsed), we want to deduct doseAmount AND reset lastSyncDate
-      // to today — effectively re-settling the snapshot at the live
-      // balance minus the consumed dose. The cleanest way is to
-      // subtract doseAmount from effPills and set that as the new
-      // snapshot, with lastSyncDate = today.
-      const newSnapshot = Math.max(0, effPills - doseAmount);
+    // Shared consume-dose logic (audit #77): settle at effPills, deduct the
+    // dose (clamped at 0), mark lastConsumedDate=today, produce dose_taken log.
+    const { updatedMed, doseAmount, log } = consumeDose(med, 'alarm', today);
+    if (updatedMed && log) {
       setMedications((prev) =>
-        prev.map((m) =>
-          m.id === med.id
-            ? {
-                ...m,
-                currentPills: newSnapshot,
-                lastConsumedDate: today,
-                lastSyncDate: today,
-              }
-            : m
-        )
+        prev.map((m) => (m.id === med.id ? updatedMed : m))
       );
-      setLogs((prev) => [
-        {
-          id: generateId('consume'),
-          medicationId: med.id,
-          medicationName: med.name,
-          type: 'dose_taken',
-          amount: -doseAmount,
-          date: today,
-          timestamp: new Date().toISOString(),
-          description: `تناول جرعة من التنبيه (-${doseAmount} ${med.unit})`,
-        },
-        ...prev,
-      ]);
+      setLogs((prev) => [log, ...prev]);
     }
     dismissAlarm();
     showToast(`تم تسجيل جرعة "${med.name}" (-${doseAmount} ${med.unit}). لن يتم الخصم التلقائي اليوم.`);
@@ -1059,41 +1007,15 @@ export default function App() {
       showToast(`تم تناول جرعة "${med.name}" اليوم بالفعل.`);
       return;
     }
-    // Use the dynamic balance for the dose-amount calculation: if the
-    // app was closed for many days, the effective balance may already
-    // be 0, in which case the consume action is a no-op.
-    const effPills = effectiveCurrentPills(med, today);
-    const doseAmount = Math.min(med.dailyDose, effPills);
+    // Shared consume-dose logic (audit #77).
+    const { updatedMed, doseAmount, log } = consumeDose(med, 'manual', today);
     if (doseAmount <= 0) return;
-    // Re-settle the snapshot at (effPills - doseAmount), with
-    // lastSyncDate = today. This matches the behavior in
-    // handleTakeDoseFromAlarm.
-    const newSnapshot = Math.max(0, effPills - doseAmount);
-    setMedications((prev) =>
-      prev.map((m) =>
-        m.id === medicationId
-          ? {
-              ...m,
-              currentPills: newSnapshot,
-              lastConsumedDate: today,
-              lastSyncDate: today,
-            }
-          : m
-      )
-    );
-    setLogs((prev) => [
-      {
-        id: 'consume-' + Date.now(),
-        medicationId: med.id,
-        medicationName: med.name,
-        type: 'dose_taken',
-        amount: -doseAmount,
-        date: today,
-        timestamp: new Date().toISOString(),
-        description: `تناول جرعة يدوياً (-${doseAmount} ${med.unit})`,
-      },
-      ...prev,
-    ]);
+    if (updatedMed && log) {
+      setMedications((prev) =>
+        prev.map((m) => (m.id === medicationId ? updatedMed : m))
+      );
+      setLogs((prev) => [log, ...prev]);
+    }
     showToast(`تم تناول جرعة "${med.name}" (-${doseAmount} ${med.unit}). لن يتم الخصم التلقائي اليوم.`);
     if (soundEnabled) playSuccessChime();
   };

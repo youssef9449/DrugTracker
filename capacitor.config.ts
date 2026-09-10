@@ -25,7 +25,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
  */
 const config: CapacitorConfig = {
   appId: 'app.nagnagh',
-  appName: 'النغنغ',
+  appName: 'متتبع الأدوية',
   webDir: 'dist',
   server: {
     androidScheme: 'https',

@@ -4,8 +4,6 @@ import {
   cleanPhoneNumber,
   generatePharmacyOrderMessage,
   buildWhatsAppUrl,
-  buildWhatsAppApiUrl,
-  buildWhatsAppAppUrl,
   calculateMedicationOrderQuantity,
 } from './whatsapp';
 import type { Medication } from '../types';
@@ -149,7 +147,7 @@ describe('generatePharmacyOrderMessage', () => {
 });
 
 describe('buildWhatsAppUrl', () => {
-  it('builds a wa.me URL with the cleaned phone + encoded text', () => {
+  it('builds a wa.me URL with the cleaned phone + encoded text (default target)', () => {
     const url = buildWhatsAppUrl('01012345678', 'مرحبا');
     expect(url).toBe('https://wa.me/201012345678?text=' + encodeURIComponent('مرحبا'));
   });
@@ -159,14 +157,24 @@ describe('buildWhatsAppUrl', () => {
     expect(url).toBe('https://wa.me/?text=' + encodeURIComponent('مرحبا'));
   });
 
-  it('builds an api.whatsapp.com URL with phone and encoded text', () => {
-    const url = buildWhatsAppApiUrl('01012345678', 'مرحبا');
+  it('builds an api.whatsapp.com URL with phone and encoded text (target: "api")', () => {
+    const url = buildWhatsAppUrl('01012345678', 'مرحبا', 'api');
     expect(url).toBe('https://api.whatsapp.com/send?phone=201012345678&text=' + encodeURIComponent('مرحبا'));
   });
 
-  it('builds a whatsapp:// native app URL', () => {
-    const url = buildWhatsAppAppUrl('01012345678', 'مرحبا');
+  it('builds a whatsapp:// native app URL (target: "app")', () => {
+    const url = buildWhatsAppUrl('01012345678', 'مرحبا', 'app');
     expect(url).toBe('whatsapp://send?phone=201012345678&text=' + encodeURIComponent('مرحبا'));
+  });
+
+  it('builds an api URL without the phone when empty (target: "api")', () => {
+    const url = buildWhatsAppUrl('', 'مرحبا', 'api');
+    expect(url).toBe('https://api.whatsapp.com/send?text=' + encodeURIComponent('مرحبا'));
+  });
+
+  it('builds an app URL without the phone when empty (target: "app")', () => {
+    const url = buildWhatsAppUrl('', 'مرحبا', 'app');
+    expect(url).toBe('whatsapp://send?text=' + encodeURIComponent('مرحبا'));
   });
 });
 

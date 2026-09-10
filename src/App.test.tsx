@@ -563,4 +563,71 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
     });
     expect(scheduleCriticalAlarm).not.toHaveBeenCalled();
   });
+
+  it('undoes only the latest refill and persists the reversal marker', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([{
+      id: 'med-undo',
+      name: 'Undo Med',
+      currentPills: 60,
+      dailyDose: 0,
+      unit: 'قرص',
+      warningThresholdDays: 5,
+      colorTag: 'teal',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      lastSyncDate: today,
+      autoDeductEnabled: false,
+      reminderEnabled: false,
+    }]));
+    localStorage.setItem('android_med_tracker_logs_v2', JSON.stringify([
+      { id: 'refill-old', medicationId: 'med-undo', medicationName: 'Undo Med', type: 'refill', amount: 30, date: today, timestamp: '2024-01-01T00:00:00.000Z', description: 'old' },
+      { id: 'refill-latest', medicationId: 'med-undo', medicationName: 'Undo Med', type: 'refill', amount: 20, date: today, timestamp: '2024-01-02T00:00:00.000Z', description: 'latest' },
+    ]));
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'تراجع عن التعبئة' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'تراجع عن التعبئة' }));
+
+    await waitFor(() => {
+      const savedMedications = JSON.parse(localStorage.getItem('android_med_tracker_items_v2') || '[]');
+      expect(savedMedications[0].currentPills).toBe(40);
+    });
+    const savedLogs = JSON.parse(localStorage.getItem('android_med_tracker_logs_v2') || '[]');
+    expect(savedLogs.find((log: { id: string }) => log.id === 'refill-latest').reversedAt).toBeTruthy();
+    expect(savedLogs.find((log: { type: string }) => log.type === 'refill_undo').relatedLogId).toBe('refill-latest');
+    // The older +30 refill is now the only remaining undoable refill.
+    expect(screen.getByText('آخر تعبئة: +30 قرص')).toBeInTheDocument();
+  });
+
+  it('restores a dose once per day and does not restore when auto-deduct is disabled', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([{
+      id: 'med-restore',
+      name: 'Restore Med',
+      currentPills: 10,
+      dailyDose: 2,
+      unit: 'قرص',
+      warningThresholdDays: 5,
+      colorTag: 'teal',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      lastSyncDate: today,
+      autoDeductEnabled: true,
+      reminderEnabled: false,
+    }]));
+    localStorage.setItem('android_med_tracker_logs_v2', '[]');
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('سجل الاستهلاك')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('سجل الاستهلاك'));
+    await waitFor(() => expect(screen.getByRole('button', { name: /إعادة الجرعة المخصومة/ })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /إعادة الجرعة المخصومة/ }));
+    fireEvent.click(screen.getByRole('button', { name: /إعادة الجرعة المخصومة/ }));
+
+    await waitFor(() => {
+      const savedMedications = JSON.parse(localStorage.getItem('android_med_tracker_items_v2') || '[]');
+      expect(savedMedications[0].currentPills).toBe(12);
+    });
+    const savedLogs = JSON.parse(localStorage.getItem('android_med_tracker_logs_v2') || '[]');
+    expect(savedLogs.filter((log: { type: string; date: string }) => log.type === 'skipped_day' && log.date === today)).toHaveLength(1);
+  });
 });

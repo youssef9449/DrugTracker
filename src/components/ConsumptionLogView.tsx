@@ -6,7 +6,7 @@ import { getTodayDateString, formatArabicDate } from '../utils/dateCalculations'
 interface ConsumptionLogViewProps {
   medications: Medication[];
   logs: ConsumptionLog[];
-  onRestoreDose: (medicationId: string, reason: string) => void;
+  onRestoreDose: (medicationId: string, reason: string) => boolean;
   showToast: (message: string) => void;
 }
 
@@ -38,8 +38,10 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
     const med = medications.find((m) => m.id === selectedMedId);
     if (!med) return;
 
-    onRestoreDose(selectedMedId, skipReason);
-    showToast(`تم استرجاع جرعة (${med.dailyDose} ${med.unit}) إلى مخزون "${med.name}"`);
+    const restored = onRestoreDose(selectedMedId, skipReason);
+    if (restored) {
+      showToast(`تم استرجاع جرعة (${med.dailyDose} ${med.unit}) إلى مخزون "${med.name}"`);
+    }
   };
 
   return (

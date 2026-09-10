@@ -29,6 +29,8 @@ interface MedicationCardProps {
   onNavigateToShopping?: () => void;
   onTriggerAlarm?: (medication: Medication) => void;
   onConsumeDose?: (medicationId: string) => void;
+  lastRefillQuantity?: number;
+  onUndoRefill?: () => void;
 }
 
 export const MedicationCard: FC<MedicationCardProps> = ({
@@ -41,6 +43,8 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   onNavigateToShopping,
   onTriggerAlarm,
   onConsumeDose,
+  lastRefillQuantity,
+  onUndoRefill,
 }) => {
   const statusInfo = calculateMedicationStatus(medication);
   const depletion = getDepletionDate(medication);
@@ -81,6 +85,14 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   };
 
   const isAutoActive = medication.autoDeductEnabled !== false;
+  const undoRefillAction = lastRefillQuantity && onUndoRefill ? (
+    <div className="mt-2 flex items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+      <span>آخر تعبئة: +{lastRefillQuantity} {medication.unit}</span>
+      <button type="button" onClick={onUndoRefill} className="shrink-0 rounded-lg border border-rose-200 bg-white px-2.5 py-1 font-bold text-rose-700 hover:bg-rose-50">
+        تراجع عن التعبئة
+      </button>
+    </div>
+  ) : null;
 
   // -------------------------------------------------------------
   // VIEW 1: "قارب على النفاذ" (ALERTS) - Focus on Urgency & Refill
@@ -260,6 +272,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             <span>الخصم التلقائي معلق — الجرعة اليدوية والخصم التلقائي معطلان لهذا اليوم.</span>
           </div>
         )}
+        {undoRefillAction}
       </div>
     );
   }
@@ -407,6 +420,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             <span>الخصم التلقائي معلق — الجرعة اليدوية والخصم التلقائي معطلان لهذا اليوم.</span>
           </div>
         )}
+        {undoRefillAction}
       </div>
     );
   }
@@ -562,6 +576,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           <span>الخصم التلقائي معلق — الجرعة اليدوية والخصم التلقائي معطلان لهذا اليوم.</span>
         </div>
       )}
+      {undoRefillAction}
 
       {/* Scheduled Reminder & Custom Sound Badge (extracted — see ReminderBadge.tsx) */}
       <ReminderBadge

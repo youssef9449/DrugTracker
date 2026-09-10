@@ -120,6 +120,8 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
       customQuantities: settings.customQuantities,
       address: address.trim(),
       contactPhone: contactPhone.trim(),
+      pharmacies: settings.pharmacies,
+      selectedPharmacyId: settings.selectedPharmacyId,
     });
     onClose();
   };

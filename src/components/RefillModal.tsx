@@ -3,6 +3,7 @@ import { X, PlusCircle, Check, Layers, Box, Pill } from 'lucide-react';
 import { Medication, describeStockInStrips } from '../types';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { effectiveCurrentPills } from '../utils/dateCalculations';
+import { getMedSizes } from '../utils/medicationPackaging';
 import { Modal } from './ui/Modal';
 
 interface RefillModalProps {
@@ -237,27 +238,10 @@ export const RefillModal: FC<RefillModalProps> = ({
   );
 };
 
-// ── Helpers (same pattern as PharmacyShoppingView) ─────────────
-
-function getMedSizes(med: Medication) {
-  const isSolid = med.unit === 'قرص' || med.unit === 'كبسولة';
-  const hasStrips = isSolid && Boolean(
-    med.stripsPerBox &&
-    med.pillsPerStrip &&
-    med.stripsPerBox > 0 &&
-    med.pillsPerStrip > 0
-  );
-  const boxSize =
-    hasStrips
-      ? med.stripsPerBox! * med.pillsPerStrip!
-      : med.packageSize && med.packageSize > 0
-      ? med.packageSize
-      : med.unit === 'مل'
-      ? 100
-      : 30;
-  const stripSize = hasStrips && med.pillsPerStrip && med.pillsPerStrip > 0 ? med.pillsPerStrip : 0;
-  return { boxSize, stripSize, hasStrips, isSolid };
-}
+// ── Helpers ─────────────────────────────────────────────────────
+// getMedSizes is imported from ../utils/medicationPackaging (#73).
+// getAvailableUnits is local to this modal — it seeds ['pills'] (distinct
+// from PharmacyShoppingView's getAvailableUnits which seeds ['boxes']).
 
 function getAvailableUnits(sz: ReturnType<typeof getMedSizes>): RefillUnit[] {
   const units: RefillUnit[] = ['pills'];

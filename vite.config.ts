@@ -2,7 +2,39 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig} from 'vite';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { defineConfig, type PluginOption } from 'vite';
+
+/**
+ * #117: Inline Vite plugin that injects a build-time cache version into
+ * the service worker. `public/sw.js` is served as-is (not processed by
+ * Vite), so `define` / `import.meta.env` don't work for it. This plugin
+ * hooks into `generateBundle` and rewrites the hardcoded
+ * `CACHE_NAME = 'drug-tracker-v5'` in dist/sw.js with a timestamp-based
+ * version so every deploy busts the old SW cache automatically — no
+ * developer needs to remember to bump the version string.
+ */
+function swCacheVersionPlugin(): PluginOption {
+  return {
+    name: 'sw-cache-version',
+    apply: 'build',
+    generateBundle() {
+      const swPath = path.resolve(__dirname, 'dist', 'sw.js');
+      try {
+        let swContent = readFileSync(swPath, 'utf-8');
+        const buildVersion = `drug-tracker-${Date.now()}`;
+        swContent = swContent.replace(
+          /const CACHE_NAME = 'drug-tracker-v\d+'/,
+          `const CACHE_NAME = '${buildVersion}'`
+        );
+        writeFileSync(swPath, swContent, 'utf-8');
+        console.log(`[sw-cache-version] Injected cache name: ${buildVersion}`);
+      } catch {
+        console.warn('[sw-cache-version] Could not read/write dist/sw.js — skipping cache version injection');
+      }
+    },
+  };
+}
 
 export default defineConfig(() => {
   return {
@@ -11,7 +43,7 @@ export default defineConfig(() => {
     // just the site root. AI Studio's preview serves from `/` so
     // relative paths resolve correctly there too.
     base: './',
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), swCacheVersionPlugin()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),

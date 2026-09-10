@@ -2,6 +2,7 @@ import type { FC } from 'react';
 import { Bell, Check, Clock, Volume2, X } from 'lucide-react';
 import { Medication, formatTimeArabic } from '../types';
 import { NOTIFICATION_SOUND_OPTIONS, playNotificationSound } from '../utils/sound';
+import { effectiveCurrentPills } from '../utils/dateCalculations';
 
 interface DoseAlarmModalProps {
   isOpen: boolean;
@@ -76,7 +77,7 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
             </div>
 
             <div className="text-[11px] text-slate-500 pt-1">
-              المخزون المتوفر لديك حالياً: {medication.currentPills} {medication.unit}
+              المخزون المتوفر لديك حالياً: {medication ? effectiveCurrentPills(medication) : 0} {medication?.unit}
             </div>
           </div>
 

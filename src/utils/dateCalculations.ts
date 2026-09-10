@@ -79,13 +79,86 @@ export function getDaysDifference(fromDateStr: string, toDateStr: string): numbe
   }
 }
 
+/**
+ * The dynamic balance that the UI actually displays.
+ *
+ * `med.currentPills` is the last "settled" snapshot — the value at
+ * `med.lastSyncDate`. From that snapshot, we project forward by the
+ * number of whole days that have passed since `lastSyncDate`, deducting
+ * `dailyDose` per day. The result is clamped at 0 so the displayed
+ * balance never goes negative.
+ *
+ * This is the SINGLE source of truth for "how many pills does the user
+ * actually have right now" in the entire UI. Callers should NEVER read
+ * `med.currentPills` directly for display — that would silently break
+ * the "balance is correct even if the app was closed for 30 days"
+ * invariant, because `currentPills` is only re-settled on app open,
+ * manual consume, refill, or dose change (see syncAutoDailyDeductions).
+ *
+ * Behavior:
+ *   - `autoDeductEnabled === false` → returns `currentPills` unchanged
+ *     (the user has paused auto-deduction; the stored snapshot IS the
+ *     effective balance).
+ *   - `dailyDose <= 0` → returns `currentPills` (no consumption rate to
+ *     project forward; effectively "unknown rate" — show the snapshot).
+ *   - Otherwise: `max(0, currentPills - daysPassed(lastSyncDate, today) * dailyDose)`.
+ *
+ * The manual-consume interaction (lastConsumedDate === today) is
+ * automatically handled: when the user takes a dose manually, the
+ * consume handler sets `currentPills -= dose` AND `lastSyncDate = today`.
+ * With `lastSyncDate === today`, `daysPassed === 0`, so this function
+ * returns `currentPills` as-is — no spurious re-deduction of the
+ * already-consumed dose. No special-casing needed here.
+ *
+ * @param med The medication.
+ * @param todayStr Optional "today" override (YYYY-MM-DD) — used by
+ *   tests for determinism. Defaults to getTodayDateString().
+ */
+export function effectiveCurrentPills(
+  med: Medication,
+  todayStr: string = getTodayDateString()
+): number {
+  // Auto-deduction paused → the stored snapshot IS the live balance.
+  if (med.autoDeductEnabled === false) return med.currentPills;
+  // No consumption rate → can't project forward meaningfully.
+  if (med.dailyDose <= 0) return med.currentPills;
+  const daysPassed = getDaysDifference(med.lastSyncDate || todayStr, todayStr);
+  if (daysPassed <= 0) return med.currentPills;
+  const projected = med.currentPills - daysPassed * med.dailyDose;
+  return Math.max(0, projected);
+}
+
+/**
+ * The dynamic "days left" estimate derived from effectiveCurrentPills.
+ *
+ * Equivalent to `Math.floor(effectiveCurrentPills(med, todayStr) / med.dailyDose)`
+ * when `dailyDose > 0`, else `999` (sentinel meaning "never depletes").
+ * Clamped at 0.
+ *
+ * Provided as a convenience for `calculateMedicationStatus` and
+ * `getDepletionDate` (and tests) so they all share one definition.
+ */
+export function effectiveDaysLeft(
+  med: Medication,
+  todayStr: string = getTodayDateString()
+): number {
+  if (med.dailyDose <= 0) return 999;
+  const eff = effectiveCurrentPills(med, todayStr);
+  if (eff <= 0) return 0;
+  return Math.floor(eff / med.dailyDose);
+}
+
 export function getDepletionDate(med: Medication): {
   dateStr: string;
   formattedArabic: string;
   daysLeft: number;
 } {
-  const rawDays = med.dailyDose > 0 ? Math.floor(med.currentPills / med.dailyDose) : 999;
-  const daysLeft = Math.max(0, rawDays);
+  // Use the DYNAMIC balance (projected from currentPills + lastSyncDate)
+  // — not the raw stored snapshot. This keeps the depletion date
+  // correct even if the app was closed for many days and the snapshot
+  // has not been re-settled yet.
+  const eff = effectiveCurrentPills(med);
+  const daysLeft = effectiveDaysLeft(med);
 
   // Compute today's UTC date, then add `daysLeft` days in UTC so the
   // result is a calendar date that doesn't shift by an hour across DST.
@@ -94,7 +167,7 @@ export function getDepletionDate(med: Medication): {
   const dateStr = formatUtcDateString(targetUtc);
 
   let formattedArabic: string;
-  if (med.currentPills <= 0) {
+  if (eff <= 0) {
     formattedArabic = 'نفد المخزون بالكامل';
   } else if (daysLeft === 0) {
     formattedArabic = 'ينفد اليوم';
@@ -194,4 +267,249 @@ export function syncAutoDailyDeductions(
     newLogs,
     deductedSummary,
   };
+}
+
+/**
+ * Settlement helper for dose change.
+ *
+ * When the user changes a medication's `dailyDose`, we MUST NOT just
+ * apply the new dose going forward from `lastSyncDate` — that would
+ * retroactively apply the new rate to all days that actually consumed
+ * at the OLD rate, corrupting the balance.
+ *
+ * Instead, we "settle" the period [lastSyncDate, today] at the OLD dose:
+ *   1. Compute consumption using the OLD dose up to today.
+ *   2. Save the resulting currentPills (the settled snapshot).
+ *   3. Set lastSyncDate = today.
+ *   4. Change dailyDose to the new value.
+ *
+ * After settlement, `effectiveCurrentPills` (with the new dose) starts
+ * projecting from today forward — applying the new rate only to future
+ * days, exactly as the user expects.
+ *
+ * `autoDeductEnabled === false` is respected: no settlement deduction
+ * happens, but we still bump lastSyncDate to today so the new dose
+ * starts projecting from now (cosmetically identical, since the
+ * effective balance is just currentPills either way).
+ *
+ * `dailyDose <= 0` (old dose) means no consumption rate → just update
+ * lastSyncDate + change the dose.
+ *
+ * Returns the settled med + the consumption log for the settlement
+ * period (if any pills were deducted). The caller is responsible for
+ * persisting both.
+ */
+export function settleDoseChange(
+  med: Medication,
+  newDose: number,
+  todayStr: string = getTodayDateString()
+): { updatedMed: Medication; log: ConsumptionLog | null } {
+  const oldDose = med.dailyDose;
+  const daysPassed = getDaysDifference(med.lastSyncDate || todayStr, todayStr);
+
+  // Compute the settled balance using the OLD dose.
+  // Only deduct when autoDeduct is active and there's a positive old rate.
+  let pillsDeducted = 0;
+  let settledPills = med.currentPills;
+  if (med.autoDeductEnabled !== false && oldDose > 0 && daysPassed > 0) {
+    pillsDeducted = Math.min(med.currentPills, daysPassed * oldDose);
+    settledPills = Math.max(0, med.currentPills - pillsDeducted);
+  }
+
+  const updatedMed: Medication = {
+    ...med,
+    currentPills: settledPills,
+    lastSyncDate: todayStr,
+    dailyDose: newDose,
+  };
+
+  const log: ConsumptionLog | null =
+    pillsDeducted > 0
+      ? {
+          id: 'log-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
+          medicationId: med.id,
+          medicationName: med.name,
+          type: 'auto_daily',
+          amount: -pillsDeducted,
+          date: todayStr,
+          timestamp: new Date().toISOString(),
+          description: `تسوية عند تغيير الجرعة: خصم ${daysPassed} ${daysPassed === 1 ? 'يوم' : 'أيام'} بالجرعة السابقة (${oldDose}/يوم) (-${pillsDeducted} ${med.unit})`,
+        }
+      : null;
+
+  return { updatedMed, log };
+}
+
+/**
+ * Settlement helper for `autoDeductEnabled` toggling.
+ *
+ * When the user toggles the auto-deduction flag, the snapshot must be
+ * re-settled at the live effective balance before the new state takes
+ * effect — otherwise the displayed balance will silently become
+ * inconsistent with reality.
+ *
+ * Behavior:
+ *   - true → false (turning auto-deduction OFF after it was ON):
+ *     The med was being auto-deducted up to today. Settle the period
+ *     [lastSyncDate, today] at the OLD active rate: deduct
+ *     daysPassed*dailyDose from currentPills (clamped at 0), set
+ *     lastSyncDate=today. THEN flip autoDeductEnabled=false.
+ *     Without this, the displayed balance would jump back UP to the
+ *     stale snapshot value the moment the flag flips (because
+ *     effectiveCurrentPills returns currentPills unchanged when
+ *     autoDeduct is false), undoing all consumption since lastSyncDate.
+ *   - false → true (turning auto-deduction ON after it was OFF):
+ *     The med was FROZEN for the elapsed period — the user wasn't
+ *     consuming during that time, so we must NOT retroactively deduct.
+ *     Keep currentPills unchanged (the frozen balance is the live
+ *     balance). Set lastSyncDate=today so the new auto-deduction
+ *     starts fresh from today forward. THEN flip autoDeductEnabled=true.
+ *     Without the lastSyncDate bump, enabling auto-deduction would
+ *     instantly deduct daysPassed*dailyDose retroactively for the
+ *     frozen period — wrong.
+ *
+ * Edge cases:
+ *   - dailyDose <= 0: no consumption rate → no deduction either way.
+ *     Just bump lastSyncDate and flip the flag.
+ *   - undefined → false (default-true med being turned OFF): treat
+ *     undefined as "auto-deduct was ON" (default), so settle at the
+ *     old active rate.
+ *   - true → true / false → false: no transition, but the caller may
+ *     still want to bump lastSyncDate — left to the caller's discretion
+ *     (this helper is only called when the flag actually changes).
+ *
+ * Returns the settled med + (optionally) a consumption log for the
+ * settlement deduction. The log is only produced for the true→false
+ * transition with a positive dailyDose and elapsed days (i.e. when
+ * pills were actually deducted). The caller is responsible for
+ * persisting both.
+ */
+export function settleAutoDeductToggle(
+  med: Medication,
+  newState: boolean,
+  todayStr: string = getTodayDateString()
+): { updatedMed: Medication; log: ConsumptionLog | null } {
+  const wasActive = med.autoDeductEnabled !== false;
+
+  // Compute daysPassed for the period [lastSyncDate, today] using the
+  // OLD state's projection behavior.
+  const daysPassed = getDaysDifference(med.lastSyncDate || todayStr, todayStr);
+
+  let pillsDeducted = 0;
+  let settledPills = med.currentPills;
+
+  // Only deduct when:
+  //   - the med WAS being auto-deducted (wasActive === true), AND
+  //   - we're turning it OFF (newState === false), AND
+  //   - there's a positive consumption rate, AND
+  //   - days actually passed since lastSyncDate.
+  // For the false→true transition, we explicitly do NOT deduct
+  // retroactively for the frozen period — currentPills stays unchanged.
+  if (wasActive && !newState && med.dailyDose > 0 && daysPassed > 0) {
+    pillsDeducted = Math.min(med.currentPills, daysPassed * med.dailyDose);
+    settledPills = Math.max(0, med.currentPills - pillsDeducted);
+  }
+
+  const updatedMed: Medication = {
+    ...med,
+    currentPills: settledPills,
+    lastSyncDate: todayStr,
+    autoDeductEnabled: newState,
+  };
+
+  const log: ConsumptionLog | null =
+    pillsDeducted > 0
+      ? {
+          id: 'log-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
+          medicationId: med.id,
+          medicationName: med.name,
+          type: 'auto_daily',
+          amount: -pillsDeducted,
+          date: todayStr,
+          timestamp: new Date().toISOString(),
+          description: `تسوية عند إيقاف الخصم التلقائي: خصم ${daysPassed} ${daysPassed === 1 ? 'يوم' : 'أيام'} بالجرعة الحالية (${med.dailyDose}/يوم) (-${pillsDeducted} ${med.unit})`,
+        }
+      : null;
+
+  return { updatedMed, log };
+}
+
+/**
+ * Compute the absolute timestamp (epoch ms) at which the medication
+ * is projected to cross the critical threshold.
+ *
+ * Returns `null` in cases where scheduling an alarm is meaningless or
+ * unsafe — callers should treat null as "do not schedule":
+ *   - `dailyDose <= 0` → no consumption rate → no projected critical
+ *     date. Caller must skip scheduling.
+ *   - `daysLeft <= criticalThresholdDays` → the med is ALREADY at or
+ *     below the critical threshold. The one-shot alarm is only for
+ *     FUTURE crossings; the existing alert effect (which runs when
+ *     the app is open and tracks already-alerted statuses via
+ *     `lastAlertedStatusRef`) handles the "already critical on app
+ *     open" case. Returning null here prevents repeated immediate
+ *     alerts from being scheduled on every app launch.
+ *   - `autoDeductEnabled === false` AND effective balance > critical
+ *     threshold → the balance is frozen, it will never cross the
+ *     critical threshold without a refill. (If it's already below,
+ *     we still return null — see above.)
+ *
+ * Otherwise returns a future timestamp computed as:
+ *   today + (effectiveDaysLeft - criticalThresholdDays) days
+ * at the user's local 09:00 AM (a reasonable "morning reminder" time
+ * — we don't need second-precision; critical alerts don't need to
+ * fire at midnight, and 9 AM avoids the device's quiet-hours window).
+ *
+ * The local-time choice is why this returns a Date and not a UTC ms.
+ *
+ * Boot persistence: on Android, the @capacitor/local-notifications
+ * plugin persists scheduled notifications in SharedPreferences and
+ * re-arms them via its `LocalNotificationRestoreReceiver` on
+ * BOOT_COMPLETED (also LOCKED_BOOT_COMPLETED + QUICKBOOT_POWERON).
+ * Past-due notifications are rescheduled to fire ~15 seconds after
+ * boot. So scheduled one-shot critical alarms survive device reboots
+ * without the user opening the app — no extra code required.
+ *
+ * @param med The medication.
+ * @param todayStr Optional "today" override (YYYY-MM-DD) — for tests.
+ * @param nowMs Optional `Date.now()` override — for tests.
+ */
+export function getCriticalAlarmDate(
+  med: Medication,
+  todayStr: string = getTodayDateString(),
+  nowMs: number = Date.now()
+): number | null {
+  // No consumption rate → no projected crossing. Caller skips.
+  if (med.dailyDose <= 0) return null;
+
+  const criticalThresholdDays = Math.max(
+    1,
+    Math.floor((med.warningThresholdDays || 5) / 2)
+  );
+  const eff = effectiveCurrentPills(med, todayStr);
+  const daysLeft = eff <= 0 ? 0 : Math.floor(eff / med.dailyDose);
+
+  // Already at or below the critical threshold → the existing alert
+  // effect (which runs when the app is open and tracks already-
+  // alerted statuses) handles this. The one-shot alarm is only for
+  // FUTURE crossings — returning null here prevents repeated
+  // immediate alerts from being scheduled on every app launch.
+  if (daysLeft <= criticalThresholdDays) return null;
+
+  // For a frozen med (autoDeduct off) with sufficient balance, the
+  // balance won't change over time → no future crossing. The user
+  // would need to refill (which would change lastSyncDate) or change
+  // the dose. Skip scheduling; an alarm with no future fire date is
+  // meaningless.
+  if (med.autoDeductEnabled === false) return null;
+
+  // Days until the med crosses the critical threshold.
+  const daysUntilCritical = daysLeft - criticalThresholdDays;
+  if (daysUntilCritical <= 0) return null;
+
+  // Compute today + daysUntilCritical at local 09:00 AM.
+  const target = new Date(nowMs);
+  target.setDate(target.getDate() + daysUntilCritical);
+  target.setHours(9, 0, 0, 0);
+  return target.getTime();
 }

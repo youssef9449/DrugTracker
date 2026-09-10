@@ -40,8 +40,15 @@ import {
   getNotificationPermission,
   getNotificationPermissionSync,
 } from './utils/notifications';
-import { getTodayDateString, syncAutoDailyDeductions } from './utils/dateCalculations';
+import {
+  getTodayDateString,
+  syncAutoDailyDeductions,
+  effectiveCurrentPills,
+  settleDoseChange,
+  settleAutoDeductToggle,
+} from './utils/dateCalculations';
 import { useDoseReminders } from './hooks/useDoseReminders';
+import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
 import { initNativeBridge, registerBackButtonHandler, cleanupNativeListeners } from './native';
 import { migrateSchema } from './lib/migration';
 import { getInitialTab } from './lib/initialTab';
@@ -554,6 +561,10 @@ export default function App() {
     const tracker = lastAlertedStatusRef.current;
     for (const med of medications) {
       const { status, daysLeft } = calculateMedicationStatus(med);
+      // The dynamic balance — what the user actually has right now, not
+      // the stale stored snapshot. Used in the notification body text so
+      // it stays correct even if the app was closed for many days.
+      const effPills = effectiveCurrentPills(med);
       const prev = tracker.get(med.id);
 
       // Med is healthy → clear its tracker so the next worsening alerts.
@@ -585,25 +596,61 @@ export default function App() {
         sendMedicineAlert(med.id, med.name, 0, 0);
       } else if (status === 'critical') {
         if (criticalStockAlertsEnabled) {
-          sendCriticalStockAlert(med.id, med.name, daysLeft, med.currentPills, med.unit || 'قرص');
+          sendCriticalStockAlert(med.id, med.name, daysLeft, effPills, med.unit || 'قرص');
         }
         // Critical is a subset of the warning window — also send the
         // general alert (separate drawer entry, less urgent wording).
-        sendMedicineAlert(med.id, med.name, daysLeft, med.currentPills);
+        sendMedicineAlert(med.id, med.name, daysLeft, effPills);
       } else if (status === 'warning') {
-        sendMedicineAlert(med.id, med.name, daysLeft, med.currentPills);
+        sendMedicineAlert(med.id, med.name, daysLeft, effPills);
       }
 
       tracker.set(med.id, status);
     }
   }, [medications, notificationsEnabled, criticalStockAlertsEnabled, hydrated, isFirstRun]);
 
+  // ─────────────────────────────────────────────────────────────
+  // One-shot critical-alarm scheduling — extracted into a hook for
+  // testability + race protection. See useCriticalAlarmScheduler.ts
+  // for the full doc (boot persistence, reschedule triggers, stale-
+  // async generation guard, edge cases). The hook handles:
+  //   - scheduling a one-shot alarm at each med's projected critical
+  //     date
+  //   - cancel + reschedule when any of the 6 trigger fields change
+  //   - cancel for deleted meds
+  //   - cancel all when the user opts out of either flag
+  //   - per-med generation guard so an older async effect cannot
+  //     recreate a stale alarm after a newer state or after deletion
+  // ─────────────────────────────────────────────────────────────
+  useCriticalAlarmScheduler({
+    medications,
+    notificationsEnabled,
+    criticalStockAlertsEnabled,
+    hydrated,
+    isFirstRun,
+  });
+
   const handleRestoreDose = (medicationId: string, reason: string) => {
     const med = medications.find((m) => m.id === medicationId);
     if (!med) return;
+    const today = getTodayDateString();
     const restoredAmount = med.dailyDose;
+    // Settle the snapshot at the current effective balance (deduct the
+    // elapsed days at the OLD dose), then add the restored dose on top.
+    // This makes the restore semantically: "skip today's dose, add it
+    // back to the live balance" — which is what the user expects.
+    const effPills = effectiveCurrentPills(med, today);
+    const newSnapshot = effPills + restoredAmount;
     setMedications((prev) =>
-      prev.map((m) => (m.id === medicationId ? { ...m, currentPills: m.currentPills + restoredAmount } : m))
+      prev.map((m) =>
+        m.id === medicationId
+          ? {
+              ...m,
+              currentPills: newSnapshot,
+              lastSyncDate: today,
+            }
+          : m
+      )
     );
     setLogs((prev) => [
       {
@@ -612,7 +659,7 @@ export default function App() {
         medicationName: med.name,
         type: 'skipped_day',
         amount: restoredAmount,
-        date: getTodayDateString(),
+        date: today,
         timestamp: new Date().toISOString(),
         description: `استرجاع جرعة (${reason}) (+${restoredAmount} ${med.unit})`,
       },
@@ -624,8 +671,23 @@ export default function App() {
   const handleConfirmRefill = (medicationId: string, addedPills: number) => {
     const med = medications.find((m) => m.id === medicationId);
     if (!med) return;
+    const today = getTodayDateString();
+    // Settle the snapshot at the current effective balance (deduct the
+    // elapsed days at the OLD dose), then add the refill amount on top.
+    // This way the new snapshot starts projecting from today with the
+    // fresh supply — clean, no retroactive consumption of the new pills.
+    const effPills = effectiveCurrentPills(med, today);
+    const newSnapshot = effPills + addedPills;
     setMedications((prev) =>
-      prev.map((m) => (m.id === medicationId ? { ...m, currentPills: m.currentPills + addedPills } : m))
+      prev.map((m) =>
+        m.id === medicationId
+          ? {
+              ...m,
+              currentPills: newSnapshot,
+              lastSyncDate: today,
+            }
+          : m
+      )
     );
     setLogs((prev) => [
       {
@@ -634,7 +696,7 @@ export default function App() {
         medicationName: med.name,
         type: 'refill',
         amount: addedPills,
-        date: getTodayDateString(),
+        date: today,
         timestamp: new Date().toISOString(),
         description: `شراء وتعبئة مخزون (+${addedPills} ${med.unit})`,
       },
@@ -644,33 +706,116 @@ export default function App() {
   };
 
   const handleToggleAutoDeduct = (medicationId: string) => {
+    // Settle the snapshot at the live effective balance before the new
+    // auto-deduction state takes effect. This handles BOTH transitions:
+    //   - true → false: deduct the elapsed period at the OLD active
+    //     rate, then flip OFF. Without this, the displayed balance
+    //     would jump back up to the stale snapshot value the moment
+    //     the flag flips (because effectiveCurrentPills returns
+    //     currentPills unchanged when autoDeduct is false), undoing
+    //     all consumption since lastSyncDate.
+    //   - false → true: keep currentPills unchanged (the user wasn't
+    //     consuming during the frozen period), bump lastSyncDate=today
+    //     so the new auto-deduction starts fresh from today. Without
+    //     the lastSyncDate bump, enabling auto-deduction would
+    //     retroactively deduct daysPassed*dailyDose for the frozen
+    //     period.
+    //
+    // IMPORTANT: the settle calculation + all side effects (setLogs,
+    // showToast) must run OUTSIDE the setMedications updater. React
+    // updater functions must be pure — React may invoke them more than
+    // once in Strict Mode (which would create duplicate settlement
+    // logs and duplicate toasts). We compute the settle result once
+    // here, fire the side effects once, and pass the result into the
+    // updater as a closure value (which the updater only READS).
+    const med = medications.find((m) => m.id === medicationId);
+    if (!med) return;
+
+    const today = getTodayDateString();
+    // `autoDeductEnabled` defaults to true when undefined, so the
+    // effective current state is `!== false`. To toggle OFF from the
+    // default-true (undefined) state we must set false explicitly.
+    // #27: the previous `!m.autoDeductEnabled` formulation no-oped
+    // for the undefined case because `!undefined === true` — the
+    // first click on a med with autoDeductEnabled===undefined kept
+    // it ON. `med.autoDeductEnabled === false` correctly maps:
+    //   undefined → false (turn OFF the default-true)
+    //   true      → false (turn OFF)
+    //   false     → true  (turn ON)
+    const newState = med.autoDeductEnabled === false;
+    const { updatedMed, log: settleLog } = settleAutoDeductToggle(
+      med,
+      newState,
+      today
+    );
+
+    // Side effect 1: persist the settlement consumption log (if any
+    // pills were deducted during the true→false transition). Runs
+    // OUTSIDE the medications updater so Strict Mode double-invoke
+    // can't duplicate the log.
+    if (settleLog) {
+      setLogs((prevLogs) => [settleLog, ...prevLogs]);
+    }
+    // Side effect 2: toast the toggle result. Also outside the updater.
+    showToast(
+      newState ? `تم تفعيل الخصم التلقائي لـ "${med.name}"` : `تم إيقاف الخصم التلقائي مؤقتاً لـ "${med.name}"`
+    );
+
+    // Updater: pure — only reads `updatedMed` from the closure and
+    // returns the new medications array. No side effects inside.
     setMedications((prev) =>
-      prev.map((m) => {
-        if (m.id === medicationId) {
-          // `autoDeductEnabled` defaults to true when undefined, so the
-          // effective current state is `!== false`. To toggle OFF from the
-          // default-true (undefined) state we must set false explicitly.
-          // #27: the previous `!m.autoDeductEnabled` formulation no-oped
-          // for the undefined case because `!undefined === true` — the
-          // first click on a med with autoDeductEnabled===undefined kept
-          // it ON. `m.autoDeductEnabled === false` correctly maps:
-          //   undefined → false (turn OFF the default-true)
-          //   true      → false (turn OFF)
-          //   false     → true  (turn ON)
-          const newState = m.autoDeductEnabled === false;
-          showToast(
-            newState ? `تم تفعيل الخصم التلقائي لـ "${m.name}"` : `تم إيقاف الخصم التلقائي مؤقتاً لـ "${m.name}"`
-          );
-          return { ...m, autoDeductEnabled: newState };
-        }
-        return m;
-      })
+      prev.map((m) => (m.id === medicationId ? updatedMed : m))
     );
   };
 
   const handleSaveMedication = (medData: Omit<Medication, 'id' | 'createdAt'>, editId?: string) => {
     if (editId) {
-      setMedications((prev) => prev.map((m) => (m.id === editId ? { ...m, ...medData } : m)));
+      // Settlement: if the user is changing the dailyDose, we MUST NOT
+      // just apply the new dose going forward from lastSyncDate — that
+      // would retroactively apply the new rate to all days that
+      // actually consumed at the OLD rate. Instead, settle the period
+      // [lastSyncDate, today] at the OLD dose first, then apply the
+      // new dose from today forward.
+      const existing = medications.find((m) => m.id === editId);
+      const today = getTodayDateString();
+      const isDoseChanging =
+        existing && medData.dailyDose !== existing.dailyDose;
+      if (existing && isDoseChanging) {
+        const { updatedMed, log } = settleDoseChange(
+          existing,
+          medData.dailyDose,
+          today
+        );
+        // Merge the settled med with the rest of the form data (name,
+        // category, reminder settings, etc.) — but keep the settled
+        // currentPills + lastSyncDate (don't let the form overwrite them).
+        setMedications((prev) =>
+          prev.map((m) =>
+            m.id === editId
+              ? {
+                  ...m,
+                  ...medData,
+                  // Override medData.currentPills + lastSyncDate with
+                  // the settled values. medData.currentPills in edit
+                  // mode equals initialData.currentPills (the input is
+                  // disabled), but settleDoseChange may have reduced it
+                  // for the elapsed days at the old dose — we MUST use
+                  // that reduced value, not the form's disabled-input
+                  // echo of the pre-edit snapshot.
+                  currentPills: updatedMed.currentPills,
+                  lastSyncDate: updatedMed.lastSyncDate,
+                }
+              : m
+          )
+        );
+        // Log the settlement consumption if any pills were deducted.
+        if (log) {
+          setLogs((prev) => [log, ...prev]);
+        }
+      } else {
+        // No dose change (or new med): just save normally.
+        setMedications((prev) => prev.map((m) => (m.id === editId ? { ...m, ...medData } : m)));
+      }
       showToast(
         medData.reminderEnabled
           ? `تم حفظ "${medData.name}" مع تذكير يومي الساعة ${medData.reminderTime}`
@@ -759,14 +904,26 @@ export default function App() {
     // Consume-pill feature: actually subtract the dose from the balance,
     // mark the med as consumed today (blocks auto-deduction), and log it.
     const today = getTodayDateString();
-    const doseAmount = Math.min(med.dailyDose, med.currentPills);
+    // Use the dynamic balance for the dose-amount calculation: if the
+    // app was closed for many days, the effective balance may already
+    // be 0, in which case the consume action is a no-op.
+    const effPills = effectiveCurrentPills(med, today);
+    const doseAmount = Math.min(med.dailyDose, effPills);
     if (doseAmount > 0) {
+      // The settle delta: deduct from the stored snapshot, not from
+      // effPills. If the snapshot is 60 but effPills is 42 (18 days
+      // elapsed), we want to deduct doseAmount AND reset lastSyncDate
+      // to today — effectively re-settling the snapshot at the live
+      // balance minus the consumed dose. The cleanest way is to
+      // subtract doseAmount from effPills and set that as the new
+      // snapshot, with lastSyncDate = today.
+      const newSnapshot = Math.max(0, effPills - doseAmount);
       setMedications((prev) =>
         prev.map((m) =>
           m.id === med.id
             ? {
                 ...m,
-                currentPills: Math.max(0, m.currentPills - doseAmount),
+                currentPills: newSnapshot,
                 lastConsumedDate: today,
                 lastSyncDate: today,
               }
@@ -809,14 +966,22 @@ export default function App() {
       showToast(`تم تناول جرعة "${med.name}" اليوم بالفعل.`);
       return;
     }
-    const doseAmount = Math.min(med.dailyDose, med.currentPills);
+    // Use the dynamic balance for the dose-amount calculation: if the
+    // app was closed for many days, the effective balance may already
+    // be 0, in which case the consume action is a no-op.
+    const effPills = effectiveCurrentPills(med, today);
+    const doseAmount = Math.min(med.dailyDose, effPills);
     if (doseAmount <= 0) return;
+    // Re-settle the snapshot at (effPills - doseAmount), with
+    // lastSyncDate = today. This matches the behavior in
+    // handleTakeDoseFromAlarm.
+    const newSnapshot = Math.max(0, effPills - doseAmount);
     setMedications((prev) =>
       prev.map((m) =>
         m.id === medicationId
           ? {
               ...m,
-              currentPills: Math.max(0, m.currentPills - doseAmount),
+              currentPills: newSnapshot,
               lastConsumedDate: today,
               lastSyncDate: today,
             }
@@ -868,7 +1033,9 @@ export default function App() {
   }, [medications]);
 
   const totalPillsCount = useMemo(() => {
-    return medications.reduce((acc, m) => acc + m.currentPills, 0);
+    // Sum the DYNAMIC balances, not the stored snapshots, so the count
+    // shown in the UI header / total reflects the projected live state.
+    return medications.reduce((acc, m) => acc + effectiveCurrentPills(m), 0);
   }, [medications]);
 
   const openAdd = () => {

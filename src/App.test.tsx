@@ -1,20 +1,25 @@
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 
 // Mock the modules that touch browser/Capacitor APIs before importing App.
 vi.mock('../native', () => ({
   initNativeBridge: vi.fn(() => Promise.resolve()),
   openAppSettings: vi.fn(() => Promise.resolve(false)),
+  registerBackButtonHandler: vi.fn(),
+  cleanupNativeListeners: vi.fn(),
 }));
-vi.mock('../utils/notifications', () => ({
-  requestNotificationPermission: vi.fn(() => Promise.resolve(false)),
+vi.mock('./utils/notifications', () => ({
+  requestNotificationPermission: vi.fn(() => Promise.resolve(true)),
   sendMedicineAlert: vi.fn(),
   sendCriticalStockAlert: vi.fn(),
   sendTestAlertNotification: vi.fn(() => Promise.resolve()),
   openNotificationSettings: vi.fn(),
-  getNotificationPermission: vi.fn(() => Promise.resolve('denied')),
-  getNotificationPermissionSync: vi.fn(() => 'denied'),
+  getNotificationPermission: vi.fn(() => Promise.resolve('granted')),
+  getNotificationPermissionSync: vi.fn(() => 'granted'),
+  scheduleCriticalAlarm: vi.fn(() => Promise.resolve()),
+  cancelCriticalAlarm: vi.fn(() => Promise.resolve()),
+  criticalAlarmId: vi.fn((id: string) => id.length),
 }));
 vi.mock('../utils/sound', () => ({
   playSuccessChime: vi.fn(),
@@ -31,6 +36,10 @@ vi.mock('../utils/audioStore', () => ({
 
 import App from './App';
 import { INITIAL_MEDICATIONS } from './data/initialData';
+import {
+  scheduleCriticalAlarm,
+  cancelCriticalAlarm,
+} from './utils/notifications';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 
@@ -115,5 +124,443 @@ describe('handleToggleAutoDeduct logic (#27)', () => {
     const m = { autoDeductEnabled: false };
     const newState = m.autoDeductEnabled === false;
     expect(newState).toBe(true);
+  });
+});
+
+/**
+ * handleToggleAutoDeduct — purity of the setMedications updater.
+ *
+ * The settlement calculation + all side effects (setLogs, showToast)
+ * must run OUTSIDE the setMedications updater. React updater
+ * functions must be pure; React may invoke them more than once in
+ * Strict Mode (which ships in src/main.tsx). If the updater itself
+ * calls setLogs/showToast/settleAutoDeductToggle, Strict Mode's
+ * double-invoke would create DUPLICATE settlement calls, logs, and
+ * toasts.
+ *
+ * The fix: handleToggleAutoDeduct computes the settle result OUTSIDE
+ * the updater (using `medications.find`), fires setLogs + showToast
+ * once from the handler body, and passes the pre-computed `updatedMed`
+ * into the updater as a closure value (which the updater only READS).
+ *
+ * These tests verify the structural property: ONE toggle click calls
+ * the pure `settleAutoDeductToggle` helper EXACTLY ONCE — even under
+ * <StrictMode> (which double-invokes the setMedications updater). If
+ * the settle call were inside the updater, StrictMode would call it
+ * twice; the fix ensures it's called once regardless.
+ *
+ * We also verify the toast side effect fires exactly once per click.
+ */
+describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  /** Open the MedicationMenu dropdown and click the toggle item. */
+  function clickToggleFor(): void {
+    // The MedicationMenu's "خيارات" button (aria-label) opens the dropdown.
+    const menuButton = screen.getByRole('button', { name: 'خيارات' });
+    fireEvent.click(menuButton);
+    // The toggle item text depends on the current state:
+    //   - auto active → "إيقاف الخصم التلقائي مؤقتاً"
+    //   - auto paused → "تفعيل الخصم التلقائي"
+    // Use a regex to match either.
+    const toggleItem = screen.getByText(/إيقاف الخصم التلقائي مؤقتاً|تفعيل الخصم التلقائي/);
+    fireEvent.click(toggleItem);
+  }
+
+  /** Seed a single med in localStorage so App renders one MedicationCard. */
+  function seedMed(overrides: Record<string, unknown> = {}): void {
+    localStorage.setItem(
+      'android_med_tracker_items_v2',
+      JSON.stringify([
+        {
+          id: 'med-toggle',
+          name: 'Toggle Med',
+          currentPills: 60,
+          dailyDose: 2,
+          unit: 'قرص',
+          warningThresholdDays: 5,
+          colorTag: 'teal',
+          createdAt: '2024-01-01T00:00:00.000Z',
+          // lastSyncDate = today so the app-open sync effect is a no-op
+          // (daysPassed = 0). This isolates the test to the toggle's
+          // own settle behavior.
+          lastSyncDate: new Date().toISOString().slice(0, 10),
+          autoDeductEnabled: true,
+          reminderEnabled: false,
+          ...overrides,
+        },
+      ])
+    );
+  }
+
+  it('one toggle click calls settleAutoDeductToggle EXACTLY ONCE (not twice, not zero)', async () => {
+    seedMed();
+
+    // Spy on the pure settle helper. The spy returns a no-op result
+    // (no deduction, no log) so the test doesn't depend on the
+    // sync effect's state — we ONLY care about the call count.
+    const dateCalcModule = await import('./utils/dateCalculations');
+    const settleSpy = vi
+      .spyOn(dateCalcModule, 'settleAutoDeductToggle')
+      .mockReturnValue({
+        updatedMed: {
+          id: 'med-toggle',
+          name: 'Toggle Med',
+          currentPills: 60,
+          dailyDose: 2,
+          unit: 'قرص',
+          warningThresholdDays: 5,
+          colorTag: 'teal',
+          createdAt: '2024-01-01T00:00:00.000Z',
+          lastSyncDate: new Date().toISOString().slice(0, 10),
+          autoDeductEnabled: false,
+        },
+        log: null,
+      });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Toggle Med')).toBeInTheDocument();
+    });
+
+    clickToggleFor();
+
+    // The handler calls settleAutoDeductToggle once (outside the
+    // updater). The setMedications updater only READS the result —
+    // it doesn't call settleAutoDeductToggle itself. So the spy
+    // must be called exactly once.
+    expect(settleSpy).toHaveBeenCalledTimes(1);
+
+    // Verify the call args: the med id matches, newState is false
+    // (was true → false), todayStr is today.
+    expect(settleSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'med-toggle', autoDeductEnabled: true }),
+      false,
+      expect.any(String)
+    );
+  });
+
+  it('one toggle click under <StrictMode> still calls settleAutoDeductToggle EXACTLY ONCE', async () => {
+    // StrictMode double-invokes updater functions in development.
+    // If settleAutoDeductToggle were called INSIDE the setMedications
+    // updater, StrictMode would call it TWICE. The fix ensures the
+    // settle call is OUTSIDE the updater, so it's called once even
+    // under StrictMode.
+    seedMed();
+
+    const dateCalcModule = await import('./utils/dateCalculations');
+    const settleSpy = vi
+      .spyOn(dateCalcModule, 'settleAutoDeductToggle')
+      .mockReturnValue({
+        updatedMed: {
+          id: 'med-toggle',
+          name: 'Toggle Med',
+          currentPills: 60,
+          dailyDose: 2,
+          unit: 'قرص',
+          warningThresholdDays: 5,
+          colorTag: 'teal',
+          createdAt: '2024-01-01T00:00:00.000Z',
+          lastSyncDate: new Date().toISOString().slice(0, 10),
+          autoDeductEnabled: false,
+        },
+        log: null,
+      });
+
+    const { StrictMode } = await import('react');
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Toggle Med')).toBeInTheDocument();
+    });
+
+    clickToggleFor();
+
+    // Exactly ONE call — StrictMode's double-invoke of the updater
+    // did NOT double the settle call (it's outside the updater).
+    expect(settleSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('one toggle (OFF → ON) calls settleAutoDeductToggle EXACTLY ONCE and produces no log', async () => {
+    // Frozen med → toggle to ON. The settle helper is called once
+    // (with newState=true) and returns no log (no retroactive deduction).
+    seedMed({ autoDeductEnabled: false });
+
+    const dateCalcModule = await import('./utils/dateCalculations');
+    const settleSpy = vi
+      .spyOn(dateCalcModule, 'settleAutoDeductToggle')
+      .mockReturnValue({
+        updatedMed: {
+          id: 'med-toggle',
+          name: 'Toggle Med',
+          currentPills: 60,
+          dailyDose: 2,
+          unit: 'قرص',
+          warningThresholdDays: 5,
+          colorTag: 'teal',
+          createdAt: '2024-01-01T00:00:00.000Z',
+          lastSyncDate: new Date().toISOString().slice(0, 10),
+          autoDeductEnabled: true,
+        },
+        log: null,
+      });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Toggle Med')).toBeInTheDocument();
+    });
+
+    clickToggleFor();
+
+    expect(settleSpy).toHaveBeenCalledTimes(1);
+    // newState=true (false→true transition).
+    expect(settleSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'med-toggle', autoDeductEnabled: false }),
+      true,
+      expect.any(String)
+    );
+  });
+
+  it('one toggle click shows the toast EXACTLY ONCE (no duplicate toasts under StrictMode)', async () => {
+    // The toast is also a side effect that was inside the updater in
+    // the buggy version. Verify it fires exactly once per click by
+    // counting the toast message in the DOM. (Toasts auto-dismiss
+    // after 3s, but we check immediately after the click.)
+    seedMed();
+
+    const { StrictMode } = await import('react');
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Toggle Med')).toBeInTheDocument();
+    });
+
+    clickToggleFor();
+
+    // The toast message for "turn OFF" is "تم إيقاف الخصم التلقائي مؤقتاً لـ ...".
+    // It should appear exactly once (not twice — which would happen if
+    // showToast were inside the updater under StrictMode).
+    await waitFor(() => {
+      const toasts = screen.getAllByText(/تم إيقاف الخصم التلقائي مؤقتاً لـ/);
+      expect(toasts.length).toBe(1);
+    });
+  });
+});
+
+/**
+ * One-shot critical-alarm reschedule effect (App.tsx).
+ *
+ * When notificationsEnabled + criticalStockAlertsEnabled are both true
+ * and the app has hydrated, the effect must call scheduleCriticalAlarm
+ * for each medication. When either flag flips off, the effect must
+ * cancel all previously-scheduled alarms.
+ */
+describe('App — one-shot critical-alarm reschedule effect', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('schedules a critical alarm for each saved medication when alerts are enabled', async () => {
+    localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([
+      {
+        id: 'med-alarm-1',
+        name: 'Alarm Test Med',
+        currentPills: 30,
+        dailyDose: 1,
+        unit: 'قرص',
+        warningThresholdDays: 5,
+        colorTag: 'teal',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        lastSyncDate: new Date().toISOString().slice(0, 10),
+        autoDeductEnabled: true,
+        reminderEnabled: false,
+      },
+    ]));
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(scheduleCriticalAlarm).toHaveBeenCalled();
+    });
+    expect(cancelCriticalAlarm).toHaveBeenCalledWith('med-alarm-1');
+    expect(scheduleCriticalAlarm).toHaveBeenCalledWith(
+      'med-alarm-1',
+      'Alarm Test Med',
+      expect.any(Number),
+      'قرص'
+    );
+  });
+
+  it('cancels all alarms when the user opts out of critical alerts', async () => {
+    localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([
+      {
+        id: 'med-alarm-2',
+        name: 'Alarm Test Med 2',
+        currentPills: 30,
+        dailyDose: 1,
+        unit: 'قرص',
+        warningThresholdDays: 5,
+        colorTag: 'teal',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        lastSyncDate: new Date().toISOString().slice(0, 10),
+        autoDeductEnabled: true,
+        reminderEnabled: false,
+      },
+    ]));
+
+    render(<App />);
+
+    // Wait for the initial schedule to happen.
+    await waitFor(() => {
+      expect(scheduleCriticalAlarm).toHaveBeenCalled();
+    });
+
+    // The critical-alerts toggle button in AppHeader has the title
+    // "تنبيه النفاذ الحرج مفعّل ..." when enabled. Find and click it.
+    // This actually performs the state transition
+    // (criticalStockAlertsEnabled: true → false), which triggers the
+    // reschedule effect to cancel all alarms.
+    const toggle = screen.getByTitle(/تنبيه النفاذ الحرج مفعّل/);
+    fireEvent.click(toggle);
+
+    // The reschedule effect must run with the new state and cancel
+    // the previously-scheduled alarm for the med.
+    await waitFor(() => {
+      expect(cancelCriticalAlarm).toHaveBeenCalledWith('med-alarm-2');
+    });
+  });
+
+  it('re-arms all critical alarms when the app is launched (e.g., after a device reboot)', async () => {
+    // After a device reboot, the Capacitor plugin's BootReceiver
+    // re-arms already-scheduled notifications from its persisted
+    // store. But if for some reason the boot receiver doesn't fire
+    // (e.g., the app was force-stopped before the reboot), opening
+    // the app triggers the reschedule effect to re-arm all alarms
+    // from the current medication state. This test verifies that
+    // re-arming works for multiple meds on app launch.
+    localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([
+      {
+        id: 'med-reboot-1',
+        name: 'Reboot Med 1',
+        currentPills: 30,
+        dailyDose: 1,
+        unit: 'قرص',
+        warningThresholdDays: 5,
+        colorTag: 'teal',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        lastSyncDate: new Date().toISOString().slice(0, 10),
+        autoDeductEnabled: true,
+        reminderEnabled: false,
+      },
+      {
+        id: 'med-reboot-2',
+        name: 'Reboot Med 2',
+        currentPills: 20,
+        dailyDose: 2,
+        unit: 'قرص',
+        warningThresholdDays: 5,
+        colorTag: 'teal',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        lastSyncDate: new Date().toISOString().slice(0, 10),
+        autoDeductEnabled: true,
+        reminderEnabled: false,
+      },
+      {
+        id: 'med-reboot-3',
+        name: 'Reboot Med 3',
+        currentPills: 14,
+        dailyDose: 1,
+        unit: 'قرص',
+        warningThresholdDays: 7,
+        colorTag: 'teal',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        lastSyncDate: new Date().toISOString().slice(0, 10),
+        autoDeductEnabled: true,
+        reminderEnabled: false,
+      },
+    ]));
+
+    render(<App />);
+
+    // All three meds must have a critical alarm scheduled on launch.
+    await waitFor(() => {
+      expect(scheduleCriticalAlarm).toHaveBeenCalledWith(
+        'med-reboot-1',
+        'Reboot Med 1',
+        expect.any(Number),
+        'قرص'
+      );
+      expect(scheduleCriticalAlarm).toHaveBeenCalledWith(
+        'med-reboot-2',
+        'Reboot Med 2',
+        expect.any(Number),
+        'قرص'
+      );
+      expect(scheduleCriticalAlarm).toHaveBeenCalledWith(
+        'med-reboot-3',
+        'Reboot Med 3',
+        expect.any(Number),
+        'قرص'
+      );
+    });
+  });
+
+  it('does NOT schedule a critical alarm for an already-critical med on app launch (no repeated immediate alerts)', async () => {
+    // An already-critical med (daysLeft <= critical threshold) must
+    // NOT trigger an immediate alarm on every app launch. The one-shot
+    // alarm is only for FUTURE crossings. The existing alert effect
+    // (which runs when the app is open and tracks already-alerted
+    // statuses) handles the immediate notification once.
+    localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([
+      {
+        id: 'med-already-critical',
+        name: 'Already Critical Med',
+        currentPills: 1, // dose 1, threshold 5 (critical 2) → daysLeft 1 → already critical
+        dailyDose: 1,
+        unit: 'قرص',
+        warningThresholdDays: 5,
+        colorTag: 'teal',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        lastSyncDate: new Date().toISOString().slice(0, 10),
+        autoDeductEnabled: true,
+        reminderEnabled: false,
+      },
+    ]));
+
+    render(<App />);
+
+    // Give the effect a moment to (incorrectly) schedule, then assert
+    // it did NOT. scheduleCriticalAlarm should never be called for
+    // an already-critical med.
+    await waitFor(() => {
+      // The cancelCriticalAlarm might be called (no-op on web, but
+      // the mock is wired), so we wait for any notification-module
+      // activity to settle. Use a microtask flush.
+      expect(cancelCriticalAlarm).not.toHaveBeenCalledWith('med-already-critical');
+    });
+    expect(scheduleCriticalAlarm).not.toHaveBeenCalled();
   });
 });

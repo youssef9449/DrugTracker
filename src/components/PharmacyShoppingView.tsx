@@ -81,9 +81,9 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   const urgentMeds = useMemo(() => {
     return medications.filter((m) => {
       const { status } = calculateMedicationStatus(m);
-      return status === 'out_of_stock' || status === 'critical' || status === 'warning';
+      return status === 'out_of_stock' || status === 'critical' || status === 'warning' || refilledIds.has(m.id);
     });
-  }, [medications]);
+  }, [medications, refilledIds]);
 
   const effectiveShowAll = showAllForPlanning;
   const displayList = effectiveShowAll ? medications : urgentMeds;
@@ -209,8 +209,8 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
    *  is known, strips only if the med has strips. */
   function getAvailableUnits(med: Medication): Array<'pills' | 'boxes' | 'strips'> {
     const { boxSize, stripSize, hasStrips } = getMedSizes(med);
-    const units: Array<'pills' | 'boxes' | 'strips'> = ['pills'];
-    if (boxSize > 0) units.push('boxes');
+    const units: Array<'pills' | 'boxes' | 'strips'> = ['boxes'];
+    if (boxSize <= 0) return units;
     if (hasStrips && stripSize > 0) units.push('strips');
     return units;
   }
@@ -224,13 +224,16 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   }
 
   function getSelectedUnits(med: Medication): OrderUnit[] {
-    return orderUnits[med.id] || ['pills'];
+    return orderUnits[med.id] || ['boxes'];
   }
 
   function getUnitQuantity(med: Medication, unit: OrderUnit, suggestedPills: number): number {
     const saved = orderUnitQuantities[med.id]?.[unit];
     if (saved !== undefined) return saved;
-    return unit === 'pills' && getSelectedUnits(med).includes('pills') ? suggestedPills : 0;
+    const { boxSize, stripSize } = getMedSizes(med);
+    if (unit === 'boxes') return Math.max(1, Math.round(suggestedPills / boxSize));
+    if (unit === 'strips') return Math.max(1, Math.round(suggestedPills / stripSize));
+    return 0;
   }
 
   function getRequestedPills(med: Medication, suggestedPills: number): number {
@@ -242,9 +245,9 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
 
   const handleToggleOrderUnit = (med: Medication, unit: OrderUnit, suggestedPills: number) => {
     setOrderUnits((prev) => {
-      const current = prev[med.id] || ['pills'];
+      const current = prev[med.id] || ['boxes'];
       const next = current.includes(unit) ? current.filter((item) => item !== unit) : [...current, unit];
-      if (next.length === 0) return { ...prev, [med.id]: ['pills'] };
+      if (next.length === 0) return { ...prev, [med.id]: ['boxes'] };
       return { ...prev, [med.id]: next };
     });
     if (!getSelectedUnits(med).includes(unit)) {

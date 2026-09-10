@@ -1336,6 +1336,21 @@ export default function App() {
                       onNavigateToShopping={() => setActiveTab('shopping')}
                       onTriggerAlarm={testAlarm}
                       onConsumeDose={handleConsumeDose}
+                      lastRefillQuantity={(() => {
+                        const lastRefill = logs.find(
+                          (log) => log.medicationId === med.id && log.type === 'refill'
+                        );
+                        return lastRefill && lastRefill.amount > 0 ? lastRefill.amount : undefined;
+                      })()}
+                      onUndoRefill={() => {
+                        const lastRefill = logs.find(
+                          (log) => log.medicationId === med.id && log.type === 'refill'
+                        );
+                        if (lastRefill && lastRefill.amount > 0) {
+                          handleConfirmRefill(med.id, -lastRefill.amount);
+                          showToast(`تم التراجع عن تعبئة "${med.name}".`);
+                        }
+                      }}
                     />
                   ))
                 )}

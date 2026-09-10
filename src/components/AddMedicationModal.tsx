@@ -492,7 +492,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                 <input
                   type="number"
                   min="1"
-                  max="500"
+                  max="100000"
                   inputMode="numeric"
                   step="any"
                   value={stripsPerBox}
@@ -533,7 +533,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                   <input
                     type="number"
                     min="1"
-                    max="100"
+                    max="100000"
                     inputMode="numeric"
                     step="any"
                     value={pillsPerStrip}
@@ -587,7 +587,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
               <input
                 type="number"
                 min="1"
-                max="1000"
+                max="100000"
                 inputMode="numeric"
                 step="any"
                 value={packageSize || ''}
@@ -620,7 +620,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
               <input
                 type="number"
                 min="1"
-                max="30"
+                max="100000"
                 inputMode="numeric"
                 value={warningThresholdDays}
                 onChange={(e) => setWarningThresholdDays(e.target.value)}

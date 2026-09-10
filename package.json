@@ -14,11 +14,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "icons": "python3 scripts/generate-icons.py",
+    "icons": "node scripts/generate-icons.mjs",
     "cap:sync": "npm run build && npx cap sync android",
     "cap:add": "npx cap add android",
-    "cap:open": "npx cap open android",
-    "apk:debug": "npm run build && npx cap sync android && npx cap open android"
+    "cap:studio": "npm run build && npx cap sync android && npx cap open android",
+    "apk:debug": "npm run build && npx cap sync android && cd android && ./gradlew assembleDebug"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",
@@ -34,7 +34,6 @@
     "@capacitor/cli": "^6.2.0",
     "@eslint/js": "^9.20.0",
     "@tailwindcss/vite": "^4.1.14",
-    "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
     "@types/node": "^22.14.0",
@@ -48,6 +47,7 @@
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^15.15.0",
     "jsdom": "^30.0.1",
+    "sharp": "^0.35.4",
     "tailwindcss": "^4.1.14",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "~5.8.2",

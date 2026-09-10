@@ -35,6 +35,7 @@ npm run build
 npx cap sync android
 
 # 3. Open the Android project in Android Studio
+#    (or use `npm run cap:studio` which does steps 1-3 in one command)
 npx cap open android
 ```
 
@@ -129,8 +130,10 @@ Quick summary:
 After editing the web source:
 
 ```bash
-npm run build && npx cap sync android
+# Use `npm run cap:studio` for steps 1-2 in one command, then:
 npx cap open android
+# Or build the APK from the command line (no Android Studio needed):
+npm run apk:debug
 # Then rebuild in Android Studio as above, OR:
 cd android
 ./gradlew assembleRelease -x lint -x lintVitalAnalyzeRelease -x lintVitalReportRelease -x testReleaseUnitTest

@@ -151,7 +151,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
               <p className="text-[11px] text-teal-200">
                 {isPharmacyOnly
                   ? 'تحديد رقم واتساب الصيدلية، كود العميل، وبيانات التوصيل'
-                  : 'تخصيص الخصم التلقائي، الإشعارات، وبيانات الصيدلية'}
+                  : 'تخصيص الخصم التلقائي والإشعارات'}
               </p>
             </div>
           </div>
@@ -532,19 +532,19 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
               const appUrl = buildWhatsAppAppUrl(pharmacyPhone, previewMsg);
 
               return (
-                <div className="bg-slate-900 text-slate-100 rounded-2xl p-3.5 text-xs space-y-2 font-mono shadow-inner">
-                  <div className="flex items-center justify-between text-[11px] text-teal-400 font-bold">
+                <div className="bg-white text-slate-700 rounded-2xl p-3.5 text-xs space-y-2 font-mono border border-slate-200 shadow-sm">
+                  <div className="flex items-center justify-between text-[11px] text-teal-800 font-bold">
                     <span className="flex items-center gap-1">
                       <MessageSquare className="w-3.5 h-3.5" />
                       {activeOrderItems && activeOrderItems.length > 0
                         ? 'معاينة طلب الأدوية المحددة في صفحة الشراء:'
                         : 'معاينة رسالة الواتساب الموجهة للصيدلية:'}
                     </span>
-                    <span className="text-slate-300">
+                    <span className="text-slate-500">
                       {formattedPhone ? `+${formattedPhone}` : 'لم يحدد الرقم بعد'}
                     </span>
                   </div>
-                  <div className="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700 text-[11px] text-slate-200 leading-relaxed whitespace-pre-line select-text max-h-44 overflow-y-auto">
+                  <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-[11px] text-slate-700 leading-relaxed whitespace-pre-line select-text max-h-44 overflow-y-auto">
                     {previewMsg}
                   </div>
 

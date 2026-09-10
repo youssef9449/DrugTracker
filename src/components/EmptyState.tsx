@@ -1,5 +1,6 @@
 import type { FC } from 'react';
 import { Pill, Plus, CheckCircle2, AlertTriangle, ArrowRight } from 'lucide-react';
+import { EMPTY_STATE_ICON_BOX } from '../lib/styles';
 
 interface EmptyStateProps {
   hasSearch: boolean;
@@ -20,7 +21,7 @@ export const EmptyState: FC<EmptyStateProps> = ({
   if (hasSearch) {
     return (
       <div className="flex flex-col items-center justify-center p-8 text-center bg-white rounded-3xl border border-dashed border-slate-300 m-2 shadow-2xs">
-        <div className="w-14 h-14 rounded-2xl bg-teal-50 text-teal-600 flex items-center justify-center mb-3">
+        <div className={EMPTY_STATE_ICON_BOX}>
           <Pill className="w-7 h-7 rotate-45" />
         </div>
         <h3 className="text-base font-bold text-slate-800">لا توجد نتائج مطابقة للبحث</h3>
@@ -92,7 +93,7 @@ export const EmptyState: FC<EmptyStateProps> = ({
   // Filter: 'all' (No medications in system)
   return (
     <div className="flex flex-col items-center justify-center p-8 text-center bg-white rounded-3xl border border-dashed border-slate-300 m-2 shadow-2xs">
-      <div className="w-14 h-14 rounded-2xl bg-teal-50 text-teal-600 flex items-center justify-center mb-3">
+      <div className={EMPTY_STATE_ICON_BOX}>
         <Pill className="w-7 h-7 rotate-45" />
       </div>
       <h3 className="text-base font-bold text-slate-800">لا توجد أدوية مسجلة حالياً</h3>

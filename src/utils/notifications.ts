@@ -38,6 +38,11 @@
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { playNotificationSound } from './sound';
+import {
+  NOTIFICATION_IMMEDIATE_OFFSET_MS,
+  CRITICAL_ALARM_IMMEDIATE_TOLERANCE_MS,
+  SW_READY_TIMEOUT_MS,
+} from './time';
 
 /**
  * Returns true when running inside the Capacitor native runtime
@@ -333,7 +338,7 @@ async function scheduleNotification(opts: {
             // Schedule 1 second in the future so it appears as a
             // real notification (not "delivered immediately" which
             // some Android versions treat as a head-up only).
-            schedule: { at: new Date(Date.now() + 1000) },
+            schedule: { at: new Date(Date.now() + NOTIFICATION_IMMEDIATE_OFFSET_MS) },
             // Sound: uses the default Android notification sound
             // for the channel. The custom sound is played via the
             // localNotificationReceived listener in the foreground.
@@ -428,7 +433,7 @@ async function scheduleWebNotification(title: string, body: string): Promise<voi
       const reg = await Promise.race([
         navigator.serviceWorker.ready,
         new Promise<ServiceWorkerRegistration | null>((resolve) =>
-          setTimeout(() => resolve(null), 2000)
+          setTimeout(() => resolve(null), SW_READY_TIMEOUT_MS)
         ),
       ]);
       if (reg) {
@@ -636,8 +641,8 @@ export async function scheduleCriticalAlarm(
   // the past (or very close), use "now + 1s" so the notification
   // appears as a real system notification.
   const fireAt =
-    criticalDateMs <= Date.now() + 60_000
-      ? new Date(Date.now() + 1000)
+    criticalDateMs <= Date.now() + CRITICAL_ALARM_IMMEDIATE_TOLERANCE_MS
+      ? new Date(Date.now() + NOTIFICATION_IMMEDIATE_OFFSET_MS)
       : new Date(criticalDateMs);
 
   const title = `🚨 ${medName}: اقترب النفاد الحرج`;

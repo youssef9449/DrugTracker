@@ -12,7 +12,7 @@ import {
 // install. The file lives at src/data/initialData.ts (relative path).
 // See that file's header comment for the AI Studio cache-error
 // troubleshooting note.
-import { INITIAL_MEDICATIONS, INITIAL_LOGS } from './data/initialData';
+import { getInitialMedications, getInitialLogs } from './data/initialData';
 import { AndroidBottomNav, ActiveTab } from './components/AndroidBottomNav';
 import { AppHeader } from './components/AppHeader';
 import { LowStockBanner } from './components/LowStockBanner';
@@ -57,6 +57,8 @@ import { migrateSchema } from './lib/migration';
 import { getInitialTab } from './lib/initialTab';
 import { generateId } from './utils/id';
 import { loadJson, loadString, persist } from './utils/storage';
+import { TOAST_MESSAGES, PERSIST_FAILURE_MESSAGES } from './constants/uiStrings';
+import { TOAST_DURATION_MS, PHARMACY_PERSIST_DEBOUNCE_MS, DEFAULT_SNOOZE_MINUTES } from './utils/time';
 import { Zap, ZapOff } from 'lucide-react';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
@@ -86,8 +88,8 @@ export default function App() {
   // hydration effect finishes, which gates the auto-deduction + alert
   // effects so they operate on the user's REAL saved state (not the
   // seed defaults) — see H8 in the audit fix.
-  const [medications, setMedications] = useState<Medication[]>(INITIAL_MEDICATIONS);
-  const [logs, setLogs] = useState<ConsumptionLog[]>(INITIAL_LOGS);
+  const [medications, setMedications] = useState<Medication[]>(getInitialMedications);
+  const [logs, setLogs] = useState<ConsumptionLog[]>(getInitialLogs);
   const [pharmacySettings, setPharmacySettings] =
     useState<PharmacySettings>(DEFAULT_PHARMACY_SETTINGS);
   const [hydrated, setHydrated] = useState(false);
@@ -329,7 +331,7 @@ export default function App() {
     toastTimerRef.current = setTimeout(() => {
       setToast((curr) => (curr?.id === id ? null : curr));
       toastTimerRef.current = null;
-    }, 4000);
+    }, TOAST_DURATION_MS);
   }, []);
 
   // ─────────────────────────────────────────────────────────────
@@ -348,7 +350,7 @@ export default function App() {
     storageKey: STORAGE_MEDS_KEY,
     value: medications,
     enabled: hydrated,
-    failureMessage: 'قد لا يتم حفظ تعديلاتك على الأدوية.',
+    failureMessage: PERSIST_FAILURE_MESSAGES.meds,
     showToast,
   });
 
@@ -356,7 +358,7 @@ export default function App() {
     storageKey: STORAGE_LOGS_KEY,
     value: logs,
     enabled: hydrated,
-    failureMessage: 'قد لا يتم حفظ سجل الاستهلاك.',
+    failureMessage: PERSIST_FAILURE_MESSAGES.logs,
     showToast,
   });
 
@@ -368,8 +370,8 @@ export default function App() {
     storageKey: STORAGE_PHARMACY_KEY,
     value: pharmacySettings,
     enabled: hydrated,
-    debounceMs: 400,
-    failureMessage: 'قد لا يتم حفظ إعدادات الصيدلية.',
+    debounceMs: PHARMACY_PERSIST_DEBOUNCE_MS,
+    failureMessage: PERSIST_FAILURE_MESSAGES.pharmacy,
     showToast,
   });
 
@@ -378,7 +380,7 @@ export default function App() {
     value: String(soundEnabled),
     json: false,
     enabled: hydrated,
-    failureMessage: 'قد لا يتم حفظ تفضيل الصوت.',
+    failureMessage: PERSIST_FAILURE_MESSAGES.sound,
     showToast,
   });
 
@@ -403,7 +405,7 @@ export default function App() {
     value: String(criticalStockAlertsEnabled),
     json: false,
     enabled: hydrated,
-    failureMessage: 'قد لا يتم حفظ تفضيل تنبيه النفاذ الحرج.',
+    failureMessage: PERSIST_FAILURE_MESSAGES.critical,
     showToast,
   });
 
@@ -412,7 +414,7 @@ export default function App() {
     value: String(globalAutoDeductEnabled),
     json: false,
     enabled: hydrated,
-    failureMessage: 'قد لا يتم حفظ تفضيل الخصم التلقائي.',
+    failureMessage: PERSIST_FAILURE_MESSAGES.autoDeduct,
     showToast,
   });
 
@@ -427,7 +429,7 @@ export default function App() {
     if (globalCustomSound) {
       // #94: surface IDB save failures to the user (was silent console.warn).
       saveGlobalCustomSound(globalCustomSound).catch(() => {
-        showToast('تعذّر حفظ الصوت المخصص — قد لا يكون متاحاً بعد إعادة التشغيل.');
+        showToast(PERSIST_FAILURE_MESSAGES.customSound);
       });
     } else {
       deleteGlobalCustomSound().catch(() => {
@@ -471,7 +473,7 @@ export default function App() {
       setMedications(result.updatedMeds);
       setLogs((prev) => [...result.newLogs, ...prev]);
       const totalPills = result.deductedSummary.reduce((sum, item) => sum + item.pillsDeducted, 0);
-      showToast(`تم الخصم التلقائي للاستهلاك: خصم ${totalPills} قرص لمرور الأيام.`);
+      showToast(TOAST_MESSAGES.autoDeductSummary(totalPills));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated]);
@@ -523,7 +525,7 @@ export default function App() {
     const restoreKey = `${medicationId}:${today}`;
     if (restoreInFlightRef.current.has(restoreKey)) return false;
     if (med.autoDeductEnabled === false) {
-      showToast(`الخصم التلقائي متوقف لدواء "${med.name}"؛ لا توجد جرعة مستحقة للاسترجاع.`);
+      showToast(TOAST_MESSAGES.autoDeductOff(med.name));
       return false;
     }
     if (logs.some((log) =>
@@ -531,7 +533,7 @@ export default function App() {
       log.type === 'skipped_day' &&
       log.date === today
     )) {
-      showToast(`تم استرجاع جرعة "${med.name}" اليوم بالفعل.`);
+      showToast(TOAST_MESSAGES.doseAlreadyRestored(med.name));
       return false;
     }
     restoreInFlightRef.current.add(restoreKey);
@@ -633,7 +635,7 @@ export default function App() {
       },
       ...prev.map((log) => log.id === refill.id ? { ...log, reversedAt: undoTimestamp } : log),
     ]);
-    showToast(`تم التراجع عن تعبئة "${med.name}".`);
+    showToast(TOAST_MESSAGES.refillUndone(med.name));
     if (soundEnabled) playSuccessChime();
   };
 
@@ -890,10 +892,10 @@ export default function App() {
     }
     try {
       await sendTestAlertNotification(globalCustomSound);
-      showToast('تم إرسال إشعار تجريبي وتشغيل صوت التنبيه بنجاح! 🔔');
+      showToast(TOAST_MESSAGES.testNotificationSent);
     } catch (err) {
       console.warn('[App] Failed to send test alert notification:', err);
-      showToast('تم تشغيل صوت التنبيه التجريبي بنجاح! 🔔');
+      showToast(TOAST_MESSAGES.testNotificationSoundOnly);
     }
   };
 
@@ -910,13 +912,13 @@ export default function App() {
       setLogs((prev) => [log, ...prev]);
     }
     dismissAlarm();
-    showToast(`تم تسجيل جرعة "${med.name}" (-${doseAmount} ${med.unit}). لن يتم الخصم التلقائي اليوم.`);
+    showToast(TOAST_MESSAGES.doseTaken(med.name, doseAmount, med.unit));
     if (soundEnabled) playSuccessChime();
   };
 
   const handleSnoozeFromAlarm = (med: Medication) => {
-    snoozeAlarm(10);
-    showToast(`تم تأجيل تنبيه "${med.name}" عشر دقائق`);
+    snoozeAlarm(DEFAULT_SNOOZE_MINUTES);
+    showToast(TOAST_MESSAGES.doseSnoozed(med.name));
   };
 
   // Consume-pill feature: manually consume a dose from the card.
@@ -928,7 +930,7 @@ export default function App() {
     const today = getTodayDateString();
     // If already consumed today, don't double-consume.
     if (med.lastConsumedDate === today) {
-      showToast(`تم تناول جرعة "${med.name}" اليوم بالفعل.`);
+      showToast(TOAST_MESSAGES.doseAlreadyTaken(med.name));
       return;
     }
     // Shared consume-dose logic (audit #77).
@@ -940,7 +942,7 @@ export default function App() {
       );
       setLogs((prev) => [log, ...prev]);
     }
-    showToast(`تم تناول جرعة "${med.name}" (-${doseAmount} ${med.unit}). لن يتم الخصم التلقائي اليوم.`);
+    showToast(TOAST_MESSAGES.doseTaken(med.name, doseAmount, med.unit));
     if (soundEnabled) playSuccessChime();
   };
 
@@ -956,8 +958,8 @@ export default function App() {
     if (soundEnabled) playSuccessChime();
     showToast(
       next
-        ? 'تم تفعيل تنبيهات النفاذ الحرج ⚠️ (إشعار فوري عند اقتراب نفاد أي دواء أو نفاذه — حسب إعداد كل دواء)'
-        : 'تم إيقاف تنبيهات النفاذ الحرج'
+        ? TOAST_MESSAGES.criticalAlertsOn
+        : TOAST_MESSAGES.criticalAlertsOff
     );
   }, [criticalStockAlertsEnabled, notificationsEnabled, soundEnabled, showToast]);
 

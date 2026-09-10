@@ -2,6 +2,7 @@ import { useState, type FC } from 'react';
 import { Plus, Clock, ShieldCheck, ArrowUpRight, ArrowDownLeft, RotateCcw } from 'lucide-react';
 import { Medication, ConsumptionLog } from '../types';
 import { getTodayDateString, formatArabicDate } from '../utils/dateCalculations';
+import { MAX_LOG_ROWS } from '../utils/time';
 
 interface ConsumptionLogViewProps {
   medications: Medication[];
@@ -164,7 +165,7 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
           </div>
         ) : (
           <div className="space-y-2">
-            {logs.slice(0, 15).map((log) => {
+            {logs.slice(0, MAX_LOG_ROWS).map((log) => {
               const isDeduction = log.amount < 0;
               return (
                 <div

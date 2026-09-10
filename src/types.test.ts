@@ -10,6 +10,7 @@ import {
   type Medication,
 } from './types';
 import { getTodayDateString } from './utils/dateCalculations';
+import { NEVER_DEPLETES_DAYS } from './utils/time';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
   // lastSyncDate defaults to today so effectiveCurrentPills() ===
@@ -53,7 +54,7 @@ describe('calculateMedicationStatus', () => {
   it('returns sufficient/undefined when dailyDose <= 0', () => {
     const s = calculateMedicationStatus(makeMed({ currentPills: 10, dailyDose: 0 }));
     expect(s.status).toBe('sufficient');
-    expect(s.daysLeft).toBe(999);
+    expect(s.daysLeft).toBe(NEVER_DEPLETES_DAYS);
   });
 
   it('returns critical when daysLeft <= derived critical threshold', () => {

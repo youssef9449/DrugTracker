@@ -37,6 +37,7 @@
 
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import { playNotificationSound } from './sound';
 
 /**
  * Returns true when running inside the Capacitor native runtime
@@ -316,7 +317,12 @@ async function scheduleNotification(opts: {
     try {
       // Make sure we have permission before scheduling.
       const perm = await LocalNotifications.checkPermissions();
-      if (perm.display !== 'granted') return;
+      if (perm.display !== 'granted') {
+        // #95: surface the silent no-op so the caller / devtools can see
+        // the notification was dropped due to missing permission.
+        console.warn('[notifications] scheduleNotification skipped: permission not granted');
+        return;
+      }
 
       await LocalNotifications.schedule({
         notifications: [
@@ -361,9 +367,8 @@ async function scheduleNotification(opts: {
       scheduleWebNotification(opts.title, opts.body);
       // Also play the custom sound in the foreground as a fallback.
       if (opts.customSoundFile) {
-        import('../utils/sound')
-          .then((m) => m.playNotificationSound('custom', opts.customSoundFile!))
-          .catch(() => void 0);
+        // #96: static import (was a dynamic import — no circular dep exists).
+        playNotificationSound('custom', opts.customSoundFile);
       }
     }
     return;
@@ -372,9 +377,8 @@ async function scheduleNotification(opts: {
   scheduleWebNotification(opts.title, opts.body);
   // On web, also play the custom sound via the Web Audio API.
   if (opts.customSoundFile) {
-    import('../utils/sound')
-      .then((m) => m.playNotificationSound('custom', opts.customSoundFile!))
-      .catch(() => void 0);
+    // #96: static import (was a dynamic import — no circular dep exists).
+    playNotificationSound('custom', opts.customSoundFile);
   }
 }
 
@@ -396,17 +400,50 @@ export async function sendTestAlertNotification(
 }
 
 /**
- * Web fallback: use the browser Notification API.
+ * Web fallback: show a notification via the service worker when available,
+ * falling back to the legacy `new Notification()` API (#104).
+ *
+ * The service-worker path (`registration.showNotification`) is preferred
+ * because it works even when the tab is in the background, and it's the
+ * only path that works once the browser deprecates `new Notification()`
+ * (already the case in Chromium ≥ 88 for service-worker-controlled
+ * pages). The SW is registered only in production (see src/main.tsx),
+ * so in dev mode we fall back to `new Notification()` after a short
+ * timeout guard (navigator.serviceWorker.ready would hang otherwise).
  */
-function scheduleWebNotification(title: string, body: string): void {
+async function scheduleWebNotification(title: string, body: string): Promise<void> {
   if (!isWebNotificationSupported() || Notification.permission !== 'granted') {
     return;
   }
+  const options: NotificationOptions = {
+    body,
+    icon: '/assets/icons/icon.svg',
+  };
+
+  // Try the service-worker path first.
+  if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+    try {
+      // Race against a 2s timeout so dev mode (where no SW is registered)
+      // doesn't hang indefinitely.
+      const reg = await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise<ServiceWorkerRegistration | null>((resolve) =>
+          setTimeout(() => resolve(null), 2000)
+        ),
+      ]);
+      if (reg) {
+        await reg.showNotification(title, options);
+        return;
+      }
+      // reg === null → timed out (dev mode, no SW). Fall through to legacy.
+    } catch {
+      // SW not available — fall through to legacy new Notification().
+    }
+  }
+
+  // Legacy fallback.
   try {
-    new Notification(title, {
-      body,
-      icon: '/assets/icons/icon.svg',
-    });
+    new Notification(title, options);
   } catch {
     // Silent fail if the browser blocks the notification (e.g.,
     // service worker context).
@@ -613,7 +650,12 @@ export async function scheduleCriticalAlarm(
   if (isNativePlatform()) {
     try {
       const perm = await LocalNotifications.checkPermissions();
-      if (perm.display !== 'granted') return;
+      if (perm.display !== 'granted') {
+        // #95: surface the silent no-op so the caller / devtools can see
+        // the alarm was dropped due to missing permission.
+        console.warn('[notifications] scheduleCriticalAlarm skipped: permission not granted');
+        return;
+      }
       await LocalNotifications.schedule({
         notifications: [
           {
@@ -687,20 +729,24 @@ export function openNotificationSettings(): void {
  * preview, regular Chrome, Firefox, Safari).
  */
 function openBrowserNotificationSettings(): void {
-  const isChromium =
-    typeof navigator !== 'undefined' &&
-    /Chrome|Chromium|Edg|OPR/i.test(navigator.userAgent);
-
-  if (isChromium) {
+  // #105: try opening the Chromium chrome://settings URL unconditionally
+  // (it only works in Chromium-based browsers anyway). On failure or null
+  // return (non-Chromium / sandboxed), fall through to the alert. This
+  // replaces the previous UA-sniff branch decision.
+  if (typeof window !== 'undefined') {
     try {
-      window.open('chrome://settings/content/notifications', '_blank');
-      return;
+      const win = window.open('chrome://settings/content/notifications', '_blank');
+      // window.open returns null when the browser blocks the navigation
+      // (e.g. non-Chromium, iframe sandbox). In that case fall through.
+      if (win) return;
     } catch {
       // chrome:// URLs may be blocked by the sandbox in some
       // contexts (iframe). Fall through to the alert.
     }
   }
 
+  // Keep the UA-derived browser hint for the alert text (UX only — the
+  // branch decision above is now feature-detected, not UA-sniffed).
   const browserHint = (() => {
     if (typeof navigator === 'undefined') return 'متصفحك';
     const ua = navigator.userAgent;
@@ -718,29 +764,3 @@ function openBrowserNotificationSettings(): void {
   );
 }
 
-/**
- * Backwards-compatibility: some callers (e.g., App.tsx's initial
- * state hydration) check Notification.permission synchronously.
- * This wrapper returns the cached web Notification state on web
- * (the same as before this PR), and on native falls back to
- * 'default' (the native permission state is async-only, so we
- * can't return it synchronously — the caller should use the async
- * getNotificationPermission() instead).
- *
- * @deprecated Prefer getNotificationPermission() (async).
- */
-export function getNotificationPermissionSync():
-  | 'granted'
-  | 'denied'
-  | 'default'
-  | 'unsupported' {
-  if (isNativePlatform()) {
-    // Native permission state is async-only. The caller should use
-    // getNotificationPermission() instead. As a fallback, return
-    // 'default' so the caller will trigger requestPermission() at
-    // least once.
-    return 'default';
-  }
-  if (!isWebNotificationSupported()) return 'unsupported';
-  return Notification.permission;
-}

@@ -3,6 +3,7 @@ import { Medication } from '../types';
 import { getTodayDateString, effectiveCurrentPills } from '../utils/dateCalculations';
 import { playNotificationSound } from '../utils/sound';
 import { sendMedicationDoseReminder } from '../utils/notifications';
+import { loadJson, saveJson } from '../utils/storage';
 
 const FIRED_KEY = 'android_med_tracker_fired_reminders_v1';
 const SNOOZE_KEY = 'android_med_tracker_snooze_v1';
@@ -32,24 +33,6 @@ export function timeToMinutes(timeStr: string): number {
   // silently never fires.
   if (h < 0 || h > 23 || m < 0 || m > 59) return -1;
   return h * 60 + m;
-}
-
-function loadJson<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function saveJson(key: string, value: unknown) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // ignore
-  }
 }
 
 function firedKey(medId: string, dateStr: string) {

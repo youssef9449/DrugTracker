@@ -165,7 +165,7 @@ describe('reverseRefill', () => {
     const undoneMed = reverseRefill(refilledMed, 30, '2024-09-20').updatedMed;
 
     expect(getCriticalAlarmDate(refilledMed, '2024-09-20', 0)).toBe(
-      getCriticalAlarmDate(baseMed, '2024-09-20', 0) + 3 * 24 * 60 * 60 * 1000
+      getCriticalAlarmDate(baseMed, '2024-09-20', 0)! + 3 * 24 * 60 * 60 * 1000
     );
     expect(getCriticalAlarmDate(undoneMed, '2024-09-20', 0)).toBe(
       getCriticalAlarmDate(baseMed, '2024-09-20', 0)

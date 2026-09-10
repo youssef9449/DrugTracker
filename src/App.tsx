@@ -56,6 +56,7 @@ import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
 import { initNativeBridge, registerBackButtonHandler, cleanupNativeListeners } from './native';
 import { migrateSchema } from './lib/migration';
 import { getInitialTab } from './lib/initialTab';
+import { generateId } from './utils/id';
 import { Zap, ZapOff } from 'lucide-react';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
@@ -726,7 +727,7 @@ export default function App() {
     );
     setLogs((prev) => [
       {
-        id: 'restore-' + Date.now(),
+        id: generateId('restore'),
         medicationId: med.id,
         medicationName: med.name,
         type: 'skipped_day',
@@ -764,7 +765,7 @@ export default function App() {
     );
     setLogs((prev) => [
       {
-        id: 'refill-' + Date.now(),
+        id: generateId('refill'),
         medicationId: med.id,
         medicationName: med.name,
         type: 'refill',
@@ -802,7 +803,7 @@ export default function App() {
     );
     setLogs((prev) => [
       {
-        id: 'refill-undo-' + Date.now(),
+        id: generateId('refill-undo'),
         medicationId: med.id,
         medicationName: med.name,
         type: 'refill_undo',
@@ -1111,7 +1112,7 @@ export default function App() {
       );
       setLogs((prev) => [
         {
-          id: 'consume-' + Date.now(),
+          id: generateId('consume'),
           medicationId: med.id,
           medicationName: med.name,
           type: 'dose_taken',

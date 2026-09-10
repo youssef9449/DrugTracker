@@ -181,22 +181,6 @@ export default function App() {
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
   const restoreInFlightRef = useRef<Set<string>>(new Set());
   const refillUndoInFlightRef = useRef<Set<string>>(new Set());
-  const refillUndoTargetRef = useRef<Map<string, string>>(new Map());
-
-  useEffect(() => {
-    // Keep the guard through the commit that marks the targeted refill as
-    // reversed. This blocks duplicate clicks in the same render cycle while
-    // allowing a later refill for the same medication to be undone.
-    refillUndoTargetRef.current.forEach((refillId, medicationId) => {
-      const targetIsReversed = logs.some(
-        (log) => log.id === refillId && Boolean(log.reversedAt)
-      );
-      if (targetIsReversed) {
-        refillUndoTargetRef.current.delete(medicationId);
-        refillUndoInFlightRef.current.delete(medicationId);
-      }
-    });
-  }, [logs]);
 
   const { alarmingMedication, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
     medications,
@@ -745,6 +729,9 @@ export default function App() {
   const handleConfirmRefill = (medicationId: string, addedPills: number) => {
     const med = medications.find((m) => m.id === medicationId);
     if (!med || addedPills <= 0) return;
+    // A new refill creates a fresh undoable log entry, so clear the
+    // dedup guard that blocked rapid double-undo of the previous refill.
+    refillUndoInFlightRef.current.delete(medicationId);
     const today = getTodayDateString();
     // Settle the snapshot at the current effective balance (deduct the
     // elapsed days at the OLD dose), then add the refill amount on top.
@@ -792,7 +779,6 @@ export default function App() {
     );
     if (!med || !refill) return;
     refillUndoInFlightRef.current.add(medicationId);
-    refillUndoTargetRef.current.set(medicationId, refill.id);
 
     const today = getTodayDateString();
     const { updatedMed, reversedAmount } = reverseRefill(med, refill.amount, today);

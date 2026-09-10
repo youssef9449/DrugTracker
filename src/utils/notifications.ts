@@ -184,7 +184,7 @@ export async function sendMedicineAlert(
       : `المتبقي ${currentPills} حبة فقط، تكفي لـ ${daysText}. يرجى الشراء قريباً!`;
 
   await scheduleNotification({
-    id: hashCode(`med-${medId}`),
+    id: notificationId('lowStock', medId),
     title,
     body,
     channelId: 'low-stock',
@@ -239,9 +239,9 @@ export async function sendCriticalStockAlert(
       : `متبقي ${currentPills} ${unit} فقط من "${medicineName}"، تكفي لـ ${daysWord}. يرجى التعبئة فوراً!`;
 
   await scheduleNotification({
-    // Use a different notification ID hash from sendMedicineAlert so
-    // the two notifications don't collide / overwrite each other.
-    id: hashCode(`critical-${medId}`),
+    // Disjoint id range from sendMedicineAlert's lowStock band so the
+    // two notifications don't collide / overwrite each other.
+    id: notificationId('critical', medId),
     title,
     body,
     channelId: 'low-stock',
@@ -279,7 +279,7 @@ export async function sendMedicationDoseReminder(
   const body = `موعد الجرعة${timeHint}. جرعتك المقررة: ${dailyDose} ${unit}. (المخزون الحالي: ${currentPills} ${unit}).`;
 
   await scheduleNotification({
-    id: hashCode(`dose-${medId}-${Date.now()}`),
+    id: notificationId('dose', medId),
     title,
     body,
     channelId: 'dose-reminder',
@@ -386,7 +386,7 @@ export async function sendTestAlertNotification(
   customSoundFile?: { fileName: string; mimeType: string; dataUrl: string } | null
 ): Promise<void> {
   await scheduleNotification({
-    id: hashCode('med-test-notification'),
+    id: notificationId('test'),
     title: '🔔 إشعار تجريبي: متابع الأدوية',
     body: 'الإشعارات والتنبيهات تعمل بشكل سليم على جهازك!',
     channelId: 'dose-reminders',
@@ -414,17 +414,77 @@ function scheduleWebNotification(title: string, body: string): void {
 }
 
 /**
- * Create a stable numeric hash from a string — used as the
- * notification ID so we can replace/update existing notifications
- * with the same key (e.g., to avoid duplicates when the user
- * snoozes and the alarm fires again).
+ * Notification ID scheme (audit issues #65 / #66).
+ *
+ * Capacitor LocalNotifications uses a numeric `id` to identify each
+ * scheduled notification. Two notifications with the same id collide
+ * (the later one overwrites the earlier). The previous scheme hashed a
+ * category-prefixed string into a single 31-bit space. Five distinct
+ * categories sharing one hash space meant cross-category collisions were
+ * possible (e.g. hashCode('critical-alarm-medA') could equal
+ * hashCode('med-medB')), silently overwriting/conflicting unrelated
+ * notifications.
+ *
+ * The fix: reserve disjoint numeric ranges per category. Each category
+ * gets a 1,000,000-wide band; within the band the id is derived from a
+ * stable hash of medId so the same med always maps to the same id
+ * (enabling cancel + reschedule). Cross-category collisions are now
+ * structurally impossible because the bands do not overlap.
+ *
+ *   low-stock alert         1_000_000 + hash(medId) % 1_000_000
+ *   critical-stock alert    2_000_000 + hash(medId) % 1_000_000
+ *   dose reminder            3_000_000 + hash(medId) % 1_000_000
+ *   test notification        4_000_000  (fixed constant, single test notif)
+ *   critical one-shot alarm  5_000_000 + hash(medId) % 1_000_000
+ *
+ * #66: the dose-reminder id previously included Date.now(), producing a
+ * NEW id on every call. That broke the snooze-and-re-fire path: instead
+ * of replacing the existing drawer entry, each snooze created a new one.
+ * The id is now stable per med (the FIRED_KEY check in useDoseReminders
+ * handles same-day dedup), restoring the original JSDoc intent.
  */
-function hashCode(str: string): number {
+const ID_RANGE_SIZE = 1_000_000;
+
+/** Numeric base for each notification category's id range. */
+const NOTIFICATION_ID_BASE = {
+  lowStock: 1_000_000,
+  critical: 2_000_000,
+  dose: 3_000_000,
+  test: 4_000_000,
+  criticalAlarm: 5_000_000,
+} as const;
+
+type NotificationCategory = keyof typeof NOTIFICATION_ID_BASE;
+
+/**
+ * Stable string hash mapped into [0, ID_RANGE_SIZE). Used to derive a
+ * per-medication slot within a category's id range so the same med
+ * always maps to the same notification id.
+ */
+function hashToRange(str: string, rangeSize: number): number {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     hash = (Math.imul(31, hash) + str.charCodeAt(i)) | 0;
   }
-  return Math.abs(hash);
+  return Math.abs(hash) % rangeSize;
+}
+
+/**
+ * Compute a stable notification id for a given category + medication.
+ *
+ * - test category returns a fixed constant (there is only ever one
+ *   test notification at a time).
+ * - All other categories return BASE + hash(medId) % RANGE_SIZE, so the
+ *   same med always maps to the same id within its category's band, and
+ *   different categories never collide (disjoint bands).
+ */
+function notificationId(
+  category: NotificationCategory,
+  medId?: string
+): number {
+  const base = NOTIFICATION_ID_BASE[category];
+  if (category === 'test') return base;
+  return base + hashToRange(medId ?? '', ID_RANGE_SIZE);
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -483,7 +543,7 @@ function hashCode(str: string): number {
  * Stable across calls so cancel + reschedule work.
  */
 export function criticalAlarmId(medId: string): number {
-  return hashCode('critical-alarm-' + medId);
+  return notificationId('criticalAlarm', medId);
 }
 
 /**

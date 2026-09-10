@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { syncAutoDailyDeductions, getTodayDateString } from './dateCalculations';
 import type { Medication } from '../types';
 
@@ -20,7 +20,16 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
 
 describe('syncAutoDailyDeductions — consume-pill feature', () => {
   beforeEach(() => {
-    // Use a fixed date for deterministic tests.
+    // Wave 13 #123: pin system time so the getTodayDateString() calls
+    // used inside each `it` block resolve to a deterministic date
+    // (2024-09-10). Prevents midnight-UTC flake risk where the test
+    // process's wall-clock date rolls over mid-run.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('skips auto-deduction when lastConsumedDate === today', () => {

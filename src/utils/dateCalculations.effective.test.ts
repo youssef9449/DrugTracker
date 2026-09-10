@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   effectiveCurrentPills,
   reverseRefill,
@@ -26,6 +26,19 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     ...overrides,
   };
 }
+
+// Wave 13 #123: pin system time so the getTodayDateString() calls used
+// by some `it` blocks (lines ~331, ~379) resolve to a deterministic
+// date (2024-09-10T12:00:00Z). Prevents midnight-UTC flake risk where
+// the test process's wall-clock date rolls over mid-run.
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('effectiveCurrentPills', () => {
   it('returns currentPills when 0 days have passed', () => {

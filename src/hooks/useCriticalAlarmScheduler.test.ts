@@ -73,6 +73,12 @@ function defaultOpts(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Wave 13 #123: pin system time so getTodayDateString() (used by
+  // makeMed's lastSyncDate default) resolves to a deterministic date.
+  // Only Date is faked so the hook's `await Promise.resolve()` chains
+  // (microtasks) and the race-guard serialization continue to work.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
   mocks.schedule.mockReset();
   mocks.cancel.mockReset();
   // Default: cancel resolves immediately, schedule resolves immediately.
@@ -81,6 +87,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
 });
 

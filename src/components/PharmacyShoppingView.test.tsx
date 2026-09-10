@@ -39,6 +39,7 @@ function renderView(overrides: Record<string, unknown> = {}) {
     settings: defaultSettings,
     onUpdateSettings: vi.fn(),
     showToast: vi.fn(),
+    onOpenUserContactsSettings: vi.fn(),
     ...overrides,
   };
   return render(<PharmacyShoppingView {...props} />);

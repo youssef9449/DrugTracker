@@ -16,7 +16,6 @@ vi.mock('./utils/notifications', () => ({
   sendTestAlertNotification: vi.fn(() => Promise.resolve()),
   openNotificationSettings: vi.fn(),
   getNotificationPermission: vi.fn(() => Promise.resolve('granted')),
-  getNotificationPermissionSync: vi.fn(() => 'granted'),
   scheduleCriticalAlarm: vi.fn(() => Promise.resolve()),
   cancelCriticalAlarm: vi.fn(() => Promise.resolve()),
   criticalAlarmId: vi.fn((id: string) => id.length),

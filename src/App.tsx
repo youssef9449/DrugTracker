@@ -37,7 +37,6 @@ import {
   requestNotificationPermission,
   sendTestAlertNotification,
   getNotificationPermission,
-  getNotificationPermissionSync,
 } from './utils/notifications';
 import {
   getTodayDateString,
@@ -265,64 +264,51 @@ export default function App() {
         setHydrated(true);
       });
 
-    // Initialize the in-app notifications flag from a SYNC snapshot
-    // of the current permission state. On web this is
-    // Notification.permission; on native (Capacitor), the permission
-    // state is async-only, so we default to 'default' and let the
-    // async getNotificationPermission() call below update it.
-    //
-    // Note: this is intentionally a sync snapshot — the React state
-    // needs to be set during the first render so the bell icon
-    // shows the correct initial state. A second pass below (the
-    // async getNotificationPermission) updates it once the native
-    // permission state is known.
-    setNotificationsEnabled(
-      getNotificationPermissionSync() === 'granted'
-    );
+    // Initialize the in-app notifications flag from the async permission
+    // state. #106: the previous sync snapshot (getNotificationPermissionSync)
+    // was removed — the bell icon now starts as false and flips to the
+    // correct state once the async permission check resolves (one render
+    // later). This completes the deprecation: no more sync native fallback.
+    getNotificationPermission()
+      .then((perm) => {
+        setNotificationsEnabled(perm === 'granted');
+
+        // Auto-request notification permission on the FIRST app open
+        // after install. The browser only shows the permission prompt
+        // when the permission state is 'default' (user hasn't been asked
+        // yet). Once the user grants or denies, the browser remembers
+        // the decision and won't re-show the prompt. If the user denied
+        // permission, this becomes a no-op; the bell button in
+        // AppHeader then takes the user to OS settings to re-enable.
+        //
+        // Auto-requesting on mount is recommended by the Web Push API
+        // spec because it ensures the prompt shows after the user has
+        // had a chance to see the app's value (which is now true on
+        // first open, since the user has just installed it).
+        //
+        // On Android 13+ (Capacitor), this triggers the OS
+        // POST_NOTIFICATIONS permission dialog via
+        // LocalNotifications.requestPermissions(). On older Android,
+        // this is a no-op (notifications allowed by default).
+        if (perm === 'default') {
+          requestNotificationPermission()
+            .then((granted) => {
+              setNotificationsEnabled(granted);
+            })
+            .catch((err) => {
+              console.warn('[App] Auto-request notification permission failed:', err);
+            });
+        }
+      })
+      .catch((err) => {
+        console.warn('[App] getNotificationPermission failed:', err);
+      });
 
     // Initialize the Capacitor native bridge (status bar color, back
     // button). No-op on the web — see src/native.ts.
     initNativeBridge().catch((err) => {
       console.warn('[App] Native bridge init failed:', err);
     });
-
-    // On native (Capacitor), get the real async permission state
-    // and update the in-app flag if it differs from the sync
-    // snapshot above.
-    getNotificationPermission()
-      .then((perm) => {
-        setNotificationsEnabled(perm === 'granted');
-      })
-      .catch((err) => {
-        console.warn('[App] getNotificationPermission failed:', err);
-      });
-
-    // Auto-request notification permission on the FIRST app open
-    // after install. The browser only shows the permission prompt
-    // when the permission state is 'default' (user hasn't been asked
-    // yet). Once the user grants or denies, the browser remembers
-    // the decision and won't re-show the prompt. If the user denied
-    // permission, this becomes a no-op; the bell button in
-    // AppHeader then takes the user to OS settings to re-enable.
-    //
-    // Auto-requesting on mount is recommended by the Web Push API
-    // spec because it ensures the prompt shows after the user has
-    // had a chance to see the app's value (which is now true on
-    // first open, since the user has just installed it).
-    //
-    // On Android 13+ (Capacitor), this triggers the OS
-    // POST_NOTIFICATIONS permission dialog via
-    // LocalNotifications.requestPermissions(). On older Android,
-    // this is a no-op (notifications allowed by default).
-    if (getNotificationPermissionSync() === 'default') {
-      requestNotificationPermission()
-        .then((granted) => {
-          setNotificationsEnabled(granted);
-        })
-        .catch((err) => {
-          console.warn('[App] Auto-request notification permission failed:', err);
-        });
-    }
   }, []);
 
   // #113: track the toast auto-dismiss timer so it can be cleared on
@@ -439,15 +425,18 @@ export default function App() {
   useEffect(() => {
     if (!hydrated) return;
     if (globalCustomSound) {
-      saveGlobalCustomSound(globalCustomSound).catch((err) => {
-        console.warn('[App] saveGlobalCustomSound failed:', err);
+      // #94: surface IDB save failures to the user (was silent console.warn).
+      saveGlobalCustomSound(globalCustomSound).catch(() => {
+        showToast('تعذّر حفظ الصوت المخصص — قد لا يكون متاحاً بعد إعادة التشغيل.');
       });
     } else {
-      deleteGlobalCustomSound().catch((err) => {
-        console.warn('[App] deleteGlobalCustomSound failed:', err);
+      deleteGlobalCustomSound().catch(() => {
+        // Deletion failure is non-critical — the orphaned record will be
+        // overwritten on the next save. console.warn for dev visibility.
+        console.warn('[App] deleteGlobalCustomSound failed');
       });
     }
-  }, [globalCustomSound, hydrated]);
+  }, [globalCustomSound, hydrated, showToast]);
 
   // ─────────────────────────────────────────────────────────────
   // Auto-deduction: runs ONCE per session, AFTER hydration completes

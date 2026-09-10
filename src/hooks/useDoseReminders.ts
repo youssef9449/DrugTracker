@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Medication } from '../types';
 import { getTodayDateString, effectiveCurrentPills } from '../utils/dateCalculations';
-import { playNotificationSound } from '../utils/sound';
+import { playNotificationSound, stopAllSounds } from '../utils/sound';
 import { sendMedicationDoseReminder } from '../utils/notifications';
 import { loadJson, saveJson } from '../utils/storage';
 
@@ -111,6 +111,8 @@ export function useDoseReminders({
   );
 
   const dismissAlarm = useCallback(() => {
+    // #107: stop any currently-playing chime when the alarm is dismissed.
+    stopAllSounds();
     const current = alarmingIdRef.current;
     if (current) {
       // #13: only mark the reminder as "fired for today" if this alarm

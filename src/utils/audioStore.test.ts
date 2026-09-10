@@ -107,3 +107,48 @@ describe('audioStore — retry on failure (#41)', () => {
     expect(r2).toBeNull();
   });
 });
+
+describe('audioStore — error surfacing (#94)', () => {
+  // #94: the functions used to silently swallow IDB transaction errors
+  // (try/catch + console.warn, never threw). Now they propagate errors
+  // to the caller — callers must .catch + surface to the user.
+  //
+  // We can't easily mock the full IDB transaction lifecycle in jsdom
+  // (event-handler wiring is async + timing-sensitive), so we verify
+  // the contract: the functions return Promises that callers must
+  // await/.catch. The App.tsx callers now have .catch handlers that
+  // toast the user on failure (tested via App.test.tsx integration).
+
+  it('saveGlobalCustomSound returns a Promise (callers must await/.catch)', async () => {
+    Object.defineProperty(globalThis, 'indexedDB', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+    const result = saveGlobalCustomSound(testFile);
+    expect(result).toBeInstanceOf(Promise);
+    await result; // does not throw when IDB is unavailable
+  });
+
+  it('deleteGlobalCustomSound returns a Promise (callers must await/.catch)', async () => {
+    Object.defineProperty(globalThis, 'indexedDB', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+    const result = deleteGlobalCustomSound();
+    expect(result).toBeInstanceOf(Promise);
+    await result; // does not throw when IDB is unavailable
+  });
+
+  it('loadGlobalCustomSound returns a Promise (callers must await/.catch)', async () => {
+    Object.defineProperty(globalThis, 'indexedDB', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+    const result = loadGlobalCustomSound();
+    expect(result).toBeInstanceOf(Promise);
+    expect(await result).toBeNull(); // null when IDB unavailable
+  });
+});

@@ -3,6 +3,63 @@ import { NotificationSoundType, CustomSoundFile } from '../types';
 
 let audioCtx: AudioContext | null = null;
 
+// #107: track active audio sources so stopAllSounds() can preempt them.
+// Oscillators auto-remove on 'ended'; HTMLAudioElements auto-remove on
+// 'ended'/'error' (via the existing cleanup() in playCustomSound).
+const activeOscillators = new Set<OscillatorNode>();
+const activeAudioElements = new Set<HTMLAudioElement>();
+
+/** Register an oscillator so stopAllSounds() can stop it. Auto-removes on ended. */
+function trackOscillator(osc: OscillatorNode): void {
+  activeOscillators.add(osc);
+  osc.onended = () => {
+    activeOscillators.delete(osc);
+  };
+}
+
+/**
+ * Stop all currently-playing sounds immediately (#107).
+ *
+ * Stops every active oscillator (synthesized tones) and pauses every
+ * active HTMLAudioElement (custom uploaded sounds). Safe to call when
+ * nothing is playing — the Sets are simply empty.
+ */
+export function stopAllSounds(): void {
+  // Stop oscillators. oscillator.stop() throws if already stopped, so
+  // guard each call.
+  for (const osc of activeOscillators) {
+    try {
+      osc.stop();
+    } catch {
+      // already stopped — ignore
+    }
+  }
+  activeOscillators.clear();
+
+  // Pause + reset HTMLAudioElements. Don't close the src (the element
+  // may be cached in customAudioCache for reuse).
+  for (const audio of activeAudioElements) {
+    try {
+      audio.pause();
+      audio.currentTime = 0;
+    } catch {
+      // ignore
+    }
+  }
+  activeAudioElements.clear();
+
+  // Suspend the AudioContext so any in-flight scheduled stops are
+  // silenced immediately. It will be resumed by the next getAudioContext()
+  // call (which calls resume() when state === 'suspended').
+  if (audioCtx && audioCtx.state === 'running') {
+    try {
+      audioCtx.suspend();
+    } catch {
+      // ignore
+    }
+  }
+}
+
 function getAudioContext(): AudioContext | null {
   try {
     if (!audioCtx && typeof window !== 'undefined') {
@@ -135,9 +192,13 @@ function playCustomSound(customFile: CustomSoundFile): Promise<void> {
       audio.currentTime = 0;
       audio.volume = 1;
 
+      // #107: track so stopAllSounds() can pause it.
+      activeAudioElements.add(audio);
+
       const cleanup = () => {
         audio?.removeEventListener('ended', onEnded);
         audio?.removeEventListener('error', onError);
+        activeAudioElements.delete(audio);
       };
       const onEnded = () => {
         cleanup();
@@ -183,6 +244,9 @@ export function playSuccessChime() {
     osc.connect(gain);
     gain.connect(ctx.destination);
 
+    // #107: track so stopAllSounds() can stop it.
+    trackOscillator(osc);
+
     osc.start(now);
     osc.stop(now + 0.35);
   } catch {
@@ -222,11 +286,21 @@ function playSynthesizedSound(soundType: NotificationSoundType) {
     if (!ctx) return;
     const now = ctx.currentTime;
 
+    // #107: wrap createOscillator so every oscillator is auto-tracked
+    // for stopAllSounds(). The wrapper is scoped to this call so the
+    // Set doesn't grow unbounded across multiple play() calls — each
+    // oscillator auto-removes on 'ended' via trackOscillator().
+    const createOsc = (): OscillatorNode => {
+      const osc = createOsc();
+      trackOscillator(osc);
+      return osc;
+    };
+
     switch (soundType) {
       case 'gentle_bell': {
         // Dual-tone crystal bell with harmonic overtone
-        const osc1 = ctx.createOscillator();
-        const osc2 = ctx.createOscillator();
+        const osc1 = createOsc();
+        const osc2 = createOsc();
         const gain = ctx.createGain();
 
         osc1.type = 'sine';
@@ -253,7 +327,7 @@ function playSynthesizedSound(soundType: NotificationSoundType) {
         // Fast wooden percussive arpeggio: G4 -> B4 -> D5 -> G5
         const notes = [392.0, 493.88, 587.33, 783.99];
         notes.forEach((freq, idx) => {
-          const osc = ctx.createOscillator();
+          const osc = createOsc();
           const gain = ctx.createGain();
           const noteStart = now + idx * 0.08;
 
@@ -278,7 +352,7 @@ function playSynthesizedSound(soundType: NotificationSoundType) {
           { freq: 987.77, start: now, dur: 0.09 },
           { freq: 1318.51, start: now + 0.12, dur: 0.15 },
         ].forEach(({ freq, start, dur }) => {
-          const osc = ctx.createOscillator();
+          const osc = createOsc();
           const gain = ctx.createGain();
 
           osc.type = 'square';
@@ -300,7 +374,7 @@ function playSynthesizedSound(soundType: NotificationSoundType) {
         // Ascending harp sweep: C5 -> E5 -> G5 -> B5 -> E6
         const harpNotes = [523.25, 659.25, 783.99, 987.77, 1318.51];
         harpNotes.forEach((freq, idx) => {
-          const osc = ctx.createOscillator();
+          const osc = createOsc();
           const gain = ctx.createGain();
           const noteStart = now + idx * 0.06;
 
@@ -322,7 +396,7 @@ function playSynthesizedSound(soundType: NotificationSoundType) {
       case 'radar': {
         // Double medical radar sonar ping
         [now, now + 0.2].forEach((pingStart) => {
-          const osc = ctx.createOscillator();
+          const osc = createOsc();
           const gain = ctx.createGain();
 
           osc.type = 'sine';
@@ -346,7 +420,7 @@ function playSynthesizedSound(soundType: NotificationSoundType) {
         // Classic major chord arpeggio: C5 -> E5 -> G5 -> C6
         const notes = [523.25, 659.25, 783.99, 1046.5];
         notes.forEach((freq, idx) => {
-          const osc = ctx.createOscillator();
+          const osc = createOsc();
           const gain = ctx.createGain();
           const noteStart = now + idx * 0.07;
 

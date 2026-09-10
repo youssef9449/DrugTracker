@@ -710,4 +710,53 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
     const savedLogs = JSON.parse(localStorage.getItem('android_med_tracker_logs_v2') || '[]');
     expect(savedLogs.filter((log: { type: string; date: string }) => log.type === 'skipped_day' && log.date === today)).toHaveLength(1);
   });
+
+  it('persists notificationsEnabled=false across app launch and respects saved state over OS permission', async () => {
+    localStorage.setItem('android_med_tracker_notifications_v1', 'false');
+
+    render(<App />);
+
+    // Even though getNotificationPermission mock returns 'granted',
+    // the saved preference 'false' must be preserved.
+    await waitFor(() => {
+      const bellBtn = screen.getByRole('button', { name: /التنبيهات متوقفة/ });
+      expect(bellBtn).toBeInTheDocument();
+      expect(bellBtn).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    expect(localStorage.getItem('android_med_tracker_notifications_v1')).toBe('false');
+  });
+
+  it('persists notificationsEnabled=true across app launch', async () => {
+    localStorage.setItem('android_med_tracker_notifications_v1', 'true');
+
+    render(<App />);
+
+    await waitFor(() => {
+      const bellBtn = screen.getByRole('button', { name: /التنبيهات مفعلة/ });
+      expect(bellBtn).toBeInTheDocument();
+      expect(bellBtn).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    expect(localStorage.getItem('android_med_tracker_notifications_v1')).toBe('true');
+  });
+
+  it('clicking the notifications button toggles state and persists new value to localStorage', async () => {
+    localStorage.setItem('android_med_tracker_notifications_v1', 'true');
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /التنبيهات مفعلة/ })).toBeInTheDocument();
+    });
+
+    const bellBtn = screen.getByRole('button', { name: /التنبيهات مفعلة/ });
+    fireEvent.click(bellBtn);
+
+    await waitFor(() => {
+      expect(localStorage.getItem('android_med_tracker_notifications_v1')).toBe('false');
+      expect(screen.getByRole('button', { name: /التنبيهات متوقفة/ })).toBeInTheDocument();
+    });
+  });
 });
+

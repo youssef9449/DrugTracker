@@ -27,6 +27,7 @@ import { AndroidFab } from './components/AndroidFab';
 import { EmptyState } from './components/EmptyState';
 import { DoseAlarmModal } from './components/DoseAlarmModal';
 import { UpdatePrompt } from './components/UpdatePrompt';
+import { Toggle } from './components/ui/Toggle';
 import { playSuccessChime } from './utils/sound';
 import {
   saveGlobalCustomSound,
@@ -59,7 +60,7 @@ import { generateId } from './utils/id';
 import { loadJson, loadString, persist } from './utils/storage';
 import { TOAST_MESSAGES, PERSIST_FAILURE_MESSAGES } from './constants/uiStrings';
 import { TOAST_DURATION_MS, PHARMACY_PERSIST_DEBOUNCE_MS, DEFAULT_SNOOZE_MINUTES } from './utils/time';
-import { Zap, ZapOff } from 'lucide-react';
+import { Zap, ZapOff, History, Settings } from 'lucide-react';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 const STORAGE_GLOBAL_AUTO_DEDUCT_KEY = 'android_med_tracker_auto_deduct_v1';
@@ -1113,72 +1114,112 @@ export default function App() {
               {filter === 'all' && (
                 <div>
                   <div
-                    className={`mx-4 mt-3 p-3 rounded-2xl flex items-center justify-between text-xs shadow-xs border transition-colors ${
+                    className={`mx-4 mt-3.5 p-4 rounded-2xl shadow-xs border transition-all duration-200 ${
                       globalAutoDeductEnabled
-                        ? 'bg-teal-50 border-teal-200/90'
-                        : 'bg-amber-50/80 border-amber-200/90'
+                        ? 'bg-teal-50/90 border-teal-200/90'
+                        : 'bg-amber-50/90 border-amber-200/90'
                     }`}
                   >
-                    <div className="flex items-center gap-2.5">
-                      <div
-                        className={`w-7 h-7 rounded-xl text-white flex items-center justify-center shrink-0 ${
-                          globalAutoDeductEnabled ? 'bg-teal-600' : 'bg-amber-600'
-                        }`}
-                      >
-                        {globalAutoDeductEnabled ? (
-                          <Zap className="w-4 h-4" />
-                        ) : (
-                          <ZapOff className="w-4 h-4" />
-                        )}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-900 block text-[11px]">
-                            {globalAutoDeductEnabled
-                              ? 'الخصم التلقائي اليومي نشط'
-                              : 'الخصم التلقائي اليومي متوقف'}
-                          </span>
-                          <span
-                            className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-                              globalAutoDeductEnabled
-                                ? 'bg-teal-100 text-teal-800'
-                                : 'bg-amber-100 text-amber-800'
-                            }`}
-                          >
-                            {globalAutoDeductEnabled ? 'مفعّل' : 'متوقف'}
-                          </span>
-                        </div>
-                        <p
-                          className={`text-[10px] ${
-                            globalAutoDeductEnabled ? 'text-teal-800' : 'text-amber-800'
+                    {/* Header Row: Icon, Title, Status Badge, and Direct Toggle Switch */}
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div
+                          className={`w-9 h-9 rounded-xl text-white flex items-center justify-center shrink-0 shadow-xs ${
+                            globalAutoDeductEnabled ? 'bg-teal-600' : 'bg-amber-600'
                           }`}
                         >
-                          {globalAutoDeductEnabled
-                            ? 'يتم احتساب الجرعات بمرور الأيام لتحديث رصيدك وموعد النفاذ بدقة.'
-                            : 'تم إيقاف خصم الجرعات تلقائياً. المخزون الحالي ثابت.'}
-                        </p>
+                          {globalAutoDeductEnabled ? (
+                            <Zap className="w-5 h-5" />
+                          ) : (
+                            <ZapOff className="w-5 h-5" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-slate-900 text-sm">
+                              {globalAutoDeductEnabled
+                                ? 'الخصم التلقائي اليومي نشط'
+                                : 'الخصم التلقائي اليومي متوقف'}
+                            </span>
+                            <span
+                              className={`text-xs px-2 py-0.5 rounded-full font-bold ${
+                                globalAutoDeductEnabled
+                                  ? 'bg-teal-100 text-teal-800 border border-teal-200/60'
+                                  : 'bg-amber-100 text-amber-800 border border-amber-200/60'
+                              }`}
+                            >
+                              {globalAutoDeductEnabled ? 'مفعّل' : 'متوقف'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Direct Toggle Switch for instant one-click control */}
+                      <div className="shrink-0 flex items-center">
+                        <Toggle
+                          checked={globalAutoDeductEnabled}
+                          onChange={handleToggleGlobalAutoDeduct}
+                          label="تبديل الخصم التلقائي اليومي"
+                          size="sm"
+                        />
                       </div>
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        onClick={() => {
-                          setSettingsModalMode('all');
-                          setIsSettingsModalOpen(true);
-                        }}
-                        className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition ${
-                          globalAutoDeductEnabled
-                            ? 'text-teal-700 hover:text-teal-900 bg-teal-100/70'
-                            : 'text-amber-800 hover:text-amber-950 bg-amber-200/70'
+
+                    {/* Description: full width with relaxed line height so it's not squeezed */}
+                    <p
+                      className={`text-xs leading-relaxed mt-2.5 ${
+                        globalAutoDeductEnabled ? 'text-teal-900/85' : 'text-amber-900/85'
+                      }`}
+                    >
+                      {globalAutoDeductEnabled
+                        ? 'يتم احتساب الجرعات بمرور الأيام لتحديث رصيدك وموعد النفاذ بدقة.'
+                        : 'تم إيقاف خصم الجرعات تلقائياً. المخزون الحالي ثابت.'}
+                    </p>
+
+                    {/* Action Bar Footer: spaced buttons with clear touch targets and icons */}
+                    <div
+                      className={`mt-3 pt-2.5 border-t flex items-center justify-between gap-2 ${
+                        globalAutoDeductEnabled
+                          ? 'border-teal-200/70'
+                          : 'border-amber-200/70'
+                      }`}
+                    >
+                      <span
+                        className={`text-[11px] font-medium hidden sm:inline ${
+                          globalAutoDeductEnabled ? 'text-teal-700/80' : 'text-amber-700/80'
                         }`}
                       >
-                        الإعدادات
-                      </button>
-                      <button
-                        onClick={() => setActiveTab('logs')}
-                        className="text-[11px] font-bold text-teal-700 hover:text-teal-900 bg-teal-100/70 px-2.5 py-1 rounded-lg"
-                      >
-                        عرض السجل
-                      </button>
+                        {globalAutoDeductEnabled
+                          ? 'يتم الخصم تلقائياً فجر كل يوم'
+                          : 'يمكنك إعادة التفعيل في أي وقت'}
+                      </span>
+                      <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                        <button
+                          onClick={() => setActiveTab('logs')}
+                          className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 ${
+                            globalAutoDeductEnabled
+                              ? 'text-teal-800 hover:text-teal-950 bg-teal-100/80 hover:bg-teal-200/80 active:scale-95'
+                              : 'text-amber-900 hover:text-amber-950 bg-amber-200/80 hover:bg-amber-300/80 active:scale-95'
+                          }`}
+                        >
+                          <History className="w-3.5 h-3.5" />
+                          <span>عرض السجل</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSettingsModalMode('all');
+                            setIsSettingsModalOpen(true);
+                          }}
+                          className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 ${
+                            globalAutoDeductEnabled
+                              ? 'text-teal-800 hover:text-teal-950 bg-teal-100/80 hover:bg-teal-200/80 active:scale-95'
+                              : 'text-amber-900 hover:text-amber-950 bg-amber-200/80 hover:bg-amber-300/80 active:scale-95'
+                          }`}
+                        >
+                          <Settings className="w-3.5 h-3.5" />
+                          <span>الإعدادات</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                   <div className="mx-4 mt-3 grid grid-cols-3 gap-2 text-center text-xs">

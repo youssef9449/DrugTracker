@@ -46,6 +46,20 @@ function renderView(overrides: Record<string, unknown> = {}) {
   return render(<PharmacyShoppingView {...props} />);
 }
 
+// Wave 13 #123: pin system time so getTodayDateString() (used by
+// makeMed's lastSyncDate default) resolves to a deterministic date.
+// Only Date is faked so React/testing-library's internal scheduling
+// keeps working unchanged. These top-level hooks run before/after every
+// test in this file, including those in nested describe blocks.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 /** Find the checkbox toggle button for a given med name. */
 function getCheckboxFor(medName: string): HTMLElement {
   // The med name is in an <h4>; the checkbox button is the

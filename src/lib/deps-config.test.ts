@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const PKG_PATH = path.join(ROOT, 'package.json');
@@ -155,8 +154,11 @@ describe('#39 — tailwindcss-animate installed + classes work', () => {
  * #40 — capacitor.config.ts is in the tsconfig include so tsc
  * type-checks it. We verify:
  *   - tsconfig.json has it in the include array
- *   - tsc --noEmit passes (the typecheck script runs it; if
- *     capacitor.config.ts had a type error it would fail)
+ *   - capacitor.config.ts exists and imports CapacitorConfig type
+ *
+ * #116: the previous `execSync('npx tsc --noEmit')` test was removed —
+ * it duplicated the `typecheck` script already in package.json and added
+ * 5-30s to every test run. The `npm run typecheck` CI gate covers this.
  */
 describe('#40 — capacitor.config.ts type-checked by tsconfig', () => {
   it('tsconfig.json include array contains capacitor.config.ts', () => {
@@ -172,13 +174,5 @@ describe('#40 — capacitor.config.ts type-checked by tsconfig', () => {
       'utf-8'
     );
     expect(src).toContain('CapacitorConfig');
-  });
-
-  it('tsc --noEmit succeeds (capacitor.config.ts is type-safe)', () => {
-    // This runs tsc --noEmit which should pass. If capacitor.config.ts
-    // had a type error, this would throw.
-    expect(() => {
-      execSync('npx tsc --noEmit', { cwd: ROOT, stdio: 'pipe' });
-    }).not.toThrow();
   });
 });

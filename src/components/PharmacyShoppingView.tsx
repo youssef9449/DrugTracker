@@ -10,7 +10,6 @@ import {
   ChevronDown,
   ChevronUp,
   RotateCcw,
-  PlusCircle,
   Layers,
   Box,
   Pill,
@@ -35,8 +34,6 @@ interface PharmacyShoppingViewProps {
   settings: PharmacySettings;
   onUpdateSettings: (newSettings: PharmacySettings) => void;
   onOpenSettings: (orderItems?: OrderItem[]) => void;
-  onConfirmRefill: (medicationId: string, addedPills: number) => void;
-  onUndoRefill?: (medicationId: string) => void;
   showToast: (message: string) => void;
 }
 
@@ -45,8 +42,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   settings,
   onUpdateSettings,
   onOpenSettings,
-  onConfirmRefill,
-  onUndoRefill,
   showToast,
 }) => {
   const [durationDays, setDurationDays] = useState<30 | 60>(settings.defaultDurationDays || 30);
@@ -69,11 +64,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   type OrderUnit = 'pills' | 'boxes' | 'strips';
   const [orderUnits, setOrderUnits] = useState<Record<string, OrderUnit[]>>({});
   const [orderUnitQuantities, setOrderUnitQuantities] = useState<Record<string, Partial<Record<OrderUnit, number>>>>({});
-  // Track which meds the user has just marked as refilled from this
-  // view (so we can show a "تمت التعبئة" confirmation chip + let them
-  // undo by tapping again if they tapped by mistake).
-  const [refilledIds, setRefilledIds] = useState<Set<string>>(new Set());
-  const [refilledQuantities, setRefilledQuantities] = useState<Record<string, number>>({});
   // #20: track meds the user explicitly DESELECTED so the
   // reconciliation effect doesn't silently re-select them when
   // `displayList` changes. Cleared for a med when it leaves
@@ -83,9 +73,9 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   const urgentMeds = useMemo(() => {
     return medications.filter((m) => {
       const { status } = calculateMedicationStatus(m);
-      return status === 'out_of_stock' || status === 'critical' || status === 'warning' || refilledIds.has(m.id);
+      return status === 'out_of_stock' || status === 'critical' || status === 'warning';
     });
-  }, [medications, refilledIds]);
+  }, [medications]);
 
   const effectiveShowAll = showAllForPlanning;
   const displayList = effectiveShowAll ? medications : urgentMeds;
@@ -94,13 +84,12 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     return new Set(urgentMeds.map((m) => m.id));
   });
 
-  // #20 + #34: reconcile the selection AND the refilledIds/deselectedIds
+  // #20 + #34: reconcile the selection and deselectedIds
   // against the displayed list. This effect:
   //   - Auto-selects any displayed med not yet selected AND not in
   //     `deselectedIds` (so manual deselects are preserved — #20).
-  //   - Prunes ids that are no longer displayed from `selectedMedIds`,
-  //     `deselectedIds`, and `refilledIds` (so deleted meds don't linger
-  //     and returning meds start fresh — #34).
+  //   - Prunes ids that are no longer displayed from `selectedMedIds` and
+  //     `deselectedIds`.
   // Each updater returns the SAME Set reference when nothing changed
   // so React skips the re-render (avoids an infinite loop since
   // `deselectedIds` is in the deps array).
@@ -115,23 +104,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       }
       for (const id of next) {
         if (!displayedIds.has(id)) { next.delete(id); changed = true; }
-      }
-      return changed ? next : prev;
-    });
-
-    setRefilledIds((prev) => {
-      let changed = false;
-      const next = new Set(prev);
-      for (const id of next) {
-        if (!displayedIds.has(id)) { next.delete(id); changed = true; }
-      }
-      return changed ? next : prev;
-    });
-    setRefilledQuantities((prev) => {
-      let changed = false;
-      const next = { ...prev };
-      for (const id of Object.keys(next)) {
-        if (!displayedIds.has(id)) { delete next[id]; changed = true; }
       }
       return changed ? next : prev;
     });
@@ -295,22 +267,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     return pluralizeArabic(count, 'شريط');
   }
 
-  // H1: "mark as refilled after ordering" flow. After the user sends
-  // the WhatsApp order and receives the meds from the pharmacy, they
-  // tap "تعبئة" on a med's card. This adds the ORDERED quantity to
-  // that med's stock via the shared onConfirmRefill handler (which
-  // creates a refill log + updates inventory), and marks the card
-  // as refilled so the UI confirms the action. If the med was
-  // previously refilled from this view, tapping again is a no-op
-  // (the confirmation chip just stays).
-  const handleMarkRefilled = (med: Medication, orderedQty: number) => {
-    if (orderedQty <= 0) return;
-    onConfirmRefill(med.id, orderedQty);
-    setRefilledIds((prev) => new Set(prev).add(med.id));
-    setRefilledQuantities((prev) => ({ ...prev, [med.id]: orderedQty }));
-    showToast(`تمت تعبئة "${med.name}" بـ ${orderedQty} ${med.unit} في المخزون.`);
-  };
-
   const activeOrderItems = useMemo((): OrderItem[] => {
     return displayList
       .filter((med) => selectedMedIds.has(med.id))
@@ -465,15 +421,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
             {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
             {copied ? 'تم النسخ!' : 'نسخ نص الرسالة'}
           </button>
-        </div>
-        {/* Post-order hint (H1): explain the "mark as refilled" flow so
-            the user knows to come back here after picking up the order. */}
-        <div className="flex items-start gap-2 bg-teal-50 border border-teal-200/80 rounded-xl px-3 py-2 text-[11px] text-teal-900 leading-relaxed">
-          <PlusCircle className="w-3.5 h-3.5 text-teal-600 shrink-0 mt-0.5" />
-          <span>
-            بعد استلام الأدوية من الصيدلية، اضغط زر <strong>«تعبئة»</strong> بجانب كل دواء بالأسفل
-            لإضافة الكمية المطلوبة تلقائياً إلى مخزونك (يُسجّل كعملية تعبئة في السجل).
-          </span>
         </div>
         <button
           type="button"
@@ -646,28 +593,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                 )}
               </div>
 
-              {/* H1: "mark as refilled after ordering" action. */}
-              <div className="mt-2.5">
-                {refilledIds.has(med.id) ? (
-                  <div className="w-full py-2 px-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center justify-center gap-1.5">
-                    <Check className="w-4 h-4" />
-                    <span>تمت التعبئة (+{refilledQuantities[med.id] || requestedPills} {med.unit} في المخزون)</span>
-                    {onUndoRefill && (
-                      <button type="button" onClick={() => { onUndoRefill(med.id); setRefilledIds((prev) => { const next = new Set(prev); next.delete(med.id); return next; }); setRefilledQuantities((prev) => { const next = { ...prev }; delete next[med.id]; return next; }); }} className="text-rose-700 underline mr-2">تراجع</button>
-                    )}
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => handleMarkRefilled(med, requestedPills)}
-                    className="w-full py-2 px-3 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-98"
-                    title="إضافة الكمية المطلوبة إلى مخزون هذا الدواء"
-                  >
-                    <PlusCircle className="w-4 h-4 text-teal-600" />
-                    <span>تعبئة (+{requestedPills} {med.unit})</span>
-                  </button>
-                )}
-              </div>
             </div>
           );
         })}
@@ -788,13 +713,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
               </div>
             </div>
 
-            {/* Friendly Refill Reminder */}
-            <div className="flex items-start gap-2 bg-teal-50/80 border border-teal-200/70 rounded-xl p-2.5 text-[11px] text-teal-900 leading-relaxed">
-              <PlusCircle className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
-              <span>
-                تذكير: بعد وصول الأدوية واستلامها من الصيدلية، اضغط زر <strong>«تعبئة»</strong> بجانب كل دواء في صفحة الشراء لتحديث المخزون تلقائياً.
-              </span>
-            </div>
           </div>
         </div>
       )}

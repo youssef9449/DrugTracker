@@ -39,7 +39,6 @@ function renderView(overrides: Record<string, unknown> = {}) {
     settings: defaultSettings,
     onUpdateSettings: vi.fn(),
     onOpenSettings: vi.fn(),
-    onConfirmRefill: vi.fn(),
     showToast: vi.fn(),
     ...overrides,
   };
@@ -54,12 +53,6 @@ function getCheckboxFor(medName: string): HTMLElement {
   const card = nameEl.closest('div.rounded-2xl')!;
   const checkBtn = card.querySelector('button')!;
   return checkBtn;
-}
-
-/** Click the "تعبئة" refill button for the first displayed med. */
-function clickRefillButton() {
-  const btn = screen.getByRole('button', { name: /تعبئة/ });
-  fireEvent.click(btn);
 }
 
 describe('PharmacyShoppingView — deselection preservation (#20)', () => {
@@ -88,7 +81,6 @@ describe('PharmacyShoppingView — deselection preservation (#20)', () => {
         settings={defaultSettings}
         onUpdateSettings={vi.fn()}
         onOpenSettings={vi.fn()}
-        onConfirmRefill={vi.fn()}
         showToast={vi.fn()}
       />
     );
@@ -115,7 +107,6 @@ describe('PharmacyShoppingView — deselection preservation (#20)', () => {
         settings={defaultSettings}
         onUpdateSettings={vi.fn()}
         onOpenSettings={vi.fn()}
-        onConfirmRefill={vi.fn()}
         showToast={vi.fn()}
       />
     );
@@ -146,7 +137,6 @@ describe('PharmacyShoppingView — deselection preservation (#20)', () => {
         settings={defaultSettings}
         onUpdateSettings={vi.fn()}
         onOpenSettings={vi.fn()}
-        onConfirmRefill={vi.fn()}
         showToast={vi.fn()}
       />
     );
@@ -157,75 +147,15 @@ describe('PharmacyShoppingView — deselection preservation (#20)', () => {
   });
 });
 
-describe('PharmacyShoppingView — refilledIds pruning (#34)', () => {
-  beforeEach(() => vi.clearAllMocks());
+describe('PharmacyShoppingView — refill actions', () => {
   afterEach(() => cleanup());
 
-  it('refilled chip disappears when the med is removed from the list', () => {
-    const medA = makeMed({ id: 'med-a', name: 'Med A', currentPills: 1, dailyDose: 1 });
-    const { rerender } = renderView({
-      medications: [medA],
-      onConfirmRefill: vi.fn(),
-    });
+  it('does not render refill or undo actions for medications', () => {
+    const med = makeMed({ currentPills: 1, dailyDose: 1 });
+    renderView({ medications: [med] });
 
-    // Tap "تعبئة" to mark medA as refilled.
-    clickRefillButton();
-
-    // The confirmation chip should appear.
-    expect(screen.getByText(/تمت التعبئة/)).toBeInTheDocument();
-
-    // Remove medA from the medications list (simulating deletion).
-    rerender(
-      <PharmacyShoppingView
-        medications={[]}
-        settings={defaultSettings}
-        onUpdateSettings={vi.fn()}
-        onOpenSettings={vi.fn()}
-        onConfirmRefill={vi.fn()}
-        showToast={vi.fn()}
-      />
-    );
-
-    // The refilled chip should be gone (the med is no longer
-    // displayed — refilledIds was pruned by the reconciliation effect).
-    expect(screen.queryByText(/تمت التعبئة/)).toBeNull();
-  });
-
-  it('a med that returns to the list after being refilled and removed can be refilled again', () => {
-    const medA = makeMed({ id: 'med-a', name: 'Med A', currentPills: 1, dailyDose: 1 });
-    const { rerender } = renderView({ medications: [medA] });
-
-    // Refill medA.
-    clickRefillButton();
-    expect(screen.getByText(/تمت التعبئة/)).toBeInTheDocument();
-
-    // Remove medA.
-    rerender(
-      <PharmacyShoppingView
-        medications={[]}
-        settings={defaultSettings}
-        onUpdateSettings={vi.fn()}
-        onOpenSettings={vi.fn()}
-        onConfirmRefill={vi.fn()}
-        showToast={vi.fn()}
-      />
-    );
-
-    // Bring medA back.
-    rerender(
-      <PharmacyShoppingView
-        medications={[medA]}
-        settings={defaultSettings}
-        onUpdateSettings={vi.fn()}
-        onOpenSettings={vi.fn()}
-        onConfirmRefill={vi.fn()}
-        showToast={vi.fn()}
-      />
-    );
-
-    // #34: the "تعبئة" button should be back (not the confirmation
-    // chip), because refilledIds was pruned when medA left the list.
-    expect(screen.getByRole('button', { name: /تعبئة/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /تعبئة/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /تراجع/ })).toBeNull();
     expect(screen.queryByText(/تمت التعبئة/)).toBeNull();
   });
 

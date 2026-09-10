@@ -144,6 +144,16 @@ describe('reverseRefill', () => {
     expect(result.updatedMed.currentPills).toBe(0);
   });
 
+  it('does not reverse an already-reversed refill amount', () => {
+    const med = makeMed({ currentPills: 20, dailyDose: 0, lastSyncDate: '2024-09-20' });
+    const firstUndo = reverseRefill(med, 30, '2024-09-20');
+    const secondUndo = reverseRefill(firstUndo.updatedMed, 30, '2024-09-20');
+
+    expect(firstUndo.reversedAmount).toBe(20);
+    expect(secondUndo.reversedAmount).toBe(0);
+    expect(secondUndo.updatedMed.currentPills).toBe(0);
+  });
+
   it('moves the critical alarm back to the pre-refill date', () => {
     const baseMed = makeMed({
       currentPills: 30,

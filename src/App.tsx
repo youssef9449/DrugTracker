@@ -180,6 +180,22 @@ export default function App() {
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
   const restoreInFlightRef = useRef<Set<string>>(new Set());
   const refillUndoInFlightRef = useRef<Set<string>>(new Set());
+  const refillUndoTargetRef = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    // Keep the guard through the commit that marks the targeted refill as
+    // reversed. This blocks duplicate clicks in the same render cycle while
+    // allowing a later refill for the same medication to be undone.
+    refillUndoTargetRef.current.forEach((refillId, medicationId) => {
+      const targetIsReversed = logs.some(
+        (log) => log.id === refillId && Boolean(log.reversedAt)
+      );
+      if (targetIsReversed) {
+        refillUndoTargetRef.current.delete(medicationId);
+        refillUndoInFlightRef.current.delete(medicationId);
+      }
+    });
+  }, [logs]);
 
   const { alarmingMedication, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
     medications,
@@ -775,6 +791,7 @@ export default function App() {
     );
     if (!med || !refill) return;
     refillUndoInFlightRef.current.add(medicationId);
+    refillUndoTargetRef.current.set(medicationId, refill.id);
 
     const today = getTodayDateString();
     const { updatedMed, reversedAmount } = reverseRefill(med, refill.amount, today);

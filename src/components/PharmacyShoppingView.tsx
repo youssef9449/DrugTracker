@@ -36,6 +36,7 @@ interface PharmacyShoppingViewProps {
   onUpdateSettings: (newSettings: PharmacySettings) => void;
   onOpenSettings: (orderItems?: OrderItem[]) => void;
   onConfirmRefill: (medicationId: string, addedPills: number) => void;
+  onUndoRefill?: (medicationId: string) => void;
   showToast: (message: string) => void;
 }
 
@@ -45,6 +46,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   onUpdateSettings,
   onOpenSettings,
   onConfirmRefill,
+  onUndoRefill,
   showToast,
 }) => {
   const [durationDays, setDurationDays] = useState<30 | 60>(settings.defaultDurationDays || 30);
@@ -650,7 +652,9 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                   <div className="w-full py-2 px-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center justify-center gap-1.5">
                     <Check className="w-4 h-4" />
                     <span>تمت التعبئة (+{refilledQuantities[med.id] || requestedPills} {med.unit} في المخزون)</span>
-                    <button type="button" onClick={() => { const quantity = refilledQuantities[med.id] || requestedPills; onConfirmRefill(med.id, -quantity); setRefilledIds((prev) => { const next = new Set(prev); next.delete(med.id); return next; }); setRefilledQuantities((prev) => { const next = { ...prev }; delete next[med.id]; return next; }); showToast(`تم التراجع عن تعبئة "${med.name}".`); }} className="text-rose-700 underline mr-2">تراجع</button>
+                    {onUndoRefill && (
+                      <button type="button" onClick={() => { onUndoRefill(med.id); setRefilledIds((prev) => { const next = new Set(prev); next.delete(med.id); return next; }); setRefilledQuantities((prev) => { const next = { ...prev }; delete next[med.id]; return next; }); }} className="text-rose-700 underline mr-2">تراجع</button>
+                    )}
                   </div>
                 ) : (
                   <button

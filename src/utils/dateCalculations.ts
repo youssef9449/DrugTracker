@@ -129,6 +129,30 @@ export function effectiveCurrentPills(
 }
 
 /**
+ * Reverse one refill while preserving all movements that happened after it.
+ * The refill is removed from the live balance, not from the stored snapshot
+ * that existed when the refill was created. If later consumption used some
+ * or all of that supply, only the remaining balance can be reversed.
+ */
+export function reverseRefill(
+  med: Medication,
+  refillAmount: number,
+  todayStr: string = getTodayDateString()
+): { updatedMed: Medication; reversedAmount: number } {
+  const liveBalance = Math.max(0, effectiveCurrentPills(med, todayStr));
+  const reversedAmount = Math.min(Math.max(0, refillAmount), liveBalance);
+
+  return {
+    updatedMed: {
+      ...med,
+      currentPills: Math.max(0, liveBalance - reversedAmount),
+      lastSyncDate: todayStr,
+    },
+    reversedAmount,
+  };
+}
+
+/**
  * The dynamic "days left" estimate derived from effectiveCurrentPills.
  *
  * Equivalent to `Math.floor(effectiveCurrentPills(med, todayStr) / med.dailyDose)`

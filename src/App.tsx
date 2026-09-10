@@ -46,6 +46,7 @@ import {
   getTodayDateString,
   syncAutoDailyDeductions,
   effectiveCurrentPills,
+  reverseRefill,
   settleDoseChange,
   settleAutoDeductToggle,
 } from './utils/dateCalculations';
@@ -97,12 +98,11 @@ function persistJson(key: string, value: unknown): string | null {
 
 /** Persist a plain string value with the same error-surfacing contract. */
 function persistString(key: string, value: string): string | null {
-  if (typeof localStorage === 'undefined') return null;
   try {
     localStorage.setItem(key, value);
     return null;
   } catch (err) {
-    const reason =
+    const effPills = effectiveCurrentPills(med, today);
       err instanceof DOMException && err.name === 'QuotaExceededError'
         ? 'مساحة التخزين ممتلئة'
         : 'تعذّر حفظ البيانات';
@@ -178,6 +178,8 @@ export default function App() {
   // localStorage and applied as a CSS class on the phone-frame.
   const [fontScale, setFontScale] = useState<'normal' | 'large'>('normal');
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
+  const restoreInFlightRef = useRef<Set<string>>(new Set());
+  const refillUndoInFlightRef = useRef<Set<string>>(new Set());
 
   const { alarmingMedication, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
     medications,
@@ -671,15 +673,28 @@ export default function App() {
     isFirstRun,
   });
 
-  const handleRestoreDose = (medicationId: string, reason: string) => {
+  const handleRestoreDose = (medicationId: string, reason: string): boolean => {
     const med = medications.find((m) => m.id === medicationId);
-    if (!med) return;
+    if (!med) return false;
     const today = getTodayDateString();
+    const restoreKey = `${medicationId}:${today}`;
+    if (restoreInFlightRef.current.has(restoreKey)) return false;
+    if (med.autoDeductEnabled === false) {
+      showToast(`الخصم التلقائي متوقف لدواء "${med.name}"؛ لا توجد جرعة مستحقة للاسترجاع.`);
+      return false;
+    }
+    if (logs.some((log) =>
+      log.medicationId === medicationId &&
+      log.type === 'skipped_day' &&
+      log.date === today
+    )) {
+      showToast(`تم استرجاع جرعة "${med.name}" اليوم بالفعل.`);
+      return false;
+    }
+    restoreInFlightRef.current.add(restoreKey);
     const restoredAmount = med.dailyDose;
-    // Settle the snapshot at the current effective balance (deduct the
-    // elapsed days at the OLD dose), then add the restored dose on top.
-    // This makes the restore semantically: "skip today's dose, add it
-    // back to the live balance" — which is what the user expects.
+    // Settle the snapshot at the current effective balance, then add the
+    // one dose that was skipped today.
     const effPills = effectiveCurrentPills(med, today);
     const newSnapshot = effPills + restoredAmount;
     setMedications((prev) =>
@@ -707,11 +722,12 @@ export default function App() {
       ...prev,
     ]);
     if (soundEnabled) playSuccessChime();
+    return true;
   };
 
   const handleConfirmRefill = (medicationId: string, addedPills: number) => {
     const med = medications.find((m) => m.id === medicationId);
-    if (!med) return;
+    if (!med || addedPills <= 0) return;
     const today = getTodayDateString();
     // Settle the snapshot at the current effective balance (deduct the
     // elapsed days at the OLD dose), then add the refill amount on top.
@@ -745,6 +761,43 @@ export default function App() {
       },
       ...prev,
     ]);
+    if (soundEnabled) playSuccessChime();
+  };
+
+  const handleUndoRefill = (medicationId: string) => {
+    if (refillUndoInFlightRef.current.has(medicationId)) return;
+    const med = medications.find((m) => m.id === medicationId);
+    const refill = logs.find((log) =>
+      log.medicationId === medicationId &&
+      log.type === 'refill' &&
+      log.amount > 0 &&
+      !log.reversedAt
+    );
+    if (!med || !refill) return;
+    refillUndoInFlightRef.current.add(medicationId);
+
+    const today = getTodayDateString();
+    const { updatedMed, reversedAmount } = reverseRefill(med, refill.amount, today);
+    const undoTimestamp = new Date().toISOString();
+
+    setMedications((prev) =>
+      prev.map((item) => item.id === medicationId ? updatedMed : item)
+    );
+    setLogs((prev) => [
+      {
+        id: 'refill-undo-' + Date.now(),
+        medicationId: med.id,
+        medicationName: med.name,
+        type: 'refill_undo',
+        amount: -reversedAmount,
+        date: today,
+        timestamp: undoTimestamp,
+        relatedLogId: refill.id,
+        description: `تراجع عن تعبئة مخزون (${reversedAmount} ${med.unit})`,
+      },
+      ...prev.map((log) => log.id === refill.id ? { ...log, reversedAt: undoTimestamp } : log),
+    ]);
+    showToast(`تم التراجع عن تعبئة "${med.name}".`);
     if (soundEnabled) playSuccessChime();
   };
 
@@ -1338,19 +1391,11 @@ export default function App() {
                       onConsumeDose={handleConsumeDose}
                       lastRefillQuantity={(() => {
                         const lastRefill = logs.find(
-                          (log) => log.medicationId === med.id && log.type === 'refill'
+                          (log) => log.medicationId === med.id && log.type === 'refill' && log.amount > 0 && !log.reversedAt
                         );
                         return lastRefill && lastRefill.amount > 0 ? lastRefill.amount : undefined;
                       })()}
-                      onUndoRefill={() => {
-                        const lastRefill = logs.find(
-                          (log) => log.medicationId === med.id && log.type === 'refill'
-                        );
-                        if (lastRefill && lastRefill.amount > 0) {
-                          handleConfirmRefill(med.id, -lastRefill.amount);
-                          showToast(`تم التراجع عن تعبئة "${med.name}".`);
-                        }
-                      }}
+                      onUndoRefill={() => handleUndoRefill(med.id)}
                     />
                   ))
                 )}
@@ -1369,6 +1414,7 @@ export default function App() {
                 setIsSettingsModalOpen(true);
               }}
               onConfirmRefill={handleConfirmRefill}
+              onUndoRefill={handleUndoRefill}
               showToast={showToast}
             />
           )}

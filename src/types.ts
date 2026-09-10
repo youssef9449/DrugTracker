@@ -233,6 +233,13 @@ export function describeOrderInBoxes(
   return pillTotalWord;
 }
 
+export interface Pharmacy {
+  id: string;
+  name: string;
+  phone: string;
+  customerCode: string;
+}
+
 export interface PharmacySettings {
   pharmacyPhone: string; // e.g., "01012345678"
   pharmacyName: string; // e.g., "صيدلية الإسعاف"
@@ -249,6 +256,8 @@ export interface PharmacySettings {
    * order message so the pharmacy can call back to confirm.
    */
   contactPhone: string;
+  pharmacies?: Pharmacy[];
+  selectedPharmacyId?: string;
 }
 
 export const DEFAULT_PHARMACY_SETTINGS: PharmacySettings = {
@@ -259,6 +268,8 @@ export const DEFAULT_PHARMACY_SETTINGS: PharmacySettings = {
   customQuantities: {},
   address: '',
   contactPhone: '',
+  pharmacies: [],
+  selectedPharmacyId: '',
 };
 
 export type MedicationStatus = 'out_of_stock' | 'critical' | 'warning' | 'sufficient';

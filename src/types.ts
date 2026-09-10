@@ -290,14 +290,26 @@ export const DEFAULT_PHARMACY_SETTINGS: PharmacySettings = {
 
 export type MedicationStatus = 'out_of_stock' | 'critical' | 'warning' | 'sufficient';
 
-export function calculateMedicationStatus(med: Medication): {
+/** The return shape of calculateMedicationStatus — extracted so it can be
+ *  referenced by name in shared types (audit #97/#88). */
+export interface MedicationStatusInfo {
   daysLeft: number;
   status: MedicationStatus;
   statusLabel: string;
   statusColorClass: string;
   badgeBg: string;
   badgeText: string;
-} {
+}
+
+/** A medication paired with its pre-computed status — produced once by the
+ *  medicationsWithStatus memo in App.tsx and consumed by LowStockBanner,
+ *  filteredMedications, alertsCount, sufficientCount (audit #88/#97). */
+export interface MedicationWithStatus {
+  med: Medication;
+  statusInfo: MedicationStatusInfo;
+}
+
+export function calculateMedicationStatus(med: Medication): MedicationStatusInfo {
   // The dynamic balance: projects currentPills forward from lastSyncDate
   // by dailyDose. This keeps status correct even if the app was closed
   // for many days and syncAutoDailyDeductions hasn't run yet.

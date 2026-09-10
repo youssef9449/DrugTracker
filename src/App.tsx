@@ -1191,7 +1191,7 @@ export default function App() {
               )}
 
               {filter === 'alerts' && (
-                <LowStockBanner medications={medications} onNavigateToShopping={() => setActiveTab('shopping')} />
+                <LowStockBanner medicationsWithStatus={medicationsWithStatus} onNavigateToShopping={() => setActiveTab('shopping')} />
               )}
 
               <div className="p-4 space-y-3">

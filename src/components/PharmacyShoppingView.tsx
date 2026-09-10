@@ -16,6 +16,7 @@ import {
   Pill,
   ExternalLink,
   X,
+  MessageSquare,
 } from 'lucide-react';
 import { Medication, PharmacySettings, calculateMedicationStatus, describeOrderInBoxes } from '../types';
 import { pluralizeArabic } from '../lib/arabicPlural';
@@ -270,15 +271,33 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   }, [displayList, selectedMedIds, settings.customQuantities, durationDays]);
 
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
+  const orderItemsForMessage = useMemo((): OrderItem[] => {
+    if (activeOrderItems.length > 0) return activeOrderItems;
+    return medications.map((med) => {
+      const { quantity } = calculateMedicationOrderQuantity(
+        med,
+        settings.defaultDurationDays,
+        settings.customQuantities
+      );
+      return {
+        name: med.name,
+        quantity,
+        unit: med.unit,
+        stripsPerBox: med.stripsPerBox,
+        pillsPerStrip: med.pillsPerStrip,
+        packageSize: med.packageSize,
+      };
+    });
+  }, [activeOrderItems, medications, settings.defaultDurationDays, settings.customQuantities]);
+
   const currentWhatsAppMessage = useMemo(() => {
-    if (activeOrderItems.length === 0) return '';
     return generatePharmacyOrderMessage(
-      activeOrderItems,
+      orderItemsForMessage,
       selectedPharmacy?.customerCode || '',
       settings.address,
       settings.contactPhone
     );
-  }, [activeOrderItems, selectedPharmacy?.customerCode, settings.address, settings.contactPhone]);
+  }, [orderItemsForMessage, selectedPharmacy?.customerCode, settings.address, settings.contactPhone]);
 
   const hasPharmacyPhone = Boolean(selectedPharmacy?.phone?.trim());
   const displayPhone = selectedPharmacy?.phone ? cleanPhoneNumber(selectedPharmacy.phone) : '';
@@ -693,11 +712,24 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                   <ExternalLink className="w-4 h-4 opacity-80 shrink-0" />
                 </a>
 
-                <div className="bg-slate-900 text-slate-100 rounded-2xl p-3.5 text-xs font-mono whitespace-pre-line leading-relaxed max-h-56 overflow-y-auto select-text">
-                  {currentWhatsAppMessage || 'يرجى تحديد أدوية لمعاينة نص الرسالة.'}
-                </div>
               </div>
             )}
+
+            {/* Live WhatsApp message preview, matching AppSettingsModal. */}
+            <div className="bg-slate-900 text-slate-100 rounded-2xl p-3.5 text-xs space-y-2 font-mono shadow-inner">
+              <div className="flex items-center justify-between text-[11px] text-teal-400 font-bold">
+                <span className="flex items-center gap-1">
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  معاينة طلب الأدوية المحددة في صفحة الشراء:
+                </span>
+                <span className="text-slate-300">
+                  {displayPhone ? `+${displayPhone}` : 'لم يحدد الرقم بعد'}
+                </span>
+              </div>
+              <div className="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700 text-[11px] text-slate-200 leading-relaxed whitespace-pre-line select-text max-h-44 overflow-y-auto">
+                {currentWhatsAppMessage || 'يرجى تحديد أدوية لمعاينة نص الرسالة.'}
+              </div>
+            </div>
 
             {/* Analyzed Items Breakdown */}
             <div className="space-y-1.5 pt-1">

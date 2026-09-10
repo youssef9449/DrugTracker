@@ -173,6 +173,45 @@ describe('PharmacyShoppingView — refill actions', () => {
     expect(screen.queryByText(/تمت التعبئة/)).toBeNull();
   });
 
+  it('keeps the period quantity unchanged when switching display units', () => {
+    const med = makeMed({
+      currentPills: 1,
+      dailyDose: 1,
+      stripsPerBox: 3,
+      pillsPerStrip: 10,
+      packageSize: 30,
+    });
+    renderView({ medications: [med] });
+
+    expect(screen.getByText('3 أشرطة')).toBeInTheDocument();
+    expect(screen.getByText('الإجمالي: علبة واحدة (30 قرصاً)')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'علبة' }));
+
+    expect(screen.getByText('1 علبة')).toBeInTheDocument();
+    expect(screen.getByText('الإجمالي: علبة واحدة (30 قرصاً)')).toBeInTheDocument();
+  });
+
+  it('allows a custom quantity independently from the selected period', () => {
+    const med = makeMed({
+      currentPills: 1,
+      dailyDose: 1,
+      stripsPerBox: 3,
+      pillsPerStrip: 10,
+      packageSize: 30,
+    });
+    renderView({ medications: [med] });
+
+    fireEvent.click(screen.getByRole('button', { name: 'كمية محددة' }));
+    expect(screen.getByRole('spinbutton', { name: 'كمية Test Med' })).toHaveValue(3);
+
+    fireEvent.click(screen.getByRole('button', { name: 'علبة' }));
+    expect(screen.getByRole('spinbutton', { name: 'كمية Test Med' })).toHaveValue(1);
+
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'كمية Test Med' }), { target: { value: '2' } });
+    expect(screen.getByText('الإجمالي: علبتين (60 قرصاً)')).toBeInTheDocument();
+  });
+
   it('clicking WhatsApp send button opens the send modal with analyzed order quantities', () => {
     const medA = makeMed({ id: 'med-a', name: 'كونكور 5', currentPills: 2, dailyDose: 1, stripsPerBox: 3, pillsPerStrip: 10 });
     renderView({ medications: [medA] });

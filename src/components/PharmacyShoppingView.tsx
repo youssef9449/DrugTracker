@@ -147,23 +147,24 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   }, [displayList, deselectedIds]);
 
   const handleToggleSelect = (id: string) => {
-    setSelectedMedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-        // #20: record the explicit deselect.
-        setDeselectedIds((d) => new Set(d).add(id));
-      } else {
-        next.add(id);
-        // #20: clear the deselect record on re-select.
-        setDeselectedIds((d) => {
-          const n = new Set(d);
-          n.delete(id);
-          return n;
-        });
-      }
-      return next;
-    });
+    // Read current values from the closure (not from setState updaters) and
+    // compute both next states, then call both setters sequentially. The
+    // previous version called setDeselectedIds from inside the
+    // setSelectedMedIds updater — unsafe under React 18+ concurrent
+    // rendering / StrictMode because updaters must be pure (audit #70).
+    const nextSelected = new Set(selectedMedIds);
+    const nextDeselected = new Set(deselectedIds);
+    if (nextSelected.has(id)) {
+      nextSelected.delete(id);
+      // #20: record the explicit deselect.
+      nextDeselected.add(id);
+    } else {
+      nextSelected.add(id);
+      // #20: clear the deselect record on re-select.
+      nextDeselected.delete(id);
+    }
+    setSelectedMedIds(nextSelected);
+    setDeselectedIds(nextDeselected);
   };
 
   const handleDurationChange = (newDuration: 30 | 60) => {

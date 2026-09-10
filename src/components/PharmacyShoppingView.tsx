@@ -1,13 +1,9 @@
 import { useState, useMemo, useEffect, type FC } from 'react';
 import {
-  Copy,
-  Check,
   Phone,
   MessageCircle,
   CheckSquare,
   Square,
-  ChevronDown,
-  ChevronUp,
   Layers,
   Box,
   Pill,
@@ -54,9 +50,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       ? { id: 'legacy', name: settings.pharmacyName || 'الصيدلية', phone: settings.pharmacyPhone || '', customerCode: settings.customerCode || '' }
       : undefined);
 
-  const [copied, setCopied] = useState(false);
   const [showAllForPlanning, setShowAllForPlanning] = useState(false);
-  const [showPreviewMessage, setShowPreviewMessage] = useState(false);
   // Per-med order unit selector: 'pills' | 'boxes' | 'strips'.
   // Stored per med id so the user's choice persists within the session.
   type OrderUnit = 'pills' | 'boxes' | 'strips';
@@ -324,75 +318,19 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     showToast('اختر الصيدلية ثم افتح واتساب لإرسال الطلب.');
   };
 
-  const handleCopyOrder = async () => {
-    if (!currentWhatsAppMessage) {
-      showToast('يرجى تحديد دواء واحد على الأقل لنسخ الطلب.');
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(currentWhatsAppMessage);
-      setCopied(true);
-      showToast('تم نسخ رسالة الواتساب بنجاح!');
-      setTimeout(() => setCopied(false), 3000);
-    } catch {
-      showToast('تعذر النسخ التلقائي.');
-    }
-  };
-
   return (
     <div className="p-4 space-y-4">
-      <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-xs space-y-3">
-        <div>
-          <h2 className="text-base font-bold text-slate-900">قائمة الشراء وتجهيز طلب الصيدلية</h2>
-          <p className="text-xs text-slate-500 mt-0.5">تُدرج أسماء الأدوية والكميات تلقائياً وتُرسل مباشرة لواتساب الصيدلية</p>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <button
-            onClick={handleSendToWhatsApp}
-            disabled={selectedCount === 0}
-            className={`w-full py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 ${
-              selectedCount === 0 ? 'bg-slate-200 text-slate-400' : 'bg-emerald-500 hover:bg-emerald-600 text-white'
-            }`}
-          >
-            <MessageCircle className="w-4 h-4" />
-            إرسال لواتساب ({selectedCount})
-          </button>
-          <button
-            onClick={handleCopyOrder}
-            disabled={selectedCount === 0}
-            className={`w-full py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border ${
-              copied ? 'bg-emerald-50 text-emerald-800 border-emerald-300' : 'bg-white text-slate-700 border-slate-200'
-            }`}
-          >
-            {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-            {copied ? 'تم النسخ!' : 'نسخ نص الرسالة'}
-          </button>
-        </div>
-        <button
-          type="button"
-          onClick={() => setShowPreviewMessage(!showPreviewMessage)}
-          className="w-full flex items-center justify-between text-xs text-slate-600 py-1 font-medium"
-        >
-          <span>معاينة نص الرسالة</span>
-          {showPreviewMessage ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-        </button>
-        {showPreviewMessage && (
-          <div className="p-3 bg-slate-50 text-slate-700 rounded-xl border border-slate-200 shadow-sm text-xs font-mono whitespace-pre-line leading-relaxed">
-            {currentWhatsAppMessage || 'يرجى تحديد أدوية لمعاينة نص الرسالة.'}
-          </div>
-        )}
-        <div className="pt-2 border-t border-slate-100 flex items-center justify-end flex-wrap gap-2 text-xs">
-          <button onClick={() => setShowAllForPlanning(!showAllForPlanning)} className="text-teal-700 font-bold underline text-[11px]">
-            {showAllForPlanning ? 'عرض النواقص فقط' : 'عرض كل الأدوية'}
-          </button>
-        </div>
-      </div>
-
       <div className="flex items-center justify-between text-xs px-1">
         <span className="font-bold text-slate-700">
           الأدوية المتاحة للطلب ({selectedCount} من {displayList.length})
         </span>
         <div className="flex items-center gap-2 text-[11px]">
+          <button
+            onClick={() => setShowAllForPlanning(!showAllForPlanning)}
+            className="text-teal-700 font-bold"
+          >
+            {showAllForPlanning ? 'النواقص فقط' : 'كل الأدوية'}
+          </button>
           <button
             onClick={() => {
               setSelectedMedIds(new Set(displayList.map((m) => m.id)));
@@ -562,6 +500,20 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
           );
         })}
       </div>
+
+      <button
+        type="button"
+        onClick={handleSendToWhatsApp}
+        aria-label="إرسال طلبية بالواتساب"
+        className={`fixed bottom-[128px] left-4 z-40 flex items-center gap-2 rounded-2xl border px-4 py-3 text-xs font-bold text-white shadow-xl ring-2 ring-white/60 transition-all duration-200 sm:text-sm ${
+          selectedCount === 0
+            ? 'bg-slate-400 border-slate-300'
+            : 'bg-emerald-600 hover:bg-emerald-700 active:scale-95 border-emerald-400/40'
+        }`}
+      >
+        <MessageCircle className="w-5 h-5" />
+        <span>إرسال طلبية بالواتساب</span>
+      </button>
 
       {/* WhatsApp Send Confirmation & Direct Links Modal */}
       {isSendModalOpen && (

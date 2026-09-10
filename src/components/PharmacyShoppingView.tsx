@@ -51,6 +51,12 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   showToast,
 }) => {
   const [durationDays, setDurationDays] = useState<30 | 60>(settings.defaultDurationDays || 30);
+  const pharmacies = settings.pharmacies || [];
+  const selectedPharmacy = pharmacies.find((pharmacy) => pharmacy.id === settings.selectedPharmacyId)
+    || pharmacies[0]
+    || (settings.pharmacyPhone || settings.pharmacyName || settings.customerCode
+      ? { id: 'legacy', name: settings.pharmacyName || 'الصيدلية', phone: settings.pharmacyPhone || '', customerCode: settings.customerCode || '' }
+      : undefined);
 
   useEffect(() => {
     if (settings.defaultDurationDays) setDurationDays(settings.defaultDurationDays);
@@ -269,65 +275,44 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   }, [displayList, selectedMedIds, settings.customQuantities, durationDays]);
 
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
-  const [phoneInput, setPhoneInput] = useState(settings.pharmacyPhone || '');
-  const [isEditingPhoneInModal, setIsEditingPhoneInModal] = useState(false);
-
-  useEffect(() => {
-    setPhoneInput(settings.pharmacyPhone || '');
-  }, [settings.pharmacyPhone]);
-
-  const handleSavePhoneFromModal = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const clean = cleanPhoneNumber(phoneInput);
-    if (!clean) {
-      showToast('يرجى إدخال رقم هاتف صحيح.');
-      return;
-    }
-    const updated = { ...settings, pharmacyPhone: clean };
-    onUpdateSettings(updated);
-    setIsEditingPhoneInModal(false);
-    showToast('تم حفظ رقم الصيدلية بنجاح!');
-  };
-
   const currentWhatsAppMessage = useMemo(() => {
     if (activeOrderItems.length === 0) return '';
     return generatePharmacyOrderMessage(
       activeOrderItems,
-      settings.customerCode || '',
+      selectedPharmacy?.customerCode || '',
       settings.address,
       settings.contactPhone
     );
-  }, [activeOrderItems, settings.customerCode, settings.address, settings.contactPhone]);
+  }, [activeOrderItems, selectedPharmacy?.customerCode, settings.address, settings.contactPhone]);
 
-  const hasPharmacyPhone = Boolean(settings.pharmacyPhone?.trim());
-  const displayPhone = settings.pharmacyPhone ? cleanPhoneNumber(settings.pharmacyPhone) : '';
+  const hasPharmacyPhone = Boolean(selectedPharmacy?.phone?.trim());
+  const displayPhone = selectedPharmacy?.phone ? cleanPhoneNumber(selectedPharmacy.phone) : '';
   const selectedCount = activeOrderItems.length;
 
   const targetWaUrl = useMemo(() => {
-    return buildWhatsAppUrl(settings.pharmacyPhone || '', currentWhatsAppMessage);
-  }, [settings.pharmacyPhone, currentWhatsAppMessage]);
+    return buildWhatsAppUrl(selectedPharmacy?.phone || '', currentWhatsAppMessage);
+  }, [selectedPharmacy?.phone, currentWhatsAppMessage]);
 
   const targetAppUrl = useMemo(() => {
-    return buildWhatsAppAppUrl(settings.pharmacyPhone || '', currentWhatsAppMessage);
-  }, [settings.pharmacyPhone, currentWhatsAppMessage]);
+    return buildWhatsAppAppUrl(selectedPharmacy?.phone || '', currentWhatsAppMessage);
+  }, [selectedPharmacy?.phone, currentWhatsAppMessage]);
 
   const targetWebUrl = useMemo(() => {
-    return buildWhatsAppWebUrl(settings.pharmacyPhone || '', currentWhatsAppMessage);
-  }, [settings.pharmacyPhone, currentWhatsAppMessage]);
+    return buildWhatsAppWebUrl(selectedPharmacy?.phone || '', currentWhatsAppMessage);
+  }, [selectedPharmacy?.phone, currentWhatsAppMessage]);
 
   const handleSendToWhatsApp = () => {
     if (selectedCount === 0) {
       showToast('يرجى تحديد دواء واحد على الأقل لإرسال الطلب.');
       return;
     }
-    if (!settings.pharmacyPhone?.trim()) {
-      setIsEditingPhoneInModal(true);
+    if (!selectedPharmacy?.phone?.trim()) {
       setIsSendModalOpen(true);
-      showToast('أدخل رقم واتساب الصيدلية لإرسال الطلب');
+      showToast('أضف صيدلية من تبويب الصيدليات أولًا.');
       return;
     }
     // Attempt opening WhatsApp directly
-    openWhatsAppLink(settings.pharmacyPhone, currentWhatsAppMessage);
+    openWhatsAppLink(selectedPharmacy.phone, currentWhatsAppMessage);
     // Also open the confirmation & direct-links modal so popup blockers never stop the user!
     setIsSendModalOpen(true);
     showToast('جاري فتح محادثة واتساب الصيدلية...');
@@ -351,13 +336,22 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   return (
     <div className="p-4 space-y-4">
       <div className="bg-white rounded-2xl border border-slate-200/90 p-3.5 shadow-xs flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
           <div className="w-9 h-9 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
             <Phone className="w-4 h-4" />
           </div>
           <div className="min-w-0 text-xs">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="font-bold text-slate-800 truncate">{settings.pharmacyName || 'الصيدلية'}</span>
+              <select
+                value={selectedPharmacy?.id || ''}
+                onChange={(event) => onUpdateSettings({ ...settings, selectedPharmacyId: event.target.value })}
+                className="max-w-[180px] bg-transparent font-bold text-slate-800 truncate outline-none"
+                aria-label="اختيار الصيدلية"
+              >
+                {pharmacies.length === 0 && <option value="">اختر صيدلية</option>}
+                {pharmacies.map((pharmacy) => <option key={pharmacy.id} value={pharmacy.id}>{pharmacy.name}</option>)}
+                {pharmacies.length === 0 && selectedPharmacy && <option value="legacy">{selectedPharmacy.name}</option>}
+              </select>
               {hasPharmacyPhone ? (
                 <span className="font-mono text-[11px] bg-teal-50 text-teal-800 px-2 py-0.5 rounded-md border border-teal-200 font-bold">
                   +{displayPhone}
@@ -370,20 +364,16 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
             </div>
             <div className="text-[11px] text-slate-500 mt-0.5">
               كود العميل:{' '}
-              {settings.customerCode?.trim() ? (
-                <strong className="text-teal-800 font-mono">{settings.customerCode.trim()}</strong>
+              {selectedPharmacy?.customerCode?.trim() ? (
+                <strong className="text-teal-800 font-mono">{selectedPharmacy.customerCode.trim()}</strong>
               ) : (
                 <span className="text-slate-400 font-normal">غير محدد (اختياري)</span>
               )}
             </div>
           </div>
         </div>
-        <button
-          onClick={() => onOpenSettings(activeOrderItems)}
-          className="shrink-0 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5"
-        >
-          <Settings className="w-3.5 h-3.5" />
-          <span>{hasPharmacyPhone ? 'تعديل' : 'إضافة الرقم'}</span>
+        <button onClick={() => onOpenSettings(activeOrderItems)} className="shrink-0 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5">
+          <Settings className="w-3.5 h-3.5" /> تعديل
         </button>
       </div>
 
@@ -666,66 +656,31 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
               </button>
             </div>
 
-            {/* Pharmacy Phone Box */}
+            {/* Selected pharmacy summary */}
             <div className="bg-slate-50 rounded-2xl p-3.5 border border-slate-200/80 space-y-2">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-bold text-slate-700 flex items-center gap-1.5">
                   <Phone className="w-3.5 h-3.5 text-teal-600" />
-                  <span>{settings.pharmacyName || 'الصيدلية'}:</span>
+                  <span>{selectedPharmacy?.name || 'لم يتم اختيار صيدلية'}:</span>
                 </span>
-                {hasPharmacyPhone && !isEditingPhoneInModal && (
-                  <button
-                    type="button"
-                    onClick={() => setIsEditingPhoneInModal(true)}
-                    className="text-[11px] text-teal-700 font-bold hover:underline"
-                  >
-                    تعديل الرقم
-                  </button>
-                )}
               </div>
-
-              {(!hasPharmacyPhone || isEditingPhoneInModal) ? (
-                <form onSubmit={handleSavePhoneFromModal} className="space-y-2 pt-1">
-                  <label className="block text-[11px] text-slate-600 font-medium">
-                    أدخل رقم واتساب الصيدلية (مثال: 01012345678):
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="tel"
-                      value={phoneInput}
-                      onChange={(e) => setPhoneInput(e.target.value)}
-                      placeholder="01012345678"
-                      dir="ltr"
-                      autoFocus
-                      className="flex-1 px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-teal-500"
-                    />
-                    <button
-                      type="submit"
-                      className="px-3.5 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold shrink-0 shadow-xs"
-                    >
-                      حفظ
-                    </button>
-                  </div>
-                </form>
-              ) : (
-                <div className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-slate-200">
-                  <span className="text-xs text-slate-500">رقم واتساب:</span>
-                  <span className="font-mono text-xs font-bold text-teal-900" dir="ltr">
-                    +{displayPhone}
-                  </span>
-                </div>
-              )}
+              <div className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-slate-200">
+                <span className="text-xs text-slate-500">رقم واتساب:</span>
+                <span className="font-mono text-xs font-bold text-teal-900" dir="ltr">
+                  {hasPharmacyPhone ? `+${displayPhone}` : 'غير متاح'}
+                </span>
+              </div>
             </div>
 
             {/* Direct Send Action Buttons */}
-            {hasPharmacyPhone && !isEditingPhoneInModal && (
+            {hasPharmacyPhone && (
               <div className="space-y-2">
                 <a
                   href={targetWaUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={() => {
-                    openWhatsAppLink(settings.pharmacyPhone, currentWhatsAppMessage);
+                    openWhatsAppLink(selectedPharmacy?.phone || '', currentWhatsAppMessage);
                     showToast('تم فتح واتساب!');
                   }}
                   className="w-full py-3 px-4 bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-2xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2.5 shadow-md active:scale-98 transition text-center"

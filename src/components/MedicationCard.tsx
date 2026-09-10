@@ -4,22 +4,19 @@ import {
   Plus,
   Calendar,
   Zap,
-  PauseCircle,
   AlertCircle,
   CheckCircle2,
   CheckCircle,
   ShoppingCart,
   Clock,
   ShieldCheck,
-  Layers,
-  Box,
 } from 'lucide-react';
 import { Medication, calculateMedicationStatus, describeStockInStrips, isSolidUnit } from '../types';
 import { getDepletionDate, getTodayDateString, effectiveCurrentPills } from '../utils/dateCalculations';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { MedicationMenu } from './MedicationMenu';
 import { ReminderBadge } from './ReminderBadge';
-import { AUTO_DEDUCT_PAUSED_NOTE } from '../lib/styles';
+import { StripsBadge, PackageSizeBadge, AutoDeductPausedNote } from './medicationCardParts';
 
 interface MedicationCardProps {
   medication: Medication;
@@ -163,16 +160,10 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 )}
                 <span>معدل الخصم: {medication.dailyDose} {medication.unit}/يوم</span>
                 {hasStrips && (
-                  <span className="text-[10px] text-teal-800 bg-white/90 border border-teal-200 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-medium">
-                    <Layers className="w-3 h-3 text-teal-600" />
-                    <span>العلبة: {medication.stripsPerBox} أشرطة × {medication.pillsPerStrip} {medication.unit}</span>
-                  </span>
+                  <StripsBadge medication={medication} className="text-[10px] text-teal-800 bg-white/90 border border-teal-200 px-1.5 py-0.5 rounded" />
                 )}
                 {!isSolid && medication.packageSize && medication.packageSize > 0 && (
-                  <span className="text-[10px] text-teal-800 bg-white/90 border border-teal-200 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-medium">
-                    <Box className="w-3 h-3 text-teal-600" />
-                    <span>سعة العبوة: {medication.packageSize} {medication.unit}</span>
-                  </span>
+                  <PackageSizeBadge medication={medication} className="text-[10px] text-teal-800 bg-white/90 border border-teal-200 px-1.5 py-0.5 rounded" />
                 )}
               </div>
             </div>
@@ -268,12 +259,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
 
         {/* Auto-deduct paused note — shown on every view when the
             auto-deduction is disabled, with the dose-taken status. */}
-        {!isAutoActive && (
-          <div className={AUTO_DEDUCT_PAUSED_NOTE}>
-            <PauseCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-            <span>الخصم التلقائي معلق — الجرعة اليدوية والخصم التلقائي معطلان لهذا اليوم.</span>
-          </div>
-        )}
+        {!isAutoActive && <AutoDeductPausedNote />}
         {undoRefillAction}
       </div>
     );
@@ -316,16 +302,10 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   </span>
                 )}
                 {hasStrips && (
-                  <span className="text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-medium border border-emerald-200/50">
-                    <Layers className="w-3 h-3 text-emerald-600" />
-                    <span>العلبة: {medication.stripsPerBox} أشرطة × {medication.pillsPerStrip} {medication.unit}</span>
-                  </span>
+                  <StripsBadge medication={medication} className="text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/50" />
                 )}
                 {!isSolid && medication.packageSize && medication.packageSize > 0 && (
-                  <span className="text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-medium border border-emerald-200/50">
-                    <Box className="w-3 h-3 text-emerald-600" />
-                    <span>سعة العبوة: {medication.packageSize} {medication.unit}</span>
-                  </span>
+                  <PackageSizeBadge medication={medication} className="text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/50" />
                 )}
                 {medication.notes && (
                   <span className="text-[11px] text-slate-400 truncate max-w-[180px]">
@@ -416,12 +396,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         />
 
         {/* Auto-deduct paused note */}
-        {!isAutoActive && (
-          <div className={AUTO_DEDUCT_PAUSED_NOTE}>
-            <PauseCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-            <span>الخصم التلقائي معلق — الجرعة اليدوية والخصم التلقائي معطلان لهذا اليوم.</span>
-          </div>
-        )}
+        {!isAutoActive && <AutoDeductPausedNote />}
         {undoRefillAction}
       </div>
     );
@@ -463,16 +438,10 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 </span>
               )}
               {hasStrips && (
-                <span className="text-[11px] text-teal-800 bg-teal-50 border border-teal-200/60 px-2 py-0.5 rounded-md flex items-center gap-1 font-medium">
-                  <Layers className="w-3 h-3 text-teal-600" />
-                  <span>العلبة: {medication.stripsPerBox} أشرطة × {medication.pillsPerStrip} {medication.unit}</span>
-                </span>
+                <StripsBadge medication={medication} className="text-[11px] text-teal-800 bg-teal-50 border border-teal-200/60 px-2 py-0.5 rounded-md gap-1" />
               )}
               {!isSolid && medication.packageSize && medication.packageSize > 0 && (
-                <span className="text-[11px] text-teal-800 bg-teal-50 border border-teal-200/60 px-2 py-0.5 rounded-md flex items-center gap-1 font-medium">
-                  <Box className="w-3 h-3 text-teal-600" />
-                  <span>سعة العبوة: {medication.packageSize} {medication.unit}</span>
-                </span>
+                <PackageSizeBadge medication={medication} className="text-[11px] text-teal-800 bg-teal-50 border border-teal-200/60 px-2 py-0.5 rounded-md gap-1" />
               )}
               {medication.notes && (
                 <span className="text-[11px] text-slate-500 truncate max-w-[170px]">
@@ -572,12 +541,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
       </div>
 
       {/* Status note if paused */}
-      {!isAutoActive && (
-        <div className="mt-2 text-[11px] bg-amber-50 text-amber-800 p-2 rounded-lg flex items-center gap-1.5 border border-amber-200">
-          <PauseCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-          <span>الخصم التلقائي معلق — الجرعة اليدوية والخصم التلقائي معطلان لهذا اليوم.</span>
-        </div>
-      )}
+      {!isAutoActive && <AutoDeductPausedNote />}
       {undoRefillAction}
 
       {/* Scheduled Reminder & Custom Sound Badge (extracted — see ReminderBadge.tsx) */}

@@ -99,44 +99,12 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
-  if (!isOpen) return null;
-
-  // Sound file picker — uses readCustomSoundFile for size/type validation.
-  const handleSoundFilePick = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    try {
-      const customFile = await readCustomSoundFile(file);
-      onSetGlobalCustomSound(customFile);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'تعذّر تحميل الملف الصوتي';
-      window.alert(message);
-    }
-  };
-
-  const handleSave = (e: FormEvent) => {
-    e.preventDefault();
-    onSaveSettings({
-      pharmacyPhone: isPharmacyOnly ? pharmacyPhone.trim() : settings.pharmacyPhone,
-      pharmacyName: isPharmacyOnly ? pharmacyName.trim() : settings.pharmacyName,
-      customerCode: isPharmacyOnly ? customerCode.trim() : settings.customerCode,
-      // Preserve the duration/quantities managed by the shopping view.
-      defaultDurationDays: settings.defaultDurationDays,
-      customQuantities: settings.customQuantities,
-      address: isPharmacyOnly ? address.trim() : settings.address,
-      contactPhone: isPharmacyOnly ? contactPhone.trim() : settings.contactPhone,
-      pharmacies: settings.pharmacies,
-      selectedPharmacyId: settings.selectedPharmacyId,
-    });
-    onClose();
-  };
-
   const formattedPhone = cleanPhoneNumber(pharmacyPhone);
 
   // #111: extracted from an inline IIFE — the WhatsApp order-message
   // preview computations. Memoized so they don't recompute on every
-  // keystroke in unrelated form fields.
+  // keystroke in unrelated form fields. Must be before the `if (!isOpen)`
+  // early return (rules-of-hooks).
   const { previewMsg, waUrl, appUrl } = useMemo(() => {
     const orderItemsForMessage: OrderItem[] =
       activeOrderItems && activeOrderItems.length > 0
@@ -179,6 +147,39 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
     contactPhone,
     pharmacyPhone,
   ]);
+
+  if (!isOpen) return null;
+
+  // Sound file picker — uses readCustomSoundFile for size/type validation.
+  const handleSoundFilePick = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const customFile = await readCustomSoundFile(file);
+      onSetGlobalCustomSound(customFile);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'تعذّر تحميل الملف الصوتي';
+      window.alert(message);
+    }
+  };
+
+  const handleSave = (e: FormEvent) => {
+    e.preventDefault();
+    onSaveSettings({
+      pharmacyPhone: isPharmacyOnly ? pharmacyPhone.trim() : settings.pharmacyPhone,
+      pharmacyName: isPharmacyOnly ? pharmacyName.trim() : settings.pharmacyName,
+      customerCode: isPharmacyOnly ? customerCode.trim() : settings.customerCode,
+      // Preserve the duration/quantities managed by the shopping view.
+      defaultDurationDays: settings.defaultDurationDays,
+      customQuantities: settings.customQuantities,
+      address: isPharmacyOnly ? address.trim() : settings.address,
+      contactPhone: isPharmacyOnly ? contactPhone.trim() : settings.contactPhone,
+      pharmacies: settings.pharmacies,
+      selectedPharmacyId: settings.selectedPharmacyId,
+    });
+    onClose();
+  };
 
   return (
     <Modal

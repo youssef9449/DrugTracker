@@ -1,7 +1,7 @@
 import type { FC } from 'react';
-import { Pill, ShoppingCart, History, Store } from 'lucide-react';
+import { Pill, ShoppingCart, History, Store, ContactRound } from 'lucide-react';
 
-export type ActiveTab = 'stock' | 'shopping' | 'pharmacies' | 'logs';
+export type ActiveTab = 'stock' | 'shopping' | 'pharmacies' | 'user-data' | 'logs';
 
 interface AndroidBottomNavProps {
   activeTab: ActiveTab;
@@ -9,12 +9,13 @@ interface AndroidBottomNavProps {
   alertsCount: number;
 }
 
-/** Tab configuration — drives the .map() so the 4 tab buttons share one
+/** Tab configuration — drives the .map() so the tab buttons share one
  *  template (audit #83, replacing 4 copy-pasted button blocks). */
 const TABS: { id: ActiveTab; icon: typeof Pill; label: string; iconClassName?: string }[] = [
   { id: 'stock', icon: Pill, label: 'المخزون', iconClassName: 'rotate-45' },
   { id: 'shopping', icon: ShoppingCart, label: 'قائمة الشراء' },
   { id: 'pharmacies', icon: Store, label: 'الصيدليات' },
+  { id: 'user-data', icon: ContactRound, label: 'بياناتي' },
   { id: 'logs', icon: History, label: 'سجل الاستهلاك' },
 ];
 

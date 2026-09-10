@@ -4,6 +4,8 @@ import {
   ConsumptionLog,
   PharmacySettings,
   Pharmacy,
+  UserAddress,
+  UserContact,
   DEFAULT_PHARMACY_SETTINGS,
   calculateMedicationStatus,
   CustomSoundFile,
@@ -19,6 +21,7 @@ import { LowStockBanner } from './components/LowStockBanner';
 import { MedicationCard } from './components/MedicationCard';
 import { PharmacyShoppingView } from './components/PharmacyShoppingView';
 import { PharmacyManagementView } from './components/PharmacyManagementView';
+import { UserDataManagementView } from './components/UserDataManagementView';
 import { ConsumptionLogView } from './components/ConsumptionLogView';
 import { AddMedicationModal } from './components/AddMedicationModal';
 import { RefillModal } from './components/RefillModal';
@@ -875,6 +878,69 @@ export default function App() {
     showToast('تم حذف الصيدلية.');
   };
 
+  const userContacts: UserContact[] = pharmacySettings.whatsappContacts?.length
+    ? pharmacySettings.whatsappContacts
+    : pharmacySettings.contactPhone
+      ? [{ id: 'legacy-contact', label: 'رقم التواصل', phone: pharmacySettings.contactPhone }]
+      : [];
+  const userAddresses: UserAddress[] = pharmacySettings.whatsappAddresses?.length
+    ? pharmacySettings.whatsappAddresses
+    : pharmacySettings.address
+      ? [{ id: 'legacy-address', label: 'عنوان التوصيل', address: pharmacySettings.address }]
+      : [];
+
+  const handleSaveUserContact = (contact: UserContact) => {
+    setPharmacySettings((prev) => {
+      const contacts = prev.whatsappContacts?.length
+        ? prev.whatsappContacts
+        : prev.contactPhone
+          ? [{ id: 'legacy-contact', label: 'رقم التواصل', phone: prev.contactPhone }]
+          : [];
+      const exists = contacts.some((item) => item.id === contact.id);
+      return {
+        ...prev,
+        whatsappContacts: exists ? contacts.map((item) => item.id === contact.id ? contact : item) : [...contacts, contact],
+        contactPhone: contact.id === 'legacy-contact' ? contact.phone : prev.contactPhone,
+      };
+    });
+  };
+
+  const handleDeleteUserContact = (id: string) => {
+    setPharmacySettings((prev) => ({
+      ...prev,
+      whatsappContacts: (prev.whatsappContacts || []).filter((item) => item.id !== id),
+      selectedWhatsappContactIds: (prev.selectedWhatsappContactIds || []).filter((item) => item !== id),
+      contactPhone: id === 'legacy-contact' ? '' : prev.contactPhone,
+    }));
+    showToast('تم حذف رقم التليفون.');
+  };
+
+  const handleSaveUserAddress = (address: UserAddress) => {
+    setPharmacySettings((prev) => {
+      const addresses = prev.whatsappAddresses?.length
+        ? prev.whatsappAddresses
+        : prev.address
+          ? [{ id: 'legacy-address', label: 'عنوان التوصيل', address: prev.address }]
+          : [];
+      const exists = addresses.some((item) => item.id === address.id);
+      return {
+        ...prev,
+        whatsappAddresses: exists ? addresses.map((item) => item.id === address.id ? address : item) : [...addresses, address],
+        address: address.id === 'legacy-address' ? address.address : prev.address,
+      };
+    });
+  };
+
+  const handleDeleteUserAddress = (id: string) => {
+    setPharmacySettings((prev) => ({
+      ...prev,
+      whatsappAddresses: (prev.whatsappAddresses || []).filter((item) => item.id !== id),
+      selectedWhatsappAddressIds: (prev.selectedWhatsappAddressIds || []).filter((item) => item !== id),
+      address: id === 'legacy-address' ? '' : prev.address,
+    }));
+    showToast('تم حذف العنوان.');
+  };
+
   const handleDeleteMedication = (id: string) => {
     const med = medications.find((m) => m.id === id);
     if (!med) return;
@@ -1245,6 +1311,10 @@ export default function App() {
               settings={pharmacySettings}
               onUpdateSettings={setPharmacySettings}
               showToast={showToast}
+              onOpenUserContactsSettings={() => {
+                setSettingsModalMode('all');
+                setIsSettingsModalOpen(true);
+              }}
             />
           )}
 
@@ -1253,6 +1323,18 @@ export default function App() {
               pharmacies={pharmacySettings.pharmacies || []}
               onSave={handleSavePharmacy}
               onDelete={handleDeletePharmacy}
+              showToast={showToast}
+            />
+          )}
+
+          {activeTab === 'user-data' && (
+            <UserDataManagementView
+              contacts={userContacts}
+              addresses={userAddresses}
+              onSaveContact={handleSaveUserContact}
+              onDeleteContact={handleDeleteUserContact}
+              onSaveAddress={handleSaveUserAddress}
+              onDeleteAddress={handleDeleteUserAddress}
               showToast={showToast}
             />
           )}

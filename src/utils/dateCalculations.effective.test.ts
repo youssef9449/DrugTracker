@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   effectiveCurrentPills,
+  reverseRefill,
   effectiveDaysLeft,
   settleDoseChange,
   settleAutoDeductToggle,
@@ -95,6 +96,70 @@ describe('effectiveCurrentPills', () => {
       lastSyncDate: '2024-09-10',
     });
     expect(effectiveCurrentPills(med, '2024-09-15')).toBe(50);
+  });
+});
+
+describe('reverseRefill', () => {
+  it('reverses a refill from the live settled balance', () => {
+    const med = makeMed({ currentPills: 50, dailyDose: 2, lastSyncDate: '2024-09-10' });
+    const result = reverseRefill(med, 30, '2024-09-10');
+
+    expect(result.reversedAmount).toBe(30);
+    expect(result.updatedMed.currentPills).toBe(20);
+    expect(result.updatedMed.lastSyncDate).toBe('2024-09-10');
+  });
+
+  it('settles elapsed auto-deduction before reversing the refill', () => {
+    const med = makeMed({ currentPills: 50, dailyDose: 2, lastSyncDate: '2024-09-15' });
+    const result = reverseRefill(med, 30, '2024-09-20');
+
+    // Live balance is 40 after five days; undo removes only the refill.
+    expect(result.reversedAmount).toBe(30);
+    expect(result.updatedMed.currentPills).toBe(10);
+    expect(effectiveCurrentPills(result.updatedMed, '2024-09-20')).toBe(10);
+  });
+
+  it('preserves consumption that happened after the refill', () => {
+    // 20 base + 30 refill - 5 manual consumption = 45 live pills.
+    const med = makeMed({ currentPills: 45, dailyDose: 0, lastSyncDate: '2024-09-20' });
+    const result = reverseRefill(med, 30, '2024-09-20');
+
+    expect(result.updatedMed.currentPills).toBe(15);
+  });
+
+  it('reverses only the latest refill amount when refills are stacked', () => {
+    // Base 10 + refill 30 + refill 20, then undo the latest +20.
+    const med = makeMed({ currentPills: 60, dailyDose: 0, lastSyncDate: '2024-09-20' });
+    const result = reverseRefill(med, 20, '2024-09-20');
+
+    expect(result.reversedAmount).toBe(20);
+    expect(result.updatedMed.currentPills).toBe(40);
+  });
+
+  it('never creates a negative balance when the refill was consumed', () => {
+    const med = makeMed({ currentPills: 0, dailyDose: 2, lastSyncDate: '2024-09-20' });
+    const result = reverseRefill(med, 30, '2024-09-20');
+
+    expect(result.reversedAmount).toBe(0);
+    expect(result.updatedMed.currentPills).toBe(0);
+  });
+
+  it('moves the critical alarm back to the pre-refill date', () => {
+    const baseMed = makeMed({
+      currentPills: 30,
+      dailyDose: 10,
+      warningThresholdDays: 4,
+      lastSyncDate: '2024-09-20',
+    });
+    const refilledMed = { ...baseMed, currentPills: 60 };
+    const undoneMed = reverseRefill(refilledMed, 30, '2024-09-20').updatedMed;
+
+    expect(getCriticalAlarmDate(refilledMed, '2024-09-20', 0)).toBe(
+      getCriticalAlarmDate(baseMed, '2024-09-20', 0) + 3 * 24 * 60 * 60 * 1000
+    );
+    expect(getCriticalAlarmDate(undoneMed, '2024-09-20', 0)).toBe(
+      getCriticalAlarmDate(baseMed, '2024-09-20', 0)
+    );
   });
 });
 

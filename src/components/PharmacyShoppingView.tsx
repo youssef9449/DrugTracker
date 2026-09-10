@@ -16,7 +16,6 @@ import { getDepletionDate, effectiveCurrentPills } from '../utils/dateCalculatio
 import {
   cleanPhoneNumber,
   generatePharmacyOrderMessage,
-  openWhatsAppLink,
   OrderItem,
   calculateMedicationOrderQuantity,
   buildWhatsAppUrl,
@@ -604,7 +603,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={() => {
-                    openWhatsAppLink(selectedPharmacy?.phone || '', currentWhatsAppMessage);
                     showToast('تم فتح واتساب!');
                   }}
                   className="w-full py-3 px-4 bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-2xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2.5 shadow-md active:scale-98 transition text-center"

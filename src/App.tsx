@@ -1230,11 +1230,6 @@ export default function App() {
               medications={medications}
               settings={pharmacySettings}
               onUpdateSettings={setPharmacySettings}
-              onOpenSettings={(orderItems) => {
-                setActiveOrderItems(orderItems);
-                setSettingsModalMode('pharmacy');
-                setIsSettingsModalOpen(true);
-              }}
               showToast={showToast}
             />
           )}

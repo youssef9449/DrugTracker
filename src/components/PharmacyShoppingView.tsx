@@ -325,12 +325,22 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
           الأدوية المتاحة للطلب ({selectedCount} من {displayList.length})
         </span>
         <div className="flex items-center gap-2 text-[11px]">
-          <button
-            onClick={() => setShowAllForPlanning(!showAllForPlanning)}
-            className="text-teal-700 font-bold"
-          >
-            {showAllForPlanning ? 'النواقص فقط' : 'كل الأدوية'}
-          </button>
+          <div className="flex items-center gap-1 rounded-2xl bg-teal-600 p-1 shadow-xs" role="group" aria-label="نطاق الأدوية">
+            <button
+              type="button"
+              onClick={() => setShowAllForPlanning(false)}
+              className={`rounded-xl px-2.5 py-1.5 font-bold transition ${!showAllForPlanning ? 'bg-white text-teal-700 shadow-xs' : 'text-white hover:bg-teal-700'}`}
+            >
+              النواقص فقط
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAllForPlanning(true)}
+              className={`rounded-xl px-2.5 py-1.5 font-bold transition ${showAllForPlanning ? 'bg-white text-teal-700 shadow-xs' : 'text-white hover:bg-teal-700'}`}
+            >
+              كل الأدوية
+            </button>
+          </div>
           <button
             onClick={() => {
               setSelectedMedIds(new Set(displayList.map((m) => m.id)));
@@ -505,11 +515,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
         type="button"
         onClick={handleSendToWhatsApp}
         aria-label="إرسال طلبية بالواتساب"
-        className={`fixed bottom-[128px] left-4 z-40 flex items-center gap-2 rounded-2xl border px-4 py-3 text-xs font-bold text-white shadow-xl ring-2 ring-white/60 transition-all duration-200 sm:text-sm ${
-          selectedCount === 0
-            ? 'bg-slate-400 border-slate-300'
-            : 'bg-emerald-600 hover:bg-emerald-700 active:scale-95 border-emerald-400/40'
-        }`}
+        className="fixed bottom-[128px] left-4 z-40 flex items-center gap-2 rounded-2xl border border-teal-400/40 bg-teal-600 px-4 py-3 text-xs font-bold text-white shadow-xl ring-2 ring-white/60 transition-all duration-200 hover:bg-teal-700 active:scale-95 sm:text-sm"
       >
         <MessageCircle className="w-5 h-5" />
         <span>إرسال طلبية بالواتساب</span>

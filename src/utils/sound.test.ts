@@ -3,6 +3,7 @@ import {
   readCustomSoundFile,
   CUSTOM_SOUND_ACCEPT_ATTR,
   NOTIFICATION_SOUND_OPTIONS,
+  stopAllSounds,
 } from './sound';
 import type { CustomSoundFile } from '../types';
 
@@ -98,5 +99,22 @@ describe('readCustomSoundFile', () => {
     const file = makeAudioFile('my-ringtone.mp3', 500);
     const result: CustomSoundFile = await readCustomSoundFile(file);
     expect(result.fileName).toBe('my-ringtone.mp3');
+  });
+});
+
+describe('stopAllSounds (#107)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('is a no-op when nothing is playing (does not throw)', () => {
+    expect(() => stopAllSounds()).not.toThrow();
+  });
+
+  it('can be called multiple times safely', () => {
+    stopAllSounds();
+    stopAllSounds();
+    stopAllSounds();
+    // No assertion needed — just that it doesn't throw.
   });
 });

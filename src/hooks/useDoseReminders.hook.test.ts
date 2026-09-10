@@ -9,6 +9,7 @@ import { getTodayDateString } from '../utils/dateCalculations';
 // play audio or schedule OS notifications during tests.
 vi.mock('../utils/sound', () => ({
   playNotificationSound: vi.fn(),
+  stopAllSounds: vi.fn(),
 }));
 vi.mock('../utils/notifications', () => ({
   sendMedicationDoseReminder: vi.fn(),
@@ -53,6 +54,18 @@ function defaultOpts(overrides: Record<string, unknown> = {}) {
 }
 
 const FIRED_KEY = 'android_med_tracker_fired_reminders_v1';
+
+// Wave 13 #123: pin system time so `new Date().toISOString().slice(0,10)`
+// (used by the hook to build FIRED_KEY entries like `med-real:<today>`)
+// resolves to a deterministic date. Prevents midnight-UTC flake risk.
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('useDoseReminders', () => {
   beforeEach(() => {

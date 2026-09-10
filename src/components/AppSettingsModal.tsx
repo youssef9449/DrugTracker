@@ -1,4 +1,4 @@
-import { useState, useEffect, type FC, type FormEvent, type ChangeEvent } from 'react';
+import { useState, useEffect, useMemo, type FC, type FormEvent, type ChangeEvent } from 'react';
 import {
   X,
   Settings,
@@ -18,6 +18,8 @@ import {
   ZapOff,
 } from 'lucide-react';
 import { Medication, PharmacySettings } from '../types';
+import { Toggle } from './ui/Toggle';
+import { Modal } from './ui/Modal';
 import {
   cleanPhoneNumber,
   generatePharmacyOrderMessage,
@@ -25,7 +27,6 @@ import {
   calculateMedicationOrderQuantity,
   OrderItem,
   buildWhatsAppUrl,
-  buildWhatsAppAppUrl,
 } from '../utils/whatsapp';
 import { readCustomSoundFile, CUSTOM_SOUND_ACCEPT_ATTR } from '../utils/sound';
 import { normalizeArabicDigits } from '../utils/whatsapp';
@@ -82,7 +83,11 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   const [address, setAddress] = useState(settings.address || '');
   const [contactPhone, setContactPhone] = useState(settings.contactPhone || '');
 
-  // Synchronize state whenever modal opens or settings change externally.
+  // Synchronize state whenever modal opens. Intentionally only dep [isOpen]
+  // — if the parent passes a new settings object reference while the modal
+  // is already open, we must NOT reset the form (that would blow away
+  // in-progress edits). The latest settings is read from the closure at
+  // the moment the modal opens (audit #93).
   useEffect(() => {
     if (isOpen) {
       setPharmacyPhone(settings.pharmacyPhone || '');
@@ -91,7 +96,57 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
       setAddress(settings.address || '');
       setContactPhone(settings.contactPhone || '');
     }
-  }, [isOpen, settings]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  const formattedPhone = cleanPhoneNumber(pharmacyPhone);
+
+  // #111: extracted from an inline IIFE — the WhatsApp order-message
+  // preview computations. Memoized so they don't recompute on every
+  // keystroke in unrelated form fields. Must be before the `if (!isOpen)`
+  // early return (rules-of-hooks).
+  const { previewMsg, waUrl, appUrl } = useMemo(() => {
+    const orderItemsForMessage: OrderItem[] =
+      activeOrderItems && activeOrderItems.length > 0
+        ? activeOrderItems
+        : medications.map((m) => {
+            const { quantity } = calculateMedicationOrderQuantity(
+              m,
+              settings.defaultDurationDays,
+              settings.customQuantities
+            );
+            return {
+              name: m.name,
+              quantity,
+              unit: m.unit,
+              stripsPerBox: m.stripsPerBox,
+              pillsPerStrip: m.pillsPerStrip,
+              packageSize: m.packageSize,
+            };
+          });
+
+    const msg = generatePharmacyOrderMessage(
+      orderItemsForMessage,
+      customerCode,
+      address,
+      contactPhone
+    );
+
+    return {
+      previewMsg: msg,
+      waUrl: buildWhatsAppUrl(pharmacyPhone, msg),
+      appUrl: buildWhatsAppUrl(pharmacyPhone, msg, 'app'),
+    };
+  }, [
+    activeOrderItems,
+    medications,
+    settings.defaultDurationDays,
+    settings.customQuantities,
+    customerCode,
+    address,
+    contactPhone,
+    pharmacyPhone,
+  ]);
 
   if (!isOpen) return null;
 
@@ -126,10 +181,12 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
     onClose();
   };
 
-  const formattedPhone = cleanPhoneNumber(pharmacyPhone);
-
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-xs">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      label={isPharmacyOnly ? 'إعدادات الصيدلية' : 'إعدادات التطبيق'}
+    >
       <div
         className="w-full sm:max-w-lg bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col animate-in slide-in-from-bottom duration-200"
         dir="rtl"
@@ -197,20 +254,11 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     </div>
                   </div>
                   {onToggleAutoDeduct && (
-                    <button
-                      type="button"
-                      onClick={onToggleAutoDeduct}
-                      className={`w-10 h-5 rounded-full relative transition ${
-                        autoDeductEnabled ? 'bg-teal-600' : 'bg-slate-300'
-                      }`}
-                      aria-label="تبديل الخصم التلقائي اليومي"
-                    >
-                      <span
-                        className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition ${
-                          autoDeductEnabled ? 'right-0.5' : 'right-[18px]'
-                        }`}
-                      />
-                    </button>
+                    <Toggle
+                      checked={autoDeductEnabled}
+                      onChange={onToggleAutoDeduct}
+                      label="تبديل الخصم التلقائي اليومي"
+                    />
                   )}
                 </div>
                 <p className="text-[10px] text-slate-500 leading-relaxed border-t border-teal-100/80 pt-2">
@@ -241,20 +289,11 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     </div>
                   </div>
                   {onToggleNotifications && (
-                    <button
-                      type="button"
-                      onClick={onToggleNotifications}
-                      className={`w-10 h-5 rounded-full relative transition ${
-                        notificationsEnabled ? 'bg-teal-600' : 'bg-slate-300'
-                      }`}
-                      aria-label="تبديل التنبيهات"
-                    >
-                      <span
-                        className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition ${
-                          notificationsEnabled ? 'right-0.5' : 'right-[18px]'
-                        }`}
-                      />
-                    </button>
+                    <Toggle
+                      checked={notificationsEnabled}
+                      onChange={onToggleNotifications}
+                      label="تبديل التنبيهات"
+                    />
                   )}
                 </div>
 
@@ -282,20 +321,12 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     </div>
                   </div>
                   {onToggleCriticalStockAlerts && (
-                    <button
-                      type="button"
-                      onClick={onToggleCriticalStockAlerts}
-                      className={`w-10 h-5 rounded-full relative transition ${
-                        criticalStockAlertsEnabled ? 'bg-rose-600' : 'bg-slate-300'
-                      }`}
-                      aria-label="تبديل تنبيهات النفاذ الحرج"
-                    >
-                      <span
-                        className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition ${
-                          criticalStockAlertsEnabled ? 'right-0.5' : 'right-[18px]'
-                        }`}
-                      />
-                    </button>
+                    <Toggle
+                      checked={criticalStockAlertsEnabled}
+                      onChange={onToggleCriticalStockAlerts}
+                      label="تبديل تنبيهات النفاذ الحرج"
+                      color="rose"
+                    />
                   )}
                 </div>
 
@@ -323,20 +354,11 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     )}
                     <span className="text-xs font-bold text-slate-700">تأثيرات صوتية في التطبيق</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={onToggleSound}
-                    className={`w-10 h-5 rounded-full relative transition ${
-                      soundEnabled ? 'bg-teal-600' : 'bg-slate-300'
-                    }`}
-                    aria-label="تبديل التأثيرات الصوتية"
-                  >
-                    <span
-                      className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition ${
-                        soundEnabled ? 'right-0.5' : 'right-[18px]'
-                      }`}
-                    />
-                  </button>
+                  <Toggle
+                    checked={soundEnabled}
+                    onChange={onToggleSound}
+                    label="تبديل التأثيرات الصوتية"
+                  />
                 </div>
 
                 <hr className="border-teal-100" />
@@ -502,79 +524,47 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
             </div>
 
             {/* Live Preview of WhatsApp Message */}
-            {(() => {
-              const orderItemsForMessage: OrderItem[] = (activeOrderItems && activeOrderItems.length > 0)
-                ? activeOrderItems
-                : medications.map((m) => {
-                    const { quantity } = calculateMedicationOrderQuantity(
-                      m,
-                      settings.defaultDurationDays,
-                      settings.customQuantities
-                    );
-                    return {
-                      name: m.name,
-                      quantity,
-                      unit: m.unit,
-                      stripsPerBox: m.stripsPerBox,
-                      pillsPerStrip: m.pillsPerStrip,
-                      packageSize: m.packageSize,
-                    };
-                  });
+            <div className="bg-white text-slate-700 rounded-2xl p-3.5 text-xs space-y-2 font-mono border border-slate-200 shadow-sm">
+              <div className="flex items-center justify-between text-[11px] text-teal-800 font-bold">
+                <span className="flex items-center gap-1">
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  {activeOrderItems && activeOrderItems.length > 0
+                    ? 'معاينة طلب الأدوية المحددة في صفحة الشراء:'
+                    : 'معاينة رسالة الواتساب الموجهة للصيدلية:'}
+                </span>
+                <span className="text-slate-500">
+                  {formattedPhone ? `+${formattedPhone}` : 'لم يحدد الرقم بعد'}
+                </span>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-[11px] text-slate-700 leading-relaxed whitespace-pre-line select-text max-h-44 overflow-y-auto">
+                {previewMsg}
+              </div>
 
-              const previewMsg = generatePharmacyOrderMessage(
-                orderItemsForMessage,
-                customerCode,
-                address,
-                contactPhone
-              );
-
-              const waUrl = buildWhatsAppUrl(pharmacyPhone, previewMsg);
-              const appUrl = buildWhatsAppAppUrl(pharmacyPhone, previewMsg);
-
-              return (
-                <div className="bg-white text-slate-700 rounded-2xl p-3.5 text-xs space-y-2 font-mono border border-slate-200 shadow-sm">
-                  <div className="flex items-center justify-between text-[11px] text-teal-800 font-bold">
-                    <span className="flex items-center gap-1">
-                      <MessageSquare className="w-3.5 h-3.5" />
-                      {activeOrderItems && activeOrderItems.length > 0
-                        ? 'معاينة طلب الأدوية المحددة في صفحة الشراء:'
-                        : 'معاينة رسالة الواتساب الموجهة للصيدلية:'}
-                    </span>
-                    <span className="text-slate-500">
-                      {formattedPhone ? `+${formattedPhone}` : 'لم يحدد الرقم بعد'}
-                    </span>
-                  </div>
-                  <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-[11px] text-slate-700 leading-relaxed whitespace-pre-line select-text max-h-44 overflow-y-auto">
-                    {previewMsg}
-                  </div>
-
-                  {/* Test / Send WhatsApp Link Button */}
-                  {pharmacyPhone.trim() && (
-                    <div className="flex items-center gap-2 pt-1">
-                      <a
-                        href={waUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={() => {
-                          openWhatsAppLink(pharmacyPhone, previewMsg);
-                        }}
-                        className="flex-1 py-2.5 px-3 bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition shadow-sm"
-                      >
-                        <MessageCircle className="w-4 h-4" />
-                        <span>فتح واتساب الآن ({formattedPhone || pharmacyPhone})</span>
-                      </a>
-                      <a
-                        href={appUrl}
-                        className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-[11px] font-bold transition border border-slate-700 shrink-0"
-                        title="فتح عبر تطبيق واتساب مباشرة"
-                      >
-                        تطبيق الهاتف
-                      </a>
-                    </div>
-                  )}
+              {/* Test / Send WhatsApp Link Button */}
+              {pharmacyPhone.trim() && (
+                <div className="flex items-center gap-2 pt-1">
+                  <a
+                    href={waUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => {
+                      openWhatsAppLink(pharmacyPhone, previewMsg);
+                    }}
+                    className="flex-1 py-2.5 px-3 bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition shadow-sm"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    <span>فتح واتساب الآن ({formattedPhone || pharmacyPhone})</span>
+                  </a>
+                  <a
+                    href={appUrl}
+                    className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-[11px] font-bold transition border border-slate-700 shrink-0"
+                    title="فتح عبر تطبيق واتساب مباشرة"
+                  >
+                    تطبيق الهاتف
+                  </a>
                 </div>
-              );
-            })()}
+              )}
+            </div>
           </div>}
 
           {/* Submit Button */}
@@ -589,10 +579,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
           </div>
         </form>
       </div>
-    </div>
+    </Modal>
   );
 };
-
-// Backwards compatibility alias
-export { AppSettingsModal as PharmacySettingsModal };
-export type { AppSettingsModalProps as PharmacySettingsModalProps };

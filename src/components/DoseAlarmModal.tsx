@@ -2,6 +2,7 @@ import type { FC } from 'react';
 import { Bell, Check, Clock, X } from 'lucide-react';
 import { Medication, formatTimeArabic } from '../types';
 import { effectiveCurrentPills } from '../utils/dateCalculations';
+import { Modal } from './ui/Modal';
 
 interface DoseAlarmModalProps {
   isOpen: boolean;
@@ -21,10 +22,16 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
   // #18/#19: the in-app chime is played by useDoseReminders.triggerAlarm
   // (gated by soundEnabled), which is the SINGLE source — this component
   // no longer plays a chime on mount.
-  if (!isOpen || !medication) return null;
-
+  // The Modal wrapper handles role="dialog"/aria-modal, ESC-to-close,
+  // focus trap, and focus restoration (#67).
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
+    <Modal
+      isOpen={isOpen && Boolean(medication)}
+      onClose={onDismiss}
+      label="تنبيه موعد الجرعة"
+      variant="center"
+    >
+      {medication && (
       <div
         className="w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden border border-teal-200"
         dir="rtl"
@@ -103,6 +110,7 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
           </div>
         </div>
       </div>
-    </div>
+      )}
+    </Modal>
   );
 };

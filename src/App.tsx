@@ -7,13 +7,12 @@ import {
   DEFAULT_PHARMACY_SETTINGS,
   calculateMedicationStatus,
   CustomSoundFile,
-  MedicationStatus,
 } from './types';
 // Seed data — default 3 medications + 2 consumption logs shown on fresh
 // install. The file lives at src/data/initialData.ts (relative path).
 // See that file's header comment for the AI Studio cache-error
 // troubleshooting note.
-import { INITIAL_MEDICATIONS, INITIAL_LOGS } from './data/initialData';
+import { getInitialMedications, getInitialLogs } from './data/initialData';
 import { AndroidBottomNav, ActiveTab } from './components/AndroidBottomNav';
 import { AppHeader } from './components/AppHeader';
 import { LowStockBanner } from './components/LowStockBanner';
@@ -28,6 +27,7 @@ import { AndroidFab } from './components/AndroidFab';
 import { EmptyState } from './components/EmptyState';
 import { DoseAlarmModal } from './components/DoseAlarmModal';
 import { UpdatePrompt } from './components/UpdatePrompt';
+import { Toggle } from './components/ui/Toggle';
 import { playSuccessChime } from './utils/sound';
 import {
   saveGlobalCustomSound,
@@ -36,11 +36,8 @@ import {
 } from './utils/audioStore';
 import {
   requestNotificationPermission,
-  sendMedicineAlert,
-  sendCriticalStockAlert,
   sendTestAlertNotification,
   getNotificationPermission,
-  getNotificationPermissionSync,
 } from './utils/notifications';
 import {
   getTodayDateString,
@@ -51,18 +48,26 @@ import {
   settleAutoDeductToggle,
 } from './utils/dateCalculations';
 import { OrderItem } from './utils/whatsapp';
+import { consumeDose, settleAndAdjust } from './utils/medActions';
 import { useDoseReminders } from './hooks/useDoseReminders';
 import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
+import { usePersistentEffect } from './hooks/usePersistentEffect';
+import { useStockAlerts } from './hooks/useStockAlerts';
 import { initNativeBridge, registerBackButtonHandler, cleanupNativeListeners } from './native';
 import { migrateSchema } from './lib/migration';
 import { getInitialTab } from './lib/initialTab';
-import { Zap, ZapOff } from 'lucide-react';
+import { generateId } from './utils/id';
+import { loadJson, loadString, persist } from './utils/storage';
+import { TOAST_MESSAGES, PERSIST_FAILURE_MESSAGES } from './constants/uiStrings';
+import { TOAST_DURATION_MS, PHARMACY_PERSIST_DEBOUNCE_MS, DEFAULT_SNOOZE_MINUTES } from './utils/time';
+import { Zap, ZapOff, History, Settings } from 'lucide-react';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 const STORAGE_GLOBAL_AUTO_DEDUCT_KEY = 'android_med_tracker_auto_deduct_v1';
 const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
 const STORAGE_PHARMACY_KEY = 'android_med_tracker_pharmacy_v2';
 const SOUND_KEY = 'android_med_tracker_sound_v1';
+const NOTIFICATIONS_KEY = 'android_med_tracker_notifications_v1';
 // Font size preference: 'normal' or 'large'. Persisted so it survives
 // app relaunch. Applied as a CSS class on the phone-frame container.
 const FONT_SIZE_KEY = 'android_med_tracker_font_size_v1';
@@ -72,57 +77,6 @@ const FONT_SIZE_KEY = 'android_med_tracker_font_size_v1';
 // threshold itself is derived per-medication from warningThresholdDays
 // via getCriticalThresholdDays() — see src/types.ts.
 const CRITICAL_STOCK_ALERTS_KEY = 'android_med_tracker_critical_alerts_v1';
-
-/**
- * Persist a JSON-serializable value to localStorage, returning a
- * descriptive error string on failure (M1: previously every write was
- * wrapped in `try { … } catch {}` which silently dropped data on quota
- * exhaustion — the caller now decides whether to surface the failure).
- *
- * Returns null on success, or a short Arabic error message on failure.
- */
-function persistJson(key: string, value: unknown): string | null {
-  if (typeof localStorage === 'undefined') return null;
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-    return null;
-  } catch (err) {
-    const reason =
-      err instanceof DOMException && err.name === 'QuotaExceededError'
-        ? 'مساحة التخزين ممتلئة'
-        : 'تعذّر حفظ البيانات';
-    console.warn(`[App] localStorage.setItem(${key}) failed:`, err);
-    return reason;
-  }
-}
-
-/** Persist a plain string value with the same error-surfacing contract. */
-function persistString(key: string, value: string): string | null {
-  try {
-    localStorage.setItem(key, value);
-    return null;
-  } catch (err) {
-    const reason =
-      err instanceof DOMException && err.name === 'QuotaExceededError'
-        ? 'مساحة التخزين ممتلئة'
-        : 'تعذّر حفظ البيانات';
-    console.warn(`[App] localStorage.setItem(${key}) failed:`, err);
-    return reason;
-  }
-}
-
-/**
- * Severity rank for MedicationStatus, used by the alert effect to
- * decide whether a status change is a worsening (fire) or an
- * improvement (don't fire, just update the tracker). Higher = worse.
- * Declared at module scope so it's stable across renders (no dep needed).
- */
-const STATUS_RANK: Record<MedicationStatus, number> = {
-  sufficient: 0,
-  warning: 1,
-  critical: 2,
-  out_of_stock: 3,
-};
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(getInitialTab);
@@ -136,8 +90,14 @@ export default function App() {
   // hydration effect finishes, which gates the auto-deduction + alert
   // effects so they operate on the user's REAL saved state (not the
   // seed defaults) — see H8 in the audit fix.
-  const [medications, setMedications] = useState<Medication[]>(INITIAL_MEDICATIONS);
-  const [logs, setLogs] = useState<ConsumptionLog[]>(INITIAL_LOGS);
+  //
+  // Compute the seed date once (useState memoizes it — only runs on
+  // first render) and share it across both factory initializers so the
+  // medication lastSyncDate and the seed auto-deduction log dates are
+  // consistent even if midnight falls between the two calls.
+  const [seedToday] = useState(getTodayDateString);
+  const [medications, setMedications] = useState<Medication[]>(() => getInitialMedications(seedToday));
+  const [logs, setLogs] = useState<ConsumptionLog[]>(() => getInitialLogs(seedToday));
   const [pharmacySettings, setPharmacySettings] =
     useState<PharmacySettings>(DEFAULT_PHARMACY_SETTINGS);
   const [hydrated, setHydrated] = useState(false);
@@ -180,22 +140,6 @@ export default function App() {
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
   const restoreInFlightRef = useRef<Set<string>>(new Set());
   const refillUndoInFlightRef = useRef<Set<string>>(new Set());
-  const refillUndoTargetRef = useRef<Map<string, string>>(new Map());
-
-  useEffect(() => {
-    // Keep the guard through the commit that marks the targeted refill as
-    // reversed. This blocks duplicate clicks in the same render cycle while
-    // allowing a later refill for the same medication to be undone.
-    refillUndoTargetRef.current.forEach((refillId, medicationId) => {
-      const targetIsReversed = logs.some(
-        (log) => log.id === refillId && Boolean(log.reversedAt)
-      );
-      if (targetIsReversed) {
-        refillUndoTargetRef.current.delete(medicationId);
-        refillUndoInFlightRef.current.delete(medicationId);
-      }
-    });
-  }, [logs]);
 
   const { alarmingMedication, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
     medications,
@@ -224,10 +168,15 @@ export default function App() {
   }, [alarmingMedication, isAddModalOpen, refillMedication, isSettingsModalOpen, dismissAlarm]);
 
   // #38: on unmount, remove all Capacitor listeners so duplicate
-  // listeners don't accumulate across HMR re-initializations.
+  // listeners don't accumulate across HMR re-initializations. Also
+  // #113: clear any pending toast auto-dismiss timer.
   useEffect(() => {
     return () => {
       cleanupNativeListeners().catch(() => {});
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -241,99 +190,78 @@ export default function App() {
     // are applied before we read the (possibly migrated) keys.
     migrateSchema();
 
-    try {
-      const savedMeds = localStorage.getItem(STORAGE_MEDS_KEY);
-      if (savedMeds) {
-        const parsed = JSON.parse(savedMeds);
-        // #15: accept an empty array here (don't gate on
-        // parsed.length > 0). Otherwise, when the user deletes all
-        // medications, the persisted "[]" is ignored on next launch,
-        // the seed INITIAL_MEDICATIONS stays in state, and the
-        // hydration-gated persistence effect overwrites the user's
-        // "[]" with the seed meds — the empty-meds state is lost.
-        if (Array.isArray(parsed)) setMedications(parsed);
-      } else {
-        // First-ever open: no saved meds. The seed data is a demo —
-        // flag it so the auto-deduction + alert + reminder effects
-        // don't fire ghost notifications/alarms for seed meds.
-        setIsFirstRun(true);
-      }
-    } catch (err) {
-      console.warn('[App] failed to load saved medications:', err);
+    // Medications — use loadJson (silent fallback). The "first run"
+    // detection distinguishes "no key set" (null) from "empty array
+    // explicitly saved" (loadJson returns []).
+    const savedMedsRaw = localStorage.getItem(STORAGE_MEDS_KEY);
+    if (savedMedsRaw === null) {
+      // First-ever open: no saved meds. The seed data is a demo —
+      // flag it so the auto-deduction + alert + reminder effects
+      // don't fire ghost notifications/alarms for seed meds.
+      setIsFirstRun(true);
+    } else {
+      // #15: accept an empty array here (don't gate on length > 0).
+      // Otherwise, when the user deletes all medications, the persisted
+      // "[]" is ignored on next launch, the seed INITIAL_MEDICATIONS
+      // stays in state, and the hydration-gated persistence effect
+      // overwrites the user's "[]" with the seed meds.
+      const parsed = loadJson<Medication[] | null>(STORAGE_MEDS_KEY, null);
+      if (Array.isArray(parsed)) setMedications(parsed);
     }
 
-    try {
-      const savedLogs = localStorage.getItem(STORAGE_LOGS_KEY);
-      if (savedLogs) {
-        const parsed = JSON.parse(savedLogs);
-        if (Array.isArray(parsed)) setLogs(parsed);
-      }
-    } catch (err) {
-      console.warn('[App] failed to load saved logs:', err);
-    }
+    // Logs
+    const savedLogs = loadJson<ConsumptionLog[] | null>(STORAGE_LOGS_KEY, null);
+    if (Array.isArray(savedLogs)) setLogs(savedLogs);
 
-    try {
-      const savedPharmacy = localStorage.getItem(STORAGE_PHARMACY_KEY);
-      if (savedPharmacy) {
-        const parsed = JSON.parse(savedPharmacy);
-        if (parsed && typeof parsed === 'object') {
-          // Clear legacy default customerCode ('14739') and legacy default pharmacyName ('الصيدلية')
-          const loadedCustomerCode =
-            parsed.customerCode === '14739' ? '' : (parsed.customerCode || '');
-          const loadedPharmacyName =
-            parsed.pharmacyName === 'الصيدلية' ? '' : (parsed.pharmacyName || '');
-          const legacyPharmacy = loadedPharmacyName || loadedCustomerCode || parsed.pharmacyPhone
-            ? [{
-                id: 'pharmacy-legacy',
-                name: loadedPharmacyName || 'صيدلية محفوظة',
-                phone: parsed.pharmacyPhone || '',
-                customerCode: loadedCustomerCode,
-              }]
-            : [];
-          const pharmacies = Array.isArray(parsed.pharmacies) ? parsed.pharmacies : legacyPharmacy;
-          setPharmacySettings({
-            ...DEFAULT_PHARMACY_SETTINGS,
-            ...parsed,
+    // Pharmacy settings — custom parsing for the legacy customerCode/
+    // pharmacyName shim, so we read the raw object via loadJson then
+    // post-process.
+    const parsed = loadJson<Partial<PharmacySettings> & { pharmacies?: unknown } | null>(
+      STORAGE_PHARMACY_KEY,
+      null
+    );
+    if (parsed && typeof parsed === 'object') {
+      // Clear legacy default customerCode ('14739') and legacy default pharmacyName ('الصيدلية')
+      const loadedCustomerCode =
+        parsed.customerCode === '14739' ? '' : (parsed.customerCode || '');
+      const loadedPharmacyName =
+        parsed.pharmacyName === 'الصيدلية' ? '' : (parsed.pharmacyName || '');
+      const legacyPharmacy = loadedPharmacyName || loadedCustomerCode || parsed.pharmacyPhone
+        ? [{
+            id: 'pharmacy-legacy',
+            name: loadedPharmacyName || 'صيدلية محفوظة',
+            phone: parsed.pharmacyPhone || '',
             customerCode: loadedCustomerCode,
-            pharmacyName: loadedPharmacyName,
-            pharmacies,
-            selectedPharmacyId: parsed.selectedPharmacyId || pharmacies[0]?.id || '',
-          });
-        }
-      }
-    } catch (err) {
-      console.warn('[App] failed to load saved pharmacy settings:', err);
+          }]
+        : [];
+      const pharmacies = Array.isArray(parsed.pharmacies) ? parsed.pharmacies : legacyPharmacy;
+      setPharmacySettings({
+        ...DEFAULT_PHARMACY_SETTINGS,
+        ...parsed,
+        customerCode: loadedCustomerCode,
+        pharmacyName: loadedPharmacyName,
+        pharmacies,
+        selectedPharmacyId: parsed.selectedPharmacyId || pharmacies[0]?.id || '',
+      });
     }
 
-    try {
-      setSoundEnabled(localStorage.getItem(SOUND_KEY) !== 'false');
-    } catch (err) {
-      console.warn('[App] failed to load sound flag:', err);
+    // Sound flag — persisted as 'true'/'false' string; default true.
+    setSoundEnabled(loadString(SOUND_KEY, 'true') !== 'false');
+
+    // Notifications flag — persisted as 'true'/'false' string if user explicitly set it.
+    const savedNotifications = loadString(NOTIFICATIONS_KEY, '');
+    if (savedNotifications === 'true' || savedNotifications === 'false') {
+      setNotificationsEnabled(savedNotifications === 'true');
     }
 
-    try {
-      const savedFont = localStorage.getItem(FONT_SIZE_KEY);
-      if (savedFont === 'large') setFontScale('large');
-    } catch (err) {
-      console.warn('[App] failed to load font size:', err);
-    }
+    // Font size — persisted as 'normal'/'large' string.
+    if (loadString(FONT_SIZE_KEY, 'normal') === 'large') setFontScale('large');
 
-    try {
-      // Critical-stock alerts default to true. We persist as
-      // 'true'/'false' string. Default true means: if the user has
-      // never touched the toggle, they get the alerts.
-      const stored = localStorage.getItem(CRITICAL_STOCK_ALERTS_KEY);
-      setCriticalStockAlertsEnabled(stored !== 'false');
-    } catch (err) {
-      console.warn('[App] failed to load critical-alerts flag:', err);
-    }
+    // Critical-stock alerts — default true (persisted as 'true'/'false').
+    setCriticalStockAlertsEnabled(loadString(CRITICAL_STOCK_ALERTS_KEY, 'true') !== 'false');
 
-    try {
-      const storedAutoDeduct = localStorage.getItem(STORAGE_GLOBAL_AUTO_DEDUCT_KEY);
-      setGlobalAutoDeductEnabled(storedAutoDeduct !== 'false');
-    } catch (err) {
-      console.warn('[App] failed to load auto-deduct flag:', err);
-    }
+    // Global auto-deduct — default true.
+    setGlobalAutoDeductEnabled(loadString(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'true') !== 'false');
 
     // Global custom sound is persisted in IndexedDB (not localStorage)
     // because its base64 data URL can be several MB — see C4. The load
@@ -352,65 +280,57 @@ export default function App() {
         setHydrated(true);
       });
 
-    // Initialize the in-app notifications flag from a SYNC snapshot
-    // of the current permission state. On web this is
-    // Notification.permission; on native (Capacitor), the permission
-    // state is async-only, so we default to 'default' and let the
-    // async getNotificationPermission() call below update it.
-    //
-    // Note: this is intentionally a sync snapshot — the React state
-    // needs to be set during the first render so the bell icon
-    // shows the correct initial state. A second pass below (the
-    // async getNotificationPermission) updates it once the native
-    // permission state is known.
-    setNotificationsEnabled(
-      getNotificationPermissionSync() === 'granted'
-    );
+    // Initialize the in-app notifications flag from the async permission
+    // state if no preference has been explicitly saved yet by the user.
+    getNotificationPermission()
+      .then((perm) => {
+        if (localStorage.getItem(NOTIFICATIONS_KEY) === null) {
+          setNotificationsEnabled(perm === 'granted');
+
+          // Auto-request notification permission on the FIRST app open
+          // after install. The browser only shows the permission prompt
+          // when the permission state is 'default' (user hasn't been asked
+          // yet). Once the user grants or denies, the browser remembers
+          // the decision and won't re-show the prompt. If the user denied
+          // permission, this becomes a no-op; the bell button in
+          // AppHeader then takes the user to OS settings to re-enable.
+          //
+          // Auto-requesting on mount is recommended by the Web Push API
+          // spec because it ensures the prompt shows after the user has
+          // had a chance to see the app's value (which is now true on
+          // first open, since the user has just installed it).
+          //
+          // On Android 13+ (Capacitor), this triggers the OS
+          // POST_NOTIFICATIONS permission dialog via
+          // LocalNotifications.requestPermissions(). On older Android,
+          // this is a no-op (notifications allowed by default).
+          if (perm === 'default') {
+            requestNotificationPermission()
+              .then((granted) => {
+                if (localStorage.getItem(NOTIFICATIONS_KEY) === null) {
+                  setNotificationsEnabled(granted);
+                }
+              })
+              .catch((err) => {
+                console.warn('[App] Auto-request notification permission failed:', err);
+              });
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('[App] getNotificationPermission failed:', err);
+      });
 
     // Initialize the Capacitor native bridge (status bar color, back
     // button). No-op on the web — see src/native.ts.
     initNativeBridge().catch((err) => {
       console.warn('[App] Native bridge init failed:', err);
     });
-
-    // On native (Capacitor), get the real async permission state
-    // and update the in-app flag if it differs from the sync
-    // snapshot above.
-    getNotificationPermission()
-      .then((perm) => {
-        setNotificationsEnabled(perm === 'granted');
-      })
-      .catch((err) => {
-        console.warn('[App] getNotificationPermission failed:', err);
-      });
-
-    // Auto-request notification permission on the FIRST app open
-    // after install. The browser only shows the permission prompt
-    // when the permission state is 'default' (user hasn't been asked
-    // yet). Once the user grants or denies, the browser remembers
-    // the decision and won't re-show the prompt. If the user denied
-    // permission, this becomes a no-op; the bell button in
-    // AppHeader then takes the user to OS settings to re-enable.
-    //
-    // Auto-requesting on mount is recommended by the Web Push API
-    // spec because it ensures the prompt shows after the user has
-    // had a chance to see the app's value (which is now true on
-    // first open, since the user has just installed it).
-    //
-    // On Android 13+ (Capacitor), this triggers the OS
-    // POST_NOTIFICATIONS permission dialog via
-    // LocalNotifications.requestPermissions(). On older Android,
-    // this is a no-op (notifications allowed by default).
-    if (getNotificationPermissionSync() === 'default') {
-      requestNotificationPermission()
-        .then((granted) => {
-          setNotificationsEnabled(granted);
-        })
-        .catch((err) => {
-          console.warn('[App] Auto-request notification permission failed:', err);
-        });
-    }
   }, []);
+
+  // #113: track the toast auto-dismiss timer so it can be cleared on
+  // unmount (prevents a setToast-after-unmount warning / leak).
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // showToast is defined with useCallback BEFORE the persistence
   // effects so those effects can surface write failures (M1: previously
@@ -420,114 +340,107 @@ export default function App() {
   const showToast = useCallback((message: string) => {
     const id = Date.now();
     setToast({ id, message });
-    setTimeout(() => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = setTimeout(() => {
       setToast((curr) => (curr?.id === id ? null : curr));
-    }, 4000);
+      toastTimerRef.current = null;
+    }, TOAST_DURATION_MS);
   }, []);
 
   // ─────────────────────────────────────────────────────────────
-  // Persistence effects (M1): each write goes through persistJson /
-  // persistString, which log the failure and return a short Arabic
-  // error message. We surface that message via a toast so the user
+  // Persistence effects (M1): each write goes through the
+  // usePersistentEffect hook (utils/storage.ts + hooks/usePersistentEffect.ts),
+  // which surfaces quota failures via a one-shot toast so the user
   // knows their data wasn't saved (instead of silently dropping it).
-  // A per-effect "already warned" ref avoids spamming toasts on every
-  // re-render that re-attempts the same failing write.
+  // A per-key "already warned" ref inside the hook avoids spamming
+  // toasts on every re-render that re-attempts the same failing write.
+  //
+  // All effects are gated on `hydrated` so the first mount does NOT
+  // write the seed defaults (which would briefly overwrite the user's
+  // real data before the hydration effect's setState arrives).
   // ─────────────────────────────────────────────────────────────
-  const warnedMedsRef = useRef(false);
-  useEffect(() => {
-    // H8-adjacent: do NOT persist until hydration has loaded the saved
-    // state. Otherwise on the first mount we'd write the seed
-    // INITIAL_MEDICATIONS to localStorage, briefly overwriting the
-    // user's real data before the hydration effect's setMedications
-    // re-render arrives — a crash in that window would lose data.
-    if (!hydrated) return;
-    const err = persistJson(STORAGE_MEDS_KEY, medications);
-    if (err && !warnedMedsRef.current) {
-      warnedMedsRef.current = true;
-      showToast(`${err} — قد لا يتم حفظ تعديلاتك على الأدوية.`);
-    } else if (!err) {
-      warnedMedsRef.current = false;
-    }
-  }, [medications, showToast, hydrated]);
+  usePersistentEffect({
+    storageKey: STORAGE_MEDS_KEY,
+    value: medications,
+    enabled: hydrated,
+    failureMessage: PERSIST_FAILURE_MESSAGES.meds,
+    showToast,
+  });
 
-  const warnedLogsRef = useRef(false);
-  useEffect(() => {
-    if (!hydrated) return;
-    const err = persistJson(STORAGE_LOGS_KEY, logs);
-    if (err && !warnedLogsRef.current) {
-      warnedLogsRef.current = true;
-      showToast(`${err} — قد لا يتم حفظ سجل الاستهلاك.`);
-    } else if (!err) {
-      warnedLogsRef.current = false;
-    }
-  }, [logs, showToast, hydrated]);
+  usePersistentEffect({
+    storageKey: STORAGE_LOGS_KEY,
+    value: logs,
+    enabled: hydrated,
+    failureMessage: PERSIST_FAILURE_MESSAGES.logs,
+    showToast,
+  });
 
   // M12: pharmacy settings are written via a 400ms debounce so rapid
   // toggles of the 30/60-day duration (which calls onUpdateSettings on
   // every click) don't fire a localStorage write per click. The last
   // value within the debounce window wins.
-  const warnedPharmacyRef = useRef(false);
-  useEffect(() => {
-    if (!hydrated) return;
-    const handle = window.setTimeout(() => {
-      const err = persistJson(STORAGE_PHARMACY_KEY, pharmacySettings);
-      if (err && !warnedPharmacyRef.current) {
-        warnedPharmacyRef.current = true;
-        showToast(`${err} — قد لا يتم حفظ إعدادات الصيدلية.`);
-      } else if (!err) {
-        warnedPharmacyRef.current = false;
-      }
-    }, 400);
-    return () => window.clearTimeout(handle);
-  }, [pharmacySettings, showToast, hydrated]);
+  usePersistentEffect({
+    storageKey: STORAGE_PHARMACY_KEY,
+    value: pharmacySettings,
+    enabled: hydrated,
+    debounceMs: PHARMACY_PERSIST_DEBOUNCE_MS,
+    failureMessage: PERSIST_FAILURE_MESSAGES.pharmacy,
+    showToast,
+  });
 
-  const warnedSoundRef = useRef(false);
-  useEffect(() => {
-    if (!hydrated) return;
-    const err = persistString(SOUND_KEY, String(soundEnabled));
-    if (err && !warnedSoundRef.current) {
-      warnedSoundRef.current = true;
-      showToast(`${err} — قد لا يتم حفظ تفضيل الصوت.`);
-    } else if (!err) {
-      warnedSoundRef.current = false;
-    }
-  }, [soundEnabled, showToast, hydrated]);
+  usePersistentEffect({
+    storageKey: SOUND_KEY,
+    value: String(soundEnabled),
+    json: false,
+    enabled: hydrated,
+    failureMessage: PERSIST_FAILURE_MESSAGES.sound,
+    showToast,
+  });
+
+  usePersistentEffect({
+    storageKey: NOTIFICATIONS_KEY,
+    value: String(notificationsEnabled),
+    json: false,
+    enabled: hydrated,
+    failureMessage: PERSIST_FAILURE_MESSAGES.notifications,
+    showToast,
+  });
 
   // Persist font size preference so it survives app relaunch, and toggle root scaling.
+  // This effect stays inline (not collapsed into usePersistentEffect) because it
+  // has a CSS-class side effect that must run BEFORE the hydrated gate (so the
+  // class is applied on first render even before hydration completes), and it
+  // uses console.warn (not toast) on failure.
   useEffect(() => {
     if (typeof document !== 'undefined') {
       document.documentElement.classList.toggle('font-scale-large', fontScale === 'large');
     }
     if (!hydrated) return;
-    const err = persistString(FONT_SIZE_KEY, fontScale);
+    const err = persist(FONT_SIZE_KEY, fontScale, { json: false });
     if (err) {
       console.warn('[App] failed to persist font size:', err);
     }
   }, [fontScale, hydrated]);
 
-  const warnedCriticalRef = useRef(false);
-  useEffect(() => {
-    if (!hydrated) return;
-    const err = persistString(CRITICAL_STOCK_ALERTS_KEY, String(criticalStockAlertsEnabled));
-    if (err && !warnedCriticalRef.current) {
-      warnedCriticalRef.current = true;
-      showToast(`${err} — قد لا يتم حفظ تفضيل تنبيه النفاذ الحرج.`);
-    } else if (!err) {
-      warnedCriticalRef.current = false;
-    }
-  }, [criticalStockAlertsEnabled, showToast, hydrated]);
+  usePersistentEffect({
+    storageKey: CRITICAL_STOCK_ALERTS_KEY,
+    value: String(criticalStockAlertsEnabled),
+    json: false,
+    enabled: hydrated,
+    failureMessage: PERSIST_FAILURE_MESSAGES.critical,
+    showToast,
+  });
 
-  const warnedAutoDeductRef = useRef(false);
-  useEffect(() => {
-    if (!hydrated) return;
-    const err = persistString(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, String(globalAutoDeductEnabled));
-    if (err && !warnedAutoDeductRef.current) {
-      warnedAutoDeductRef.current = true;
-      showToast(`${err} — قد لا يتم حفظ تفضيل الخصم التلقائي.`);
-    } else if (!err) {
-      warnedAutoDeductRef.current = false;
-    }
-  }, [globalAutoDeductEnabled, showToast, hydrated]);
+  usePersistentEffect({
+    storageKey: STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
+    value: String(globalAutoDeductEnabled),
+    json: false,
+    enabled: hydrated,
+    failureMessage: PERSIST_FAILURE_MESSAGES.autoDeduct,
+    showToast,
+  });
 
   // Persist global custom sound to IndexedDB (C4: storing the base64
   // data URL in localStorage risked blowing the ~5 MB quota and silently
@@ -538,15 +451,18 @@ export default function App() {
   useEffect(() => {
     if (!hydrated) return;
     if (globalCustomSound) {
-      saveGlobalCustomSound(globalCustomSound).catch((err) => {
-        console.warn('[App] saveGlobalCustomSound failed:', err);
+      // #94: surface IDB save failures to the user (was silent console.warn).
+      saveGlobalCustomSound(globalCustomSound).catch(() => {
+        showToast(PERSIST_FAILURE_MESSAGES.customSound);
       });
     } else {
-      deleteGlobalCustomSound().catch((err) => {
-        console.warn('[App] deleteGlobalCustomSound failed:', err);
+      deleteGlobalCustomSound().catch(() => {
+        // Deletion failure is non-critical — the orphaned record will be
+        // overwritten on the next save. console.warn for dev visibility.
+        console.warn('[App] deleteGlobalCustomSound failed');
       });
     }
-  }, [globalCustomSound, hydrated]);
+  }, [globalCustomSound, hydrated, showToast]);
 
   // ─────────────────────────────────────────────────────────────
   // Auto-deduction: runs ONCE per session, AFTER hydration completes
@@ -581,7 +497,7 @@ export default function App() {
       setMedications(result.updatedMeds);
       setLogs((prev) => [...result.newLogs, ...prev]);
       const totalPills = result.deductedSummary.reduce((sum, item) => sum + item.pillsDeducted, 0);
-      showToast(`تم الخصم التلقائي للاستهلاك: خصم ${totalPills} قرص لمرور الأيام.`);
+      showToast(TOAST_MESSAGES.autoDeductSummary(totalPills));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated]);
@@ -594,79 +510,16 @@ export default function App() {
   // id keyed by med.id (H6 — no more collisions between same-named
   // medications).
   //
-  // We track the last-alerted status per med in a ref and compare
-  // severity ranks (out_of_stock > critical > warning > sufficient).
-  // We only fire when the new status is STRICTLY WORSE than the
-  // previously-alerted one — so a partial refill that improves a med
-  // from critical→warning does NOT fire a spurious "warning" alert.
-  // When a med improves to 'sufficient', we clear the tracker so the
-  // next crossing alerts again. When notifications are toggled off,
-  // we clear the tracker so re-enabling fires for current alertable
-  // meds again.
-  // ─────────────────────────────────────────────────────────────
-  const lastAlertedStatusRef = useRef<Map<string, MedicationStatus>>(new Map());
-  useEffect(() => {
-    if (!hydrated) return;
-    // First-run: don't fire ghost notifications for seed data.
-    if (isFirstRun) return;
-
-    // When notifications are off, reset the tracker so the next time
-    // they're turned on, current alertable meds fire again.
-    if (!notificationsEnabled) {
-      lastAlertedStatusRef.current.clear();
-      return;
-    }
-
-    const tracker = lastAlertedStatusRef.current;
-    for (const med of medications) {
-      const { status, daysLeft } = calculateMedicationStatus(med);
-      // The dynamic balance — what the user actually has right now, not
-      // the stale stored snapshot. Used in the notification body text so
-      // it stays correct even if the app was closed for many days.
-      const effPills = effectiveCurrentPills(med);
-      const prev = tracker.get(med.id);
-
-      // Med is healthy → clear its tracker so the next worsening alerts.
-      if (status === 'sufficient') {
-        tracker.delete(med.id);
-        continue;
-      }
-
-      // Already alerted for this exact (or a worse) status → don't
-      // re-fire. `prev` records the worst status we've already alerted
-      // for; if the new status is the same or better, skip.
-      if (prev !== undefined && STATUS_RANK[status] <= STATUS_RANK[prev]) {
-        // Update the tracker if the status improved (so a later
-        // worsening from the new, better baseline fires again).
-        if (STATUS_RANK[status] < STATUS_RANK[prev]) {
-          tracker.set(med.id, status);
-        }
-        continue;
-      }
-
-      // New med (prev undefined) OR status strictly worsened → fire the
-      // appropriate alert(s) for the new status.
-      if (status === 'out_of_stock') {
-        if (criticalStockAlertsEnabled) {
-          sendCriticalStockAlert(med.id, med.name, 0, 0, med.unit || 'قرص');
-        }
-        // Also send the general low-stock alert so it appears as its
-        // own drawer entry (different notification id).
-        sendMedicineAlert(med.id, med.name, 0, 0);
-      } else if (status === 'critical') {
-        if (criticalStockAlertsEnabled) {
-          sendCriticalStockAlert(med.id, med.name, daysLeft, effPills, med.unit || 'قرص');
-        }
-        // Critical is a subset of the warning window — also send the
-        // general alert (separate drawer entry, less urgent wording).
-        sendMedicineAlert(med.id, med.name, daysLeft, effPills);
-      } else if (status === 'warning') {
-        sendMedicineAlert(med.id, med.name, daysLeft, effPills);
-      }
-
-      tracker.set(med.id, status);
-    }
-  }, [medications, notificationsEnabled, criticalStockAlertsEnabled, hydrated, isFirstRun]);
+  // Extracted into useStockAlerts for testability (#87). The hook owns
+  // the STATUS_RANK map + the lastAlertedStatusRef tracker. See
+  // src/hooks/useStockAlerts.ts for the full severity-rank logic.
+  useStockAlerts({
+    medications,
+    notificationsEnabled,
+    criticalStockAlertsEnabled,
+    hydrated,
+    isFirstRun,
+  });
 
   // ─────────────────────────────────────────────────────────────
   // One-shot critical-alarm scheduling — extracted into a hook for
@@ -696,7 +549,7 @@ export default function App() {
     const restoreKey = `${medicationId}:${today}`;
     if (restoreInFlightRef.current.has(restoreKey)) return false;
     if (med.autoDeductEnabled === false) {
-      showToast(`الخصم التلقائي متوقف لدواء "${med.name}"؛ لا توجد جرعة مستحقة للاسترجاع.`);
+      showToast(TOAST_MESSAGES.autoDeductOff(med.name));
       return false;
     }
     if (logs.some((log) =>
@@ -704,29 +557,20 @@ export default function App() {
       log.type === 'skipped_day' &&
       log.date === today
     )) {
-      showToast(`تم استرجاع جرعة "${med.name}" اليوم بالفعل.`);
+      showToast(TOAST_MESSAGES.doseAlreadyRestored(med.name));
       return false;
     }
     restoreInFlightRef.current.add(restoreKey);
     const restoredAmount = med.dailyDose;
-    // Settle the snapshot at the current effective balance, then add the
-    // one dose that was skipped today.
-    const effPills = effectiveCurrentPills(med, today);
-    const newSnapshot = effPills + restoredAmount;
+    // Shared settle+adjust logic (audit #78): settle at effPills, add the
+    // restored dose, set lastSyncDate=today.
+    const { updatedMed } = settleAndAdjust(med, restoredAmount, today);
     setMedications((prev) =>
-      prev.map((m) =>
-        m.id === medicationId
-          ? {
-              ...m,
-              currentPills: newSnapshot,
-              lastSyncDate: today,
-            }
-          : m
-      )
+      prev.map((m) => (m.id === medicationId ? updatedMed : m))
     );
     setLogs((prev) => [
       {
-        id: 'restore-' + Date.now(),
+        id: generateId('restore'),
         medicationId: med.id,
         medicationName: med.name,
         type: 'skipped_day',
@@ -744,27 +588,19 @@ export default function App() {
   const handleConfirmRefill = (medicationId: string, addedPills: number) => {
     const med = medications.find((m) => m.id === medicationId);
     if (!med || addedPills <= 0) return;
+    // A new refill creates a fresh undoable log entry, so clear the
+    // dedup guard that blocked rapid double-undo of the previous refill.
+    refillUndoInFlightRef.current.delete(medicationId);
     const today = getTodayDateString();
-    // Settle the snapshot at the current effective balance (deduct the
-    // elapsed days at the OLD dose), then add the refill amount on top.
-    // This way the new snapshot starts projecting from today with the
-    // fresh supply — clean, no retroactive consumption of the new pills.
-    const effPills = effectiveCurrentPills(med, today);
-    const newSnapshot = effPills + addedPills;
+    // Shared settle+adjust logic (audit #78): settle at effPills, add the
+    // refill amount, set lastSyncDate=today.
+    const { updatedMed } = settleAndAdjust(med, addedPills, today);
     setMedications((prev) =>
-      prev.map((m) =>
-        m.id === medicationId
-          ? {
-              ...m,
-              currentPills: newSnapshot,
-              lastSyncDate: today,
-            }
-          : m
-      )
+      prev.map((m) => (m.id === medicationId ? updatedMed : m))
     );
     setLogs((prev) => [
       {
-        id: 'refill-' + Date.now(),
+        id: generateId('refill'),
         medicationId: med.id,
         medicationName: med.name,
         type: 'refill',
@@ -791,7 +627,16 @@ export default function App() {
     );
     if (!med || !refill) return;
     refillUndoInFlightRef.current.add(medicationId);
-    refillUndoTargetRef.current.set(medicationId, refill.id);
+
+    // Clear the guard after the current event-loop tick. This blocks a
+    // rapid double-click (same tick — the timeout hasn't fired yet) while
+    // allowing a legitimate subsequent undo of the NEXT refill (after the
+    // timeout fires and the state has updated). React's act() in tests
+    // flushes state updates but NOT setTimeout (a macrotask), so the guard
+    // stays set between synchronous fireEvent calls.
+    setTimeout(() => {
+      refillUndoInFlightRef.current.delete(medicationId);
+    }, 0);
 
     const today = getTodayDateString();
     const { updatedMed, reversedAmount } = reverseRefill(med, refill.amount, today);
@@ -802,7 +647,7 @@ export default function App() {
     );
     setLogs((prev) => [
       {
-        id: 'refill-undo-' + Date.now(),
+        id: generateId('refill-undo'),
         medicationId: med.id,
         medicationName: med.name,
         type: 'refill_undo',
@@ -814,7 +659,7 @@ export default function App() {
       },
       ...prev.map((log) => log.id === refill.id ? { ...log, reversedAt: undoTimestamp } : log),
     ]);
-    showToast(`تم التراجع عن تعبئة "${med.name}".`);
+    showToast(TOAST_MESSAGES.refillUndone(med.name));
     if (soundEnabled) playSuccessChime();
   };
 
@@ -1071,66 +916,33 @@ export default function App() {
     }
     try {
       await sendTestAlertNotification(globalCustomSound);
-      showToast('تم إرسال إشعار تجريبي وتشغيل صوت التنبيه بنجاح! 🔔');
+      showToast(TOAST_MESSAGES.testNotificationSent);
     } catch (err) {
       console.warn('[App] Failed to send test alert notification:', err);
-      showToast('تم تشغيل صوت التنبيه التجريبي بنجاح! 🔔');
+      showToast(TOAST_MESSAGES.testNotificationSoundOnly);
     }
   };
 
 
   const handleTakeDoseFromAlarm = (med: Medication) => {
-    // Consume-pill feature: actually subtract the dose from the balance,
-    // mark the med as consumed today (blocks auto-deduction), and log it.
     const today = getTodayDateString();
-    // Use the dynamic balance for the dose-amount calculation: if the
-    // app was closed for many days, the effective balance may already
-    // be 0, in which case the consume action is a no-op.
-    const effPills = effectiveCurrentPills(med, today);
-    const doseAmount = Math.min(med.dailyDose, effPills);
-    if (doseAmount > 0) {
-      // The settle delta: deduct from the stored snapshot, not from
-      // effPills. If the snapshot is 60 but effPills is 42 (18 days
-      // elapsed), we want to deduct doseAmount AND reset lastSyncDate
-      // to today — effectively re-settling the snapshot at the live
-      // balance minus the consumed dose. The cleanest way is to
-      // subtract doseAmount from effPills and set that as the new
-      // snapshot, with lastSyncDate = today.
-      const newSnapshot = Math.max(0, effPills - doseAmount);
+    // Shared consume-dose logic (audit #77): settle at effPills, deduct the
+    // dose (clamped at 0), mark lastConsumedDate=today, produce dose_taken log.
+    const { updatedMed, doseAmount, log } = consumeDose(med, 'alarm', today);
+    if (updatedMed && log) {
       setMedications((prev) =>
-        prev.map((m) =>
-          m.id === med.id
-            ? {
-                ...m,
-                currentPills: newSnapshot,
-                lastConsumedDate: today,
-                lastSyncDate: today,
-              }
-            : m
-        )
+        prev.map((m) => (m.id === med.id ? updatedMed : m))
       );
-      setLogs((prev) => [
-        {
-          id: 'consume-' + Date.now(),
-          medicationId: med.id,
-          medicationName: med.name,
-          type: 'dose_taken',
-          amount: -doseAmount,
-          date: today,
-          timestamp: new Date().toISOString(),
-          description: `تناول جرعة من التنبيه (-${doseAmount} ${med.unit})`,
-        },
-        ...prev,
-      ]);
+      setLogs((prev) => [log, ...prev]);
     }
     dismissAlarm();
-    showToast(`تم تسجيل جرعة "${med.name}" (-${doseAmount} ${med.unit}). لن يتم الخصم التلقائي اليوم.`);
+    showToast(TOAST_MESSAGES.doseTaken(med.name, doseAmount, med.unit));
     if (soundEnabled) playSuccessChime();
   };
 
   const handleSnoozeFromAlarm = (med: Medication) => {
-    snoozeAlarm(10);
-    showToast(`تم تأجيل تنبيه "${med.name}" عشر دقائق`);
+    snoozeAlarm(DEFAULT_SNOOZE_MINUTES);
+    showToast(TOAST_MESSAGES.doseSnoozed(med.name));
   };
 
   // Consume-pill feature: manually consume a dose from the card.
@@ -1142,50 +954,74 @@ export default function App() {
     const today = getTodayDateString();
     // If already consumed today, don't double-consume.
     if (med.lastConsumedDate === today) {
-      showToast(`تم تناول جرعة "${med.name}" اليوم بالفعل.`);
+      showToast(TOAST_MESSAGES.doseAlreadyTaken(med.name));
       return;
     }
-    // Use the dynamic balance for the dose-amount calculation: if the
-    // app was closed for many days, the effective balance may already
-    // be 0, in which case the consume action is a no-op.
-    const effPills = effectiveCurrentPills(med, today);
-    const doseAmount = Math.min(med.dailyDose, effPills);
+    // Shared consume-dose logic (audit #77).
+    const { updatedMed, doseAmount, log } = consumeDose(med, 'manual', today);
     if (doseAmount <= 0) return;
-    // Re-settle the snapshot at (effPills - doseAmount), with
-    // lastSyncDate = today. This matches the behavior in
-    // handleTakeDoseFromAlarm.
-    const newSnapshot = Math.max(0, effPills - doseAmount);
-    setMedications((prev) =>
-      prev.map((m) =>
-        m.id === medicationId
-          ? {
-              ...m,
-              currentPills: newSnapshot,
-              lastConsumedDate: today,
-              lastSyncDate: today,
-            }
-          : m
-      )
-    );
-    setLogs((prev) => [
-      {
-        id: 'consume-' + Date.now(),
-        medicationId: med.id,
-        medicationName: med.name,
-        type: 'dose_taken',
-        amount: -doseAmount,
-        date: today,
-        timestamp: new Date().toISOString(),
-        description: `تناول جرعة يدوياً (-${doseAmount} ${med.unit})`,
-      },
-      ...prev,
-    ]);
-    showToast(`تم تناول جرعة "${med.name}" (-${doseAmount} ${med.unit}). لن يتم الخصم التلقائي اليوم.`);
+    if (updatedMed && log) {
+      setMedications((prev) =>
+        prev.map((m) => (m.id === medicationId ? updatedMed : m))
+      );
+      setLogs((prev) => [log, ...prev]);
+    }
+    showToast(TOAST_MESSAGES.doseTaken(med.name, doseAmount, med.unit));
     if (soundEnabled) playSuccessChime();
   };
 
+  // #79: extracted from two byte-identical inline handlers passed to
+  // AppHeader and AppSettingsModal. useCallback so both props get the
+  // same stable reference.
+  const handleToggleCriticalStockAlerts = useCallback(() => {
+    const next = !criticalStockAlertsEnabled;
+    setCriticalStockAlertsEnabled(next);
+    if (next && !notificationsEnabled) {
+      setNotificationsEnabled(true);
+    }
+    if (soundEnabled) playSuccessChime();
+    showToast(
+      next
+        ? TOAST_MESSAGES.criticalAlertsOn
+        : TOAST_MESSAGES.criticalAlertsOff
+    );
+  }, [criticalStockAlertsEnabled, notificationsEnabled, soundEnabled, showToast]);
+
+  // #88: Single memoized medications-with-status array. Previously
+  // calculateMedicationStatus(med) was recomputed in 4 separate memos
+  // (filteredMedications, alertsCount, sufficientCount, totalPillsCount)
+  // + inside LowStockBanner (3x per med). Now all derive from this one.
+  const medicationsWithStatus = useMemo(
+    () =>
+      medications.map((med) => ({
+        med,
+        statusInfo: calculateMedicationStatus(med),
+      })),
+    [medications]
+  );
+
+  // #89: Precompute a Map<medId, lastRefillLog> so the per-card render
+  // doesn't call logs.find() O(meds×logs) per render. Previously this was
+  // an inline IIFE inside the MedicationCard.map.
+  const lastRefillByMed = useMemo(() => {
+    const map = new Map<string, ConsumptionLog>();
+    for (const log of logs) {
+      if (
+        log.type === 'refill' &&
+        log.amount > 0 &&
+        !log.reversedAt
+      ) {
+        // logs are newest-first; keep the FIRST (latest) matching log per med.
+        if (!map.has(log.medicationId)) {
+          map.set(log.medicationId, log);
+        }
+      }
+    }
+    return map;
+  }, [logs]);
+
   const filteredMedications = useMemo(() => {
-    return medications.filter((med) => {
+    return medicationsWithStatus.filter(({ med, statusInfo }) => {
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchName = med.name.toLowerCase().includes(q);
@@ -1193,29 +1029,33 @@ export default function App() {
         const matchNotes = med.notes?.toLowerCase().includes(q) || false;
         if (!matchName && !matchCat && !matchNotes) return false;
       }
-      const { status } = calculateMedicationStatus(med);
+      const { status } = statusInfo;
       if (filter === 'alerts') return status === 'out_of_stock' || status === 'critical' || status === 'warning';
       if (filter === 'sufficient') return status === 'sufficient';
       return true;
-    });
-  }, [medications, searchQuery, filter]);
+    }).map(({ med }) => med);
+  }, [medicationsWithStatus, searchQuery, filter]);
 
-  const alertsCount = useMemo(() => {
-    return medications.filter((m) => {
-      const { status } = calculateMedicationStatus(m);
-      return status === 'out_of_stock' || status === 'critical' || status === 'warning';
-    }).length;
-  }, [medications]);
+  const alertsCount = useMemo(
+    () => medicationsWithStatus.filter(({ statusInfo }) =>
+      statusInfo.status === 'out_of_stock' ||
+      statusInfo.status === 'critical' ||
+      statusInfo.status === 'warning'
+    ).length,
+    [medicationsWithStatus]
+  );
 
-  const sufficientCount = useMemo(() => {
-    return medications.filter((m) => calculateMedicationStatus(m).status === 'sufficient').length;
-  }, [medications]);
+  const sufficientCount = useMemo(
+    () => medicationsWithStatus.filter(({ statusInfo }) => statusInfo.status === 'sufficient').length,
+    [medicationsWithStatus]
+  );
 
-  const totalPillsCount = useMemo(() => {
+  const totalPillsCount = useMemo(
     // Sum the DYNAMIC balances, not the stored snapshots, so the count
     // shown in the UI header / total reflects the projected live state.
-    return medications.reduce((acc, m) => acc + effectiveCurrentPills(m), 0);
-  }, [medications]);
+    () => medications.reduce((acc, m) => acc + effectiveCurrentPills(m), 0),
+    [medications]
+  );
 
   const openAdd = () => {
     setEditingMedication(null);
@@ -1253,19 +1093,7 @@ export default function App() {
           notificationsEnabled={notificationsEnabled}
           onToggleNotifications={handleToggleNotifications}
           criticalStockAlertsEnabled={criticalStockAlertsEnabled}
-          onToggleCriticalStockAlerts={() => {
-            const next = !criticalStockAlertsEnabled;
-            setCriticalStockAlertsEnabled(next);
-            if (next && !notificationsEnabled) {
-              setNotificationsEnabled(true);
-            }
-            if (soundEnabled) playSuccessChime();
-            showToast(
-              next
-                ? 'تم تفعيل تنبيهات النفاذ الحرج ⚠️ (إشعار فوري عند اقتراب نفاد أي دواء أو نفاذه — حسب إعداد كل دواء)'
-                : 'تم إيقاف تنبيهات النفاذ الحرج'
-            );
-          }}
+          onToggleCriticalStockAlerts={handleToggleCriticalStockAlerts}
           isPhoneFrame={isPhoneFrame}
           onTogglePhoneFrame={() => setIsPhoneFrame(!isPhoneFrame)}
           onOpenSettings={() => {
@@ -1286,10 +1114,10 @@ export default function App() {
               {filter === 'all' && (
                 <div>
                   <div
-                    className={`mx-4 mt-3 p-3 rounded-2xl flex items-center justify-between text-xs shadow-xs border transition-colors ${
+                    className={`mx-4 mt-3.5 p-4 rounded-2xl shadow-xs border transition-all duration-200 ${
                       globalAutoDeductEnabled
-                        ? 'bg-teal-50 border-teal-200/90'
-                        : 'bg-amber-50/80 border-amber-200/90'
+                        ? 'bg-teal-50/90 border-teal-200/90'
+                        : 'bg-amber-50/90 border-amber-200/90'
                     }`}
                   >
                     <div className="flex items-center gap-2.5">
@@ -1357,7 +1185,7 @@ export default function App() {
               )}
 
               {filter === 'alerts' && (
-                <LowStockBanner medications={medications} onNavigateToShopping={() => setActiveTab('shopping')} />
+                <LowStockBanner medicationsWithStatus={medicationsWithStatus} onNavigateToShopping={() => setActiveTab('shopping')} />
               )}
 
               <div className="p-4 space-y-3">
@@ -1386,9 +1214,7 @@ export default function App() {
                       onTriggerAlarm={testAlarm}
                       onConsumeDose={handleConsumeDose}
                       lastRefillQuantity={(() => {
-                        const lastRefill = logs.find(
-                          (log) => log.medicationId === med.id && log.type === 'refill' && log.amount > 0 && !log.reversedAt
-                        );
+                        const lastRefill = lastRefillByMed.get(med.id);
                         return lastRefill && lastRefill.amount > 0 ? lastRefill.amount : undefined;
                       })()}
                       onUndoRefill={() => handleUndoRefill(med.id)}
@@ -1432,7 +1258,7 @@ export default function App() {
           )}
         </main>
 
-        {activeTab === 'stock' && <AndroidFab onOpenAddModal={openAdd} />}
+        {activeTab === 'stock' && <AndroidFab onClick={openAdd} />}
         <AndroidBottomNav activeTab={activeTab} onTabChange={setActiveTab} alertsCount={alertsCount} />
 
         {toast && (
@@ -1481,19 +1307,7 @@ export default function App() {
         criticalStockAlertsEnabled={criticalStockAlertsEnabled}
         autoDeductEnabled={globalAutoDeductEnabled}
         onToggleAutoDeduct={handleToggleGlobalAutoDeduct}
-        onToggleCriticalStockAlerts={() => {
-          const next = !criticalStockAlertsEnabled;
-          setCriticalStockAlertsEnabled(next);
-          if (next && !notificationsEnabled) {
-            setNotificationsEnabled(true);
-          }
-          if (soundEnabled) playSuccessChime();
-          showToast(
-            next
-              ? 'تم تفعيل تنبيهات النفاذ الحرج ⚠️ (إشعار فوري عند اقتراب نفاد أي دواء أو نفاذه — حسب إعداد كل دواء)'
-              : 'تم إيقاف تنبيهات النفاذ الحرج'
-          );
-        }}
+        onToggleCriticalStockAlerts={handleToggleCriticalStockAlerts}
         onSendTestNotification={handleSendTestNotification}
         onSetGlobalCustomSound={(file) => {
           setGlobalCustomSound(file);

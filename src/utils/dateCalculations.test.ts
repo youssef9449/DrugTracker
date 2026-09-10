@@ -1,10 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   getTodayDateString,
   getDaysDifference,
   getDepletionDate,
   syncAutoDailyDeductions,
 } from './dateCalculations';
+import { NEVER_DEPLETES_DAYS } from './time';
 import type { Medication } from '../types';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
@@ -25,6 +26,20 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     ...overrides,
   };
 }
+
+// Wave 13 #123: pin system time so makeMed's `lastSyncDate: getTodayDateString()`
+// default and the `getDepletionDate(...)` assertions that compute the date
+// string 7 days out resolve to a deterministic date (2024-09-10T12:00:00Z).
+// Prevents midnight-UTC flake risk where the test process's wall-clock date
+// rolls over mid-run.
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('getTodayDateString', () => {
   it('returns a YYYY-MM-DD string', () => {
@@ -88,9 +103,9 @@ describe('getDepletionDate', () => {
     expect(getDaysDifference(getTodayDateString(), r.dateStr)).toBe(7);
   });
 
-  it('treats dailyDose <= 0 as 999 days (effectively never depletes)', () => {
+  it(`treats dailyDose <= 0 as ${NEVER_DEPLETES_DAYS} days (effectively never depletes)`, () => {
     const r = getDepletionDate(makeMed({ currentPills: 30, dailyDose: 0 }));
-    expect(r.daysLeft).toBe(999);
+    expect(r.daysLeft).toBe(NEVER_DEPLETES_DAYS);
   });
 });
 

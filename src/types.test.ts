@@ -5,10 +5,12 @@ import {
   formatTimeArabic,
   describeStockInStrips,
   describeOrderInBoxes,
+  isSolidUnit,
   DEFAULT_PHARMACY_SETTINGS,
   type Medication,
 } from './types';
 import { getTodayDateString } from './utils/dateCalculations';
+import { NEVER_DEPLETES_DAYS } from './utils/time';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
   // lastSyncDate defaults to today so effectiveCurrentPills() ===
@@ -52,7 +54,7 @@ describe('calculateMedicationStatus', () => {
   it('returns sufficient/undefined when dailyDose <= 0', () => {
     const s = calculateMedicationStatus(makeMed({ currentPills: 10, dailyDose: 0 }));
     expect(s.status).toBe('sufficient');
-    expect(s.daysLeft).toBe(999);
+    expect(s.daysLeft).toBe(NEVER_DEPLETES_DAYS);
   });
 
   it('returns critical when daysLeft <= derived critical threshold', () => {
@@ -184,5 +186,33 @@ describe('DEFAULT_PHARMACY_SETTINGS', () => {
     expect(DEFAULT_PHARMACY_SETTINGS.customerCode).toBe('');
     expect(DEFAULT_PHARMACY_SETTINGS.defaultDurationDays).toBe(30);
     expect(DEFAULT_PHARMACY_SETTINGS.customQuantities).toEqual({});
+  });
+});
+
+describe('isSolidUnit (#72)', () => {
+  it('returns true for قرص (pill)', () => {
+    expect(isSolidUnit('قرص')).toBe(true);
+  });
+
+  it('returns true for كبسولة (capsule)', () => {
+    expect(isSolidUnit('كبسولة')).toBe(true);
+  });
+
+  it('returns false for مل (liquid milliliters)', () => {
+    expect(isSolidUnit('مل')).toBe(false);
+  });
+
+  it('returns false for arbitrary custom units', () => {
+    expect(isSolidUnit('جرعة')).toBe(false);
+    expect(isSolidUnit('كيس')).toBe(false);
+    expect(isSolidUnit('ampule')).toBe(false);
+    expect(isSolidUnit('')).toBe(false);
+  });
+
+  it('is case-sensitive (Arabic strings have no case, but verify no surprises)', () => {
+    // Whitespace / near-miss strings should not match.
+    expect(isSolidUnit(' قرص')).toBe(false);
+    expect(isSolidUnit('قرص ')).toBe(false);
+    expect(isSolidUnit('القرص')).toBe(false);
   });
 });

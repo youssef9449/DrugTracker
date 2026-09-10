@@ -33,6 +33,17 @@ describe('manifest.json — SVG icon purpose (#26)', () => {
     expect(maskableIcons.every((i: { src: string }) => i.src.includes('maskable'))).toBe(true);
   });
 
+  it('includes a 180x180 icon for iOS apple-touch-icon (#119)', () => {
+    const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf-8'));
+    const icon180 = manifest.icons.find(
+      (i: { src: string }) => i.src === '/assets/icons/icon-180.png'
+    );
+    expect(icon180).toBeDefined();
+    expect(icon180.sizes).toBe('180x180');
+    expect(icon180.type).toBe('image/png');
+    expect(icon180.purpose).toBe('any');
+  });
+
   it('the manifest shortcuts use the ?tab= param for all 3 tabs', () => {
     const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf-8'));
     expect(manifest.shortcuts).toHaveLength(3);

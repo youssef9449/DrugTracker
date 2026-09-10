@@ -1,6 +1,41 @@
 import { type FC } from 'react';
-import { Pill, Bell, BellOff, Search, Smartphone, Monitor, ShoppingCart, History, Settings, AlertTriangle, Type } from 'lucide-react';
+import { Pill, Bell, BellOff, Search, Smartphone, Monitor, ShoppingCart, History, Settings, AlertTriangle, Type, Store } from 'lucide-react';
 import { ActiveTab } from './AndroidBottomNav';
+import { ICON_BUTTON_CLASS } from '../lib/styles';
+
+// #84: Single map replacing the 3 parallel switch statements
+// (getHeaderIcon / getHeaderTitle / getHeaderSubtitle).
+const HEADER_BY_TAB: Record<ActiveTab, {
+  icon: typeof Pill;
+  iconClassName: string;
+  title: string;
+  subtitle: string;
+}> = {
+  stock: {
+    icon: Pill,
+    iconClassName: 'w-5 h-5 rotate-45 text-white',
+    title: 'متابع مخزون الأدوية',
+    subtitle: 'حساب استهلاك الحبوب وتنبيهات النفاذ تلقائياً',
+  },
+  shopping: {
+    icon: ShoppingCart,
+    iconClassName: 'w-5 h-5 text-white',
+    title: 'قائمة الشراء والصيدلية',
+    subtitle: 'تجهيز طلب الواتساب وحساب الكميات',
+  },
+  pharmacies: {
+    icon: Store,
+    iconClassName: 'w-5 h-5 text-white',
+    title: 'إدارة الصيدليات',
+    subtitle: 'أرقام وعناوين الصيدليات لطلب الأدوية عبر واتساب',
+  },
+  logs: {
+    icon: History,
+    iconClassName: 'w-5 h-5 text-white',
+    title: 'سجل الاستهلاك اليومي',
+    subtitle: 'تتبع الخصم التلقائي عبر مرور الأيام',
+  },
+};
 
 interface AppHeaderProps {
   activeTab: ActiveTab;
@@ -37,38 +72,12 @@ export const AppHeader: FC<AppHeaderProps> = ({
   fontScale,
   onToggleFontScale,
 }) => {
-  const getHeaderIcon = () => {
-    switch (activeTab) {
-      case 'shopping':
-        return <ShoppingCart className="w-5 h-5 text-white" />;
-      case 'logs':
-        return <History className="w-5 h-5 text-white" />;
-      default:
-        return <Pill className="w-5 h-5 rotate-45 text-white" />;
-    }
-  };
-
-  const getHeaderTitle = () => {
-    switch (activeTab) {
-      case 'shopping':
-        return 'قائمة الشراء والصيدلية';
-      case 'logs':
-        return 'سجل الاستهلاك اليومي';
-      default:
-        return 'متابع مخزون الأدوية';
-    }
-  };
-
-  const getHeaderSubtitle = () => {
-    switch (activeTab) {
-      case 'shopping':
-        return 'تجهيز طلب الواتساب وحساب الكميات';
-      case 'logs':
-        return 'تتبع الخصم التلقائي عبر مرور الأيام';
-      default:
-        return 'حساب استهلاك الحبوب وتنبيهات النفاذ تلقائياً';
-    }
-  };
+  // #84: Single HEADER_BY_TAB map replacing the 3 parallel switch
+  // statements (getHeaderIcon / getHeaderTitle / getHeaderSubtitle).
+  // 'pharmacies' falls back to the stock values (same as the old default
+  // case — no separate pharmacies header was defined).
+  const header = HEADER_BY_TAB[activeTab] ?? HEADER_BY_TAB.stock;
+  const HeaderIcon = header.icon;
 
   return (
     <header className="bg-teal-800 text-white shadow-xs">
@@ -76,12 +85,12 @@ export const AppHeader: FC<AppHeaderProps> = ({
       <div className="px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="w-9 h-9 rounded-xl bg-teal-700/80 border border-teal-600/50 flex items-center justify-center text-teal-100 shadow-xs">
-            {getHeaderIcon()}
+            <HeaderIcon className={header.iconClassName} />
           </div>
           <div>
-            <h1 className="text-base font-bold tracking-tight">{getHeaderTitle()}</h1>
+            <h1 className="text-base font-bold tracking-tight">{header.title}</h1>
             <p className="text-[11px] text-teal-200/90 font-medium">
-              {getHeaderSubtitle()}
+              {header.subtitle}
             </p>
           </div>
         </div>
@@ -92,7 +101,7 @@ export const AppHeader: FC<AppHeaderProps> = ({
           <button
             onClick={onOpenSettings}
             title="الإعدادات"
-            className="p-2 rounded-xl text-teal-100 hover:text-white hover:bg-teal-700/80 transition active:scale-95"
+            className={ICON_BUTTON_CLASS}
           >
             <Settings className="w-4 h-4" />
           </button>
@@ -159,7 +168,7 @@ export const AppHeader: FC<AppHeaderProps> = ({
           <button
             onClick={onTogglePhoneFrame}
             title={isPhoneFrame ? 'التبديل إلى وضع الشاشة الكاملة' : 'التبديل إلى مظهر هاتف أندرويد'}
-            className="hidden md:flex p-2 rounded-xl text-teal-100 hover:text-white hover:bg-teal-700/80 transition active:scale-95"
+            className={`hidden md:flex ${ICON_BUTTON_CLASS}`}
           >
             {isPhoneFrame ? <Monitor className="w-4 h-4" /> : <Smartphone className="w-4 h-4" />}
           </button>

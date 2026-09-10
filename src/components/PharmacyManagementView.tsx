@@ -1,7 +1,8 @@
-import { useState, type FC } from 'react';
+import { useState, type FC, type FormEvent } from 'react';
 import { Check, Pencil, Plus, Store, Trash2, X } from 'lucide-react';
 import type { Pharmacy } from '../types';
 import { cleanPhoneNumber } from '../utils/whatsapp';
+import { Modal } from './ui/Modal';
 
 interface PharmacyManagementViewProps {
   pharmacies: Pharmacy[];
@@ -21,7 +22,7 @@ export const PharmacyManagementView: FC<PharmacyManagementViewProps> = ({ pharma
     setIsFormOpen(true);
   };
 
-  const handleSubmit = (event: React.FormEvent) => {
+  const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     const name = form.name.trim();
     const phone = cleanPhoneNumber(form.phone);
@@ -51,7 +52,11 @@ export const PharmacyManagementView: FC<PharmacyManagementViewProps> = ({ pharma
         ))}</div>
       )}
       {isFormOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-end sm:items-center justify-center p-4">
+        <Modal
+          isOpen={isFormOpen}
+          onClose={() => setIsFormOpen(false)}
+          label={editing ? 'تعديل الصيدلية' : 'إضافة صيدلية'}
+        >
           <form onSubmit={handleSubmit} className="bg-white rounded-3xl w-full max-w-md p-5 space-y-4" dir="rtl">
             <div className="flex items-center justify-between"><h3 className="font-bold text-slate-900">{editing ? 'تعديل الصيدلية' : 'إضافة صيدلية'}</h3><button type="button" onClick={() => setIsFormOpen(false)} aria-label="إغلاق"><X className="w-5 h-5 text-slate-500" /></button></div>
             <label className="block text-xs font-bold text-slate-700">اسم الصيدلية<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-300" /></label>
@@ -59,7 +64,7 @@ export const PharmacyManagementView: FC<PharmacyManagementViewProps> = ({ pharma
             <label className="block text-xs font-bold text-slate-700">كود العميل<input value={form.customerCode} onChange={(e) => setForm({ ...form, customerCode: e.target.value })} className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-300 font-mono" dir="ltr" /></label>
             <button type="submit" className="w-full py-3 rounded-xl bg-teal-700 text-white font-bold flex items-center justify-center gap-2"><Check className="w-4 h-4" /> حفظ</button>
           </form>
-        </div>
+        </Modal>
       )}
     </div>
   );

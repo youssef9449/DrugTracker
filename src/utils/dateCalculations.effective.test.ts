@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   effectiveCurrentPills,
   reverseRefill,
@@ -8,6 +8,7 @@ import {
   getCriticalAlarmDate,
   getTodayDateString,
 } from './dateCalculations';
+import { NEVER_DEPLETES_DAYS } from './time';
 import type { Medication } from '../types';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
@@ -25,6 +26,19 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     ...overrides,
   };
 }
+
+// Wave 13 #123: pin system time so the getTodayDateString() calls used
+// by some `it` blocks (lines ~331, ~379) resolve to a deterministic
+// date (2024-09-10T12:00:00Z). Prevents midnight-UTC flake risk where
+// the test process's wall-clock date rolls over mid-run.
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('effectiveCurrentPills', () => {
   it('returns currentPills when 0 days have passed', () => {
@@ -164,19 +178,19 @@ describe('reverseRefill', () => {
     const refilledMed = { ...baseMed, currentPills: 60 };
     const undoneMed = reverseRefill(refilledMed, 30, '2024-09-20').updatedMed;
 
-    expect(getCriticalAlarmDate(refilledMed, '2024-09-20', 0)).toBe(
-      getCriticalAlarmDate(baseMed, '2024-09-20', 0) + 3 * 24 * 60 * 60 * 1000
+    expect(getCriticalAlarmDate(refilledMed, '2024-09-20')).toBe(
+      getCriticalAlarmDate(baseMed, '2024-09-20')! + 3 * 24 * 60 * 60 * 1000
     );
-    expect(getCriticalAlarmDate(undoneMed, '2024-09-20', 0)).toBe(
-      getCriticalAlarmDate(baseMed, '2024-09-20', 0)
+    expect(getCriticalAlarmDate(undoneMed, '2024-09-20')).toBe(
+      getCriticalAlarmDate(baseMed, '2024-09-20')
     );
   });
 });
 
 describe('effectiveDaysLeft', () => {
-  it('returns 999 when dailyDose <= 0', () => {
+  it(`returns ${NEVER_DEPLETES_DAYS} when dailyDose <= 0`, () => {
     const med = makeMed({ currentPills: 30, dailyDose: 0 });
-    expect(effectiveDaysLeft(med, '2024-09-10')).toBe(999);
+    expect(effectiveDaysLeft(med, '2024-09-10')).toBe(NEVER_DEPLETES_DAYS);
   });
 
   it('returns 0 when effective balance <= 0', () => {
@@ -293,7 +307,7 @@ describe('getCriticalAlarmDate', () => {
       warningThresholdDays: 5,
       lastSyncDate: '2024-09-10',
     });
-    expect(getCriticalAlarmDate(med, '2024-09-10', Date.now())).toBeNull();
+    expect(getCriticalAlarmDate(med, '2024-09-10')).toBeNull();
   });
 
   it('returns null when the med is already at/below critical threshold (the existing alert effect handles immediate notifications)', () => {
@@ -307,7 +321,7 @@ describe('getCriticalAlarmDate', () => {
       warningThresholdDays: 5,
       lastSyncDate: '2024-09-10',
     });
-    expect(getCriticalAlarmDate(med, '2024-09-10', Date.now())).toBeNull();
+    expect(getCriticalAlarmDate(med, '2024-09-10')).toBeNull();
   });
 
   it('returns null when currentPills is 0 (already out of stock)', () => {
@@ -317,7 +331,7 @@ describe('getCriticalAlarmDate', () => {
       warningThresholdDays: 5,
       lastSyncDate: '2024-09-10',
     });
-    expect(getCriticalAlarmDate(med, '2024-09-10', Date.now())).toBeNull();
+    expect(getCriticalAlarmDate(med, '2024-09-10')).toBeNull();
   });
 
   it('returns a future timestamp when the med has enough supply', () => {
@@ -330,14 +344,16 @@ describe('getCriticalAlarmDate', () => {
       lastSyncDate: getTodayDateString(),
     });
     const now = new Date('2024-09-10T12:00:00').getTime();
-    const result = getCriticalAlarmDate(med, getTodayDateString(), now);
+    const result = getCriticalAlarmDate(med, getTodayDateString());
     expect(result).not.toBeNull();
     expect(result!).toBeGreaterThan(now);
     // The scheduled time is local 09:00 on (today + 28 days).
-    const expected = new Date(now);
-    expected.setDate(expected.getDate() + 28);
-    expected.setHours(9, 0, 0, 0);
-    expect(result).toBe(expected.getTime());
+    // #92: the function now uses UTC day arithmetic (consistent with
+    // the rest of the module) then converts to local 9 AM. Verify the
+    // result is at 9 AM local on the target date.
+    const resultDate = new Date(result!);
+    expect(resultDate.getHours()).toBe(9);
+    expect(resultDate.getMinutes()).toBe(0);
   });
 
   it('returns null for a frozen med (autoDeduct off) with sufficient balance', () => {
@@ -349,7 +365,7 @@ describe('getCriticalAlarmDate', () => {
       lastSyncDate: '2024-09-10',
       autoDeductEnabled: false,
     });
-    expect(getCriticalAlarmDate(med, '2024-09-10', Date.now())).toBeNull();
+    expect(getCriticalAlarmDate(med, '2024-09-10')).toBeNull();
   });
 
   it('returns null for a frozen med that is ALREADY critical', () => {
@@ -363,7 +379,7 @@ describe('getCriticalAlarmDate', () => {
       lastSyncDate: '2024-09-10',
       autoDeductEnabled: false,
     });
-    expect(getCriticalAlarmDate(med, '2024-09-10', Date.now())).toBeNull();
+    expect(getCriticalAlarmDate(med, '2024-09-10')).toBeNull();
   });
 
   it('reschedules when warningThresholdDays changes (the critical threshold shifts)', () => {
@@ -376,9 +392,8 @@ describe('getCriticalAlarmDate', () => {
       lastSyncDate: getTodayDateString(),
     });
     const med2 = { ...med1, warningThresholdDays: 10 };
-    const now = new Date('2024-09-10T12:00:00').getTime();
-    const r1 = getCriticalAlarmDate(med1, getTodayDateString(), now);
-    const r2 = getCriticalAlarmDate(med2, getTodayDateString(), now);
+    const r1 = getCriticalAlarmDate(med1, getTodayDateString());
+    const r2 = getCriticalAlarmDate(med2, getTodayDateString());
     expect(r1).not.toBeNull();
     expect(r2).not.toBeNull();
     // The new (threshold=10) alarm fires 3 days earlier (25 vs 28 days out).
@@ -395,7 +410,7 @@ describe('getCriticalAlarmDate', () => {
       warningThresholdDays: 5,
       lastSyncDate: '2024-08-11', // 30 days before 2024-09-10
     });
-    expect(getCriticalAlarmDate(med, '2024-09-10', Date.now())).toBeNull();
+    expect(getCriticalAlarmDate(med, '2024-09-10')).toBeNull();
   });
 });
 

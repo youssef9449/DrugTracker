@@ -16,7 +16,6 @@ vi.mock('./utils/notifications', () => ({
   sendTestAlertNotification: vi.fn(() => Promise.resolve()),
   openNotificationSettings: vi.fn(),
   getNotificationPermission: vi.fn(() => Promise.resolve('granted')),
-  getNotificationPermissionSync: vi.fn(() => 'granted'),
   scheduleCriticalAlarm: vi.fn(() => Promise.resolve()),
   cancelCriticalAlarm: vi.fn(() => Promise.resolve()),
   criticalAlarmId: vi.fn((id: string) => id.length),
@@ -35,13 +34,28 @@ vi.mock('../utils/audioStore', () => ({
 }));
 
 import App from './App';
-import { INITIAL_MEDICATIONS } from './data/initialData';
+import { getInitialMedications } from './data/initialData';
 import {
   scheduleCriticalAlarm,
   cancelCriticalAlarm,
 } from './utils/notifications';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
+
+// Wave 13 #123: pin system time so the many `new Date().toISOString()`
+// calls used by App's seed data + lastSyncDate defaults resolve to a
+// known date (2024-09-10T12:00:00Z). Prevents midnight-UTC flake risk
+// where the test process's wall-clock date rolls over mid-run. Only
+// the Date object is faked so React/testing-library's setTimeout-based
+// waitFor polling keeps working unchanged.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('App — hydration (#15)', () => {
   beforeEach(() => {
@@ -68,7 +82,7 @@ describe('App — hydration (#15)', () => {
 
     // The seed medications must NOT have appeared (the old bug kept the
     // seed meds because `parsed.length > 0` was false).
-    for (const seedMed of INITIAL_MEDICATIONS) {
+    for (const seedMed of getInitialMedications()) {
       expect(screen.queryByText(seedMed.name)).toBeNull();
     }
   });
@@ -580,8 +594,11 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
       reminderEnabled: false,
     }]));
     localStorage.setItem('android_med_tracker_logs_v2', JSON.stringify([
-      { id: 'refill-old', medicationId: 'med-undo', medicationName: 'Undo Med', type: 'refill', amount: 30, date: today, timestamp: '2024-01-01T00:00:00.000Z', description: 'old' },
+      // Logs are stored newest-first in the app (every setLogs prepends),
+      // so the seed must match that convention for logs.find() to target
+      // the latest non-reversed refill.
       { id: 'refill-latest', medicationId: 'med-undo', medicationName: 'Undo Med', type: 'refill', amount: 20, date: today, timestamp: '2024-01-02T00:00:00.000Z', description: 'latest' },
+      { id: 'refill-old', medicationId: 'med-undo', medicationName: 'Undo Med', type: 'refill', amount: 30, date: today, timestamp: '2024-01-01T00:00:00.000Z', description: 'old' },
     ]));
 
     render(<App />);
@@ -610,6 +627,70 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
     await waitFor(() => {
       const finalLogs = JSON.parse(localStorage.getItem('android_med_tracker_logs_v2') || '[]');
       expect(finalLogs.filter((log: { type: string }) => log.type === 'refill_undo')).toHaveLength(2);
+    });
+  });
+
+  it('allows undoing multiple refills sequentially (regression: undo only worked once)', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([{
+      id: 'med-seq',
+      name: 'Seq Med',
+      currentPills: 60,
+      dailyDose: 0,
+      unit: 'قرص',
+      warningThresholdDays: 5,
+      colorTag: 'teal',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      lastSyncDate: today,
+      autoDeductEnabled: false,
+      reminderEnabled: false,
+    }]));
+    localStorage.setItem('android_med_tracker_logs_v2', JSON.stringify([
+      { id: 'refill-newest', medicationId: 'med-seq', medicationName: 'Seq Med', type: 'refill', amount: 20, date: today, timestamp: '2024-01-03T00:00:00.000Z', description: 'newest' },
+      { id: 'refill-middle', medicationId: 'med-seq', medicationName: 'Seq Med', type: 'refill', amount: 15, date: today, timestamp: '2024-01-02T00:00:00.000Z', description: 'middle' },
+      { id: 'refill-oldest', medicationId: 'med-seq', medicationName: 'Seq Med', type: 'refill', amount: 25, date: today, timestamp: '2024-01-01T00:00:00.000Z', description: 'oldest' },
+    ]));
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'تراجع عن التعبئة' })).toBeInTheDocument());
+
+    // 1st undo: reverses the newest refill (+20). 60 - 20 = 40.
+    fireEvent.click(screen.getByRole('button', { name: 'تراجع عن التعبئة' }));
+    await waitFor(() => {
+      const savedMeds = JSON.parse(localStorage.getItem('android_med_tracker_items_v2') || '[]');
+      expect(savedMeds[0].currentPills).toBe(40);
+    });
+    // Only 1 refill_undo log so far.
+    let savedLogs = JSON.parse(localStorage.getItem('android_med_tracker_logs_v2') || '[]');
+    expect(savedLogs.filter((log: { type: string }) => log.type === 'refill_undo')).toHaveLength(1);
+    // The +15 refill is now the latest undoable one.
+    expect(screen.getByText('آخر تعبئة: +15 قرص')).toBeInTheDocument();
+
+    // 2nd undo (sequential — after the first completed): reverses the
+    // middle refill (+15). 40 - 15 = 25. This is the regression: the
+    // guard must be cleared so a legitimate second undo works.
+    fireEvent.click(screen.getByRole('button', { name: 'تراجع عن التعبئة' }));
+    await waitFor(() => {
+      const savedMeds = JSON.parse(localStorage.getItem('android_med_tracker_items_v2') || '[]');
+      expect(savedMeds[0].currentPills).toBe(25);
+    });
+    savedLogs = JSON.parse(localStorage.getItem('android_med_tracker_logs_v2') || '[]');
+    expect(savedLogs.filter((log: { type: string }) => log.type === 'refill_undo')).toHaveLength(2);
+    // The +25 (oldest) refill is now the only remaining undoable one.
+    expect(screen.getByText('آخر تعبئة: +25 قرص')).toBeInTheDocument();
+
+    // 3rd undo: reverses the oldest refill (+25). 25 - 25 = 0.
+    fireEvent.click(screen.getByRole('button', { name: 'تراجع عن التعبئة' }));
+    await waitFor(() => {
+      const savedMeds = JSON.parse(localStorage.getItem('android_med_tracker_items_v2') || '[]');
+      expect(savedMeds[0].currentPills).toBe(0);
+    });
+    savedLogs = JSON.parse(localStorage.getItem('android_med_tracker_logs_v2') || '[]');
+    expect(savedLogs.filter((log: { type: string }) => log.type === 'refill_undo')).toHaveLength(3);
+
+    // No more undoable refills — the undo button should be gone.
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'تراجع عن التعبئة' })).not.toBeInTheDocument();
     });
   });
 
@@ -644,4 +725,53 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
     const savedLogs = JSON.parse(localStorage.getItem('android_med_tracker_logs_v2') || '[]');
     expect(savedLogs.filter((log: { type: string; date: string }) => log.type === 'skipped_day' && log.date === today)).toHaveLength(1);
   });
+
+  it('persists notificationsEnabled=false across app launch and respects saved state over OS permission', async () => {
+    localStorage.setItem('android_med_tracker_notifications_v1', 'false');
+
+    render(<App />);
+
+    // Even though getNotificationPermission mock returns 'granted',
+    // the saved preference 'false' must be preserved.
+    await waitFor(() => {
+      const bellBtn = screen.getByRole('button', { name: /التنبيهات متوقفة/ });
+      expect(bellBtn).toBeInTheDocument();
+      expect(bellBtn).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    expect(localStorage.getItem('android_med_tracker_notifications_v1')).toBe('false');
+  });
+
+  it('persists notificationsEnabled=true across app launch', async () => {
+    localStorage.setItem('android_med_tracker_notifications_v1', 'true');
+
+    render(<App />);
+
+    await waitFor(() => {
+      const bellBtn = screen.getByRole('button', { name: /التنبيهات مفعلة/ });
+      expect(bellBtn).toBeInTheDocument();
+      expect(bellBtn).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    expect(localStorage.getItem('android_med_tracker_notifications_v1')).toBe('true');
+  });
+
+  it('clicking the notifications button toggles state and persists new value to localStorage', async () => {
+    localStorage.setItem('android_med_tracker_notifications_v1', 'true');
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /التنبيهات مفعلة/ })).toBeInTheDocument();
+    });
+
+    const bellBtn = screen.getByRole('button', { name: /التنبيهات مفعلة/ });
+    fireEvent.click(bellBtn);
+
+    await waitFor(() => {
+      expect(localStorage.getItem('android_med_tracker_notifications_v1')).toBe('false');
+      expect(screen.getByRole('button', { name: /التنبيهات متوقفة/ })).toBeInTheDocument();
+    });
+  });
 });
+

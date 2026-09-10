@@ -7,6 +7,7 @@ vi.mock('../native', () => ({
   initNativeBridge: vi.fn(() => Promise.resolve()),
   openAppSettings: vi.fn(() => Promise.resolve(false)),
   registerBackButtonHandler: vi.fn(),
+  registerNotificationActionHandler: vi.fn(),
   cleanupNativeListeners: vi.fn(),
 }));
 vi.mock('./utils/notifications', () => ({

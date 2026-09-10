@@ -47,6 +47,20 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     || (settings.pharmacyPhone || settings.pharmacyName || settings.customerCode
       ? { id: 'legacy', name: settings.pharmacyName || 'الصيدلية', phone: settings.pharmacyPhone || '', customerCode: settings.customerCode || '' }
       : undefined);
+  const whatsappContacts = settings.whatsappContacts?.length
+    ? settings.whatsappContacts
+    : settings.contactPhone
+      ? [{ id: 'legacy-contact', label: 'رقم التواصل', phone: settings.contactPhone }]
+      : [];
+  const whatsappAddresses = settings.whatsappAddresses?.length
+    ? settings.whatsappAddresses
+    : settings.address
+      ? [{ id: 'legacy-address', label: 'عنوان التوصيل', address: settings.address }]
+      : [];
+  const selectedWhatsappContactIds = settings.selectedWhatsappContactIds
+    ?? whatsappContacts.map((contact) => contact.id);
+  const selectedWhatsappAddressIds = settings.selectedWhatsappAddressIds
+    ?? whatsappAddresses.map((item) => item.id);
 
   const [showAllForPlanning, setShowAllForPlanning] = useState(false);
   // Per-med order unit selector: 'pills' | 'boxes' | 'strips'.
@@ -303,10 +317,42 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     return generatePharmacyOrderMessage(
       orderItemsForMessage,
       selectedPharmacy?.customerCode || '',
-      settings.address,
-      settings.contactPhone
+      '',
+      '',
+      whatsappAddresses
+        .filter((item) => selectedWhatsappAddressIds.includes(item.id))
+        .map((item) => `${item.label}: ${item.address}`),
+      whatsappContacts
+        .filter((contact) => selectedWhatsappContactIds.includes(contact.id))
+        .map((contact) => `${contact.label}: ${contact.phone}`)
     );
-  }, [orderItemsForMessage, selectedPharmacy?.customerCode, settings.address, settings.contactPhone]);
+  }, [orderItemsForMessage, selectedPharmacy?.customerCode, whatsappAddresses, whatsappContacts, selectedWhatsappAddressIds, selectedWhatsappContactIds]);
+
+  const toggleWhatsappContact = (id: string) => {
+    const nextIds = selectedWhatsappContactIds.includes(id)
+      ? selectedWhatsappContactIds.filter((selectedId) => selectedId !== id)
+      : [...selectedWhatsappContactIds, id];
+    onUpdateSettings({
+      ...settings,
+      whatsappContacts,
+      whatsappAddresses,
+      selectedWhatsappContactIds: nextIds,
+      selectedWhatsappAddressIds,
+    });
+  };
+
+  const toggleWhatsappAddress = (id: string) => {
+    const nextIds = selectedWhatsappAddressIds.includes(id)
+      ? selectedWhatsappAddressIds.filter((selectedId) => selectedId !== id)
+      : [...selectedWhatsappAddressIds, id];
+    onUpdateSettings({
+      ...settings,
+      whatsappContacts,
+      whatsappAddresses,
+      selectedWhatsappContactIds,
+      selectedWhatsappAddressIds: nextIds,
+    });
+  };
 
   const hasPharmacyPhone = Boolean(selectedPharmacy?.phone?.trim());
   const displayPhone = selectedPharmacy?.phone ? cleanPhoneNumber(selectedPharmacy.phone) : '';
@@ -349,7 +395,10 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setShowAllForPlanning(true)}
+              onClick={() => {
+                setRemovedFromShoppingIds(new Set());
+                setShowAllForPlanning(true);
+              }}
               className={`rounded-lg px-2 py-1 text-[10px] font-bold transition ${showAllForPlanning ? 'bg-white text-teal-700 shadow-xs' : 'text-white hover:bg-teal-700'}`}
             >
               كل الأدوية
@@ -594,6 +643,51 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                 </span>
               </div>
             </div>
+
+            {(whatsappContacts.length > 0 || whatsappAddresses.length > 0) && (
+              <div className="bg-teal-50/60 rounded-2xl p-3.5 border border-teal-200/80 space-y-3">
+                <div>
+                  <h4 className="text-xs font-bold text-teal-950">بيانات المستخدم في الرسالة</h4>
+                  <p className="text-[10px] text-teal-800 mt-0.5">اختر الأرقام والعناوين التي تريد إرسالها للصيدلية.</p>
+                </div>
+                {whatsappContacts.length > 0 && (
+                  <div className="space-y-1.5">
+                    <span className="text-[11px] font-bold text-slate-700">أرقام التواصل</span>
+                    {whatsappContacts.map((contact) => (
+                      <label key={contact.id} className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 px-2.5 py-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedWhatsappContactIds.includes(contact.id)}
+                          onChange={() => toggleWhatsappContact(contact.id)}
+                          className="h-4 w-4 accent-teal-600"
+                          aria-label={`إضافة ${contact.label} إلى الرسالة`}
+                        />
+                        <span className="text-xs font-bold text-slate-700">{contact.label}</span>
+                        <span className="text-xs font-mono text-slate-500 mr-auto" dir="ltr">{contact.phone}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                {whatsappAddresses.length > 0 && (
+                  <div className="space-y-1.5">
+                    <span className="text-[11px] font-bold text-slate-700">العناوين</span>
+                    {whatsappAddresses.map((item) => (
+                      <label key={item.id} className="flex items-start gap-2 bg-white rounded-xl border border-slate-200 px-2.5 py-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedWhatsappAddressIds.includes(item.id)}
+                          onChange={() => toggleWhatsappAddress(item.id)}
+                          className="h-4 w-4 mt-0.5 accent-teal-600"
+                          aria-label={`إضافة ${item.label} إلى الرسالة`}
+                        />
+                        <span className="text-xs font-bold text-slate-700">{item.label}</span>
+                        <span className="text-[11px] text-slate-500 mr-auto text-left">{item.address}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Direct Send Action Buttons */}
             {hasPharmacyPhone && (

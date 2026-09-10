@@ -257,6 +257,18 @@ export interface Pharmacy {
   customerCode: string;
 }
 
+export interface UserContact {
+  id: string;
+  label: string;
+  phone: string;
+}
+
+export interface UserAddress {
+  id: string;
+  label: string;
+  address: string;
+}
+
 export interface PharmacySettings {
   pharmacyPhone: string; // e.g., "01012345678"
   pharmacyName: string; // e.g., "صيدلية الإسعاف"
@@ -275,6 +287,10 @@ export interface PharmacySettings {
   contactPhone: string;
   pharmacies?: Pharmacy[];
   selectedPharmacyId?: string;
+  whatsappContacts?: UserContact[];
+  whatsappAddresses?: UserAddress[];
+  selectedWhatsappContactIds?: string[];
+  selectedWhatsappAddressIds?: string[];
 }
 
 export const DEFAULT_PHARMACY_SETTINGS: PharmacySettings = {
@@ -287,6 +303,8 @@ export const DEFAULT_PHARMACY_SETTINGS: PharmacySettings = {
   contactPhone: '',
   pharmacies: [],
   selectedPharmacyId: '',
+  whatsappContacts: [],
+  whatsappAddresses: [],
 };
 
 export type MedicationStatus = 'out_of_stock' | 'critical' | 'warning' | 'sufficient';

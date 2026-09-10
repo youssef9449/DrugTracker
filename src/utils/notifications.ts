@@ -290,6 +290,8 @@ export async function sendMedicationDoseReminder(
     body,
     channelId: 'dose-reminder',
     smallIcon: 'ic_launcher',
+    actionTypeId: 'dose-reminder',
+    extra: { medicationId: medId },
     customSoundFile,
   });
 }
@@ -316,6 +318,8 @@ async function scheduleNotification(opts: {
   body: string;
   channelId: string;
   smallIcon: string;
+  actionTypeId?: string;
+  extra?: Record<string, unknown>;
   customSoundFile?: { fileName: string; mimeType: string; dataUrl: string } | null;
 }): Promise<void> {
   if (isNativePlatform()) {
@@ -345,6 +349,7 @@ async function scheduleNotification(opts: {
             sound: undefined,
             smallIcon: opts.smallIcon,
             channelId: opts.channelId,
+            actionTypeId: opts.actionTypeId,
             // Android notification grouping — group all dose reminders
             // together so they don't clutter the drawer.
             ongoing: false,
@@ -354,15 +359,18 @@ async function scheduleNotification(opts: {
             // the notification fires. The `extra` field is an opaque
             // bag that Capacitor serializes via Gson on Android —
             // objects with string fields work fine.
-            extra: opts.customSoundFile
-              ? {
-                  customSoundFile: {
-                    fileName: opts.customSoundFile.fileName,
-                    mimeType: opts.customSoundFile.mimeType,
-                    dataUrl: opts.customSoundFile.dataUrl,
-                  },
-                }
-              : undefined,
+            extra: {
+              ...opts.extra,
+              ...(opts.customSoundFile
+                ? {
+                    customSoundFile: {
+                      fileName: opts.customSoundFile.fileName,
+                      mimeType: opts.customSoundFile.mimeType,
+                      dataUrl: opts.customSoundFile.dataUrl,
+                    },
+                  }
+                : {}),
+            },
           },
         ],
       });

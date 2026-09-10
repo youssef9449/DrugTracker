@@ -92,7 +92,9 @@ export function generatePharmacyOrderMessage(
   items: OrderItem[],
   customerCode: string = '',
   address?: string,
-  contactPhone?: string
+  contactPhone?: string,
+  additionalAddresses: string[] = [],
+  additionalContactPhones: string[] = []
 ): string {
   if (items.length === 0) return '';
 
@@ -128,11 +130,17 @@ export function generatePharmacyOrderMessage(
   if (address && address.trim()) {
     text += `\nالعنوان: ${address.trim()}`;
   }
+  additionalAddresses.forEach((value) => {
+    if (value.trim()) text += `\nالعنوان: ${value.trim()}`;
+  });
 
   // Append contact phone if provided
   if (contactPhone && contactPhone.trim()) {
     text += `\nرقم التواصل: ${contactPhone.trim()}`;
   }
+  additionalContactPhones.forEach((value) => {
+    if (value.trim()) text += `\nرقم التواصل: ${value.trim()}`;
+  });
 
   return text;
 }

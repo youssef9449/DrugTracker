@@ -24,6 +24,7 @@ vi.mock('@capacitor/local-notifications', () => ({
   LocalNotifications: {
     listChannels: vi.fn(() => Promise.resolve({ channels: [] })),
     createChannel: vi.fn(() => Promise.resolve()),
+    registerActionTypes: vi.fn(() => Promise.resolve()),
     addListener: vi.fn(() => Promise.resolve({ remove: vi.fn(() => Promise.resolve()) })),
   },
 }));

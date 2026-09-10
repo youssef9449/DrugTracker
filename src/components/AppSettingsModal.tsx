@@ -17,7 +17,7 @@ import {
   Zap,
   ZapOff,
 } from 'lucide-react';
-import { Medication, PharmacySettings, UserAddress, UserContact } from '../types';
+import { Medication, PharmacySettings } from '../types';
 import { Toggle } from './ui/Toggle';
 import { Modal } from './ui/Modal';
 import {
@@ -29,7 +29,6 @@ import {
 } from '../utils/whatsapp';
 import { readCustomSoundFile, CUSTOM_SOUND_ACCEPT_ATTR } from '../utils/sound';
 import { normalizeArabicDigits } from '../utils/whatsapp';
-import { generateId } from '../utils/id';
 
 export interface AppSettingsModalProps {
   isOpen: boolean;
@@ -82,12 +81,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   );
   const [address, setAddress] = useState(settings.address || '');
   const [contactPhone, setContactPhone] = useState(settings.contactPhone || '');
-  const [whatsappContacts, setWhatsappContacts] = useState<UserContact[]>([]);
-  const [whatsappAddresses, setWhatsappAddresses] = useState<UserAddress[]>([]);
-  const [newContactLabel, setNewContactLabel] = useState('');
-  const [newContactPhone, setNewContactPhone] = useState('');
-  const [newAddressLabel, setNewAddressLabel] = useState('');
-  const [newAddressValue, setNewAddressValue] = useState('');
 
   // Synchronize state whenever modal opens. Intentionally only dep [isOpen]
   // — if the parent passes a new settings object reference while the modal
@@ -101,20 +94,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
       setCustomerCode((settings.customerCode === '14739' ? '' : settings.customerCode) || '');
       setAddress(settings.address || '');
       setContactPhone(settings.contactPhone || '');
-      setWhatsappContacts(
-        settings.whatsappContacts?.length
-          ? settings.whatsappContacts
-          : settings.contactPhone
-            ? [{ id: 'legacy-contact', label: 'رقم التواصل', phone: settings.contactPhone }]
-            : []
-      );
-      setWhatsappAddresses(
-        settings.whatsappAddresses?.length
-          ? settings.whatsappAddresses
-          : settings.address
-            ? [{ id: 'legacy-address', label: 'عنوان التوصيل', address: settings.address }]
-            : []
-      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
@@ -197,34 +176,12 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
       contactPhone: isPharmacyOnly ? contactPhone.trim() : settings.contactPhone,
       pharmacies: settings.pharmacies,
       selectedPharmacyId: settings.selectedPharmacyId,
-      whatsappContacts,
-      whatsappAddresses,
+      whatsappContacts: settings.whatsappContacts,
+      whatsappAddresses: settings.whatsappAddresses,
       selectedWhatsappContactIds: settings.selectedWhatsappContactIds,
       selectedWhatsappAddressIds: settings.selectedWhatsappAddressIds,
     });
     onClose();
-  };
-
-  const addWhatsappContact = () => {
-    const phone = normalizeArabicDigits(newContactPhone).replace(/\D/g, '');
-    if (!phone) return;
-    setWhatsappContacts((prev) => [
-      ...prev,
-      { id: generateId('contact'), label: newContactLabel.trim() || 'رقم تواصل', phone },
-    ]);
-    setNewContactLabel('');
-    setNewContactPhone('');
-  };
-
-  const addWhatsappAddress = () => {
-    const value = newAddressValue.trim();
-    if (!value) return;
-    setWhatsappAddresses((prev) => [
-      ...prev,
-      { id: generateId('address'), label: newAddressLabel.trim() || 'عنوان', address: value },
-    ]);
-    setNewAddressLabel('');
-    setNewAddressValue('');
   };
 
   return (
@@ -461,87 +418,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
               </div>
             </>
           )}
-
-          {!isPharmacyOnly && <div className="space-y-3 pt-1">
-            <div className="flex items-center gap-2">
-              <Phone className="w-4 h-4 text-teal-700" />
-              <div>
-                <h4 className="text-sm font-bold text-slate-900">أرقام وعناوين المستخدم</h4>
-                <p className="text-[10px] text-slate-500">احفظ أكثر من رقم أو عنوان لاستخدامه في رسالة واتساب.</p>
-              </div>
-            </div>
-
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-2">
-              <div className="flex gap-2">
-                <input
-                  value={newContactLabel}
-                  onChange={(e) => setNewContactLabel(e.target.value)}
-                  placeholder="اسم الرقم"
-                  className="w-2/5 px-2.5 py-2 rounded-xl border border-slate-300 text-xs bg-white"
-                />
-                <input
-                  type="tel"
-                  value={newContactPhone}
-                  onChange={(e) => setNewContactPhone(e.target.value)}
-                  placeholder="رقم الهاتف"
-                  className="flex-1 px-2.5 py-2 rounded-xl border border-slate-300 text-xs font-mono bg-white"
-                />
-                <button type="button" onClick={addWhatsappContact} className="px-3 rounded-xl bg-teal-600 text-white text-xs font-bold">
-                  إضافة
-                </button>
-              </div>
-              {whatsappContacts.map((contact) => (
-                <div key={contact.id} className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-2.5 py-2">
-                  <span className="text-xs font-bold text-slate-700 flex-1">{contact.label}</span>
-                  <span className="text-xs font-mono text-slate-600" dir="ltr">{contact.phone}</span>
-                  <button
-                    type="button"
-                    onClick={() => setWhatsappContacts((prev) => prev.filter((item) => item.id !== contact.id))}
-                    className="text-rose-500 hover:text-rose-700"
-                    title="حذف الرقم"
-                    aria-label={`حذف ${contact.label}`}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-2">
-              <div className="flex gap-2">
-                <input
-                  value={newAddressLabel}
-                  onChange={(e) => setNewAddressLabel(e.target.value)}
-                  placeholder="اسم العنوان"
-                  className="w-2/5 px-2.5 py-2 rounded-xl border border-slate-300 text-xs bg-white"
-                />
-                <input
-                  value={newAddressValue}
-                  onChange={(e) => setNewAddressValue(e.target.value)}
-                  placeholder="العنوان بالتفصيل"
-                  className="flex-1 px-2.5 py-2 rounded-xl border border-slate-300 text-xs bg-white"
-                />
-                <button type="button" onClick={addWhatsappAddress} className="px-3 rounded-xl bg-teal-600 text-white text-xs font-bold">
-                  إضافة
-                </button>
-              </div>
-              {whatsappAddresses.map((item) => (
-                <div key={item.id} className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-2.5 py-2">
-                  <span className="text-xs font-bold text-slate-700">{item.label}</span>
-                  <span className="text-[11px] text-slate-600 flex-1 truncate">{item.address}</span>
-                  <button
-                    type="button"
-                    onClick={() => setWhatsappAddresses((prev) => prev.filter((addressItem) => addressItem.id !== item.id))}
-                    className="text-rose-500 hover:text-rose-700"
-                    title="حذف العنوان"
-                    aria-label={`حذف ${item.label}`}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>}
 
           {/* Pharmacy and WhatsApp Configuration Section */}
           {isPharmacyOnly && <div className="space-y-3 pt-1">

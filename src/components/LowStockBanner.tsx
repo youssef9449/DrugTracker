@@ -1,21 +1,25 @@
 import type { FC } from 'react';
 import { AlertTriangle, AlertCircle, ShoppingBag, ShoppingCart } from 'lucide-react';
-import { Medication, calculateMedicationStatus } from '../types';
+import { MedicationWithStatus } from '../types';
 import { getDepletionDate } from '../utils/dateCalculations';
 
 interface LowStockBannerProps {
-  medications: Medication[];
+  medicationsWithStatus: MedicationWithStatus[];
   onNavigateToShopping: () => void;
 }
 
 export const LowStockBanner: FC<LowStockBannerProps> = ({
-  medications,
+  medicationsWithStatus,
   onNavigateToShopping,
 }) => {
-  const lowStockMeds = medications.filter((m) => {
-    const { status } = calculateMedicationStatus(m);
-    return status === 'out_of_stock' || status === 'critical' || status === 'warning';
-  });
+  // #97: consume the pre-computed medicationsWithStatus from App.tsx
+  // instead of calling calculateMedicationStatus 3x per med. The status
+  // was already computed once by the medicationsWithStatus memo (#88).
+  const lowStockMeds = medicationsWithStatus.filter(({ statusInfo }) =>
+    statusInfo.status === 'out_of_stock' ||
+    statusInfo.status === 'critical' ||
+    statusInfo.status === 'warning'
+  );
 
   if (lowStockMeds.length === 0) {
     return (
@@ -34,7 +38,7 @@ export const LowStockBanner: FC<LowStockBannerProps> = ({
   }
 
   const outOfStockCount = lowStockMeds.filter(
-    (m) => calculateMedicationStatus(m).status === 'out_of_stock'
+    ({ statusInfo }) => statusInfo.status === 'out_of_stock'
   ).length;
 
   return (
@@ -87,8 +91,8 @@ export const LowStockBanner: FC<LowStockBannerProps> = ({
 
       {/* Pill tags with depletion dates */}
       <div className="mt-2.5 pt-2 border-t border-rose-200/50 flex flex-wrap gap-1.5">
-        {lowStockMeds.map((med) => {
-          const { status } = calculateMedicationStatus(med);
+        {lowStockMeds.map(({ med, statusInfo }) => {
+          const { status } = statusInfo;
           const depletion = getDepletionDate(med);
           return (
             <span

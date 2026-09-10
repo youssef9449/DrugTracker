@@ -132,14 +132,12 @@ export const AppHeader: FC<AppHeaderProps> = ({
             onClick={onToggleCriticalStockAlerts}
             title={
               criticalStockAlertsEnabled
-                ? alertsCount > 0
-                  ? `تنبيه النفاذ الحرج مفعّل (${alertsCount} أدوية قاربت على النفاذ — انقر للإيقاف)`
-                  : 'تنبيه النفاذ الحرج مفعّل (انقر للإيقاف)'
+                ? 'تنبيه النفاذ الحرج مفعّل (انقر للإيقاف)'
                 : 'تنبيه النفاذ الحرج متوقف (انقر للتفعيل)'
             }
             aria-label={
               criticalStockAlertsEnabled
-                ? `تنبيه النفاذ الحرج مفعّل${alertsCount > 0 ? ` (${alertsCount} أدوية قاربت على النفاذ)` : ''}`
+                ? 'تنبيه النفاذ الحرج مفعّل'
                 : 'تنبيه النفاذ الحرج متوقف'
             }
             aria-pressed={criticalStockAlertsEnabled}
@@ -154,11 +152,6 @@ export const AppHeader: FC<AppHeaderProps> = ({
                 criticalStockAlertsEnabled ? 'fill-rose-300/30 text-rose-200' : 'opacity-70'
               }`}
             />
-            {alertsCount > 0 && (
-              <span className="absolute -top-1 -right-1 px-1.5 min-w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] font-mono font-bold flex items-center justify-center ring-2 ring-teal-800 shadow-xs animate-pulse">
-                {alertsCount}
-              </span>
-            )}
           </button>
 
 

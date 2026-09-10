@@ -21,7 +21,7 @@ import { PharmacyShoppingView } from './components/PharmacyShoppingView';
 import { ConsumptionLogView } from './components/ConsumptionLogView';
 import { AddMedicationModal } from './components/AddMedicationModal';
 import { RefillModal } from './components/RefillModal';
-import { PharmacySettingsModal } from './components/PharmacySettingsModal';
+import { AppSettingsModal } from './components/AppSettingsModal';
 import { AndroidFab } from './components/AndroidFab';
 import { EmptyState } from './components/EmptyState';
 import { DoseAlarmModal } from './components/DoseAlarmModal';
@@ -52,9 +52,10 @@ import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
 import { initNativeBridge, registerBackButtonHandler, cleanupNativeListeners } from './native';
 import { migrateSchema } from './lib/migration';
 import { getInitialTab } from './lib/initialTab';
-import { Zap } from 'lucide-react';
+import { Zap, ZapOff } from 'lucide-react';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
+const STORAGE_GLOBAL_AUTO_DEDUCT_KEY = 'android_med_tracker_auto_deduct_v1';
 const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
 const STORAGE_PHARMACY_KEY = 'android_med_tracker_pharmacy_v2';
 const SOUND_KEY = 'android_med_tracker_sound_v1';
@@ -159,6 +160,7 @@ export default function App() {
   // warningThresholdDays via getCriticalThresholdDays() — not a fixed
   // pill count (see C3 in the audit fix).
   const [criticalStockAlertsEnabled, setCriticalStockAlertsEnabled] = useState<boolean>(true);
+  const [globalAutoDeductEnabled, setGlobalAutoDeductEnabled] = useState<boolean>(true);
   // Global custom sound — shared across all notifications (not
   // per-medication). The user uploads it from the AppHeader. It is
   // persisted in IndexedDB (not localStorage) because the base64 data
@@ -290,6 +292,13 @@ export default function App() {
       setCriticalStockAlertsEnabled(stored !== 'false');
     } catch (err) {
       console.warn('[App] failed to load critical-alerts flag:', err);
+    }
+
+    try {
+      const storedAutoDeduct = localStorage.getItem(STORAGE_GLOBAL_AUTO_DEDUCT_KEY);
+      setGlobalAutoDeductEnabled(storedAutoDeduct !== 'false');
+    } catch (err) {
+      console.warn('[App] failed to load auto-deduct flag:', err);
     }
 
     // Global custom sound is persisted in IndexedDB (not localStorage)
@@ -474,6 +483,18 @@ export default function App() {
     }
   }, [criticalStockAlertsEnabled, showToast, hydrated]);
 
+  const warnedAutoDeductRef = useRef(false);
+  useEffect(() => {
+    if (!hydrated) return;
+    const err = persistString(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, String(globalAutoDeductEnabled));
+    if (err && !warnedAutoDeductRef.current) {
+      warnedAutoDeductRef.current = true;
+      showToast(`${err} — قد لا يتم حفظ تفضيل الخصم التلقائي.`);
+    } else if (!err) {
+      warnedAutoDeductRef.current = false;
+    }
+  }, [globalAutoDeductEnabled, showToast, hydrated]);
+
   // Persist global custom sound to IndexedDB (C4: storing the base64
   // data URL in localStorage risked blowing the ~5 MB quota and silently
   // dropping other state; IndexedDB has a much larger quota).
@@ -514,6 +535,10 @@ export default function App() {
       return;
     }
     deductedRef.current = true;
+
+    if (!globalAutoDeductEnabled) {
+      return;
+    }
 
     const today = getTodayDateString();
     const result = syncAutoDailyDeductions(medications, today);
@@ -768,6 +793,48 @@ export default function App() {
     );
   };
 
+  const handleToggleGlobalAutoDeduct = () => {
+    const next = !globalAutoDeductEnabled;
+    setGlobalAutoDeductEnabled(next);
+    const today = getTodayDateString();
+
+    if (!next) {
+      // Turning OFF: settle all medications at their current effective balance
+      let totalDeducted = 0;
+      const newLogs: ConsumptionLog[] = [];
+      const settledMeds = medications.map((med) => {
+        const { updatedMed, log } = settleAutoDeductToggle(med, false, today);
+        if (log) {
+          newLogs.push(log);
+          totalDeducted += Math.abs(log.amount);
+        }
+        return updatedMed;
+      });
+
+      setMedications(settledMeds);
+      if (newLogs.length > 0) {
+        setLogs((prev) => [...newLogs, ...prev]);
+      }
+
+      showToast(
+        totalDeducted > 0
+          ? `تم إيقاف الخصم التلقائي لجميع الأدوية (تمت تسوية خصم ${totalDeducted} قرص للأيام السابقة).`
+          : 'تم إيقاف الخصم التلقائي لجميع الأدوية ⏸️ (المخزون ثابت الآن)'
+      );
+    } else {
+      // Turning ON: reactivate all medications, resetting lastSyncDate to today
+      const reactivatedMeds = medications.map((med) => {
+        const { updatedMed } = settleAutoDeductToggle(med, true, today);
+        return updatedMed;
+      });
+
+      setMedications(reactivatedMeds);
+      showToast('تم تفعيل الخصم التلقائي اليومي لجميع الأدوية ⚡');
+    }
+
+    if (soundEnabled) playSuccessChime();
+  };
+
   const handleSaveMedication = (medData: Omit<Medication, 'id' | 'createdAt'>, editId?: string) => {
     if (editId) {
       // Settlement: if the user is changing the dailyDose, we MUST NOT
@@ -827,7 +894,7 @@ export default function App() {
         id: 'med-' + Date.now(),
         createdAt: new Date().toISOString(),
         lastSyncDate: getTodayDateString(),
-        autoDeductEnabled: true,
+        autoDeductEnabled: globalAutoDeductEnabled,
       };
       setMedications((prev) => [newMed, ...prev]);
       showToast(
@@ -842,7 +909,7 @@ export default function App() {
 
   const handleSavePharmacySettings = (newSettings: PharmacySettings) => {
     setPharmacySettings(newSettings);
-    showToast('تم حفظ إعدادات الصيدلية ورقم العميل والكميات بنجاح!');
+    showToast('تم حفظ الإعدادات بنجاح!');
     if (soundEnabled) playSuccessChime();
   };
 
@@ -1103,22 +1170,71 @@ export default function App() {
             <div>
               {filter === 'all' && (
                 <div>
-                  <div className="mx-4 mt-3 p-3 bg-teal-50 border border-teal-200/90 rounded-2xl flex items-center justify-between text-xs shadow-xs">
+                  <div
+                    className={`mx-4 mt-3 p-3 rounded-2xl flex items-center justify-between text-xs shadow-xs border transition-colors ${
+                      globalAutoDeductEnabled
+                        ? 'bg-teal-50 border-teal-200/90'
+                        : 'bg-amber-50/80 border-amber-200/90'
+                    }`}
+                  >
                     <div className="flex items-center gap-2.5">
-                      <div className="w-7 h-7 rounded-xl bg-teal-600 text-white flex items-center justify-center shrink-0">
-                        <Zap className="w-4 h-4" />
+                      <div
+                        className={`w-7 h-7 rounded-xl text-white flex items-center justify-center shrink-0 ${
+                          globalAutoDeductEnabled ? 'bg-teal-600' : 'bg-amber-600'
+                        }`}
+                      >
+                        {globalAutoDeductEnabled ? (
+                          <Zap className="w-4 h-4" />
+                        ) : (
+                          <ZapOff className="w-4 h-4" />
+                        )}
                       </div>
                       <div>
-                        <span className="font-bold text-teal-950 block text-[11px]">الخصم التلقائي اليومي نشط</span>
-                        <p className="text-[10px] text-teal-800">يتم احتساب الجرعات بمرور الأيام لتحديث رصيدك وموعد النفاذ بدقة.</p>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-900 block text-[11px]">
+                            {globalAutoDeductEnabled
+                              ? 'الخصم التلقائي اليومي نشط'
+                              : 'الخصم التلقائي اليومي متوقف'}
+                          </span>
+                          <span
+                            className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                              globalAutoDeductEnabled
+                                ? 'bg-teal-100 text-teal-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}
+                          >
+                            {globalAutoDeductEnabled ? 'مفعّل' : 'متوقف'}
+                          </span>
+                        </div>
+                        <p
+                          className={`text-[10px] ${
+                            globalAutoDeductEnabled ? 'text-teal-800' : 'text-amber-800'
+                          }`}
+                        >
+                          {globalAutoDeductEnabled
+                            ? 'يتم احتساب الجرعات بمرور الأيام لتحديث رصيدك وموعد النفاذ بدقة.'
+                            : 'تم إيقاف خصم الجرعات تلقائياً. المخزون الحالي ثابت.'}
+                        </p>
                       </div>
                     </div>
-                    <button
-                      onClick={() => setActiveTab('logs')}
-                      className="text-[11px] font-bold text-teal-700 hover:text-teal-900 bg-teal-100/70 px-2.5 py-1 rounded-lg shrink-0"
-                    >
-                      عرض السجل
-                    </button>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        onClick={() => setIsSettingsModalOpen(true)}
+                        className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition ${
+                          globalAutoDeductEnabled
+                            ? 'text-teal-700 hover:text-teal-900 bg-teal-100/70'
+                            : 'text-amber-800 hover:text-amber-950 bg-amber-200/70'
+                        }`}
+                      >
+                        الإعدادات
+                      </button>
+                      <button
+                        onClick={() => setActiveTab('logs')}
+                        className="text-[11px] font-bold text-teal-700 hover:text-teal-900 bg-teal-100/70 px-2.5 py-1 rounded-lg"
+                      >
+                        عرض السجل
+                      </button>
+                    </div>
                   </div>
                   <div className="mx-4 mt-3 grid grid-cols-3 gap-2 text-center text-xs">
                     <div className="bg-white p-2.5 rounded-2xl border border-slate-200/80 shadow-xs">
@@ -1230,7 +1346,7 @@ export default function App() {
         onClose={() => setRefillMedication(null)}
         onConfirmRefill={handleConfirmRefill}
       />
-      <PharmacySettingsModal
+      <AppSettingsModal
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
         settings={pharmacySettings}
@@ -1242,6 +1358,8 @@ export default function App() {
         notificationsEnabled={notificationsEnabled}
         onToggleNotifications={handleToggleNotifications}
         criticalStockAlertsEnabled={criticalStockAlertsEnabled}
+        autoDeductEnabled={globalAutoDeductEnabled}
+        onToggleAutoDeduct={handleToggleGlobalAutoDeduct}
         onToggleCriticalStockAlerts={() => {
           const next = !criticalStockAlertsEnabled;
           setCriticalStockAlertsEnabled(next);

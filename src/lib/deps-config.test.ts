@@ -116,6 +116,15 @@ describe('#39 — tailwindcss-animate installed + classes work', () => {
     expect(src).toContain('slide-in-from-bottom');
   });
 
+  it('AppSettingsModal uses the animate-in classes', () => {
+    const src = fs.readFileSync(
+      path.join(ROOT, 'src/components/AppSettingsModal.tsx'),
+      'utf-8'
+    );
+    expect(src).toContain('animate-in');
+    expect(src).toContain('slide-in-from-bottom');
+  });
+
   it('PharmacySettingsModal uses the animate-in classes', () => {
     const src = fs.readFileSync(
       path.join(ROOT, 'src/components/PharmacySettingsModal.tsx'),

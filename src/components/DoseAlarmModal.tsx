@@ -1,7 +1,6 @@
 import type { FC } from 'react';
-import { Bell, Check, Clock, Volume2, X } from 'lucide-react';
+import { Bell, Check, Clock, X } from 'lucide-react';
 import { Medication, formatTimeArabic } from '../types';
-import { NOTIFICATION_SOUND_OPTIONS, playNotificationSound } from '../utils/sound';
 import { effectiveCurrentPills } from '../utils/dateCalculations';
 
 interface DoseAlarmModalProps {
@@ -21,16 +20,8 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
 }) => {
   // #18/#19: the in-app chime is played by useDoseReminders.triggerAlarm
   // (gated by soundEnabled), which is the SINGLE source — this component
-  // no longer plays a chime on mount. Previously it had a useEffect that
-  // played the chime on the false→true opening transition, which (a)
-  // duplicated the triggerAlarm chime (played twice) and (b) ignored the
-  // soundEnabled flag. Both bugs are fixed by removing the useEffect.
+  // no longer plays a chime on mount.
   if (!isOpen || !medication) return null;
-
-  const effectiveSoundType = medication.notificationSound || 'classic_chime';
-  const currentSoundOption = NOTIFICATION_SOUND_OPTIONS.find(
-    (s) => s.id === effectiveSoundType
-  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
@@ -79,30 +70,6 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
             <div className="text-[11px] text-slate-500 pt-1">
               المخزون المتوفر لديك حالياً: {medication ? effectiveCurrentPills(medication) : 0} {medication?.unit}
             </div>
-          </div>
-
-          <div className="flex items-center justify-between p-2.5 bg-amber-50/60 border border-amber-200/80 rounded-xl text-xs">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-lg shrink-0">{currentSoundOption?.icon || '🔔'}</span>
-              <div className="min-w-0">
-                <span className="text-slate-600">نغمة التنبيه: </span>
-                <span className="font-bold text-amber-950 truncate inline-block max-w-[140px] align-bottom">
-                  {currentSoundOption?.name || 'نغمة كلاسيكية'}
-                </span>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() =>
-                playNotificationSound(effectiveSoundType)
-              }
-              className="px-2.5 py-1 bg-white hover:bg-amber-100 border border-amber-300 rounded-lg text-xs font-bold text-amber-900 flex items-center gap-1 shadow-xs active:scale-95 transition shrink-0"
-              title="إعادة الاستماع للنغمة"
-            >
-              <Volume2 className="w-3.5 h-3.5 text-amber-700" />
-              <span>إعادة التشغيل</span>
-            </button>
           </div>
 
           <div className="space-y-2 pt-1">

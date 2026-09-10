@@ -1,4 +1,4 @@
-import { useState, useEffect, type FC } from 'react';
+import { useState, type FC } from 'react';
 import { Plus, Clock, ShieldCheck, ArrowUpRight, ArrowDownLeft, RotateCcw } from 'lucide-react';
 import { Medication, ConsumptionLog } from '../types';
 import { getTodayDateString, formatArabicDate } from '../utils/dateCalculations';
@@ -16,16 +16,17 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
   onRestoreDose,
   showToast,
 }) => {
-  const [selectedMedId, setSelectedMedId] = useState<string>(medications[0]?.id || '');
+  const [selectedMedIdInput, setSelectedMedIdInput] = useState<string>(medications[0]?.id || '');
   const [skipReason, setSkipReason] = useState<string>('نسيان الجرعة');
 
-  useEffect(() => {
-    if (!selectedMedId && medications.length > 0) {
-      setSelectedMedId(medications[0].id);
-    } else if (selectedMedId && !medications.some((m) => m.id === selectedMedId)) {
-      setSelectedMedId(medications[0]?.id || '');
-    }
-  }, [medications, selectedMedId]);
+  // Derive the effective selection: if the stored id no longer matches a
+  // displayed medication (e.g. it was deleted), fall back to the first.
+  // This replaces the previous useEffect that mutated selectedMedId while
+  // it was in its own dependency array (audit issue #69) — a derived value
+  // is simpler, has no stale-closure risk, and never thrashes.
+  const selectedMedId = medications.some((m) => m.id === selectedMedIdInput)
+    ? selectedMedIdInput
+    : (medications[0]?.id || '');
 
   // Total monthly consumption calculation across all active meds
   const totalMonthlyConsumption = medications.reduce(
@@ -106,7 +107,8 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
             </label>
             <select
               value={selectedMedId}
-              onChange={(e) => setSelectedMedId(e.target.value)}
+              onChange={(e) => setSelectedMedIdInput(e.target.value)}
+              aria-label="اختر الدواء"
               className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs focus:ring-1 focus:ring-teal-500"
             >
               {medications.map((m) => (

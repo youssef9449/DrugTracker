@@ -1,4 +1,5 @@
 import { Medication, ConsumptionLog } from '../types';
+import { generateId } from './id';
 
 /**
  * Returns today's date as a deterministic YYYY-MM-DD string, using
@@ -260,7 +261,7 @@ export function syncAutoDailyDeductions(
 
       if (pillsToDeduct > 0) {
         newLogs.push({
-          id: 'log-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
+          id: generateId('log'),
           medicationId: med.id,
           medicationName: med.name,
           type: 'auto_daily',
@@ -350,7 +351,7 @@ export function settleDoseChange(
   const log: ConsumptionLog | null =
     pillsDeducted > 0
       ? {
-          id: 'log-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
+          id: generateId('log'),
           medicationId: med.id,
           medicationName: med.name,
           type: 'auto_daily',
@@ -444,7 +445,7 @@ export function settleAutoDeductToggle(
   const log: ConsumptionLog | null =
     pillsDeducted > 0
       ? {
-          id: 'log-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
+          id: generateId('log'),
           medicationId: med.id,
           medicationName: med.name,
           type: 'auto_daily',

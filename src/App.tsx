@@ -102,7 +102,7 @@ function persistString(key: string, value: string): string | null {
     localStorage.setItem(key, value);
     return null;
   } catch (err) {
-    const effPills = effectiveCurrentPills(med, today);
+    const reason =
       err instanceof DOMException && err.name === 'QuotaExceededError'
         ? 'مساحة التخزين ممتلئة'
         : 'تعذّر حفظ البيانات';

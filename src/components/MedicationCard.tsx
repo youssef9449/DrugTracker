@@ -7,6 +7,7 @@ import {
   PauseCircle,
   AlertCircle,
   CheckCircle2,
+  CheckCircle,
   ShoppingCart,
   Clock,
   ShieldCheck,
@@ -15,9 +16,9 @@ import {
 } from 'lucide-react';
 import { Medication, calculateMedicationStatus, describeStockInStrips, isSolidUnit } from '../types';
 import { getDepletionDate, getTodayDateString, effectiveCurrentPills } from '../utils/dateCalculations';
+import { pluralizeArabic } from '../lib/arabicPlural';
 import { MedicationMenu } from './MedicationMenu';
 import { ReminderBadge } from './ReminderBadge';
-import { CheckCircle } from 'lucide-react';
 import { AUTO_DEDUCT_PAUSED_NOTE } from '../lib/styles';
 
 interface MedicationCardProps {
@@ -149,7 +150,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   {isOut
                     ? 'نفد المخزون بالكامل'
                     : isCrit
-                    ? `حرج: ينفد خلال ${statusInfo.daysLeft} ${statusInfo.daysLeft === 1 ? 'يوم' : 'أيام'}`
+                    ? `حرج: ينفد خلال ${pluralizeArabic(statusInfo.daysLeft, 'يوم')}`
                     : `تنبيه: متبقي ${statusInfo.daysLeft} أيام`}
                 </span>
               </div>

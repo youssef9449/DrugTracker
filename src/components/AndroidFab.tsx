@@ -2,19 +2,11 @@ import type { FC } from 'react';
 import { Plus } from 'lucide-react';
 
 interface AndroidFabProps {
-  onOpenAddModal?: () => void;
-  onClick?: () => void;
+  /** Called when the FAB is clicked. */
+  onClick: () => void;
 }
 
-export const AndroidFab: FC<AndroidFabProps> = ({ onOpenAddModal, onClick }) => {
-  const handleClick = () => {
-    if (onOpenAddModal) {
-      onOpenAddModal();
-    } else if (onClick) {
-      onClick();
-    }
-  };
-
+export const AndroidFab: FC<AndroidFabProps> = ({ onClick }) => {
   // Position: anchored to the bottom-left, raised above the
   // AndroidBottomNav (which sits at ~64px tall). Using bottom-[128px]
   // keeps the FAB clear of both the bottom-nav AND the consumption-log
@@ -26,7 +18,7 @@ export const AndroidFab: FC<AndroidFabProps> = ({ onOpenAddModal, onClick }) => 
     <div className="absolute bottom-[128px] left-4 z-40 pointer-events-auto">
       <button
         type="button"
-        onClick={handleClick}
+        onClick={onClick}
         id="add-medicine-fab"
         aria-label="إضافة دواء جديد"
         className="flex items-center gap-2 px-4 py-3 bg-teal-600 hover:bg-teal-700 active:scale-95 text-white font-bold text-xs sm:text-sm rounded-2xl shadow-xl hover:shadow-2xl transition-all duration-200 border border-teal-400/40 ring-2 ring-white/60"
@@ -37,4 +29,3 @@ export const AndroidFab: FC<AndroidFabProps> = ({ onOpenAddModal, onClick }) => 
     </div>
   );
 };
-

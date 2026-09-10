@@ -1266,7 +1266,7 @@ export default function App() {
           )}
         </main>
 
-        {activeTab === 'stock' && <AndroidFab onOpenAddModal={openAdd} />}
+        {activeTab === 'stock' && <AndroidFab onClick={openAdd} />}
         <AndroidBottomNav activeTab={activeTab} onTabChange={setActiveTab} alertsCount={alertsCount} />
 
         {toast && (

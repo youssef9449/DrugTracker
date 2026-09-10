@@ -16,8 +16,6 @@ import {
   Pill,
   ExternalLink,
   X,
-  Smartphone,
-  Globe,
 } from 'lucide-react';
 import { Medication, PharmacySettings, calculateMedicationStatus, describeOrderInBoxes } from '../types';
 import { pluralizeArabic } from '../lib/arabicPlural';
@@ -29,8 +27,6 @@ import {
   OrderItem,
   calculateMedicationOrderQuantity,
   buildWhatsAppUrl,
-  buildWhatsAppAppUrl,
-  buildWhatsAppWebUrl,
 } from '../utils/whatsapp';
 
 interface PharmacyShoppingViewProps {
@@ -85,12 +81,11 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     });
   }, [medications]);
 
-  const effectiveShowAll = showAllForPlanning || urgentMeds.length === 0;
+  const effectiveShowAll = showAllForPlanning;
   const displayList = effectiveShowAll ? medications : urgentMeds;
 
   const [selectedMedIds, setSelectedMedIds] = useState<Set<string>>(() => {
-    const initialList = urgentMeds.length > 0 ? urgentMeds : medications;
-    return new Set(initialList.map((m) => m.id));
+    return new Set(urgentMeds.map((m) => m.id));
   });
 
   // #20 + #34: reconcile the selection AND the refilledIds/deselectedIds
@@ -291,14 +286,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
 
   const targetWaUrl = useMemo(() => {
     return buildWhatsAppUrl(selectedPharmacy?.phone || '', currentWhatsAppMessage);
-  }, [selectedPharmacy?.phone, currentWhatsAppMessage]);
-
-  const targetAppUrl = useMemo(() => {
-    return buildWhatsAppAppUrl(selectedPharmacy?.phone || '', currentWhatsAppMessage);
-  }, [selectedPharmacy?.phone, currentWhatsAppMessage]);
-
-  const targetWebUrl = useMemo(() => {
-    return buildWhatsAppWebUrl(selectedPharmacy?.phone || '', currentWhatsAppMessage);
   }, [selectedPharmacy?.phone, currentWhatsAppMessage]);
 
   const handleSendToWhatsApp = () => {
@@ -706,31 +693,8 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                   <ExternalLink className="w-4 h-4 opacity-80 shrink-0" />
                 </a>
 
-                <div className="grid grid-cols-3 gap-2 text-center">
-                  <a
-                    href={targetAppUrl}
-                    className="py-2 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition"
-                  >
-                    <Smartphone className="w-4 h-4 text-slate-600" />
-                    <span>تطبيق الهاتف</span>
-                  </a>
-                  <a
-                    href={targetWebUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="py-2 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition"
-                  >
-                    <Globe className="w-4 h-4 text-slate-600" />
-                    <span>واتساب ويب</span>
-                  </a>
-                  <button
-                    type="button"
-                    onClick={handleCopyOrder}
-                    className="py-2 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition"
-                  >
-                    {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4 text-slate-600" />}
-                    <span>{copied ? 'تم النسخ!' : 'نسخ النص'}</span>
-                  </button>
+                <div className="bg-slate-900 text-slate-100 rounded-2xl p-3.5 text-xs font-mono whitespace-pre-line leading-relaxed max-h-56 overflow-y-auto select-text">
+                  {currentWhatsAppMessage || 'يرجى تحديد أدوية لمعاينة نص الرسالة.'}
                 </div>
               </div>
             )}

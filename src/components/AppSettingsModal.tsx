@@ -23,7 +23,6 @@ import { Modal } from './ui/Modal';
 import {
   cleanPhoneNumber,
   generatePharmacyOrderMessage,
-  openWhatsAppLink,
   calculateMedicationOrderQuantity,
   OrderItem,
   buildWhatsAppUrl,
@@ -547,9 +546,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     href={waUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    onClick={() => {
-                      openWhatsAppLink(pharmacyPhone, previewMsg);
-                    }}
                     className="flex-1 py-2.5 px-3 bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition shadow-sm"
                   >
                     <MessageCircle className="w-4 h-4" />

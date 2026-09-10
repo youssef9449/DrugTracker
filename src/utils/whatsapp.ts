@@ -192,7 +192,7 @@ export function openWhatsAppLink(phone: string, message: string): boolean {
   try {
     const win = window.open(url, '_blank', 'noopener,noreferrer');
     if (win) {
-      opened = true;
+      return true;
     }
   } catch {
     // window.open blocked by sandbox or browser popup settings

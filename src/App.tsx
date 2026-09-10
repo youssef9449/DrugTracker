@@ -7,7 +7,6 @@ import {
   DEFAULT_PHARMACY_SETTINGS,
   calculateMedicationStatus,
   CustomSoundFile,
-  MedicationStatus,
 } from './types';
 // Seed data — default 3 medications + 2 consumption logs shown on fresh
 // install. The file lives at src/data/initialData.ts (relative path).
@@ -36,8 +35,6 @@ import {
 } from './utils/audioStore';
 import {
   requestNotificationPermission,
-  sendMedicineAlert,
-  sendCriticalStockAlert,
   sendTestAlertNotification,
   getNotificationPermission,
   getNotificationPermissionSync,
@@ -51,9 +48,11 @@ import {
   settleAutoDeductToggle,
 } from './utils/dateCalculations';
 import { OrderItem } from './utils/whatsapp';
+import { consumeDose, settleAndAdjust } from './utils/medActions';
 import { useDoseReminders } from './hooks/useDoseReminders';
 import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
 import { usePersistentEffect } from './hooks/usePersistentEffect';
+import { useStockAlerts } from './hooks/useStockAlerts';
 import { initNativeBridge, registerBackButtonHandler, cleanupNativeListeners } from './native';
 import { migrateSchema } from './lib/migration';
 import { getInitialTab } from './lib/initialTab';
@@ -75,19 +74,6 @@ const FONT_SIZE_KEY = 'android_med_tracker_font_size_v1';
 // threshold itself is derived per-medication from warningThresholdDays
 // via getCriticalThresholdDays() — see src/types.ts.
 const CRITICAL_STOCK_ALERTS_KEY = 'android_med_tracker_critical_alerts_v1';
-
-/**
- * Severity rank for MedicationStatus, used by the alert effect to
- * decide whether a status change is a worsening (fire) or an
- * improvement (don't fire, just update the tracker). Higher = worse.
- * Declared at module scope so it's stable across renders (no dep needed).
- */
-const STATUS_RANK: Record<MedicationStatus, number> = {
-  sufficient: 0,
-  warning: 1,
-  critical: 2,
-  out_of_stock: 3,
-};
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(getInitialTab);
@@ -173,10 +159,15 @@ export default function App() {
   }, [alarmingMedication, isAddModalOpen, refillMedication, isSettingsModalOpen, dismissAlarm]);
 
   // #38: on unmount, remove all Capacitor listeners so duplicate
-  // listeners don't accumulate across HMR re-initializations.
+  // listeners don't accumulate across HMR re-initializations. Also
+  // #113: clear any pending toast auto-dismiss timer.
   useEffect(() => {
     return () => {
       cleanupNativeListeners().catch(() => {});
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -334,6 +325,10 @@ export default function App() {
     }
   }, []);
 
+  // #113: track the toast auto-dismiss timer so it can be cleared on
+  // unmount (prevents a setToast-after-unmount warning / leak).
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // showToast is defined with useCallback BEFORE the persistence
   // effects so those effects can surface write failures (M1: previously
   // every catch was empty and a quota-exceeded write silently dropped
@@ -342,8 +337,12 @@ export default function App() {
   const showToast = useCallback((message: string) => {
     const id = Date.now();
     setToast({ id, message });
-    setTimeout(() => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = setTimeout(() => {
       setToast((curr) => (curr?.id === id ? null : curr));
+      toastTimerRef.current = null;
     }, 4000);
   }, []);
 
@@ -496,79 +495,16 @@ export default function App() {
   // id keyed by med.id (H6 — no more collisions between same-named
   // medications).
   //
-  // We track the last-alerted status per med in a ref and compare
-  // severity ranks (out_of_stock > critical > warning > sufficient).
-  // We only fire when the new status is STRICTLY WORSE than the
-  // previously-alerted one — so a partial refill that improves a med
-  // from critical→warning does NOT fire a spurious "warning" alert.
-  // When a med improves to 'sufficient', we clear the tracker so the
-  // next crossing alerts again. When notifications are toggled off,
-  // we clear the tracker so re-enabling fires for current alertable
-  // meds again.
-  // ─────────────────────────────────────────────────────────────
-  const lastAlertedStatusRef = useRef<Map<string, MedicationStatus>>(new Map());
-  useEffect(() => {
-    if (!hydrated) return;
-    // First-run: don't fire ghost notifications for seed data.
-    if (isFirstRun) return;
-
-    // When notifications are off, reset the tracker so the next time
-    // they're turned on, current alertable meds fire again.
-    if (!notificationsEnabled) {
-      lastAlertedStatusRef.current.clear();
-      return;
-    }
-
-    const tracker = lastAlertedStatusRef.current;
-    for (const med of medications) {
-      const { status, daysLeft } = calculateMedicationStatus(med);
-      // The dynamic balance — what the user actually has right now, not
-      // the stale stored snapshot. Used in the notification body text so
-      // it stays correct even if the app was closed for many days.
-      const effPills = effectiveCurrentPills(med);
-      const prev = tracker.get(med.id);
-
-      // Med is healthy → clear its tracker so the next worsening alerts.
-      if (status === 'sufficient') {
-        tracker.delete(med.id);
-        continue;
-      }
-
-      // Already alerted for this exact (or a worse) status → don't
-      // re-fire. `prev` records the worst status we've already alerted
-      // for; if the new status is the same or better, skip.
-      if (prev !== undefined && STATUS_RANK[status] <= STATUS_RANK[prev]) {
-        // Update the tracker if the status improved (so a later
-        // worsening from the new, better baseline fires again).
-        if (STATUS_RANK[status] < STATUS_RANK[prev]) {
-          tracker.set(med.id, status);
-        }
-        continue;
-      }
-
-      // New med (prev undefined) OR status strictly worsened → fire the
-      // appropriate alert(s) for the new status.
-      if (status === 'out_of_stock') {
-        if (criticalStockAlertsEnabled) {
-          sendCriticalStockAlert(med.id, med.name, 0, 0, med.unit || 'قرص');
-        }
-        // Also send the general low-stock alert so it appears as its
-        // own drawer entry (different notification id).
-        sendMedicineAlert(med.id, med.name, 0, 0);
-      } else if (status === 'critical') {
-        if (criticalStockAlertsEnabled) {
-          sendCriticalStockAlert(med.id, med.name, daysLeft, effPills, med.unit || 'قرص');
-        }
-        // Critical is a subset of the warning window — also send the
-        // general alert (separate drawer entry, less urgent wording).
-        sendMedicineAlert(med.id, med.name, daysLeft, effPills);
-      } else if (status === 'warning') {
-        sendMedicineAlert(med.id, med.name, daysLeft, effPills);
-      }
-
-      tracker.set(med.id, status);
-    }
-  }, [medications, notificationsEnabled, criticalStockAlertsEnabled, hydrated, isFirstRun]);
+  // Extracted into useStockAlerts for testability (#87). The hook owns
+  // the STATUS_RANK map + the lastAlertedStatusRef tracker. See
+  // src/hooks/useStockAlerts.ts for the full severity-rank logic.
+  useStockAlerts({
+    medications,
+    notificationsEnabled,
+    criticalStockAlertsEnabled,
+    hydrated,
+    isFirstRun,
+  });
 
   // ─────────────────────────────────────────────────────────────
   // One-shot critical-alarm scheduling — extracted into a hook for
@@ -611,20 +547,11 @@ export default function App() {
     }
     restoreInFlightRef.current.add(restoreKey);
     const restoredAmount = med.dailyDose;
-    // Settle the snapshot at the current effective balance, then add the
-    // one dose that was skipped today.
-    const effPills = effectiveCurrentPills(med, today);
-    const newSnapshot = effPills + restoredAmount;
+    // Shared settle+adjust logic (audit #78): settle at effPills, add the
+    // restored dose, set lastSyncDate=today.
+    const { updatedMed } = settleAndAdjust(med, restoredAmount, today);
     setMedications((prev) =>
-      prev.map((m) =>
-        m.id === medicationId
-          ? {
-              ...m,
-              currentPills: newSnapshot,
-              lastSyncDate: today,
-            }
-          : m
-      )
+      prev.map((m) => (m.id === medicationId ? updatedMed : m))
     );
     setLogs((prev) => [
       {
@@ -650,22 +577,11 @@ export default function App() {
     // dedup guard that blocked rapid double-undo of the previous refill.
     refillUndoInFlightRef.current.delete(medicationId);
     const today = getTodayDateString();
-    // Settle the snapshot at the current effective balance (deduct the
-    // elapsed days at the OLD dose), then add the refill amount on top.
-    // This way the new snapshot starts projecting from today with the
-    // fresh supply — clean, no retroactive consumption of the new pills.
-    const effPills = effectiveCurrentPills(med, today);
-    const newSnapshot = effPills + addedPills;
+    // Shared settle+adjust logic (audit #78): settle at effPills, add the
+    // refill amount, set lastSyncDate=today.
+    const { updatedMed } = settleAndAdjust(med, addedPills, today);
     setMedications((prev) =>
-      prev.map((m) =>
-        m.id === medicationId
-          ? {
-              ...m,
-              currentPills: newSnapshot,
-              lastSyncDate: today,
-            }
-          : m
-      )
+      prev.map((m) => (m.id === medicationId ? updatedMed : m))
     );
     setLogs((prev) => [
       {
@@ -994,48 +910,15 @@ export default function App() {
 
 
   const handleTakeDoseFromAlarm = (med: Medication) => {
-    // Consume-pill feature: actually subtract the dose from the balance,
-    // mark the med as consumed today (blocks auto-deduction), and log it.
     const today = getTodayDateString();
-    // Use the dynamic balance for the dose-amount calculation: if the
-    // app was closed for many days, the effective balance may already
-    // be 0, in which case the consume action is a no-op.
-    const effPills = effectiveCurrentPills(med, today);
-    const doseAmount = Math.min(med.dailyDose, effPills);
-    if (doseAmount > 0) {
-      // The settle delta: deduct from the stored snapshot, not from
-      // effPills. If the snapshot is 60 but effPills is 42 (18 days
-      // elapsed), we want to deduct doseAmount AND reset lastSyncDate
-      // to today — effectively re-settling the snapshot at the live
-      // balance minus the consumed dose. The cleanest way is to
-      // subtract doseAmount from effPills and set that as the new
-      // snapshot, with lastSyncDate = today.
-      const newSnapshot = Math.max(0, effPills - doseAmount);
+    // Shared consume-dose logic (audit #77): settle at effPills, deduct the
+    // dose (clamped at 0), mark lastConsumedDate=today, produce dose_taken log.
+    const { updatedMed, doseAmount, log } = consumeDose(med, 'alarm', today);
+    if (updatedMed && log) {
       setMedications((prev) =>
-        prev.map((m) =>
-          m.id === med.id
-            ? {
-                ...m,
-                currentPills: newSnapshot,
-                lastConsumedDate: today,
-                lastSyncDate: today,
-              }
-            : m
-        )
+        prev.map((m) => (m.id === med.id ? updatedMed : m))
       );
-      setLogs((prev) => [
-        {
-          id: generateId('consume'),
-          medicationId: med.id,
-          medicationName: med.name,
-          type: 'dose_taken',
-          amount: -doseAmount,
-          date: today,
-          timestamp: new Date().toISOString(),
-          description: `تناول جرعة من التنبيه (-${doseAmount} ${med.unit})`,
-        },
-        ...prev,
-      ]);
+      setLogs((prev) => [log, ...prev]);
     }
     dismissAlarm();
     showToast(`تم تسجيل جرعة "${med.name}" (-${doseAmount} ${med.unit}). لن يتم الخصم التلقائي اليوم.`);
@@ -1059,47 +942,71 @@ export default function App() {
       showToast(`تم تناول جرعة "${med.name}" اليوم بالفعل.`);
       return;
     }
-    // Use the dynamic balance for the dose-amount calculation: if the
-    // app was closed for many days, the effective balance may already
-    // be 0, in which case the consume action is a no-op.
-    const effPills = effectiveCurrentPills(med, today);
-    const doseAmount = Math.min(med.dailyDose, effPills);
+    // Shared consume-dose logic (audit #77).
+    const { updatedMed, doseAmount, log } = consumeDose(med, 'manual', today);
     if (doseAmount <= 0) return;
-    // Re-settle the snapshot at (effPills - doseAmount), with
-    // lastSyncDate = today. This matches the behavior in
-    // handleTakeDoseFromAlarm.
-    const newSnapshot = Math.max(0, effPills - doseAmount);
-    setMedications((prev) =>
-      prev.map((m) =>
-        m.id === medicationId
-          ? {
-              ...m,
-              currentPills: newSnapshot,
-              lastConsumedDate: today,
-              lastSyncDate: today,
-            }
-          : m
-      )
-    );
-    setLogs((prev) => [
-      {
-        id: 'consume-' + Date.now(),
-        medicationId: med.id,
-        medicationName: med.name,
-        type: 'dose_taken',
-        amount: -doseAmount,
-        date: today,
-        timestamp: new Date().toISOString(),
-        description: `تناول جرعة يدوياً (-${doseAmount} ${med.unit})`,
-      },
-      ...prev,
-    ]);
+    if (updatedMed && log) {
+      setMedications((prev) =>
+        prev.map((m) => (m.id === medicationId ? updatedMed : m))
+      );
+      setLogs((prev) => [log, ...prev]);
+    }
     showToast(`تم تناول جرعة "${med.name}" (-${doseAmount} ${med.unit}). لن يتم الخصم التلقائي اليوم.`);
     if (soundEnabled) playSuccessChime();
   };
 
+  // #79: extracted from two byte-identical inline handlers passed to
+  // AppHeader and AppSettingsModal. useCallback so both props get the
+  // same stable reference.
+  const handleToggleCriticalStockAlerts = useCallback(() => {
+    const next = !criticalStockAlertsEnabled;
+    setCriticalStockAlertsEnabled(next);
+    if (next && !notificationsEnabled) {
+      setNotificationsEnabled(true);
+    }
+    if (soundEnabled) playSuccessChime();
+    showToast(
+      next
+        ? 'تم تفعيل تنبيهات النفاذ الحرج ⚠️ (إشعار فوري عند اقتراب نفاد أي دواء أو نفاذه — حسب إعداد كل دواء)'
+        : 'تم إيقاف تنبيهات النفاذ الحرج'
+    );
+  }, [criticalStockAlertsEnabled, notificationsEnabled, soundEnabled, showToast]);
+
+  // #88: Single memoized medications-with-status array. Previously
+  // calculateMedicationStatus(med) was recomputed in 4 separate memos
+  // (filteredMedications, alertsCount, sufficientCount, totalPillsCount)
+  // + inside LowStockBanner (3x per med). Now all derive from this one.
+  const medicationsWithStatus = useMemo(
+    () =>
+      medications.map((med) => ({
+        med,
+        statusInfo: calculateMedicationStatus(med),
+      })),
+    [medications]
+  );
+
+  // #89: Precompute a Map<medId, lastRefillLog> so the per-card render
+  // doesn't call logs.find() O(meds×logs) per render. Previously this was
+  // an inline IIFE inside the MedicationCard.map.
+  const lastRefillByMed = useMemo(() => {
+    const map = new Map<string, ConsumptionLog>();
+    for (const log of logs) {
+      if (
+        log.type === 'refill' &&
+        log.amount > 0 &&
+        !log.reversedAt
+      ) {
+        // logs are newest-first; keep the FIRST (latest) matching log per med.
+        if (!map.has(log.medicationId)) {
+          map.set(log.medicationId, log);
+        }
+      }
+    }
+    return map;
+  }, [logs]);
+
   const filteredMedications = useMemo(() => {
-    return medications.filter((med) => {
+    return medicationsWithStatus.filter(({ med, statusInfo }) => {
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchName = med.name.toLowerCase().includes(q);
@@ -1107,29 +1014,33 @@ export default function App() {
         const matchNotes = med.notes?.toLowerCase().includes(q) || false;
         if (!matchName && !matchCat && !matchNotes) return false;
       }
-      const { status } = calculateMedicationStatus(med);
+      const { status } = statusInfo;
       if (filter === 'alerts') return status === 'out_of_stock' || status === 'critical' || status === 'warning';
       if (filter === 'sufficient') return status === 'sufficient';
       return true;
-    });
-  }, [medications, searchQuery, filter]);
+    }).map(({ med }) => med);
+  }, [medicationsWithStatus, searchQuery, filter]);
 
-  const alertsCount = useMemo(() => {
-    return medications.filter((m) => {
-      const { status } = calculateMedicationStatus(m);
-      return status === 'out_of_stock' || status === 'critical' || status === 'warning';
-    }).length;
-  }, [medications]);
+  const alertsCount = useMemo(
+    () => medicationsWithStatus.filter(({ statusInfo }) =>
+      statusInfo.status === 'out_of_stock' ||
+      statusInfo.status === 'critical' ||
+      statusInfo.status === 'warning'
+    ).length,
+    [medicationsWithStatus]
+  );
 
-  const sufficientCount = useMemo(() => {
-    return medications.filter((m) => calculateMedicationStatus(m).status === 'sufficient').length;
-  }, [medications]);
+  const sufficientCount = useMemo(
+    () => medicationsWithStatus.filter(({ statusInfo }) => statusInfo.status === 'sufficient').length,
+    [medicationsWithStatus]
+  );
 
-  const totalPillsCount = useMemo(() => {
+  const totalPillsCount = useMemo(
     // Sum the DYNAMIC balances, not the stored snapshots, so the count
     // shown in the UI header / total reflects the projected live state.
-    return medications.reduce((acc, m) => acc + effectiveCurrentPills(m), 0);
-  }, [medications]);
+    () => medications.reduce((acc, m) => acc + effectiveCurrentPills(m), 0),
+    [medications]
+  );
 
   const openAdd = () => {
     setEditingMedication(null);
@@ -1167,19 +1078,7 @@ export default function App() {
           notificationsEnabled={notificationsEnabled}
           onToggleNotifications={handleToggleNotifications}
           criticalStockAlertsEnabled={criticalStockAlertsEnabled}
-          onToggleCriticalStockAlerts={() => {
-            const next = !criticalStockAlertsEnabled;
-            setCriticalStockAlertsEnabled(next);
-            if (next && !notificationsEnabled) {
-              setNotificationsEnabled(true);
-            }
-            if (soundEnabled) playSuccessChime();
-            showToast(
-              next
-                ? 'تم تفعيل تنبيهات النفاذ الحرج ⚠️ (إشعار فوري عند اقتراب نفاد أي دواء أو نفاذه — حسب إعداد كل دواء)'
-                : 'تم إيقاف تنبيهات النفاذ الحرج'
-            );
-          }}
+          onToggleCriticalStockAlerts={handleToggleCriticalStockAlerts}
           isPhoneFrame={isPhoneFrame}
           onTogglePhoneFrame={() => setIsPhoneFrame(!isPhoneFrame)}
           onOpenSettings={() => {
@@ -1321,9 +1220,7 @@ export default function App() {
                       onTriggerAlarm={testAlarm}
                       onConsumeDose={handleConsumeDose}
                       lastRefillQuantity={(() => {
-                        const lastRefill = logs.find(
-                          (log) => log.medicationId === med.id && log.type === 'refill' && log.amount > 0 && !log.reversedAt
-                        );
+                        const lastRefill = lastRefillByMed.get(med.id);
                         return lastRefill && lastRefill.amount > 0 ? lastRefill.amount : undefined;
                       })()}
                       onUndoRefill={() => handleUndoRefill(med.id)}
@@ -1418,19 +1315,7 @@ export default function App() {
         criticalStockAlertsEnabled={criticalStockAlertsEnabled}
         autoDeductEnabled={globalAutoDeductEnabled}
         onToggleAutoDeduct={handleToggleGlobalAutoDeduct}
-        onToggleCriticalStockAlerts={() => {
-          const next = !criticalStockAlertsEnabled;
-          setCriticalStockAlertsEnabled(next);
-          if (next && !notificationsEnabled) {
-            setNotificationsEnabled(true);
-          }
-          if (soundEnabled) playSuccessChime();
-          showToast(
-            next
-              ? 'تم تفعيل تنبيهات النفاذ الحرج ⚠️ (إشعار فوري عند اقتراب نفاد أي دواء أو نفاذه — حسب إعداد كل دواء)'
-              : 'تم إيقاف تنبيهات النفاذ الحرج'
-          );
-        }}
+        onToggleCriticalStockAlerts={handleToggleCriticalStockAlerts}
         onSendTestNotification={handleSendTestNotification}
         onSetGlobalCustomSound={(file) => {
           setGlobalCustomSound(file);

@@ -223,15 +223,11 @@ export interface CalculatedOrderQuantity {
 }
 
 /**
- * Calculates medication order quantity according to coverage duration
- * (1 month / 30 days vs 2 months / 60 days).
+ * Calculates medication order quantity according to coverage duration.
  *
- * Key insight: the returned `quantity` is the exact number of PILLS
- * needed (not rounded up to whole boxes). The caller then passes
- * this quantity to `describeOrderInBoxes()` which breaks it down
- * into "X boxes + Y strips + Z loose pills" — so the pharmacy order
- * reads naturally: "علبة واحدة و شريط (30 قرص)" instead of
- * "علبتان (40 قرص)" when the user only needs 30.
+ * Solid medications are rounded up to a whole strip when strip packaging
+ * is configured. Liquids and loose medications are rounded up to a whole
+ * package so the requested quantity never falls short of consumption.
  *
  * - If the user set a custom quantity: use that (×2 for 60 days).
  * - If dailyDose > 0 and monthly consumption exceeds one package:
@@ -242,10 +238,10 @@ export interface CalculatedOrderQuantity {
  */
 export function calculateMedicationOrderQuantity(
   med: Medication,
-  durationDays: 30 | 60,
+  durationDays: number,
   customQuantities?: Record<string, number>
 ): CalculatedOrderQuantity {
-  const monthsMultiplier = durationDays === 60 ? 2 : 1;
+  const monthsMultiplier = durationDays / 30;
   const packSize =
     med.stripsPerBox && med.pillsPerStrip && med.stripsPerBox > 0 && med.pillsPerStrip > 0
       ? med.stripsPerBox * med.pillsPerStrip
@@ -253,7 +249,8 @@ export function calculateMedicationOrderQuantity(
       ? med.packageSize
       : 30;
 
-  // 1. If user explicitly specified a custom base monthly quantity
+  // Preserve the legacy custom-quantity behavior for settings and older
+  // saved data. The shopping view now calculates directly from duration.
   if (
     customQuantities &&
     customQuantities[med.id] !== undefined &&
@@ -268,30 +265,22 @@ export function calculateMedicationOrderQuantity(
     };
   }
 
-  // 2. Automatic baseline calculation for 1 month (30 days):
-  let baseMonthlyQuantity: number;
+  // Calculate the actual consumption for the selected number of days.
+  let quantity: number;
   if (med.dailyDose > 0) {
-    const monthlyConsumption = Math.ceil(med.dailyDose * 30);
-    if (monthlyConsumption > packSize) {
-      // Need more than 1 package — order the EXACT number of pills.
-      // describeOrderInBoxes will break it down into
-      // "X boxes + Y strips + Z loose pills" so the pharmacy can
-      // fulfil the order precisely (e.g., 30 pills = 1 box + 1 strip
-      // when the box holds 20).
-      baseMonthlyQuantity = monthlyConsumption;
-    } else {
-      // Need less than 1 package — just order 1 full package.
-      baseMonthlyQuantity = packSize;
-    }
+    const consumption = Math.ceil(med.dailyDose * Math.max(1, durationDays));
+    const roundingUnit = med.stripsPerBox && med.pillsPerStrip && med.stripsPerBox > 0 && med.pillsPerStrip > 0
+      ? med.pillsPerStrip
+      : packSize;
+    quantity = Math.max(roundingUnit, Math.ceil(consumption / roundingUnit) * roundingUnit);
   } else {
-    // No daily dose specified — order 1 package.
-    baseMonthlyQuantity = packSize;
+    quantity = packSize;
   }
 
   return {
-    quantity: baseMonthlyQuantity * monthsMultiplier,
+    quantity,
     isCustom: false,
-    baseMonthlyQuantity,
+    baseMonthlyQuantity: quantity / monthsMultiplier,
     monthsMultiplier,
   };
 }

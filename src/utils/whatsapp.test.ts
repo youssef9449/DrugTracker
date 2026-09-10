@@ -241,4 +241,16 @@ describe('calculateMedicationOrderQuantity', () => {
     const r = calculateMedicationOrderQuantity(med, 30);
     expect(r.quantity).toBe(30);
   });
+
+  it('rounds a selected period up to the nearest strip', () => {
+    const med = makeMed({ dailyDose: 1, stripsPerBox: 3, pillsPerStrip: 10, packageSize: 30 });
+    const r = calculateMedicationOrderQuantity(med, 15);
+    expect(r.quantity).toBe(20);
+  });
+
+  it('rounds a selected period up to the nearest package for liquids', () => {
+    const med = makeMed({ unit: 'مل', dailyDose: 1, packageSize: 100 });
+    const r = calculateMedicationOrderQuantity(med, 40);
+    expect(r.quantity).toBe(100);
+  });
 });

@@ -110,19 +110,19 @@ describe('generatePharmacyOrderMessage', () => {
     const msgEmpty = generatePharmacyOrderMessage([
       { name: 'كونكور 5 مجم', quantity: 30, unit: 'قرص', packageSize: 30 },
     ], '');
-    expect(msgEmpty).not.toContain('رقم العميل');
+    expect(msgEmpty).not.toContain('كود العميل');
 
     const msgWhitespace = generatePharmacyOrderMessage([
       { name: 'كونكور 5 مجم', quantity: 30, unit: 'قرص', packageSize: 30 },
     ], '   ');
-    expect(msgWhitespace).not.toContain('رقم العميل');
+    expect(msgWhitespace).not.toContain('كود العميل');
   });
 
   it('includes the customer code line when provided', () => {
     const msg = generatePharmacyOrderMessage([
       { name: 'كونكور 5 مجم', quantity: 30, unit: 'قرص', packageSize: 30 },
     ], '14739');
-    expect(msg).toContain('رقم العميل 14739');
+    expect(msg).toContain('كود العميل 14739');
   });
 
   it('includes address and contactPhone when provided', () => {

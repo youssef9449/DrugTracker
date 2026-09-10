@@ -20,7 +20,7 @@
 @import "tailwindcss";
 
 /* #39: tailwindcss-animate provides the animate-in / slide-in-from-bottom
- * / duration-200 classes used by RefillModal and PharmacySettingsModal
+ * / duration-200 classes used by RefillModal and AppSettingsModal (PharmacySettingsModal)
  * for their entrance animation. Without this plugin Tailwind v4 silently
  * ignores the unknown classes (the modals appear instantly). */
 @plugin "tailwindcss-animate";

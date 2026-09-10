@@ -212,7 +212,7 @@ describe('PharmacyShoppingView — refill actions', () => {
     const medA = makeMed({ id: 'med-a', name: 'كونكور 5', currentPills: 2, dailyDose: 1, stripsPerBox: 3, pillsPerStrip: 10 });
     renderView({ medications: [medA] });
 
-    const sendBtn = screen.getByRole('button', { name: /إرسال لواتساب/ });
+    const sendBtn = screen.getByRole('button', { name: 'إرسال طلبية بالواتساب' });
     fireEvent.click(sendBtn);
 
     // Modal opens

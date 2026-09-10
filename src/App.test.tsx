@@ -42,6 +42,21 @@ import {
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 
+// Wave 13 #123: pin system time so the many `new Date().toISOString()`
+// calls used by App's seed data + lastSyncDate defaults resolve to a
+// known date (2024-09-10T12:00:00Z). Prevents midnight-UTC flake risk
+// where the test process's wall-clock date rolls over mid-run. Only
+// the Date object is faked so React/testing-library's setTimeout-based
+// waitFor polling keeps working unchanged.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe('App — hydration (#15)', () => {
   beforeEach(() => {
     vi.clearAllMocks();

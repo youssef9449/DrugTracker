@@ -45,6 +45,29 @@ describe('normalizeArabicDigits', () => {
 });
 
 describe('cleanPhoneNumber', () => {
+  // #28 — cleanPhoneNumber must strip ALL non-digits, not just
+  // spaces/dashes/parens/plus. Letters, dots, slashes, colons etc. must
+  // also be removed so they don't produce invalid wa.me URLs.
+  it('strips letters from a phone-like string (#28)', () => {
+    expect(cleanPhoneNumber('Phone: 01012345678')).toBe('201012345678');
+  });
+
+  it('strips dots from a dotted number (#28)', () => {
+    expect(cleanPhoneNumber('010.1234.5678')).toBe('201012345678');
+  });
+
+  it('strips slashes (#28)', () => {
+    expect(cleanPhoneNumber('010/1234/5678')).toBe('201012345678');
+  });
+
+  it('strips colons (#28)', () => {
+    expect(cleanPhoneNumber('010:1234:5678')).toBe('201012345678');
+  });
+
+  it('strips a mix of non-digit characters (#28)', () => {
+    expect(cleanPhoneNumber('Tel: 010-1234.5678 (ext)')).toBe('201012345678');
+  });
+
   it('prefixes Egyptian mobile numbers with 20', () => {
     expect(cleanPhoneNumber('01012345678')).toBe('201012345678');
     expect(cleanPhoneNumber('01123456789')).toBe('201123456789');

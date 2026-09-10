@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   getTodayDateString,
   getDaysDifference,
@@ -26,6 +26,20 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     ...overrides,
   };
 }
+
+// Wave 13 #123: pin system time so makeMed's `lastSyncDate: getTodayDateString()`
+// default and the `getDepletionDate(...)` assertions that compute the date
+// string 7 days out resolve to a deterministic date (2024-09-10T12:00:00Z).
+// Prevents midnight-UTC flake risk where the test process's wall-clock date
+// rolls over mid-run.
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('getTodayDateString', () => {
   it('returns a YYYY-MM-DD string', () => {

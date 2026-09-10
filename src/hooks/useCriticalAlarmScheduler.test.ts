@@ -378,6 +378,195 @@ describe('useCriticalAlarmScheduler — race protection (generation guard)', () 
     // lastDate (D2, ~58 days out) > firstDate (D1, ~28 days out).
     expect(lastDate).toBeGreaterThan(firstDate);
   });
+
+  it('schedule in flight → state change → cancel → schedule resolves last: post-schedule check cancels the stale alarm', async () => {
+    // THE RACE THIS TEST PROVES:
+    //   1. S1 effect runs: cancel() resolves → schedule() STARTS
+    //      (in flight; alarm not yet placed).
+    //   2. S2 state change: bumps generation AND calls cancel() —
+    //      but S1's alarm isn't placed yet, so this cancel is a
+    //      no-op (finds nothing to remove).
+    //   3. S1 schedule() resolves → STALE ALARM EXISTS (S1's date).
+    //   4. S2 effect's schedule chain runs → calls schedule() with
+    //      S2's date (the LATEST state).
+    //
+    // WITHOUT the post-schedule check (stale-guard #2), step 3 leaves
+    // the stale S1 alarm in place — it would fire at S1's date, which
+    // is wrong (the latest state is S2).
+    //
+    // WITH the post-schedule check, after S1's schedule resolves we
+    // re-check the generation. It was bumped by S2, so we call
+    // cancelCriticalAlarm() to undo the stale S1 schedule. The net
+    // result: only the S2 schedule survives.
+    //
+    // Verifies the user's exact scenario:
+    //   "schedule → state change → cancel → schedule resolves last"
+
+    // We need controllable resolvers for BOTH cancel AND schedule to
+    // interleave them precisely.
+    const cancelResolvers: Array<() => void> = [];
+    const scheduleResolvers: Array<() => void> = [];
+    mocks.cancel.mockImplementation(() => {
+      return new Promise<void>((resolve) => {
+        cancelResolvers.push(resolve);
+      });
+    });
+    mocks.schedule.mockImplementation(() => {
+      return new Promise<void>((resolve) => {
+        scheduleResolvers.push(resolve);
+      });
+    });
+
+    const medS1 = makeMed({ id: 'med-race', currentPills: 30, dailyDose: 1 }); // D1
+    const medS2 = makeMed({ id: 'med-race', currentPills: 60, dailyDose: 1 }); // D2
+
+    const { rerender } = renderHook(
+      ({ medications }) =>
+        useCriticalAlarmScheduler(defaultOpts({ medications })),
+      {
+        initialProps: { medications: [medS1] as Medication[] },
+      }
+    );
+
+    // Step 1: S1 effect called cancel (resolver 0). schedule not yet called.
+    expect(cancelResolvers).toHaveLength(1);
+    expect(scheduleResolvers).toHaveLength(0);
+
+    // Step 2: resolve S1's cancel → pre-schedule guard passes (gen 1)
+    // → schedule() STARTS (resolver 0 captured). Alarm NOT yet placed.
+    cancelResolvers[0]();
+    await Promise.resolve();
+    expect(scheduleResolvers).toHaveLength(1);
+
+    // Step 3: WHILE S1's schedule is in flight, trigger a state change.
+    // S2 effect bumps gen to 2 AND calls cancel (resolver 1 captured).
+    rerender({ medications: [medS2] as Medication[] });
+    expect(cancelResolvers).toHaveLength(2);
+    // S1's schedule is STILL in flight (resolver 0 still pending).
+    expect(scheduleResolvers).toHaveLength(1);
+
+    // Step 4: resolve S2's cancel (it's a no-op find because S1's
+    // alarm isn't placed yet, but the cancel call itself completes).
+    cancelResolvers[1]();
+    await Promise.resolve();
+    // S2's pre-schedule guard passes (gen 2) → S2 schedule() STARTS
+    // (resolver 1 captured).
+    expect(scheduleResolvers).toHaveLength(2);
+
+    // Step 5: resolve S1's schedule (resolver 0). S1's stale alarm
+    // is now PLACED. The post-schedule check fires → sees gen 2 vs
+    // captured 1 → calls cancel() to undo the stale alarm
+    // (resolver 2 captured).
+    scheduleResolvers[0]();
+    await Promise.resolve();
+    expect(cancelResolvers).toHaveLength(3); // S1's undo-cancel captured
+
+    // Step 6: resolve S2's schedule (resolver 1). S2's alarm (the
+    // LATEST) is now placed.
+    scheduleResolvers[1]();
+    await Promise.resolve();
+    // The post-schedule check for S2 fires → gen 2 vs captured 2 →
+    // MATCHES → NO undo-cancel.
+    expect(cancelResolvers).toHaveLength(3);
+
+    // Step 7: resolve S1's undo-cancel (resolver 2).
+    cancelResolvers[2]();
+    await Promise.resolve();
+
+    // FINAL ASSERTIONS:
+    // schedule was called twice (S1 + S2). cancel was called 3 times
+    // (S1's initial cancel, S2's cancel during state change, S1's
+    // undo-cancel from the post-schedule check).
+    expect(mocks.schedule).toHaveBeenCalledTimes(2);
+    expect(mocks.cancel).toHaveBeenCalledTimes(3);
+
+    // The LATEST schedule call (S2) used the LATEST critical date.
+    const lastScheduleCall = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
+    expect(lastScheduleCall[0]).toBe('med-race');
+    const lastScheduledDate = lastScheduleCall[2] as number;
+    // D2 (60 pills, dose 1, threshold 5 → critical 2 → 58 days out)
+    // is much further than D1 (30 pills → 28 days out).
+    expect(lastScheduledDate - Date.now()).toBeGreaterThan(40 * 24 * 60 * 60 * 1000);
+
+    // The last cancel call was the undo of S1's stale alarm
+    // (called with 'med-race').
+    const lastCancelCall = mocks.cancel.mock.calls[mocks.cancel.mock.calls.length - 1];
+    expect(lastCancelCall[0]).toBe('med-race');
+  });
+
+  it('opt-out while a schedule is in flight: post-schedule check cancels the stale alarm', async () => {
+    // Variant of the race above: instead of a state change, the
+    // newer effect run is an OPT-OUT (criticalStockAlertsEnabled
+    // flips to false). The opt-out path cancels ALL previously-
+    // scheduled alarms + bumps generations. If S1's schedule was
+    // in flight when the opt-out fires, the post-schedule check
+    // must undo the stale alarm after S1's schedule resolves.
+
+    const cancelResolvers: Array<() => void> = [];
+    const scheduleResolvers: Array<() => void> = [];
+    mocks.cancel.mockImplementation(() => {
+      return new Promise<void>((resolve) => {
+        cancelResolvers.push(resolve);
+      });
+    });
+    mocks.schedule.mockImplementation(() => {
+      return new Promise<void>((resolve) => {
+        scheduleResolvers.push(resolve);
+      });
+    });
+
+    const med = makeMed({ id: 'med-optout-race', currentPills: 30, dailyDose: 1 });
+
+    const { rerender } = renderHook(
+      ({ criticalStockAlertsEnabled, medications }) =>
+        useCriticalAlarmScheduler(
+          defaultOpts({ criticalStockAlertsEnabled, medications })
+        ),
+      {
+        initialProps: {
+          criticalStockAlertsEnabled: true,
+          medications: [med] as Medication[],
+        },
+      }
+    );
+
+    // S1: cancel called (resolver 0). schedule not yet.
+    expect(cancelResolvers).toHaveLength(1);
+
+    // Resolve S1's cancel → schedule STARTS (resolver 0).
+    cancelResolvers[0]();
+    await Promise.resolve();
+    expect(scheduleResolvers).toHaveLength(1);
+
+    // WHILE S1's schedule is in flight, the user opts out.
+    // The opt-out path bumps the generation AND calls cancel for the
+    // previously-scheduled med (resolver 1 captured).
+    rerender({ criticalStockAlertsEnabled: false, medications: [med] });
+    expect(cancelResolvers).toHaveLength(2);
+
+    // Resolve S1's schedule (resolver 0). S1's stale alarm is now
+    // placed. The post-schedule check fires → gen was bumped →
+    // calls cancel to undo (resolver 2 captured).
+    scheduleResolvers[0]();
+    await Promise.resolve();
+    expect(cancelResolvers).toHaveLength(3);
+
+    // Resolve the remaining cancel promises (opt-out cancel + undo).
+    cancelResolvers[1]();
+    cancelResolvers[2]();
+    await Promise.resolve();
+
+    // FINAL: schedule was called once (S1). cancel was called 3 times
+    // (S1's initial cancel, opt-out's cancel, S1's post-schedule undo).
+    // The stale S1 alarm was placed and then un-done — the user's
+    // opt-out is honored, no alarm survives.
+    expect(mocks.schedule).toHaveBeenCalledTimes(1);
+    expect(mocks.cancel).toHaveBeenCalledTimes(3);
+
+    // The last cancel was the undo of S1's stale alarm.
+    const lastCancel = mocks.cancel.mock.calls[mocks.cancel.mock.calls.length - 1];
+    expect(lastCancel[0]).toBe('med-optout-race');
+  });
 });
 
 describe('useCriticalAlarmScheduler — reboot fallback (app-launch re-arm)', () => {

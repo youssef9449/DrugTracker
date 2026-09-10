@@ -50,13 +50,25 @@ export interface UseCriticalAlarmSchedulerOptions {
  *     1. Each effect run bumps the generation for every med it touches.
  *     2. The `.then()` callback after cancel() captures the generation
  *        at effect-run time and checks it against the current value
- *        before calling schedule(). If a newer run bumped the value,
- *        the stale run bails out — no stale schedule call.
- *     3. Deleting a med bumps its generation, so any in-flight
- *        schedule from a prior run for that med bails out.
+ *        BEFORE calling schedule(). If a newer run bumped the value,
+ *        the stale run bails out — no schedule call.
+ *     3. POST-schedule check: schedule() is itself async and may take
+ *        time to resolve. While it's in flight, a newer state change
+ *        or opt-out may have bumped the generation AND called
+ *        cancelCriticalAlarm() — but that cancel ran BEFORE the older
+ *        schedule actually placed the alarm (so the cancel found
+ *        nothing to remove, and the older schedule went on to create
+ *        the stale alarm AFTER the cancel). To handle this, AFTER
+ *        schedule() resolves we re-check the generation; if it
+ *        changed during the await, we call cancelCriticalAlarm() to
+ *        undo the stale schedule that just completed.
+ *     4. Deleting a med bumps its generation, so any in-flight
+ *        schedule from a prior run for that med bails out (or is
+ *        re-canceled per step 3 if it already completed).
  *
  *   This serializes per-med: only the LATEST effect run's schedule
- *   call actually fires.
+ *   survives. Older schedules are either skipped (step 2) or
+ *   re-canceled after the fact (step 3).
  *
  * Boot persistence — Android reboot:
  *   The @capacitor/local-notifications plugin persists scheduled
@@ -124,24 +136,49 @@ export function useCriticalAlarmScheduler({
       }
 
       // We're going to schedule. Capture the generation so the
-      // .then() callback can bail if a newer run superseded this one.
+      // .then() callbacks can bail if a newer run superseded this one.
       // cancel() is called first so any existing alarm with the same
       // stable id is removed; then schedule() re-arms with the new
-      // date. The race guard ensures only the latest run's schedule
-      // actually fires.
+      // date. The race guards ensure only the latest run's schedule
+      // actually fires (and survives).
       cancelCriticalAlarm(med.id)
         .then(() => {
-          // Stale-guard: if a newer effect run bumped the generation,
-          // bail out — don't schedule a stale alarm. This also covers
-          // the case where the med was deleted between this run's
-          // cancel() and now (deletion bumps the generation too).
+          // Stale-guard #1 (pre-schedule): if a newer effect run bumped
+          // the generation, bail out — don't schedule a stale alarm.
+          // This also covers the case where the med was deleted between
+          // this run's cancel() and now (deletion bumps the generation
+          // too).
           if (alarmGenerationRef.current.get(med.id) !== gen) return;
+          // Schedule and chain the post-schedule check onto the
+          // schedule() promise (so the check only runs if schedule
+          // actually fired).
           return scheduleCriticalAlarm(
             med.id,
             med.name,
             criticalDateMs,
             med.unit || 'قرص'
-          );
+          ).then(() => {
+            // Stale-guard #2 (post-schedule): schedule() is async and may
+            // have taken time to resolve. While it was in flight, a newer
+            // state change or opt-out may have bumped the generation AND
+            // called cancelCriticalAlarm() — but that cancel ran BEFORE
+            // this schedule actually placed the alarm (so the cancel
+            // found nothing to remove, and this schedule went on to
+            // create the stale alarm AFTER the cancel). To undo the
+            // stale schedule that just completed, re-check the generation
+            // and call cancelCriticalAlarm() if it changed.
+            //
+            // Without this guard, the race looks like:
+            //   1. S1 effect: cancel() resolves → schedule() STARTS
+            //   2. S2 state change: bumps gen → calls cancel() (no-op,
+            //      S1's alarm isn't placed yet)
+            //   3. S1 effect: schedule() completes → STALE ALARM EXISTS
+            // The post-schedule check fires after step 3, sees gen
+            // was bumped, and cancels the just-placed stale alarm.
+            if (alarmGenerationRef.current.get(med.id) !== gen) {
+              cancelCriticalAlarm(med.id).catch(() => void 0);
+            }
+          });
         })
         .catch(() => void 0);
       stillScheduled.add(med.id);

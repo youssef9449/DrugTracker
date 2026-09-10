@@ -66,6 +66,7 @@ const STORAGE_GLOBAL_AUTO_DEDUCT_KEY = 'android_med_tracker_auto_deduct_v1';
 const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
 const STORAGE_PHARMACY_KEY = 'android_med_tracker_pharmacy_v2';
 const SOUND_KEY = 'android_med_tracker_sound_v1';
+const NOTIFICATIONS_KEY = 'android_med_tracker_notifications_v1';
 // Font size preference: 'normal' or 'large'. Persisted so it survives
 // app relaunch. Applied as a CSS class on the phone-frame container.
 const FONT_SIZE_KEY = 'android_med_tracker_font_size_v1';
@@ -246,6 +247,12 @@ export default function App() {
     // Sound flag — persisted as 'true'/'false' string; default true.
     setSoundEnabled(loadString(SOUND_KEY, 'true') !== 'false');
 
+    // Notifications flag — persisted as 'true'/'false' string if user explicitly set it.
+    const savedNotifications = loadString(NOTIFICATIONS_KEY, '');
+    if (savedNotifications === 'true' || savedNotifications === 'false') {
+      setNotificationsEnabled(savedNotifications === 'true');
+    }
+
     // Font size — persisted as 'normal'/'large' string.
     if (loadString(FONT_SIZE_KEY, 'normal') === 'large') setFontScale('large');
 
@@ -273,39 +280,40 @@ export default function App() {
       });
 
     // Initialize the in-app notifications flag from the async permission
-    // state. #106: the previous sync snapshot (getNotificationPermissionSync)
-    // was removed — the bell icon now starts as false and flips to the
-    // correct state once the async permission check resolves (one render
-    // later). This completes the deprecation: no more sync native fallback.
+    // state if no preference has been explicitly saved yet by the user.
     getNotificationPermission()
       .then((perm) => {
-        setNotificationsEnabled(perm === 'granted');
+        if (localStorage.getItem(NOTIFICATIONS_KEY) === null) {
+          setNotificationsEnabled(perm === 'granted');
 
-        // Auto-request notification permission on the FIRST app open
-        // after install. The browser only shows the permission prompt
-        // when the permission state is 'default' (user hasn't been asked
-        // yet). Once the user grants or denies, the browser remembers
-        // the decision and won't re-show the prompt. If the user denied
-        // permission, this becomes a no-op; the bell button in
-        // AppHeader then takes the user to OS settings to re-enable.
-        //
-        // Auto-requesting on mount is recommended by the Web Push API
-        // spec because it ensures the prompt shows after the user has
-        // had a chance to see the app's value (which is now true on
-        // first open, since the user has just installed it).
-        //
-        // On Android 13+ (Capacitor), this triggers the OS
-        // POST_NOTIFICATIONS permission dialog via
-        // LocalNotifications.requestPermissions(). On older Android,
-        // this is a no-op (notifications allowed by default).
-        if (perm === 'default') {
-          requestNotificationPermission()
-            .then((granted) => {
-              setNotificationsEnabled(granted);
-            })
-            .catch((err) => {
-              console.warn('[App] Auto-request notification permission failed:', err);
-            });
+          // Auto-request notification permission on the FIRST app open
+          // after install. The browser only shows the permission prompt
+          // when the permission state is 'default' (user hasn't been asked
+          // yet). Once the user grants or denies, the browser remembers
+          // the decision and won't re-show the prompt. If the user denied
+          // permission, this becomes a no-op; the bell button in
+          // AppHeader then takes the user to OS settings to re-enable.
+          //
+          // Auto-requesting on mount is recommended by the Web Push API
+          // spec because it ensures the prompt shows after the user has
+          // had a chance to see the app's value (which is now true on
+          // first open, since the user has just installed it).
+          //
+          // On Android 13+ (Capacitor), this triggers the OS
+          // POST_NOTIFICATIONS permission dialog via
+          // LocalNotifications.requestPermissions(). On older Android,
+          // this is a no-op (notifications allowed by default).
+          if (perm === 'default') {
+            requestNotificationPermission()
+              .then((granted) => {
+                if (localStorage.getItem(NOTIFICATIONS_KEY) === null) {
+                  setNotificationsEnabled(granted);
+                }
+              })
+              .catch((err) => {
+                console.warn('[App] Auto-request notification permission failed:', err);
+              });
+          }
         }
       })
       .catch((err) => {
@@ -387,6 +395,15 @@ export default function App() {
     json: false,
     enabled: hydrated,
     failureMessage: PERSIST_FAILURE_MESSAGES.sound,
+    showToast,
+  });
+
+  usePersistentEffect({
+    storageKey: NOTIFICATIONS_KEY,
+    value: String(notificationsEnabled),
+    json: false,
+    enabled: hydrated,
+    failureMessage: PERSIST_FAILURE_MESSAGES.notifications,
     showToast,
   });
 

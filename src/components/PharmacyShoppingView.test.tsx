@@ -155,6 +155,16 @@ describe('PharmacyShoppingView — deselection preservation (#20)', () => {
     // deselect records.
     expect(screen.getByText(/2 من 2/)).toBeInTheDocument();
   });
+
+  it('removes a medication from the shopping list without deleting it', () => {
+    const med = makeMed({ id: 'med-remove', name: 'Remove Me', currentPills: 1, dailyDose: 1 });
+    renderView({ medications: [med] });
+
+    fireEvent.click(screen.getByRole('button', { name: 'إزالة Remove Me من قائمة الشراء' }));
+
+    expect(screen.queryByText('Remove Me')).toBeNull();
+    expect(screen.getByText(/0 من 0/)).toBeInTheDocument();
+  });
 });
 
 describe('PharmacyShoppingView — refill actions', () => {

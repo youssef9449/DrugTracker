@@ -1,6 +1,5 @@
 import { useState, useMemo, useEffect, type FC } from 'react';
 import {
-  Phone,
   MessageCircle,
   CheckSquare,
   Square,
@@ -55,6 +54,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   // Stored per med id so the user's choice persists within the session.
   type OrderUnit = 'pills' | 'boxes' | 'strips';
   const [orderUnits, setOrderUnits] = useState<Record<string, OrderUnit[]>>({});
+  const [removedFromShoppingIds, setRemovedFromShoppingIds] = useState<Set<string>>(new Set());
   // #20: track meds the user explicitly DESELECTED so the
   // reconciliation effect doesn't silently re-select them when
   // `displayList` changes. Cleared for a med when it leaves
@@ -69,7 +69,8 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   }, [medications]);
 
   const effectiveShowAll = showAllForPlanning;
-  const displayList = effectiveShowAll ? medications : urgentMeds;
+  const displayList = (effectiveShowAll ? medications : urgentMeds)
+    .filter((medication) => !removedFromShoppingIds.has(medication.id));
 
   const [selectedMedIds, setSelectedMedIds] = useState<Set<string>>(() => {
     return new Set(urgentMeds.map((m) => m.id));
@@ -128,6 +129,20 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     }
     setSelectedMedIds(nextSelected);
     setDeselectedIds(nextDeselected);
+  };
+
+  const handleRemoveFromShopping = (id: string) => {
+    setRemovedFromShoppingIds((prev) => new Set(prev).add(id));
+    setSelectedMedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    setDeselectedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
   };
 
   const getMedicationPeriod = (med: Medication): MedicationPeriod => medicationPeriods[med.id] || {
@@ -325,18 +340,18 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
           الأدوية المتاحة للطلب ({selectedCount} من {displayList.length})
         </span>
         <div className="flex items-center gap-2 text-[11px]">
-          <div className="flex items-center gap-1 rounded-2xl bg-teal-600 p-1 shadow-xs" role="group" aria-label="نطاق الأدوية">
+          <div className="flex items-center gap-0.5 rounded-xl bg-teal-600 p-0.5 shadow-xs" role="group" aria-label="نطاق الأدوية">
             <button
               type="button"
               onClick={() => setShowAllForPlanning(false)}
-              className={`rounded-xl px-2.5 py-1.5 font-bold transition ${!showAllForPlanning ? 'bg-white text-teal-700 shadow-xs' : 'text-white hover:bg-teal-700'}`}
+              className={`rounded-lg px-2 py-1 text-[10px] font-bold transition ${!showAllForPlanning ? 'bg-white text-teal-700 shadow-xs' : 'text-white hover:bg-teal-700'}`}
             >
               النواقص فقط
             </button>
             <button
               type="button"
               onClick={() => setShowAllForPlanning(true)}
-              className={`rounded-xl px-2.5 py-1.5 font-bold transition ${showAllForPlanning ? 'bg-white text-teal-700 shadow-xs' : 'text-white hover:bg-teal-700'}`}
+              className={`rounded-lg px-2 py-1 text-[10px] font-bold transition ${showAllForPlanning ? 'bg-white text-teal-700 shadow-xs' : 'text-white hover:bg-teal-700'}`}
             >
               كل الأدوية
             </button>
@@ -406,6 +421,15 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                     </span>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveFromShopping(med.id)}
+                  aria-label={`إزالة ${med.name} من قائمة الشراء`}
+                  title="إزالة من قائمة الشراء"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 active:scale-95"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
 
               {/* Unit selector + quantity input */}
@@ -564,12 +588,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                   )}
                 </select>
               </label>
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-slate-700 flex items-center gap-1.5">
-                  <Phone className="w-3.5 h-3.5 text-teal-600" />
-                  <span>{selectedPharmacy?.name || 'لم يتم اختيار صيدلية'}:</span>
-                </span>
-              </div>
               <div className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-slate-200">
                 <span className="text-xs text-slate-500">رقم واتساب:</span>
                 <span className="font-mono text-xs font-bold text-teal-900" dir="ltr">

@@ -108,14 +108,15 @@ describe('native.ts — cleanupNativeListeners (#38)', () => {
  * are imported from @capacitor/local-notifications and used without a
  * cast). If the cast were still needed, tsc would fail.
  *
- * The test below is a compile-time assertion: if this test file
- * compiles, the types are correct (no cast needed).
+ * #122: the previous `expect(true).toBe(true)` tautology was removed.
+ * The test is a compile-time assertion: if this test file compiles,
+ * the types are correct. No runtime assertion is needed.
  */
 describe('native.ts — createChannel cast removed (#37)', () => {
   it('the Channel/Importance/Visibility types are importable from @capacitor/local-notifications', () => {
     // This import is at the top of the file. If the types didn't
     // exist, tsc would fail. The mock provides the runtime; the
-    // real .d.ts provides the types.
-    expect(true).toBe(true);
+    // real .d.ts provides the types. The test passes by compiling
+    // successfully — no runtime assertion needed (#122).
   });
 });

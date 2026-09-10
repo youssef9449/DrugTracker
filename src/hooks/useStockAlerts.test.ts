@@ -1,5 +1,5 @@
 /// <reference types="@testing-library/jest-dom/vitest" />
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import type { Medication } from '../types';
 import { useStockAlerts } from './useStockAlerts';
@@ -35,6 +35,14 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Wave 13 #123: pin system time so getTodayDateString() (used by
+  // makeMed's lastSyncDate default) resolves to a deterministic date.
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('useStockAlerts', () => {

@@ -102,10 +102,8 @@ describe('UpdatePrompt — listener cleanup (#33)', () => {
     // After unmount, if a registration's updatefound fired, the
     // setWaitingWorker should NOT be called on the unmounted component.
     // (The isMounted guard prevents a React "setState on unmounted
-    // component" warning.) We assert no error is thrown — the guard
-    // silently skips.
-    expect(true).toBe(true); // no-op assertion; the real assertion is
-    // that render+unmount didn't throw.
+    // component" warning.) The test passes if no error was thrown
+    // during render + unmount — no assertion needed (#122).
   });
 });
 

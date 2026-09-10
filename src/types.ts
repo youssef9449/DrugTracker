@@ -89,6 +89,18 @@ export function getCriticalThresholdDays(med: Medication): number {
 }
 
 /**
+ * Returns true when the unit represents a solid medication (pill or
+ * capsule) — i.e. one that is packaged in strips/boxes. Liquid units
+ * (e.g. 'مل') and anything else return false.
+ *
+ * Centralizes the `unit === 'قرص' || unit === 'كبسولة'` predicate that
+ * was duplicated 12× across the codebase (audit #72).
+ */
+export function isSolidUnit(unit: string): boolean {
+  return unit === 'قرص' || unit === 'كبسولة';
+}
+
+/**
  * Formats 24-hour time "HH:mm" into friendly Arabic 12-hour format,
  * e.g. "9:00 ص" or "9:30 م".
  *
@@ -127,7 +139,7 @@ export function describeStockInStrips(
   unit: string = 'قرص'
 ): string | null {
   // Strips only apply to solid medications (pills/capsules)
-  if (unit !== 'قرص' && unit !== 'كبسولة') return null;
+  if (!isSolidUnit(unit)) return null;
   if (!pillsPerStrip || pillsPerStrip <= 0 || pills <= 0) return null;
 
   const totalStrips = Math.floor(pills / pillsPerStrip);
@@ -179,7 +191,7 @@ export function describeOrderInBoxes(
   packageSize?: number,
   unit: string = 'قرص'
 ): string {
-  const isSolid = unit === 'قرص' || unit === 'كبسولة';
+  const isSolid = isSolidUnit(unit);
   const effectiveStripsPerBox = isSolid ? stripsPerBox : undefined;
   const effectivePillsPerStrip = isSolid ? pillsPerStrip : undefined;
   const boxWordLabel = unit === 'مل' ? 'عبوة' : 'علبة';

@@ -29,6 +29,7 @@ import {
   calculateMedicationOrderQuantity,
   buildWhatsAppUrl,
 } from '../utils/whatsapp';
+import { getMedSizes } from '../utils/medicationPackaging';
 
 interface PharmacyShoppingViewProps {
   medications: Medication[];
@@ -186,27 +187,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   // The user picks an order unit (pills/boxes/strips) and a quantity
   // in that unit. We convert to the total pill count for storage in
   // customQuantities and for describeOrderInBoxes.
-
-  /** Get the med's packaging constants. */
-  function getMedSizes(med: Medication) {
-    const isSolid = med.unit === 'قرص' || med.unit === 'كبسولة';
-    const hasStrips = isSolid && Boolean(
-      med.stripsPerBox &&
-      med.pillsPerStrip &&
-      med.stripsPerBox > 0 &&
-      med.pillsPerStrip > 0
-    );
-    const boxSize =
-      hasStrips
-        ? med.stripsPerBox! * med.pillsPerStrip!
-        : med.packageSize && med.packageSize > 0
-        ? med.packageSize
-        : med.unit === 'مل'
-        ? 100
-        : 30;
-    const stripSize = hasStrips && med.pillsPerStrip && med.pillsPerStrip > 0 ? med.pillsPerStrip : 0;
-    return { boxSize, stripSize, hasStrips, isSolid };
-  }
 
   /** Available order units for a med: pills always, boxes if boxSize
    *  is known, strips only if the med has strips. */

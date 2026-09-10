@@ -53,10 +53,12 @@ import {
 import { OrderItem } from './utils/whatsapp';
 import { useDoseReminders } from './hooks/useDoseReminders';
 import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
+import { usePersistentEffect } from './hooks/usePersistentEffect';
 import { initNativeBridge, registerBackButtonHandler, cleanupNativeListeners } from './native';
 import { migrateSchema } from './lib/migration';
 import { getInitialTab } from './lib/initialTab';
 import { generateId } from './utils/id';
+import { loadJson, loadString, persist } from './utils/storage';
 import { Zap, ZapOff } from 'lucide-react';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
@@ -73,44 +75,6 @@ const FONT_SIZE_KEY = 'android_med_tracker_font_size_v1';
 // threshold itself is derived per-medication from warningThresholdDays
 // via getCriticalThresholdDays() — see src/types.ts.
 const CRITICAL_STOCK_ALERTS_KEY = 'android_med_tracker_critical_alerts_v1';
-
-/**
- * Persist a JSON-serializable value to localStorage, returning a
- * descriptive error string on failure (M1: previously every write was
- * wrapped in `try { … } catch {}` which silently dropped data on quota
- * exhaustion — the caller now decides whether to surface the failure).
- *
- * Returns null on success, or a short Arabic error message on failure.
- */
-function persistJson(key: string, value: unknown): string | null {
-  if (typeof localStorage === 'undefined') return null;
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-    return null;
-  } catch (err) {
-    const reason =
-      err instanceof DOMException && err.name === 'QuotaExceededError'
-        ? 'مساحة التخزين ممتلئة'
-        : 'تعذّر حفظ البيانات';
-    console.warn(`[App] localStorage.setItem(${key}) failed:`, err);
-    return reason;
-  }
-}
-
-/** Persist a plain string value with the same error-surfacing contract. */
-function persistString(key: string, value: string): string | null {
-  try {
-    localStorage.setItem(key, value);
-    return null;
-  } catch (err) {
-    const reason =
-      err instanceof DOMException && err.name === 'QuotaExceededError'
-        ? 'مساحة التخزين ممتلئة'
-        : 'تعذّر حفظ البيانات';
-    console.warn(`[App] localStorage.setItem(${key}) failed:`, err);
-    return reason;
-  }
-}
 
 /**
  * Severity rank for MedicationStatus, used by the alert effect to
@@ -226,99 +190,72 @@ export default function App() {
     // are applied before we read the (possibly migrated) keys.
     migrateSchema();
 
-    try {
-      const savedMeds = localStorage.getItem(STORAGE_MEDS_KEY);
-      if (savedMeds) {
-        const parsed = JSON.parse(savedMeds);
-        // #15: accept an empty array here (don't gate on
-        // parsed.length > 0). Otherwise, when the user deletes all
-        // medications, the persisted "[]" is ignored on next launch,
-        // the seed INITIAL_MEDICATIONS stays in state, and the
-        // hydration-gated persistence effect overwrites the user's
-        // "[]" with the seed meds — the empty-meds state is lost.
-        if (Array.isArray(parsed)) setMedications(parsed);
-      } else {
-        // First-ever open: no saved meds. The seed data is a demo —
-        // flag it so the auto-deduction + alert + reminder effects
-        // don't fire ghost notifications/alarms for seed meds.
-        setIsFirstRun(true);
-      }
-    } catch (err) {
-      console.warn('[App] failed to load saved medications:', err);
+    // Medications — use loadJson (silent fallback). The "first run"
+    // detection distinguishes "no key set" (null) from "empty array
+    // explicitly saved" (loadJson returns []).
+    const savedMedsRaw = localStorage.getItem(STORAGE_MEDS_KEY);
+    if (savedMedsRaw === null) {
+      // First-ever open: no saved meds. The seed data is a demo —
+      // flag it so the auto-deduction + alert + reminder effects
+      // don't fire ghost notifications/alarms for seed meds.
+      setIsFirstRun(true);
+    } else {
+      // #15: accept an empty array here (don't gate on length > 0).
+      // Otherwise, when the user deletes all medications, the persisted
+      // "[]" is ignored on next launch, the seed INITIAL_MEDICATIONS
+      // stays in state, and the hydration-gated persistence effect
+      // overwrites the user's "[]" with the seed meds.
+      const parsed = loadJson<Medication[] | null>(STORAGE_MEDS_KEY, null);
+      if (Array.isArray(parsed)) setMedications(parsed);
     }
 
-    try {
-      const savedLogs = localStorage.getItem(STORAGE_LOGS_KEY);
-      if (savedLogs) {
-        const parsed = JSON.parse(savedLogs);
-        if (Array.isArray(parsed)) setLogs(parsed);
-      }
-    } catch (err) {
-      console.warn('[App] failed to load saved logs:', err);
-    }
+    // Logs
+    const savedLogs = loadJson<ConsumptionLog[] | null>(STORAGE_LOGS_KEY, null);
+    if (Array.isArray(savedLogs)) setLogs(savedLogs);
 
-    try {
-      const savedPharmacy = localStorage.getItem(STORAGE_PHARMACY_KEY);
-      if (savedPharmacy) {
-        const parsed = JSON.parse(savedPharmacy);
-        if (parsed && typeof parsed === 'object') {
-          // Clear legacy default customerCode ('14739') and legacy default pharmacyName ('الصيدلية')
-          const loadedCustomerCode =
-            parsed.customerCode === '14739' ? '' : (parsed.customerCode || '');
-          const loadedPharmacyName =
-            parsed.pharmacyName === 'الصيدلية' ? '' : (parsed.pharmacyName || '');
-          const legacyPharmacy = loadedPharmacyName || loadedCustomerCode || parsed.pharmacyPhone
-            ? [{
-                id: 'pharmacy-legacy',
-                name: loadedPharmacyName || 'صيدلية محفوظة',
-                phone: parsed.pharmacyPhone || '',
-                customerCode: loadedCustomerCode,
-              }]
-            : [];
-          const pharmacies = Array.isArray(parsed.pharmacies) ? parsed.pharmacies : legacyPharmacy;
-          setPharmacySettings({
-            ...DEFAULT_PHARMACY_SETTINGS,
-            ...parsed,
+    // Pharmacy settings — custom parsing for the legacy customerCode/
+    // pharmacyName shim, so we read the raw object via loadJson then
+    // post-process.
+    const parsed = loadJson<Partial<PharmacySettings> & { pharmacies?: unknown } | null>(
+      STORAGE_PHARMACY_KEY,
+      null
+    );
+    if (parsed && typeof parsed === 'object') {
+      // Clear legacy default customerCode ('14739') and legacy default pharmacyName ('الصيدلية')
+      const loadedCustomerCode =
+        parsed.customerCode === '14739' ? '' : (parsed.customerCode || '');
+      const loadedPharmacyName =
+        parsed.pharmacyName === 'الصيدلية' ? '' : (parsed.pharmacyName || '');
+      const legacyPharmacy = loadedPharmacyName || loadedCustomerCode || parsed.pharmacyPhone
+        ? [{
+            id: 'pharmacy-legacy',
+            name: loadedPharmacyName || 'صيدلية محفوظة',
+            phone: parsed.pharmacyPhone || '',
             customerCode: loadedCustomerCode,
-            pharmacyName: loadedPharmacyName,
-            pharmacies,
-            selectedPharmacyId: parsed.selectedPharmacyId || pharmacies[0]?.id || '',
-          });
-        }
-      }
-    } catch (err) {
-      console.warn('[App] failed to load saved pharmacy settings:', err);
+          }]
+        : [];
+      const pharmacies = Array.isArray(parsed.pharmacies) ? parsed.pharmacies : legacyPharmacy;
+      setPharmacySettings({
+        ...DEFAULT_PHARMACY_SETTINGS,
+        ...parsed,
+        customerCode: loadedCustomerCode,
+        pharmacyName: loadedPharmacyName,
+        pharmacies,
+        selectedPharmacyId: parsed.selectedPharmacyId || pharmacies[0]?.id || '',
+      });
     }
 
-    try {
-      setSoundEnabled(localStorage.getItem(SOUND_KEY) !== 'false');
-    } catch (err) {
-      console.warn('[App] failed to load sound flag:', err);
-    }
+    // Sound flag — persisted as 'true'/'false' string; default true.
+    setSoundEnabled(loadString(SOUND_KEY, 'true') !== 'false');
 
-    try {
-      const savedFont = localStorage.getItem(FONT_SIZE_KEY);
-      if (savedFont === 'large') setFontScale('large');
-    } catch (err) {
-      console.warn('[App] failed to load font size:', err);
-    }
+    // Font size — persisted as 'normal'/'large' string.
+    if (loadString(FONT_SIZE_KEY, 'normal') === 'large') setFontScale('large');
 
-    try {
-      // Critical-stock alerts default to true. We persist as
-      // 'true'/'false' string. Default true means: if the user has
-      // never touched the toggle, they get the alerts.
-      const stored = localStorage.getItem(CRITICAL_STOCK_ALERTS_KEY);
-      setCriticalStockAlertsEnabled(stored !== 'false');
-    } catch (err) {
-      console.warn('[App] failed to load critical-alerts flag:', err);
-    }
+    // Critical-stock alerts — default true (persisted as 'true'/'false').
+    setCriticalStockAlertsEnabled(loadString(CRITICAL_STOCK_ALERTS_KEY, 'true') !== 'false');
 
-    try {
-      const storedAutoDeduct = localStorage.getItem(STORAGE_GLOBAL_AUTO_DEDUCT_KEY);
-      setGlobalAutoDeductEnabled(storedAutoDeduct !== 'false');
-    } catch (err) {
-      console.warn('[App] failed to load auto-deduct flag:', err);
-    }
+    // Global auto-deduct — default true.
+    setGlobalAutoDeductEnabled(loadString(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'true') !== 'false');
 
     // Global custom sound is persisted in IndexedDB (not localStorage)
     // because its base64 data URL can be several MB — see C4. The load
@@ -411,108 +348,88 @@ export default function App() {
   }, []);
 
   // ─────────────────────────────────────────────────────────────
-  // Persistence effects (M1): each write goes through persistJson /
-  // persistString, which log the failure and return a short Arabic
-  // error message. We surface that message via a toast so the user
+  // Persistence effects (M1): each write goes through the
+  // usePersistentEffect hook (utils/storage.ts + hooks/usePersistentEffect.ts),
+  // which surfaces quota failures via a one-shot toast so the user
   // knows their data wasn't saved (instead of silently dropping it).
-  // A per-effect "already warned" ref avoids spamming toasts on every
-  // re-render that re-attempts the same failing write.
+  // A per-key "already warned" ref inside the hook avoids spamming
+  // toasts on every re-render that re-attempts the same failing write.
+  //
+  // All effects are gated on `hydrated` so the first mount does NOT
+  // write the seed defaults (which would briefly overwrite the user's
+  // real data before the hydration effect's setState arrives).
   // ─────────────────────────────────────────────────────────────
-  const warnedMedsRef = useRef(false);
-  useEffect(() => {
-    // H8-adjacent: do NOT persist until hydration has loaded the saved
-    // state. Otherwise on the first mount we'd write the seed
-    // INITIAL_MEDICATIONS to localStorage, briefly overwriting the
-    // user's real data before the hydration effect's setMedications
-    // re-render arrives — a crash in that window would lose data.
-    if (!hydrated) return;
-    const err = persistJson(STORAGE_MEDS_KEY, medications);
-    if (err && !warnedMedsRef.current) {
-      warnedMedsRef.current = true;
-      showToast(`${err} — قد لا يتم حفظ تعديلاتك على الأدوية.`);
-    } else if (!err) {
-      warnedMedsRef.current = false;
-    }
-  }, [medications, showToast, hydrated]);
+  usePersistentEffect({
+    storageKey: STORAGE_MEDS_KEY,
+    value: medications,
+    enabled: hydrated,
+    failureMessage: 'قد لا يتم حفظ تعديلاتك على الأدوية.',
+    showToast,
+  });
 
-  const warnedLogsRef = useRef(false);
-  useEffect(() => {
-    if (!hydrated) return;
-    const err = persistJson(STORAGE_LOGS_KEY, logs);
-    if (err && !warnedLogsRef.current) {
-      warnedLogsRef.current = true;
-      showToast(`${err} — قد لا يتم حفظ سجل الاستهلاك.`);
-    } else if (!err) {
-      warnedLogsRef.current = false;
-    }
-  }, [logs, showToast, hydrated]);
+  usePersistentEffect({
+    storageKey: STORAGE_LOGS_KEY,
+    value: logs,
+    enabled: hydrated,
+    failureMessage: 'قد لا يتم حفظ سجل الاستهلاك.',
+    showToast,
+  });
 
   // M12: pharmacy settings are written via a 400ms debounce so rapid
   // toggles of the 30/60-day duration (which calls onUpdateSettings on
   // every click) don't fire a localStorage write per click. The last
   // value within the debounce window wins.
-  const warnedPharmacyRef = useRef(false);
-  useEffect(() => {
-    if (!hydrated) return;
-    const handle = window.setTimeout(() => {
-      const err = persistJson(STORAGE_PHARMACY_KEY, pharmacySettings);
-      if (err && !warnedPharmacyRef.current) {
-        warnedPharmacyRef.current = true;
-        showToast(`${err} — قد لا يتم حفظ إعدادات الصيدلية.`);
-      } else if (!err) {
-        warnedPharmacyRef.current = false;
-      }
-    }, 400);
-    return () => window.clearTimeout(handle);
-  }, [pharmacySettings, showToast, hydrated]);
+  usePersistentEffect({
+    storageKey: STORAGE_PHARMACY_KEY,
+    value: pharmacySettings,
+    enabled: hydrated,
+    debounceMs: 400,
+    failureMessage: 'قد لا يتم حفظ إعدادات الصيدلية.',
+    showToast,
+  });
 
-  const warnedSoundRef = useRef(false);
-  useEffect(() => {
-    if (!hydrated) return;
-    const err = persistString(SOUND_KEY, String(soundEnabled));
-    if (err && !warnedSoundRef.current) {
-      warnedSoundRef.current = true;
-      showToast(`${err} — قد لا يتم حفظ تفضيل الصوت.`);
-    } else if (!err) {
-      warnedSoundRef.current = false;
-    }
-  }, [soundEnabled, showToast, hydrated]);
+  usePersistentEffect({
+    storageKey: SOUND_KEY,
+    value: String(soundEnabled),
+    json: false,
+    enabled: hydrated,
+    failureMessage: 'قد لا يتم حفظ تفضيل الصوت.',
+    showToast,
+  });
 
   // Persist font size preference so it survives app relaunch, and toggle root scaling.
+  // This effect stays inline (not collapsed into usePersistentEffect) because it
+  // has a CSS-class side effect that must run BEFORE the hydrated gate (so the
+  // class is applied on first render even before hydration completes), and it
+  // uses console.warn (not toast) on failure.
   useEffect(() => {
     if (typeof document !== 'undefined') {
       document.documentElement.classList.toggle('font-scale-large', fontScale === 'large');
     }
     if (!hydrated) return;
-    const err = persistString(FONT_SIZE_KEY, fontScale);
+    const err = persist(FONT_SIZE_KEY, fontScale, { json: false });
     if (err) {
       console.warn('[App] failed to persist font size:', err);
     }
   }, [fontScale, hydrated]);
 
-  const warnedCriticalRef = useRef(false);
-  useEffect(() => {
-    if (!hydrated) return;
-    const err = persistString(CRITICAL_STOCK_ALERTS_KEY, String(criticalStockAlertsEnabled));
-    if (err && !warnedCriticalRef.current) {
-      warnedCriticalRef.current = true;
-      showToast(`${err} — قد لا يتم حفظ تفضيل تنبيه النفاذ الحرج.`);
-    } else if (!err) {
-      warnedCriticalRef.current = false;
-    }
-  }, [criticalStockAlertsEnabled, showToast, hydrated]);
+  usePersistentEffect({
+    storageKey: CRITICAL_STOCK_ALERTS_KEY,
+    value: String(criticalStockAlertsEnabled),
+    json: false,
+    enabled: hydrated,
+    failureMessage: 'قد لا يتم حفظ تفضيل تنبيه النفاذ الحرج.',
+    showToast,
+  });
 
-  const warnedAutoDeductRef = useRef(false);
-  useEffect(() => {
-    if (!hydrated) return;
-    const err = persistString(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, String(globalAutoDeductEnabled));
-    if (err && !warnedAutoDeductRef.current) {
-      warnedAutoDeductRef.current = true;
-      showToast(`${err} — قد لا يتم حفظ تفضيل الخصم التلقائي.`);
-    } else if (!err) {
-      warnedAutoDeductRef.current = false;
-    }
-  }, [globalAutoDeductEnabled, showToast, hydrated]);
+  usePersistentEffect({
+    storageKey: STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
+    value: String(globalAutoDeductEnabled),
+    json: false,
+    enabled: hydrated,
+    failureMessage: 'قد لا يتم حفظ تفضيل الخصم التلقائي.',
+    showToast,
+  });
 
   // Persist global custom sound to IndexedDB (C4: storing the base64
   // data URL in localStorage risked blowing the ~5 MB quota and silently

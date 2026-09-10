@@ -112,14 +112,14 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   const handleSave = (e: FormEvent) => {
     e.preventDefault();
     onSaveSettings({
-      pharmacyPhone: pharmacyPhone.trim(),
-      pharmacyName: pharmacyName.trim(),
-      customerCode: customerCode.trim(),
+      pharmacyPhone: isPharmacyOnly ? pharmacyPhone.trim() : settings.pharmacyPhone,
+      pharmacyName: isPharmacyOnly ? pharmacyName.trim() : settings.pharmacyName,
+      customerCode: isPharmacyOnly ? customerCode.trim() : settings.customerCode,
       // Preserve the duration/quantities managed by the shopping view.
       defaultDurationDays: settings.defaultDurationDays,
       customQuantities: settings.customQuantities,
-      address: address.trim(),
-      contactPhone: contactPhone.trim(),
+      address: isPharmacyOnly ? address.trim() : settings.address,
+      contactPhone: isPharmacyOnly ? contactPhone.trim() : settings.contactPhone,
       pharmacies: settings.pharmacies,
       selectedPharmacyId: settings.selectedPharmacyId,
     });
@@ -395,19 +395,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
           )}
 
           {/* Pharmacy and WhatsApp Configuration Section */}
-          <div className="space-y-3 pt-1">
-            {!isPharmacyOnly && (
-              <div className="border-t border-slate-200 pt-3">
-                <h4 className="text-xs font-bold text-slate-800 mb-1 flex items-center gap-1.5">
-                  <Phone className="w-4 h-4 text-teal-600" />
-                  <span>بيانات الصيدلية وطلب الواتساب</span>
-                </h4>
-                <p className="text-[11px] text-slate-500 mb-3">
-                  تحديد بيانات الصيدلية والتوصيل لتجهيز وإرسال الطلبات بنقرة واحدة
-                </p>
-              </div>
-            )}
-
+          {isPharmacyOnly && <div className="space-y-3 pt-1">
             {/* Pharmacy Phone Number */}
             <div className="bg-teal-50/70 border border-teal-200/80 rounded-2xl p-3.5 space-y-2">
               <label className="block text-xs font-bold text-teal-950 flex items-center gap-1.5">
@@ -587,7 +575,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                 </div>
               );
             })()}
-          </div>
+          </div>}
 
           {/* Submit Button */}
           <div className="pt-2">

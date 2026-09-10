@@ -15,7 +15,7 @@ export const AndroidFab: FC<AndroidFabProps> = ({ onClick }) => {
   // Previously bottom-[82px] which sat too close to the bottom-nav
   // and felt cramped; bumping up 46px gives it more breathing room.
   return (
-    <div className="absolute bottom-[128px] left-4 z-40 pointer-events-auto">
+    <div className="absolute bottom-[112px] left-4 z-40 pointer-events-auto">
       <button
         type="button"
         onClick={onClick}

@@ -1332,27 +1332,6 @@ export default function App() {
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        onClick={() => {
-                          setSettingsModalMode('all');
-                          setIsSettingsModalOpen(true);
-                        }}
-                        className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition ${
-                          globalAutoDeductEnabled
-                            ? 'text-teal-700 hover:text-teal-900 bg-teal-100/70'
-                            : 'text-amber-800 hover:text-amber-950 bg-amber-200/70'
-                        }`}
-                      >
-                        الإعدادات
-                      </button>
-                      <button
-                        onClick={() => setActiveTab('logs')}
-                        className="text-[11px] font-bold text-teal-700 hover:text-teal-900 bg-teal-100/70 px-2.5 py-1 rounded-lg"
-                      >
-                        عرض السجل
-                      </button>
-                    </div>
                   </div>
                   <div className="mx-4 mt-3 grid grid-cols-3 gap-2 text-center text-xs">
                     <div className="bg-white p-2.5 rounded-2xl border border-slate-200/80 shadow-xs">
@@ -1430,8 +1409,6 @@ export default function App() {
                 setSettingsModalMode('pharmacy');
                 setIsSettingsModalOpen(true);
               }}
-              onConfirmRefill={handleConfirmRefill}
-              onUndoRefill={handleUndoRefill}
               showToast={showToast}
             />
           )}

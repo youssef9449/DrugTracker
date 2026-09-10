@@ -616,6 +616,70 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
     });
   });
 
+  it('allows undoing multiple refills sequentially (regression: undo only worked once)', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([{
+      id: 'med-seq',
+      name: 'Seq Med',
+      currentPills: 60,
+      dailyDose: 0,
+      unit: 'قرص',
+      warningThresholdDays: 5,
+      colorTag: 'teal',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      lastSyncDate: today,
+      autoDeductEnabled: false,
+      reminderEnabled: false,
+    }]));
+    localStorage.setItem('android_med_tracker_logs_v2', JSON.stringify([
+      { id: 'refill-newest', medicationId: 'med-seq', medicationName: 'Seq Med', type: 'refill', amount: 20, date: today, timestamp: '2024-01-03T00:00:00.000Z', description: 'newest' },
+      { id: 'refill-middle', medicationId: 'med-seq', medicationName: 'Seq Med', type: 'refill', amount: 15, date: today, timestamp: '2024-01-02T00:00:00.000Z', description: 'middle' },
+      { id: 'refill-oldest', medicationId: 'med-seq', medicationName: 'Seq Med', type: 'refill', amount: 25, date: today, timestamp: '2024-01-01T00:00:00.000Z', description: 'oldest' },
+    ]));
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'تراجع عن التعبئة' })).toBeInTheDocument());
+
+    // 1st undo: reverses the newest refill (+20). 60 - 20 = 40.
+    fireEvent.click(screen.getByRole('button', { name: 'تراجع عن التعبئة' }));
+    await waitFor(() => {
+      const savedMeds = JSON.parse(localStorage.getItem('android_med_tracker_items_v2') || '[]');
+      expect(savedMeds[0].currentPills).toBe(40);
+    });
+    // Only 1 refill_undo log so far.
+    let savedLogs = JSON.parse(localStorage.getItem('android_med_tracker_logs_v2') || '[]');
+    expect(savedLogs.filter((log: { type: string }) => log.type === 'refill_undo')).toHaveLength(1);
+    // The +15 refill is now the latest undoable one.
+    expect(screen.getByText('آخر تعبئة: +15 قرص')).toBeInTheDocument();
+
+    // 2nd undo (sequential — after the first completed): reverses the
+    // middle refill (+15). 40 - 15 = 25. This is the regression: the
+    // guard must be cleared so a legitimate second undo works.
+    fireEvent.click(screen.getByRole('button', { name: 'تراجع عن التعبئة' }));
+    await waitFor(() => {
+      const savedMeds = JSON.parse(localStorage.getItem('android_med_tracker_items_v2') || '[]');
+      expect(savedMeds[0].currentPills).toBe(25);
+    });
+    savedLogs = JSON.parse(localStorage.getItem('android_med_tracker_logs_v2') || '[]');
+    expect(savedLogs.filter((log: { type: string }) => log.type === 'refill_undo')).toHaveLength(2);
+    // The +25 (oldest) refill is now the only remaining undoable one.
+    expect(screen.getByText('آخر تعبئة: +25 قرص')).toBeInTheDocument();
+
+    // 3rd undo: reverses the oldest refill (+25). 25 - 25 = 0.
+    fireEvent.click(screen.getByRole('button', { name: 'تراجع عن التعبئة' }));
+    await waitFor(() => {
+      const savedMeds = JSON.parse(localStorage.getItem('android_med_tracker_items_v2') || '[]');
+      expect(savedMeds[0].currentPills).toBe(0);
+    });
+    savedLogs = JSON.parse(localStorage.getItem('android_med_tracker_logs_v2') || '[]');
+    expect(savedLogs.filter((log: { type: string }) => log.type === 'refill_undo')).toHaveLength(3);
+
+    // No more undoable refills — the undo button should be gone.
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'تراجع عن التعبئة' })).not.toBeInTheDocument();
+    });
+  });
+
   it('restores a dose once per day and does not restore when auto-deduct is disabled', async () => {
     const today = new Date().toISOString().slice(0, 10);
     localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([{

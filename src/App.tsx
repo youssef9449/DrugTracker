@@ -697,6 +697,16 @@ export default function App() {
     if (!med || !refill) return;
     refillUndoInFlightRef.current.add(medicationId);
 
+    // Clear the guard after the current event-loop tick. This blocks a
+    // rapid double-click (same tick — the timeout hasn't fired yet) while
+    // allowing a legitimate subsequent undo of the NEXT refill (after the
+    // timeout fires and the state has updated). React's act() in tests
+    // flushes state updates but NOT setTimeout (a macrotask), so the guard
+    // stays set between synchronous fireEvent calls.
+    setTimeout(() => {
+      refillUndoInFlightRef.current.delete(medicationId);
+    }, 0);
+
     const today = getTodayDateString();
     const { updatedMed, reversedAmount } = reverseRefill(med, refill.amount, today);
     const undoTimestamp = new Date().toISOString();

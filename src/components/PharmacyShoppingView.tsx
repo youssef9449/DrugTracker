@@ -311,11 +311,10 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       showToast('أضف صيدلية من تبويب الصيدليات أولًا.');
       return;
     }
-    // Attempt opening WhatsApp directly
-    openWhatsAppLink(selectedPharmacy.phone, currentWhatsAppMessage);
-    // Also open the confirmation & direct-links modal so popup blockers never stop the user!
+    // Let the user choose the destination pharmacy in the confirmation modal
+    // before opening WhatsApp.
     setIsSendModalOpen(true);
-    showToast('جاري فتح محادثة واتساب الصيدلية...');
+    showToast('اختر الصيدلية ثم افتح واتساب لإرسال الطلب.');
   };
 
   const handleCopyOrder = async () => {
@@ -658,6 +657,23 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
 
             {/* Selected pharmacy summary */}
             <div className="bg-slate-50 rounded-2xl p-3.5 border border-slate-200/80 space-y-2">
+              <label className="block text-xs font-bold text-slate-700">
+                الصيدلية التي سيتم إرسال الطلب إليها
+                <select
+                  value={selectedPharmacy?.id || ''}
+                  onChange={(event) => onUpdateSettings({ ...settings, selectedPharmacyId: event.target.value })}
+                  className="mt-1.5 w-full bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-teal-500"
+                  aria-label="اختيار صيدلية لإرسال الطلب"
+                >
+                  {pharmacies.length === 0 && <option value="">لا توجد صيدليات محفوظة</option>}
+                  {pharmacies.map((pharmacy) => (
+                    <option key={pharmacy.id} value={pharmacy.id}>{pharmacy.name}</option>
+                  ))}
+                  {pharmacies.length === 0 && selectedPharmacy && (
+                    <option value="legacy">{selectedPharmacy.name}</option>
+                  )}
+                </select>
+              </label>
               <div className="flex items-center justify-between text-xs">
                 <span className="font-bold text-slate-700 flex items-center gap-1.5">
                   <Phone className="w-3.5 h-3.5 text-teal-600" />

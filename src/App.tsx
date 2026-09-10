@@ -88,8 +88,14 @@ export default function App() {
   // hydration effect finishes, which gates the auto-deduction + alert
   // effects so they operate on the user's REAL saved state (not the
   // seed defaults) — see H8 in the audit fix.
-  const [medications, setMedications] = useState<Medication[]>(getInitialMedications);
-  const [logs, setLogs] = useState<ConsumptionLog[]>(getInitialLogs);
+  //
+  // Compute the seed date once (useState memoizes it — only runs on
+  // first render) and share it across both factory initializers so the
+  // medication lastSyncDate and the seed auto-deduction log dates are
+  // consistent even if midnight falls between the two calls.
+  const [seedToday] = useState(getTodayDateString);
+  const [medications, setMedications] = useState<Medication[]>(() => getInitialMedications(seedToday));
+  const [logs, setLogs] = useState<ConsumptionLog[]>(() => getInitialLogs(seedToday));
   const [pharmacySettings, setPharmacySettings] =
     useState<PharmacySettings>(DEFAULT_PHARMACY_SETTINGS);
   const [hydrated, setHydrated] = useState(false);

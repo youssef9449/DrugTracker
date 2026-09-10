@@ -15,6 +15,13 @@
  * long-running dev session that crosses midnight previously kept stale
  * "today" values; now each call gets the current date.
  *
+ * Both functions accept an optional `todayStr` parameter so the caller
+ * can share a single date snapshot across medications + logs — if the
+ * first render straddles local midnight, two independent
+ * `getTodayDateString()` calls could produce a lastSyncDate for day D
+ * on the meds and a date for day D+1 on the seed auto-deduction logs,
+ * creating inconsistent seed state that's persisted on first run.
+ *
  * NOTE: if AI Studio's preview shows an error like
  *     Failed to resolve import "./data/initialData" from "src/App.tsx"
  * it is a stale-cache issue in AI Studio's preview server, not a
@@ -25,8 +32,8 @@
 import { Medication, ConsumptionLog } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
 
-export function getInitialMedications(): Medication[] {
-  const today = getTodayDateString();
+export function getInitialMedications(todayStr: string = getTodayDateString()): Medication[] {
+  const today = todayStr;
   const nowIso = new Date().toISOString();
   return [
     {
@@ -92,8 +99,8 @@ export function getInitialMedications(): Medication[] {
   ];
 }
 
-export function getInitialLogs(): ConsumptionLog[] {
-  const today = getTodayDateString();
+export function getInitialLogs(todayStr: string = getTodayDateString()): ConsumptionLog[] {
+  const today = todayStr;
   const nowIso = new Date().toISOString();
   return [
     {

@@ -1,5 +1,6 @@
 import { pluralizeArabic } from './lib/arabicPlural';
 import { effectiveCurrentPills, effectiveDaysLeft } from './utils/dateCalculations';
+import { NEVER_DEPLETES_DAYS } from './utils/time';
 
 export interface ConsumptionLog {
   id: string;
@@ -329,7 +330,7 @@ export function calculateMedicationStatus(med: Medication): MedicationStatusInfo
 
   if (med.dailyDose <= 0) {
     return {
-      daysLeft: 999,
+      daysLeft: NEVER_DEPLETES_DAYS,
       status: 'sufficient',
       statusLabel: 'غير محدد',
       statusColorClass: 'text-slate-600',

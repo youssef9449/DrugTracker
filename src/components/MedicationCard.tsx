@@ -14,6 +14,7 @@ import {
 import { Medication, calculateMedicationStatus, describeStockInStrips, isSolidUnit } from '../types';
 import { getDepletionDate, getTodayDateString, effectiveCurrentPills } from '../utils/dateCalculations';
 import { pluralizeArabic } from '../lib/arabicPlural';
+import { VISUAL_RANGE_MULTIPLIER, MIN_VISUAL_RANGE_DAYS, DAYS_PER_MONTH } from '../utils/time';
 import { MedicationMenu } from './MedicationMenu';
 import { ReminderBadge } from './ReminderBadge';
 import { StripsBadge, PackageSizeBadge, AutoDeductPausedNote } from './medicationCardParts';
@@ -64,7 +65,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     : null;
 
   // Maximum visual scale for progress
-  const maxVisualRange = Math.max(medication.warningThresholdDays * 3, 20);
+  const maxVisualRange = Math.max(medication.warningThresholdDays * VISUAL_RANGE_MULTIPLIER, MIN_VISUAL_RANGE_DAYS);
   const percentLeft = Math.min(
     100,
     Math.max(0, Math.round((statusInfo.daysLeft / maxVisualRange) * 100))
@@ -270,7 +271,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   // -------------------------------------------------------------
   if (viewFilter === 'sufficient') {
     const safeDays = statusInfo.daysLeft;
-    const monthlyUsage = medication.dailyDose * 30;
+    const monthlyUsage = medication.dailyDose * DAYS_PER_MONTH;
 
     return (
       <div

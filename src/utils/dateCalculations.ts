@@ -1,5 +1,6 @@
 import { Medication, ConsumptionLog, getCriticalThresholdDays } from '../types';
 import { generateId } from './id';
+import { MS_PER_DAY, NEVER_DEPLETES_DAYS, CRITICAL_ALARM_FIRE_HOUR } from './time';
 
 /**
  * Returns today's date as a deterministic YYYY-MM-DD string, using
@@ -46,8 +47,7 @@ function formatUtcDateString(d: Date): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-/** One calendar day in milliseconds (used for UTC day arithmetic). */
-const MS_PER_DAY = 1000 * 60 * 60 * 24;
+// MS_PER_DAY is now imported from ./time (#99).
 
 export function formatArabicDate(dateStr: string, includeWeekday: boolean = true): string {
   try {
@@ -157,7 +157,8 @@ export function reverseRefill(
  * The dynamic "days left" estimate derived from effectiveCurrentPills.
  *
  * Equivalent to `Math.floor(effectiveCurrentPills(med, todayStr) / med.dailyDose)`
- * when `dailyDose > 0`, else `999` (sentinel meaning "never depletes").
+ * when `dailyDose > 0`, else `NEVER_DEPLETES_DAYS` (sentinel meaning "never
+ * depletes").
  * Clamped at 0.
  *
  * Provided as a convenience for `calculateMedicationStatus` and
@@ -167,7 +168,7 @@ export function effectiveDaysLeft(
   med: Medication,
   todayStr: string = getTodayDateString()
 ): number {
-  if (med.dailyDose <= 0) return 999;
+  if (med.dailyDose <= 0) return NEVER_DEPLETES_DAYS;
   const eff = effectiveCurrentPills(med, todayStr);
   if (eff <= 0) return 0;
   return Math.floor(eff / med.dailyDose);
@@ -497,12 +498,10 @@ export function settleAutoDeductToggle(
  *
  * @param med The medication.
  * @param todayStr Optional "today" override (YYYY-MM-DD) — for tests.
- * @param nowMs Optional `Date.now()` override — for tests.
  */
 export function getCriticalAlarmDate(
   med: Medication,
-  todayStr: string = getTodayDateString(),
-  nowMs: number = Date.now()
+  todayStr: string = getTodayDateString()
 ): number | null {
   // No consumption rate → no projected crossing. Caller skips.
   if (med.dailyDose <= 0) return null;
@@ -531,9 +530,27 @@ export function getCriticalAlarmDate(
   const daysUntilCritical = daysLeft - criticalThresholdDays;
   if (daysUntilCritical <= 0) return null;
 
-  // Compute today + daysUntilCritical at local 09:00 AM.
-  const target = new Date(nowMs);
-  target.setDate(target.getDate() + daysUntilCritical);
-  target.setHours(9, 0, 0, 0);
+  // #92: compute the target date in UTC (consistent with the rest of
+  // this module's UTC day arithmetic) then convert to local 9 AM. The
+  // previous code used `target.setDate(...)` + `target.setHours(9, ...)`
+  // which are LOCAL field writes — mixing LOCAL with the UTC-derived
+  // `daysUntilCritical` risked off-by-one around DST transitions (the
+  // module's own JSDoc at the top warns about this exact trap).
+  //
+  // Approach: parse today as UTC, add daysUntilCritical in UTC, then
+  // construct a local Date at 9 AM on that calendar date. This mirrors
+  // how getDepletionDate (lines ~188-192) does UTC day arithmetic.
+  const todayUtc = parseUtcDate(todayStr) ?? new Date(Date.UTC(1970, 0, 1));
+  const targetUtcMs = todayUtc.getTime() + daysUntilCritical * MS_PER_DAY;
+  const targetUtcDate = new Date(targetUtcMs);
+  // Build a local Date at 9 AM on the target calendar date (using the
+  // UTC fields so we don't shift by an hour across DST).
+  const target = new Date(
+    targetUtcDate.getUTCFullYear(),
+    targetUtcDate.getUTCMonth(),
+    targetUtcDate.getUTCDate(),
+    CRITICAL_ALARM_FIRE_HOUR, // 9 AM local
+    0, 0, 0
+  );
   return target.getTime();
 }

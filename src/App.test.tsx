@@ -580,8 +580,11 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
       reminderEnabled: false,
     }]));
     localStorage.setItem('android_med_tracker_logs_v2', JSON.stringify([
-      { id: 'refill-old', medicationId: 'med-undo', medicationName: 'Undo Med', type: 'refill', amount: 30, date: today, timestamp: '2024-01-01T00:00:00.000Z', description: 'old' },
+      // Logs are stored newest-first in the app (every setLogs prepends),
+      // so the seed must match that convention for logs.find() to target
+      // the latest non-reversed refill.
       { id: 'refill-latest', medicationId: 'med-undo', medicationName: 'Undo Med', type: 'refill', amount: 20, date: today, timestamp: '2024-01-02T00:00:00.000Z', description: 'latest' },
+      { id: 'refill-old', medicationId: 'med-undo', medicationName: 'Undo Med', type: 'refill', amount: 30, date: today, timestamp: '2024-01-01T00:00:00.000Z', description: 'old' },
     ]));
 
     render(<App />);

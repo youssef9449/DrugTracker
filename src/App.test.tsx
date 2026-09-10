@@ -34,7 +34,7 @@ vi.mock('../utils/audioStore', () => ({
 }));
 
 import App from './App';
-import { INITIAL_MEDICATIONS } from './data/initialData';
+import { getInitialMedications } from './data/initialData';
 import {
   scheduleCriticalAlarm,
   cancelCriticalAlarm,
@@ -67,7 +67,7 @@ describe('App — hydration (#15)', () => {
 
     // The seed medications must NOT have appeared (the old bug kept the
     // seed meds because `parsed.length > 0` was false).
-    for (const seedMed of INITIAL_MEDICATIONS) {
+    for (const seedMed of getInitialMedications()) {
       expect(screen.queryByText(seedMed.name)).toBeNull();
     }
   });

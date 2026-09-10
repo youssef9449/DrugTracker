@@ -4,6 +4,7 @@ import { getTodayDateString, effectiveCurrentPills } from '../utils/dateCalculat
 import { playNotificationSound, stopAllSounds } from '../utils/sound';
 import { sendMedicationDoseReminder } from '../utils/notifications';
 import { loadJson, saveJson } from '../utils/storage';
+import { REMINDER_POLL_INTERVAL_MS, DEFAULT_SNOOZE_MINUTES, MS_PER_MINUTE } from '../utils/time';
 
 const FIRED_KEY = 'android_med_tracker_fired_reminders_v1';
 const SNOOZE_KEY = 'android_med_tracker_snooze_v1';
@@ -148,11 +149,11 @@ export function useDoseReminders({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const snoozeAlarm = useCallback((minutes: number = 10) => {
+  const snoozeAlarm = useCallback((minutes: number = DEFAULT_SNOOZE_MINUTES) => {
     const current = alarmingIdRef.current;
     if (current) {
       const snooze = loadJson<Record<string, number>>(SNOOZE_KEY, {});
-      snooze[current] = Date.now() + minutes * 60 * 1000;
+      snooze[current] = Date.now() + minutes * MS_PER_MINUTE;
       saveJson(SNOOZE_KEY, snooze);
     }
     alarmingIdRef.current = null;
@@ -260,7 +261,7 @@ export function useDoseReminders({
     // 5s is cheap (the check is pure, no network / no DOM), and a
     // 5-second granularity is imperceptible to the user while still
     // avoiding the perceived "the alarm was late" lag of 15s.
-    const timer = window.setInterval(checkDue, 5000);
+    const timer = window.setInterval(checkDue, REMINDER_POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
     // #90: gate on the stable reminderSignature instead of the raw
     // `medications` array ref. The interval is only torn down/recreated

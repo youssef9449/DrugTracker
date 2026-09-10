@@ -17,6 +17,8 @@
  *   App.tsx so they can toast the user on quota exhaustion).
  */
 
+import { STORAGE_ERRORS } from '../constants/uiStrings';
+
 /**
  * Read and JSON.parse a localStorage value. Returns `fallback` if the key
  * is absent or parsing fails. Never throws.
@@ -91,8 +93,8 @@ export function persist(
   } catch (err) {
     const reason =
       err instanceof DOMException && err.name === 'QuotaExceededError'
-        ? 'مساحة التخزين ممتلئة'
-        : 'تعذّر حفظ البيانات';
+        ? STORAGE_ERRORS.quotaExceeded
+        : STORAGE_ERRORS.generic;
     console.warn(`[storage] localStorage.setItem(${key}) failed:`, err);
     return reason;
   }

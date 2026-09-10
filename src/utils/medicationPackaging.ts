@@ -1,4 +1,5 @@
 import { Medication, isSolidUnit } from '../types';
+import { DEFAULT_LIQUID_PACK_SIZE, DEFAULT_SOLID_PACK_SIZE } from './time';
 
 /**
  * Shared medication-packaging helpers (audit #73).
@@ -48,8 +49,8 @@ export function getMedSizes(med: Medication): MedSizes {
     : med.packageSize && med.packageSize > 0
     ? med.packageSize
     : med.unit === 'مل'
-    ? 100
-    : 30;
+    ? DEFAULT_LIQUID_PACK_SIZE
+    : DEFAULT_SOLID_PACK_SIZE;
   const stripSize =
     hasStrips && pillsPerStrip && pillsPerStrip > 0 ? pillsPerStrip : 0;
   return { boxSize, stripSize, hasStrips, isSolid };

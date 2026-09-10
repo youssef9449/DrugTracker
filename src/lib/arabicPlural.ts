@@ -103,6 +103,14 @@ const KNOWN_UNITS: Record<string, ArabicUnitForms> = {
     many: 'شريطاً',
     feminine: false,
   },
+  // يوم (day) — masculine. Used by MedicationCard status labels.
+  'يوم': {
+    singular: 'يوم',
+    dual: 'يومين',
+    few: 'أيام',
+    many: 'يوماً',
+    feminine: false,
+  },
 };
 
 /**

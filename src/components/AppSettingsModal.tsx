@@ -567,7 +567,3 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
     </Modal>
   );
 };
-
-// Backwards compatibility alias
-export { AppSettingsModal as PharmacySettingsModal };
-export type { AppSettingsModalProps as PharmacySettingsModalProps };

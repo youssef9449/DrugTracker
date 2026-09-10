@@ -28,6 +28,7 @@ import {
   calculateMedicationOrderQuantity,
   buildWhatsAppUrl,
 } from '../utils/whatsapp';
+import { getMedSizes } from '../utils/medicationPackaging';
 
 interface PharmacyShoppingViewProps {
   medications: Medication[];
@@ -119,23 +120,24 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   }, [displayList, deselectedIds]);
 
   const handleToggleSelect = (id: string) => {
-    setSelectedMedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-        // #20: record the explicit deselect.
-        setDeselectedIds((d) => new Set(d).add(id));
-      } else {
-        next.add(id);
-        // #20: clear the deselect record on re-select.
-        setDeselectedIds((d) => {
-          const n = new Set(d);
-          n.delete(id);
-          return n;
-        });
-      }
-      return next;
-    });
+    // Read current values from the closure (not from setState updaters) and
+    // compute both next states, then call both setters sequentially. The
+    // previous version called setDeselectedIds from inside the
+    // setSelectedMedIds updater — unsafe under React 18+ concurrent
+    // rendering / StrictMode because updaters must be pure (audit #70).
+    const nextSelected = new Set(selectedMedIds);
+    const nextDeselected = new Set(deselectedIds);
+    if (nextSelected.has(id)) {
+      nextSelected.delete(id);
+      // #20: record the explicit deselect.
+      nextDeselected.add(id);
+    } else {
+      nextSelected.add(id);
+      // #20: clear the deselect record on re-select.
+      nextDeselected.delete(id);
+    }
+    setSelectedMedIds(nextSelected);
+    setDeselectedIds(nextDeselected);
   };
 
   const handleDurationChange = (newDuration: 30 | 60) => {
@@ -157,27 +159,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   // The user picks an order unit (pills/boxes/strips) and a quantity
   // in that unit. We convert to the total pill count for storage in
   // customQuantities and for describeOrderInBoxes.
-
-  /** Get the med's packaging constants. */
-  function getMedSizes(med: Medication) {
-    const isSolid = med.unit === 'قرص' || med.unit === 'كبسولة';
-    const hasStrips = isSolid && Boolean(
-      med.stripsPerBox &&
-      med.pillsPerStrip &&
-      med.stripsPerBox > 0 &&
-      med.pillsPerStrip > 0
-    );
-    const boxSize =
-      hasStrips
-        ? med.stripsPerBox! * med.pillsPerStrip!
-        : med.packageSize && med.packageSize > 0
-        ? med.packageSize
-        : med.unit === 'مل'
-        ? 100
-        : 30;
-    const stripSize = hasStrips && med.pillsPerStrip && med.pillsPerStrip > 0 ? med.pillsPerStrip : 0;
-    return { boxSize, stripSize, hasStrips, isSolid };
-  }
 
   /** Available order units for a med: pills always, boxes if boxSize
    *  is known, strips only if the med has strips. */
@@ -700,12 +681,12 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
               </div>
               <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-2.5 max-h-40 overflow-y-auto space-y-1.5 text-xs">
                 {activeOrderItems.map((item, idx) => {
-                  const pkg = describeOrderInBoxes(item.quantity, item.unit, item.stripsPerBox, item.pillsPerStrip, item.packageSize);
+                  const pkg = describeOrderInBoxes(item.quantity, item.stripsPerBox, item.pillsPerStrip, item.packageSize, item.unit);
                   return (
                     <div key={idx} className="flex items-center justify-between py-1 border-b border-slate-200/60 last:border-b-0">
                       <span className="font-bold text-slate-800">{item.name}</span>
                       <span className="text-[11px] text-teal-800 bg-teal-50 px-2 py-0.5 rounded-lg border border-teal-200/60 font-semibold">
-                        {pkg.packagingDesc || `${item.quantity} ${item.unit}`}
+                        {pkg || `${item.quantity} ${item.unit}`}
                       </span>
                     </div>
                   );

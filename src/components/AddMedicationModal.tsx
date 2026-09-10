@@ -1,12 +1,14 @@
-import { useState, useEffect, type FC, type FormEvent } from 'react';
+import { useState, useEffect, useMemo, type FC, type FormEvent } from 'react';
 import { X, Pill, ShieldAlert, Check, Zap, Layers, Box, Calculator, Bell, Clock, Volume2 } from 'lucide-react';
-import { Medication, describeStockInStrips, NotificationSoundType, formatTimeArabic } from '../types';
+import { Medication, describeStockInStrips, NotificationSoundType, formatTimeArabic, isSolidUnit } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
 import {
   NOTIFICATION_SOUND_OPTIONS,
   playNotificationSound,
 } from '../utils/sound';
 import { CustomTimePicker } from './CustomTimePicker';
+import { Toggle } from './ui/Toggle';
+import { Modal } from './ui/Modal';
 
 interface AddMedicationModalProps {
   isOpen: boolean;
@@ -61,6 +63,12 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
   const [helperBoxes, setHelperBoxes] = useState<number>(1);
   const [helperStrips, setHelperStrips] = useState<number>(0);
   const [helperLoose, setHelperLoose] = useState<number>(0);
+  // #111: extracted from an inline IIFE — the stock-helper total.
+  const helperTotal = useMemo(() => {
+    const s = Math.max(1, parseInt(stripsPerBox, 10) || 1);
+    const p = Math.max(1, parseInt(pillsPerStrip, 10) || 1);
+    return helperBoxes * (s * p) + helperStrips * p + helperLoose;
+  }, [helperBoxes, helperStrips, helperLoose, stripsPerBox, pillsPerStrip]);
   const [error, setError] = useState('');
 
   const [reminderEnabled, setReminderEnabled] = useState<boolean>(false);
@@ -85,7 +93,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       setCategory(initialData.category || '');
       setNotes(initialData.notes || '');
       setColorTag(initialData.colorTag || 'teal');
-      const isSolid = initUnit === 'قرص' || initUnit === 'كبسولة';
+      const isSolid = isSolidUnit(initUnit);
       const hasStrips = isSolid && Boolean(
         initialData.stripsPerBox &&
           initialData.pillsPerStrip &&
@@ -94,9 +102,11 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       );
       setNoStrips(!hasStrips);
       if (hasStrips) {
-        setStripsPerBox(String(initialData.stripsPerBox));
-        setPillsPerStrip(String(initialData.pillsPerStrip));
-        setPackageSize(initialData.packageSize || initialData.stripsPerBox! * initialData.pillsPerStrip!);
+        const strips = initialData.stripsPerBox;
+        const perStrip = initialData.pillsPerStrip;
+        setStripsPerBox(String(strips));
+        setPillsPerStrip(String(perStrip));
+        setPackageSize(initialData.packageSize || (strips && perStrip ? strips * perStrip : 30));
       } else {
         const defaultPkg = isSolid ? 30 : initUnit === 'مل' ? 100 : 30;
         setStripsPerBox(String(initialData.packageSize || defaultPkg));
@@ -128,7 +138,13 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
     }
     setShowStockHelper(false);
     setError('');
-  }, [initialData, isOpen]);
+    // Intentionally only sync on the open transition (dep [isOpen]) — if
+    // the parent passes a new initialData object reference while the
+    // modal is already open, we must NOT reset the form (that would
+    // blow away in-progress edits). The latest initialData is read from
+    // the closure at the moment the modal opens (audit #93).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -140,7 +156,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
         if (packageSize === 30) setPackageSize(100);
         if (currentPills === 30) setCurrentPills(100);
         if (dailyDose === '1') setDailyDose('5');
-      } else if (newUnit === 'قرص' || newUnit === 'كبسولة') {
+      } else if (isSolidUnit(newUnit)) {
         if (packageSize === 100) setPackageSize(30);
         if (currentPills === 100) setCurrentPills(30);
         if (dailyDose === '5') setDailyDose('1');
@@ -207,7 +223,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
     // strips and per-strip counts are completely irrelevant.
     // For solid types (pills/capsules), handle "no strips" (loose pills)
     // or standard strips.
-    const isSolid = unit === 'قرص' || unit === 'كبسولة';
+    const isSolid = isSolidUnit(unit);
     let stripsPerBoxNum: number | undefined;
     let pillsPerStripNum: number | undefined;
     let calculatedPkgSize: number;
@@ -235,8 +251,8 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
     // we pass it explicitly here to make the intent unambiguous and
     // guard against any future input-enable change.
     const isEditing = Boolean(initialData);
-    const savedCurrentPills = isEditing
-      ? initialData!.currentPills
+    const savedCurrentPills = isEditing && initialData
+      ? initialData.currentPills
       : Number(currentPills);
 
     onSave(
@@ -277,7 +293,11 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       : 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-xs">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      label={initialData ? 'تعديل بيانات الدواء' : 'إضافة دواء جديد'}
+    >
       <div
         className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
         dir="rtl"
@@ -332,7 +352,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
                   {unit === 'مل'
                     ? 'الكمية المتوفرة حالياً (مل)'
-                    : unit === 'قرص' || unit === 'كبسولة'
+                    : isSolidUnit(unit)
                     ? 'عدد الحبوب المتوفرة حالياً'
                     : `الكمية المتوفرة حالياً (${unit})`}{' '}
                   {initialData ? (
@@ -378,7 +398,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
 
             {/* C1: hide the stock helper in edit mode AND for non-pill
                 types (liquid, dose, sachet — strips don't apply). */}
-            {!initialData && (unit === 'قرص' || unit === 'كبسولة') && (
+            {!initialData && isSolidUnit(unit) && (
               <div className="mt-1.5 flex items-center justify-between flex-wrap gap-1">
                 <button
                   type="button"
@@ -437,11 +457,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                 </div>
                 <div className="flex items-center justify-between pt-1">
                   <span className="text-[11px] text-teal-900 font-mono">
-                    المجموع = {(() => {
-                      const s = Math.max(1, parseInt(stripsPerBox, 10) || 1);
-                      const p = Math.max(1, parseInt(pillsPerStrip, 10) || 1);
-                      return helperBoxes * (s * p) + helperStrips * p + helperLoose;
-                    })()} {unit}
+                    المجموع = {helperTotal} {unit}
                   </span>
                   <button
                     type="button"
@@ -459,7 +475,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
               For liquid (مل), dose (جرعة), or sachet (كيس), strips
               and per-box pill count don't make sense; the user just
               enters the package size directly. */}
-          {(unit === 'قرص' || unit === 'كبسولة') && (
+          {isSolidUnit(unit) && (
           <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-2.5">
             <div className="flex items-center gap-2">
               <div className="w-6 h-6 rounded-lg bg-teal-100 text-teal-800 flex items-center justify-center">
@@ -563,7 +579,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
           )}
 
           {/* For liquid/dose/sachet: just show a package size field. */}
-          {unit !== 'قرص' && unit !== 'كبسولة' && (
+          {!isSolidUnit(unit) && (
           <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
             <div className="flex items-center gap-2">
               <div className="w-6 h-6 rounded-lg bg-teal-100 text-teal-800 flex items-center justify-center">
@@ -683,21 +699,12 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={reminderEnabled}
-                onClick={() => setReminderEnabled(!reminderEnabled)}
-                className={`w-11 h-6 rounded-full relative transition shrink-0 ${
-                  reminderEnabled ? 'bg-teal-600' : 'bg-slate-300'
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition ${
-                    reminderEnabled ? 'right-0.5' : 'right-[22px]'
-                  }`}
-                />
-              </button>
+              <Toggle
+                checked={reminderEnabled}
+                onChange={() => setReminderEnabled(!reminderEnabled)}
+                label="تفعيل تذكير يومي بموعد محدد"
+                size="md"
+              />
             </div>
 
             {reminderEnabled && (
@@ -794,6 +801,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
           </button>
         </form>
       </div>
-    </div>
+    </Modal>
   );
 };

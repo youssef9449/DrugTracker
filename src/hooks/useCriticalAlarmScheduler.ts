@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { Medication } from '../types';
 import { getTodayDateString, getCriticalAlarmDate } from '../utils/dateCalculations';
 import { scheduleCriticalAlarm, cancelCriticalAlarm } from '../utils/notifications';
@@ -117,6 +117,42 @@ export function useCriticalAlarmScheduler({
   // AFTER the newer schedule completed.
   const alarmChainRef = useRef<Map<string, Promise<void>>>(new Map());
 
+  // #91: keep the latest medications in a ref so the effect can read the
+  // current array without depending on the array reference (which changes
+  // on every App render — even unrelated state like typing in a search
+  // field — causing 3N async bridge calls per render).
+  const medicationsRef = useRef(medications);
+  useEffect(() => {
+    medicationsRef.current = medications;
+  }, [medications]);
+
+  // #91: stable signature capturing ONLY the fields that affect the
+  // critical alarm date (per getCriticalAlarmDate + scheduleCriticalAlarm):
+  //   id, currentPills, dailyDose, lastSyncDate, warningThresholdDays,
+  //   autoDeductEnabled, name, unit.
+  // The effect is gated on this string instead of the raw `medications`
+  // array ref, so the full cancel+schedule chain only re-runs when a med's
+  // alarm-relevant config actually changes.
+  const criticalSignature = useMemo(
+    () =>
+      medications
+        .map((m) =>
+          [
+            m.id,
+            m.currentPills,
+            m.dailyDose,
+            m.lastSyncDate ?? '',
+            m.warningThresholdDays,
+            m.autoDeductEnabled === false ? 0 : 1,
+            m.name,
+            m.unit ?? '',
+          ].join('|')
+        )
+        .sort()
+        .join('\n'),
+    [medications]
+  );
+
   /**
    * Append an async operation to the per-med chain and return the
    * new chain tail. The operation runs only after any previously-
@@ -160,7 +196,9 @@ export function useCriticalAlarmScheduler({
     const today = getTodayDateString();
     const stillScheduled = new Set<string>();
 
-    for (const med of medications) {
+    // #91: read from the ref so the effect doesn't re-run when only the
+    // array reference changes (the deps are gated on criticalSignature).
+    for (const med of medicationsRef.current) {
       // Bump generation for this med — any in-flight cancel+schedule
       // from a previous effect run is now stale.
       const gen = (alarmGenerationRef.current.get(med.id) ?? 0) + 1;
@@ -240,7 +278,7 @@ export function useCriticalAlarmScheduler({
     }
     scheduledCriticalIdsRef.current = stillScheduled;
   }, [
-    medications,
+    criticalSignature,
     notificationsEnabled,
     criticalStockAlertsEnabled,
     hydrated,

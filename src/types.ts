@@ -1,5 +1,6 @@
 import { pluralizeArabic } from './lib/arabicPlural';
 import { effectiveCurrentPills, effectiveDaysLeft } from './utils/dateCalculations';
+import { NEVER_DEPLETES_DAYS } from './utils/time';
 
 export interface ConsumptionLog {
   id: string;
@@ -89,6 +90,18 @@ export function getCriticalThresholdDays(med: Medication): number {
 }
 
 /**
+ * Returns true when the unit represents a solid medication (pill or
+ * capsule) — i.e. one that is packaged in strips/boxes. Liquid units
+ * (e.g. 'مل') and anything else return false.
+ *
+ * Centralizes the `unit === 'قرص' || unit === 'كبسولة'` predicate that
+ * was duplicated 12× across the codebase (audit #72).
+ */
+export function isSolidUnit(unit: string): boolean {
+  return unit === 'قرص' || unit === 'كبسولة';
+}
+
+/**
  * Formats 24-hour time "HH:mm" into friendly Arabic 12-hour format,
  * e.g. "9:00 ص" or "9:30 م".
  *
@@ -127,7 +140,7 @@ export function describeStockInStrips(
   unit: string = 'قرص'
 ): string | null {
   // Strips only apply to solid medications (pills/capsules)
-  if (unit !== 'قرص' && unit !== 'كبسولة') return null;
+  if (!isSolidUnit(unit)) return null;
   if (!pillsPerStrip || pillsPerStrip <= 0 || pills <= 0) return null;
 
   const totalStrips = Math.floor(pills / pillsPerStrip);
@@ -179,7 +192,7 @@ export function describeOrderInBoxes(
   packageSize?: number,
   unit: string = 'قرص'
 ): string {
-  const isSolid = unit === 'قرص' || unit === 'كبسولة';
+  const isSolid = isSolidUnit(unit);
   const effectiveStripsPerBox = isSolid ? stripsPerBox : undefined;
   const effectivePillsPerStrip = isSolid ? pillsPerStrip : undefined;
   const boxWordLabel = unit === 'مل' ? 'عبوة' : 'علبة';
@@ -278,14 +291,26 @@ export const DEFAULT_PHARMACY_SETTINGS: PharmacySettings = {
 
 export type MedicationStatus = 'out_of_stock' | 'critical' | 'warning' | 'sufficient';
 
-export function calculateMedicationStatus(med: Medication): {
+/** The return shape of calculateMedicationStatus — extracted so it can be
+ *  referenced by name in shared types (audit #97/#88). */
+export interface MedicationStatusInfo {
   daysLeft: number;
   status: MedicationStatus;
   statusLabel: string;
   statusColorClass: string;
   badgeBg: string;
   badgeText: string;
-} {
+}
+
+/** A medication paired with its pre-computed status — produced once by the
+ *  medicationsWithStatus memo in App.tsx and consumed by LowStockBanner,
+ *  filteredMedications, alertsCount, sufficientCount (audit #88/#97). */
+export interface MedicationWithStatus {
+  med: Medication;
+  statusInfo: MedicationStatusInfo;
+}
+
+export function calculateMedicationStatus(med: Medication): MedicationStatusInfo {
   // The dynamic balance: projects currentPills forward from lastSyncDate
   // by dailyDose. This keeps status correct even if the app was closed
   // for many days and syncAutoDailyDeductions hasn't run yet.
@@ -305,7 +330,7 @@ export function calculateMedicationStatus(med: Medication): {
 
   if (med.dailyDose <= 0) {
     return {
-      daysLeft: 999,
+      daysLeft: NEVER_DEPLETES_DAYS,
       status: 'sufficient',
       statusLabel: 'غير محدد',
       statusColorClass: 'text-slate-600',

@@ -90,7 +90,7 @@ describe('DoseAlarmModal — chime (#18/#19)', () => {
     expect(playNotificationSound).not.toHaveBeenCalled();
   });
 
-  it('the "إعادة التشغيل" (replay) button DOES play the chime on click', () => {
+  it('renders NO replay/chime button — the chime is solely the hook\'s job (#18/#19, refactor d81d4a9)', () => {
     const med = makeMed();
     render(
       <DoseAlarmModal
@@ -101,11 +101,15 @@ describe('DoseAlarmModal — chime (#18/#19)', () => {
         onDismiss={vi.fn()}
       />
     );
-    // The replay button is user-initiated and should still play.
-    const replayButton = screen.getByTitle('إعادة الاستماع للنغمة');
-    fireEvent.click(replayButton);
-    expect(playNotificationSound).toHaveBeenCalledTimes(1);
-    expect(playNotificationSound).toHaveBeenCalledWith('classic_chime');
+    // The replay button (previously title="إعادة الاستماع للنغمة") was
+    // intentionally removed in commit d81d4a9 along with the sound import —
+    // the chime is now solely the hook's job via useDoseReminders.triggerAlarm.
+    expect(screen.queryByTitle('إعادة الاستماع للنغمة')).toBeNull();
+    // No user action on the modal should trigger the chime.
+    fireEvent.click(screen.getByText('تناولت الجرعة الآن'));
+    fireEvent.click(screen.getByText('تأجيل 10 دقائق'));
+    fireEvent.click(screen.getByLabelText('إغلاق'));
+    expect(playNotificationSound).not.toHaveBeenCalled();
   });
 
   it('renders nothing when isOpen is false', () => {

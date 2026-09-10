@@ -66,60 +66,54 @@ function openDb(): Promise<IDBDatabase | null> {
 
 /**
  * Persist the global custom sound file to IndexedDB.
+ *
+ * #94: throws on IDB transaction error (callers should .catch + toast the
+ * user). Previously the error was silently swallowed — the user got no
+ * feedback that their custom sound wasn't saved.
  */
 export async function saveGlobalCustomSound(
   file: CustomSoundFile
 ): Promise<void> {
   const db = await openDb();
   if (!db) return;
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      tx.objectStore(STORE_NAME).put(file, GLOBAL_SOUND_KEY);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
-    });
-  } catch (err) {
-    console.warn('[audioStore] saveGlobalCustomSound failed:', err);
-  }
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).put(file, GLOBAL_SOUND_KEY);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
 }
 
 /**
  * Load the global custom sound file from IndexedDB.
- * Returns null if not stored, unavailable, or on error.
+ * Returns null if not stored or unavailable. Throws on IDB transaction
+ * error (callers can .catch — null means "no custom sound set").
  */
 export async function loadGlobalCustomSound(): Promise<CustomSoundFile | null> {
   const db = await openDb();
   if (!db) return null;
-  try {
-    return await new Promise<CustomSoundFile | null>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readonly');
-      const req = tx.objectStore(STORE_NAME).get(GLOBAL_SOUND_KEY);
-      req.onsuccess = () => resolve((req.result as CustomSoundFile) || null);
-      req.onerror = () => reject(req.error);
-    });
-  } catch (err) {
-    console.warn('[audioStore] loadGlobalCustomSound failed:', err);
-    return null;
-  }
+  return new Promise<CustomSoundFile | null>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const req = tx.objectStore(STORE_NAME).get(GLOBAL_SOUND_KEY);
+    req.onsuccess = () => resolve((req.result as CustomSoundFile) || null);
+    req.onerror = () => reject(req.error);
+  });
 }
 
 /**
  * Remove the global custom sound from IndexedDB.
+ *
+ * #94: throws on IDB transaction error (callers should .catch + toast).
  */
 export async function deleteGlobalCustomSound(): Promise<void> {
   const db = await openDb();
   if (!db) return;
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      tx.objectStore(STORE_NAME).delete(GLOBAL_SOUND_KEY);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
-    });
-  } catch (err) {
-    console.warn('[audioStore] deleteGlobalCustomSound failed:', err);
-  }
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).delete(GLOBAL_SOUND_KEY);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
 }

@@ -37,6 +37,12 @@
 
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import { playNotificationSound } from './sound';
+import {
+  NOTIFICATION_IMMEDIATE_OFFSET_MS,
+  CRITICAL_ALARM_IMMEDIATE_TOLERANCE_MS,
+  SW_READY_TIMEOUT_MS,
+} from './time';
 
 /**
  * Returns true when running inside the Capacitor native runtime
@@ -184,7 +190,7 @@ export async function sendMedicineAlert(
       : `المتبقي ${currentPills} حبة فقط، تكفي لـ ${daysText}. يرجى الشراء قريباً!`;
 
   await scheduleNotification({
-    id: hashCode(`med-${medId}`),
+    id: notificationId('lowStock', medId),
     title,
     body,
     channelId: 'low-stock',
@@ -239,9 +245,9 @@ export async function sendCriticalStockAlert(
       : `متبقي ${currentPills} ${unit} فقط من "${medicineName}"، تكفي لـ ${daysWord}. يرجى التعبئة فوراً!`;
 
   await scheduleNotification({
-    // Use a different notification ID hash from sendMedicineAlert so
-    // the two notifications don't collide / overwrite each other.
-    id: hashCode(`critical-${medId}`),
+    // Disjoint id range from sendMedicineAlert's lowStock band so the
+    // two notifications don't collide / overwrite each other.
+    id: notificationId('critical', medId),
     title,
     body,
     channelId: 'low-stock',
@@ -279,7 +285,7 @@ export async function sendMedicationDoseReminder(
   const body = `موعد الجرعة${timeHint}. جرعتك المقررة: ${dailyDose} ${unit}. (المخزون الحالي: ${currentPills} ${unit}).`;
 
   await scheduleNotification({
-    id: hashCode(`dose-${medId}-${Date.now()}`),
+    id: notificationId('dose', medId),
     title,
     body,
     channelId: 'dose-reminder',
@@ -316,7 +322,12 @@ async function scheduleNotification(opts: {
     try {
       // Make sure we have permission before scheduling.
       const perm = await LocalNotifications.checkPermissions();
-      if (perm.display !== 'granted') return;
+      if (perm.display !== 'granted') {
+        // #95: surface the silent no-op so the caller / devtools can see
+        // the notification was dropped due to missing permission.
+        console.warn('[notifications] scheduleNotification skipped: permission not granted');
+        return;
+      }
 
       await LocalNotifications.schedule({
         notifications: [
@@ -327,7 +338,7 @@ async function scheduleNotification(opts: {
             // Schedule 1 second in the future so it appears as a
             // real notification (not "delivered immediately" which
             // some Android versions treat as a head-up only).
-            schedule: { at: new Date(Date.now() + 1000) },
+            schedule: { at: new Date(Date.now() + NOTIFICATION_IMMEDIATE_OFFSET_MS) },
             // Sound: uses the default Android notification sound
             // for the channel. The custom sound is played via the
             // localNotificationReceived listener in the foreground.
@@ -361,9 +372,8 @@ async function scheduleNotification(opts: {
       scheduleWebNotification(opts.title, opts.body);
       // Also play the custom sound in the foreground as a fallback.
       if (opts.customSoundFile) {
-        import('../utils/sound')
-          .then((m) => m.playNotificationSound('custom', opts.customSoundFile!))
-          .catch(() => void 0);
+        // #96: static import (was a dynamic import — no circular dep exists).
+        playNotificationSound('custom', opts.customSoundFile);
       }
     }
     return;
@@ -372,9 +382,8 @@ async function scheduleNotification(opts: {
   scheduleWebNotification(opts.title, opts.body);
   // On web, also play the custom sound via the Web Audio API.
   if (opts.customSoundFile) {
-    import('../utils/sound')
-      .then((m) => m.playNotificationSound('custom', opts.customSoundFile!))
-      .catch(() => void 0);
+    // #96: static import (was a dynamic import — no circular dep exists).
+    playNotificationSound('custom', opts.customSoundFile);
   }
 }
 
@@ -386,7 +395,7 @@ export async function sendTestAlertNotification(
   customSoundFile?: { fileName: string; mimeType: string; dataUrl: string } | null
 ): Promise<void> {
   await scheduleNotification({
-    id: hashCode('med-test-notification'),
+    id: notificationId('test'),
     title: '🔔 إشعار تجريبي: متابع الأدوية',
     body: 'الإشعارات والتنبيهات تعمل بشكل سليم على جهازك!',
     channelId: 'dose-reminders',
@@ -396,17 +405,50 @@ export async function sendTestAlertNotification(
 }
 
 /**
- * Web fallback: use the browser Notification API.
+ * Web fallback: show a notification via the service worker when available,
+ * falling back to the legacy `new Notification()` API (#104).
+ *
+ * The service-worker path (`registration.showNotification`) is preferred
+ * because it works even when the tab is in the background, and it's the
+ * only path that works once the browser deprecates `new Notification()`
+ * (already the case in Chromium ≥ 88 for service-worker-controlled
+ * pages). The SW is registered only in production (see src/main.tsx),
+ * so in dev mode we fall back to `new Notification()` after a short
+ * timeout guard (navigator.serviceWorker.ready would hang otherwise).
  */
-function scheduleWebNotification(title: string, body: string): void {
+async function scheduleWebNotification(title: string, body: string): Promise<void> {
   if (!isWebNotificationSupported() || Notification.permission !== 'granted') {
     return;
   }
+  const options: NotificationOptions = {
+    body,
+    icon: '/assets/icons/icon.svg',
+  };
+
+  // Try the service-worker path first.
+  if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+    try {
+      // Race against a 2s timeout so dev mode (where no SW is registered)
+      // doesn't hang indefinitely.
+      const reg = await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise<ServiceWorkerRegistration | null>((resolve) =>
+          setTimeout(() => resolve(null), SW_READY_TIMEOUT_MS)
+        ),
+      ]);
+      if (reg) {
+        await reg.showNotification(title, options);
+        return;
+      }
+      // reg === null → timed out (dev mode, no SW). Fall through to legacy.
+    } catch {
+      // SW not available — fall through to legacy new Notification().
+    }
+  }
+
+  // Legacy fallback.
   try {
-    new Notification(title, {
-      body,
-      icon: '/assets/icons/icon.svg',
-    });
+    new Notification(title, options);
   } catch {
     // Silent fail if the browser blocks the notification (e.g.,
     // service worker context).
@@ -414,17 +456,77 @@ function scheduleWebNotification(title: string, body: string): void {
 }
 
 /**
- * Create a stable numeric hash from a string — used as the
- * notification ID so we can replace/update existing notifications
- * with the same key (e.g., to avoid duplicates when the user
- * snoozes and the alarm fires again).
+ * Notification ID scheme (audit issues #65 / #66).
+ *
+ * Capacitor LocalNotifications uses a numeric `id` to identify each
+ * scheduled notification. Two notifications with the same id collide
+ * (the later one overwrites the earlier). The previous scheme hashed a
+ * category-prefixed string into a single 31-bit space. Five distinct
+ * categories sharing one hash space meant cross-category collisions were
+ * possible (e.g. hashCode('critical-alarm-medA') could equal
+ * hashCode('med-medB')), silently overwriting/conflicting unrelated
+ * notifications.
+ *
+ * The fix: reserve disjoint numeric ranges per category. Each category
+ * gets a 1,000,000-wide band; within the band the id is derived from a
+ * stable hash of medId so the same med always maps to the same id
+ * (enabling cancel + reschedule). Cross-category collisions are now
+ * structurally impossible because the bands do not overlap.
+ *
+ *   low-stock alert         1_000_000 + hash(medId) % 1_000_000
+ *   critical-stock alert    2_000_000 + hash(medId) % 1_000_000
+ *   dose reminder            3_000_000 + hash(medId) % 1_000_000
+ *   test notification        4_000_000  (fixed constant, single test notif)
+ *   critical one-shot alarm  5_000_000 + hash(medId) % 1_000_000
+ *
+ * #66: the dose-reminder id previously included Date.now(), producing a
+ * NEW id on every call. That broke the snooze-and-re-fire path: instead
+ * of replacing the existing drawer entry, each snooze created a new one.
+ * The id is now stable per med (the FIRED_KEY check in useDoseReminders
+ * handles same-day dedup), restoring the original JSDoc intent.
  */
-function hashCode(str: string): number {
+const ID_RANGE_SIZE = 1_000_000;
+
+/** Numeric base for each notification category's id range. */
+const NOTIFICATION_ID_BASE = {
+  lowStock: 1_000_000,
+  critical: 2_000_000,
+  dose: 3_000_000,
+  test: 4_000_000,
+  criticalAlarm: 5_000_000,
+} as const;
+
+type NotificationCategory = keyof typeof NOTIFICATION_ID_BASE;
+
+/**
+ * Stable string hash mapped into [0, ID_RANGE_SIZE). Used to derive a
+ * per-medication slot within a category's id range so the same med
+ * always maps to the same notification id.
+ */
+function hashToRange(str: string, rangeSize: number): number {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     hash = (Math.imul(31, hash) + str.charCodeAt(i)) | 0;
   }
-  return Math.abs(hash);
+  return Math.abs(hash) % rangeSize;
+}
+
+/**
+ * Compute a stable notification id for a given category + medication.
+ *
+ * - test category returns a fixed constant (there is only ever one
+ *   test notification at a time).
+ * - All other categories return BASE + hash(medId) % RANGE_SIZE, so the
+ *   same med always maps to the same id within its category's band, and
+ *   different categories never collide (disjoint bands).
+ */
+function notificationId(
+  category: NotificationCategory,
+  medId?: string
+): number {
+  const base = NOTIFICATION_ID_BASE[category];
+  if (category === 'test') return base;
+  return base + hashToRange(medId ?? '', ID_RANGE_SIZE);
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -483,7 +585,7 @@ function hashCode(str: string): number {
  * Stable across calls so cancel + reschedule work.
  */
 export function criticalAlarmId(medId: string): number {
-  return hashCode('critical-alarm-' + medId);
+  return notificationId('criticalAlarm', medId);
 }
 
 /**
@@ -539,8 +641,8 @@ export async function scheduleCriticalAlarm(
   // the past (or very close), use "now + 1s" so the notification
   // appears as a real system notification.
   const fireAt =
-    criticalDateMs <= Date.now() + 60_000
-      ? new Date(Date.now() + 1000)
+    criticalDateMs <= Date.now() + CRITICAL_ALARM_IMMEDIATE_TOLERANCE_MS
+      ? new Date(Date.now() + NOTIFICATION_IMMEDIATE_OFFSET_MS)
       : new Date(criticalDateMs);
 
   const title = `🚨 ${medName}: اقترب النفاد الحرج`;
@@ -553,7 +655,12 @@ export async function scheduleCriticalAlarm(
   if (isNativePlatform()) {
     try {
       const perm = await LocalNotifications.checkPermissions();
-      if (perm.display !== 'granted') return;
+      if (perm.display !== 'granted') {
+        // #95: surface the silent no-op so the caller / devtools can see
+        // the alarm was dropped due to missing permission.
+        console.warn('[notifications] scheduleCriticalAlarm skipped: permission not granted');
+        return;
+      }
       await LocalNotifications.schedule({
         notifications: [
           {
@@ -627,20 +734,24 @@ export function openNotificationSettings(): void {
  * preview, regular Chrome, Firefox, Safari).
  */
 function openBrowserNotificationSettings(): void {
-  const isChromium =
-    typeof navigator !== 'undefined' &&
-    /Chrome|Chromium|Edg|OPR/i.test(navigator.userAgent);
-
-  if (isChromium) {
+  // #105: try opening the Chromium chrome://settings URL unconditionally
+  // (it only works in Chromium-based browsers anyway). On failure or null
+  // return (non-Chromium / sandboxed), fall through to the alert. This
+  // replaces the previous UA-sniff branch decision.
+  if (typeof window !== 'undefined') {
     try {
-      window.open('chrome://settings/content/notifications', '_blank');
-      return;
+      const win = window.open('chrome://settings/content/notifications', '_blank');
+      // window.open returns null when the browser blocks the navigation
+      // (e.g. non-Chromium, iframe sandbox). In that case fall through.
+      if (win) return;
     } catch {
       // chrome:// URLs may be blocked by the sandbox in some
       // contexts (iframe). Fall through to the alert.
     }
   }
 
+  // Keep the UA-derived browser hint for the alert text (UX only — the
+  // branch decision above is now feature-detected, not UA-sniffed).
   const browserHint = (() => {
     if (typeof navigator === 'undefined') return 'متصفحك';
     const ua = navigator.userAgent;
@@ -658,29 +769,3 @@ function openBrowserNotificationSettings(): void {
   );
 }
 
-/**
- * Backwards-compatibility: some callers (e.g., App.tsx's initial
- * state hydration) check Notification.permission synchronously.
- * This wrapper returns the cached web Notification state on web
- * (the same as before this PR), and on native falls back to
- * 'default' (the native permission state is async-only, so we
- * can't return it synchronously — the caller should use the async
- * getNotificationPermission() instead).
- *
- * @deprecated Prefer getNotificationPermission() (async).
- */
-export function getNotificationPermissionSync():
-  | 'granted'
-  | 'denied'
-  | 'default'
-  | 'unsupported' {
-  if (isNativePlatform()) {
-    // Native permission state is async-only. The caller should use
-    // getNotificationPermission() instead. As a fallback, return
-    // 'default' so the caller will trigger requestPermission() at
-    // least once.
-    return 'default';
-  }
-  if (!isWebNotificationSupported()) return 'unsupported';
-  return Notification.permission;
-}

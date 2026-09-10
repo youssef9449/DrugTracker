@@ -3,6 +3,8 @@ import { X, PlusCircle, Check, Layers, Box, Pill } from 'lucide-react';
 import { Medication, describeStockInStrips } from '../types';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { effectiveCurrentPills } from '../utils/dateCalculations';
+import { getMedSizes } from '../utils/medicationPackaging';
+import { Modal } from './ui/Modal';
 
 interface RefillModalProps {
   medication: Medication | null;
@@ -36,11 +38,11 @@ export const RefillModal: FC<RefillModalProps> = ({
     }
   }, [medication, isOpen]);
 
-  if (!isOpen || !medication) return null;
+  if (!medication) return null;
 
   const sz = getMedSizes(medication);
   const isSolid = sz.isSolid;
-  const availableUnits = getAvailableUnits(medication, sz);
+  const availableUnits = getAvailableUnits(sz);
   const boxLabel = medication.unit === 'مل' ? 'عبوة' : 'علبة';
 
   // Convert unit qty → pills.
@@ -103,7 +105,11 @@ export const RefillModal: FC<RefillModalProps> = ({
   const unitStep = refillUnit === 'pills' ? sz.boxSize : 1;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-xs">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      label="إعادة تعبئة المخزون"
+    >
       <div
         className="w-full sm:max-w-sm bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom duration-200"
         dir="rtl"
@@ -228,33 +234,16 @@ export const RefillModal: FC<RefillModalProps> = ({
           </button>
         </form>
       </div>
-    </div>
+    </Modal>
   );
 };
 
-// ── Helpers (same pattern as PharmacyShoppingView) ─────────────
+// ── Helpers ─────────────────────────────────────────────────────
+// getMedSizes is imported from ../utils/medicationPackaging (#73).
+// getAvailableUnits is local to this modal — it seeds ['pills'] (distinct
+// from PharmacyShoppingView's getAvailableUnits which seeds ['boxes']).
 
-function getMedSizes(med: Medication) {
-  const isSolid = med.unit === 'قرص' || med.unit === 'كبسولة';
-  const hasStrips = isSolid && Boolean(
-    med.stripsPerBox &&
-    med.pillsPerStrip &&
-    med.stripsPerBox > 0 &&
-    med.pillsPerStrip > 0
-  );
-  const boxSize =
-    hasStrips
-      ? med.stripsPerBox! * med.pillsPerStrip!
-      : med.packageSize && med.packageSize > 0
-      ? med.packageSize
-      : med.unit === 'مل'
-      ? 100
-      : 30;
-  const stripSize = hasStrips && med.pillsPerStrip && med.pillsPerStrip > 0 ? med.pillsPerStrip : 0;
-  return { boxSize, stripSize, hasStrips, isSolid };
-}
-
-function getAvailableUnits(med: Medication, sz: ReturnType<typeof getMedSizes>): RefillUnit[] {
+function getAvailableUnits(sz: ReturnType<typeof getMedSizes>): RefillUnit[] {
   const units: RefillUnit[] = ['pills'];
   if (sz.boxSize > 0) units.push('boxes');
   if (sz.hasStrips && sz.stripSize > 0) units.push('strips');

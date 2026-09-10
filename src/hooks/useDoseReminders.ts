@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Medication } from '../types';
 import { getTodayDateString, effectiveCurrentPills } from '../utils/dateCalculations';
-import { playNotificationSound } from '../utils/sound';
+import { playNotificationSound, stopAllSounds } from '../utils/sound';
 import { sendMedicationDoseReminder } from '../utils/notifications';
+import { loadJson, saveJson } from '../utils/storage';
+import { REMINDER_POLL_INTERVAL_MS, DEFAULT_SNOOZE_MINUTES, MS_PER_MINUTE } from '../utils/time';
 
 const FIRED_KEY = 'android_med_tracker_fired_reminders_v1';
 const SNOOZE_KEY = 'android_med_tracker_snooze_v1';
@@ -32,24 +34,6 @@ export function timeToMinutes(timeStr: string): number {
   // silently never fires.
   if (h < 0 || h > 23 || m < 0 || m > 59) return -1;
   return h * 60 + m;
-}
-
-function loadJson<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function saveJson(key: string, value: unknown) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // ignore
-  }
 }
 
 function firedKey(medId: string, dateStr: string) {
@@ -104,7 +88,32 @@ export function useDoseReminders({
     globalCustomSoundRef.current = globalCustomSound;
   }, [globalCustomSound]);
 
+  // #90: keep the latest medications in a ref so the polling effect +
+  // dismissAlarm can read the current array without depending on the
+  // array reference (which changes on every App render, even unrelated
+  // state changes like typing in a search field).
+  const medicationsRef = useRef(medications);
+  useEffect(() => {
+    medicationsRef.current = medications;
+  }, [medications]);
+
+  // #90: stable signature capturing ONLY the fields checkDue actually
+  // reads (reminderEnabled, reminderTime, id). The polling effect is
+  // gated on this string instead of the raw `medications` array ref,
+  // so the 5s interval is NOT torn down/recreated on every App state
+  // change — only when a med's reminder config actually changes.
+  const reminderSignature = useMemo(
+    () =>
+      medications
+        .map((m) => `${m.id}|${m.reminderEnabled ? 1 : 0}|${m.reminderTime ?? ''}`)
+        .sort()
+        .join('\n'),
+    [medications]
+  );
+
   const dismissAlarm = useCallback(() => {
+    // #107: stop any currently-playing chime when the alarm is dismissed.
+    stopAllSounds();
     const current = alarmingIdRef.current;
     if (current) {
       // #13: only mark the reminder as "fired for today" if this alarm
@@ -128,19 +137,23 @@ export function useDoseReminders({
 
     const nextId = queueRef.current.shift();
     if (nextId) {
-      const next = medications.find((m) => m.id === nextId);
+      // #90: read from the ref so dismissAlarm doesn't depend on the
+      // medications array reference.
+      const next = medicationsRef.current.find((m) => m.id === nextId);
       if (next) {
         triggerAlarm(next, false);
       }
     }
+    // triggerAlarm is stable (useCallback with [] deps) so it's safe to
+    // omit from the dep array. eslint-disable for the missing dep.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [medications]);
+  }, []);
 
-  const snoozeAlarm = useCallback((minutes: number = 10) => {
+  const snoozeAlarm = useCallback((minutes: number = DEFAULT_SNOOZE_MINUTES) => {
     const current = alarmingIdRef.current;
     if (current) {
       const snooze = loadJson<Record<string, number>>(SNOOZE_KEY, {});
-      snooze[current] = Date.now() + minutes * 60 * 1000;
+      snooze[current] = Date.now() + minutes * MS_PER_MINUTE;
       saveJson(SNOOZE_KEY, snooze);
     }
     alarmingIdRef.current = null;
@@ -210,7 +223,9 @@ export function useDoseReminders({
       const snooze = loadJson<Record<string, number>>(SNOOZE_KEY, {});
       const nowTs = Date.now();
 
-      medications.forEach((med) => {
+      // #90: read from the ref so the interval doesn't need to be
+      // recreated when the medications array reference changes.
+      medicationsRef.current.forEach((med) => {
         if (!med.reminderEnabled || !med.reminderTime) return;
         if (alarmingIdRef.current === med.id) return;
         if (queueRef.current.includes(med.id)) return;
@@ -246,9 +261,13 @@ export function useDoseReminders({
     // 5s is cheap (the check is pure, no network / no DOM), and a
     // 5-second granularity is imperceptible to the user while still
     // avoiding the perceived "the alarm was late" lag of 15s.
-    const timer = window.setInterval(checkDue, 5000);
+    const timer = window.setInterval(checkDue, REMINDER_POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [medications, triggerAlarm, hydrated]);
+    // #90: gate on the stable reminderSignature instead of the raw
+    // `medications` array ref. The interval is only torn down/recreated
+    // when a med's reminder config actually changes, not on every App
+    // state update (e.g. typing in a search field).
+  }, [reminderSignature, triggerAlarm, hydrated]);
 
   return {
     alarmingMedication,

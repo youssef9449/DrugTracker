@@ -1,7 +1,7 @@
 import type { FC } from 'react';
-import { Pill, ShoppingCart, History } from 'lucide-react';
+import { Pill, ShoppingCart, History, Store } from 'lucide-react';
 
-export type ActiveTab = 'stock' | 'shopping' | 'logs';
+export type ActiveTab = 'stock' | 'shopping' | 'pharmacies' | 'logs';
 
 interface AndroidBottomNavProps {
   activeTab: ActiveTab;
@@ -59,7 +59,21 @@ export const AndroidBottomNav: FC<AndroidBottomNavProps> = ({
         <span className="text-[11px] mt-1">قائمة الشراء</span>
       </button>
 
-      {/* Tab 3: Automatic Consumption Logs & Daily Records */}
+      <button
+        onClick={() => onTabChange('pharmacies')}
+        className={`flex-1 flex flex-col items-center justify-center py-1 rounded-2xl transition-all duration-200 relative ${
+          activeTab === 'pharmacies'
+            ? 'text-teal-800 font-bold'
+            : 'text-slate-500 hover:text-slate-800 font-medium'
+        }`}
+      >
+        <div className={`px-4 py-1 rounded-full flex items-center justify-center transition ${activeTab === 'pharmacies' ? 'bg-teal-100 text-teal-800' : 'bg-transparent'}`}>
+          <Store className="w-5 h-5" />
+        </div>
+        <span className="text-[11px] mt-1">الصيدليات</span>
+      </button>
+
+      {/* Tab 4: Automatic Consumption Logs & Daily Records */}
       <button
         onClick={() => onTabChange('logs')}
         className={`flex-1 flex flex-col items-center justify-center py-1 rounded-2xl transition-all duration-200 relative ${

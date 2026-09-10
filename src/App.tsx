@@ -3,6 +3,7 @@ import {
   Medication,
   ConsumptionLog,
   PharmacySettings,
+  Pharmacy,
   DEFAULT_PHARMACY_SETTINGS,
   calculateMedicationStatus,
   CustomSoundFile,
@@ -18,6 +19,7 @@ import { AppHeader } from './components/AppHeader';
 import { LowStockBanner } from './components/LowStockBanner';
 import { MedicationCard } from './components/MedicationCard';
 import { PharmacyShoppingView } from './components/PharmacyShoppingView';
+import { PharmacyManagementView } from './components/PharmacyManagementView';
 import { ConsumptionLogView } from './components/ConsumptionLogView';
 import { AddMedicationModal } from './components/AddMedicationModal';
 import { RefillModal } from './components/RefillModal';
@@ -262,11 +264,22 @@ export default function App() {
             parsed.customerCode === '14739' ? '' : (parsed.customerCode || '');
           const loadedPharmacyName =
             parsed.pharmacyName === 'الصيدلية' ? '' : (parsed.pharmacyName || '');
+          const legacyPharmacy = loadedPharmacyName || loadedCustomerCode || parsed.pharmacyPhone
+            ? [{
+                id: 'pharmacy-legacy',
+                name: loadedPharmacyName || 'صيدلية محفوظة',
+                phone: parsed.pharmacyPhone || '',
+                customerCode: loadedCustomerCode,
+              }]
+            : [];
+          const pharmacies = Array.isArray(parsed.pharmacies) ? parsed.pharmacies : legacyPharmacy;
           setPharmacySettings({
             ...DEFAULT_PHARMACY_SETTINGS,
             ...parsed,
             customerCode: loadedCustomerCode,
             pharmacyName: loadedPharmacyName,
+            pharmacies,
+            selectedPharmacyId: parsed.selectedPharmacyId || pharmacies[0]?.id || '',
           });
         }
       }
@@ -920,6 +933,26 @@ export default function App() {
     if (soundEnabled) playSuccessChime();
   };
 
+  const handleSavePharmacy = (pharmacy: Pharmacy) => {
+    setPharmacySettings((prev) => {
+      const pharmacies = prev.pharmacies || [];
+      const exists = pharmacies.some((item) => item.id === pharmacy.id);
+      return {
+        ...prev,
+        pharmacies: exists ? pharmacies.map((item) => item.id === pharmacy.id ? pharmacy : item) : [...pharmacies, pharmacy],
+        selectedPharmacyId: prev.selectedPharmacyId || pharmacy.id,
+      };
+    });
+  };
+
+  const handleDeletePharmacy = (id: string) => {
+    setPharmacySettings((prev) => {
+      const pharmacies = (prev.pharmacies || []).filter((item) => item.id !== id);
+      return { ...prev, pharmacies, selectedPharmacyId: prev.selectedPharmacyId === id ? pharmacies[0]?.id || '' : prev.selectedPharmacyId };
+    });
+    showToast('تم حذف الصيدلية.');
+  };
+
   const handleDeleteMedication = (id: string) => {
     const med = medications.find((m) => m.id === id);
     if (!med) return;
@@ -1319,6 +1352,15 @@ export default function App() {
                 setIsSettingsModalOpen(true);
               }}
               onConfirmRefill={handleConfirmRefill}
+              showToast={showToast}
+            />
+          )}
+
+          {activeTab === 'pharmacies' && (
+            <PharmacyManagementView
+              pharmacies={pharmacySettings.pharmacies || []}
+              onSave={handleSavePharmacy}
+              onDelete={handleDeletePharmacy}
               showToast={showToast}
             />
           )}

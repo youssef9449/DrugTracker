@@ -115,12 +115,12 @@ export function generatePharmacyOrderMessage(
     }
   });
 
-  // Only include "رقم العميل" if the user actually entered a code.
-  // The user explicitly asked for this: "خلي الجزء بتاع رقم العميل
+  // Only include "كود العميل" if the user actually entered a code.
+  // The user explicitly asked for this: "خلي الجزء بتاع كود العميل
   // اختياري يعني لو مش مكتوب في الصندوق حاجة ميكتبهوش في الرسالة".
   const code = (customerCode || '').trim();
   if (code) {
-    text += `\nرقم العميل ${code}`;
+    text += `\nكود العميل ${code}`;
   }
 
   // Append address if provided (same logic — optional, only show

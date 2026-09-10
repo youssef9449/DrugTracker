@@ -2,6 +2,7 @@ import { useState, useEffect, type FC, type FormEvent } from 'react';
 import { X, PlusCircle, Check, Layers, Box, Pill } from 'lucide-react';
 import { Medication, describeStockInStrips } from '../types';
 import { pluralizeArabic } from '../lib/arabicPlural';
+import { effectiveCurrentPills } from '../utils/dateCalculations';
 
 interface RefillModalProps {
   medication: Medication | null;
@@ -71,13 +72,19 @@ export const RefillModal: FC<RefillModalProps> = ({
     onClose();
   };
 
-  const newTotal = medication.currentPills + addedCount;
+  // Use the DYNAMIC balance as the base for the "current" display and
+  // the projected "new total". This keeps the refill preview correct
+  // even if the app was closed for many days and the snapshot hasn't
+  // been re-settled yet. After onConfirmRefill runs, the App's refill
+  // handler will add addedPills to the (already settled) currentPills.
+  const effPills = effectiveCurrentPills(medication);
+  const newTotal = effPills + addedCount;
   const newDays =
     medication.dailyDose > 0 ? Math.floor(newTotal / medication.dailyDose) : 0;
 
   const currentStripsDesc = isSolid
     ? describeStockInStrips(
-        medication.currentPills,
+        effPills,
         medication.pillsPerStrip,
         medication.stripsPerBox,
         medication.unit
@@ -120,7 +127,7 @@ export const RefillModal: FC<RefillModalProps> = ({
             <h4 className="font-bold text-base text-slate-800 mt-0.5">{medication.name}</h4>
             <div className="mt-1 text-xs text-slate-600 flex items-center gap-1.5 flex-wrap">
               <span>المتوفر حالياً:</span>
-              <strong className="font-mono text-teal-700">{medication.currentPills} {medication.unit}</strong>
+              <strong className="font-mono text-teal-700">{effPills} {medication.unit}</strong>
               {currentStripsDesc && (
                 <span className="text-[11px] text-slate-500 font-medium">({currentStripsDesc})</span>
               )}

@@ -1,4 +1,5 @@
 import { pluralizeArabic } from './lib/arabicPlural';
+import { effectiveCurrentPills, effectiveDaysLeft } from './utils/dateCalculations';
 
 export interface ConsumptionLog {
   id: string;
@@ -270,7 +271,13 @@ export function calculateMedicationStatus(med: Medication): {
   badgeBg: string;
   badgeText: string;
 } {
-  if (med.currentPills <= 0) {
+  // The dynamic balance: projects currentPills forward from lastSyncDate
+  // by dailyDose. This keeps status correct even if the app was closed
+  // for many days and syncAutoDailyDeductions hasn't run yet.
+  const effPills = effectiveCurrentPills(med);
+  const daysLeft = effectiveDaysLeft(med);
+
+  if (effPills <= 0) {
     return {
       daysLeft: 0,
       status: 'out_of_stock',
@@ -292,7 +299,6 @@ export function calculateMedicationStatus(med: Medication): {
     };
   }
 
-  const daysLeft = Math.floor(med.currentPills / med.dailyDose);
   const criticalThresholdDays = getCriticalThresholdDays(med);
 
   if (daysLeft <= criticalThresholdDays) {

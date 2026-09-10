@@ -427,6 +427,168 @@ function hashCode(str: string): number {
   return Math.abs(hash);
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// One-shot critical-stock alarm (AlarmManager-backed).
+//
+// Replaces the previous "fire a critical alert when the alert effect
+// sees the status worsen" pattern, which only ran while the app was
+// open. The new pattern: schedule a SINGLE future notification at the
+// calendar date the medication is projected to cross the critical
+// threshold. If the user never opens the app, the alarm still fires
+// via Android's AlarmManager (or iOS's UNUserNotificationCenter), and
+// the user sees the critical alert in their notification drawer.
+//
+// Boot persistence: on Android, the @capacitor/local-notifications
+// plugin persists scheduled notifications to SharedPreferences and
+// re-arms them via its LocalNotificationRestoreReceiver on
+// BOOT_COMPLETED (also LOCKED_BOOT_COMPLETED + QUICKBOOT_POWERON).
+// Past-due notifications are rescheduled to fire ~15 seconds after
+// boot. So scheduled one-shot critical alarms survive device reboots
+// without the user opening the app — no BootReceiver code in our
+// codebase needed.
+//
+// Rescheduling: the caller (useCriticalAlarmScheduler) cancels the
+// existing alarm for a med and schedules a new one whenever any of
+// the fields that affect the critical date change:
+//   - currentPills (snapshot)
+//   - dailyDose
+//   - lastSyncDate
+//   - warningThresholdDays (critical threshold is derived from it)
+//   - autoDeductEnabled
+//   - medication id (med deleted/created)
+//
+// Race protection: the hook uses a per-med generation counter so an
+// older async effect cannot recreate a stale alarm after a newer
+// medication state or after the medication is deleted. Each effect
+// run bumps the generation for the med; the .then() callback after
+// cancel() checks the generation and bails if a newer run superseded
+// it.
+//
+// Edge cases (handled by getCriticalAlarmDate, which returns null to
+// signal "do not schedule"):
+//   - dailyDose <= 0 → no consumption rate → no critical date.
+//   - effectiveCurrentPills <= 0 OR daysLeft <= critical threshold →
+//     the med is ALREADY critical. The one-shot alarm is only for
+//     FUTURE crossings; the existing alert effect (which runs when
+//     the app is open and tracks already-alerted statuses via
+//     lastAlertedStatusRef) handles the immediate notification.
+//     Returning null here prevents repeated immediate alerts on
+//     every app launch.
+//   - autoDeductEnabled === false AND not already critical → the
+//     balance is frozen, won't cross the threshold without a refill.
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Compute the unique notification id for a medication's critical alarm.
+ * Stable across calls so cancel + reschedule work.
+ */
+export function criticalAlarmId(medId: string): number {
+  return hashCode('critical-alarm-' + medId);
+}
+
+/**
+ * Cancel any pending one-shot critical alarm for this medication.
+ *
+ * On native: calls LocalNotifications.cancel() with the stable id.
+ * On web: no persistent alarm to cancel (web notifications are
+ * fire-and-forget; the "alarm" is conceptually just a future
+ * scheduleNotification call that happens to have a future `at`).
+ */
+export async function cancelCriticalAlarm(medId: string): Promise<void> {
+  if (!isNativePlatform()) return;
+  try {
+    await LocalNotifications.cancel({
+      notifications: [{ id: criticalAlarmId(medId) }],
+    });
+  } catch (err) {
+    console.warn('[notifications] cancelCriticalAlarm failed:', err);
+  }
+}
+
+/**
+ * Schedule a one-shot critical-stock alarm at the given absolute time.
+ *
+ * This is the single entry point for critical-date scheduling. The
+ * caller computes `criticalDateMs` (via getCriticalAlarmDate in
+ * dateCalculations) and passes it here. In normal operation the
+ * caller only invokes this with a FUTURE timestamp (getCriticalAlarmDate
+ * returns null for already-critical meds, so no immediate alarms are
+ * scheduled). The past-date fallback below is defensive — it covers
+ * edge cases (e.g. the device was off across the projected critical
+ * date and the boot receiver re-arms the alarm with a now-stale date).
+ *
+ * `criticalDateMs <= Date.now()` (within a 1-minute tolerance) is
+ * treated as "immediate" — we schedule the notification 1 second in
+ * the future so it appears as a real system notification (Capacitor
+ * treats `at: now` as "delivered immediately" which some Android
+ * versions only show as a head-up that auto-dismisses).
+ *
+ * `unit` is included in the notification body for display.
+ *
+ * Boot persistence: scheduled notifications are persisted by the
+ * @capacitor/local-notifications plugin and re-armed on BOOT_COMPLETED.
+ * See the section-header comment above for details.
+ */
+export async function scheduleCriticalAlarm(
+  medId: string,
+  medName: string,
+  criticalDateMs: number,
+  unit: string = 'قرص'
+): Promise<void> {
+  // Compute the schedule time. If the computed critical date is in
+  // the past (or very close), use "now + 1s" so the notification
+  // appears as a real system notification.
+  const fireAt =
+    criticalDateMs <= Date.now() + 60_000
+      ? new Date(Date.now() + 1000)
+      : new Date(criticalDateMs);
+
+  const title = `🚨 ${medName}: اقترب النفاد الحرج`;
+  const body = `مخزون "${medName}" دخل مرحلة النفاد الحرج (${unit}). يرجى التعبئة فوراً!`;
+
+  // On native: schedule via LocalNotifications (one-shot, AlarmManager).
+  // Use the channelId 'low-stock' so it shares the same channel as the
+  // immediate sendCriticalStockAlert (the existing channel is already
+  // configured for urgent alerts).
+  if (isNativePlatform()) {
+    try {
+      const perm = await LocalNotifications.checkPermissions();
+      if (perm.display !== 'granted') return;
+      await LocalNotifications.schedule({
+        notifications: [
+          {
+            id: criticalAlarmId(medId),
+            title,
+            body,
+            schedule: {
+              at: fireAt,
+              // Allow while idle — critical alerts should fire even
+              // when the device is in Doze. This maps to
+              // AlarmManager.setAndAllowWhileIdle on Android.
+              allowWhileIdle: true,
+            },
+            channelId: 'low-stock',
+            smallIcon: 'ic_launcher',
+            ongoing: false,
+            autoCancel: true,
+          },
+        ],
+      });
+      return;
+    } catch (err) {
+      console.warn('[notifications] Capacitor scheduleCriticalAlarm failed:', err);
+      // Fall through to web fallback below.
+    }
+  }
+
+  // Web fallback: no persistent scheduling available — fire the
+  // notification immediately (since we can't reliably wake the page
+  // up at a future time). The user will at least see an immediate
+  // alert if they happen to have the tab open. This is a known
+  // limitation; the headline use case is the Android native path.
+  scheduleWebNotification(title, body);
+}
+
 /**
  * Open the OS / browser notification settings page where the user
  * can toggle notification permissions per-app.

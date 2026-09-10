@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, cleanup } from '@testing-library/react';
 import { useDoseReminders } from './useDoseReminders';
 import type { Medication } from '../types';
+import { getTodayDateString } from '../utils/dateCalculations';
 
 // Mock the sound + notifications modules so the hook doesn't actually
 // play audio or schedule OS notifications during tests.
@@ -19,6 +20,9 @@ import { sendMedicationDoseReminder } from '../utils/notifications';
 
 /** Build a medication with a reminder enabled at the given time. */
 function makeMed(overrides: Partial<Medication> = {}): Medication {
+  // lastSyncDate defaults to today so effectiveCurrentPills() ===
+  // currentPills (no projection). Tests that exercise the dynamic
+  // balance override lastSyncDate explicitly.
   return {
     id: 'med-test',
     name: 'Test Med',
@@ -28,7 +32,7 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: '2024-01-01',
+    lastSyncDate: getTodayDateString(),
     reminderEnabled: true,
     reminderTime: '23:59', // far-future so the polling effect won't fire
     notificationSound: 'classic_chime',

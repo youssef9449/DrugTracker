@@ -14,7 +14,7 @@ import {
   Box,
 } from 'lucide-react';
 import { Medication, calculateMedicationStatus, describeStockInStrips } from '../types';
-import { getDepletionDate, getTodayDateString } from '../utils/dateCalculations';
+import { getDepletionDate, getTodayDateString, effectiveCurrentPills } from '../utils/dateCalculations';
 import { MedicationMenu } from './MedicationMenu';
 import { ReminderBadge } from './ReminderBadge';
 import { CheckCircle } from 'lucide-react';
@@ -46,9 +46,14 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   const depletion = getDepletionDate(medication);
   const isSolid = medication.unit === 'قرص' || medication.unit === 'كبسولة';
   const hasStrips = isSolid && Boolean(medication.stripsPerBox && medication.pillsPerStrip);
+  // Use the DYNAMIC balance (projected from currentPills + lastSyncDate)
+  // — never the raw snapshot. This keeps the displayed count correct
+  // even if the app was closed for many days and the snapshot hasn't
+  // been re-settled yet.
+  const effPills = effectiveCurrentPills(medication);
   const stripsDesc = isSolid
     ? describeStockInStrips(
-        medication.currentPills,
+        effPills,
         medication.pillsPerStrip,
         medication.stripsPerBox,
         medication.unit
@@ -183,7 +188,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   isOut ? 'text-red-600' : 'text-rose-600'
                 }`}
               >
-                {medication.currentPills}
+                {effPills}
               </span>
               <span className="text-xs text-slate-600 font-medium">
                 {medication.unit}
@@ -336,7 +341,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             <span className="text-[10px] text-slate-500 block">المخزون المتوفر</span>
             <div className="flex items-baseline gap-1 mt-0.5">
               <span className="text-xl font-extrabold font-mono text-emerald-900">
-                {medication.currentPills}
+                {effPills}
               </span>
               <span className="text-[11px] text-slate-600">
                 {medication.unit}
@@ -483,14 +488,14 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           <div className="flex items-baseline gap-1 mt-0.5">
             <span
               className={`text-2xl font-extrabold font-mono ${
-                medication.currentPills === 0
+                effPills === 0
                   ? 'text-red-600'
-                  : medication.currentPills <= medication.dailyDose * 2
+                  : effPills <= medication.dailyDose * 2
                   ? 'text-rose-600'
                   : 'text-slate-800'
               }`}
             >
-              {medication.currentPills}
+              {effPills}
             </span>
             <span className="text-xs text-slate-600 font-medium">
               {medication.unit || 'قرص'}
@@ -581,9 +586,9 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           ) : (
             <button
               onClick={() => onConsumeDose(medication.id)}
-              disabled={medication.currentPills <= 0 || medication.dailyDose <= 0}
+              disabled={effPills <= 0 || medication.dailyDose <= 0}
               className={`w-full py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 ${
-                medication.currentPills <= 0 || medication.dailyDose <= 0
+                effPills <= 0 || medication.dailyDose <= 0
                   ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
                   : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200'
               }`}

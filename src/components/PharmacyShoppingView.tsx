@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { Medication, PharmacySettings, calculateMedicationStatus, describeOrderInBoxes } from '../types';
 import { pluralizeArabic } from '../lib/arabicPlural';
-import { getDepletionDate } from '../utils/dateCalculations';
+import { getDepletionDate, effectiveCurrentPills } from '../utils/dateCalculations';
 import {
   cleanPhoneNumber,
   generatePharmacyOrderMessage,
@@ -470,7 +470,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                   <div className="min-w-0">
                     <h4 className="font-bold text-slate-900 text-sm">{med.name}</h4>
                     <div className="text-xs text-slate-500 mt-0.5">
-                      المتبقي: <strong className="font-mono text-slate-700">{med.currentPills}</strong> • ينفد {depletion.formattedArabic}
+                      المتبقي: <strong className="font-mono text-slate-700">{effectiveCurrentPills(med)}</strong> • ينفد {depletion.formattedArabic}
                     </div>
                     <span
                       className={`inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded-lg border ${

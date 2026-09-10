@@ -28,6 +28,10 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
     ? selectedMedIdInput
     : (medications[0]?.id || '');
 
+  // #111: derived from the IIFE that was inline in the JSX — the
+  // selected med object, or undefined when no meds exist.
+  const selectedMed = medications.find((m) => m.id === selectedMedId);
+
   // Total monthly consumption calculation across all active meds
   const totalMonthlyConsumption = medications.reduce(
     (acc, m) => acc + (m.autoDeductEnabled !== false ? m.dailyDose * 30 : 0),
@@ -143,10 +147,7 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
           <Plus className="w-3.5 h-3.5 text-teal-600" />
           <span>
             إعادة الجرعة المخصومة للمخزون{' '}
-            {(() => {
-              const med = medications.find((m) => m.id === selectedMedId);
-              return med ? `(+${med.dailyDose} ${med.unit})` : '(+1 جرعة)';
-            })()}
+            {selectedMed ? `(+${selectedMed.dailyDose} ${selectedMed.unit})` : '(+1 جرعة)'}
           </span>
         </button>
       </div>

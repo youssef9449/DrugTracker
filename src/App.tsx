@@ -1191,7 +1191,7 @@ export default function App() {
               )}
 
               {filter === 'alerts' && (
-                <LowStockBanner medications={medications} onNavigateToShopping={() => setActiveTab('shopping')} />
+                <LowStockBanner medicationsWithStatus={medicationsWithStatus} onNavigateToShopping={() => setActiveTab('shopping')} />
               )}
 
               <div className="p-4 space-y-3">
@@ -1266,7 +1266,7 @@ export default function App() {
           )}
         </main>
 
-        {activeTab === 'stock' && <AndroidFab onOpenAddModal={openAdd} />}
+        {activeTab === 'stock' && <AndroidFab onClick={openAdd} />}
         <AndroidBottomNav activeTab={activeTab} onTabChange={setActiveTab} alertsCount={alertsCount} />
 
         {toast && (

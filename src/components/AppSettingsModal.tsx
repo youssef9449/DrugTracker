@@ -1,4 +1,4 @@
-import { useState, useEffect, type FC, type FormEvent, type ChangeEvent } from 'react';
+import { useState, useEffect, useMemo, type FC, type FormEvent, type ChangeEvent } from 'react';
 import {
   X,
   Settings,
@@ -99,6 +99,55 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
+  const formattedPhone = cleanPhoneNumber(pharmacyPhone);
+
+  // #111: extracted from an inline IIFE — the WhatsApp order-message
+  // preview computations. Memoized so they don't recompute on every
+  // keystroke in unrelated form fields. Must be before the `if (!isOpen)`
+  // early return (rules-of-hooks).
+  const { previewMsg, waUrl, appUrl } = useMemo(() => {
+    const orderItemsForMessage: OrderItem[] =
+      activeOrderItems && activeOrderItems.length > 0
+        ? activeOrderItems
+        : medications.map((m) => {
+            const { quantity } = calculateMedicationOrderQuantity(
+              m,
+              settings.defaultDurationDays,
+              settings.customQuantities
+            );
+            return {
+              name: m.name,
+              quantity,
+              unit: m.unit,
+              stripsPerBox: m.stripsPerBox,
+              pillsPerStrip: m.pillsPerStrip,
+              packageSize: m.packageSize,
+            };
+          });
+
+    const msg = generatePharmacyOrderMessage(
+      orderItemsForMessage,
+      customerCode,
+      address,
+      contactPhone
+    );
+
+    return {
+      previewMsg: msg,
+      waUrl: buildWhatsAppUrl(pharmacyPhone, msg),
+      appUrl: buildWhatsAppUrl(pharmacyPhone, msg, 'app'),
+    };
+  }, [
+    activeOrderItems,
+    medications,
+    settings.defaultDurationDays,
+    settings.customQuantities,
+    customerCode,
+    address,
+    contactPhone,
+    pharmacyPhone,
+  ]);
+
   if (!isOpen) return null;
 
   // Sound file picker — uses readCustomSoundFile for size/type validation.
@@ -131,8 +180,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
     });
     onClose();
   };
-
-  const formattedPhone = cleanPhoneNumber(pharmacyPhone);
 
   return (
     <Modal
@@ -477,79 +524,47 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
             </div>
 
             {/* Live Preview of WhatsApp Message */}
-            {(() => {
-              const orderItemsForMessage: OrderItem[] = (activeOrderItems && activeOrderItems.length > 0)
-                ? activeOrderItems
-                : medications.map((m) => {
-                    const { quantity } = calculateMedicationOrderQuantity(
-                      m,
-                      settings.defaultDurationDays,
-                      settings.customQuantities
-                    );
-                    return {
-                      name: m.name,
-                      quantity,
-                      unit: m.unit,
-                      stripsPerBox: m.stripsPerBox,
-                      pillsPerStrip: m.pillsPerStrip,
-                      packageSize: m.packageSize,
-                    };
-                  });
+            <div className="bg-white text-slate-700 rounded-2xl p-3.5 text-xs space-y-2 font-mono border border-slate-200 shadow-sm">
+              <div className="flex items-center justify-between text-[11px] text-teal-800 font-bold">
+                <span className="flex items-center gap-1">
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  {activeOrderItems && activeOrderItems.length > 0
+                    ? 'معاينة طلب الأدوية المحددة في صفحة الشراء:'
+                    : 'معاينة رسالة الواتساب الموجهة للصيدلية:'}
+                </span>
+                <span className="text-slate-500">
+                  {formattedPhone ? `+${formattedPhone}` : 'لم يحدد الرقم بعد'}
+                </span>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-[11px] text-slate-700 leading-relaxed whitespace-pre-line select-text max-h-44 overflow-y-auto">
+                {previewMsg}
+              </div>
 
-              const previewMsg = generatePharmacyOrderMessage(
-                orderItemsForMessage,
-                customerCode,
-                address,
-                contactPhone
-              );
-
-              const waUrl = buildWhatsAppUrl(pharmacyPhone, previewMsg);
-              const appUrl = buildWhatsAppUrl(pharmacyPhone, previewMsg, 'app');
-
-              return (
-                <div className="bg-white text-slate-700 rounded-2xl p-3.5 text-xs space-y-2 font-mono border border-slate-200 shadow-sm">
-                  <div className="flex items-center justify-between text-[11px] text-teal-800 font-bold">
-                    <span className="flex items-center gap-1">
-                      <MessageSquare className="w-3.5 h-3.5" />
-                      {activeOrderItems && activeOrderItems.length > 0
-                        ? 'معاينة طلب الأدوية المحددة في صفحة الشراء:'
-                        : 'معاينة رسالة الواتساب الموجهة للصيدلية:'}
-                    </span>
-                    <span className="text-slate-500">
-                      {formattedPhone ? `+${formattedPhone}` : 'لم يحدد الرقم بعد'}
-                    </span>
-                  </div>
-                  <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-[11px] text-slate-700 leading-relaxed whitespace-pre-line select-text max-h-44 overflow-y-auto">
-                    {previewMsg}
-                  </div>
-
-                  {/* Test / Send WhatsApp Link Button */}
-                  {pharmacyPhone.trim() && (
-                    <div className="flex items-center gap-2 pt-1">
-                      <a
-                        href={waUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={() => {
-                          openWhatsAppLink(pharmacyPhone, previewMsg);
-                        }}
-                        className="flex-1 py-2.5 px-3 bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition shadow-sm"
-                      >
-                        <MessageCircle className="w-4 h-4" />
-                        <span>فتح واتساب الآن ({formattedPhone || pharmacyPhone})</span>
-                      </a>
-                      <a
-                        href={appUrl}
-                        className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-[11px] font-bold transition border border-slate-700 shrink-0"
-                        title="فتح عبر تطبيق واتساب مباشرة"
-                      >
-                        تطبيق الهاتف
-                      </a>
-                    </div>
-                  )}
+              {/* Test / Send WhatsApp Link Button */}
+              {pharmacyPhone.trim() && (
+                <div className="flex items-center gap-2 pt-1">
+                  <a
+                    href={waUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => {
+                      openWhatsAppLink(pharmacyPhone, previewMsg);
+                    }}
+                    className="flex-1 py-2.5 px-3 bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition shadow-sm"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    <span>فتح واتساب الآن ({formattedPhone || pharmacyPhone})</span>
+                  </a>
+                  <a
+                    href={appUrl}
+                    className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-[11px] font-bold transition border border-slate-700 shrink-0"
+                    title="فتح عبر تطبيق واتساب مباشرة"
+                  >
+                    تطبيق الهاتف
+                  </a>
                 </div>
-              );
-            })()}
+              )}
+            </div>
           </div>}
 
           {/* Submit Button */}
@@ -567,7 +582,3 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
     </Modal>
   );
 };
-
-// Backwards compatibility alias
-export { AppSettingsModal as PharmacySettingsModal };
-export type { AppSettingsModalProps as PharmacySettingsModalProps };

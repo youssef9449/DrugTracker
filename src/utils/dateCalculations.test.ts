@@ -5,6 +5,7 @@ import {
   getDepletionDate,
   syncAutoDailyDeductions,
 } from './dateCalculations';
+import { NEVER_DEPLETES_DAYS } from './time';
 import type { Medication } from '../types';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
@@ -88,9 +89,9 @@ describe('getDepletionDate', () => {
     expect(getDaysDifference(getTodayDateString(), r.dateStr)).toBe(7);
   });
 
-  it('treats dailyDose <= 0 as 999 days (effectively never depletes)', () => {
+  it(`treats dailyDose <= 0 as ${NEVER_DEPLETES_DAYS} days (effectively never depletes)`, () => {
     const r = getDepletionDate(makeMed({ currentPills: 30, dailyDose: 0 }));
-    expect(r.daysLeft).toBe(999);
+    expect(r.daysLeft).toBe(NEVER_DEPLETES_DAYS);
   });
 });
 

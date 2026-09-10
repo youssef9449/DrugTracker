@@ -47,6 +47,7 @@ import {
   settleDoseChange,
   settleAutoDeductToggle,
 } from './utils/dateCalculations';
+import { OrderItem } from './utils/whatsapp';
 import { useDoseReminders } from './hooks/useDoseReminders';
 import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
 import { initNativeBridge, registerBackButtonHandler, cleanupNativeListeners } from './native';
@@ -147,6 +148,8 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [settingsModalMode, setSettingsModalMode] = useState<'all' | 'pharmacy'>('all');
+  const [activeOrderItems, setActiveOrderItems] = useState<OrderItem[] | undefined>();
   const [editingMedication, setEditingMedication] = useState<Medication | null>(null);
   const [refillMedication, setRefillMedication] = useState<Medication | null>(null);
 
@@ -909,7 +912,11 @@ export default function App() {
 
   const handleSavePharmacySettings = (newSettings: PharmacySettings) => {
     setPharmacySettings(newSettings);
-    showToast('تم حفظ الإعدادات بنجاح!');
+    showToast(
+      settingsModalMode === 'pharmacy'
+        ? 'تم حفظ إعدادات الصيدلية بنجاح!'
+        : 'تم حفظ الإعدادات بنجاح!'
+    );
     if (soundEnabled) playSuccessChime();
   };
 
@@ -1156,7 +1163,10 @@ export default function App() {
           }}
           isPhoneFrame={isPhoneFrame}
           onTogglePhoneFrame={() => setIsPhoneFrame(!isPhoneFrame)}
-          onOpenSettings={() => setIsSettingsModalOpen(true)}
+          onOpenSettings={() => {
+            setSettingsModalMode('all');
+            setIsSettingsModalOpen(true);
+          }}
           fontScale={fontScale}
           onToggleFontScale={() => {
             const next = fontScale === 'normal' ? 'large' : 'normal';
@@ -1219,7 +1229,10 @@ export default function App() {
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <button
-                        onClick={() => setIsSettingsModalOpen(true)}
+                        onClick={() => {
+                          setSettingsModalMode('all');
+                          setIsSettingsModalOpen(true);
+                        }}
                         className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition ${
                           globalAutoDeductEnabled
                             ? 'text-teal-700 hover:text-teal-900 bg-teal-100/70'
@@ -1300,7 +1313,11 @@ export default function App() {
               medications={medications}
               settings={pharmacySettings}
               onUpdateSettings={setPharmacySettings}
-              onOpenSettings={() => setIsSettingsModalOpen(true)}
+              onOpenSettings={(orderItems) => {
+                setActiveOrderItems(orderItems);
+                setSettingsModalMode('pharmacy');
+                setIsSettingsModalOpen(true);
+              }}
               onConfirmRefill={handleConfirmRefill}
               showToast={showToast}
             />
@@ -1348,9 +1365,14 @@ export default function App() {
       />
       <AppSettingsModal
         isOpen={isSettingsModalOpen}
-        onClose={() => setIsSettingsModalOpen(false)}
+        onClose={() => {
+          setIsSettingsModalOpen(false);
+          setActiveOrderItems(undefined);
+        }}
+        mode={settingsModalMode}
         settings={pharmacySettings}
         medications={medications}
+        activeOrderItems={activeOrderItems}
         onSaveSettings={handleSavePharmacySettings}
         soundEnabled={soundEnabled}
         onToggleSound={() => setSoundEnabled(!soundEnabled)}

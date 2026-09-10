@@ -4,6 +4,8 @@ import {
   cleanPhoneNumber,
   generatePharmacyOrderMessage,
   buildWhatsAppUrl,
+  buildWhatsAppApiUrl,
+  buildWhatsAppAppUrl,
   calculateMedicationOrderQuantity,
 } from './whatsapp';
 import type { Medication } from '../types';
@@ -60,6 +62,16 @@ describe('cleanPhoneNumber', () => {
     expect(cleanPhoneNumber('+20 10 1234 5678')).toBe('201012345678');
     // Valid 11-digit Egyptian mobile (010 1234 5678)
     expect(cleanPhoneNumber('(010) 1234-5678')).toBe('201012345678');
+  });
+
+  it('handles Egyptian numbers entered without leading 0 (10 digits)', () => {
+    expect(cleanPhoneNumber('1012345678')).toBe('201012345678');
+    expect(cleanPhoneNumber('1123456789')).toBe('201123456789');
+  });
+
+  it('handles Egyptian numbers with redundant 0 after 20 (+20 010...)', () => {
+    expect(cleanPhoneNumber('+2001012345678')).toBe('201012345678');
+    expect(cleanPhoneNumber('002001012345678')).toBe('201012345678');
   });
 
   it('normalizes Arabic-Indic digits before parsing', () => {
@@ -145,6 +157,16 @@ describe('buildWhatsAppUrl', () => {
   it('builds a wa.me URL without the phone when empty', () => {
     const url = buildWhatsAppUrl('', 'مرحبا');
     expect(url).toBe('https://wa.me/?text=' + encodeURIComponent('مرحبا'));
+  });
+
+  it('builds an api.whatsapp.com URL with phone and encoded text', () => {
+    const url = buildWhatsAppApiUrl('01012345678', 'مرحبا');
+    expect(url).toBe('https://api.whatsapp.com/send?phone=201012345678&text=' + encodeURIComponent('مرحبا'));
+  });
+
+  it('builds a whatsapp:// native app URL', () => {
+    const url = buildWhatsAppAppUrl('01012345678', 'مرحبا');
+    expect(url).toBe('whatsapp://send?phone=201012345678&text=' + encodeURIComponent('مرحبا'));
   });
 });
 

@@ -3,6 +3,7 @@ import { X, PlusCircle, Check, Layers, Box, Pill } from 'lucide-react';
 import { Medication, describeStockInStrips } from '../types';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { effectiveCurrentPills } from '../utils/dateCalculations';
+import { Modal } from './ui/Modal';
 
 interface RefillModalProps {
   medication: Medication | null;
@@ -36,7 +37,7 @@ export const RefillModal: FC<RefillModalProps> = ({
     }
   }, [medication, isOpen]);
 
-  if (!isOpen || !medication) return null;
+  if (!medication) return null;
 
   const sz = getMedSizes(medication);
   const isSolid = sz.isSolid;
@@ -103,7 +104,11 @@ export const RefillModal: FC<RefillModalProps> = ({
   const unitStep = refillUnit === 'pills' ? sz.boxSize : 1;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-xs">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      label="إعادة تعبئة المخزون"
+    >
       <div
         className="w-full sm:max-w-sm bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom duration-200"
         dir="rtl"
@@ -228,7 +233,7 @@ export const RefillModal: FC<RefillModalProps> = ({
           </button>
         </form>
       </div>
-    </div>
+    </Modal>
   );
 };
 

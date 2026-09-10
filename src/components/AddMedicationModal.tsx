@@ -7,6 +7,8 @@ import {
   playNotificationSound,
 } from '../utils/sound';
 import { CustomTimePicker } from './CustomTimePicker';
+import { Toggle } from './ui/Toggle';
+import { Modal } from './ui/Modal';
 
 interface AddMedicationModalProps {
   isOpen: boolean;
@@ -128,7 +130,13 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
     }
     setShowStockHelper(false);
     setError('');
-  }, [initialData, isOpen]);
+    // Intentionally only sync on the open transition (dep [isOpen]) — if
+    // the parent passes a new initialData object reference while the
+    // modal is already open, we must NOT reset the form (that would
+    // blow away in-progress edits). The latest initialData is read from
+    // the closure at the moment the modal opens (audit #93).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -277,7 +285,11 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       : 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-xs">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      label={initialData ? 'تعديل بيانات الدواء' : 'إضافة دواء جديد'}
+    >
       <div
         className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
         dir="rtl"
@@ -683,21 +695,12 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={reminderEnabled}
-                onClick={() => setReminderEnabled(!reminderEnabled)}
-                className={`w-11 h-6 rounded-full relative transition shrink-0 ${
-                  reminderEnabled ? 'bg-teal-600' : 'bg-slate-300'
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition ${
-                    reminderEnabled ? 'right-0.5' : 'right-[22px]'
-                  }`}
-                />
-              </button>
+              <Toggle
+                checked={reminderEnabled}
+                onChange={() => setReminderEnabled(!reminderEnabled)}
+                label="تفعيل تذكير يومي بموعد محدد"
+                size="md"
+              />
             </div>
 
             {reminderEnabled && (
@@ -794,6 +797,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
           </button>
         </form>
       </div>
-    </div>
+    </Modal>
   );
 };

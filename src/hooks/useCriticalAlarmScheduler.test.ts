@@ -138,7 +138,8 @@ describe('useCriticalAlarmScheduler — basic scheduling', () => {
       'med-future',
       'Test Med',
       expect.any(Number),
-      'قرص'
+      'قرص',
+      expect.any(String)
     );
   });
 
@@ -306,7 +307,7 @@ describe('useCriticalAlarmScheduler — race protection (generation guard + seri
     await flushUntil(() => scheduleSpy.mock.calls.length >= 1);
 
     expect(scheduleSpy).toHaveBeenCalledTimes(1);
-    expect(scheduleSpy).toHaveBeenCalledWith('med-rapid', 'Test Med', expect.any(Number), 'قرص');
+    expect(scheduleSpy).toHaveBeenCalledWith('med-rapid', 'Test Med', expect.any(Number), 'قرص', expect.any(String));
     const scheduledDate = scheduleSpy.mock.calls[0][2] as number;
     expect(scheduledDate - Date.now()).toBeGreaterThan(40 * 24 * 60 * 60 * 1000);
   });
@@ -586,9 +587,9 @@ describe('useCriticalAlarmScheduler — reboot fallback (app-launch re-arm)', ()
 
     // All three meds got a schedule call.
     expect(mocks.schedule).toHaveBeenCalledTimes(3);
-    expect(mocks.schedule).toHaveBeenCalledWith('med-rb-1', 'Test Med', expect.any(Number), 'قرص');
-    expect(mocks.schedule).toHaveBeenCalledWith('med-rb-2', 'Test Med', expect.any(Number), 'قرص');
-    expect(mocks.schedule).toHaveBeenCalledWith('med-rb-3', 'Test Med', expect.any(Number), 'قرص');
+    expect(mocks.schedule).toHaveBeenCalledWith('med-rb-1', 'Test Med', expect.any(Number), 'قرص', expect.any(String));
+    expect(mocks.schedule).toHaveBeenCalledWith('med-rb-2', 'Test Med', expect.any(Number), 'قرص', expect.any(String));
+    expect(mocks.schedule).toHaveBeenCalledWith('med-rb-3', 'Test Med', expect.any(Number), 'قرص', expect.any(String));
   });
 });
 

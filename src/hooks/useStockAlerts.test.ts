@@ -226,13 +226,15 @@ describe('useStockAlerts — criticalStockAlertsEnabled behavior', () => {
 describe('useStockAlerts — scheduled alarm reconciliation', () => {
   it('does NOT fire foreground notification when scheduled alarm already delivered', () => {
     // Simulate: a scheduled alarm was set for med-1, and the alarm date
-    // has passed. The scheduler persisted the transition key.
+    // has passed. The scheduler persisted the transition key + alarmTime.
     const med = makeMed({ currentPills: 0, dailyDose: 1, lastSyncDate: '2024-09-09' });
     const transitionKey = getCriticalTransitionKey(med, '2024-09-10');
 
     vi.mocked(loadJson).mockImplementation((key: string, fallback: unknown) => {
       if (key === 'android_med_tracker_scheduled_critical_v1') {
-        return { 'med-1': transitionKey };
+        // Return the NEW format: { transitionKey, alarmTime }
+        // alarmTime is in the past (1 day before the pinned test time).
+        return { 'med-1': { transitionKey, alarmTime: Date.now() - 86400000 } };
       }
       return fallback;
     });

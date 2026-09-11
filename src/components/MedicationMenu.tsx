@@ -5,29 +5,21 @@ import {
   Trash2,
   PauseCircle,
   PlayCircle,
-  Plus,
 } from 'lucide-react';
 import { Medication } from '../types';
 
 /**
  * The per-card dropdown menu shared by the three MedicationCard
- * render branches (alerts / sufficient / all). Extracted in L7 to
- * eliminate the three near-duplicate copies (which is how the C5
- * duplicate-menu-item bug was born).
+ * render branches (alerts / sufficient / all).
  *
- * Props control which items are shown:
- *   - `showRefillInMenu`: include the "تعبئة مخزون" item (omitted in
- *     the alerts view, where refill is the main CTA button).
- *
- * The "تجربة صوت وتنبيه الدواء" test-sound item was removed at the
- * user's request — the test-sound action is still available in the
- * AppSettingsModal ("تجربة إشعار وتنبيه صوتي الآن").
+ * The refill option was removed at the user's request — refills are
+ * handled exclusively via the dedicated card action buttons.
  */
 interface MedicationMenuProps {
   medication: Medication;
   isAutoActive: boolean;
-  showRefillInMenu: boolean;
-  onOpenRefill: (medication: Medication) => void;
+  showRefillInMenu?: boolean;
+  onOpenRefill?: (medication: Medication) => void;
   onEdit: (medication: Medication) => void;
   onDelete: (id: string) => void;
   onToggleAutoDeduct: (id: string) => void;
@@ -36,8 +28,6 @@ interface MedicationMenuProps {
 export function MedicationMenu({
   medication,
   isAutoActive,
-  showRefillInMenu,
-  onOpenRefill,
   onEdit,
   onDelete,
   onToggleAutoDeduct,
@@ -61,18 +51,6 @@ export function MedicationMenu({
             onClick={() => setMenuOpen(false)}
           />
           <div className="absolute left-0 top-8 z-30 w-44 bg-white border border-slate-200 rounded-xl shadow-xl py-1 text-xs">
-            {showRefillInMenu && (
-              <button
-                onClick={() => {
-                  setMenuOpen(false);
-                  onOpenRefill(medication);
-                }}
-                className="w-full text-right px-3 py-2 text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-              >
-                <Plus className="w-3.5 h-3.5 text-teal-600" />
-                <span>تعبئة مخزون (+ علبة)</span>
-              </button>
-            )}
             <button
               onClick={() => {
                 setMenuOpen(false);

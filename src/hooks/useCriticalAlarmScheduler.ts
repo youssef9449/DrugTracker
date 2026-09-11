@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { Medication } from '../types';
-import { getTodayDateString, getCriticalAlarmDate, getCriticalTransitionKey } from '../utils/dateCalculations';
+import { getTodayDateString, getCriticalAlarmDate } from '../utils/dateCalculations';
 import { scheduleCriticalAlarm, cancelCriticalAlarm } from '../utils/notifications';
-import { saveJson } from '../utils/storage';
-
-const SCHEDULED_TRANSITIONS_KEY = 'android_med_tracker_scheduled_critical_v1';
+import {
+  loadScheduledCriticalAlarms,
+  saveScheduledCriticalAlarms,
+  generateCriticalTransitionKey,
+} from '../utils/criticalTransitions';
 
 /**
  * Options for {@link useCriticalAlarmScheduler}.
@@ -191,7 +193,14 @@ export function useCriticalAlarmScheduler({
           id,
           (alarmGenerationRef.current.get(id) ?? 0) + 1
         );
-        enqueue(id, () => cancelCriticalAlarm(id));
+        enqueue(id, async () => {
+          await cancelCriticalAlarm(id);
+          const records = loadScheduledCriticalAlarms();
+          if (records[id] && records[id].status !== 'NOT_SCHEDULED') {
+            records[id].status = 'NOT_SCHEDULED';
+            saveScheduledCriticalAlarms(records);
+          }
+        });
       });
       scheduledCriticalIdsRef.current.clear();
       return;
@@ -199,10 +208,6 @@ export function useCriticalAlarmScheduler({
 
     const today = getTodayDateString();
     const stillScheduled = new Set<string>();
-    // Persist { [medId]: { transitionKey, alarmTime } } so reconciliation
-    // can check whether the alarm time has passed (alarm fired) or is
-    // still in the future (alarm pending).
-    const scheduledTransitions: Record<string, { transitionKey: string; alarmTime: number }> = {};
 
     for (const med of medicationsRef.current) {
       const gen = (alarmGenerationRef.current.get(med.id) ?? 0) + 1;
@@ -211,43 +216,70 @@ export function useCriticalAlarmScheduler({
       const criticalDateMs = getCriticalAlarmDate(med, today);
       if (criticalDateMs === null) {
         if (scheduledCriticalIdsRef.current.has(med.id)) {
-          enqueue(med.id, () => cancelCriticalAlarm(med.id));
+          enqueue(med.id, async () => {
+            await cancelCriticalAlarm(med.id);
+            const records = loadScheduledCriticalAlarms();
+            if (records[med.id] && records[med.id].status === 'SCHEDULED') {
+              records[med.id].status = 'NOT_SCHEDULED';
+              saveScheduledCriticalAlarms(records);
+            }
+          });
         }
         continue;
       }
 
-      const transitionKey = getCriticalTransitionKey(med, today) || `${med.id}:fallback`;
-
+      const transitionKey = generateCriticalTransitionKey(med.id, criticalDateMs);
       const unit = med.unit || 'قرص';
       const name = med.name;
-      enqueue(med.id, () =>
-        cancelCriticalAlarm(med.id)
-          .then(() => {
-            if (alarmGenerationRef.current.get(med.id) !== gen) return;
-            return scheduleCriticalAlarm(
-              med.id,
-              name,
-              criticalDateMs,
-              unit,
-              transitionKey
-            ).then(() => {
-              if (alarmGenerationRef.current.get(med.id) !== gen) {
-                return cancelCriticalAlarm(med.id);
-              }
-            });
-          })
-      );
-      stillScheduled.add(med.id);
-      scheduledTransitions[med.id] = { transitionKey, alarmTime: criticalDateMs };
-    }
 
-    // Persist scheduled transitions for app-restart reconciliation.
-    // This is written BEFORE the async scheduling completes, but the
-    // reconciliation logic checks alarmTime vs Date.now() — if the alarm
-    // time hasn't passed yet, it treats the alarm as "pending" (not fired),
-    // which is correct even if scheduling ultimately fails (the alarm won't
-    // fire, and the foreground will send the notification instead).
-    saveJson(SCHEDULED_TRANSITIONS_KEY, scheduledTransitions);
+      stillScheduled.add(med.id);
+
+      enqueue(med.id, async () => {
+        await cancelCriticalAlarm(med.id);
+        if (alarmGenerationRef.current.get(med.id) !== gen) return;
+
+        try {
+          const scheduledResult = await scheduleCriticalAlarm(
+            med.id,
+            name,
+            criticalDateMs,
+            unit,
+            transitionKey
+          );
+
+          if (alarmGenerationRef.current.get(med.id) !== gen) {
+            await cancelCriticalAlarm(med.id);
+            const records = loadScheduledCriticalAlarms();
+            if (records[med.id]) {
+              records[med.id].status = 'NOT_SCHEDULED';
+              saveScheduledCriticalAlarms(records);
+            }
+            return;
+          }
+
+          const records = loadScheduledCriticalAlarms();
+          if (scheduledResult !== false) {
+            records[med.id] = {
+              transitionKey,
+              alarmTime: criticalDateMs,
+              status: 'SCHEDULED',
+            };
+          } else {
+            if (records[med.id]) {
+              records[med.id].status = 'NOT_SCHEDULED';
+            }
+          }
+          saveScheduledCriticalAlarms(records);
+        } catch (err) {
+          console.warn('[critical-alarm] schedule failed:', err);
+          const records = loadScheduledCriticalAlarms();
+          if (records[med.id]) {
+            records[med.id].status = 'NOT_SCHEDULED';
+            saveScheduledCriticalAlarms(records);
+          }
+        }
+      });
+    }
 
     // Cancel alarms for meds that are no longer in the list (deleted).
     // Bump their generation so any in-flight schedule from a previous
@@ -258,7 +290,14 @@ export function useCriticalAlarmScheduler({
           prevId,
           (alarmGenerationRef.current.get(prevId) ?? 0) + 1
         );
-        enqueue(prevId, () => cancelCriticalAlarm(prevId));
+        enqueue(prevId, async () => {
+          await cancelCriticalAlarm(prevId);
+          const records = loadScheduledCriticalAlarms();
+          if (records[prevId]) {
+            delete records[prevId];
+            saveScheduledCriticalAlarms(records);
+          }
+        });
       }
     }
     scheduledCriticalIdsRef.current = stillScheduled;

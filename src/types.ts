@@ -43,6 +43,20 @@ export interface Medication {
   lastConsumedDate?: string;
 }
 
+export interface CriticalTransitionState {
+  transitionKey: string;
+  enteredAt: number;
+  notificationSent: boolean;
+}
+
+export type ScheduledCriticalAlarmStatus = 'NOT_SCHEDULED' | 'SCHEDULED' | 'DELIVERED';
+
+export interface ScheduledCriticalAlarmRecord {
+  transitionKey: string;
+  alarmTime: number;
+  status: ScheduledCriticalAlarmStatus;
+}
+
 /**
  * The user-configured stock notification threshold (in days).
  *

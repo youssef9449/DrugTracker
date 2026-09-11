@@ -343,7 +343,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           <MedicationMenu
             medication={medication}
             isAutoActive={isAutoActive}
-            showRefillInMenu={true}
+            showRefillInMenu={false}
             onOpenRefill={onOpenRefill}
             onEdit={onEdit}
             onDelete={onDelete}

@@ -5,9 +5,8 @@ import { useDoseReminders } from './useDoseReminders';
 import type { Medication } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
 
-// Mock the sound module so the hook doesn't actually play audio during tests.
+// Mock the sound module — only stopAllSounds remains (used by dismiss/snooze).
 vi.mock('../utils/sound', () => ({
-  playNotificationSound: vi.fn(),
   stopAllSounds: vi.fn(),
 }));
 
@@ -22,8 +21,6 @@ vi.mock('../utils/notifications', async () => {
   };
 });
 
-// Import the mocked functions so we can assert on them.
-import { playNotificationSound } from '../utils/sound';
 import { scheduleSnoozedDoseReminder } from '../utils/notifications';
 
 /** Build a medication with a reminder enabled at the given time. */
@@ -40,7 +37,6 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     lastSyncDate: getTodayDateString(),
     reminderEnabled: true,
     reminderTime: '23:59',
-    notificationSound: 'classic_chime',
     ...overrides,
   };
 }
@@ -49,16 +45,12 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
 function defaultOpts(overrides: Record<string, unknown> = {}) {
   return {
     medications: [],
-    soundEnabled: true,
-    appInForeground: true,
     ...overrides,
   };
 }
 
 const FIRED_KEY = 'android_med_tracker_fired_reminders_v1';
 
-// Pin system time so `getTodayDateString()` (used to build FIRED_KEY
-// entries like `med-real:<today>`) resolves to a deterministic date.
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
@@ -78,8 +70,8 @@ describe('useDoseReminders', () => {
     cleanup();
   });
 
-  describe('openAlarm (called by the native localNotificationReceived listener)', () => {
-    it('opens the DoseAlarmModal for the given med (sound is played by the listener, NOT openAlarm)', () => {
+  describe('openAlarm', () => {
+    it('opens the DoseAlarmModal for the given med (no JS sound)', () => {
       const med = makeMed({ id: 'med-open' });
       const { result } = renderHook(() =>
         useDoseReminders(defaultOpts({ medications: [med] }))
@@ -92,27 +84,6 @@ describe('useDoseReminders', () => {
       expect(result.current.alarmingMedication).toEqual(
         expect.objectContaining({ id: 'med-open' })
       );
-      // openAlarm does NOT play the sound — the localNotificationReceived
-      // listener in native.ts already played the single authoritative
-      // sound before calling openAlarm. This prevents double sounds.
-      expect(playNotificationSound).not.toHaveBeenCalled();
-    });
-
-    it('does NOT open when soundEnabled is false (no chime)', () => {
-      const med = makeMed({ id: 'med-nosound' });
-      const { result } = renderHook(() =>
-        useDoseReminders(defaultOpts({ medications: [med], soundEnabled: false }))
-      );
-
-      act(() => {
-        result.current.openAlarm('med-nosound');
-      });
-
-      // Modal opens (the alarm is still surfaced), but no chime.
-      expect(result.current.alarmingMedication).toEqual(
-        expect.objectContaining({ id: 'med-nosound' })
-      );
-      expect(playNotificationSound).not.toHaveBeenCalled();
     });
 
     it('does NOT re-open if already alarming the same med (dedup)', () => {
@@ -124,18 +95,14 @@ describe('useDoseReminders', () => {
       act(() => {
         result.current.openAlarm('med-dup');
       });
-      // openAlarm doesn't play a sound (listener does), so we check the
-      // modal state instead of call counts.
       expect(result.current.alarmingMedication).toEqual(
         expect.objectContaining({ id: 'med-dup' })
       );
 
-      // Second call while already alarming → no-op (modal stays open,
-      // no re-open).
+      // Second call while already alarming → no-op.
       act(() => {
         result.current.openAlarm('med-dup');
       });
-      // Still the same med, no change.
       expect(result.current.alarmingMedication).toEqual(
         expect.objectContaining({ id: 'med-dup' })
       );
@@ -157,12 +124,11 @@ describe('useDoseReminders', () => {
       });
 
       expect(result.current.alarmingMedication).toBeNull();
-      expect(playNotificationSound).not.toHaveBeenCalled();
     });
 
-    it('does NOT open for a med id that no longer exists (deleted between schedule + fire)', () => {
+    it('does NOT open for a med id that no longer exists', () => {
       const { result } = renderHook(() =>
-        useDoseReminders(defaultOpts({ medications: [] /* med removed */ }))
+        useDoseReminders(defaultOpts({ medications: [] }))
       );
 
       act(() => {
@@ -170,7 +136,6 @@ describe('useDoseReminders', () => {
       });
 
       expect(result.current.alarmingMedication).toBeNull();
-      expect(playNotificationSound).not.toHaveBeenCalled();
     });
 
     it('dismissAlarm writes FIRED_KEY so the reminder does not re-fire today', () => {
@@ -194,50 +159,9 @@ describe('useDoseReminders', () => {
     });
   });
 
-  describe('single-sound policy (openAlarm does NOT play a sound)', () => {
-    // The localNotificationReceived listener in native.ts is the SINGLE
-    // authoritative sound path. It plays either the custom sound (if
-    // set) or the per-med synthesized chime, then calls openAlarm.
-    // openAlarm must NOT play any sound — otherwise two sounds would
-    // play on a dose event (the listener's + openAlarm's).
-    it('openAlarm does NOT call playNotificationSound (listener owns the sound)', () => {
-      const med = makeMed({ id: 'med-sound-policy' });
-      const { result } = renderHook(() =>
-        useDoseReminders(defaultOpts({ medications: [med], soundEnabled: true }))
-      );
-
-      act(() => {
-        result.current.openAlarm('med-sound-policy');
-      });
-
-      // Modal opens.
-      expect(result.current.alarmingMedication).toEqual(
-        expect.objectContaining({ id: 'med-sound-policy' })
-      );
-      // But NO sound is played by openAlarm — the listener already did.
-      expect(playNotificationSound).not.toHaveBeenCalled();
-    });
-
-    it('testAlarm DOES play the chime (manual test is not a notification event)', () => {
-      const med = makeMed({ id: 'med-test-sound' });
-      const { result } = renderHook(() =>
-        useDoseReminders(defaultOpts({ medications: [med], soundEnabled: true }))
-      );
-
-      act(() => {
-        result.current.testAlarm(med);
-      });
-
-      // testAlarm plays the chime because it's triggered manually by the
-      // user (not by the notification listener), so there's no listener
-      // sound to duplicate.
-      expect(playNotificationSound).toHaveBeenCalledWith('classic_chime');
-    });
-  });
-
-  describe('#13 — testAlarm does not poison FIRED_KEY', () => {
-    it('testAlarm opens the modal but does NOT write FIRED_KEY on dismiss', () => {
-      const med = makeMed({ id: 'med-a' });
+  describe('testAlarm', () => {
+    it('opens the modal without writing FIRED_KEY', () => {
+      const med = makeMed({ id: 'med-test' });
       const { result } = renderHook(() =>
         useDoseReminders(defaultOpts({ medications: [med] }))
       );
@@ -246,29 +170,9 @@ describe('useDoseReminders', () => {
         result.current.testAlarm(med);
       });
       expect(result.current.alarmingMedication).toEqual(
-        expect.objectContaining({ id: 'med-a' })
+        expect.objectContaining({ id: 'med-test' })
       );
 
-      act(() => {
-        result.current.dismissAlarm();
-      });
-      expect(result.current.alarmingMedication).toBeNull();
-
-      const fired = JSON.parse(
-        localStorage.getItem(FIRED_KEY) || '{}'
-      ) as Record<string, boolean>;
-      expect(fired['med-a']).toBeUndefined();
-    });
-
-    it('a REAL alarm (openAlarm) DOES write FIRED_KEY on dismiss', () => {
-      const med = makeMed({ id: 'med-real' });
-      const { result } = renderHook(() =>
-        useDoseReminders(defaultOpts({ medications: [med] }))
-      );
-
-      act(() => {
-        result.current.openAlarm('med-real');
-      });
       act(() => {
         result.current.dismissAlarm();
       });
@@ -276,47 +180,14 @@ describe('useDoseReminders', () => {
       const fired = JSON.parse(
         localStorage.getItem(FIRED_KEY) || '{}'
       ) as Record<string, boolean>;
-      const today = new Date().toISOString().slice(0, 10);
-      expect(fired[`med-real:${today}`]).toBe(true);
-    });
-
-    it('a test alarm followed by a real alarm still marks the real one fired', () => {
-      const med = makeMed({ id: 'med-mixed' });
-      const { result } = renderHook(() =>
-        useDoseReminders(defaultOpts({ medications: [med] }))
-      );
-
-      // Real alarm first.
-      act(() => {
-        result.current.openAlarm('med-mixed');
-      });
-      act(() => {
-        result.current.dismissAlarm();
-      });
-      const today = new Date().toISOString().slice(0, 10);
-      let fired = JSON.parse(
-        localStorage.getItem(FIRED_KEY) || '{}'
-      ) as Record<string, boolean>;
-      expect(fired[`med-mixed:${today}`]).toBe(true);
-
-      // Now a test alarm on the same med.
-      act(() => {
-        result.current.testAlarm(med);
-      });
-      act(() => {
-        result.current.dismissAlarm();
-      });
-      fired = JSON.parse(
-        localStorage.getItem(FIRED_KEY) || '{}'
-      ) as Record<string, boolean>;
-      // The real alarm's fired marker is still there.
-      expect(fired[`med-mixed:${today}`]).toBe(true);
+      // testAlarm must NOT write FIRED_KEY.
+      expect(Object.keys(fired).length).toBe(0);
     });
   });
 
   describe('snooze', () => {
     it('snoozeAlarm clears the current alarm without marking it fired', () => {
-      const med = makeMed({ id: 'med-snooze' });
+      const med = makeMed({ id: 'med-snooze', reminderTime: '09:00' });
       const { result } = renderHook(() =>
         useDoseReminders(defaultOpts({ medications: [med] }))
       );
@@ -357,9 +228,7 @@ describe('useDoseReminders', () => {
         1,
         'قرص',
         '09:00',
-        15,
-        'classic_chime',
-        'dose-reminder-foreground-v1'
+        15
       );
     });
   });

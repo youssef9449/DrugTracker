@@ -68,13 +68,13 @@ describe('notification ID scheme — disjoint ranges per category (#65)', () => 
     await sendMedicationDoseReminder(medId, 'Test', 1, 'قرص', 30, '09:00'); // dose
     const doseId = lastScheduledId();
 
-    await sendTestAlertNotification(null); // test
+    await sendTestAlertNotification(); // test
     const testId = lastScheduledId();
 
     await scheduleCriticalAlarm(medId, 'Test', Date.now() + 86_400_000, 'قرص'); // criticalAlarm
     const alarmId = lastScheduledId();
 
-    await scheduleDoseReminder(medId, 'Test', '09:00', 1, 'قرص', 30, null); // doseAlarm
+    await scheduleDoseReminder(medId, 'Test', '09:00', 1, 'قرص', 30); // doseAlarm
     const doseAlarmId = lastScheduledId();
 
     // Each category must fall in its own disjoint 1M band.
@@ -111,7 +111,7 @@ describe('notification ID scheme — disjoint ranges per category (#65)', () => 
       await sendCriticalStockAlert(medId, 'T', 3, 5, 'قرص');
       await sendMedicationDoseReminder(medId, 'T', 1, 'قرص', 30, '09:00');
       await scheduleCriticalAlarm(medId, 'T', Date.now() + 86_400_000, 'قرص');
-      await scheduleDoseReminder(medId, 'T', '09:00', 1, 'قرص', 30, null);
+      await scheduleDoseReminder(medId, 'T', '09:00', 1, 'قرص', 30);
     }
 
     // Collect all scheduled ids across all categories + medIds.
@@ -220,7 +220,7 @@ describe('doseReminderAlarmId — stable across calls, disjoint from other categ
     const medId = 'med-dose-reschedule';
 
     await cancelDoseReminder(medId);
-    await scheduleDoseReminder(medId, 'Test', '09:00', 1, 'قرص', 30, null);
+    await scheduleDoseReminder(medId, 'Test', '09:00', 1, 'قرص', 30);
 
     expect(mocks.cancel).toHaveBeenCalledTimes(1);
     expect(mocks.schedule).toHaveBeenCalledTimes(1);
@@ -243,9 +243,9 @@ describe('snoozeDoseReminderId — distinct from daily dose alarms', () => {
 
 describe('test notification id is a fixed constant', () => {
   it('always uses exactly 4_000_000 regardless of how many times it fires', async () => {
-    await sendTestAlertNotification(null);
-    await sendTestAlertNotification(null);
-    await sendTestAlertNotification(null);
+    await sendTestAlertNotification();
+    await sendTestAlertNotification();
+    await sendTestAlertNotification();
 
     expect(mocks.schedule).toHaveBeenCalledTimes(3);
     for (const call of mocks.schedule.mock.calls) {

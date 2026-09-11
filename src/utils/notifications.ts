@@ -37,16 +37,28 @@
 
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
-import { playNotificationSound } from './sound';
 import {
   NOTIFICATION_IMMEDIATE_OFFSET_MS,
   CRITICAL_ALARM_IMMEDIATE_TOLERANCE_MS,
   SW_READY_TIMEOUT_MS,
 } from './time';
 
-/** Versioned because Android channel sound settings are immutable. */
+/**
+ * The single Android notification channel for dose reminders.
+ * Versioned because Android channel sound settings are immutable —
+ * bumping the suffix is the only way to change the bundled sound.
+ *
+ * The channel is created in native.ts with:
+ *   - sound: 'dose_reminder.wav' (bundled native sound)
+ *   - importance: HIGH (heads-up + sound)
+ *   - visibility: PUBLIC (lock screen)
+ *
+ * There is NO foreground/background channel switching. The same channel
+ * is used whether the app is foreground, background, or killed. The
+ * native notification sound is the ONLY sound for dose reminders —
+ * no JS sound playback is involved.
+ */
 export const DOSE_REMINDER_CHANNEL_ID = 'dose-reminder-v2';
-export const DOSE_REMINDER_FOREGROUND_CHANNEL_ID = 'dose-reminder-foreground-v1';
 
 /**
  * Returns true when running inside the Capacitor native runtime
@@ -344,16 +356,15 @@ export async function sendCriticalStockAlert(
  * medication with `reminderEnabled + reminderTime` set and the
  * current time matches the reminder time.
  *
+ * Uses the single `dose-reminder-v2` channel with the bundled native
+ * sound. No JS sound playback is involved.
+ *
  * @param medId Stable medication id (for a unique notification id)
  * @param medicineName Medication name (title)
  * @param dailyDose Daily dose amount (body)
  * @param unit Unit (e.g., 'قرص')
  * @param currentPills Current pill count (body)
  * @param reminderTime HH:MM string (24-hour) for the scheduled time
- * @param customSoundFile Optional global custom sound — when provided,
- *   its data URL is stored in the notification's `extra` field so the
- *   foreground listener can play it (and the background channel uses
- *   the default sound).
  */
 export async function sendMedicationDoseReminder(
   medId: string,
@@ -362,7 +373,6 @@ export async function sendMedicationDoseReminder(
   unit: string = 'قرص',
   currentPills: number,
   reminderTime?: string,
-  customSoundFile?: { fileName: string; mimeType: string; dataUrl: string } | null
 ): Promise<void> {
   const timeHint = reminderTime ? ` الساعة ${reminderTime}` : '';
   const title = `⏰ حان موعد دواء: ${medicineName}`;
@@ -376,7 +386,6 @@ export async function sendMedicationDoseReminder(
     smallIcon: 'ic_launcher',
     actionTypeId: 'dose-reminder',
     extra: { medicationId: medId },
-    customSoundFile,
   });
 }
 
@@ -385,16 +394,8 @@ export async function sendMedicationDoseReminder(
  * the app is running on. Falls back to the browser Notification API
  * when Capacitor isn't available.
  *
- * @param opts.customSoundFile — optional user-uploaded custom sound.
- *   When provided, the file's data URL is stored in the
- *   notification's `extra` field. A `localNotificationReceived`
- *   listener in native.ts reads this field and plays the custom
- *   sound via an HTMLAudioElement when the notification fires in
- *   the foreground. On Android, the notification channel's default
- *   sound still plays in the background (when the app is closed) —
- *   there's no portable way to play a per-notification custom sound
- *   in background without writing the file to the device's
- *   `res/raw` directory, which requires native code.
+ * The notification sound is handled entirely by the Android notification
+ * channel (bundled native sound). No JS sound playback is involved.
  */
 async function scheduleNotification(opts: {
   id: number;
@@ -404,15 +405,11 @@ async function scheduleNotification(opts: {
   smallIcon: string;
   actionTypeId?: string;
   extra?: Record<string, unknown>;
-  customSoundFile?: { fileName: string; mimeType: string; dataUrl: string } | null;
 }): Promise<void> {
   if (isNativePlatform()) {
     try {
-      // Make sure we have permission before scheduling.
       const perm = await LocalNotifications.checkPermissions();
       if (perm.display !== 'granted') {
-        // #95: surface the silent no-op so the caller / devtools can see
-        // the notification was dropped due to missing permission.
         console.warn('[notifications] scheduleNotification skipped: permission not granted');
         return;
       }
@@ -423,25 +420,12 @@ async function scheduleNotification(opts: {
             id: opts.id,
             title: opts.title,
             body: opts.body,
-            // Schedule 1 second in the future so it appears as a
-            // real notification (not "delivered immediately" which
-            // some Android versions treat as a head-up only).
             schedule: { at: new Date(Date.now() + NOTIFICATION_IMMEDIATE_OFFSET_MS) },
-            // Sound: uses the default Android notification sound
-            // for the channel. The custom sound is played via the
-            // localNotificationReceived listener in the foreground.
             smallIcon: opts.smallIcon,
             channelId: opts.channelId,
             actionTypeId: opts.actionTypeId,
-            // Android notification grouping — group all dose reminders
-            // together so they don't clutter the drawer.
             ongoing: false,
             autoCancel: true,
-            // Store the custom sound file in `extra` so the
-            // localNotificationReceived listener can access it when
-            // the notification fires. The `extra` field is an opaque
-            // bag that Capacitor serializes via Gson on Android —
-            // objects with string fields work fine.
             extra: {
               ...opts.extra,
             },
@@ -450,39 +434,26 @@ async function scheduleNotification(opts: {
       });
     } catch (err) {
       console.warn('[notifications] Capacitor schedule failed:', err);
-      // Fall back to web notification API as a last resort.
       scheduleWebNotification(opts.title, opts.body);
-      // Also play the custom sound in the foreground as a fallback.
-      if (opts.customSoundFile) {
-        // #96: static import (was a dynamic import — no circular dep exists).
-        playNotificationSound('custom', opts.customSoundFile);
-      }
     }
     return;
   }
 
   scheduleWebNotification(opts.title, opts.body);
-  // On web, also play the custom sound via the Web Audio API.
-  if (opts.customSoundFile) {
-    // #96: static import (was a dynamic import — no circular dep exists).
-    playNotificationSound('custom', opts.customSoundFile);
-  }
 }
 
 /**
  * Send a test notification immediately so the user can verify that
- * notifications and sounds work properly on their device.
+ * notifications work properly on their device. Uses the same channel
+ * and native sound as real dose reminders.
  */
-export async function sendTestAlertNotification(
-  customSoundFile?: { fileName: string; mimeType: string; dataUrl: string } | null
-): Promise<void> {
+export async function sendTestAlertNotification(): Promise<void> {
   await scheduleNotification({
     id: notificationId('test'),
     title: '🔔 إشعار تجريبي: متابع الأدوية',
     body: 'الإشعارات والتنبيهات تعمل بشكل سليم على جهازك!',
     channelId: DOSE_REMINDER_CHANNEL_ID,
     smallIcon: 'ic_launcher',
-    customSoundFile,
   });
 }
 
@@ -856,18 +827,6 @@ export async function cancelSnoozedDoseReminder(medId: string): Promise<void> {
   }
 }
 
-/** Remove only the pre-v2 snooze ID during normal daily rescheduling. */
-export async function cancelLegacySnoozedDoseReminder(medId: string): Promise<void> {
-  if (!isNativePlatform()) return;
-  try {
-    await LocalNotifications.cancel({
-      notifications: [{ id: notificationId('dose', medId) }],
-    });
-  } catch (err) {
-    console.warn('[notifications] cancelLegacySnoozedDoseReminder failed:', err);
-  }
-}
-
 /**
  * Schedule a ONE-SHOT dose-reminder notification `minutes` in the future.
  *
@@ -895,8 +854,6 @@ export async function scheduleSnoozedDoseReminder(
   unit: string,
   reminderTime: string | undefined,
   minutes: number,
-  perMedSound?: string,
-  channelId: string = DOSE_REMINDER_CHANNEL_ID,
 ): Promise<void> {
   const fireAt = new Date(Date.now() + minutes * 60_000);
   const timeHint = reminderTime ? ` (موعد الجرعة الأصلي ${reminderTime})` : '';
@@ -923,15 +880,12 @@ export async function scheduleSnoozedDoseReminder(
               allowWhileIdle: true,
             },
             smallIcon: 'ic_launcher',
-            channelId,
+            channelId: DOSE_REMINDER_CHANNEL_ID,
             actionTypeId: 'dose-reminder',
             ongoing: false,
             autoCancel: true,
             extra: {
               medicationId: medId,
-              // Kept for foreground modal routing and diagnostics. Native
-              // channel sound, not this value, plays the notification.
-              notificationSound: perMedSound || 'classic_chime',
             },
           },
         ],
@@ -959,10 +913,8 @@ export async function scheduleSnoozedDoseReminder(
  *
  * `allowWhileIdle: true` lets the alarm fire even in Doze mode.
  *
- * `customSoundFile` is used only by the web fallback. Android does not
- * serialize the large data URL; the foreground App handler reads the
- * current IndexedDB-backed sound, while the audible background channel
- * uses its bundled native sound.
+ * The notification uses the `dose-reminder-v2` channel with the bundled
+ * native sound (`dose_reminder.wav`). No JS sound playback is involved.
  */
 export async function scheduleDoseReminder(
   medId: string,
@@ -971,9 +923,6 @@ export async function scheduleDoseReminder(
   dailyDose: number,
   unit: string,
   currentPills: number,
-  customSoundFile: { fileName: string; mimeType: string; dataUrl: string } | null,
-  perMedSound?: string,
-  channelId: string = DOSE_REMINDER_CHANNEL_ID
 ): Promise<void> {
   // Validate the HH:MM string and compute the next fire Date.
   const parts = reminderTime.split(':').map((n) => parseInt(n, 10));
@@ -1014,15 +963,12 @@ export async function scheduleDoseReminder(
               allowWhileIdle: true,
             },
             smallIcon: 'ic_launcher',
-            channelId,
+            channelId: DOSE_REMINDER_CHANNEL_ID,
             actionTypeId: 'dose-reminder',
             ongoing: false,
             autoCancel: true,
             extra: {
               medicationId: medId,
-              // Kept for foreground modal routing and diagnostics. Native
-              // channel sound, not this value, plays the notification.
-              notificationSound: perMedSound || 'classic_chime',
             },
           },
         ],
@@ -1036,9 +982,6 @@ export async function scheduleDoseReminder(
 
   // Web fallback: no persistent recurring scheduling — fire immediately.
   scheduleWebNotification(title, body);
-  if (customSoundFile) {
-    playNotificationSound('custom', customSoundFile);
-  }
 }
 
 /**

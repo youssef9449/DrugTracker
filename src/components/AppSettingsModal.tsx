@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, type FC, type FormEvent, type ChangeEvent } from 'react';
+import { useState, useEffect, useMemo, type FC, type FormEvent } from 'react';
 import {
   X,
   Settings,
@@ -10,8 +10,6 @@ import {
   MessageCircle,
   Volume2,
   VolumeX,
-  FileAudio,
-  Trash2,
   Bell,
   BellOff,
   AlertTriangle,
@@ -28,7 +26,8 @@ import {
   OrderItem,
   buildWhatsAppUrl,
 } from '../utils/whatsapp';
-import { readCustomSoundFile, CUSTOM_SOUND_ACCEPT_ATTR } from '../utils/sound';
+
+
 import { normalizeArabicDigits } from '../utils/whatsapp';
 
 export interface AppSettingsModalProps {
@@ -41,8 +40,6 @@ export interface AppSettingsModalProps {
   onSaveSettings: (newSettings: PharmacySettings) => void;
   soundEnabled: boolean;
   onToggleSound: () => void;
-  globalCustomSound?: { fileName: string; mimeType: string; dataUrl: string } | null;
-  onSetGlobalCustomSound: (file: { fileName: string; mimeType: string; dataUrl: string } | null) => void;
   notificationsEnabled?: boolean;
   onToggleNotifications?: () => void;
   criticalStockAlertsEnabled?: boolean;
@@ -68,8 +65,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   onSaveSettings,
   soundEnabled,
   onToggleSound,
-  globalCustomSound,
-  onSetGlobalCustomSound,
   notificationsEnabled = true,
   onToggleNotifications,
   criticalStockAlertsEnabled = true,
@@ -158,20 +153,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   ]);
 
   if (!isOpen) return null;
-
-  // Sound file picker — uses readCustomSoundFile for size/type validation.
-  const handleSoundFilePick = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    try {
-      const customFile = await readCustomSoundFile(file);
-      onSetGlobalCustomSound(customFile);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'تعذّر تحميل الملف الصوتي';
-      window.alert(message);
-    }
-  };
 
   const handleSave = (e: FormEvent) => {
     e.preventDefault();
@@ -404,58 +385,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     onChange={onToggleSound}
                     label="تبديل التأثيرات الصوتية"
                   />
-                </div>
-
-                <hr className="border-teal-100" />
-
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-700">صوت تنبيه مخصص من جهازك</span>
-                    <span className="text-[10px] text-teal-700 font-medium">اختياري</span>
-                  </div>
-                  {globalCustomSound ? (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2 bg-teal-50 border border-teal-200 rounded-xl px-2.5 py-1.5">
-                        <FileAudio className="w-3.5 h-3.5 text-teal-600 shrink-0" />
-                        <span
-                          className="text-[11px] text-teal-800 font-bold truncate flex-1"
-                          title={globalCustomSound.fileName}
-                        >
-                          {globalCustomSound.fileName}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => onSetGlobalCustomSound(null)}
-                          className="text-rose-500 hover:text-rose-700 transition shrink-0"
-                          title="إزالة"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                      <label className="block w-full py-1.5 px-2 rounded-xl text-[11px] font-bold text-center cursor-pointer bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100 transition">
-                        <input
-                          type="file"
-                          accept={CUSTOM_SOUND_ACCEPT_ATTR}
-                          className="sr-only"
-                          onChange={handleSoundFilePick}
-                        />
-                        تغيير الملف
-                      </label>
-                    </div>
-                  ) : (
-                    <label className="block w-full py-2 px-2 rounded-xl text-[11px] font-bold text-center cursor-pointer bg-teal-50 text-teal-800 border border-teal-200 hover:bg-teal-100 transition">
-                      <input
-                        type="file"
-                        accept={CUSTOM_SOUND_ACCEPT_ATTR}
-                        className="sr-only"
-                        onChange={handleSoundFilePick}
-                      />
-                      📂 اختر ملفاً صوتياً من جهازك
-                    </label>
-                  )}
-                  <p className="text-[10px] text-slate-500 leading-relaxed">
-                    الصوت المخصص يُطبّق على كل إشعارات الأدوية (تذكير الجرعات + تنبيهات النفاذ). MP3 / WAV / OGG، حد أقصى 2MB.
-                  </p>
                 </div>
               </div>
             </>

@@ -420,7 +420,8 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
       'med-alarm-1',
       'Alarm Test Med',
       expect.any(Number),
-      'قرص'
+      'قرص',
+      expect.any(String)
     );
   });
 
@@ -521,19 +522,22 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
         'med-reboot-1',
         'Reboot Med 1',
         expect.any(Number),
-        'قرص'
+        'قرص',
+        expect.any(String)
       );
       expect(scheduleCriticalAlarm).toHaveBeenCalledWith(
         'med-reboot-2',
         'Reboot Med 2',
         expect.any(Number),
-        'قرص'
+        'قرص',
+        expect.any(String)
       );
       expect(scheduleCriticalAlarm).toHaveBeenCalledWith(
         'med-reboot-3',
         'Reboot Med 3',
         expect.any(Number),
-        'قرص'
+        'قرص',
+        expect.any(String)
       );
     });
   });

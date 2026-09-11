@@ -710,7 +710,8 @@ export async function scheduleCriticalAlarm(
   medId: string,
   medName: string,
   criticalDateMs: number,
-  unit: string = 'قرص'
+  unit: string = 'قرص',
+  criticalTransitionKey?: string,
 ): Promise<void> {
   // Compute the schedule time. If the computed critical date is in
   // the past (or very close), use "now + 1s" so the notification
@@ -753,6 +754,10 @@ export async function scheduleCriticalAlarm(
             smallIcon: 'ic_launcher',
             ongoing: false,
             autoCancel: true,
+            extra: {
+              medicationId: medId,
+              criticalTransitionKey: criticalTransitionKey || '',
+            },
           },
         ],
       });

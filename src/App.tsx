@@ -485,15 +485,12 @@ export default function App() {
 
   // ─────────────────────────────────────────────────────────────
   // Alert effect: watches the (post-deduction) medications array and
-  // the notification flags, and fires a notification the FIRST time a
-  // medication WORSENS — using the per-medication critical threshold
-  // DERIVED from warningThresholdDays (C3), and a stable notification
-  // id keyed by med.id (H6 — no more collisions between same-named
-  // medications).
+  // fires a notification the FIRST time a medication transitions into
+  // critical/out_of_stock. Uses a persistent dedup map so the same
+  // transition can never produce two notifications (foreground +
+  // scheduled alarm + app restart are all deduped).
   //
-  // Extracted into useStockAlerts for testability (#87). The hook owns
-  // the STATUS_RANK map + the lastAlertedStatusRef tracker. See
-  // src/hooks/useStockAlerts.ts for the full severity-rank logic.
+  // Extracted into useStockAlerts for testability (#87).
   useStockAlerts({
     medications,
     notificationsEnabled,

@@ -363,7 +363,6 @@ export async function sendCriticalStockAlert(
  * @param medicineName Medication name (title)
  * @param dailyDose Daily dose amount (body)
  * @param unit Unit (e.g., 'قرص')
- * @param currentPills Current pill count (body)
  * @param reminderTime HH:MM string (24-hour) for the scheduled time
  */
 export async function sendMedicationDoseReminder(
@@ -371,12 +370,11 @@ export async function sendMedicationDoseReminder(
   medicineName: string,
   dailyDose: number,
   unit: string = 'قرص',
-  currentPills: number,
   reminderTime?: string,
 ): Promise<void> {
   const timeHint = reminderTime ? ` الساعة ${reminderTime}` : '';
   const title = `⏰ حان موعد دواء: ${medicineName}`;
-  const body = `موعد الجرعة${timeHint}. جرعتك المقررة: ${dailyDose} ${unit}. (المخزون الحالي: ${currentPills} ${unit}).`;
+  const body = `موعد الجرعة${timeHint}. جرعتك المقررة: ${dailyDose} ${unit}.`;
 
   await scheduleNotification({
     id: notificationId('dose', medId),
@@ -922,7 +920,6 @@ export async function scheduleDoseReminder(
   reminderTime: string,
   dailyDose: number,
   unit: string,
-  currentPills: number,
 ): Promise<void> {
   // Validate the HH:MM string and compute the next fire Date.
   const parts = reminderTime.split(':').map((n) => parseInt(n, 10));
@@ -939,7 +936,7 @@ export async function scheduleDoseReminder(
   }
 
   const title = `⏰ حان موعد دواء: ${medName}`;
-  const body = `موعد الجرعة الساعة ${reminderTime}. جرعتك المقررة: ${dailyDose} ${unit}. (المخزون الحالي: ${currentPills} ${unit}).`;
+  const body = `موعد الجرعة الساعة ${reminderTime}. جرعتك المقررة: ${dailyDose} ${unit}.`;
 
   if (isNativePlatform()) {
     try {

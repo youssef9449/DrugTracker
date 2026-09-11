@@ -23,6 +23,8 @@ import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { App } from '@capacitor/app';
 import { LocalNotifications, type Channel, type Importance, type Visibility } from '@capacitor/local-notifications';
+import { playNotificationSound } from './utils/sound';
+import type { NotificationSoundType } from './types';
 
 let initialized = false;
 
@@ -76,6 +78,17 @@ export function registerDoseReceivedHandler(
   doseReceivedHandler = handler;
 }
 
+// App-resume handler — called when the app returns to the foreground
+// (active state). App.tsx registers a handler that re-checks the
+// exact-alarm permission, since the user may have just granted/denied
+// it in the Android settings screen (opened via openExactAlarmSettings).
+let appStateHandle: { remove: () => Promise<void> } | null = null;
+let appResumeHandler: (() => void) | null = null;
+
+export function registerAppResumeHandler(handler: (() => void) | null) {
+  appResumeHandler = handler;
+}
+
 export async function initNativeBridge(): Promise<void> {
   if (initialized) return;
   initialized = true;
@@ -109,6 +122,27 @@ export async function initNativeBridge(): Promise<void> {
     });
   } catch (err) {
     console.warn('[native] backButton listener failed:', err);
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // App state (resume) listener — re-checks exact-alarm permission
+  // when the app returns to the foreground. The user may have just
+  // granted/denied SCHEDULE_EXACT_ALARM in the Android settings screen
+  // (opened via openExactAlarmSettings). Capacitor's appStateChange
+  // fires with isActive=true when the app becomes active again.
+  // ─────────────────────────────────────────────────────────────
+  try {
+    appStateHandle = await App.addListener('appStateChange', ({ isActive }) => {
+      if (isActive && appResumeHandler) {
+        try {
+          appResumeHandler();
+        } catch (err) {
+          console.warn('[native] appResumeHandler failed:', err);
+        }
+      }
+    });
+  } catch (err) {
+    console.warn('[native] appStateChange listener failed:', err);
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -200,24 +234,34 @@ export async function initNativeBridge(): Promise<void> {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // Foreground notification listener — plays the user's custom sound
-  // AND opens the in-app DoseAlarmModal for dose reminders.
+  // Foreground notification listener — plays ONE sound + opens the
+  // in-app DoseAlarmModal for dose reminders.
   // ─────────────────────────────────────────────────────────────
   // When a local notification fires while the app is in the
-  // foreground, Capacitor delivers it to this listener instead of
-  // showing it in the system notification tray. We use this to:
-  //   1. Play the user-uploaded custom sound (stored in the
-  //      notification's `extra` field) — overriding the default
-  //      channel sound.
-  //   2. If the notification carries a `medicationId` in its `extra`
-  //      (dose reminders + snoozed reminders do), call the registered
-  //      doseReceivedHandler so App.tsx can open the DoseAlarmModal +
-  //      play the per-med chime. This replaces the old JS polling —
-  //      the native scheduler fires the notification at reminderTime,
-  //      and this listener surfaces it in-app.
-  //   3. The notification itself is still delivered to the system
-  //      notification tray by Capacitor, so the user sees the
-  //      notification + hears the custom sound.
+  // foreground, Capacitor delivers it to this listener. We use this
+  // to play the SINGLE authoritative sound for the dose event:
+  //
+  //   SOUND POLICY (single authoritative path):
+  //   - If the notification carries a customSoundFile in its `extra`,
+  //     play it via an HTMLAudioElement (the user's uploaded sound).
+  //   - Otherwise, if the notification carries a per-medication
+  //     `notificationSound` id in its `extra`, play the synthesized
+  //     chime via playNotificationSound().
+  //   - The notification itself is scheduled with `sound: undefined`
+  //     so the system channel sound does NOT also play in the
+  //     foreground (that would be a second sound).
+  //
+  //   In the BACKGROUND/killed state, this listener does NOT run
+  //   (the app process is gone). The system delivers the notification
+  //   to the tray with the channel's default sound — which is the ONE
+  //   sound for that case. The custom sound cannot play in the
+  //   background without native code (deferred — problem #2), so the
+  //   channel default is the accepted fallback.
+  //
+  //   openAlarm() (called below via doseReceivedHandler) does NOT
+  //   play any sound — the listener already played it here. This
+  //   ensures exactly ONE sound per dose event in the foreground.
+  //
   // #38: await the addListener and store the handle so it can be
   // removed if needed (prevents duplicate listeners across HMR).
   try {
@@ -227,25 +271,46 @@ export async function initNativeBridge(): Promise<void> {
         extra?: {
           customSoundFile?: { dataUrl: string; fileName: string; mimeType: string };
           medicationId?: string;
+          notificationSound?: string;
         };
       }) => {
+        // ── SINGLE AUTHORITATIVE SOUND ──
+        // Play the custom sound if present; otherwise play the
+        // per-med synthesized chime if present. Never both.
         const customSound = notification?.extra?.customSoundFile;
+        const perMedSound = notification?.extra?.notificationSound;
         if (customSound?.dataUrl) {
-          // Play the custom sound via an Audio element. We use a
-          // dedicated Audio element (not the Web Audio API) because
-          // custom sounds are MP3/WAV/etc files, not synthesized
-          // tones. The Audio element plays them naturally.
+          // Custom uploaded sound (MP3/WAV/etc) via Audio element.
           try {
             const audio = new Audio(customSound.dataUrl);
             audio.volume = 1;
             audio.play().catch((err) => {
               console.warn('[native] Custom sound playback failed:', err);
+              // Fallback to the per-med chime if the custom file fails.
+              if (perMedSound) {
+                try {
+                  playNotificationSound(perMedSound as NotificationSoundType);
+                } catch {
+                  // silent — already logged above.
+                }
+              }
             });
           } catch (err) {
             console.warn('[native] Custom sound Audio() creation failed:', err);
           }
+        } else if (perMedSound) {
+          // No custom sound — play the per-med synthesized chime.
+          try {
+            playNotificationSound(perMedSound as NotificationSoundType);
+          } catch (err) {
+            console.warn('[native] Per-med chime playback failed:', err);
+          }
         }
-        // If this is a dose-reminder notification, surface it in-app.
+
+        // ── IN-APP MODAL (foreground only) ──
+        // If this is a dose-reminder notification, surface it in-app
+        // via the registered handler. The handler opens DoseAlarmModal
+        // WITHOUT playing a sound (the sound was already played above).
         const medicationId = notification?.extra?.medicationId;
         if (medicationId && doseReceivedHandler) {
           try {
@@ -283,11 +348,18 @@ export async function cleanupNativeListeners(): Promise<void> {
   } catch (err) {
     console.warn('[native] notificationActionHandle.remove() failed:', err);
   }
+  try {
+    if (appStateHandle) await appStateHandle.remove();
+  } catch (err) {
+    console.warn('[native] appStateHandle.remove() failed:', err);
+  }
   backPressHandle = null;
   notificationHandle = null;
   notificationActionHandle = null;
   notificationActionHandler = null;
   doseReceivedHandler = null;
+  appStateHandle = null;
+  appResumeHandler = null;
 }
 
 /**

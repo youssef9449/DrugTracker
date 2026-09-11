@@ -265,13 +265,42 @@ echo "sdk.dir=$ANDROID_HOME" > android/local.properties
 # org.gradle.configureondemand=true
 ```
 
-#### 6. Sync the web build into the Android project
+#### 6. Add the SCHEDULE_EXACT_ALARM permission (Android 12+)
+
+Medication dose reminders are time-sensitive and MUST fire at the exact
+scheduled time. On Android 12+ (API 31+), `@capacitor/local-notifications`
+uses `AlarmManager.setExactAndAllowWhileIdle` — but only if the app
+declares the `SCHEDULE_EXACT_ALARM` permission and the user grants it.
+
+Open `android/app/src/main/AndroidManifest.xml` and add this line inside
+the `<manifest>` tag (before `<application>`):
+
+```xml
+<uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+```
+
+**Why `SCHEDULE_EXACT_ALARM` and not `USE_EXACT_ALARM`?**
+- `USE_EXACT_ALARM` is for apps whose core purpose IS an alarm clock or
+  calendar (granted automatically, no user prompt). A medication tracker
+  doesn't qualify under Google Play's policy.
+- `SCHEDULE_EXACT_ALARM` is for apps that NEED exact alarms but aren't
+  alarm-clock apps. The user must grant it via the Android settings screen
+  (the app opens it via `LocalNotifications.changeExactNotificationSetting()`).
+  On Android < 12 it's granted automatically (no settings screen needed).
+
+The app checks this permission at runtime (`getExactAlarmPermission()` in
+`notifications.ts`) and shows a UI warning + "grant" button in the
+AppSettingsModal when it's missing. The `useDoseReminderScheduler` hook
+BLOCKS dose-reminder scheduling when the permission is denied (inexact
+alarms are unacceptable for medication reminders).
+
+#### 7. Sync the web build into the Android project
 
 ```bash
 npx cap sync android
 ```
 
-#### 7. Build the signed release APK
+#### 8. Build the signed release APK
 
 ```bash
 cd android
@@ -297,7 +326,7 @@ cd android
 > (Once you are on Gradle 8.7 this workaround is unnecessary — `./gradlew`
 > returns on its own.)
 
-#### 8. Verify the signature + grab the APK
+#### 9. Verify the signature + grab the APK
 
 ```bash
 $ANDROID_HOME/build-tools/34.0.0/apksigner verify --verbose --print-certs \

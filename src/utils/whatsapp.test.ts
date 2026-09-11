@@ -262,7 +262,13 @@ describe('calculateMedicationOrderQuantity', () => {
   });
 
   it('rounds a selected period up to the nearest package for liquids', () => {
-    const med = makeMed({ unit: 'مل', dailyDose: 1, packageSize: 100 });
+    const med = makeMed({
+      unit: 'مل',
+      dailyDose: 1,
+      stripsPerBox: undefined,
+      pillsPerStrip: undefined,
+      packageSize: 100,
+    });
     const r = calculateMedicationOrderQuantity(med, 40);
     expect(r.quantity).toBe(100);
   });

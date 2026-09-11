@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 /**
- * Capacitor configuration for النغنغ (Drug Tracker).
+ * Capacitor configuration for Drug Tracker.
  *
  * The app is a Vite + React SPA. Capacitor wraps the production
  * build (output of `vite build`, located in `dist/`) in an Android
@@ -18,14 +18,14 @@ import type { CapacitorConfig } from '@capacitor/cli';
  *   cd android && ./gradlew assembleDebug
  *   → android/app/build/outputs/apk/debug/app-debug.apk
  *
- * The bundle ID `app.nagnagh` is used as the Android package name
+ * The bundle ID `app.drugtracker` is used as the Android package name
  * and the iOS bundle identifier. It must be lowercase, contain only
  * letters and dots, and end with a non-numeric segment. We use the
  * `app.` prefix to keep it out of the public DNS namespace.
  */
 const config: CapacitorConfig = {
-  appId: 'app.nagnagh',
-  appName: 'متتبع الأدوية',
+  appId: 'app.drugtracker',
+  appName: 'Drug Tracker',
   webDir: 'dist',
   server: {
     androidScheme: 'https',

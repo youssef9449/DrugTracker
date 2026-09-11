@@ -254,11 +254,11 @@ export async function cleanupNativeListeners(): Promise<void> {
  * notification permissions for the app.
  *
  * - **Android**: opens the Android "App info" screen for this app
- *   (Settings → Apps → النغنغ → Notifications), where the user
+ *   (Settings → Apps → Drug Tracker → Notifications), where the user
  *   can toggle notifications on.
  *
  * - **iOS**: opens the iOS Settings app at this app's notification
- *   permissions page (Settings → النغنغ → Notifications).
+ *   permissions page (Settings → Drug Tracker → Notifications).
  *
  * - **Web**: returns false; the caller should fall back to
  *   openBrowserNotificationSettings() instead — there's no portable

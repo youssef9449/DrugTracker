@@ -1,6 +1,6 @@
 {
-  "name": "متتبع الأدوية",
-  "short_name": "متتبع الأدوية",
+  "name": "Drug Tracker",
+  "short_name": "Drug Tracker",
   "description": "تطبيق لمتابعة مخزون الأدوية وتنبيهك عند اقتراب نفاذ الحبوب بناءً على معدل الاستهلاك اليومي.",
   "lang": "ar",
   "dir": "rtl",

@@ -1,5 +1,5 @@
 /**
- * Service Worker for النغنغ (Drug Tracker)
+ * Service Worker for Drug Tracker.
  *
  * Caches the app shell (HTML + JS + CSS + icons) so the app keeps
  * working offline after the first load. Uses a stale-while-revalidate

@@ -486,6 +486,7 @@ async function scheduleWebNotification(title: string, body: string): Promise<voi
  *   dose reminder            3_000_000 + hash(medId) % 1_000_000
  *   test notification        4_000_000  (fixed constant, single test notif)
  *   critical one-shot alarm  5_000_000 + hash(medId) % 1_000_000
+ *   dose recurring alarm     6_000_000 + hash(medId) % 1_000_000
  *
  * #66: the dose-reminder id previously included Date.now(), producing a
  * NEW id on every call. That broke the snooze-and-re-fire path: instead
@@ -502,6 +503,7 @@ const NOTIFICATION_ID_BASE = {
   dose: 3_000_000,
   test: 4_000_000,
   criticalAlarm: 5_000_000,
+  doseAlarm: 6_000_000,
 } as const;
 
 type NotificationCategory = keyof typeof NOTIFICATION_ID_BASE;
@@ -702,6 +704,233 @@ export async function scheduleCriticalAlarm(
   // alert if they happen to have the tab open. This is a known
   // limitation; the headline use case is the Android native path.
   scheduleWebNotification(title, body);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Recurring daily dose-reminder alarm (AlarmManager-backed).
+//
+// This is the NATIVE complement to the in-app polling in useDoseReminders.
+// The polling only fires while the app is in the foreground; this native
+// schedule fires the dose reminder at the medication's reminderTime EVERY
+// DAY via Android's AlarmManager (or iOS's UNUserNotificationCenter), even
+// when the app is killed or the device is in Doze. The user sees the
+// reminder in their notification drawer without ever opening the app.
+//
+// The recurring notification uses a SEPARATE id band (doseAlarm = 6M)
+// from the immediate dose notification (dose = 3M) so the two never
+// collide. The useDoseReminderScheduler hook cancels + reschedules
+// whenever a med's reminder config changes (reminderEnabled, reminderTime,
+// med deleted, notifications disabled), with the same race-protection
+// pattern as useCriticalAlarmScheduler (generation counter + per-med
+// serialization chain).
+//
+// When the notification fires:
+//   - App in background/killed: shown in the system notification tray
+//     with the channel's default sound. (Custom sound in background is
+//     problem #2, deferred — see the scheduleNotification JSDoc.)
+//   - App in foreground: delivered to the localNotificationReceived
+//     listener in native.ts, which plays the custom sound (if any) via
+//     an Audio element. The in-app polling then opens the DoseAlarmModal.
+//
+// Boot persistence: scheduled notifications are persisted by the
+// @capacitor/local-notifications plugin and re-armed on BOOT_COMPLETED.
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Compute the unique notification id for a medication's recurring dose
+ * alarm. Stable across calls so cancel + reschedule work.
+ */
+export function doseReminderAlarmId(medId: string): number {
+  return notificationId('doseAlarm', medId);
+}
+
+/**
+ * Cancel any pending recurring dose-reminder alarm for this medication.
+ *
+ * On native: calls LocalNotifications.cancel() with the stable id.
+ * On web: no-op (web has no persistent recurring alarm to cancel).
+ */
+export async function cancelDoseReminder(medId: string): Promise<void> {
+  if (!isNativePlatform()) return;
+  try {
+    await LocalNotifications.cancel({
+      notifications: [{ id: doseReminderAlarmId(medId) }],
+    });
+  } catch (err) {
+    console.warn('[notifications] cancelDoseReminder failed:', err);
+  }
+}
+
+/**
+ * Schedule a ONE-SHOT dose-reminder notification `minutes` in the future.
+ *
+ * Called by useDoseReminders.snoozeAlarm when the user hits "غفوة" on the
+ * DoseAlarmModal. Uses the immediate 'dose' id band (3M) so the snoozed
+ * notification replaces (not duplicates) any pending immediate dose
+ * notification. When it fires (foreground or background):
+ *   - Background: shown in the system tray with the channel's default
+ *     sound.
+ *   - Foreground: the localNotificationReceived listener calls
+ *     openAlarm → re-opens the DoseAlarmModal.
+ *
+ * This replaces the old polling-based snooze, which only re-opened the
+ * modal while the app was in the foreground. Now the snoozed reminder
+ * fires via AlarmManager even if the user backgrounded the app.
+ *
+ * NOTE: the snoozed notification does NOT repeat — it fires once. The
+ * recurring daily reminder (scheduleDoseReminder, doseAlarm band) is
+ * unaffected and will still fire tomorrow at reminderTime.
+ */
+export async function scheduleSnoozedDoseReminder(
+  medId: string,
+  medName: string,
+  dailyDose: number,
+  unit: string,
+  reminderTime: string | undefined,
+  minutes: number
+): Promise<void> {
+  const fireAt = new Date(Date.now() + minutes * 60_000);
+  const timeHint = reminderTime ? ` (موعد الجرعة الأصلي ${reminderTime})` : '';
+  const title = `⏰ تذكير مجدد: ${medName}`;
+  const body = `غفوة ${minutes} دقيقة انتهت${timeHint}. جرعتك المقررة: ${dailyDose} ${unit}.`;
+
+  if (isNativePlatform()) {
+    try {
+      const perm = await LocalNotifications.checkPermissions();
+      if (perm.display !== 'granted') {
+        console.warn('[notifications] scheduleSnoozedDoseReminder skipped: permission not granted');
+        return;
+      }
+      await LocalNotifications.schedule({
+        notifications: [
+          {
+            // Use the immediate 'dose' id (3M band) so the snoozed
+            // notification replaces any pending immediate dose notif.
+            id: notificationId('dose', medId),
+            title,
+            body,
+            schedule: {
+              at: fireAt,
+              allowWhileIdle: true,
+            },
+            sound: undefined,
+            smallIcon: 'ic_launcher',
+            channelId: 'dose-reminder',
+            actionTypeId: 'dose-reminder',
+            ongoing: false,
+            autoCancel: true,
+            extra: {
+              medicationId: medId,
+            },
+          },
+        ],
+      });
+      return;
+    } catch (err) {
+      console.warn('[notifications] Capacitor scheduleSnoozedDoseReminder failed:', err);
+    }
+  }
+
+  // Web fallback: fire immediately (can't wake a future time reliably).
+  scheduleWebNotification(title, body);
+}
+
+/**
+ * Schedule a recurring daily dose-reminder notification at the given
+ * HH:MM (24-hour) time.
+ *
+ * Computes the next fire time (today at HH:MM if it's still in the
+ * future, otherwise tomorrow at HH:MM) and schedules a RECURRING daily
+ * notification via LocalNotifications. With `repeats: true` +
+ * `every: 'day'`, Android's AlarmManager re-arms it automatically
+ * every 24 hours at the same time — the app doesn't need to be open.
+ *
+ * `allowWhileIdle: true` lets the alarm fire even in Doze mode.
+ *
+ * `customSoundFile` is stored in the notification's `extra` field so
+ * the foreground `localNotificationReceived` listener can play it when
+ * the notification fires while the app is open. In the background the
+ * channel's default sound is used (custom sound in background is
+ * deferred — problem #2).
+ */
+export async function scheduleDoseReminder(
+  medId: string,
+  medName: string,
+  reminderTime: string,
+  dailyDose: number,
+  unit: string,
+  currentPills: number,
+  customSoundFile?: { fileName: string; mimeType: string; dataUrl: string } | null
+): Promise<void> {
+  // Validate the HH:MM string and compute the next fire Date.
+  const parts = reminderTime.split(':').map((n) => parseInt(n, 10));
+  const [hour, minute] = parts;
+  if (parts.length < 2 || Number.isNaN(hour) || Number.isNaN(minute)) return;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return;
+
+  const now = new Date();
+  const fireToday = new Date();
+  fireToday.setHours(hour, minute, 0, 0);
+  // If today's fire time already passed, schedule for tomorrow.
+  if (fireToday.getTime() <= now.getTime()) {
+    fireToday.setDate(fireToday.getDate() + 1);
+  }
+
+  const title = `⏰ حان موعد دواء: ${medName}`;
+  const body = `موعد الجرعة الساعة ${reminderTime}. جرعتك المقررة: ${dailyDose} ${unit}. (المخزون الحالي: ${currentPills} ${unit}).`;
+
+  if (isNativePlatform()) {
+    try {
+      const perm = await LocalNotifications.checkPermissions();
+      if (perm.display !== 'granted') {
+        console.warn('[notifications] scheduleDoseReminder skipped: permission not granted');
+        return;
+      }
+      await LocalNotifications.schedule({
+        notifications: [
+          {
+            id: doseReminderAlarmId(medId),
+            title,
+            body,
+            schedule: {
+              at: fireToday,
+              repeats: true,
+              every: 'day',
+              allowWhileIdle: true,
+            },
+            sound: undefined,
+            smallIcon: 'ic_launcher',
+            channelId: 'dose-reminder',
+            actionTypeId: 'dose-reminder',
+            ongoing: false,
+            autoCancel: true,
+            extra: {
+              medicationId: medId,
+              ...(customSoundFile
+                ? {
+                    customSoundFile: {
+                      fileName: customSoundFile.fileName,
+                      mimeType: customSoundFile.mimeType,
+                      dataUrl: customSoundFile.dataUrl,
+                    },
+                  }
+                : {}),
+            },
+          },
+        ],
+      });
+      return;
+    } catch (err) {
+      console.warn('[notifications] Capacitor scheduleDoseReminder failed:', err);
+      // Fall through to web fallback below.
+    }
+  }
+
+  // Web fallback: no persistent recurring scheduling — fire immediately.
+  scheduleWebNotification(title, body);
+  if (customSoundFile) {
+    playNotificationSound('custom', customSoundFile);
+  }
 }
 
 /**

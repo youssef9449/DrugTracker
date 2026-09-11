@@ -55,12 +55,14 @@ import { OrderItem } from './utils/whatsapp';
 import { consumeDose, settleAndAdjust } from './utils/medActions';
 import { useDoseReminders } from './hooks/useDoseReminders';
 import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
+import { useDoseReminderScheduler } from './hooks/useDoseReminderScheduler';
 import { usePersistentEffect } from './hooks/usePersistentEffect';
 import { useStockAlerts } from './hooks/useStockAlerts';
 import {
   initNativeBridge,
   registerBackButtonHandler,
   registerNotificationActionHandler,
+  registerDoseReceivedHandler,
   cleanupNativeListeners,
 } from './native';
 import { migrateSchema } from './lib/migration';
@@ -153,15 +155,9 @@ export default function App() {
   const restoreInFlightRef = useRef<Set<string>>(new Set());
   const refillUndoInFlightRef = useRef<Set<string>>(new Set());
 
-  const { alarmingMedication, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
+  const { alarmingMedication, openAlarm, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
     medications,
     soundEnabled,
-    notificationsEnabled,
-    // #24: pass hydrated so the polling effect doesn't fire phantom
-    // alarms for seed medications before the user's real saved state
-    // is loaded from localStorage/IndexedDB.
-    hydrated: hydrated && !isFirstRun,
-    globalCustomSound,
   });
 
   // #21: register a back-button handler that closes the top modal
@@ -552,6 +548,27 @@ export default function App() {
     criticalStockAlertsEnabled,
     hydrated,
     isFirstRun,
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // NATIVE recurring daily dose-reminder scheduling.
+  //
+  // Schedules a recurring native notification (AlarmManager-backed) for
+  // each medication with reminderEnabled + reminderTime, so the dose
+  // reminder fires EVERY DAY at the configured time — even when the app
+  // is killed, the device is in Doze, or the user never opens the app.
+  //
+  // This complements the in-app polling in useDoseReminders (which only
+  // fires the DoseAlarmModal + chime while the app is in the foreground).
+  // See useDoseReminderScheduler.ts for the race-protection + boot-
+  // persistence details.
+  // ─────────────────────────────────────────────────────────────
+  useDoseReminderScheduler({
+    medications,
+    notificationsEnabled,
+    hydrated,
+    isFirstRun,
+    globalCustomSound,
   });
 
   const handleRestoreDose = (medicationId: string, reason: string): boolean => {
@@ -1024,8 +1041,23 @@ export default function App() {
     return () => registerNotificationActionHandler(null);
   }, [medications, handleTakeDoseFromAlarm]);
 
+  // Register the dose-received handler: when a native dose-reminder
+  // notification fires while the app is in the foreground, the
+  // localNotificationReceived listener in native.ts calls this handler
+  // with the medicationId, which opens the DoseAlarmModal + plays the
+  // per-med chime (via openAlarm). This replaces the old JS polling —
+  // the native scheduler fires the notification at reminderTime, and
+  // this surfaces it in-app. openAlarm is stable (empty-deps
+  // useCallback) so this effect only registers once.
+  useEffect(() => {
+    registerDoseReceivedHandler((medicationId) => {
+      openAlarm(medicationId);
+    });
+    return () => registerDoseReceivedHandler(null);
+  }, [openAlarm]);
+
   const handleSnoozeFromAlarm = (med: Medication) => {
-    snoozeAlarm(DEFAULT_SNOOZE_MINUTES);
+    snoozeAlarm(med, DEFAULT_SNOOZE_MINUTES);
     showToast(TOAST_MESSAGES.doseSnoozed(med.name));
   };
 

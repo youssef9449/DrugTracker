@@ -24,12 +24,15 @@ vi.mock('@capacitor/local-notifications', () => ({
 
 import {
   criticalAlarmId,
+  doseReminderAlarmId,
   sendMedicineAlert,
   sendCriticalStockAlert,
   sendMedicationDoseReminder,
   sendTestAlertNotification,
   cancelCriticalAlarm,
   scheduleCriticalAlarm,
+  scheduleDoseReminder,
+  cancelDoseReminder,
 } from './notifications';
 
 beforeEach(() => {
@@ -67,6 +70,9 @@ describe('notification ID scheme — disjoint ranges per category (#65)', () => 
     await scheduleCriticalAlarm(medId, 'Test', Date.now() + 86_400_000, 'قرص'); // criticalAlarm
     const alarmId = lastScheduledId();
 
+    await scheduleDoseReminder(medId, 'Test', '09:00', 1, 'قرص', 30, null); // doseAlarm
+    const doseAlarmId = lastScheduledId();
+
     // Each category must fall in its own disjoint 1M band.
     expect(lowStockId).toBeGreaterThanOrEqual(1_000_000);
     expect(lowStockId).toBeLessThan(2_000_000);
@@ -82,6 +88,9 @@ describe('notification ID scheme — disjoint ranges per category (#65)', () => 
 
     expect(alarmId).toBeGreaterThanOrEqual(5_000_000);
     expect(alarmId).toBeLessThan(6_000_000);
+
+    expect(doseAlarmId).toBeGreaterThanOrEqual(6_000_000);
+    expect(doseAlarmId).toBeLessThan(7_000_000);
   });
 
   it('never produces cross-category collisions even with adversarial medIds', async () => {
@@ -98,6 +107,7 @@ describe('notification ID scheme — disjoint ranges per category (#65)', () => 
       await sendCriticalStockAlert(medId, 'T', 3, 5, 'قرص');
       await sendMedicationDoseReminder(medId, 'T', 1, 'قرص', 30, '09:00');
       await scheduleCriticalAlarm(medId, 'T', Date.now() + 86_400_000, 'قرص');
+      await scheduleDoseReminder(medId, 'T', '09:00', 1, 'قرص', 30, null);
     }
 
     // Collect all scheduled ids across all categories + medIds.
@@ -107,8 +117,8 @@ describe('notification ID scheme — disjoint ranges per category (#65)', () => 
       }
     }
 
-    // 4 categories * 7 medIds = 28 distinct ids (test notif not included here).
-    expect(ids.size).toBe(28);
+    // 5 categories * 7 medIds = 35 distinct ids (test notif not included here).
+    expect(ids.size).toBe(35);
   });
 
   it('different medIds within the same category map to different ids (no intra-category collision across 100 meds)', async () => {
@@ -184,6 +194,37 @@ describe('criticalAlarmId — stable across calls, disjoint from other categorie
     const scheduledId = mocks.schedule.mock.calls[0][0].notifications[0].id;
     expect(cancelledId).toBe(scheduledId);
     expect(cancelledId).toBe(criticalAlarmId(medId));
+  });
+});
+
+describe('doseReminderAlarmId — stable across calls, disjoint from other categories', () => {
+  it('returns the same id for the same medId on every call', () => {
+    expect(doseReminderAlarmId('med-x')).toBe(doseReminderAlarmId('med-x'));
+  });
+
+  it('returns different ids for different medIds', () => {
+    expect(doseReminderAlarmId('med-x')).not.toBe(doseReminderAlarmId('med-y'));
+  });
+
+  it('lives in the doseAlarm band (6_000_000–6_999_999)', () => {
+    const id = doseReminderAlarmId('med-band');
+    expect(id).toBeGreaterThanOrEqual(6_000_000);
+    expect(id).toBeLessThan(7_000_000);
+  });
+
+  it('cancel + reschedule use the SAME stable id', async () => {
+    const medId = 'med-dose-reschedule';
+
+    await cancelDoseReminder(medId);
+    await scheduleDoseReminder(medId, 'Test', '09:00', 1, 'قرص', 30, null);
+
+    expect(mocks.cancel).toHaveBeenCalledTimes(1);
+    expect(mocks.schedule).toHaveBeenCalledTimes(1);
+
+    const cancelledId = mocks.cancel.mock.calls[0][0].notifications[0].id;
+    const scheduledId = mocks.schedule.mock.calls[0][0].notifications[0].id;
+    expect(cancelledId).toBe(scheduledId);
+    expect(cancelledId).toBe(doseReminderAlarmId(medId));
   });
 });
 

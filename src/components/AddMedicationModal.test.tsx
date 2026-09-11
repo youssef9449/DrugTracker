@@ -140,6 +140,56 @@ describe('AddMedicationModal — noStrips edit preserves packageSize (#14)', () 
     expect(savedData.packageSize).toBe(20);
     expect(savedData.stripsPerBox).toBeUndefined();
   });
+
+  it('non-solid unit: package size field can be cleared without snapping to 1', () => {
+    // Regression test for the bug where selecting a non-pill unit (مل/جرعة/كيس)
+    // made the package-size field impossible to clear — clearing it snapped
+    // back to "1" because of `Math.max(1, parseInt(...) || 1)`.
+    render(<AddMedicationModal {...baseProps()} />);
+
+    // Switch the unit to a liquid (مل) — this reveals the non-solid
+    // package-size input (placeholder "مثال: 100 أو 120 مل").
+    const unitSelect = screen.getByRole('combobox') as HTMLSelectElement;
+    fireEvent.change(unitSelect, { target: { value: 'مل' } });
+
+    const pkgInput = screen.getByPlaceholderText('مثال: 100 أو 120 مل') as HTMLInputElement;
+    // After switching to مل, the default is 100.
+    expect(pkgInput).toHaveValue(100);
+
+    // Clear the field — it must become empty, NOT snap to "1".
+    // (A number input renders an empty value as '' in .value.)
+    fireEvent.change(pkgInput, { target: { value: '' } });
+    expect(pkgInput.value).toBe('');
+
+    // Typing a new value works normally.
+    fireEvent.change(pkgInput, { target: { value: '120' } });
+    expect(pkgInput).toHaveValue(120);
+  });
+
+  it('non-solid unit: edited package size is saved correctly', () => {
+    const onSave = vi.fn();
+    render(<AddMedicationModal {...baseProps({ onSave })} />);
+
+    // Switch to liquid (مل).
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'مل' } });
+
+    const pkgInput = screen.getByPlaceholderText('مثال: 100 أو 120 مل');
+    // Change from the default 100 to 120.
+    fireEvent.change(pkgInput, { target: { value: '120' } });
+
+    // Enter a name + valid daily dose so validation passes.
+    fireEvent.change(screen.getByPlaceholderText(/بانادول|كونكور/), { target: { value: 'Sirop' } });
+    // dailyDose default for مل is '5' (set by handleUnitChange).
+    // Submit.
+    fireEvent.click(screen.getByText('إضافة الدواء'));
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const savedData = onSave.mock.calls[0][0];
+    expect(savedData.unit).toBe('مل');
+    expect(savedData.packageSize).toBe(120);
+    expect(savedData.stripsPerBox).toBeUndefined();
+    expect(savedData.pillsPerStrip).toBeUndefined();
+  });
 });
 
 /**

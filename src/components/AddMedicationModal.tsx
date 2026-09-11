@@ -80,6 +80,15 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
   // enters the total pills per box.
   const [noStrips, setNoStrips] = useState<boolean>(false);
 
+  // String-typed mirror of `packageSize`, used ONLY by the non-solid
+  // (liquid / dose / sachet) package-size input. Keeping it as a string
+  // lets the user clear the field mid-edit (select-all → delete) without
+  // the old `Math.max(1, parseInt(...) || 1)` snapping it back to "1".
+  // The numeric `packageSize` is the source of truth for validation /
+  // save; this string is synced to it and parsed back on every change.
+  // (Same pattern already used for `dailyDose`, `stripsPerBox`, etc.)
+  const [packageSizeStr, setPackageSizeStr] = useState<string>(String(packageSize));
+
   useEffect(() => {
     if (initialData) {
       setName(initialData.name);
@@ -106,12 +115,16 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
         const perStrip = initialData.pillsPerStrip;
         setStripsPerBox(String(strips));
         setPillsPerStrip(String(perStrip));
-        setPackageSize(initialData.packageSize || (strips && perStrip ? strips * perStrip : 30));
+        const pkg = initialData.packageSize || (strips && perStrip ? strips * perStrip : 30);
+        setPackageSize(pkg);
+        setPackageSizeStr(String(pkg));
       } else {
         const defaultPkg = isSolid ? 30 : initUnit === 'مل' ? 100 : 30;
         setStripsPerBox(String(initialData.packageSize || defaultPkg));
         setPillsPerStrip(String(initialData.pillsPerStrip || 10));
-        setPackageSize(initialData.packageSize || defaultPkg);
+        const pkg = initialData.packageSize || defaultPkg;
+        setPackageSize(pkg);
+        setPackageSizeStr(String(pkg));
       }
       setReminderEnabled(Boolean(initialData.reminderEnabled));
       setReminderTime(initialData.reminderTime || '09:00');
@@ -129,6 +142,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       setPillsPerStrip('10');
       setNoStrips(false);
       setPackageSize(30);
+      setPackageSizeStr('30');
       setHelperBoxes(1);
       setHelperStrips(0);
       setHelperLoose(0);
@@ -153,11 +167,17 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
     setUnit(newUnit);
     if (!initialData) {
       if (newUnit === 'مل') {
-        if (packageSize === 30) setPackageSize(100);
+        if (packageSize === 30) {
+          setPackageSize(100);
+          setPackageSizeStr('100');
+        }
         if (currentPills === 30) setCurrentPills(100);
         if (dailyDose === '1') setDailyDose('5');
       } else if (isSolidUnit(newUnit)) {
-        if (packageSize === 100) setPackageSize(30);
+        if (packageSize === 100) {
+          setPackageSize(30);
+          setPackageSizeStr('30');
+        }
         if (currentPills === 100) setCurrentPills(30);
         if (dailyDose === '5') setDailyDose('1');
       }
@@ -606,8 +626,23 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                 max="100000"
                 inputMode="numeric"
                 step="any"
-                value={packageSize || ''}
-                onChange={(e) => setPackageSize(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                value={packageSizeStr}
+                onChange={(e) => {
+                  // Store the raw string so the field can be cleared
+                  // mid-edit (select-all → delete) instead of snapping
+                  // back to "1" like the old `Math.max(1, parseInt || 1)`.
+                  // The numeric packageSize is parsed here and also
+                  // re-parsed at save time as a safety net.
+                  const raw = e.target.value;
+                  setPackageSizeStr(raw);
+                  const parsed = parseInt(raw, 10);
+                  if (!isNaN(parsed) && parsed > 0) {
+                    setPackageSize(parsed);
+                  }
+                  // If empty/invalid, leave packageSize at its previous
+                  // value — the save handler falls back to a sensible
+                  // default (line: `packageSize || (unit === 'مل' ? 100 : 30)`).
+                }}
                 placeholder={unit === 'مل' ? 'مثال: 100 أو 120 مل' : 'مثال: 30'}
                 className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
               />

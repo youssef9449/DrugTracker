@@ -44,23 +44,22 @@ export interface Medication {
 }
 
 /**
- * Critical-stock threshold (in days), derived from the medication's
- * `warningThresholdDays`.
+ * The user-configured stock notification threshold (in days).
  *
- * The "warning" status fires when `daysLeft <= warningThresholdDays`.
- * The "critical" status is a more urgent subset that fires at half the
- * warning window (floored to at least 1 day), so the critical level
- * scales with the user-configured warning window instead of being a
- * fixed 2-day constant.
+ * This is the ONLY threshold. There is no derived "critical" sub-threshold.
+ * The user sets `warningThresholdDays` from the Medication Card, and that
+ * value is used directly:
  *
- * Examples:
- *   warningThresholdDays = 5  -> criticalThresholdDays = 2
- *   warningThresholdDays = 7  -> criticalThresholdDays = 3
- *   warningThresholdDays = 10 -> criticalThresholdDays = 5
- *   warningThresholdDays = 1  -> criticalThresholdDays = 1
+ *   daysLeft >  warningThresholdDays  → 'sufficient' (no notification)
+ *   daysLeft <= warningThresholdDays  → 'critical'   (ONE notification)
+ *   effPills  <= 0                    → 'out_of_stock' (ONE notification)
+ *
+ * A single state transition (sufficient→critical, or sufficient→out_of_stock)
+ * produces exactly ONE notification. The same critical state persisting
+ * across app restarts / re-renders / days does NOT produce duplicates.
  */
 export function getCriticalThresholdDays(med: Medication): number {
-  return Math.max(1, Math.floor((med.warningThresholdDays || 5) / 2));
+  return Math.max(1, med.warningThresholdDays || 5);
 }
 
 /**
@@ -331,9 +330,12 @@ export function calculateMedicationStatus(med: Medication): MedicationStatusInfo
     };
   }
 
-  const criticalThresholdDays = getCriticalThresholdDays(med);
+  // The user-configured threshold is the ONLY threshold.
+  // daysLeft <= warningThresholdDays → critical.
+  // No derived sub-threshold, no hidden "warning" tier.
+  const thresholdDays = getCriticalThresholdDays(med);
 
-  if (daysLeft <= criticalThresholdDays) {
+  if (daysLeft <= thresholdDays) {
     const daysWord =
       daysLeft === 1 ? 'يوم واحد' : daysLeft === 2 ? 'يومين' : `${daysLeft} أيام`;
     return {
@@ -343,17 +345,6 @@ export function calculateMedicationStatus(med: Medication): MedicationStatusInfo
       statusColorClass: 'text-rose-600',
       badgeBg: 'bg-rose-50 text-rose-700 border-rose-200',
       badgeText: `🚨 باقي ${daysLeft === 1 ? 'يوم فقط' : `${daysLeft} أيام`}`,
-    };
-  }
-
-  if (daysLeft <= med.warningThresholdDays) {
-    return {
-      daysLeft,
-      status: 'warning',
-      statusLabel: `اقترب من النفاذ (${daysLeft} أيام)`,
-      statusColorClass: 'text-amber-600',
-      badgeBg: 'bg-amber-50 text-amber-700 border-amber-200',
-      badgeText: `⚠️ يكفي لـ ${daysLeft} أيام فقط`,
     };
   }
 

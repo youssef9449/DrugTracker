@@ -130,9 +130,10 @@ export function useCriticalAlarmScheduler({
   // critical alarm date (per getCriticalAlarmDate + scheduleCriticalAlarm):
   //   id, currentPills, dailyDose, lastSyncDate, warningThresholdDays,
   //   autoDeductEnabled, name, unit.
-  // The effect is gated on this string instead of the raw `medications`
-  // array ref, so the full cancel+schedule chain only re-runs when a med's
-  // alarm-relevant config actually changes.
+  // warningThresholdDays IS the user-configured threshold (no derived
+  // sub-threshold). The effect is gated on this string so the full
+  // cancel+schedule chain only re-runs when a med's alarm-relevant
+  // config actually changes.
   const criticalSignature = useMemo(
     () =>
       medications

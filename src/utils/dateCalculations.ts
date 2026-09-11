@@ -469,12 +469,11 @@ export function settleAutoDeductToggle(
  *   - `dailyDose <= 0` → no consumption rate → no projected critical
  *     date. Caller must skip scheduling.
  *   - `daysLeft <= criticalThresholdDays` → the med is ALREADY at or
- *     below the critical threshold. The one-shot alarm is only for
- *     FUTURE crossings; the existing alert effect (which runs when
- *     the app is open and tracks already-alerted statuses via
- *     `lastAlertedStatusRef`) handles the "already critical on app
- *     open" case. Returning null here prevents repeated immediate
- *     alerts from being scheduled on every app launch.
+ *     below the user-configured threshold. The one-shot alarm is only
+ *     for FUTURE crossings; the existing alert effect (useStockAlerts)
+ *     handles the "already critical on app open" case. Returning null
+ *     here prevents repeated immediate alerts from being scheduled on
+ *     every app launch.
  *   - `autoDeductEnabled === false` AND effective balance > critical
  *     threshold → the balance is frozen, it will never cross the
  *     critical threshold without a refill. (If it's already below,

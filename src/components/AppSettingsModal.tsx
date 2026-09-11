@@ -5,6 +5,7 @@ import {
   Phone,
   UserCheck,
   Check,
+  CheckCircle2,
   MessageSquare,
   MessageCircle,
   Volume2,
@@ -49,6 +50,13 @@ export interface AppSettingsModalProps {
   onSendTestNotification?: () => void;
   autoDeductEnabled?: boolean;
   onToggleAutoDeduct?: () => void;
+  /** Whether exact-alarm permission (SCHEDULE_EXACT_ALARM) is granted
+   *  on Android 12+. When false, dose reminders CANNOT be guaranteed
+   *  to fire on time — the UI shows a warning + a button to open the
+   *  Android exact-alarm settings. */
+  exactAlarmEnabled?: boolean;
+  /** Open the Android settings screen to grant exact-alarm permission. */
+  onOpenExactAlarmSettings?: () => void;
 }
 
 export const AppSettingsModal: FC<AppSettingsModalProps> = ({
@@ -69,6 +77,8 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   onSendTestNotification,
   autoDeductEnabled = true,
   onToggleAutoDeduct,
+  exactAlarmEnabled = true,
+  onOpenExactAlarmSettings,
   mode = 'all',
 }) => {
   const isPharmacyOnly = mode === 'pharmacy';
@@ -343,6 +353,38 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     <Bell className="w-4 h-4 text-amber-600" />
                     <span>🔔 تجربة إشعار وتنبيه صوتي الآن (اختبار فوري)</span>
                   </button>
+                )}
+
+                {/* Exact-alarm permission warning (Android 12+) */}
+                {notificationsEnabled && !exactAlarmEnabled && onOpenExactAlarmSettings && (
+                  <div className="bg-rose-50 border border-rose-300/80 rounded-xl p-3 space-y-2">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                      <div className="text-[11px] text-rose-900 leading-relaxed">
+                        <strong>تنبيه: المنبهات الدقيقة غير مفعّلة</strong>
+                        <br />
+                        لضمان وصول تذكير الجرعة في موعده بالضبط، اسمح للتطبيق باستخدام
+                        المنبهات الدقيقة من إعدادات Android. بدون هذا الإذن قد يتأخر
+                        التذكير دقائق أو ساعات.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={onOpenExactAlarmSettings}
+                      className="w-full py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition active:scale-98 shadow-xs"
+                    >
+                      <Bell className="w-4 h-4" />
+                      <span>السماح بالمنبهات الدقيقة (إعدادات Android)</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* Exact-alarm granted indicator */}
+                {notificationsEnabled && exactAlarmEnabled && (
+                  <div className="flex items-center gap-1.5 text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span>المنبهات الدقيقة مفعّلة — تذكيرات الجرعات مضمونة في موعدها</span>
+                  </div>
                 )}
               </div>
 

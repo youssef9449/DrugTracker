@@ -43,6 +43,8 @@ import {
   requestNotificationPermission,
   sendTestAlertNotification,
   getNotificationPermission,
+  getExactAlarmPermission,
+  openExactAlarmSettings,
 } from './utils/notifications';
 import {
   getTodayDateString,
@@ -63,6 +65,7 @@ import {
   registerBackButtonHandler,
   registerNotificationActionHandler,
   registerDoseReceivedHandler,
+  registerAppResumeHandler,
   cleanupNativeListeners,
 } from './native';
 import { migrateSchema } from './lib/migration';
@@ -139,6 +142,12 @@ export default function App() {
   // warningThresholdDays via getCriticalThresholdDays() — not a fixed
   // pill count (see C3 in the audit fix).
   const [criticalStockAlertsEnabled, setCriticalStockAlertsEnabled] = useState<boolean>(true);
+  // Exact-alarm permission state (Android 12+). When false, dose-reminder
+  // scheduling is BLOCKED — inexact alarms are unacceptable for medication
+  // reminders. The user grants this via Android settings (the plugin's
+  // changeExactNotificationSetting opens the settings screen). On web /
+  // Android < 12 this is always true.
+  const [exactAlarmEnabled, setExactAlarmEnabled] = useState<boolean>(true);
   const [globalAutoDeductEnabled, setGlobalAutoDeductEnabled] = useState<boolean>(true);
   // Global custom sound — shared across all notifications (not
   // per-medication). The user uploads it from the AppHeader. It is
@@ -327,6 +336,17 @@ export default function App() {
       })
       .catch((err) => {
         console.warn('[App] getNotificationPermission failed:', err);
+      });
+
+    // Initialize the exact-alarm permission state (Android 12+). On web /
+    // Android < 12 this resolves to 'granted' immediately. On Android 12+
+    // it checks whether the user has granted SCHEDULE_EXACT_ALARM.
+    getExactAlarmPermission()
+      .then((state) => {
+        setExactAlarmEnabled(state === 'granted');
+      })
+      .catch((err) => {
+        console.warn('[App] getExactAlarmPermission failed:', err);
       });
 
     // Initialize the Capacitor native bridge (status bar color, back
@@ -568,6 +588,7 @@ export default function App() {
     notificationsEnabled,
     hydrated,
     isFirstRun,
+    exactAlarmEnabled,
     globalCustomSound,
   });
 
@@ -1066,9 +1087,45 @@ export default function App() {
     return () => registerDoseReceivedHandler(null);
   }, [openAlarm]);
 
+  // ─────────────────────────────────────────────────────────────
+  // App-resume handler: re-check exact-alarm permission when the app
+  // returns to the foreground. The user may have just granted/denied
+  // SCHEDULE_EXACT_ALARM in the Android settings screen (opened via the
+  // "السماح بالمنبهات الدقيقة" button in AppSettingsModal). When the
+  // permission state changes, the useDoseReminderScheduler effect
+  // (which depends on exactAlarmEnabled) re-runs and reschedules all
+  // dose reminders with the correct (exact or cancelled) policy.
+  // ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    registerAppResumeHandler(() => {
+      getExactAlarmPermission()
+        .then((state) => {
+          setExactAlarmEnabled(state === 'granted');
+        })
+        .catch((err) => {
+          console.warn('[App] Resume exact-alarm re-check failed:', err);
+        });
+    });
+    return () => registerAppResumeHandler(null);
+  }, []);
+
   const handleSnoozeFromAlarm = (med: Medication) => {
     snoozeAlarm(med, DEFAULT_SNOOZE_MINUTES);
     showToast(TOAST_MESSAGES.doseSnoozed(med.name));
+  };
+
+  // Open the Android exact-alarm settings screen so the user can grant
+  // SCHEDULE_EXACT_ALARM. On web this is a no-op. After the user returns
+  // to the app, the appStateChange listener re-checks the permission
+  // and updates exactAlarmEnabled → the scheduler reschedules.
+  const handleOpenExactAlarmSettings = () => {
+    openExactAlarmSettings()
+      .then((opened) => {
+        if (!opened) {
+          showToast('إعدادات المنبهات الدقيقة غير متاحة على هذا الجهاز');
+        }
+      })
+      .catch(() => void 0);
   };
 
   // Consume-pill feature: manually consume a dose from the card.
@@ -1460,6 +1517,8 @@ export default function App() {
         onToggleAutoDeduct={handleToggleGlobalAutoDeduct}
         onToggleCriticalStockAlerts={handleToggleCriticalStockAlerts}
         onSendTestNotification={handleSendTestNotification}
+        exactAlarmEnabled={exactAlarmEnabled}
+        onOpenExactAlarmSettings={handleOpenExactAlarmSettings}
         onSetGlobalCustomSound={(file) => {
           setGlobalCustomSound(file);
           if (file) {

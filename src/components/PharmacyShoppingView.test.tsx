@@ -265,9 +265,18 @@ describe('PharmacyShoppingView — refill actions', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'إرسال طلبية بالواتساب' }));
 
-    expect(screen.getByText(/رقم التواصل: البيت: 01000000000/)).toBeInTheDocument();
-    expect(screen.getByText(/العنوان: البيت: شارع 10/)).toBeInTheDocument();
-    expect(screen.queryByText(/رقم التواصل: العمل: 01111111111/)).toBeNull();
+    // Contact phone line shows ONLY the number — the descriptive label
+    // (e.g. "البيت") must NOT be included in the WhatsApp message.
+    expect(screen.getByText(/رقم التواصل: 01000000000/)).toBeInTheDocument();
+    expect(screen.queryByText(/البيت: 01000000000/)).toBeNull();
+    // Address line also shows ONLY the address — the descriptive label
+    // must NOT be included.
+    expect(screen.getByText(/العنوان: شارع 10/)).toBeInTheDocument();
+    expect(screen.queryByText(/البيت: شارع 10/)).toBeNull();
+    // Unselected contact phone must not appear in the message.
+    // (The bare number still shows in the contact list UI — only check
+    //  it isn't present as a "رقم التواصل:" line in the message.)
+    expect(screen.queryByText(/رقم التواصل: 01111111111/)).toBeNull();
     expect(screen.getByRole('checkbox', { name: 'إضافة العمل إلى الرسالة' })).not.toBeChecked();
   });
 

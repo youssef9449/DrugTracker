@@ -68,7 +68,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   onDelete,
   onToggleAutoDeduct,
   onNavigateToShopping,
-  onTriggerAlarm,
   onConsumeDose,
   lastRefillQuantity,
   onUndoRefill,
@@ -202,12 +201,10 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             medication={medication}
             isAutoActive={isAutoActive}
             showRefillInMenu={false}
-            showTestSound={true}
             onOpenRefill={onOpenRefill}
             onEdit={onEdit}
             onDelete={onDelete}
             onToggleAutoDeduct={onToggleAutoDeduct}
-            onTriggerAlarm={onTriggerAlarm}
           />
         </div>
 
@@ -259,8 +256,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           containerClass="bg-white/90 border-amber-200 mt-2"
           textClass="text-amber-950"
           badgeClass="text-amber-900 bg-amber-100"
-          buttonClass="bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900"
-          onTriggerAlarm={onTriggerAlarm}
         />
 
         {/* Quick Action: Immediate Refill + Shopping List CTA */}
@@ -349,12 +344,10 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             medication={medication}
             isAutoActive={isAutoActive}
             showRefillInMenu={true}
-            showTestSound={true}
             onOpenRefill={onOpenRefill}
             onEdit={onEdit}
             onDelete={onDelete}
             onToggleAutoDeduct={onToggleAutoDeduct}
-            onTriggerAlarm={onTriggerAlarm}
           />
         </div>
 
@@ -419,8 +412,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           containerClass="bg-emerald-50/70 border-emerald-200/80 mt-2"
           textClass="text-emerald-950"
           badgeClass="text-emerald-900 bg-emerald-100"
-          buttonClass="bg-white hover:bg-emerald-100 border border-emerald-300 text-emerald-900"
-          onTriggerAlarm={onTriggerAlarm}
         />
 
         {/* Auto-deduct paused note */}
@@ -490,12 +481,10 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           medication={medication}
           isAutoActive={isAutoActive}
           showRefillInMenu={false}
-          showTestSound={false}
           onOpenRefill={onOpenRefill}
           onEdit={onEdit}
           onDelete={onDelete}
           onToggleAutoDeduct={onToggleAutoDeduct}
-          onTriggerAlarm={onTriggerAlarm}
         />
       </div>
 
@@ -583,8 +572,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         containerClass="bg-teal-50/70 border-teal-200/80 mt-2.5"
         textClass="text-teal-950"
         badgeClass="text-teal-900 bg-teal-100"
-        buttonClass="bg-white hover:bg-teal-100 border border-teal-300 text-teal-900"
-        onTriggerAlarm={onTriggerAlarm}
       />
 
       {/* Consume-pill feature: "تناول جرعة" button + consumed-today badge.

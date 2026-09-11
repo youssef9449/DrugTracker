@@ -538,38 +538,55 @@ export function getCriticalAlarmDate(
  *
  * The key identifies a SPECIFIC critical transition — not merely "the med
  * is critical." It must:
- * - Stay stable across re-renders / app restarts for the same transition.
+ * - Stay stable across re-renders / app restarts / days passing for the
+ *   same continuous critical transition.
  * - Change when the med leaves critical state and later re-enters it.
- * - Not depend on dynamic pill counts (which fluctuate daily with auto-deduct).
+ * - NOT depend on `effectiveCurrentPills()` (which shifts daily with
+ *   auto-deduction) or on `todayStr` (which changes every day).
  *
- * The key is derived from the threshold-crossing date: the UTC calendar date
- * on which the med's projected balance reaches the user-configured threshold.
- * This date is computed from lastSyncDate + effective balance, so it's
- * deterministic and doesn't shift as days pass (only changes on refill/consume/
- * dose/threshold edits, which legitimately create a new transition).
+ * The key is derived from the STORED snapshot values that only change
+ * when the user takes an action (refill, consume, edit dose/threshold):
+ *   - `med.lastSyncDate` (when the snapshot was set)
+ *   - `med.currentPills` (the stored balance at lastSyncDate)
+ *   - `med.dailyDose` (consumption rate)
+ *   - `med.warningThresholdDays` (the user-configured threshold)
+ *
+ * The threshold-crossing date is:
+ *   lastSyncDate + (currentPills / dailyDose - thresholdDays) days
+ *
+ * This is the SAME date that `getCriticalAlarmDate` computes (before
+ * adjusting to 9 AM local). It's stable because currentPills and
+ * lastSyncDate don't change unless the user refills or consumes.
  *
  * Returns null for sufficient meds (no critical transition).
  */
 export function getCriticalTransitionKey(
   med: Medication,
-  todayStr: string = getTodayDateString()
+  _todayStr: string = getTodayDateString()
 ): string | null {
   if (med.dailyDose <= 0) return null;
 
   const thresholdDays = getCriticalThresholdDays(med);
-  const daysLeft = effectiveDaysLeft(med, todayStr);
-
-  if (daysLeft > thresholdDays) return null; // sufficient
-
-  // The med is critical or out_of_stock.
-  // Compute the threshold-crossing date from lastSyncDate + effective balance.
-  // This date is stable: it doesn't change as days pass (only changes when
-  // the user refills, consumes, changes dose, or changes threshold).
-  const effPills = effectiveCurrentPills(med, todayStr);
+  // Use the STORED currentPills — NOT effectiveCurrentPills — so the key
+  // is stable across days. effectiveCurrentPills shifts daily with
+  // auto-deduction, which would make the key change every day.
+  const storedPills = Math.max(0, med.currentPills);
   const lastSyncUtc = parseUtcDate(med.lastSyncDate);
   if (!lastSyncUtc) return `${med.id}:unknown`;
 
-  const totalDaysToDepletion = Math.max(0, effPills) / med.dailyDose;
+  // Check if the med is actually critical using the DYNAMIC balance.
+  // The stored balance may be above threshold, but after auto-deduction
+  // the effective balance may be below. We need to know if the med IS
+  // critical NOW (using effective balance), but the KEY must be stable
+  // (using stored balance).
+  const effDaysLeft = effectiveDaysLeft(med, _todayStr);
+  if (effDaysLeft > thresholdDays) return null; // sufficient
+
+  // The med is critical or out_of_stock.
+  // Compute the threshold-crossing date from the STORED snapshot.
+  // This date is the same whether computed today or tomorrow — it only
+  // changes when currentPills, lastSyncDate, dailyDose, or threshold changes.
+  const totalDaysToDepletion = storedPills / med.dailyDose;
   const daysToThreshold = totalDaysToDepletion - thresholdDays;
   const crossingUtcMs = lastSyncUtc.getTime() + Math.floor(daysToThreshold) * MS_PER_DAY;
   const crossingUtcDate = new Date(crossingUtcMs);

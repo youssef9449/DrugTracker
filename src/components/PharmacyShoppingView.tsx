@@ -324,10 +324,10 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       '',
       whatsappAddresses
         .filter((item) => selectedWhatsappAddressIds.includes(item.id))
-        .map((item) => `${item.label}: ${item.address}`),
+        .map((item) => item.address),
       whatsappContacts
         .filter((contact) => selectedWhatsappContactIds.includes(contact.id))
-        .map((contact) => `${contact.label}: ${contact.phone}`)
+        .map((contact) => contact.phone)
     );
   }, [orderItemsForMessage, selectedPharmacy?.customerCode, whatsappAddresses, whatsappContacts, selectedWhatsappAddressIds, selectedWhatsappContactIds]);
 

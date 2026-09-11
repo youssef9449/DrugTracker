@@ -46,7 +46,13 @@ export const PharmacyManagementView: FC<PharmacyManagementViewProps> = ({ pharma
       ) : (
         <div className="space-y-3">{pharmacies.map((pharmacy) => (
           <div key={pharmacy.id} className="bg-white rounded-2xl border border-slate-200 p-4 flex items-center justify-between gap-3">
-            <div className="min-w-0"><h3 className="font-bold text-slate-900 truncate">{pharmacy.name}</h3><p className="text-xs text-slate-500 mt-1" dir="ltr">+{pharmacy.phone}</p><p className="text-xs text-slate-500 mt-1">كود العميل: {pharmacy.customerCode || 'غير محدد'}</p></div>
+            <div className="min-w-0">
+              <h3 className="font-bold text-slate-900 truncate">{pharmacy.name}</h3>
+              <p className="text-xs text-slate-500 mt-1" dir="ltr">+{pharmacy.phone}</p>
+              {pharmacy.customerCode && (
+                <p className="text-xs text-slate-500 mt-1">كود العميل: {pharmacy.customerCode}</p>
+              )}
+            </div>
             <div className="flex items-center gap-1 shrink-0"><button type="button" onClick={() => openForm(pharmacy)} aria-label={`تعديل ${pharmacy.name}`} className="p-2 rounded-xl bg-slate-100 text-slate-700"><Pencil className="w-4 h-4" /></button><button type="button" onClick={() => onDelete(pharmacy.id)} aria-label={`حذف ${pharmacy.name}`} className="p-2 rounded-xl bg-rose-50 text-rose-700"><Trash2 className="w-4 h-4" /></button></div>
           </div>
         ))}</div>

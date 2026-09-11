@@ -712,7 +712,7 @@ export async function scheduleCriticalAlarm(
   criticalDateMs: number,
   unit: string = 'قرص',
   criticalTransitionKey?: string,
-): Promise<void> {
+): Promise<boolean> {
   // Compute the schedule time. If the computed critical date is in
   // the past (or very close), use "now + 1s" so the notification
   // appears as a real system notification.
@@ -735,7 +735,7 @@ export async function scheduleCriticalAlarm(
         // #95: surface the silent no-op so the caller / devtools can see
         // the alarm was dropped due to missing permission.
         console.warn('[notifications] scheduleCriticalAlarm skipped: permission not granted');
-        return;
+        return false;
       }
       await LocalNotifications.schedule({
         notifications: [
@@ -761,10 +761,11 @@ export async function scheduleCriticalAlarm(
           },
         ],
       });
-      return;
+      return true;
     } catch (err) {
       console.warn('[notifications] Capacitor scheduleCriticalAlarm failed:', err);
       // Fall through to web fallback below.
+      return false;
     }
   }
 
@@ -774,6 +775,7 @@ export async function scheduleCriticalAlarm(
   // alert if they happen to have the tab open. This is a known
   // limitation; the headline use case is the Android native path.
   scheduleWebNotification(title, body);
+  return false;
 }
 
 // ─────────────────────────────────────────────────────────────────────

@@ -9,6 +9,7 @@ import {
 import { CustomTimePicker } from './CustomTimePicker';
 import { Toggle } from './ui/Toggle';
 import { Modal } from './ui/Modal';
+import { Checkbox } from './ui/Checkbox';
 
 interface AddMedicationModalProps {
   isOpen: boolean;
@@ -489,11 +490,10 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
 
             {/* "بدون أشرطة" toggle */}
             <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={noStrips}
                 onChange={(e) => setNoStrips(e.target.checked)}
-                className="w-4 h-4 accent-teal-600"
+                aria-label="بدون أشرطة (أقراص فرط في العلبة)"
               />
               <span className="text-[11px] font-bold text-slate-700">
                 بدون أشرطة (أقراص فرط في العلبة)

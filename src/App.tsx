@@ -30,7 +30,6 @@ import { AndroidFab } from './components/AndroidFab';
 import { EmptyState } from './components/EmptyState';
 import { DoseAlarmModal } from './components/DoseAlarmModal';
 import { UpdatePrompt } from './components/UpdatePrompt';
-import { Toggle } from './components/ui/Toggle';
 import { playSuccessChime } from './utils/sound';
 import {
   saveGlobalCustomSound,
@@ -45,7 +44,6 @@ import {
 import {
   getTodayDateString,
   syncAutoDailyDeductions,
-  effectiveCurrentPills,
   reverseRefill,
   settleDoseChange,
   settleAutoDeductToggle,
@@ -68,7 +66,7 @@ import { generateId } from './utils/id';
 import { loadJson, loadString, persist } from './utils/storage';
 import { TOAST_MESSAGES, PERSIST_FAILURE_MESSAGES } from './constants/uiStrings';
 import { TOAST_DURATION_MS, PHARMACY_PERSIST_DEBOUNCE_MS, DEFAULT_SNOOZE_MINUTES } from './utils/time';
-import { Zap, ZapOff, History, Settings } from 'lucide-react';
+import { Zap, ZapOff } from 'lucide-react';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 const STORAGE_GLOBAL_AUTO_DEDUCT_KEY = 'android_med_tracker_auto_deduct_v1';

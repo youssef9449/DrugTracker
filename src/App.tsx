@@ -996,13 +996,14 @@ export default function App() {
         return;
       }
 
-      // Permission granted → activate the toggle + send a test
-      // notification so the user sees it working immediately.
+      // Permission granted → activate the toggle. No test notification
+      // is sent here — the user only asked to toggle notifications on,
+      // not to test them. The test notification is available separately
+      // in the AppSettingsModal ('تجربة إشعار وتنبيه صوتي الآن').
       setNotificationsEnabled(true);
       if (soundEnabled) {
         playSuccessChime();
       }
-      sendTestAlertNotification(globalCustomSound).catch(() => void 0);
       showToast(TOAST_MESSAGES.notificationsOn);
     } else {
       // Turning OFF.

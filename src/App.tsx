@@ -1130,17 +1130,6 @@ export default function App() {
     [medicationsWithStatus]
   );
 
-  const totalStockByUnit = useMemo(() => {
-    // Keep balances separate by unit; adding tablets and milliliters would
-    // produce a number that has no meaningful interpretation.
-    const totals = new Map<string, number>();
-    for (const medication of medications) {
-      const unit = medication.unit || 'وحدة';
-      totals.set(unit, (totals.get(unit) || 0) + effectiveCurrentPills(medication));
-    }
-    return Array.from(totals.entries());
-  }, [medications]);
-
   const openAdd = () => {
     setEditingMedication(null);
     setIsAddModalOpen(true);
@@ -1245,29 +1234,10 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-                  <div className="mx-4 mt-3 grid grid-cols-3 items-start gap-2 text-center text-xs">
+                  <div className="mx-4 mt-3 grid grid-cols-2 items-start gap-2 text-center text-xs">
                     <div className="bg-white p-2.5 rounded-2xl border border-slate-200/80 shadow-xs">
                       <span className="text-[10px] text-slate-500 block">إجمالي الأدوية</span>
                       <span className="text-base font-extrabold font-mono text-slate-800">{medications.length}</span>
-                    </div>
-                    <div className="bg-white p-2.5 rounded-2xl border border-slate-200/80 shadow-xs">
-                      <span className="text-[10px] text-slate-500 block">المخزون الكلي</span>
-                      {totalStockByUnit.length > 0 ? (
-                        <div className="no-scrollbar flex items-center justify-start gap-1 mt-1 overflow-x-auto">
-                          {totalStockByUnit.map(([unit, total]) => (
-                            <span
-                              key={unit}
-                              className="inline-flex shrink-0 items-baseline gap-1 rounded-lg bg-teal-50 border border-teal-100 px-1.5 py-0.5 text-teal-800"
-                              title={`إجمالي ${unit}`}
-                            >
-                              <span className="text-sm font-extrabold font-mono">{total}</span>
-                              <span className="text-[10px] font-semibold">{unit}</span>
-                            </span>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="text-sm font-extrabold font-mono text-slate-400">0</span>
-                      )}
                     </div>
                     <div className="bg-white p-2.5 rounded-2xl border border-slate-200/80 shadow-xs">
                       <span className="text-[10px] text-slate-500 block">حالة المخزون</span>

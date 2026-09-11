@@ -50,11 +50,30 @@ let backPressHandle: { remove: () => Promise<void> } | null = null;
 let notificationHandle: { remove: () => Promise<void> } | null = null;
 let notificationActionHandle: { remove: () => Promise<void> } | null = null;
 let notificationActionHandler: ((actionId: string, medicationId: string) => void) | null = null;
+// Dose-reminder "received" handler — called when a local notification
+// fires while the app is in the foreground. App.tsx registers a handler
+// that opens the DoseAlarmModal for the med whose reminder fired.
+let doseReceivedHandler: ((medicationId: string) => void) | null = null;
 
 export function registerNotificationActionHandler(
   handler: ((actionId: string, medicationId: string) => void) | null
 ) {
   notificationActionHandler = handler;
+}
+
+/**
+ * Register the handler called when a dose-reminder notification fires
+ * while the app is in the foreground. The handler receives the
+ * medicationId (from the notification's `extra.medicationId` field) and
+ * is responsible for opening the DoseAlarmModal + playing the per-med
+ * chime (via useDoseReminders.openAlarm).
+ *
+ * Pass null to unregister (e.g. on App unmount / HMR).
+ */
+export function registerDoseReceivedHandler(
+  handler: ((medicationId: string) => void) | null
+) {
+  doseReceivedHandler = handler;
 }
 
 export async function initNativeBridge(): Promise<void> {
@@ -182,6 +201,7 @@ export async function initNativeBridge(): Promise<void> {
 
   // ─────────────────────────────────────────────────────────────
   // Foreground notification listener — plays the user's custom sound
+  // AND opens the in-app DoseAlarmModal for dose reminders.
   // ─────────────────────────────────────────────────────────────
   // When a local notification fires while the app is in the
   // foreground, Capacitor delivers it to this listener instead of
@@ -189,7 +209,13 @@ export async function initNativeBridge(): Promise<void> {
   //   1. Play the user-uploaded custom sound (stored in the
   //      notification's `extra` field) — overriding the default
   //      channel sound.
-  //   2. The notification itself is still delivered to the system
+  //   2. If the notification carries a `medicationId` in its `extra`
+  //      (dose reminders + snoozed reminders do), call the registered
+  //      doseReceivedHandler so App.tsx can open the DoseAlarmModal +
+  //      play the per-med chime. This replaces the old JS polling —
+  //      the native scheduler fires the notification at reminderTime,
+  //      and this listener surfaces it in-app.
+  //   3. The notification itself is still delivered to the system
   //      notification tray by Capacitor, so the user sees the
   //      notification + hears the custom sound.
   // #38: await the addListener and store the handle so it can be
@@ -197,7 +223,12 @@ export async function initNativeBridge(): Promise<void> {
   try {
     notificationHandle = await LocalNotifications.addListener(
       'localNotificationReceived',
-      (notification: { extra?: { customSoundFile?: { dataUrl: string; fileName: string; mimeType: string } } }) => {
+      (notification: {
+        extra?: {
+          customSoundFile?: { dataUrl: string; fileName: string; mimeType: string };
+          medicationId?: string;
+        };
+      }) => {
         const customSound = notification?.extra?.customSoundFile;
         if (customSound?.dataUrl) {
           // Play the custom sound via an Audio element. We use a
@@ -212,6 +243,15 @@ export async function initNativeBridge(): Promise<void> {
             });
           } catch (err) {
             console.warn('[native] Custom sound Audio() creation failed:', err);
+          }
+        }
+        // If this is a dose-reminder notification, surface it in-app.
+        const medicationId = notification?.extra?.medicationId;
+        if (medicationId && doseReceivedHandler) {
+          try {
+            doseReceivedHandler(medicationId);
+          } catch (err) {
+            console.warn('[native] doseReceivedHandler failed:', err);
           }
         }
       }
@@ -247,6 +287,7 @@ export async function cleanupNativeListeners(): Promise<void> {
   notificationHandle = null;
   notificationActionHandle = null;
   notificationActionHandler = null;
+  doseReceivedHandler = null;
 }
 
 /**

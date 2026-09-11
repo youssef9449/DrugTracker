@@ -1298,10 +1298,7 @@ export default function App() {
               settings={pharmacySettings}
               onUpdateSettings={setPharmacySettings}
               showToast={showToast}
-              onOpenUserContactsSettings={() => {
-                setSettingsModalMode('all');
-                setIsSettingsModalOpen(true);
-              }}
+              onOpenUserContactsSettings={() => setActiveTab('user-data')}
             />
           )}
 

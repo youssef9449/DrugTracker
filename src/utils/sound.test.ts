@@ -118,3 +118,68 @@ describe('stopAllSounds (#107)', () => {
     // No assertion needed — just that it doesn't throw.
   });
 });
+
+describe('playNotificationSound — synthesized tones (#107 regression)', () => {
+  // Regression test for the infinite-recursion bug in playSynthesizedSound.
+  // The #107 audit introduced a local `createOsc` helper that called ITSELF
+  // (not ctx.createOscillator), causing a stack overflow caught silently
+  // by the try/catch — every synthesized sound (gentle_bell, marimba,
+  // digital_beep, harp, radar, classic_chime) crashed with no error shown.
+  // This test mocks the AudioContext to verify playNotificationSound
+  // actually calls ctx.createOscillator() and does not throw.
+
+  // Build a mock AudioContext with chainable createOscillator/createGain.
+  function buildMockCtx() {
+    const mockNode = {
+      type: '',
+      frequency: { setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() },
+      gain: { setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn() },
+      connect: vi.fn(function (this: typeof mockNode) { return this; }),
+      start: vi.fn(),
+      stop: vi.fn(),
+      addEventListener: vi.fn(),
+      onended: null as null | (() => void),
+    };
+    const mockCtx = {
+      currentTime: 0,
+      state: 'running',
+      resume: vi.fn(),
+      createOscillator: vi.fn(() => mockNode),
+      createGain: vi.fn(() => mockNode),
+      destination: {},
+    };
+    return mockCtx;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it.each([
+    'classic_chime',
+    'gentle_bell',
+    'marimba',
+    'digital_beep',
+    'harp',
+    'radar',
+  ] as const)('plays "%s" without throwing (no infinite recursion)', async (soundType) => {
+    const mockCtx = buildMockCtx();
+    // Stub window.AudioContext so the module-level getAudioContext()
+    // creates our mock. Use resetModules + dynamic import to get a fresh
+    // module instance (the module-level `audioCtx` is cached, so without
+    // a reset the first test's context persists).
+    vi.stubGlobal('AudioContext', vi.fn(() => mockCtx));
+    vi.resetModules();
+    const { playNotificationSound } = await import('./sound');
+
+    try {
+      expect(() => playNotificationSound(soundType)).not.toThrow();
+      // The synthesized path must actually call createOscillator — the
+      // recursion bug meant it was never called (the function threw first).
+      expect(mockCtx.createOscillator).toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
+});

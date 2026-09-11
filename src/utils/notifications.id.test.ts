@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   cancel: vi.fn(),
   checkPermissions: vi.fn(),
   checkExactNotificationSetting: vi.fn(),
+  changeExactNotificationSetting: vi.fn(),
   platform: vi.fn(() => 'android'),
 }));
 
@@ -21,6 +22,7 @@ vi.mock('@capacitor/local-notifications', () => ({
     cancel: mocks.cancel,
     checkPermissions: mocks.checkPermissions,
     checkExactNotificationSetting: mocks.checkExactNotificationSetting,
+    changeExactNotificationSetting: mocks.changeExactNotificationSetting,
   },
 }));
 
@@ -36,6 +38,8 @@ import {
   scheduleDoseReminder,
   snoozeDoseReminderId,
   cancelDoseReminder,
+  getExactAlarmPermission,
+  openExactAlarmSettings,
 } from './notifications';
 
 beforeEach(() => {
@@ -251,5 +255,82 @@ describe('test notification id is a fixed constant', () => {
     for (const call of mocks.schedule.mock.calls) {
       expect(call[0].notifications[0].id).toBe(4_000_000);
     }
+  });
+});
+
+describe('getExactAlarmPermission — platform-aware', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns "granted" on web (no exact-alarm concept)', async () => {
+    mocks.platform.mockReturnValue('web');
+    const result = await getExactAlarmPermission();
+    expect(result).toBe('granted');
+    expect(mocks.checkExactNotificationSetting).not.toHaveBeenCalled();
+  });
+
+  it('returns "granted" on iOS (no SCHEDULE_EXACT_ALARM concept)', async () => {
+    mocks.platform.mockReturnValue('ios');
+    const result = await getExactAlarmPermission();
+    expect(result).toBe('granted');
+    expect(mocks.checkExactNotificationSetting).not.toHaveBeenCalled();
+  });
+
+  it('returns "granted" on Android when exact alarm is granted', async () => {
+    mocks.platform.mockReturnValue('android');
+    mocks.checkExactNotificationSetting.mockResolvedValue({ exact_alarm: 'granted' });
+    const result = await getExactAlarmPermission();
+    expect(result).toBe('granted');
+    expect(mocks.checkExactNotificationSetting).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns "denied" on Android when exact alarm is denied', async () => {
+    mocks.platform.mockReturnValue('android');
+    mocks.checkExactNotificationSetting.mockResolvedValue({ exact_alarm: 'denied' });
+    const result = await getExactAlarmPermission();
+    expect(result).toBe('denied');
+  });
+
+  it('returns "unsupported" on Android when the API throws', async () => {
+    mocks.platform.mockReturnValue('android');
+    mocks.checkExactNotificationSetting.mockRejectedValue(new Error('API unavailable'));
+    const result = await getExactAlarmPermission();
+    expect(result).toBe('unsupported');
+  });
+});
+
+describe('openExactAlarmSettings — Android-only', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.changeExactNotificationSetting.mockResolvedValue(undefined);
+  });
+
+  it('returns false on web', async () => {
+    mocks.platform.mockReturnValue('web');
+    const result = await openExactAlarmSettings();
+    expect(result).toBe(false);
+    expect(mocks.changeExactNotificationSetting).not.toHaveBeenCalled();
+  });
+
+  it('returns false on iOS', async () => {
+    mocks.platform.mockReturnValue('ios');
+    const result = await openExactAlarmSettings();
+    expect(result).toBe(false);
+    expect(mocks.changeExactNotificationSetting).not.toHaveBeenCalled();
+  });
+
+  it('calls changeExactNotificationSetting on Android and returns true', async () => {
+    mocks.platform.mockReturnValue('android');
+    const result = await openExactAlarmSettings();
+    expect(result).toBe(true);
+    expect(mocks.changeExactNotificationSetting).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns false on Android when the API throws', async () => {
+    mocks.platform.mockReturnValue('android');
+    mocks.changeExactNotificationSetting.mockRejectedValue(new Error('failed'));
+    const result = await openExactAlarmSettings();
+    expect(result).toBe(false);
   });
 });

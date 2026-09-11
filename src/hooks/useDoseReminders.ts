@@ -112,7 +112,8 @@ export function useDoseReminders({
       medication.dailyDose,
       medication.unit,
       medication.reminderTime,
-      minutes
+      minutes,
+      medication.notificationSound || 'classic_chime'
     ).catch(() => void 0);
   }, []);
 
@@ -144,13 +145,13 @@ export function useDoseReminders({
     isTestAlarmRef.current = false;
     alarmingIdRef.current = med.id;
     setAlarmingMedication(med);
-    if (soundEnabledRef.current) {
-      // Per-medication synthesized chime (so the user can tell which med
-      // is due). The custom sound (if any) was already played by the
-      // localNotificationReceived listener in native.ts from the
-      // notification's extra field.
-      playNotificationSound(med.notificationSound || 'classic_chime');
-    }
+    // NOTE: we do NOT play any sound here. The
+    // localNotificationReceived listener in native.ts already played
+    // the SINGLE authoritative sound (custom sound if set, otherwise
+    // the per-med synthesized chime) before calling openAlarm. Playing
+    // a second sound here would produce a double-sound bug. The
+    // soundEnabled flag is respected by the listener (it reads the
+    // per-med notificationSound from the notification's extra field).
   }, []);
 
   const testAlarm = useCallback((med: Medication) => {

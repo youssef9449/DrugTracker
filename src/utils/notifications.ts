@@ -150,6 +150,86 @@ export async function requestNotificationPermission(): Promise<boolean> {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Exact-alarm permission (Android 12+ / API 31+)
+//
+// @capacitor/local-notifications v6 schedules notifications via
+// AlarmManager. On Android 12+, exact alarms require the
+// SCHEDULE_EXACT_ALARM permission, which the user must grant via the
+// Android settings screen (ACTION_REQUEST_SCHEDULE_EXACT_ALARM).
+//
+// When exact-alarm permission is GRANTED, the plugin uses
+// AlarmManager.setExactAndAllowWhileIdle → the notification fires at
+// the exact scheduled time.
+//
+// When DENIED, the plugin falls back to setAndAllowWhileIdle (inexact)
+// → the notification may be delayed by minutes or hours. For medication
+// dose reminders this is unacceptable, so we treat exact-alarm as a
+// mandatory capability and surface its state to the UI.
+//
+// The plugin's API:
+//   checkExactNotificationSetting() → { exact_alarm: 'granted' | 'denied' | 'prompt' }
+//   changeExactNotificationSetting() → opens the Android settings screen
+//     (returns 'granted' on Android < 12 where no permission is needed)
+//
+// Note: on Android < 12, checkExactNotificationSetting returns 'granted'
+// because exact alarms don't require a separate permission.
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Check whether exact-alarm permission is granted on Android 12+.
+ *
+ * Returns 'granted' when:
+ *   - the app is NOT on a native platform (web — treated as granted
+ *     since web has no exact-alarm concept),
+ *   - OR the Android version is < 12 (no permission needed),
+ *   - OR the user has granted SCHEDULE_EXACT_ALARM.
+ *
+ * Returns 'denied' when the user has NOT granted the permission on
+ * Android 12+. Returns 'unsupported' if the check itself failed
+ * (e.g. an older plugin version that doesn't expose the method).
+ */
+export async function getExactAlarmPermission(): Promise<
+  'granted' | 'denied' | 'unsupported'
+> {
+  if (!isNativePlatform()) return 'granted';
+  try {
+    const status = await LocalNotifications.checkExactNotificationSetting();
+    // The plugin maps Android's canScheduleExactAlarms() to exact_alarm
+    // state: 'granted' when true, 'denied' when false. On Android < 12
+    // the plugin returns 'granted'.
+    if (status.exact_alarm === 'granted') return 'granted';
+    return 'denied';
+  } catch (err) {
+    console.warn('[notifications] checkExactNotificationSetting failed:', err);
+    return 'unsupported';
+  }
+}
+
+/**
+ * Open the Android settings screen where the user can grant the
+ * SCHEDULE_EXACT_ALARM permission.
+ *
+ * On Android < 12 this is a no-op (returns 'granted' immediately).
+ * On Android 12+ it opens the system settings page for the app; the
+ * user grants/denies, then returns to the app. The caller must
+ * re-check permission via getExactAlarmPermission() after the app
+ * resumes (see the appState listener in App.tsx).
+ *
+ * Returns true if the settings screen was opened, false if not
+ * available (web / unsupported).
+ */
+export async function openExactAlarmSettings(): Promise<boolean> {
+  if (!isNativePlatform()) return false;
+  try {
+    await LocalNotifications.changeExactNotificationSetting();
+    return true;
+  } catch (err) {
+    console.warn('[notifications] changeExactNotificationSetting failed:', err);
+    return false;
+  }
+}
+
 /**
  * Send a "low stock" notification when a medication is about to
  * run out. The notification fires immediately on the device.
@@ -787,7 +867,8 @@ export async function scheduleSnoozedDoseReminder(
   dailyDose: number,
   unit: string,
   reminderTime: string | undefined,
-  minutes: number
+  minutes: number,
+  perMedSound?: string
 ): Promise<void> {
   const fireAt = new Date(Date.now() + minutes * 60_000);
   const timeHint = reminderTime ? ` (موعد الجرعة الأصلي ${reminderTime})` : '';
@@ -821,6 +902,9 @@ export async function scheduleSnoozedDoseReminder(
             autoCancel: true,
             extra: {
               medicationId: medId,
+              // per-med notificationSound id so the foreground listener
+              // plays the same single-sound policy as the daily reminder.
+              notificationSound: perMedSound || 'classic_chime',
             },
           },
         ],
@@ -860,7 +944,8 @@ export async function scheduleDoseReminder(
   dailyDose: number,
   unit: string,
   currentPills: number,
-  customSoundFile?: { fileName: string; mimeType: string; dataUrl: string } | null
+  customSoundFile: { fileName: string; mimeType: string; dataUrl: string } | null,
+  perMedSound?: string
 ): Promise<void> {
   // Validate the HH:MM string and compute the next fire Date.
   const parts = reminderTime.split(':').map((n) => parseInt(n, 10));
@@ -906,6 +991,9 @@ export async function scheduleDoseReminder(
             autoCancel: true,
             extra: {
               medicationId: medId,
+              // per-med notificationSound id so the foreground listener
+              // can play the synthesized chime when no custom sound is set.
+              notificationSound: perMedSound || 'classic_chime',
               ...(customSoundFile
                 ? {
                     customSoundFile: {

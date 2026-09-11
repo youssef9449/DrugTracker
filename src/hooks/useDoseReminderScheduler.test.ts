@@ -60,6 +60,7 @@ function defaultOpts(overrides: Record<string, unknown> = {}) {
     notificationsEnabled: true,
     hydrated: true,
     isFirstRun: false,
+    exactAlarmEnabled: true,
     globalCustomSound: null as CustomSoundFile | null,
     ...overrides,
   };
@@ -98,10 +99,10 @@ describe('useDoseReminderScheduler — basic scheduling', () => {
 
     expect(mocks.schedule).toHaveBeenCalledTimes(2);
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-a', 'A', '08:00', 1, 'قرص', 30, null
+      'med-a', 'A', '08:00', 1, 'قرص', 30, null, 'classic_chime'
     );
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-b', 'B', '14:00', 1, 'قرص', 30, null
+      'med-b', 'B', '14:00', 1, 'قرص', 30, null, 'classic_chime'
     );
   });
 
@@ -114,7 +115,7 @@ describe('useDoseReminderScheduler — basic scheduling', () => {
 
     expect(mocks.cancel).toHaveBeenCalledWith('med-x');
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-x', 'Test Med', '09:00', 1, 'قرص', 30, null
+      'med-x', 'Test Med', '09:00', 1, 'قرص', 30, null, 'classic_chime'
     );
   });
 });
@@ -217,6 +218,58 @@ describe('useDoseReminderScheduler — cancellation', () => {
   });
 });
 
+describe('useDoseReminderScheduler — exact-alarm gating', () => {
+  it('does NOT schedule when exactAlarmEnabled is false (inexact alarms unacceptable)', () => {
+    const med = makeMed({ id: 'med-noexact', reminderTime: '09:00' });
+    renderHook(() =>
+      useDoseReminderScheduler(defaultOpts({ medications: [med], exactAlarmEnabled: false }))
+    );
+    expect(mocks.schedule).not.toHaveBeenCalled();
+  });
+
+  it('cancels previously-scheduled alarms when exactAlarmEnabled turns false', async () => {
+    const med = makeMed({ id: 'med-exact-off', reminderTime: '09:00' });
+    const { rerender } = renderHook(
+      ({ exactAlarmEnabled }) =>
+        useDoseReminderScheduler(
+          defaultOpts({ medications: [med], exactAlarmEnabled })
+        ),
+      { initialProps: { exactAlarmEnabled: true } }
+    );
+
+    // First render: alarm scheduled.
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+
+    // Exact-alarm permission revoked → cancel the alarm, don't reschedule.
+    rerender({ exactAlarmEnabled: false });
+    await flushUntil(() => mocks.cancel.mock.calls.some((c) => c[0] === 'med-exact-off'));
+
+    expect(mocks.cancel).toHaveBeenCalledWith('med-exact-off');
+  });
+
+  it('reschedules when exactAlarmEnabled turns from false to true (user granted permission)', async () => {
+    const med = makeMed({ id: 'med-exact-on', reminderTime: '09:00' });
+    const { rerender } = renderHook(
+      ({ exactAlarmEnabled }) =>
+        useDoseReminderScheduler(
+          defaultOpts({ medications: [med], exactAlarmEnabled })
+        ),
+      { initialProps: { exactAlarmEnabled: false } }
+    );
+
+    // First render: exact-alarm disabled → no schedule.
+    expect(mocks.schedule).not.toHaveBeenCalled();
+
+    // User grants exact-alarm → reschedule.
+    rerender({ exactAlarmEnabled: true });
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+
+    expect(mocks.schedule).toHaveBeenCalledWith(
+      'med-exact-on', 'Test Med', '09:00', 1, 'قرص', 30, null, 'classic_chime'
+    );
+  });
+});
+
 describe('useDoseReminderScheduler — custom sound', () => {
   it('passes the global custom sound to scheduleDoseReminder', async () => {
     const med = makeMed({ id: 'med-snd', reminderTime: '09:00' });
@@ -240,7 +293,8 @@ describe('useDoseReminderScheduler — custom sound', () => {
       1,
       'قرص',
       30,
-      customSound
+      customSound,
+      'classic_chime'
     );
   });
 

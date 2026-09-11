@@ -12,6 +12,16 @@ export interface UseDoseReminderSchedulerOptions {
   hydrated: boolean;
   isFirstRun: boolean;
   /**
+   * Whether exact-alarm permission is granted on Android 12+. When false,
+   * the scheduler does NOT schedule dose reminders (they would be inexact
+   * and fire at unpredictable times — unacceptable for medication
+   * reminders). The caller must surface this to the user so they can
+   * grant the permission via Android settings.
+   *
+   * On web / Android < 12 this is always true (no permission needed).
+   */
+  exactAlarmEnabled: boolean;
+  /**
    * The global user-uploaded custom sound. When the user changes it, all
    * scheduled dose reminders are re-armed so the notification's `extra`
    * field carries the new sound (played by the foreground
@@ -52,6 +62,7 @@ export function useDoseReminderScheduler({
   notificationsEnabled,
   hydrated,
   isFirstRun,
+  exactAlarmEnabled,
   globalCustomSound,
 }: UseDoseReminderSchedulerOptions): void {
   const scheduledDoseIdsRef = useRef<Set<string>>(new Set());
@@ -122,10 +133,13 @@ export function useDoseReminderScheduler({
   useEffect(() => {
     if (!hydrated || isFirstRun) return;
 
-    // User disabled notifications → cancel all previously-scheduled dose
-    // reminders and clear the tracker. Bump generations so any in-flight
-    // schedule from a prior effect run is stale.
-    if (!notificationsEnabled) {
+    // User disabled notifications OR exact-alarm permission is missing →
+    // cancel all previously-scheduled dose reminders and clear the
+    // tracker. Exact-alarm is MANDATORY for medication dose reminders:
+    // an inexact alarm could fire minutes or hours late, which is
+    // unacceptable. Bump generations so any in-flight schedule from a
+    // prior effect run is stale.
+    if (!notificationsEnabled || !exactAlarmEnabled) {
       scheduledDoseIdsRef.current.forEach((id) => {
         doseGenerationRef.current.set(
           id,
@@ -160,10 +174,11 @@ export function useDoseReminderScheduler({
       const reminderTime = med.reminderTime;
       const dailyDose = med.dailyDose;
       const pills = effectiveCurrentPills(med);
+      const perMedSound = med.notificationSound || 'classic_chime';
       // Capture the custom sound identity at schedule time so the closure
       // has the value the effect ran with (it won't change during the
       // async chain even if the ref updates).
-      const customSound = customSoundRef.current;
+      const customSound = customSoundRef.current ?? null;
 
       enqueue(med.id, () =>
         cancelDoseReminder(med.id)
@@ -178,7 +193,8 @@ export function useDoseReminderScheduler({
               dailyDose,
               unit,
               pills,
-              customSound
+              customSound,
+              perMedSound
             ).then(() => {
               // Post-schedule stale-guard: re-check the gen after the
               // await. If a newer run bumped it during the schedule(),
@@ -208,6 +224,7 @@ export function useDoseReminderScheduler({
     doseSignature,
     soundSignature,
     notificationsEnabled,
+    exactAlarmEnabled,
     hydrated,
     isFirstRun,
   ]);

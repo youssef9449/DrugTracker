@@ -39,7 +39,6 @@ export const TOAST_MESSAGES = {
 
   // Test notification
   testNotificationSent: 'تم إرسال إشعار تجريبي وتشغيل صوت التنبيه بنجاح! 🔔',
-  testNotificationSoundOnly: 'تم تشغيل صوت التنبيه التجريبي بنجاح! 🔔',
 
   // Auto-deduct
   autoDeductSummary: (totalPills: number) =>

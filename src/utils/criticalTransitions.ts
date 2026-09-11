@@ -25,9 +25,20 @@
  *   notification was displayed. SCHEDULED ≠ DELIVERED. Delivery is only
  *   recorded from positive native evidence (see applyDeliveredCriticalEvidence)
  *   or from migrated state that already carried evidence.
+ * - A scheduled claim whose firing window has passed (alarmTime <= now)
+ *   is CONSUMED for that transition: the transition moves to
+ *   notificationState 'FIRED_OR_DUE' and the record to status
+ *   'FIRED_OR_DUE'. FIRED_OR_DUE is TERMINAL for the episode's
+ *   notification ownership: delivery is UNKNOWN (the alarm may have
+ *   fired while the app was dead and been dismissed, or never fired),
+ *   so the claim must NEVER be re-armed for the same transition, and
+ *   the foreground path must NOT send on top of it. Only positive
+ *   native evidence upgrades FIRED_OR_DUE → SENT.
  * - An episode whose notificationState is SENT can never regain a
  *   SCHEDULED claim (canScheduleForTransition refuses; the helpers
- *   enforce it — see updateScheduledAlarm).
+ *   enforce it — see updateScheduledAlarm). The same protection covers
+ *   FIRED_OR_DUE episodes and consumed (FIRED_OR_DUE / DELIVERED)
+ *   claims still bound to the active transition.
  * - Scheduled-record writes are funneled through the ownership helpers
  *   below: the episode owner binds (bindScheduledAlarmToTransition) and
  *   invalidates ownership (invalidateEpisodeOwnership), the scheduler
@@ -60,6 +71,14 @@
  *     - android_med_tracker_critical_transition_v1
  *     - android_med_tracker_critical_notified_v2
  *     - android_med_tracker_scheduled_critical_v1
+ *
+ *   The FIRED_OR_DUE claim state does NOT bump the storage version: the
+ *   persisted SHAPE (fields) of all three stores is unchanged, only the
+ *   value domain of two enum fields grew, and both directions normalize
+ *   safely (older code reading 'FIRED_OR_DUE' falls back to the safe
+ *   "already handled" direction; this code accepts it explicitly).
+ *   There is exactly ONE authoritative representation after migration —
+ *   no legacy key participates in the state machine.
  *
  * All storage access is synchronous (localStorage via loadJson/saveJson),
  * so reconcile passes are atomic with respect to each other and either
@@ -123,7 +142,12 @@ function normalizeTransitionEntry(raw: unknown): CriticalTransitionState | null 
   const enteredAt = typeof rec.enteredAt === 'number' && Number.isFinite(rec.enteredAt) ? rec.enteredAt : 0;
   // v2 shape uses notificationState; v1 shape used the boolean notificationSent.
   let notificationState: CriticalNotificationState;
-  if (rec.notificationState === 'SCHEDULED' || rec.notificationState === 'SENT' || rec.notificationState === 'NONE') {
+  if (
+    rec.notificationState === 'SCHEDULED' ||
+    rec.notificationState === 'SENT' ||
+    rec.notificationState === 'NONE' ||
+    rec.notificationState === 'FIRED_OR_DUE'
+  ) {
     notificationState = rec.notificationState;
   } else if (rec.notificationSent === true) {
     notificationState = 'SENT';
@@ -218,7 +242,14 @@ export function saveCriticalTransitions(transitions: Record<string, CriticalTran
 // ─────────────────────────────────────────────────────────────────────
 
 function normalizeScheduledStatus(raw: unknown, alarmTime: number): ScheduledCriticalAlarmStatus {
-  if (raw === 'SCHEDULED' || raw === 'DELIVERED' || raw === 'NOT_SCHEDULED') return raw;
+  if (
+    raw === 'SCHEDULED' ||
+    raw === 'FIRED_OR_DUE' ||
+    raw === 'DELIVERED' ||
+    raw === 'NOT_SCHEDULED'
+  ) {
+    return raw;
+  }
   // Legacy records without a status: a positive alarmTime meant a
   // successfully-registered alarm. Keep that (it was the registration
   // outcome, not a delivery claim).
@@ -406,6 +437,85 @@ export function getActiveTransition(
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Scheduled-claim phase classification
+//
+// A SCHEDULED record's alarmTime splits the claim's lifecycle into
+// phases with DIFFERENT rules. Elapsed time alone proves nothing about
+// delivery — it only means the firing window has been reached:
+//
+//   PENDING_FUTURE  — the native alarm is still pending (reliable
+//                     evidence it has not fired yet). The claim may be
+//                     updated/rescheduled (cancel + new alarm) while it
+//                     stays future.
+//   DUE_OR_PAST     — the firing window has been reached. Delivery is
+//                     UNKNOWN (fired-while-dead-then-dismissed, or never
+//                     fired). The claim MUST be consumed by the episode
+//                     owner (consumeDueScheduledClaim) and must NEVER
+//                     be re-armed for the same transition.
+//   CONSUMED_WINDOW — the owner already consumed the claim
+//                     (status FIRED_OR_DUE). Terminal for this
+//                     transition: no re-arm, no foreground send.
+//   DELIVERED       — positive delivery evidence was recorded. Terminal;
+//                     upgrades the episode to SENT.
+//   INVALID / NO_CLAIM — no valid claim exists.
+// ─────────────────────────────────────────────────────────────────────
+
+export type ScheduledClaimPhase =
+  | 'NO_CLAIM'
+  | 'PENDING_FUTURE'
+  | 'DUE_OR_PAST'
+  | 'CONSUMED_WINDOW'
+  | 'DELIVERED'
+  | 'INVALID';
+
+/**
+ * Classify the current phase of a medication's scheduled claim.
+ * Pure function — no I/O, no clock reads other than the passed `now`.
+ */
+export function getScheduledClaimPhase(
+  rec: ScheduledCriticalAlarmRecord | undefined,
+  now: number
+): ScheduledClaimPhase {
+  if (!rec) return 'NO_CLAIM';
+  switch (rec.status) {
+    case 'SCHEDULED':
+      return rec.alarmTime > now ? 'PENDING_FUTURE' : 'DUE_OR_PAST';
+    case 'FIRED_OR_DUE':
+      return 'CONSUMED_WINDOW';
+    case 'DELIVERED':
+      return 'DELIVERED';
+    case 'NOT_SCHEDULED':
+    default:
+      return 'INVALID';
+  }
+}
+
+/**
+ * Reliable evidence that the native alarm is still pending: the claim
+ * is SCHEDULED and its fire time is in the future. Only a PENDING_FUTURE
+ * claim may be rescheduled/updated; a due/past claim must never be
+ * re-armed for the same transition.
+ */
+export function isScheduledClaimFuture(
+  rec: ScheduledCriticalAlarmRecord | undefined,
+  now: number
+): boolean {
+  return getScheduledClaimPhase(rec, now) === 'PENDING_FUTURE';
+}
+
+/**
+ * The claim's firing window has been reached (SCHEDULED + alarmTime <=
+ * now). Delivery is UNKNOWN — this is NOT evidence of delivery and NOT
+ * evidence of non-delivery. The claim must be consumed, not re-armed.
+ */
+export function isScheduledClaimDue(
+  rec: ScheduledCriticalAlarmRecord | undefined,
+  now: number
+): boolean {
+  return getScheduledClaimPhase(rec, now) === 'DUE_OR_PAST';
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Scheduler ownership context (episode-vs-scheduler race safety)
 //
 // A scheduler operation spans async native bridge calls (cancel +
@@ -507,19 +617,24 @@ export function isSchedulingContextStillValid(
  * Whether a successfully-registered native alarm may currently own a
  * notification claim for this medication's active episode.
  *
- * Rule: an episode whose single user-facing notification was already
- * SENT must never regain a SCHEDULED claim — that would restore
- * notification ownership after it was consumed and arm a second
- * user-facing notification for the same episode. Episodes in the NONE
- * or SCHEDULED state (and meds with no active episode) may receive a
- * scheduled claim.
+ * Rules:
+ * - an episode whose single notification was already SENT must never
+ *   regain a SCHEDULED claim — that would restore notification
+ *   ownership after it was consumed and arm a second user-facing
+ *   notification for the same episode;
+ * - an episode whose owning claim reached its firing window
+ *   (FIRED_OR_DUE) is equally terminal: the alarm opportunity was
+ *   consumed (delivery unknown) and must never be re-created;
+ * - episodes in the NONE or SCHEDULED state (and meds with no active
+ *   episode) may receive a scheduled claim.
  */
 export function canScheduleForTransition(
   transitions: Record<string, CriticalTransitionState>,
   medId: string
 ): boolean {
   const active = getActiveTransition(transitions, medId);
-  return !active || active.notificationState !== 'SENT';
+  if (!active) return true;
+  return active.notificationState !== 'SENT' && active.notificationState !== 'FIRED_OR_DUE';
 }
 
 /**
@@ -585,7 +700,16 @@ export interface ScheduledAlarmUpdate {
    * this stale operation MUST abandon the storage write.
    */
   baselineGeneration: number;
+  /**
+   * The operation's view of "now" (epoch ms), used to classify the
+   * EXISTING claim's phase (still pending vs firing window reached).
+   * Defaults to Date.now() when omitted.
+   */
+  now?: number;
 }
+
+/** Outcome of {@link updateScheduledAlarm}. */
+export type ScheduledAlarmWriteResult = 'persisted' | 'unchanged' | 'refused';
 
 /**
  * SCHEDULER ONLY: persist the outcome of a SUCCESSFUL native schedule
@@ -593,12 +717,26 @@ export interface ScheduledAlarmUpdate {
  *
  * Ownership rules enforced here (the heart of the ownership model):
  *
- *   SENT rule — if the ACTIVE episode's notification was already SENT,
- *   the write is REFUSED entirely (returns false, no mutation). A SENT
- *   episode must never regain a SCHEDULED claim: that would restore
- *   notification ownership after it was consumed. The scheduler is
- *   responsible for cancelling the native alarm it armed in that case
- *   (see canScheduleForTransition for the pre-arm relevance check).
+ *   Notification-ownership rule — if the ACTIVE episode's notification
+ *   was already consumed (SENT, or FIRED_OR_DUE: the owning claim's
+ *   firing window passed), the write is REFUSED entirely (returns
+ *   'refused', no mutation). A consumed episode must never regain a
+ *   SCHEDULED claim: that would restore notification ownership after
+ *   it was spent and arm a second user-facing notification for the
+ *   same episode. The scheduler is responsible for cancelling the
+ *   native alarm it armed in that case (see canScheduleForTransition
+ *   for the pre-arm relevance check).
+ *
+ *   Consumed-claim rule — a claim still bound to the ACTIVE transition
+ *   whose notification opportunity is spent must NEVER be re-armed as
+ *   SCHEDULED for the same transition: this covers the terminal
+ *   FIRED_OR_DUE / DELIVERED statuses AND a SCHEDULED claim whose
+ *   firing window has already been reached (alarmTime <= now). That
+ *   last case is exactly the "alarm fired while the app was dead, user
+ *   dismissed it, app reopens, scheduler re-arms" duplicate. Only a
+ *   still-future pending claim may be rescheduled, and only a claim
+ *   bound to a dead/absent episode may be overwritten by a genuinely
+ *   new opportunity (new episode or no episode yet).
  *
  *   Binding rule — transitionKey := the ACTIVE transition's key for
  *   this med, or '' when no episode is currently active:
@@ -611,10 +749,11 @@ export interface ScheduledAlarmUpdate {
  * The scheduler never generates an identity here — it only reads the
  * authoritative transition map passed by the caller.
  *
- * Generation rule: the write is ABANDONED (returns false, no mutation)
- * when the stored record's generation differs from the operation's
- * baseline — i.e. another scheduler write landed while this operation
- * was awaiting the native bridge. Accepted writes bump generation.
+ * Generation rule: the write is ABANDONED (returns 'refused', no
+ * mutation) when the stored record's generation differs from the
+ * operation's baseline — i.e. another scheduler write landed while this
+ * operation was awaiting the native bridge. Accepted writes bump
+ * generation.
  *
  * NOTE: the generation check alone does NOT make an operation safe to
  * write — episode-owner lifecycle changes do not bump the generation.
@@ -623,28 +762,50 @@ export interface ScheduledAlarmUpdate {
  * helper still enforces the invariants below as the last line of
  * defense so a future caller cannot bypass the state machine.
  *
- * Returns true when the map changed (caller persists).
+ * Returns:
+ *   'persisted' — the record was written (caller must persist the map);
+ *   'unchanged' — the record already held exactly this scheduling data
+ *                 (the re-armed alarm matches the claim — keep it);
+ *   'refused'   — the write was refused by an ownership/consumption
+ *                 rule; the caller MUST cancel the native alarm it
+ *                 armed (an alarm without a valid claim may never
+ *                 survive).
  */
 export function updateScheduledAlarm(
   scheduled: Record<string, ScheduledCriticalAlarmRecord>,
   transitions: Record<string, CriticalTransitionState>,
   medId: string,
   update: ScheduledAlarmUpdate
-): boolean {
+): ScheduledAlarmWriteResult {
   const existing = scheduled[medId];
   // Stale-generation protection: only the write whose baseline still
   // matches the stored record may proceed.
   if (existing && (existing.generation ?? 0) !== update.baselineGeneration) {
-    return false;
+    return 'refused';
   }
-  // SENT-ownership rule: never create a SCHEDULED claim for an episode
-  // whose single notification was already sent (SENT → SCHEDULED is
-  // forbidden for the same transitionKey).
+  // Notification-ownership rule: never create a SCHEDULED claim for an
+  // episode whose single notification was already consumed (SENT) or
+  // whose owning claim's window passed (FIRED_OR_DUE) — SENT →
+  // SCHEDULED and FIRED_OR_DUE → SCHEDULED are both forbidden for the
+  // same transitionKey.
   if (!canScheduleForTransition(transitions, medId)) {
-    return false;
+    return 'refused';
   }
   // READ (never create) the authoritative episode identity.
   const activeKey = getActiveTransition(transitions, medId)?.transitionKey ?? '';
+  // Consumed-claim rule: a claim still bound to the ACTIVE transition
+  // whose opportunity is spent (consumed statuses, or a SCHEDULED claim
+  // whose firing window was reached) is terminal for that transition.
+  if (
+    existing &&
+    existing.transitionKey !== '' &&
+    existing.transitionKey === activeKey &&
+    (existing.status === 'FIRED_OR_DUE' ||
+      existing.status === 'DELIVERED' ||
+      isScheduledClaimDue(existing, update.now ?? Date.now()))
+  ) {
+    return 'refused';
+  }
   const next: ScheduledCriticalAlarmRecord = {
     // Preserve the active episode's binding; drop dead/stale bindings.
     transitionKey: activeKey,
@@ -659,10 +820,10 @@ export function updateScheduledAlarm(
     existing.status === next.status
   ) {
     // Scheduling data unchanged — nothing to persist, no revision.
-    return false;
+    return 'unchanged';
   }
   scheduled[medId] = next;
-  return true;
+  return 'persisted';
 }
 
 /**
@@ -770,19 +931,34 @@ export interface ReconcileEpisodeResult {
  *              operations from the dead episode become stale)
  *
  * Notification ownership:
- *   Path A (foreground): NONE ──send──► SENT
+ *   Path A (foreground): NONE ──send──► SENT. A claim bound to the
+ *   episode is neutralized at the same moment (the foreground consumed
+ *   the episode's single notification opportunity; an alarm still
+ *   armed for it is stale and is cancelled by the scheduler — and can
+ *   never resurrect the claim because the state says no claim exists).
  *   Path B (scheduled):  a validly-registered alarm owns the episode's
- *   single notification → adopted transition gets notificationState
- *   'SCHEDULED' and the foreground stays quiet. A failed scheduling
- *   attempt (status NOT_SCHEDULED) is NOT a valid claim → the
- *   foreground path remains available.
+ *   single notification → the foreground stays quiet. A failed
+ *   scheduling attempt (status NOT_SCHEDULED) is NOT a valid claim →
+ *   the foreground path remains available.
+ *
+ *   Once the owning claim's firing window has been reached
+ *   (alarmTime <= now), the claim is CONSUMED: the transition moves to
+ *   'FIRED_OR_DUE' and the record to status 'FIRED_OR_DUE'. Delivery is
+ *   UNKNOWN at that point (fired-while-dead-then-dismissed, or never
+ *   fired) — so FIRED_OR_DUE is terminal for this transition: no
+ *   re-arm, no foreground send. Only positive native evidence (drawer
+ *   presence) upgrades it to 'SENT'.
  *
  * Adoption is restricted to UNBOUND claims (transitionKey ''): bound
  * claims belong to the episode they were bound to, and by the time a
  * creation pass runs, that episode is gone — adopting a bound claim
- * would resurrect a dead episode's identity. Only every ownership
- * mutation here bumps the medication's ownership revision, which
- * invalidates any in-flight scheduler operation captured earlier.
+ * would resurrect a dead episode's identity. An adopted claim whose
+ * window already passed yields a 'FIRED_OR_DUE' episode (NOT a
+ * SCHEDULED one — elapsed time is not delivery); an adopted claim with
+ * recorded delivery evidence (status DELIVERED) yields 'SENT'. Only
+ * every ownership mutation here bumps the medication's ownership
+ * revision, which invalidates any in-flight scheduler operation
+ * captured earlier.
  */
 export function reconcileCriticalEpisode(
   transitions: Record<string, CriticalTransitionState>,
@@ -828,32 +1004,40 @@ export function reconcileCriticalEpisode(
     //     is active) and its (projected) fire time has passed — the
     //     crossing most likely happened while the app was dead and the
     //     native alarm was displayed. The claim becomes the episode
-    //     identity and keeps notification ownership ('SCHEDULED'). If
+    //     identity and keeps notification ownership. Because the
+    //     firing window has ALREADY passed at adoption time, the
+    //     adopted episode is 'FIRED_OR_DUE' (delivery UNKNOWN) — never
+    //     'SCHEDULED': elapsed time is not delivery, and the consumed
+    //     opportunity must never be re-armed for this transition. If
     //     the record already carries delivery evidence (status
     //     DELIVERED), the episode is 'SENT' immediately.
-    //     NB: we do NOT convert elapsed time into delivery — the record
-    //     stays SCHEDULED; only positive evidence upgrades it.
+    // (b) FRESH episode: crossing detected in the foreground (or no
+    //     valid claim exists — including failed scheduling). The key is
+    //     generated ONCE here and persisted immediately.
     //     A BOUND claim is never adopted: binding means it belonged to
     //     an episode that has since ended (a crash between the owner's
     //     two store writes is the only way to observe that state) — a
     //     new episode must never inherit a dead episode's identity.
-    // (b) FRESH episode: crossing detected in the foreground (or no
-    //     valid claim exists — including failed scheduling). The key is
-    //     generated ONCE here and persisted immediately.
-    const adoptableClaim = Boolean(
-      rec && rec.transitionKey === '' && rec.status === 'SCHEDULED' && rec.alarmTime <= now
-    );
-    const deliveredClaim = Boolean(rec && rec.transitionKey === '' && rec.status === 'DELIVERED');
+    const claim = rec && rec.transitionKey === '' ? getScheduledClaimPhase(rec, now) : null;
+    const adoptableClaim =
+      claim === 'DUE_OR_PAST' || claim === 'CONSUMED_WINDOW' || claim === 'DELIVERED';
 
-    if (adoptableClaim || deliveredClaim) {
-      const key = rec!.transitionKey || generateCriticalTransitionKey(medId, now);
+    if (rec && adoptableClaim) {
+      const key = rec.transitionKey || generateCriticalTransitionKey(medId, now);
       t = {
         transitionKey: key,
-        enteredAt: rec!.alarmTime > 0 ? rec!.alarmTime : now,
-        notificationState: deliveredClaim ? 'SENT' : 'SCHEDULED',
+        enteredAt: rec.alarmTime > 0 ? rec.alarmTime : now,
+        notificationState: claim === 'DELIVERED' ? 'SENT' : 'FIRED_OR_DUE',
       };
       // Owner bind: the adopted claim carries this episode's identity.
       if (bindScheduledAlarmToTransition(scheduled, medId, key)) {
+        dirty.scheduled = true;
+      }
+      // Consume the adopted claim whose window already passed: the
+      // episode owns whatever notification that alarm produced (or
+      // didn't). It can never be re-armed for this transition.
+      if (rec.status === 'SCHEDULED') {
+        rec.status = 'FIRED_OR_DUE';
         dirty.scheduled = true;
       }
     } else {
@@ -862,7 +1046,7 @@ export function reconcileCriticalEpisode(
         enteredAt: now,
         notificationState: 'NONE',
       };
-      if (rec && rec.status === 'SCHEDULED') {
+      if (rec) {
         if (rec.transitionKey === '') {
           // Bind a still-pending (future) alarm to this episode so it can
           // never be mistaken for another episode's claim later. A FUTURE
@@ -873,11 +1057,12 @@ export function reconcileCriticalEpisode(
             dirty.scheduled = true;
           }
         } else {
-          // A claim still bound to another key at creation time is a
+          // A claim still bound to ANOTHER key at creation time is a
           // leftover of a DEAD episode (a crash between the owner's two
-          // store writes is the only way to observe that state).
-          // Neutralize it: a dead episode's claim must never be
-          // inherited by — or own the notification of — a new episode.
+          // store writes is the only way to observe that state) — in any
+          // status (SCHEDULED / FIRED_OR_DUE / DELIVERED). Neutralize it:
+          // a dead episode's claim must never be inherited by — or own,
+          // suppress, or be resurrected for — a new episode.
           rec.status = 'NOT_SCHEDULED';
           dirty.scheduled = true;
         }
@@ -893,34 +1078,19 @@ export function reconcileCriticalEpisode(
     }
   }
 
-  // ── Claim-evidence upgrade (Path B ownership after the fact) ──
-  // The episode began with notificationState NONE (e.g. alerts were
-  // disabled at crossing) while a pending alarm was bound to it. If
-  // that bound claim has since elapsed or carries delivery evidence,
-  // the scheduled path OWNS the episode's single notification — the
-  // foreground must never send on top of it.
-  // NB: elapsed time only moves NONE → SCHEDULED (ownership), NEVER to
-  // SENT/'DELIVERED' — only positive evidence proves delivery.
-  if (t.notificationState === 'NONE' && rec && rec.transitionKey === t.transitionKey) {
-    if (rec.status === 'DELIVERED') {
-      t.notificationState = 'SENT';
-      dirty.transitions = true;
-      if (bumpEpisodeOwnershipRevision(ownershipRevisions, medId)) {
-        dirty.ownership = true;
-      }
-    } else if (rec.status === 'SCHEDULED' && rec.alarmTime <= now) {
-      t.notificationState = 'SCHEDULED';
-      dirty.transitions = true;
-      if (bumpEpisodeOwnershipRevision(ownershipRevisions, medId)) {
-        dirty.ownership = true;
-      }
-    }
-  }
+  // ── Consume due/past bound claims (FIRED_OR_DUE terminality) ──
+  // Any claim bound to the active episode whose firing window has been
+  // reached (or that is already recorded as consumed/delivered) fixes
+  // the episode's notification ownership here: SCHEDULED/NONE →
+  // FIRED_OR_DUE (or DELIVERED evidence → SENT below). After this pass
+  // the foreground can never send on top of a consumed claim, and the
+  // claim can never be re-armed (the record is terminal too).
+  consumeDueScheduledClaim(transitions, scheduled, ownershipRevisions, medId, now, dirty);
 
-  // Migrated/already-recorded delivery evidence on the bound record
-  // upgrades an adopted SCHEDULED episode to SENT without any async work.
+  // Migrated/recorded delivery evidence on the bound claim upgrades a
+  // SCHEDULED or FIRED_OR_DUE episode to SENT without any async work.
   if (
-    t.notificationState === 'SCHEDULED' &&
+    (t.notificationState === 'SCHEDULED' || t.notificationState === 'FIRED_OR_DUE') &&
     rec &&
     rec.transitionKey === t.transitionKey &&
     rec.status === 'DELIVERED'
@@ -936,9 +1106,9 @@ export function reconcileCriticalEpisode(
   let notificationSent = false;
   if (t.notificationState === 'NONE') {
     // Reached only when no valid scheduled claim owns this episode
-    // (ownership upgrades above have already consumed that case). A
-    // failed scheduling attempt (NOT_SCHEDULED) and a still-future
-    // claim both leave the foreground path available.
+    // (ownership upgrades/consumption above have already consumed that
+    // case). A failed scheduling attempt (NOT_SCHEDULED) and a
+    // still-future claim both leave the foreground path available.
     if (canNotify) {
       send();
       // Mark optimistically BEFORE the async send resolves: the send
@@ -947,6 +1117,19 @@ export function reconcileCriticalEpisode(
       t.notificationState = 'SENT';
       dirty.transitions = true;
       notificationSent = true;
+      // The foreground just consumed the episode's single notification
+      // opportunity — neutralize its bound claim (if any) so no valid
+      // SCHEDULED claim survives for a SENT episode. Any native alarm
+      // still armed for that claim is stale; the scheduler cancels it
+      // (and can never re-arm it: the claim no longer exists).
+      if (
+        rec &&
+        rec.transitionKey === t.transitionKey &&
+        rec.status === 'SCHEDULED'
+      ) {
+        rec.status = 'NOT_SCHEDULED';
+        dirty.scheduled = true;
+      }
       // Ownership consumed → invalidate in-flight scheduler operations:
       // a late scheduling result must never re-arm a notification for
       // this episode (SENT can never become SCHEDULED again).
@@ -962,14 +1145,75 @@ export function reconcileCriticalEpisode(
   return { transition: t, created, notificationSent };
 }
 
+/**
+ * EPISODE OWNER ONLY (called from reconcileCriticalEpisode): consume a
+ * scheduled claim bound to the ACTIVE transition once its firing window
+ * has been reached, or repair an already-consumed claim whose episode
+ * state lags behind (e.g. a crash between the owner's two store
+ * writes).
+ *
+ *   record SCHEDULED + alarmTime <= now  →  record 'FIRED_OR_DUE'
+ *   transition NONE/SCHEDULED             →  'FIRED_OR_DUE'
+ *
+ * FIRED_OR_DUE is TERMINAL for the transition: delivery is UNKNOWN
+ * (the alarm may have fired while the app was dead and been dismissed,
+ * or never fired), so the foreground must not send on top of it and
+ * the claim must never be re-armed for the same transition. Only
+ * positive native evidence (applyDeliveredCriticalEvidence) may move
+ * it onward to SENT.
+ *
+ * A due/past claim whose episode is already SENT is left alone (the
+ * episode was consumed by the foreground; the record is neutralized at
+ * episode end).
+ *
+ * Every ownership mutation here bumps the medication's ownership
+ * revision so in-flight scheduler operations captured before the
+ * consumption cannot re-arm the consumed claim.
+ */
+export function consumeDueScheduledClaim(
+  transitions: Record<string, CriticalTransitionState>,
+  scheduled: Record<string, ScheduledCriticalAlarmRecord>,
+  ownershipRevisions: Record<string, number>,
+  medId: string,
+  now: number,
+  dirty: ReconcileDirtyFlags
+): void {
+  const t = transitions[medId];
+  if (!t) return;
+  const rec = scheduled[medId];
+  if (!rec || rec.transitionKey !== t.transitionKey) return;
+  // Only episodes whose notification ownership is not yet consumed can
+  // move to FIRED_OR_DUE here (SENT is terminal and owned elsewhere).
+  if (t.notificationState !== 'NONE' && t.notificationState !== 'SCHEDULED') return;
+
+  let episodeChanged = false;
+  if (isScheduledClaimDue(rec, now)) {
+    // Firing window reached → consume the claim (delivery UNKNOWN).
+    rec.status = 'FIRED_OR_DUE';
+    dirty.scheduled = true;
+    episodeChanged = true;
+  } else if (rec.status === 'FIRED_OR_DUE') {
+    // Record already consumed (e.g. a crash between the owner's two
+    // store writes) — bring the episode in line.
+    episodeChanged = true;
+  }
+  if (episodeChanged) {
+    t.notificationState = 'FIRED_OR_DUE';
+    dirty.transitions = true;
+    if (bumpEpisodeOwnershipRevision(ownershipRevisions, medId)) {
+      dirty.ownership = true;
+    }
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Delivery evidence (strict semantics)
 // ─────────────────────────────────────────────────────────────────────
 
 /**
- * Upgrade adopted episodes from 'SCHEDULED' to 'SENT' using POSITIVE
- * delivery evidence only: the scheduled critical alarm notification is
- * currently visible in the Android notification drawer
+ * Upgrade episodes from 'SCHEDULED' or 'FIRED_OR_DUE' to 'SENT' using
+ * POSITIVE delivery evidence only: the scheduled critical alarm
+ * notification is currently visible in the Android notification drawer
  * (LocalNotifications.getDeliveredNotifications).
  *
  * Presence in the drawer proves the notification was displayed. Absence
@@ -977,15 +1221,17 @@ export function reconcileCriticalEpisode(
  * changes any state, and elapsed `alarmTime` alone NEVER produces a
  * DELIVERED/SENT transition. Pure function over the stores; performs no
  * I/O so it is trivially testable and cannot race the scheduler's
- * record writes (it never writes the scheduled store).
+ * record writes (the caller re-loads the authoritative scheduled map
+ * inside its async callback before invoking this).
  *
- * Upgrading SCHEDULED → SENT changes the episode's notification
- * ownership, so the medication's ownership revision is bumped: any
- * in-flight scheduler operation captured before the upgrade must not
- * write a SCHEDULED claim for the now-SENT episode.
+ * Upgrading the episode changes its notification ownership AND marks
+ * the bound claim 'DELIVERED' (persisted positive evidence — the claim
+ * becomes terminal), so the medication's ownership revision is bumped:
+ * any in-flight scheduler operation captured before the upgrade must
+ * not write a SCHEDULED claim for the now-SENT episode.
  *
- * Returns true when any transition changed (caller persists transitions
- * + ownership revisions).
+ * Returns true when any store changed (caller persists transitions +
+ * scheduled records + ownership revisions).
  */
 export function applyDeliveredCriticalEvidence(
   medIds: string[],
@@ -998,11 +1244,15 @@ export function applyDeliveredCriticalEvidence(
   let changed = false;
   for (const medId of medIds) {
     const t = transitions[medId];
-    if (!t || t.notificationState !== 'SCHEDULED') continue;
+    if (!t) continue;
+    if (t.notificationState !== 'SCHEDULED' && t.notificationState !== 'FIRED_OR_DUE') continue;
     const rec = scheduled[medId];
     if (!rec || rec.transitionKey !== t.transitionKey) continue;
     if (!deliveredNotificationIds.has(alarmIdFor(medId))) continue;
     t.notificationState = 'SENT';
+    // Persist the positive evidence on the claim itself: it becomes
+    // terminal (never re-armed) and the evidence survives restarts.
+    rec.status = 'DELIVERED';
     changed = true;
     if (bumpEpisodeOwnershipRevision(ownershipRevisions, medId)) {
       changed = true;

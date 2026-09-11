@@ -103,18 +103,53 @@ export interface UseCriticalAlarmSchedulerOptions {
  * criticalTransitions.ts — this hook cannot bypass them):
  *   - Every storage operation captures the FULL ownership context
  *     (record generation + active episode identity + notification
- *     ownership state + per-med ownership revision) BEFORE the async
- *     native work and re-verifies it AFTER; a stale context ABANDONS
- *     the write (and cancels the native alarm this operation armed).
+ *     ownership state + per-med ownership revision + record binding)
+ *     BEFORE the async native work and re-verifies it AFTER; a stale
+ *     context ABANDONS every persistent write (and cancels the native
+ *     alarm this operation armed) — including on the FAILURE/CATCH
+ *     paths, so a stale operation can never erase a newer claim or
+ *     touch a newer episode.
  *   - A successful schedule binds the claim to the CURRENTLY ACTIVE
  *     transition (READ from the authoritative store — never generated
  *     here), so a re-schedule can never erase an active episode's
  *     binding and never resurrect a dead one. With no active episode
  *     the claim is written unbound ('') and is adopted/bound by the
  *     episode owner at the actual crossing (see reconcileCriticalEpisode).
- *   - An episode whose notification was already SENT never regains a
- *     SCHEDULED claim (canScheduleForTransition pre-arm check + the
- *     helper's SENT rule).
+ *   - An episode whose notification was already consumed — SENT, or
+ *     FIRED_OR_DUE (the owning claim's firing window passed, delivery
+ *     unknown) — never regains a SCHEDULED claim (canScheduleForTransition
+ *     pre-arm check + the helper's refusal rules).
+ *
+ * == Decision table (per med, per effect run) ==
+ *
+ *   Med sufficient, projected future crossing (criticalDateMs ≠ null):
+ *     cancel old native alarm → schedule at the projected time →
+ *     persist the claim ONLY after success ('refused' write ⇒ cancel
+ *     the just-armed orphan alarm). This path never re-arms a consumed
+ *     claim FOR AN ACTIVE EPISODE (sufficient meds have no episode);
+ *     a consumed claim left over from a dead episode is dropped, and
+ *     the new alarm is a genuinely new opportunity for a not-yet-begun
+ *     episode.
+ *
+ *   Med critical / frozen (criticalDateMs = null):
+ *     NEVER schedule (there is no future crossing to warn about — the
+ *     foreground owner handles the active episode), and never re-arm
+ *     a due/past claim. Two cancel paths keep no stale armed alarm
+ *     alive:
+ *       - same-session: a med this session armed an alarm for is
+ *         cancelled when its projection disappears;
+ *       - cross-session: an episode already in the SENT state gets its
+ *         armed native alarm cancelled (the foreground consumed the
+ *         episode's notification; an alarm left over from a previous
+ *         session could only ever fire a SECOND user-facing
+ *         notification for the same episode).
+ *     An episode in the FIRED_OR_DUE (or pre-consumption SCHEDULED)
+ *     state keeps its armed alarm untouched: a one-shot AlarmManager
+ *     alarm fires at most once, so it IS the episode's single remaining
+ *     notification opportunity — cancelling it would drop the
+ *     episode's only notification, re-arming it would duplicate it.
+ *     The episode owner consumes the claim (FIRED_OR_DUE) and positive
+ *     drawer evidence upgrades it to SENT.
  *
  * Re-schedule triggers: this effect re-runs (and re-schedules every
  * med's alarm) whenever any field that affects the critical date
@@ -321,6 +356,11 @@ export function useCriticalAlarmScheduler({
 
       const criticalDateMs = getCriticalAlarmDate(med, today);
       if (criticalDateMs === null) {
+        // No future crossing to arm: the med is critical (the foreground
+        // owner handles the active episode) or frozen. NEVER schedule here,
+        // and never re-arm a due/past claim — that would duplicate the
+        // notification of an episode whose claim already consumed its
+        // firing window.
         if (scheduledCriticalIdsRef.current.has(med.id)) {
           enqueue(med.id, async () => {
             const baselineGen = readRecordGeneration(med.id);
@@ -331,6 +371,20 @@ export function useCriticalAlarmScheduler({
             }
           });
         }
+        // Cross-session staleness: an alarm armed by a PREVIOUS session
+        // for an episode whose notification the foreground has already
+        // consumed (SENT) can only ever fire a SECOND user-facing
+        // notification for the same episode — cancel it. Episodes whose
+        // claim is FIRED_OR_DUE (or still SCHEDULED pre-consumption)
+        // keep their armed alarm: it is the episode's single remaining
+        // opportunity and fires at most once. Cancel is idempotent and
+        // writes no persistent state, so no ownership context is needed.
+        enqueue(med.id, async () => {
+          const t = loadCriticalTransitions()[med.id];
+          if (t && t.notificationState === 'SENT') {
+            await cancelCriticalAlarm(med.id);
+          }
+        });
         continue;
       }
 
@@ -359,10 +413,14 @@ export function useCriticalAlarmScheduler({
         await cancelCriticalAlarm(med.id);
         if (alarmGenerationRef.current.get(med.id) !== gen) return;
 
-        // Relevance check: if the active episode's notification was
-        // already SENT, a new native alarm must not be armed at all —
-        // it could only ever become a second user-facing notification
-        // for an episode whose single notification was consumed.
+        // Relevance check (pre-arm): if the active episode's notification
+        // was already consumed — SENT, or FIRED_OR_DUE (the owning
+        // claim's firing window passed) — a new native alarm must not be
+        // armed at all; it could only ever become a second user-facing
+        // notification for an episode whose single notification
+        // opportunity was spent. (Sufficient meds have no active episode,
+        // so this is defense-in-depth for the state machine; the cancel
+        // above already cleaned up any stale armed alarm.)
         if (!canScheduleForTransition(loadCriticalTransitions(), med.id)) return;
 
         try {
@@ -375,9 +433,15 @@ export function useCriticalAlarmScheduler({
 
           if (alarmGenerationRef.current.get(med.id) !== gen) {
             await cancelCriticalAlarm(med.id);
-            const records = loadScheduledCriticalAlarms();
-            if (invalidateScheduledAlarm(records, med.id, context.baselineRecordGeneration)) {
-              saveScheduledCriticalAlarms(records);
+            // Stale-generation compensation: only abandon THIS
+            // operation's own alarm state. A persistent write is only
+            // allowed when the ownership context is still valid — a
+            // stale operation must never erase a newer claim.
+            if (isSchedulingContextStillValidForMed(context)) {
+              const records = loadScheduledCriticalAlarms();
+              if (invalidateScheduledAlarm(records, med.id, context.baselineRecordGeneration)) {
+                saveScheduledCriticalAlarms(records);
+              }
             }
             return;
           }
@@ -408,21 +472,34 @@ export function useCriticalAlarmScheduler({
           // updateScheduledAlarm re-reads the CURRENT record and the
           // authoritative active transition at write time: it preserves
           // the active episode's binding, drops dead/stale bindings,
-          // refuses SENT episodes, and stamps the new generation. It
-          // can neither erase a valid binding nor resurrect an old
-          // identity.
+          // refuses consumed episodes/claims (SENT / FIRED_OR_DUE), and
+          // stamps the new generation. It can neither erase a valid
+          // binding nor resurrect an old identity.
           if (scheduledResult !== false) {
             const records = loadScheduledCriticalAlarms();
-            const transitions = loadCriticalTransitions();
-            if (
-              updateScheduledAlarm(records, transitions, med.id, {
-                alarmTime: criticalDateMs,
-                baselineGeneration: context.baselineRecordGeneration,
-              })
-            ) {
+            const write = updateScheduledAlarm(records, loadCriticalTransitions(), med.id, {
+              alarmTime: criticalDateMs,
+              baselineGeneration: context.baselineRecordGeneration,
+              now: Date.now(),
+            });
+            if (write === 'persisted') {
               saveScheduledCriticalAlarms(records);
+            } else if (write === 'refused') {
+              // The write was refused by an ownership/consumption rule.
+              // The alarm this operation just armed has NO valid claim
+              // behind it — it could only ever fire an unclaimed
+              // notification. Cancel it so it can never survive as an
+              // orphan.
+              await cancelCriticalAlarm(med.id);
             }
+            // 'unchanged': the record already held exactly this
+            // scheduling data; the re-armed alarm matches its claim.
           } else {
+            // Native scheduling failed → no valid SCHEDULED claim. The
+            // foreground path stays available. A stale operation must
+            // not touch the persistent state at all (the current owner
+            // decides what the state means now).
+            if (!isSchedulingContextStillValidForMed(context)) return;
             const records = loadScheduledCriticalAlarms();
             if (
               invalidateScheduledAlarm(records, med.id, context.baselineRecordGeneration)
@@ -432,6 +509,11 @@ export function useCriticalAlarmScheduler({
           }
         } catch (err) {
           console.warn('[critical-alarm] schedule failed:', err);
+          // Ownership-safe failure path: a stale operation must not
+          // invalidate a newer episode's claim or erase a newer
+          // scheduler write. Only the still-valid owner of this context
+          // may neutralize its own record.
+          if (!isSchedulingContextStillValidForMed(context)) return;
           const records = loadScheduledCriticalAlarms();
           if (invalidateScheduledAlarm(records, med.id, context.baselineRecordGeneration)) {
             saveScheduledCriticalAlarms(records);

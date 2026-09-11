@@ -3,6 +3,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, cleanup } from '@testing-library/react';
 import type { Medication } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
+import {
+  CRITICAL_TRANSITION_STORAGE_KEY,
+  SCHEDULED_CRITICAL_STORAGE_KEY,
+} from '../utils/criticalTransitions';
 import { useCriticalAlarmScheduler } from './useCriticalAlarmScheduler';
 
 // Mock @capacitor/core so isNativePlatform() returns false (web path),
@@ -1107,3 +1111,150 @@ describe('useCriticalAlarmScheduler — episode-vs-scheduler ownership races', (
 void scheduleCriticalAlarm;
 void cancelCriticalAlarm;
 
+
+// ─────────────────────────────────────────────────────────────────────
+// FIRED_OR_DUE / consumed-claim decision table (scheduler never re-arms
+// a claim whose firing window passed, and cancels stale armed alarms
+// for episodes whose notification the foreground already consumed)
+// ─────────────────────────────────────────────────────────────────────
+
+describe('useCriticalAlarmScheduler — due/past claim terminality (no duplicate on reopen)', () => {
+  it('a critical med with an adopted FIRED_OR_DUE claim is NEVER re-armed (no schedule call at all)', async () => {
+    // The alarm fired while the app was dead and the user dismissed it.
+    // The episode owner adopted the claim (FIRED_OR_DUE, bound record).
+    localStorage.setItem(
+      CRITICAL_TRANSITION_STORAGE_KEY,
+      JSON.stringify({
+        'med-crit': { transitionKey: 'crit_med-crit_A', enteredAt: Date.now() - 7200000, notificationState: 'FIRED_OR_DUE' },
+      })
+    );
+    localStorage.setItem(
+      SCHEDULED_CRITICAL_STORAGE_KEY,
+      JSON.stringify({
+        'med-crit': { transitionKey: 'crit_med-crit_A', alarmTime: Date.now() - 7200000, status: 'FIRED_OR_DUE' },
+      })
+    );
+    const med = makeMed({ id: 'med-crit', currentPills: 1, dailyDose: 1, warningThresholdDays: 5 });
+
+    const { rerender } = renderHook(
+      (opts) => useCriticalAlarmScheduler(defaultOpts(opts)),
+      { initialProps: defaultOpts({ medications: [med] }) }
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    await flushUntil(() => mocks.cancel.mock.calls.length >= 0);
+
+    // No re-arm for the consumed claim — and no re-arm after re-runs.
+    expect(mocks.schedule).not.toHaveBeenCalled();
+    rerender(defaultOpts({ medications: [makeMed({ id: 'med-crit', currentPills: 1, dailyDose: 1, warningThresholdDays: 5 })] }));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.schedule).not.toHaveBeenCalled();
+
+    // The consumed record stays terminal; the transition is untouched.
+    const rec = JSON.parse(localStorage.getItem(SCHEDULED_CRITICAL_STORAGE_KEY)!)['med-crit'];
+    expect(rec.status).toBe('FIRED_OR_DUE');
+    expect(rec.transitionKey).toBe('crit_med-crit_A');
+  });
+
+  it('a critical med with a bound due claim (pre-consumption SCHEDULED) is never re-armed either', async () => {
+    // The scheduler may run BEFORE the episode owner consumes the claim:
+    // it must not re-arm regardless (the owner consumes it instead).
+    localStorage.setItem(
+      CRITICAL_TRANSITION_STORAGE_KEY,
+      JSON.stringify({
+        'med-crit2': { transitionKey: 'crit_med-crit2_B', enteredAt: 1, notificationState: 'SCHEDULED' },
+      })
+    );
+    localStorage.setItem(
+      SCHEDULED_CRITICAL_STORAGE_KEY,
+      JSON.stringify({
+        'med-crit2': { transitionKey: 'crit_med-crit2_B', alarmTime: Date.now() - 1000, status: 'SCHEDULED' },
+      })
+    );
+    const med = makeMed({ id: 'med-crit2', currentPills: 1, dailyDose: 1, warningThresholdDays: 5 });
+
+    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mocks.schedule).not.toHaveBeenCalled();
+  });
+
+  it('cross-session staleness: an armed alarm for a SENT episode (foreground claimed it) is cancelled', async () => {
+    // Episode was claimed by the foreground in a PREVIOUS session; the
+    // alarm armed back then is still pending. A fresh app open must
+    // cancel it — it could only ever fire a SECOND notification for the
+    // same episode.
+    localStorage.setItem(
+      CRITICAL_TRANSITION_STORAGE_KEY,
+      JSON.stringify({
+        'med-sent': { transitionKey: 'crit_med-sent_C', enteredAt: 1, notificationState: 'SENT' },
+      })
+    );
+    localStorage.setItem(
+      SCHEDULED_CRITICAL_STORAGE_KEY,
+      JSON.stringify({
+        'med-sent': { transitionKey: 'crit_med-sent_C', alarmTime: Date.now() + 86400000, status: 'SCHEDULED' },
+      })
+    );
+    const med = makeMed({ id: 'med-sent', currentPills: 1, dailyDose: 1, warningThresholdDays: 5 });
+
+    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
+    // Flush until the serialized chain (SENT-cancel op) has run.
+    await flushUntil(() => mocks.cancel.mock.calls.some(([id]) => id === 'med-sent'));
+
+    expect(mocks.schedule).not.toHaveBeenCalled();
+    expect(mocks.cancel).toHaveBeenCalledWith('med-sent');
+  });
+
+  it('cross-session: a FIRED_OR_DUE episode keeps its armed alarm (it is the episode\u2019s single remaining opportunity)', async () => {
+    localStorage.setItem(
+      CRITICAL_TRANSITION_STORAGE_KEY,
+      JSON.stringify({
+        'med-due': { transitionKey: 'crit_med-due_D', enteredAt: 1, notificationState: 'FIRED_OR_DUE' },
+      })
+    );
+    localStorage.setItem(
+      SCHEDULED_CRITICAL_STORAGE_KEY,
+      JSON.stringify({
+        'med-due': { transitionKey: 'crit_med-due_D', alarmTime: Date.now() - 1000, status: 'FIRED_OR_DUE' },
+      })
+    );
+    const med = makeMed({ id: 'med-due', currentPills: 1, dailyDose: 1, warningThresholdDays: 5 });
+
+    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
+    await flushUntil(() => mocks.cancel.mock.calls.length >= 0);
+
+    // Never re-armed, and not cancelled either (the one-shot alarm fires
+    // at most once — it IS the episode's own notification opportunity).
+    expect(mocks.schedule).not.toHaveBeenCalled();
+    expect(mocks.cancel).not.toHaveBeenCalled();
+  });
+
+  it('a sufficient med with a consumed claim left over from a DEAD episode re-arms a genuinely NEW unbound opportunity', async () => {
+    // The old claim (FIRED_OR_DUE, bound to the dead episode A) is dead
+    // state; the med is sufficient again and the projected crossing is
+    // future. The new alarm is a new opportunity for a not-yet-begun
+    // episode — allowed, and persisted UNBOUND (never resurrects A).
+    localStorage.setItem(
+      SCHEDULED_CRITICAL_STORAGE_KEY,
+      JSON.stringify({
+        'med-suff': { transitionKey: 'crit_med-suff_DEAD', alarmTime: Date.now() - 7200000, status: 'FIRED_OR_DUE', generation: 2 },
+      })
+    );
+    const med = makeMed({ id: 'med-suff', currentPills: 30, dailyDose: 1, warningThresholdDays: 5 });
+
+    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
+    await flushUntil(() => mocks.schedule.mock.calls.length > 0);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mocks.schedule).toHaveBeenCalledTimes(1);
+    const rec = JSON.parse(localStorage.getItem(SCHEDULED_CRITICAL_STORAGE_KEY)!)['med-suff'];
+    expect(rec.status).toBe('SCHEDULED');
+    expect(rec.transitionKey).toBe(''); // unbound — dead binding dropped, A never resurrected
+    expect(rec.generation).toBe(3);
+    expect(rec.alarmTime).toBeGreaterThan(Date.now());
+  });
+});

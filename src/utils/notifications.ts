@@ -725,6 +725,16 @@ export async function getDeliveredNotificationIds(): Promise<Set<number>> {
  * treats `at: now` as "delivered immediately" which some Android
  * versions only show as a head-up that auto-dismisses).
  *
+ * IMPORTANT: this past-date fallback is only valid when arming a
+ * GENUINELY NEW notification opportunity (the scheduler only calls
+ * this for sufficient meds whose projected crossing is future; the
+ * fallback is defensive). It must never be used to resurrect an
+ * existing scheduled claim whose firing window has already passed for
+ * the same transition — the write helpers in criticalTransitions.ts
+ * (updateScheduledAlarm) refuse to persist a claim for a consumed
+ * episode/transition, and the scheduler cancels an alarm whose claim
+ * write was refused.
+ *
  * `unit` is included in the notification body for display.
  *
  * NOTE: the alarm carries NO transition identity. criticalDateMs is

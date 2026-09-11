@@ -14,6 +14,7 @@ import {
   loadOwnershipRevisions,
   saveOwnershipRevisions,
   reconcileCriticalEpisode,
+  consumeDueScheduledClaim,
   applyDeliveredCriticalEvidence,
   getActiveTransition,
   bindScheduledAlarmToTransition,
@@ -26,6 +27,9 @@ import {
   canScheduleForTransition,
   captureSchedulingContext,
   isSchedulingContextStillValid,
+  getScheduledClaimPhase,
+  isScheduledClaimFuture,
+  isScheduledClaimDue,
 } from './criticalTransitions';
 import { CriticalTransitionState, ScheduledCriticalAlarmRecord } from '../types';
 
@@ -281,17 +285,33 @@ describe('reconcileCriticalEpisode — episode lifecycle', () => {
 });
 
 describe('reconcileCriticalEpisode — scheduled claim interaction', () => {
-  it('ADOPTS an elapsed SCHEDULED claim: binds the key, marks SCHEDULED, does NOT send', () => {
+  it('ADOPTS an elapsed SCHEDULED claim: binds the key, marks FIRED_OR_DUE (delivery unknown), does NOT send', () => {
     const alarmTime = Date.now() - 3600000;
     writeScheduled({ 'med-1': { transitionKey: '', alarmTime, status: 'SCHEDULED' } });
 
     const { result, sent } = pass({ isCriticalish: true });
 
     expect(sent).toBe(0);
-    expect(result!.transition.notificationState).toBe('SCHEDULED');
+    // The claim's firing window already passed at adoption time: the
+    // episode is FIRED_OR_DUE (delivery UNKNOWN) — never SCHEDULED-as-
+    // if-pending and never SENT (elapsed time is not delivery).
+    expect(result!.transition.notificationState).toBe('FIRED_OR_DUE');
     expect(result!.transition.transitionKey).toMatch(/^crit_med-1_/);
     expect(result!.transition.enteredAt).toBe(alarmTime);
-    expect(loadScheduledCriticalAlarms()['med-1'].transitionKey).toBe(result!.transition.transitionKey);
+    const rec = loadScheduledCriticalAlarms()['med-1'];
+    expect(rec.transitionKey).toBe(result!.transition.transitionKey);
+    // The claim itself is consumed — it can never be re-armed.
+    expect(rec.status).toBe('FIRED_OR_DUE');
+  });
+
+  it('an already-FIRED_OR_DUE unbound claim adopts as FIRED_OR_DUE too (terminal, no re-notify)', () => {
+    const alarmTime = Date.now() - 3600000;
+    writeScheduled({ 'med-1': { transitionKey: '', alarmTime, status: 'FIRED_OR_DUE' } });
+
+    const { result, sent } = pass({ isCriticalish: true });
+    expect(sent).toBe(0);
+    expect(result!.transition.notificationState).toBe('FIRED_OR_DUE');
+    expect(loadScheduledCriticalAlarms()['med-1'].status).toBe('FIRED_OR_DUE');
   });
 
   it('a BOUND elapsed claim is NEVER adopted (dead-episode leftover → neutralized + fresh identity + foreground)', () => {
@@ -347,7 +367,7 @@ describe('reconcileCriticalEpisode — scheduled claim interaction', () => {
     expect(loadScheduledCriticalAlarms()['med-1'].transitionKey).toBe(result!.transition.transitionKey);
   });
 
-  it('a NONE-state episode with a bound claim that has since elapsed does NOT re-notify (scheduled path owns it)', () => {
+  it('a NONE-state episode with a bound claim that has since elapsed becomes FIRED_OR_DUE (claim consumed, no re-notify)', () => {
     // Episode began while alerts were disabled, with a future claim bound.
     const alarmTime = Date.now() + 86400000;
     writeScheduled({ 'med-1': { transitionKey: '', alarmTime, status: 'SCHEDULED' } });
@@ -358,9 +378,11 @@ describe('reconcileCriticalEpisode — scheduled claim interaction', () => {
     vi.setSystemTime(new Date('2024-09-13T12:00:00Z'));
 
     const second = pass({ isCriticalish: true, canNotify: true, now: Date.now() });
-    // The scheduled alarm is the authoritative path → foreground quiet.
+    // The scheduled alarm consumed this episode's notification
+    // opportunity (delivery unknown) → foreground quiet, claim terminal.
     expect(second.sent).toBe(0);
-    expect(second.result!.transition.notificationState).toBe('SCHEDULED');
+    expect(second.result!.transition.notificationState).toBe('FIRED_OR_DUE');
+    expect(loadScheduledCriticalAlarms()['med-1'].status).toBe('FIRED_OR_DUE');
   });
 
   it('changed alarmTime (rescheduling) does NOT change the episode key', () => {
@@ -539,35 +561,41 @@ describe('updateScheduledAlarm — scheduler write rule (ownership + generation)
 
   it('TEST A: scheduler writes unbound claim → owner binds it to Transition A → scheduler reschedules ⇒ key A remains', () => {
     const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
-      'med-1': mkRecord({ alarmTime: 1000 }), // G1 wrote an unbound claim (generation absent → 0)
+      // G1 wrote an unbound PENDING claim (generation absent → 0).
+      'med-1': mkRecord({ alarmTime: Date.now() + 1000 }),
     };
     // Owner binds the claim to the active episode (reconcile at the crossing).
     bindScheduledAlarmToTransition(scheduled, 'med-1', 'A');
     const transitions = { 'med-1': mkTransition('A') };
 
-    // Scheduler reschedules with a new projected date.
+    // Scheduler reschedules with a new (still future) projected date.
     const changed = updateScheduledAlarm(scheduled, transitions, 'med-1', {
-      alarmTime: 9999,
+      alarmTime: Date.now() + 9999,
       baselineGeneration: 0,
+      now: Date.now(),
     });
 
-    expect(changed).toBe(true);
+    expect(changed).toBe('persisted');
     expect(scheduled['med-1'].transitionKey).toBe('A'); // binding NOT erased
-    expect(scheduled['med-1'].alarmTime).toBe(9999);
+    expect(scheduled['med-1'].alarmTime).toBe(Date.now() + 9999);
     expect(scheduled['med-1'].status).toBe('SCHEDULED');
     expect(scheduled['med-1'].generation).toBe(1);
   });
 
   it('TEST B: claim already bound to A; scheduler changes alarmTime ⇒ same key A, new alarmTime', () => {
     const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
-      'med-1': mkRecord({ transitionKey: 'A', alarmTime: 1000, generation: 4 }),
+      'med-1': mkRecord({ transitionKey: 'A', alarmTime: Date.now() + 1000, generation: 4 }),
     };
     const transitions = { 'med-1': mkTransition('A') };
 
-    updateScheduledAlarm(scheduled, transitions, 'med-1', { alarmTime: 5555, baselineGeneration: 4 });
+    updateScheduledAlarm(scheduled, transitions, 'med-1', {
+      alarmTime: Date.now() + 5555,
+      baselineGeneration: 4,
+      now: Date.now(),
+    });
 
     expect(scheduled['med-1'].transitionKey).toBe('A');
-    expect(scheduled['med-1'].alarmTime).toBe(5555);
+    expect(scheduled['med-1'].alarmTime).toBe(Date.now() + 5555);
     expect(scheduled['med-1'].status).toBe('SCHEDULED');
     expect(scheduled['med-1'].generation).toBe(5);
   });
@@ -611,7 +639,7 @@ describe('updateScheduledAlarm — scheduler write rule (ownership + generation)
     const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {};
     const transitions = {};
 
-    expect(updateScheduledAlarm(scheduled, transitions, 'med-1', { alarmTime: 123, baselineGeneration: 0 })).toBe(true);
+    expect(updateScheduledAlarm(scheduled, transitions, 'med-1', { alarmTime: 123, baselineGeneration: 0 })).toBe('persisted');
 
     expect(scheduled['med-1']).toEqual({
       transitionKey: '',
@@ -633,7 +661,7 @@ describe('updateScheduledAlarm — scheduler write rule (ownership + generation)
       baselineGeneration: 0,
     });
 
-    expect(changed).toBe(false);
+    expect(changed).toBe('refused');
     // Persistent record still belongs to G2/current state — untouched.
     expect(scheduled['med-1']).toEqual(stored);
     expect(scheduled['med-1'].alarmTime).toBe(42);
@@ -646,7 +674,7 @@ describe('updateScheduledAlarm — scheduler write rule (ownership + generation)
     };
     const transitions = {};
 
-    expect(updateScheduledAlarm(scheduled, transitions, 'med-1', { alarmTime: 777, baselineGeneration: 3 })).toBe(false);
+    expect(updateScheduledAlarm(scheduled, transitions, 'med-1', { alarmTime: 777, baselineGeneration: 3 })).toBe('unchanged');
     expect(scheduled['med-1'].generation).toBe(3); // unchanged
   });
 });
@@ -757,7 +785,7 @@ describe('reconcileCriticalEpisode — TEST E: a new episode never inherits the 
         alarmTime: Date.now() + 86400000,
         baselineGeneration: scheduled['med-1'].generation ?? 0,
       })
-    ).toBe(true);
+    ).toBe('persisted');
     saveScheduledCriticalAlarms(scheduled);
     expect(scheduled['med-1'].transitionKey).toBe('');
 
@@ -817,6 +845,13 @@ describe('canScheduleForTransition — SENT ownership rule', () => {
     };
     expect(canScheduleForTransition(transitions, 'med-1')).toBe(false);
   });
+
+  it('REFUSES scheduling for a FIRED_OR_DUE episode (the claim window was consumed)', () => {
+    const transitions: Record<string, CriticalTransitionState> = {
+      'med-1': { transitionKey: 'k1', enteredAt: 1, notificationState: 'FIRED_OR_DUE' },
+    };
+    expect(canScheduleForTransition(transitions, 'med-1')).toBe(false);
+  });
 });
 
 describe('updateScheduledAlarm — BLOCKER 2: SENT can never become SCHEDULED', () => {
@@ -841,7 +876,7 @@ describe('updateScheduledAlarm — BLOCKER 2: SENT can never become SCHEDULED', 
       baselineGeneration: 3,
     });
 
-    expect(changed).toBe(false);
+    expect(changed).toBe('refused');
     // No SCHEDULED ownership was restored, no binding/alarmTime touched.
     expect(scheduled['med-1']).toEqual(mkRecord());
   });
@@ -857,7 +892,7 @@ describe('updateScheduledAlarm — BLOCKER 2: SENT can never become SCHEDULED', 
         alarmTime: Date.now() + 999999,
         baselineGeneration: 0,
       })
-    ).toBe(false);
+    ).toBe('refused');
     expect(scheduled['med-1']).toBeUndefined();
   });
 
@@ -874,7 +909,7 @@ describe('updateScheduledAlarm — BLOCKER 2: SENT can never become SCHEDULED', 
         alarmTime: 12345,
         baselineGeneration: 3,
       })
-    ).toBe(true);
+    ).toBe('persisted');
     expect(scheduled['med-1'].status).toBe('SCHEDULED');
     expect(scheduled['med-1'].transitionKey).toBe('A');
   });
@@ -892,10 +927,82 @@ describe('updateScheduledAlarm — BLOCKER 2: SENT can never become SCHEDULED', 
         alarmTime: 4242,
         baselineGeneration: 3,
       })
-    ).toBe(true);
+    ).toBe('persisted');
     expect(scheduled['med-1'].status).toBe('SCHEDULED');
     expect(scheduled['med-1'].transitionKey).toBe('A');
     expect(scheduled['med-1'].alarmTime).toBe(4242);
+  });
+
+  it('a FIRED_OR_DUE episode can NEVER regain a SCHEDULED claim (consumed window stays terminal)', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': mkRecord({ status: 'FIRED_OR_DUE', alarmTime: Date.now() - 1000 }),
+    };
+    const transitions: Record<string, CriticalTransitionState> = {
+      'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'FIRED_OR_DUE' },
+    };
+
+    expect(
+      updateScheduledAlarm(scheduled, transitions, 'med-1', {
+        alarmTime: Date.now() + 999999,
+        baselineGeneration: 3,
+      })
+    ).toBe('refused');
+    expect(scheduled['med-1'].status).toBe('FIRED_OR_DUE');
+  });
+
+  it('a consumed claim (FIRED_OR_DUE) bound to the ACTIVE transition is never re-armed', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': mkRecord({ status: 'FIRED_OR_DUE', alarmTime: Date.now() - 1000 }),
+    };
+    const transitions: Record<string, CriticalTransitionState> = {
+      'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'NONE' },
+    };
+
+    // Even if the episode state lagged behind (crash between the
+    // owner's two writes), a consumed claim bound to the active
+    // transition must not be resurrected as SCHEDULED.
+    expect(
+      updateScheduledAlarm(scheduled, transitions, 'med-1', {
+        alarmTime: Date.now() + 999999,
+        baselineGeneration: 3,
+      })
+    ).toBe('refused');
+    expect(scheduled['med-1'].status).toBe('FIRED_OR_DUE');
+  });
+
+  it('a consumed claim (DELIVERED evidence) bound to the ACTIVE transition is never re-armed', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': mkRecord({ status: 'DELIVERED', alarmTime: Date.now() - 1000 }),
+    };
+    const transitions: Record<string, CriticalTransitionState> = {
+      'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'SCHEDULED' },
+    };
+
+    expect(
+      updateScheduledAlarm(scheduled, transitions, 'med-1', {
+        alarmTime: Date.now() + 999999,
+        baselineGeneration: 3,
+      })
+    ).toBe('refused');
+    expect(scheduled['med-1'].status).toBe('DELIVERED');
+  });
+
+  it('a consumed claim bound to a DEAD episode may be overwritten by a genuinely new opportunity', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': mkRecord({ transitionKey: 'DEAD', status: 'FIRED_OR_DUE', alarmTime: Date.now() - 1000 }),
+    };
+    // Episode A ended; no active episode exists. The new projected
+    // crossing is a genuinely new notification opportunity.
+    const transitions = {};
+
+    expect(
+      updateScheduledAlarm(scheduled, transitions, 'med-1', {
+        alarmTime: Date.now() + 999999,
+        baselineGeneration: 3,
+      })
+    ).toBe('persisted');
+    expect(scheduled['med-1'].status).toBe('SCHEDULED');
+    expect(scheduled['med-1'].transitionKey).toBe('');
   });
 });
 
@@ -1045,18 +1152,20 @@ describe('reconcileCriticalEpisode — ownership-revision bumps', () => {
     expect(getOwnershipRevision(readOwnership(), 'med-1')).toBe(before + 1);
   });
 
-  it('bumps when the claim-evidence upgrade moves NONE → SCHEDULED', () => {
+  it('bumps when the claim consumption moves NONE → FIRED_OR_DUE', () => {
     // Episode begins (disabled alerts) with a future claim bound to it.
     writeScheduled({ 'med-1': { transitionKey: '', alarmTime: Date.now() + 86400000, status: 'SCHEDULED' } });
     pass({ isCriticalish: true, canNotify: false });
     const afterCreate = getOwnershipRevision(readOwnership(), 'med-1');
 
-    // The alarm elapsed while the app was dead → scheduled path owns it.
+    // The alarm elapsed while the app was dead → the claim is consumed
+    // (delivery unknown) and the episode's ownership moves to
+    // FIRED_OR_DUE — notification ownership changed.
     vi.setSystemTime(new Date('2024-09-13T12:00:00Z'));
     pass({ isCriticalish: true, canNotify: true, now: Date.now() });
 
     expect(readOwnership()['med-1']).toBe(afterCreate + 1);
-    expect(loadCriticalTransitions()['med-1'].notificationState).toBe('SCHEDULED');
+    expect(loadCriticalTransitions()['med-1'].notificationState).toBe('FIRED_OR_DUE');
   });
 
   it('does NOT bump when a reconcile pass changes nothing (repeated renders/restarts)', () => {
@@ -1065,5 +1174,357 @@ describe('reconcileCriticalEpisode — ownership-revision bumps', () => {
     pass({ isCriticalish: true, canNotify: true });
     pass({ isCriticalish: true, canNotify: true });
     expect(readOwnership()['med-1']).toBe(before);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// FIRED_OR_DUE: due/past claim consumption (the "alarm fired while the
+// app was dead, user dismissed it, app reopens" duplicate guard)
+// ─────────────────────────────────────────────────────────────────────
+
+describe('getScheduledClaimPhase — claim lifecycle classification', () => {
+  const rec = (over: Partial<ScheduledCriticalAlarmRecord>): ScheduledCriticalAlarmRecord => ({
+    transitionKey: '',
+    alarmTime: 1000,
+    status: 'SCHEDULED',
+    ...over,
+  });
+
+  it('SCHEDULED + future alarmTime ⇒ PENDING_FUTURE (reliable evidence the alarm is still pending)', () => {
+    const future = rec({ alarmTime: 2000 });
+    expect(getScheduledClaimPhase(future, 1000)).toBe('PENDING_FUTURE');
+    expect(isScheduledClaimFuture(future, 1000)).toBe(true);
+    expect(isScheduledClaimDue(future, 1000)).toBe(false);
+  });
+
+  it('SCHEDULED + past alarmTime ⇒ DUE_OR_PAST (delivery UNKNOWN — never delivery evidence)', () => {
+    const due = rec({ alarmTime: 500 });
+    expect(getScheduledClaimPhase(due, 1000)).toBe('DUE_OR_PAST');
+    expect(isScheduledClaimDue(due, 1000)).toBe(true);
+    expect(isScheduledClaimFuture(due, 1000)).toBe(false);
+    // Exactly-at-now is also due (the window has been reached).
+    expect(isScheduledClaimDue(rec({ alarmTime: 1000 }), 1000)).toBe(true);
+  });
+
+  it('FIRED_OR_DUE ⇒ CONSUMED_WINDOW; DELIVERED ⇒ DELIVERED; NOT_SCHEDULED ⇒ INVALID; missing ⇒ NO_CLAIM', () => {
+    expect(getScheduledClaimPhase(rec({ status: 'FIRED_OR_DUE' }), 1000)).toBe('CONSUMED_WINDOW');
+    expect(getScheduledClaimPhase(rec({ status: 'DELIVERED' }), 1000)).toBe('DELIVERED');
+    expect(getScheduledClaimPhase(rec({ status: 'NOT_SCHEDULED' }), 1000)).toBe('INVALID');
+    expect(getScheduledClaimPhase(undefined, 1000)).toBe('NO_CLAIM');
+    // Elapsed time NEVER manufactures delivery evidence.
+    expect(isScheduledClaimDue(rec({ status: 'FIRED_OR_DUE' }), 1000)).toBe(false);
+  });
+});
+
+describe('consumeDueScheduledClaim — owner-side claim consumption', () => {
+  const dirty = () => ({ transitions: false, scheduled: false, ownership: false });
+
+  it('consumes a bound due claim: record FIRED_OR_DUE + episode SCHEDULED → FIRED_OR_DUE + revision bump', () => {
+    writeTransitions({ 'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'SCHEDULED' } });
+    writeScheduled({ 'med-1': { transitionKey: 'A', alarmTime: 500, status: 'SCHEDULED' } });
+    writeOwnership({ 'med-1': 3 });
+
+    const transitions = loadCriticalTransitions();
+    const scheduled = loadScheduledCriticalAlarms();
+    const revisions = loadOwnershipRevisions();
+    const d = dirty();
+    consumeDueScheduledClaim(transitions, scheduled, revisions, 'med-1', 1000, d);
+
+    expect(d.scheduled).toBe(true);
+    expect(d.transitions).toBe(true);
+    expect(d.ownership).toBe(true);
+    expect(scheduled['med-1'].status).toBe('FIRED_OR_DUE');
+    expect(transitions['med-1'].notificationState).toBe('FIRED_OR_DUE');
+    expect(revisions['med-1']).toBe(4);
+  });
+
+  it('moves a NONE episode with a bound due claim to FIRED_OR_DUE (the claim owns the notification)', () => {
+    writeTransitions({ 'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'NONE' } });
+    writeScheduled({ 'med-1': { transitionKey: 'A', alarmTime: 500, status: 'SCHEDULED' } });
+
+    const transitions = loadCriticalTransitions();
+    const scheduled = loadScheduledCriticalAlarms();
+    const revisions = loadOwnershipRevisions();
+    const d = dirty();
+    consumeDueScheduledClaim(transitions, scheduled, revisions, 'med-1', 1000, d);
+
+    expect(transitions['med-1'].notificationState).toBe('FIRED_OR_DUE');
+    expect(scheduled['med-1'].status).toBe('FIRED_OR_DUE');
+  });
+
+  it('repairs a crash between the owner writes: record FIRED_OR_DUE + episode SCHEDULED → FIRED_OR_DUE', () => {
+    writeTransitions({ 'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'SCHEDULED' } });
+    writeScheduled({ 'med-1': { transitionKey: 'A', alarmTime: 500, status: 'FIRED_OR_DUE' } });
+
+    const transitions = loadCriticalTransitions();
+    const scheduled = loadScheduledCriticalAlarms();
+    const d = dirty();
+    consumeDueScheduledClaim(transitions, scheduled, loadOwnershipRevisions(), 'med-1', 1000, d);
+
+    expect(d.transitions).toBe(true);
+    expect(d.scheduled).toBe(false); // record already consumed
+    expect(transitions['med-1'].notificationState).toBe('FIRED_OR_DUE');
+  });
+
+  it('does nothing for a still-future bound claim (PENDING_FUTURE is not consumed)', () => {
+    writeTransitions({ 'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'SCHEDULED' } });
+    writeScheduled({ 'med-1': { transitionKey: 'A', alarmTime: 5000, status: 'SCHEDULED' } });
+
+    const transitions = loadCriticalTransitions();
+    const scheduled = loadScheduledCriticalAlarms();
+    const d = dirty();
+    consumeDueScheduledClaim(transitions, scheduled, loadOwnershipRevisions(), 'med-1', 1000, d);
+
+    expect(d.transitions).toBe(false);
+    expect(d.scheduled).toBe(false);
+    expect(transitions['med-1'].notificationState).toBe('SCHEDULED');
+    expect(scheduled['med-1'].status).toBe('SCHEDULED');
+  });
+
+  it('leaves a SENT episode alone (terminal ownership) and ignores unbound/other-key claims', () => {
+    writeTransitions({
+      'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'SENT' },
+      'med-2': { transitionKey: 'B', enteredAt: 1, notificationState: 'SCHEDULED' },
+    });
+    writeScheduled({
+      'med-1': { transitionKey: 'A', alarmTime: 500, status: 'SCHEDULED' },
+      'med-2': { transitionKey: 'OTHER', alarmTime: 500, status: 'SCHEDULED' },
+    });
+
+    const transitions = loadCriticalTransitions();
+    const scheduled = loadScheduledCriticalAlarms();
+    const d = dirty();
+    consumeDueScheduledClaim(transitions, scheduled, loadOwnershipRevisions(), 'med-1', 1000, d);
+    consumeDueScheduledClaim(transitions, scheduled, loadOwnershipRevisions(), 'med-2', 1000, d);
+
+    expect(d.transitions).toBe(false);
+    expect(d.scheduled).toBe(false);
+    expect(transitions['med-1'].notificationState).toBe('SENT');
+    expect(scheduled['med-1'].status).toBe('SCHEDULED');
+    expect(transitions['med-2'].notificationState).toBe('SCHEDULED');
+    expect(scheduled['med-2'].status).toBe('SCHEDULED');
+  });
+
+  it('repeated consumption passes are idempotent (no duplicate revision bumps, no state flips)', () => {
+    writeTransitions({ 'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'SCHEDULED' } });
+    writeScheduled({ 'med-1': { transitionKey: 'A', alarmTime: 500, status: 'SCHEDULED' } });
+    writeOwnership({ 'med-1': 1 });
+
+    const transitions = loadCriticalTransitions();
+    const scheduled = loadScheduledCriticalAlarms();
+    const revisions = loadOwnershipRevisions();
+    const d1 = dirty();
+    consumeDueScheduledClaim(transitions, scheduled, revisions, 'med-1', 1000, d1);
+    const d2 = dirty();
+    consumeDueScheduledClaim(transitions, scheduled, revisions, 'med-1', 1000, d2);
+    const d3 = dirty();
+    consumeDueScheduledClaim(transitions, scheduled, revisions, 'med-1', 2000, d3);
+
+    expect(d2.transitions).toBe(false);
+    expect(d2.scheduled).toBe(false);
+    expect(d2.ownership).toBe(false);
+    expect(d3.transitions).toBe(false);
+    expect(d3.scheduled).toBe(false);
+    expect(revisions['med-1']).toBe(2); // bumped exactly once
+  });
+});
+
+describe('reconcileCriticalEpisode — foreground send consumes the bound claim (Path A)', () => {
+  it('foreground send on an early crossing neutralizes the bound FUTURE claim (no SCHEDULED claim survives a SENT episode)', () => {
+    const alarmTime = Date.now() + 86400000;
+    writeScheduled({ 'med-1': { transitionKey: '', alarmTime, status: 'SCHEDULED' } });
+
+    const { result, sent } = pass({ isCriticalish: true, canNotify: true });
+    expect(sent).toBe(1);
+    expect(result!.transition.notificationState).toBe('SENT');
+
+    const rec = loadScheduledCriticalAlarms()['med-1'];
+    // The claim was consumed by the foreground send: no valid SCHEDULED
+    // claim survives for a SENT episode, so even if the scheduler never
+    // runs again the armed alarm can never own/resurrect a notification.
+    expect(rec.status).toBe('NOT_SCHEDULED');
+    expect(rec.transitionKey).toBe(result!.transition.transitionKey);
+    expect(rec.alarmTime).toBe(alarmTime);
+  });
+
+  it('a second reconcile pass after the foreground send keeps everything terminal (idempotent)', () => {
+    writeScheduled({ 'med-1': { transitionKey: '', alarmTime: Date.now() + 86400000, status: 'SCHEDULED' } });
+
+    pass({ isCriticalish: true, canNotify: true });
+    const firstState = loadScheduledCriticalAlarms()['med-1'];
+    const transitionsBefore = loadCriticalTransitions()['med-1'];
+
+    const second = pass({ isCriticalish: true, canNotify: true });
+    expect(second.sent).toBe(0);
+    expect(second.result!.transition.transitionKey).toBe(transitionsBefore.transitionKey);
+    expect(second.result!.transition.notificationState).toBe('SENT');
+    expect(loadScheduledCriticalAlarms()['med-1']).toEqual(firstState);
+  });
+});
+
+describe('applyDeliveredCriticalEvidence — FIRED_OR_DUE + persisted evidence', () => {
+  const alarmIdFor = (medId: string) => medId.length;
+
+  it('upgrades a FIRED_OR_DUE episode to SENT with positive drawer evidence and marks the claim DELIVERED', () => {
+    writeTransitions({ 'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'FIRED_OR_DUE' } });
+    writeScheduled({ 'med-1': { transitionKey: 'A', alarmTime: 500, status: 'FIRED_OR_DUE' } });
+
+    const transitions = loadCriticalTransitions();
+    const scheduled = loadScheduledCriticalAlarms();
+    const revisions = loadOwnershipRevisions();
+    const changed = applyDeliveredCriticalEvidence(['med-1'], new Set([alarmIdFor('med-1')]), transitions, scheduled, revisions, alarmIdFor);
+
+    expect(changed).toBe(true);
+    expect(transitions['med-1'].notificationState).toBe('SENT');
+    expect(scheduled['med-1'].status).toBe('DELIVERED'); // evidence persisted
+    expect(revisions['med-1']).toBe(1);
+  });
+
+  it('absence from the drawer never moves a FIRED_OR_DUE episode (delivery stays UNKNOWN, claim stays consumed)', () => {
+    writeTransitions({ 'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'FIRED_OR_DUE' } });
+    writeScheduled({ 'med-1': { transitionKey: 'A', alarmTime: 500, status: 'FIRED_OR_DUE' } });
+
+    const transitions = loadCriticalTransitions();
+    const scheduled = loadScheduledCriticalAlarms();
+    const changed = applyDeliveredCriticalEvidence(['med-1'], new Set<number>(), transitions, scheduled, loadOwnershipRevisions(), alarmIdFor);
+
+    expect(changed).toBe(false);
+    expect(transitions['med-1'].notificationState).toBe('FIRED_OR_DUE');
+    expect(scheduled['med-1'].status).toBe('FIRED_OR_DUE');
+  });
+
+  it('never touches NONE or SENT episodes', () => {
+    writeTransitions({
+      'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'NONE' },
+      'med-2': { transitionKey: 'B', enteredAt: 1, notificationState: 'SENT' },
+    });
+    writeScheduled({
+      'med-1': { transitionKey: 'A', alarmTime: 500, status: 'SCHEDULED' },
+      'med-2': { transitionKey: 'B', alarmTime: 500, status: 'SCHEDULED' },
+    });
+
+    const transitions = loadCriticalTransitions();
+    const scheduled = loadScheduledCriticalAlarms();
+    const changed = applyDeliveredCriticalEvidence(
+      ['med-1', 'med-2'],
+      new Set([alarmIdFor('med-1'), alarmIdFor('med-2')]),
+      transitions,
+      scheduled,
+      loadOwnershipRevisions(),
+      alarmIdFor
+    );
+
+    expect(changed).toBe(false);
+    expect(transitions['med-1'].notificationState).toBe('NONE');
+    expect(transitions['med-2'].notificationState).toBe('SENT');
+  });
+});
+
+describe('FIRED_OR_DUE storage normalization (migration-safe, single authoritative v2)', () => {
+  it('loads a persisted FIRED_OR_DUE transition verbatim', () => {
+    writeTransitions({ 'med-1': { transitionKey: 'k1', enteredAt: 7, notificationState: 'FIRED_OR_DUE' } });
+    expect(loadCriticalTransitions()['med-1']).toEqual({
+      transitionKey: 'k1',
+      enteredAt: 7,
+      notificationState: 'FIRED_OR_DUE',
+    });
+  });
+
+  it('loads a persisted FIRED_OR_DUE scheduled record verbatim (shape unchanged, no version bump)', () => {
+    writeScheduled({ 'med-1': { transitionKey: 'k1', alarmTime: 42, status: 'FIRED_OR_DUE' } });
+    expect(loadScheduledCriticalAlarms()['med-1']).toEqual({
+      transitionKey: 'k1',
+      alarmTime: 42,
+      status: 'FIRED_OR_DUE',
+    });
+  });
+
+  it('normalizes an unknown status to the safe direction (registered alarm stays SCHEDULED)', () => {
+    writeScheduled({
+      'med-1': { transitionKey: '', alarmTime: 42, status: 'SOMETHING_NEW' },
+      'med-2': { transitionKey: '', alarmTime: 0, status: 'SOMETHING_NEW' },
+    } as unknown as Record<string, ScheduledCriticalAlarmRecord>);
+    const loaded = loadScheduledCriticalAlarms();
+    expect(loaded['med-1'].status).toBe('SCHEDULED');
+    expect(loaded['med-2'].status).toBe('NOT_SCHEDULED');
+  });
+});
+
+describe('updateScheduledAlarm — due-claim bound to the active transition is never re-armed', () => {
+  it('refuses SCHEDULED(due) → SCHEDULED(future) for the SAME transition (the fired-while-dead re-arm guard)', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': {
+        transitionKey: 'A',
+        alarmTime: Date.now() - 3600000, // firing window already reached
+        status: 'SCHEDULED',
+        generation: 3,
+      },
+    };
+    const transitions: Record<string, CriticalTransitionState> = {
+      'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'SCHEDULED' },
+    };
+
+    expect(
+      updateScheduledAlarm(scheduled, transitions, 'med-1', {
+        alarmTime: Date.now() + 999999, // the "now + 1s" resurrection attempt
+        baselineGeneration: 3,
+        now: Date.now(),
+      })
+    ).toBe('refused');
+    // The due claim is untouched — the owner consumes it instead.
+    expect(scheduled['med-1'].status).toBe('SCHEDULED');
+    expect(scheduled['med-1'].alarmTime).toBe(Date.now() - 3600000);
+  });
+
+  it('still allows rescheduling a claim that is genuinely still PENDING (future) for the same transition', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': {
+        transitionKey: 'A',
+        alarmTime: Date.now() + 3600000, // still future
+        status: 'SCHEDULED',
+        generation: 3,
+      },
+    };
+    const transitions: Record<string, CriticalTransitionState> = {
+      'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'SCHEDULED' },
+    };
+
+    expect(
+      updateScheduledAlarm(scheduled, transitions, 'med-1', {
+        alarmTime: Date.now() + 7200000,
+        baselineGeneration: 3,
+        now: Date.now(),
+      })
+    ).toBe('persisted');
+    expect(scheduled['med-1'].alarmTime).toBe(Date.now() + 7200000);
+    expect(scheduled['med-1'].transitionKey).toBe('A');
+  });
+});
+
+describe('reconcileCriticalEpisode — dead-bound consumed leftovers (any status)', () => {
+  it('a bound FIRED_OR_DUE leftover of a dead episode is neutralized — never inherited by a new episode', () => {
+    writeScheduled({
+      'med-1': { transitionKey: 'crit_med-1_DEAD_A', alarmTime: Date.now() - 3600000, status: 'FIRED_OR_DUE' },
+    });
+
+    const { result, sent } = pass({ isCriticalish: true, canNotify: true });
+    // Fresh identity, foreground fires (the dead claim owns nothing).
+    expect(sent).toBe(1);
+    expect(result!.transition.notificationState).toBe('SENT');
+    expect(result!.transition.transitionKey).not.toBe('crit_med-1_DEAD_A');
+    const rec = loadScheduledCriticalAlarms()['med-1'];
+    expect(rec.status).toBe('NOT_SCHEDULED');
+    expect(rec.transitionKey).toBe('crit_med-1_DEAD_A'); // inert binding info only
+  });
+
+  it('a bound DELIVERED leftover of a dead episode is neutralized too', () => {
+    writeScheduled({
+      'med-1': { transitionKey: 'crit_med-1_DEAD_B', alarmTime: Date.now() - 3600000, status: 'DELIVERED' },
+    });
+
+    const { result, sent } = pass({ isCriticalish: true, canNotify: true });
+    expect(sent).toBe(1);
+    expect(result!.transition.notificationState).toBe('SENT');
+    expect(loadScheduledCriticalAlarms()['med-1'].status).toBe('NOT_SCHEDULED');
   });
 });

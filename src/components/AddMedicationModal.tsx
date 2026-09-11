@@ -42,6 +42,11 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
   // state is converted to a number at submit time and the dailyDose
   // validation in handleSubmit checks for empty / 0 / NaN.
   const [currentPills, setCurrentPills] = useState<number>(30);
+  // String-typed mirror of `currentPills`, used ONLY by the
+  // "المتوفر حالياً" number input so the field can be cleared mid-edit
+  // (select-all → delete) without the old `Math.max(0, parseInt || 0)`
+  // snapping it back to 0. Same pattern as packageSizeStr (PR #146).
+  const [currentPillsStr, setCurrentPillsStr] = useState<string>('30');
   const [dailyDose, setDailyDose] = useState<string>('1');
   const [unit, setUnit] = useState('قرص');
   const [warningThresholdDays, setWarningThresholdDays] = useState<string>('5');
@@ -94,6 +99,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
     if (initialData) {
       setName(initialData.name);
       setCurrentPills(initialData.currentPills);
+      setCurrentPillsStr(String(initialData.currentPills));
       // Convert numeric initial values to STRING state for the
       // number inputs (see comment on dailyDose declaration above).
       setDailyDose(String(initialData.dailyDose ?? ''));
@@ -133,6 +139,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
     } else {
       setName('');
       setCurrentPills(30);
+      setCurrentPillsStr('30');
       setDailyDose('1');
       setUnit('قرص');
       setWarningThresholdDays('5');
@@ -172,14 +179,20 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
           setPackageSize(100);
           setPackageSizeStr('100');
         }
-        if (currentPills === 30) setCurrentPills(100);
+        if (currentPills === 30) {
+          setCurrentPills(100);
+          setCurrentPillsStr('100');
+        }
         if (dailyDose === '1') setDailyDose('5');
       } else if (isSolidUnit(newUnit)) {
         if (packageSize === 100) {
           setPackageSize(30);
           setPackageSizeStr('30');
         }
-        if (currentPills === 100) setCurrentPills(30);
+        if (currentPills === 100) {
+          setCurrentPills(30);
+          setCurrentPillsStr('30');
+        }
         if (dailyDose === '5') setDailyDose('1');
       }
     }
@@ -209,7 +222,9 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
     const pStrip = Math.max(1, parseInt(pillsPerStrip, 10) || 1);
     const boxSize = sBox * pStrip;
     const computed = helperBoxes * boxSize + helperStrips * pStrip + helperLoose;
-    setCurrentPills(Math.max(0, computed));
+    const clamped = Math.max(0, computed);
+    setCurrentPills(clamped);
+    setCurrentPillsStr(String(clamped));
     setShowStockHelper(false);
   };
 
@@ -387,7 +402,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                   min="0"
                   step="1"
                   required
-                  value={currentPills}
+                  value={currentPillsStr}
                   // C1: stock adjustments on an EXISTING medication must go
                   // through the RefillModal (+) or the "restore dose" flow,
                   // not the edit form — otherwise the form overwrites the
@@ -395,7 +410,19 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                   // loses deductions. Disabled here on edit; the value is
                   // shown for reference only.
                   disabled={Boolean(initialData)}
-                  onChange={(e) => setCurrentPills(Math.max(0, parseInt(e.target.value) || 0))}
+                  onChange={(e) => {
+                    // Store the raw string so the field can be cleared
+                    // mid-edit (select-all → delete) instead of snapping
+                    // back to 0 like the old `Math.max(0, parseInt || 0)`.
+                    const raw = e.target.value;
+                    setCurrentPillsStr(raw);
+                    const parsed = parseInt(raw, 10);
+                    if (!isNaN(parsed) && parsed >= 0) {
+                      setCurrentPills(parsed);
+                    }
+                    // If empty/invalid, leave currentPills at its previous
+                    // value — the submit handler falls back to it.
+                  }}
                   className={`w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white ${
                     initialData ? 'opacity-60 cursor-not-allowed' : ''
                   }`}

@@ -19,6 +19,33 @@ import { MedicationMenu } from './MedicationMenu';
 import { ReminderBadge } from './ReminderBadge';
 import { StripsBadge, PackageSizeBadge, AutoDeductPausedNote } from './medicationCardParts';
 
+/**
+ * Map a medication's `colorTag` (the user-selected card color from the
+ * AddMedicationModal color picker) to Tailwind classes used for the card's
+ * icon box + left border accent. The status-based color (red/rose/amber
+ * for out-of-stock/critical/warning) still takes priority for the icon
+ * box in the alerts view, but the left border always shows the user's
+ * chosen color so the selection has a visible effect.
+ *
+ * Returns a { bg, border } pair of class strings. Unknown tags default
+ * to teal (the app's primary theme).
+ */
+function colorTagClasses(colorTag: string | undefined): { bg: string; border: string } {
+  switch (colorTag) {
+    case 'rose':
+      return { bg: 'bg-rose-50 text-rose-700', border: 'border-r-rose-400' };
+    case 'amber':
+      return { bg: 'bg-amber-50 text-amber-700', border: 'border-r-amber-400' };
+    case 'sky':
+      return { bg: 'bg-sky-50 text-sky-700', border: 'border-r-sky-400' };
+    case 'violet':
+      return { bg: 'bg-violet-50 text-violet-700', border: 'border-r-violet-400' };
+    case 'teal':
+    default:
+      return { bg: 'bg-teal-50 text-teal-700', border: 'border-r-teal-400' };
+  }
+}
+
 interface MedicationCardProps {
   medication: Medication;
   viewFilter?: 'all' | 'alerts' | 'sufficient';
@@ -406,10 +433,15 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   // -------------------------------------------------------------
   // VIEW 3: "جميع الأدوية" (ALL) - Comprehensive Inventory Management
   // -------------------------------------------------------------
+  // The user-selected colorTag drives the icon box background (when
+  // status is normal) and the card's right accent border (always, so
+  // the color choice is visible even when the status color overrides
+  // the icon box).
+  const tag = colorTagClasses(medication.colorTag);
   return (
     <div
       id={`med-card-${medication.id}`}
-      className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-xs hover:shadow-md transition relative overflow-hidden"
+      className={`bg-white rounded-2xl border border-slate-200/80 p-4 shadow-xs hover:shadow-md transition relative overflow-hidden border-r-4 ${tag.border}`}
     >
       {/* Top row: Name, Category, Menu */}
       <div className="flex items-start justify-between gap-2">
@@ -422,7 +454,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 ? 'bg-rose-100 text-rose-600'
                 : statusInfo.status === 'warning'
                 ? 'bg-amber-100 text-amber-600'
-                : 'bg-teal-50 text-teal-700'
+                : tag.bg
             }`}
           >
             <Pill className="w-5 h-5 rotate-45" />
@@ -589,7 +621,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           className="w-full py-2 px-3 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 shadow-2xs"
         >
           <Plus className="w-4 h-4 text-teal-600" />
-          <span>تعبئة رصيد عند الشراء (+ {medication.unit === 'مل' ? 'عبوة جديدة' : 'علبة جديدة'})</span>
+          <span>تعبئة رصيد عند الشراء</span>
         </button>
       </div>
     </div>

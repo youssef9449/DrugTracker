@@ -27,15 +27,7 @@ vi.mock('./utils/notifications', () => ({
 }));
 vi.mock('../utils/sound', () => ({
   playSuccessChime: vi.fn(),
-  playNotificationSound: vi.fn(),
-  NOTIFICATION_SOUND_OPTIONS: [
-    { id: 'classic_chime', name: 'نغمة كلاسيكية', description: '', icon: '🔔' },
-  ],
-}));
-vi.mock('../utils/audioStore', () => ({
-  saveGlobalCustomSound: vi.fn(() => Promise.resolve()),
-  loadGlobalCustomSound: vi.fn(() => Promise.resolve(null)),
-  deleteGlobalCustomSound: vi.fn(() => Promise.resolve()),
+  stopAllSounds: vi.fn(),
 }));
 
 import App from './App';
@@ -78,7 +70,7 @@ describe('App — hydration (#15)', () => {
 
     render(<App />);
 
-    // Wait for hydration to complete (loadGlobalCustomSound resolves,
+    // Wait for hydration to complete (permission checks resolve,
     // hydrated flips true). The EmptyState component renders when
     // medications is empty — it shows "لا توجد أدوية مسجلة حالياً".
     await waitFor(() => {
@@ -104,7 +96,6 @@ describe('App — hydration (#15)', () => {
       createdAt: '2024-01-01T00:00:00.000Z',
       lastSyncDate: '2024-01-01',
       reminderEnabled: false,
-      notificationSound: 'classic_chime',
     };
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([savedMed]));
 

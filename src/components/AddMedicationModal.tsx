@@ -1,11 +1,7 @@
 import { useState, useEffect, useMemo, type FC, type FormEvent } from 'react';
-import { X, Pill, ShieldAlert, Check, Zap, Layers, Box, Calculator, Bell, Clock, Volume2 } from 'lucide-react';
-import { Medication, describeStockInStrips, NotificationSoundType, formatTimeArabic, isSolidUnit } from '../types';
+import { X, Pill, ShieldAlert, Check, Zap, Layers, Box, Calculator, Bell, Clock } from 'lucide-react';
+import { Medication, describeStockInStrips, formatTimeArabic, isSolidUnit } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
-import {
-  NOTIFICATION_SOUND_OPTIONS,
-  playNotificationSound,
-} from '../utils/sound';
 import { CustomTimePicker } from './CustomTimePicker';
 import { Toggle } from './ui/Toggle';
 import { Modal } from './ui/Modal';
@@ -79,7 +75,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
 
   const [reminderEnabled, setReminderEnabled] = useState<boolean>(false);
   const [reminderTime, setReminderTime] = useState<string>('09:00');
-  const [notificationSound, setNotificationSound] = useState<NotificationSoundType>('classic_chime');
   // Toggle for medications that come as loose pills in a box without
   // strips (e.g., Coffiram — 15 pills per box, no blister strips).
   // When enabled, the strip fields are hidden and the user just
@@ -135,7 +130,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       }
       setReminderEnabled(Boolean(initialData.reminderEnabled));
       setReminderTime(initialData.reminderTime || '09:00');
-      setNotificationSound(initialData.notificationSound || 'classic_chime');
     } else {
       setName('');
       setCurrentPills(30);
@@ -156,7 +150,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       setHelperLoose(0);
       setReminderEnabled(false);
       setReminderTime('09:00');
-      setNotificationSound('classic_chime');
     }
     setShowStockHelper(false);
     setError('');
@@ -308,11 +301,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
         packageSize: calculatedPkgSize,
         reminderEnabled,
         reminderTime: reminderEnabled ? reminderTime : undefined,
-        // Per-medication sound is a synthesized tone only (classic_chime,
-        // marimba, ...). Custom sound files are a GLOBAL setting uploaded
-        // via the AppHeader and apply to all notifications — not stored
-        // per-medication (see H3 in the audit fix).
-        notificationSound: reminderEnabled ? notificationSound : 'classic_chime',
       },
       initialData ? initialData.id : undefined
     );
@@ -795,59 +783,9 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
             )}
           </div>
 
-          {/* Per-medication synthesized sound selector — only shown
-              when reminder is enabled. The "custom file" option was
-              removed because custom sound is now a GLOBAL setting
-              (uploaded via AppHeader, applies to all medications).
-              Each medication still gets its own synthesized tone
-              (classic_chime, marimba, etc.). */}
-          {reminderEnabled && (
-            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
-              <div className="flex items-start gap-2">
-                <div className="w-8 h-8 rounded-xl bg-teal-100 text-teal-800 flex items-center justify-center shrink-0">
-                  <Volume2 className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-slate-800">نغمة تنبيه هذا الدواء</h4>
-                  <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
-                    اختر نغمة مختلفة لكل دواء حتى تميّز التنبيه من غير ما تشوف الشاشة.
-                  </p>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {NOTIFICATION_SOUND_OPTIONS.filter((opt) => opt.id !== 'custom').map((opt) => {
-                  const selected = notificationSound === opt.id;
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => {
-                        setNotificationSound(opt.id);
-                        playNotificationSound(opt.id);
-                      }}
-                      className={`text-right p-2.5 rounded-xl border transition ${
-                        selected
-                          ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
-                          : 'bg-white text-slate-700 border-slate-200 hover:border-teal-300 hover:bg-teal-50'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="text-base">{opt.icon}</span>
-                        {selected && <Volume2 className="w-3.5 h-3.5" />}
-                      </div>
-                      <div className="text-[11px] font-bold mt-1">{opt.name}</div>
-                      <div className={`text-[10px] mt-0.5 ${selected ? 'text-teal-100' : 'text-slate-500'}`}>
-                        {opt.description}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="text-[10px] text-slate-500 bg-teal-50/50 border border-teal-200/60 rounded-lg px-2 py-1.5">
-                💡 لاستخدام ملف صوتي مخصص من جهازك، اضغط على أيقونة الصوت في الشريط العلوي وارفع ملفك هناك — الصوت المخصص يُطبّق على كل الأدوية.
-              </div>
-            </div>
-          )}
+          {/* Per-medication sound selector removed — all dose reminders
+              now use the single native channel sound. */}
+
 
           <div className="p-3 bg-white border border-slate-200 rounded-xl text-xs flex items-center justify-between">
             <span className="text-slate-600">يكفي تقريباً لمدة:</span>

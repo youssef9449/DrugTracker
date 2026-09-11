@@ -4,18 +4,10 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { AddMedicationModal } from './AddMedicationModal';
 import type { Medication } from '../types';
 
-// Mock playNotificationSound so the sound-option buttons don't touch
-// the Web Audio API during tests.
+// Mock sound module — only playSuccessChime + stopAllSounds remain.
 vi.mock('../utils/sound', () => ({
-  playNotificationSound: vi.fn(),
-  NOTIFICATION_SOUND_OPTIONS: [
-    { id: 'classic_chime', name: 'نغمة كلاسيكية', description: 'd', icon: '🔔' },
-    { id: 'gentle_bell', name: 'جرس هادئ', description: 'd', icon: '✨' },
-    { id: 'marimba', name: 'ماريمبا', description: 'd', icon: '🪵' },
-    { id: 'digital_beep', name: 'نغمة رقمية', description: 'd', icon: '📱' },
-    { id: 'harp', name: 'قيثارة', description: 'd', icon: '🎵' },
-    { id: 'radar', name: 'رادار', description: 'd', icon: '📡' },
-  ],
+  playSuccessChime: vi.fn(),
+  stopAllSounds: vi.fn(),
 }));
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {

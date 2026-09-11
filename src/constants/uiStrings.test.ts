@@ -35,11 +35,10 @@ describe('uiStrings (#100)', () => {
     );
   });
 
-  it('PERSIST_FAILURE_MESSAGES has all 8 keys', () => {
-    expect(Object.keys(PERSIST_FAILURE_MESSAGES)).toHaveLength(8);
+  it('PERSIST_FAILURE_MESSAGES has all 7 keys', () => {
+    expect(Object.keys(PERSIST_FAILURE_MESSAGES)).toHaveLength(7);
     expect(PERSIST_FAILURE_MESSAGES.meds).toContain('الأدوية');
     expect(PERSIST_FAILURE_MESSAGES.notifications).toContain('التنبيهات');
-    expect(PERSIST_FAILURE_MESSAGES.customSound).toContain('الصوت المخصص');
   });
 
   it('STORAGE_ERRORS has quota + generic', () => {

@@ -8,7 +8,6 @@ import {
   UserContact,
   DEFAULT_PHARMACY_SETTINGS,
   calculateMedicationStatus,
-  CustomSoundFile,
 } from './types';
 // NOTE: the app previously seeded 3 demo medications + 2 consumption
 // logs on a fresh install (src/data/initialData.ts). That seed data
@@ -33,12 +32,8 @@ import { AndroidFab } from './components/AndroidFab';
 import { EmptyState } from './components/EmptyState';
 import { DoseAlarmModal } from './components/DoseAlarmModal';
 import { UpdatePrompt } from './components/UpdatePrompt';
-import { getDoseNotificationSound, playNotificationSound, playSuccessChime } from './utils/sound';
-import {
-  saveGlobalCustomSound,
-  loadGlobalCustomSound,
-  deleteGlobalCustomSound,
-} from './utils/audioStore';
+import { playSuccessChime } from './utils/sound';
+
 import {
   requestNotificationPermission,
   sendTestAlertNotification,
@@ -149,14 +144,7 @@ export default function App() {
   // changeExactNotificationSetting opens the settings screen). On web /
   // Android < 12 this is always true.
   const [exactAlarmEnabled, setExactAlarmEnabled] = useState<boolean | null>(null);
-  const [appInForeground, setAppInForeground] = useState(true);
   const [globalAutoDeductEnabled, setGlobalAutoDeductEnabled] = useState<boolean>(true);
-  // Global custom sound — shared across all notifications (not
-  // per-medication). The user uploads it from the AppHeader. It is
-  // persisted in IndexedDB (not localStorage) because the base64 data
-  // URL can be up to ~2.7 MB and would blow the localStorage quota —
-  // see C4 in the audit fix.
-  const [globalCustomSound, setGlobalCustomSound] = useState<CustomSoundFile | null>(null);
 
   const [isPhoneFrame, setIsPhoneFrame] = useState(true);
   // Font size toggle: 'normal' (default) or 'large'. Persisted to
@@ -168,8 +156,6 @@ export default function App() {
 
   const { alarmingMedication, openAlarm, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
     medications,
-    soundEnabled,
-    appInForeground,
   });
 
   // #21: register a back-button handler that closes the top modal
@@ -283,74 +269,60 @@ export default function App() {
     // Global auto-deduct — default true.
     setGlobalAutoDeductEnabled(loadString(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'true') !== 'false');
 
-    // Global custom sound is persisted in IndexedDB (not localStorage)
-    // because its base64 data URL can be several MB — see C4. The load
-    // is async; we set `hydrated` after it resolves so the
-    // auto-deduction + alert effects wait for the real saved state.
-    loadGlobalCustomSound()
-      .then((file) => {
-        if (file && file.dataUrl) {
-          setGlobalCustomSound(file);
-        }
-      })
-      .catch((err) => {
-        console.warn('[App] loadGlobalCustomSound failed:', err);
-      })
-      .finally(() => {
-        setHydrated(true);
-      });
-
     // Initialize the in-app notifications flag from the async permission
     // state if no preference has been explicitly saved yet by the user.
-    getNotificationPermission()
-      .then((perm) => {
-        if (localStorage.getItem(NOTIFICATIONS_KEY) === null) {
-          setNotificationsEnabled(perm === 'granted');
+    // Also check exact-alarm permission (Android 12+).
+    // Hydration completes AFTER these async checks resolve so the
+    // scheduler effects see the correct permission state on first run.
+    Promise.all([
+      getNotificationPermission()
+        .then((perm) => {
+          if (localStorage.getItem(NOTIFICATIONS_KEY) === null) {
+            setNotificationsEnabled(perm === 'granted');
 
-          // Auto-request notification permission on the FIRST app open
-          // after install. The browser only shows the permission prompt
-          // when the permission state is 'default' (user hasn't been asked
-          // yet). Once the user grants or denies, the browser remembers
-          // the decision and won't re-show the prompt. If the user denied
-          // permission, this becomes a no-op; the bell button in
-          // AppHeader then takes the user to OS settings to re-enable.
-          //
-          // Auto-requesting on mount is recommended by the Web Push API
-          // spec because it ensures the prompt shows after the user has
-          // had a chance to see the app's value (which is now true on
-          // first open, since the user has just installed it).
-          //
-          // On Android 13+ (Capacitor), this triggers the OS
-          // POST_NOTIFICATIONS permission dialog via
-          // LocalNotifications.requestPermissions(). On older Android,
-          // this is a no-op (notifications allowed by default).
-          if (perm === 'default') {
-            requestNotificationPermission()
-              .then((granted) => {
-                if (localStorage.getItem(NOTIFICATIONS_KEY) === null) {
-                  setNotificationsEnabled(granted);
-                }
-              })
-              .catch((err) => {
-                console.warn('[App] Auto-request notification permission failed:', err);
-              });
+            // Auto-request notification permission on the FIRST app open
+            // after install. The browser only shows the permission prompt
+            // when the permission state is 'default' (user hasn't been asked
+            // yet). Once the user grants or denies, the browser remembers
+            // the decision and won't re-show the prompt. If the user denied
+            // permission, this becomes a no-op; the bell button in
+            // AppHeader then takes the user to OS settings to re-enable.
+            //
+            // Auto-requesting on mount is recommended by the Web Push API
+            // spec because it ensures the prompt shows after the user has
+            // had a chance to see the app's value (which is now true on
+            // first open, since the user has just installed it).
+            //
+            // On Android 13+ (Capacitor), this triggers the OS
+            // POST_NOTIFICATIONS permission dialog via
+            // LocalNotifications.requestPermissions(). On older Android,
+            // this is a no-op (notifications allowed by default).
+            if (perm === 'default') {
+              requestNotificationPermission()
+                .then((granted) => {
+                  if (localStorage.getItem(NOTIFICATIONS_KEY) === null) {
+                    setNotificationsEnabled(granted);
+                  }
+                })
+                .catch((err) => {
+                  console.warn('[App] Auto-request notification permission failed:', err);
+                });
+            }
           }
-        }
-      })
-      .catch((err) => {
-        console.warn('[App] getNotificationPermission failed:', err);
-      });
-
-    // Initialize the exact-alarm permission state (Android 12+). On web /
-    // Android < 12 this resolves to 'granted' immediately. On Android 12+
-    // it checks whether the user has granted SCHEDULE_EXACT_ALARM.
-    getExactAlarmPermission()
-      .then((state) => {
-        setExactAlarmEnabled(state === 'granted');
-      })
-      .catch((err) => {
-        console.warn('[App] getExactAlarmPermission failed:', err);
-      });
+        })
+        .catch((err) => {
+          console.warn('[App] getNotificationPermission failed:', err);
+        }),
+      getExactAlarmPermission()
+        .then((state) => {
+          setExactAlarmEnabled(state === 'granted');
+        })
+        .catch((err) => {
+          console.warn('[App] getExactAlarmPermission failed:', err);
+        }),
+    ]).finally(() => {
+      setHydrated(true);
+    });
 
     // Initialize the Capacitor native bridge (status bar color, back
     // button). No-op on the web — see src/native.ts.
@@ -476,25 +448,9 @@ export default function App() {
   // Persist global custom sound to IndexedDB (C4: storing the base64
   // data URL in localStorage risked blowing the ~5 MB quota and silently
   // dropping other state; IndexedDB has a much larger quota).
-  // Gated on `hydrated` so we don't `deleteGlobalCustomSound()` on mount
-  // (when globalCustomSound is null) BEFORE the async loadGlobalCustomSound
+  // (custom sound storage was removed — this comment is stale)
+  // 
   // in the hydration effect has had a chance to read the saved value.
-  useEffect(() => {
-    if (!hydrated) return;
-    if (globalCustomSound) {
-      // #94: surface IDB save failures to the user (was silent console.warn).
-      saveGlobalCustomSound(globalCustomSound).catch(() => {
-        showToast(PERSIST_FAILURE_MESSAGES.customSound);
-      });
-    } else {
-      deleteGlobalCustomSound().catch(() => {
-        // Deletion failure is non-critical — the orphaned record will be
-        // overwritten on the next save. console.warn for dev visibility.
-        console.warn('[App] deleteGlobalCustomSound failed');
-      });
-    }
-  }, [globalCustomSound, hydrated, showToast]);
-
   // ─────────────────────────────────────────────────────────────
   // Auto-deduction: runs ONCE per session, AFTER hydration completes
   // (so it operates on the user's REAL saved medications, not the
@@ -592,8 +548,6 @@ export default function App() {
     hydrated,
     isFirstRun,
     exactAlarmEnabled,
-    appInForeground,
-    globalCustomSound,
   });
 
   const handleRestoreDose = (medicationId: string, reason: string): boolean => {
@@ -1042,7 +996,7 @@ export default function App() {
       playSuccessChime();
     }
     try {
-      await sendTestAlertNotification(globalCustomSound);
+      await sendTestAlertNotification();
       showToast(TOAST_MESSAGES.testNotificationSent);
     } catch (err) {
       console.warn('[App] Failed to send test alert notification:', err);
@@ -1087,23 +1041,10 @@ export default function App() {
   // useCallback) so this effect only registers once.
   useEffect(() => {
     registerDoseReceivedHandler((medicationId) => {
-      if (soundEnabled) {
-        const medication = medications.find((med) => med.id === medicationId);
-        if (medication) {
-          const selectedSound = getDoseNotificationSound(
-            soundEnabled,
-            globalCustomSound,
-            medication.notificationSound
-          );
-          if (selectedSound) {
-            playNotificationSound(selectedSound.soundType, selectedSound.customSoundFile);
-          }
-        }
-      }
       openAlarm(medicationId);
     });
     return () => registerDoseReceivedHandler(null);
-  }, [globalCustomSound, medications, openAlarm, soundEnabled]);
+  }, [openAlarm]);
 
   // ─────────────────────────────────────────────────────────────
   // App-resume handler: re-check exact-alarm permission when the app
@@ -1116,7 +1057,6 @@ export default function App() {
   // ─────────────────────────────────────────────────────────────
   useEffect(() => {
     registerAppResumeHandler((isActive) => {
-      setAppInForeground(isActive);
       if (isActive) {
         getExactAlarmPermission()
           .then((state) => {
@@ -1530,7 +1470,6 @@ export default function App() {
         onSaveSettings={handleSavePharmacySettings}
         soundEnabled={soundEnabled}
         onToggleSound={() => setSoundEnabled(!soundEnabled)}
-        globalCustomSound={globalCustomSound}
         notificationsEnabled={notificationsEnabled}
         onToggleNotifications={handleToggleNotifications}
         criticalStockAlertsEnabled={criticalStockAlertsEnabled}
@@ -1540,17 +1479,6 @@ export default function App() {
         onSendTestNotification={handleSendTestNotification}
         exactAlarmEnabled={exactAlarmEnabled}
         onOpenExactAlarmSettings={handleOpenExactAlarmSettings}
-        onSetGlobalCustomSound={(file) => {
-          setGlobalCustomSound(file);
-          if (file) {
-            import('./utils/sound')
-              .then((m) => m.playNotificationSound('custom', file))
-              .catch(() => void 0);
-            showToast(`تم تعيين "${file.fileName}" كصوت مخصص لكل الأدوية`);
-          } else {
-            showToast('تم إزالة الصوت المخصص');
-          }
-        }}
       />
       <DoseAlarmModal
         isOpen={Boolean(alarmingMedication)}

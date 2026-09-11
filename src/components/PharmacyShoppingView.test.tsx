@@ -208,7 +208,7 @@ describe('PharmacyShoppingView — refill actions', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'علبة' }));
 
-    expect(screen.getByText('1 علبة')).toBeInTheDocument();
+    expect(screen.getByText('علبة واحدة')).toBeInTheDocument();
     expect(screen.getByText('الإجمالي: علبة واحدة (30 قرصاً)')).toBeInTheDocument();
   });
 

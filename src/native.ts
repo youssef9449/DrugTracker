@@ -13,10 +13,14 @@
  *     on the dark teal background.
  *   - Listen for the Android hardware back button and close the
  *     top modal if one is open, or exit the app if none (#21).
- *   - Create the Android notification channel(s) used by
- *     @capacitor/local-notifications so notifications actually fire
- *     when the app is in the foreground (otherwise Android silently
- *     drops them if no channel is configured).
+ *   - Create the Android notification channel `dose-reminder-v2`
+ *     with the bundled native sound `dose_reminder.wav`.
+ *   - Listen for `appStateChange` to re-check exact-alarm permission
+ *     when the app resumes.
+ *   - Listen for `localNotificationReceived` to open the in-app
+ *     DoseAlarmModal when a dose reminder fires in the foreground.
+ *     No sound playback occurs in this listener — the native channel
+ *     handles the sound.
  */
 
 import { Capacitor } from '@capacitor/core';
@@ -66,8 +70,8 @@ export function registerNotificationActionHandler(
  * Register the handler called when a dose-reminder notification fires
  * while the app is in the foreground. The handler receives the
  * medicationId (from the notification's `extra.medicationId` field) and
- * is responsible for opening the DoseAlarmModal + playing the per-med
- * chime (via useDoseReminders.openAlarm).
+ * is responsible for opening the DoseAlarmModal. No sound is played —
+ * the native notification channel plays the bundled sound.
  *
  * Pass null to unregister (e.g. on App unmount / HMR).
  */
@@ -77,9 +81,10 @@ export function registerDoseReceivedHandler(
   doseReceivedHandler = handler;
 }
 
-// App-state handler — called for both foreground/background transitions.
-// App.tsx uses it to switch fixed dose channels and re-check exact alarms
-// when returning from Android settings.
+// App-state handler — called when the app transitions between
+// foreground/background. App.tsx uses it to re-check exact-alarm
+// permission on resume (the user may have granted/denied it in
+// Android settings).
 let appStateHandle: { remove: () => Promise<void> } | null = null;
 let appResumeHandler: ((isActive: boolean) => void) | null = null;
 
@@ -123,9 +128,10 @@ export async function initNativeBridge(): Promise<void> {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // App state listener — switches dose schedules between the silent
-  // foreground channel and the audible background/killed channel, and
-  // lets App.tsx re-check exact-alarm permission on active resume.
+  // App state listener — fires on foreground/background transitions.
+  // Used to re-check exact-alarm permission when the app resumes
+  // (the user may have just granted/denied SCHEDULE_EXACT_ALARM in
+  // the Android settings screen).
   // ─────────────────────────────────────────────────────────────
   try {
     appStateHandle = await App.addListener('appStateChange', ({ isActive }) => {
@@ -204,8 +210,8 @@ export async function initNativeBridge(): Promise<void> {
       },
     ];
 
-    // Android channel sound is immutable. Replace the old silent channel
-    // once instead of creating channels for individual medication sounds.
+    // Android channel sound is immutable. Delete the old v1 channel
+    // if it exists so the v2 channel with the bundled sound takes over.
     if (existingIds.has('dose-reminder')) {
       await LocalNotifications.deleteChannel({ id: 'dose-reminder' });
       console.info('[native] Migrated dose-reminder channel to dose-reminder-v2');

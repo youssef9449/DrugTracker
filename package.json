@@ -17,7 +17,7 @@
     "icons": "node scripts/generate-icons.mjs",
     "cap:sync": "npm run build && npx cap sync android && node scripts/prepare-android.mjs",
     "cap:add": "npx cap add android",
-    "cap:studio": "npm run build && npx cap sync android && npx cap open android",
+    "cap:studio": "npm run build && npx cap sync android && node scripts/prepare-android.mjs && npx cap open android",
     "apk:debug": "npm run build && npx cap sync android && node scripts/prepare-android.mjs && cd android && ./gradlew assembleDebug"
   },
   "dependencies": {

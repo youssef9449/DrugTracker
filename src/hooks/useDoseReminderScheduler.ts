@@ -6,6 +6,8 @@ import {
   cancelDoseReminder,
   cancelSnoozedDoseReminder,
   cancelLegacySnoozedDoseReminder,
+  DOSE_REMINDER_CHANNEL_ID,
+  DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
 } from '../utils/notifications';
 
 /**
@@ -26,11 +28,12 @@ export interface UseDoseReminderSchedulerOptions {
    * On web / Android < 12 this is always true (no permission needed).
    */
   exactAlarmEnabled: boolean | null;
+  appInForeground: boolean;
   /**
    * The global user-uploaded custom sound. When the user changes it, all
    * scheduled dose reminders are re-armed so the notification's `extra`
-   * field carries the new sound (played by the foreground
-   * localNotificationReceived listener in native.ts).
+  * state is used by the foreground App handler; Android always uses the
+  * bundled sound on the background channel.
    */
   globalCustomSound?: CustomSoundFile | null;
 }
@@ -68,6 +71,7 @@ export function useDoseReminderScheduler({
   hydrated,
   isFirstRun,
   exactAlarmEnabled,
+  appInForeground,
   globalCustomSound,
 }: UseDoseReminderSchedulerOptions): void {
   const scheduledDoseIdsRef = useRef<Set<string>>(new Set());
@@ -199,7 +203,10 @@ export function useDoseReminderScheduler({
               unit,
               pills,
               customSound,
-              perMedSound
+              perMedSound,
+              appInForeground
+                ? DOSE_REMINDER_FOREGROUND_CHANNEL_ID
+                : DOSE_REMINDER_CHANNEL_ID
             )).then(() => {
               // Post-schedule stale-guard: re-check the gen after the
               // await. If a newer run bumped it during the schedule(),
@@ -230,6 +237,7 @@ export function useDoseReminderScheduler({
     soundSignature,
     notificationsEnabled,
     exactAlarmEnabled,
+    appInForeground,
     hydrated,
     isFirstRun,
   ]);

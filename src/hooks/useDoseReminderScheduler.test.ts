@@ -61,6 +61,7 @@ function defaultOpts(overrides: Record<string, unknown> = {}) {
     hydrated: true,
     isFirstRun: false,
     exactAlarmEnabled: true,
+    appInForeground: true,
     globalCustomSound: null as CustomSoundFile | null,
     ...overrides,
   };
@@ -99,10 +100,10 @@ describe('useDoseReminderScheduler — basic scheduling', () => {
 
     expect(mocks.schedule).toHaveBeenCalledTimes(2);
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-a', 'A', '08:00', 1, 'قرص', 30, null, 'classic_chime'
+      'med-a', 'A', '08:00', 1, 'قرص', 30, null, 'classic_chime', 'dose-reminder-foreground-v1'
     );
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-b', 'B', '14:00', 1, 'قرص', 30, null, 'classic_chime'
+      'med-b', 'B', '14:00', 1, 'قرص', 30, null, 'classic_chime', 'dose-reminder-foreground-v1'
     );
   });
 
@@ -115,7 +116,7 @@ describe('useDoseReminderScheduler — basic scheduling', () => {
 
     expect(mocks.cancel).toHaveBeenCalledWith('med-x');
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-x', 'Test Med', '09:00', 1, 'قرص', 30, null, 'classic_chime'
+      'med-x', 'Test Med', '09:00', 1, 'قرص', 30, null, 'classic_chime', 'dose-reminder-foreground-v1'
     );
   });
 });
@@ -273,7 +274,7 @@ describe('useDoseReminderScheduler — exact-alarm gating', () => {
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
 
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-exact-on', 'Test Med', '09:00', 1, 'قرص', 30, null, 'classic_chime'
+      'med-exact-on', 'Test Med', '09:00', 1, 'قرص', 30, null, 'classic_chime', 'dose-reminder-foreground-v1'
     );
   });
 });
@@ -302,7 +303,8 @@ describe('useDoseReminderScheduler — custom sound', () => {
       'قرص',
       30,
       customSound,
-      'classic_chime'
+      'classic_chime',
+      'dose-reminder-foreground-v1'
     );
   });
 
@@ -328,5 +330,23 @@ describe('useDoseReminderScheduler — custom sound', () => {
     // The latest schedule call must carry the NEW sound.
     const lastCall = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
     expect(lastCall[6]).toEqual(sound2);
+  });
+});
+
+describe('useDoseReminderScheduler — channel policy', () => {
+  it('moves the stable daily reminder to the audible channel when backgrounded', async () => {
+    const med = makeMed({ id: 'med-background' });
+    const { rerender } = renderHook(
+      ({ appInForeground }) =>
+        useDoseReminderScheduler(defaultOpts({ medications: [med], appInForeground })),
+      { initialProps: { appInForeground: true } }
+    );
+
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    rerender({ appInForeground: false });
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
+
+    const lastCall = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
+    expect(lastCall[lastCall.length - 1]).toBe('dose-reminder-v2');
   });
 });

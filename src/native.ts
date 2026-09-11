@@ -23,7 +23,10 @@ import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { App } from '@capacitor/app';
 import { LocalNotifications, type Channel, type Importance, type Visibility } from '@capacitor/local-notifications';
-import { DOSE_REMINDER_CHANNEL_ID } from './utils/notifications';
+import {
+  DOSE_REMINDER_CHANNEL_ID,
+  DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
+} from './utils/notifications';
 
 let initialized = false;
 
@@ -46,7 +49,7 @@ export function registerBackButtonHandler(handler: (() => boolean) | null) {
 
 // #38: store Capacitor listener handles so they can be removed if
 // needed (e.g. on HMR of native.ts, duplicate listeners would
-// otherwise accumulate and each would play the custom sound).
+// otherwise accumulate).
 let backPressHandle: { remove: () => Promise<void> } | null = null;
 let notificationHandle: { remove: () => Promise<void> } | null = null;
 let notificationActionHandle: { remove: () => Promise<void> } | null = null;
@@ -77,14 +80,13 @@ export function registerDoseReceivedHandler(
   doseReceivedHandler = handler;
 }
 
-// App-resume handler — called when the app returns to the foreground
-// (active state). App.tsx registers a handler that re-checks the
-// exact-alarm permission, since the user may have just granted/denied
-// it in the Android settings screen (opened via openExactAlarmSettings).
+// App-state handler — called for both foreground/background transitions.
+// App.tsx uses it to switch fixed dose channels and re-check exact alarms
+// when returning from Android settings.
 let appStateHandle: { remove: () => Promise<void> } | null = null;
-let appResumeHandler: (() => void) | null = null;
+let appResumeHandler: ((isActive: boolean) => void) | null = null;
 
-export function registerAppResumeHandler(handler: (() => void) | null) {
+export function registerAppResumeHandler(handler: ((isActive: boolean) => void) | null) {
   appResumeHandler = handler;
 }
 
@@ -124,17 +126,15 @@ export async function initNativeBridge(): Promise<void> {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // App state (resume) listener — re-checks exact-alarm permission
-  // when the app returns to the foreground. The user may have just
-  // granted/denied SCHEDULE_EXACT_ALARM in the Android settings screen
-  // (opened via openExactAlarmSettings). Capacitor's appStateChange
-  // fires with isActive=true when the app becomes active again.
+  // App state listener — switches dose schedules between the silent
+  // foreground channel and the audible background/killed channel, and
+  // lets App.tsx re-check exact-alarm permission on active resume.
   // ─────────────────────────────────────────────────────────────
   try {
     appStateHandle = await App.addListener('appStateChange', ({ isActive }) => {
-      if (isActive && appResumeHandler) {
+      if (appResumeHandler) {
         try {
-          appResumeHandler();
+          appResumeHandler(isActive);
         } catch (err) {
           console.warn('[native] appResumeHandler failed:', err);
         }
@@ -195,6 +195,13 @@ export async function initNativeBridge(): Promise<void> {
         name: 'تذكير الجرعات',
         description: 'تذكيرات يومية بمواعيد الأدوية',
         sound: 'dose_reminder.wav',
+        importance: 4 as Importance,
+        visibility: 1 as Visibility,
+      },
+      {
+        id: DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
+        name: 'تذكير الجرعات داخل التطبيق',
+        description: 'قناة صامتة للصوت المخصص عند فتح التطبيق',
         importance: 4 as Importance,
         visibility: 1 as Visibility,
       },

@@ -293,6 +293,27 @@ AppSettingsModal when it's missing. The `useDoseReminderScheduler` hook
 BLOCKS dose-reminder scheduling when the permission is denied (inexact
 alarms are unacceptable for medication reminders).
 
+### Dose notification sound policy
+
+Android notification channels cannot change their sound after creation, and
+Capacitor Local Notifications 6 posts the native notification after emitting
+the foreground `localNotificationReceived` event. The app therefore uses two
+fixed dose channels:
+
+- `dose-reminder-foreground-v1` is silent. While the app is active, the
+   foreground handler plays one global custom, per-medication synthesized, or
+   default chime and opens the modal.
+- `dose-reminder-v2` contains the bundled `dose_reminder.wav`. When the app
+   is backgrounded or killed, Android plays this native sound without
+   JavaScript.
+
+Lifecycle transitions re-arm the same stable notification IDs onto the
+appropriate channel. The global uploaded sound remains in IndexedDB and is
+never copied into native notification extras. The `soundEnabled` setting
+controls foreground JavaScript playback; Android may still play the native
+background fallback because channel sound cannot be toggled per notification
+without creating uncontrolled channel state.
+
 #### 7. Sync the web build into the Android project
 
 ```bash

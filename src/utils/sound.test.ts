@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   readCustomSoundFile,
+  getDoseNotificationSound,
   CUSTOM_SOUND_ACCEPT_ATTR,
   NOTIFICATION_SOUND_OPTIONS,
   stopAllSounds,
@@ -21,6 +22,30 @@ function makeAudioFile(
   const content = new Uint8Array(size);
   return new File([content], name, { type });
 }
+
+describe('getDoseNotificationSound', () => {
+  const customSound: CustomSoundFile = {
+    fileName: 'dose.mp3',
+    mimeType: 'audio/mpeg',
+    dataUrl: 'data:audio/mpeg;base64,AAAA',
+  };
+
+  it('disables foreground playback when sound is off', () => {
+    expect(getDoseNotificationSound(false, customSound, 'marimba')).toBeNull();
+  });
+
+  it('prefers the global custom sound', () => {
+    expect(getDoseNotificationSound(true, customSound, 'marimba')).toEqual({
+      soundType: 'custom',
+      customSoundFile: customSound,
+    });
+  });
+
+  it('uses the per-med sound, then the default chime', () => {
+    expect(getDoseNotificationSound(true, null, 'harp')).toEqual({ soundType: 'harp' });
+    expect(getDoseNotificationSound(true, null, undefined)).toEqual({ soundType: 'classic_chime' });
+  });
+});
 
 describe('CUSTOM_SOUND_ACCEPT_ATTR', () => {
   it('is "audio/*" (the generic audio MIME wildcard)', () => {

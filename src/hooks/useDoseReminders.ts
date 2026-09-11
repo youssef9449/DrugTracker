@@ -4,7 +4,11 @@ import { getTodayDateString } from '../utils/dateCalculations';
 import { playNotificationSound, stopAllSounds } from '../utils/sound';
 import { loadJson, saveJson } from '../utils/storage';
 import { DEFAULT_SNOOZE_MINUTES, MS_PER_MINUTE } from '../utils/time';
-import { scheduleSnoozedDoseReminder } from '../utils/notifications';
+import {
+  scheduleSnoozedDoseReminder,
+  DOSE_REMINDER_CHANNEL_ID,
+  DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
+} from '../utils/notifications';
 
 const FIRED_KEY = 'android_med_tracker_fired_reminders_v1';
 const SNOOZE_KEY = 'android_med_tracker_snooze_v1';
@@ -16,6 +20,7 @@ function firedKey(medId: string, dateStr: string) {
 interface UseDoseRemindersOptions {
   medications: Medication[];
   soundEnabled: boolean;
+  appInForeground: boolean;
 }
 
 /**
@@ -33,8 +38,8 @@ interface UseDoseRemindersOptions {
  * The recurring native reminder is now scheduled by
  * {@link useDoseReminderScheduler} (Android's AlarmManager fires it every
  * day at reminderTime, foreground or killed). When the notification fires
- * while the app is open, the `localNotificationReceived` listener in
- * native.ts calls back here via `openAlarm`. This hook no longer polls.
+ * while the app is open, the App-level received handler plays the selected
+ * foreground sound and calls back here via `openAlarm`. This hook no longer polls.
  *
  * === Snooze ===
  * Snoozing schedules a ONE-SHOT native notification X minutes in the
@@ -57,6 +62,7 @@ interface UseDoseRemindersOptions {
 export function useDoseReminders({
   medications,
   soundEnabled,
+  appInForeground,
 }: UseDoseRemindersOptions) {
   const [alarmingMedication, setAlarmingMedication] = useState<Medication | null>(null);
   // The currently-alarming med id, kept in a ref so the stable
@@ -76,6 +82,11 @@ export function useDoseReminders({
   useEffect(() => {
     medicationsRef.current = medications;
   }, [medications]);
+
+  const appInForegroundRef = useRef(appInForeground);
+  useEffect(() => {
+    appInForegroundRef.current = appInForeground;
+  }, [appInForeground]);
 
   const dismissAlarm = useCallback(() => {
     stopAllSounds();
@@ -113,14 +124,41 @@ export function useDoseReminders({
       medication.unit,
       medication.reminderTime,
       minutes,
-      medication.notificationSound || 'classic_chime'
+      medication.notificationSound || 'classic_chime',
+      appInForegroundRef.current
+        ? DOSE_REMINDER_FOREGROUND_CHANNEL_ID
+        : DOSE_REMINDER_CHANNEL_ID
     ).catch(() => void 0);
   }, []);
 
-  // openAlarm is called by the native localNotificationReceived listener
-  // when the recurring dose-reminder notification fires while the app is
-  // in the foreground. It opens the DoseAlarmModal + plays the per-med
-  // chime + writes FIRED_KEY (dedup). Stable signature (no deps) so the
+  // A snooze can outlive the foreground state in which it was created.
+  // Re-arm its stable ID onto the appropriate fixed channel on lifecycle
+  // transitions; this never creates a second notification entry.
+  useEffect(() => {
+    const snoozes = loadJson<Record<string, number>>(SNOOZE_KEY, {});
+    const channelId = appInForeground
+      ? DOSE_REMINDER_FOREGROUND_CHANNEL_ID
+      : DOSE_REMINDER_CHANNEL_ID;
+    for (const medication of medicationsRef.current) {
+      const until = snoozes[medication.id];
+      if (!until || until <= Date.now()) continue;
+      const minutes = Math.max(1, Math.ceil((until - Date.now()) / MS_PER_MINUTE));
+      scheduleSnoozedDoseReminder(
+        medication.id,
+        medication.name,
+        medication.dailyDose,
+        medication.unit,
+        medication.reminderTime,
+        minutes,
+        medication.notificationSound || 'classic_chime',
+        channelId
+      ).catch(() => void 0);
+    }
+  }, [appInForeground]);
+
+  // openAlarm is called after the native localNotificationReceived event
+  // has played the single foreground sound. It opens the DoseAlarmModal
+  // and writes FIRED_KEY (dedup). Stable signature (no deps) so the
   // listener registration in App.tsx doesn't re-subscribe on every render.
   const openAlarm = useCallback((medId: string) => {
     // Resolve the med from the latest medications array.
@@ -145,13 +183,8 @@ export function useDoseReminders({
     isTestAlarmRef.current = false;
     alarmingIdRef.current = med.id;
     setAlarmingMedication(med);
-    // NOTE: we do NOT play any sound here. The
-    // localNotificationReceived listener in native.ts already played
-    // the SINGLE authoritative sound (custom sound if set, otherwise
-    // the per-med synthesized chime) before calling openAlarm. Playing
-    // a second sound here would produce a double-sound bug. The
-    // soundEnabled flag is respected by the listener (it reads the
-    // per-med notificationSound from the notification's extra field).
+    // Sound is deliberately absent here. The App-level notification
+    // handler plays it before calling openAlarm, so this cannot double-play.
   }, []);
 
   const testAlarm = useCallback((med: Medication) => {

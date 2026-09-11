@@ -280,6 +280,19 @@ export function playNotificationSound(
   playSynthesizedSound(soundType);
 }
 
+/** Select the single foreground sound for a scheduled dose event. */
+export function getDoseNotificationSound(
+  soundEnabled: boolean,
+  globalCustomSound: CustomSoundFile | null | undefined,
+  perMedSound: NotificationSoundType | undefined
+): { soundType: NotificationSoundType; customSoundFile?: CustomSoundFile } | null {
+  if (!soundEnabled) return null;
+  if (globalCustomSound?.dataUrl) {
+    return { soundType: 'custom', customSoundFile: globalCustomSound };
+  }
+  return { soundType: perMedSound || 'classic_chime' };
+}
+
 function playSynthesizedSound(soundType: NotificationSoundType) {
   try {
     const ctx = getAudioContext();

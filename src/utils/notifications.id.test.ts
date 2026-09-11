@@ -20,6 +20,7 @@ vi.mock('@capacitor/local-notifications', () => ({
     schedule: mocks.schedule,
     cancel: mocks.cancel,
     checkPermissions: mocks.checkPermissions,
+    checkExactNotificationSetting: mocks.checkExactNotificationSetting,
   },
 }));
 

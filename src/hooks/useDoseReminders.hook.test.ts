@@ -50,6 +50,7 @@ function defaultOpts(overrides: Record<string, unknown> = {}) {
   return {
     medications: [],
     soundEnabled: true,
+    appInForeground: true,
     ...overrides,
   };
 }
@@ -357,7 +358,8 @@ describe('useDoseReminders', () => {
         'قرص',
         '09:00',
         15,
-        'classic_chime'
+        'classic_chime',
+        'dose-reminder-foreground-v1'
       );
     });
   });

@@ -33,7 +33,7 @@ import { AndroidFab } from './components/AndroidFab';
 import { EmptyState } from './components/EmptyState';
 import { DoseAlarmModal } from './components/DoseAlarmModal';
 import { UpdatePrompt } from './components/UpdatePrompt';
-import { playSuccessChime } from './utils/sound';
+import { getDoseNotificationSound, playNotificationSound, playSuccessChime } from './utils/sound';
 import {
   saveGlobalCustomSound,
   loadGlobalCustomSound,
@@ -149,6 +149,7 @@ export default function App() {
   // changeExactNotificationSetting opens the settings screen). On web /
   // Android < 12 this is always true.
   const [exactAlarmEnabled, setExactAlarmEnabled] = useState<boolean | null>(null);
+  const [appInForeground, setAppInForeground] = useState(true);
   const [globalAutoDeductEnabled, setGlobalAutoDeductEnabled] = useState<boolean>(true);
   // Global custom sound — shared across all notifications (not
   // per-medication). The user uploads it from the AppHeader. It is
@@ -168,6 +169,7 @@ export default function App() {
   const { alarmingMedication, openAlarm, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
     medications,
     soundEnabled,
+    appInForeground,
   });
 
   // #21: register a back-button handler that closes the top modal
@@ -590,6 +592,7 @@ export default function App() {
     hydrated,
     isFirstRun,
     exactAlarmEnabled,
+    appInForeground,
     globalCustomSound,
   });
 
@@ -1076,17 +1079,31 @@ export default function App() {
   // Register the dose-received handler: when a native dose-reminder
   // notification fires while the app is in the foreground, the
   // localNotificationReceived listener in native.ts calls this handler
-  // with the medicationId, which opens the DoseAlarmModal + plays the
-  // per-med chime (via openAlarm). This replaces the old JS polling —
+  // with the medicationId. The handler plays exactly one foreground sound
+  // using the global custom sound or medication sound, then opens the modal
+  // via openAlarm. This replaces the old JS polling —
   // the native scheduler fires the notification at reminderTime, and
   // this surfaces it in-app. openAlarm is stable (empty-deps
   // useCallback) so this effect only registers once.
   useEffect(() => {
     registerDoseReceivedHandler((medicationId) => {
+      if (soundEnabled) {
+        const medication = medications.find((med) => med.id === medicationId);
+        if (medication) {
+          const selectedSound = getDoseNotificationSound(
+            soundEnabled,
+            globalCustomSound,
+            medication.notificationSound
+          );
+          if (selectedSound) {
+            playNotificationSound(selectedSound.soundType, selectedSound.customSoundFile);
+          }
+        }
+      }
       openAlarm(medicationId);
     });
     return () => registerDoseReceivedHandler(null);
-  }, [openAlarm]);
+  }, [globalCustomSound, medications, openAlarm, soundEnabled]);
 
   // ─────────────────────────────────────────────────────────────
   // App-resume handler: re-check exact-alarm permission when the app
@@ -1098,14 +1115,17 @@ export default function App() {
   // dose reminders with the correct (exact or cancelled) policy.
   // ─────────────────────────────────────────────────────────────
   useEffect(() => {
-    registerAppResumeHandler(() => {
-      getExactAlarmPermission()
-        .then((state) => {
-          setExactAlarmEnabled(state === 'granted');
-        })
-        .catch((err) => {
-          console.warn('[App] Resume exact-alarm re-check failed:', err);
-        });
+    registerAppResumeHandler((isActive) => {
+      setAppInForeground(isActive);
+      if (isActive) {
+        getExactAlarmPermission()
+          .then((state) => {
+            setExactAlarmEnabled(state === 'granted');
+          })
+          .catch((err) => {
+            console.warn('[App] Resume exact-alarm re-check failed:', err);
+          });
+      }
     });
     return () => registerAppResumeHandler(null);
   }, []);

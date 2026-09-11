@@ -46,6 +46,7 @@ import {
 
 /** Versioned because Android channel sound settings are immutable. */
 export const DOSE_REMINDER_CHANNEL_ID = 'dose-reminder-v2';
+export const DOSE_REMINDER_FOREGROUND_CHANNEL_ID = 'dose-reminder-foreground-v1';
 
 /**
  * Returns true when running inside the Capacitor native runtime
@@ -894,7 +895,8 @@ export async function scheduleSnoozedDoseReminder(
   unit: string,
   reminderTime: string | undefined,
   minutes: number,
-  perMedSound?: string
+  perMedSound?: string,
+  channelId: string = DOSE_REMINDER_CHANNEL_ID,
 ): Promise<void> {
   const fireAt = new Date(Date.now() + minutes * 60_000);
   const timeHint = reminderTime ? ` (موعد الجرعة الأصلي ${reminderTime})` : '';
@@ -921,7 +923,7 @@ export async function scheduleSnoozedDoseReminder(
               allowWhileIdle: true,
             },
             smallIcon: 'ic_launcher',
-            channelId: DOSE_REMINDER_CHANNEL_ID,
+            channelId,
             actionTypeId: 'dose-reminder',
             ongoing: false,
             autoCancel: true,
@@ -957,11 +959,10 @@ export async function scheduleSnoozedDoseReminder(
  *
  * `allowWhileIdle: true` lets the alarm fire even in Doze mode.
  *
- * `customSoundFile` is stored in the notification's `extra` field so
- * the foreground `localNotificationReceived` listener can play it when
- * the notification fires while the app is open. In the background the
- * channel's default sound is used (custom sound in background is
- * deferred — problem #2).
+ * `customSoundFile` is used only by the web fallback. Android does not
+ * serialize the large data URL; the foreground App handler reads the
+ * current IndexedDB-backed sound, while the audible background channel
+ * uses its bundled native sound.
  */
 export async function scheduleDoseReminder(
   medId: string,
@@ -971,7 +972,8 @@ export async function scheduleDoseReminder(
   unit: string,
   currentPills: number,
   customSoundFile: { fileName: string; mimeType: string; dataUrl: string } | null,
-  perMedSound?: string
+  perMedSound?: string,
+  channelId: string = DOSE_REMINDER_CHANNEL_ID
 ): Promise<void> {
   // Validate the HH:MM string and compute the next fire Date.
   const parts = reminderTime.split(':').map((n) => parseInt(n, 10));
@@ -1012,7 +1014,7 @@ export async function scheduleDoseReminder(
               allowWhileIdle: true,
             },
             smallIcon: 'ic_launcher',
-            channelId: DOSE_REMINDER_CHANNEL_ID,
+            channelId,
             actionTypeId: 'dose-reminder',
             ongoing: false,
             autoCancel: true,

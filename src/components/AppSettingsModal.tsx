@@ -54,7 +54,7 @@ export interface AppSettingsModalProps {
    *  on Android 12+. When false, dose reminders CANNOT be guaranteed
    *  to fire on time — the UI shows a warning + a button to open the
    *  Android exact-alarm settings. */
-  exactAlarmEnabled?: boolean;
+  exactAlarmEnabled?: boolean | null;
   /** Open the Android settings screen to grant exact-alarm permission. */
   onOpenExactAlarmSettings?: () => void;
 }
@@ -77,7 +77,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   onSendTestNotification,
   autoDeductEnabled = true,
   onToggleAutoDeduct,
-  exactAlarmEnabled = true,
+  exactAlarmEnabled = null,
   onOpenExactAlarmSettings,
   mode = 'all',
 }) => {

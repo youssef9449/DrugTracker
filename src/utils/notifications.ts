@@ -44,6 +44,9 @@ import {
   SW_READY_TIMEOUT_MS,
 } from './time';
 
+/** Versioned because Android channel sound settings are immutable. */
+export const DOSE_REMINDER_CHANNEL_ID = 'dose-reminder-v2';
+
 /**
  * Returns true when running inside the Capacitor native runtime
  * (Android or iOS). When false, we're in a browser/AI Studio preview
@@ -368,7 +371,7 @@ export async function sendMedicationDoseReminder(
     id: notificationId('dose', medId),
     title,
     body,
-    channelId: 'dose-reminder',
+    channelId: DOSE_REMINDER_CHANNEL_ID,
     smallIcon: 'ic_launcher',
     actionTypeId: 'dose-reminder',
     extra: { medicationId: medId },
@@ -426,7 +429,6 @@ async function scheduleNotification(opts: {
             // Sound: uses the default Android notification sound
             // for the channel. The custom sound is played via the
             // localNotificationReceived listener in the foreground.
-            sound: undefined,
             smallIcon: opts.smallIcon,
             channelId: opts.channelId,
             actionTypeId: opts.actionTypeId,
@@ -441,15 +443,6 @@ async function scheduleNotification(opts: {
             // objects with string fields work fine.
             extra: {
               ...opts.extra,
-              ...(opts.customSoundFile
-                ? {
-                    customSoundFile: {
-                      fileName: opts.customSoundFile.fileName,
-                      mimeType: opts.customSoundFile.mimeType,
-                      dataUrl: opts.customSoundFile.dataUrl,
-                    },
-                  }
-                : {}),
             },
           },
         ],
@@ -486,7 +479,7 @@ export async function sendTestAlertNotification(
     id: notificationId('test'),
     title: '🔔 إشعار تجريبي: متابع الأدوية',
     body: 'الإشعارات والتنبيهات تعمل بشكل سليم على جهازك!',
-    channelId: 'dose-reminder',
+    channelId: DOSE_REMINDER_CHANNEL_ID,
     smallIcon: 'ic_launcher',
     customSoundFile,
   });
@@ -584,6 +577,7 @@ const NOTIFICATION_ID_BASE = {
   test: 4_000_000,
   criticalAlarm: 5_000_000,
   doseAlarm: 6_000_000,
+  doseSnooze: 7_000_000,
 } as const;
 
 type NotificationCategory = keyof typeof NOTIFICATION_ID_BASE;
@@ -824,6 +818,11 @@ export function doseReminderAlarmId(medId: string): number {
   return notificationId('doseAlarm', medId);
 }
 
+/** Stable, separate id for a one-shot snoozed dose reminder. */
+export function snoozeDoseReminderId(medId: string): number {
+  return notificationId('doseSnooze', medId);
+}
+
 /**
  * Cancel any pending recurring dose-reminder alarm for this medication.
  *
@@ -838,6 +837,33 @@ export async function cancelDoseReminder(medId: string): Promise<void> {
     });
   } catch (err) {
     console.warn('[notifications] cancelDoseReminder failed:', err);
+  }
+}
+
+/** Cancel the current and legacy one-shot snooze IDs for a medication. */
+export async function cancelSnoozedDoseReminder(medId: string): Promise<void> {
+  if (!isNativePlatform()) return;
+  try {
+    await LocalNotifications.cancel({
+      notifications: [
+        { id: snoozeDoseReminderId(medId) },
+        { id: notificationId('dose', medId) },
+      ],
+    });
+  } catch (err) {
+    console.warn('[notifications] cancelSnoozedDoseReminder failed:', err);
+  }
+}
+
+/** Remove only the pre-v2 snooze ID during normal daily rescheduling. */
+export async function cancelLegacySnoozedDoseReminder(medId: string): Promise<void> {
+  if (!isNativePlatform()) return;
+  try {
+    await LocalNotifications.cancel({
+      notifications: [{ id: notificationId('dose', medId) }],
+    });
+  } catch (err) {
+    console.warn('[notifications] cancelLegacySnoozedDoseReminder failed:', err);
   }
 }
 
@@ -877,33 +903,32 @@ export async function scheduleSnoozedDoseReminder(
 
   if (isNativePlatform()) {
     try {
+      if (await getExactAlarmPermission() !== 'granted') {
+        throw new Error('Exact-alarm permission is required for snoozed dose reminders');
+      }
       const perm = await LocalNotifications.checkPermissions();
       if (perm.display !== 'granted') {
-        console.warn('[notifications] scheduleSnoozedDoseReminder skipped: permission not granted');
-        return;
+        throw new Error('Notification permission is required for snoozed dose reminders');
       }
       await LocalNotifications.schedule({
         notifications: [
           {
-            // Use the immediate 'dose' id (3M band) so the snoozed
-            // notification replaces any pending immediate dose notif.
-            id: notificationId('dose', medId),
+            id: snoozeDoseReminderId(medId),
             title,
             body,
             schedule: {
               at: fireAt,
               allowWhileIdle: true,
             },
-            sound: undefined,
             smallIcon: 'ic_launcher',
-            channelId: 'dose-reminder',
+            channelId: DOSE_REMINDER_CHANNEL_ID,
             actionTypeId: 'dose-reminder',
             ongoing: false,
             autoCancel: true,
             extra: {
               medicationId: medId,
-              // per-med notificationSound id so the foreground listener
-              // plays the same single-sound policy as the daily reminder.
+              // Kept for foreground modal routing and diagnostics. Native
+              // channel sound, not this value, plays the notification.
               notificationSound: perMedSound || 'classic_chime',
             },
           },
@@ -912,6 +937,7 @@ export async function scheduleSnoozedDoseReminder(
       return;
     } catch (err) {
       console.warn('[notifications] Capacitor scheduleSnoozedDoseReminder failed:', err);
+      throw err;
     }
   }
 
@@ -966,10 +992,12 @@ export async function scheduleDoseReminder(
 
   if (isNativePlatform()) {
     try {
+      if (await getExactAlarmPermission() !== 'granted') {
+        throw new Error('Exact-alarm permission is required for dose reminders');
+      }
       const perm = await LocalNotifications.checkPermissions();
       if (perm.display !== 'granted') {
-        console.warn('[notifications] scheduleDoseReminder skipped: permission not granted');
-        return;
+        throw new Error('Notification permission is required for dose reminders');
       }
       await LocalNotifications.schedule({
         notifications: [
@@ -983,26 +1011,16 @@ export async function scheduleDoseReminder(
               every: 'day',
               allowWhileIdle: true,
             },
-            sound: undefined,
             smallIcon: 'ic_launcher',
-            channelId: 'dose-reminder',
+            channelId: DOSE_REMINDER_CHANNEL_ID,
             actionTypeId: 'dose-reminder',
             ongoing: false,
             autoCancel: true,
             extra: {
               medicationId: medId,
-              // per-med notificationSound id so the foreground listener
-              // can play the synthesized chime when no custom sound is set.
+              // Kept for foreground modal routing and diagnostics. Native
+              // channel sound, not this value, plays the notification.
               notificationSound: perMedSound || 'classic_chime',
-              ...(customSoundFile
-                ? {
-                    customSoundFile: {
-                      fileName: customSoundFile.fileName,
-                      mimeType: customSoundFile.mimeType,
-                      dataUrl: customSoundFile.dataUrl,
-                    },
-                  }
-                : {}),
             },
           },
         ],
@@ -1010,7 +1028,7 @@ export async function scheduleDoseReminder(
       return;
     } catch (err) {
       console.warn('[notifications] Capacitor scheduleDoseReminder failed:', err);
-      // Fall through to web fallback below.
+      throw err;
     }
   }
 

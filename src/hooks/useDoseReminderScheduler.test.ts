@@ -227,6 +227,14 @@ describe('useDoseReminderScheduler — exact-alarm gating', () => {
     expect(mocks.schedule).not.toHaveBeenCalled();
   });
 
+  it('does NOT schedule while exact-alarm permission is still unknown', () => {
+    const med = makeMed({ id: 'med-unknown', reminderTime: '09:00' });
+    renderHook(() =>
+      useDoseReminderScheduler(defaultOpts({ medications: [med], exactAlarmEnabled: null }))
+    );
+    expect(mocks.schedule).not.toHaveBeenCalled();
+  });
+
   it('cancels previously-scheduled alarms when exactAlarmEnabled turns false', async () => {
     const med = makeMed({ id: 'med-exact-off', reminderTime: '09:00' });
     const { rerender } = renderHook(

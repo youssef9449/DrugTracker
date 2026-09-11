@@ -23,8 +23,7 @@ import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { App } from '@capacitor/app';
 import { LocalNotifications, type Channel, type Importance, type Visibility } from '@capacitor/local-notifications';
-import { playNotificationSound } from './utils/sound';
-import type { NotificationSoundType } from './types';
+import { DOSE_REMINDER_CHANNEL_ID } from './utils/notifications';
 
 let initialized = false;
 
@@ -151,7 +150,7 @@ export async function initNativeBridge(): Promise<void> {
   // Without an Android NotificationChannel, scheduled notifications
   // silently fail on Android 8.0+. Capacitor LocalNotifications
   // creates a default channel automatically, but the notification
-  // channel id used in `schedule({ channelId: 'dose-reminder' })`
+  // channel id used in `schedule({ channelId: 'dose-reminder-v2' })`
   // must be created first or Android will fall back to the default
   // channel (which is acceptable but means we lose the ability to
   // later customize per-channel importance / sound / vibration).
@@ -192,9 +191,10 @@ export async function initNativeBridge(): Promise<void> {
     // the lock screen).
     const channels: Channel[] = [
       {
-        id: 'dose-reminder',
+        id: DOSE_REMINDER_CHANNEL_ID,
         name: 'تذكير الجرعات',
         description: 'تذكيرات يومية بمواعيد الأدوية',
+        sound: 'dose_reminder.wav',
         importance: 4 as Importance,
         visibility: 1 as Visibility,
       },
@@ -206,6 +206,13 @@ export async function initNativeBridge(): Promise<void> {
         visibility: 1 as Visibility,
       },
     ];
+
+    // Android channel sound is immutable. Replace the old silent channel
+    // once instead of creating channels for individual medication sounds.
+    if (existingIds.has('dose-reminder')) {
+      await LocalNotifications.deleteChannel({ id: 'dose-reminder' });
+      console.info('[native] Migrated dose-reminder channel to dose-reminder-v2');
+    }
 
     for (const ch of channels) {
       if (!existingIds.has(ch.id)) {
@@ -234,34 +241,13 @@ export async function initNativeBridge(): Promise<void> {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // Foreground notification listener — plays ONE sound + opens the
-  // in-app DoseAlarmModal for dose reminders.
+  // Foreground notification listener — keeps the native notification and
+  // opens the in-app DoseAlarmModal for dose reminders. The native channel
+  // is the single sound source in every app state.
   // ─────────────────────────────────────────────────────────────
-  // When a local notification fires while the app is in the
-  // foreground, Capacitor delivers it to this listener. We use this
-  // to play the SINGLE authoritative sound for the dose event:
-  //
-  //   SOUND POLICY (single authoritative path):
-  //   - If the notification carries a customSoundFile in its `extra`,
-  //     play it via an HTMLAudioElement (the user's uploaded sound).
-  //   - Otherwise, if the notification carries a per-medication
-  //     `notificationSound` id in its `extra`, play the synthesized
-  //     chime via playNotificationSound().
-  //   - The notification itself is scheduled with `sound: undefined`
-  //     so the system channel sound does NOT also play in the
-  //     foreground (that would be a second sound).
-  //
-  //   In the BACKGROUND/killed state, this listener does NOT run
-  //   (the app process is gone). The system delivers the notification
-  //   to the tray with the channel's default sound — which is the ONE
-  //   sound for that case. The custom sound cannot play in the
-  //   background without native code (deferred — problem #2), so the
-  //   channel default is the accepted fallback.
-  //
-  //   openAlarm() (called below via doseReceivedHandler) does NOT
-  //   play any sound — the listener already played it here. This
-  //   ensures exactly ONE sound per dose event in the foreground.
-  //
+  // The v6 plugin cannot resolve an IndexedDB/data-URL sound after the app
+  // process is killed. The bundled channel tone is therefore the reliable
+  // fallback for foreground, background, and killed delivery.
   // #38: await the addListener and store the handle so it can be
   // removed if needed (prevents duplicate listeners across HMR).
   try {
@@ -269,48 +255,10 @@ export async function initNativeBridge(): Promise<void> {
       'localNotificationReceived',
       (notification: {
         extra?: {
-          customSoundFile?: { dataUrl: string; fileName: string; mimeType: string };
           medicationId?: string;
-          notificationSound?: string;
         };
       }) => {
-        // ── SINGLE AUTHORITATIVE SOUND ──
-        // Play the custom sound if present; otherwise play the
-        // per-med synthesized chime if present. Never both.
-        const customSound = notification?.extra?.customSoundFile;
-        const perMedSound = notification?.extra?.notificationSound;
-        if (customSound?.dataUrl) {
-          // Custom uploaded sound (MP3/WAV/etc) via Audio element.
-          try {
-            const audio = new Audio(customSound.dataUrl);
-            audio.volume = 1;
-            audio.play().catch((err) => {
-              console.warn('[native] Custom sound playback failed:', err);
-              // Fallback to the per-med chime if the custom file fails.
-              if (perMedSound) {
-                try {
-                  playNotificationSound(perMedSound as NotificationSoundType);
-                } catch {
-                  // silent — already logged above.
-                }
-              }
-            });
-          } catch (err) {
-            console.warn('[native] Custom sound Audio() creation failed:', err);
-          }
-        } else if (perMedSound) {
-          // No custom sound — play the per-med synthesized chime.
-          try {
-            playNotificationSound(perMedSound as NotificationSoundType);
-          } catch (err) {
-            console.warn('[native] Per-med chime playback failed:', err);
-          }
-        }
-
-        // ── IN-APP MODAL (foreground only) ──
-        // If this is a dose-reminder notification, surface it in-app
-        // via the registered handler. The handler opens DoseAlarmModal
-        // WITHOUT playing a sound (the sound was already played above).
+        // Keep the native notification in addition to the in-app modal.
         const medicationId = notification?.extra?.medicationId;
         if (medicationId && doseReceivedHandler) {
           try {

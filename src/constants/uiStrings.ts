@@ -30,6 +30,13 @@ export const TOAST_MESSAGES = {
   criticalAlertsOn: 'تم تفعيل تنبيهات النفاذ الحرج ⚠️ (إشعار فوري عند اقتراب نفاد أي دواء أو نفاذه — حسب إعداد كل دواء)',
   criticalAlertsOff: 'تم إيقاف تنبيهات النفاذ الحرج',
 
+  // Notification permission outcomes
+  notificationsOn:
+    'تم تفعيل الإشعارات والتنبيهات بنجاح 🔔 (تم إرسال إشعار تجريبي)',
+  notificationsPermissionDenied:
+    'تعذّر الحصول على إذن الإشعارات ❌ — يرجى السماح بالإشعارات من إعدادات الجهاز ثم إعادة المحاولة',
+  notificationsOff: 'تم إيقاف الإشعارات والتنبيهات 🔕',
+
   // Test notification
   testNotificationSent: 'تم إرسال إشعار تجريبي وتشغيل صوت التنبيه بنجاح! 🔔',
   testNotificationSoundOnly: 'تم تشغيل صوت التنبيه التجريبي بنجاح! 🔔',

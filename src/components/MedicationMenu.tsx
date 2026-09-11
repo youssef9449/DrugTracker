@@ -6,10 +6,8 @@ import {
   PauseCircle,
   PlayCircle,
   Plus,
-  Volume2,
 } from 'lucide-react';
 import { Medication } from '../types';
-import { playNotificationSound } from '../utils/sound';
 
 /**
  * The per-card dropdown menu shared by the three MedicationCard
@@ -20,43 +18,31 @@ import { playNotificationSound } from '../utils/sound';
  * Props control which items are shown:
  *   - `showRefillInMenu`: include the "تعبئة مخزون" item (omitted in
  *     the alerts view, where refill is the main CTA button).
- *   - `showTestSound`: include the "تجربة صوت وتنبيه الدواء" item
- *     (omitted in the "all" view, where the reminder badge already
- *     has its own test button).
+ *
+ * The "تجربة صوت وتنبيه الدواء" test-sound item was removed at the
+ * user's request — the test-sound action is still available in the
+ * AppSettingsModal ("تجربة إشعار وتنبيه صوتي الآن").
  */
 interface MedicationMenuProps {
   medication: Medication;
   isAutoActive: boolean;
   showRefillInMenu: boolean;
-  showTestSound: boolean;
   onOpenRefill: (medication: Medication) => void;
   onEdit: (medication: Medication) => void;
   onDelete: (id: string) => void;
   onToggleAutoDeduct: (id: string) => void;
-  onTriggerAlarm?: (medication: Medication) => void;
 }
 
 export function MedicationMenu({
   medication,
   isAutoActive,
   showRefillInMenu,
-  showTestSound,
   onOpenRefill,
   onEdit,
   onDelete,
   onToggleAutoDeduct,
-  onTriggerAlarm,
 }: MedicationMenuProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-
-  const handleTestSound = () => {
-    setMenuOpen(false);
-    if (onTriggerAlarm) {
-      onTriggerAlarm(medication);
-    } else {
-      playNotificationSound(medication.notificationSound || 'classic_chime');
-    }
-  };
 
   return (
     <div className="relative">
@@ -97,15 +83,6 @@ export function MedicationMenu({
               <Edit3 className="w-3.5 h-3.5 text-slate-500" />
               <span>تعديل تفاصيل الدواء</span>
             </button>
-            {showTestSound && (
-              <button
-                onClick={handleTestSound}
-                className="w-full text-right px-3 py-2 text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-              >
-                <Volume2 className="w-3.5 h-3.5 text-teal-600" />
-                <span>تجربة صوت وتنبيه الدواء</span>
-              </button>
-            )}
             <button
               onClick={() => {
                 setMenuOpen(false);

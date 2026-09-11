@@ -3,19 +3,26 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import type { Medication } from '../types';
 import { useStockAlerts } from './useStockAlerts';
-import { getTodayDateString, getCriticalTransitionKey } from '../utils/dateCalculations';
+import { getTodayDateString } from '../utils/dateCalculations';
+import {
+  CRITICAL_TRANSITION_STORAGE_KEY,
+  SCHEDULED_CRITICAL_STORAGE_KEY,
+} from '../utils/criticalTransitions';
 
 vi.mock('../utils/notifications', () => ({
   sendCriticalStockAlert: vi.fn(),
+  getDeliveredNotificationIds: vi.fn(() => Promise.resolve(new Set<number>())),
+  criticalAlarmId: vi.fn((id: string) => id.length),
 }));
 
 vi.mock('../utils/storage', () => ({
   loadJson: vi.fn(<T,>(_key: string, fallback: T): T => fallback),
   saveJson: vi.fn(),
+  loadString: vi.fn((_key: string, fallback: string): string => fallback),
 }));
 
 import { sendCriticalStockAlert } from '../utils/notifications';
-import { loadJson } from '../utils/storage';
+import { loadJson, saveJson } from '../utils/storage';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
   return {
@@ -144,18 +151,22 @@ describe('useStockAlerts — dedup (no duplicate notifications)', () => {
     expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
   });
 
-  it('does NOT re-fire after app restart (persistent dedup via transition key)', () => {
-    // Simulate: a previous session persisted the notified transition key.
-    const med = makeMed({ currentPills: 0, dailyDose: 1, lastSyncDate: '2024-09-10' });
-    // Compute what the transition key would be and persist it.
-    const transitionKey = getCriticalTransitionKey(med, '2024-09-10');
+  it('does NOT re-fire after app restart (persistent v2 transition with SENT state)', () => {
+    // Simulate: a previous session persisted the active episode as SENT.
     vi.mocked(loadJson).mockImplementation((key: string, fallback: unknown) => {
-      if (key === 'android_med_tracker_critical_notified_v2') {
-        return { 'med-1': transitionKey };
+      if (key === CRITICAL_TRANSITION_STORAGE_KEY) {
+        return {
+          'med-1': {
+            transitionKey: 'crit_med-1_1725969600000_abc123',
+            enteredAt: 1725969600000,
+            notificationState: 'SENT',
+          },
+        };
       }
       return fallback;
     });
 
+    const med = makeMed({ currentPills: 0, dailyDose: 1, lastSyncDate: '2024-09-10' });
     renderHook(() =>
       useStockAlerts({
         medications: [med],
@@ -169,7 +180,28 @@ describe('useStockAlerts — dedup (no duplicate notifications)', () => {
     expect(sendCriticalStockAlert).not.toHaveBeenCalled();
   });
 
-  it('fires again after critical → sufficient → critical (new transition key)', () => {
+  it('does NOT re-fire after app restart with legacy notified map (migration keeps dedup)', () => {
+    vi.mocked(loadJson).mockImplementation((key: string, fallback: unknown) => {
+      if (key === 'android_med_tracker_critical_notified_v2') {
+        return { 'med-1': 'crit_med-1_legacy_key' };
+      }
+      return fallback;
+    });
+
+    const med = makeMed({ currentPills: 0, dailyDose: 1, lastSyncDate: '2024-09-10' });
+    renderHook(() =>
+      useStockAlerts({
+        medications: [med],
+        notificationsEnabled: true,
+        criticalStockAlertsEnabled: true,
+        hydrated: true,
+        isFirstRun: false,
+      })
+    );
+    expect(sendCriticalStockAlert).not.toHaveBeenCalled();
+  });
+
+  it('fires again after critical → sufficient → critical (new episode)', () => {
     const criticalMed = makeMed({ currentPills: 1, dailyDose: 1 });
     const { rerender } = renderHook(
       ({ medications }) =>
@@ -184,12 +216,12 @@ describe('useStockAlerts — dedup (no duplicate notifications)', () => {
     );
     expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
 
-    // Refill → sufficient (different lastSyncDate → different transition key).
+    // Refill → sufficient.
     const sufficientMed = makeMed({ currentPills: 100, dailyDose: 1, lastSyncDate: '2024-09-11' });
     rerender({ medications: [sufficientMed] });
     expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
 
-    // Drop back to critical → new transition → fire again.
+    // Drop back to critical → new episode → fire again.
     const criticalAgain = makeMed({ currentPills: 1, dailyDose: 1, lastSyncDate: '2024-09-11' });
     rerender({ medications: [criticalAgain] });
     expect(sendCriticalStockAlert).toHaveBeenCalledTimes(2);
@@ -197,7 +229,7 @@ describe('useStockAlerts — dedup (no duplicate notifications)', () => {
 });
 
 describe('useStockAlerts — criticalStockAlertsEnabled behavior', () => {
-  it('does NOT mark transition as notified when criticalStockAlertsEnabled is false', () => {
+  it('does NOT mark transition as SENT when criticalStockAlertsEnabled is false', () => {
     const med = makeMed({ currentPills: 0, dailyDose: 1 });
     const { rerender } = renderHook(
       ({ criticalStockAlertsEnabled }) =>
@@ -213,7 +245,7 @@ describe('useStockAlerts — criticalStockAlertsEnabled behavior', () => {
     // No notification sent (critical alerts disabled).
     expect(sendCriticalStockAlert).not.toHaveBeenCalled();
 
-    // Enable critical alerts — now the transition should fire.
+    // Enable critical alerts — now the episode should fire exactly once.
     rerender({ criticalStockAlertsEnabled: true });
     expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
 
@@ -223,22 +255,25 @@ describe('useStockAlerts — criticalStockAlertsEnabled behavior', () => {
   });
 });
 
-describe('useStockAlerts — scheduled alarm reconciliation', () => {
-  it('does NOT fire foreground notification when scheduled alarm already delivered', () => {
-    // Simulate: a scheduled alarm was set for med-1, and the alarm date
-    // has passed. The scheduler persisted the transition key + alarmTime.
-    const med = makeMed({ currentPills: 0, dailyDose: 1, lastSyncDate: '2024-09-09' });
-    const transitionKey = getCriticalTransitionKey(med, '2024-09-10');
-
+describe('useStockAlerts — scheduled alarm claim (strict delivery semantics)', () => {
+  it('does NOT fire foreground notification when an elapsed scheduled claim exists', () => {
+    // A scheduled alarm was registered for med-1 and its alarm time has
+    // passed. The alarm is the authoritative notification path for the
+    // episode → foreground must stay quiet.
     vi.mocked(loadJson).mockImplementation((key: string, fallback: unknown) => {
-      if (key === 'android_med_tracker_scheduled_critical_v1') {
-        // Return the NEW format: { transitionKey, alarmTime }
-        // alarmTime is in the past (1 day before the pinned test time).
-        return { 'med-1': { transitionKey, alarmTime: Date.now() - 86400000 } };
+      if (key === SCHEDULED_CRITICAL_STORAGE_KEY) {
+        return {
+          'med-1': {
+            transitionKey: '',
+            alarmTime: Date.now() - 86400000, // elapsed
+            status: 'SCHEDULED',
+          },
+        };
       }
       return fallback;
     });
 
+    const med = makeMed({ currentPills: 0, dailyDose: 1, lastSyncDate: '2024-09-09' });
     renderHook(() =>
       useStockAlerts({
         medications: [med],
@@ -248,9 +283,109 @@ describe('useStockAlerts — scheduled alarm reconciliation', () => {
         isFirstRun: false,
       })
     );
-    // The scheduled alarm already fired → reconciliation marks as notified
-    // → foreground does NOT fire.
     expect(sendCriticalStockAlert).not.toHaveBeenCalled();
+  });
+
+  it('elapsed alarmTime does NOT prove delivery: record stays SCHEDULED, episode is adopted as SCHEDULED (never SENT/DELIVERED)', () => {
+    vi.mocked(loadJson).mockImplementation((key: string, fallback: unknown) => {
+      if (key === SCHEDULED_CRITICAL_STORAGE_KEY) {
+        return {
+          'med-1': {
+            transitionKey: '',
+            alarmTime: Date.now() - 86400000,
+            status: 'SCHEDULED',
+          },
+        };
+      }
+      return fallback;
+    });
+
+    const med = makeMed({ currentPills: 0, dailyDose: 1, lastSyncDate: '2024-09-09' });
+    renderHook(() =>
+      useStockAlerts({
+        medications: [med],
+        notificationsEnabled: true,
+        criticalStockAlertsEnabled: true,
+        hydrated: true,
+        isFirstRun: false,
+      })
+    );
+
+    expect(sendCriticalStockAlert).not.toHaveBeenCalled();
+
+    // The adopted episode must be SCHEDULED — NOT 'SENT' — because a
+    // passed timestamp is not proof that Android displayed anything.
+    const transitionsWrite = vi
+      .mocked(saveJson)
+      .mock.calls.find((c) => c[0] === CRITICAL_TRANSITION_STORAGE_KEY);
+    expect(transitionsWrite).toBeDefined();
+    const persisted = transitionsWrite![1] as Record<string, { notificationState: string }>;
+    expect(persisted['med-1'].notificationState).toBe('SCHEDULED');
+
+    // The scheduled record itself must NOT be flipped to DELIVERED.
+    const scheduledWrite = vi
+      .mocked(saveJson)
+      .mock.calls.find((c) => c[0] === SCHEDULED_CRITICAL_STORAGE_KEY);
+    expect(scheduledWrite).toBeDefined();
+    const persistedRec = scheduledWrite![1] as Record<string, { status: string }>;
+    expect(persistedRec['med-1'].status).toBe('SCHEDULED');
+  });
+
+  it('a future scheduled alarm does NOT suppress the foreground notification', () => {
+    // The crossing happened EARLIER than projected (user consumed more
+    // than planned). The pending alarm is stale — the user must be
+    // notified NOW, not when the stale alarm fires.
+    vi.mocked(loadJson).mockImplementation((key: string, fallback: unknown) => {
+      if (key === SCHEDULED_CRITICAL_STORAGE_KEY) {
+        return {
+          'med-1': {
+            transitionKey: '',
+            alarmTime: Date.now() + 5 * 86400000, // future
+            status: 'SCHEDULED',
+          },
+        };
+      }
+      return fallback;
+    });
+
+    const med = makeMed({ currentPills: 0, dailyDose: 1, lastSyncDate: '2024-09-10' });
+    renderHook(() =>
+      useStockAlerts({
+        medications: [med],
+        notificationsEnabled: true,
+        criticalStockAlertsEnabled: true,
+        hydrated: true,
+        isFirstRun: false,
+      })
+    );
+    expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed scheduling attempt (NOT_SCHEDULED) does NOT suppress the foreground notification', () => {
+    vi.mocked(loadJson).mockImplementation((key: string, fallback: unknown) => {
+      if (key === SCHEDULED_CRITICAL_STORAGE_KEY) {
+        return {
+          'med-1': {
+            transitionKey: '',
+            alarmTime: Date.now() - 86400000,
+            status: 'NOT_SCHEDULED',
+          },
+        };
+      }
+      return fallback;
+    });
+
+    const med = makeMed({ currentPills: 0, dailyDose: 1, lastSyncDate: '2024-09-10' });
+    renderHook(() =>
+      useStockAlerts({
+        medications: [med],
+        notificationsEnabled: true,
+        criticalStockAlertsEnabled: true,
+        hydrated: true,
+        isFirstRun: false,
+      })
+    );
+    expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -296,7 +431,7 @@ describe('useStockAlerts — threshold semantics', () => {
     );
     expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
 
-    // Advance to 6 days — same transition, no new notification.
+    // Advance to 6 days — same episode, no new notification.
     const med2 = makeMed({ currentPills: 6, dailyDose: 1, warningThresholdDays: 7, lastSyncDate: '2024-09-11' });
     vi.setSystemTime(new Date('2024-09-11T12:00:00Z'));
     rerender({ medications: [med2] });

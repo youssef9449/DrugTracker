@@ -24,6 +24,7 @@ vi.mock('./utils/notifications', () => ({
   scheduleCriticalAlarm: vi.fn(() => Promise.resolve()),
   cancelCriticalAlarm: vi.fn(() => Promise.resolve()),
   criticalAlarmId: vi.fn((id: string) => id.length),
+  getDeliveredNotificationIds: vi.fn(() => Promise.resolve(new Set<number>())),
 }));
 vi.mock('../utils/sound', () => ({
   playSuccessChime: vi.fn(),
@@ -420,8 +421,7 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
       'med-alarm-1',
       'Alarm Test Med',
       expect.any(Number),
-      'قرص',
-      expect.any(String)
+      'قرص'
     );
   });
 
@@ -522,22 +522,19 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
         'med-reboot-1',
         'Reboot Med 1',
         expect.any(Number),
-        'قرص',
-        expect.any(String)
+        'قرص'
       );
       expect(scheduleCriticalAlarm).toHaveBeenCalledWith(
         'med-reboot-2',
         'Reboot Med 2',
         expect.any(Number),
-        'قرص',
-        expect.any(String)
+        'قرص'
       );
       expect(scheduleCriticalAlarm).toHaveBeenCalledWith(
         'med-reboot-3',
         'Reboot Med 3',
         expect.any(Number),
-        'قرص',
-        expect.any(String)
+        'قرص'
       );
     });
   });

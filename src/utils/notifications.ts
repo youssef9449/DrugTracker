@@ -683,6 +683,31 @@ export async function cancelCriticalAlarm(medId: string): Promise<void> {
 }
 
 /**
+ * IDs of the app's notifications currently VISIBLE in the system
+ * notification drawer (native platforms only; empty set on web).
+ *
+ * This is the ONLY reliable positive delivery signal available in the
+ * lifecycles this app supports: a notification that is present in the
+ * drawer was definitely displayed, even if the app process was dead at
+ * fire time. Absence proves NOTHING (the user may have dismissed it),
+ * so callers must treat absence as "no evidence" — never as
+ * "not delivered" — and must never infer delivery from elapsed time.
+ */
+export async function getDeliveredNotificationIds(): Promise<Set<number>> {
+  const ids = new Set<number>();
+  if (!isNativePlatform()) return ids;
+  try {
+    const result = await LocalNotifications.getDeliveredNotifications();
+    for (const n of result.notifications) {
+      ids.add(n.id);
+    }
+  } catch (err) {
+    console.warn('[notifications] getDeliveredNotifications failed:', err);
+  }
+  return ids;
+}
+
+/**
  * Schedule a one-shot critical-stock alarm at the given absolute time.
  *
  * This is the single entry point for critical-date scheduling. The
@@ -702,6 +727,11 @@ export async function cancelCriticalAlarm(medId: string): Promise<void> {
  *
  * `unit` is included in the notification body for display.
  *
+ * NOTE: the alarm carries NO transition identity. criticalDateMs is
+ * scheduling data, not episode identity — the episode owner
+ * (useStockAlerts, via criticalTransitions.ts) binds/adopts the
+ * persisted scheduled record to an episode at the actual crossing.
+ *
  * Boot persistence: scheduled notifications are persisted by the
  * @capacitor/local-notifications plugin and re-armed on BOOT_COMPLETED.
  * See the section-header comment above for details.
@@ -710,8 +740,7 @@ export async function scheduleCriticalAlarm(
   medId: string,
   medName: string,
   criticalDateMs: number,
-  unit: string = 'قرص',
-  criticalTransitionKey?: string,
+  unit: string = 'قرص'
 ): Promise<boolean> {
   // Compute the schedule time. If the computed critical date is in
   // the past (or very close), use "now + 1s" so the notification
@@ -756,7 +785,6 @@ export async function scheduleCriticalAlarm(
             autoCancel: true,
             extra: {
               medicationId: medId,
-              criticalTransitionKey: criticalTransitionKey || '',
             },
           },
         ],

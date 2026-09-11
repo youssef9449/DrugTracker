@@ -5,7 +5,6 @@ import { scheduleCriticalAlarm, cancelCriticalAlarm } from '../utils/notificatio
 import {
   loadScheduledCriticalAlarms,
   saveScheduledCriticalAlarms,
-  generateCriticalTransitionKey,
 } from '../utils/criticalTransitions';
 
 /**
@@ -28,6 +27,20 @@ export interface UseCriticalAlarmSchedulerOptions {
  * AlarmManager (Capacitor LocalNotifications). The alarm fires even if
  * the app is killed — the user sees the alert in their drawer at the
  * projected critical date without ever opening the app.
+ *
+ * == Identity separation (IMPORTANT) ==
+ * This hook is a SCHEDULER, not an episode owner. It NEVER creates,
+ * adopts, or derives a critical transition identity — the transitionKey
+ * parameter that used to be generated here from criticalDateMs was the
+ * root cause of unstable episode identities and has been removed.
+ * criticalDateMs is scheduling data, NOT identity:
+ *   transitionKey = identity of the critical episode  (owned by
+ *                    useStockAlerts via criticalTransitions.ts)
+ *   alarmTime     = projected time for the notification (owned HERE,
+ *                    may change many times during one episode)
+ * The persisted record carries transitionKey: '' until the episode
+ * owner binds/adopts the claim at the actual crossing (see
+ * reconcileCriticalEpisode).
  *
  * Re-schedule triggers: this effect re-runs (and re-schedules every
  * med's alarm) whenever any field that affects the critical date
@@ -228,7 +241,11 @@ export function useCriticalAlarmScheduler({
         continue;
       }
 
-      const transitionKey = generateCriticalTransitionKey(med.id, criticalDateMs);
+      // A future projected crossing only — the med is still sufficient,
+      // so NO active transition exists yet and none may be created here.
+      // The scheduled record is persisted with transitionKey: '' (an
+      // unbound claim); useStockAlerts binds/adopts it when the episode
+      // actually begins. The alarmTime below is pure scheduling data.
       const unit = med.unit || 'قرص';
       const name = med.name;
 
@@ -243,8 +260,7 @@ export function useCriticalAlarmScheduler({
             med.id,
             name,
             criticalDateMs,
-            unit,
-            transitionKey
+            unit
           );
 
           if (alarmGenerationRef.current.get(med.id) !== gen) {
@@ -257,10 +273,14 @@ export function useCriticalAlarmScheduler({
             return;
           }
 
+          // Persist the scheduled-claim record ONLY after the native
+          // schedule actually succeeded. A failure leaves no valid
+          // SCHEDULED claim, which keeps the foreground notification
+          // path available in useStockAlerts.
           const records = loadScheduledCriticalAlarms();
           if (scheduledResult !== false) {
             records[med.id] = {
-              transitionKey,
+              transitionKey: '',
               alarmTime: criticalDateMs,
               status: 'SCHEDULED',
             };

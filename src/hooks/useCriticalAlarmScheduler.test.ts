@@ -73,6 +73,8 @@ function defaultOpts(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Isolate persisted scheduled-record state between tests.
+  localStorage.clear();
   // Wave 13 #123: pin system time so getTodayDateString() (used by
   // makeMed's lastSyncDate default) resolves to a deterministic date.
   // Only Date is faked so the hook's `await Promise.resolve()` chains
@@ -138,8 +140,7 @@ describe('useCriticalAlarmScheduler — basic scheduling', () => {
       'med-future',
       'Test Med',
       expect.any(Number),
-      'قرص',
-      expect.any(String)
+      'قرص'
     );
   });
 
@@ -307,7 +308,7 @@ describe('useCriticalAlarmScheduler — race protection (generation guard + seri
     await flushUntil(() => scheduleSpy.mock.calls.length >= 1);
 
     expect(scheduleSpy).toHaveBeenCalledTimes(1);
-    expect(scheduleSpy).toHaveBeenCalledWith('med-rapid', 'Test Med', expect.any(Number), 'قرص', expect.any(String));
+    expect(scheduleSpy).toHaveBeenCalledWith('med-rapid', 'Test Med', expect.any(Number), 'قرص');
     const scheduledDate = scheduleSpy.mock.calls[0][2] as number;
     expect(scheduledDate - Date.now()).toBeGreaterThan(40 * 24 * 60 * 60 * 1000);
   });
@@ -587,9 +588,113 @@ describe('useCriticalAlarmScheduler — reboot fallback (app-launch re-arm)', ()
 
     // All three meds got a schedule call.
     expect(mocks.schedule).toHaveBeenCalledTimes(3);
-    expect(mocks.schedule).toHaveBeenCalledWith('med-rb-1', 'Test Med', expect.any(Number), 'قرص', expect.any(String));
-    expect(mocks.schedule).toHaveBeenCalledWith('med-rb-2', 'Test Med', expect.any(Number), 'قرص', expect.any(String));
-    expect(mocks.schedule).toHaveBeenCalledWith('med-rb-3', 'Test Med', expect.any(Number), 'قرص', expect.any(String));
+    expect(mocks.schedule).toHaveBeenCalledWith('med-rb-1', 'Test Med', expect.any(Number), 'قرص');
+    expect(mocks.schedule).toHaveBeenCalledWith('med-rb-2', 'Test Med', expect.any(Number), 'قرص');
+    expect(mocks.schedule).toHaveBeenCalledWith('med-rb-3', 'Test Med', expect.any(Number), 'قرص');
+  });
+});
+
+describe('useCriticalAlarmScheduler — scheduled record persistence (identity separation)', () => {
+  const TRANSITION_KEY_STORE = 'android_med_tracker_critical_transition_v2';
+  const SCHEDULED_STORE = 'android_med_tracker_scheduled_critical_v2';
+
+  function readScheduledRecord(medId: string): { transitionKey: string; alarmTime: number; status: string } | undefined {
+    const raw = localStorage.getItem(SCHEDULED_STORE);
+    if (!raw) return undefined;
+    return JSON.parse(raw)[medId];
+  }
+
+  it('persists the scheduled record with an EMPTY transitionKey only after schedule success', async () => {
+    const med = makeMed({ id: 'med-persist', currentPills: 30, dailyDose: 1 });
+
+    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    // Let the post-schedule persistence microtasks settle.
+    await flushUntil(() => readScheduledRecord('med-persist') !== undefined);
+
+    const rec = readScheduledRecord('med-persist');
+    expect(rec).toBeDefined();
+    expect(rec!.status).toBe('SCHEDULED');
+    // The scheduler NEVER writes an episode identity — the claim is
+    // unbound ('') until the episode owner binds/adopts it.
+    expect(rec!.transitionKey).toBe('');
+    expect(rec!.alarmTime).toBeGreaterThan(Date.now());
+  });
+
+  it('NEVER writes the critical transition store (no identity creation)', async () => {
+    const med = makeMed({ id: 'med-noidentity', currentPills: 30, dailyDose: 1 });
+
+    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    await flushUntil(() => readScheduledRecord('med-noidentity') !== undefined);
+
+    expect(localStorage.getItem(TRANSITION_KEY_STORE)).toBeNull();
+  });
+
+  it('rescheduling with a changed projected date keeps the claim unbound and does not create an identity', async () => {
+    const med1 = makeMed({ id: 'med-resched', currentPills: 30, dailyDose: 1 });
+    const med2 = makeMed({ id: 'med-resched', currentPills: 60, dailyDose: 1 });
+
+    const { rerender } = renderHook(
+      ({ medications }) => useCriticalAlarmScheduler(defaultOpts({ medications })),
+      { initialProps: { medications: [med1] as Medication[] } }
+    );
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    await flushUntil(() => readScheduledRecord('med-resched') !== undefined);
+    const firstAlarmTime = readScheduledRecord('med-resched')!.alarmTime;
+
+    rerender({ medications: [med2] as Medication[] });
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
+    await flushUntil(() => readScheduledRecord('med-resched')!.alarmTime !== firstAlarmTime);
+
+    const rec = readScheduledRecord('med-resched');
+    expect(rec!.status).toBe('SCHEDULED');
+    expect(rec!.transitionKey).toBe('');
+    expect(rec!.alarmTime).toBeGreaterThan(firstAlarmTime);
+    expect(localStorage.getItem(TRANSITION_KEY_STORE)).toBeNull();
+  });
+
+  it('scheduling failure neutralizes a prior SCHEDULED claim — no valid SCHEDULED claim survives', async () => {
+    // A previous generation scheduled successfully; a reschedule now
+    // FAILS. The stale SCHEDULED claim must be neutralized so it can
+    // never suppress the foreground notification later.
+    localStorage.setItem(
+      SCHEDULED_STORE,
+      JSON.stringify({ 'med-fail': { transitionKey: '', alarmTime: Date.now() + 86400000, status: 'SCHEDULED' } })
+    );
+    mocks.schedule.mockResolvedValue(false); // simulate failed native schedule
+    const med = makeMed({ id: 'med-fail', currentPills: 30, dailyDose: 1 });
+
+    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    await flushUntil(() => readScheduledRecord('med-fail')?.status === 'NOT_SCHEDULED');
+
+    const rec = readScheduledRecord('med-fail');
+    expect(rec).toBeDefined();
+    expect(rec!.status).toBe('NOT_SCHEDULED');
+  });
+
+  it('scheduling failure with no prior record persists nothing (no claim exists)', async () => {
+    mocks.schedule.mockResolvedValue(false); // simulate failed native schedule
+    const med = makeMed({ id: 'med-fail-fresh', currentPills: 30, dailyDose: 1 });
+
+    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    await flushUntil(() => true, 10);
+
+    // No prior claim → nothing to neutralize → no record written. The
+    // foreground path stays fully available for useStockAlerts.
+    expect(readScheduledRecord('med-fail-fresh')).toBeUndefined();
+    expect(localStorage.getItem(TRANSITION_KEY_STORE)).toBeNull();
+  });
+
+  it('scheduleCriticalAlarm is called WITHOUT a transition-key argument (4 args)', async () => {
+    const med = makeMed({ id: 'med-arity', currentPills: 30, dailyDose: 1 });
+
+    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+
+    expect(mocks.schedule.mock.calls[0]).toHaveLength(4);
   });
 });
 
@@ -599,3 +704,4 @@ describe('useCriticalAlarmScheduler — reboot fallback (app-launch re-arm)', ()
 // inference on vi.mocked() assertions elsewhere in this file).
 void scheduleCriticalAlarm;
 void cancelCriticalAlarm;
+

@@ -1,13 +1,18 @@
 import { useEffect, useRef } from 'react';
 import { Medication, calculateMedicationStatus, CriticalTransitionState } from '../types';
 import { effectiveCurrentPills } from '../utils/dateCalculations';
-import { sendCriticalStockAlert } from '../utils/notifications';
+import {
+  sendCriticalStockAlert,
+  getDeliveredNotificationIds,
+  criticalAlarmId,
+} from '../utils/notifications';
 import {
   loadCriticalTransitions,
   saveCriticalTransitions,
   loadScheduledCriticalAlarms,
   saveScheduledCriticalAlarms,
-  generateCriticalTransitionKey,
+  reconcileCriticalEpisode,
+  applyDeliveredCriticalEvidence,
 } from '../utils/criticalTransitions';
 
 interface UseStockAlertsOptions {
@@ -19,32 +24,50 @@ interface UseStockAlertsOptions {
 }
 
 /**
- * Watch the medications array + notification flags and manage critical-stock
- * alert transitions.
+ * Watch the medications array + notification flags and OWN the logical
+ * critical-stock episode lifecycle.
  *
- * == Core Invariant ==
- * For one continuous critical-stock episode of one medication, the app must
- * never show more than ONE user-facing critical-stock notification.
+ * == Responsibilities (this hook is the single episode owner) ==
+ * - Calculate current status (user-configured threshold ONLY:
+ *   daysLeft <= warningThresholdDays → critical; effPills <= 0 →
+ *   out_of_stock; no hidden derived sub-threshold).
+ * - Create + persist a transition EXACTLY ONCE per continuous episode
+ *   via the authoritative {@link reconcileCriticalEpisode} in
+ *   criticalTransitions.ts (sufficient → critical/out_of_stock, or
+ *   initial reconciliation of an already-critical med with no record).
+ * - Preserve the transition (same key, same notification state)
+ *   while the med stays critical/out_of_stock — across re-renders,
+ *   days passing, auto deduction, manual consumption, refill-while-
+ *   critical, lastSyncDate changes, app restarts, scheduler
+ *   rescheduling, and the projected critical date moving.
+ * - Delete the transition when the med becomes sufficient (episode end)
+ *   and clear that episode's bound scheduled claim so a stale record
+ *   can never suppress a future episode.
+ * - Decide whether the foreground notification is still required:
+ *   at most ONE user-facing notification per continuous transition.
  *
- * == Episode Lifecycle ==
- * - Transitions are tracked in `android_med_tracker_critical_transition_v1`
- *   as `{ transitionKey, enteredAt, notificationSent }`.
- * - A new transition is created ONLY on Sufficient → Critical (or initial entry).
- * - Critical → OutOfStock is the same transition (no new notification).
- * - Decreasing pills / doses taken while remaining critical are the same transition.
- * - Critical → Sufficient ends the transition (record is removed).
- *
- * == Scheduled Alarm Claiming & Reconciliation ==
- * When a scheduled alarm claimed the upcoming critical transition and its
- * alarm date has passed (`alarmTime <= now`), the system recognizes that the
- * alarm was delivered while the app was in the background/closed.
- * It adopts the claimed transition, marks `notificationSent: true`, and updates
- * the scheduled alarm record to `DELIVERED`, suppressing foreground duplication.
+ * == Notification ownership ==
+ *   Path A (foreground): transition.notificationState NONE → send → SENT.
+ *   Path B (scheduled):  a validly-registered native alarm owns the
+ *   episode's single notification → the episode is adopted with
+ *   notificationState 'SCHEDULED' and the foreground stays quiet.
+ *   SCHEDULED does NOT mean delivered: elapsed alarmTime is never
+ *   treated as proof of delivery. Only positive native evidence
+ *   (the alarm notification actually visible in the drawer, checked
+ *   asynchronously below) upgrades an episode to 'SENT'.
  *
  * == Disabled / Re-enabled Notifications ==
- * If critical alerts or notifications are disabled when the medication becomes
- * critical, `notificationSent` remains `false`. When alerts are enabled later,
- * exactly ONE notification will fire for the active transition.
+ * If critical alerts or notifications are disabled when the medication
+ * becomes critical, notificationState stays 'NONE' (never 'SENT').
+ * When alerts are enabled later, exactly ONE notification fires for
+ * the still-active episode.
+ *
+ * == Race safety ==
+ * All state lives in synchronous localStorage and this effect is the
+ * only transition creator. The scheduler (useCriticalAlarmScheduler)
+ * only writes scheduled-alarm records — never identities — so React
+ * effect execution order between the two hooks cannot produce
+ * contradictory state. No artificial delays are used or needed.
  */
 export function useStockAlerts({
   medications,
@@ -53,6 +76,8 @@ export function useStockAlerts({
   hydrated,
   isFirstRun,
 }: UseStockAlertsOptions): void {
+  // In-memory mirror of the persistent transition map. Loaded once per
+  // JS session, mutated by every reconcile pass, persisted when dirty.
   const transitionsRef = useRef<Record<string, CriticalTransitionState> | null>(null);
 
   useEffect(() => {
@@ -64,94 +89,75 @@ export function useStockAlerts({
     }
     const transitions = transitionsRef.current;
     const scheduled = loadScheduledCriticalAlarms();
-    let transitionsDirty = false;
-    let scheduledDirty = false;
+    const dirty = { transitions: false, scheduled: false };
     const now = Date.now();
 
     for (const med of medications) {
       const { status, daysLeft } = calculateMedicationStatus(med);
       const effPills = effectiveCurrentPills(med);
-      const isCritical = status === 'critical' || status === 'out_of_stock';
+      const isCriticalish = status === 'critical' || status === 'out_of_stock';
 
-      if (!isCritical) {
-        // "Critical → Sufficient ends the transition"
-        if (transitions[med.id]) {
-          delete transitions[med.id];
-          transitionsDirty = true;
-        }
-        continue;
-      }
-
-      // The medication is critical or out of stock.
-      let currentTransition = transitions[med.id];
-      const scheduledRec = scheduled[med.id];
-
-      // Check if a scheduled alarm claimed this transition and has already delivered
-      const isAlarmDelivered = Boolean(
-        scheduledRec &&
-        (scheduledRec.status === 'SCHEDULED' || scheduledRec.status === 'DELIVERED') &&
-        scheduledRec.alarmTime <= now
+      reconcileCriticalEpisode(
+        transitions,
+        scheduled,
+        {
+          medId: med.id,
+          isCriticalish,
+          canNotify: notificationsEnabled && criticalStockAlertsEnabled,
+          now,
+          send: () => {
+            void sendCriticalStockAlert(med.id, med.name, daysLeft, effPills, med.unit || 'قرص');
+          },
+        },
+        dirty
       );
-
-      if (!currentTransition) {
-        if (isAlarmDelivered && scheduledRec) {
-          // Scheduled alarm delivered while the app was closed.
-          currentTransition = {
-            transitionKey: scheduledRec.transitionKey,
-            enteredAt: scheduledRec.alarmTime,
-            notificationSent: true,
-          };
-          transitions[med.id] = currentTransition;
-          transitionsDirty = true;
-          if (scheduledRec.status !== 'DELIVERED') {
-            scheduledRec.status = 'DELIVERED';
-            scheduledDirty = true;
-          }
-        } else {
-          // New critical transition starting in foreground (or alarm not fired/scheduled).
-          const transitionKey = scheduledRec?.transitionKey || generateCriticalTransitionKey(med.id, now);
-          currentTransition = {
-            transitionKey,
-            enteredAt: now,
-            notificationSent: false,
-          };
-          transitions[med.id] = currentTransition;
-          transitionsDirty = true;
-        }
-      } else if (isAlarmDelivered && scheduledRec && !currentTransition.notificationSent) {
-        currentTransition.notificationSent = true;
-        transitionsDirty = true;
-        if (scheduledRec.status !== 'DELIVERED') {
-          scheduledRec.status = 'DELIVERED';
-          scheduledDirty = true;
-        }
-      }
-
-      // Foreground notification dispatch
-      if (!currentTransition.notificationSent) {
-        if (notificationsEnabled && criticalStockAlertsEnabled) {
-          sendCriticalStockAlert(med.id, med.name, daysLeft, effPills, med.unit || 'قرص');
-          currentTransition.notificationSent = true;
-          transitionsDirty = true;
-        }
-      }
     }
 
-    // Clean up entries for deleted medications
-    const medIds = new Set(medications.map((m) => m.id));
+    // Clean up transitions for deleted medications.
+    const medIds = medications.map((m) => m.id);
+    const medIdSet = new Set(medIds);
     for (const id of Object.keys(transitions)) {
-      if (!medIds.has(id)) {
+      if (!medIdSet.has(id)) {
         delete transitions[id];
-        transitionsDirty = true;
+        dirty.transitions = true;
       }
     }
+    // (Scheduled records of deleted meds are the SCHEDULER's
+    // responsibility — it owns the native alarm cancellation.)
 
-    if (transitionsDirty) {
+    if (dirty.transitions) {
       saveCriticalTransitions(transitions);
     }
-    if (scheduledDirty) {
+    if (dirty.scheduled) {
       saveScheduledCriticalAlarms(scheduled);
+    }
+
+    // ── Delivery-evidence reconciliation (strict semantics) ──
+    // For episodes in the 'SCHEDULED' state, check (native only, best
+    // effort) whether the scheduled alarm notification is ACTUALLY
+    // visible in the Android drawer. That is positive evidence of
+    // delivery; absence proves nothing and changes nothing. This pass
+    // NEVER treats elapsed alarmTime as delivery, and it only mutates
+    // transitions (never the scheduler's records), so it cannot race
+    // the scheduler's async record writes.
+    const hasEvidenceCandidates = medIds.some(
+      (id) => transitions[id]?.notificationState === 'SCHEDULED'
+    );
+    if (hasEvidenceCandidates) {
+      void getDeliveredNotificationIds()
+        .then((deliveredIds) => {
+          const changed = applyDeliveredCriticalEvidence(
+            medIds,
+            deliveredIds,
+            transitions,
+            scheduled,
+            criticalAlarmId
+          );
+          if (changed) {
+            saveCriticalTransitions(transitions);
+          }
+        })
+        .catch(() => undefined);
     }
   }, [medications, notificationsEnabled, criticalStockAlertsEnabled, hydrated, isFirstRun]);
 }
-

@@ -598,7 +598,9 @@ describe('useCriticalAlarmScheduler — scheduled record persistence (identity s
   const TRANSITION_KEY_STORE = 'android_med_tracker_critical_transition_v2';
   const SCHEDULED_STORE = 'android_med_tracker_scheduled_critical_v2';
 
-  function readScheduledRecord(medId: string): { transitionKey: string; alarmTime: number; status: string } | undefined {
+  function readScheduledRecord(
+    medId: string
+  ): { transitionKey: string; alarmTime: number; status: string; generation?: number } | undefined {
     const raw = localStorage.getItem(SCHEDULED_STORE);
     if (!raw) return undefined;
     return JSON.parse(raw)[medId];
@@ -695,6 +697,172 @@ describe('useCriticalAlarmScheduler — scheduled record persistence (identity s
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
 
     expect(mocks.schedule.mock.calls[0]).toHaveLength(4);
+  });
+
+  it('TEST H: schedule success stamps the record SCHEDULED with a bumped generation', async () => {
+    const med = makeMed({ id: 'med-genstamp', currentPills: 30, dailyDose: 1 });
+
+    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    await flushUntil(() => readScheduledRecord('med-genstamp') !== undefined);
+
+    const rec = readScheduledRecord('med-genstamp')!;
+    expect(rec.status).toBe('SCHEDULED');
+    expect(rec.transitionKey).toBe('');
+    expect(rec.generation).toBe(1); // first accepted scheduler write
+  });
+});
+
+describe('useCriticalAlarmScheduler — scheduled-record ownership & generation (race safety)', () => {
+  const TRANSITION_KEY_STORE = 'android_med_tracker_critical_transition_v2';
+  const SCHEDULED_STORE = 'android_med_tracker_scheduled_critical_v2';
+
+  type StoredRecord = {
+    transitionKey: string;
+    alarmTime: number;
+    status: string;
+    generation?: number;
+  };
+
+  function readRecord(medId: string): StoredRecord | undefined {
+    const raw = localStorage.getItem(SCHEDULED_STORE);
+    if (!raw) return undefined;
+    return JSON.parse(raw)[medId];
+  }
+
+  function writeScheduledStore(records: Record<string, StoredRecord>): void {
+    localStorage.setItem(SCHEDULED_STORE, JSON.stringify(records));
+  }
+
+  it('TEST A/B: owner binds the claim to episode A → reschedule keeps binding A, only alarmTime changes', async () => {
+    const med1 = makeMed({ id: 'med-bind', currentPills: 30, dailyDose: 1 });
+    const med2 = makeMed({ id: 'med-bind', currentPills: 60, dailyDose: 1 });
+
+    const { rerender } = renderHook(
+      ({ medications }) => useCriticalAlarmScheduler(defaultOpts({ medications })),
+      { initialProps: { medications: [med1] as Medication[] } }
+    );
+    await flushUntil(() => readRecord('med-bind') !== undefined);
+    const first = readRecord('med-bind')!;
+    expect(first.transitionKey).toBe(''); // unbound claim
+    expect(first.generation).toBe(1);
+
+    // The episode owner binds the claim (exactly what
+    // reconcileCriticalEpisode does at the actual crossing): transition A
+    // becomes active and the claim is bound to it.
+    localStorage.setItem(
+      TRANSITION_KEY_STORE,
+      JSON.stringify({
+        'med-bind': { transitionKey: 'crit_med-bind_A', enteredAt: Date.now(), notificationState: 'SENT' },
+      })
+    );
+    const bound = JSON.parse(localStorage.getItem(SCHEDULED_STORE)!);
+    bound['med-bind'].transitionKey = 'crit_med-bind_A';
+    localStorage.setItem(SCHEDULED_STORE, JSON.stringify(bound));
+
+    // Stock change → new scheduler generation → reschedule (new projected date).
+    rerender({ medications: [med2] as Medication[] });
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
+    await flushUntil(() => readRecord('med-bind')!.alarmTime !== first.alarmTime);
+
+    const rec = readRecord('med-bind')!;
+    // The binding to A survived the reschedule — the scheduler must never
+    // replace it with an unbound claim.
+    expect(rec.transitionKey).toBe('crit_med-bind_A');
+    expect(rec.status).toBe('SCHEDULED');
+    expect(rec.alarmTime).toBeGreaterThan(first.alarmTime); // only scheduling data changed
+    expect(rec.generation).toBe(2);
+    // The scheduler did not touch the transition store.
+    const transitions = JSON.parse(localStorage.getItem(TRANSITION_KEY_STORE)!);
+    expect(transitions['med-bind'].transitionKey).toBe('crit_med-bind_A');
+  });
+
+  it('TEST C: G1 schedule in flight, G2 starts → G1 bails + compensates; the persisted record is G2\u2019s', async () => {
+    let releaseG1!: (value: boolean) => void;
+    const g1Gate = new Promise<boolean>((resolve) => { releaseG1 = resolve; });
+    // G1's schedule call hangs on the gate.
+    mocks.schedule.mockImplementationOnce(() => g1Gate);
+
+    const med1 = makeMed({ id: 'med-gen', currentPills: 30, dailyDose: 1 });
+    const med2 = makeMed({ id: 'med-gen', currentPills: 70, dailyDose: 1 });
+
+    const { rerender } = renderHook(
+      ({ medications }) => useCriticalAlarmScheduler(defaultOpts({ medications })),
+      { initialProps: { medications: [med1] as Medication[] } }
+    );
+    // G1's op: cancel resolves → schedule is now gated and in flight.
+    await flushUntil(() => mocks.cancel.mock.calls.length >= 1);
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    expect(readRecord('med-gen')).toBeUndefined(); // nothing persisted while gated
+
+    // G2's effect run bumps the generation and enqueues op2 (serialized
+    // behind op1's gate).
+    rerender({ medications: [med2] as Medication[] });
+
+    // Release G1: schedule resolves → G1's post-schedule gen check fails
+    // → compensating cancel + neutralize. Then G2's op runs and persists.
+    releaseG1(true);
+    await flushUntil(() => mocks.cancel.mock.calls.length >= 3);
+    await flushUntil(() => readRecord('med-gen') !== undefined);
+
+    const rec = readRecord('med-gen')!;
+    // The persistent record belongs to G2 — the latest generation.
+    expect(rec.status).toBe('SCHEDULED');
+    expect(rec.transitionKey).toBe('');
+    const g2Date = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1][2] as number;
+    expect(rec.alarmTime).toBe(g2Date);
+    expect(rec.generation).toBe(1);
+  });
+
+  it('TEST D: after episode A ends, a reschedule writes an UNBOUND claim (never resurrects A)', async () => {
+    // Episode A ended: the owner deleted the transition and neutralized
+    // its bound claim (the binding remains only as inert information).
+    writeScheduledStore({
+      'med-end': { transitionKey: 'crit_med-end_A', alarmTime: Date.now() + 86400000, status: 'NOT_SCHEDULED' },
+    });
+    // No active transition exists anymore.
+
+    const med = makeMed({ id: 'med-end', currentPills: 90, dailyDose: 1 });
+    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    await flushUntil(() => readRecord('med-end')?.status === 'SCHEDULED');
+
+    const rec = readRecord('med-end')!;
+    expect(rec.transitionKey).toBe('');     // A was NOT resurrected
+    expect(rec.status).toBe('SCHEDULED');   // fresh valid claim for the future crossing
+    expect(rec.generation).toBeGreaterThanOrEqual(1);
+    // The scheduler never wrote the transition store (no identity creation).
+    expect(localStorage.getItem(TRANSITION_KEY_STORE)).toBeNull();
+  });
+
+  it('TEST G: alarm date changes 3+ times ⇒ claim stays unbound, only alarmTime changes, generation advances', async () => {
+    const meds = [30, 60, 90, 120].map((pills) =>
+      makeMed({ id: 'med-g', currentPills: pills, dailyDose: 1 })
+    );
+    const { rerender } = renderHook(
+      ({ medications }) => useCriticalAlarmScheduler(defaultOpts({ medications })),
+      { initialProps: { medications: [meds[0]] as Medication[] } }
+    );
+    await flushUntil(() => readRecord('med-g') !== undefined);
+
+    const alarmTimes: number[] = [readRecord('med-g')!.alarmTime];
+    const keys = new Set<string>([readRecord('med-g')!.transitionKey]);
+
+    for (let i = 1; i < meds.length; i++) {
+      rerender({ medications: [meds[i]] as Medication[] });
+      await flushUntil(() => mocks.schedule.mock.calls.length >= i + 1);
+      await flushUntil(() => readRecord('med-g')!.alarmTime !== alarmTimes[i - 1]);
+      alarmTimes.push(readRecord('med-g')!.alarmTime);
+      keys.add(readRecord('med-g')!.transitionKey);
+    }
+
+    // No identity was ever created; every projected date landed.
+    expect(keys).toEqual(new Set(['']));
+    expect(new Set(alarmTimes).size).toBe(alarmTimes.length);
+    const finalRec = readRecord('med-g')!;
+    expect(finalRec.status).toBe('SCHEDULED');
+    // One accepted write per distinct projected date.
+    expect(finalRec.generation).toBe(alarmTimes.length);
   });
 });
 

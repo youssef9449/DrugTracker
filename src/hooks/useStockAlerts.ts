@@ -65,9 +65,15 @@ interface UseStockAlertsOptions {
  * == Race safety ==
  * All state lives in synchronous localStorage and this effect is the
  * only transition creator. The scheduler (useCriticalAlarmScheduler)
- * only writes scheduled-alarm records — never identities — so React
- * effect execution order between the two hooks cannot produce
- * contradictory state. No artificial delays are used or needed.
+ * writes scheduled-alarm records ONLY through the ownership helpers in
+ * criticalTransitions.ts (updateScheduledAlarm / invalidateScheduledAlarm /
+ * clearScheduledAlarm), which read the authoritative active transition at
+ * write time (read-only), preserve the active episode's binding, refuse
+ * stale-generation writes, and never generate identity — so React effect
+ * execution order between the two hooks cannot produce contradictory
+ * state, and no async scheduler operation can erase this owner's binding
+ * or resurrect a dead episode's claim. No artificial delays are used or
+ * needed.
  */
 export function useStockAlerts({
   medications,

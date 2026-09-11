@@ -24,6 +24,13 @@
  *   notification was displayed. SCHEDULED ≠ DELIVERED. Delivery is only
  *   recorded from positive native evidence (see applyDeliveredCriticalEvidence)
  *   or from migrated state that already carried evidence.
+ * - Scheduled-record writes are funneled through the ownership helpers
+ *   below: the episode owner binds (bindScheduledAlarmToTransition), the
+ *   scheduler only updates scheduling data (updateScheduledAlarm /
+ *   invalidateScheduledAlarm / clearScheduledAlarm) with generation
+ *   checks so a stale scheduler operation can never clobber the record
+ *   written by a newer one, erase a binding to the active episode, or
+ *   resurrect a binding to a dead one.
  *
  * == Storage versioning / migration ==
  *   v2 (current): android_med_tracker_critical_transition_v2
@@ -199,13 +206,19 @@ function normalizeScheduledStatus(raw: unknown, alarmTime: number): ScheduledCri
 
 function normalizeScheduledRecord(raw: unknown): ScheduledCriticalAlarmRecord | null {
   if (!raw || typeof raw !== 'object') return null;
-  const rec = raw as { transitionKey?: unknown; alarmTime?: unknown; status?: unknown };
+  const rec = raw as { transitionKey?: unknown; alarmTime?: unknown; status?: unknown; generation?: unknown };
   const alarmTime = typeof rec.alarmTime === 'number' && Number.isFinite(rec.alarmTime) ? rec.alarmTime : 0;
-  return {
+  const normalized: ScheduledCriticalAlarmRecord = {
     transitionKey: typeof rec.transitionKey === 'string' ? rec.transitionKey : '',
     alarmTime,
     status: normalizeScheduledStatus(rec.status, alarmTime),
   };
+  // generation is optional: only preserve a well-formed revision counter,
+  // otherwise the field stays absent (treated as 0 by the write helpers).
+  if (typeof rec.generation === 'number' && Number.isFinite(rec.generation) && rec.generation >= 0) {
+    normalized.generation = rec.generation;
+  }
+  return normalized;
 }
 
 /**
@@ -254,6 +267,193 @@ export function loadScheduledCriticalAlarms(): Record<string, ScheduledCriticalA
  */
 export function saveScheduledCriticalAlarms(records: Record<string, ScheduledCriticalAlarmRecord>): void {
   saveJson(SCHEDULED_CRITICAL_STORAGE_KEY, records);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Scheduled-record ownership / versioning helpers
+//
+// These helpers ENCODE the write invariants so callers cannot
+// accidentally violate them (e.g. erasing a valid episode binding with
+// `records[id] = { transitionKey: '', … }`).
+//
+// Two writers exist, with strictly separated powers:
+//
+//   THE EPISODE OWNER (useStockAlerts via reconcileCriticalEpisode)
+//     - creates/deletes episode identity
+//     - binds an existing scheduled record to an episode
+//       (bindScheduledAlarmToTransition) and neutralizes its own
+//       episode's claim at episode end
+//     - writes synchronously; needs no generation check (it IS
+//       authoritative)
+//
+//   THE SCHEDULER (useCriticalAlarmScheduler)
+//     - may READ the active identity (getActiveTransition) but NEVER
+//       generate, adopt, or delete one
+//     - writes scheduling data only, through updateScheduledAlarm /
+//       invalidateScheduledAlarm / clearScheduledAlarm, which enforce:
+//         * generation check — an operation captures the record's
+//           generation BEFORE its async native work and may persist
+//           only if the stored generation is unchanged (a stale
+//           generation must abandon the write)
+//         * binding rule — a successfully scheduled claim is bound to
+//           the CURRENTLY ACTIVE transition (if any), never to a dead
+//           one and never blindly unbound when an episode is active
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * READ the authoritative active transition for a medication, if one
+ * exists. This is the ONLY identity-related access the scheduler is
+ * allowed: read-only. It must never create, adopt, mutate, or delete a
+ * transition.
+ */
+export function getActiveTransition(
+  transitions: Record<string, CriticalTransitionState>,
+  medId: string
+): CriticalTransitionState | null {
+  return transitions[medId] ?? null;
+}
+
+/**
+ * EPISODE OWNER ONLY: bind an existing scheduled record to the given
+ * episode identity. This overwrites any previous binding (an unbound
+ * claim becomes bound; a stale binding from a previous episode is
+ * replaced — the owner is authoritative). It does NOT touch status,
+ * alarmTime, or generation.
+ *
+ * Returns true when the map changed (caller persists).
+ */
+export function bindScheduledAlarmToTransition(
+  scheduled: Record<string, ScheduledCriticalAlarmRecord>,
+  medId: string,
+  transitionKey: string
+): boolean {
+  const rec = scheduled[medId];
+  if (!rec || !transitionKey || rec.transitionKey === transitionKey) return false;
+  rec.transitionKey = transitionKey;
+  return true;
+}
+
+/** Input for {@link updateScheduledAlarm}. */
+export interface ScheduledAlarmUpdate {
+  alarmTime: number;
+  /**
+   * The record generation the scheduling operation observed BEFORE its
+   * async native work (baseline). If the stored record's generation no
+   * longer matches, a newer scheduler write happened in between and
+   * this stale operation MUST abandon the storage write.
+   */
+  baselineGeneration: number;
+}
+
+/**
+ * SCHEDULER ONLY: persist the outcome of a SUCCESSFUL native schedule
+ * (the alarm is armed at `update.alarmTime`).
+ *
+ * Binding rule (the heart of the ownership model):
+ *   transitionKey := the ACTIVE transition's key for this med, or ''
+ *   when no episode is currently active.
+ *
+ * Consequences:
+ *   - a record already bound to the active episode KEEPS that binding
+ *     (the alarm time can change; the episode identity cannot);
+ *   - a stale binding to a dead episode is dropped, never resurrected;
+ *   - an unbound claim stays unbound when no episode is active;
+ *   - when an episode IS active, the claim becomes its bound claim.
+ *
+ * The scheduler never generates an identity here — it only reads the
+ * authoritative transition map passed by the caller.
+ *
+ * Generation rule: the write is ABANDONED (returns false, no mutation)
+ * when the stored record's generation differs from the operation's
+ * baseline — i.e. another scheduler write landed while this operation
+ * was awaiting the native bridge. Accepted writes bump generation.
+ *
+ * Returns true when the map changed (caller persists).
+ */
+export function updateScheduledAlarm(
+  scheduled: Record<string, ScheduledCriticalAlarmRecord>,
+  transitions: Record<string, CriticalTransitionState>,
+  medId: string,
+  update: ScheduledAlarmUpdate
+): boolean {
+  const existing = scheduled[medId];
+  // Stale-generation protection: only the write whose baseline still
+  // matches the stored record may proceed.
+  if (existing && (existing.generation ?? 0) !== update.baselineGeneration) {
+    return false;
+  }
+  // READ (never create) the authoritative episode identity.
+  const activeKey = getActiveTransition(transitions, medId)?.transitionKey ?? '';
+  const next: ScheduledCriticalAlarmRecord = {
+    // Preserve the active episode's binding; drop dead/stale bindings.
+    transitionKey: activeKey,
+    alarmTime: update.alarmTime,
+    status: 'SCHEDULED',
+    generation: (existing?.generation ?? 0) + 1,
+  };
+  if (
+    existing &&
+    existing.transitionKey === next.transitionKey &&
+    existing.alarmTime === next.alarmTime &&
+    existing.status === next.status
+  ) {
+    // Scheduling data unchanged — nothing to persist, no revision.
+    return false;
+  }
+  scheduled[medId] = next;
+  return true;
+}
+
+/**
+ * SCHEDULER ONLY: neutralize the med's scheduled claim after a native
+ * cancel or a failed schedule — status → NOT_SCHEDULED so no valid
+ * SCHEDULED claim survives (the foreground notification path stays
+ * available in the episode owner). The transitionKey is PRESERVED:
+ * binding information is not the scheduler's to erase; the owner
+ * rebinding or episode-end logic decides what a neutralized record
+ * means later.
+ *
+ * Stale-generation safe (same rule as {@link updateScheduledAlarm})
+ * when a baselineGeneration is provided.
+ *
+ * Returns true when the map changed (caller persists).
+ */
+export function invalidateScheduledAlarm(
+  scheduled: Record<string, ScheduledCriticalAlarmRecord>,
+  medId: string,
+  baselineGeneration?: number
+): boolean {
+  const rec = scheduled[medId];
+  if (!rec || rec.status === 'NOT_SCHEDULED') return false;
+  if (baselineGeneration !== undefined && (rec.generation ?? 0) !== baselineGeneration) {
+    return false;
+  }
+  rec.status = 'NOT_SCHEDULED';
+  if (baselineGeneration !== undefined) {
+    rec.generation = (rec.generation ?? 0) + 1;
+  }
+  return true;
+}
+
+/**
+ * SCHEDULER ONLY: remove the med's scheduled record entirely (the
+ * medication was deleted; the owner deletes the transition separately).
+ * Stale-generation safe like the other helpers.
+ *
+ * Returns true when the map changed (caller persists).
+ */
+export function clearScheduledAlarm(
+  scheduled: Record<string, ScheduledCriticalAlarmRecord>,
+  medId: string,
+  baselineGeneration?: number
+): boolean {
+  const rec = scheduled[medId];
+  if (!rec) return false;
+  if (baselineGeneration !== undefined && (rec.generation ?? 0) !== baselineGeneration) {
+    return false;
+  }
+  delete scheduled[medId];
+  return true;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -368,8 +568,8 @@ export function reconcileCriticalEpisode(
         enteredAt: rec!.alarmTime > 0 ? rec!.alarmTime : now,
         notificationState: deliveredClaim ? 'SENT' : 'SCHEDULED',
       };
-      if (rec!.transitionKey !== key) {
-        rec!.transitionKey = key;
+      // Owner bind: the adopted claim carries this episode's identity.
+      if (bindScheduledAlarmToTransition(scheduled, medId, key)) {
         dirty.scheduled = true;
       }
     } else {
@@ -383,8 +583,11 @@ export function reconcileCriticalEpisode(
       // alarm does not suppress the foreground — the crossing already
       // happened earlier than projected, and the scheduler cancels the
       // stale alarm right after (same React commit).
-      if (rec && rec.status === 'SCHEDULED' && rec.transitionKey !== t.transitionKey) {
-        rec.transitionKey = t.transitionKey;
+      if (
+        rec &&
+        rec.status === 'SCHEDULED' &&
+        bindScheduledAlarmToTransition(scheduled, medId, t.transitionKey)
+      ) {
         dirty.scheduled = true;
       }
     }

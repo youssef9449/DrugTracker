@@ -971,6 +971,9 @@ export default function App() {
 
   const handleToggleNotifications = async () => {
     if (!notificationsEnabled) {
+      // Turning ON: must obtain notification permission first.
+      // If the user denies, do NOT activate the toggle — show a failure
+      // message so the user knows the permission wasn't granted.
       let pushAllowed = false;
       try {
         const currentPerm = await getNotificationPermission();
@@ -979,26 +982,33 @@ export default function App() {
         } else if (currentPerm === 'default') {
           pushAllowed = await requestNotificationPermission();
         }
+        // If currentPerm === 'denied', the OS won't re-show the prompt —
+        // pushAllowed stays false and the toggle does NOT activate.
       } catch (err) {
         console.warn('[App] Notification permission error:', err);
       }
 
-      // Always turn on in-app notifications so in-app chimes,
-      // dose alarm dialogs, and stock depletion tracking function properly.
+      if (!pushAllowed) {
+        // Permission denied (or error) → do NOT activate the toggle.
+        // Show a clear failure message instead of falsely claiming
+        // notifications are on.
+        showToast(TOAST_MESSAGES.notificationsPermissionDenied);
+        return;
+      }
+
+      // Permission granted → activate the toggle. No test notification
+      // is sent here — the user only asked to toggle notifications on,
+      // not to test them. The test notification is available separately
+      // in the AppSettingsModal ('تجربة إشعار وتنبيه صوتي الآن').
       setNotificationsEnabled(true);
       if (soundEnabled) {
         playSuccessChime();
       }
-
-      if (pushAllowed) {
-        sendTestAlertNotification(globalCustomSound).catch(() => void 0);
-        showToast('تم تفعيل إشعارات الهاتف والتنبيهات الصوتية بنجاح 🔔 (تم إرسال إشعار تجريبي)');
-      } else {
-        showToast('تم تفعيل التنبيهات والأصوات داخل التطبيق بنجاح 🔔 (لإشعارات الهاتف بالخلفية اسمح بها في إعدادات المتصفح)');
-      }
+      showToast(TOAST_MESSAGES.notificationsOn);
     } else {
+      // Turning OFF.
       setNotificationsEnabled(false);
-      showToast('تم إيقاف التنبيهات داخل التطبيق 🔕');
+      showToast(TOAST_MESSAGES.notificationsOff);
     }
   };
 
@@ -1089,18 +1099,46 @@ export default function App() {
   // #79: extracted from two byte-identical inline handlers passed to
   // AppHeader and AppSettingsModal. useCallback so both props get the
   // same stable reference.
-  const handleToggleCriticalStockAlerts = useCallback(() => {
+  // handleToggleCriticalStockAlerts must be async because it requests
+  // notification permission when turning ON. Previously it was a sync
+  // useCallback that always flipped the toggle on without checking
+  // permission — now it requests permission first and does NOT activate
+  // if the user denies.
+  const handleToggleCriticalStockAlerts = useCallback(async () => {
     const next = !criticalStockAlertsEnabled;
-    setCriticalStockAlertsEnabled(next);
-    if (next && !notificationsEnabled) {
+    if (!next) {
+      // Turning OFF — always allowed.
+      setCriticalStockAlertsEnabled(false);
+      showToast(TOAST_MESSAGES.criticalAlertsOff);
+      return;
+    }
+
+    // Turning ON — ensure notification permission is granted first.
+    // If notifications aren't enabled yet (or permission is missing),
+    // request it. On denial, do NOT activate the toggle.
+    if (!notificationsEnabled) {
+      let pushAllowed = false;
+      try {
+        const currentPerm = await getNotificationPermission();
+        if (currentPerm === 'granted') {
+          pushAllowed = true;
+        } else if (currentPerm === 'default') {
+          pushAllowed = await requestNotificationPermission();
+        }
+      } catch (err) {
+        console.warn('[App] Notification permission error (critical toggle):', err);
+      }
+      if (!pushAllowed) {
+        showToast(TOAST_MESSAGES.notificationsPermissionDenied);
+        return;
+      }
+      // Permission granted → also flip the notifications toggle on.
       setNotificationsEnabled(true);
     }
+
+    setCriticalStockAlertsEnabled(true);
     if (soundEnabled) playSuccessChime();
-    showToast(
-      next
-        ? TOAST_MESSAGES.criticalAlertsOn
-        : TOAST_MESSAGES.criticalAlertsOff
-    );
+    showToast(TOAST_MESSAGES.criticalAlertsOn);
   }, [criticalStockAlertsEnabled, notificationsEnabled, soundEnabled, showToast]);
 
   // #88: Single memoized medications-with-status array. Previously

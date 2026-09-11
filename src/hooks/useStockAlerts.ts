@@ -1,26 +1,13 @@
 import { useEffect, useRef } from 'react';
 import {
   Medication,
-  MedicationStatus,
   calculateMedicationStatus,
 } from '../types';
 import { effectiveCurrentPills } from '../utils/dateCalculations';
-import {
-  sendMedicineAlert,
-  sendCriticalStockAlert,
-} from '../utils/notifications';
+import { sendCriticalStockAlert } from '../utils/notifications';
+import { loadJson, saveJson } from '../utils/storage';
 
-/**
- * Severity rank for MedicationStatus, used to decide whether a status
- * change is a worsening (fire) or an improvement (don't fire, just
- * update the tracker). Higher = worse.
- */
-const STATUS_RANK: Record<MedicationStatus, number> = {
-  sufficient: 0,
-  warning: 1,
-  critical: 2,
-  out_of_stock: 3,
-};
+const CRITICAL_NOTIFIED_KEY = 'android_med_tracker_critical_notified_v1';
 
 interface UseStockAlertsOptions {
   medications: Medication[];
@@ -34,17 +21,24 @@ interface UseStockAlertsOptions {
 
 /**
  * Watch the medications array + notification flags and fire a notification
- * the FIRST time a medication WORSENS (audit #87).
+ * the FIRST time a medication transitions into a critical/out_of_stock state.
  *
- * Extracted from App.tsx (was a ~70-line inline useEffect). Tracks the
- * last-alerted status per med in a ref and compares severity ranks
- * (out_of_stock > critical > warning > sufficient). Only fires when the
- * new status is STRICTLY WORSE than the previously-alerted one — so a
- * partial refill that improves a med from critical→warning does NOT fire
- * a spurious "warning" alert. When a med improves to 'sufficient', the
- * tracker is cleared so the next crossing alerts again. When notifications
- * are toggled off, the tracker is cleared so re-enabling fires for current
- * alertable meds again.
+ * == Dedup model ==
+ * A persistent map `CRITICAL_NOTIFIED_KEY` in localStorage tracks per-med
+ * whether the current critical transition has already been notified:
+ *   `{ [medId]: true }` — med is in critical state AND was already notified.
+ *
+ * When the med transitions back to 'sufficient', the entry is cleared.
+ * When it transitions back to 'critical', a new notification is allowed.
+ *
+ * This ensures exactly ONE notification per state transition, regardless
+ * of app restart, re-render, or scheduled alarm also firing.
+ *
+ * == No double notifications ==
+ * Only `sendCriticalStockAlert` is called (one drawer entry per transition).
+ * The old `sendMedicineAlert` (generic low-stock) is no longer fired
+ * alongside the critical alert — it was producing a second drawer entry
+ * for the same event.
  */
 export function useStockAlerts({
   medications,
@@ -53,68 +47,64 @@ export function useStockAlerts({
   hydrated,
   isFirstRun,
 }: UseStockAlertsOptions): void {
-  const lastAlertedStatusRef = useRef<Map<string, MedicationStatus>>(new Map());
+  // In-memory cache synced from localStorage. Persists across re-renders
+  // within the same hook instance. Loaded once on mount, then kept in
+  // sync as we mutate it.
+  const notifiedRef = useRef<Map<string, boolean> | null>(null);
 
   useEffect(() => {
     if (!hydrated) return;
-    // First-run: don't fire ghost notifications for seed data.
     if (isFirstRun) return;
 
-    // When notifications are off, reset the tracker so the next time
-    // they're turned on, current alertable meds fire again.
+    // Initialize from localStorage on first run after hydration.
+    if (notifiedRef.current === null) {
+      const persisted = loadJson<Record<string, boolean>>(CRITICAL_NOTIFIED_KEY, {});
+      notifiedRef.current = new Map(Object.entries(persisted));
+    }
+    const tracker = notifiedRef.current;
+
+    // When notifications are off, clear the tracker so the next time
+    // they're turned on, current critical meds fire again.
     if (!notificationsEnabled) {
-      lastAlertedStatusRef.current.clear();
+      if (tracker.size > 0) {
+        tracker.clear();
+        saveJson(CRITICAL_NOTIFIED_KEY, {});
+      }
       return;
     }
 
-    const tracker = lastAlertedStatusRef.current;
+    let dirty = false;
+
     for (const med of medications) {
       const { status, daysLeft } = calculateMedicationStatus(med);
-      // The dynamic balance — what the user actually has right now, not
-      // the stale stored snapshot. Used in the notification body text so
-      // it stays correct even if the app was closed for many days.
       const effPills = effectiveCurrentPills(med);
-      const prev = tracker.get(med.id);
+      const alreadyNotified = tracker.has(med.id);
 
-      // Med is healthy → clear its tracker so the next worsening alerts.
+      // Med is healthy → clear its notified flag so the next crossing
+      // into critical triggers a new notification.
       if (status === 'sufficient') {
-        tracker.delete(med.id);
-        continue;
-      }
-
-      // Already alerted for this exact (or a worse) status → don't
-      // re-fire. `prev` records the worst status we've already alerted
-      // for; if the new status is the same or better, skip.
-      if (prev !== undefined && STATUS_RANK[status] <= STATUS_RANK[prev]) {
-        // Update the tracker if the status improved (so a later
-        // worsening from the new, better baseline fires again).
-        if (STATUS_RANK[status] < STATUS_RANK[prev]) {
-          tracker.set(med.id, status);
+        if (alreadyNotified) {
+          tracker.delete(med.id);
+          dirty = true;
         }
         continue;
       }
 
-      // New med (prev undefined) OR status strictly worsened → fire the
-      // appropriate alert(s) for the new status.
-      if (status === 'out_of_stock') {
-        if (criticalStockAlertsEnabled) {
-          sendCriticalStockAlert(med.id, med.name, 0, 0, med.unit || 'قرص');
-        }
-        // Also send the general low-stock alert so it appears as its
-        // own drawer entry (different notification id).
-        sendMedicineAlert(med.id, med.name, 0, 0);
-      } else if (status === 'critical') {
+      // Already notified for this critical transition → skip.
+      if (alreadyNotified) continue;
+
+      // New critical/out_of_stock transition → fire exactly ONE notification.
+      if (status === 'critical' || status === 'out_of_stock') {
         if (criticalStockAlertsEnabled) {
           sendCriticalStockAlert(med.id, med.name, daysLeft, effPills, med.unit || 'قرص');
         }
-        // Critical is a subset of the warning window — also send the
-        // general alert (separate drawer entry, less urgent wording).
-        sendMedicineAlert(med.id, med.name, daysLeft, effPills);
-      } else if (status === 'warning') {
-        sendMedicineAlert(med.id, med.name, daysLeft, effPills);
+        tracker.set(med.id, true);
+        dirty = true;
       }
+    }
 
-      tracker.set(med.id, status);
+    if (dirty) {
+      saveJson(CRITICAL_NOTIFIED_KEY, Object.fromEntries(tracker));
     }
   }, [medications, notificationsEnabled, criticalStockAlertsEnabled, hydrated, isFirstRun]);
 }

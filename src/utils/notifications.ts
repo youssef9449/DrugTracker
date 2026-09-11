@@ -344,8 +344,8 @@ export async function sendCriticalStockAlert(
   unit: string = 'قرص'
 ): Promise<void> {
   // Title reflects the actual situation: out of stock, or critical
-  // with N days left (the critical threshold is derived from the
-  // medication's warningThresholdDays — see getCriticalThresholdDays).
+  // with N days left (the critical threshold IS the user-configured
+  // warningThresholdDays — see getCriticalThresholdDays).
   const title =
     currentPills <= 0
       ? `🚨 ${medicineName}: نفد المخزون!`
@@ -630,7 +630,7 @@ function notificationId(
 //   - currentPills (snapshot)
 //   - dailyDose
 //   - lastSyncDate
-//   - warningThresholdDays (critical threshold is derived from it)
+//   - warningThresholdDays (IS the user-configured critical threshold)
 //   - autoDeductEnabled
 //   - medication id (med deleted/created)
 //

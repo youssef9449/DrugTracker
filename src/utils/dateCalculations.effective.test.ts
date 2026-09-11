@@ -169,13 +169,16 @@ describe('reverseRefill', () => {
   });
 
   it('moves the critical alarm back to the pre-refill date', () => {
+    // With warningThresholdDays=4 (the user threshold IS the critical threshold),
+    // baseMed: 50 pills, dose 10 → daysLeft=5, threshold=4 → daysUntilCritical=1
+    // refilledMed: 80 pills → daysLeft=8 → daysUntilCritical=4 (3 more days)
     const baseMed = makeMed({
-      currentPills: 30,
+      currentPills: 50,
       dailyDose: 10,
       warningThresholdDays: 4,
       lastSyncDate: '2024-09-20',
     });
-    const refilledMed = { ...baseMed, currentPills: 60 };
+    const refilledMed = { ...baseMed, currentPills: 80 };
     const undoneMed = reverseRefill(refilledMed, 30, '2024-09-20').updatedMed;
 
     expect(getCriticalAlarmDate(refilledMed, '2024-09-20')).toBe(
@@ -382,9 +385,9 @@ describe('getCriticalAlarmDate', () => {
     expect(getCriticalAlarmDate(med, '2024-09-10')).toBeNull();
   });
 
-  it('reschedules when warningThresholdDays changes (the critical threshold shifts)', () => {
-    // 30 pills, dose 1, threshold 5 (critical 2) → daysUntilCritical 28.
-    // Now threshold 10 (critical 5) → daysUntilCritical 25.
+  it('reschedules when warningThresholdDays changes (higher threshold = earlier alarm)', () => {
+    // 30 pills, dose 1, threshold 5 → daysUntilCritical = 25.
+    // threshold 10 → daysUntilCritical = 20 (fires 5 days earlier).
     const med1 = makeMed({
       currentPills: 30,
       dailyDose: 1,
@@ -396,7 +399,7 @@ describe('getCriticalAlarmDate', () => {
     const r2 = getCriticalAlarmDate(med2, getTodayDateString());
     expect(r1).not.toBeNull();
     expect(r2).not.toBeNull();
-    // The new (threshold=10) alarm fires 3 days earlier (25 vs 28 days out).
+    // The new (threshold=10) alarm fires 5 days earlier (20 vs 25 days out).
     expect(r2!).toBeLessThan(r1!);
   });
 

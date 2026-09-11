@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   CRITICAL_TRANSITION_STORAGE_KEY,
   SCHEDULED_CRITICAL_STORAGE_KEY,
+  CRITICAL_OWNERSHIP_STORAGE_KEY,
   LEGACY_TRANSITION_V1_KEY,
   LEGACY_CRITICAL_NOTIFIED_KEY,
   LEGACY_SCHEDULED_V1_KEY,
@@ -10,6 +11,8 @@ import {
   saveCriticalTransitions,
   loadScheduledCriticalAlarms,
   saveScheduledCriticalAlarms,
+  loadOwnershipRevisions,
+  saveOwnershipRevisions,
   reconcileCriticalEpisode,
   applyDeliveredCriticalEvidence,
   getActiveTransition,
@@ -17,6 +20,12 @@ import {
   updateScheduledAlarm,
   invalidateScheduledAlarm,
   clearScheduledAlarm,
+  invalidateEpisodeOwnership,
+  bumpEpisodeOwnershipRevision,
+  getOwnershipRevision,
+  canScheduleForTransition,
+  captureSchedulingContext,
+  isSchedulingContextStillValid,
 } from './criticalTransitions';
 import { CriticalTransitionState, ScheduledCriticalAlarmRecord } from '../types';
 
@@ -50,6 +59,15 @@ function writeScheduled(map: Record<string, ScheduledCriticalAlarmRecord>): void
   localStorageStore[SCHEDULED_CRITICAL_STORAGE_KEY] = JSON.stringify(map);
 }
 
+function writeOwnership(map: Record<string, number>): void {
+  localStorageStore[CRITICAL_OWNERSHIP_STORAGE_KEY] = JSON.stringify(map);
+}
+
+function readOwnership(): Record<string, number> {
+  const raw = localStorageStore[CRITICAL_OWNERSHIP_STORAGE_KEY];
+  return raw ? JSON.parse(raw) : {};
+}
+
 /** Run one reconcile pass for a single med and persist like the hook does. */
 function pass(opts: {
   medId?: string;
@@ -59,11 +77,13 @@ function pass(opts: {
 }) {
   const transitions = loadCriticalTransitions();
   const scheduled = loadScheduledCriticalAlarms();
-  const dirty = { transitions: false, scheduled: false };
+  const ownershipRevisions = loadOwnershipRevisions();
+  const dirty = { transitions: false, scheduled: false, ownership: false };
   let sent = 0;
   const result = reconcileCriticalEpisode(
     transitions,
     scheduled,
+    ownershipRevisions,
     {
       medId: opts.medId ?? 'med-1',
       isCriticalish: opts.isCriticalish,
@@ -75,7 +95,8 @@ function pass(opts: {
   );
   if (dirty.transitions) saveCriticalTransitions(transitions);
   if (dirty.scheduled) saveScheduledCriticalAlarms(scheduled);
-  return { result, sent };
+  if (dirty.ownership) saveOwnershipRevisions(ownershipRevisions);
+  return { result, sent, ownershipRevisions };
 }
 
 describe('generateCriticalTransitionKey', () => {
@@ -273,14 +294,26 @@ describe('reconcileCriticalEpisode — scheduled claim interaction', () => {
     expect(loadScheduledCriticalAlarms()['med-1'].transitionKey).toBe(result!.transition.transitionKey);
   });
 
-  it('adopting a bound claim preserves its identity (adopt, never re-generate)', () => {
+  it('a BOUND elapsed claim is NEVER adopted (dead-episode leftover → neutralized + fresh identity + foreground)', () => {
+    // A claim still bound to a key at creation time belonged to an
+    // episode that has since ended (e.g. a crash between the owner's
+    // two store writes). The new episode must never inherit it.
     writeScheduled({
-      'med-1': { transitionKey: 'crit_med-1_ARMED_CLAIM', alarmTime: Date.now() - 1, status: 'SCHEDULED' },
+      'med-1': { transitionKey: 'crit_med-1_DEAD_EPISODE', alarmTime: Date.now() - 1, status: 'SCHEDULED' },
     });
 
     const { result, sent } = pass({ isCriticalish: true });
-    expect(result!.transition.transitionKey).toBe('crit_med-1_ARMED_CLAIM');
-    expect(sent).toBe(0);
+    expect(result!.created).toBe(true);
+    expect(result!.transition.transitionKey).not.toBe('crit_med-1_DEAD_EPISODE');
+    // The leftover was neutralized, NOT rebound: its elapsed alarm must
+    // not own (suppress the foreground of) the NEW episode.
+    expect(loadScheduledCriticalAlarms()['med-1'].status).toBe('NOT_SCHEDULED');
+    expect(loadScheduledCriticalAlarms()['med-1'].transitionKey).toBe('crit_med-1_DEAD_EPISODE');
+    expect(result!.transition.notificationState).toBe('SENT');
+    expect(sent).toBe(1);
+    // Ownership revision moved: the new episode invalidates in-flight
+    // scheduler operations captured before it existed.
+    expect(getOwnershipRevision(readOwnership(), 'med-1')).toBeGreaterThan(0);
   });
 
   it('a DELIVERED claim (recorded evidence) adopts as SENT without sending', () => {
@@ -358,17 +391,23 @@ describe('applyDeliveredCriticalEvidence', () => {
     };
 
     // Only med-1's alarm is in the drawer.
+    const ownership: Record<string, number> = { 'med-1': 4, 'med-22': 2 };
     const changed = applyDeliveredCriticalEvidence(
       ['med-1', 'med-22'],
       new Set([alarmIdFor('med-1')]),
       transitions,
       scheduled,
+      ownership,
       alarmIdFor
     );
 
     expect(changed).toBe(true);
     expect(transitions['med-1'].notificationState).toBe('SENT');
     expect(transitions['med-22'].notificationState).toBe('SCHEDULED'); // no evidence → unchanged
+    // The ownership revision moved for the upgraded episode (ownership
+    // state changed → in-flight scheduler operations are invalidated).
+    expect(ownership['med-1']).toBe(5);
+    expect(ownership['med-22']).toBe(2);
   });
 
   it('never touches episodes that are NONE or SENT', () => {
@@ -381,7 +420,9 @@ describe('applyDeliveredCriticalEvidence', () => {
       'med-2': { transitionKey: 'k2', alarmTime: 2, status: 'SCHEDULED' },
     };
 
-    applyDeliveredCriticalEvidence(['med-1', 'med-2'], new Set([1, 2]), transitions, scheduled, alarmIdFor);
+    applyDeliveredCriticalEvidence(
+      ['med-1', 'med-2'], new Set([1, 2]), transitions, scheduled, {}, alarmIdFor
+    );
     expect(transitions['med-1'].notificationState).toBe('NONE');
     expect(transitions['med-2'].notificationState).toBe('SENT');
   });
@@ -399,6 +440,7 @@ describe('applyDeliveredCriticalEvidence', () => {
       new Set([alarmIdFor('med-1')]),
       transitions,
       scheduled,
+      {},
       alarmIdFor
     );
     expect(changed).toBe(false);
@@ -489,7 +531,10 @@ describe('updateScheduledAlarm — scheduler write rule (ownership + generation)
   const mkTransition = (key: string): CriticalTransitionState => ({
     transitionKey: key,
     enteredAt: 1,
-    notificationState: 'SENT',
+    // NONE = the active episode's notification is not yet owned by any
+    // path, so a scheduler write may create the SCHEDULED claim. The
+    // SENT refusal is covered by dedicated tests below.
+    notificationState: 'NONE',
   });
 
   it('TEST A: scheduler writes unbound claim → owner binds it to Transition A → scheduler reschedules ⇒ key A remains', () => {
@@ -720,5 +765,305 @@ describe('reconcileCriticalEpisode — TEST E: a new episode never inherits the 
     const { result, sent } = pass({ isCriticalish: true, canNotify: true });
     expect(sent).toBe(1); // future claim → foreground; no inheritance from A
     expect(result!.transition.transitionKey).not.toBe('crit_med-1_DEAD_A');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Ownership-revision store (episode-vs-scheduler race safety)
+// ─────────────────────────────────────────────────────────────────────
+
+describe('ownership-revision store', () => {
+  it('starts empty; missing entries read as 0', () => {
+    expect(loadOwnershipRevisions()).toEqual({});
+    expect(getOwnershipRevision(loadOwnershipRevisions(), 'med-1')).toBe(0);
+  });
+
+  it('bump increments, initializes missing entries to 1, and reports changes', () => {
+    const revisions: Record<string, number> = {};
+    expect(bumpEpisodeOwnershipRevision(revisions, 'med-1')).toBe(true);
+    expect(revisions['med-1']).toBe(1);
+    expect(bumpEpisodeOwnershipRevision(revisions, 'med-1')).toBe(true);
+    expect(revisions['med-1']).toBe(2);
+    // Persisted and reloaded faithfully.
+    saveOwnershipRevisions(revisions);
+    expect(loadOwnershipRevisions()).toEqual(revisions);
+  });
+
+  it('normalization drops malformed entries instead of crashing', () => {
+    writeOwnership({ 'med-1': 3, 'med-2': -5, 'med-3': 'x' } as unknown as Record<string, number>);
+    writeOwnership({ 'med-1': 3, 'med-2': -5, 'med-4': 1.5 });
+    // 1.5 is finite + non-negative → kept (any monotonic value is safe).
+    expect(loadOwnershipRevisions()).toEqual({ 'med-1': 3, 'med-4': 1.5 });
+  });
+});
+
+describe('canScheduleForTransition — SENT ownership rule', () => {
+  it('allows scheduling when no episode is active', () => {
+    expect(canScheduleForTransition({}, 'med-1')).toBe(true);
+  });
+
+  it('allows scheduling for NONE and SCHEDULED episodes', () => {
+    const transitions: Record<string, CriticalTransitionState> = {
+      'med-1': { transitionKey: 'k1', enteredAt: 1, notificationState: 'NONE' },
+      'med-2': { transitionKey: 'k2', enteredAt: 1, notificationState: 'SCHEDULED' },
+    };
+    expect(canScheduleForTransition(transitions, 'med-1')).toBe(true);
+    expect(canScheduleForTransition(transitions, 'med-2')).toBe(true);
+  });
+
+  it('REFUSES scheduling for a SENT episode (its notification was consumed)', () => {
+    const transitions: Record<string, CriticalTransitionState> = {
+      'med-1': { transitionKey: 'k1', enteredAt: 1, notificationState: 'SENT' },
+    };
+    expect(canScheduleForTransition(transitions, 'med-1')).toBe(false);
+  });
+});
+
+describe('updateScheduledAlarm — BLOCKER 2: SENT can never become SCHEDULED', () => {
+  const mkRecord = (over: Partial<ScheduledCriticalAlarmRecord> = {}): ScheduledCriticalAlarmRecord => ({
+    transitionKey: 'A',
+    alarmTime: Date.now() + 86400000,
+    status: 'NOT_SCHEDULED',
+    generation: 3,
+    ...over,
+  });
+
+  it('refuses the write entirely when the active episode is SENT (record untouched)', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': mkRecord(),
+    };
+    const transitions: Record<string, CriticalTransitionState> = {
+      'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'SENT' },
+    };
+
+    const changed = updateScheduledAlarm(scheduled, transitions, 'med-1', {
+      alarmTime: Date.now() + 999999,
+      baselineGeneration: 3,
+    });
+
+    expect(changed).toBe(false);
+    // No SCHEDULED ownership was restored, no binding/alarmTime touched.
+    expect(scheduled['med-1']).toEqual(mkRecord());
+  });
+
+  it('refuses even when the record does not exist yet (no new claim for a SENT episode)', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {};
+    const transitions: Record<string, CriticalTransitionState> = {
+      'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'SENT' },
+    };
+
+    expect(
+      updateScheduledAlarm(scheduled, transitions, 'med-1', {
+        alarmTime: Date.now() + 999999,
+        baselineGeneration: 0,
+      })
+    ).toBe(false);
+    expect(scheduled['med-1']).toBeUndefined();
+  });
+
+  it('a NONE episode MAY gain a SCHEDULED claim (legitimate ownership handoff)', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': mkRecord({ status: 'NOT_SCHEDULED', transitionKey: '' }),
+    };
+    const transitions: Record<string, CriticalTransitionState> = {
+      'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'NONE' },
+    };
+
+    expect(
+      updateScheduledAlarm(scheduled, transitions, 'med-1', {
+        alarmTime: 12345,
+        baselineGeneration: 3,
+      })
+    ).toBe(true);
+    expect(scheduled['med-1'].status).toBe('SCHEDULED');
+    expect(scheduled['med-1'].transitionKey).toBe('A');
+  });
+
+  it('a SCHEDULED episode MAY have its alarmTime updated (same identity)', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': mkRecord({ status: 'SCHEDULED' }),
+    };
+    const transitions: Record<string, CriticalTransitionState> = {
+      'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'SCHEDULED' },
+    };
+
+    expect(
+      updateScheduledAlarm(scheduled, transitions, 'med-1', {
+        alarmTime: 4242,
+        baselineGeneration: 3,
+      })
+    ).toBe(true);
+    expect(scheduled['med-1'].status).toBe('SCHEDULED');
+    expect(scheduled['med-1'].transitionKey).toBe('A');
+    expect(scheduled['med-1'].alarmTime).toBe(4242);
+  });
+});
+
+describe('captureSchedulingContext / isSchedulingContextStillValid', () => {
+  const capture = () =>
+    captureSchedulingContext(loadCriticalTransitions(), loadScheduledCriticalAlarms(), loadOwnershipRevisions(), 'med-1');
+  const stillValid = (ctx: ReturnType<typeof capture>) =>
+    isSchedulingContextStillValid(ctx, loadCriticalTransitions(), loadScheduledCriticalAlarms(), loadOwnershipRevisions());
+
+  it('valid when nothing ownership-relevant changed', () => {
+    writeTransitions({ 'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'NONE' } });
+    writeScheduled({ 'med-1': { transitionKey: 'A', alarmTime: 1000, status: 'SCHEDULED', generation: 4 } });
+    writeOwnership({ 'med-1': 7 });
+
+    const ctx = capture();
+    expect(stillValid(ctx)).toBe(true);
+    expect(ctx).toEqual({
+      medId: 'med-1',
+      baselineTransitionKey: 'A',
+      baselineNotificationState: 'NONE',
+      baselineOwnershipRevision: 7,
+      baselineRecordGeneration: 4,
+      baselineRecordTransitionKey: 'A',
+    });
+  });
+
+  it('valid with no episode and no record (all baselines zero/empty)', () => {
+    const ctx = capture();
+    expect(ctx.baselineTransitionKey).toBe('');
+    expect(ctx.baselineNotificationState).toBeNull();
+    expect(ctx.baselineOwnershipRevision).toBe(0);
+    expect(ctx.baselineRecordGeneration).toBe(0);
+    expect(ctx.baselineRecordTransitionKey).toBe('');
+    expect(stillValid(ctx)).toBe(true);
+  });
+
+  it('INVALID after the episode ends (revision bumped by the owner)', () => {
+    writeTransitions({ 'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'NONE' } });
+    writeScheduled({ 'med-1': { transitionKey: 'A', alarmTime: 1000, status: 'SCHEDULED', generation: 4 } });
+    writeOwnership({ 'med-1': 7 });
+    const ctx = capture();
+
+    // Owner ends the episode (exactly what reconcileCriticalEpisode does):
+    // transition deleted, bound claim neutralized, revision bumped.
+    const revisions = loadOwnershipRevisions();
+    const dirty = { transitions: false, scheduled: false, ownership: false };
+    reconcileCriticalEpisode(
+      loadCriticalTransitions(),
+      loadScheduledCriticalAlarms(),
+      revisions,
+      { medId: 'med-1', isCriticalish: false, canNotify: true, now: Date.now(), send: () => undefined },
+      dirty
+    );
+    saveOwnershipRevisions(revisions);
+
+    expect(stillValid(ctx)).toBe(false);
+  });
+
+  it('INVALID when a new episode B replaced episode A (transitionKey changed)', () => {
+    writeTransitions({ 'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'SENT' } });
+    const ctx = capture();
+
+    writeTransitions({ 'med-1': { transitionKey: 'B', enteredAt: 2, notificationState: 'NONE' } });
+    expect(stillValid(ctx)).toBe(false);
+  });
+
+  it('INVALID when notification ownership changed NONE → SENT under the operation', () => {
+    writeTransitions({ 'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'NONE' } });
+    const ctx = capture();
+
+    writeTransitions({ 'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'SENT' } });
+    expect(stillValid(ctx)).toBe(false);
+  });
+
+  it('INVALID when a newer scheduler write replaced the record (generation moved)', () => {
+    writeScheduled({ 'med-1': { transitionKey: '', alarmTime: 1000, status: 'SCHEDULED', generation: 2 } });
+    const ctx = capture();
+
+    writeScheduled({ 'med-1': { transitionKey: '', alarmTime: 2000, status: 'SCHEDULED', generation: 3 } });
+    expect(stillValid(ctx)).toBe(false);
+  });
+
+  it('INVALID when the owner bound the record (binding moved without a generation bump)', () => {
+    writeScheduled({ 'med-1': { transitionKey: '', alarmTime: 1000, status: 'SCHEDULED', generation: 2 } });
+    const ctx = capture();
+
+    const scheduled = loadScheduledCriticalAlarms();
+    bindScheduledAlarmToTransition(scheduled, 'med-1', 'A');
+    saveScheduledCriticalAlarms(scheduled);
+    expect(stillValid(ctx)).toBe(false);
+  });
+
+  it('INVALID when the record disappeared entirely', () => {
+    writeScheduled({ 'med-1': { transitionKey: '', alarmTime: 1000, status: 'SCHEDULED', generation: 2 } });
+    const ctx = capture();
+
+    writeScheduled({});
+    expect(stillValid(ctx)).toBe(false);
+  });
+});
+
+describe('invalidateEpisodeOwnership — owner-side end-of-episode invalidation', () => {
+  it('neutralizes the claim bound to the dead episode AND bumps the revision', () => {
+    writeScheduled({ 'med-1': { transitionKey: 'A', alarmTime: 1000, status: 'SCHEDULED', generation: 2 } });
+    const scheduled = loadScheduledCriticalAlarms();
+    const revisions: Record<string, number> = {};
+
+    expect(invalidateEpisodeOwnership(scheduled, revisions, 'med-1', 'A')).toBe(true);
+    expect(scheduled['med-1'].status).toBe('NOT_SCHEDULED');
+    expect(scheduled['med-1'].transitionKey).toBe('A'); // binding kept as inert info
+    expect(scheduled['med-1'].generation).toBe(2);      // owner writes do not bump scheduler generation
+    expect(revisions['med-1']).toBe(1);
+  });
+
+  it('leaves a claim bound to ANOTHER key alone but still bumps the revision', () => {
+    writeScheduled({ 'med-1': { transitionKey: 'OLDER', alarmTime: 1000, status: 'SCHEDULED' } });
+    const scheduled = loadScheduledCriticalAlarms();
+    const revisions: Record<string, number> = { 'med-1': 5 };
+
+    expect(invalidateEpisodeOwnership(scheduled, revisions, 'med-1', 'A')).toBe(true);
+    expect(scheduled['med-1'].status).toBe('SCHEDULED');
+    expect(revisions['med-1']).toBe(6);
+  });
+
+  it('bumps the revision even when no record exists (med deletion cleanup)', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {};
+    const revisions: Record<string, number> = {};
+
+    expect(invalidateEpisodeOwnership(scheduled, revisions, 'med-1', 'A')).toBe(true);
+    expect(scheduled['med-1']).toBeUndefined();
+    expect(revisions['med-1']).toBe(1);
+  });
+});
+
+describe('reconcileCriticalEpisode — ownership-revision bumps', () => {
+  it('bumps on episode creation and again on the foreground send', () => {
+    const first = pass({ isCriticalish: true, canNotify: true });
+    // creation + NONE → SENT
+    expect(getOwnershipRevision(readOwnership(), 'med-1')).toBe(2);
+    expect(first.sent).toBe(1);
+  });
+
+  it('bumps on episode end', () => {
+    pass({ isCriticalish: true, canNotify: true });
+    const before = getOwnershipRevision(readOwnership(), 'med-1');
+    pass({ isCriticalish: false });
+    expect(getOwnershipRevision(readOwnership(), 'med-1')).toBe(before + 1);
+  });
+
+  it('bumps when the claim-evidence upgrade moves NONE → SCHEDULED', () => {
+    // Episode begins (disabled alerts) with a future claim bound to it.
+    writeScheduled({ 'med-1': { transitionKey: '', alarmTime: Date.now() + 86400000, status: 'SCHEDULED' } });
+    pass({ isCriticalish: true, canNotify: false });
+    const afterCreate = getOwnershipRevision(readOwnership(), 'med-1');
+
+    // The alarm elapsed while the app was dead → scheduled path owns it.
+    vi.setSystemTime(new Date('2024-09-13T12:00:00Z'));
+    pass({ isCriticalish: true, canNotify: true, now: Date.now() });
+
+    expect(readOwnership()['med-1']).toBe(afterCreate + 1);
+    expect(loadCriticalTransitions()['med-1'].notificationState).toBe('SCHEDULED');
+  });
+
+  it('does NOT bump when a reconcile pass changes nothing (repeated renders/restarts)', () => {
+    pass({ isCriticalish: true, canNotify: true });
+    const before = readOwnership()['med-1'];
+    pass({ isCriticalish: true, canNotify: true });
+    pass({ isCriticalish: true, canNotify: true });
+    expect(readOwnership()['med-1']).toBe(before);
   });
 });

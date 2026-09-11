@@ -4,7 +4,8 @@
  * This module is the SINGLE SOURCE OF TRUTH for:
  *   1. Critical transition identity (one per continuous critical episode).
  *   2. Scheduled critical-alarm records (pure scheduling data, separate).
- *   3. The one authoritative episode reconcile algorithm shared by
+ *   3. The per-medication OWNERSHIP REVISION (see below).
+ *   4. The one authoritative episode reconcile algorithm shared by
  *      useStockAlerts (episode owner) and consumed indirectly by
  *      useCriticalAlarmScheduler (which NEVER creates identities).
  *
@@ -24,17 +25,37 @@
  *   notification was displayed. SCHEDULED ≠ DELIVERED. Delivery is only
  *   recorded from positive native evidence (see applyDeliveredCriticalEvidence)
  *   or from migrated state that already carried evidence.
+ * - An episode whose notificationState is SENT can never regain a
+ *   SCHEDULED claim (canScheduleForTransition refuses; the helpers
+ *   enforce it — see updateScheduledAlarm).
  * - Scheduled-record writes are funneled through the ownership helpers
- *   below: the episode owner binds (bindScheduledAlarmToTransition), the
- *   scheduler only updates scheduling data (updateScheduledAlarm /
+ *   below: the episode owner binds (bindScheduledAlarmToTransition) and
+ *   invalidates ownership (invalidateEpisodeOwnership), the scheduler
+ *   only updates scheduling data (updateScheduledAlarm /
  *   invalidateScheduledAlarm / clearScheduledAlarm) with generation
  *   checks so a stale scheduler operation can never clobber the record
  *   written by a newer one, erase a binding to the active episode, or
  *   resurrect a binding to a dead one.
  *
+ * == Ownership revision (episode-vs-scheduler race safety) ==
+ * The record `generation` only answers "is this scheduler write newer
+ * than another SCHEDULER write?" — episode-owner lifecycle writes
+ * (bind / episode end / notificationState change) intentionally do not
+ * bump it. To close that gap, a per-medication monotonic
+ * `ownershipRevision` is persisted alongside the two state stores and
+ * bumped by EVERY episode-owner lifecycle change: episode created,
+ * episode ended (sufficient or med deleted), notification ownership
+ * changed (NONE → SCHEDULED / → SENT), owner bind, and positive
+ * delivery evidence. A scheduler operation captures the full ownership
+ * context (captureSchedulingContext) BEFORE its async native work and
+ * must verify it (isSchedulingContextStillValid) BEFORE writing
+ * persistent scheduled state — otherwise the operation is stale and
+ * must abandon the write (and cancel the native alarm it armed).
+ *
  * == Storage versioning / migration ==
  *   v2 (current): android_med_tracker_critical_transition_v2
  *                 android_med_tracker_scheduled_critical_v2
+ *                 android_med_tracker_critical_ownership_v2
  *   Legacy (read-once migration sources, then removed):
  *     - android_med_tracker_critical_transition_v1
  *     - android_med_tracker_critical_notified_v2
@@ -270,6 +291,70 @@ export function saveScheduledCriticalAlarms(records: Record<string, ScheduledCri
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Ownership-revision store — episode-vs-scheduler race safety
+//
+// A per-medication monotonic counter that the EPISODE OWNER bumps on
+// every lifecycle change that invalidates in-flight scheduler work:
+//   - a critical episode is created
+//   - a critical episode ends (med became sufficient / transition
+//     removed / medication deleted)
+//   - the notification ownership state changes
+//     (NONE → SCHEDULED / NONE → SENT / SCHEDULED → SENT)
+//   - the owner binds a scheduled record to an episode
+//
+// The scheduled record's `generation` does NOT cover these changes (it
+// is a scheduler-vs-scheduler revision only), so a scheduler operation
+// that captured only the generation could happily write after an
+// episode ended and resurrect its dead scheduled claim. The ownership
+// revision closes that hole: scheduler operations capture it in their
+// ownership context (captureSchedulingContext) and abandon their write
+// when it moved on (isSchedulingContextStillValid).
+//
+// Missing entries mean 0. Entries are never deleted (they are tiny
+// numbers); bumping on medication deletion is what invalidates
+// in-flight scheduler operations for that medication.
+// ─────────────────────────────────────────────────────────────────────
+
+export const CRITICAL_OWNERSHIP_STORAGE_KEY = 'android_med_tracker_critical_ownership_v2';
+
+export function loadOwnershipRevisions(): Record<string, number> {
+  const raw = loadJson<unknown>(CRITICAL_OWNERSHIP_STORAGE_KEY, null);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const revisions: Record<string, number> = {};
+  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+      revisions[id] = value;
+    }
+  }
+  return revisions;
+}
+
+export function saveOwnershipRevisions(revisions: Record<string, number>): void {
+  saveJson(CRITICAL_OWNERSHIP_STORAGE_KEY, revisions);
+}
+
+/** Current ownership revision for a medication (0 when never bumped). */
+export function getOwnershipRevision(revisions: Record<string, number>, medId: string): number {
+  return revisions[medId] ?? 0;
+}
+
+/**
+ * EPISODE OWNER ONLY (and the scheduler's deleted-medication cleanup):
+ * bump the medication's ownership revision so every in-flight scheduler
+ * operation that captured its context before this point becomes stale.
+ * Returns true when the map changed (caller persists).
+ */
+export function bumpEpisodeOwnershipRevision(
+  revisions: Record<string, number>,
+  medId: string
+): boolean {
+  const next = (revisions[medId] ?? 0) + 1;
+  if (revisions[medId] === next) return false;
+  revisions[medId] = next;
+  return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Scheduled-record ownership / versioning helpers
 //
 // These helpers ENCODE the write invariants so callers cannot
@@ -281,8 +366,9 @@ export function saveScheduledCriticalAlarms(records: Record<string, ScheduledCri
 //   THE EPISODE OWNER (useStockAlerts via reconcileCriticalEpisode)
 //     - creates/deletes episode identity
 //     - binds an existing scheduled record to an episode
-//       (bindScheduledAlarmToTransition) and neutralizes its own
-//       episode's claim at episode end
+//       (bindScheduledAlarmToTransition) and invalidates its own
+//       episode's claim at episode end (invalidateEpisodeOwnership)
+//     - bumps the ownership revision on every lifecycle change
 //     - writes synchronously; needs no generation check (it IS
 //       authoritative)
 //
@@ -295,6 +381,12 @@ export function saveScheduledCriticalAlarms(records: Record<string, ScheduledCri
 //           generation BEFORE its async native work and may persist
 //           only if the stored generation is unchanged (a stale
 //           generation must abandon the write)
+//         * ownership-context check — the operation must also verify
+//           its captured SchedulingOwnershipContext (ownership
+//           revision + active episode identity + notification state)
+//           before writing; the helpers below refuse writes that would
+//           create a SCHEDULED claim for a SENT episode or resurrect a
+//           dead one
 //         * binding rule — a successfully scheduled claim is bound to
 //           the CURRENTLY ACTIVE transition (if any), never to a dead
 //           one and never blindly unbound when an episode is active
@@ -311,6 +403,123 @@ export function getActiveTransition(
   medId: string
 ): CriticalTransitionState | null {
   return transitions[medId] ?? null;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Scheduler ownership context (episode-vs-scheduler race safety)
+//
+// A scheduler operation spans async native bridge calls (cancel +
+// schedule). The persistent ownership state can change UNDER it: the
+// episode owner may end the episode, begin a new one, change the
+// notification ownership, or delete the medication. The record's
+// `generation` does not move for any of those (it is scheduler-write
+// revision only), so an operation that checked only the generation
+// could resurrect a dead claim or restore notification ownership after
+// it was consumed.
+//
+// The rule: capture the immutable ownership context BEFORE any async
+// work and verify it is STILL valid after the native work resolves.
+// Only then may the operation write persistent scheduled state.
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Immutable ownership context captured by a scheduler operation BEFORE
+ * its async native work. Every field must still match at write time
+ * (isSchedulingContextStillValid) or the operation is stale.
+ */
+export interface SchedulingOwnershipContext {
+  medId: string;
+  /** Active episode identity at capture ('' when no episode was active). */
+  baselineTransitionKey: string;
+  /**
+   * Notification ownership state of the active episode at capture
+   * (null when no episode was active). A NONE → SENT flip under the
+   * operation invalidates it even when the revision store is missing.
+   */
+  baselineNotificationState: CriticalNotificationState | null;
+  /** Per-med ownership revision at capture (0 when never bumped). */
+  baselineOwnershipRevision: number;
+  /** Scheduled-record generation at capture (0 when no record existed). */
+  baselineRecordGeneration: number;
+  /** The record's binding at capture ('' when unbound or absent). */
+  baselineRecordTransitionKey: string;
+}
+
+/**
+ * Capture the scheduling ownership context for a medication from the
+ * CURRENT authoritative stores. Must be called before the operation's
+ * first await (before any native bridge work).
+ *
+ * Pure function over the passed maps — callers load the maps fresh
+ * (loadCriticalTransitions / loadScheduledCriticalAlarms /
+ * loadOwnershipRevisions) at capture time.
+ */
+export function captureSchedulingContext(
+  transitions: Record<string, CriticalTransitionState>,
+  scheduled: Record<string, ScheduledCriticalAlarmRecord>,
+  ownershipRevisions: Record<string, number>,
+  medId: string
+): SchedulingOwnershipContext {
+  const active = transitions[medId];
+  const record = scheduled[medId];
+  return {
+    medId,
+    baselineTransitionKey: active?.transitionKey ?? '',
+    baselineNotificationState: active ? active.notificationState : null,
+    baselineOwnershipRevision: ownershipRevisions[medId] ?? 0,
+    baselineRecordGeneration: record?.generation ?? 0,
+    baselineRecordTransitionKey: record?.transitionKey ?? '',
+  };
+}
+
+/**
+ * Verify that a scheduling operation's captured ownership context is
+ * still valid against the CURRENT authoritative stores. Every captured
+ * field is compared; ANY mismatch means an episode-owner lifecycle
+ * change (or a newer scheduler write) happened under the operation and
+ * it MUST NOT write persistent scheduled state.
+ */
+export function isSchedulingContextStillValid(
+  context: SchedulingOwnershipContext,
+  transitions: Record<string, CriticalTransitionState>,
+  scheduled: Record<string, ScheduledCriticalAlarmRecord>,
+  ownershipRevisions: Record<string, number>
+): boolean {
+  const active = transitions[context.medId];
+  const record = scheduled[context.medId];
+  return (
+    // Episode-owner lifecycle change (create / end / state change /
+    // bind / deletion) — the authoritative invalidation signal.
+    (ownershipRevisions[context.medId] ?? 0) === context.baselineOwnershipRevision &&
+    // Same episode still active (key never changes within an episode).
+    (active?.transitionKey ?? '') === context.baselineTransitionKey &&
+    // Notification ownership did not flip under the operation
+    // (e.g. the foreground sent while the operation awaited).
+    (active ? active.notificationState : null) === context.baselineNotificationState &&
+    // No newer scheduler write replaced the record.
+    (record?.generation ?? 0) === context.baselineRecordGeneration &&
+    // The record's binding did not move (owner bind/adopt).
+    (record?.transitionKey ?? '') === context.baselineRecordTransitionKey
+  );
+}
+
+/**
+ * Whether a successfully-registered native alarm may currently own a
+ * notification claim for this medication's active episode.
+ *
+ * Rule: an episode whose single user-facing notification was already
+ * SENT must never regain a SCHEDULED claim — that would restore
+ * notification ownership after it was consumed and arm a second
+ * user-facing notification for the same episode. Episodes in the NONE
+ * or SCHEDULED state (and meds with no active episode) may receive a
+ * scheduled claim.
+ */
+export function canScheduleForTransition(
+  transitions: Record<string, CriticalTransitionState>,
+  medId: string
+): boolean {
+  const active = getActiveTransition(transitions, medId);
+  return !active || active.notificationState !== 'SENT';
 }
 
 /**
@@ -333,6 +542,39 @@ export function bindScheduledAlarmToTransition(
   return true;
 }
 
+/**
+ * EPISODE OWNER ONLY: invalidate the scheduler ownership of an episode
+ * that just ENDED (med became sufficient, or the episode's transition
+ * was removed for any other reason).
+ *
+ * 1. Neutralizes the scheduled claim that was bound to the dead
+ *    transition (status → NOT_SCHEDULED) so it can never suppress,
+ *    adopt into, or be resurrected for a FUTURE episode.
+ * 2. Bumps the ownership revision so EVERY in-flight scheduler
+ *    operation that captured its context before this point becomes
+ *    stale — a late native scheduling result can no longer write a
+ *    SCHEDULED claim for the dead episode.
+ *
+ * Returns true when any store map changed (caller persists).
+ */
+export function invalidateEpisodeOwnership(
+  scheduled: Record<string, ScheduledCriticalAlarmRecord>,
+  ownershipRevisions: Record<string, number>,
+  medId: string,
+  deadTransitionKey: string
+): boolean {
+  let changed = false;
+  const rec = scheduled[medId];
+  if (rec && rec.transitionKey === deadTransitionKey && rec.status !== 'NOT_SCHEDULED') {
+    rec.status = 'NOT_SCHEDULED';
+    changed = true;
+  }
+  if (bumpEpisodeOwnershipRevision(ownershipRevisions, medId)) {
+    changed = true;
+  }
+  return changed;
+}
+
 /** Input for {@link updateScheduledAlarm}. */
 export interface ScheduledAlarmUpdate {
   alarmTime: number;
@@ -349,16 +591,22 @@ export interface ScheduledAlarmUpdate {
  * SCHEDULER ONLY: persist the outcome of a SUCCESSFUL native schedule
  * (the alarm is armed at `update.alarmTime`).
  *
- * Binding rule (the heart of the ownership model):
- *   transitionKey := the ACTIVE transition's key for this med, or ''
- *   when no episode is currently active.
+ * Ownership rules enforced here (the heart of the ownership model):
  *
- * Consequences:
- *   - a record already bound to the active episode KEEPS that binding
- *     (the alarm time can change; the episode identity cannot);
- *   - a stale binding to a dead episode is dropped, never resurrected;
- *   - an unbound claim stays unbound when no episode is active;
- *   - when an episode IS active, the claim becomes its bound claim.
+ *   SENT rule — if the ACTIVE episode's notification was already SENT,
+ *   the write is REFUSED entirely (returns false, no mutation). A SENT
+ *   episode must never regain a SCHEDULED claim: that would restore
+ *   notification ownership after it was consumed. The scheduler is
+ *   responsible for cancelling the native alarm it armed in that case
+ *   (see canScheduleForTransition for the pre-arm relevance check).
+ *
+ *   Binding rule — transitionKey := the ACTIVE transition's key for
+ *   this med, or '' when no episode is currently active:
+ *     - a record already bound to the active episode KEEPS that binding
+ *       (the alarm time can change; the episode identity cannot);
+ *     - a stale binding to a dead episode is dropped, never resurrected;
+ *     - an unbound claim stays unbound when no episode is active;
+ *     - when an episode IS active, the claim becomes its bound claim.
  *
  * The scheduler never generates an identity here — it only reads the
  * authoritative transition map passed by the caller.
@@ -367,6 +615,13 @@ export interface ScheduledAlarmUpdate {
  * when the stored record's generation differs from the operation's
  * baseline — i.e. another scheduler write landed while this operation
  * was awaiting the native bridge. Accepted writes bump generation.
+ *
+ * NOTE: the generation check alone does NOT make an operation safe to
+ * write — episode-owner lifecycle changes do not bump the generation.
+ * Callers must additionally verify their captured ownership context
+ * (isSchedulingContextStillValid) before invoking this helper. The
+ * helper still enforces the invariants below as the last line of
+ * defense so a future caller cannot bypass the state machine.
  *
  * Returns true when the map changed (caller persists).
  */
@@ -380,6 +635,12 @@ export function updateScheduledAlarm(
   // Stale-generation protection: only the write whose baseline still
   // matches the stored record may proceed.
   if (existing && (existing.generation ?? 0) !== update.baselineGeneration) {
+    return false;
+  }
+  // SENT-ownership rule: never create a SCHEDULED claim for an episode
+  // whose single notification was already sent (SENT → SCHEDULED is
+  // forbidden for the same transitionKey).
+  if (!canScheduleForTransition(transitions, medId)) {
     return false;
   }
   // READ (never create) the authoritative episode identity.
@@ -464,6 +725,8 @@ export function clearScheduledAlarm(
 export interface ReconcileDirtyFlags {
   transitions: boolean;
   scheduled: boolean;
+  /** The ownership-revision store changed (caller persists it). */
+  ownership: boolean;
 }
 
 export interface ReconcileMedInput {
@@ -485,7 +748,7 @@ export interface ReconcileEpisodeResult {
 }
 
 /**
- * Reconcile ONE medication's critical-episode state against the two
+ * Reconcile ONE medication's critical-episode state against the three
  * persistent stores (mutated in place; caller persists when dirty).
  *
  * This is the ONLY place a transition is created or a foreground
@@ -502,7 +765,9 @@ export interface ReconcileEpisodeResult {
  *       │                          │  refill-while-critical / restart /
  *       │                          │  reschedule … SAME key, ≤1 notification
  *       └──── episode ends ────────┘
- *             (transition deleted + bound scheduled claim cleared)
+ *             (transition deleted + bound scheduled claim neutralized
+ *              + ownership revision bumped — in-flight scheduler
+ *              operations from the dead episode become stale)
  *
  * Notification ownership:
  *   Path A (foreground): NONE ──send──► SENT
@@ -511,10 +776,18 @@ export interface ReconcileEpisodeResult {
  *   'SCHEDULED' and the foreground stays quiet. A failed scheduling
  *   attempt (status NOT_SCHEDULED) is NOT a valid claim → the
  *   foreground path remains available.
+ *
+ * Adoption is restricted to UNBOUND claims (transitionKey ''): bound
+ * claims belong to the episode they were bound to, and by the time a
+ * creation pass runs, that episode is gone — adopting a bound claim
+ * would resurrect a dead episode's identity. Only every ownership
+ * mutation here bumps the medication's ownership revision, which
+ * invalidates any in-flight scheduler operation captured earlier.
  */
 export function reconcileCriticalEpisode(
   transitions: Record<string, CriticalTransitionState>,
   scheduled: Record<string, ScheduledCriticalAlarmRecord>,
+  ownershipRevisions: Record<string, number>,
   input: ReconcileMedInput,
   dirty: ReconcileDirtyFlags
 ): ReconcileEpisodeResult | null {
@@ -526,10 +799,15 @@ export function reconcileCriticalEpisode(
     const t = transitions[medId];
     if (t) {
       // Kill the episode's bound scheduled claim so a stale record can
-      // never adopt/suppress a FUTURE episode (new key, new claim).
-      if (rec && rec.transitionKey === t.transitionKey && rec.status !== 'NOT_SCHEDULED') {
-        rec.status = 'NOT_SCHEDULED';
+      // never adopt/suppress a FUTURE episode (new key, new claim),
+      // and bump the ownership revision so any in-flight scheduler
+      // operation from this dead episode can no longer write a
+      // scheduled claim for it.
+      if (
+        invalidateEpisodeOwnership(scheduled, ownershipRevisions, medId, t.transitionKey)
+      ) {
         dirty.scheduled = true;
+        dirty.ownership = true;
       }
       delete transitions[medId];
       dirty.transitions = true;
@@ -544,22 +822,28 @@ export function reconcileCriticalEpisode(
   if (!t) {
     // No persisted transition. Two valid creation paths:
     //
-    // (a) ADOPT a pending scheduled claim: an alarm was successfully
-    //     registered for this med and its (projected) fire time has
-    //     passed — the crossing most likely happened while the app was
-    //     dead and the native alarm was displayed. The claim becomes the
-    //     episode identity and keeps notification ownership
-    //     ('SCHEDULED'). If the record already carries delivery evidence
-    //     (status DELIVERED), the episode is 'SENT' immediately.
+    // (a) ADOPT a pending UNBOUND scheduled claim: an alarm was
+    //     successfully registered for this med while it was still
+    //     sufficient (claims are only written unbound when no episode
+    //     is active) and its (projected) fire time has passed — the
+    //     crossing most likely happened while the app was dead and the
+    //     native alarm was displayed. The claim becomes the episode
+    //     identity and keeps notification ownership ('SCHEDULED'). If
+    //     the record already carries delivery evidence (status
+    //     DELIVERED), the episode is 'SENT' immediately.
     //     NB: we do NOT convert elapsed time into delivery — the record
     //     stays SCHEDULED; only positive evidence upgrades it.
+    //     A BOUND claim is never adopted: binding means it belonged to
+    //     an episode that has since ended (a crash between the owner's
+    //     two store writes is the only way to observe that state) — a
+    //     new episode must never inherit a dead episode's identity.
     // (b) FRESH episode: crossing detected in the foreground (or no
     //     valid claim exists — including failed scheduling). The key is
     //     generated ONCE here and persisted immediately.
     const adoptableClaim = Boolean(
-      rec && rec.status === 'SCHEDULED' && rec.alarmTime <= now
+      rec && rec.transitionKey === '' && rec.status === 'SCHEDULED' && rec.alarmTime <= now
     );
-    const deliveredClaim = Boolean(rec && rec.status === 'DELIVERED');
+    const deliveredClaim = Boolean(rec && rec.transitionKey === '' && rec.status === 'DELIVERED');
 
     if (adoptableClaim || deliveredClaim) {
       const key = rec!.transitionKey || generateCriticalTransitionKey(medId, now);
@@ -578,22 +862,35 @@ export function reconcileCriticalEpisode(
         enteredAt: now,
         notificationState: 'NONE',
       };
-      // Bind a still-pending (future) alarm to this episode so it can
-      // never be mistaken for another episode's claim later. A FUTURE
-      // alarm does not suppress the foreground — the crossing already
-      // happened earlier than projected, and the scheduler cancels the
-      // stale alarm right after (same React commit).
-      if (
-        rec &&
-        rec.status === 'SCHEDULED' &&
-        bindScheduledAlarmToTransition(scheduled, medId, t.transitionKey)
-      ) {
-        dirty.scheduled = true;
+      if (rec && rec.status === 'SCHEDULED') {
+        if (rec.transitionKey === '') {
+          // Bind a still-pending (future) alarm to this episode so it can
+          // never be mistaken for another episode's claim later. A FUTURE
+          // alarm does not suppress the foreground — the crossing already
+          // happened earlier than projected, and the scheduler cancels the
+          // stale alarm right after (same React commit).
+          if (bindScheduledAlarmToTransition(scheduled, medId, t.transitionKey)) {
+            dirty.scheduled = true;
+          }
+        } else {
+          // A claim still bound to another key at creation time is a
+          // leftover of a DEAD episode (a crash between the owner's two
+          // store writes is the only way to observe that state).
+          // Neutralize it: a dead episode's claim must never be
+          // inherited by — or own the notification of — a new episode.
+          rec.status = 'NOT_SCHEDULED';
+          dirty.scheduled = true;
+        }
       }
     }
     transitions[medId] = t;
     dirty.transitions = true;
     created = true;
+    // New episode → new ownership context: invalidate every in-flight
+    // scheduler operation captured before this point.
+    if (bumpEpisodeOwnershipRevision(ownershipRevisions, medId)) {
+      dirty.ownership = true;
+    }
   }
 
   // ── Claim-evidence upgrade (Path B ownership after the fact) ──
@@ -608,9 +905,15 @@ export function reconcileCriticalEpisode(
     if (rec.status === 'DELIVERED') {
       t.notificationState = 'SENT';
       dirty.transitions = true;
+      if (bumpEpisodeOwnershipRevision(ownershipRevisions, medId)) {
+        dirty.ownership = true;
+      }
     } else if (rec.status === 'SCHEDULED' && rec.alarmTime <= now) {
       t.notificationState = 'SCHEDULED';
       dirty.transitions = true;
+      if (bumpEpisodeOwnershipRevision(ownershipRevisions, medId)) {
+        dirty.ownership = true;
+      }
     }
   }
 
@@ -624,6 +927,9 @@ export function reconcileCriticalEpisode(
   ) {
     t.notificationState = 'SENT';
     dirty.transitions = true;
+    if (bumpEpisodeOwnershipRevision(ownershipRevisions, medId)) {
+      dirty.ownership = true;
+    }
   }
 
   // ── Foreground notification decision (Path A) ──
@@ -641,6 +947,12 @@ export function reconcileCriticalEpisode(
       t.notificationState = 'SENT';
       dirty.transitions = true;
       notificationSent = true;
+      // Ownership consumed → invalidate in-flight scheduler operations:
+      // a late scheduling result must never re-arm a notification for
+      // this episode (SENT can never become SCHEDULED again).
+      if (bumpEpisodeOwnershipRevision(ownershipRevisions, medId)) {
+        dirty.ownership = true;
+      }
     }
     // canNotify false → state stays 'NONE'. Disabling alerts must NOT
     // consume the episode: re-enabling while still critical allows
@@ -667,13 +979,20 @@ export function reconcileCriticalEpisode(
  * I/O so it is trivially testable and cannot race the scheduler's
  * record writes (it never writes the scheduled store).
  *
- * Returns true when any transition changed (caller persists transitions).
+ * Upgrading SCHEDULED → SENT changes the episode's notification
+ * ownership, so the medication's ownership revision is bumped: any
+ * in-flight scheduler operation captured before the upgrade must not
+ * write a SCHEDULED claim for the now-SENT episode.
+ *
+ * Returns true when any transition changed (caller persists transitions
+ * + ownership revisions).
  */
 export function applyDeliveredCriticalEvidence(
   medIds: string[],
   deliveredNotificationIds: Set<number>,
   transitions: Record<string, CriticalTransitionState>,
   scheduled: Record<string, ScheduledCriticalAlarmRecord>,
+  ownershipRevisions: Record<string, number>,
   alarmIdFor: (medId: string) => number
 ): boolean {
   let changed = false;
@@ -685,6 +1004,9 @@ export function applyDeliveredCriticalEvidence(
     if (!deliveredNotificationIds.has(alarmIdFor(medId))) continue;
     t.notificationState = 'SENT';
     changed = true;
+    if (bumpEpisodeOwnershipRevision(ownershipRevisions, medId)) {
+      changed = true;
+    }
   }
   return changed;
 }

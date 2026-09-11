@@ -46,7 +46,7 @@ export interface Medication {
 // ─────────────────────────────────────────────────────────────────────
 // Critical-episode state model (authoritative).
 //
-// TWO independent concepts that must never be conflated:
+// THREE independent concepts that must never be conflated:
 //
 // 1. TRANSITION IDENTITY — `CriticalTransitionState`. One continuous
 //    critical episode (sufficient → critical → … → sufficient) has
@@ -62,6 +62,18 @@ export interface Medication {
 //    projected fire time (mutable — it can be rescheduled many times
 //    during the same episode) and a strict status.
 //
+// 3. OWNERSHIP REVISION — a per-medication monotonic counter (persisted
+//    by criticalTransitions.ts in android_med_tracker_critical_ownership_v2).
+//    The EPISODE OWNER bumps it on every lifecycle change that
+//    invalidates in-flight scheduler work: episode created, episode
+//    ended, notification ownership changed, owner bind, medication
+//    deleted. Scheduler operations capture it in their ownership
+//    context (captureSchedulingContext) and abandon their persistent
+//    writes when it moved on (isSchedulingContextStillValid). The
+//    record's `generation` only orders SCHEDULER writes against each
+//    other; the ownership revision orders them against the EPISODE
+//    OWNER. They answer different questions and both are required.
+//
 // `notificationState` is the per-episode notification ownership state:
 //   'NONE'      — no user-facing notification has been sent yet and no
 //                 scheduled alarm owns this episode's notification.
@@ -70,7 +82,8 @@ export interface Medication {
 //                 must stay quiet). This does NOT mean delivered.
 //   'SENT'      — the episode's single user-facing notification was
 //                 sent (foreground) or delivery was confirmed by
-//                 positive native evidence.
+//                 positive native evidence. An episode in the SENT
+//                 state can never regain a SCHEDULED claim.
 // ─────────────────────────────────────────────────────────────────────
 
 export type CriticalNotificationState = 'NONE' | 'SCHEDULED' | 'SENT';

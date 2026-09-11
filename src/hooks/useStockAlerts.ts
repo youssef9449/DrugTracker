@@ -11,6 +11,8 @@ import {
   saveCriticalTransitions,
   loadScheduledCriticalAlarms,
   saveScheduledCriticalAlarms,
+  loadOwnershipRevisions,
+  saveOwnershipRevisions,
   reconcileCriticalEpisode,
   applyDeliveredCriticalEvidence,
 } from '../utils/criticalTransitions';
@@ -69,10 +71,14 @@ interface UseStockAlertsOptions {
  * criticalTransitions.ts (updateScheduledAlarm / invalidateScheduledAlarm /
  * clearScheduledAlarm), which read the authoritative active transition at
  * write time (read-only), preserve the active episode's binding, refuse
- * stale-generation writes, and never generate identity — so React effect
- * execution order between the two hooks cannot produce contradictory
- * state, and no async scheduler operation can erase this owner's binding
- * or resurrect a dead episode's claim. No artificial delays are used or
+ * stale-generation writes, refuse SCHEDULED claims for SENT episodes,
+ * and never generate identity — so React effect execution order between
+ * the two hooks cannot produce contradictory state. Every episode-owner
+ * lifecycle change made here bumps the medication's ownership revision
+ * (see criticalTransitions.ts), which invalidates any async scheduler
+ * operation captured before it — no late scheduler write can erase this
+ * owner's binding, resurrect a dead episode's claim, or re-arm a
+ * notification for a SENT episode. No artificial delays are used or
  * needed.
  */
 export function useStockAlerts({
@@ -95,7 +101,8 @@ export function useStockAlerts({
     }
     const transitions = transitionsRef.current;
     const scheduled = loadScheduledCriticalAlarms();
-    const dirty = { transitions: false, scheduled: false };
+    const ownershipRevisions = loadOwnershipRevisions();
+    const dirty = { transitions: false, scheduled: false, ownership: false };
     const now = Date.now();
 
     for (const med of medications) {
@@ -106,6 +113,7 @@ export function useStockAlerts({
       reconcileCriticalEpisode(
         transitions,
         scheduled,
+        ownershipRevisions,
         {
           medId: med.id,
           isCriticalish,
@@ -129,13 +137,17 @@ export function useStockAlerts({
       }
     }
     // (Scheduled records of deleted meds are the SCHEDULER's
-    // responsibility — it owns the native alarm cancellation.)
+    // responsibility — it owns the native alarm cancellation and bumps
+    // the ownership revision for deleted meds there.)
 
     if (dirty.transitions) {
       saveCriticalTransitions(transitions);
     }
     if (dirty.scheduled) {
       saveScheduledCriticalAlarms(scheduled);
+    }
+    if (dirty.ownership) {
+      saveOwnershipRevisions(ownershipRevisions);
     }
 
     // ── Delivery-evidence reconciliation (strict semantics) ──
@@ -152,15 +164,22 @@ export function useStockAlerts({
     if (hasEvidenceCandidates) {
       void getDeliveredNotificationIds()
         .then((deliveredIds) => {
+          // Re-load the ownership revisions INSIDE this async callback:
+          // the scheduler may have bumped them (e.g. medication deleted)
+          // while the drawer query was in flight — a read-modify-write
+          // here can never clobber that bump.
+          const currentRevisions = loadOwnershipRevisions();
           const changed = applyDeliveredCriticalEvidence(
             medIds,
             deliveredIds,
             transitions,
             scheduled,
+            currentRevisions,
             criticalAlarmId
           );
           if (changed) {
             saveCriticalTransitions(transitions);
+            saveOwnershipRevisions(currentRevisions);
           }
         })
         .catch(() => undefined);

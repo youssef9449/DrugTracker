@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { Medication } from '../types';
-import { effectiveCurrentPills } from '../utils/dateCalculations';
 import {
   scheduleDoseReminder,
   cancelDoseReminder,
@@ -53,8 +52,7 @@ export interface UseDoseReminderSchedulerOptions {
  * This hook knows NOTHING about:
  *   - sounds (native channel owns the sound)
  *   - foreground/background state
- *   - custom sounds
- *   - soundEnabled
+ *   - currentPills / lastSyncDate (those are stock/auto-deduct concerns)
  */
 export function useDoseReminderScheduler({
   medications,
@@ -72,11 +70,12 @@ export function useDoseReminderScheduler({
     medicationsRef.current = medications;
   }, [medications]);
 
-  // Stable signature capturing ONLY the fields that affect the dose
-  // reminder schedule (id, reminderEnabled, reminderTime, name, dailyDose,
-  // unit, currentPills, lastSyncDate). The effect is gated on this string
-  // so the full cancel+schedule chain only re-runs when a med's reminder
-  // config actually changes.
+  // Stable signature capturing ONLY the fields that affect the scheduled
+  // notification: id, enabled state, reminder time, dose amount, unit, name.
+  // currentPills and lastSyncDate are deliberately excluded — they affect
+  // stock alert / auto-deduction systems, NOT the dose reminder schedule.
+  // A stock change (e.g. taking a pill) must NOT trigger cancel+reschedule
+  // of the daily reminder.
   const doseSignature = useMemo(
     () =>
       medications
@@ -88,8 +87,6 @@ export function useDoseReminderScheduler({
             m.name,
             m.dailyDose,
             m.unit ?? '',
-            m.currentPills,
-            m.lastSyncDate ?? '',
           ].join('|')
         )
         .sort()
@@ -140,7 +137,6 @@ export function useDoseReminderScheduler({
       const name = med.name;
       const reminderTime = med.reminderTime;
       const dailyDose = med.dailyDose;
-      const pills = effectiveCurrentPills(med);
 
       enqueue(med.id, () =>
         cancelDoseReminder(med.id)
@@ -152,7 +148,6 @@ export function useDoseReminderScheduler({
               reminderTime,
               dailyDose,
               unit,
-              pills,
             ).then(() => {
               if (doseGenerationRef.current.get(med.id) !== gen) {
                 return cancelDoseReminder(med.id);

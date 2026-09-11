@@ -1000,7 +1000,7 @@ export default function App() {
       showToast(TOAST_MESSAGES.testNotificationSent);
     } catch (err) {
       console.warn('[App] Failed to send test alert notification:', err);
-      showToast(TOAST_MESSAGES.testNotificationSoundOnly);
+      showToast('تعذّر إرسال الإشعار التجريبي');
     }
   };
 

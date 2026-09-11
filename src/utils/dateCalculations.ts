@@ -505,45 +505,24 @@ export function getCriticalAlarmDate(
   // No consumption rate → no projected crossing. Caller skips.
   if (med.dailyDose <= 0) return null;
 
-  // Reuse the canonical threshold + daysLeft helpers instead of
-  // re-deriving them inline (audit #74). The early-return above means
-  // dailyDose > 0 here, so effectiveDaysLeft won't hit its 999 sentinel.
   const criticalThresholdDays = getCriticalThresholdDays(med);
   const daysLeft = effectiveDaysLeft(med, todayStr);
 
-  // Already at or below the critical threshold → the existing alert
-  // effect (which runs when the app is open and tracks already-
-  // alerted statuses) handles this. The one-shot alarm is only for
-  // FUTURE crossings — returning null here prevents repeated
-  // immediate alerts from being scheduled on every app launch.
+  // Already at or below the critical threshold → return null.
+  // The foreground useStockAlerts hook handles immediate notifications.
+  // The one-shot alarm is only for FUTURE crossings.
   if (daysLeft <= criticalThresholdDays) return null;
 
   // For a frozen med (autoDeduct off) with sufficient balance, the
-  // balance won't change over time → no future crossing. The user
-  // would need to refill (which would change lastSyncDate) or change
-  // the dose. Skip scheduling; an alarm with no future fire date is
-  // meaningless.
+  // balance won't change over time → no future crossing.
   if (med.autoDeductEnabled === false) return null;
 
-  // Days until the med crosses the critical threshold.
   const daysUntilCritical = daysLeft - criticalThresholdDays;
   if (daysUntilCritical <= 0) return null;
 
-  // #92: compute the target date in UTC (consistent with the rest of
-  // this module's UTC day arithmetic) then convert to local 9 AM. The
-  // previous code used `target.setDate(...)` + `target.setHours(9, ...)`
-  // which are LOCAL field writes — mixing LOCAL with the UTC-derived
-  // `daysUntilCritical` risked off-by-one around DST transitions (the
-  // module's own JSDoc at the top warns about this exact trap).
-  //
-  // Approach: parse today as UTC, add daysUntilCritical in UTC, then
-  // construct a local Date at 9 AM on that calendar date. This mirrors
-  // how getDepletionDate (lines ~188-192) does UTC day arithmetic.
   const todayUtc = parseUtcDate(todayStr) ?? new Date(Date.UTC(1970, 0, 1));
   const targetUtcMs = todayUtc.getTime() + daysUntilCritical * MS_PER_DAY;
   const targetUtcDate = new Date(targetUtcMs);
-  // Build a local Date at 9 AM on the target calendar date (using the
-  // UTC fields so we don't shift by an hour across DST).
   const target = new Date(
     targetUtcDate.getUTCFullYear(),
     targetUtcDate.getUTCMonth(),
@@ -552,4 +531,49 @@ export function getCriticalAlarmDate(
     0, 0, 0
   );
   return target.getTime();
+}
+
+/**
+ * Compute a stable transition key for a medication's critical-stock state.
+ *
+ * The key identifies a SPECIFIC critical transition — not merely "the med
+ * is critical." It must:
+ * - Stay stable across re-renders / app restarts for the same transition.
+ * - Change when the med leaves critical state and later re-enters it.
+ * - Not depend on dynamic pill counts (which fluctuate daily with auto-deduct).
+ *
+ * The key is derived from the threshold-crossing date: the UTC calendar date
+ * on which the med's projected balance reaches the user-configured threshold.
+ * This date is computed from lastSyncDate + effective balance, so it's
+ * deterministic and doesn't shift as days pass (only changes on refill/consume/
+ * dose/threshold edits, which legitimately create a new transition).
+ *
+ * Returns null for sufficient meds (no critical transition).
+ */
+export function getCriticalTransitionKey(
+  med: Medication,
+  todayStr: string = getTodayDateString()
+): string | null {
+  if (med.dailyDose <= 0) return null;
+
+  const thresholdDays = getCriticalThresholdDays(med);
+  const daysLeft = effectiveDaysLeft(med, todayStr);
+
+  if (daysLeft > thresholdDays) return null; // sufficient
+
+  // The med is critical or out_of_stock.
+  // Compute the threshold-crossing date from lastSyncDate + effective balance.
+  // This date is stable: it doesn't change as days pass (only changes when
+  // the user refills, consumes, changes dose, or changes threshold).
+  const effPills = effectiveCurrentPills(med, todayStr);
+  const lastSyncUtc = parseUtcDate(med.lastSyncDate);
+  if (!lastSyncUtc) return `${med.id}:unknown`;
+
+  const totalDaysToDepletion = Math.max(0, effPills) / med.dailyDose;
+  const daysToThreshold = totalDaysToDepletion - thresholdDays;
+  const crossingUtcMs = lastSyncUtc.getTime() + Math.floor(daysToThreshold) * MS_PER_DAY;
+  const crossingUtcDate = new Date(crossingUtcMs);
+  const crossingDateStr = `${crossingUtcDate.getUTCFullYear()}-${String(crossingUtcDate.getUTCMonth() + 1).padStart(2, '0')}-${String(crossingUtcDate.getUTCDate()).padStart(2, '0')}`;
+
+  return `${med.id}:${crossingDateStr}:${thresholdDays}`;
 }

@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { Medication } from '../types';
-import { getTodayDateString, getCriticalAlarmDate } from '../utils/dateCalculations';
+import { getTodayDateString, getCriticalAlarmDate, getCriticalTransitionKey } from '../utils/dateCalculations';
 import { scheduleCriticalAlarm, cancelCriticalAlarm } from '../utils/notifications';
+import { saveJson } from '../utils/storage';
+
+const SCHEDULED_TRANSITIONS_KEY = 'android_med_tracker_scheduled_critical_v1';
 
 /**
  * Options for {@link useCriticalAlarmScheduler}.
@@ -196,66 +199,37 @@ export function useCriticalAlarmScheduler({
 
     const today = getTodayDateString();
     const stillScheduled = new Set<string>();
+    const scheduledTransitions: Record<string, string> = {};
 
-    // #91: read from the ref so the effect doesn't re-run when only the
-    // array reference changes (the deps are gated on criticalSignature).
     for (const med of medicationsRef.current) {
-      // Bump generation for this med — any in-flight cancel+schedule
-      // from a previous effect run is now stale.
       const gen = (alarmGenerationRef.current.get(med.id) ?? 0) + 1;
       alarmGenerationRef.current.set(med.id, gen);
 
       const criticalDateMs = getCriticalAlarmDate(med, today);
       if (criticalDateMs === null) {
-        // No future crossing (dailyDose=0, frozen+sufficient, or
-        // already critical) — cancel any previously-scheduled alarm
-        // for this med, but don't schedule a new one. Enqueued so it
-        // serializes against any in-flight operations for this med.
         if (scheduledCriticalIdsRef.current.has(med.id)) {
           enqueue(med.id, () => cancelCriticalAlarm(med.id));
         }
         continue;
       }
 
-      // Enqueue the full cancel → schedule → compensating-cancel chain
-      // for this med. Because it's enqueued, it runs strictly AFTER any
-      // previously-chained operations for this med (from prior
-      // generations) complete. This guarantees:
-      //   - The cancel runs in order (no interleaving with other gens).
-      //   - The schedule runs after the cancel completes.
-      //   - The post-schedule compensating cancel (if gen is stale)
-      //     runs BEFORE any NEWER generation's schedule (because the
-      //     newer generation's chain is appended AFTER this chain).
-      // So an older generation's compensating cancel can ONLY remove
-      // its OWN stale alarm — never a newer generation's alarm.
+      // Compute the transition key so the scheduled notification carries
+      // enough metadata for app-restart reconciliation.
+      const transitionKey = getCriticalTransitionKey(med, today) || `${med.id}:fallback`;
+
       const unit = med.unit || 'قرص';
       const name = med.name;
       enqueue(med.id, () =>
         cancelCriticalAlarm(med.id)
           .then(() => {
-            // Stale-guard #1 (pre-schedule): if a newer effect run
-            // bumped the generation, bail out — don't schedule a
-            // stale alarm. This also covers the case where the med
-            // was deleted between this run's cancel() and now.
             if (alarmGenerationRef.current.get(med.id) !== gen) return;
-            // Schedule and chain the post-schedule check onto the
-            // schedule() promise (so the check only runs if schedule
-            // actually fired).
             return scheduleCriticalAlarm(
               med.id,
               name,
               criticalDateMs,
-              unit
+              unit,
+              transitionKey
             ).then(() => {
-              // Stale-guard #2 (post-schedule): re-check the gen
-              // after schedule() resolves. If a newer run bumped it
-              // during the await, run a compensating cancel to undo
-              // this stale schedule. Because of per-med
-              // serialization, this compensating cancel runs BEFORE
-              // any newer generation's schedule (the newer
-              // generation's chain was appended after this chain),
-              // so it can ONLY remove this generation's OWN stale
-              // alarm — never a newer generation's alarm.
               if (alarmGenerationRef.current.get(med.id) !== gen) {
                 return cancelCriticalAlarm(med.id);
               }
@@ -263,7 +237,11 @@ export function useCriticalAlarmScheduler({
           })
       );
       stillScheduled.add(med.id);
+      scheduledTransitions[med.id] = transitionKey;
     }
+
+    // Persist scheduled transitions for app-restart reconciliation.
+    saveJson(SCHEDULED_TRANSITIONS_KEY, scheduledTransitions);
 
     // Cancel alarms for meds that are no longer in the list (deleted).
     // Bump their generation so any in-flight schedule from a previous

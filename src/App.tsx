@@ -1069,7 +1069,7 @@ export default function App() {
 
   // #88: Single memoized medications-with-status array. Previously
   // calculateMedicationStatus(med) was recomputed in 4 separate memos
-  // (filteredMedications, alertsCount, sufficientCount, totalPillsCount)
+  // (filteredMedications, alertsCount, sufficientCount, totalStockByUnit)
   // + inside LowStockBanner (3x per med). Now all derive from this one.
   const medicationsWithStatus = useMemo(
     () =>
@@ -1130,12 +1130,16 @@ export default function App() {
     [medicationsWithStatus]
   );
 
-  const totalPillsCount = useMemo(
-    // Sum the DYNAMIC balances, not the stored snapshots, so the count
-    // shown in the UI header / total reflects the projected live state.
-    () => medications.reduce((acc, m) => acc + effectiveCurrentPills(m), 0),
-    [medications]
-  );
+  const totalStockByUnit = useMemo(() => {
+    // Keep balances separate by unit; adding tablets and milliliters would
+    // produce a number that has no meaningful interpretation.
+    const totals = new Map<string, number>();
+    for (const medication of medications) {
+      const unit = medication.unit || 'وحدة';
+      totals.set(unit, (totals.get(unit) || 0) + effectiveCurrentPills(medication));
+    }
+    return Array.from(totals.entries());
+  }, [medications]);
 
   const openAdd = () => {
     setEditingMedication(null);
@@ -1248,7 +1252,22 @@ export default function App() {
                     </div>
                     <div className="bg-white p-2.5 rounded-2xl border border-slate-200/80 shadow-xs">
                       <span className="text-[10px] text-slate-500 block">المخزون الكلي</span>
-                      <span className="text-base font-extrabold font-mono text-teal-800">{totalPillsCount}</span>
+                      {totalStockByUnit.length > 0 ? (
+                        <div className="flex flex-wrap items-center justify-center gap-1 mt-1">
+                          {totalStockByUnit.map(([unit, total]) => (
+                            <span
+                              key={unit}
+                              className="inline-flex items-baseline gap-1 rounded-lg bg-teal-50 border border-teal-100 px-1.5 py-0.5 text-teal-800"
+                              title={`إجمالي ${unit}`}
+                            >
+                              <span className="text-sm font-extrabold font-mono">{total}</span>
+                              <span className="text-[10px] font-semibold">{unit}</span>
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-sm font-extrabold font-mono text-slate-400">0</span>
+                      )}
                     </div>
                     <div className="bg-white p-2.5 rounded-2xl border border-slate-200/80 shadow-xs">
                       <span className="text-[10px] text-slate-500 block">حالة المخزون</span>

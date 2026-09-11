@@ -608,7 +608,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           className="w-full py-2 px-3 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 shadow-2xs"
         >
           <Plus className="w-4 h-4 text-teal-600" />
-          <span>تعبئة رصيد عند الشراء</span>
+          <span>تعبئة رصيد</span>
         </button>
       </div>
     </div>

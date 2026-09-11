@@ -199,7 +199,10 @@ export function useCriticalAlarmScheduler({
 
     const today = getTodayDateString();
     const stillScheduled = new Set<string>();
-    const scheduledTransitions: Record<string, string> = {};
+    // Persist { [medId]: { transitionKey, alarmTime } } so reconciliation
+    // can check whether the alarm time has passed (alarm fired) or is
+    // still in the future (alarm pending).
+    const scheduledTransitions: Record<string, { transitionKey: string; alarmTime: number }> = {};
 
     for (const med of medicationsRef.current) {
       const gen = (alarmGenerationRef.current.get(med.id) ?? 0) + 1;
@@ -213,8 +216,6 @@ export function useCriticalAlarmScheduler({
         continue;
       }
 
-      // Compute the transition key so the scheduled notification carries
-      // enough metadata for app-restart reconciliation.
       const transitionKey = getCriticalTransitionKey(med, today) || `${med.id}:fallback`;
 
       const unit = med.unit || 'قرص';
@@ -237,10 +238,15 @@ export function useCriticalAlarmScheduler({
           })
       );
       stillScheduled.add(med.id);
-      scheduledTransitions[med.id] = transitionKey;
+      scheduledTransitions[med.id] = { transitionKey, alarmTime: criticalDateMs };
     }
 
     // Persist scheduled transitions for app-restart reconciliation.
+    // This is written BEFORE the async scheduling completes, but the
+    // reconciliation logic checks alarmTime vs Date.now() — if the alarm
+    // time hasn't passed yet, it treats the alarm as "pending" (not fired),
+    // which is correct even if scheduling ultimately fails (the alarm won't
+    // fire, and the foreground will send the notification instead).
     saveJson(SCHEDULED_TRANSITIONS_KEY, scheduledTransitions);
 
     // Cancel alarms for meds that are no longer in the list (deleted).

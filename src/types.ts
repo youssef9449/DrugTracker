@@ -43,17 +43,70 @@ export interface Medication {
   lastConsumedDate?: string;
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Critical-episode state model (authoritative).
+//
+// TWO independent concepts that must never be conflated:
+//
+// 1. TRANSITION IDENTITY — `CriticalTransitionState`. One continuous
+//    critical episode (sufficient → critical → … → sufficient) has
+//    exactly ONE transitionKey. The key is generated ONCE when the
+//    episode begins (sufficient → critical/out_of_stock, or initial
+//    reconciliation of an already-critical med) and is reused
+//    everywhere until the episode ends. It NEVER depends on
+//    criticalDateMs / alarmTime / stock snapshots / lastSyncDate /
+//    today — those are mutable scheduling data, not identity.
+//
+// 2. SCHEDULED ALARM STATE — `ScheduledCriticalAlarmRecord`. Pure
+//    scheduling data for the native one-shot AlarmManager alarm: the
+//    projected fire time (mutable — it can be rescheduled many times
+//    during the same episode) and a strict status.
+//
+// `notificationState` is the per-episode notification ownership state:
+//   'NONE'      — no user-facing notification has been sent yet and no
+//                 scheduled alarm owns this episode's notification.
+//   'SCHEDULED' — a validly-registered scheduled alarm owns this
+//                 episode's single notification (the foreground path
+//                 must stay quiet). This does NOT mean delivered.
+//   'SENT'      — the episode's single user-facing notification was
+//                 sent (foreground) or delivery was confirmed by
+//                 positive native evidence.
+// ─────────────────────────────────────────────────────────────────────
+
+export type CriticalNotificationState = 'NONE' | 'SCHEDULED' | 'SENT';
+
 export interface CriticalTransitionState {
+  /** Opaque identity of ONE continuous critical episode. Stable for the
+   *  whole episode; changes only for a NEW episode (after sufficient). */
   transitionKey: string;
+  /**
+   * Best-known epoch ms when the episode began. Informational only —
+   * never used for identity or dedup decisions. 0 = unknown (legacy
+   * migration).
+   */
   enteredAt: number;
-  notificationSent: boolean;
+  notificationState: CriticalNotificationState;
 }
 
 export type ScheduledCriticalAlarmStatus = 'NOT_SCHEDULED' | 'SCHEDULED' | 'DELIVERED';
 
 export interface ScheduledCriticalAlarmRecord {
+  /**
+   * The episode identity this alarm belongs to. '' while the alarm is a
+   * pending claim for a projected crossing that has not begun yet; it is
+   * bound to the episode identity by the episode owner (useStockAlerts)
+   * at the actual crossing. The SCHEDULER NEVER FILLS THIS IN.
+   */
   transitionKey: string;
+  /** Projected fire time (ms). Mutable scheduling data — may be
+   *  rescheduled many times during the same episode. */
   alarmTime: number;
+  /**
+   * Strict status. SCHEDULED ≠ DELIVERED: only positive native evidence
+   * (or migrated evidence) may set DELIVERED. `alarmTime <= Date.now()`
+   * is NEVER sufficient — a passed timestamp does not prove Android
+   * displayed the notification.
+   */
   status: ScheduledCriticalAlarmStatus;
 }
 

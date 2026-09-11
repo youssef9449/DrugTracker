@@ -39,6 +39,25 @@ const FOCUSABLE_SELECTOR =
  *     before the modal opened (the trigger button) on close
  *
  * The panel content is passed as children.
+ *
+ * IMPLEMENTATION NOTE — keyboard dismissal bug on Android WebView:
+ * The original implementation had `handleKeyDown` depend on `onClose`
+ * (`useCallback(..., [onClose])`) and the focus-management `useEffect`
+ * depend on `handleKeyDown`. Several parents pass an INLINE `onClose`
+ * closure (e.g. `onClose={() => setIsFormOpen(false)}`), which gets a
+ * NEW function identity on every parent re-render. That cascaded into:
+ *   1. `handleKeyDown` identity changes every render.
+ *   2. The focus `useEffect` tears down + re-runs on every keystroke.
+ *   3. Teardown calls `previouslyFocusedRef.current?.focus()`, yanking
+ *      focus out of the input the user is typing in back to the trigger
+ *      button → the Android soft keyboard dismisses.
+ *   4. The re-run schedules `setTimeout(0)` to refocus the first input,
+ *      which on Android WebView does not reliably reopen the keyboard.
+ * The fix is to hold the latest `onClose` in a ref so `handleKeyDown` can
+ * be fully stable (empty deps). The focus effect then only runs ONCE when
+ * the modal opens and cleans up ONCE when it closes — never on every
+ * keystroke. This keeps focus inside the active input while typing, so
+ * the soft keyboard stays open.
  */
 export const Modal: FC<ModalProps> = ({
   isOpen,
@@ -50,39 +69,41 @@ export const Modal: FC<ModalProps> = ({
 }) => {
   const dialogRef = useRef<HTMLDivElement>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  // Ref holding the latest `onClose` so the keydown handler can read it
+  // without being re-created when the parent passes an inline closure.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
-  // Trap focus + handle ESC. Runs only while open.
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+  // Trap focus + handle ESC. Stable identity (empty deps) — reads the
+  // latest `onClose` from the ref at call time.
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onCloseRef.current();
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const focusables = Array.from(
+      dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
+    ).filter((el) => !el.hasAttribute('hidden') && el.style.display !== 'none');
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const active = document.activeElement as HTMLElement | null;
+    if (e.shiftKey) {
+      if (active === first || !dialog.contains(active)) {
         e.preventDefault();
-        onClose();
-        return;
+        last.focus();
       }
-      if (e.key !== 'Tab') return;
-      const dialog = dialogRef.current;
-      if (!dialog) return;
-      const focusables = Array.from(
-        dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
-      ).filter((el) => !el.hasAttribute('hidden') && el.style.display !== 'none');
-      if (focusables.length === 0) return;
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      const active = document.activeElement as HTMLElement | null;
-      if (e.shiftKey) {
-        if (active === first || !dialog.contains(active)) {
-          e.preventDefault();
-          last.focus();
-        }
-      } else {
-        if (active === last || !dialog.contains(active)) {
-          e.preventDefault();
-          first.focus();
-        }
+    } else {
+      if (active === last || !dialog.contains(active)) {
+        e.preventDefault();
+        first.focus();
       }
-    },
-    [onClose]
-  );
+    }
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -113,6 +134,10 @@ export const Modal: FC<ModalProps> = ({
       // Restore focus to the trigger on close.
       previouslyFocusedRef.current?.focus();
     };
+    // Both deps are now stable: `handleKeyDown` has empty deps, and
+    // `isOpen` only flips on open/close. The effect therefore runs ONCE
+    // per open and cleans up ONCE per close — no more teardown-on-keystroke
+    // that was dismissing the soft keyboard.
   }, [isOpen, handleKeyDown]);
 
   if (!isOpen) return null;

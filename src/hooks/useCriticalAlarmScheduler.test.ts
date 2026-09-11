@@ -749,11 +749,14 @@ describe('useCriticalAlarmScheduler — scheduled-record ownership & generation 
 
     // The episode owner binds the claim (exactly what
     // reconcileCriticalEpisode does at the actual crossing): transition A
-    // becomes active and the claim is bound to it.
+    // becomes active and the claim is bound to it. notificationState
+    // 'SCHEDULED' = the registered alarm owns the episode's single
+    // notification (a SENT episode would refuse scheduler writes —
+    // covered by a dedicated BLOCKER test below).
     localStorage.setItem(
       TRANSITION_KEY_STORE,
       JSON.stringify({
-        'med-bind': { transitionKey: 'crit_med-bind_A', enteredAt: Date.now(), notificationState: 'SENT' },
+        'med-bind': { transitionKey: 'crit_med-bind_A', enteredAt: Date.now(), notificationState: 'SCHEDULED' },
       })
     );
     const bound = JSON.parse(localStorage.getItem(SCHEDULED_STORE)!);
@@ -863,6 +866,237 @@ describe('useCriticalAlarmScheduler — scheduled-record ownership & generation 
     expect(finalRec.status).toBe('SCHEDULED');
     // One accepted write per distinct projected date.
     expect(finalRec.generation).toBe(alarmTimes.length);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Episode-vs-scheduler ownership races (BLOCKER 1 & BLOCKER 2).
+//
+// The owner's lifecycle writes (episode end / new episode / foreground
+// send / med deletion) do NOT bump the record's scheduler generation,
+// so an operation that checked only the generation could resurrect a
+// dead claim or restore notification ownership after it was consumed.
+// These tests simulate the owner's exact persistent writes WHILE a
+// scheduler operation is gated inside its async native work, then let
+// the operation finish and assert on the FINAL PERSISTENT STATE.
+// ─────────────────────────────────────────────────────────────────────
+describe('useCriticalAlarmScheduler — episode-vs-scheduler ownership races', () => {
+  const TRANSITION_KEY_STORE = 'android_med_tracker_critical_transition_v2';
+  const SCHEDULED_STORE = 'android_med_tracker_scheduled_critical_v2';
+  const OWNERSHIP_STORE = 'android_med_tracker_critical_ownership_v2';
+
+  type StoredRecord = {
+    transitionKey: string;
+    alarmTime: number;
+    status: string;
+    generation?: number;
+  };
+
+  function readRecord(medId: string): StoredRecord | undefined {
+    const raw = localStorage.getItem(SCHEDULED_STORE);
+    if (!raw) return undefined;
+    return JSON.parse(raw)[medId];
+  }
+
+  function readTransitions(): Record<string, { transitionKey: string; notificationState: string }> {
+    return JSON.parse(localStorage.getItem(TRANSITION_KEY_STORE) || '{}');
+  }
+
+  function readOwnership(): Record<string, number> {
+    return JSON.parse(localStorage.getItem(OWNERSHIP_STORE) || '{}');
+  }
+
+  /** Seed the persistent stores exactly as previous writes left them. */
+  function seedRecord(medId: string, record: StoredRecord): void {
+    localStorage.setItem(SCHEDULED_STORE, JSON.stringify({ [medId]: record }));
+  }
+
+  /**
+   * Simulate the episode owner ENDING episode A (exactly the persistent
+   * writes reconcileCriticalEpisode performs): transition deleted, the
+   * claim bound to A neutralized, ownership revision bumped.
+   */
+  function ownerEndsEpisode(medId: string, keyA: string, revision: number): void {
+    localStorage.setItem(TRANSITION_KEY_STORE, JSON.stringify({}));
+    const sched = JSON.parse(localStorage.getItem(SCHEDULED_STORE)!);
+    if (sched[medId] && sched[medId].transitionKey === keyA) {
+      sched[medId].status = 'NOT_SCHEDULED';
+    }
+    localStorage.setItem(SCHEDULED_STORE, JSON.stringify(sched));
+    localStorage.setItem(OWNERSHIP_STORE, JSON.stringify({ [medId]: revision }));
+  }
+
+  it('BLOCKER 1 / Test A: a stale scheduler operation cannot resurrect the claim of an ended episode', async () => {
+    // A previous scheduler write left an unbound SCHEDULED claim; no
+    // episode is active yet.
+    seedRecord('med-a', { transitionKey: '', alarmTime: Date.now() + 86400000, status: 'SCHEDULED', generation: 1 });
+
+    let releaseG1!: (value: boolean) => void;
+    const g1Gate = new Promise<boolean>((resolve) => { releaseG1 = resolve; });
+    mocks.schedule.mockImplementationOnce(() => g1Gate);
+
+    renderHook(() =>
+      useCriticalAlarmScheduler(
+        defaultOpts({ medications: [makeMed({ id: 'med-a', currentPills: 30, dailyDose: 1 })] })
+      )
+    );
+    // G1 captured its context (unbound claim, gen 1, revision 0) and is
+    // now gated inside scheduleCriticalAlarm.
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+
+    // The episode began AND ended while G1 awaited the bridge:
+    // the owner bound the claim to A, then A became sufficient again —
+    // transition deleted, claim neutralized, ownership revision bumped.
+    const sched = JSON.parse(localStorage.getItem(SCHEDULED_STORE)!);
+    sched['med-a'].transitionKey = 'crit_med-a_A';
+    localStorage.setItem(SCHEDULED_STORE, JSON.stringify(sched));
+    ownerEndsEpisode('med-a', 'crit_med-a_A', 2);
+
+    releaseG1(true);
+    await flushUntil(() => mocks.cancel.mock.calls.length >= 2); // initial + compensating
+
+    // The dead episode's claim was NOT resurrected: still neutralized,
+    // still bound to A (inert), generation untouched by G1.
+    const rec = readRecord('med-a')!;
+    expect(rec.status).toBe('NOT_SCHEDULED');
+    expect(rec.transitionKey).toBe('crit_med-a_A');
+    expect(rec.generation).toBe(1);
+    // No transition was created (the scheduler never creates identity).
+    expect(readTransitions()['med-a']).toBeUndefined();
+    // G1 cancelled the alarm it armed (compensating cancel).
+    expect(mocks.cancel.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('BLOCKER 1 / Test B+G: a stale operation from episode A cannot write episode B or an unbound claim', async () => {
+    seedRecord('med-b', { transitionKey: '', alarmTime: Date.now() + 86400000, status: 'SCHEDULED', generation: 1 });
+
+    let releaseG1!: (value: boolean) => void;
+    const g1Gate = new Promise<boolean>((resolve) => { releaseG1 = resolve; });
+    mocks.schedule.mockImplementationOnce(() => g1Gate);
+
+    renderHook(() =>
+      useCriticalAlarmScheduler(
+        defaultOpts({ medications: [makeMed({ id: 'med-b', currentPills: 30, dailyDose: 1 })] })
+      )
+    );
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+
+    // A ended and B began while G1 awaited: B is active (NONE), the
+    // leftover claim of A sits neutralized, the ownership revision moved.
+    localStorage.setItem(
+      TRANSITION_KEY_STORE,
+      JSON.stringify({ 'med-b': { transitionKey: 'crit_med-b_B', enteredAt: Date.now(), notificationState: 'NONE' } })
+    );
+    const sched = JSON.parse(localStorage.getItem(SCHEDULED_STORE)!);
+    sched['med-b'].transitionKey = 'crit_med-b_A'; // dead binding, neutralized
+    sched['med-b'].status = 'NOT_SCHEDULED';
+    localStorage.setItem(SCHEDULED_STORE, JSON.stringify(sched));
+    localStorage.setItem(OWNERSHIP_STORE, JSON.stringify({ 'med-b': 3 }));
+
+    releaseG1(true);
+    await flushUntil(() => mocks.cancel.mock.calls.length >= 2);
+
+    // G1 cannot restore A, cannot create an unbound claim, and cannot
+    // overwrite B: the persistent state is exactly the owner's.
+    const rec = readRecord('med-b')!;
+    expect(rec.status).toBe('NOT_SCHEDULED');
+    expect(rec.transitionKey).toBe('crit_med-b_A');
+    expect(rec.generation).toBe(1);
+    const transitions = readTransitions();
+    expect(transitions['med-b'].transitionKey).toBe('crit_med-b_B');
+    expect(transitions['med-b'].notificationState).toBe('NONE');
+  });
+
+  it('BLOCKER 2 / Test C: the scheduler never arms an alarm for a SENT episode', async () => {
+    // Episode A is active and its single notification was already sent.
+    localStorage.setItem(
+      TRANSITION_KEY_STORE,
+      JSON.stringify({ 'med-c': { transitionKey: 'crit_med-c_A', enteredAt: Date.now(), notificationState: 'SENT' } })
+    );
+    seedRecord('med-c', { transitionKey: 'crit_med-c_A', alarmTime: Date.now() + 86400000, status: 'NOT_SCHEDULED', generation: 1 });
+
+    // The med projects a future crossing (sufficient), so the scheduler
+    // effect WOULD schedule — but the active episode is SENT.
+    renderHook(() =>
+      useCriticalAlarmScheduler(
+        defaultOpts({ medications: [makeMed({ id: 'med-c', currentPills: 30, dailyDose: 1 })] })
+      )
+    );
+    await flushUntil(() => mocks.cancel.mock.calls.length >= 1);
+
+    // The pre-arm relevance check refused: no alarm was scheduled and
+    // no SCHEDULED ownership was (re)created for the SENT episode.
+    expect(mocks.schedule).not.toHaveBeenCalled();
+    const rec = readRecord('med-c')!;
+    expect(rec.status).toBe('NOT_SCHEDULED');
+    expect(readTransitions()['med-c'].notificationState).toBe('SENT');
+  });
+
+  it('Test I: foreground send during a schedule operation → compensating cancel, no SCHEDULED claim', async () => {
+    seedRecord('med-i', { transitionKey: '', alarmTime: Date.now() + 86400000, status: 'SCHEDULED', generation: 1 });
+
+    let releaseG1!: (value: boolean) => void;
+    const g1Gate = new Promise<boolean>((resolve) => { releaseG1 = resolve; });
+    mocks.schedule.mockImplementationOnce(() => g1Gate);
+
+    renderHook(() =>
+      useCriticalAlarmScheduler(
+        defaultOpts({ medications: [makeMed({ id: 'med-i', currentPills: 30, dailyDose: 1 })] })
+      )
+    );
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+
+    // The med crossed while G1 awaited: episode A began, the pending
+    // claim was bound to it, the FOREGROUND sent (future claim does not
+    // suppress) → SENT. The owner bumped the ownership revision.
+    localStorage.setItem(
+      TRANSITION_KEY_STORE,
+      JSON.stringify({ 'med-i': { transitionKey: 'crit_med-i_A', enteredAt: Date.now(), notificationState: 'SENT' } })
+    );
+    const sched = JSON.parse(localStorage.getItem(SCHEDULED_STORE)!);
+    sched['med-i'].transitionKey = 'crit_med-i_A';
+    localStorage.setItem(SCHEDULED_STORE, JSON.stringify(sched));
+    localStorage.setItem(OWNERSHIP_STORE, JSON.stringify({ 'med-i': 2 }));
+
+    releaseG1(true);
+    await flushUntil(() => mocks.cancel.mock.calls.length >= 2);
+
+    // Still SENT, no new SCHEDULED ownership, record untouched by G1 —
+    // the alarm G1 armed was compensated (no duplicate notification).
+    const rec = readRecord('med-i')!;
+    expect(rec.status).toBe('SCHEDULED'); // the owner's bound claim, not G1's write
+    expect(rec.transitionKey).toBe('crit_med-i_A');
+    expect(rec.generation).toBe(1); // G1's write was abandoned
+    expect(readTransitions()['med-i'].notificationState).toBe('SENT');
+    expect(mocks.cancel.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('Test H: deleting a medication invalidates ownership synchronously and no stale operation resurrects the record', async () => {
+    let releaseG1!: (value: boolean) => void;
+    const g1Gate = new Promise<boolean>((resolve) => { releaseG1 = resolve; });
+    mocks.schedule.mockImplementationOnce(() => g1Gate);
+
+    const { rerender } = renderHook(
+      ({ medications }) =>
+        useCriticalAlarmScheduler(defaultOpts({ medications })),
+      { initialProps: { medications: [makeMed({ id: 'med-h', currentPills: 30, dailyDose: 1 })] as Medication[] } }
+    );
+    // G1 is gated inside its schedule call.
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+
+    // The medication is deleted → the effect bumps the in-memory
+    // generation AND the persistent ownership revision synchronously,
+    // then enqueues the cleanup (cancel + clear).
+    rerender({ medications: [] as Medication[] });
+    expect(readOwnership()['med-h']).toBe(1); // bumped synchronously
+
+    releaseG1(true);
+    await flushUntil(() => mocks.cancel.mock.calls.length >= 3); // G1 initial + G1 compensating + cleanup
+
+    // No scheduled record exists for the deleted medication and none
+    // can be resurrected by the stale operation.
+    expect(readRecord('med-h')).toBeUndefined();
+    expect(readTransitions()['med-h']).toBeUndefined();
   });
 });
 

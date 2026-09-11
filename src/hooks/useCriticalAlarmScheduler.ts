@@ -6,19 +6,65 @@ import {
   loadCriticalTransitions,
   loadScheduledCriticalAlarms,
   saveScheduledCriticalAlarms,
+  loadOwnershipRevisions,
+  saveOwnershipRevisions,
+  captureSchedulingContext,
+  isSchedulingContextStillValid,
+  canScheduleForTransition,
+  bumpEpisodeOwnershipRevision,
   updateScheduledAlarm,
   invalidateScheduledAlarm,
   clearScheduledAlarm,
+  type SchedulingOwnershipContext,
 } from '../utils/criticalTransitions';
 
 /**
  * The stored generation (scheduler-write revision) of a med's scheduled
- * record, or 0 when the med has no record yet. Captured at the START of
- * each enqueued operation (before its async native work) as the baseline
- * the operation's storage write is validated against.
+ * record, or 0 when the med has no record yet. Used by the CANCEL-side
+ * operations (opt-out, already-critical cancel, deleted-med cleanup),
+ * which only ever REMOVE claims — their writes are generation-checked
+ * so they can never erase a newer scheduler write. The SCHEDULE path
+ * uses the full ownership context instead (captureSchedulingContextForMed).
  */
 function readRecordGeneration(medId: string): number {
   return loadScheduledCriticalAlarms()[medId]?.generation ?? 0;
+}
+
+/**
+ * Capture the medication's immutable scheduling ownership context from
+ * the CURRENT authoritative stores (transition identity + notification
+ * ownership + ownership revision + record revision/binding).
+ *
+ * MUST be called BEFORE the operation's first await — before any async
+ * native bridge work — so the captured context describes the state the
+ * operation is acting on. After the native work resolves, the context
+ * is re-verified (isSchedulingContextStillValid) and the operation may
+ * only persist scheduled state if it still matches.
+ */
+function captureSchedulingContextForMed(medId: string): SchedulingOwnershipContext {
+  return captureSchedulingContext(
+    loadCriticalTransitions(),
+    loadScheduledCriticalAlarms(),
+    loadOwnershipRevisions(),
+    medId
+  );
+}
+
+/**
+ * Re-verify a captured ownership context against the CURRENT
+ * authoritative stores. Returns false when ANY ownership-relevant
+ * state moved under the operation (episode ended / new episode began /
+ * notification ownership changed / med deleted / newer scheduler
+ * write) — in that case the operation is stale and must not write
+ * persistent scheduled state.
+ */
+function isSchedulingContextStillValidForMed(context: SchedulingOwnershipContext): boolean {
+  return isSchedulingContextStillValid(
+    context,
+    loadCriticalTransitions(),
+    loadScheduledCriticalAlarms(),
+    loadOwnershipRevisions()
+  );
 }
 
 /**
@@ -55,15 +101,20 @@ export interface UseCriticalAlarmSchedulerOptions {
  *
  * Scheduled-record write rules (enforced by the helpers in
  * criticalTransitions.ts — this hook cannot bypass them):
- *   - Every storage write captures the record's generation (revision)
- *     BEFORE the async native work and is applied only if the stored
- *     generation still matches; a stale generation ABANDONS the write.
+ *   - Every storage operation captures the FULL ownership context
+ *     (record generation + active episode identity + notification
+ *     ownership state + per-med ownership revision) BEFORE the async
+ *     native work and re-verifies it AFTER; a stale context ABANDONS
+ *     the write (and cancels the native alarm this operation armed).
  *   - A successful schedule binds the claim to the CURRENTLY ACTIVE
  *     transition (READ from the authoritative store — never generated
  *     here), so a re-schedule can never erase an active episode's
  *     binding and never resurrect a dead one. With no active episode
  *     the claim is written unbound ('') and is adopted/bound by the
  *     episode owner at the actual crossing (see reconcileCriticalEpisode).
+ *   - An episode whose notification was already SENT never regains a
+ *     SCHEDULED claim (canScheduleForTransition pre-arm check + the
+ *     helper's SENT rule).
  *
  * Re-schedule triggers: this effect re-runs (and re-schedules every
  * med's alarm) whenever any field that affects the critical date
@@ -80,14 +131,15 @@ export interface UseCriticalAlarmSchedulerOptions {
  *   - Skip when criticalStockAlertsEnabled is false (user opted out).
  *   - Skip when notificationsEnabled is false (no permission to show).
  *
- * Race protection — stale-async guard + per-med serialization:
+ * Race protection — stale-async guard + per-med serialization +
+ * ownership-context verification:
  *   cancelCriticalAlarm() and scheduleCriticalAlarm() are async (they
  *   go through Capacitor's bridge). Both operate on the SAME stable
  *   native notification id (`criticalAlarmId(medId)`), so an older
  *   generation's compensating cancel would remove a newer generation's
  *   already-placed alarm if the two operations interleave freely.
  *
- *   Two layers of protection:
+ *   Three layers of protection:
  *
  *   A) PER-MED SERIALIZATION (the core fix). All cancel/schedule
  *      operations for a given med are chained onto a per-med Promise
@@ -100,8 +152,9 @@ export interface UseCriticalAlarmSchedulerOptions {
  *      generation's schedule, so it can only remove the older
  *      generation's OWN stale alarm — never the newer one.
  *
- *   B) GENERATION COUNTER (defense-in-depth). Even with serialization,
- *      we keep the per-med generation counter (`alarmGenerationRef`):
+ *   B) GENERATION COUNTER (scheduler-vs-scheduler). Even with
+ *      serialization, we keep the per-med generation counter
+ *      (`alarmGenerationRef`):
  *        1. Each effect run bumps the generation for every med it touches.
  *        2. Pre-schedule check: if a newer run bumped the gen, skip
  *           the schedule call (no point placing an alarm that will
@@ -116,10 +169,27 @@ export interface UseCriticalAlarmSchedulerOptions {
  *           schedule from a prior run for that med bails out (or is
  *           re-canceled per step 3 if it already completed).
  *
+ *   C) OWNERSHIP-CONTEXT VERIFICATION (scheduler-vs-episode-owner).
+ *      The generation counter only answers "is this scheduler
+ *      operation newer than another scheduler operation?" — it does
+ *      NOT detect episode-owner lifecycle changes (episode ended, new
+ *      episode began, notification ownership changed, med deleted),
+ *      because those do not bump the record generation. Therefore
+ *      every operation captures a SchedulingOwnershipContext
+ *      (captureSchedulingContext) BEFORE its async native work and
+ *      verifies it (isSchedulingContextStillValid) after: any mismatch
+ *      means the operation is operating on a dead/changed ownership
+ *      context, so it abandons all persistent writes and cancels the
+ *      native alarm it armed. Deleting a medication additionally bumps
+ *      the ownership revision synchronously (bumpEpisodeOwnershipRevision).
+ *
  *   The combination guarantees: only the LATEST generation's schedule
- *   survives, and an older generation's compensating cancel can NEVER
- *   remove a newer generation's alarm (because serialization orders
- *   the older compensating cancel BEFORE the newer schedule).
+ *   for the CURRENT episode ownership survives, an older generation's
+ *   compensating cancel can NEVER remove a newer generation's alarm
+ *   (because serialization orders the older compensating cancel BEFORE
+ *   the newer schedule), and no stale operation can resurrect a dead
+ *   episode's claim or restore notification ownership after it was
+ *   consumed.
  *
  * Boot persistence — Android reboot:
  *   The @capacitor/local-notifications plugin persists scheduled
@@ -277,15 +347,23 @@ export function useCriticalAlarmScheduler({
       stillScheduled.add(med.id);
 
       enqueue(med.id, async () => {
-        // Baseline record generation — captured BEFORE any async native
-        // work. The post-schedule storage write below is applied only if
-        // the stored generation still equals this baseline; otherwise a
-        // newer scheduler write landed while this operation awaited the
-        // bridge and this stale operation MUST abandon the write.
-        const baselineGen = readRecordGeneration(med.id);
+        // Capture the FULL ownership context BEFORE any async native
+        // work: record generation + active episode identity + notification
+        // ownership state + per-med ownership revision + record binding.
+        // After the native work resolves, the context is re-verified and
+        // this operation may only persist scheduled state if it still
+        // matches. A generation check alone would miss episode-owner
+        // lifecycle changes (they do not bump the record generation).
+        const context = captureSchedulingContextForMed(med.id);
 
         await cancelCriticalAlarm(med.id);
         if (alarmGenerationRef.current.get(med.id) !== gen) return;
+
+        // Relevance check: if the active episode's notification was
+        // already SENT, a new native alarm must not be armed at all —
+        // it could only ever become a second user-facing notification
+        // for an episode whose single notification was consumed.
+        if (!canScheduleForTransition(loadCriticalTransitions(), med.id)) return;
 
         try {
           const scheduledResult = await scheduleCriticalAlarm(
@@ -298,9 +376,27 @@ export function useCriticalAlarmScheduler({
           if (alarmGenerationRef.current.get(med.id) !== gen) {
             await cancelCriticalAlarm(med.id);
             const records = loadScheduledCriticalAlarms();
-            if (invalidateScheduledAlarm(records, med.id, baselineGen)) {
+            if (invalidateScheduledAlarm(records, med.id, context.baselineRecordGeneration)) {
               saveScheduledCriticalAlarms(records);
             }
+            return;
+          }
+
+          // Ownership-context check (scheduler-vs-episode-owner): if
+          // the episode ended, a new episode began, the notification
+          // ownership changed, or the medication was deleted while this
+          // operation awaited the bridge, its captured context is stale.
+          // It must NOT recreate or mutate the scheduled claim — that
+          // would resurrect a dead episode's claim or restore
+          // notification ownership after it was consumed. Cancel the
+          // native alarm this operation armed so it can never fire for
+          // an episode it does not belong to, and leave the persistent
+          // scheduled state to the CURRENT owner.
+          if (
+            !isSchedulingContextStillValidForMed(context) ||
+            !medicationsRef.current.some((m) => m.id === med.id)
+          ) {
+            await cancelCriticalAlarm(med.id);
             return;
           }
 
@@ -312,44 +408,55 @@ export function useCriticalAlarmScheduler({
           // updateScheduledAlarm re-reads the CURRENT record and the
           // authoritative active transition at write time: it preserves
           // the active episode's binding, drops dead/stale bindings,
-          // and stamps the new generation. It can neither erase a valid
-          // binding nor resurrect an old identity.
+          // refuses SENT episodes, and stamps the new generation. It
+          // can neither erase a valid binding nor resurrect an old
+          // identity.
           if (scheduledResult !== false) {
             const records = loadScheduledCriticalAlarms();
             const transitions = loadCriticalTransitions();
             if (
               updateScheduledAlarm(records, transitions, med.id, {
                 alarmTime: criticalDateMs,
-                baselineGeneration: baselineGen,
+                baselineGeneration: context.baselineRecordGeneration,
               })
             ) {
               saveScheduledCriticalAlarms(records);
             }
           } else {
             const records = loadScheduledCriticalAlarms();
-            if (invalidateScheduledAlarm(records, med.id, baselineGen)) {
+            if (
+              invalidateScheduledAlarm(records, med.id, context.baselineRecordGeneration)
+            ) {
               saveScheduledCriticalAlarms(records);
             }
           }
         } catch (err) {
           console.warn('[critical-alarm] schedule failed:', err);
           const records = loadScheduledCriticalAlarms();
-          if (invalidateScheduledAlarm(records, med.id, baselineGen)) {
+          if (invalidateScheduledAlarm(records, med.id, context.baselineRecordGeneration)) {
             saveScheduledCriticalAlarms(records);
           }
         }
       });
     }
 
-    // Cancel alarms for meds that are no longer in the list (deleted).
-    // Bump their generation so any in-flight schedule from a previous
-    // run bails. Enqueued so they serialize against in-flight ops.
+    // Cancel alarms for meds that are no longer scheduled (deleted, or
+    // the projected crossing no longer exists). Bump their in-memory
+    // generation AND their persistent ownership revision SYNCHRONOUSLY
+    // so any in-flight schedule from a previous run bails out / becomes
+    // ownership-stale before it can persist a claim for a medication
+    // that no longer exists. The enqueued cleanup then serializes
+    // against in-flight ops and removes the native alarm + record.
     for (const prevId of scheduledCriticalIdsRef.current) {
       if (!stillScheduled.has(prevId)) {
         alarmGenerationRef.current.set(
           prevId,
           (alarmGenerationRef.current.get(prevId) ?? 0) + 1
         );
+        const revisions = loadOwnershipRevisions();
+        if (bumpEpisodeOwnershipRevision(revisions, prevId)) {
+          saveOwnershipRevisions(revisions);
+        }
         enqueue(prevId, async () => {
           const baselineGen = readRecordGeneration(prevId);
           await cancelCriticalAlarm(prevId);

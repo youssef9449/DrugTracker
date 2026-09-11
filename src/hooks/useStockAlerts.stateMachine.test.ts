@@ -233,6 +233,64 @@ describe('useStockAlerts — Notification deduplication', () => {
     third.unmount();
   });
 
+  it('TEST J: repeated restarts across episode end + new episode — stable keys, no duplicates, no stale resurrection', () => {
+    // Scheduler wrote a pending unbound claim (med still sufficient).
+    localStorageStore[SCHEDULED_CRITICAL_STORAGE_KEY] = JSON.stringify({
+      'med-state-1': { transitionKey: '', alarmTime: Date.now() + 86400000, status: 'SCHEDULED', generation: 1 },
+    });
+
+    // Session 1: crossing → episode A, foreground owns the notification,
+    // pending claim bound to A.
+    const first = renderHook(({ medications }) => useAlerts({ medications }), {
+      initialProps: { medications: [makeMed({ currentPills: 4 })] as Medication[] },
+    });
+    const keyA = readTransitions()['med-state-1'].transitionKey;
+    expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
+    expect(readScheduled()['med-state-1'].transitionKey).toBe(keyA);
+    first.unmount();
+
+    // Session 2 (restart): still critical → SAME key, no re-send.
+    const second = renderHook(({ medications }) => useAlerts({ medications }), {
+      initialProps: { medications: [makeMed({ currentPills: 4 })] as Medication[] },
+    });
+    expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
+    expect(readTransitions()['med-state-1'].transitionKey).toBe(keyA);
+    second.unmount();
+
+    // Session 3: refill → sufficient → episode A ends, claim neutralized,
+    // ownership revision bumped.
+    const third = renderHook(({ medications }) => useAlerts({ medications }), {
+      initialProps: { medications: [makeMed({ currentPills: 40 })] as Medication[] },
+    });
+    expect(readTransitions()['med-state-1']).toBeUndefined();
+    expect(readScheduled()['med-state-1'].status).toBe('NOT_SCHEDULED');
+    third.unmount();
+
+    // Sessions 4–6: critical again → episode B (fresh key), exactly one
+    // new notification, and repeated restarts never resurrect A's claim
+    // nor duplicate B's notification.
+    let keyB = '';
+    for (let session = 0; session < 3; session++) {
+      const restart = renderHook(({ medications }) => useAlerts({ medications }), {
+        initialProps: { medications: [makeMed({ currentPills: 3 })] as Medication[] },
+      });
+      const t = readTransitions()['med-state-1'];
+      expect(t).toBeDefined();
+      expect(t.transitionKey).not.toBe(keyA);
+      if (keyB === '') {
+        keyB = t.transitionKey;
+        expect(sendCriticalStockAlert).toHaveBeenCalledTimes(2); // 1×A + 1×B
+      } else {
+        expect(t.transitionKey).toBe(keyB); // same identity across restarts
+        expect(sendCriticalStockAlert).toHaveBeenCalledTimes(2); // never duplicated
+      }
+      // A's leftover claim stays neutralized + inert — never resurrected.
+      expect(readScheduled()['med-state-1'].status).toBe('NOT_SCHEDULED');
+      expect(readScheduled()['med-state-1'].transitionKey).toBe(keyA);
+      restart.unmount();
+    }
+  });
+
   it('critical → out_of_stock → restart does NOT re-notify the same episode', () => {
     const { rerender, unmount } = renderHook(({ medications }) => useAlerts({ medications }), {
       initialProps: { medications: [makeMed({ currentPills: 2 })] as Medication[] },
@@ -363,11 +421,12 @@ describe('useStockAlerts — Scheduler interaction', () => {
     expect(readTransitions()['med-state-1'].notificationState).toBe('SENT');
   });
 
-  it('a bound claim from the armed alarm is adopted as the episode identity (adopt, no duplicate)', () => {
-    // Leftover record bound to an old-style key, elapsed. Whatever
-    // produced it, the record represents the alarm that was armed for
-    // this med's crossing — the episode adopts it instead of sending a
-    // possible duplicate foreground notification.
+  it('a BOUND elapsed claim is a dead-episode leftover: neutralized, never adopted (fresh identity + foreground)', () => {
+    // Leftover record still bound to another episode's key, elapsed. A
+    // bound claim can only be a leftover of an episode that already
+    // ended (e.g. a crash between the owner's two store writes) — the
+    // new episode must NEVER inherit it (no identity adoption, no
+    // notification-ownership handoff from a dead episode).
     localStorageStore[SCHEDULED_CRITICAL_STORAGE_KEY] = JSON.stringify({
       'med-state-1': {
         transitionKey: 'crit_med-state-1_OLD_EPISODE',
@@ -376,27 +435,19 @@ describe('useStockAlerts — Scheduler interaction', () => {
       },
     });
 
-    // This simulates the guard-rail directly: even an elapsed SCHEDULED
-    // record that does not match any active episode must not silently
-    // suppress notification of a new episode. Adoption is legitimate
-    // only for unbound claims (''), which represents the alarm that was
-    // armed for THIS crossing.
-    vi.mocked(getDeliveredNotificationIds).mockResolvedValue(
-      new Set([7]) // irrelevant — criticalAlarmId mock returns id length
-    );
-
     renderHook(({ medications }) => useAlerts({ medications }), {
       initialProps: { medications: [makeMed({ currentPills: 2 })] as Medication[] },
     });
 
-    // The old claim was honored as the pending crossing (adopted) — the
-    // identity is preserved, notification ownership stays with the
-    // scheduled path, and the foreground stays quiet. This is required:
-    // the old key IS the alarm that was armed for this crossing.
+    // The leftover was neutralized (inert binding information only) and
+    // the fresh episode fired its OWN foreground notification — the dead
+    // episode's claim can neither adopt its identity nor suppress it.
+    expect(readScheduled()['med-state-1'].status).toBe('NOT_SCHEDULED');
+    expect(readScheduled()['med-state-1'].transitionKey).toBe('crit_med-state-1_OLD_EPISODE');
     const transitions = readTransitions();
-    expect(transitions['med-state-1'].transitionKey).toBe('crit_med-state-1_OLD_EPISODE');
-    expect(transitions['med-state-1'].notificationState).toBe('SCHEDULED');
-    expect(sendCriticalStockAlert).not.toHaveBeenCalled();
+    expect(transitions['med-state-1'].transitionKey).not.toBe('crit_med-state-1_OLD_EPISODE');
+    expect(transitions['med-state-1'].notificationState).toBe('SENT');
+    expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
   });
 
   it('deleted medication cleans up its transition', () => {
@@ -654,7 +705,7 @@ describe('useStockAlerts — TEST E: a new episode never inherits the previous c
     expect(readTransitions()['med-state-1'].notificationState).toBe('SENT');
   });
 
-  it('a FUTURE claim still bound to the dead episode A is rebound to the new episode B (never inherited as-is)', () => {
+  it('a FUTURE claim still bound to the dead episode A is neutralized — B never inherits it', () => {
     // Pathological leftover: a future SCHEDULED claim bound to A while
     // the transition A is gone (e.g. a crash between cleanup steps).
     localStorageStore[SCHEDULED_CRITICAL_STORAGE_KEY] = JSON.stringify({
@@ -668,9 +719,12 @@ describe('useStockAlerts — TEST E: a new episode never inherits the previous c
     const keyB = readTransitions()['med-state-1'].transitionKey;
     // B's identity is fresh — the dead binding was not adopted as-is...
     expect(keyB).not.toBe('crit_med-state-1_DEAD_A');
-    // ...and the future claim was rebound to B by the episode owner, so
-    // it can only ever act as B's own claim from now on.
-    expect(readScheduled()['med-state-1'].transitionKey).toBe(keyB);
+    // ...and the leftover claim was NEUTRALIZED, not rebound: nothing
+    // from episode A (identity OR claim) carries into episode B. The
+    // still-armed native alarm is cancelled by the scheduler's
+    // cancel path (episode active → no projected crossing).
+    expect(readScheduled()['med-state-1'].status).toBe('NOT_SCHEDULED');
+    expect(readScheduled()['med-state-1'].transitionKey).toBe('crit_med-state-1_DEAD_A');
     // A future claim does not suppress the foreground: B notified once.
     expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
     expect(readTransitions()['med-state-1'].notificationState).toBe('SENT');

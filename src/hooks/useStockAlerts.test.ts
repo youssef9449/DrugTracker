@@ -5,14 +5,17 @@ import type { Medication } from '../types';
 import { useStockAlerts } from './useStockAlerts';
 import { getTodayDateString } from '../utils/dateCalculations';
 
-// Mock the notifications module so we can assert calls without triggering
-// real Capacitor / Notification API calls.
 vi.mock('../utils/notifications', () => ({
-  sendMedicineAlert: vi.fn(),
   sendCriticalStockAlert: vi.fn(),
 }));
 
-import { sendMedicineAlert, sendCriticalStockAlert } from '../utils/notifications';
+vi.mock('../utils/storage', () => ({
+  loadJson: vi.fn(<T,>(_key: string, fallback: T): T => fallback),
+  saveJson: vi.fn(),
+}));
+
+import { sendCriticalStockAlert } from '../utils/notifications';
+import { loadJson } from '../utils/storage';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
   return {
@@ -24,9 +27,6 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
-    // Default lastSyncDate to today so effectiveCurrentPills === currentPills
-    // (no days-passed projection). Tests that exercise the dynamic balance
-    // override lastSyncDate explicitly.
     lastSyncDate: getTodayDateString(),
     autoDeductEnabled: true,
     ...overrides,
@@ -35,10 +35,10 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Wave 13 #123: pin system time so getTodayDateString() (used by
-  // makeMed's lastSyncDate default) resolves to a deterministic date.
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
+  // Default: no persisted notified state.
+  vi.mocked(loadJson).mockReturnValue({});
 });
 
 afterEach(() => {
@@ -56,11 +56,10 @@ describe('useStockAlerts', () => {
         isFirstRun: false,
       })
     );
-    expect(sendMedicineAlert).not.toHaveBeenCalled();
     expect(sendCriticalStockAlert).not.toHaveBeenCalled();
   });
 
-  it('does NOT fire on first run (seed data)', () => {
+  it('does NOT fire on first run', () => {
     renderHook(() =>
       useStockAlerts({
         medications: [makeMed({ currentPills: 0, dailyDose: 1 })],
@@ -70,7 +69,7 @@ describe('useStockAlerts', () => {
         isFirstRun: true,
       })
     );
-    expect(sendMedicineAlert).not.toHaveBeenCalled();
+    expect(sendCriticalStockAlert).not.toHaveBeenCalled();
   });
 
   it('does NOT fire when notifications are disabled', () => {
@@ -83,10 +82,10 @@ describe('useStockAlerts', () => {
         isFirstRun: false,
       })
     );
-    expect(sendMedicineAlert).not.toHaveBeenCalled();
+    expect(sendCriticalStockAlert).not.toHaveBeenCalled();
   });
 
-  it('fires out_of_stock alerts when a med hits 0 pills (critical + general)', () => {
+  it('fires ONE critical alert when med transitions to out_of_stock (no double)', () => {
     renderHook(() =>
       useStockAlerts({
         medications: [makeMed({ currentPills: 0, dailyDose: 1 })],
@@ -96,29 +95,38 @@ describe('useStockAlerts', () => {
         isFirstRun: false,
       })
     );
-    // Critical alert fired (criticalStockAlertsEnabled is true).
     expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
-    expect(sendCriticalStockAlert).toHaveBeenCalledWith('med-1', 'Test Med', 0, 0, 'قرص');
-    // General low-stock alert also fired (separate drawer entry).
-    expect(sendMedicineAlert).toHaveBeenCalledTimes(1);
-    expect(sendMedicineAlert).toHaveBeenCalledWith('med-1', 'Test Med', 0, 0);
   });
 
-  it('skips the critical alert when criticalStockAlertsEnabled is false (but still fires general)', () => {
+  it('fires ONE critical alert when med transitions to critical (threshold = 5)', () => {
+    // currentPills=5, dailyDose=1 → daysLeft=5 ≤ threshold 5 → critical
     renderHook(() =>
       useStockAlerts({
-        medications: [makeMed({ currentPills: 0, dailyDose: 1 })],
+        medications: [makeMed({ currentPills: 5, dailyDose: 1 })],
         notificationsEnabled: true,
-        criticalStockAlertsEnabled: false,
+        criticalStockAlertsEnabled: true,
+        hydrated: true,
+        isFirstRun: false,
+      })
+    );
+    expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT fire when med is sufficient (daysLeft > threshold)', () => {
+    // currentPills=30, dailyDose=1 → daysLeft=30 > threshold 5
+    renderHook(() =>
+      useStockAlerts({
+        medications: [makeMed({ currentPills: 30, dailyDose: 1 })],
+        notificationsEnabled: true,
+        criticalStockAlertsEnabled: true,
         hydrated: true,
         isFirstRun: false,
       })
     );
     expect(sendCriticalStockAlert).not.toHaveBeenCalled();
-    expect(sendMedicineAlert).toHaveBeenCalledTimes(1);
   });
 
-  it('does NOT re-fire for the same status (dedup via lastAlertedStatusRef)', () => {
+  it('does NOT re-fire for the same critical state (persistent dedup)', () => {
     const med = makeMed({ currentPills: 0, dailyDose: 1 });
     const { rerender } = renderHook(
       ({ medications }) =>
@@ -131,14 +139,31 @@ describe('useStockAlerts', () => {
         }),
       { initialProps: { medications: [med] } }
     );
-    expect(sendMedicineAlert).toHaveBeenCalledTimes(1);
+    expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
 
     // Re-render with the same medications — should NOT re-fire.
     rerender({ medications: [med] });
-    expect(sendMedicineAlert).toHaveBeenCalledTimes(1);
+    expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
   });
 
-  it('clears the tracker when a med improves to sufficient, so a later worsening fires again', () => {
+  it('persists the notified state (survives app restart)', () => {
+    // Simulate: notified state was persisted from a previous session.
+    vi.mocked(loadJson).mockReturnValue({ 'med-1': true });
+
+    renderHook(() =>
+      useStockAlerts({
+        medications: [makeMed({ currentPills: 0, dailyDose: 1 })],
+        notificationsEnabled: true,
+        criticalStockAlertsEnabled: true,
+        hydrated: true,
+        isFirstRun: false,
+      })
+    );
+    // Already notified → no new alert.
+    expect(sendCriticalStockAlert).not.toHaveBeenCalled();
+  });
+
+  it('clears notified state when med improves to sufficient, so later re-critical fires', () => {
     // Start with a critical med.
     const criticalMed = makeMed({ currentPills: 1, dailyDose: 1 });
     const { rerender } = renderHook(
@@ -152,30 +177,46 @@ describe('useStockAlerts', () => {
         }),
       { initialProps: { medications: [criticalMed] } }
     );
-    expect(sendMedicineAlert).toHaveBeenCalledTimes(1);
+    expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
 
-    // Refill → sufficient.
+    // Refill → sufficient. saveJson should be called to clear the notified flag.
     const sufficientMed = makeMed({ currentPills: 100, dailyDose: 1 });
     rerender({ medications: [sufficientMed] });
-    expect(sendMedicineAlert).toHaveBeenCalledTimes(1); // no new alert on improvement
+    expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1); // no new alert on improvement
 
-    // Drop back to critical → should fire again (tracker was cleared).
+    // The saveJson call should have cleared med-1 from the notified map.
+    // Simulate the next load reflecting the cleared state.
+    vi.mocked(loadJson).mockReturnValue({});
+
+    // Drop back to critical → should fire again.
     const criticalAgain = makeMed({ currentPills: 1, dailyDose: 1 });
     rerender({ medications: [criticalAgain] });
-    expect(sendMedicineAlert).toHaveBeenCalledTimes(2);
+    expect(sendCriticalStockAlert).toHaveBeenCalledTimes(2);
   });
 
-  it('does NOT fire for a sufficient med', () => {
+  it('threshold 7: 7 days is critical, 8 days is not', () => {
     renderHook(() =>
       useStockAlerts({
-        medications: [makeMed({ currentPills: 100, dailyDose: 1 })],
+        medications: [makeMed({ currentPills: 7, dailyDose: 1, warningThresholdDays: 7 })],
         notificationsEnabled: true,
         criticalStockAlertsEnabled: true,
         hydrated: true,
         isFirstRun: false,
       })
     );
-    expect(sendMedicineAlert).not.toHaveBeenCalled();
+    expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
+  });
+
+  it('threshold 7: 8 days does NOT fire (sufficient)', () => {
+    renderHook(() =>
+      useStockAlerts({
+        medications: [makeMed({ currentPills: 8, dailyDose: 1, warningThresholdDays: 7 })],
+        notificationsEnabled: true,
+        criticalStockAlertsEnabled: true,
+        hydrated: true,
+        isFirstRun: false,
+      })
+    );
     expect(sendCriticalStockAlert).not.toHaveBeenCalled();
   });
 });

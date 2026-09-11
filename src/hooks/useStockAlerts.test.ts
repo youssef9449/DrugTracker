@@ -286,7 +286,7 @@ describe('useStockAlerts — scheduled alarm claim (strict delivery semantics)',
     expect(sendCriticalStockAlert).not.toHaveBeenCalled();
   });
 
-  it('elapsed alarmTime does NOT prove delivery: record stays SCHEDULED, episode is adopted as SCHEDULED (never SENT/DELIVERED)', () => {
+  it('elapsed alarmTime does NOT prove delivery: episode is adopted as FIRED_OR_DUE (never SENT/DELIVERED), claim consumed', () => {
     vi.mocked(loadJson).mockImplementation((key: string, fallback: unknown) => {
       if (key === SCHEDULED_CRITICAL_STORAGE_KEY) {
         return {
@@ -313,22 +313,23 @@ describe('useStockAlerts — scheduled alarm claim (strict delivery semantics)',
 
     expect(sendCriticalStockAlert).not.toHaveBeenCalled();
 
-    // The adopted episode must be SCHEDULED — NOT 'SENT' — because a
-    // passed timestamp is not proof that Android displayed anything.
+    // The adopted episode must be FIRED_OR_DUE — NOT 'SENT' (a passed
+    // timestamp is not proof that Android displayed anything) and not a
+    // pending SCHEDULED claim either (its window already passed).
     const transitionsWrite = vi
       .mocked(saveJson)
       .mock.calls.find((c) => c[0] === CRITICAL_TRANSITION_STORAGE_KEY);
     expect(transitionsWrite).toBeDefined();
     const persisted = transitionsWrite![1] as Record<string, { notificationState: string }>;
-    expect(persisted['med-1'].notificationState).toBe('SCHEDULED');
+    expect(persisted['med-1'].notificationState).toBe('FIRED_OR_DUE');
 
-    // The scheduled record itself must NOT be flipped to DELIVERED.
+    // The scheduled record is consumed (FIRED_OR_DUE), never DELIVERED.
     const scheduledWrite = vi
       .mocked(saveJson)
       .mock.calls.find((c) => c[0] === SCHEDULED_CRITICAL_STORAGE_KEY);
     expect(scheduledWrite).toBeDefined();
     const persistedRec = scheduledWrite![1] as Record<string, { status: string }>;
-    expect(persistedRec['med-1'].status).toBe('SCHEDULED');
+    expect(persistedRec['med-1'].status).toBe('FIRED_OR_DUE');
   });
 
   it('a future scheduled alarm does NOT suppress the foreground notification', () => {

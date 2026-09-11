@@ -75,18 +75,39 @@ export interface Medication {
 //    OWNER. They answer different questions and both are required.
 //
 // `notificationState` is the per-episode notification ownership state:
-//   'NONE'      — no user-facing notification has been sent yet and no
-//                 scheduled alarm owns this episode's notification.
-//   'SCHEDULED' — a validly-registered scheduled alarm owns this
-//                 episode's single notification (the foreground path
-//                 must stay quiet). This does NOT mean delivered.
-//   'SENT'      — the episode's single user-facing notification was
-//                 sent (foreground) or delivery was confirmed by
-//                 positive native evidence. An episode in the SENT
-//                 state can never regain a SCHEDULED claim.
+//   'NONE'         — no user-facing notification has been sent yet and no
+//                    scheduled alarm owns this episode's notification.
+//   'SCHEDULED'    — a validly-registered scheduled alarm owns this
+//                    episode's single notification (the foreground path
+//                    must stay quiet). This does NOT mean delivered.
+//   'FIRED_OR_DUE' — the owning scheduled claim has reached its firing
+//                    window (alarmTime <= now) without positive delivery
+//                    evidence. Delivery is UNKNOWN (the notification may
+//                    have fired while the app was dead and been
+//                    dismissed, or never have fired at all). This state is
+//                    TERMINAL for the episode's notification ownership:
+//                    the claim is consumed, the foreground path stays
+//                    quiet, and the claim must NEVER be re-armed for the
+//                    same transition. Only positive native evidence (the
+//                    notification actually visible in the drawer) may
+//                    upgrade it to 'SENT'.
+//   'SENT'         — the episode's single user-facing notification was
+//                    sent (foreground) or delivery was confirmed by
+//                    positive native evidence. An episode in the SENT
+//                    state can never regain a SCHEDULED claim.
+//
+// Allowed transitions (enforced by criticalTransitions.ts):
+//   NONE → SCHEDULED    (successful native scheduling adopted/bound)
+//   NONE → SENT         (foreground send, exactly once, if enabled)
+//   NONE → FIRED_OR_DUE (bound claim's window passed)
+//   SCHEDULED → FIRED_OR_DUE (claim's firing window reached, delivery unknown)
+//   SCHEDULED → SENT    (positive delivery evidence only)
+//   FIRED_OR_DUE → SENT (positive delivery evidence only)
+//   NEVER: SENT → SCHEDULED; NEVER: FIRED_OR_DUE → SCHEDULED;
+//   NEVER: FIRED_OR_DUE → SENT merely because time elapsed.
 // ─────────────────────────────────────────────────────────────────────
 
-export type CriticalNotificationState = 'NONE' | 'SCHEDULED' | 'SENT';
+export type CriticalNotificationState = 'NONE' | 'SCHEDULED' | 'FIRED_OR_DUE' | 'SENT';
 
 export interface CriticalTransitionState {
   /** Opaque identity of ONE continuous critical episode. Stable for the
@@ -101,7 +122,31 @@ export interface CriticalTransitionState {
   notificationState: CriticalNotificationState;
 }
 
-export type ScheduledCriticalAlarmStatus = 'NOT_SCHEDULED' | 'SCHEDULED' | 'DELIVERED';
+/**
+ * Status of the scheduled-claim record (pure scheduling/evidence data —
+ * the notification-ownership state machine lives on the transition):
+ *   'NOT_SCHEDULED' — no valid claim exists (never scheduled, cancelled,
+ *                     failed, neutralized at episode end, or consumed by
+ *                     a foreground send).
+ *   'SCHEDULED'     — a native alarm was successfully registered. While
+ *                     alarmTime is in the future the alarm is still
+ *                     pending; once alarmTime <= now the claim has
+ *                     reached its firing window and must be consumed
+ *                     (→ 'FIRED_OR_DUE') by the episode owner — never
+ *                     re-armed for the same transition.
+ *   'FIRED_OR_DUE'  — the claim's firing window passed without positive
+ *                     delivery evidence. Terminal: the alarm opportunity
+ *                     for this transition is consumed and must never be
+ *                     re-armed (absence from the drawer proves nothing).
+ *   'DELIVERED'     — positive delivery evidence was recorded (the alarm
+ *                     notification is/was actually visible in the
+ *                     drawer). Terminal; upgrades the episode to SENT.
+ */
+export type ScheduledCriticalAlarmStatus =
+  | 'NOT_SCHEDULED'
+  | 'SCHEDULED'
+  | 'FIRED_OR_DUE'
+  | 'DELIVERED';
 
 export interface ScheduledCriticalAlarmRecord {
   /**
@@ -123,7 +168,8 @@ export interface ScheduledCriticalAlarmRecord {
    * Strict status. SCHEDULED ≠ DELIVERED: only positive native evidence
    * (or migrated evidence) may set DELIVERED. `alarmTime <= Date.now()`
    * is NEVER sufficient — a passed timestamp does not prove Android
-   * displayed the notification.
+   * displayed the notification; it only moves the claim to its
+   * FIRED_OR_DUE terminal state (delivery unknown), never to DELIVERED.
    */
   status: ScheduledCriticalAlarmStatus;
   /**

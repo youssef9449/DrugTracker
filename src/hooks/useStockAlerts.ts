@@ -50,13 +50,18 @@ interface UseStockAlertsOptions {
  *
  * == Notification ownership ==
  *   Path A (foreground): transition.notificationState NONE → send → SENT.
+ *   Any claim bound to the episode is neutralized at that moment (the
+ *   foreground consumed the episode's single notification opportunity).
  *   Path B (scheduled):  a validly-registered native alarm owns the
- *   episode's single notification → the episode is adopted with
+ *   episode's single notification → the episode is adopted/bound with
  *   notificationState 'SCHEDULED' and the foreground stays quiet.
- *   SCHEDULED does NOT mean delivered: elapsed alarmTime is never
- *   treated as proof of delivery. Only positive native evidence
- *   (the alarm notification actually visible in the drawer, checked
- *   asynchronously below) upgrades an episode to 'SENT'.
+ *   SCHEDULED does NOT mean delivered: once the claim's firing window
+ *   passes (alarmTime <= now) the episode becomes 'FIRED_OR_DUE' —
+ *   delivery UNKNOWN, claim consumed, never re-armed, foreground stays
+ *   quiet. Elapsed alarmTime is never treated as proof of delivery.
+ *   Only positive native evidence (the alarm notification actually
+ *   visible in the drawer, checked asynchronously below) upgrades an
+ *   episode to 'SENT'.
  *
  * == Disabled / Re-enabled Notifications ==
  * If critical alerts or notifications are disabled when the medication
@@ -151,34 +156,38 @@ export function useStockAlerts({
     }
 
     // ── Delivery-evidence reconciliation (strict semantics) ──
-    // For episodes in the 'SCHEDULED' state, check (native only, best
-    // effort) whether the scheduled alarm notification is ACTUALLY
-    // visible in the Android drawer. That is positive evidence of
-    // delivery; absence proves nothing and changes nothing. This pass
-    // NEVER treats elapsed alarmTime as delivery, and it only mutates
-    // transitions (never the scheduler's records), so it cannot race
-    // the scheduler's async record writes.
-    const hasEvidenceCandidates = medIds.some(
-      (id) => transitions[id]?.notificationState === 'SCHEDULED'
-    );
+    // For episodes whose notification ownership is not yet terminal
+    // ('SCHEDULED' = claim pending/consumed-window-not-yet-marked,
+    // 'FIRED_OR_DUE' = claim consumed, delivery unknown), check (native
+    // only, best effort) whether the scheduled alarm notification is
+    // ACTUALLY visible in the Android drawer. That is positive evidence
+    // of delivery; absence proves nothing and changes nothing. This
+    // pass NEVER treats elapsed alarmTime as delivery.
+    const hasEvidenceCandidates = medIds.some((id) => {
+      const state = transitions[id]?.notificationState;
+      return state === 'SCHEDULED' || state === 'FIRED_OR_DUE';
+    });
     if (hasEvidenceCandidates) {
       void getDeliveredNotificationIds()
         .then((deliveredIds) => {
-          // Re-load the ownership revisions INSIDE this async callback:
-          // the scheduler may have bumped them (e.g. medication deleted)
-          // while the drawer query was in flight — a read-modify-write
-          // here can never clobber that bump.
+          // Re-load the ownership revisions AND the scheduled records
+          // INSIDE this async callback: the scheduler may have written
+          // records (or bumped revisions, e.g. medication deleted) while
+          // the drawer query was in flight — a read-modify-write of a
+          // stale map here could clobber those writes.
           const currentRevisions = loadOwnershipRevisions();
+          const currentScheduled = loadScheduledCriticalAlarms();
           const changed = applyDeliveredCriticalEvidence(
             medIds,
             deliveredIds,
             transitions,
-            scheduled,
+            currentScheduled,
             currentRevisions,
             criticalAlarmId
           );
           if (changed) {
             saveCriticalTransitions(transitions);
+            saveScheduledCriticalAlarms(currentScheduled);
             saveOwnershipRevisions(currentRevisions);
           }
         })

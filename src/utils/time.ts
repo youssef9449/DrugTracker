@@ -62,5 +62,19 @@ export const DEFAULT_SOLID_PACK_SIZE = 30;
 /** Default package size for liquid (ml) medications. */
 export const DEFAULT_LIQUID_PACK_SIZE = 100;
 
+/**
+ * Convert a "HH:MM" 24-hour string to minutes-since-midnight.
+ *
+ * Returns -1 for malformed input (NaN, wrong shape, or out-of-range
+ * hour/minute — #25). Used by the dose-reminder scheduler + tests.
+ */
+export function timeToMinutes(timeStr: string): number {
+  const parts = timeStr.split(':').map((n) => parseInt(n, 10));
+  const [h, m] = parts;
+  if (parts.length < 2 || Number.isNaN(h) || Number.isNaN(m)) return -1;
+  if (h < 0 || h > 23 || m < 0 || m > 59) return -1;
+  return h * 60 + m;
+}
+
 /** Days per month — used for monthly-consumption calculations. */
 export const DAYS_PER_MONTH = 30;

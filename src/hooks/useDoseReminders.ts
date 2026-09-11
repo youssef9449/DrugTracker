@@ -1,40 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Medication } from '../types';
-import { getTodayDateString, effectiveCurrentPills } from '../utils/dateCalculations';
+import { getTodayDateString } from '../utils/dateCalculations';
 import { playNotificationSound, stopAllSounds } from '../utils/sound';
-import { sendMedicationDoseReminder } from '../utils/notifications';
 import { loadJson, saveJson } from '../utils/storage';
-import { REMINDER_POLL_INTERVAL_MS, DEFAULT_SNOOZE_MINUTES, MS_PER_MINUTE } from '../utils/time';
+import { DEFAULT_SNOOZE_MINUTES, MS_PER_MINUTE } from '../utils/time';
+import { scheduleSnoozedDoseReminder } from '../utils/notifications';
 
 const FIRED_KEY = 'android_med_tracker_fired_reminders_v1';
 const SNOOZE_KEY = 'android_med_tracker_snooze_v1';
-
-function getNowHHMM(): string {
-  const d = new Date();
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
-
-/**
- * Convert a "HH:MM" 24-hour string to minutes-since-midnight.
- *
- * Returns -1 for malformed input (NaN, wrong shape, or out-of-range
- * hour/minute — #25). Used by the polling effect to compare the current
- * time against a medication's `reminderTime`; a -1 return causes the
- * reminder to be skipped rather than firing at an unreachable time.
- *
- * Exported so the validation contract can be unit-tested directly.
- */
-export function timeToMinutes(timeStr: string): number {
-  const parts = timeStr.split(':').map((n) => parseInt(n, 10));
-  const [h, m] = parts;
-  // Missing hour or minute (no colon, or empty side) → NaN or undefined.
-  if (parts.length < 2 || Number.isNaN(h) || Number.isNaN(m)) return -1;
-  // #25: reject out-of-range hours/minutes so a corrupted reminderTime
-  // (e.g. "25:99") doesn't produce an unreachable minute count that
-  // silently never fires.
-  if (h < 0 || h > 23 || m < 0 || m > 59) return -1;
-  return h * 60 + m;
-}
 
 function firedKey(medId: string, dateStr: string) {
   return `${medId}:${dateStr}`;
@@ -43,234 +16,160 @@ function firedKey(medId: string, dateStr: string) {
 interface UseDoseRemindersOptions {
   medications: Medication[];
   soundEnabled: boolean;
-  notificationsEnabled: boolean;
-  /**
-   * #24: when false (before App has hydrated persisted state from
-   * localStorage/IndexedDB), the polling effect does NOT run `checkDue`,
-   * so phantom alarms for the SEED medications don't fire before the
-   * user's real saved medications are loaded.
-   */
-  hydrated: boolean;
-  globalCustomSound?: { fileName: string; mimeType: string; dataUrl: string } | null;
 }
 
+/**
+ * In-app dose-reminder alarm UI controller.
+ *
+ * Owns the DoseAlarmModal state (which medication is currently
+ * "alarming") and exposes `openAlarm` / `dismissAlarm` / `snoozeAlarm` /
+ * `testAlarm` for the UI + the native notification listener to call.
+ *
+ * === History ===
+ * Previously this hook ran a JS polling interval (every 5s) that checked
+ * `now >= reminderTime` and fired the alarm itself. That only worked while
+ * the app was in the foreground — when killed, no reminder fired at all.
+ *
+ * The recurring native reminder is now scheduled by
+ * {@link useDoseReminderScheduler} (Android's AlarmManager fires it every
+ * day at reminderTime, foreground or killed). When the notification fires
+ * while the app is open, the `localNotificationReceived` listener in
+ * native.ts calls back here via `openAlarm`. This hook no longer polls.
+ *
+ * === Snooze ===
+ * Snoozing schedules a ONE-SHOT native notification X minutes in the
+ * future (via scheduleSnoozedDoseReminder). When it fires the listener
+ * calls `openAlarm` again — so the snooze works even if the user
+ * backgrounded the app after snoozing.
+ *
+ * === FIRED_KEY dedup ===
+ * `openAlarm` writes FIRED_KEY[medId:today] = true so the recurring
+ * native notification, if it happens to fire twice (e.g. snooze + the
+ * daily one), doesn't re-open the modal the same day. `testAlarm` does
+ * NOT write FIRED_KEY (so testing the alarm doesn't block the real
+ * scheduled reminder later).
+ *
+ * All callbacks are stable (empty dep useCallback) so listener
+ * registrations that depend on them don't re-subscribe on every render.
+ * They read the latest medications/sound/id via refs kept in sync by
+ * small effects.
+ */
 export function useDoseReminders({
   medications,
   soundEnabled,
-  notificationsEnabled,
-  hydrated,
-  globalCustomSound,
 }: UseDoseRemindersOptions) {
   const [alarmingMedication, setAlarmingMedication] = useState<Medication | null>(null);
-  const queueRef = useRef<string[]>([]);
+  // The currently-alarming med id, kept in a ref so the stable
+  // dismissAlarm/snoozeAlarm callbacks can read/write it without deps.
   const alarmingIdRef = useRef<string | null>(null);
   // #13: set to true by testAlarm so dismissAlarm knows NOT to write
   // FIRED_KEY (which would block the real scheduled reminder for the
-  // day). Reset to false at the start of every triggerAlarm call so
-  // subsequent real alarms still mark themselves fired.
+  // day). Reset to false at the start of every openAlarm call.
   const isTestAlarmRef = useRef(false);
 
-  // Keep the latest sound/notify flags + global custom sound in refs so
-  // the stable `triggerAlarm` callback can read them without being
-  // recreated on every change (which would re-run the polling effect
-  // and reset timers). This fixes the H5 stale-closure bug where the
-  // polling interval kept using an outdated `globalCustomSound`.
   const soundEnabledRef = useRef(soundEnabled);
-  const notificationsEnabledRef = useRef(notificationsEnabled);
-  const globalCustomSoundRef = useRef(globalCustomSound);
   useEffect(() => {
     soundEnabledRef.current = soundEnabled;
   }, [soundEnabled]);
-  useEffect(() => {
-    notificationsEnabledRef.current = notificationsEnabled;
-  }, [notificationsEnabled]);
-  useEffect(() => {
-    globalCustomSoundRef.current = globalCustomSound;
-  }, [globalCustomSound]);
 
-  // #90: keep the latest medications in a ref so the polling effect +
-  // dismissAlarm can read the current array without depending on the
-  // array reference (which changes on every App render, even unrelated
-  // state changes like typing in a search field).
   const medicationsRef = useRef(medications);
   useEffect(() => {
     medicationsRef.current = medications;
   }, [medications]);
 
-  // #90: stable signature capturing ONLY the fields checkDue actually
-  // reads (reminderEnabled, reminderTime, id). The polling effect is
-  // gated on this string instead of the raw `medications` array ref,
-  // so the 5s interval is NOT torn down/recreated on every App state
-  // change — only when a med's reminder config actually changes.
-  const reminderSignature = useMemo(
-    () =>
-      medications
-        .map((m) => `${m.id}|${m.reminderEnabled ? 1 : 0}|${m.reminderTime ?? ''}`)
-        .sort()
-        .join('\n'),
-    [medications]
-  );
-
   const dismissAlarm = useCallback(() => {
-    // #107: stop any currently-playing chime when the alarm is dismissed.
     stopAllSounds();
     const current = alarmingIdRef.current;
     if (current) {
-      // #13: only mark the reminder as "fired for today" if this alarm
-      // was a REAL scheduled reminder, not a test alarm triggered by
-      // the user clicking "تجربة الصوت". A test alarm would otherwise
-      // poison FIRED_KEY and block the real reminder later that day.
       if (!isTestAlarmRef.current) {
         const fired = loadJson<Record<string, boolean>>(FIRED_KEY, {});
         fired[firedKey(current, getTodayDateString())] = true;
         saveJson(FIRED_KEY, fired);
       }
-
       const snooze = loadJson<Record<string, number>>(SNOOZE_KEY, {});
       delete snooze[current];
       saveJson(SNOOZE_KEY, snooze);
     }
-    // Reset the test flag so the next alarm (real or test) starts clean.
     isTestAlarmRef.current = false;
     alarmingIdRef.current = null;
     setAlarmingMedication(null);
-
-    const nextId = queueRef.current.shift();
-    if (nextId) {
-      // #90: read from the ref so dismissAlarm doesn't depend on the
-      // medications array reference.
-      const next = medicationsRef.current.find((m) => m.id === nextId);
-      if (next) {
-        triggerAlarm(next, false);
-      }
-    }
-    // triggerAlarm is stable (useCallback with [] deps) so it's safe to
-    // omit from the dep array. eslint-disable for the missing dep.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const snoozeAlarm = useCallback((minutes: number = DEFAULT_SNOOZE_MINUTES) => {
-    const current = alarmingIdRef.current;
-    if (current) {
-      const snooze = loadJson<Record<string, number>>(SNOOZE_KEY, {});
-      snooze[current] = Date.now() + minutes * MS_PER_MINUTE;
-      saveJson(SNOOZE_KEY, snooze);
-    }
+  const snoozeAlarm = useCallback((medication: Medication, minutes: number = DEFAULT_SNOOZE_MINUTES) => {
+    stopAllSounds();
+    const snooze = loadJson<Record<string, number>>(SNOOZE_KEY, {});
+    snooze[medication.id] = Date.now() + minutes * MS_PER_MINUTE;
+    saveJson(SNOOZE_KEY, snooze);
     alarmingIdRef.current = null;
     setAlarmingMedication(null);
+    // Schedule a ONE-SHOT native notification X minutes in the future.
+    // When it fires, the localNotificationReceived listener calls
+    // openAlarm again — so snooze works even if the user backgrounded
+    // the app after snoozing. (Replaces the old polling-based snooze.)
+    scheduleSnoozedDoseReminder(
+      medication.id,
+      medication.name,
+      medication.dailyDose,
+      medication.unit,
+      medication.reminderTime,
+      minutes
+    ).catch(() => void 0);
   }, []);
 
-  // triggerAlarm is intentionally a useCallback with a stable signature
-  // (no deps) so it can be referenced by dismissAlarm and the polling
-  // effect without causing re-subscriptions. It reads the latest
-  // sound/notification/global-custom-sound state from refs.
-  const triggerAlarm = useCallback((med: Medication, enqueueIfBusy: boolean) => {
-    if (alarmingIdRef.current && alarmingIdRef.current !== med.id) {
-      if (enqueueIfBusy && !queueRef.current.includes(med.id)) {
-        queueRef.current.push(med.id);
-      }
-      return;
-    }
-    // #13: reset the test flag at the start of every alarm so a real
-    // scheduled alarm (from the polling effect) doesn't inherit a stale
-    // `true` from a previous test alarm. testAlarm sets it back to true
-    // AFTER calling triggerAlarm (see below).
+  // openAlarm is called by the native localNotificationReceived listener
+  // when the recurring dose-reminder notification fires while the app is
+  // in the foreground. It opens the DoseAlarmModal + plays the per-med
+  // chime + writes FIRED_KEY (dedup). Stable signature (no deps) so the
+  // listener registration in App.tsx doesn't re-subscribe on every render.
+  const openAlarm = useCallback((medId: string) => {
+    // Resolve the med from the latest medications array.
+    const med = medicationsRef.current.find((m) => m.id === medId);
+    if (!med) return; // med was deleted between scheduling and firing.
+
+    // Dedup: if already alarming this med, don't re-open.
+    if (alarmingIdRef.current === med.id) return;
+
+    // Dedup: if already fired today (e.g. user took the dose already),
+    // don't re-open. (The daily native schedule still fires tomorrow.)
+    const fired = loadJson<Record<string, boolean>>(FIRED_KEY, {});
+    if (fired[firedKey(med.id, getTodayDateString())]) return;
+
+    // Snooze: if the user snoozed and the window hasn't elapsed yet,
+    // don't re-open (the snoozed notification will fire when it ends).
+    const snooze = loadJson<Record<string, number>>(SNOOZE_KEY, {});
+    const snoozeUntil = snooze[med.id];
+    if (snoozeUntil && Date.now() < snoozeUntil) return;
+
+    // Reset the test flag (a real alarm is not a test).
     isTestAlarmRef.current = false;
     alarmingIdRef.current = med.id;
     setAlarmingMedication(med);
     if (soundEnabledRef.current) {
-      // In-app chime plays the per-medication synthesized tone (so the
-      // user can tell which med is due). The global custom sound, if
-      // set, is attached to the push notification (background) below.
-      // #18/#19: this is the SINGLE source of the in-app chime — the
-      // DoseAlarmModal useEffect chime was removed (it played twice and
-      // ignored soundEnabled).
+      // Per-medication synthesized chime (so the user can tell which med
+      // is due). The custom sound (if any) was already played by the
+      // localNotificationReceived listener in native.ts from the
+      // notification's extra field.
       playNotificationSound(med.notificationSound || 'classic_chime');
-    }
-    if (notificationsEnabledRef.current) {
-      sendMedicationDoseReminder(
-        med.id,
-        med.name,
-        med.dailyDose,
-        med.unit,
-        // Use the dynamic balance so the dose-reminder body shows the
-        // projected live inventory (not the stale stored snapshot).
-        effectiveCurrentPills(med),
-        med.reminderTime,
-        // Global custom sound — applies to all medications, played by
-        // the system when the notification fires in the background.
-        globalCustomSoundRef.current
-      );
     }
   }, []);
 
   const testAlarm = useCallback((med: Medication) => {
-    triggerAlarm(med, false);
-    // #13: set the test flag AFTER triggerAlarm (which resets it to
-    // false at the start) so dismissAlarm knows NOT to write FIRED_KEY
-    // for this alarm. Without this, testing an alarm earlier in the day
-    // would mark the reminder as fired and block the real scheduled
-    // reminder from firing later that day.
+    // Open the modal + play the chime for a manual test (the per-card
+    // "تجربة صوت وتنبيه الدواء" button). Does NOT write FIRED_KEY.
+    isTestAlarmRef.current = false;
+    alarmingIdRef.current = med.id;
+    setAlarmingMedication(med);
+    if (soundEnabledRef.current) {
+      playNotificationSound(med.notificationSound || 'classic_chime');
+    }
+    // #13: set the test flag AFTER opening (which resets it) so
+    // dismissAlarm knows NOT to write FIRED_KEY for this alarm.
     isTestAlarmRef.current = true;
-  }, [triggerAlarm]);
-
-  useEffect(() => {
-    const checkDue = () => {
-      const now = getNowHHMM();
-      const today = getTodayDateString();
-      const nowMins = timeToMinutes(now);
-      const fired = loadJson<Record<string, boolean>>(FIRED_KEY, {});
-      const snooze = loadJson<Record<string, number>>(SNOOZE_KEY, {});
-      const nowTs = Date.now();
-
-      // #90: read from the ref so the interval doesn't need to be
-      // recreated when the medications array reference changes.
-      medicationsRef.current.forEach((med) => {
-        if (!med.reminderEnabled || !med.reminderTime) return;
-        if (alarmingIdRef.current === med.id) return;
-        if (queueRef.current.includes(med.id)) return;
-
-        const snoozeUntil = snooze[med.id];
-        if (snoozeUntil && nowTs < snoozeUntil) return;
-
-        if (snoozeUntil && nowTs >= snoozeUntil) {
-          triggerAlarm(med, true);
-          return;
-        }
-
-        const key = firedKey(med.id, today);
-        if (fired[key]) return;
-
-        const reminderMins = timeToMinutes(med.reminderTime);
-        if (reminderMins < 0) return;
-        if (nowMins >= reminderMins) {
-          triggerAlarm(med, true);
-        }
-      });
-    };
-
-    // #24: do NOT poll before App has hydrated persisted state, or the
-    // SEED medications (all reminderEnabled:true) would fire phantom
-    // alarms for meds the user doesn't have. Once `hydrated` flips true
-    // the effect re-runs and starts polling with the user's real meds.
-    if (!hydrated) return;
-
-    checkDue();
-    // Poll every 5s (down from 15s) so a reminder scheduled for, say,
-    // 09:00 fires within ~5s of the minute rather than up to ~15s late.
-    // 5s is cheap (the check is pure, no network / no DOM), and a
-    // 5-second granularity is imperceptible to the user while still
-    // avoiding the perceived "the alarm was late" lag of 15s.
-    const timer = window.setInterval(checkDue, REMINDER_POLL_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-    // #90: gate on the stable reminderSignature instead of the raw
-    // `medications` array ref. The interval is only torn down/recreated
-    // when a med's reminder config actually changes, not on every App
-    // state update (e.g. typing in a search field).
-  }, [reminderSignature, triggerAlarm, hydrated]);
+  }, []);
 
   return {
     alarmingMedication,
+    openAlarm,
     dismissAlarm,
     snoozeAlarm,
     testAlarm,

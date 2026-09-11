@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { timeToMinutes } from './useDoseReminders';
+import { timeToMinutes } from './time';
 
 /**
  * #25 — timeToMinutes must reject out-of-range hours/minutes, not just

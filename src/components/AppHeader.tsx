@@ -1,5 +1,5 @@
 import { type FC } from 'react';
-import { Pill, Bell, BellOff, Search, Smartphone, Monitor, ShoppingCart, History, Settings, AlertTriangle, Type, Store } from 'lucide-react';
+import { Pill, Bell, BellOff, Search, Smartphone, Monitor, ShoppingCart, History, Settings, AlertTriangle, Type, Store, ContactRound } from 'lucide-react';
 import { ActiveTab } from './AndroidBottomNav';
 import { ICON_BUTTON_CLASS } from '../lib/styles';
 
@@ -28,6 +28,12 @@ const HEADER_BY_TAB: Record<ActiveTab, {
     iconClassName: 'w-5 h-5 text-white',
     title: 'إدارة الصيدليات',
     subtitle: 'أرقام وعناوين الصيدليات لطلب الأدوية عبر واتساب',
+  },
+  'user-data': {
+    icon: ContactRound,
+    iconClassName: 'w-5 h-5 text-white',
+    title: 'بياناتي',
+    subtitle: 'أرقام التواصل وعناوين التوصيل لطلب الأدوية',
   },
   logs: {
     icon: History,

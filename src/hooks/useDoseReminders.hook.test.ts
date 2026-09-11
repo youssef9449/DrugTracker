@@ -78,7 +78,7 @@ describe('useDoseReminders', () => {
   });
 
   describe('openAlarm (called by the native localNotificationReceived listener)', () => {
-    it('opens the DoseAlarmModal for the given med and plays the per-med chime', () => {
+    it('opens the DoseAlarmModal for the given med (sound is played by the listener, NOT openAlarm)', () => {
       const med = makeMed({ id: 'med-open' });
       const { result } = renderHook(() =>
         useDoseReminders(defaultOpts({ medications: [med] }))
@@ -91,7 +91,10 @@ describe('useDoseReminders', () => {
       expect(result.current.alarmingMedication).toEqual(
         expect.objectContaining({ id: 'med-open' })
       );
-      expect(playNotificationSound).toHaveBeenCalledWith('classic_chime');
+      // openAlarm does NOT play the sound — the localNotificationReceived
+      // listener in native.ts already played the single authoritative
+      // sound before calling openAlarm. This prevents double sounds.
+      expect(playNotificationSound).not.toHaveBeenCalled();
     });
 
     it('does NOT open when soundEnabled is false (no chime)', () => {
@@ -120,13 +123,21 @@ describe('useDoseReminders', () => {
       act(() => {
         result.current.openAlarm('med-dup');
       });
-      expect(playNotificationSound).toHaveBeenCalledTimes(1);
+      // openAlarm doesn't play a sound (listener does), so we check the
+      // modal state instead of call counts.
+      expect(result.current.alarmingMedication).toEqual(
+        expect.objectContaining({ id: 'med-dup' })
+      );
 
-      // Second call while already alarming → no-op (no double chime).
+      // Second call while already alarming → no-op (modal stays open,
+      // no re-open).
       act(() => {
         result.current.openAlarm('med-dup');
       });
-      expect(playNotificationSound).toHaveBeenCalledTimes(1);
+      // Still the same med, no change.
+      expect(result.current.alarmingMedication).toEqual(
+        expect.objectContaining({ id: 'med-dup' })
+      );
     });
 
     it('does NOT open when the med was already fired today (FIRED_KEY dedup)', () => {
@@ -179,6 +190,47 @@ describe('useDoseReminders', () => {
       ) as Record<string, boolean>;
       const today = new Date().toISOString().slice(0, 10);
       expect(fired[`med-dismiss:${today}`]).toBe(true);
+    });
+  });
+
+  describe('single-sound policy (openAlarm does NOT play a sound)', () => {
+    // The localNotificationReceived listener in native.ts is the SINGLE
+    // authoritative sound path. It plays either the custom sound (if
+    // set) or the per-med synthesized chime, then calls openAlarm.
+    // openAlarm must NOT play any sound — otherwise two sounds would
+    // play on a dose event (the listener's + openAlarm's).
+    it('openAlarm does NOT call playNotificationSound (listener owns the sound)', () => {
+      const med = makeMed({ id: 'med-sound-policy' });
+      const { result } = renderHook(() =>
+        useDoseReminders(defaultOpts({ medications: [med], soundEnabled: true }))
+      );
+
+      act(() => {
+        result.current.openAlarm('med-sound-policy');
+      });
+
+      // Modal opens.
+      expect(result.current.alarmingMedication).toEqual(
+        expect.objectContaining({ id: 'med-sound-policy' })
+      );
+      // But NO sound is played by openAlarm — the listener already did.
+      expect(playNotificationSound).not.toHaveBeenCalled();
+    });
+
+    it('testAlarm DOES play the chime (manual test is not a notification event)', () => {
+      const med = makeMed({ id: 'med-test-sound' });
+      const { result } = renderHook(() =>
+        useDoseReminders(defaultOpts({ medications: [med], soundEnabled: true }))
+      );
+
+      act(() => {
+        result.current.testAlarm(med);
+      });
+
+      // testAlarm plays the chime because it's triggered manually by the
+      // user (not by the notification listener), so there's no listener
+      // sound to duplicate.
+      expect(playNotificationSound).toHaveBeenCalledWith('classic_chime');
     });
   });
 
@@ -304,7 +356,8 @@ describe('useDoseReminders', () => {
         1,
         'قرص',
         '09:00',
-        15
+        15,
+        'classic_chime'
       );
     });
   });

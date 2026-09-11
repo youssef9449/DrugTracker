@@ -10,11 +10,14 @@ import {
   calculateMedicationStatus,
   CustomSoundFile,
 } from './types';
-// Seed data — default 3 medications + 2 consumption logs shown on fresh
-// install. The file lives at src/data/initialData.ts (relative path).
-// See that file's header comment for the AI Studio cache-error
-// troubleshooting note.
-import { getInitialMedications, getInitialLogs } from './data/initialData';
+// NOTE: the app previously seeded 3 demo medications + 2 consumption
+// logs on a fresh install (src/data/initialData.ts). That seed data
+// showed up the moment the app was installed, which the user did not
+// want — a fresh install should start with an empty inventory and let
+// the user add their own medications. The seed functions are kept in
+// initialData.ts only for the existing regression test that asserts
+// they DON'T appear on a fresh run; they are no longer used as the
+// initial state here.
 import { AndroidBottomNav, ActiveTab } from './components/AndroidBottomNav';
 import { AppHeader } from './components/AppHeader';
 import { LowStockBanner } from './components/LowStockBanner';
@@ -97,13 +100,16 @@ export default function App() {
   // effects so they operate on the user's REAL saved state (not the
   // seed defaults) — see H8 in the audit fix.
   //
-  // Compute the seed date once (useState memoizes it — only runs on
-  // first render) and share it across both factory initializers so the
-  // medication lastSyncDate and the seed auto-deduction log dates are
-  // consistent even if midnight falls between the two calls.
-  const [seedToday] = useState(getTodayDateString);
-  const [medications, setMedications] = useState<Medication[]>(() => getInitialMedications(seedToday));
-  const [logs, setLogs] = useState<ConsumptionLog[]>(() => getInitialLogs(seedToday));
+  // A fresh install starts with an EMPTY inventory — no seed/demo
+  // medications or logs. The user adds their own medications via the
+  // "إضافة دواء" button. (Previously the app seeded 3 demo meds + 2
+  // logs from src/data/initialData.ts on first run; that behavior was
+  // removed because users saw demo drugs they never entered.) Once the
+  // user saves anything, state is persisted to localStorage and this
+  // initial value is irrelevant (the hydration effect overwrites it
+  // with the saved value before any side-effect runs).
+  const [medications, setMedications] = useState<Medication[]>([]);
+  const [logs, setLogs] = useState<ConsumptionLog[]>([]);
   const [pharmacySettings, setPharmacySettings] =
     useState<PharmacySettings>(DEFAULT_PHARMACY_SETTINGS);
   const [hydrated, setHydrated] = useState(false);

@@ -61,18 +61,28 @@ import {
 export const DOSE_REMINDER_CHANNEL_ID = 'dose-reminder-v2';
 
 /**
+ * Returns 'android' when running on Android, 'ios' when on iOS, or
+ * null for web/browser. Used to gate Android-only APIs like exact-alarm.
+ */
+function getNativePlatform(): 'android' | 'ios' | null {
+  try {
+    if (typeof Capacitor === 'undefined') return null;
+    const platform = Capacitor.getPlatform();
+    if (platform === 'android') return 'android';
+    if (platform === 'ios') return 'ios';
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Returns true when running inside the Capacitor native runtime
  * (Android or iOS). When false, we're in a browser/AI Studio preview
  * and should use the standard Notification API.
  */
 function isNativePlatform(): boolean {
-  try {
-    if (typeof Capacitor === 'undefined') return false;
-    const platform = Capacitor.getPlatform();
-    return platform === 'android' || platform === 'ios';
-  } catch {
-    return false;
-  }
+  return getNativePlatform() !== null;
 }
 
 /**
@@ -195,25 +205,31 @@ export async function requestNotificationPermission(): Promise<boolean> {
 /**
  * Check whether exact-alarm permission is granted on Android 12+.
  *
- * Returns 'granted' when:
- *   - the app is NOT on a native platform (web — treated as granted
- *     since web has no exact-alarm concept),
- *   - OR the Android version is < 12 (no permission needed),
- *   - OR the user has granted SCHEDULE_EXACT_ALARM.
+ * Exact-alarm permission is an Android-only concept (SCHEDULE_EXACT_ALARM).
+ * On iOS and web, exact alarms don't require a separate permission —
+ * the OS handles notification timing natively.
  *
- * Returns 'denied' when the user has NOT granted the permission on
- * Android 12+. Returns 'unsupported' if the check itself failed
- * (e.g. an older plugin version that doesn't expose the method).
+ * Returns 'granted' when:
+ *   - on web (no exact-alarm concept),
+ *   - on iOS (no SCHEDULE_EXACT_ALARM equivalent — iOS handles it natively),
+ *   - on Android < 12 (no permission needed — plugin returns 'granted'),
+ *   - on Android 12+ with SCHEDULE_EXACT_ALARM granted.
+ *
+ * Returns 'denied' when the user has NOT granted SCHEDULE_EXACT_ALARM
+ * on Android 12+. Returns 'unsupported' only if the API call itself
+ * throws (should not happen with the installed plugin version).
  */
 export async function getExactAlarmPermission(): Promise<
   'granted' | 'denied' | 'unsupported'
 > {
-  if (!isNativePlatform()) return 'granted';
+  const platform = getNativePlatform();
+  // Web and iOS: exact-alarm is always 'granted' — the concept doesn't apply.
+  // Android's SCHEDULE_EXACT_ALARM has no iOS equivalent; iOS schedules
+  // notifications via UNUserNotificationCenter which handles timing natively.
+  if (platform !== 'android') return 'granted';
+  // Android: check the exact-alarm permission via the plugin.
   try {
     const status = await LocalNotifications.checkExactNotificationSetting();
-    // The plugin maps Android's canScheduleExactAlarms() to exact_alarm
-    // state: 'granted' when true, 'denied' when false. On Android < 12
-    // the plugin returns 'granted'.
     if (status.exact_alarm === 'granted') return 'granted';
     return 'denied';
   } catch (err) {
@@ -226,17 +242,22 @@ export async function getExactAlarmPermission(): Promise<
  * Open the Android settings screen where the user can grant the
  * SCHEDULE_EXACT_ALARM permission.
  *
- * On Android < 12 this is a no-op (returns 'granted' immediately).
- * On Android 12+ it opens the system settings page for the app; the
- * user grants/denies, then returns to the app. The caller must
- * re-check permission via getExactAlarmPermission() after the app
+ * This is an Android-only API. On iOS and web it returns false without
+ * attempting any native call.
+ *
+ * On Android < 12 the plugin returns 'granted' immediately (no settings
+ * screen needed). On Android 12+ it opens the system settings page for
+ * the app; the user grants/denies, then returns to the app. The caller
+ * must re-check permission via getExactAlarmPermission() after the app
  * resumes (see the appState listener in App.tsx).
  *
  * Returns true if the settings screen was opened, false if not
- * available (web / unsupported).
+ * available (web / iOS / error).
  */
 export async function openExactAlarmSettings(): Promise<boolean> {
-  if (!isNativePlatform()) return false;
+  const platform = getNativePlatform();
+  // Exact-alarm settings are Android-only.
+  if (platform !== 'android') return false;
   try {
     await LocalNotifications.changeExactNotificationSetting();
     return true;
@@ -770,11 +791,10 @@ export async function scheduleCriticalAlarm(
 //
 // When the notification fires:
 //   - App in background/killed: shown in the system notification tray
-//     with the channel's default sound. (Custom sound in background is
-//     problem #2, deferred — see the scheduleNotification JSDoc.)
-//   - App in foreground: delivered to the localNotificationReceived
-//     listener in native.ts, which plays the custom sound (if any) via
-//     an Audio element. The in-app polling then opens the DoseAlarmModal.
+//     with the channel's bundled native sound.
+//   - App in foreground: the localNotificationReceived listener in
+//     native.ts opens the DoseAlarmModal. No JS sound — the native
+//     channel sound is the sole sound.
 //
 // Boot persistence: scheduled notifications are persisted by the
 // @capacitor/local-notifications plugin and re-armed on BOOT_COMPLETED.

@@ -445,12 +445,6 @@ export default function App() {
     showToast,
   });
 
-  // Persist global custom sound to IndexedDB (C4: storing the base64
-  // data URL in localStorage risked blowing the ~5 MB quota and silently
-  // dropping other state; IndexedDB has a much larger quota).
-  // (custom sound storage was removed — this comment is stale)
-  // 
-  // in the hydration effect has had a chance to read the saved value.
   // ─────────────────────────────────────────────────────────────
   // Auto-deduction: runs ONCE per session, AFTER hydration completes
   // (so it operates on the user's REAL saved medications, not the
@@ -1033,12 +1027,10 @@ export default function App() {
   // Register the dose-received handler: when a native dose-reminder
   // notification fires while the app is in the foreground, the
   // localNotificationReceived listener in native.ts calls this handler
-  // with the medicationId. The handler plays exactly one foreground sound
-  // using the global custom sound or medication sound, then opens the modal
-  // via openAlarm. This replaces the old JS polling —
-  // the native scheduler fires the notification at reminderTime, and
-  // this surfaces it in-app. openAlarm is stable (empty-deps
-  // useCallback) so this effect only registers once.
+  // with the medicationId, which opens the DoseAlarmModal via openAlarm.
+  // No sound is played here — the native notification channel plays the
+  // bundled sound. openAlarm is stable (empty-deps useCallback) so this
+  // effect only registers once.
   useEffect(() => {
     registerDoseReceivedHandler((medicationId) => {
       openAlarm(medicationId);

@@ -250,7 +250,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           </div>
         </div>
 
-        {/* Scheduled Reminder & Custom Sound Badge (extracted — see ReminderBadge.tsx) */}
+        {/* Scheduled Reminder Badge (extracted — see ReminderBadge.tsx) */}
         <ReminderBadge
           medication={medication}
           containerClass="bg-white/90 border-amber-200 mt-2"
@@ -406,7 +406,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           </span>
         </div>
 
-        {/* Scheduled Reminder & Custom Sound Badge (extracted — see ReminderBadge.tsx) */}
+        {/* Scheduled Reminder Badge (extracted — see ReminderBadge.tsx) */}
         <ReminderBadge
           medication={medication}
           containerClass="bg-emerald-50/70 border-emerald-200/80 mt-2"
@@ -566,7 +566,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
       {!isAutoActive && <AutoDeductPausedNote />}
       {undoRefillAction}
 
-      {/* Scheduled Reminder & Custom Sound Badge (extracted — see ReminderBadge.tsx) */}
+      {/* Scheduled Reminder Badge (extracted — see ReminderBadge.tsx) */}
       <ReminderBadge
         medication={medication}
         containerClass="bg-teal-50/70 border-teal-200/80 mt-2.5"

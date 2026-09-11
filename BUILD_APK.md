@@ -265,19 +265,18 @@ echo "sdk.dir=$ANDROID_HOME" > android/local.properties
 # org.gradle.configureondemand=true
 ```
 
-#### 6. Add the SCHEDULE_EXACT_ALARM permission (Android 12+)
+#### 6. Prepare exact alarms and the native reminder sound
 
 Medication dose reminders are time-sensitive and MUST fire at the exact
 scheduled time. On Android 12+ (API 31+), `@capacitor/local-notifications`
 uses `AlarmManager.setExactAndAllowWhileIdle` — but only if the app
 declares the `SCHEDULE_EXACT_ALARM` permission and the user grants it.
 
-Open `android/app/src/main/AndroidManifest.xml` and add this line inside
-the `<manifest>` tag (before `<application>`):
-
-```xml
-<uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-```
+The repeatable `npm run cap:sync` and `npm run apk:debug` commands run
+`scripts/prepare-android.mjs` after Capacitor sync. It injects the
+`SCHEDULE_EXACT_ALARM` permission into the generated manifest and creates the
+bundled `dose_reminder.wav` resource used by the versioned dose notification
+channel. No manual manifest edit is required after a sync.
 
 **Why `SCHEDULE_EXACT_ALARM` and not `USE_EXACT_ALARM`?**
 - `USE_EXACT_ALARM` is for apps whose core purpose IS an alarm clock or

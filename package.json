@@ -15,10 +15,10 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "icons": "node scripts/generate-icons.mjs",
-    "cap:sync": "npm run build && npx cap sync android",
+    "cap:sync": "npm run build && npx cap sync android && node scripts/prepare-android.mjs",
     "cap:add": "npx cap add android",
     "cap:studio": "npm run build && npx cap sync android && npx cap open android",
-    "apk:debug": "npm run build && npx cap sync android && cd android && ./gradlew assembleDebug"
+    "apk:debug": "npm run build && npx cap sync android && node scripts/prepare-android.mjs && cd android && ./gradlew assembleDebug"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",

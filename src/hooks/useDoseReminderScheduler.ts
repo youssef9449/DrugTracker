@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { Medication, CustomSoundFile } from '../types';
 import { effectiveCurrentPills } from '../utils/dateCalculations';
-import { scheduleDoseReminder, cancelDoseReminder } from '../utils/notifications';
+import {
+  scheduleDoseReminder,
+  cancelDoseReminder,
+  cancelSnoozedDoseReminder,
+  cancelLegacySnoozedDoseReminder,
+} from '../utils/notifications';
 
 /**
  * Options for {@link useDoseReminderScheduler}.
@@ -20,7 +25,7 @@ export interface UseDoseReminderSchedulerOptions {
    *
    * On web / Android < 12 this is always true (no permission needed).
    */
-  exactAlarmEnabled: boolean;
+  exactAlarmEnabled: boolean | null;
   /**
    * The global user-uploaded custom sound. When the user changes it, all
    * scheduled dose reminders are re-armed so the notification's `extra`
@@ -139,13 +144,13 @@ export function useDoseReminderScheduler({
     // an inexact alarm could fire minutes or hours late, which is
     // unacceptable. Bump generations so any in-flight schedule from a
     // prior effect run is stale.
-    if (!notificationsEnabled || !exactAlarmEnabled) {
+    if (!notificationsEnabled || exactAlarmEnabled !== true) {
       scheduledDoseIdsRef.current.forEach((id) => {
         doseGenerationRef.current.set(
           id,
           (doseGenerationRef.current.get(id) ?? 0) + 1
         );
-        enqueue(id, () => cancelDoseReminder(id));
+        enqueue(id, () => cancelDoseReminder(id).then(() => cancelSnoozedDoseReminder(id)));
       });
       scheduledDoseIdsRef.current.clear();
       return;
@@ -164,7 +169,7 @@ export function useDoseReminderScheduler({
         // Reminder disabled / no time → cancel any previously-scheduled
         // alarm for this med, but don't schedule a new one.
         if (scheduledDoseIdsRef.current.has(med.id)) {
-          enqueue(med.id, () => cancelDoseReminder(med.id));
+          enqueue(med.id, () => cancelDoseReminder(med.id).then(() => cancelSnoozedDoseReminder(med.id)));
         }
         continue;
       }
@@ -186,7 +191,7 @@ export function useDoseReminderScheduler({
             // Stale-guard: if a newer effect run bumped the generation,
             // bail — don't schedule a stale alarm.
             if (doseGenerationRef.current.get(med.id) !== gen) return;
-            return scheduleDoseReminder(
+            return cancelLegacySnoozedDoseReminder(med.id).then(() => scheduleDoseReminder(
               med.id,
               name,
               reminderTime,
@@ -195,7 +200,7 @@ export function useDoseReminderScheduler({
               pills,
               customSound,
               perMedSound
-            ).then(() => {
+            )).then(() => {
               // Post-schedule stale-guard: re-check the gen after the
               // await. If a newer run bumped it during the schedule(),
               // run a compensating cancel. Serialization guarantees this
@@ -216,7 +221,7 @@ export function useDoseReminderScheduler({
           prevId,
           (doseGenerationRef.current.get(prevId) ?? 0) + 1
         );
-        enqueue(prevId, () => cancelDoseReminder(prevId));
+        enqueue(prevId, () => cancelDoseReminder(prevId).then(() => cancelSnoozedDoseReminder(prevId)));
       }
     }
     scheduledDoseIdsRef.current = stillScheduled;

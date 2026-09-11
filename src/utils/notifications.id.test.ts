@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   schedule: vi.fn(),
   cancel: vi.fn(),
   checkPermissions: vi.fn(),
+  checkExactNotificationSetting: vi.fn(),
   platform: vi.fn(() => 'android'),
 }));
 
@@ -32,6 +33,7 @@ import {
   cancelCriticalAlarm,
   scheduleCriticalAlarm,
   scheduleDoseReminder,
+  snoozeDoseReminderId,
   cancelDoseReminder,
 } from './notifications';
 
@@ -39,6 +41,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.platform.mockReturnValue('android');
   mocks.checkPermissions.mockResolvedValue({ display: 'granted' });
+  mocks.checkExactNotificationSetting.mockResolvedValue({ exact_alarm: 'granted' });
 });
 
 /**
@@ -225,6 +228,15 @@ describe('doseReminderAlarmId — stable across calls, disjoint from other categ
     const scheduledId = mocks.schedule.mock.calls[0][0].notifications[0].id;
     expect(cancelledId).toBe(scheduledId);
     expect(cancelledId).toBe(doseReminderAlarmId(medId));
+  });
+});
+
+describe('snoozeDoseReminderId — distinct from daily dose alarms', () => {
+  it('is stable and does not collide with the recurring dose alarm', () => {
+    expect(snoozeDoseReminderId('med-x')).toBe(snoozeDoseReminderId('med-x'));
+    expect(snoozeDoseReminderId('med-x')).not.toBe(doseReminderAlarmId('med-x'));
+    expect(snoozeDoseReminderId('med-x')).toBeGreaterThanOrEqual(7_000_000);
+    expect(snoozeDoseReminderId('med-x')).toBeLessThan(8_000_000);
   });
 });
 

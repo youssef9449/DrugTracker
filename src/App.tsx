@@ -142,12 +142,13 @@ export default function App() {
   // warningThresholdDays via getCriticalThresholdDays() — not a fixed
   // pill count (see C3 in the audit fix).
   const [criticalStockAlertsEnabled, setCriticalStockAlertsEnabled] = useState<boolean>(true);
-  // Exact-alarm permission state (Android 12+). When false, dose-reminder
+  // Exact-alarm permission state (Android 12+). null means the native
+  // permission check has not completed yet. When false, dose-reminder
   // scheduling is BLOCKED — inexact alarms are unacceptable for medication
   // reminders. The user grants this via Android settings (the plugin's
   // changeExactNotificationSetting opens the settings screen). On web /
   // Android < 12 this is always true.
-  const [exactAlarmEnabled, setExactAlarmEnabled] = useState<boolean>(true);
+  const [exactAlarmEnabled, setExactAlarmEnabled] = useState<boolean | null>(null);
   const [globalAutoDeductEnabled, setGlobalAutoDeductEnabled] = useState<boolean>(true);
   // Global custom sound — shared across all notifications (not
   // per-medication). The user uploads it from the AppHeader. It is

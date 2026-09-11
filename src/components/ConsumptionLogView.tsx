@@ -2,7 +2,7 @@ import { useState, type FC } from 'react';
 import { Plus, Clock, ShieldCheck, ArrowUpRight, ArrowDownLeft, RotateCcw } from 'lucide-react';
 import { Medication, ConsumptionLog } from '../types';
 import { getTodayDateString, formatArabicDate } from '../utils/dateCalculations';
-import { MAX_LOG_ROWS } from '../utils/time';
+import { MAX_LOG_ROWS, DAYS_PER_MONTH } from '../utils/time';
 
 interface ConsumptionLogViewProps {
   medications: Medication[];
@@ -33,9 +33,20 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
   // selected med object, or undefined when no meds exist.
   const selectedMed = medications.find((m) => m.id === selectedMedId);
 
-  // Total monthly consumption calculation across all active meds
-  const totalMonthlyConsumption = medications.reduce(
-    (acc, m) => acc + (m.autoDeductEnabled !== false ? m.dailyDose * 30 : 0),
+  // Total monthly DOSES across all active meds.
+  // A "جرعة" (dose) = one daily intake event, regardless of how many
+  // pills it contains. Each active med (auto-deduct enabled, positive
+  // dailyDose) is taken once per day → DAYS_PER_MONTH doses/month.
+  //
+  // The previous implementation summed `dailyDose * 30`, which is the
+  // total PILLS/month — that's wrong for two reasons:
+  //   1. The stat label is "جرعة / شهر" (doses/month), not pills/month.
+  //      A med with dailyDose=2 taken once a day = 30 doses/month, not 60.
+  //   2. Summing pills across different units (قرص + مل + كيس) is
+  //      meaningless and produced an inflated, nonsensical number.
+  const totalMonthlyDoses = medications.reduce(
+    (acc, m) =>
+      acc + (m.autoDeductEnabled !== false && m.dailyDose > 0 ? DAYS_PER_MONTH : 0),
     0
   );
 
@@ -79,9 +90,9 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
         {/* Monthly Estimate Stats */}
         <div className="mt-3 grid grid-cols-2 gap-2 text-center text-xs">
           <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-            <span className="text-[11px] text-slate-500 block">إجمالي استهلاكك الشهري</span>
+            <span className="text-[11px] text-slate-500 block">إجمالي جرعاتك الشهرية</span>
             <span className="text-lg font-extrabold font-mono text-teal-800">
-              {totalMonthlyConsumption}
+              {totalMonthlyDoses}
             </span>
             <span className="text-[11px] text-slate-600 mr-1">جرعة / شهر</span>
           </div>

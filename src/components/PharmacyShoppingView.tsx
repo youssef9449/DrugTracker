@@ -21,6 +21,7 @@ import {
   buildWhatsAppUrl,
 } from '../utils/whatsapp';
 import { getMedSizes } from '../utils/medicationPackaging';
+import { Checkbox } from './ui/Checkbox';
 
 interface PharmacyShoppingViewProps {
   medications: Medication[];
@@ -667,11 +668,9 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                     <span className="text-[11px] font-bold text-slate-700">أرقام التواصل</span>
                     {whatsappContacts.map((contact) => (
                       <label key={contact.id} className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 px-2.5 py-2 cursor-pointer">
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={selectedWhatsappContactIds.includes(contact.id)}
                           onChange={() => toggleWhatsappContact(contact.id)}
-                          className="h-4 w-4 accent-teal-600"
                           aria-label={`إضافة ${contact.label} إلى الرسالة`}
                         />
                         <span className="text-xs font-bold text-slate-700">{contact.label}</span>
@@ -689,12 +688,11 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                     <span className="text-[11px] font-bold text-slate-700">العناوين</span>
                     {whatsappAddresses.map((item) => (
                       <label key={item.id} className="flex items-start gap-2 bg-white rounded-xl border border-slate-200 px-2.5 py-2 cursor-pointer">
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={selectedWhatsappAddressIds.includes(item.id)}
                           onChange={() => toggleWhatsappAddress(item.id)}
-                          className="h-4 w-4 mt-0.5 accent-teal-600"
                           aria-label={`إضافة ${item.label} إلى الرسالة`}
+                          className="mt-0.5"
                         />
                         <span className="text-xs font-bold text-slate-700">{item.label}</span>
                         <span className="text-[11px] text-slate-500 mr-auto text-left">{item.address}</span>

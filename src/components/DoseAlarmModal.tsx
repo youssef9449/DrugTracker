@@ -19,9 +19,8 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
   onSnooze,
   onDismiss,
 }) => {
-  // #18/#19: the in-app chime is played by useDoseReminders.triggerAlarm
-  // (gated by soundEnabled), which is the SINGLE source — this component
-  // no longer plays a chime on mount.
+  // The in-app chime was removed — the Android notification channel plays
+  // the single native sound. This component only renders the modal UI.
   // The Modal wrapper handles role="dialog"/aria-modal, ESC-to-close,
   // focus trap, and focus restoration (#67).
   return (

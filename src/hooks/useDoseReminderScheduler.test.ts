@@ -94,10 +94,10 @@ describe('useDoseReminderScheduler — basic scheduling', () => {
 
     expect(mocks.schedule).toHaveBeenCalledTimes(2);
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-a', 'A', '08:00', 1, 'قرص', 30
+      'med-a', 'A', '08:00', 1, 'قرص'
     );
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-b', 'B', '14:00', 1, 'قرص', 30
+      'med-b', 'B', '14:00', 1, 'قرص'
     );
   });
 
@@ -110,7 +110,7 @@ describe('useDoseReminderScheduler — basic scheduling', () => {
 
     expect(mocks.cancel).toHaveBeenCalledWith('med-x');
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-x', 'Test Med', '09:00', 1, 'قرص', 30
+      'med-x', 'Test Med', '09:00', 1, 'قرص'
     );
   });
 });
@@ -220,7 +220,7 @@ describe('useDoseReminderScheduler — exact-alarm gating', () => {
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
 
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-exact-on', 'Test Med', '09:00', 1, 'قرص', 30
+      'med-exact-on', 'Test Med', '09:00', 1, 'قرص'
     );
   });
 });
@@ -259,5 +259,94 @@ describe('useDoseReminderScheduler — cancellation', () => {
 
     expect(mocks.cancel).toHaveBeenCalledWith('med-off1');
     expect(mocks.cancel).toHaveBeenCalledWith('med-off2');
+  });
+});
+
+describe('useDoseReminderScheduler — doseSignature (no unnecessary reschedule)', () => {
+  it('does NOT reschedule when currentPills changes (stock change)', async () => {
+    const med = makeMed({ id: 'med-stock', reminderTime: '09:00', currentPills: 30 });
+    const { rerender } = renderHook(
+      ({ medications }) => useDoseReminderScheduler(defaultOpts({ medications })),
+      { initialProps: { medications: [med] } }
+    );
+
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    const callsAfterFirst = mocks.schedule.mock.calls.length;
+
+    // Stock changes (take a pill) — should NOT trigger reschedule.
+    const medUpdated = { ...med, currentPills: 29 };
+    rerender({ medications: [medUpdated] });
+
+    // Wait a few ticks — no new schedule call should happen.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(mocks.schedule.mock.calls.length).toBe(callsAfterFirst);
+  });
+
+  it('does NOT reschedule when lastSyncDate changes', async () => {
+    const med = makeMed({ id: 'med-sync', reminderTime: '09:00', lastSyncDate: '2024-09-09' });
+    const { rerender } = renderHook(
+      ({ medications }) => useDoseReminderScheduler(defaultOpts({ medications })),
+      { initialProps: { medications: [med] } }
+    );
+
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    const callsAfterFirst = mocks.schedule.mock.calls.length;
+
+    const medUpdated = { ...med, lastSyncDate: '2024-09-10' };
+    rerender({ medications: [medUpdated] });
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(mocks.schedule.mock.calls.length).toBe(callsAfterFirst);
+  });
+
+  it('DOES reschedule when reminderTime changes', async () => {
+    const med = makeMed({ id: 'med-time', reminderTime: '08:00' });
+    const { rerender } = renderHook(
+      ({ medications }) => useDoseReminderScheduler(defaultOpts({ medications })),
+      { initialProps: { medications: [med] } }
+    );
+
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+
+    const medUpdated = { ...med, reminderTime: '09:00' };
+    rerender({ medications: [medUpdated] });
+
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
+    const lastCall = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
+    expect(lastCall[2]).toBe('09:00');
+  });
+
+  it('DOES reschedule when medication name changes (affects title)', async () => {
+    const med = makeMed({ id: 'med-name', name: 'Panadol', reminderTime: '09:00' });
+    const { rerender } = renderHook(
+      ({ medications }) => useDoseReminderScheduler(defaultOpts({ medications })),
+      { initialProps: { medications: [med] } }
+    );
+
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+
+    const medUpdated = { ...med, name: 'Panadol Extra' };
+    rerender({ medications: [medUpdated] });
+
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
+    const lastCall = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
+    expect(lastCall[1]).toBe('Panadol Extra');
+  });
+
+  it('DOES reschedule when dailyDose changes (affects body)', async () => {
+    const med = makeMed({ id: 'med-dose', dailyDose: 1, reminderTime: '09:00' });
+    const { rerender } = renderHook(
+      ({ medications }) => useDoseReminderScheduler(defaultOpts({ medications })),
+      { initialProps: { medications: [med] } }
+    );
+
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+
+    const medUpdated = { ...med, dailyDose: 2 };
+    rerender({ medications: [medUpdated] });
+
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
+    const lastCall = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
+    expect(lastCall[3]).toBe(2);
   });
 });

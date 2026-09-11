@@ -65,25 +65,36 @@ export function useStockAlerts({
 
       // App-restart reconciliation: check if any scheduled critical
       // alarm has already fired while the app was closed.
-      // If a med is currently critical and its transition key matches
-      // a previously-scheduled transition, the alarm already delivered
-      // the notification → mark as notified.
-      const scheduled = loadJson<Record<string, string>>(SCHEDULED_TRANSITIONS_KEY, {});
-      const today = new Date().toISOString().slice(0, 10);
+      // The persisted scheduled transitions now include alarmTime,
+      // so we can distinguish:
+      //   - alarm time in the future → alarm NOT fired → don't suppress
+      //   - alarm time in the past → alarm likely fired → suppress
+      const scheduled = loadJson<Record<string, { transitionKey: string; alarmTime: number }>>(SCHEDULED_TRANSITIONS_KEY, {});
+      const now = Date.now();
+      const reconcileToday = new Date().toISOString().slice(0, 10);
       let reconcileDirty = false;
 
       for (const med of medications) {
-        const transitionKey = getCriticalTransitionKey(med, today);
+        const transitionKey = getCriticalTransitionKey(med, reconcileToday);
         if (!transitionKey) continue; // not critical
 
-        // If this med had a scheduled alarm and the transition key
-        // matches, the alarm likely already fired (the alarm date was
-        // in the past). Mark as notified to prevent a foreground duplicate.
-        if (scheduled[med.id] && scheduled[med.id] === transitionKey) {
-          if (!notifiedRef.current.has(med.id)) {
-            notifiedRef.current.set(med.id, transitionKey);
-            reconcileDirty = true;
+        // If this med had a scheduled alarm:
+        // 1. The transition key matches → same transition
+        // 2. The alarm time has passed → the alarm likely already fired
+        // Only then do we mark as notified to prevent a foreground duplicate.
+        const scheduledInfo = scheduled[med.id];
+        if (scheduledInfo && scheduledInfo.transitionKey === transitionKey) {
+          if (scheduledInfo.alarmTime <= now) {
+            // Alarm time has passed → alarm likely already delivered.
+            if (!notifiedRef.current.has(med.id)) {
+              notifiedRef.current.set(med.id, transitionKey);
+              reconcileDirty = true;
+            }
           }
+          // If alarmTime > now → alarm is still future → don't mark as
+          // notified. The scheduled alarm will fire later. If the app is
+          // open when it fires, the foreground listener will handle it.
+          // If the app is closed, Android will deliver it.
         }
       }
 

@@ -1,7 +1,6 @@
 import { useState, type FC, type FormEvent } from 'react';
 import { Check, MapPin, Pencil, Phone, Plus, Trash2, X } from 'lucide-react';
 import type { UserAddress, UserContact } from '../types';
-import { cleanPhoneNumber } from '../utils/whatsapp';
 import { Modal } from './ui/Modal';
 
 interface UserDataManagementViewProps {
@@ -51,7 +50,7 @@ export const UserDataManagementView: FC<UserDataManagementViewProps> = ({
     }
 
     if (editing.kind === 'contact') {
-      const phone = cleanPhoneNumber(form.value);
+      const phone = form.value.trim();
       if (!phone) {
         showToast('اكتب رقم تليفون صحيحًا.');
         return;

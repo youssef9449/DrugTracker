@@ -3,9 +3,23 @@ import type { Medication } from '../types';
 import { getTodayDateString, getCriticalAlarmDate } from '../utils/dateCalculations';
 import { scheduleCriticalAlarm, cancelCriticalAlarm } from '../utils/notifications';
 import {
+  loadCriticalTransitions,
   loadScheduledCriticalAlarms,
   saveScheduledCriticalAlarms,
+  updateScheduledAlarm,
+  invalidateScheduledAlarm,
+  clearScheduledAlarm,
 } from '../utils/criticalTransitions';
+
+/**
+ * The stored generation (scheduler-write revision) of a med's scheduled
+ * record, or 0 when the med has no record yet. Captured at the START of
+ * each enqueued operation (before its async native work) as the baseline
+ * the operation's storage write is validated against.
+ */
+function readRecordGeneration(medId: string): number {
+  return loadScheduledCriticalAlarms()[medId]?.generation ?? 0;
+}
 
 /**
  * Options for {@link useCriticalAlarmScheduler}.
@@ -38,9 +52,18 @@ export interface UseCriticalAlarmSchedulerOptions {
  *                    useStockAlerts via criticalTransitions.ts)
  *   alarmTime     = projected time for the notification (owned HERE,
  *                    may change many times during one episode)
- * The persisted record carries transitionKey: '' until the episode
- * owner binds/adopts the claim at the actual crossing (see
- * reconcileCriticalEpisode).
+ *
+ * Scheduled-record write rules (enforced by the helpers in
+ * criticalTransitions.ts — this hook cannot bypass them):
+ *   - Every storage write captures the record's generation (revision)
+ *     BEFORE the async native work and is applied only if the stored
+ *     generation still matches; a stale generation ABANDONS the write.
+ *   - A successful schedule binds the claim to the CURRENTLY ACTIVE
+ *     transition (READ from the authoritative store — never generated
+ *     here), so a re-schedule can never erase an active episode's
+ *     binding and never resurrect a dead one. With no active episode
+ *     the claim is written unbound ('') and is adopted/bound by the
+ *     episode owner at the actual crossing (see reconcileCriticalEpisode).
  *
  * Re-schedule triggers: this effect re-runs (and re-schedules every
  * med's alarm) whenever any field that affects the critical date
@@ -207,10 +230,10 @@ export function useCriticalAlarmScheduler({
           (alarmGenerationRef.current.get(id) ?? 0) + 1
         );
         enqueue(id, async () => {
+          const baselineGen = readRecordGeneration(id);
           await cancelCriticalAlarm(id);
           const records = loadScheduledCriticalAlarms();
-          if (records[id] && records[id].status !== 'NOT_SCHEDULED') {
-            records[id].status = 'NOT_SCHEDULED';
+          if (invalidateScheduledAlarm(records, id, baselineGen)) {
             saveScheduledCriticalAlarms(records);
           }
         });
@@ -230,10 +253,10 @@ export function useCriticalAlarmScheduler({
       if (criticalDateMs === null) {
         if (scheduledCriticalIdsRef.current.has(med.id)) {
           enqueue(med.id, async () => {
+            const baselineGen = readRecordGeneration(med.id);
             await cancelCriticalAlarm(med.id);
             const records = loadScheduledCriticalAlarms();
-            if (records[med.id] && records[med.id].status === 'SCHEDULED') {
-              records[med.id].status = 'NOT_SCHEDULED';
+            if (invalidateScheduledAlarm(records, med.id, baselineGen)) {
               saveScheduledCriticalAlarms(records);
             }
           });
@@ -243,15 +266,24 @@ export function useCriticalAlarmScheduler({
 
       // A future projected crossing only — the med is still sufficient,
       // so NO active transition exists yet and none may be created here.
-      // The scheduled record is persisted with transitionKey: '' (an
-      // unbound claim); useStockAlerts binds/adopts it when the episode
-      // actually begins. The alarmTime below is pure scheduling data.
+      // The claim is persisted (after schedule success) via
+      // updateScheduledAlarm: bound to the active transition when one
+      // exists (read-only), otherwise unbound. useStockAlerts binds/
+      // adopts it when the episode actually begins. alarmTime below is
+      // pure scheduling data.
       const unit = med.unit || 'قرص';
       const name = med.name;
 
       stillScheduled.add(med.id);
 
       enqueue(med.id, async () => {
+        // Baseline record generation — captured BEFORE any async native
+        // work. The post-schedule storage write below is applied only if
+        // the stored generation still equals this baseline; otherwise a
+        // newer scheduler write landed while this operation awaited the
+        // bridge and this stale operation MUST abandon the write.
+        const baselineGen = readRecordGeneration(med.id);
+
         await cancelCriticalAlarm(med.id);
         if (alarmGenerationRef.current.get(med.id) !== gen) return;
 
@@ -266,8 +298,7 @@ export function useCriticalAlarmScheduler({
           if (alarmGenerationRef.current.get(med.id) !== gen) {
             await cancelCriticalAlarm(med.id);
             const records = loadScheduledCriticalAlarms();
-            if (records[med.id]) {
-              records[med.id].status = 'NOT_SCHEDULED';
+            if (invalidateScheduledAlarm(records, med.id, baselineGen)) {
               saveScheduledCriticalAlarms(records);
             }
             return;
@@ -277,24 +308,33 @@ export function useCriticalAlarmScheduler({
           // schedule actually succeeded. A failure leaves no valid
           // SCHEDULED claim, which keeps the foreground notification
           // path available in useStockAlerts.
-          const records = loadScheduledCriticalAlarms();
+          //
+          // updateScheduledAlarm re-reads the CURRENT record and the
+          // authoritative active transition at write time: it preserves
+          // the active episode's binding, drops dead/stale bindings,
+          // and stamps the new generation. It can neither erase a valid
+          // binding nor resurrect an old identity.
           if (scheduledResult !== false) {
-            records[med.id] = {
-              transitionKey: '',
-              alarmTime: criticalDateMs,
-              status: 'SCHEDULED',
-            };
+            const records = loadScheduledCriticalAlarms();
+            const transitions = loadCriticalTransitions();
+            if (
+              updateScheduledAlarm(records, transitions, med.id, {
+                alarmTime: criticalDateMs,
+                baselineGeneration: baselineGen,
+              })
+            ) {
+              saveScheduledCriticalAlarms(records);
+            }
           } else {
-            if (records[med.id]) {
-              records[med.id].status = 'NOT_SCHEDULED';
+            const records = loadScheduledCriticalAlarms();
+            if (invalidateScheduledAlarm(records, med.id, baselineGen)) {
+              saveScheduledCriticalAlarms(records);
             }
           }
-          saveScheduledCriticalAlarms(records);
         } catch (err) {
           console.warn('[critical-alarm] schedule failed:', err);
           const records = loadScheduledCriticalAlarms();
-          if (records[med.id]) {
-            records[med.id].status = 'NOT_SCHEDULED';
+          if (invalidateScheduledAlarm(records, med.id, baselineGen)) {
             saveScheduledCriticalAlarms(records);
           }
         }
@@ -311,10 +351,10 @@ export function useCriticalAlarmScheduler({
           (alarmGenerationRef.current.get(prevId) ?? 0) + 1
         );
         enqueue(prevId, async () => {
+          const baselineGen = readRecordGeneration(prevId);
           await cancelCriticalAlarm(prevId);
           const records = loadScheduledCriticalAlarms();
-          if (records[prevId]) {
-            delete records[prevId];
+          if (clearScheduledAlarm(records, prevId, baselineGen)) {
             saveScheduledCriticalAlarms(records);
           }
         });

@@ -95,7 +95,12 @@ export interface ScheduledCriticalAlarmRecord {
    * The episode identity this alarm belongs to. '' while the alarm is a
    * pending claim for a projected crossing that has not begun yet; it is
    * bound to the episode identity by the episode owner (useStockAlerts)
-   * at the actual crossing. The SCHEDULER NEVER FILLS THIS IN.
+   * at the actual crossing. The SCHEDULER NEVER GENERATES OR INVENTS an
+   * identity here — when it writes a scheduling update it may only bind
+   * the claim to the CURRENTLY ACTIVE transition (read from the
+   * authoritative transition store) or leave it unbound. It can never
+   * erase a binding to the active episode and never resurrect a binding
+   * to a dead one.
    */
   transitionKey: string;
   /** Projected fire time (ms). Mutable scheduling data — may be
@@ -108,6 +113,21 @@ export interface ScheduledCriticalAlarmRecord {
    * displayed the notification.
    */
   status: ScheduledCriticalAlarmStatus;
+  /**
+   * Monotonic revision of SCHEDULER-originated writes to this record
+   * (bumped by the scheduler's record-write helpers in
+   * criticalTransitions.ts on every accepted write). The episode
+   * owner's writes (bind / episode-end invalidation) do NOT bump it —
+   * they are synchronous and authoritative. A scheduler operation
+   * captures the generation it observed before its async native work
+   * and may only persist if the stored generation still equals that
+   * baseline; otherwise the operation is stale and MUST abandon the
+   * write. This prevents an older scheduler generation from clobbering
+   * the record written by a newer one. Absent (undefined) on records
+   * that no scheduler write has touched yet (e.g. migrated records);
+   * treated as 0.
+   */
+  generation?: number;
 }
 
 /**

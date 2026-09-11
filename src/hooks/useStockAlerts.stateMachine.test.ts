@@ -538,5 +538,142 @@ describe('useStockAlerts — App lifecycle & delivery semantics', () => {
     expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
     expect(readTransitions()['med-state-1'].transitionKey).toBe(key);
   });
+
+  it('TEST J: scheduled alarm elapsed + no drawer evidence ⇒ remains SCHEDULED, never SENT because time passed', async () => {
+    localStorageStore[SCHEDULED_CRITICAL_STORAGE_KEY] = JSON.stringify({
+      'med-state-1': { transitionKey: '', alarmTime: Date.now() - 7200000, status: 'SCHEDULED' },
+    });
+    // Drawer is empty — the notification may never have been displayed
+    // OR the user dismissed it; either way there is no positive evidence.
+    vi.mocked(getDeliveredNotificationIds).mockResolvedValue(new Set<number>());
+
+    renderHook(({ medications }) => useAlerts({ medications }), {
+      initialProps: { medications: [makeMed({ currentPills: 2 })] as Medication[] },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(readTransitions()['med-state-1'].notificationState).toBe('SCHEDULED');
+    // Elapsed time alone never upgraded anything:
+    expect(readScheduled()['med-state-1'].status).toBe('SCHEDULED'); // NOT 'DELIVERED'
+    expect(sendCriticalStockAlert).not.toHaveBeenCalled();
+  });
+
+  it('TEST K: scheduled alarm elapsed + drawer contains the critical alarm ⇒ episode becomes SENT', async () => {
+    localStorageStore[SCHEDULED_CRITICAL_STORAGE_KEY] = JSON.stringify({
+      'med-state-1': { transitionKey: '', alarmTime: Date.now() - 7200000, status: 'SCHEDULED' },
+    });
+    vi.mocked(getDeliveredNotificationIds).mockResolvedValue(
+      new Set([criticalAlarmId('med-state-1')])
+    );
+
+    renderHook(({ medications }) => useAlerts({ medications }), {
+      initialProps: { medications: [makeMed({ currentPills: 2 })] as Medication[] },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Positive evidence is the ONLY thing that can upgrade SCHEDULED → SENT.
+    expect(readTransitions()['med-state-1'].notificationState).toBe('SENT');
+    expect(sendCriticalStockAlert).not.toHaveBeenCalled(); // via the scheduled path, not foreground
+  });
+
+  it('TEST L: scheduled alarm elapsed + dismissed notification (no drawer evidence) ⇒ no speculative second notification across renders and restarts', async () => {
+    localStorageStore[SCHEDULED_CRITICAL_STORAGE_KEY] = JSON.stringify({
+      'med-state-1': { transitionKey: '', alarmTime: Date.now() - 7200000, status: 'SCHEDULED' },
+    });
+    // The user dismissed the notification → it is no longer in the drawer.
+    vi.mocked(getDeliveredNotificationIds).mockResolvedValue(new Set<number>());
+
+    const { rerender, unmount } = renderHook(({ medications }) => useAlerts({ medications }), {
+      initialProps: { medications: [makeMed({ currentPills: 2 })] as Medication[] },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The scheduled path owns the episode's notification: the foreground
+    // must NOT speculate a replacement just because the drawer is empty.
+    expect(sendCriticalStockAlert).not.toHaveBeenCalled();
+    expect(readTransitions()['med-state-1'].notificationState).toBe('SCHEDULED');
+
+    // Re-render (stock still criticalish) and a full restart: still zero
+    // user-facing notifications for this episode.
+    rerender({ medications: [makeMed({ currentPills: 1 })] as Medication[] });
+    await Promise.resolve();
+    await Promise.resolve();
+    unmount();
+
+    renderHook(({ medications }) => useAlerts({ medications }), {
+      initialProps: { medications: [makeMed({ currentPills: 1 })] as Medication[] },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(sendCriticalStockAlert).not.toHaveBeenCalled();
+    expect(readTransitions()['med-state-1'].notificationState).toBe('SCHEDULED');
+    expect(readScheduled()['med-state-1'].status).toBe('SCHEDULED');
+  });
+});
+
+describe('useStockAlerts — TEST E: a new episode never inherits the previous claim (hook integration)', () => {
+  it('A ends → B begins: B gets a fresh identity and the foreground fires; the leftover claim of A stays inert', () => {
+    // Seed a future unbound claim, exactly as a successful scheduler
+    // write persists it while the med is still sufficient.
+    localStorageStore[SCHEDULED_CRITICAL_STORAGE_KEY] = JSON.stringify({
+      'med-state-1': { transitionKey: '', alarmTime: Date.now() + 86400000, status: 'SCHEDULED' },
+    });
+
+    // Episode A: the med crosses early; the future claim is bound to A
+    // and the foreground owns the notification (a future claim never suppresses).
+    const { rerender } = renderHook(({ medications }) => useAlerts({ medications }), {
+      initialProps: { medications: [makeMed({ currentPills: 4 })] as Medication[] },
+    });
+    const keyA = readTransitions()['med-state-1'].transitionKey;
+    expect(readScheduled()['med-state-1'].transitionKey).toBe(keyA);
+    expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
+
+    // Refill → sufficient: episode A ends, its bound claim is neutralized.
+    rerender({ medications: [makeMed({ currentPills: 40 })] as Medication[] });
+    expect(readTransitions()['med-state-1']).toBeUndefined();
+    const leftover = readScheduled()['med-state-1'];
+    expect(leftover.status).toBe('NOT_SCHEDULED');
+    expect(leftover.transitionKey).toBe(keyA); // inert binding information only
+
+    // Critical again → episode B: fresh identity, exactly one notification.
+    rerender({ medications: [makeMed({ currentPills: 3 })] as Medication[] });
+    const keyB = readTransitions()['med-state-1'].transitionKey;
+    expect(keyB).not.toBe(keyA);
+    expect(sendCriticalStockAlert).toHaveBeenCalledTimes(2); // 1×A + 1×B — never suppressed, never duplicated
+    // The neutralized leftover claim of A is NOT adoptable by B and does
+    // not own B's notification.
+    expect(readScheduled()['med-state-1'].status).toBe('NOT_SCHEDULED');
+    expect(readTransitions()['med-state-1'].notificationState).toBe('SENT');
+  });
+
+  it('a FUTURE claim still bound to the dead episode A is rebound to the new episode B (never inherited as-is)', () => {
+    // Pathological leftover: a future SCHEDULED claim bound to A while
+    // the transition A is gone (e.g. a crash between cleanup steps).
+    localStorageStore[SCHEDULED_CRITICAL_STORAGE_KEY] = JSON.stringify({
+      'med-state-1': { transitionKey: 'crit_med-state-1_DEAD_A', alarmTime: Date.now() + 86400000, status: 'SCHEDULED' },
+    });
+
+    renderHook(({ medications }) => useAlerts({ medications }), {
+      initialProps: { medications: [makeMed({ currentPills: 2 })] as Medication[] },
+    });
+
+    const keyB = readTransitions()['med-state-1'].transitionKey;
+    // B's identity is fresh — the dead binding was not adopted as-is...
+    expect(keyB).not.toBe('crit_med-state-1_DEAD_A');
+    // ...and the future claim was rebound to B by the episode owner, so
+    // it can only ever act as B's own claim from now on.
+    expect(readScheduled()['med-state-1'].transitionKey).toBe(keyB);
+    // A future claim does not suppress the foreground: B notified once.
+    expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
+    expect(readTransitions()['med-state-1'].notificationState).toBe('SENT');
+  });
 });
 

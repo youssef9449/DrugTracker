@@ -12,6 +12,11 @@ import {
   saveScheduledCriticalAlarms,
   reconcileCriticalEpisode,
   applyDeliveredCriticalEvidence,
+  getActiveTransition,
+  bindScheduledAlarmToTransition,
+  updateScheduledAlarm,
+  invalidateScheduledAlarm,
+  clearScheduledAlarm,
 } from './criticalTransitions';
 import { CriticalTransitionState, ScheduledCriticalAlarmRecord } from '../types';
 
@@ -411,8 +416,309 @@ describe('save/load round-trip', () => {
 
     const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
       'med-1': { transitionKey: '', alarmTime: 123456, status: 'SCHEDULED' },
+      'med-2': { transitionKey: 'k2', alarmTime: 42, status: 'NOT_SCHEDULED', generation: 3 },
     };
     saveScheduledCriticalAlarms(scheduled);
     expect(loadScheduledCriticalAlarms()).toEqual(scheduled);
+  });
+
+  it('drops a malformed generation instead of crashing (defensive normalization)', () => {
+    writeScheduled({
+      'med-1': { transitionKey: '', alarmTime: 5, status: 'SCHEDULED', generation: 'bogus' } as unknown as ScheduledCriticalAlarmRecord,
+      'med-2': { transitionKey: '', alarmTime: 6, status: 'SCHEDULED', generation: -3 } as unknown as ScheduledCriticalAlarmRecord,
+    });
+    const loaded = loadScheduledCriticalAlarms();
+    expect(loaded['med-1'].generation).toBeUndefined();
+    expect(loaded['med-2'].generation).toBeUndefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Scheduled-record ownership / versioning helpers (race-safety layer)
+// ─────────────────────────────────────────────────────────────────────
+
+describe('getActiveTransition', () => {
+  it('returns the active transition, or null when none exists', () => {
+    const transitions: Record<string, CriticalTransitionState> = {
+      'med-1': { transitionKey: 'A', enteredAt: 1, notificationState: 'NONE' },
+    };
+    expect(getActiveTransition(transitions, 'med-1')).toEqual(transitions['med-1']);
+    expect(getActiveTransition(transitions, 'med-missing')).toBeNull();
+    expect(getActiveTransition({}, 'med-1')).toBeNull();
+  });
+});
+
+describe('bindScheduledAlarmToTransition — episode-owner bind', () => {
+  it('binds an unbound claim to the episode', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': { transitionKey: '', alarmTime: 100, status: 'SCHEDULED' },
+    };
+    expect(bindScheduledAlarmToTransition(scheduled, 'med-1', 'A')).toBe(true);
+    expect(scheduled['med-1'].transitionKey).toBe('A');
+    // Scheduling data untouched.
+    expect(scheduled['med-1'].alarmTime).toBe(100);
+    expect(scheduled['med-1'].status).toBe('SCHEDULED');
+  });
+
+  it('replaces a stale binding from a previous episode (the owner is authoritative)', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': { transitionKey: 'OLD', alarmTime: 100, status: 'SCHEDULED' },
+    };
+    expect(bindScheduledAlarmToTransition(scheduled, 'med-1', 'A')).toBe(true);
+    expect(scheduled['med-1'].transitionKey).toBe('A');
+  });
+
+  it('is a no-op when already bound to the episode, when the key is empty, or when no record exists', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': { transitionKey: 'A', alarmTime: 100, status: 'SCHEDULED' },
+      'med-2': { transitionKey: '', alarmTime: 200, status: 'NOT_SCHEDULED' },
+    };
+    expect(bindScheduledAlarmToTransition(scheduled, 'med-1', 'A')).toBe(false);
+    expect(bindScheduledAlarmToTransition(scheduled, 'med-2', '')).toBe(false);
+    expect(bindScheduledAlarmToTransition(scheduled, 'med-missing', 'A')).toBe(false);
+  });
+});
+
+describe('updateScheduledAlarm — scheduler write rule (ownership + generation)', () => {
+  const mkRecord = (over: Partial<ScheduledCriticalAlarmRecord> = {}): ScheduledCriticalAlarmRecord => ({
+    transitionKey: '',
+    alarmTime: Date.now() + 86400000,
+    status: 'SCHEDULED',
+    ...over,
+  });
+  const mkTransition = (key: string): CriticalTransitionState => ({
+    transitionKey: key,
+    enteredAt: 1,
+    notificationState: 'SENT',
+  });
+
+  it('TEST A: scheduler writes unbound claim → owner binds it to Transition A → scheduler reschedules ⇒ key A remains', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': mkRecord({ alarmTime: 1000 }), // G1 wrote an unbound claim (generation absent → 0)
+    };
+    // Owner binds the claim to the active episode (reconcile at the crossing).
+    bindScheduledAlarmToTransition(scheduled, 'med-1', 'A');
+    const transitions = { 'med-1': mkTransition('A') };
+
+    // Scheduler reschedules with a new projected date.
+    const changed = updateScheduledAlarm(scheduled, transitions, 'med-1', {
+      alarmTime: 9999,
+      baselineGeneration: 0,
+    });
+
+    expect(changed).toBe(true);
+    expect(scheduled['med-1'].transitionKey).toBe('A'); // binding NOT erased
+    expect(scheduled['med-1'].alarmTime).toBe(9999);
+    expect(scheduled['med-1'].status).toBe('SCHEDULED');
+    expect(scheduled['med-1'].generation).toBe(1);
+  });
+
+  it('TEST B: claim already bound to A; scheduler changes alarmTime ⇒ same key A, new alarmTime', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': mkRecord({ transitionKey: 'A', alarmTime: 1000, generation: 4 }),
+    };
+    const transitions = { 'med-1': mkTransition('A') };
+
+    updateScheduledAlarm(scheduled, transitions, 'med-1', { alarmTime: 5555, baselineGeneration: 4 });
+
+    expect(scheduled['med-1'].transitionKey).toBe('A');
+    expect(scheduled['med-1'].alarmTime).toBe(5555);
+    expect(scheduled['med-1'].status).toBe('SCHEDULED');
+    expect(scheduled['med-1'].generation).toBe(5);
+  });
+
+  it('binds the claim to the ACTIVE transition even when the stored record was unbound', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': mkRecord({ transitionKey: '', generation: 2 }),
+    };
+    const transitions = { 'med-1': mkTransition('A') };
+
+    updateScheduledAlarm(scheduled, transitions, 'med-1', { alarmTime: 777, baselineGeneration: 2 });
+
+    expect(scheduled['med-1'].transitionKey).toBe('A');
+  });
+
+  it('stale binding to a dead episode is dropped and the ACTIVE transition wins (no resurrection)', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': mkRecord({ transitionKey: 'DEAD', generation: 1 }),
+    };
+    const transitions = { 'med-1': mkTransition('A') };
+
+    updateScheduledAlarm(scheduled, transitions, 'med-1', { alarmTime: 777, baselineGeneration: 1 });
+
+    expect(scheduled['med-1'].transitionKey).toBe('A');
+    expect(scheduled['med-1'].transitionKey).not.toBe('DEAD');
+  });
+
+  it('writes an UNBOUND claim when no episode is active — even if the old record was bound (dead binding dropped)', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': mkRecord({ transitionKey: 'DEAD', generation: 1 }),
+    };
+    const transitions = {}; // episode ended — no active transition
+
+    updateScheduledAlarm(scheduled, transitions, 'med-1', { alarmTime: 777, baselineGeneration: 1 });
+
+    expect(scheduled['med-1'].transitionKey).toBe('');
+    expect(scheduled['med-1'].status).toBe('SCHEDULED');
+  });
+
+  it('creates the record when none exists (unbound when no episode is active)', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {};
+    const transitions = {};
+
+    expect(updateScheduledAlarm(scheduled, transitions, 'med-1', { alarmTime: 123, baselineGeneration: 0 })).toBe(true);
+
+    expect(scheduled['med-1']).toEqual({
+      transitionKey: '',
+      alarmTime: 123,
+      status: 'SCHEDULED',
+      generation: 1,
+    });
+  });
+
+  it('TEST C (storage level): an older generation ABANDONS the write when the record moved on', () => {
+    // G2 already wrote the record (generation 2, bound to A, alarmTime 42).
+    const stored = mkRecord({ transitionKey: 'A', alarmTime: 42, generation: 2 });
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = { 'med-1': stored };
+    const transitions = { 'med-1': mkTransition('A') };
+
+    // G1 (stale, baseline 0) tries to write afterwards.
+    const changed = updateScheduledAlarm(scheduled, transitions, 'med-1', {
+      alarmTime: 111,
+      baselineGeneration: 0,
+    });
+
+    expect(changed).toBe(false);
+    // Persistent record still belongs to G2/current state — untouched.
+    expect(scheduled['med-1']).toEqual(stored);
+    expect(scheduled['med-1'].alarmTime).toBe(42);
+    expect(scheduled['med-1'].generation).toBe(2);
+  });
+
+  it('skips the write (no revision) when the scheduling data is unchanged', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': mkRecord({ transitionKey: '', alarmTime: 777, generation: 3 }),
+    };
+    const transitions = {};
+
+    expect(updateScheduledAlarm(scheduled, transitions, 'med-1', { alarmTime: 777, baselineGeneration: 3 })).toBe(false);
+    expect(scheduled['med-1'].generation).toBe(3); // unchanged
+  });
+});
+
+describe('invalidateScheduledAlarm — scheduler neutralize rule', () => {
+  it('neutralizes SCHEDULED → NOT_SCHEDULED, preserving the binding and bumping the generation', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': { transitionKey: 'A', alarmTime: 100, status: 'SCHEDULED', generation: 1 },
+    };
+    expect(invalidateScheduledAlarm(scheduled, 'med-1', 1)).toBe(true);
+    expect(scheduled['med-1'].status).toBe('NOT_SCHEDULED');
+    expect(scheduled['med-1'].transitionKey).toBe('A'); // binding preserved (informational)
+    expect(scheduled['med-1'].generation).toBe(2);
+  });
+
+  it('neutralizes a DELIVERED record too (delivery evidence lives in the transition store)', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': { transitionKey: 'A', alarmTime: 100, status: 'DELIVERED' },
+    };
+    expect(invalidateScheduledAlarm(scheduled, 'med-1', 0)).toBe(true);
+    expect(scheduled['med-1'].status).toBe('NOT_SCHEDULED');
+  });
+
+  it('no-op when already NOT_SCHEDULED, when the med has no record, or on a stale generation', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': { transitionKey: 'A', alarmTime: 100, status: 'NOT_SCHEDULED', generation: 2 },
+      'med-2': { transitionKey: '', alarmTime: 100, status: 'SCHEDULED', generation: 5 },
+    };
+    expect(invalidateScheduledAlarm(scheduled, 'med-1', 2)).toBe(false);
+    expect(invalidateScheduledAlarm(scheduled, 'med-missing', 0)).toBe(false);
+    // Stored generation 5 ≠ stale baseline 3 → abandon.
+    expect(invalidateScheduledAlarm(scheduled, 'med-2', 3)).toBe(false);
+    expect(scheduled['med-2'].status).toBe('SCHEDULED');
+    expect(scheduled['med-2'].generation).toBe(5);
+  });
+
+  it('works without a baseline check (owner-style synchronous use)', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': { transitionKey: 'A', alarmTime: 100, status: 'SCHEDULED' },
+    };
+    expect(invalidateScheduledAlarm(scheduled, 'med-1')).toBe(true);
+    expect(scheduled['med-1'].status).toBe('NOT_SCHEDULED');
+    expect(scheduled['med-1'].generation).toBeUndefined(); // untouched without a baseline
+  });
+});
+
+describe('clearScheduledAlarm — deleted-med cleanup', () => {
+  it('removes the record entirely', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': { transitionKey: 'A', alarmTime: 1, status: 'SCHEDULED', generation: 7 },
+    };
+    expect(clearScheduledAlarm(scheduled, 'med-1', 7)).toBe(true);
+    expect(scheduled['med-1']).toBeUndefined();
+  });
+
+  it('abandons the delete on a stale generation and no-ops without a record', () => {
+    const scheduled: Record<string, ScheduledCriticalAlarmRecord> = {
+      'med-1': { transitionKey: 'A', alarmTime: 1, status: 'SCHEDULED', generation: 7 },
+    };
+    expect(clearScheduledAlarm(scheduled, 'med-1', 3)).toBe(false);
+    expect(scheduled['med-1']).toBeDefined();
+    expect(clearScheduledAlarm(scheduled, 'med-missing', 0)).toBe(false);
+  });
+});
+
+describe('reconcileCriticalEpisode — TEST E: a new episode never inherits the previous claim', () => {
+  it('A ends (claim neutralized) → B begins ⇒ B key ≠ A and the leftover claim of A cannot suppress B', () => {
+    // Episode A begins with a future claim that gets bound to it.
+    writeScheduled({
+      'med-1': { transitionKey: '', alarmTime: Date.now() + 86400000, status: 'SCHEDULED' },
+    });
+    const first = pass({ isCriticalish: true, canNotify: true });
+    const keyA = first.result!.transition.transitionKey;
+    expect(first.sent).toBe(1); // foreground owned A's notification (future claim does not suppress)
+    expect(loadScheduledCriticalAlarms()['med-1'].transitionKey).toBe(keyA);
+
+    // Refill → episode A ends: transition deleted, bound claim neutralized.
+    pass({ isCriticalish: false });
+    expect(loadCriticalTransitions()['med-1']).toBeUndefined();
+    const leftover = loadScheduledCriticalAlarms()['med-1'];
+    expect(leftover.status).toBe('NOT_SCHEDULED');
+    expect(leftover.transitionKey).toBe(keyA); // binding kept only as inert information
+
+    // New crossing → episode B.
+    const second = pass({ isCriticalish: true, canNotify: true });
+    const keyB = second.result!.transition.transitionKey;
+
+    expect(second.result!.created).toBe(true);
+    expect(keyB).not.toBe(keyA);          // NEW identity — never inherited
+    expect(second.sent).toBe(1);          // A's neutralized leftover claim does NOT suppress B
+    expect(second.result!.transition.notificationState).toBe('SENT');
+  });
+
+  it('an ELAPSED claim bound to a dead episode cannot be adopted by the new episode B', () => {
+    // A pathological leftover: a SCHEDULED elapsed record still bound to
+    // the dead episode A (e.g. a crash between the owner's cleanup steps).
+    writeScheduled({
+      'med-1': { transitionKey: 'crit_med-1_DEAD_A', alarmTime: Date.now() - 3600000, status: 'SCHEDULED' },
+    });
+
+    // The scheduler reschedules (med sufficient, no active episode):
+    // the dead binding is dropped — the claim becomes unbound with the
+    // NEW armed alarm time, so it can never adopt A's identity later.
+    const scheduled = loadScheduledCriticalAlarms();
+    const transitions = loadCriticalTransitions();
+    expect(
+      updateScheduledAlarm(scheduled, transitions, 'med-1', {
+        alarmTime: Date.now() + 86400000,
+        baselineGeneration: scheduled['med-1'].generation ?? 0,
+      })
+    ).toBe(true);
+    saveScheduledCriticalAlarms(scheduled);
+    expect(scheduled['med-1'].transitionKey).toBe('');
+
+    // Later crossing: the fresh episode gets its OWN key — A is gone.
+    const { result, sent } = pass({ isCriticalish: true, canNotify: true });
+    expect(sent).toBe(1); // future claim → foreground; no inheritance from A
+    expect(result!.transition.transitionKey).not.toBe('crit_med-1_DEAD_A');
   });
 });

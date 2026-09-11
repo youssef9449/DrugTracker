@@ -1,14 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Medication } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
-import { playNotificationSound, stopAllSounds } from '../utils/sound';
+import { stopAllSounds } from '../utils/sound';
 import { loadJson, saveJson } from '../utils/storage';
 import { DEFAULT_SNOOZE_MINUTES, MS_PER_MINUTE } from '../utils/time';
-import {
-  scheduleSnoozedDoseReminder,
-  DOSE_REMINDER_CHANNEL_ID,
-  DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
-} from '../utils/notifications';
+import { scheduleSnoozedDoseReminder } from '../utils/notifications';
 
 const FIRED_KEY = 'android_med_tracker_fired_reminders_v1';
 const SNOOZE_KEY = 'android_med_tracker_snooze_v1';
@@ -19,8 +15,6 @@ function firedKey(medId: string, dateStr: string) {
 
 interface UseDoseRemindersOptions {
   medications: Medication[];
-  soundEnabled: boolean;
-  appInForeground: boolean;
 }
 
 /**
@@ -30,16 +24,13 @@ interface UseDoseRemindersOptions {
  * "alarming") and exposes `openAlarm` / `dismissAlarm` / `snoozeAlarm` /
  * `testAlarm` for the UI + the native notification listener to call.
  *
- * === History ===
- * Previously this hook ran a JS polling interval (every 5s) that checked
- * `now >= reminderTime` and fired the alarm itself. That only worked while
- * the app was in the foreground — when killed, no reminder fired at all.
- *
- * The recurring native reminder is now scheduled by
+ * === Architecture ===
+ * The recurring native reminder is scheduled by
  * {@link useDoseReminderScheduler} (Android's AlarmManager fires it every
  * day at reminderTime, foreground or killed). When the notification fires
- * while the app is open, the App-level received handler plays the selected
- * foreground sound and calls back here via `openAlarm`. This hook no longer polls.
+ * while the app is open, the `localNotificationReceived` listener in
+ * native.ts calls back here via `openAlarm`. This hook has NO polling
+ * and NO sound playback — the native channel sound is the single sound.
  *
  * === Snooze ===
  * Snoozing schedules a ONE-SHOT native notification X minutes in the
@@ -56,37 +47,18 @@ interface UseDoseRemindersOptions {
  *
  * All callbacks are stable (empty dep useCallback) so listener
  * registrations that depend on them don't re-subscribe on every render.
- * They read the latest medications/sound/id via refs kept in sync by
- * small effects.
  */
 export function useDoseReminders({
   medications,
-  soundEnabled,
-  appInForeground,
 }: UseDoseRemindersOptions) {
   const [alarmingMedication, setAlarmingMedication] = useState<Medication | null>(null);
-  // The currently-alarming med id, kept in a ref so the stable
-  // dismissAlarm/snoozeAlarm callbacks can read/write it without deps.
   const alarmingIdRef = useRef<string | null>(null);
-  // #13: set to true by testAlarm so dismissAlarm knows NOT to write
-  // FIRED_KEY (which would block the real scheduled reminder for the
-  // day). Reset to false at the start of every openAlarm call.
   const isTestAlarmRef = useRef(false);
-
-  const soundEnabledRef = useRef(soundEnabled);
-  useEffect(() => {
-    soundEnabledRef.current = soundEnabled;
-  }, [soundEnabled]);
 
   const medicationsRef = useRef(medications);
   useEffect(() => {
     medicationsRef.current = medications;
   }, [medications]);
-
-  const appInForegroundRef = useRef(appInForeground);
-  useEffect(() => {
-    appInForegroundRef.current = appInForeground;
-  }, [appInForeground]);
 
   const dismissAlarm = useCallback(() => {
     stopAllSounds();
@@ -116,7 +88,7 @@ export function useDoseReminders({
     // Schedule a ONE-SHOT native notification X minutes in the future.
     // When it fires, the localNotificationReceived listener calls
     // openAlarm again — so snooze works even if the user backgrounded
-    // the app after snoozing. (Replaces the old polling-based snooze.)
+    // the app after snoozing.
     scheduleSnoozedDoseReminder(
       medication.id,
       medication.name,
@@ -124,52 +96,25 @@ export function useDoseReminders({
       medication.unit,
       medication.reminderTime,
       minutes,
-      medication.notificationSound || 'classic_chime',
-      appInForegroundRef.current
-        ? DOSE_REMINDER_FOREGROUND_CHANNEL_ID
-        : DOSE_REMINDER_CHANNEL_ID
     ).catch(() => void 0);
   }, []);
 
-  // A snooze can outlive the foreground state in which it was created.
-  // Re-arm its stable ID onto the appropriate fixed channel on lifecycle
-  // transitions; this never creates a second notification entry.
-  useEffect(() => {
-    const snoozes = loadJson<Record<string, number>>(SNOOZE_KEY, {});
-    const channelId = appInForeground
-      ? DOSE_REMINDER_FOREGROUND_CHANNEL_ID
-      : DOSE_REMINDER_CHANNEL_ID;
-    for (const medication of medicationsRef.current) {
-      const until = snoozes[medication.id];
-      if (!until || until <= Date.now()) continue;
-      const minutes = Math.max(1, Math.ceil((until - Date.now()) / MS_PER_MINUTE));
-      scheduleSnoozedDoseReminder(
-        medication.id,
-        medication.name,
-        medication.dailyDose,
-        medication.unit,
-        medication.reminderTime,
-        minutes,
-        medication.notificationSound || 'classic_chime',
-        channelId
-      ).catch(() => void 0);
-    }
-  }, [appInForeground]);
-
-  // openAlarm is called after the native localNotificationReceived event
-  // has played the single foreground sound. It opens the DoseAlarmModal
-  // and writes FIRED_KEY (dedup). Stable signature (no deps) so the
-  // listener registration in App.tsx doesn't re-subscribe on every render.
+  // openAlarm is called by the native localNotificationReceived listener
+  // when the recurring dose-reminder notification fires while the app is
+  // in the foreground. It opens the DoseAlarmModal + writes FIRED_KEY
+  // (dedup). Stable signature (no deps) so the listener registration in
+  // App.tsx doesn't re-subscribe on every render.
+  //
+  // NO sound is played here. The native notification channel plays the
+  // bundled sound ('dose_reminder.wav'). There is no JS sound path.
   const openAlarm = useCallback((medId: string) => {
-    // Resolve the med from the latest medications array.
     const med = medicationsRef.current.find((m) => m.id === medId);
     if (!med) return; // med was deleted between scheduling and firing.
 
     // Dedup: if already alarming this med, don't re-open.
     if (alarmingIdRef.current === med.id) return;
 
-    // Dedup: if already fired today (e.g. user took the dose already),
-    // don't re-open. (The daily native schedule still fires tomorrow.)
+    // Dedup: if already fired today, don't re-open.
     const fired = loadJson<Record<string, boolean>>(FIRED_KEY, {});
     if (fired[firedKey(med.id, getTodayDateString())]) return;
 
@@ -179,25 +124,19 @@ export function useDoseReminders({
     const snoozeUntil = snooze[med.id];
     if (snoozeUntil && Date.now() < snoozeUntil) return;
 
-    // Reset the test flag (a real alarm is not a test).
     isTestAlarmRef.current = false;
     alarmingIdRef.current = med.id;
     setAlarmingMedication(med);
-    // Sound is deliberately absent here. The App-level notification
-    // handler plays it before calling openAlarm, so this cannot double-play.
   }, []);
 
+  // testAlarm opens the modal for a manual test. It does NOT write
+  // FIRED_KEY so it doesn't block the real scheduled reminder.
+  // No sound is played — the test notification button in settings
+  // sends a real native notification (which plays the channel sound).
   const testAlarm = useCallback((med: Medication) => {
-    // Open the modal + play the chime for a manual test (the per-card
-    // "تجربة صوت وتنبيه الدواء" button). Does NOT write FIRED_KEY.
     isTestAlarmRef.current = false;
     alarmingIdRef.current = med.id;
     setAlarmingMedication(med);
-    if (soundEnabledRef.current) {
-      playNotificationSound(med.notificationSound || 'classic_chime');
-    }
-    // #13: set the test flag AFTER opening (which resets it) so
-    // dismissAlarm knows NOT to write FIRED_KEY for this alarm.
     isTestAlarmRef.current = true;
   }, []);
 

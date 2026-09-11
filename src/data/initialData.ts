@@ -54,7 +54,6 @@ export function getInitialMedications(todayStr: string = getTodayDateString()): 
       packageSize: 30,
       reminderEnabled: true,
       reminderTime: '09:00',
-      notificationSound: 'gentle_bell',
     },
     {
       id: 'med-2',
@@ -74,7 +73,6 @@ export function getInitialMedications(todayStr: string = getTodayDateString()): 
       packageSize: 50,
       reminderEnabled: true,
       reminderTime: '14:00',
-      notificationSound: 'marimba',
     },
     {
       id: 'med-3',
@@ -94,7 +92,6 @@ export function getInitialMedications(todayStr: string = getTodayDateString()): 
       packageSize: 30,
       reminderEnabled: true,
       reminderTime: '21:00',
-      notificationSound: 'harp',
     },
   ];
 }

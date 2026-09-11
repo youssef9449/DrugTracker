@@ -49,10 +49,6 @@ export const TOAST_MESSAGES = {
   fontScaledUp: 'تم تكبير حجم الخط',
   fontScaledDown: 'تم إرجاع حجم الخط للطبيعي',
 
-  // Custom sound
-  customSoundSet: (fileName: string) => `تم تعيين "${fileName}" كصوت مخصص لكل الأدوية`,
-  customSoundRemoved: 'تم إزالة الصوت المخصص',
-
   // Shopping duration
   duration60: 'تم التبديل لتغطية شهرين',
   duration30: 'تم التبديل لتغطية شهر',
@@ -70,7 +66,6 @@ export const PERSIST_FAILURE_MESSAGES = {
   notifications: 'قد لا يتم حفظ تفضيل التنبيهات.',
   critical: 'قد لا يتم حفظ تفضيل تنبيه النفاذ الحرج.',
   autoDeduct: 'قد لا يتم حفظ تفضيل الخصم التلقائي.',
-  customSound: 'تعذّر حفظ الصوت المخصص — قد لا يكون متاحاً بعد إعادة التشغيل.',
 } as const;
 
 /** Storage error reasons (used by persist() in storage.ts). */

@@ -23,10 +23,7 @@ import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { App } from '@capacitor/app';
 import { LocalNotifications, type Channel, type Importance, type Visibility } from '@capacitor/local-notifications';
-import {
-  DOSE_REMINDER_CHANNEL_ID,
-  DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
-} from './utils/notifications';
+import { DOSE_REMINDER_CHANNEL_ID } from './utils/notifications';
 
 let initialized = false;
 
@@ -199,13 +196,6 @@ export async function initNativeBridge(): Promise<void> {
         visibility: 1 as Visibility,
       },
       {
-        id: DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
-        name: 'تذكير الجرعات داخل التطبيق',
-        description: 'قناة صامتة للصوت المخصص عند فتح التطبيق',
-        importance: 4 as Importance,
-        visibility: 1 as Visibility,
-      },
-      {
         id: 'low-stock',
         name: 'تنبيهات النفاذ',
         description: 'تنبيه عند اقتراب نفاذ دواء من المخزون',
@@ -248,13 +238,17 @@ export async function initNativeBridge(): Promise<void> {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // Foreground notification listener — keeps the native notification and
-  // opens the in-app DoseAlarmModal for dose reminders. The native channel
-  // is the single sound source in every app state.
+  // Foreground notification listener — opens the in-app DoseAlarmModal.
   // ─────────────────────────────────────────────────────────────
-  // The v6 plugin cannot resolve an IndexedDB/data-URL sound after the app
-  // process is killed. The bundled channel tone is therefore the reliable
-  // fallback for foreground, background, and killed delivery.
+  // When a local notification fires while the app is in the foreground,
+  // Capacitor delivers it to this listener. The listener's ONLY job is
+  // to extract the medicationId and call the registered handler so
+  // App.tsx can open the DoseAlarmModal.
+  //
+  // NO sound playback happens here. The notification's sound is played
+  // by the Android notification channel (bundled native sound
+  // 'dose_reminder.wav'). There is no JS sound path for dose reminders.
+  //
   // #38: await the addListener and store the handle so it can be
   // removed if needed (prevents duplicate listeners across HMR).
   try {
@@ -265,7 +259,6 @@ export async function initNativeBridge(): Promise<void> {
           medicationId?: string;
         };
       }) => {
-        // Keep the native notification in addition to the in-app modal.
         const medicationId = notification?.extra?.medicationId;
         if (medicationId && doseReceivedHandler) {
           try {

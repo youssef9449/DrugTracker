@@ -1,5 +1,5 @@
 /**
- * Notification utilities for النغنغ (Drug Tracker).
+ * Notification utilities for Drug Tracker..
  *
  * Two backends are used depending on platform:
  *

@@ -1,4 +1,4 @@
-# النغنغ — Drug Tracker APK build guide
+# Drug Tracker — APK build guide
 
 The web app (Vite + React SPA) is fully functional in any browser. To install it as a native Android APK on a phone, two options are available:
 
@@ -163,7 +163,7 @@ This option is easier if you don't want to install Android Studio, but requires 
 5. **Download the `.apk`** or `.aab` file. PWABuilder packages the PWA (manifest + service worker) into a TWA (Trusted Web Activity) APK that installs like a native app.
 
 The resulting APK will:
-- Show "النغنغ" as the app name on the home screen.
+- Show "Drug Tracker" as the app name on the home screen.
 - Use the bell icon from `public/assets/icons/icon.svg` / `icon-192.png` as the launcher icon.
 - Open in a full-screen Android window (no browser chrome).
 - Use the teal-800 status bar color.
@@ -173,7 +173,7 @@ The resulting APK will:
 
 ## Renaming the app
 
-The external display name "النغنغ" is set in three places — keep them in sync:
+The external display name "Drug Tracker" is set in three places — keep them in sync:
 
 | File | Field | Purpose |
 |------|-------|---------|
@@ -182,7 +182,7 @@ The external display name "النغنغ" is set in three places — keep them in
 | `capacitor.config.ts` | `appName` | Capacitor Android project (the APK's display name) |
 | `metadata.json` | `name` | Google AI Studio preview |
 
-The Android package ID (`app.nagnagh`) is set in `capacitor.config.ts` → `appId`. Changing it after the first build requires deleting `android/` and re-running `npx cap add android`.
+The Android package ID (`app.drugtracker`) is set in `capacitor.config.ts` → `appId`. Changing it after the first build requires deleting `android/` and re-running `npx cap add android`.
 
 ---
 

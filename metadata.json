@@ -1,6 +1,32 @@
 {
   "name": "متتبع الأدوية",
-  "description": "تطبيق لمتابعة مخزون الأدوية وتنبيهك عند اقتراب نفاذ الحبوب بناءً على معدل الاستهلاك اليومي.",
+  "short_name": "متتبع الأدوية",
+  "description": "تطبيق PWA لمتابعة مخزون الأدوية، تنبيهك عند اقتراب نفاذ الحبوب بناءً على معدل الاستهلاك اليومي، وإدارة قوائم التسوق والصيدليات.",
+  "version": "0.1.0",
+  "author": "youssef9449",
+  "homepage": "https://github.com/youssef9449/DrugTracker",
+  "repository": "https://github.com/youssef9449/DrugTracker",
+  "license": "MIT",
+  "keywords": [
+    "أدوية",
+    "مخزون",
+    "تنبيهات",
+    "صيدلية",
+    "صحة",
+    "PWA",
+    "React",
+    "Capacitor"
+  ],
+  "features": [
+    "تتبع مخزون الأدوية",
+    "تنبيهات نفاد المخزون",
+    "منبهات الجرعات",
+    "قائمة تسوق تلقائية",
+    "إدارة الصيدليات",
+    "سجل الاستهلاك",
+    "دعم PWA",
+    "APK أندرويد"
+  ],
   "requestFramePermissions": ["notifications"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

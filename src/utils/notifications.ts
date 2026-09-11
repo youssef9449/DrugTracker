@@ -406,7 +406,7 @@ export async function sendTestAlertNotification(
     id: notificationId('test'),
     title: '🔔 إشعار تجريبي: متابع الأدوية',
     body: 'الإشعارات والتنبيهات تعمل بشكل سليم على جهازك!',
-    channelId: 'dose-reminders',
+    channelId: 'dose-reminder',
     smallIcon: 'ic_launcher',
     customSoundFile,
   });

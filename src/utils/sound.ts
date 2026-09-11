@@ -286,12 +286,12 @@ function playSynthesizedSound(soundType: NotificationSoundType) {
     if (!ctx) return;
     const now = ctx.currentTime;
 
-    // #107: wrap createOscillator so every oscillator is auto-tracked
+    // #107: wrap ctx.createOscillator() so every oscillator is auto-tracked
     // for stopAllSounds(). The wrapper is scoped to this call so the
     // Set doesn't grow unbounded across multiple play() calls — each
     // oscillator auto-removes on 'ended' via trackOscillator().
     const createOsc = (): OscillatorNode => {
-      const osc = createOsc();
+      const osc = ctx.createOscillator();
       trackOscillator(osc);
       return osc;
     };
@@ -327,7 +327,7 @@ function playSynthesizedSound(soundType: NotificationSoundType) {
         // Fast wooden percussive arpeggio: G4 -> B4 -> D5 -> G5
         const notes = [392.0, 493.88, 587.33, 783.99];
         notes.forEach((freq, idx) => {
-          const osc = createOsc();
+          const osc = ctx.createOscillator();
           const gain = ctx.createGain();
           const noteStart = now + idx * 0.08;
 
@@ -352,7 +352,7 @@ function playSynthesizedSound(soundType: NotificationSoundType) {
           { freq: 987.77, start: now, dur: 0.09 },
           { freq: 1318.51, start: now + 0.12, dur: 0.15 },
         ].forEach(({ freq, start, dur }) => {
-          const osc = createOsc();
+          const osc = ctx.createOscillator();
           const gain = ctx.createGain();
 
           osc.type = 'square';
@@ -374,7 +374,7 @@ function playSynthesizedSound(soundType: NotificationSoundType) {
         // Ascending harp sweep: C5 -> E5 -> G5 -> B5 -> E6
         const harpNotes = [523.25, 659.25, 783.99, 987.77, 1318.51];
         harpNotes.forEach((freq, idx) => {
-          const osc = createOsc();
+          const osc = ctx.createOscillator();
           const gain = ctx.createGain();
           const noteStart = now + idx * 0.06;
 
@@ -396,7 +396,7 @@ function playSynthesizedSound(soundType: NotificationSoundType) {
       case 'radar': {
         // Double medical radar sonar ping
         [now, now + 0.2].forEach((pingStart) => {
-          const osc = createOsc();
+          const osc = ctx.createOscillator();
           const gain = ctx.createGain();
 
           osc.type = 'sine';
@@ -420,7 +420,7 @@ function playSynthesizedSound(soundType: NotificationSoundType) {
         // Classic major chord arpeggio: C5 -> E5 -> G5 -> C6
         const notes = [523.25, 659.25, 783.99, 1046.5];
         notes.forEach((freq, idx) => {
-          const osc = createOsc();
+          const osc = ctx.createOscillator();
           const gain = ctx.createGain();
           const noteStart = now + idx * 0.07;
 

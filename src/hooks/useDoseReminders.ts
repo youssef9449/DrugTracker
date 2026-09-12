@@ -5,9 +5,9 @@ import { stopAllSounds } from '../utils/sound';
 import { loadJson, saveJson } from '../utils/storage';
 import { DEFAULT_SNOOZE_MINUTES, MS_PER_MINUTE } from '../utils/time';
 import { scheduleSnoozedDoseReminder } from '../utils/notifications';
+import { SNOOZE_KEY } from '../utils/doseReminderStorage';
 
 const FIRED_KEY = 'android_med_tracker_fired_reminders_v1';
-const SNOOZE_KEY = 'android_med_tracker_snooze_v1';
 
 function firedKey(medId: string, dateStr: string) {
   return `${medId}:${dateStr}`;
@@ -110,6 +110,16 @@ export function useDoseReminders({
   const openAlarm = useCallback((medId: string) => {
     const med = medicationsRef.current.find((m) => m.id === medId);
     if (!med) return; // med was deleted between scheduling and firing.
+
+    // Today's dose was already consumed (manual card action or the
+    // notification's take-dose action): never re-open the alarm modal
+    // for a taken dose. This is the foreground safety net behind the
+    // scheduler's native suppression — if the pending recurring/snoozed
+    // alarm could not be cancelled (e.g. a bridge error), the UI must
+    // not ask the user to take the dose again. Legitimate snooze
+    // re-fires are unaffected: in that flow the dose has NOT been
+    // taken, so this guard does not hit.
+    if (med.lastConsumedDate === getTodayDateString()) return;
 
     // Dedup: if already alarming this med, don't re-open.
     if (alarmingIdRef.current === med.id) return;

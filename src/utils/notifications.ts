@@ -928,29 +928,66 @@ export async function scheduleCriticalAlarm(
 // ─────────────────────────────────────────────────────────────────────
 
 /**
+ * Sentinel dose id used for legacy medications that only have
+ * `reminderTime` (no `doseSchedule`). Maps to the historical
+ * med-only notification id so existing single-dose alarms keep working.
+ */
+export const LEGACY_DOSE_ID = 'legacy';
+
+/**
  * Compute the unique notification id for a medication's recurring dose
  * alarm. Stable across calls so cancel + reschedule work.
+ *
+ * Single-argument form preserves the Phase-0/1 id for legacy meds.
  */
 export function doseReminderAlarmId(medId: string): number {
   return notificationId('doseAlarm', medId);
 }
 
+/**
+ * Recurring dose-alarm id for a specific dose row.
+ *
+ * Identity = medicationId + doseId so each daily dose slot is independently
+ * schedulable/cancellable. The legacy sentinel (`LEGACY_DOSE_ID`) maps to
+ * the historical med-only id so pre-Phase-2 single-dose alarms remain valid.
+ *
+ * Band: doseAlarm (6_000_000 + hash(...) % 1_000_000).
+ */
+export function doseReminderAlarmIdForDose(medId: string, doseId: string): number {
+  if (!doseId || doseId === LEGACY_DOSE_ID) {
+    return doseReminderAlarmId(medId);
+  }
+  // Composite key stays inside the same doseAlarm band; distinct from the
+  // med-only hash for all practical med/dose id pairs.
+  return notificationId('doseAlarm', `${medId}::${doseId}`);
+}
+
 /** Stable, separate id for a one-shot snoozed dose reminder. */
-export function snoozeDoseReminderId(medId: string): number {
-  return notificationId('doseSnooze', medId);
+export function snoozeDoseReminderId(medId: string, doseId?: string): number {
+  if (!doseId || doseId === LEGACY_DOSE_ID) {
+    return notificationId('doseSnooze', medId);
+  }
+  return notificationId('doseSnooze', `${medId}::${doseId}`);
 }
 
 /**
- * Cancel any pending recurring dose-reminder alarm for this medication.
+ * Cancel any pending recurring dose-reminder alarm for this medication
+ * (and optionally a specific dose row).
  *
- * On native: calls LocalNotifications.cancel() with the stable id.
+ * - `cancelDoseReminder(medId)` — legacy / med-only id (Phase 0/1).
+ * - `cancelDoseReminder(medId, doseId)` — that dose's id only.
+ *
  * On web: no-op (web has no persistent recurring alarm to cancel).
  */
-export async function cancelDoseReminder(medId: string): Promise<void> {
+export async function cancelDoseReminder(medId: string, doseId?: string): Promise<void> {
   if (!isNativePlatform()) return;
   try {
+    const id =
+      doseId !== undefined
+        ? doseReminderAlarmIdForDose(medId, doseId)
+        : doseReminderAlarmId(medId);
     await LocalNotifications.cancel({
-      notifications: [{ id: doseReminderAlarmId(medId) }],
+      notifications: [{ id }],
     });
   } catch (err) {
     console.warn('[notifications] cancelDoseReminder failed:', err);
@@ -1060,8 +1097,19 @@ export interface ScheduleDoseReminderOptions {
    * cancelled and re-armed from tomorrow, so the already-taken dose can
    * never produce today's reminder. Tomorrow — and every later day —
    * the reminder fires normally at reminderTime.
+   *
+   * Phase 2 note: consumption is still medication-level (`lastConsumedDate`),
+   * not per-dose. skipToday therefore suppresses TODAY for this scheduled
+   * dose slot when the med was marked consumed. Per-dose consumption is
+   * Phase 3.
    */
   skipToday?: boolean;
+  /**
+   * Specific dose-row id from `Medication.doseSchedule`. When omitted or
+   * set to {@link LEGACY_DOSE_ID}, the historical med-only notification
+   * id is used (single-dose / legacy path).
+   */
+  doseId?: string;
 }
 
 /**
@@ -1136,6 +1184,8 @@ export async function scheduleDoseReminder(
 
   const title = `⏰ حان موعد دواء: ${medName}`;
   const body = `موعد الجرعة الساعة ${reminderTime}. جرعتك المقررة: ${dailyDose} ${unit}.`;
+  const doseId = options?.doseId;
+  const notifId = doseReminderAlarmIdForDose(medId, doseId ?? LEGACY_DOSE_ID);
 
   if (isNativePlatform()) {
     try {
@@ -1149,7 +1199,7 @@ export async function scheduleDoseReminder(
       await LocalNotifications.schedule({
         notifications: [
           {
-            id: doseReminderAlarmId(medId),
+            id: notifId,
             title,
             body,
             schedule: {
@@ -1165,6 +1215,9 @@ export async function scheduleDoseReminder(
             autoCancel: true,
             extra: {
               medicationId: medId,
+              // Phase 2 metadata for future Phase 3 per-dose handling.
+              // take_dose still consumes at medication level (unchanged).
+              ...(doseId ? { doseId } : {}),
             },
           },
         ],

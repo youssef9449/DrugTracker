@@ -29,6 +29,8 @@ vi.mock('@capacitor/local-notifications', () => ({
 import {
   criticalAlarmId,
   doseReminderAlarmId,
+  doseReminderAlarmIdForDose,
+  LEGACY_DOSE_ID,
   sendMedicineAlert,
   sendCriticalStockAlert,
   sendMedicationDoseReminder,
@@ -332,5 +334,33 @@ describe('openExactAlarmSettings — Android-only', () => {
     mocks.changeExactNotificationSetting.mockRejectedValue(new Error('failed'));
     const result = await openExactAlarmSettings();
     expect(result).toBe(false);
+  });
+});
+
+
+describe('doseReminderAlarmIdForDose — multi-dose identity (Phase 2)', () => {
+  it('legacy / omitted dose id matches historical med-only id', () => {
+    expect(doseReminderAlarmIdForDose('med-x', LEGACY_DOSE_ID)).toBe(
+      doseReminderAlarmId('med-x')
+    );
+  });
+
+  it('distinct dose ids produce distinct notification ids for the same med', () => {
+    const a = doseReminderAlarmIdForDose('med-x', 'dose-a');
+    const b = doseReminderAlarmIdForDose('med-x', 'dose-b');
+    expect(a).not.toBe(b);
+    expect(a).not.toBe(doseReminderAlarmId('med-x'));
+  });
+
+  it('same med+dose pair is stable across calls', () => {
+    expect(doseReminderAlarmIdForDose('med-x', 'd1')).toBe(
+      doseReminderAlarmIdForDose('med-x', 'd1')
+    );
+  });
+
+  it('stays inside the doseAlarm band', () => {
+    const id = doseReminderAlarmIdForDose('med-band', 'slot-1');
+    expect(id).toBeGreaterThanOrEqual(6_000_000);
+    expect(id).toBeLessThan(7_000_000);
   });
 });

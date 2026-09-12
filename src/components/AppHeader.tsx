@@ -1,5 +1,5 @@
 import { type FC } from 'react';
-import { Bell, BellOff, Search, Smartphone, Monitor, Settings, AlertTriangle, Type } from 'lucide-react';
+import { Bell, BellOff, Search, Smartphone, Monitor, Settings, AlertTriangle } from 'lucide-react';
 import { ActiveTab } from './AndroidBottomNav';
 import { ICON_BUTTON_CLASS } from '../lib/styles';
 
@@ -159,19 +159,18 @@ export const AppHeader: FC<AppHeaderProps> = ({
             {isPhoneFrame ? <Monitor className="w-4 h-4" /> : <Smartphone className="w-4 h-4" />}
           </button>
 
-          {/* Font size toggle */}
+          {/* Font size toggle — compact A+/A- only (no Type icon) */}
           <button
             onClick={onToggleFontScale}
             title={fontScale === 'large' ? 'إرجاع حجم الخط للطبيعي' : 'تكبير حجم الخط'}
             aria-label={fontScale === 'large' ? 'إرجاع حجم الخط للطبيعي' : 'تكبير حجم الخط'}
-            className={`px-2 py-1.5 rounded-xl transition active:scale-95 flex items-center gap-1 font-bold text-xs ${
+            className={`px-1.5 py-1 rounded-lg transition active:scale-95 font-bold leading-none ${
               fontScale === 'large'
-                ? 'bg-amber-400 text-teal-950 shadow-xs ring-1 ring-amber-300'
-                : 'text-teal-100 hover:text-white hover:bg-teal-700/80 bg-teal-800/40'
+                ? 'bg-white/20 text-white shadow-xs ring-1 ring-white/30'
+                : 'text-teal-100 hover:text-white hover:bg-teal-700/80'
             }`}
           >
-            <Type className="w-3.5 h-3.5 shrink-0" />
-            <span className="font-mono text-[11px] leading-none">
+            <span className="font-mono text-[11px]">
               {fontScale === 'large' ? 'A-' : 'A+'}
             </span>
           </button>

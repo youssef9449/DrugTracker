@@ -119,19 +119,21 @@ describe('reminderTime-gated auto-deduction timing', () => {
     expect(effectiveCurrentPills(med, '2026-09-11', now)).toBe(28);
 
     // sync on open settles ONLY past days (there are none here: betweenDays
-    // = 0); today's dose stays dynamic and is settled on day rollover or
-    // a later mutation. The snapshot is not yet reduced, but the live
-    // balance (effectiveCurrentPills) is correct.
+    // = 0); today's dose stays dynamic and is settled at the next existing
+    // execution point (a later mutation, or the next app-open sync) — NOT
+    // automatically at the calendar-day boundary. The snapshot is not yet
+    // reduced, but the live balance (effectiveCurrentPills) is correct.
     const result = syncAutoDailyDeductions([med], '2026-09-11', now);
     expect(result.updatedMeds[0].currentPills).toBe(30); // today NOT settled by sync
     expect(result.newLogs).toHaveLength(0); // nothing past to settle
     expect(effectiveCurrentPills(result.updatedMeds[0], '2026-09-11', now)).toBe(28);
   });
 
-  it('app closed before reminderTime, opened after: the due dose is settled on the next day rollover', () => {
+  it('app closed before reminderTime, opened after: the due dose is settled when sync next runs (next app open)', () => {
     // Continuation of the above: the dose that became due is not lost —
-    // it is settled when the next calendar day's sync treats it as a
-    // fully-elapsed past day.
+    // it is settled when syncAutoDailyDeductions next runs (e.g. on the
+    // next app open) and treats it as a fully-elapsed past day. There is
+    // no automatic midnight settlement while the app stays open.
     const med = makeRemindedMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2026-09-10' });
     const now = at('2026-09-12T15:00:00Z'); // next day at 15:00 (< 20:00)
     const result = syncAutoDailyDeductions([med], '2026-09-12', now);

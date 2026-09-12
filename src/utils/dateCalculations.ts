@@ -64,7 +64,11 @@ function localDateStr(d: Date): string {
  * Used to compute "yesterday" for the settlement lastSyncDate rule:
  * a reminderTime-gated settlement that does NOT settle today's dose
  * advances lastSyncDate to yesterday so today's dose stays projectable
- * (and is settled on day rollover or a later mutation).
+ * (and is settled at the next existing execution point — app-open
+ * syncAutoDailyDeductions or a later mutation such as
+ * refill/consume/dose-change/toggle). The projection
+ * (effectiveCurrentPills) reflects today's dose across the
+ * calendar-day boundary without settling the snapshot.
  */
 function addDaysToDateStr(dateStr: string, n: number): string {
   const d = parseUtcDate(dateStr);
@@ -254,7 +258,9 @@ export function countDueAutoDoses(
  *   Used by the reminderTime-gated settlement (sync / refill / consume /
  *   dose-change / toggle): settling only past days leaves today's dose
  *   dynamic so a later manual consume can replace it without
- *   double-deduction; it is settled on day rollover or a mutation.
+ *   double-deduction; today's dose is settled at the next existing
+ *   execution point (app-open syncAutoDailyDeductions or a later
+ *   mutation), NOT automatically at the calendar-day boundary.
  *
  * For legacy (non-gated) meds, both equal `totalDays` (today is settled
  * at the start of the calendar day — the pre-change behavior).
@@ -329,7 +335,8 @@ export function computeDueDoseBreakdown(
  * - reminderTime-gated with `dueDoses > 0` and no manual consume today
  *   → yesterday: the past days are now settled, but today's dose is
  *   NOT (it stays projectable via {@link effectiveCurrentPills}'s
- *   `todayDue` until manual consume or day rollover).
+ *   `todayDue` until the next existing execution point — manual
+ *   consume, app-open sync, or a later mutation).
  * - Legacy path (or reminderTime-gated with a manual consume today)
  *   → today: legacy settles today's dose at the start of the calendar
  *   day; a manual consume today already set lastSyncDate = today.
@@ -356,9 +363,10 @@ export function settlementLastSyncDate(
  *   - reminderTime-gated with a manual consume today: today (the manual
  *     consume already settled today's dose).
  *   - reminderTime-gated otherwise: yesterday — today's dose stays
- *     dynamic (projectable via todayDue, and settled on day rollover or
- *     a later mutation). This lets, e.g., a dose change apply the NEW
- *     dose to today's (still-dynamic) dose.
+ *     dynamic (projectable via todayDue, and settled at the next
+ *     existing execution point — app-open sync or a later mutation).
+ *     This lets, e.g., a dose change apply the NEW dose to today's
+ *     (still-dynamic) dose.
  */
 export function mutationSettlementLastSyncDate(
   todayStr: string,
@@ -497,9 +505,11 @@ export function syncAutoDailyDeductions(
     // For the reminderTime-gated path, sync settles ONLY fully-elapsed
     // past days (betweenDays). Today's dose is left dynamic (projected
     // by effectiveCurrentPills via todayDue) so a later manual consume
-    // can replace it without double-deduction; it is settled on day
-    // rollover or a mutation. For the legacy path, sync settles
-    // totalDays (today included) — the pre-change behavior.
+    // can replace it without double-deduction; today's dose is settled
+    // at the next existing execution point (a later mutation, or the
+    // next app-open sync), NOT automatically at the calendar-day
+    // boundary. For the legacy path, sync settles totalDays (today
+    // included) — the pre-change behavior.
     const dueDoses = breakdown.gated ? breakdown.pastDueDoses : breakdown.fullDueDoses;
 
     if (med.autoDeductEnabled !== false && med.dailyDose > 0 && dueDoses > 0 && !breakdown.consumedToday) {

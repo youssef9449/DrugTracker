@@ -62,12 +62,21 @@ export interface Medication {
    */
   lastConsumedDate?: string;
   /**
-   * Per-dose consumption map (Phase 3): doseId → YYYY-MM-DD of the last
-   * date that slot was manually consumed. Authoritative for multi-dose
-   * meds; suppresses only that dose's auto-deduction and reminder for
-   * the given date. Missing/undefined is fine for legacy meds.
+   * Per-dose last-consumption map (Phase 3): doseId → YYYY-MM-DD of the
+   * most recent date that slot was manually consumed. Used for "consumed
+   * today?" reminder suppression and as a backward-compatible signal.
+   * Historical catch-up prefers {@link doseConsumptionHistory}.
    */
   doseConsumption?: Record<string, string>;
+  /**
+   * Per-dose consumption history (Phase 3B): doseId → YYYY-MM-DD dates
+   * on which that slot was manually consumed (unique, chronological).
+   * Authoritative for historical multi-dose catch-up so a partial day
+   * does not double-deduct slots already settled by consumeDose.
+   * Missing/undefined is fine for legacy meds and pre-3B data; readers
+   * fall back to {@link doseConsumption} as a single-date history.
+   */
+  doseConsumptionHistory?: Record<string, string[]>;
 }
 
 /** One individual dose event within a day (Phase 1 multi-dose model). */

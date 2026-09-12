@@ -49,3 +49,31 @@ describe('doseReminderStorage Phase 3B dose-scoped snooze', () => {
     expect(raw['m1::d3']).toBe(12345);
   });
 });
+
+describe('Phase 3B snooze migration from med-level key', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('old med-level snooze does not suppress multi-dose d1 or d2', () => {
+    setSnoozeUntil('m1', Date.now() + 60_000); // med-only
+    expect(isSnoozeActive('m1', 'd1')).toBe(false);
+    expect(isSnoozeActive('m1', 'd2')).toBe(false);
+  });
+
+  it('checking multi-dose clears obsolete med-level key', () => {
+    setSnoozeUntil('m1', Date.now() + 60_000);
+    isSnoozeActive('m1', 'd1');
+    const raw = JSON.parse(localStorage.getItem(SNOOZE_KEY) || '{}');
+    expect(raw['m1']).toBeUndefined();
+  });
+
+  it('clearing d2 also drops obsolete med-level key', () => {
+    setSnoozeUntil('m1', Date.now() + 60_000);
+    setSnoozeUntil('m1', Date.now() + 60_000, 'd2');
+    clearSnoozedDose('m1', 'd2');
+    expect(isSnoozeActive('m1', 'd2')).toBe(false);
+    const raw = JSON.parse(localStorage.getItem(SNOOZE_KEY) || '{}');
+    expect(raw['m1']).toBeUndefined();
+  });
+});

@@ -10,6 +10,7 @@ import {
   settleDoseChange,
   countDueAutoDoses,
   effectiveDaysLeft,
+  historicalDayDueUnits,
 } from './dateCalculations';
 import { consumeDose, settleAndAdjust } from './medActions';
 import type { Medication } from '../types';
@@ -352,10 +353,11 @@ describe('Phase 3 consumeDose multi-dose', () => {
 });
 
 describe('Phase 3B countDueAutoDoses / days left', () => {
-  it('countDueAutoDoses for multi is day-equivalent units/dayAmt', () => {
+  it('countDueAutoDoses for multi is integer due dose-event count', () => {
     const med = makeMed({ lastSyncDate: '2024-09-12', currentPills: 30 });
     const now = at('2024-09-12T15:00:00');
-    expect(countDueAutoDoses(med, now, '2024-09-12')).toBe(0.75);
+    // d1 + d2 due at 15:00 → 2 events (not fractional units/dayAmt)
+    expect(countDueAutoDoses(med, now, '2024-09-12')).toBe(2);
   });
 
   it('effectiveDaysLeft uses schedule total', () => {
@@ -378,3 +380,151 @@ describe('Phase 3B settleAndAdjust multi-dose', () => {
     expect(effectiveCurrentPills(updatedMed, '2024-09-12', now)).toBe(33);
   });
 });
+
+describe('Phase 3B BLOCKER — historical partial consumption (no double deduction)', () => {
+  it('Scenario A: partial day rolls into tomorrow deducts only unconsumed slots', () => {
+    // Day 1 Sep 12: d1+d2 manual, d3 not. Stock after = 37 from 40.
+    // lastSync stays yesterday-style after partial consumes.
+    const med = makeMed({
+      lastSyncDate: '2024-09-11',
+      currentPills: 37,
+      doseConsumption: { d1: '2024-09-12', d2: '2024-09-12' },
+      doseConsumptionHistory: {
+        d1: ['2024-09-12'],
+        d2: ['2024-09-12'],
+      },
+    });
+    // Day 2 Sep 13 10:00 — Sep 12 is historical
+    const now = at('2024-09-13T10:00:00');
+    const b = computeDueDoseBreakdown(med, now, '2024-09-13');
+    // Sep 12 historical: only d3 (1 unit) still due
+    expect(b.pastDueUnits).toBe(1);
+    // Today Sep 13 10:00: d1 due (2)
+    expect(b.todayDueUnits).toBe(2);
+    expect(b.fullDueUnits).toBe(3);
+    expect(effectiveCurrentPills(med, '2024-09-13', now)).toBe(34);
+  });
+
+  it('Scenario B: only d1 consumed historically → deduct d2+d3', () => {
+    const med = makeMed({
+      lastSyncDate: '2024-09-11',
+      currentPills: 38,
+      doseConsumption: { d1: '2024-09-12' },
+      doseConsumptionHistory: { d1: ['2024-09-12'] },
+    });
+    const now = at('2024-09-13T07:00:00');
+    const b = computeDueDoseBreakdown(med, now, '2024-09-13');
+    expect(b.pastDueUnits).toBe(2); // d2+d3
+    expect(b.todayDueUnits).toBe(0);
+    expect(effectiveCurrentPills(med, '2024-09-13', now)).toBe(36);
+  });
+
+  it('Scenario C: all doses consumed historically → 0 past due', () => {
+    const med = makeMed({
+      lastSyncDate: '2024-09-11',
+      currentPills: 36,
+      doseConsumption: {
+        d1: '2024-09-12',
+        d2: '2024-09-12',
+        d3: '2024-09-12',
+      },
+      doseConsumptionHistory: {
+        d1: ['2024-09-12'],
+        d2: ['2024-09-12'],
+        d3: ['2024-09-12'],
+      },
+      lastConsumedDate: '2024-09-12',
+    });
+    const now = at('2024-09-13T10:00:00');
+    const b = computeDueDoseBreakdown(med, now, '2024-09-13');
+    expect(b.pastDueUnits).toBe(0);
+  });
+
+  it('Scenario D: no recorded history → full schedule fallback', () => {
+    const med = makeMed({
+      lastSyncDate: '2024-09-11',
+      currentPills: 40,
+      // no doseConsumption / history
+    });
+    const now = at('2024-09-13T07:00:00');
+    const b = computeDueDoseBreakdown(med, now, '2024-09-13');
+    expect(b.pastDueUnits).toBe(4); // full Sep 12
+  });
+
+  it('Scenario E: consecutive partially-consumed days settled independently', () => {
+    // Day1 Sep 10: only d1; Day2 Sep 11: d1+d2; Day3 Sep 12: nothing
+    // lastSync Sep 9, today Sep 13 early
+    const med = makeMed({
+      lastSyncDate: '2024-09-09',
+      currentPills: 40,
+      doseConsumption: {
+        d1: '2024-09-11', // last
+        d2: '2024-09-11',
+      },
+      doseConsumptionHistory: {
+        d1: ['2024-09-10', '2024-09-11'],
+        d2: ['2024-09-11'],
+      },
+    });
+    const now = at('2024-09-13T07:00:00');
+    const b = computeDueDoseBreakdown(med, now, '2024-09-13');
+    // Sep 10: d2+d3 = 2
+    // Sep 11: d3 = 1
+    // Sep 12: full = 4
+    expect(b.betweenDays).toBe(3);
+    expect(b.pastDueUnits).toBe(2 + 1 + 4);
+    expect(b.todayDueUnits).toBe(0);
+  });
+
+  it('consumeDose writes history so later catch-up is correct', () => {
+    let med = makeMed({ lastSyncDate: '2024-09-12', currentPills: 40 });
+    const day1 = at('2024-09-12T10:00:00');
+    let r = consumeDose(med, 'manual', '2024-09-12', day1, 'd1');
+    med = r.updatedMed!;
+    r = consumeDose(med, 'manual', '2024-09-12', at('2024-09-12T15:00:00'), 'd2');
+    med = r.updatedMed!;
+    expect(med.currentPills).toBe(37);
+    expect(med.doseConsumptionHistory!.d1).toContain('2024-09-12');
+    expect(med.doseConsumptionHistory!.d2).toContain('2024-09-12');
+
+    // Next day
+    const day2 = at('2024-09-13T10:00:00');
+    const b = computeDueDoseBreakdown(med, day2, '2024-09-13');
+    expect(b.pastDueUnits).toBe(1); // only d3 from Sep 12
+    expect(effectiveCurrentPills(med, '2024-09-13', day2)).toBe(
+      med.currentPills - 1 - 2 // past d3 + today d1
+    );
+  });
+
+  it('pre-3B doseConsumption last-date alone still credits that day', () => {
+    // Only last-date map, no history field (migrated readers treat as single-date history)
+    const med = makeMed({
+      lastSyncDate: '2024-09-11',
+      currentPills: 38,
+      doseConsumption: { d1: '2024-09-12' },
+      // no doseConsumptionHistory
+    });
+    const now = at('2024-09-13T07:00:00');
+    expect(computeDueDoseBreakdown(med, now, '2024-09-13').pastDueUnits).toBe(2);
+  });
+
+  it('schedule amount edit does not rewrite historical consumption identity', () => {
+    const med = makeMed({
+      lastSyncDate: '2024-09-12',
+      doseConsumption: { d1: '2024-09-11' },
+      doseConsumptionHistory: { d1: ['2024-09-11'] },
+      doseSchedule: [
+        { id: 'd1', amount: 3, time: '10:00' }, // was 2 @ 08:00
+        { id: 'd2', amount: 1, time: '14:00' },
+        { id: 'd3', amount: 1, time: '21:00' },
+      ],
+      dailyDose: 5,
+    });
+    // History still marks d1 consumed on Sep 11 regardless of new amount
+    expect(isDoseConsumedOnDate(med, 'd1', '2024-09-11')).toBe(true);
+    // Historical settlement for Sep 11 uses CURRENT schedule amounts for
+    // unconsumed slots only; d1 skipped, d2+d3 = 2
+    expect(historicalDayDueUnits(med, '2024-09-11')).toBe(2);
+  });
+});
+

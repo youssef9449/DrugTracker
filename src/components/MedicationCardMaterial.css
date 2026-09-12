@@ -30,9 +30,7 @@
 
 /* Compact cards: remove the first-pass emoji and replace it with a unit-aware visual cue. */
 [id^="med-card-"][class*="border-r-2"]:has(.medication-menu-root)
-  > div:nth-child(2) > span:nth-child(4)::before,
-[id^="med-card-"][class*="border-r-2"]:has(.medication-menu-root)
-  > div:nth-child(2) > span:nth-child(6)::before {
+  > div:nth-child(2) > span:nth-child(4)::before {
   content: none !important;
 }
 

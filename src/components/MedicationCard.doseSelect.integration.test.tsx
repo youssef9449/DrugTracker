@@ -1,29 +1,70 @@
 /// <reference types="@testing-library/jest-dom/vitest" />
 /**
- * Phase 3A integration: MedicationCard Take Dose → SelectDoseModal → explicit doseId.
- * Mirrors App.tsx handleConsumeDose multi-dose branching without mounting full App.
+ * Phase 3A integration — real App wiring:
+ * MedicationCard → handleConsumeDose → SelectDoseModal → consumeDose(d2)
+ *
+ * Does NOT re-implement App multi-dose branching. Seeds localStorage the
+ * same way App hydrates, renders <App />, and asserts persisted state.
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { useState } from 'react';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
-import { MedicationCard } from './MedicationCard';
-import { SelectDoseModal } from './SelectDoseModal';
-import type { Medication } from '../types';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
+
+vi.mock('../native', () => ({
+  initNativeBridge: vi.fn(() => Promise.resolve()),
+  openAppSettings: vi.fn(() => Promise.resolve(false)),
+  registerBackButtonHandler: vi.fn(),
+  registerNotificationActionHandler: vi.fn(),
+  registerDoseReceivedHandler: vi.fn(),
+  registerAppResumeHandler: vi.fn(),
+  cleanupNativeListeners: vi.fn(() => Promise.resolve()),
+}));
+
+vi.mock('../utils/notifications', () => ({
+  requestNotificationPermission: vi.fn(() => Promise.resolve(true)),
+  sendMedicineAlert: vi.fn(),
+  sendCriticalStockAlert: vi.fn(() => Promise.resolve(true)),
+  sendTestAlertNotification: vi.fn(() => Promise.resolve()),
+  openNotificationSettings: vi.fn(),
+  getNotificationPermission: vi.fn(() => Promise.resolve('granted')),
+  getExactAlarmPermission: vi.fn(() => Promise.resolve('granted')),
+  openExactAlarmSettings: vi.fn(() => Promise.resolve(true)),
+  scheduleCriticalAlarm: vi.fn(() => Promise.resolve()),
+  cancelCriticalAlarm: vi.fn(() => Promise.resolve()),
+  verifyCriticalAlarmPending: vi.fn(() => Promise.resolve(false)),
+  criticalAlarmId: vi.fn((id: string) => id.length),
+  scheduleDoseReminder: vi.fn(() => Promise.resolve()),
+  cancelDoseReminder: vi.fn(() => Promise.resolve()),
+  cancelSnoozedDoseReminder: vi.fn(() => Promise.resolve()),
+  scheduleSnoozedDoseReminder: vi.fn(() => Promise.resolve()),
+  isDoseReminderTimeStillAhead: vi.fn(() => true),
+  LEGACY_DOSE_ID: 'legacy',
+}));
+
+vi.mock('../utils/sound', () => ({
+  playSuccessChime: vi.fn(),
+  stopAllSounds: vi.fn(),
+}));
+
+import App from '../App';
+import type { Medication, ConsumptionLog } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
+
+const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
+const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
 
 function makeMulti(overrides: Partial<Medication> = {}): Medication {
   return {
     id: 'med-multi',
-    name: 'Drug A',
+    name: 'Drug A Multi',
     currentPills: 30,
     dailyDose: 4,
     unit: 'قرص',
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: getTodayDateString(),
+    lastSyncDate: '2024-09-10',
     autoDeductEnabled: true,
-    reminderEnabled: true,
+    reminderEnabled: false,
     reminderTime: '08:00',
     doseSchedule: [
       { id: 'd1', amount: 2, time: '08:00' },
@@ -38,85 +79,67 @@ function makeMulti(overrides: Partial<Medication> = {}): Medication {
 function makeLegacy(overrides: Partial<Medication> = {}): Medication {
   return {
     id: 'med-legacy',
-    name: 'Legacy Med',
+    name: 'Legacy One Dose',
     currentPills: 10,
     dailyDose: 1,
     unit: 'قرص',
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: getTodayDateString(),
+    lastSyncDate: '2024-09-10',
     autoDeductEnabled: true,
-    reminderEnabled: true,
+    reminderEnabled: false,
     reminderTime: '20:00',
     ...overrides,
   };
 }
 
-/**
- * Same multi-dose decision as App.handleConsumeDose:
- * multi without doseId → open selector; otherwise forward to onFinal.
- */
-function ManualConsumeHarness({
-  medication,
-  onFinal,
-}: {
-  medication: Medication;
-  onFinal: (medicationId: string, doseId?: string) => void;
-}) {
-  const [selectDoseMed, setSelectDoseMed] = useState<Medication | null>(null);
-
-  const handleConsumeDose = (medicationId: string, doseId?: string) => {
-    const isMulti =
-      Array.isArray(medication.doseSchedule) && medication.doseSchedule.length > 1;
-    if (isMulti && !doseId) {
-      setSelectDoseMed(medication);
-      return;
-    }
-    const resolvedDoseId =
-      doseId ??
-      (Array.isArray(medication.doseSchedule) && medication.doseSchedule.length === 1
-        ? medication.doseSchedule[0].id
-        : undefined);
-    setSelectDoseMed(null);
-    onFinal(medicationId, resolvedDoseId);
-  };
-
-  const noop = () => {};
-
-  return (
-    <>
-      <MedicationCard
-        medication={medication}
-        onOpenRefill={noop}
-        onEdit={noop}
-        onDelete={noop}
-        onToggleAutoDeduct={noop}
-        onConsumeDose={handleConsumeDose}
-      />
-      <SelectDoseModal
-        isOpen={Boolean(selectDoseMed)}
-        medication={selectDoseMed}
-        onSelect={(medId, doseId) => handleConsumeDose(medId, doseId)}
-        onClose={() => setSelectDoseMed(null)}
-      />
-    </>
-  );
+function readMeds(): Medication[] {
+  const raw = localStorage.getItem(STORAGE_MEDS_KEY);
+  if (!raw) return [];
+  return JSON.parse(raw) as Medication[];
 }
 
-afterEach(() => cleanup());
+function readLogs(): ConsumptionLog[] {
+  const raw = localStorage.getItem(STORAGE_LOGS_KEY);
+  if (!raw) return [];
+  return JSON.parse(raw) as ConsumptionLog[];
+}
 
-describe('MedicationCard → SelectDoseModal integration (Phase 3A)', () => {
-  it('opens selector on Take Dose and selecting d2 passes doseId=d2 (not first slot)', () => {
-    const onFinal = vi.fn();
-    render(<ManualConsumeHarness medication={makeMulti()} onFinal={onFinal} />);
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
+  vi.clearAllMocks();
+  localStorage.clear();
+});
 
-    // Generic Take Dose — no doseId from the card.
-    const takeBtn = screen.getByTitle(/تناول جرعة/);
-    fireEvent.click(takeBtn);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
-    // Selector must open with all three slots.
-    expect(screen.getByText(/اختر الجرعة التي تناولتها/)).toBeInTheDocument();
+describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
+  it('Take Dose opens SelectDoseModal; selecting d2 consumes only d2 via App path', async () => {
+    localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeMulti()]));
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Drug A Multi')).toBeInTheDocument();
+    });
+
+    // Real card Take Dose → real handleConsumeDose (multi, no doseId) → selector
+    fireEvent.click(screen.getByTitle(/تناول جرعة/));
+
+    await waitFor(() => {
+      expect(screen.getByText(/اختر الجرعة التي تناولتها/)).toBeInTheDocument();
+    });
+
+    // Opening selector must not have written consumption yet.
+    expect(readMeds()[0]?.doseConsumption?.d2).toBeUndefined();
+    expect(readMeds()[0]?.doseConsumption?.d1).toBeUndefined();
+
     const doseButtons = screen
       .getAllByRole('button')
       .filter((b) => b.getAttribute('data-dose-id'));
@@ -126,35 +149,49 @@ describe('MedicationCard → SelectDoseModal integration (Phase 3A)', () => {
       'd3',
     ]);
 
-    // Explicitly pick non-first slot d2.
-    const d2 = doseButtons.find((b) => b.getAttribute('data-dose-id') === 'd2');
-    expect(d2).toBeTruthy();
-    fireEvent.click(d2!);
-
-    expect(onFinal).toHaveBeenCalledTimes(1);
-    expect(onFinal).toHaveBeenCalledWith('med-multi', 'd2');
-    // Never auto-selected d1.
-    expect(onFinal).not.toHaveBeenCalledWith('med-multi', 'd1');
-  });
-
-  it('does not call onFinal when Take Dose only opens the selector', () => {
-    const onFinal = vi.fn();
-    render(<ManualConsumeHarness medication={makeMulti()} onFinal={onFinal} />);
-    fireEvent.click(screen.getByTitle(/تناول جرعة/));
-    expect(onFinal).not.toHaveBeenCalled();
-    expect(screen.getByText(/اختر الجرعة التي تناولتها/)).toBeInTheDocument();
-  });
-
-  it('consumed slot is disabled; unconsumed slot still selectable', () => {
-    const today = getTodayDateString();
-    const onFinal = vi.fn();
-    render(
-      <ManualConsumeHarness
-        medication={makeMulti({ doseConsumption: { d1: today } })}
-        onFinal={onFinal}
-      />
+    // Explicit non-first slot
+    fireEvent.click(
+      doseButtons.find((b) => b.getAttribute('data-dose-id') === 'd2')!
     );
+
+    const today = getTodayDateString();
+    await waitFor(() => {
+      const meds = readMeds();
+      const med = meds.find((m) => m.id === 'med-multi');
+      expect(med?.doseConsumption?.d2).toBe(today);
+    });
+
+    const med = readMeds().find((m) => m.id === 'med-multi')!;
+    expect(med.doseConsumption?.d1).toBeUndefined();
+    expect(med.doseConsumption?.d3).toBeUndefined();
+    expect(med.doseConsumption?.d2).toBe(today);
+
+    await waitFor(() => {
+      const logs = readLogs();
+      const doseLog = logs.find(
+        (l) => l.type === 'dose_taken' && l.medicationId === 'med-multi'
+      );
+      expect(doseLog?.doseId).toBe('d2');
+    });
+  });
+
+  it('consumed slot stays disabled; another slot can still be selected', async () => {
+    const today = getTodayDateString();
+    localStorage.setItem(
+      STORAGE_MEDS_KEY,
+      JSON.stringify([makeMulti({ doseConsumption: { d1: today } })])
+    );
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Drug A Multi')).toBeInTheDocument();
+    });
+
     fireEvent.click(screen.getByTitle(/تناول جرعة/));
+    await waitFor(() => {
+      expect(screen.getByText(/اختر الجرعة التي تناولتها/)).toBeInTheDocument();
+    });
 
     const d1 = screen
       .getAllByRole('button')
@@ -164,58 +201,115 @@ describe('MedicationCard → SelectDoseModal integration (Phase 3A)', () => {
       .find((b) => b.getAttribute('data-dose-id') === 'd2');
     expect(d1).toBeDisabled();
     fireEvent.click(d1!);
-    expect(onFinal).not.toHaveBeenCalled();
 
-    expect(d2).not.toBeDisabled();
+    // Still only d1 marked consumed
+    expect(readMeds()[0]?.doseConsumption?.d2).toBeUndefined();
+
     fireEvent.click(d2!);
-    expect(onFinal).toHaveBeenCalledWith('med-multi', 'd2');
+    await waitFor(() => {
+      expect(readMeds()[0]?.doseConsumption?.d2).toBe(today);
+    });
+    expect(readMeds()[0]?.doseConsumption?.d1).toBe(today);
   });
 
-  it('shows all-consumed state and does not offer selectable slots', () => {
+  it('closing the selector without selecting does not consume', async () => {
+    localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeMulti()]));
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Drug A Multi')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle(/تناول جرعة/));
+    await waitFor(() => {
+      expect(screen.getByText(/اختر الجرعة التي تناولتها/)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('إغلاق'));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/اختر الجرعة التي تناولتها/)).toBeNull();
+    });
+
+    expect(readMeds()[0]?.doseConsumption).toBeUndefined();
+    expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(0);
+  });
+
+  it('legacy medication Take Dose consumes without opening the selector', async () => {
+    localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeLegacy()]));
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Legacy One Dose')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle(/تناول جرعة/));
+
+    // No multi-dose selector
+    expect(screen.queryByText(/اختر الجرعة التي تناولتها/)).toBeNull();
+
     const today = getTodayDateString();
-    const onFinal = vi.fn();
-    render(
-      <ManualConsumeHarness
-        medication={makeMulti({
-          doseConsumption: { d1: today, d2: today, d3: today },
-        })}
-        onFinal={onFinal}
-      />
+    await waitFor(() => {
+      const med = readMeds().find((m) => m.id === 'med-legacy');
+      expect(med?.lastConsumedDate).toBe(today);
+    });
+
+    const logs = readLogs().filter((l) => l.type === 'dose_taken');
+    expect(logs.length).toBeGreaterThan(0);
+    expect(logs[0].doseId).toBeUndefined();
+  });
+
+  it('single-slot schedule resolves that doseId without showing the selector', async () => {
+    localStorage.setItem(
+      STORAGE_MEDS_KEY,
+      JSON.stringify([
+        makeMulti({
+          name: 'Single Slot Med',
+          doseSchedule: [{ id: 'only', amount: 1, time: '09:00' }],
+          dosesPerDay: 1,
+          dailyDose: 1,
+        }),
+      ])
     );
-    // Card shows completed badge (no take button) when all slots consumed.
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Single Slot Med')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle(/تناول جرعة/));
+    expect(screen.queryByText(/اختر الجرعة التي تناولتها/)).toBeNull();
+
+    const today = getTodayDateString();
+    await waitFor(() => {
+      const med = readMeds().find((m) => m.name === 'Single Slot Med');
+      expect(med?.doseConsumption?.only).toBe(today);
+    });
+
+    const log = readLogs().find((l) => l.type === 'dose_taken');
+    expect(log?.doseId).toBe('only');
+  });
+
+  it('all slots consumed shows completed badge and no take action', async () => {
+    const today = getTodayDateString();
+    localStorage.setItem(
+      STORAGE_MEDS_KEY,
+      JSON.stringify([
+        makeMulti({
+          doseConsumption: { d1: today, d2: today, d3: today },
+        }),
+      ])
+    );
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Drug A Multi')).toBeInTheDocument();
+    });
+
     expect(screen.queryByTitle(/^تناول جرعة/)).toBeNull();
     expect(screen.getByTitle(/تم تناول جرعة اليوم/)).toBeInTheDocument();
-    expect(onFinal).not.toHaveBeenCalled();
-  });
-
-  it('legacy medication Take Dose calls onFinal without opening selector', () => {
-    const onFinal = vi.fn();
-    render(<ManualConsumeHarness medication={makeLegacy()} onFinal={onFinal} />);
-    fireEvent.click(screen.getByTitle(/تناول جرعة/));
-    expect(screen.queryByText(/اختر الجرعة التي تناولتها/)).toBeNull();
-    expect(onFinal).toHaveBeenCalledTimes(1);
-    expect(onFinal).toHaveBeenCalledWith('med-legacy', undefined);
-  });
-
-  it('single-dose schedule passes the only doseId without selector', () => {
-    const onFinal = vi.fn();
-    const med = makeMulti({
-      doseSchedule: [{ id: 'only', amount: 1, time: '09:00' }],
-      dosesPerDay: 1,
-      dailyDose: 1,
-    });
-    render(<ManualConsumeHarness medication={med} onFinal={onFinal} />);
-    fireEvent.click(screen.getByTitle(/تناول جرعة/));
-    expect(screen.queryByText(/اختر الجرعة التي تناولتها/)).toBeNull();
-    expect(onFinal).toHaveBeenCalledWith('med-multi', 'only');
-  });
-
-  it('closing the selector without selecting does not consume', () => {
-    const onFinal = vi.fn();
-    render(<ManualConsumeHarness medication={makeMulti()} onFinal={onFinal} />);
-    fireEvent.click(screen.getByTitle(/تناول جرعة/));
-    expect(screen.getByText(/اختر الجرعة التي تناولتها/)).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText('إغلاق'));
-    expect(onFinal).not.toHaveBeenCalled();
   });
 });

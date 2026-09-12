@@ -151,6 +151,12 @@ export default function App() {
   // been dropped while the app was backgrounded. See
   // useCriticalAlarmScheduler's RECONCILIATION section.
   const [criticalAlarmResumeTick, setCriticalAlarmResumeTick] = useState(0);
+  // Bumped on every app resume (appStateChange) so the dose-reminder
+  // scheduler re-runs its CONSUMPTION SUPPRESSION: an already-consumed
+  // dose (lastConsumedDate === today) can never produce today's
+  // reminder, even if a previous suppression attempt failed while the
+  // process was backgrounded/killed. Mirrors criticalAlarmResumeTick.
+  const [doseAlarmResumeTick, setDoseAlarmResumeTick] = useState(0);
   const [globalAutoDeductEnabled, setGlobalAutoDeductEnabled] = useState<boolean>(true);
 
   const [isPhoneFrame, setIsPhoneFrame] = useState(true);
@@ -549,6 +555,7 @@ export default function App() {
     hydrated,
     isFirstRun,
     exactAlarmEnabled,
+    resumeTick: doseAlarmResumeTick,
   });
 
   const handleRestoreDose = (medicationId: string, reason: string): boolean => {
@@ -1059,11 +1066,18 @@ export default function App() {
   // verifies each matching claim against the platform's actual pending
   // notifications, re-arming any alarm the OS dropped (exact-alarm
   // permission revoked, scheduled notification removed, …).
+  //
+  // …and the DOSE reminders: every resume bumps doseAlarmResumeTick →
+  // useDoseReminderScheduler's consumption-suppression effect re-runs,
+  // so a dose consumed today (manually or via the notification action)
+  // can never produce today's reminder after a resume — repairing any
+  // suppression attempt that failed.
   // ─────────────────────────────────────────────────────────────
   useEffect(() => {
     registerAppResumeHandler((isActive) => {
       if (isActive) {
         setCriticalAlarmResumeTick((tick) => tick + 1);
+        setDoseAlarmResumeTick((tick) => tick + 1);
         getExactAlarmPermission()
           .then((state) => {
             setExactAlarmEnabled(state === 'granted');

@@ -7,7 +7,9 @@ import { Modal } from './ui/Modal';
 interface DoseAlarmModalProps {
   isOpen: boolean;
   medication: Medication | null;
-  onTakeDose: (med: Medication) => void;
+  /** Dose slot that triggered this alarm (Phase 2/3 notification extra). */
+  doseId?: string | null;
+  onTakeDose: (med: Medication, doseId?: string) => void;
   onSnooze: (med: Medication) => void;
   onDismiss: () => void;
 }
@@ -15,14 +17,20 @@ interface DoseAlarmModalProps {
 export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
   isOpen,
   medication,
+  doseId,
   onTakeDose,
   onSnooze,
   onDismiss,
 }) => {
-  // The in-app chime was removed — the Android notification channel plays
-  // the single native sound. This component only renders the modal UI.
-  // The Modal wrapper handles role="dialog"/aria-modal, ESC-to-close,
-  // focus trap, and focus restoration (#67).
+  const dose =
+    medication && doseId && Array.isArray(medication.doseSchedule)
+      ? medication.doseSchedule.find((d) => d.id === doseId)
+      : undefined;
+  const displayTime =
+    dose?.time ?? medication?.reminderTime;
+  const displayAmount = dose?.amount ?? medication?.dailyDose;
+  const unit = medication?.unit ?? 'قرص';
+
   return (
     <Modal
       isOpen={isOpen && Boolean(medication)}
@@ -53,8 +61,8 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
           <span className="inline-flex items-center gap-1 bg-amber-400/20 text-amber-200 border border-amber-300/30 px-3 py-0.5 rounded-full text-xs font-bold mb-1">
             <Clock className="w-3.5 h-3.5 text-amber-300" />
             <span>
-              {medication.reminderTime
-                ? `موعد الساعة: ${formatTimeArabic(medication.reminderTime)}`
+              {displayTime
+                ? `موعد الساعة: ${formatTimeArabic(displayTime)}`
                 : 'تنبيه موعد الجرعة'}
             </span>
           </span>
@@ -69,20 +77,21 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
 
             <div className="inline-flex items-center gap-1.5 bg-teal-100/80 text-teal-900 border border-teal-200 px-3 py-1 rounded-xl text-sm font-extrabold mt-1">
               <span>الجرعة المطلوبة:</span>
-              <span className="font-mono text-base">{medication.dailyDose}</span>
-              <span>{medication.unit}</span>
+              <span className="font-mono text-base">{displayAmount}</span>
+              <span>{unit}</span>
             </div>
 
             <div className="text-[11px] text-slate-500 pt-1">
-              المخزون المتوفر لديك حالياً: {medication ? effectiveCurrentPills(medication) : 0} {medication?.unit}
+              المخزون المتوفر لديك حالياً: {effectiveCurrentPills(medication)} {unit}
             </div>
           </div>
 
           <div className="space-y-2 pt-1">
             <button
               type="button"
-              onClick={() => onTakeDose(medication)}
+              onClick={() => onTakeDose(medication, doseId ?? undefined)}
               className="w-full py-3 px-4 bg-teal-700 hover:bg-teal-800 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-sm transition active:scale-98"
+              data-testid="alarm-take-dose"
             >
               <Check className="w-4 h-4" />
               <span>تناولت الجرعة الآن</span>

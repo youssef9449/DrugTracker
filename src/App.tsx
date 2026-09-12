@@ -1231,13 +1231,23 @@ export default function App() {
     return map;
   }, [logs]);
 
+  // Realtime search: filters on every keystroke (searchQuery updates immediately
+  // from the controlled input onChange/onInput — no debounce).
   const filteredMedications = useMemo(() => {
+    const qRaw = searchQuery.trim().toLowerCase();
+    // Light Arabic normalization so typing أ/ا/إ still matches names stored with أ
+    const normalizeAr = (s: string) =>
+      s
+        .toLowerCase()
+        .replace(/[أإآٱ]/g, 'ا')
+        .replace(/ة/g, 'ه')
+        .replace(/ى/g, 'ي');
+    const q = qRaw ? normalizeAr(qRaw) : '';
     return medicationsWithStatus.filter(({ med, statusInfo }) => {
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const matchName = med.name.toLowerCase().includes(q);
-        const matchCat = med.category?.toLowerCase().includes(q) || false;
-        const matchNotes = med.notes?.toLowerCase().includes(q) || false;
+      if (q) {
+        const matchName = normalizeAr(med.name).includes(q);
+        const matchCat = med.category ? normalizeAr(med.category).includes(q) : false;
+        const matchNotes = med.notes ? normalizeAr(med.notes).includes(q) : false;
         if (!matchName && !matchCat && !matchNotes) return false;
       }
       const { status } = statusInfo;
@@ -1406,9 +1416,13 @@ export default function App() {
                         onChange={() => {
                           const next = !isCompactView;
                           setIsCompactView(next);
-                          showToast(next ? 'تم تفعيل العرض المختصر' : 'تم تفعيل العرض التفصيلي');
+                          showToast(
+                            next
+                              ? 'تم تفعيل العرض المختصر (شبكة)'
+                              : 'تم تفعيل العرض التفصيلي'
+                          );
                         }}
-                        label="تبديل العرض بين المختصر والتفصيلي"
+                        label="تبديل العرض بين المختصر (شبكة) والتفصيلي"
                         size="sm"
                         color="teal"
                       />
@@ -1421,8 +1435,15 @@ export default function App() {
                 <LowStockBanner medicationsWithStatus={medicationsWithStatus} onNavigateToShopping={() => setActiveTab('shopping')} />
               )}
 
-              <div className={`p-4 ${isCompactView && filter === 'all' ? 'space-y-2' : 'space-y-3'}`}>
+              <div
+                className={
+                  isCompactView && filter === 'all'
+                    ? 'p-3 grid grid-cols-2 gap-2 sm:grid-cols-3'
+                    : 'p-4 space-y-3'
+                }
+              >
                 {filteredMedications.length === 0 ? (
+                  <div className="col-span-full">
                   <EmptyState
                     hasSearch={Boolean(searchQuery.trim())}
                     onClearSearch={() => setSearchQuery('')}
@@ -1430,6 +1451,7 @@ export default function App() {
                     onFilterChange={setFilter}
                     onOpenAddModal={openAdd}
                   />
+                  </div>
                 ) : (
                   filteredMedications.map((med) => (
                     <MedicationCard

@@ -812,7 +812,7 @@ export default function App() {
   };
 
 
-  /** Drop doseConsumption entries whose doseId is no longer on the schedule. */
+  /** Drop doseConsumption / history entries whose doseId is no longer on the schedule. */
   const pruneDoseConsumption = (
     medData: Omit<Medication, 'id' | 'createdAt'>,
     existing?: Medication
@@ -824,12 +824,32 @@ export default function App() {
     }
     const valid = new Set(schedule.map((d) => d.id));
     const prev = medData.doseConsumption ?? existing?.doseConsumption;
-    if (!prev) return medData;
-    const next: Record<string, string> = {};
-    for (const [id, date] of Object.entries(prev)) {
-      if (valid.has(id)) next[id] = date;
+    const prevHist =
+      medData.doseConsumptionHistory ?? existing?.doseConsumptionHistory;
+    let changed = false;
+    let next = prev;
+    if (prev) {
+      next = {};
+      for (const [id, date] of Object.entries(prev)) {
+        if (valid.has(id)) next[id] = date;
+        else changed = true;
+      }
+      if (Object.keys(next).length !== Object.keys(prev).length) changed = true;
     }
-    return { ...medData, doseConsumption: next };
+    let nextHist = prevHist;
+    if (prevHist) {
+      nextHist = {};
+      for (const [id, dates] of Object.entries(prevHist)) {
+        if (valid.has(id)) nextHist[id] = dates;
+        else changed = true;
+      }
+    }
+    if (!changed && next === prev && nextHist === prevHist) return medData;
+    return {
+      ...medData,
+      ...(next ? { doseConsumption: next } : {}),
+      ...(nextHist ? { doseConsumptionHistory: nextHist } : {}),
+    };
   };
 
   const handleSaveMedication = (medData: Omit<Medication, 'id' | 'createdAt'>, editId?: string) => {

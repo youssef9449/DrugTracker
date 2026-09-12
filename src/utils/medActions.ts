@@ -4,6 +4,8 @@ import {
   effectiveCurrentPills,
   computeDueDoseBreakdown,
   mutationSettlementLastSyncDate,
+  recordDoseConsumed,
+  isDoseConsumedOnDate,
 } from './dateCalculations';
 import { generateId } from './id';
 
@@ -127,12 +129,12 @@ export function consumeDose(
       : undefined;
     if (!target) {
       // Fallback: earliest unconsumed slot for today (stable order).
-      target = schedule.find((d) => med.doseConsumption?.[d.id] !== todayStr);
+      target = schedule.find((d) => !isDoseConsumedOnDate(med, d.id, todayStr));
     }
     if (!target) {
       return { updatedMed: null, doseAmount: 0, log: null };
     }
-    if (med.doseConsumption?.[target.id] === todayStr) {
+    if (isDoseConsumedOnDate(med, target.id, todayStr)) {
       return { updatedMed: null, doseAmount: 0, log: null };
     }
     targetDoseId = target.id;
@@ -151,17 +153,28 @@ export function consumeDose(
   }
   const newSnapshot = Math.max(0, settleBase - doseAmount);
 
-  const doseConsumption: Record<string, string> = {
-    ...(med.doseConsumption ?? {}),
-  };
+  let doseConsumption = med.doseConsumption;
+  let doseConsumptionHistory = med.doseConsumptionHistory;
   if (multi && targetDoseId) {
-    doseConsumption[targetDoseId] = todayStr;
+    const recorded = recordDoseConsumed(med, targetDoseId, todayStr);
+    doseConsumption = recorded.doseConsumption;
+    doseConsumptionHistory = recorded.doseConsumptionHistory;
   }
 
   const allSlotsConsumedToday =
     multi &&
     !!med.doseSchedule &&
-    med.doseSchedule.every((d) => doseConsumption[d.id] === todayStr);
+    med.doseSchedule.every((d) =>
+      isDoseConsumedOnDate(
+        {
+          ...med,
+          doseConsumption,
+          doseConsumptionHistory,
+        },
+        d.id,
+        todayStr
+      )
+    );
 
   const lastConsumedDate = !multi || allSlotsConsumedToday ? todayStr : med.lastConsumedDate;
 
@@ -178,7 +191,9 @@ export function consumeDose(
     currentPills: newSnapshot,
     lastConsumedDate,
     lastSyncDate,
-    ...(multi ? { doseConsumption } : {}),
+    ...(multi
+      ? { doseConsumption, doseConsumptionHistory }
+      : {}),
   };
   const description =
     source === 'alarm'

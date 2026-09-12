@@ -364,3 +364,15 @@ describe('doseReminderAlarmIdForDose — multi-dose identity (Phase 2)', () => {
     expect(id).toBeLessThan(7_000_000);
   });
 });
+
+describe('Phase 3B snooze notification ids', () => {
+  it('multi-dose snooze ids differ per dose', () => {
+    const a = snoozeDoseReminderId('med-x', 'd1');
+    const b = snoozeDoseReminderId('med-x', 'd2');
+    const leg = snoozeDoseReminderId('med-x', LEGACY_DOSE_ID);
+    const only = snoozeDoseReminderId('med-x');
+    expect(a).not.toBe(b);
+    expect(a).not.toBe(leg);
+    expect(leg).toBe(only);
+  });
+});

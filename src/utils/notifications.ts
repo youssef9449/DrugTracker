@@ -1010,12 +1010,11 @@ export async function cancelSnoozedDoseReminder(
     const ids: { id: number }[] = [
       { id: snoozeDoseReminderId(medId, doseId) },
     ];
-    // Always also clear the historical med-only / immediate-dose ids so a
-    // pre-Phase-3B snooze cannot linger after a per-dose cancel.
-    if (!doseId || doseId === LEGACY_DOSE_ID) {
-      ids.push({ id: snoozeDoseReminderId(medId) });
-      ids.push({ id: notificationId('dose', medId) });
-    }
+    // Always clear historical med-only / immediate-dose ids so a
+    // pre-Phase-3B snooze cannot linger (including when cancelling a
+    // multi-dose slot that may share an old med-level pending notif).
+    ids.push({ id: snoozeDoseReminderId(medId) });
+    ids.push({ id: notificationId('dose', medId) });
     await LocalNotifications.cancel({ notifications: ids });
   } catch (err) {
     console.warn('[notifications] cancelSnoozedDoseReminder failed:', err);

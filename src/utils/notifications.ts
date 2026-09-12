@@ -1047,6 +1047,50 @@ export async function scheduleSnoozedDoseReminder(
 }
 
 /**
+ * Optional behavior flags for {@link scheduleDoseReminder}.
+ */
+export interface ScheduleDoseReminderOptions {
+  /**
+   * Start the recurring schedule from TOMORROW even when today's HH:MM
+   * is still in the future.
+   *
+   * Used when today's dose has already been consumed (manual card action
+   * or the notification's take-dose action — both set
+   * `lastConsumedDate = today`): the pending recurring alarm is
+   * cancelled and re-armed from tomorrow, so the already-taken dose can
+   * never produce today's reminder. Tomorrow — and every later day —
+   * the reminder fires normally at reminderTime.
+   */
+  skipToday?: boolean;
+}
+
+/**
+ * Whether today's occurrence of the given HH:MM reminder time is still
+ * in the future. Uses the SAME boundary as {@link scheduleDoseReminder}
+ * (HH:MM:00.000 strictly after `now`), so "still ahead" means exactly
+ * "the pending recurring alarm would still fire today".
+ *
+ * Used by useDoseReminderScheduler to decide whether a consumed dose
+ * needs today's recurring alarm suppressed:
+ *   - still ahead  → cancel the pending alarm + re-arm from tomorrow.
+ *   - already past → the alarm fired (or was suppressed); a fired
+ *     notification is never retracted, and the plugin re-armed the
+ *     recurring alarm for tomorrow by itself.
+ */
+export function isDoseReminderTimeStillAhead(
+  reminderTime: string,
+  now: Date = new Date()
+): boolean {
+  const parts = reminderTime.split(':').map((n) => parseInt(n, 10));
+  const [hour, minute] = parts;
+  if (parts.length < 2 || Number.isNaN(hour) || Number.isNaN(minute)) return false;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return false;
+  const todayAt = new Date(now);
+  todayAt.setHours(hour, minute, 0, 0);
+  return todayAt.getTime() > now.getTime();
+}
+
+/**
  * Schedule a recurring daily dose-reminder notification at the given
  * HH:MM (24-hour) time.
  *
@@ -1055,6 +1099,11 @@ export async function scheduleSnoozedDoseReminder(
  * notification via LocalNotifications. With `repeats: true` +
  * `every: 'day'`, Android's AlarmManager re-arms it automatically
  * every 24 hours at the same time — the app doesn't need to be open.
+ *
+ * `options.skipToday` forces the first occurrence to TOMORROW even when
+ * today's HH:MM is still ahead — used when today's dose was already
+ * consumed, so the re-armed recurring alarm can never fire for the
+ * already-taken dose today.
  *
  * `allowWhileIdle: true` lets the alarm fire even in Doze mode.
  *
@@ -1067,6 +1116,7 @@ export async function scheduleDoseReminder(
   reminderTime: string,
   dailyDose: number,
   unit: string,
+  options?: ScheduleDoseReminderOptions,
 ): Promise<void> {
   // Validate the HH:MM string and compute the next fire Date.
   const parts = reminderTime.split(':').map((n) => parseInt(n, 10));
@@ -1077,8 +1127,10 @@ export async function scheduleDoseReminder(
   const now = new Date();
   const fireToday = new Date();
   fireToday.setHours(hour, minute, 0, 0);
-  // If today's fire time already passed, schedule for tomorrow.
-  if (fireToday.getTime() <= now.getTime()) {
+  // Move to tomorrow when today's fire time already passed, or when the
+  // caller asked to skip today (today's dose was already consumed).
+  // Exactly ONE increment in either case — never two.
+  if (fireToday.getTime() <= now.getTime() || options?.skipToday === true) {
     fireToday.setDate(fireToday.getDate() + 1);
   }
 
@@ -1125,6 +1177,10 @@ export async function scheduleDoseReminder(
   }
 
   // Web fallback: no persistent recurring scheduling — fire immediately.
+  // With skipToday there is nothing to remind about today (the dose was
+  // already consumed), so the immediate fallback is skipped entirely —
+  // a consumed dose must not produce today's web reminder either.
+  if (options?.skipToday === true) return;
   scheduleWebNotification(title, body);
 }
 

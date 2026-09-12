@@ -22,6 +22,7 @@ vi.mock('../utils/notifications', async () => {
 });
 
 import { scheduleSnoozedDoseReminder } from '../utils/notifications';
+import { clearSnoozedDoseForMed } from '../utils/doseReminderStorage';
 
 /** Build a medication with a reminder enabled at the given time. */
 function makeMed(overrides: Partial<Medication> = {}): Medication {
@@ -138,6 +139,43 @@ describe('useDoseReminders', () => {
       expect(result.current.alarmingMedication).toBeNull();
     });
 
+    it('does NOT open when today\u2019s dose was already consumed (manual or alarm-action consumption)', () => {
+      const med = makeMed({
+        id: 'med-consumed-today',
+        lastConsumedDate: getTodayDateString(),
+      });
+      const { result } = renderHook(() =>
+        useDoseReminders(defaultOpts({ medications: [med] }))
+      );
+
+      act(() => {
+        result.current.openAlarm('med-consumed-today');
+      });
+
+      // The alarm modal must never ask the user to take an
+      // already-taken dose — even if the native alarm could not be
+      // suppressed (foreground safety net behind the scheduler).
+      expect(result.current.alarmingMedication).toBeNull();
+    });
+
+    it('still opens when the dose was consumed YESTERDAY (guard is current-calendar-day based)', () => {
+      const med = makeMed({
+        id: 'med-consumed-yesterday',
+        lastConsumedDate: '2024-09-09', // yesterday (system time 2024-09-10)
+      });
+      const { result } = renderHook(() =>
+        useDoseReminders(defaultOpts({ medications: [med] }))
+      );
+
+      act(() => {
+        result.current.openAlarm('med-consumed-yesterday');
+      });
+
+      expect(result.current.alarmingMedication).toEqual(
+        expect.objectContaining({ id: 'med-consumed-yesterday' })
+      );
+    });
+
     it('dismissAlarm writes FIRED_KEY so the reminder does not re-fire today', () => {
       const med = makeMed({ id: 'med-dismiss' });
       const { result } = renderHook(() =>
@@ -230,6 +268,84 @@ describe('useDoseReminders', () => {
         '09:00',
         15
       );
+    });
+
+    it('legitimate snooze flow is intact: fire → snooze → dose NOT taken → re-fire opens the modal again', () => {
+      const med = makeMed({ id: 'med-snooze-legit', reminderTime: '09:00' });
+      const { result } = renderHook(() =>
+        useDoseReminders(defaultOpts({ medications: [med] }))
+      );
+
+      // Reminder fires (foreground) → modal opens.
+      act(() => {
+        result.current.openAlarm('med-snooze-legit');
+      });
+      expect(result.current.alarmingMedication).toEqual(
+        expect.objectContaining({ id: 'med-snooze-legit' })
+      );
+
+      // User snoozes.
+      act(() => {
+        result.current.snoozeAlarm(med, 10);
+      });
+      expect(result.current.alarmingMedication).toBeNull();
+
+      // Snoozed one-shot fires 10 minutes later — dose still NOT taken
+      // → the modal must open again (the consumed-today guard must not
+      // interfere with legitimate snoozes).
+      act(() => {
+        vi.setSystemTime(new Date('2024-09-10T12:10:00Z'));
+        result.current.openAlarm('med-snooze-legit');
+      });
+      expect(result.current.alarmingMedication).toEqual(
+        expect.objectContaining({ id: 'med-snooze-legit' })
+      );
+    });
+
+    it('snoozed reminder for an already-consumed dose does NOT reopen the modal (consumed-today guard)', () => {
+      // The user snoozed, then took the dose manually before the snooze
+      // fired; even if the native cancellation of the snoozed one-shot
+      // failed, the modal must not ask for the dose again.
+      const med = makeMed({
+        id: 'med-snooze-taken',
+        reminderTime: '09:00',
+        lastConsumedDate: getTodayDateString(),
+      });
+      const { result } = renderHook(() =>
+        useDoseReminders(defaultOpts({ medications: [med] }))
+      );
+
+      act(() => {
+        vi.setSystemTime(new Date('2024-09-10T12:10:00Z'));
+        result.current.openAlarm('med-snooze-taken');
+      });
+
+      expect(result.current.alarmingMedication).toBeNull();
+    });
+  });
+
+  describe('clearSnoozedDoseForMed', () => {
+    it('removes the persisted snooze marker for the medication', () => {
+      const SNOOZE_KEY = 'android_med_tracker_snooze_v1';
+      localStorage.setItem(
+        SNOOZE_KEY,
+        JSON.stringify({
+          'med-a': Date.now() + 60_000,
+          'med-b': Date.now() + 60_000,
+        })
+      );
+
+      clearSnoozedDoseForMed('med-a');
+
+      const snooze = JSON.parse(
+        localStorage.getItem(SNOOZE_KEY) || '{}'
+      ) as Record<string, number>;
+      expect(snooze['med-a']).toBeUndefined();
+      expect(snooze['med-b']).toBeDefined();
+    });
+
+    it('is a no-op when no marker exists', () => {
+      expect(() => clearSnoozedDoseForMed('med-none')).not.toThrow();
     });
   });
 });

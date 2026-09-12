@@ -790,6 +790,8 @@ describe('useDoseReminderScheduler — multi-dose (Phase 2)', () => {
     );
     await flushUntil(() => mocks.schedule.mock.calls.length >= 3);
     mocks.cancel.mockClear();
+    mocks.cancelSnoozed.mockClear();
+    mocks.schedule.mockClear();
 
     const shrunk = {
       ...med,
@@ -802,7 +804,21 @@ describe('useDoseReminderScheduler — multi-dose (Phase 2)', () => {
     rerender({ medications: [shrunk] });
     await flushUntil(() => mocks.cancel.mock.calls.some((c) => c[0] === 'med-rm' && c[1] === 'b'));
 
-    expect(mocks.cancel).toHaveBeenCalledWith('med-rm', 'b');
+    // Removed dose cancelled exactly once (no duplicate cancelSlot path).
+    const cancelB = mocks.cancel.mock.calls.filter(
+      (c) => c[0] === 'med-rm' && c[1] === 'b'
+    );
+    expect(cancelB).toHaveLength(1);
+
+    const cancelSnoozedB = mocks.cancelSnoozed.mock.calls.filter(
+      (c) => c[0] === 'med-rm' && c[1] === 'b'
+    );
+    expect(cancelSnoozedB).toHaveLength(1);
+
+    // Siblings still rescheduled; removed dose is not.
+    expect(mocks.schedule.mock.calls.some((c) => c[5]?.doseId === 'a')).toBe(true);
+    expect(mocks.schedule.mock.calls.some((c) => c[5]?.doseId === 'c')).toBe(true);
+    expect(mocks.schedule.mock.calls.some((c) => c[5]?.doseId === 'b')).toBe(false);
   });
 
   it('reconciles when a dose time changes (same dose id)', async () => {

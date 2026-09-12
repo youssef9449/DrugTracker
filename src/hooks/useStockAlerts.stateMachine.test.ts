@@ -7,6 +7,7 @@ import { getTodayDateString } from '../utils/dateCalculations';
 import {
   CRITICAL_TRANSITION_STORAGE_KEY,
   SCHEDULED_CRITICAL_STORAGE_KEY,
+  CRITICAL_OWNERSHIP_STORAGE_KEY,
 } from '../utils/criticalTransitions';
 
 vi.mock('../utils/notifications', () => ({
@@ -14,9 +15,10 @@ vi.mock('../utils/notifications', () => ({
   // Default: no notification is visible in the drawer (web-like / no evidence).
   getDeliveredNotificationIds: vi.fn(() => Promise.resolve(new Set<number>())),
   criticalAlarmId: vi.fn((id: string) => id.length),
+  cancelCriticalAlarm: vi.fn(() => Promise.resolve()),
 }));
 
-import { sendCriticalStockAlert, getDeliveredNotificationIds, criticalAlarmId } from '../utils/notifications';
+import { sendCriticalStockAlert, getDeliveredNotificationIds, criticalAlarmId, cancelCriticalAlarm } from '../utils/notifications';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
   return {
@@ -378,6 +380,55 @@ describe('useStockAlerts — Scheduler interaction', () => {
     expect(scheduled['med-state-1'].transitionKey).toBe(transitions['med-state-1'].transitionKey);
   });
 
+  it('foreground consumption CANCELS the armed native critical alarm (self-contained consumption)', () => {
+    // A pending future alarm was armed by the scheduler while the med
+    // was sufficient. The med crosses critical EARLIER than projected
+    // while the app is open — possibly on a render where NO alarm-
+    // relevant med field changed (e.g. the calendar advanced across
+    // midnight), in which case the scheduler's criticalSignature is
+    // unchanged, its effect never re-runs, and its cross-session
+    // staleness cancel would never fire. The foreground consumption
+    // must therefore cancel the armed alarm HERE: the med is critical
+    // (the scheduler never arms for critical meds), so ANY armed alarm
+    // for it can only ever fire a SECOND user-facing notification for
+    // the episode whose notification was just consumed.
+    localStorageStore[SCHEDULED_CRITICAL_STORAGE_KEY] = JSON.stringify({
+      'med-state-1': {
+        transitionKey: '',
+        alarmTime: Date.now() + 5 * 86400000,
+        status: 'SCHEDULED',
+      },
+    });
+
+    renderHook(({ medications }) => useAlerts({ medications }), {
+      initialProps: { medications: [makeMed({ currentPills: 2 })] as Medication[] },
+    });
+
+    expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
+    expect(cancelCriticalAlarm).toHaveBeenCalledWith('med-state-1');
+    expect(readTransitions()['med-state-1'].notificationState).toBe('SENT');
+    // The claim was neutralized synchronously: no valid SCHEDULED claim
+    // survives the consumption even if the native cancel races.
+    expect(readScheduled()['med-state-1'].status).toBe('NOT_SCHEDULED');
+  });
+
+  it('foreground consumption does NOT cancel when nothing was consumed (no spurious cancels)', () => {
+    // Re-renders / already-SENT episodes must not produce cancel calls.
+    const med = makeMed({ currentPills: 2 });
+    const { rerender } = renderHook(({ medications }) => useAlerts({ medications }), {
+      initialProps: { medications: [med] as Medication[] },
+    });
+    expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
+    expect(cancelCriticalAlarm).toHaveBeenCalledTimes(1);
+
+    rerender({ medications: [makeMed({ currentPills: 2 })] as Medication[] });
+    rerender({ medications: [makeMed({ currentPills: 2 })] as Medication[] });
+
+    // Still exactly the ONE consumption cancel from the first pass.
+    expect(cancelCriticalAlarm).toHaveBeenCalledTimes(1);
+    expect(sendCriticalStockAlert).toHaveBeenCalledTimes(1);
+  });
+
   it('scheduling failure (NOT_SCHEDULED) leaves no valid claim → foreground fires', () => {
     localStorageStore[SCHEDULED_CRITICAL_STORAGE_KEY] = JSON.stringify({
       'med-state-1': {
@@ -461,6 +512,45 @@ describe('useStockAlerts — Scheduler interaction', () => {
 
     rerender({ medications: [] as Medication[] });
     expect(readTransitions()['med-state-1']).toBeUndefined();
+  });
+
+  it('deleted medication cleanup cannot affect another medication (transition, claim, revision isolation)', () => {
+    // med-a: SENT episode (terminal, claim already neutralized).
+    // med-b: FIRED_OR_DUE episode with its consumed claim (terminal).
+    // Deleting med-a must not touch med-b's transition, claim, or
+    // ownership revision — cleanup is strictly per-medication.
+    localStorageStore[CRITICAL_TRANSITION_STORAGE_KEY] = JSON.stringify({
+      'med-a': { transitionKey: 'crit_med-a_A', enteredAt: 1, notificationState: 'SENT' },
+      'med-b': { transitionKey: 'crit_med-b_B', enteredAt: 2, notificationState: 'FIRED_OR_DUE' },
+    });
+    localStorageStore[SCHEDULED_CRITICAL_STORAGE_KEY] = JSON.stringify({
+      'med-a': { transitionKey: 'crit_med-a_A', alarmTime: Date.now() - 3600000, status: 'NOT_SCHEDULED' },
+      'med-b': { transitionKey: 'crit_med-b_B', alarmTime: Date.now() - 3600000, status: 'FIRED_OR_DUE' },
+    });
+    localStorageStore[CRITICAL_OWNERSHIP_STORAGE_KEY] = JSON.stringify({ 'med-a': 3, 'med-b': 4 });
+
+    const medA = makeMed({ id: 'med-a', currentPills: 2 });
+    const medB = makeMed({ id: 'med-b', currentPills: 2 });
+    const { rerender } = renderHook(({ medications }) => useAlerts({ medications }), {
+      initialProps: { medications: [medA, medB] as Medication[] },
+    });
+
+    // Both episodes are terminal → nothing fires on the initial pass.
+    expect(sendCriticalStockAlert).not.toHaveBeenCalled();
+    const beforeBTransition = readTransitions()['med-b'];
+    const beforeBClaim = readScheduled()['med-b'];
+
+    rerender({ medications: [medB] as Medication[] }); // med-a deleted
+
+    // med-a's episode is gone…
+    expect(readTransitions()['med-a']).toBeUndefined();
+    // …and med-b is untouched: same transition, same claim, same
+    // ownership revision.
+    expect(readTransitions()['med-b']).toEqual(beforeBTransition);
+    expect(readScheduled()['med-b']).toEqual(beforeBClaim);
+    expect(
+      JSON.parse(localStorageStore[CRITICAL_OWNERSHIP_STORAGE_KEY])['med-b']
+    ).toBe(4);
   });
 });
 

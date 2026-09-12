@@ -931,11 +931,15 @@ export interface ReconcileEpisodeResult {
  *              operations from the dead episode become stale)
  *
  * Notification ownership:
- *   Path A (foreground): NONE ──send──► SENT. A claim bound to the
- *   episode is neutralized at the same moment (the foreground consumed
- *   the episode's single notification opportunity; an alarm still
- *   armed for it is stale and is cancelled by the scheduler — and can
- *   never resurrect the claim because the state says no claim exists).
+ *   Path A (foreground): NONE ──send──► SENT. ANY armed SCHEDULED
+ *   claim for the medication is neutralized at that moment (matching-
+ *   bound, mismatched-bound leftover of a dead episode, or unbound
+ *   crash leftover): the med has an ACTIVE episode, so it is critical,
+ *   and the scheduler never arms claims for critical meds — no
+ *   SCHEDULED claim can be legitimate here. A "valid" SCHEDULED claim
+ *   surviving on a SENT episode would keep an armed native alarm alive
+ *   that can only ever fire a SECOND user-facing notification for the
+ *   same episode.
  *   Path B (scheduled):  a validly-registered alarm owns the episode's
  *   single notification → the foreground stays quiet. A failed
  *   scheduling attempt (status NOT_SCHEDULED) is NOT a valid claim →
@@ -1118,15 +1122,21 @@ export function reconcileCriticalEpisode(
       dirty.transitions = true;
       notificationSent = true;
       // The foreground just consumed the episode's single notification
-      // opportunity — neutralize its bound claim (if any) so no valid
-      // SCHEDULED claim survives for a SENT episode. Any native alarm
-      // still armed for that claim is stale; the scheduler cancels it
-      // (and can never re-arm it: the claim no longer exists).
-      if (
-        rec &&
-        rec.transitionKey === t.transitionKey &&
-        rec.status === 'SCHEDULED'
-      ) {
+      // opportunity — neutralize ANY armed SCHEDULED claim for this
+      // medication so no valid SCHEDULED claim survives a SENT episode.
+      // The med has an ACTIVE episode → it is critical → the scheduler
+      // never arms claims for critical meds, so EVERY SCHEDULED claim
+      // here is stale: this episode's own bound claim (early crossing),
+      // a mismatched-bound leftover of a dead episode (legacy migration
+      // or a crash between the owner's two store writes), or an unbound
+      // crash leftover. A surviving "valid" claim would keep an armed
+      // native alarm alive that can only ever fire a SECOND user-facing
+      // notification for this episode. Consumed/terminal records
+      // (FIRED_OR_DUE / DELIVERED) are not armed — other paths clean
+      // them up. The native alarm behind a neutralized claim is
+      // cancelled by the owner right after the reconcile pass (and the
+      // scheduler's cross-session staleness cancel is a second net).
+      if (rec && rec.status === 'SCHEDULED') {
         rec.status = 'NOT_SCHEDULED';
         dirty.scheduled = true;
       }

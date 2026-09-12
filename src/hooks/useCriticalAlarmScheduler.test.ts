@@ -1102,6 +1102,65 @@ describe('useCriticalAlarmScheduler — episode-vs-scheduler ownership races', (
     expect(readRecord('med-h')).toBeUndefined();
     expect(readTransitions()['med-h']).toBeUndefined();
   });
+
+  it('scenario 31: a schedule FAILURE after the episode ownership changed cannot invalidate the new episode', async () => {
+    // G1 starts scheduling for the (then) sufficient med (a dead
+    // episode A's consumed claim is still on the record). While the
+    // native schedule is in flight, the owner ends A and begins
+    // episode B (NONE, foreground-eligible, no claim yet). The schedule
+    // then FAILS (resolves false). G1's failure path detects the stale
+    // ownership context and must return WITHOUT touching persistent
+    // state — in particular it must NOT neutralize/erase anything the
+    // new owner left behind, and B's foreground eligibility (no valid
+    // claim) must remain exactly as the owner wrote it.
+    seedRecord('med-n', {
+      transitionKey: 'crit_med-n_A',
+      alarmTime: Date.now() - 7200000,
+      status: 'FIRED_OR_DUE',
+      generation: 2,
+    });
+
+    let releaseG1!: (value: boolean) => void;
+    const g1Gate = new Promise<boolean>((resolve) => { releaseG1 = resolve; });
+    mocks.schedule.mockImplementationOnce(() => g1Gate);
+
+    renderHook(() =>
+      useCriticalAlarmScheduler(
+        defaultOpts({ medications: [makeMed({ id: 'med-n', currentPills: 30, dailyDose: 1 })] })
+      )
+    );
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+
+    // Owner lifecycle while G1 awaited: A ended, B began (NONE), the
+    // dead claim was dropped by the owner, revision bumped.
+    localStorage.setItem(
+      TRANSITION_KEY_STORE,
+      JSON.stringify({
+        'med-n': { transitionKey: 'crit_med-n_B', enteredAt: Date.now(), notificationState: 'NONE' },
+      })
+    );
+    localStorage.setItem(SCHEDULED_STORE, JSON.stringify({
+      'med-n': { transitionKey: '', alarmTime: 0, status: 'NOT_SCHEDULED', generation: 2 },
+    }));
+    localStorage.setItem(OWNERSHIP_STORE, JSON.stringify({ 'med-n': 5 }));
+
+    releaseG1(false); // native scheduling FAILED
+    // Drain the serialized chain (no observable side effect is expected
+    // — that is the point — so flush a fixed, deterministic number of
+    // microtask ticks; no timers are involved).
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+
+    // G1's stale failure wrote NOTHING: B's episode and the owner's
+    // record state are exactly as the owner left them.
+    const rec = readRecord('med-n')!;
+    expect(rec.status).toBe('NOT_SCHEDULED');
+    expect(rec.transitionKey).toBe('');
+    expect(rec.generation).toBe(2); // no scheduler write landed
+    const transitions = readTransitions();
+    expect(transitions['med-n'].transitionKey).toBe('crit_med-n_B');
+    expect(transitions['med-n'].notificationState).toBe('NONE');
+    expect(readOwnership()['med-n']).toBe(5);
+  });
 });
 
 // Re-import to suppress the unused-import lint warning on the

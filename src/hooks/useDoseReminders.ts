@@ -5,9 +5,9 @@ import { stopAllSounds } from '../utils/sound';
 import { loadJson, saveJson } from '../utils/storage';
 import { DEFAULT_SNOOZE_MINUTES, MS_PER_MINUTE } from '../utils/time';
 import { scheduleSnoozedDoseReminder } from '../utils/notifications';
+import { SNOOZE_KEY } from '../utils/doseReminderStorage';
 
 const FIRED_KEY = 'android_med_tracker_fired_reminders_v1';
-const SNOOZE_KEY = 'android_med_tracker_snooze_v1';
 
 function firedKey(medId: string, dateStr: string) {
   return `${medId}:${dateStr}`;
@@ -15,23 +15,6 @@ function firedKey(medId: string, dateStr: string) {
 
 interface UseDoseRemindersOptions {
   medications: Medication[];
-}
-
-/**
- * Clear the persisted snooze marker for a medication.
- *
- * Called by useDoseReminderScheduler's consumption suppression: when the
- * day's dose is consumed (manual card action or the notification's
- * take-dose action) while a snoozed one-shot reminder is still pending,
- * the native pending notification is cancelled
- * (cancelSnoozedDoseReminder) and the marker is removed here so no
- * stale snooze state survives for an already-taken dose.
- */
-export function clearSnoozedDoseForMed(medId: string): void {
-  const snooze = loadJson<Record<string, number>>(SNOOZE_KEY, {});
-  if (snooze[medId] === undefined) return;
-  delete snooze[medId];
-  saveJson(SNOOZE_KEY, snooze);
 }
 
 /**

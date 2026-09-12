@@ -22,7 +22,7 @@ vi.mock('../utils/notifications', async () => {
 });
 
 import { scheduleSnoozedDoseReminder } from '../utils/notifications';
-import { clearSnoozedDoseForMed } from './useDoseReminders';
+import { clearSnoozedDoseForMed } from '../utils/doseReminderStorage';
 
 /** Build a medication with a reminder enabled at the given time. */
 function makeMed(overrides: Partial<Medication> = {}): Medication {

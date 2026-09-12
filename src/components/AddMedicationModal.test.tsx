@@ -37,6 +37,17 @@ function baseProps(overrides: Record<string, unknown> = {}) {
   };
 }
 
+
+/** The unit <select> (قرص/كبسولة/مل/...), not the dosesPerDay select. */
+function getUnitSelect(): HTMLSelectElement {
+  const selects = screen.getAllByRole('combobox') as HTMLSelectElement[];
+  const unit = selects.find((s) =>
+    Array.from(s.options).some((o) => o.value === 'مل' || o.value === 'قرص')
+  );
+  if (!unit) throw new Error('unit select not found');
+  return unit;
+}
+
 describe('AddMedicationModal — noStrips edit preserves packageSize (#14)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -62,8 +73,8 @@ describe('AddMedicationModal — noStrips edit preserves packageSize (#14)', () 
     const pillsPerBoxInput = screen.getByDisplayValue('15');
     expect(pillsPerBoxInput).toBeInTheDocument();
 
-    // The "حجم العلبة" preview also shows 15.
-    expect(screen.getByText(/15/)).toBeInTheDocument();
+    // The "حجم العلبة" preview also shows 15 (may appear in more than one node).
+    expect(screen.getAllByText(/15/).length).toBeGreaterThanOrEqual(1);
   });
 
   it('saving a noStrips edit preserves packageSize 15 (does not rewrite to 3)', () => {
@@ -141,7 +152,7 @@ describe('AddMedicationModal — noStrips edit preserves packageSize (#14)', () 
 
     // Switch the unit to a liquid (مل) — this reveals the non-solid
     // package-size input (placeholder "مثال: 100 أو 120 مل").
-    const unitSelect = screen.getByRole('combobox') as HTMLSelectElement;
+    const unitSelect = getUnitSelect();
     fireEvent.change(unitSelect, { target: { value: 'مل' } });
 
     const pkgInput = screen.getByPlaceholderText('مثال: 100 أو 120 مل') as HTMLInputElement;
@@ -163,7 +174,7 @@ describe('AddMedicationModal — noStrips edit preserves packageSize (#14)', () 
     render(<AddMedicationModal {...baseProps({ onSave })} />);
 
     // Switch to liquid (مل).
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'مل' } });
+    fireEvent.change(getUnitSelect(), { target: { value: 'مل' } });
 
     const pkgInput = screen.getByPlaceholderText('مثال: 100 أو 120 مل');
     // Change from the default 100 to 120.
@@ -209,5 +220,109 @@ describe('ConsumptionLogView — onAddLog prop removed (#32)', () => {
     );
     // The header is always rendered.
     expect(screen.getByText('سجل الاستهلاك التلقائي')).toBeInTheDocument();
+  });
+});
+
+describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('shows one dose row by default for a new medication', () => {
+    render(<AddMedicationModal {...baseProps()} />);
+    expect(screen.getByText('الجرعة 1')).toBeInTheDocument();
+    expect(screen.queryByText('الجرعة 2')).not.toBeInTheDocument();
+  });
+
+  it('changing dosesPerDay from 1 → 3 creates three rows', () => {
+    render(<AddMedicationModal {...baseProps()} />);
+    // dosesPerDay is the only <select> whose options are 1..6
+    const selects = screen.getAllByRole('combobox') as HTMLSelectElement[];
+    const doseCountSelect = selects.find((s) =>
+      Array.from(s.options).some((o) => o.value === '6')
+    );
+    expect(doseCountSelect).toBeTruthy();
+    fireEvent.change(doseCountSelect!, { target: { value: '3' } });
+    expect(screen.getByText('الجرعة 1')).toBeInTheDocument();
+    expect(screen.getByText('الجرعة 2')).toBeInTheDocument();
+    expect(screen.getByText('الجرعة 3')).toBeInTheDocument();
+  });
+
+  it('edit mode loads existing multi-dose schedule', () => {
+    const med = makeMed({
+      dailyDose: 4,
+      dosesPerDay: 3,
+      doseSchedule: [
+        { id: 'd1', amount: 2, time: '08:00' },
+        { id: 'd2', amount: 1, time: '14:00' },
+        { id: 'd3', amount: 1, time: '21:00' },
+      ],
+      reminderTime: '08:00',
+    });
+    render(<AddMedicationModal {...baseProps({ initialData: med })} />);
+    expect(screen.getByText('الجرعة 1')).toBeInTheDocument();
+    expect(screen.getByText('الجرعة 2')).toBeInTheDocument();
+    expect(screen.getByText('الجرعة 3')).toBeInTheDocument();
+    const amountTwos = screen.getAllByDisplayValue('2');
+    expect(amountTwos.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('legacy med without schedule maps to one dose in the UI', () => {
+    const med = makeMed({
+      dailyDose: 2,
+      reminderTime: '20:00',
+      dosesPerDay: undefined,
+      doseSchedule: undefined,
+    });
+    render(<AddMedicationModal {...baseProps({ initialData: med })} />);
+    expect(screen.getByText('الجرعة 1')).toBeInTheDocument();
+    expect(screen.queryByText('الجرعة 2')).not.toBeInTheDocument();
+    const amountTwos = screen.getAllByDisplayValue('2');
+    expect(amountTwos.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('saving persists doseSchedule and derived dailyDose without changing stock fields', () => {
+    const med = makeMed({
+      id: 'med-edit-stock',
+      currentPills: 42,
+      lastSyncDate: '2024-06-01',
+      lastConsumedDate: '2024-06-01',
+      dailyDose: 1,
+      reminderTime: '09:00',
+    });
+    const onSave = vi.fn();
+    render(
+      <AddMedicationModal {...baseProps({ initialData: med, onSave })} />
+    );
+
+    const nameInput = screen.getByDisplayValue('Test');
+    fireEvent.change(nameInput, { target: { value: 'Test Updated' } });
+    fireEvent.click(screen.getByText('حفظ التعديلات'));
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.currentPills).toBe(42);
+    expect(saved.lastSyncDate).toBe('2024-06-01');
+    expect(saved.doseSchedule).toHaveLength(1);
+    expect(saved.dosesPerDay).toBe(1);
+    expect(saved.dailyDose).toBe(1);
+  });
+
+  it('invalid zero amount prevents saving', () => {
+    const onSave = vi.fn();
+    render(<AddMedicationModal {...baseProps({ onSave })} />);
+    const nameInput = screen.getByPlaceholderText(/بانادول|كونكور/);
+    fireEvent.change(nameInput, { target: { value: 'BadDose' } });
+
+    const amountInputs = screen.getAllByPlaceholderText('مثال: 1');
+    const scheduleAmount = amountInputs[0] as HTMLInputElement;
+    fireEvent.change(scheduleAmount, { target: { value: '0' } });
+
+    fireEvent.click(screen.getByText('إضافة الدواء'));
+    expect(onSave).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,14 @@
 import { useState, useEffect, useMemo, type FC, type FormEvent } from 'react';
 import { X, Pill, ShieldAlert, Check, Zap, Layers, Box, Calculator, Clock } from 'lucide-react';
-import { Medication, describeStockInStrips, formatTimeArabic, isSolidUnit } from '../types';
+import { Medication, MedicationDose, describeStockInStrips, formatTimeArabic, isSolidUnit } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
+import {
+  MAX_DOSES_PER_DAY,
+  getDoseScheduleForUI,
+  resizeDoseSchedule,
+  totalDailyAmount,
+  validateAndNormalizeDoseSchedule,
+} from '../utils/doseSchedule';
 import { CustomTimePicker } from './CustomTimePicker';
 import { Toggle } from './ui/Toggle';
 import { Modal } from './ui/Modal';
@@ -43,7 +50,13 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
   // (select-all → delete) without the old `Math.max(0, parseInt || 0)`
   // snapping it back to 0. Same pattern as packageSizeStr (PR #146).
   const [currentPillsStr, setCurrentPillsStr] = useState<string>('30');
-  const [dailyDose, setDailyDose] = useState<string>('1');
+  // Legacy single-field dailyDose is replaced in the UI by a multi-dose
+  // schedule. dailyDose is still computed as the sum of schedule amounts
+  // at save time so the existing auto-deduction engine is unchanged.
+  const [dosesPerDay, setDosesPerDay] = useState<number>(1);
+  const [doseSchedule, setDoseSchedule] = useState<MedicationDose[]>(() =>
+    resizeDoseSchedule([], 1)
+  );
   const [unit, setUnit] = useState('قرص');
   const [warningThresholdDays, setWarningThresholdDays] = useState<string>('5');
   const [category, setCategory] = useState('');
@@ -74,7 +87,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
   const [error, setError] = useState('');
 
   const [reminderEnabled, setReminderEnabled] = useState<boolean>(false);
-  const [reminderTime, setReminderTime] = useState<string>('09:00');
   // Toggle for medications that come as loose pills in a box without
   // strips (e.g., Coffiram — 15 pills per box, no blister strips).
   // When enabled, the strip fields are hidden and the user just
@@ -95,9 +107,11 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       setName(initialData.name);
       setCurrentPills(initialData.currentPills);
       setCurrentPillsStr(String(initialData.currentPills));
-      // Convert numeric initial values to STRING state for the
-      // number inputs (see comment on dailyDose declaration above).
-      setDailyDose(String(initialData.dailyDose ?? ''));
+      // Multi-dose schedule: use stored schedule when present, otherwise
+      // map legacy dailyDose + reminderTime to a single-dose row.
+      const schedule = getDoseScheduleForUI(initialData);
+      setDoseSchedule(schedule);
+      setDosesPerDay(schedule.length);
       const initUnit = initialData.unit || 'قرص';
       setUnit(initUnit);
       setWarningThresholdDays(String(initialData.warningThresholdDays ?? 5));
@@ -129,12 +143,13 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
         setPackageSizeStr(String(pkg));
       }
       setReminderEnabled(Boolean(initialData.reminderEnabled));
-      setReminderTime(initialData.reminderTime || '09:00');
     } else {
       setName('');
       setCurrentPills(30);
       setCurrentPillsStr('30');
-      setDailyDose('1');
+      const defaultSchedule = resizeDoseSchedule([], 1);
+      setDoseSchedule(defaultSchedule);
+      setDosesPerDay(1);
       setUnit('قرص');
       setWarningThresholdDays('5');
       setCategory('');
@@ -149,7 +164,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       setHelperStrips(0);
       setHelperLoose(0);
       setReminderEnabled(false);
-      setReminderTime('09:00');
     }
     setShowStockHelper(false);
     setError('');
@@ -176,7 +190,12 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
           setCurrentPills(100);
           setCurrentPillsStr('100');
         }
-        if (dailyDose === '1') setDailyDose('5');
+        setDoseSchedule((prev) => {
+          if (prev.length === 1 && Number(prev[0].amount) === 1) {
+            return [{ ...prev[0], amount: 5 }];
+          }
+          return prev;
+        });
       } else if (isSolidUnit(newUnit)) {
         if (packageSize === 100) {
           setPackageSize(30);
@@ -186,7 +205,12 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
           setCurrentPills(30);
           setCurrentPillsStr('30');
         }
-        if (dailyDose === '5') setDailyDose('1');
+        setDoseSchedule((prev) => {
+          if (prev.length === 1 && Number(prev[0].amount) === 5) {
+            return [{ ...prev[0], amount: 1 }];
+          }
+          return prev;
+        });
       }
     }
   };
@@ -231,23 +255,16 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       setError('الكمية المتوفرة لا يمكن أن تكون سالبة');
       return;
     }
-    // Convert the string-typed dailyDose to a number for validation
-    // + save. We need to handle the empty string case explicitly
-    // (NaN fails the > 0 check, but we want a clearer error message).
-    const doseNum = parseFloat(dailyDose);
-    if (dailyDose.trim() === '' || isNaN(doseNum)) {
-      setError('يرجى إدخال معدل الاستهلاك اليومي');
+    // Validate multi-dose schedule (amounts, times, uniqueness, length).
+    // dailyDose for the existing engine = sum of schedule amounts.
+    const scheduleResult = validateAndNormalizeDoseSchedule(dosesPerDay, doseSchedule);
+    if (!scheduleResult.ok || !scheduleResult.schedule) {
+      setError(scheduleResult.message || 'جدول الجرعات غير صالح');
       return;
     }
-    if (doseNum <= 0) {
-      setError('معدل الاستهلاك يجب أن يكون أكبر من صفر');
-      return;
-    }
-    // ميعاد الجرعة اليومي إجباري دائماً (مستقل عن تفعيل الإشعار)
-    if (!reminderTime || !/^([01]?\d|2[0-3]):[0-5]\d$/.test(reminderTime)) {
-      setError('يرجى تحديد ميعاد الجرعة اليومي');
-      return;
-    }
+    const doseNum = scheduleResult.dailyDose!;
+    const normalizedSchedule = scheduleResult.schedule;
+    const savedReminderTime = scheduleResult.reminderTime || '09:00';
 
     // Calculate packaging — for non-solid types (e.g. liquid / مل),
     // strips and per-strip counts are completely irrelevant.
@@ -301,21 +318,21 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
         pillsPerStrip: pillsPerStripNum,
         packageSize: calculatedPkgSize,
         reminderEnabled,
-        reminderTime,
+        // Phase-1 compat: single reminderTime remains the earliest dose
+        // so existing notification scheduling is unchanged.
+        reminderTime: savedReminderTime,
+        dosesPerDay: normalizedSchedule.length,
+        doseSchedule: normalizedSchedule,
       },
       initialData ? initialData.id : undefined
     );
     onClose();
   };
 
-  // Compute previewDays from the string-typed dailyDose. We parse
-  // it to a number here; if the user hasn't typed anything valid yet
-  // (empty string or NaN), we just show 0 days.
-  const previewDoseNum = parseFloat(dailyDose);
+  // Preview days from total daily consumption (sum of schedule amounts).
+  const previewDoseNum = totalDailyAmount(doseSchedule);
   const previewDays =
-    !isNaN(previewDoseNum) && previewDoseNum > 0
-      ? Math.floor(currentPills / previewDoseNum)
-      : 0;
+    previewDoseNum > 0 ? Math.floor(currentPills / previewDoseNum) : 0;
 
   return (
     <Modal
@@ -665,23 +682,30 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
           </div>
           )}
 
-          {/* items-end keeps the two input boxes on the same baseline even when
-              the daily-dose label is longer and wraps to a second line. */}
+          {/* Multi-dose count + warning threshold */}
           <div className="grid grid-cols-2 gap-3 items-end">
             <div className="min-w-0">
               <label className="block text-xs font-bold text-slate-700 mb-1.5 leading-snug">
-                الاستهلاك اليومي ({unit}) <span className="text-red-500">*</span>
+                عدد مرات تناول الدواء يومياً <span className="text-red-500">*</span>
               </label>
-              <input
-                type="number"
-                min="0"
-                step="any"
-                inputMode="decimal"
-                value={dailyDose}
-                onChange={(e) => setDailyDose(e.target.value)}
-                placeholder={unit === 'مل' ? 'مثال: 5 أو 10 مل' : 'مثال: 1'}
+              <select
+                value={dosesPerDay}
+                onChange={(e) => {
+                  const n = Math.max(
+                    1,
+                    Math.min(MAX_DOSES_PER_DAY, parseInt(e.target.value, 10) || 1)
+                  );
+                  setDosesPerDay(n);
+                  setDoseSchedule((prev) => resizeDoseSchedule(prev, n));
+                }}
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
-              />
+              >
+                {Array.from({ length: MAX_DOSES_PER_DAY }, (_, i) => i + 1).map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="min-w-0">
               <label className="block text-xs font-bold text-slate-700 mb-1.5 leading-snug">
@@ -747,39 +771,76 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
               </div>
               <div className="min-w-0">
                 <h4 className="text-xs font-bold text-slate-800">
-                  ميعاد الجرعة اليومي <span className="text-red-500">*</span>
+                  جدول الجرعات اليومية <span className="text-red-500">*</span>
                 </h4>
                 <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
-                  حدد الساعة التي تأخذ فيها الجرعة يومياً.
+                  حدد كمية وميعاد كل جرعة. الإجمالي اليومي يُحسب تلقائياً.
                 </p>
               </div>
             </div>
 
-            {/* الوقت ظاهر دائماً وإجباري — مستقل عن تفعيل الإشعار */}
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5" />
-                <span>وقت الجرعة</span>
-              </label>
-              {/* Custom time picker (replaces the native <input type="time">
-                  which on Android shows the OS time picker with default
-                  Material colors — text invisible in AM/PM dropdown due
-                  to the OS using the system theme color for the option
-                  text against a same-color background). We use 3
-                  theme-styled <select> dropdowns instead: hour (1-12),
-                  minute (00-59), and AM/PM. The selected value is
-                  converted to/from 24-hour "HH:MM" format used by
-                  reminderTime state. */}
-              <CustomTimePicker
-                value={reminderTime}
-                onChange={setReminderTime}
-              />
-              <div className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-center font-bold">
-                {formatTimeArabic(reminderTime) || 'اختر الوقت'}
+            {doseSchedule.map((dose, index) => (
+              <div
+                key={dose.id}
+                className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 space-y-2"
+              >
+                <div className="text-xs font-bold text-slate-700">الجرعة {index + 1}</div>
+                <div className="grid grid-cols-2 gap-2 items-start">
+                  <div className="min-w-0">
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                      الكمية ({unit})
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      inputMode="decimal"
+                      value={Number.isFinite(Number(dose.amount)) ? dose.amount : ''}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        const parsed = parseFloat(raw);
+                        setDoseSchedule((prev) =>
+                          prev.map((d, i) =>
+                            i === index
+                              ? {
+                                  ...d,
+                                  amount: raw.trim() === '' || isNaN(parsed) ? 0 : parsed,
+                                }
+                              : d
+                          )
+                        );
+                      }}
+                      placeholder="مثال: 1"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+                    />
+                  </div>
+                  <div className="min-w-0">
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                      الميعاد
+                    </label>
+                    <CustomTimePicker
+                      value={dose.time}
+                      onChange={(time) => {
+                        setDoseSchedule((prev) =>
+                          prev.map((d, i) => (i === index ? { ...d, time } : d))
+                        );
+                      }}
+                    />
+                    <div className="text-[11px] text-slate-600 bg-white border border-slate-200 rounded-lg px-2 py-1 text-center font-bold mt-1">
+                      {formatTimeArabic(dose.time) || 'اختر الوقت'}
+                    </div>
+                  </div>
+                </div>
               </div>
+            ))}
+
+            <div className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 flex items-center justify-between">
+              <span>إجمالي الاستهلاك اليومي</span>
+              <span className="font-bold text-teal-800 font-mono">
+                {totalDailyAmount(doseSchedule) || 0} {unit}
+              </span>
             </div>
 
-            {/* سطر مستقل: التوجل يتحكم فقط في إرسال إشعار التنبيه لهذا الدواء */}
             <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-100">
               <span className="text-xs font-bold text-slate-700 leading-snug">
                 تفعيل اشعار التنبيه بالجرعة

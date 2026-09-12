@@ -36,7 +36,7 @@
   content: none !important;
 }
 
-/* Compact cards: type-specific visual cue remains in the dose chip. */
+/* Compact cards: a small type-aware icon stays with the daily-dose information. */
 [id^="med-card-"][class*="border-r-2"]:has(.medication-type-icon[title="نوع الدواء: قرص"])
   > div:nth-child(2) > span:nth-child(4)::before {
   content: "◉" !important;
@@ -67,12 +67,12 @@
   font-size: 0.65rem;
 }
 
-/* The separate header type icon is useful on roomy cards but redundant in the mini layout. */
+/* The separate header type icon is redundant in the mini layout. */
 [id^="med-card-"][class*="border-r-2"] .medication-type-icon {
   display: none;
 }
 
-/* Compact action bar: keep only the useful controls visible and give them stable touch targets. */
+/* Compact action bar: edit / auto-deduct / delete are directly reachable. */
 [id^="med-card-"][class*="border-r-2"] .medication-menu-root {
   gap: 0.125rem;
 }
@@ -90,7 +90,6 @@
   align-items: center;
 }
 
-/* Edit/delete/toggle are first-class compact actions; the overflow menu remains available on larger cards. */
 [id^="med-card-"][class*="border-r-2"] .medication-menu-root > button[aria-label="تعديل الدواء"] {
   color: rgb(71 85 105);
   background: rgb(248 250 252);
@@ -101,7 +100,7 @@
   background: rgb(255 241 242);
 }
 
-/* Compact undo: preserve the action but make it a tiny icon-style affordance. */
+/* Compact undo: preserve the existing callback but represent it as an icon affordance. */
 [id^="med-card-"][class*="border-r-2"] > button {
   width: 1.875rem;
   min-height: 1.875rem;
@@ -119,7 +118,7 @@
   font-weight: 800;
 }
 
-/* Roomier views use a more Material-like header/action grouping. */
+/* Roomier views get consistent Material-like controls and enough overflow space for menus. */
 [id^="med-card-"]:not([class*="border-r-2"]) .medication-menu-root > button,
 [id^="med-card-"]:not([class*="border-r-2"]) .medication-type-icon {
   box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
@@ -131,18 +130,7 @@
   background: rgb(248 250 252);
 }
 
-/* Wider screens can expose the type icon without crowding the header. */
-@media (min-width: 640px) {
-  [id^="med-card-"][class*="border-r-2"] .medication-type-icon {
-    display: none;
-  }
-
-  [id^="med-card-"]:not([class*="border-r-2"]) .medication-menu-root {
-    gap: 0.25rem;
-  }
-}
-
-/* Narrow phones: keep the compact metadata from forcing actions or the medication name off-screen. */
+/* Narrow phones: keep compact metadata from forcing actions off-screen. */
 @media (max-width: 360px) {
   [id^="med-card-"][class*="border-r-2"] .medication-menu-root > button {
     width: 1.625rem;

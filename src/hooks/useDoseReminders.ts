@@ -119,7 +119,17 @@ export function useDoseReminders({
     // not ask the user to take the dose again. Legitimate snooze
     // re-fires are unaffected: in that flow the dose has NOT been
     // taken, so this guard does not hit.
-    if (med.lastConsumedDate === getTodayDateString()) return;
+    {
+      const today = getTodayDateString();
+      if (Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) {
+        const allDone = med.doseSchedule.every(
+          (d) => med.doseConsumption?.[d.id] === today
+        );
+        if (allDone) return;
+      } else if (med.lastConsumedDate === today) {
+        return;
+      }
+    }
 
     // Dedup: if already alarming this med, don't re-open.
     if (alarmingIdRef.current === med.id) return;

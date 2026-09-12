@@ -54,14 +54,14 @@ export function registerBackButtonHandler(handler: (() => boolean) | null) {
 let backPressHandle: { remove: () => Promise<void> } | null = null;
 let notificationHandle: { remove: () => Promise<void> } | null = null;
 let notificationActionHandle: { remove: () => Promise<void> } | null = null;
-let notificationActionHandler: ((actionId: string, medicationId: string) => void) | null = null;
+let notificationActionHandler: ((actionId: string, medicationId: string, doseId?: string) => void) | null = null;
 // Dose-reminder "received" handler — called when a local notification
 // fires while the app is in the foreground. App.tsx registers a handler
 // that opens the DoseAlarmModal for the med whose reminder fired.
-let doseReceivedHandler: ((medicationId: string) => void) | null = null;
+let doseReceivedHandler: ((medicationId: string, doseId?: string) => void) | null = null;
 
 export function registerNotificationActionHandler(
-  handler: ((actionId: string, medicationId: string) => void) | null
+  handler: ((actionId: string, medicationId: string, doseId?: string) => void) | null
 ) {
   notificationActionHandler = handler;
 }
@@ -76,7 +76,7 @@ export function registerNotificationActionHandler(
  * Pass null to unregister (e.g. on App unmount / HMR).
  */
 export function registerDoseReceivedHandler(
-  handler: ((medicationId: string) => void) | null
+  handler: ((medicationId: string, doseId?: string) => void) | null
 ) {
   doseReceivedHandler = handler;
 }
@@ -232,10 +232,14 @@ export async function initNativeBridge(): Promise<void> {
   try {
     notificationActionHandle = await LocalNotifications.addListener(
       'localNotificationActionPerformed',
-      (event: { actionId: string; notification?: { extra?: { medicationId?: string } } }) => {
+      (event: {
+        actionId: string;
+        notification?: { extra?: { medicationId?: string; doseId?: string } };
+      }) => {
         const medicationId = event.notification?.extra?.medicationId;
+        const doseId = event.notification?.extra?.doseId;
         if (medicationId && notificationActionHandler) {
-          notificationActionHandler(event.actionId, medicationId);
+          notificationActionHandler(event.actionId, medicationId, doseId);
         }
       }
     );
@@ -263,12 +267,14 @@ export async function initNativeBridge(): Promise<void> {
       (notification: {
         extra?: {
           medicationId?: string;
+          doseId?: string;
         };
       }) => {
         const medicationId = notification?.extra?.medicationId;
+        const doseId = notification?.extra?.doseId;
         if (medicationId && doseReceivedHandler) {
           try {
-            doseReceivedHandler(medicationId);
+            doseReceivedHandler(medicationId, doseId);
           } catch (err) {
             console.warn('[native] doseReceivedHandler failed:', err);
           }

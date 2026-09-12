@@ -1032,11 +1032,10 @@ export default function App() {
   };
 
 
-  const handleTakeDoseFromAlarm = useCallback((med: Medication) => {
+  const handleTakeDoseFromAlarm = useCallback((med: Medication, doseId?: string) => {
     const today = getTodayDateString();
-    // Shared consume-dose logic (audit #77): settle at effPills, deduct the
-    // dose (clamped at 0), mark lastConsumedDate=today, produce dose_taken log.
-    const { updatedMed, doseAmount, log } = consumeDose(med, 'alarm', today);
+    // Phase 3: optional doseId selects the slot (from notification extra).
+    const { updatedMed, doseAmount, log } = consumeDose(med, 'alarm', today, new Date(), doseId);
     if (updatedMed && log) {
       setMedications((prev) =>
         prev.map((m) => (m.id === med.id ? updatedMed : m))
@@ -1049,10 +1048,10 @@ export default function App() {
   }, [dismissAlarm, soundEnabled]);
 
   useEffect(() => {
-    registerNotificationActionHandler((actionId, medicationId) => {
+    registerNotificationActionHandler((actionId, medicationId, doseId) => {
       if (actionId !== 'take_dose') return;
       const medication = medications.find((med) => med.id === medicationId);
-      if (medication) handleTakeDoseFromAlarm(medication);
+      if (medication) handleTakeDoseFromAlarm(medication, doseId);
     });
     return () => registerNotificationActionHandler(null);
   }, [medications, handleTakeDoseFromAlarm]);
@@ -1131,18 +1130,31 @@ export default function App() {
   // Consume-pill feature: manually consume a dose from the card.
   // Subtracts dailyDose from currentPills, marks the med as consumed
   // today (blocks auto-deduction for today), creates a dose_taken log.
-  const handleConsumeDose = (medicationId: string) => {
+  const handleConsumeDose = (medicationId: string, doseId?: string) => {
     const med = medications.find((m) => m.id === medicationId);
     if (!med) return;
     const today = getTodayDateString();
-    // If already consumed today, don't double-consume.
-    if (med.lastConsumedDate === today) {
+    // Legacy: block double-consume for the single daily slot.
+    // Multi-dose: consumeDose itself rejects an already-consumed slot and
+    // picks the next pending slot when doseId is omitted.
+    if (
+      !(Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) &&
+      med.lastConsumedDate === today
+    ) {
       showToast(TOAST_MESSAGES.doseAlreadyTaken(med.name));
       return;
     }
-    // Shared consume-dose logic (audit #77).
-    const { updatedMed, doseAmount, log } = consumeDose(med, 'manual', today);
-    if (doseAmount <= 0) return;
+    const { updatedMed, doseAmount, log } = consumeDose(
+      med,
+      'manual',
+      today,
+      new Date(),
+      doseId
+    );
+    if (doseAmount <= 0) {
+      showToast(TOAST_MESSAGES.doseAlreadyTaken(med.name));
+      return;
+    }
     if (updatedMed && log) {
       setMedications((prev) =>
         prev.map((m) => (m.id === medicationId ? updatedMed : m))

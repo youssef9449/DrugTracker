@@ -79,11 +79,15 @@ export function getDoseScheduleForUI(
   med: Pick<Medication, 'dailyDose' | 'reminderTime' | 'dosesPerDay' | 'doseSchedule'>
 ): MedicationDose[] {
   if (Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) {
-    return med.doseSchedule.map((d) => ({
-      id: d.id || generateId('dose'),
-      amount: Number(d.amount) > 0 ? Number(d.amount) : 1,
-      time: normalizeTimeString(d.time || '09:00'),
-    }));
+    // Defensive chronological order for legacy/corrupted/unsorted stored data.
+    // Length remains authoritative; ids/amounts/times are preserved.
+    return sortDoseSchedule(
+      med.doseSchedule.map((d) => ({
+        id: d.id || generateId('dose'),
+        amount: Number(d.amount) > 0 ? Number(d.amount) : 1,
+        time: normalizeTimeString(d.time || '09:00'),
+      }))
+    );
   }
   const amount = Number(med.dailyDose) > 0 ? Number(med.dailyDose) : 1;
   const time =

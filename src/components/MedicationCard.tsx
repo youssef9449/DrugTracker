@@ -450,7 +450,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   // status badge, visual progress bar, refill, consume, and menu).
   // -------------------------------------------------------------
   // -------------------------------------------------------------
-  // COMPACT (MINI) VIEW: same features as detailed, denser layout
+  // COMPACT (MINI) VIEW: same features, aggressively compressed height
   // -------------------------------------------------------------
   if (isCompact && viewFilter === 'all') {
     const isOut = statusInfo.status === 'out_of_stock';
@@ -458,52 +458,180 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const isWarn = statusInfo.status === 'warning';
     const isConsumedToday = medication.lastConsumedDate === getTodayDateString();
 
-    const statusBadge = isOut ? (
-      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 inline-flex items-center gap-0.5">
-        <AlertCircle className="w-2.5 h-2.5" />
-        نفد
-      </span>
-    ) : isCrit ? (
-      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 inline-flex items-center gap-0.5">
-        <Clock className="w-2.5 h-2.5" />
-        حرج ({statusInfo.daysLeft}ي)
-      </span>
-    ) : isWarn ? (
-      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 inline-flex items-center gap-0.5">
-        <Clock className="w-2.5 h-2.5" />
-        تنبيه
-      </span>
-    ) : (
-      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 inline-flex items-center gap-0.5">
-        <CheckCircle2 className="w-2.5 h-2.5" />
-        آمن ({statusInfo.daysLeft}ي)
-      </span>
-    );
+    const statusLabel = isOut
+      ? 'نفد'
+      : isCrit
+      ? `حرج ${statusInfo.daysLeft}ي`
+      : isWarn
+      ? `تنبيه ${statusInfo.daysLeft}ي`
+      : `آمن ${statusInfo.daysLeft}ي`;
+    const statusClass = isOut
+      ? 'bg-red-100 text-red-700'
+      : isCrit
+      ? 'bg-rose-100 text-rose-700'
+      : isWarn
+      ? 'bg-amber-100 text-amber-800'
+      : 'bg-emerald-100 text-emerald-800';
 
     return (
       <div
         id={`med-card-${medication.id}`}
-        className={`bg-white rounded-xl border border-slate-200/90 p-2 shadow-2xs transition relative overflow-hidden border-r-2 ${tag.border} ${
-          isOut ? 'bg-red-50/30' : isCrit ? 'bg-rose-50/25' : isWarn ? 'bg-amber-50/15' : ''
+        className={`bg-white rounded-lg border border-slate-200/90 p-1.5 shadow-2xs transition relative overflow-hidden border-r-2 ${tag.border} ${
+          isOut ? 'bg-red-50/25' : isCrit ? 'bg-rose-50/20' : isWarn ? 'bg-amber-50/10' : ''
         }`}
       >
-        {/* Name + status + actions */}
-        <div className="flex items-start justify-between gap-1">
-          <div className="min-w-0 flex-1">
-            <h3 className="text-[11px] font-bold text-slate-900 leading-snug break-words">
+        {/* Row 1: name + status + actions */}
+        <div className="flex items-center gap-1">
+          <h3 className="flex-1 min-w-0 text-[10px] font-bold text-slate-900 leading-tight truncate" title={medication.name}>
+            {medication.name}
+          </h3>
+          <span className={`shrink-0 text-[8px] font-bold px-1 py-px rounded ${statusClass}`}>
+            {statusLabel}
+          </span>
+          <div className="flex items-center shrink-0">
+            {onConsumeDose && (
+              isConsumedToday ? (
+                <span title="تم تناول جرعة اليوم" className="w-5 h-5 flex items-center justify-center text-emerald-600">
+                  <CheckCircle className="w-3 h-3" />
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onConsumeDose(medication.id)}
+                  disabled={effPills <= 0 || medication.dailyDose <= 0}
+                  title={`تناول جرعة (-${medication.dailyDose})`}
+                  className={`w-5 h-5 flex items-center justify-center rounded ${
+                    effPills <= 0 || medication.dailyDose <= 0
+                      ? 'text-slate-300 cursor-not-allowed'
+                      : 'text-emerald-700 hover:bg-emerald-50'
+                  }`}
+                >
+                  <Pill className="w-3 h-3 rotate-45" />
+                </button>
+              )
+            )}
+            <button
+              type="button"
+              onClick={() => onOpenRefill(medication)}
+              title="تعبئة"
+              className="w-5 h-5 flex items-center justify-center rounded text-teal-700 hover:bg-teal-50"
+            >
+              <Plus className="w-3 h-3" />
+            </button>
+            <MedicationMenu
+              medication={medication}
+              isAutoActive={isAutoActive}
+              showRefillInMenu={false}
+              onOpenRefill={onOpenRefill}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              onToggleAutoDeduct={onToggleAutoDeduct}
+            />
+          </div>
+        </div>
+
+        {/* Row 2: stock · dose · depletion (one line) */}
+        <div className="mt-1 flex items-center gap-1 text-[9px] text-slate-600 leading-none truncate">
+          <span className={`font-mono font-bold ${effPills === 0 ? 'text-red-600' : 'text-slate-800'}`}>
+            {effPills}
+          </span>
+          <span className="text-slate-400">{medication.unit || 'قرص'}</span>
+          <span className="text-slate-300">·</span>
+          <span className="font-mono text-teal-800">{medication.dailyDose}/ي</span>
+          <span className="text-slate-300">·</span>
+          <span className="truncate text-slate-500">{depletion.formattedArabic}</span>
+        </div>
+
+        {/* Row 3: progress + auto-deduct */}
+        <div className="mt-1 flex items-center gap-1">
+          <div className="flex-1 h-0.5 bg-slate-100 rounded-full overflow-hidden min-w-0">
+            <div
+              className={`h-full ${getProgressColor()}`}
+              style={{ width: `${percentLeft}%` }}
+            />
+          </div>
+          <span
+            className={`shrink-0 text-[8px] font-bold leading-none ${
+              isAutoActive ? 'text-teal-600' : 'text-amber-600'
+            }`}
+            title={isAutoActive ? 'خصم تلقائي مفعّل' : 'خصم تلقائي متوقف'}
+          >
+            {isAutoActive ? 'خصم✓' : 'خصم✗'}
+          </span>
+        </div>
+
+        {lastRefillQuantity && onUndoRefill ? (
+          <button
+            type="button"
+            onClick={onUndoRefill}
+            className="mt-1 w-full text-[8px] font-bold text-rose-700 bg-amber-50 border border-amber-200 rounded px-1 py-0.5"
+          >
+            تراجع +{lastRefillQuantity}
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
+  // -------------------------------------------------------------
+  // DETAILED VIEW for "all": former compact card (medium density)
+  // -------------------------------------------------------------
+  if (viewFilter === 'all') {
+
+    const isOut = statusInfo.status === 'out_of_stock';
+    const isCrit = statusInfo.status === 'critical';
+    const isWarn = statusInfo.status === 'warning';
+    const isConsumedToday = medication.lastConsumedDate === getTodayDateString();
+
+    return (
+      <div
+        id={`med-card-${medication.id}`}
+        className={`bg-white rounded-xl border border-slate-200/90 p-2.5 shadow-2xs hover:shadow-xs transition relative overflow-hidden border-r-4 ${tag.border} ${
+          isOut
+            ? 'bg-red-50/20'
+            : isCrit
+            ? 'bg-rose-50/20'
+            : isWarn
+            ? 'bg-amber-50/15'
+            : ''
+        }`}
+      >
+        {/* Top line: Name + Category + Status Badge + Actions */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0 flex-wrap">
+            <h3 className="text-xs font-bold text-slate-900 leading-tight truncate max-w-[140px] sm:max-w-xs">
               {medication.name}
             </h3>
-            <div className="mt-0.5 flex flex-wrap items-center gap-1">
-              {medication.category && (
-                <span className="text-[9px] font-medium bg-slate-100 text-slate-600 px-1 py-0.5 rounded">
-                  {medication.category}
-                </span>
-              )}
-              {statusBadge}
-            </div>
+            {medication.category && (
+              <span className="text-[9px] font-medium bg-slate-100 text-slate-600 px-1 py-0.5 rounded">
+                {medication.category}
+              </span>
+            )}
+            {isOut ? (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 flex items-center gap-0.5 shrink-0">
+                <AlertCircle className="w-2.5 h-2.5" />
+                <span>نفد</span>
+              </span>
+            ) : isCrit ? (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 flex items-center gap-0.5 shrink-0">
+                <Clock className="w-2.5 h-2.5" />
+                <span>حرج ({statusInfo.daysLeft}ي)</span>
+              </span>
+            ) : isWarn ? (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 flex items-center gap-0.5 shrink-0">
+                <Clock className="w-2.5 h-2.5" />
+                <span>تنبيه ({statusInfo.daysLeft}ي)</span>
+              </span>
+            ) : (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 flex items-center gap-0.5 shrink-0">
+                <CheckCircle2 className="w-2.5 h-2.5" />
+                <span>آمن ({statusInfo.daysLeft}ي)</span>
+              </span>
+            )}
           </div>
 
-          <div className="flex items-center gap-0.5 shrink-0">
+          {/* Quick Actions at top left */}
+          <div className="flex items-center gap-1 shrink-0">
             {onConsumeDose && (
               isConsumedToday ? (
                 <span
@@ -528,6 +656,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 </button>
               )
             )}
+
             <button
               type="button"
               onClick={() => onOpenRefill(medication)}
@@ -535,175 +664,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               className="w-6 h-6 flex items-center justify-center rounded-md bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 transition active:scale-95"
             >
               <Plus className="w-3.5 h-3.5" />
-            </button>
-            <MedicationMenu
-              medication={medication}
-              isAutoActive={isAutoActive}
-              showRefillInMenu={false}
-              onOpenRefill={onOpenRefill}
-              onEdit={onEdit}
-              onDelete={onDelete}
-              onToggleAutoDeduct={onToggleAutoDeduct}
-            />
-          </div>
-        </div>
-
-        {/* Stock / dose / depletion */}
-        <div className="mt-1.5 pt-1.5 border-t border-slate-100 space-y-0.5 text-[10px]">
-          <div className="flex items-center gap-1 flex-wrap">
-            <span className="text-slate-400">المتبقي:</span>
-            <span
-              className={`font-extrabold font-mono ${
-                effPills === 0
-                  ? 'text-red-600'
-                  : effPills <= medication.dailyDose * 2
-                  ? 'text-rose-600'
-                  : 'text-slate-800'
-              }`}
-            >
-              {effPills}
-            </span>
-            <span className="text-slate-500">{medication.unit || 'قرص'}</span>
-            {stripsDesc && (
-              <span className="text-slate-400 truncate">({stripsDesc})</span>
-            )}
-          </div>
-          <div className="flex items-center gap-1.5 flex-wrap text-slate-600">
-            <span>
-              <span className="text-slate-400">الجرعة:</span>{' '}
-              <span className="font-mono font-bold text-teal-800">{medication.dailyDose}</span>
-              <span className="text-slate-400">/يوم</span>
-            </span>
-            <span className="text-slate-300">•</span>
-            <span className="inline-flex items-center gap-0.5">
-              <Calendar className="w-2.5 h-2.5 text-slate-400" />
-              <span className="text-slate-400">النفاذ:</span>
-              <span className="font-bold text-slate-800">{depletion.formattedArabic}</span>
-            </span>
-          </div>
-        </div>
-
-        {/* Progress */}
-        <div className="mt-1.5 w-full h-1 bg-slate-100 rounded-full overflow-hidden">
-          <div
-            className={`h-full transition-all duration-500 ${getProgressColor()}`}
-            style={{ width: `${percentLeft}%` }}
-          />
-        </div>
-
-        {/* Auto-deduct */}
-        <div
-          className={`mt-1 text-[9px] px-1.5 py-0.5 rounded flex items-center gap-0.5 leading-tight border ${
-            isAutoActive
-              ? 'text-teal-700 bg-teal-50 border-teal-200/70'
-              : 'text-amber-700 bg-amber-50 border-amber-200/70'
-          }`}
-        >
-          {isAutoActive ? (
-            <>
-              <Zap className="w-2.5 h-2.5 shrink-0" />
-              <span className="truncate">خصم تلقائي مفعّل</span>
-            </>
-          ) : (
-            <span className="truncate">خصم تلقائي متوقف</span>
-          )}
-        </div>
-        {undoRefillAction}
-      </div>
-    );
-  }
-
-  // -------------------------------------------------------------
-  // DETAILED VIEW for "all": former compact card (medium density)
-  // -------------------------------------------------------------
-  if (viewFilter === 'all') {
-
-    const isOut = statusInfo.status === 'out_of_stock';
-    const isCrit = statusInfo.status === 'critical';
-    const isWarn = statusInfo.status === 'warning';
-    const isConsumedToday = medication.lastConsumedDate === getTodayDateString();
-
-    return (
-      <div
-        id={`med-card-${medication.id}`}
-        className={`bg-white rounded-2xl border border-slate-200/90 p-3 shadow-2xs hover:shadow-xs transition relative overflow-hidden border-r-4 ${tag.border} ${
-          isOut
-            ? 'bg-red-50/20'
-            : isCrit
-            ? 'bg-rose-50/20'
-            : isWarn
-            ? 'bg-amber-50/15'
-            : ''
-        }`}
-      >
-        {/* Top line: Name + Category + Status Badge + Actions */}
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0 flex-wrap">
-            <h3 className="text-sm font-bold text-slate-900 leading-tight truncate max-w-[150px] sm:max-w-xs">
-              {medication.name}
-            </h3>
-            {medication.category && (
-              <span className="text-[10px] font-medium bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded-md">
-                {medication.category}
-              </span>
-            )}
-            {isOut ? (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700 flex items-center gap-1 shrink-0">
-                <AlertCircle className="w-3 h-3" />
-                <span>نفد المخزون</span>
-              </span>
-            ) : isCrit ? (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 flex items-center gap-1 shrink-0">
-                <Clock className="w-3 h-3" />
-                <span>حرج ({statusInfo.daysLeft} {statusInfo.daysLeft === 1 ? 'يوم' : statusInfo.daysLeft === 2 ? 'يومان' : 'أيام'})</span>
-              </span>
-            ) : isWarn ? (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 flex items-center gap-1 shrink-0">
-                <Clock className="w-3 h-3" />
-                <span>تنبيه ({statusInfo.daysLeft} أيام)</span>
-              </span>
-            ) : (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 flex items-center gap-1 shrink-0">
-                <CheckCircle2 className="w-3 h-3" />
-                <span>آمن ({statusInfo.daysLeft} يوم)</span>
-              </span>
-            )}
-          </div>
-
-          {/* Quick Actions at top left */}
-          <div className="flex items-center gap-1 shrink-0">
-            {onConsumeDose && (
-              isConsumedToday ? (
-                <span
-                  title="تم تناول جرعة اليوم"
-                  className="w-7 h-7 flex items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-200 text-xs"
-                >
-                  <CheckCircle className="w-3.5 h-3.5" />
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => onConsumeDose(medication.id)}
-                  disabled={effPills <= 0 || medication.dailyDose <= 0}
-                  title={`تناول جرعة اليوم (-${medication.dailyDose} ${medication.unit})`}
-                  className={`w-7 h-7 flex items-center justify-center rounded-lg border text-xs transition active:scale-95 ${
-                    effPills <= 0 || medication.dailyDose <= 0
-                      ? 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed'
-                      : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
-                  }`}
-                >
-                  <Pill className="w-3.5 h-3.5 rotate-45" />
-                </button>
-              )
-            )}
-
-            <button
-              type="button"
-              onClick={() => onOpenRefill(medication)}
-              title="تعبئة رصيد"
-              className="w-7 h-7 flex items-center justify-center rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 transition active:scale-95"
-            >
-              <Plus className="w-4 h-4" />
             </button>
 
             <MedicationMenu
@@ -719,11 +679,11 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         </div>
 
         {/* Second line: Crucial details (Remaining stock, daily dose, depletion date) */}
-        <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between gap-2 text-xs flex-wrap">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-[11px] text-slate-500 font-medium">المتبقي:</span>
+        <div className="mt-1.5 pt-1.5 border-t border-slate-100 flex items-center justify-between gap-2 text-[11px] flex-wrap">
+          <div className="flex items-center gap-1 min-w-0">
+            <span className="text-[10px] text-slate-500 font-medium">المتبقي:</span>
             <span
-              className={`font-extrabold font-mono text-sm ${
+              className={`font-extrabold font-mono text-xs ${
                 effPills === 0
                   ? 'text-red-600'
                   : effPills <= medication.dailyDose * 2
@@ -733,27 +693,27 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             >
               {effPills}
             </span>
-            <span className="text-[11px] text-slate-600 font-medium">
+            <span className="text-[10px] text-slate-600 font-medium">
               {medication.unit || 'قرص'}
             </span>
             {stripsDesc && (
-              <span className="text-[10px] text-slate-400 font-medium truncate">
+              <span className="text-[9px] text-slate-400 font-medium truncate">
                 ({stripsDesc})
               </span>
             )}
           </div>
 
-          <div className="flex items-center gap-2 text-[11px] text-slate-600">
-            <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5 text-[10px] text-slate-600">
+            <div className="flex items-center gap-0.5">
               <span className="text-slate-400">الجرعة:</span>
               <span className="font-mono font-bold text-teal-800">{medication.dailyDose}</span>
-              <span className="text-slate-400 text-[10px]">/يوم</span>
+              <span className="text-slate-400">/يوم</span>
             </div>
 
             <span className="text-slate-300">•</span>
 
-            <div className="flex items-center gap-1">
-              <Calendar className="w-3 h-3 text-slate-400" />
+            <div className="flex items-center gap-0.5">
+              <Calendar className="w-2.5 h-2.5 text-slate-400" />
               <span className="text-slate-400">النفاذ:</span>
               <span className="font-bold text-slate-800">{depletion.formattedArabic}</span>
             </div>
@@ -761,7 +721,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         </div>
 
         {/* Mini Visual Stock Progress Bar */}
-        <div className="mt-2 w-full h-1 bg-slate-100 rounded-full overflow-hidden">
+        <div className="mt-1.5 w-full h-0.5 bg-slate-100 rounded-full overflow-hidden">
           <div
             className={`h-full transition-all duration-500 ${getProgressColor()}`}
             style={{ width: `${percentLeft}%` }}
@@ -769,7 +729,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         </div>
 
         <div
-          className={`mt-1.5 text-[10px] px-2 py-0.5 rounded-md flex items-center gap-1 border ${
+          className={`mt-1 text-[9px] px-1.5 py-0.5 rounded flex items-center gap-1 border ${
             isAutoActive
               ? 'text-teal-700 bg-teal-50 border-teal-200/70'
               : 'text-amber-700 bg-amber-50 border-amber-200/70'

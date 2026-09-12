@@ -59,8 +59,9 @@ export interface Medication {
 //     passing, auto-deduction, manual consumption, refills-while-
 //     critical, app restarts and moving projections never start a new
 //     one).
-//   - Critical → Sufficient ends it (claim cleared → a later critical
-//     episode gets a fresh notification opportunity).
+//   - Critical → Sufficient ends it (useStockAlerts clears the claim
+//     synchronously on that render → a later critical episode gets a
+//     fresh notification opportunity).
 //
 // `claimed === true` means the episode's single notification
 // opportunity has been consumed:

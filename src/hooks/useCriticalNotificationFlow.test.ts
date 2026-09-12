@@ -12,6 +12,13 @@ import { useCriticalAlarmScheduler } from './useCriticalAlarmScheduler';
 // These verify the END-TO-END business rule: at most ONE critical-stock
 // notification per continuous Critical/Out-of-Stock episode, with no
 // duplicates across restarts, early crossings, or refill cycles.
+//
+// OWNERSHIP INVARIANT: useStockAlerts owns the claim's business
+// lifecycle SYNCHRONOUSLY (Sufficient ⇒ claim cleared on that very
+// render); the scheduler only executes native alarms and may write a
+// claim as the outcome of a successful future schedule. The race tests
+// below pin this: an in-flight async scheduler operation must never be
+// able to silence or erase a NEW episode's claim.
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: { getPlatform: () => 'web' },
@@ -236,6 +243,107 @@ describe('critical notification flow — both hooks integrated', () => {
     expect(cancelMock).toHaveBeenCalledWith('med-1');
     // Still exactly one user-facing notification.
     rerender({ medications: [{ ...critical }] });
+    await flush();
+    expect(sendMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('BLOCKER RACE: Critical → Sufficient → Critical before async cleanup resolves still notifies exactly once', async () => {
+    // 1. Episode A: Critical → the foreground sends once and claims.
+    const criticalA = makeMed({ currentPills: 3, warningThresholdDays: 5 });
+    const { rerender } = renderHook((props) => useBothHooks(props), {
+      initialProps: { medications: [criticalA] },
+    });
+    await flush();
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
+
+    // 2. Refill → Sufficient. The scheduler's follow-up schedule is
+    // gated, so no async operation can complete before episode B starts.
+    let resolveSchedule: (v: boolean) => void = () => undefined;
+    scheduleMock.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSchedule = resolve;
+        })
+    );
+    const sufficient = makeMed({ currentPills: 40, warningThresholdDays: 5 });
+    rerender({ medications: [sufficient] });
+
+    // 3. The claim is cleared IMMEDIATELY — synchronously, on this very
+    // render, before any async scheduler operation completes. This is
+    // the ownership that makes step 4 safe.
+    expect(readClaims()['med-1']).toBeUndefined();
+
+    // 4. The user consumes pills again BEFORE the old async operation
+    // resolves. Episode B must NOT inherit episode A's claim: the
+    // foreground sees no claim → sends exactly ONE new notification.
+    const criticalB = makeMed({ currentPills: 4, warningThresholdDays: 5 });
+    rerender({ medications: [criticalB] });
+    expect(sendMock).toHaveBeenCalledTimes(2);
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
+
+    // 5. Resolve the old async operation. It must NOT remove the new
+    // claim, flip it to claimed=false, or write any stale state.
+    resolveSchedule(true);
+    await flush();
+
+    // 6. Final expected claim: episode B's, untouched.
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
+    expect(sendMock).toHaveBeenCalledTimes(2);
+
+    // Still critical → quiet (episode B already consumed its chance).
+    rerender({ medications: [{ ...criticalB }] });
+    await flush();
+    expect(sendMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('BLOCKER RACE (future-alarm variant): a Sufficient render clears the claim synchronously and the pending native cancel cannot erase episode B\u2019s claim', async () => {
+    // State at the end of episode A: the refill happened while an alarm
+    // armed for episode A's early crossing was still pending — a
+    // still-future claim that no longer belongs to any live episode.
+    localStorage.setItem(
+      CRITICAL_CLAIMS_STORAGE_KEY,
+      JSON.stringify({ 'med-1': { claimed: true, alarmTime: Date.now() + 24 * 60 * 60 * 1000 } })
+    );
+
+    // Gate the native cancel so the "old cancellation" stays in flight.
+    let resolveCancel: () => void = () => undefined;
+    cancelMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveCancel = resolve;
+        })
+    );
+
+    const sufficient = makeMed({ currentPills: 40, warningThresholdDays: 5 });
+    const { rerender } = renderHook((props) => useBothHooks(props), {
+      initialProps: { medications: [sufficient] },
+    });
+
+    // The claim is cleared SYNCHRONOUSLY on this render (it is episode A
+    // residue — not the scheduler's live projection record), and the
+    // stale alarm's cancellation is requested through the queue.
+    expect(readClaims()['med-1']).toBeUndefined();
+
+    // Episode B starts BEFORE the native cancel resolves: the foreground
+    // finds no claim → sends exactly ONE notification for episode B.
+    const criticalB = makeMed({ currentPills: 4, warningThresholdDays: 5 });
+    rerender({ medications: [criticalB] });
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
+
+    // The old cancellation resolves — it must not erase episode B's
+    // claim, un-claim it, or recreate stale state.
+    resolveCancel();
+    await flush();
+
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    // The stale episode-A alarm was cancelled through the queue.
+    expect(cancelMock).toHaveBeenCalledWith('med-1');
+
+    // Still critical → quiet.
+    rerender({ medications: [{ ...criticalB }] });
     await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
   });

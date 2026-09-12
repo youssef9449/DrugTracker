@@ -18,23 +18,21 @@
  *   - android_med_tracker_scheduled_critical_v2   (scheduled-claim records)
  *   - android_med_tracker_critical_ownership_v2   (ownership revisions)
  *
- * The migration inspects BOTH legacy stores together — never the
- * transition state alone:
- *   - SENT / FIRED_OR_DUE            → { claimed: true,  alarmTime: null }
- *     (the notification was already delivered; a still-armed record
- *     alongside these states is stale residue — never resurrected)
- *   - valid FUTURE scheduled alarm   → { claimed: true,  alarmTime }
- *     (preserved REGARDLESS of the transition state — SCHEDULED included —
- *     so the new scheduler recognises the armed alarm instead of
- *     cancelling/re-arming it, which could lose it on a failed re-arm)
- *   - elapsed (alarmTime <= now)
- *     scheduled alarm                → { claimed: true,  alarmTime: null }
- *     (never pretend it is still future; delivery state is not
- *     reconstructed, so it migrates as consumed — this prevents a
- *     duplicate foreground notification right after the upgrade)
- *   - NONE / no transition, nothing
- *     armed                          → { claimed: false, alarmTime: null }
- *     (the opportunity was never consumed — it stays open)
+ * Migration precedence (evaluated per medication, FIRST match wins):
+ *   1. SENT / FIRED_OR_DUE
+ *      → claimed=true, alarmTime=null
+ *      because the notification opportunity is already consumed.
+ *      Any scheduled record beside these states is stale legacy residue
+ *      and must not resurrect a second notification.
+ *   2. Otherwise, a valid FUTURE scheduled alarm
+ *      → claimed=true, alarmTime=<future alarm time>
+ *      because the alarm is still the active notification opportunity.
+ *   3. Otherwise, an elapsed scheduled alarm
+ *      → claimed=true, alarmTime=null
+ *      because delivery is not reconstructed and we must avoid
+ *      duplicates (never pretend an elapsed alarm is still future).
+ *   4. Otherwise, NONE / no consumed opportunity
+ *      → claimed=false, alarmTime=null.
  */
 
 import type { CriticalNotificationClaim } from '../types';
@@ -73,15 +71,14 @@ function removeLegacyKeys(): void {
  * Migrate the previous state-machine stores into the simple claim map.
  * Pure function over the parsed legacy values.
  *
- * Decision order per medication (see the file-header rules):
- *   1. SENT / FIRED_OR_DUE      → consumed (alarmTime: null, always —
- *      a still-armed record next to these states is stale residue).
- *   2. Valid FUTURE armed alarm → preserved with its alarmTime, no
- *      matter the transition state (SCHEDULED included).
- *   3. Elapsed armed alarm      → consumed (alarmTime: null).
- *   4. NONE / no transition     → open opportunity (claimed: false).
- *   5. SCHEDULED without any    → consumed.
- *      armed record
+ * Migration precedence (FIRST match wins — SENT/FIRED_OR_DUE beat a
+ * future scheduled record, which is stale residue beside them):
+ *   1. SENT / FIRED_OR_DUE      → consumed (claimed=true, alarmTime=null).
+ *   2. Valid FUTURE armed alarm → preserved with its alarmTime.
+ *   3. Elapsed armed alarm      → consumed (claimed=true, alarmTime=null).
+ *   4. NONE / no transition, nothing armed → open (claimed=false,
+ *      alarmTime=null).
+ *   5. SCHEDULED without any armed record → consumed.
  */
 export function migrateLegacyClaims(
   legacyTransitions: unknown,

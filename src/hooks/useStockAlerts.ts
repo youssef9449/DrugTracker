@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Medication, calculateMedicationStatus } from '../types';
-import { effectiveCurrentPills } from '../utils/dateCalculations';
+import { effectiveCurrentPills, getCriticalAlarmDate, getTodayDateString } from '../utils/dateCalculations';
 import { sendCriticalStockAlert, cancelCriticalAlarm } from '../utils/notifications';
 import {
   loadCriticalNotificationClaims,
@@ -34,15 +34,33 @@ const IN_FLIGHT_CLAIM = { claimed: true, alarmTime: null } as const;
  *
  * Per medication, per pass:
  *
- *   sufficient / frozen         → nothing (the scheduler owns claims for
- *                                 non-critical meds: it arms the future
- *                                 alarm or clears the ended episode's
- *                                 claim).
- *   notifications/alerts off    → nothing, and the claim is NEVER
- *                                 written (disabling must not consume the
- *                                 opportunity; re-enabling while still
- *                                 critical allows exactly one
- *                                 notification).
+ *   sufficient / frozen         → the episode is over. Any leftover
+ *                                 claim is cleared SYNCHRONOUSLY here
+ *                                 (never via an async queue), so the
+ *                                 next Critical episode can never
+ *                                 inherit the previous episode's claim.
+ *                                 Exception: the scheduler's live armed
+ *                                 record { claimed: true, alarmTime: T }
+ *                                 where T is EXACTLY the med's current
+ *                                 projected crossing (notifications
+ *                                 enabled) — that claim IS the armed
+ *                                 future alarm's bookkeeping, not an
+ *                                 ended episode's; touching it would
+ *                                 cancel a live alarm and lose the
+ *                                 future notification. Any OTHER claim
+ *                                 (consumed episode, stale/moved alarm
+ *                                 time, open marker) is cleared, and a
+ *                                 still-future alarm time it references
+ *                                 is cancelled natively (fire-and-forget
+ *                                 op that writes nothing).
+ *   notifications/alerts off    → for critical meds: nothing is sent and
+ *                                 the claim is NEVER written (disabling
+ *                                 must not consume the opportunity;
+ *                                 re-enabling while still critical
+ *                                 allows exactly one notification).
+ *                                 The sufficient cleanup above still
+ *                                 runs — clearing an ended episode's
+ *                                 claim is bookkeeping, not notification.
  *   critical + claimed          → nothing. No duplicate. Covers the
  *                                 foreground send, the scheduled alarm
  *                                 whose window passed (fired while the
@@ -75,13 +93,15 @@ const IN_FLIGHT_CLAIM = { claimed: true, alarmTime: null } as const;
  *   - Every claim write is a synchronous load → write → save of the map
  *     (localStorage is synchronous); JS single-threading makes each
  *     write atomic.
+ *   - This hook runs BEFORE useCriticalAlarmScheduler in App.tsx, so its
+ *     synchronous claim decisions and its enqueued native ops always
+ *     precede the scheduler's cancel/schedule chain for the same render.
  *   - The foreground writes claims only for CRITICAL meds; the scheduler
  *     only for SUFFICIENT ones — they never race on the same state.
  *   - The send resolves asynchronously; the failure-revert is a tiny
  *     CAS: if the claim moved since this pass marked it (episode ended +
- *     scheduler armed the next crossing, med deleted, …), the revert is
- *     skipped — a stale foreground result can never overwrite newer
- *     business state.
+ *     re-armed, med deleted, …), the revert is skipped — a stale
+ *     foreground result can never overwrite newer business state.
  *   - Native alarm cancels go through the shared per-medication
  *     operation queue so they serialize against the scheduler's
  *     cancel/schedule chain.
@@ -115,7 +135,43 @@ export function useStockAlerts({
     for (const med of medications) {
       const { status, daysLeft } = calculateMedicationStatus(med);
       const isCriticalish = status === 'critical' || status === 'out_of_stock';
-      if (!isCriticalish) continue;
+
+      if (!isCriticalish) {
+        // ── Sufficient: this hook ends the business episode, here and
+        // now, synchronously. A new Critical episode must never inherit
+        // the previous episode's claim, so no async queue may own this
+        // clear.
+        const claim = getCriticalNotificationClaim(claims, med.id);
+        if (claim) {
+          const projection = canNotify
+            ? getCriticalAlarmDate(med, getTodayDateString())
+            : null;
+          // The scheduler's live armed record: an alarm successfully
+          // scheduled for EXACTLY the current projected crossing. It is
+          // the future alarm's bookkeeping, not an ended episode's claim
+          // — leave it alone so the armed alarm keeps its record (and
+          // the scheduler's "already armed" fast path stays valid).
+          const isLiveArmedRecord =
+            claim.claimed &&
+            claim.alarmTime !== null &&
+            projection !== null &&
+            claim.alarmTime === projection &&
+            claim.alarmTime > Date.now();
+          if (!isLiveArmedRecord) {
+            clearCriticalNotificationClaim(claims, med.id);
+            changed = true;
+            // A still-future alarm the claim references (e.g. armed for
+            // an episode that has since ended, or left armed while
+            // notifications were disabled) is now stale — cancel it
+            // natively. The op writes NOTHING; the claim is already
+            // cleared above, and no async result may recreate it.
+            if (claim.claimed && claim.alarmTime !== null && claim.alarmTime > Date.now()) {
+              void enqueueCriticalAlarmOp(med.id, () => cancelCriticalAlarm(med.id));
+            }
+          }
+        }
+        continue;
+      }
 
       // Disabled: never send, never claim. The episode logically stays
       // critical and its notification opportunity stays open.

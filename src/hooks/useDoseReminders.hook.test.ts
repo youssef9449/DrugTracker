@@ -299,7 +299,8 @@ describe('useDoseReminders', () => {
         1,
         'قرص',
         '09:00',
-        15
+        15,
+        undefined
       );
     });
 

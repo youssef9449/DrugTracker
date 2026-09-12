@@ -586,7 +586,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     return (
       <div
         id={`med-card-${medication.id}`}
-        className={`bg-white rounded-2xl border border-slate-200/90 p-3 shadow-2xs hover:shadow-xs transition relative overflow-hidden border-r-4 ${tag.border} ${
+        className={`bg-white rounded-xl border border-slate-200/90 p-2.5 shadow-2xs hover:shadow-xs transition relative overflow-hidden border-r-4 ${tag.border} ${
           isOut
             ? 'bg-red-50/20'
             : isCrit
@@ -599,33 +599,33 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         {/* Top line: Name + Category + Status Badge + Actions */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0 flex-wrap">
-            <h3 className="text-sm font-bold text-slate-900 leading-tight truncate max-w-[150px] sm:max-w-xs">
+            <h3 className="text-xs font-bold text-slate-900 leading-tight truncate max-w-[140px] sm:max-w-xs">
               {medication.name}
             </h3>
             {medication.category && (
-              <span className="text-[10px] font-medium bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded-md">
+              <span className="text-[9px] font-medium bg-slate-100 text-slate-600 px-1 py-0.5 rounded">
                 {medication.category}
               </span>
             )}
             {isOut ? (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700 flex items-center gap-1 shrink-0">
-                <AlertCircle className="w-3 h-3" />
-                <span>نفد المخزون</span>
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 flex items-center gap-0.5 shrink-0">
+                <AlertCircle className="w-2.5 h-2.5" />
+                <span>نفد</span>
               </span>
             ) : isCrit ? (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 flex items-center gap-1 shrink-0">
-                <Clock className="w-3 h-3" />
-                <span>حرج ({statusInfo.daysLeft} {statusInfo.daysLeft === 1 ? 'يوم' : statusInfo.daysLeft === 2 ? 'يومان' : 'أيام'})</span>
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 flex items-center gap-0.5 shrink-0">
+                <Clock className="w-2.5 h-2.5" />
+                <span>حرج ({statusInfo.daysLeft}ي)</span>
               </span>
             ) : isWarn ? (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 flex items-center gap-1 shrink-0">
-                <Clock className="w-3 h-3" />
-                <span>تنبيه ({statusInfo.daysLeft} أيام)</span>
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 flex items-center gap-0.5 shrink-0">
+                <Clock className="w-2.5 h-2.5" />
+                <span>تنبيه ({statusInfo.daysLeft}ي)</span>
               </span>
             ) : (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 flex items-center gap-1 shrink-0">
-                <CheckCircle2 className="w-3 h-3" />
-                <span>آمن ({statusInfo.daysLeft} يوم)</span>
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 flex items-center gap-0.5 shrink-0">
+                <CheckCircle2 className="w-2.5 h-2.5" />
+                <span>آمن ({statusInfo.daysLeft}ي)</span>
               </span>
             )}
           </div>
@@ -636,9 +636,9 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               isConsumedToday ? (
                 <span
                   title="تم تناول جرعة اليوم"
-                  className="w-7 h-7 flex items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-200 text-xs"
+                  className="w-6 h-6 flex items-center justify-center rounded-md bg-emerald-50 text-emerald-600 border border-emerald-200"
                 >
-                  <CheckCircle className="w-3.5 h-3.5" />
+                  <CheckCircle className="w-3 h-3" />
                 </span>
               ) : (
                 <button
@@ -646,13 +646,13 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   onClick={() => onConsumeDose(medication.id)}
                   disabled={effPills <= 0 || medication.dailyDose <= 0}
                   title={`تناول جرعة اليوم (-${medication.dailyDose} ${medication.unit})`}
-                  className={`w-7 h-7 flex items-center justify-center rounded-lg border text-xs transition active:scale-95 ${
+                  className={`w-6 h-6 flex items-center justify-center rounded-md border transition active:scale-95 ${
                     effPills <= 0 || medication.dailyDose <= 0
                       ? 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed'
                       : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
                   }`}
                 >
-                  <Pill className="w-3.5 h-3.5 rotate-45" />
+                  <Pill className="w-3 h-3 rotate-45" />
                 </button>
               )
             )}
@@ -661,9 +661,9 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               type="button"
               onClick={() => onOpenRefill(medication)}
               title="تعبئة رصيد"
-              className="w-7 h-7 flex items-center justify-center rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 transition active:scale-95"
+              className="w-6 h-6 flex items-center justify-center rounded-md bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 transition active:scale-95"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-3.5 h-3.5" />
             </button>
 
             <MedicationMenu
@@ -679,11 +679,11 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         </div>
 
         {/* Second line: Crucial details (Remaining stock, daily dose, depletion date) */}
-        <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between gap-2 text-xs flex-wrap">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-[11px] text-slate-500 font-medium">المتبقي:</span>
+        <div className="mt-1.5 pt-1.5 border-t border-slate-100 flex items-center justify-between gap-2 text-[11px] flex-wrap">
+          <div className="flex items-center gap-1 min-w-0">
+            <span className="text-[10px] text-slate-500 font-medium">المتبقي:</span>
             <span
-              className={`font-extrabold font-mono text-sm ${
+              className={`font-extrabold font-mono text-xs ${
                 effPills === 0
                   ? 'text-red-600'
                   : effPills <= medication.dailyDose * 2
@@ -693,27 +693,27 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             >
               {effPills}
             </span>
-            <span className="text-[11px] text-slate-600 font-medium">
+            <span className="text-[10px] text-slate-600 font-medium">
               {medication.unit || 'قرص'}
             </span>
             {stripsDesc && (
-              <span className="text-[10px] text-slate-400 font-medium truncate">
+              <span className="text-[9px] text-slate-400 font-medium truncate">
                 ({stripsDesc})
               </span>
             )}
           </div>
 
-          <div className="flex items-center gap-2 text-[11px] text-slate-600">
-            <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5 text-[10px] text-slate-600">
+            <div className="flex items-center gap-0.5">
               <span className="text-slate-400">الجرعة:</span>
               <span className="font-mono font-bold text-teal-800">{medication.dailyDose}</span>
-              <span className="text-slate-400 text-[10px]">/يوم</span>
+              <span className="text-slate-400">/يوم</span>
             </div>
 
             <span className="text-slate-300">•</span>
 
-            <div className="flex items-center gap-1">
-              <Calendar className="w-3 h-3 text-slate-400" />
+            <div className="flex items-center gap-0.5">
+              <Calendar className="w-2.5 h-2.5 text-slate-400" />
               <span className="text-slate-400">النفاذ:</span>
               <span className="font-bold text-slate-800">{depletion.formattedArabic}</span>
             </div>
@@ -721,7 +721,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         </div>
 
         {/* Mini Visual Stock Progress Bar */}
-        <div className="mt-2 w-full h-1 bg-slate-100 rounded-full overflow-hidden">
+        <div className="mt-1.5 w-full h-0.5 bg-slate-100 rounded-full overflow-hidden">
           <div
             className={`h-full transition-all duration-500 ${getProgressColor()}`}
             style={{ width: `${percentLeft}%` }}
@@ -729,7 +729,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         </div>
 
         <div
-          className={`mt-1.5 text-[10px] px-2 py-0.5 rounded-md flex items-center gap-1 border ${
+          className={`mt-1 text-[9px] px-1.5 py-0.5 rounded flex items-center gap-1 border ${
             isAutoActive
               ? 'text-teal-700 bg-teal-50 border-teal-200/70'
               : 'text-amber-700 bg-amber-50 border-amber-200/70'

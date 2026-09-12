@@ -1418,11 +1418,11 @@ export default function App() {
                           setIsCompactView(next);
                           showToast(
                             next
-                              ? 'تم تفعيل العرض المختصر (شبكة)'
+                              ? 'تم تفعيل العرض المختصر'
                               : 'تم تفعيل العرض التفصيلي'
                           );
                         }}
-                        label="تبديل العرض بين المختصر (شبكة) والتفصيلي"
+                        label="تبديل العرض بين المختصر والتفصيلي"
                         size="sm"
                         color="teal"
                       />

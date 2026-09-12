@@ -20,14 +20,20 @@ import { useCriticalAlarmScheduler } from './useCriticalAlarmScheduler';
 // below pin this: an in-flight async scheduler operation must never be
 // able to silence or erase a NEW episode's claim.
 
+// Mutable platform mock so tests can switch between the web and the
+// native (android) code paths.
+const platformMock = vi.hoisted(() => vi.fn(() => 'web'));
+
 vi.mock('@capacitor/core', () => ({
-  Capacitor: { getPlatform: () => 'web' },
+  Capacitor: { getPlatform: platformMock },
 }));
 vi.mock('@capacitor/local-notifications', () => ({
   LocalNotifications: {
     schedule: vi.fn(),
     cancel: vi.fn(),
     checkPermissions: vi.fn(),
+    checkExactNotificationSetting: vi.fn(),
+    getPending: vi.fn(),
   },
 }));
 
@@ -35,6 +41,7 @@ const mocks = vi.hoisted(() => ({
   send: vi.fn(),
   schedule: vi.fn(),
   cancel: vi.fn(),
+  verify: vi.fn(),
 }));
 
 vi.mock('../utils/notifications', async () => {
@@ -46,6 +53,7 @@ vi.mock('../utils/notifications', async () => {
     sendCriticalStockAlert: mocks.send,
     scheduleCriticalAlarm: mocks.schedule,
     cancelCriticalAlarm: mocks.cancel,
+    verifyCriticalAlarmPending: mocks.verify,
   };
 });
 
@@ -54,6 +62,7 @@ import { sendCriticalStockAlert } from '../utils/notifications';
 const sendMock = vi.mocked(sendCriticalStockAlert);
 const scheduleMock = vi.mocked(mocks.schedule);
 const cancelMock = vi.mocked(mocks.cancel);
+const verifyMock = mocks.verify;
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
   return {
@@ -75,6 +84,7 @@ function useBothHooks(props: {
   medications: Medication[];
   notificationsEnabled?: boolean;
   criticalStockAlertsEnabled?: boolean;
+  resumeTick?: number;
 }) {
   useStockAlerts({
     medications: props.medications,
@@ -89,6 +99,7 @@ function useBothHooks(props: {
     criticalStockAlertsEnabled: props.criticalStockAlertsEnabled ?? true,
     hydrated: true,
     isFirstRun: false,
+    resumeTick: props.resumeTick ?? 0,
   });
 }
 
@@ -105,9 +116,12 @@ beforeEach(() => {
   localStorage.clear();
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
+  platformMock.mockReturnValue('web');
   sendMock.mockResolvedValue(true);
   scheduleMock.mockResolvedValue(true);
   cancelMock.mockResolvedValue(undefined);
+  verifyMock.mockReset();
+  verifyMock.mockResolvedValue(false);
 });
 
 afterEach(() => {
@@ -258,7 +272,9 @@ describe('critical notification flow — both hooks integrated', () => {
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
 
     // 2. Refill → Sufficient. The scheduler's follow-up schedule is
-    // gated, so no async operation can complete before episode B starts.
+    // gated, so no async operation can COMPLETE before episode B starts.
+    // (The flush lets the enqueued operation START — capturing the real
+    // promise resolver — while the schedule itself stays pending.)
     let resolveSchedule: (v: boolean) => void = () => undefined;
     scheduleMock.mockImplementationOnce(
       () =>
@@ -268,6 +284,8 @@ describe('critical notification flow — both hooks integrated', () => {
     );
     const sufficient = makeMed({ currentPills: 40, warningThresholdDays: 5 });
     rerender({ medications: [sufficient] });
+    await flush();
+    expect(scheduleMock).toHaveBeenCalledTimes(1); // in flight, unresolved
 
     // 3. The claim is cleared IMMEDIATELY — synchronously, on this very
     // render, before any async scheduler operation completes. This is
@@ -307,6 +325,8 @@ describe('critical notification flow — both hooks integrated', () => {
     );
 
     // Gate the native cancel so the "old cancellation" stays in flight.
+    // (The flush below lets the enqueued cancel START — capturing the
+    // real promise resolver — while the cancel itself stays pending.)
     let resolveCancel: () => void = () => undefined;
     cancelMock.mockImplementationOnce(
       () =>
@@ -324,6 +344,10 @@ describe('critical notification flow — both hooks integrated', () => {
     // residue — not the scheduler's live projection record), and the
     // stale alarm's cancellation is requested through the queue.
     expect(readClaims()['med-1']).toBeUndefined();
+
+    // Let the queued cancel op actually START (pending, unresolved).
+    await flush();
+    expect(cancelMock).toHaveBeenCalledTimes(1);
 
     // Episode B starts BEFORE the native cancel resolves: the foreground
     // finds no claim → sends exactly ONE notification for episode B.
@@ -344,6 +368,108 @@ describe('critical notification flow — both hooks integrated', () => {
 
     // Still critical → quiet.
     rerender({ medications: [{ ...criticalB }] });
+    await flush();
+    expect(sendMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('BLOCKER (native alarm disappearance): matching claim + missing native alarm → silent repair, no duplicate foreground', async () => {
+    // State as left by a previous session: the alarm was armed at T
+    // (claimed) — but the OS dropped it (exact-alarm revoked, notification
+    // removed, …). The app reopens: the claim must NOT be treated as
+    // proof that the alarm exists.
+    platformMock.mockReturnValue('android');
+    verifyMock.mockResolvedValue(false); // getPending has no alarm at T
+    const sufficient = makeMed({ currentPills: 40, warningThresholdDays: 5 });
+    const projectedT = getCriticalAlarmDate(sufficient, getTodayDateString()) as number;
+    localStorage.setItem(
+      CRITICAL_CLAIMS_STORAGE_KEY,
+      JSON.stringify({ 'med-1': { claimed: true, alarmTime: projectedT } })
+    );
+
+    const { rerender } = renderHook((props) => useBothHooks(props), {
+      initialProps: { medications: [sufficient] },
+    });
+    await flush();
+
+    // The scheduler repaired the claim by re-arming the SAME alarm time.
+    expect(verifyMock).toHaveBeenCalledWith('med-1', projectedT);
+    expect(cancelMock).toHaveBeenCalledWith('med-1');
+    expect(scheduleMock).toHaveBeenCalledWith('med-1', 'Test Med', projectedT, 'قرص');
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: projectedT });
+    // Reconciliation is silent for the user: the med is sufficient, so
+    // no foreground notification was sent (and none is due yet).
+    expect(sendMock).not.toHaveBeenCalled();
+
+    // The med crosses later → the (re-armed) future claim is released
+    // and exactly ONE notification fires for this episode.
+    const critical = makeMed({ currentPills: 4, warningThresholdDays: 5 });
+    rerender({ medications: [critical] });
+    await flush();
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
+  });
+
+  it('BLOCKER (resume reconciliation): app resume re-verifies matching claims against the platform and repairs quietly', async () => {
+    platformMock.mockReturnValue('android');
+    const sufficient = makeMed({ currentPills: 30, warningThresholdDays: 5 });
+    const projectedT = getCriticalAlarmDate(sufficient, getTodayDateString()) as number;
+
+    const { rerender } = renderHook((props) => useBothHooks(props), {
+      initialProps: { medications: [sufficient], resumeTick: 0 },
+    });
+    await flush();
+    expect(scheduleMock).toHaveBeenCalledTimes(1);
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: projectedT });
+    expect(sendMock).not.toHaveBeenCalled();
+
+    // The alarm disappeared while the app was backgrounded.
+    verifyMock.mockResolvedValue(false);
+
+    // Resume: App.tsx bumps the tick → reconciliation runs. The alarm
+    // is missing → repaired at the same T, silently.
+    rerender({ medications: [sufficient], resumeTick: 1 });
+    await flush();
+
+    expect(verifyMock).toHaveBeenCalledWith('med-1', projectedT);
+    expect(scheduleMock).toHaveBeenCalledTimes(2);
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: projectedT });
+    // No user-facing notification just because reconciliation happened.
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it('BLOCKER (repair failure): native scheduling failure opens the claim and the foreground fallback still notifies exactly once', async () => {
+    // The claim says armed at T, but the native alarm is gone AND the
+    // repair cannot re-arm it. The claim must open — and when the med
+    // crosses, the foreground (not a phantom alarm) delivers the ONE
+    // episode notification.
+    platformMock.mockReturnValue('android');
+    verifyMock.mockResolvedValue(false);
+    scheduleMock.mockResolvedValue(false); // repair fails (e.g. permission revoked)
+    const sufficient = makeMed({ currentPills: 40, warningThresholdDays: 5 });
+    const projectedT = getCriticalAlarmDate(sufficient, getTodayDateString()) as number;
+    localStorage.setItem(
+      CRITICAL_CLAIMS_STORAGE_KEY,
+      JSON.stringify({ 'med-1': { claimed: true, alarmTime: projectedT } })
+    );
+
+    const { rerender } = renderHook((props) => useBothHooks(props), {
+      initialProps: { medications: [sufficient] },
+    });
+    await flush();
+
+    // No false armed claim: the opportunity is open again.
+    expect(readClaims()['med-1']).toEqual({ claimed: false, alarmTime: null });
+    expect(sendMock).not.toHaveBeenCalled(); // still sufficient — nothing sent yet
+
+    // The med crosses → the foreground fallback delivers exactly once.
+    const critical = makeMed({ currentPills: 4, warningThresholdDays: 5 });
+    rerender({ medications: [critical] });
+    await flush();
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
+
+    // Still critical → quiet.
+    rerender({ medications: [{ ...critical }] });
     await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
   });

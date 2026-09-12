@@ -1438,7 +1438,7 @@ export default function App() {
               <div
                 className={
                   isCompactView && filter === 'all'
-                    ? 'p-3 grid grid-cols-2 gap-2 sm:grid-cols-3'
+                    ? 'p-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3'
                     : 'p-4 space-y-3'
                 }
               >

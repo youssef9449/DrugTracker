@@ -69,17 +69,50 @@
   display: none;
 }
 
-/* Compact action bar: keep every action physically inside the card. */
-[id^="med-card-"][class*="border-r-2"] .medication-menu-root {
+/* Compact header: reserve the left edge for all quick actions so they never push outside the card. */
+[id^="med-card-"][class*="border-r-2"] > div:first-child {
+  position: relative;
+  align-items: center;
+  min-width: 0;
+  padding-left: 7.5rem;
+  padding-right: 1.875rem;
+}
+
+[id^="med-card-"][class*="border-r-2"] > div:first-child > h3 {
+  min-width: 0;
+  flex: 1 1 auto;
+  max-width: none;
+}
+
+[id^="med-card-"][class*="border-r-2"] > div:first-child > span {
+  flex-shrink: 0;
+}
+
+[id^="med-card-"][class*="border-r-2"] > div:first-child > div:last-child {
+  position: absolute;
+  left: 0.25rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
   gap: 0.0625rem;
-  max-width: 100%;
+  width: 7.125rem;
+  max-width: calc(100% - 0.5rem);
+  min-width: 0;
   overflow: hidden;
 }
 
+[id^="med-card-"][class*="border-r-2"] .medication-menu-root {
+  gap: 0.0625rem;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
 [id^="med-card-"][class*="border-r-2"] .medication-menu-root > button {
-  width: 1.5rem;
-  height: 1.5rem;
-  min-width: 1.5rem;
+  width: 1.375rem;
+  height: 1.375rem;
+  min-width: 1.375rem;
+  padding: 0;
 }
 
 [id^="med-card-"][class*="border-r-2"] .medication-menu-root > button[aria-label="تعديل الدواء"] {
@@ -92,24 +125,9 @@
   background: rgb(255 241 242);
 }
 
-[id^="med-card-"][class*="border-r-2"] > div:first-child {
-  align-items: center;
-  min-width: 0;
-}
-
-[id^="med-card-"][class*="border-r-2"] > div:first-child > h3 {
-  min-width: 0;
-  max-width: none;
-}
-
-[id^="med-card-"][class*="border-r-2"] > div:first-child > div:last-child {
-  max-width: 100%;
-  min-width: 0;
-}
-
-/* Compact auto-deduct is represented by its single toggle icon; hide the old text duplicate. */
+/* Compact auto-deduct is represented by the single toggle icon in the header. */
 [id^="med-card-"][class*="border-r-2"] > div:nth-child(3) > span {
-  display: none;
+  display: none !important;
 }
 
 /* The compact undo action is an icon in the top edge, not a separate row. */
@@ -140,21 +158,47 @@
   font-weight: 800;
 }
 
-/* Detailed all-medications view: let the name consume the real available header width. */
-[id^="med-card-"][class*="border-r-4"] > div:first-child > div:first-child {
-  flex: 1 1 auto;
+/* Detailed all-medications view: force a two-column header so actions never wrap below the title. */
+[id^="med-card-"][class*="border-r-4"] > div:first-child {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start !important;
+  gap: 0.5rem !important;
   min-width: 0;
+}
+
+[id^="med-card-"][class*="border-r-4"] > div:first-child > div:first-child {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
 }
 
 [id^="med-card-"][class*="border-r-4"] > div:first-child > div:first-child > h3 {
   flex: 1 1 auto;
   min-width: 0;
   max-width: none !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Detailed auto-deduct is represented by the header toggle only; remove the duplicate status strip. */
-[id^="med-card-"][class*="border-r-4"] > div[class*="mt-1 text-[9px]"] {
-  display: none;
+[id^="med-card-"][class*="border-r-4"] > div:first-child > div:first-child > span {
+  flex-shrink: 0;
+}
+
+[id^="med-card-"][class*="border-r-4"] > div:first-child > .medication-menu-root {
+  grid-column: 2;
+  grid-row: 1;
+  flex-shrink: 0;
+  min-width: max-content;
+}
+
+/* Detailed auto-deduct is represented by the header toggle only; hide the old full-width status strip. */
+[id^="med-card-"][class*="border-r-4"] > div:nth-child(4) {
+  display: none !important;
 }
 
 /* Roomier views use a restrained Material-like surface and explicit touch-friendly actions. */
@@ -170,10 +214,20 @@
 }
 
 @media (max-width: 360px) {
-  [id^="med-card-"][class*="border-r-2"] .medication-menu-root > button {
-    width: 1.375rem;
-    height: 1.375rem;
-    min-width: 1.375rem;
+  [id^="med-card-"][class*="border-r-2"] > div:first-child {
+    padding-left: 7rem;
+    padding-right: 1.75rem;
+  }
+
+  [id^="med-card-"][class*="border-r-2"] > div:first-child > div:last-child {
+    width: 6.625rem;
+  }
+
+  [id^="med-card-"][class*="border-r-2"] .medication-menu-root > button,
+  [id^="med-card-"][class*="border-r-2"] > div:first-child > div:last-child > button {
+    width: 1.25rem;
+    height: 1.25rem;
+    min-width: 1.25rem;
   }
 
   [id^="med-card-"][class*="border-r-2"] > button {

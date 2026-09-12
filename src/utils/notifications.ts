@@ -39,7 +39,6 @@ import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import {
   NOTIFICATION_IMMEDIATE_OFFSET_MS,
-  CRITICAL_ALARM_IMMEDIATE_TOLERANCE_MS,
   SW_READY_TIMEOUT_MS,
 } from './time';
 
@@ -342,7 +341,7 @@ export async function sendCriticalStockAlert(
   daysLeft: number,
   currentPills: number,
   unit: string = 'قرص'
-): Promise<void> {
+): Promise<boolean> {
   // Title reflects the actual situation: out of stock, or critical
   // with N days left (the critical threshold IS the user-configured
   // warningThresholdDays — see getCriticalThresholdDays).
@@ -361,7 +360,10 @@ export async function sendCriticalStockAlert(
       ? `المخزون نفد تماماً (0 ${unit}). يرجى طلب الدواء فوراً!`
       : `متبقي ${currentPills} ${unit} فقط من "${medicineName}"، تكفي لـ ${daysWord}. يرجى التعبئة فوراً!`;
 
-  await scheduleNotification({
+  // Returns whether the notification was actually handed to the
+  // platform. Callers (the foreground stock-alert fallback) must only
+  // record "sent" state after a successful send.
+  return scheduleNotification({
     // Disjoint id range from sendMedicineAlert's lowStock band so the
     // two notifications don't collide / overwrite each other.
     id: notificationId('critical', medId),
@@ -424,13 +426,13 @@ async function scheduleNotification(opts: {
   smallIcon: string;
   actionTypeId?: string;
   extra?: Record<string, unknown>;
-}): Promise<void> {
+}): Promise<boolean> {
   if (isNativePlatform()) {
     try {
       const perm = await LocalNotifications.checkPermissions();
       if (perm.display !== 'granted') {
         console.warn('[notifications] scheduleNotification skipped: permission not granted');
-        return;
+        return false;
       }
 
       await LocalNotifications.schedule({
@@ -453,12 +455,12 @@ async function scheduleNotification(opts: {
       });
     } catch (err) {
       console.warn('[notifications] Capacitor schedule failed:', err);
-      scheduleWebNotification(opts.title, opts.body);
+      return scheduleWebNotification(opts.title, opts.body);
     }
-    return;
+    return true;
   }
 
-  scheduleWebNotification(opts.title, opts.body);
+  return scheduleWebNotification(opts.title, opts.body);
 }
 
 /**
@@ -488,9 +490,9 @@ export async function sendTestAlertNotification(): Promise<void> {
  * so in dev mode we fall back to `new Notification()` after a short
  * timeout guard (navigator.serviceWorker.ready would hang otherwise).
  */
-async function scheduleWebNotification(title: string, body: string): Promise<void> {
+async function scheduleWebNotification(title: string, body: string): Promise<boolean> {
   if (!isWebNotificationSupported() || Notification.permission !== 'granted') {
-    return;
+    return false;
   }
   const options: NotificationOptions = {
     body,
@@ -510,7 +512,7 @@ async function scheduleWebNotification(title: string, body: string): Promise<voi
       ]);
       if (reg) {
         await reg.showNotification(title, options);
-        return;
+        return true;
       }
       // reg === null → timed out (dev mode, no SW). Fall through to legacy.
     } catch {
@@ -521,9 +523,11 @@ async function scheduleWebNotification(title: string, body: string): Promise<voi
   // Legacy fallback.
   try {
     new Notification(title, options);
+    return true;
   } catch {
     // Silent fail if the browser blocks the notification (e.g.,
     // service worker context).
+    return false;
   }
 }
 
@@ -634,12 +638,11 @@ function notificationId(
 //   - autoDeductEnabled
 //   - medication id (med deleted/created)
 //
-// Race protection: the hook uses a per-med generation counter so an
-// older async effect cannot recreate a stale alarm after a newer
-// medication state or after the medication is deleted. Each effect
-// run bumps the generation for the med; the .then() callback after
-// cancel() checks the generation and bails if a newer run superseded
-// it.
+// Race protection: useCriticalAlarmScheduler serializes every native
+// cancel/schedule per medication on a shared operation queue and guards
+// each operation with an in-memory generation counter, so an older
+// async operation can neither recreate a stale alarm after a newer
+// medication state nor clobber newer persistent claim state.
 //
 // Edge cases (handled by getCriticalAlarmDate, which returns null to
 // signal "do not schedule"):
@@ -683,64 +686,23 @@ export async function cancelCriticalAlarm(medId: string): Promise<void> {
 }
 
 /**
- * IDs of the app's notifications currently VISIBLE in the system
- * notification drawer (native platforms only; empty set on web).
- *
- * This is the ONLY reliable positive delivery signal available in the
- * lifecycles this app supports: a notification that is present in the
- * drawer was definitely displayed, even if the app process was dead at
- * fire time. Absence proves NOTHING (the user may have dismissed it),
- * so callers must treat absence as "no evidence" — never as
- * "not delivered" — and must never infer delivery from elapsed time.
- */
-export async function getDeliveredNotificationIds(): Promise<Set<number>> {
-  const ids = new Set<number>();
-  if (!isNativePlatform()) return ids;
-  try {
-    const result = await LocalNotifications.getDeliveredNotifications();
-    for (const n of result.notifications) {
-      ids.add(n.id);
-    }
-  } catch (err) {
-    console.warn('[notifications] getDeliveredNotifications failed:', err);
-  }
-  return ids;
-}
-
-/**
  * Schedule a one-shot critical-stock alarm at the given absolute time.
  *
  * This is the single entry point for critical-date scheduling. The
- * caller computes `criticalDateMs` (via getCriticalAlarmDate in
- * dateCalculations) and passes it here. In normal operation the
- * caller only invokes this with a FUTURE timestamp (getCriticalAlarmDate
- * returns null for already-critical meds, so no immediate alarms are
- * scheduled). The past-date fallback below is defensive — it covers
- * edge cases (e.g. the device was off across the projected critical
- * date and the boot receiver re-arms the alarm with a now-stale date).
+ * caller (useCriticalAlarmScheduler) computes `criticalDateMs` via
+ * getCriticalAlarmDate and only ever invokes this with a FUTURE
+ * timestamp (getCriticalAlarmDate returns null for already-critical and
+ * frozen meds, so no immediate alarms are scheduled). The alarm time is
+ * used exactly as given — no past-date rewriting — so the persisted
+ * claim's alarmTime always matches the actually-armed alarm.
  *
- * `criticalDateMs <= Date.now()` (within a 1-minute tolerance) is
- * treated as "immediate" — we schedule the notification 1 second in
- * the future so it appears as a real system notification (Capacitor
- * treats `at: now` as "delivered immediately" which some Android
- * versions only show as a head-up that auto-dismisses).
- *
- * IMPORTANT: this past-date fallback is only valid when arming a
- * GENUINELY NEW notification opportunity (the scheduler only calls
- * this for sufficient meds whose projected crossing is future; the
- * fallback is defensive). It must never be used to resurrect an
- * existing scheduled claim whose firing window has already passed for
- * the same transition — the write helpers in criticalTransitions.ts
- * (updateScheduledAlarm) refuse to persist a claim for a consumed
- * episode/transition, and the scheduler cancels an alarm whose claim
- * write was refused.
+ * Returns true only when the native alarm was really registered; callers
+ * must persist claimed=true only after a `true` result. A `false` result
+ * (permission missing, bridge error, or the web fallback path, which has
+ * no persistent scheduling) leaves the notification opportunity open so
+ * the foreground fallback can still send one notification.
  *
  * `unit` is included in the notification body for display.
- *
- * NOTE: the alarm carries NO transition identity. criticalDateMs is
- * scheduling data, not episode identity — the episode owner
- * (useStockAlerts, via criticalTransitions.ts) binds/adopts the
- * persisted scheduled record to an episode at the actual crossing.
  *
  * Boot persistence: scheduled notifications are persisted by the
  * @capacitor/local-notifications plugin and re-armed on BOOT_COMPLETED.
@@ -752,13 +714,7 @@ export async function scheduleCriticalAlarm(
   criticalDateMs: number,
   unit: string = 'قرص'
 ): Promise<boolean> {
-  // Compute the schedule time. If the computed critical date is in
-  // the past (or very close), use "now + 1s" so the notification
-  // appears as a real system notification.
-  const fireAt =
-    criticalDateMs <= Date.now() + CRITICAL_ALARM_IMMEDIATE_TOLERANCE_MS
-      ? new Date(Date.now() + NOTIFICATION_IMMEDIATE_OFFSET_MS)
-      : new Date(criticalDateMs);
+  const fireAt = new Date(criticalDateMs);
 
   const title = `🚨 ${medName}: اقترب النفاد الحرج`;
   const body = `مخزون "${medName}" دخل مرحلة النفاد الحرج (${unit}). يرجى التعبئة فوراً!`;

@@ -44,149 +44,52 @@ export interface Medication {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Critical-episode state model (authoritative).
+// Critical-stock notification claim (the ONE business state model).
 //
-// THREE independent concepts that must never be conflated:
+// For each medication, during one continuous Critical/Out-of-Stock
+// episode, the user receives AT MOST ONE critical-stock notification.
+// This tiny persistent record answers exactly one question:
 //
-// 1. TRANSITION IDENTITY — `CriticalTransitionState`. One continuous
-//    critical episode (sufficient → critical → … → sufficient) has
-//    exactly ONE transitionKey. The key is generated ONCE when the
-//    episode begins (sufficient → critical/out_of_stock, or initial
-//    reconciliation of an already-critical med) and is reused
-//    everywhere until the episode ends. It NEVER depends on
-//    criticalDateMs / alarmTime / stock snapshots / lastSyncDate /
-//    today — those are mutable scheduling data, not identity.
+//     "Has this medication's current critical episode already claimed
+//      its critical notification?"
 //
-// 2. SCHEDULED ALARM STATE — `ScheduledCriticalAlarmRecord`. Pure
-//    scheduling data for the native one-shot AlarmManager alarm: the
-//    projected fire time (mutable — it can be rescheduled many times
-//    during the same episode) and a strict status.
+// Episode semantics:
+//   - Sufficient → Critical/OutOfStock starts an episode.
+//   - Critical → Critical / → OutOfStock is the SAME episode (a day
+//     passing, auto-deduction, manual consumption, refills-while-
+//     critical, app restarts and moving projections never start a new
+//     one).
+//   - Critical → Sufficient ends it (claim cleared → a later critical
+//     episode gets a fresh notification opportunity).
 //
-// 3. OWNERSHIP REVISION — a per-medication monotonic counter (persisted
-//    by criticalTransitions.ts in android_med_tracker_critical_ownership_v2).
-//    The EPISODE OWNER bumps it on every lifecycle change that
-//    invalidates in-flight scheduler work: episode created, episode
-//    ended, notification ownership changed, owner bind, medication
-//    deleted. Scheduler operations capture it in their ownership
-//    context (captureSchedulingContext) and abandon their persistent
-//    writes when it moved on (isSchedulingContextStillValid). The
-//    record's `generation` only orders SCHEDULER writes against each
-//    other; the ownership revision orders them against the EPISODE
-//    OWNER. They answer different questions and both are required.
+// `claimed === true` means the episode's single notification
+// opportunity has been consumed:
+//   - `alarmTime: number` — a native one-shot alarm was successfully
+//     scheduled at that epoch ms. While alarmTime is in the future the
+//     alarm provably has NOT fired yet; once it is in the past the
+//     opportunity is consumed regardless of whether Android physically
+//     displayed it (the app deliberately does NOT reconstruct delivery
+//     state after the fact).
+//   - `alarmTime: null` — the foreground fallback sent the notification
+//     directly.
 //
-// `notificationState` is the per-episode notification ownership state:
-//   'NONE'         — no user-facing notification has been sent yet and no
-//                    scheduled alarm owns this episode's notification.
-//   'SCHEDULED'    — a validly-registered scheduled alarm owns this
-//                    episode's single notification (the foreground path
-//                    must stay quiet). This does NOT mean delivered.
-//   'FIRED_OR_DUE' — the owning scheduled claim has reached its firing
-//                    window (alarmTime <= now) without positive delivery
-//                    evidence. Delivery is UNKNOWN (the notification may
-//                    have fired while the app was dead and been
-//                    dismissed, or never have fired at all). This state is
-//                    TERMINAL for the episode's notification ownership:
-//                    the claim is consumed, the foreground path stays
-//                    quiet, and the claim must NEVER be re-armed for the
-//                    same transition. Only positive native evidence (the
-//                    notification actually visible in the drawer) may
-//                    upgrade it to 'SENT'.
-//   'SENT'         — the episode's single user-facing notification was
-//                    sent (foreground) or delivery was confirmed by
-//                    positive native evidence. An episode in the SENT
-//                    state can never regain a SCHEDULED claim.
-//
-// Allowed transitions (enforced by criticalTransitions.ts):
-//   NONE → SCHEDULED    (successful native scheduling adopted/bound)
-//   NONE → SENT         (foreground send, exactly once, if enabled)
-//   NONE → FIRED_OR_DUE (bound claim's window passed)
-//   SCHEDULED → FIRED_OR_DUE (claim's firing window reached, delivery unknown)
-//   SCHEDULED → SENT    (positive delivery evidence only)
-//   FIRED_OR_DUE → SENT (positive delivery evidence only)
-//   NEVER: SENT → SCHEDULED; NEVER: FIRED_OR_DUE → SCHEDULED;
-//   NEVER: FIRED_OR_DUE → SENT merely because time elapsed.
+// A failed schedule or a failed foreground send leaves
+// `claimed === false`, so the remaining path (scheduled alarm or
+// foreground fallback) stays available. Disabling notifications never
+// consumes the opportunity: while disabled nothing is sent and nothing
+// is marked claimed.
 // ─────────────────────────────────────────────────────────────────────
 
-export type CriticalNotificationState = 'NONE' | 'SCHEDULED' | 'FIRED_OR_DUE' | 'SENT';
-
-export interface CriticalTransitionState {
-  /** Opaque identity of ONE continuous critical episode. Stable for the
-   *  whole episode; changes only for a NEW episode (after sufficient). */
-  transitionKey: string;
+export interface CriticalNotificationClaim {
+  /** True once this episode's notification was scheduled or sent. */
+  claimed: boolean;
   /**
-   * Best-known epoch ms when the episode began. Informational only —
-   * never used for identity or dedup decisions. 0 = unknown (legacy
-   * migration).
+   * Fire time (epoch ms) of the successfully scheduled native alarm,
+   * or null when the claim came from a foreground send. Purely
+   * informational bookkeeping — it lets callers distinguish "an alarm
+   * is armed for the future" from "already sent / window passed".
    */
-  enteredAt: number;
-  notificationState: CriticalNotificationState;
-}
-
-/**
- * Status of the scheduled-claim record (pure scheduling/evidence data —
- * the notification-ownership state machine lives on the transition):
- *   'NOT_SCHEDULED' — no valid claim exists (never scheduled, cancelled,
- *                     failed, neutralized at episode end, or consumed by
- *                     a foreground send).
- *   'SCHEDULED'     — a native alarm was successfully registered. While
- *                     alarmTime is in the future the alarm is still
- *                     pending; once alarmTime <= now the claim has
- *                     reached its firing window and must be consumed
- *                     (→ 'FIRED_OR_DUE') by the episode owner — never
- *                     re-armed for the same transition.
- *   'FIRED_OR_DUE'  — the claim's firing window passed without positive
- *                     delivery evidence. Terminal: the alarm opportunity
- *                     for this transition is consumed and must never be
- *                     re-armed (absence from the drawer proves nothing).
- *   'DELIVERED'     — positive delivery evidence was recorded (the alarm
- *                     notification is/was actually visible in the
- *                     drawer). Terminal; upgrades the episode to SENT.
- */
-export type ScheduledCriticalAlarmStatus =
-  | 'NOT_SCHEDULED'
-  | 'SCHEDULED'
-  | 'FIRED_OR_DUE'
-  | 'DELIVERED';
-
-export interface ScheduledCriticalAlarmRecord {
-  /**
-   * The episode identity this alarm belongs to. '' while the alarm is a
-   * pending claim for a projected crossing that has not begun yet; it is
-   * bound to the episode identity by the episode owner (useStockAlerts)
-   * at the actual crossing. The SCHEDULER NEVER GENERATES OR INVENTS an
-   * identity here — when it writes a scheduling update it may only bind
-   * the claim to the CURRENTLY ACTIVE transition (read from the
-   * authoritative transition store) or leave it unbound. It can never
-   * erase a binding to the active episode and never resurrect a binding
-   * to a dead one.
-   */
-  transitionKey: string;
-  /** Projected fire time (ms). Mutable scheduling data — may be
-   *  rescheduled many times during the same episode. */
-  alarmTime: number;
-  /**
-   * Strict status. SCHEDULED ≠ DELIVERED: only positive native evidence
-   * (or migrated evidence) may set DELIVERED. `alarmTime <= Date.now()`
-   * is NEVER sufficient — a passed timestamp does not prove Android
-   * displayed the notification; it only moves the claim to its
-   * FIRED_OR_DUE terminal state (delivery unknown), never to DELIVERED.
-   */
-  status: ScheduledCriticalAlarmStatus;
-  /**
-   * Monotonic revision of SCHEDULER-originated writes to this record
-   * (bumped by the scheduler's record-write helpers in
-   * criticalTransitions.ts on every accepted write). The episode
-   * owner's writes (bind / episode-end invalidation) do NOT bump it —
-   * they are synchronous and authoritative. A scheduler operation
-   * captures the generation it observed before its async native work
-   * and may only persist if the stored generation still equals that
-   * baseline; otherwise the operation is stale and MUST abandon the
-   * write. This prevents an older scheduler generation from clobbering
-   * the record written by a newer one. Absent (undefined) on records
-   * that no scheduler write has touched yet (e.g. migrated records);
-   * treated as 0.
-   */
-  generation?: number;
+  alarmTime: number | null;
 }
 
 /**

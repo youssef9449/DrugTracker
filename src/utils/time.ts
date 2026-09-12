@@ -29,10 +29,6 @@ export const DEFAULT_SNOOZE_MINUTES = 10;
  *  future so Capacitor treats it as a real notification, not head-up). */
 export const NOTIFICATION_IMMEDIATE_OFFSET_MS = 1000;
 
-/** Tolerance for treating a critical-date alarm as "immediate" (within
- *  1 minute of now → fire immediately instead of scheduling). */
-export const CRITICAL_ALARM_IMMEDIATE_TOLERANCE_MS = 60_000;
-
 /** Local hour (24h) at which critical-date alarms fire (9 AM). */
 export const CRITICAL_ALARM_FIRE_HOUR = 9;
 

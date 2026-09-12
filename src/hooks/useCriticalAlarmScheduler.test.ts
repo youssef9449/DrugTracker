@@ -2,17 +2,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, cleanup } from '@testing-library/react';
 import type { Medication } from '../types';
-import { getTodayDateString } from '../utils/dateCalculations';
+import { getTodayDateString, getCriticalAlarmDate } from '../utils/dateCalculations';
+import { CRITICAL_CLAIMS_STORAGE_KEY } from '../utils/criticalNotificationClaims';
 import {
-  CRITICAL_TRANSITION_STORAGE_KEY,
-  SCHEDULED_CRITICAL_STORAGE_KEY,
-} from '../utils/criticalTransitions';
-import { useCriticalAlarmScheduler } from './useCriticalAlarmScheduler';
+  useCriticalAlarmScheduler,
+  type UseCriticalAlarmSchedulerOptions,
+} from './useCriticalAlarmScheduler';
 
-// Mock @capacitor/core so isNativePlatform() returns false (web path),
-// which makes cancelCriticalAlarm a no-op and scheduleCriticalAlarm
-// fall through to the web fallback (also a no-op in tests). The mocks
-// for the notification functions let us assert on call counts.
+// Mock @capacitor/core so isNativePlatform() returns false (web path).
 vi.mock('@capacitor/core', () => ({
   Capacitor: { getPlatform: () => 'web' },
 }));
@@ -24,17 +21,14 @@ vi.mock('@capacitor/local-notifications', () => ({
   },
 }));
 
-// Mutable mocks so we can control Promise resolution per-test for the
-// race-guard tests. vi.hoisted is required because vi.mock factories
-// are hoisted to the top of the file (above any const declarations).
+// Mutable mocks so tests can control Promise resolution for the
+// stale-async race tests. vi.hoisted is required because vi.mock
+// factories are hoisted above any const declarations.
 const mocks = vi.hoisted(() => ({
   schedule: vi.fn(),
   cancel: vi.fn(),
 }));
 
-// Override the scheduleCriticalAlarm + cancelCriticalAlarm exports
-// with the hoisted mocks. The real functions wrap Capacitor's API;
-// here we replace them with controllable vi.fn()s.
 vi.mock('../utils/notifications', async () => {
   const actual = await vi.importActual<typeof import('../utils/notifications')>(
     '../utils/notifications'
@@ -47,6 +41,9 @@ vi.mock('../utils/notifications', async () => {
 });
 
 import { scheduleCriticalAlarm, cancelCriticalAlarm } from '../utils/notifications';
+
+const scheduleMock = vi.mocked(scheduleCriticalAlarm);
+const cancelMock = vi.mocked(cancelCriticalAlarm);
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
   return {
@@ -64,9 +61,11 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
   };
 }
 
-function defaultOpts(overrides: Record<string, unknown> = {}) {
+function defaultOpts(
+  overrides: Partial<UseCriticalAlarmSchedulerOptions> = {}
+): UseCriticalAlarmSchedulerOptions {
   return {
-    medications: [] as Medication[],
+    medications: [],
     notificationsEnabled: true,
     criticalStockAlertsEnabled: true,
     hydrated: true,
@@ -75,1245 +74,334 @@ function defaultOpts(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function readClaims(): Record<string, { claimed: boolean; alarmTime: number | null }> {
+  return JSON.parse(localStorage.getItem(CRITICAL_CLAIMS_STORAGE_KEY) || '{}');
+}
+
+function writeClaims(claims: Record<string, { claimed: boolean; alarmTime: number | null }>) {
+  localStorage.setItem(CRITICAL_CLAIMS_STORAGE_KEY, JSON.stringify(claims));
+}
+
+/** A deferred promise the test resolves manually. */
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  let reject!: (e: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/** Drain pending microtasks (the per-med operation queue). */
+const flush = async (): Promise<void> => {
+  // Only Date is faked — setTimeout is real, and one macrotask turn
+  // drains every pending microtask in the chain.
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
-  // Isolate persisted scheduled-record state between tests.
   localStorage.clear();
-  // Wave 13 #123: pin system time so getTodayDateString() (used by
-  // makeMed's lastSyncDate default) resolves to a deterministic date.
-  // Only Date is faked so the hook's `await Promise.resolve()` chains
-  // (microtasks) and the race-guard serialization continue to work.
+  // Wave 13 #123: pin system time so getTodayDateString() resolves to a
+  // deterministic date. Only Date is faked so microtask chains and the
+  // per-med operation queue keep working.
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
-  mocks.schedule.mockReset();
-  mocks.cancel.mockReset();
-  // Default: cancel resolves immediately, schedule resolves immediately.
-  mocks.cancel.mockResolvedValue(undefined);
-  mocks.schedule.mockResolvedValue(undefined);
+  scheduleMock.mockReset();
+  scheduleMock.mockResolvedValue(true);
+  cancelMock.mockReset();
+  cancelMock.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
-  vi.useRealTimers();
   cleanup();
+  vi.useRealTimers();
 });
 
-/**
- * Flush microtasks until a predicate returns true (or a max iteration
- * count is reached). Useful for waiting until the serialized
- * cancel/schedule chain has settled to a known state without manually
- * counting `await Promise.resolve()` calls.
- */
-async function flushUntil(
-  predicate: () => boolean,
-  maxIterations = 20
-): Promise<void> {
-  for (let i = 0; i < maxIterations; i++) {
-    if (predicate()) return;
-    await Promise.resolve();
-  }
-  // Final check — if still false, the test will fail on the caller's
-  // assertion, which is more informative than a timeout error here.
-}
+describe('useCriticalAlarmScheduler — scheduling and the persistent claim', () => {
+  it('schedules one alarm for a sufficient med with a future crossing and persists the claim ONLY after success', async () => {
+    const med = makeMed();
+    const expectedT = getCriticalAlarmDate(med, getTodayDateString());
+    expect(expectedT).not.toBeNull();
 
-describe('useCriticalAlarmScheduler — basic scheduling', () => {
-  it('schedules a critical alarm for each medication on mount', async () => {
-    const med1 = makeMed({ id: 'med-a', name: 'A', currentPills: 30, dailyDose: 1 });
-    const med2 = makeMed({ id: 'med-b', name: 'B', currentPills: 20, dailyDose: 2 });
+    const gate = deferred<boolean>();
+    scheduleMock.mockReturnValueOnce(gate.promise);
 
-    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med1, med2] })));
-
-    // cancel is enqueued per-med (runs on a microtask), then schedule
-    // fires after the cancel Promise resolves. Flush the microtask
-    // for the cancel to actually be called.
-    await Promise.resolve();
-    expect(mocks.cancel).toHaveBeenCalledWith('med-a');
-    expect(mocks.cancel).toHaveBeenCalledWith('med-b');
-  });
-
-  it('schedules for a med with sufficient supply (future crossing)', async () => {
-    const med = makeMed({ id: 'med-future', currentPills: 30, dailyDose: 1, warningThresholdDays: 5 });
-
-    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
-
-    // Flush microtasks so the cancel().then(schedule()) chain runs.
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(mocks.schedule).toHaveBeenCalledTimes(1);
-    expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-future',
-      'Test Med',
-      expect.any(Number),
-      'قرص'
-    );
-  });
-
-  it('does NOT schedule for an already-critical med (returns null)', async () => {
-    // daysLeft 1 <= critical threshold 2 → already critical → null.
-    const med = makeMed({ id: 'med-crit', currentPills: 1, dailyDose: 1, warningThresholdDays: 5 });
-
-    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
-
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(mocks.schedule).not.toHaveBeenCalled();
-  });
-
-  it('does NOT schedule before hydration', async () => {
-    const med = makeMed({ id: 'med-nohydr', currentPills: 30 });
-
-    renderHook(() =>
-      useCriticalAlarmScheduler(
-        defaultOpts({ medications: [med], hydrated: false })
-      )
-    );
-
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(mocks.schedule).not.toHaveBeenCalled();
-    expect(mocks.cancel).not.toHaveBeenCalled();
-  });
-
-  it('does NOT schedule on first run (seed data)', async () => {
-    const med = makeMed({ id: 'med-firstrun', currentPills: 30 });
-
-    renderHook(() =>
-      useCriticalAlarmScheduler(
-        defaultOpts({ medications: [med], isFirstRun: true })
-      )
-    );
-
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(mocks.schedule).not.toHaveBeenCalled();
-    expect(mocks.cancel).not.toHaveBeenCalled();
-  });
-
-  it('cancels all previously-scheduled alarms when criticalStockAlertsEnabled flips off', async () => {
-    const med = makeMed({ id: 'med-optout', currentPills: 30 });
-
-    const { rerender } = renderHook(
-      ({ medications, criticalStockAlertsEnabled }) =>
-        useCriticalAlarmScheduler(
-          defaultOpts({ medications, criticalStockAlertsEnabled })
-        ),
-      {
-        initialProps: {
-          medications: [med] as Medication[],
-          criticalStockAlertsEnabled: true,
-        },
-      }
-    );
-
-    // Initial: schedule fires.
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(mocks.schedule).toHaveBeenCalledTimes(1);
-
-    // Flip criticalStockAlertsEnabled off.
-    mocks.cancel.mockClear();
-    rerender({
-      medications: [med],
-      criticalStockAlertsEnabled: false,
+    renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({ medications: [med] }),
     });
 
-    // The opt-out cancel is enqueued (runs on a microtask).
-    await Promise.resolve();
-    expect(mocks.cancel).toHaveBeenCalledWith('med-optout');
+    // Not yet resolved → no claim persisted yet.
+    await flush();
+    expect(scheduleMock).toHaveBeenCalledTimes(1);
+    expect(scheduleMock).toHaveBeenCalledWith('med-1', 'Test Med', expectedT, 'قرص');
+    expect(readClaims()['med-1']).toBeUndefined();
+
+    gate.resolve(true);
+    await flush();
+
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: expectedT });
   });
 
-  it('cancels all previously-scheduled alarms when notificationsEnabled flips off', async () => {
-    const med = makeMed({ id: 'med-notoff', currentPills: 30 });
+  it('does NOT re-arm when the claim already matches the projection', async () => {
+    const med = makeMed();
+    const expectedT = getCriticalAlarmDate(med, getTodayDateString()) as number;
+    writeClaims({ 'med-1': { claimed: true, alarmTime: expectedT } });
 
-    const { rerender } = renderHook(
-      ({ medications, notificationsEnabled }) =>
-        useCriticalAlarmScheduler(
-          defaultOpts({ medications, notificationsEnabled })
-        ),
-      {
-        initialProps: {
-          medications: [med] as Medication[],
-          notificationsEnabled: true,
-        },
-      }
-    );
-
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(mocks.schedule).toHaveBeenCalledTimes(1);
-
-    mocks.cancel.mockClear();
-    rerender({
-      medications: [med],
-      notificationsEnabled: false,
+    renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({ medications: [med] }),
     });
+    await flush();
 
-    // The opt-out cancel is enqueued (runs on a microtask).
-    await Promise.resolve();
-    expect(mocks.cancel).toHaveBeenCalledWith('med-notoff');
+    expect(scheduleMock).not.toHaveBeenCalled();
+    expect(cancelMock).not.toHaveBeenCalled();
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: expectedT });
+  });
+
+  it('re-arms (and updates the claim) when the projected date moves', async () => {
+    const medA = makeMed({ currentPills: 30 });
+    const t1 = getCriticalAlarmDate(medA, getTodayDateString()) as number;
+    writeClaims({ 'med-1': { claimed: true, alarmTime: t1 } });
+
+    const { rerender } = renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({ medications: [medA] }),
+    });
+    await flush();
+    expect(scheduleMock).not.toHaveBeenCalled(); // claim matches → skip
+
+    // Refill moves the projection.
+    const medB = makeMed({ currentPills: 60 });
+    const t2 = getCriticalAlarmDate(medB, getTodayDateString()) as number;
+    expect(t2).not.toBe(t1);
+    rerender(defaultOpts({ medications: [medB] }));
+    await flush();
+
+    expect(cancelMock).toHaveBeenCalledWith('med-1');
+    expect(scheduleMock).toHaveBeenCalledTimes(1);
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: t2 });
+  });
+
+  it('failed scheduling leaves the claim open (foreground fallback stays available)', async () => {
+    scheduleMock.mockResolvedValue(false);
+    const med = makeMed();
+
+    renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({ medications: [med] }),
+    });
+    await flush();
+
+    expect(scheduleMock).toHaveBeenCalledTimes(1);
+    expect(readClaims()['med-1']).toEqual({ claimed: false, alarmTime: null });
+  });
+
+  it('failed scheduling (rejected promise) also leaves the claim open', async () => {
+    scheduleMock.mockRejectedValueOnce(new Error('bridge down'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const med = makeMed();
+
+    renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({ medications: [med] }),
+    });
+    await flush();
+
+    expect(readClaims()['med-1']).toEqual({ claimed: false, alarmTime: null });
+    warnSpy.mockRestore();
   });
 });
 
-describe('useCriticalAlarmScheduler — race protection (generation guard + serialization)', () => {
-  // With per-med serialization, all cancel/schedule operations for a
-  // given med are chained onto a per-med Promise. Each effect run
-  // APPENDS its operation to the chain, so they run strictly in order.
-  // The tests below use controllable Promise resolvers + a
-  // native-notification-store model to verify the FINAL alarm state.
-
-  /** A minimal in-memory model of the native notification store. */
-  function createNativeStore() {
-    const store = new Map<number, { medId: string; fireAt: number }>();
-    return {
-      schedule: (id: number, medId: string, fireAt: number) => {
-        store.set(id, { medId, fireAt });
-      },
-      cancel: (id: number) => { store.delete(id); },
-      has: (id: number) => store.has(id),
-      get: (id: number) => store.get(id),
-      size: () => store.size,
-    };
-  }
-
-  it('rapid medication state changes: only the LATEST state schedule fires (older schedules bail)', async () => {
-    const cancelResolvers: Array<() => void> = [];
-    mocks.cancel.mockImplementation(() => {
-      return new Promise<void>((resolve) => { cancelResolvers.push(resolve); });
+describe('useCriticalAlarmScheduler — never schedules for critical or frozen meds', () => {
+  it('does not schedule for an already-critical med (the foreground owns the episode)', async () => {
+    const med = makeMed({ currentPills: 3, warningThresholdDays: 5 });
+    renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({ medications: [med] }),
     });
-    const scheduleSpy = vi.fn();
-    mocks.schedule.mockImplementation(scheduleSpy);
+    await flush();
 
-    const medState1 = makeMed({ id: 'med-rapid', currentPills: 30, dailyDose: 1 });
-    const medState2 = makeMed({ id: 'med-rapid', currentPills: 60, dailyDose: 1 });
-
-    const { rerender } = renderHook(
-      ({ medications }) => useCriticalAlarmScheduler(defaultOpts({ medications })),
-      { initialProps: { medications: [medState1] as Medication[] } }
-    );
-
-    // G1's op is enqueued. Flush until G1's cancel fires.
-    await flushUntil(() => cancelResolvers.length >= 1);
-    expect(scheduleSpy).not.toHaveBeenCalled();
-
-    // Trigger G2 BEFORE G1's cancel resolves. G2's op is queued.
-    rerender({ medications: [medState2] as Medication[] });
-
-    // Resolve G1's cancel → G1 bails (gen stale) → G1 chain completes
-    // → G2's op runs → G2's cancel fires.
-    cancelResolvers[0]();
-    await flushUntil(() => cancelResolvers.length >= 2);
-    expect(scheduleSpy).not.toHaveBeenCalled();
-
-    // Resolve G2's cancel → G2's pre-schedule check passes → schedule D2.
-    cancelResolvers[1]();
-    await flushUntil(() => scheduleSpy.mock.calls.length >= 1);
-
-    expect(scheduleSpy).toHaveBeenCalledTimes(1);
-    expect(scheduleSpy).toHaveBeenCalledWith('med-rapid', 'Test Med', expect.any(Number), 'قرص');
-    const scheduledDate = scheduleSpy.mock.calls[0][2] as number;
-    expect(scheduledDate - Date.now()).toBeGreaterThan(40 * 24 * 60 * 60 * 1000);
+    expect(scheduleMock).not.toHaveBeenCalled();
+    expect(readClaims()['med-1']).toBeUndefined();
   });
 
-  it('medication deletion while scheduling is in flight: no stale schedule fires', async () => {
-    const cancelResolvers: Array<() => void> = [];
-    mocks.cancel.mockImplementation(() => {
-      return new Promise<void>((resolve) => { cancelResolvers.push(resolve); });
+  it('keeps a critical med\u2019s consumed claim (it is what suppresses duplicates)', async () => {
+    writeClaims({ 'med-1': { claimed: true, alarmTime: Date.now() - 1000 } });
+    const med = makeMed({ currentPills: 3, warningThresholdDays: 5 });
+    renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({ medications: [med] }),
     });
-    const scheduleSpy = vi.fn();
-    mocks.schedule.mockImplementation(scheduleSpy);
+    await flush();
 
-    const medX = makeMed({ id: 'med-deleted', currentPills: 30, dailyDose: 1 });
-
-    const { rerender } = renderHook(
-      ({ medications }) => useCriticalAlarmScheduler(defaultOpts({ medications })),
-      { initialProps: { medications: [medX] as Medication[] } }
-    );
-
-    await flushUntil(() => cancelResolvers.length >= 1);
-    expect(scheduleSpy).not.toHaveBeenCalled();
-
-    rerender({ medications: [] as Medication[] });
-
-    cancelResolvers[0]();
-    await flushUntil(() => cancelResolvers.length >= 2);
-    expect(scheduleSpy).not.toHaveBeenCalled();
-
-    cancelResolvers[1]();
-    await flushUntil(() => true, 5);
-    expect(scheduleSpy).not.toHaveBeenCalled();
-
-    expect(mocks.cancel).toHaveBeenCalledWith('med-deleted');
-    expect(mocks.cancel.mock.calls.filter((c) => c[0] === 'med-deleted')).toHaveLength(2);
+    expect(scheduleMock).not.toHaveBeenCalled();
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: expect.any(Number) });
   });
 
-  it('a successful first schedule followed by a state change schedules both (no false bail)', async () => {
-    const medState1 = makeMed({ id: 'med-seq', currentPills: 30, dailyDose: 1 });
-    const medState2 = makeMed({ id: 'med-seq', currentPills: 60, dailyDose: 1 });
+  it('cancels an alarm it armed earlier in the session once the med becomes critical', async () => {
+    const medA = makeMed({ currentPills: 30 });
+    const { rerender } = renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({ medications: [medA] }),
+    });
+    await flush();
+    expect(scheduleMock).toHaveBeenCalledTimes(1);
 
-    const { rerender } = renderHook(
-      ({ medications }) => useCriticalAlarmScheduler(defaultOpts({ medications })),
-      { initialProps: { medications: [medState1] as Medication[] } }
-    );
+    // Med crosses (manual consumption) → the alarm this session armed is stale.
+    const medB = makeMed({ currentPills: 3, warningThresholdDays: 5 });
+    rerender(defaultOpts({ medications: [medB] }));
+    await flush();
 
-    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-    expect(mocks.schedule).toHaveBeenCalledTimes(1);
-    const firstDate = mocks.schedule.mock.calls[0][2] as number;
-
-    rerender({ medications: [medState2] as Medication[] });
-    await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
-
-    expect(mocks.schedule.mock.calls.length).toBeGreaterThanOrEqual(2);
-    const lastCall = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
-    const lastDate = lastCall[2] as number;
-    expect(lastDate).toBeGreaterThan(firstDate);
+    expect(cancelMock).toHaveBeenCalledWith('med-1');
+    expect(scheduleMock).toHaveBeenCalledTimes(1); // no re-arm for critical meds
   });
 
-  // ─── THE BLOCKER RACE: older schedule completes AFTER newer schedule ───
-  //
-  // Without serialization, G1's compensating cancel (same stable id)
-  // would cancel G2's alarm. With serialization, G1's full chain
-  // (including compensating cancel) runs BEFORE G2's schedule, so G1's
-  // cancel only removes G1's OWN alarm. Tests assert the FINAL native
-  // notification state (not just call counts).
+  it('cancels the alarm and clears the claim for a frozen sufficient med', async () => {
+    const med = makeMed({ autoDeductEnabled: false, currentPills: 30 });
+    writeClaims({ 'med-1': { claimed: true, alarmTime: Date.now() - 86_400_000 } });
 
-  it('BLOCKER: G1 schedule in flight, G2 starts → only G2 alarm survives (native store)', async () => {
-    const nativeStore = createNativeStore();
-    const STABLE_ID = 12345;
-    const cancelResolvers: Array<() => void> = [];
-    const scheduleResolvers: Array<() => void> = [];
-
-    mocks.cancel.mockImplementation((_medId: string) => {
-      return new Promise<void>((resolve) => {
-        nativeStore.cancel(STABLE_ID);
-        cancelResolvers.push(resolve);
-      });
+    renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({ medications: [med] }),
     });
-    mocks.schedule.mockImplementation((medId: string, _name: string, fireAt: number) => {
-      return new Promise<void>((resolve) => {
-        nativeStore.schedule(STABLE_ID, medId, fireAt);
-        scheduleResolvers.push(resolve);
-      });
-    });
+    await flush();
 
-    const medG1 = makeMed({ id: 'med-blocker', currentPills: 30, dailyDose: 1 });
-    const medG2 = makeMed({ id: 'med-blocker', currentPills: 60, dailyDose: 1 });
-
-    const { rerender } = renderHook(
-      ({ medications }) => useCriticalAlarmScheduler(defaultOpts({ medications })),
-      { initialProps: { medications: [medG1] as Medication[] } }
-    );
-
-    // G1's cancel fires.
-    await flushUntil(() => cancelResolvers.length >= 1);
-
-    // G2 starts BEFORE G1's cancel resolves. G2's op queued.
-    rerender({ medications: [medG2] as Medication[] });
-
-    // Resolve G1's cancel → G1 bails (gen 2) → G1 chain completes →
-    // G2's cancel fires.
-    cancelResolvers[0]();
-    await flushUntil(() => cancelResolvers.length >= 2);
-
-    // Resolve G2's cancel → G2's schedule fires.
-    cancelResolvers[1]();
-    await flushUntil(() => scheduleResolvers.length >= 1);
-
-    // Resolve G2's schedule → G2's alarm placed → G2's post-schedule
-    // check passes (gen 2 vs 2) → no undo.
-    scheduleResolvers[0]();
-    await flushUntil(() => true, 5);
-
-    // FINAL: native store contains ONLY G2's alarm (fireAt = D2 ~58 days).
-    expect(nativeStore.size()).toBe(1);
-    expect(nativeStore.has(STABLE_ID)).toBe(true);
-    const alarm = nativeStore.get(STABLE_ID);
-    expect(alarm).toBeDefined();
-    expect(alarm!.medId).toBe('med-blocker');
-    expect(alarm!.fireAt - Date.now()).toBeGreaterThan(40 * 24 * 60 * 60 * 1000);
-  });
-
-  it('BLOCKER: G1 schedule completes, G2 starts → only G2 alarm survives (G1 compensating cancel removes only G1)', async () => {
-    const nativeStore = createNativeStore();
-    const STABLE_ID = 67890;
-    const cancelResolvers: Array<() => void> = [];
-    const scheduleResolvers: Array<() => void> = [];
-
-    mocks.cancel.mockImplementation((_medId: string) => {
-      return new Promise<void>((resolve) => {
-        nativeStore.cancel(STABLE_ID);
-        cancelResolvers.push(resolve);
-      });
-    });
-    mocks.schedule.mockImplementation((medId: string, _name: string, fireAt: number) => {
-      return new Promise<void>((resolve) => {
-        nativeStore.schedule(STABLE_ID, medId, fireAt);
-        scheduleResolvers.push(resolve);
-      });
-    });
-
-    const medG1 = makeMed({ id: 'med-blocker2', currentPills: 30, dailyDose: 1 });
-    const medG2 = makeMed({ id: 'med-blocker2', currentPills: 60, dailyDose: 1 });
-
-    const { rerender } = renderHook(
-      ({ medications }) => useCriticalAlarmScheduler(defaultOpts({ medications })),
-      { initialProps: { medications: [medG1] as Medication[] } }
-    );
-
-    // G1's cancel fires.
-    await flushUntil(() => cancelResolvers.length >= 1);
-
-    // Resolve G1's cancel → G1's pre-schedule check passes → G1's
-    // schedule fires (places G1's alarm synchronously).
-    cancelResolvers[0]();
-    await flushUntil(() => scheduleResolvers.length >= 1);
-    // G1's alarm is in the store (placed synchronously by schedule mock).
-    expect(nativeStore.has(STABLE_ID)).toBe(true);
-
-    // G2 starts WHILE G1's schedule is in flight. G2's op queued.
-    rerender({ medications: [medG2] as Medication[] });
-
-    // Resolve G1's schedule → G1's post-schedule check: gen 1 vs 2 →
-    // STALE → compensating cancel fires (removes G1's alarm synchronously).
-    scheduleResolvers[0]();
-    await flushUntil(() => cancelResolvers.length >= 2);
-    // G1's alarm was removed by its own compensating cancel.
-    expect(nativeStore.has(STABLE_ID)).toBe(false);
-
-    // Resolve G1's compensating cancel → G1's chain completes →
-    // G2's op runs → G2's cancel fires.
-    cancelResolvers[1]();
-    await flushUntil(() => cancelResolvers.length >= 3);
-
-    // Resolve G2's cancel → G2's schedule fires (places G2's alarm).
-    cancelResolvers[2]();
-    await flushUntil(() => scheduleResolvers.length >= 2);
-
-    // Resolve G2's schedule → G2's post-schedule check passes → no undo.
-    scheduleResolvers[1]();
-    await flushUntil(() => true, 5);
-
-    // FINAL: native store contains ONLY G2's alarm (fireAt = D2 ~58 days).
-    // G1's alarm was placed then removed by its own compensating cancel.
-    // G2's alarm is the only one that survives.
-    expect(nativeStore.size()).toBe(1);
-    expect(nativeStore.has(STABLE_ID)).toBe(true);
-    const alarm = nativeStore.get(STABLE_ID);
-    expect(alarm).toBeDefined();
-    expect(alarm!.medId).toBe('med-blocker2');
-    expect(alarm!.fireAt - Date.now()).toBeGreaterThan(40 * 24 * 60 * 60 * 1000);
-  });
-
-  it('opt-out while a schedule is in flight: no alarm survives (native store)', async () => {
-    const nativeStore = createNativeStore();
-    const STABLE_ID = 11111;
-    const cancelResolvers: Array<() => void> = [];
-    const scheduleResolvers: Array<() => void> = [];
-
-    mocks.cancel.mockImplementation((_medId: string) => {
-      return new Promise<void>((resolve) => {
-        nativeStore.cancel(STABLE_ID);
-        cancelResolvers.push(resolve);
-      });
-    });
-    mocks.schedule.mockImplementation((medId: string, _name: string, fireAt: number) => {
-      return new Promise<void>((resolve) => {
-        nativeStore.schedule(STABLE_ID, medId, fireAt);
-        scheduleResolvers.push(resolve);
-      });
-    });
-
-    const med = makeMed({ id: 'med-optout-race', currentPills: 30, dailyDose: 1 });
-
-    const { rerender } = renderHook(
-      ({ criticalStockAlertsEnabled, medications }) =>
-        useCriticalAlarmScheduler(
-          defaultOpts({ criticalStockAlertsEnabled, medications })
-        ),
-      {
-        initialProps: {
-          criticalStockAlertsEnabled: true,
-          medications: [med] as Medication[],
-        },
-      }
-    );
-
-    // G1's cancel fires.
-    await flushUntil(() => cancelResolvers.length >= 1);
-
-    // Resolve G1's cancel → G1's schedule fires (places G1's alarm).
-    cancelResolvers[0]();
-    await flushUntil(() => scheduleResolvers.length >= 1);
-    expect(nativeStore.has(STABLE_ID)).toBe(true);
-
-    // Opt-out WHILE G1's schedule is in flight.
-    rerender({ criticalStockAlertsEnabled: false, medications: [med] });
-
-    // Resolve G1's schedule → post-schedule check: gen stale →
-    // compensating cancel fires (removes G1's alarm synchronously).
-    scheduleResolvers[0]();
-    await flushUntil(() => cancelResolvers.length >= 2);
-    expect(nativeStore.has(STABLE_ID)).toBe(false);
-
-    // Resolve G1's compensating cancel → G1's chain completes →
-    // opt-out cancel fires.
-    cancelResolvers[1]();
-    await flushUntil(() => cancelResolvers.length >= 3);
-
-    // Resolve the opt-out cancel (no-op, alarm already removed).
-    cancelResolvers[2]();
-    await flushUntil(() => true, 5);
-
-    // FINAL: NO alarm survives. The user's opt-out is honored.
-    expect(nativeStore.size()).toBe(0);
-    expect(nativeStore.has(STABLE_ID)).toBe(false);
+    expect(scheduleMock).not.toHaveBeenCalled();
+    expect(cancelMock).toHaveBeenCalledWith('med-1');
+    expect(readClaims()['med-1']).toBeUndefined();
   });
 });
 
-describe('useCriticalAlarmScheduler — reboot fallback (app-launch re-arm)', () => {
-  it('re-arms all alarms from the current medication state on mount (post-reboot re-launch)', async () => {
-    // After a device reboot, the Capacitor plugin's BootReceiver
-    // re-arms already-scheduled notifications from its persisted
-    // store. But if the boot receiver doesn't fire (force-stopped
-    // before reboot), opening the app triggers the reschedule
-    // effect to re-arm all alarms from current state.
-    const meds = [
-      makeMed({ id: 'med-rb-1', currentPills: 30, dailyDose: 1 }),
-      makeMed({ id: 'med-rb-2', currentPills: 20, dailyDose: 2 }),
-      makeMed({ id: 'med-rb-3', currentPills: 14, dailyDose: 1, warningThresholdDays: 7 }),
-    ];
+describe('useCriticalAlarmScheduler — opt-out and cleanup', () => {
+  it('cancels alarms and clears future claims when notifications are disabled', async () => {
+    const med = makeMed();
+    const expectedT = getCriticalAlarmDate(med, getTodayDateString()) as number;
 
-    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: meds })));
-
-    await Promise.resolve();
-    await Promise.resolve();
-
-    // All three meds got a schedule call.
-    expect(mocks.schedule).toHaveBeenCalledTimes(3);
-    expect(mocks.schedule).toHaveBeenCalledWith('med-rb-1', 'Test Med', expect.any(Number), 'قرص');
-    expect(mocks.schedule).toHaveBeenCalledWith('med-rb-2', 'Test Med', expect.any(Number), 'قرص');
-    expect(mocks.schedule).toHaveBeenCalledWith('med-rb-3', 'Test Med', expect.any(Number), 'قرص');
-  });
-});
-
-describe('useCriticalAlarmScheduler — scheduled record persistence (identity separation)', () => {
-  const TRANSITION_KEY_STORE = 'android_med_tracker_critical_transition_v2';
-  const SCHEDULED_STORE = 'android_med_tracker_scheduled_critical_v2';
-
-  function readScheduledRecord(
-    medId: string
-  ): { transitionKey: string; alarmTime: number; status: string; generation?: number } | undefined {
-    const raw = localStorage.getItem(SCHEDULED_STORE);
-    if (!raw) return undefined;
-    return JSON.parse(raw)[medId];
-  }
-
-  it('persists the scheduled record with an EMPTY transitionKey only after schedule success', async () => {
-    const med = makeMed({ id: 'med-persist', currentPills: 30, dailyDose: 1 });
-
-    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
-    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-    // Let the post-schedule persistence microtasks settle.
-    await flushUntil(() => readScheduledRecord('med-persist') !== undefined);
-
-    const rec = readScheduledRecord('med-persist');
-    expect(rec).toBeDefined();
-    expect(rec!.status).toBe('SCHEDULED');
-    // The scheduler NEVER writes an episode identity — the claim is
-    // unbound ('') until the episode owner binds/adopts it.
-    expect(rec!.transitionKey).toBe('');
-    expect(rec!.alarmTime).toBeGreaterThan(Date.now());
-  });
-
-  it('NEVER writes the critical transition store (no identity creation)', async () => {
-    const med = makeMed({ id: 'med-noidentity', currentPills: 30, dailyDose: 1 });
-
-    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
-    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-    await flushUntil(() => readScheduledRecord('med-noidentity') !== undefined);
-
-    expect(localStorage.getItem(TRANSITION_KEY_STORE)).toBeNull();
-  });
-
-  it('rescheduling with a changed projected date keeps the claim unbound and does not create an identity', async () => {
-    const med1 = makeMed({ id: 'med-resched', currentPills: 30, dailyDose: 1 });
-    const med2 = makeMed({ id: 'med-resched', currentPills: 60, dailyDose: 1 });
-
-    const { rerender } = renderHook(
-      ({ medications }) => useCriticalAlarmScheduler(defaultOpts({ medications })),
-      { initialProps: { medications: [med1] as Medication[] } }
-    );
-    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-    await flushUntil(() => readScheduledRecord('med-resched') !== undefined);
-    const firstAlarmTime = readScheduledRecord('med-resched')!.alarmTime;
-
-    rerender({ medications: [med2] as Medication[] });
-    await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
-    await flushUntil(() => readScheduledRecord('med-resched')!.alarmTime !== firstAlarmTime);
-
-    const rec = readScheduledRecord('med-resched');
-    expect(rec!.status).toBe('SCHEDULED');
-    expect(rec!.transitionKey).toBe('');
-    expect(rec!.alarmTime).toBeGreaterThan(firstAlarmTime);
-    expect(localStorage.getItem(TRANSITION_KEY_STORE)).toBeNull();
-  });
-
-  it('scheduling failure neutralizes a prior SCHEDULED claim — no valid SCHEDULED claim survives', async () => {
-    // A previous generation scheduled successfully; a reschedule now
-    // FAILS. The stale SCHEDULED claim must be neutralized so it can
-    // never suppress the foreground notification later.
-    localStorage.setItem(
-      SCHEDULED_STORE,
-      JSON.stringify({ 'med-fail': { transitionKey: '', alarmTime: Date.now() + 86400000, status: 'SCHEDULED' } })
-    );
-    mocks.schedule.mockResolvedValue(false); // simulate failed native schedule
-    const med = makeMed({ id: 'med-fail', currentPills: 30, dailyDose: 1 });
-
-    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
-    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-    await flushUntil(() => readScheduledRecord('med-fail')?.status === 'NOT_SCHEDULED');
-
-    const rec = readScheduledRecord('med-fail');
-    expect(rec).toBeDefined();
-    expect(rec!.status).toBe('NOT_SCHEDULED');
-  });
-
-  it('scheduling failure with no prior record persists nothing (no claim exists)', async () => {
-    mocks.schedule.mockResolvedValue(false); // simulate failed native schedule
-    const med = makeMed({ id: 'med-fail-fresh', currentPills: 30, dailyDose: 1 });
-
-    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
-    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-    await flushUntil(() => true, 10);
-
-    // No prior claim → nothing to neutralize → no record written. The
-    // foreground path stays fully available for useStockAlerts.
-    expect(readScheduledRecord('med-fail-fresh')).toBeUndefined();
-    expect(localStorage.getItem(TRANSITION_KEY_STORE)).toBeNull();
-  });
-
-  it('scheduleCriticalAlarm is called WITHOUT a transition-key argument (4 args)', async () => {
-    const med = makeMed({ id: 'med-arity', currentPills: 30, dailyDose: 1 });
-
-    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
-    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-
-    expect(mocks.schedule.mock.calls[0]).toHaveLength(4);
-  });
-
-  it('TEST H: schedule success stamps the record SCHEDULED with a bumped generation', async () => {
-    const med = makeMed({ id: 'med-genstamp', currentPills: 30, dailyDose: 1 });
-
-    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
-    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-    await flushUntil(() => readScheduledRecord('med-genstamp') !== undefined);
-
-    const rec = readScheduledRecord('med-genstamp')!;
-    expect(rec.status).toBe('SCHEDULED');
-    expect(rec.transitionKey).toBe('');
-    expect(rec.generation).toBe(1); // first accepted scheduler write
-  });
-});
-
-describe('useCriticalAlarmScheduler — scheduled-record ownership & generation (race safety)', () => {
-  const TRANSITION_KEY_STORE = 'android_med_tracker_critical_transition_v2';
-  const SCHEDULED_STORE = 'android_med_tracker_scheduled_critical_v2';
-
-  type StoredRecord = {
-    transitionKey: string;
-    alarmTime: number;
-    status: string;
-    generation?: number;
-  };
-
-  function readRecord(medId: string): StoredRecord | undefined {
-    const raw = localStorage.getItem(SCHEDULED_STORE);
-    if (!raw) return undefined;
-    return JSON.parse(raw)[medId];
-  }
-
-  function writeScheduledStore(records: Record<string, StoredRecord>): void {
-    localStorage.setItem(SCHEDULED_STORE, JSON.stringify(records));
-  }
-
-  it('TEST A/B: owner binds the claim to episode A → reschedule keeps binding A, only alarmTime changes', async () => {
-    const med1 = makeMed({ id: 'med-bind', currentPills: 30, dailyDose: 1 });
-    const med2 = makeMed({ id: 'med-bind', currentPills: 60, dailyDose: 1 });
-
-    const { rerender } = renderHook(
-      ({ medications }) => useCriticalAlarmScheduler(defaultOpts({ medications })),
-      { initialProps: { medications: [med1] as Medication[] } }
-    );
-    await flushUntil(() => readRecord('med-bind') !== undefined);
-    const first = readRecord('med-bind')!;
-    expect(first.transitionKey).toBe(''); // unbound claim
-    expect(first.generation).toBe(1);
-
-    // The episode owner binds the claim (exactly what
-    // reconcileCriticalEpisode does at the actual crossing): transition A
-    // becomes active and the claim is bound to it. notificationState
-    // 'SCHEDULED' = the registered alarm owns the episode's single
-    // notification (a SENT episode would refuse scheduler writes —
-    // covered by a dedicated BLOCKER test below).
-    localStorage.setItem(
-      TRANSITION_KEY_STORE,
-      JSON.stringify({
-        'med-bind': { transitionKey: 'crit_med-bind_A', enteredAt: Date.now(), notificationState: 'SCHEDULED' },
-      })
-    );
-    const bound = JSON.parse(localStorage.getItem(SCHEDULED_STORE)!);
-    bound['med-bind'].transitionKey = 'crit_med-bind_A';
-    localStorage.setItem(SCHEDULED_STORE, JSON.stringify(bound));
-
-    // Stock change → new scheduler generation → reschedule (new projected date).
-    rerender({ medications: [med2] as Medication[] });
-    await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
-    await flushUntil(() => readRecord('med-bind')!.alarmTime !== first.alarmTime);
-
-    const rec = readRecord('med-bind')!;
-    // The binding to A survived the reschedule — the scheduler must never
-    // replace it with an unbound claim.
-    expect(rec.transitionKey).toBe('crit_med-bind_A');
-    expect(rec.status).toBe('SCHEDULED');
-    expect(rec.alarmTime).toBeGreaterThan(first.alarmTime); // only scheduling data changed
-    expect(rec.generation).toBe(2);
-    // The scheduler did not touch the transition store.
-    const transitions = JSON.parse(localStorage.getItem(TRANSITION_KEY_STORE)!);
-    expect(transitions['med-bind'].transitionKey).toBe('crit_med-bind_A');
-  });
-
-  it('TEST C: G1 schedule in flight, G2 starts → G1 bails + compensates; the persisted record is G2\u2019s', async () => {
-    let releaseG1!: (value: boolean) => void;
-    const g1Gate = new Promise<boolean>((resolve) => { releaseG1 = resolve; });
-    // G1's schedule call hangs on the gate.
-    mocks.schedule.mockImplementationOnce(() => g1Gate);
-
-    const med1 = makeMed({ id: 'med-gen', currentPills: 30, dailyDose: 1 });
-    const med2 = makeMed({ id: 'med-gen', currentPills: 70, dailyDose: 1 });
-
-    const { rerender } = renderHook(
-      ({ medications }) => useCriticalAlarmScheduler(defaultOpts({ medications })),
-      { initialProps: { medications: [med1] as Medication[] } }
-    );
-    // G1's op: cancel resolves → schedule is now gated and in flight.
-    await flushUntil(() => mocks.cancel.mock.calls.length >= 1);
-    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-    expect(readRecord('med-gen')).toBeUndefined(); // nothing persisted while gated
-
-    // G2's effect run bumps the generation and enqueues op2 (serialized
-    // behind op1's gate).
-    rerender({ medications: [med2] as Medication[] });
-
-    // Release G1: schedule resolves → G1's post-schedule gen check fails
-    // → compensating cancel + neutralize. Then G2's op runs and persists.
-    releaseG1(true);
-    await flushUntil(() => mocks.cancel.mock.calls.length >= 3);
-    await flushUntil(() => readRecord('med-gen') !== undefined);
-
-    const rec = readRecord('med-gen')!;
-    // The persistent record belongs to G2 — the latest generation.
-    expect(rec.status).toBe('SCHEDULED');
-    expect(rec.transitionKey).toBe('');
-    const g2Date = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1][2] as number;
-    expect(rec.alarmTime).toBe(g2Date);
-    expect(rec.generation).toBe(1);
-  });
-
-  it('TEST D: after episode A ends, a reschedule writes an UNBOUND claim (never resurrects A)', async () => {
-    // Episode A ended: the owner deleted the transition and neutralized
-    // its bound claim (the binding remains only as inert information).
-    writeScheduledStore({
-      'med-end': { transitionKey: 'crit_med-end_A', alarmTime: Date.now() + 86400000, status: 'NOT_SCHEDULED' },
+    const { rerender } = renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({ medications: [med] }),
     });
-    // No active transition exists anymore.
+    await flush();
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: expectedT });
 
-    const med = makeMed({ id: 'med-end', currentPills: 90, dailyDose: 1 });
-    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
-    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-    await flushUntil(() => readRecord('med-end')?.status === 'SCHEDULED');
+    rerender(defaultOpts({ medications: [med], notificationsEnabled: false }));
+    await flush();
 
-    const rec = readRecord('med-end')!;
-    expect(rec.transitionKey).toBe('');     // A was NOT resurrected
-    expect(rec.status).toBe('SCHEDULED');   // fresh valid claim for the future crossing
-    expect(rec.generation).toBeGreaterThanOrEqual(1);
-    // The scheduler never wrote the transition store (no identity creation).
-    expect(localStorage.getItem(TRANSITION_KEY_STORE)).toBeNull();
+    expect(cancelMock).toHaveBeenCalledWith('med-1');
+    // The future alarm was cancelled before it could fire → the
+    // opportunity is restored for when notifications are re-enabled.
+    expect(readClaims()['med-1']).toBeUndefined();
   });
 
-  it('TEST G: alarm date changes 3+ times ⇒ claim stays unbound, only alarmTime changes, generation advances', async () => {
-    const meds = [30, 60, 90, 120].map((pills) =>
-      makeMed({ id: 'med-g', currentPills: pills, dailyDose: 1 })
-    );
-    const { rerender } = renderHook(
-      ({ medications }) => useCriticalAlarmScheduler(defaultOpts({ medications })),
-      { initialProps: { medications: [meds[0]] as Medication[] } }
-    );
-    await flushUntil(() => readRecord('med-g') !== undefined);
-
-    const alarmTimes: number[] = [readRecord('med-g')!.alarmTime];
-    const keys = new Set<string>([readRecord('med-g')!.transitionKey]);
-
-    for (let i = 1; i < meds.length; i++) {
-      rerender({ medications: [meds[i]] as Medication[] });
-      await flushUntil(() => mocks.schedule.mock.calls.length >= i + 1);
-      await flushUntil(() => readRecord('med-g')!.alarmTime !== alarmTimes[i - 1]);
-      alarmTimes.push(readRecord('med-g')!.alarmTime);
-      keys.add(readRecord('med-g')!.transitionKey);
-    }
-
-    // No identity was ever created; every projected date landed.
-    expect(keys).toEqual(new Set(['']));
-    expect(new Set(alarmTimes).size).toBe(alarmTimes.length);
-    const finalRec = readRecord('med-g')!;
-    expect(finalRec.status).toBe('SCHEDULED');
-    // One accepted write per distinct projected date.
-    expect(finalRec.generation).toBe(alarmTimes.length);
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────
-// Episode-vs-scheduler ownership races (BLOCKER 1 & BLOCKER 2).
-//
-// The owner's lifecycle writes (episode end / new episode / foreground
-// send / med deletion) do NOT bump the record's scheduler generation,
-// so an operation that checked only the generation could resurrect a
-// dead claim or restore notification ownership after it was consumed.
-// These tests simulate the owner's exact persistent writes WHILE a
-// scheduler operation is gated inside its async native work, then let
-// the operation finish and assert on the FINAL PERSISTENT STATE.
-// ─────────────────────────────────────────────────────────────────────
-describe('useCriticalAlarmScheduler — episode-vs-scheduler ownership races', () => {
-  const TRANSITION_KEY_STORE = 'android_med_tracker_critical_transition_v2';
-  const SCHEDULED_STORE = 'android_med_tracker_scheduled_critical_v2';
-  const OWNERSHIP_STORE = 'android_med_tracker_critical_ownership_v2';
-
-  type StoredRecord = {
-    transitionKey: string;
-    alarmTime: number;
-    status: string;
-    generation?: number;
-  };
-
-  function readRecord(medId: string): StoredRecord | undefined {
-    const raw = localStorage.getItem(SCHEDULED_STORE);
-    if (!raw) return undefined;
-    return JSON.parse(raw)[medId];
-  }
-
-  function readTransitions(): Record<string, { transitionKey: string; notificationState: string }> {
-    return JSON.parse(localStorage.getItem(TRANSITION_KEY_STORE) || '{}');
-  }
-
-  function readOwnership(): Record<string, number> {
-    return JSON.parse(localStorage.getItem(OWNERSHIP_STORE) || '{}');
-  }
-
-  /** Seed the persistent stores exactly as previous writes left them. */
-  function seedRecord(medId: string, record: StoredRecord): void {
-    localStorage.setItem(SCHEDULED_STORE, JSON.stringify({ [medId]: record }));
-  }
-
-  /**
-   * Simulate the episode owner ENDING episode A (exactly the persistent
-   * writes reconcileCriticalEpisode performs): transition deleted, the
-   * claim bound to A neutralized, ownership revision bumped.
-   */
-  function ownerEndsEpisode(medId: string, keyA: string, revision: number): void {
-    localStorage.setItem(TRANSITION_KEY_STORE, JSON.stringify({}));
-    const sched = JSON.parse(localStorage.getItem(SCHEDULED_STORE)!);
-    if (sched[medId] && sched[medId].transitionKey === keyA) {
-      sched[medId].status = 'NOT_SCHEDULED';
-    }
-    localStorage.setItem(SCHEDULED_STORE, JSON.stringify(sched));
-    localStorage.setItem(OWNERSHIP_STORE, JSON.stringify({ [medId]: revision }));
-  }
-
-  it('BLOCKER 1 / Test A: a stale scheduler operation cannot resurrect the claim of an ended episode', async () => {
-    // A previous scheduler write left an unbound SCHEDULED claim; no
-    // episode is active yet.
-    seedRecord('med-a', { transitionKey: '', alarmTime: Date.now() + 86400000, status: 'SCHEDULED', generation: 1 });
-
-    let releaseG1!: (value: boolean) => void;
-    const g1Gate = new Promise<boolean>((resolve) => { releaseG1 = resolve; });
-    mocks.schedule.mockImplementationOnce(() => g1Gate);
-
-    renderHook(() =>
-      useCriticalAlarmScheduler(
-        defaultOpts({ medications: [makeMed({ id: 'med-a', currentPills: 30, dailyDose: 1 })] })
-      )
-    );
-    // G1 captured its context (unbound claim, gen 1, revision 0) and is
-    // now gated inside scheduleCriticalAlarm.
-    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-
-    // The episode began AND ended while G1 awaited the bridge:
-    // the owner bound the claim to A, then A became sufficient again —
-    // transition deleted, claim neutralized, ownership revision bumped.
-    const sched = JSON.parse(localStorage.getItem(SCHEDULED_STORE)!);
-    sched['med-a'].transitionKey = 'crit_med-a_A';
-    localStorage.setItem(SCHEDULED_STORE, JSON.stringify(sched));
-    ownerEndsEpisode('med-a', 'crit_med-a_A', 2);
-
-    releaseG1(true);
-    await flushUntil(() => mocks.cancel.mock.calls.length >= 2); // initial + compensating
-
-    // The dead episode's claim was NOT resurrected: still neutralized,
-    // still bound to A (inert), generation untouched by G1.
-    const rec = readRecord('med-a')!;
-    expect(rec.status).toBe('NOT_SCHEDULED');
-    expect(rec.transitionKey).toBe('crit_med-a_A');
-    expect(rec.generation).toBe(1);
-    // No transition was created (the scheduler never creates identity).
-    expect(readTransitions()['med-a']).toBeUndefined();
-    // G1 cancelled the alarm it armed (compensating cancel).
-    expect(mocks.cancel.mock.calls.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('BLOCKER 1 / Test B+G: a stale operation from episode A cannot write episode B or an unbound claim', async () => {
-    seedRecord('med-b', { transitionKey: '', alarmTime: Date.now() + 86400000, status: 'SCHEDULED', generation: 1 });
-
-    let releaseG1!: (value: boolean) => void;
-    const g1Gate = new Promise<boolean>((resolve) => { releaseG1 = resolve; });
-    mocks.schedule.mockImplementationOnce(() => g1Gate);
-
-    renderHook(() =>
-      useCriticalAlarmScheduler(
-        defaultOpts({ medications: [makeMed({ id: 'med-b', currentPills: 30, dailyDose: 1 })] })
-      )
-    );
-    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-
-    // A ended and B began while G1 awaited: B is active (NONE), the
-    // leftover claim of A sits neutralized, the ownership revision moved.
-    localStorage.setItem(
-      TRANSITION_KEY_STORE,
-      JSON.stringify({ 'med-b': { transitionKey: 'crit_med-b_B', enteredAt: Date.now(), notificationState: 'NONE' } })
-    );
-    const sched = JSON.parse(localStorage.getItem(SCHEDULED_STORE)!);
-    sched['med-b'].transitionKey = 'crit_med-b_A'; // dead binding, neutralized
-    sched['med-b'].status = 'NOT_SCHEDULED';
-    localStorage.setItem(SCHEDULED_STORE, JSON.stringify(sched));
-    localStorage.setItem(OWNERSHIP_STORE, JSON.stringify({ 'med-b': 3 }));
-
-    releaseG1(true);
-    await flushUntil(() => mocks.cancel.mock.calls.length >= 2);
-
-    // G1 cannot restore A, cannot create an unbound claim, and cannot
-    // overwrite B: the persistent state is exactly the owner's.
-    const rec = readRecord('med-b')!;
-    expect(rec.status).toBe('NOT_SCHEDULED');
-    expect(rec.transitionKey).toBe('crit_med-b_A');
-    expect(rec.generation).toBe(1);
-    const transitions = readTransitions();
-    expect(transitions['med-b'].transitionKey).toBe('crit_med-b_B');
-    expect(transitions['med-b'].notificationState).toBe('NONE');
-  });
-
-  it('BLOCKER 2 / Test C: the scheduler never arms an alarm for a SENT episode', async () => {
-    // Episode A is active and its single notification was already sent.
-    localStorage.setItem(
-      TRANSITION_KEY_STORE,
-      JSON.stringify({ 'med-c': { transitionKey: 'crit_med-c_A', enteredAt: Date.now(), notificationState: 'SENT' } })
-    );
-    seedRecord('med-c', { transitionKey: 'crit_med-c_A', alarmTime: Date.now() + 86400000, status: 'NOT_SCHEDULED', generation: 1 });
-
-    // The med projects a future crossing (sufficient), so the scheduler
-    // effect WOULD schedule — but the active episode is SENT.
-    renderHook(() =>
-      useCriticalAlarmScheduler(
-        defaultOpts({ medications: [makeMed({ id: 'med-c', currentPills: 30, dailyDose: 1 })] })
-      )
-    );
-    await flushUntil(() => mocks.cancel.mock.calls.length >= 1);
-
-    // The pre-arm relevance check refused: no alarm was scheduled and
-    // no SCHEDULED ownership was (re)created for the SENT episode.
-    expect(mocks.schedule).not.toHaveBeenCalled();
-    const rec = readRecord('med-c')!;
-    expect(rec.status).toBe('NOT_SCHEDULED');
-    expect(readTransitions()['med-c'].notificationState).toBe('SENT');
-  });
-
-  it('Test I: foreground send during a schedule operation → compensating cancel, no SCHEDULED claim', async () => {
-    seedRecord('med-i', { transitionKey: '', alarmTime: Date.now() + 86400000, status: 'SCHEDULED', generation: 1 });
-
-    let releaseG1!: (value: boolean) => void;
-    const g1Gate = new Promise<boolean>((resolve) => { releaseG1 = resolve; });
-    mocks.schedule.mockImplementationOnce(() => g1Gate);
-
-    renderHook(() =>
-      useCriticalAlarmScheduler(
-        defaultOpts({ medications: [makeMed({ id: 'med-i', currentPills: 30, dailyDose: 1 })] })
-      )
-    );
-    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-
-    // The med crossed while G1 awaited: episode A began, the pending
-    // claim was bound to it, the FOREGROUND sent (future claim does not
-    // suppress) → SENT. The owner bumped the ownership revision.
-    localStorage.setItem(
-      TRANSITION_KEY_STORE,
-      JSON.stringify({ 'med-i': { transitionKey: 'crit_med-i_A', enteredAt: Date.now(), notificationState: 'SENT' } })
-    );
-    const sched = JSON.parse(localStorage.getItem(SCHEDULED_STORE)!);
-    sched['med-i'].transitionKey = 'crit_med-i_A';
-    localStorage.setItem(SCHEDULED_STORE, JSON.stringify(sched));
-    localStorage.setItem(OWNERSHIP_STORE, JSON.stringify({ 'med-i': 2 }));
-
-    releaseG1(true);
-    await flushUntil(() => mocks.cancel.mock.calls.length >= 2);
-
-    // Still SENT, no new SCHEDULED ownership, record untouched by G1 —
-    // the alarm G1 armed was compensated (no duplicate notification).
-    const rec = readRecord('med-i')!;
-    expect(rec.status).toBe('SCHEDULED'); // the owner's bound claim, not G1's write
-    expect(rec.transitionKey).toBe('crit_med-i_A');
-    expect(rec.generation).toBe(1); // G1's write was abandoned
-    expect(readTransitions()['med-i'].notificationState).toBe('SENT');
-    expect(mocks.cancel.mock.calls.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('Test H: deleting a medication invalidates ownership synchronously and no stale operation resurrects the record', async () => {
-    let releaseG1!: (value: boolean) => void;
-    const g1Gate = new Promise<boolean>((resolve) => { releaseG1 = resolve; });
-    mocks.schedule.mockImplementationOnce(() => g1Gate);
-
-    const { rerender } = renderHook(
-      ({ medications }) =>
-        useCriticalAlarmScheduler(defaultOpts({ medications })),
-      { initialProps: { medications: [makeMed({ id: 'med-h', currentPills: 30, dailyDose: 1 })] as Medication[] } }
-    );
-    // G1 is gated inside its schedule call.
-    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-
-    // The medication is deleted → the effect bumps the in-memory
-    // generation AND the persistent ownership revision synchronously,
-    // then enqueues the cleanup (cancel + clear).
-    rerender({ medications: [] as Medication[] });
-    expect(readOwnership()['med-h']).toBe(1); // bumped synchronously
-
-    releaseG1(true);
-    await flushUntil(() => mocks.cancel.mock.calls.length >= 3); // G1 initial + G1 compensating + cleanup
-
-    // No scheduled record exists for the deleted medication and none
-    // can be resurrected by the stale operation.
-    expect(readRecord('med-h')).toBeUndefined();
-    expect(readTransitions()['med-h']).toBeUndefined();
-  });
-
-  it('scenario 31: a schedule FAILURE after the episode ownership changed cannot invalidate the new episode', async () => {
-    // G1 starts scheduling for the (then) sufficient med (a dead
-    // episode A's consumed claim is still on the record). While the
-    // native schedule is in flight, the owner ends A and begins
-    // episode B (NONE, foreground-eligible, no claim yet). The schedule
-    // then FAILS (resolves false). G1's failure path detects the stale
-    // ownership context and must return WITHOUT touching persistent
-    // state — in particular it must NOT neutralize/erase anything the
-    // new owner left behind, and B's foreground eligibility (no valid
-    // claim) must remain exactly as the owner wrote it.
-    seedRecord('med-n', {
-      transitionKey: 'crit_med-n_A',
-      alarmTime: Date.now() - 7200000,
-      status: 'FIRED_OR_DUE',
-      generation: 2,
+  it('keeps consumed claims (foreground send / past alarm) on opt-out', async () => {
+    writeClaims({ 'med-1': { claimed: true, alarmTime: null } });
+    renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({ medications: [makeMed()], notificationsEnabled: false }),
     });
+    await flush();
 
-    let releaseG1!: (value: boolean) => void;
-    const g1Gate = new Promise<boolean>((resolve) => { releaseG1 = resolve; });
-    mocks.schedule.mockImplementationOnce(() => g1Gate);
+    // Claim with no armed alarm: nothing to cancel, nothing to restore.
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
+  });
 
-    renderHook(() =>
-      useCriticalAlarmScheduler(
-        defaultOpts({ medications: [makeMed({ id: 'med-n', currentPills: 30, dailyDose: 1 })] })
-      )
-    );
-    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+  it('cancels the alarm when a medication is deleted (claim entry removed by the foreground hook)', async () => {
+    const med = makeMed();
+    const { rerender } = renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({ medications: [med] }),
+    });
+    await flush();
+    expect(scheduleMock).toHaveBeenCalledTimes(1);
 
-    // Owner lifecycle while G1 awaited: A ended, B began (NONE), the
-    // dead claim was dropped by the owner, revision bumped.
-    localStorage.setItem(
-      TRANSITION_KEY_STORE,
-      JSON.stringify({
-        'med-n': { transitionKey: 'crit_med-n_B', enteredAt: Date.now(), notificationState: 'NONE' },
-      })
-    );
-    localStorage.setItem(SCHEDULED_STORE, JSON.stringify({
-      'med-n': { transitionKey: '', alarmTime: 0, status: 'NOT_SCHEDULED', generation: 2 },
-    }));
-    localStorage.setItem(OWNERSHIP_STORE, JSON.stringify({ 'med-n': 5 }));
+    rerender(defaultOpts({ medications: [] }));
+    await flush();
 
-    releaseG1(false); // native scheduling FAILED
-    // Drain the serialized chain (no observable side effect is expected
-    // — that is the point — so flush a fixed, deterministic number of
-    // microtask ticks; no timers are involved).
-    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(cancelMock).toHaveBeenCalledWith('med-1');
+  });
 
-    // G1's stale failure wrote NOTHING: B's episode and the owner's
-    // record state are exactly as the owner left them.
-    const rec = readRecord('med-n')!;
-    expect(rec.status).toBe('NOT_SCHEDULED');
-    expect(rec.transitionKey).toBe('');
-    expect(rec.generation).toBe(2); // no scheduler write landed
-    const transitions = readTransitions();
-    expect(transitions['med-n'].transitionKey).toBe('crit_med-n_B');
-    expect(transitions['med-n'].notificationState).toBe('NONE');
-    expect(readOwnership()['med-n']).toBe(5);
+  it('cancels cross-session armed alarms for meds that still have a claim when opted out', async () => {
+    // The alarm was armed in a previous session; this session starts with
+    // notifications disabled — the claim map still names the med.
+    writeClaims({ 'med-old': { claimed: true, alarmTime: Date.now() + 86_400_000 } });
+    renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({ medications: [], notificationsEnabled: false }),
+    });
+    await flush();
+
+    expect(cancelMock).toHaveBeenCalledWith('med-old');
+    expect(readClaims()['med-old']).toBeUndefined();
   });
 });
 
-// Re-import to suppress the unused-import lint warning on the
-// notifications module symbols (the actual exports are replaced by
-// the hoisted mocks above, but we still need the import for type
-// inference on vi.mocked() assertions elsewhere in this file).
-void scheduleCriticalAlarm;
-void cancelCriticalAlarm;
+describe('useCriticalAlarmScheduler — stale-async safety', () => {
+  it('a newer run supersedes an in-flight schedule: the stale alarm is cancelled and only the newer claim survives', async () => {
+    const medA = makeMed({ currentPills: 30 });
 
+    // Gate the first schedule so it is still pending when the newer run starts.
+    const gate = deferred<boolean>();
+    scheduleMock.mockReturnValueOnce(gate.promise);
+    scheduleMock.mockResolvedValueOnce(true);
 
-// ─────────────────────────────────────────────────────────────────────
-// FIRED_OR_DUE / consumed-claim decision table (scheduler never re-arms
-// a claim whose firing window passed, and cancels stale armed alarms
-// for episodes whose notification the foreground already consumed)
-// ─────────────────────────────────────────────────────────────────────
+    const { rerender } = renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({ medications: [medA] }),
+    });
+    await flush();
+    expect(scheduleMock).toHaveBeenCalledTimes(1);
 
-describe('useCriticalAlarmScheduler — due/past claim terminality (no duplicate on reopen)', () => {
-  it('a critical med with an adopted FIRED_OR_DUE claim is NEVER re-armed (no schedule call at all)', async () => {
-    // The alarm fired while the app was dead and the user dismissed it.
-    // The episode owner adopted the claim (FIRED_OR_DUE, bound record).
-    localStorage.setItem(
-      CRITICAL_TRANSITION_STORAGE_KEY,
-      JSON.stringify({
-        'med-crit': { transitionKey: 'crit_med-crit_A', enteredAt: Date.now() - 7200000, notificationState: 'FIRED_OR_DUE' },
-      })
-    );
-    localStorage.setItem(
-      SCHEDULED_CRITICAL_STORAGE_KEY,
-      JSON.stringify({
-        'med-crit': { transitionKey: 'crit_med-crit_A', alarmTime: Date.now() - 7200000, status: 'FIRED_OR_DUE' },
-      })
-    );
-    const med = makeMed({ id: 'med-crit', currentPills: 1, dailyDose: 1, warningThresholdDays: 5 });
+    // Newer run with a changed projection, while run 1's schedule is pending.
+    const medB = makeMed({ currentPills: 40 });
+    const t2 = getCriticalAlarmDate(medB, getTodayDateString()) as number;
+    rerender(defaultOpts({ medications: [medB] }));
 
-    const { rerender } = renderHook(
-      (opts) => useCriticalAlarmScheduler(defaultOpts(opts)),
-      { initialProps: defaultOpts({ medications: [med] }) }
-    );
-    await Promise.resolve();
-    await Promise.resolve();
-    await flushUntil(() => mocks.cancel.mock.calls.length >= 0);
+    // Run 1's schedule now resolves successfully — but it is stale.
+    gate.resolve(true);
+    await flush();
 
-    // No re-arm for the consumed claim — and no re-arm after re-runs.
-    expect(mocks.schedule).not.toHaveBeenCalled();
-    rerender(defaultOpts({ medications: [makeMed({ id: 'med-crit', currentPills: 1, dailyDose: 1, warningThresholdDays: 5 })] }));
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(mocks.schedule).not.toHaveBeenCalled();
-
-    // The consumed record stays terminal; the transition is untouched.
-    const rec = JSON.parse(localStorage.getItem(SCHEDULED_CRITICAL_STORAGE_KEY)!)['med-crit'];
-    expect(rec.status).toBe('FIRED_OR_DUE');
-    expect(rec.transitionKey).toBe('crit_med-crit_A');
+    // Run 1 compensated by cancelling the alarm it armed; run 2 re-armed
+    // at the new projection and persisted the newer claim.
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: t2 });
+    expect(scheduleMock).toHaveBeenCalledTimes(2);
+    expect(scheduleMock).toHaveBeenLastCalledWith('med-1', 'Test Med', t2, 'قرص');
   });
 
-  it('a critical med with a bound due claim (pre-consumption SCHEDULED) is never re-armed either', async () => {
-    // The scheduler may run BEFORE the episode owner consumes the claim:
-    // it must not re-arm regardless (the owner consumes it instead).
-    localStorage.setItem(
-      CRITICAL_TRANSITION_STORAGE_KEY,
-      JSON.stringify({
-        'med-crit2': { transitionKey: 'crit_med-crit2_B', enteredAt: 1, notificationState: 'SCHEDULED' },
+  it('a medication that crosses while its schedule is in flight aborts the claim write and cancels the just-armed alarm', async () => {
+    const medA = makeMed({ currentPills: 30 });
+
+    const gate = deferred<boolean>();
+    scheduleMock.mockReturnValueOnce(gate.promise);
+
+    const { rerender } = renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({ medications: [medA] }),
+    });
+    await flush();
+    expect(scheduleMock).toHaveBeenCalledTimes(1);
+
+    // The med crosses (manual consumption) while the schedule is pending.
+    rerender(
+      defaultOpts({
+        medications: [makeMed({ currentPills: 3, warningThresholdDays: 5 })],
       })
     );
-    localStorage.setItem(
-      SCHEDULED_CRITICAL_STORAGE_KEY,
-      JSON.stringify({
-        'med-crit2': { transitionKey: 'crit_med-crit2_B', alarmTime: Date.now() - 1000, status: 'SCHEDULED' },
-      })
-    );
-    const med = makeMed({ id: 'med-crit2', currentPills: 1, dailyDose: 1, warningThresholdDays: 5 });
 
-    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
-    await Promise.resolve();
-    await Promise.resolve();
+    // The in-flight schedule resolves now — stale: the foreground owns
+    // the active episode, so the scheduler must cancel its own alarm
+    // and write nothing.
+    gate.resolve(true);
+    await flush();
 
-    expect(mocks.schedule).not.toHaveBeenCalled();
+    // cancel called for the pre-schedule cancel AND the compensation.
+    expect(cancelMock).toHaveBeenCalledWith('med-1');
+    expect(readClaims()['med-1']).toBeUndefined();
+    expect(scheduleMock).toHaveBeenCalledTimes(1);
   });
 
-  it('cross-session staleness: an armed alarm for a SENT episode (foreground claimed it) is cancelled', async () => {
-    // Episode was claimed by the foreground in a PREVIOUS session; the
-    // alarm armed back then is still pending. A fresh app open must
-    // cancel it — it could only ever fire a SECOND notification for the
-    // same episode.
-    localStorage.setItem(
-      CRITICAL_TRANSITION_STORAGE_KEY,
-      JSON.stringify({
-        'med-sent': { transitionKey: 'crit_med-sent_C', enteredAt: 1, notificationState: 'SENT' },
-      })
-    );
-    localStorage.setItem(
-      SCHEDULED_CRITICAL_STORAGE_KEY,
-      JSON.stringify({
-        'med-sent': { transitionKey: 'crit_med-sent_C', alarmTime: Date.now() + 86400000, status: 'SCHEDULED' },
-      })
-    );
-    const med = makeMed({ id: 'med-sent', currentPills: 1, dailyDose: 1, warningThresholdDays: 5 });
+  it('a medication deleted while its schedule is in flight leaves no claim', async () => {
+    const medA = makeMed({ currentPills: 30 });
+    const gate = deferred<boolean>();
+    scheduleMock.mockReturnValueOnce(gate.promise);
 
-    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
-    // Flush until the serialized chain (SENT-cancel op) has run.
-    await flushUntil(() => mocks.cancel.mock.calls.some(([id]) => id === 'med-sent'));
+    const { rerender } = renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({ medications: [medA] }),
+    });
+    await flush();
+    expect(scheduleMock).toHaveBeenCalledTimes(1);
 
-    expect(mocks.schedule).not.toHaveBeenCalled();
-    expect(mocks.cancel).toHaveBeenCalledWith('med-sent');
-  });
+    rerender(defaultOpts({ medications: [] }));
+    gate.resolve(true);
+    await flush();
 
-  it('cross-session: a FIRED_OR_DUE episode keeps its armed alarm (it is the episode\u2019s single remaining opportunity)', async () => {
-    localStorage.setItem(
-      CRITICAL_TRANSITION_STORAGE_KEY,
-      JSON.stringify({
-        'med-due': { transitionKey: 'crit_med-due_D', enteredAt: 1, notificationState: 'FIRED_OR_DUE' },
-      })
-    );
-    localStorage.setItem(
-      SCHEDULED_CRITICAL_STORAGE_KEY,
-      JSON.stringify({
-        'med-due': { transitionKey: 'crit_med-due_D', alarmTime: Date.now() - 1000, status: 'FIRED_OR_DUE' },
-      })
-    );
-    const med = makeMed({ id: 'med-due', currentPills: 1, dailyDose: 1, warningThresholdDays: 5 });
-
-    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
-    await flushUntil(() => mocks.cancel.mock.calls.length >= 0);
-
-    // Never re-armed, and not cancelled either (the one-shot alarm fires
-    // at most once — it IS the episode's own notification opportunity).
-    expect(mocks.schedule).not.toHaveBeenCalled();
-    expect(mocks.cancel).not.toHaveBeenCalled();
-  });
-
-  it('a sufficient med with a consumed claim left over from a DEAD episode re-arms a genuinely NEW unbound opportunity', async () => {
-    // The old claim (FIRED_OR_DUE, bound to the dead episode A) is dead
-    // state; the med is sufficient again and the projected crossing is
-    // future. The new alarm is a new opportunity for a not-yet-begun
-    // episode — allowed, and persisted UNBOUND (never resurrects A).
-    localStorage.setItem(
-      SCHEDULED_CRITICAL_STORAGE_KEY,
-      JSON.stringify({
-        'med-suff': { transitionKey: 'crit_med-suff_DEAD', alarmTime: Date.now() - 7200000, status: 'FIRED_OR_DUE', generation: 2 },
-      })
-    );
-    const med = makeMed({ id: 'med-suff', currentPills: 30, dailyDose: 1, warningThresholdDays: 5 });
-
-    renderHook(() => useCriticalAlarmScheduler(defaultOpts({ medications: [med] })));
-    await flushUntil(() => mocks.schedule.mock.calls.length > 0);
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(mocks.schedule).toHaveBeenCalledTimes(1);
-    const rec = JSON.parse(localStorage.getItem(SCHEDULED_CRITICAL_STORAGE_KEY)!)['med-suff'];
-    expect(rec.status).toBe('SCHEDULED');
-    expect(rec.transitionKey).toBe(''); // unbound — dead binding dropped, A never resurrected
-    expect(rec.generation).toBe(3);
-    expect(rec.alarmTime).toBeGreaterThan(Date.now());
+    expect(readClaims()['med-1']).toBeUndefined();
   });
 });

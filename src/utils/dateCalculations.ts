@@ -533,11 +533,3 @@ export function getCriticalAlarmDate(
   return target.getTime();
 }
 
-// NOTE: the former getCriticalTransitionKey() (which hashed
-// lastSyncDate + currentPills + dailyDose + warningThresholdDays into a
-// "stable" transition key) has been REMOVED on purpose. No transition
-// identity may be derived from stock/date/dose snapshots — those change
-// on every refill, consume, and auto-deduction. Transition identity is
-// now generated ONCE per critical episode by the authoritative
-// reconcileCriticalEpisode() in utils/criticalTransitions.ts and stored
-// in android_med_tracker_critical_transition_v2.

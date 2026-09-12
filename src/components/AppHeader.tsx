@@ -183,9 +183,15 @@ export const AppHeader: FC<AppHeaderProps> = ({
           {/* Search Input */}
           <div className="relative">
             <input
-              type="text"
+              type="search"
+              inputMode="search"
+              enterKeyHint="search"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
+              onInput={(e) => onSearchChange((e.target as HTMLInputElement).value)}
               placeholder="بحث عن دواء..."
               className="w-full pl-3 pr-9 py-1.5 rounded-xl bg-teal-900/40 border border-teal-700 text-white placeholder-teal-300/70 text-xs focus:outline-none focus:ring-1 focus:ring-teal-300 focus:bg-teal-900/60 transition"
             />

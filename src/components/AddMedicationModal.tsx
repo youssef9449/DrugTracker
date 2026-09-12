@@ -520,7 +520,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
               </div>
               <div>
                 <h4 className="text-xs font-bold text-slate-800">مواصفات العلبة</h4>
-                <p className="text-[10px] text-slate-500">تحديد عدد الأقراص لطلب علب صحيحة من الصيدلية</p>
               </div>
             </div>
 

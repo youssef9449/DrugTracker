@@ -8,7 +8,6 @@ import {
   saveCriticalNotificationClaims,
   getCriticalNotificationClaim,
   setCriticalNotificationClaim,
-  clearCriticalNotificationClaim,
   enqueueCriticalAlarmOp,
 } from '../utils/criticalNotificationClaims';
 
@@ -58,18 +57,29 @@ export interface UseCriticalAlarmSchedulerOptions {
  *
  *   Med SUFFICIENT with no future crossing (frozen: auto-deduct off, or
  *   dailyDose <= 0):
- *     cancel any armed alarm and clear the claim — the episode (if any)
- *     is over and nothing will cross the threshold without user action.
+ *     cancel any alarm this session armed — nothing will cross the
+ *     threshold without user action. The claim is NOT touched here:
+ *     ending the business episode (clearing the claim) is the foreground
+ *     hook's synchronous job (useStockAlerts).
  *
  *   Flags disabled (either notificationsEnabled or
  *   criticalStockAlertsEnabled false):
  *     cancel every possibly-armed critical alarm (this session's and any
- *     left over from a previous session, found via the claim map) and
- *     restore claims whose still-future alarm was cancelled before it
- *     could fire, so re-enabling later re-opens the opportunity.
+ *     left over from a previous session, found via the claim map). No
+ *     claim writes — the claim's business lifecycle belongs to
+ *     useStockAlerts (a Sufficient med's claim is cleared there
+ *     synchronously; re-enabling re-arms from a clean slate).
  *
  *   Deleted medications: their alarms are cancelled (their claim entries
  *   are removed by the foreground hook).
+ *
+ * OWNERSHIP (important): this hook is the native-alarm EXECUTOR only.
+ * It never ends a business episode and never clears the persistent
+ * claim because a medication became Sufficient/frozen/disabled — that
+ * transition is owned, synchronously, by useStockAlerts. The only claim
+ * writes here are the schedule outcome for a SUFFICIENT med with a
+ * future crossing: success → { claimed: true, alarmTime: T }, failure →
+ * { claimed: false, alarmTime: null } (opportunity stays open).
  *
  * Re-schedule triggers: the effect re-runs whenever any field that
  * affects the projected critical date changes (id, currentPills,
@@ -149,8 +159,8 @@ export function useCriticalAlarmScheduler({
     const currentGeneration = (medId: string): number =>
       alarmGenerationRef.current.get(medId) ?? 0;
 
-    // ── Flags disabled: cancel everything and restore open ──
-    // ── opportunities consumed only by cancelled future alarms ──
+    // ── Flags disabled: cancel every possibly-armed alarm ──
+    // ── (claim writes belong to the foreground hook) ──
     if (!notificationsEnabled || !criticalStockAlertsEnabled) {
       const ids = new Set([
         ...scheduledCriticalIdsRef.current,
@@ -160,18 +170,6 @@ export function useCriticalAlarmScheduler({
         nextGeneration(id);
         enqueueCriticalAlarmOp(id, async () => {
           await cancelCriticalAlarm(id);
-          // A claim backed by a still-future alarm that we just
-          // cancelled before it could fire must be released, so
-          // re-enabling notifications re-opens exactly one opportunity.
-          // Consumed claims (foreground send: alarmTime null; alarm
-          // whose window already passed) are kept — their opportunity
-          // was genuinely used.
-          const claims = loadCriticalNotificationClaims();
-          const claim = getCriticalNotificationClaim(claims, id);
-          if (claim?.claimed && claim.alarmTime !== null && claim.alarmTime > Date.now()) {
-            clearCriticalNotificationClaim(claims, id);
-            saveCriticalNotificationClaims(claims);
-          }
         });
       }
       scheduledCriticalIdsRef.current.clear();
@@ -193,23 +191,15 @@ export function useCriticalAlarmScheduler({
         // notification; never schedule, never write claims.
         // Sufficient but frozen (no auto deduction / no dose) → nothing
         // will cross the threshold without user action.
+        // Claim lifecycle is NOT this hook's job: an armed alarm that is
+        // no longer wanted is cancelled below, but ending the episode
+        // (clearing the claim) is useStockAlerts' synchronous decision.
         const hadAlarm = scheduledCriticalIdsRef.current.has(med.id);
-        const claim = getCriticalNotificationClaim(claimsNow, med.id);
-        const needsCleanup = hadAlarm || (claim !== null && !isCriticalish);
-        if (needsCleanup) {
-          enqueueCriticalAlarmOp(med.id, async () => {
-            if (currentGeneration(med.id) !== gen) return;
-            await cancelCriticalAlarm(med.id);
-            if (!isCriticalish) {
-              // Frozen sufficient med: clear the ended/stale claim so the
-              // next episode gets a fresh opportunity. Critical meds keep
-              // their claim — it is what suppresses duplicates.
-              const claims = loadCriticalNotificationClaims();
-              if (claims[med.id] !== undefined) {
-                clearCriticalNotificationClaim(claims, med.id);
-                saveCriticalNotificationClaims(claims);
-              }
-            }
+        if (hadAlarm) {
+          const medId = med.id;
+          enqueueCriticalAlarmOp(medId, async () => {
+            if (currentGeneration(medId) !== gen) return;
+            await cancelCriticalAlarm(medId);
           });
         }
         continue;

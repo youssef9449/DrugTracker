@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import type { Medication } from '../types';
 import { useStockAlerts } from './useStockAlerts';
-import { getTodayDateString } from '../utils/dateCalculations';
+import { getTodayDateString, getCriticalAlarmDate } from '../utils/dateCalculations';
 import { CRITICAL_CLAIMS_STORAGE_KEY } from '../utils/criticalNotificationClaims';
 
 vi.mock('../utils/notifications', () => ({
@@ -211,24 +211,25 @@ describe('useStockAlerts — one notification per critical episode', () => {
     expect(sendMock).toHaveBeenCalledTimes(1);
   });
 
-  it('allows a NEW notification after Critical → Sufficient → Critical (new episode)', async () => {
+  it('allows a NEW notification after Critical → Sufficient → Critical (new episode)', () => {
     const { rerender } = renderHook(({ medications }) => useAlerts({ medications }), {
       initialProps: {
         medications: [makeMed({ currentPills: 7, dailyDose: 1, warningThresholdDays: 7 })],
       },
     });
     expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
 
-    // Refill → sufficient. The foreground hook itself does not touch the
-    // claim for sufficient meds (the scheduler owns it); simulate the
-    // scheduler's claim handling for the ended episode.
+    // Refill → sufficient. This hook OWNS the episode end: the claim is
+    // cleared SYNCHRONOUSLY on this very render — no manual storage
+    // edits, no waiting for any async scheduler cleanup.
     rerender({
       medications: [
         makeMed({ currentPills: 40, dailyDose: 1, warningThresholdDays: 7 }),
       ],
     });
-    localStorage.setItem(CRITICAL_CLAIMS_STORAGE_KEY, JSON.stringify({}));
     expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(readClaims()['med-1']).toBeUndefined();
 
     // Stock drops again → new critical episode → exactly one new notification.
     rerender({
@@ -308,6 +309,88 @@ describe('useStockAlerts — claim backed by a scheduled alarm', () => {
   });
 });
 
+describe('useStockAlerts — Sufficient clears the claim synchronously (episode ownership)', () => {
+  it('clears a consumed claim immediately when the med becomes sufficient', () => {
+    writeClaim('med-1', { claimed: true, alarmTime: null });
+    renderHook(() =>
+      useAlerts({
+        medications: [makeMed({ currentPills: 30, dailyDose: 1, warningThresholdDays: 5 })],
+      })
+    );
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(readClaims()['med-1']).toBeUndefined();
+    // alarmTime was null — no armed alarm to cancel.
+    expect(cancelMock).not.toHaveBeenCalled();
+  });
+
+  it('clears a stale still-future claim when sufficient and cancels the armed alarm it references', async () => {
+    // Episode A ended (refill) while an alarm armed for its (early)
+    // crossing was still pending: the claim is cleared synchronously and
+    // the now-stale alarm is cancelled natively.
+    writeClaim('med-1', { claimed: true, alarmTime: Date.now() + 24 * 60 * 60 * 1000 });
+    renderHook(() =>
+      useAlerts({
+        medications: [makeMed({ currentPills: 30, dailyDose: 1, warningThresholdDays: 5 })],
+      })
+    );
+    // Cleared synchronously — before any async operation resolves.
+    expect(readClaims()['med-1']).toBeUndefined();
+    await vi.waitFor(() => {
+      expect(cancelMock).toHaveBeenCalledWith('med-1');
+    });
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it('does NOT touch the scheduler\u2019s live armed record (claim === current projection)', () => {
+    const med = makeMed({ currentPills: 30, dailyDose: 1, warningThresholdDays: 5 });
+    const projectedT = getCriticalAlarmDate(med, getTodayDateString()) as number;
+    writeClaim('med-1', { claimed: true, alarmTime: projectedT });
+    const { rerender } = renderHook(({ medications }) => useAlerts({ medications }), {
+      initialProps: { medications: [med] },
+    });
+
+    // Signature-neutral re-render: the live record (and the alarm it
+    // books) must survive untouched.
+    rerender({ medications: [{ ...med }] });
+
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: projectedT });
+    expect(cancelMock).not.toHaveBeenCalled();
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it('clears an ended episode\u2019s claim even while notifications are disabled (bookkeeping, not notification)', () => {
+    writeClaim('med-1', { claimed: true, alarmTime: null });
+    renderHook(() =>
+      useAlerts({
+        medications: [makeMed({ currentPills: 30, dailyDose: 1, warningThresholdDays: 5 })],
+        notificationsEnabled: false,
+      })
+    );
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(readClaims()['med-1']).toBeUndefined();
+  });
+
+  it('a frozen sufficient med\u2019s stale claim is cleared synchronously; nothing live is cancelled', () => {
+    writeClaim('med-1', { claimed: true, alarmTime: Date.now() - 86_400_000 });
+    renderHook(() =>
+      useAlerts({
+        medications: [
+          makeMed({
+            currentPills: 30,
+            dailyDose: 1,
+            warningThresholdDays: 5,
+            autoDeductEnabled: false,
+          }),
+        ],
+      })
+    );
+    expect(readClaims()['med-1']).toBeUndefined();
+    expect(sendMock).not.toHaveBeenCalled();
+    // alarmTime in the past — nothing live to cancel.
+    expect(cancelMock).not.toHaveBeenCalled();
+  });
+});
+
 describe('useStockAlerts — failures and cleanup', () => {
   it('does NOT leave the episode claimed when the send fails, so the fallback is never suppressed', async () => {
     sendMock.mockResolvedValueOnce(false);
@@ -341,7 +424,13 @@ describe('useStockAlerts — failures and cleanup', () => {
     writeClaim('med-other', { claimed: true, alarmTime: null });
     renderHook(() =>
       useAlerts({
-        medications: [makeMed({ id: 'med-other' })],
+        // med-other stays CRITICAL so its claim legitimately survives —
+        // isolating the deletion cleanup from the Sufficient lifecycle
+        // (a sufficient med's stale claim is cleared synchronously, see
+        // the episode-ownership suite above).
+        medications: [
+          makeMed({ id: 'med-other', currentPills: 3, dailyDose: 1, warningThresholdDays: 5 }),
+        ],
       })
     );
     const claims = readClaims();

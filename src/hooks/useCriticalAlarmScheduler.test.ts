@@ -251,7 +251,33 @@ describe('useCriticalAlarmScheduler — never schedules for critical or frozen m
     expect(scheduleMock).toHaveBeenCalledTimes(1); // no re-arm for critical meds
   });
 
-  it('cancels the alarm and clears the claim for a frozen sufficient med', async () => {
+  it('cancels the alarm it armed when a sufficient med becomes frozen, but leaves the claim to the foreground hook', async () => {
+    const medA = makeMed({ currentPills: 30 });
+    const t1 = getCriticalAlarmDate(medA, getTodayDateString()) as number;
+    const { rerender } = renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({ medications: [medA] }),
+    });
+    await flush();
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: t1 });
+
+    // Med becomes frozen (auto-deduct off): nothing will cross without
+    // user action. The scheduler cancels the alarm it armed — and ONLY
+    // that: ending the episode (clearing the claim) is useStockAlerts'
+    // synchronous job, and an async clear here is exactly the race that
+    // silenced new episodes.
+    const medB = makeMed({ currentPills: 30, autoDeductEnabled: false });
+    rerender(defaultOpts({ medications: [medB] }));
+    await flush();
+
+    expect(cancelMock).toHaveBeenCalledWith('med-1');
+    expect(scheduleMock).toHaveBeenCalledTimes(1);
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: t1 });
+  });
+
+  it('a frozen sufficient med whose alarm was not armed this session is left entirely to the foreground hook', async () => {
+    // Cross-session state: an old claim exists, but this session never
+    // armed anything — the scheduler has no alarm business here, and the
+    // claim lifecycle belongs to useStockAlerts.
     const med = makeMed({ autoDeductEnabled: false, currentPills: 30 });
     writeClaims({ 'med-1': { claimed: true, alarmTime: Date.now() - 86_400_000 } });
 
@@ -261,13 +287,13 @@ describe('useCriticalAlarmScheduler — never schedules for critical or frozen m
     await flush();
 
     expect(scheduleMock).not.toHaveBeenCalled();
-    expect(cancelMock).toHaveBeenCalledWith('med-1');
-    expect(readClaims()['med-1']).toBeUndefined();
+    expect(cancelMock).not.toHaveBeenCalled();
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: expect.any(Number) });
   });
 });
 
 describe('useCriticalAlarmScheduler — opt-out and cleanup', () => {
-  it('cancels alarms and clears future claims when notifications are disabled', async () => {
+  it('cancels alarms when notifications are disabled and leaves claims to the foreground hook', async () => {
     const med = makeMed();
     const expectedT = getCriticalAlarmDate(med, getTodayDateString()) as number;
 
@@ -281,9 +307,10 @@ describe('useCriticalAlarmScheduler — opt-out and cleanup', () => {
     await flush();
 
     expect(cancelMock).toHaveBeenCalledWith('med-1');
-    // The future alarm was cancelled before it could fire → the
-    // opportunity is restored for when notifications are re-enabled.
-    expect(readClaims()['med-1']).toBeUndefined();
+    // The scheduler only cancels native alarms. Clearing a Sufficient
+    // med's claim is useStockAlerts' synchronous job — an async clear
+    // here raced with new episodes (the blocker this ownership fixes).
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: expectedT });
   });
 
   it('keeps consumed claims (foreground send / past alarm) on opt-out', async () => {
@@ -321,7 +348,10 @@ describe('useCriticalAlarmScheduler — opt-out and cleanup', () => {
     await flush();
 
     expect(cancelMock).toHaveBeenCalledWith('med-old');
-    expect(readClaims()['med-old']).toBeUndefined();
+    // The claim entry itself is the foreground hook's business (it
+    // clears claims for deleted/sufficient meds synchronously); the
+    // scheduler only cancels the native alarm.
+    expect(readClaims()['med-old']).toEqual({ claimed: true, alarmTime: expect.any(Number) });
   });
 });
 

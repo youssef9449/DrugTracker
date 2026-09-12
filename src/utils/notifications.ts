@@ -673,6 +673,11 @@ export function criticalAlarmId(medId: string): number {
  * On web: no persistent alarm to cancel (web notifications are
  * fire-and-forget; the "alarm" is conceptually just a future
  * scheduleNotification call that happens to have a future `at`).
+ *
+ * Used both by the scheduler's reschedule chains and by its
+ * reconciliation: a claim that says "armed" is only bookkeeping — when
+ * verification cannot confirm the native alarm, this is called first so
+ * the repair never doubles up an alarm under the same stable id.
  */
 export async function cancelCriticalAlarm(medId: string): Promise<void> {
   if (!isNativePlatform()) return;
@@ -682,6 +687,111 @@ export async function cancelCriticalAlarm(medId: string): Promise<void> {
     });
   } catch (err) {
     console.warn('[notifications] cancelCriticalAlarm failed:', err);
+  }
+}
+
+/**
+ * True when a pending-notification `schedule.at` value refers to the
+ * alarm time `alarmTimeMs`.
+ *
+ * Runtime shapes differ by platform (the TypeScript types say `Date`,
+ * but the plugin serializes): Android returns the epoch-milliseconds
+ * number it was given; iOS returns an ISO-8601 STRING whose default
+ * formatter drops sub-second precision. Numbers must match exactly;
+ * strings are parsed and allowed ≤2s of serialization drift. This is
+ * round-trip tolerance only — never delivery inference.
+ */
+function pendingAtMatchesAlarmTime(at: unknown, alarmTimeMs: number): boolean {
+  if (typeof at === 'number') return at === alarmTimeMs;
+  if (typeof at === 'string') {
+    const parsed = new Date(at).getTime();
+    return !Number.isNaN(parsed) && Math.abs(parsed - alarmTimeMs) <= 2000;
+  }
+  return false;
+}
+
+/**
+ * Verify that this medication's critical alarm is ACTUALLY pending on
+ * the platform right now, at exactly `alarmTimeMs`.
+ *
+ * Why this exists: the persistent claim records that a schedule SUCCEEDED
+ * at some point — it is business dedup state, NOT proof that the native
+ * alarm still exists. Android may drop previously-scheduled alarms
+ * (SCHEDULE_EXACT_ALARM revoked, force-stop, OEM task killers, the
+ * scheduled notification otherwise removed), and the claim would stay
+ * armed while nothing ever fires — silently suppressing the episode's
+ * notification.
+ *
+ * What is verified, using the installed @capacitor/local-notifications
+ * v6 API only:
+ *   1. `checkPermissions()` — display permission still granted. Without
+ *      it a pending alarm fires but is never shown.
+ *   2. On Android: `checkExactNotificationSetting()` is not 'denied'.
+ *      When it flips to denied the OS cancels the app's exact alarms;
+ *      the plugin's pending list may still list them, so that state
+ *      must never count as "armed".
+ *   3. `getPending()` contains this medication's stable critical-alarm
+ *      id with schedule.at === alarmTimeMs (see
+ *      pendingAtMatchesAlarmTime for platform shapes).
+ *
+ * PLATFORM LIMITATION (documented honestly, not hidden): on Android
+ * `getPending()` reads the plugin's persisted schedule record
+ * (SharedPreferences), not live AlarmManager state — no public API can
+ * query AlarmManager. The record faithfully follows our own
+ * cancel/schedule calls and is removed when an alarm fires, but it
+ * cannot see OS-level alarm cancellation that happened while the app
+ * was not running (force-stop, some OEM task killers, a
+ * SCHEDULE_EXACT_ALARM revocation plus re-grant between our checks).
+ * Only the observable permission/exact-setting states above catch
+ * those. This is the strongest signal the platform offers; a claim is
+ * therefore never treated as proof of native existence — verification
+ * failures simply fall through to a cancel + re-schedule repair whose
+ * success re-establishes the evidence.
+ *
+ * Returns true  → treat the armed claim as verified: keep it, no
+ *                 re-arm, no duplicate.
+ * Returns false → NOT verifiably armed; the caller should repair by
+ *                 re-arming (cancel + schedule). Bridge errors count as
+ *                 false: an unverifiable alarm must not be trusted, and
+ *                 re-arming is idempotent (same stable id, no
+ *                 user-facing notification).
+ *
+ * On web there is no persistent native alarm to verify at all (the
+ * plugin's pending list is empty for web-scheduled notifications by
+ * design), so this returns false — the repair attempt will then fail on
+ * web too and leave the foreground fallback available, which IS the web
+ * delivery path.
+ */
+export async function verifyCriticalAlarmPending(
+  medId: string,
+  alarmTimeMs: number
+): Promise<boolean> {
+  if (!isNativePlatform()) return false;
+  try {
+    const perm = await LocalNotifications.checkPermissions();
+    if (perm.display !== 'granted') return false;
+    if (getNativePlatform() === 'android') {
+      try {
+        const exact = await LocalNotifications.checkExactNotificationSetting();
+        if (exact.exact_alarm === 'denied') return false;
+      } catch (err) {
+        console.warn(
+          '[notifications] verifyCriticalAlarmPending: exact-alarm check failed:',
+          err
+        );
+        return false;
+      }
+    }
+    const pending = await LocalNotifications.getPending();
+    const id = criticalAlarmId(medId);
+    return pending.notifications.some(
+      (n) =>
+        n.id === id &&
+        pendingAtMatchesAlarmTime((n.schedule as { at?: unknown } | undefined)?.at, alarmTimeMs)
+    );
+  } catch (err) {
+    console.warn('[notifications] verifyCriticalAlarmPending failed:', err);
+    return false;
   }
 }
 
@@ -696,11 +806,16 @@ export async function cancelCriticalAlarm(medId: string): Promise<void> {
  * used exactly as given — no past-date rewriting — so the persisted
  * claim's alarmTime always matches the actually-armed alarm.
  *
- * Returns true only when the native alarm was really registered; callers
- * must persist claimed=true only after a `true` result. A `false` result
- * (permission missing, bridge error, or the web fallback path, which has
- * no persistent scheduling) leaves the notification opportunity open so
- * the foreground fallback can still send one notification.
+ * Returns true ONLY when the native scheduled critical notification was
+ * actually accepted by LocalNotifications: the native `schedule()` call
+ * resolved AND its ScheduleResult actually lists this medication's
+ * notification id. Callers must persist claimed=true only after a `true`
+ * result. A `false` result — permission failure, bridge failure, native
+ * schedule failure, a resolve that does not list our id, or the web
+ * fallback path (which has no persistent scheduling) — leaves the
+ * notification opportunity open so the foreground fallback can still
+ * send one notification. A successful browser/web notification NEVER
+ * counts as native future-alarm scheduling success.
  *
  * `unit` is included in the notification body for display.
  *
@@ -732,7 +847,7 @@ export async function scheduleCriticalAlarm(
         console.warn('[notifications] scheduleCriticalAlarm skipped: permission not granted');
         return false;
       }
-      await LocalNotifications.schedule({
+      const result = await LocalNotifications.schedule({
         notifications: [
           {
             id: criticalAlarmId(medId),
@@ -755,10 +870,21 @@ export async function scheduleCriticalAlarm(
           },
         ],
       });
-      return true;
+      // True ONLY when the plugin actually registered the alarm: the
+      // resolved ScheduleResult lists the ids that were really
+      // scheduled. A resolve that omits our stable id (or an empty
+      // list) is not a native future alarm and must be reported as a
+      // failure — the scheduler then leaves the claim open instead of
+      // persisting an armed claim with no alarm behind it.
+      return result.notifications.some((n) => n.id === criticalAlarmId(medId));
     } catch (err) {
       console.warn('[notifications] Capacitor scheduleCriticalAlarm failed:', err);
-      // Fall through to web fallback below.
+      // Native failure (permission, bridge, or schedule rejection) →
+      // false. The web fallback is deliberately NOT consulted here: a
+      // browser notification is not a native future critical alarm, and
+      // letting a web-fallback success masquerade as one would persist
+      // an armed claim with no alarm behind it and suppress the
+      // foreground fallback for the episode.
       return false;
     }
   }

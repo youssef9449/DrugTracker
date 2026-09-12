@@ -82,13 +82,21 @@ export interface Medication {
 // ─────────────────────────────────────────────────────────────────────
 
 export interface CriticalNotificationClaim {
-  /** True once this episode's notification was scheduled or sent. */
+  /**
+   * True once this episode's notification opportunity has been taken:
+   * a future alarm was scheduled natively, or the foreground sent the
+   * notification. Business dedup state — NOT proof that a native alarm
+   * still exists (the scheduler verifies/re-arms actual native alarms
+   * against the platform; a lost alarm opens the claim again).
+   */
   claimed: boolean;
   /**
-   * Fire time (epoch ms) of the successfully scheduled native alarm,
-   * or null when the claim came from a foreground send. Purely
-   * informational bookkeeping — it lets callers distinguish "an alarm
-   * is armed for the future" from "already sent / window passed".
+   * Fire time (epoch ms) recorded by the last successful native
+   * schedule, or null when the claim came from a foreground send. Purely
+   * informational bookkeeping — it lets callers distinguish "a future
+   * alarm was scheduled here" from "already sent / window passed". It is
+   * never treated as evidence that the alarm is still armed or that
+   * anything was delivered.
    */
   alarmTime: number | null;
 }

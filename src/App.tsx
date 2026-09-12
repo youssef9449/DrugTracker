@@ -144,6 +144,13 @@ export default function App() {
   // changeExactNotificationSetting opens the settings screen). On web /
   // Android < 12 this is always true.
   const [exactAlarmEnabled, setExactAlarmEnabled] = useState<boolean | null>(null);
+  // Bumped on every app resume (appStateChange) so the critical-alarm
+  // scheduler re-runs and reconciles its matching claims against the
+  // platform's actual pending notifications — the user may have just
+  // granted/denied SCHEDULE_EXACT_ALARM, or the native alarm may have
+  // been dropped while the app was backgrounded. See
+  // useCriticalAlarmScheduler's RECONCILIATION section.
+  const [criticalAlarmResumeTick, setCriticalAlarmResumeTick] = useState(0);
   const [globalAutoDeductEnabled, setGlobalAutoDeductEnabled] = useState<boolean>(true);
 
   const [isPhoneFrame, setIsPhoneFrame] = useState(true);
@@ -520,6 +527,7 @@ export default function App() {
     criticalStockAlertsEnabled,
     hydrated,
     isFirstRun,
+    resumeTick: criticalAlarmResumeTick,
   });
 
   // ─────────────────────────────────────────────────────────────
@@ -1045,10 +1053,17 @@ export default function App() {
   // permission state changes, the useDoseReminderScheduler effect
   // (which depends on exactAlarmEnabled) re-runs and reschedules all
   // dose reminders with the correct (exact or cancelled) policy.
+  //
+  // The resume also reconciles the CRITICAL alarms: every resume bumps
+  // criticalAlarmResumeTick → useCriticalAlarmScheduler re-runs and
+  // verifies each matching claim against the platform's actual pending
+  // notifications, re-arming any alarm the OS dropped (exact-alarm
+  // permission revoked, scheduled notification removed, …).
   // ─────────────────────────────────────────────────────────────
   useEffect(() => {
     registerAppResumeHandler((isActive) => {
       if (isActive) {
+        setCriticalAlarmResumeTick((tick) => tick + 1);
         getExactAlarmPermission()
           .then((state) => {
             setExactAlarmEnabled(state === 'granted');

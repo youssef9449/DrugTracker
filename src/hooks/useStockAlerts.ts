@@ -43,16 +43,19 @@ const IN_FLIGHT_CLAIM = { claimed: true, alarmTime: null } as const;
  *                                 record { claimed: true, alarmTime: T }
  *                                 where T is EXACTLY the med's current
  *                                 projected crossing (notifications
- *                                 enabled) — that claim IS the armed
- *                                 future alarm's bookkeeping, not an
- *                                 ended episode's; touching it would
- *                                 cancel a live alarm and lose the
- *                                 future notification. Any OTHER claim
- *                                 (consumed episode, stale/moved alarm
- *                                 time, open marker) is cleared, and a
- *                                 still-future alarm time it references
- *                                 is cancelled natively (fire-and-forget
- *                                 op that writes nothing).
+ *                                 enabled) — that claim is the future
+ *                                 alarm's bookkeeping, not an ended
+ *                                 episode's; touching it would fight
+ *                                 the scheduler's verified fast path
+ *                                 (which re-checks the claim against
+ *                                 the platform's actual pending
+ *                                 alarms before trusting it). Any
+ *                                 OTHER claim (consumed episode,
+ *                                 stale/moved alarm time, open marker)
+ *                                 is cleared, and a still-future alarm
+ *                                 time it references is cancelled
+ *                                 natively (fire-and-forget op that
+ *                                 writes nothing).
  *   notifications/alerts off    → for critical meds: nothing is sent and
  *                                 the claim is NEVER written (disabling
  *                                 must not consume the opportunity;
@@ -149,8 +152,10 @@ export function useStockAlerts({
           // The scheduler's live armed record: an alarm successfully
           // scheduled for EXACTLY the current projected crossing. It is
           // the future alarm's bookkeeping, not an ended episode's claim
-          // — leave it alone so the armed alarm keeps its record (and
-          // the scheduler's "already armed" fast path stays valid).
+          // — leave it alone. (The claim itself is not proof the native
+          // alarm exists; the scheduler's fast path VERIFIES it against
+          // the platform's pending notifications on every run and
+          // re-arms it when the OS dropped it.)
           const isLiveArmedRecord =
             claim.claimed &&
             claim.alarmTime !== null &&

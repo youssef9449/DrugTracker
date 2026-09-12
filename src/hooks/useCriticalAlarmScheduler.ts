@@ -2,7 +2,11 @@ import { useEffect, useMemo, useRef } from 'react';
 import type { Medication } from '../types';
 import { calculateMedicationStatus } from '../types';
 import { getTodayDateString, getCriticalAlarmDate } from '../utils/dateCalculations';
-import { scheduleCriticalAlarm, cancelCriticalAlarm } from '../utils/notifications';
+import {
+  scheduleCriticalAlarm,
+  cancelCriticalAlarm,
+  verifyCriticalAlarmPending,
+} from '../utils/notifications';
 import {
   loadCriticalNotificationClaims,
   saveCriticalNotificationClaims,
@@ -20,6 +24,18 @@ export interface UseCriticalAlarmSchedulerOptions {
   criticalStockAlertsEnabled: boolean;
   hydrated: boolean;
   isFirstRun: boolean;
+  /**
+   * Bump this counter whenever the app RESUMES to the foreground
+   * (App.tsx bumps it from its appStateChange handler). Each change
+   * re-runs the scheduling effect, which reconciles every matching
+   * claim against the platform's actual pending notifications — this is
+   * what makes "returning from the Android exact-alarm settings screen"
+   * or "the native alarm disappeared while the app was backgrounded"
+   * recoverable without waiting for a medication edit. The initial
+   * mount (0) is the cold-start reconciliation; only RESUME events need
+   * to bump it.
+   */
+  resumeTick?: number;
 }
 
 /**
@@ -47,13 +63,19 @@ export interface UseCriticalAlarmSchedulerOptions {
  *     armed for the med (it was sufficient when armed) is cancelled.
  *
  *   Med SUFFICIENT with a future projected crossing at T:
- *     claim already { claimed: true, alarmTime: T } → nothing (the alarm
- *       is already armed exactly here).
+ *     claim matches { claimed: true, alarmTime: T } → VERIFY the native
+ *       alarm actually exists (verifyCriticalAlarmPending): verified →
+ *       keep it, nothing to do; unverifiable/missing → the repair chain
+ *       below re-arms it (cancel + schedule); success → the claim stays
+ *       { claimed: true, alarmTime: T }, failure → { claimed: false,
+ *       alarmTime: null } so the foreground fallback stays available.
  *     otherwise → cancel the previous alarm, schedule at T; on success
  *       persist { claimed: true, alarmTime: T } — ONLY after
- *       scheduleCriticalAlarm() resolves successfully; on failure persist
- *       { claimed: false, alarmTime: null } so the foreground fallback
- *       stays available. A failed schedule NEVER suppresses the fallback.
+ *       scheduleCriticalAlarm() resolves successfully (which now also
+ *       requires the plugin's ScheduleResult to actually list the
+ *       notification); on failure persist { claimed: false,
+ *       alarmTime: null } so the foreground fallback stays available.
+ *       A failed schedule NEVER suppresses the fallback.
  *
  *   Med SUFFICIENT with no future crossing (frozen: auto-deduct off, or
  *   dailyDose <= 0):
@@ -80,6 +102,26 @@ export interface UseCriticalAlarmSchedulerOptions {
  * writes here are the schedule outcome for a SUFFICIENT med with a
  * future crossing: success → { claimed: true, alarmTime: T }, failure →
  * { claimed: false, alarmTime: null } (opportunity stays open).
+ *
+ * RECONCILIATION ("armed" is verified, never assumed): the persistent
+ * claim is business DEDUP state — it does NOT prove the native alarm
+ * still exists. Android can drop previously-scheduled alarms
+ * (SCHEDULE_EXACT_ALARM revoked, force-stop, OEM task killers, the
+ * scheduled notification otherwise removed), so a matching claim is
+ * verified against the platform (verifyCriticalAlarmPending:
+ * display permission + exact-alarm setting + the plugin's pending
+ * list — see that function for the exact guarantees and their
+ * documented platform limits). Verified → keep (no re-arm, no
+ * duplicate). Unverifiable or missing → cancel + re-schedule; a
+ * successful repair re-establishes the evidence, a failed repair opens
+ * the claim so the foreground fallback remains available. Reconciliation
+ * runs on every effect run: cold start (initial mount), every resume
+ * (resumeTick — returning from the exact-alarm settings screen re-arms
+ * what the OS dropped), and every alarm-relevant medication change.
+ * Reconciliation NEVER sends a user-facing notification and NEVER
+ * creates a duplicate: it only cancels/schedules native alarms under
+ * the one stable id and writes the same two claim shapes as any other
+ * schedule outcome.
  *
  * Re-schedule triggers: the effect re-runs whenever any field that
  * affects the projected critical date changes (id, currentPills,
@@ -109,6 +151,7 @@ export function useCriticalAlarmScheduler({
   criticalStockAlertsEnabled,
   hydrated,
   isFirstRun,
+  resumeTick = 0,
 }: UseCriticalAlarmSchedulerOptions): void {
   // Meds this session armed (or kept) an alarm for — used to cancel
   // alarms for meds that are deleted or whose projection disappears.
@@ -180,6 +223,76 @@ export function useCriticalAlarmScheduler({
     const stillScheduled = new Set<string>();
     const claimsNow = loadCriticalNotificationClaims();
 
+    /**
+     * The cancel → schedule → verify-world → claim-write chain, shared
+     * by the fresh-schedule path and the reconciliation repair path
+     * (a matching claim whose native alarm could not be verified).
+     */
+    const runScheduleChain = async (
+      medId: string,
+      medName: string,
+      chainCriticalDateMs: number,
+      unit: string,
+      gen: number
+    ): Promise<void> => {
+      await cancelCriticalAlarm(medId);
+      if (currentGeneration(medId) !== gen) return; // a newer run superseded this one
+
+      let scheduled = false;
+      try {
+        scheduled =
+          (await scheduleCriticalAlarm(medId, medName, chainCriticalDateMs, unit)) === true;
+      } catch (err) {
+        console.warn('[critical-alarm] schedule failed:', err);
+        scheduled = false;
+      }
+
+      // Post-schedule verification + claim write — one synchronous
+      // block (no awaits between the checks and the write), so no
+      // other JS code can interleave.
+      if (currentGeneration(medId) !== gen) {
+        // A newer run superseded this operation while it awaited the
+        // bridge: undo ONLY this operation's own alarm and write
+        // nothing. The newer run owns the claim now.
+        if (scheduled) await cancelCriticalAlarm(medId);
+        return;
+      }
+      const currentMed = medicationsRef.current.find((m) => m.id === medId);
+      if (!currentMed) {
+        // Deleted while we awaited — the deletion cleanup cancels the
+        // alarm; never persist a claim for a removed medication.
+        if (scheduled) await cancelCriticalAlarm(medId);
+        return;
+      }
+      const { status: currentStatus } = calculateMedicationStatus(currentMed);
+      if (currentStatus === 'critical' || currentStatus === 'out_of_stock') {
+        // The medication crossed while we awaited — the foreground
+        // hook now owns the episode's notification. Cancel the alarm
+        // this operation armed and write nothing.
+        if (scheduled) await cancelCriticalAlarm(medId);
+        return;
+      }
+      if (getCriticalAlarmDate(currentMed, getTodayDateString()) !== chainCriticalDateMs) {
+        // The projection moved — a newer run will arm the right alarm.
+        if (scheduled) await cancelCriticalAlarm(medId);
+        return;
+      }
+
+      const claims = loadCriticalNotificationClaims();
+      if (scheduled) {
+        // Persist the claim ONLY after the native schedule succeeded.
+        setCriticalNotificationClaim(claims, medId, {
+          claimed: true,
+          alarmTime: chainCriticalDateMs,
+        });
+      } else {
+        // Failed schedule → claim stays open so the foreground
+        // fallback can still send one notification for this episode.
+        setCriticalNotificationClaim(claims, medId, { claimed: false, alarmTime: null });
+      }
+      saveCriticalNotificationClaims(claims);
+    };
+
     for (const med of medicationsRef.current) {
       const gen = nextGeneration(med.id);
       const { status } = calculateMedicationStatus(med);
@@ -209,73 +322,31 @@ export function useCriticalAlarmScheduler({
       stillScheduled.add(med.id);
 
       const claim = getCriticalNotificationClaim(claimsNow, med.id);
-      if (claim?.claimed && claim.alarmTime === criticalDateMs) {
-        // The alarm is already armed exactly here (persisted after a
-        // previous successful schedule). Nothing to do.
-        continue;
-      }
-
       const medId = med.id;
       const medName = med.name;
       const unit = med.unit || 'قرص';
 
-      enqueueCriticalAlarmOp(medId, async () => {
-        await cancelCriticalAlarm(medId);
-        if (currentGeneration(medId) !== gen) return; // a newer run superseded this one
+      if (claim?.claimed && claim.alarmTime === criticalDateMs) {
+        // The claim says the alarm is armed exactly here. A claim is
+        // business dedup state — it does NOT prove the native alarm
+        // still exists (Android can drop previously-scheduled alarms:
+        // SCHEDULE_EXACT_ALARM revoked, force-stop, OEM kills, the
+        // notification otherwise removed). Verify before trusting:
+        // verified → keep it (no re-arm, no duplicate); unverifiable or
+        // missing → run the repair chain (cancel + re-schedule) whose
+        // outcome writes the claim exactly like any fresh schedule.
+        enqueueCriticalAlarmOp(medId, async () => {
+          if (currentGeneration(medId) !== gen) return;
+          const verified = await verifyCriticalAlarmPending(medId, criticalDateMs);
+          if (verified || currentGeneration(medId) !== gen) return;
+          await runScheduleChain(medId, medName, criticalDateMs, unit, gen);
+        });
+        continue;
+      }
 
-        let scheduled = false;
-        try {
-          scheduled = (await scheduleCriticalAlarm(medId, medName, criticalDateMs, unit)) === true;
-        } catch (err) {
-          console.warn('[critical-alarm] schedule failed:', err);
-          scheduled = false;
-        }
-
-        // Post-schedule verification + claim write — one synchronous
-        // block (no awaits between the checks and the write), so no
-        // other JS code can interleave.
-        if (currentGeneration(medId) !== gen) {
-          // A newer run superseded this operation while it awaited the
-          // bridge: undo ONLY this operation's own alarm and write
-          // nothing. The newer run owns the claim now.
-          if (scheduled) await cancelCriticalAlarm(medId);
-          return;
-        }
-        const currentMed = medicationsRef.current.find((m) => m.id === medId);
-        if (!currentMed) {
-          // Deleted while we awaited — the deletion cleanup cancels the
-          // alarm; never persist a claim for a removed medication.
-          if (scheduled) await cancelCriticalAlarm(medId);
-          return;
-        }
-        const { status: currentStatus } = calculateMedicationStatus(currentMed);
-        if (currentStatus === 'critical' || currentStatus === 'out_of_stock') {
-          // The medication crossed while we awaited — the foreground
-          // hook now owns the episode's notification. Cancel the alarm
-          // this operation armed and write nothing.
-          if (scheduled) await cancelCriticalAlarm(medId);
-          return;
-        }
-        if (getCriticalAlarmDate(currentMed, getTodayDateString()) !== criticalDateMs) {
-          // The projection moved — a newer run will arm the right alarm.
-          if (scheduled) await cancelCriticalAlarm(medId);
-          return;
-        }
-
-        const claims = loadCriticalNotificationClaims();
-        if (scheduled) {
-          // Persist the claim ONLY after the native schedule succeeded.
-          setCriticalNotificationClaim(claims, medId, {
-            claimed: true,
-            alarmTime: criticalDateMs,
-          });
-        } else {
-          // Failed schedule → claim stays open so the foreground
-          // fallback can still send one notification for this episode.
-          setCriticalNotificationClaim(claims, medId, { claimed: false, alarmTime: null });
-        }
-        saveCriticalNotificationClaims(claims);
-      });
+      enqueueCriticalAlarmOp(medId, () =>
+        runScheduleChain(medId, medName, criticalDateMs, unit, gen)
+      );
     }
 
     // Cancel alarms for meds that are no longer present (deleted).
@@ -294,5 +365,6 @@ export function useCriticalAlarmScheduler({
     criticalStockAlertsEnabled,
     hydrated,
     isFirstRun,
+    resumeTick,
   ]);
 }

@@ -23,6 +23,7 @@ vi.mock('./utils/notifications', () => ({
   openExactAlarmSettings: vi.fn(() => Promise.resolve(true)),
   scheduleCriticalAlarm: vi.fn(() => Promise.resolve()),
   cancelCriticalAlarm: vi.fn(() => Promise.resolve()),
+  verifyCriticalAlarmPending: vi.fn(() => Promise.resolve(false)),
   criticalAlarmId: vi.fn((id: string) => id.length),
 
 }));

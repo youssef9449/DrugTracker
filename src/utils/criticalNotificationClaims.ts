@@ -26,7 +26,9 @@
  *      and must not resurrect a second notification.
  *   2. Otherwise, a valid FUTURE scheduled alarm
  *      → claimed=true, alarmTime=<future alarm time>
- *      because the alarm is still the active notification opportunity.
+ *      because the last successful schedule recorded a still-future fire
+ *      time; the scheduler recognizes the record and verifies/re-arms
+ *      the actual native alarm against the platform.
  *   3. Otherwise, an elapsed scheduled alarm
  *      → claimed=true, alarmTime=null
  *      because delivery is not reconstructed and we must avoid

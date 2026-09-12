@@ -1,12 +1,19 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { Medication } from '../types';
+import { calculateMedicationStatus } from '../types';
 import { getTodayDateString, getCriticalAlarmDate } from '../utils/dateCalculations';
-import { scheduleCriticalAlarm, cancelCriticalAlarm } from '../utils/notifications';
 import {
-  loadScheduledCriticalAlarms,
-  saveScheduledCriticalAlarms,
-  generateCriticalTransitionKey,
-} from '../utils/criticalTransitions';
+  scheduleCriticalAlarm,
+  cancelCriticalAlarm,
+  verifyCriticalAlarmPending,
+} from '../utils/notifications';
+import {
+  loadCriticalNotificationClaims,
+  saveCriticalNotificationClaims,
+  getCriticalNotificationClaim,
+  setCriticalNotificationClaim,
+  enqueueCriticalAlarmOp,
+} from '../utils/criticalNotificationClaims';
 
 /**
  * Options for {@link useCriticalAlarmScheduler}.
@@ -17,84 +24,126 @@ export interface UseCriticalAlarmSchedulerOptions {
   criticalStockAlertsEnabled: boolean;
   hydrated: boolean;
   isFirstRun: boolean;
+  /**
+   * Bump this counter whenever the app RESUMES to the foreground
+   * (App.tsx bumps it from its appStateChange handler). Each change
+   * re-runs the scheduling effect, which reconciles every matching
+   * claim against the platform's actual pending notifications — this is
+   * what makes "returning from the Android exact-alarm settings screen"
+   * or "the native alarm disappeared while the app was backgrounded"
+   * recoverable without waiting for a medication edit. The initial
+   * mount (0) is the cold-start reconciliation; only RESUME events need
+   * to bump it.
+   */
+  resumeTick?: number;
 }
 
 /**
  * One-shot critical-alarm scheduling effect.
  *
- * For each medication, computes the projected calendar date the med
- * will cross the critical threshold (getCriticalAlarmDate) and
- * schedules a SINGLE one-shot notification at that date via Android's
- * AlarmManager (Capacitor LocalNotifications). The alarm fires even if
- * the app is killed — the user sees the alert in their drawer at the
- * projected critical date without ever opening the app.
+ * For each SUFFICIENT medication whose projected critical date is in the
+ * future, schedules a SINGLE one-shot notification at that date via
+ * Android's AlarmManager (Capacitor LocalNotifications). The alarm fires
+ * even if the app is killed — the user sees the alert in their drawer at
+ * the projected critical date without ever opening the app. On Android,
+ * the plugin persists scheduled notifications and re-arms them on
+ * BOOT_COMPLETED, so alarms survive device reboots with no extra code.
  *
- * Re-schedule triggers: this effect re-runs (and re-schedules every
- * med's alarm) whenever any field that affects the critical date
- * changes:
- *   - med.id (a med was added or deleted — must cancel old, schedule new)
- *   - med.currentPills (snapshot changed via refill/consume/restore)
- *   - med.dailyDose (changed via edit — settlement handled in save)
- *   - med.lastSyncDate (changed via refill/consume/settlement)
- *   - med.warningThresholdDays (drives the critical threshold)
- *   - med.autoDeductEnabled (pausing freezes the projected crossing)
+ * The persistent claim ({@link CriticalNotificationClaim}) is the
+ * business source of truth; this hook is just the EXECUTOR that arms and
+ * cancels the native alarm and records the claim after a successful
+ * schedule. It never decides whether the user has been notified for an
+ * active critical episode — that is the foreground hook's job.
  *
- * Gating:
- *   - Skip entirely before hydration (don't schedule for seed data).
- *   - Skip when criticalStockAlertsEnabled is false (user opted out).
- *   - Skip when notificationsEnabled is false (no permission to show).
+ * Decision table (per med, per effect run):
  *
- * Race protection — stale-async guard + per-med serialization:
- *   cancelCriticalAlarm() and scheduleCriticalAlarm() are async (they
- *   go through Capacitor's bridge). Both operate on the SAME stable
- *   native notification id (`criticalAlarmId(medId)`), so an older
- *   generation's compensating cancel would remove a newer generation's
- *   already-placed alarm if the two operations interleave freely.
+ *   Med CRITICAL / out_of_stock:
+ *     NEVER schedule (the foreground hook owns the active episode's
+ *     notification), never write claims for it. Any alarm this session
+ *     armed for the med (it was sufficient when armed) is cancelled.
  *
- *   Two layers of protection:
+ *   Med SUFFICIENT with a future projected crossing at T:
+ *     claim matches { claimed: true, alarmTime: T } → VERIFY the native
+ *       alarm actually exists (verifyCriticalAlarmPending): verified →
+ *       keep it, nothing to do; unverifiable/missing → the repair chain
+ *       below re-arms it (cancel + schedule); success → the claim stays
+ *       { claimed: true, alarmTime: T }, failure → { claimed: false,
+ *       alarmTime: null } so the foreground fallback stays available.
+ *     otherwise → cancel the previous alarm, schedule at T; on success
+ *       persist { claimed: true, alarmTime: T } — ONLY after
+ *       scheduleCriticalAlarm() resolves successfully (which now also
+ *       requires the plugin's ScheduleResult to actually list the
+ *       notification); on failure persist { claimed: false,
+ *       alarmTime: null } so the foreground fallback stays available.
+ *       A failed schedule NEVER suppresses the fallback.
  *
- *   A) PER-MED SERIALIZATION (the core fix). All cancel/schedule
- *      operations for a given med are chained onto a per-med Promise
- *      (`alarmChainRef.get(medId)`). Each effect run APPENDS its
- *      cancel+schedule+compensating-cancel to this chain, so they run
- *      strictly in order — a newer generation's operations wait for
- *      the older generation's full chain (including its compensating
- *      cancel) to complete first. This guarantees an older
- *      generation's compensating cancel runs BEFORE the newer
- *      generation's schedule, so it can only remove the older
- *      generation's OWN stale alarm — never the newer one.
+ *   Med SUFFICIENT with no future crossing (frozen: auto-deduct off, or
+ *   dailyDose <= 0):
+ *     cancel any alarm this session armed — nothing will cross the
+ *     threshold without user action. The claim is NOT touched here:
+ *     ending the business episode (clearing the claim) is the foreground
+ *     hook's synchronous job (useStockAlerts).
  *
- *   B) GENERATION COUNTER (defense-in-depth). Even with serialization,
- *      we keep the per-med generation counter (`alarmGenerationRef`):
- *        1. Each effect run bumps the generation for every med it touches.
- *        2. Pre-schedule check: if a newer run bumped the gen, skip
- *           the schedule call (no point placing an alarm that will
- *           just be superseded).
- *        3. Post-schedule check: after schedule() resolves, re-check
- *           the gen; if it changed during the await, run a
- *           compensating cancel to undo this stale schedule. Because
- *           of (A), this compensating cancel runs BEFORE any newer
- *           generation's schedule, so it can only remove this
- *           generation's OWN alarm.
- *        4. Deleting a med bumps its generation, so any in-flight
- *           schedule from a prior run for that med bails out (or is
- *           re-canceled per step 3 if it already completed).
+ *   Flags disabled (either notificationsEnabled or
+ *   criticalStockAlertsEnabled false):
+ *     cancel every possibly-armed critical alarm (this session's and any
+ *     left over from a previous session, found via the claim map). No
+ *     claim writes — the claim's business lifecycle belongs to
+ *     useStockAlerts (a Sufficient med's claim is cleared there
+ *     synchronously; re-enabling re-arms from a clean slate).
  *
- *   The combination guarantees: only the LATEST generation's schedule
- *   survives, and an older generation's compensating cancel can NEVER
- *   remove a newer generation's alarm (because serialization orders
- *   the older compensating cancel BEFORE the newer schedule).
+ *   Deleted medications: their alarms are cancelled (their claim entries
+ *   are removed by the foreground hook).
  *
- * Boot persistence — Android reboot:
- *   The @capacitor/local-notifications plugin persists scheduled
- *   notifications to SharedPreferences and re-arms them on
- *   BOOT_COMPLETED via its LocalNotificationRestoreReceiver. So our
- *   scheduled one-shot critical alarms survive device reboots without
- *   the user opening the app — no extra code or BootReceiver needed.
+ * OWNERSHIP (important): this hook is the native-alarm EXECUTOR only.
+ * It never ends a business episode and never clears the persistent
+ * claim because a medication became Sufficient/frozen/disabled — that
+ * transition is owned, synchronously, by useStockAlerts. The only claim
+ * writes here are the schedule outcome for a SUFFICIENT med with a
+ * future crossing: success → { claimed: true, alarmTime: T }, failure →
+ * { claimed: false, alarmTime: null } (opportunity stays open).
  *
- *   If for some reason the boot receiver doesn't fire (e.g. the app
- *   was force-stopped before the reboot), the user opening the app
- *   triggers this effect (re-arms all alarms) as a fallback.
+ * RECONCILIATION ("armed" is verified, never assumed): the persistent
+ * claim is business DEDUP state — it does NOT prove the native alarm
+ * still exists. Android can drop previously-scheduled alarms
+ * (SCHEDULE_EXACT_ALARM revoked, force-stop, OEM task killers, the
+ * scheduled notification otherwise removed), so a matching claim is
+ * verified against the platform (verifyCriticalAlarmPending:
+ * display permission + exact-alarm setting + the plugin's pending
+ * list — see that function for the exact guarantees and their
+ * documented platform limits). Verified → keep (no re-arm, no
+ * duplicate). Unverifiable or missing → cancel + re-schedule; a
+ * successful repair re-establishes the evidence, a failed repair opens
+ * the claim so the foreground fallback remains available. Reconciliation
+ * runs on every effect run: cold start (initial mount), every resume
+ * (resumeTick — returning from the exact-alarm settings screen re-arms
+ * what the OS dropped), and every alarm-relevant medication change.
+ * Reconciliation NEVER sends a user-facing notification and NEVER
+ * creates a duplicate: it only cancels/schedules native alarms under
+ * the one stable id and writes the same two claim shapes as any other
+ * schedule outcome.
+ *
+ * Re-schedule triggers: the effect re-runs whenever any field that
+ * affects the projected critical date changes (id, currentPills,
+ * dailyDose, lastSyncDate, warningThresholdDays, autoDeductEnabled,
+ * name, unit) — see `criticalSignature`.
+ *
+ * Async race safety (all in-memory, nothing persisted for it):
+ *   - Per-medication serialization: every native cancel/schedule runs on
+ *     the shared per-medication operation queue
+ *     (enqueueCriticalAlarmOp), so operations for one medication never
+ *     interleave (they share one stable native notification id).
+ *   - Generation counter: each effect run bumps a per-med generation; a
+ *     chained operation captures its generation and abandons everything
+ *     (cancelling only its own just-armed alarm, writing nothing) when a
+ *     newer run superseded it while it awaited the bridge.
+ *   - Post-schedule re-verification (one synchronous block, before any
+ *     claim write): the medication must still exist, still be
+ *     sufficient, and still project the SAME critical date. If the world
+ *     moved (episode started/ended, med edited/deleted), the operation
+ *     cancels the alarm it just armed and leaves the claim to the
+ *     current owner — a stale operation can never overwrite newer
+ *     business state or resurrect a dead episode's alarm.
  */
 export function useCriticalAlarmScheduler({
   medications,
@@ -102,42 +151,24 @@ export function useCriticalAlarmScheduler({
   criticalStockAlertsEnabled,
   hydrated,
   isFirstRun,
+  resumeTick = 0,
 }: UseCriticalAlarmSchedulerOptions): void {
-  // Track previously-scheduled med ids so we can cancel alarms for
-  // deleted meds (the medications array no longer contains them).
+  // Meds this session armed (or kept) an alarm for — used to cancel
+  // alarms for meds that are deleted or whose projection disappears.
   const scheduledCriticalIdsRef = useRef<Set<string>>(new Set());
-  // Per-med generation counter for stale-async race protection.
-  // Each effect run bumps the value for the med it touches; the
-  // .then() callback captures the value at effect-run time and bails
-  // if a newer run bumped it.
+  // In-memory per-med generation counter for stale-async protection.
   const alarmGenerationRef = useRef<Map<string, number>>(new Map());
-  // Per-med serialization chain. Each effect run APPENDS its
-  // cancel+schedule+compensating-cancel to this Promise so they run
-  // strictly in order. This guarantees an older generation's
-  // compensating cancel runs BEFORE a newer generation's schedule,
-  // so the older cancel can only remove the older generation's OWN
-  // alarm — never the newer one. Without this, the older
-  // compensating cancel (which uses the SAME stable notification id
-  // as the newer schedule) could remove the newer alarm if it ran
-  // AFTER the newer schedule completed.
-  const alarmChainRef = useRef<Map<string, Promise<void>>>(new Map());
 
-  // #91: keep the latest medications in a ref so the effect can read the
-  // current array without depending on the array reference (which changes
-  // on every App render — even unrelated state like typing in a search
-  // field — causing 3N async bridge calls per render).
+  // Keep the latest medications in a ref so chained async operations can
+  // re-read the CURRENT array without depending on unstable references.
   const medicationsRef = useRef(medications);
   useEffect(() => {
     medicationsRef.current = medications;
   }, [medications]);
 
-  // #91: stable signature capturing ONLY the fields that affect the
-  // critical alarm date (per getCriticalAlarmDate + scheduleCriticalAlarm):
-  //   id, currentPills, dailyDose, lastSyncDate, warningThresholdDays,
-  //   autoDeductEnabled, name, unit.
-  // warningThresholdDays IS the user-configured threshold (no derived
-  // sub-threshold). The effect is gated on this string so the full
-  // cancel+schedule chain only re-runs when a med's alarm-relevant
+  // Stable signature capturing ONLY the fields that affect the critical
+  // alarm date (per getCriticalAlarmDate + scheduleCriticalAlarm), so the
+  // cancel+schedule chains re-run only when a med's alarm-relevant
   // config actually changes.
   const criticalSignature = useMemo(
     () =>
@@ -159,144 +190,171 @@ export function useCriticalAlarmScheduler({
     [medications]
   );
 
-  /**
-   * Append an async operation to the per-med chain and return the
-   * new chain tail. The operation runs only after any previously-
-   * chained operation for this med completes.
-   */
-  const enqueue = (medId: string, op: () => Promise<void>): Promise<void> => {
-    const prev = alarmChainRef.current.get(medId) ?? Promise.resolve();
-    const next = prev.then(op, op); // run op whether prev resolved or rejected
-    alarmChainRef.current.set(medId, next);
-    // Swallow rejection on the stored tail so it doesn't surface as
-    // an unhandled rejection. The caller of enqueue() can still hang
-    // .then/.catch off the returned `next` if they want to observe
-    // the result.
-    next.catch(() => void 0);
-    return next;
-  };
-
   useEffect(() => {
     if (!hydrated || isFirstRun) return;
 
-    // User opted out of either flag → cancel all previously-scheduled
-    // alarms and clear the tracker. Also bump generations so any
-    // in-flight schedule from a prior effect run is stale. The cancels
-    // are enqueued per-med so they serialize against any in-flight
-    // operations from prior generations (e.g. an older generation's
-    // schedule that hasn't placed its alarm yet — its compensating
-    // cancel will run AFTER this opt-out cancel, but it'll be a
-    // no-op because the alarm was already removed).
+    /** Bump + return this run's generation for a med. */
+    const nextGeneration = (medId: string): number => {
+      const gen = (alarmGenerationRef.current.get(medId) ?? 0) + 1;
+      alarmGenerationRef.current.set(medId, gen);
+      return gen;
+    };
+    const currentGeneration = (medId: string): number =>
+      alarmGenerationRef.current.get(medId) ?? 0;
+
+    // ── Flags disabled: cancel every possibly-armed alarm ──
+    // ── (claim writes belong to the foreground hook) ──
     if (!notificationsEnabled || !criticalStockAlertsEnabled) {
-      scheduledCriticalIdsRef.current.forEach((id) => {
-        alarmGenerationRef.current.set(
-          id,
-          (alarmGenerationRef.current.get(id) ?? 0) + 1
-        );
-        enqueue(id, async () => {
+      const ids = new Set([
+        ...scheduledCriticalIdsRef.current,
+        ...Object.keys(loadCriticalNotificationClaims()),
+      ]);
+      for (const id of ids) {
+        nextGeneration(id);
+        enqueueCriticalAlarmOp(id, async () => {
           await cancelCriticalAlarm(id);
-          const records = loadScheduledCriticalAlarms();
-          if (records[id] && records[id].status !== 'NOT_SCHEDULED') {
-            records[id].status = 'NOT_SCHEDULED';
-            saveScheduledCriticalAlarms(records);
-          }
         });
-      });
+      }
       scheduledCriticalIdsRef.current.clear();
       return;
     }
 
     const today = getTodayDateString();
     const stillScheduled = new Set<string>();
+    const claimsNow = loadCriticalNotificationClaims();
+
+    /**
+     * The cancel → schedule → verify-world → claim-write chain, shared
+     * by the fresh-schedule path and the reconciliation repair path
+     * (a matching claim whose native alarm could not be verified).
+     */
+    const runScheduleChain = async (
+      medId: string,
+      medName: string,
+      chainCriticalDateMs: number,
+      unit: string,
+      gen: number
+    ): Promise<void> => {
+      await cancelCriticalAlarm(medId);
+      if (currentGeneration(medId) !== gen) return; // a newer run superseded this one
+
+      let scheduled = false;
+      try {
+        scheduled =
+          (await scheduleCriticalAlarm(medId, medName, chainCriticalDateMs, unit)) === true;
+      } catch (err) {
+        console.warn('[critical-alarm] schedule failed:', err);
+        scheduled = false;
+      }
+
+      // Post-schedule verification + claim write — one synchronous
+      // block (no awaits between the checks and the write), so no
+      // other JS code can interleave.
+      if (currentGeneration(medId) !== gen) {
+        // A newer run superseded this operation while it awaited the
+        // bridge: undo ONLY this operation's own alarm and write
+        // nothing. The newer run owns the claim now.
+        if (scheduled) await cancelCriticalAlarm(medId);
+        return;
+      }
+      const currentMed = medicationsRef.current.find((m) => m.id === medId);
+      if (!currentMed) {
+        // Deleted while we awaited — the deletion cleanup cancels the
+        // alarm; never persist a claim for a removed medication.
+        if (scheduled) await cancelCriticalAlarm(medId);
+        return;
+      }
+      const { status: currentStatus } = calculateMedicationStatus(currentMed);
+      if (currentStatus === 'critical' || currentStatus === 'out_of_stock') {
+        // The medication crossed while we awaited — the foreground
+        // hook now owns the episode's notification. Cancel the alarm
+        // this operation armed and write nothing.
+        if (scheduled) await cancelCriticalAlarm(medId);
+        return;
+      }
+      if (getCriticalAlarmDate(currentMed, getTodayDateString()) !== chainCriticalDateMs) {
+        // The projection moved — a newer run will arm the right alarm.
+        if (scheduled) await cancelCriticalAlarm(medId);
+        return;
+      }
+
+      const claims = loadCriticalNotificationClaims();
+      if (scheduled) {
+        // Persist the claim ONLY after the native schedule succeeded.
+        setCriticalNotificationClaim(claims, medId, {
+          claimed: true,
+          alarmTime: chainCriticalDateMs,
+        });
+      } else {
+        // Failed schedule → claim stays open so the foreground
+        // fallback can still send one notification for this episode.
+        setCriticalNotificationClaim(claims, medId, { claimed: false, alarmTime: null });
+      }
+      saveCriticalNotificationClaims(claims);
+    };
 
     for (const med of medicationsRef.current) {
-      const gen = (alarmGenerationRef.current.get(med.id) ?? 0) + 1;
-      alarmGenerationRef.current.set(med.id, gen);
-
+      const gen = nextGeneration(med.id);
+      const { status } = calculateMedicationStatus(med);
+      const isCriticalish = status === 'critical' || status === 'out_of_stock';
       const criticalDateMs = getCriticalAlarmDate(med, today);
-      if (criticalDateMs === null) {
-        if (scheduledCriticalIdsRef.current.has(med.id)) {
-          enqueue(med.id, async () => {
-            await cancelCriticalAlarm(med.id);
-            const records = loadScheduledCriticalAlarms();
-            if (records[med.id] && records[med.id].status === 'SCHEDULED') {
-              records[med.id].status = 'NOT_SCHEDULED';
-              saveScheduledCriticalAlarms(records);
-            }
+
+      if (isCriticalish || criticalDateMs === null) {
+        // Already critical → the foreground owns the episode's
+        // notification; never schedule, never write claims.
+        // Sufficient but frozen (no auto deduction / no dose) → nothing
+        // will cross the threshold without user action.
+        // Claim lifecycle is NOT this hook's job: an armed alarm that is
+        // no longer wanted is cancelled below, but ending the episode
+        // (clearing the claim) is useStockAlerts' synchronous decision.
+        const hadAlarm = scheduledCriticalIdsRef.current.has(med.id);
+        if (hadAlarm) {
+          const medId = med.id;
+          enqueueCriticalAlarmOp(medId, async () => {
+            if (currentGeneration(medId) !== gen) return;
+            await cancelCriticalAlarm(medId);
           });
         }
         continue;
       }
 
-      const transitionKey = generateCriticalTransitionKey(med.id, criticalDateMs);
-      const unit = med.unit || 'قرص';
-      const name = med.name;
-
+      // Sufficient with a future projected crossing at criticalDateMs.
       stillScheduled.add(med.id);
 
-      enqueue(med.id, async () => {
-        await cancelCriticalAlarm(med.id);
-        if (alarmGenerationRef.current.get(med.id) !== gen) return;
+      const claim = getCriticalNotificationClaim(claimsNow, med.id);
+      const medId = med.id;
+      const medName = med.name;
+      const unit = med.unit || 'قرص';
 
-        try {
-          const scheduledResult = await scheduleCriticalAlarm(
-            med.id,
-            name,
-            criticalDateMs,
-            unit,
-            transitionKey
-          );
+      if (claim?.claimed && claim.alarmTime === criticalDateMs) {
+        // The claim says the alarm is armed exactly here. A claim is
+        // business dedup state — it does NOT prove the native alarm
+        // still exists (Android can drop previously-scheduled alarms:
+        // SCHEDULE_EXACT_ALARM revoked, force-stop, OEM kills, the
+        // notification otherwise removed). Verify before trusting:
+        // verified → keep it (no re-arm, no duplicate); unverifiable or
+        // missing → run the repair chain (cancel + re-schedule) whose
+        // outcome writes the claim exactly like any fresh schedule.
+        enqueueCriticalAlarmOp(medId, async () => {
+          if (currentGeneration(medId) !== gen) return;
+          const verified = await verifyCriticalAlarmPending(medId, criticalDateMs);
+          if (verified || currentGeneration(medId) !== gen) return;
+          await runScheduleChain(medId, medName, criticalDateMs, unit, gen);
+        });
+        continue;
+      }
 
-          if (alarmGenerationRef.current.get(med.id) !== gen) {
-            await cancelCriticalAlarm(med.id);
-            const records = loadScheduledCriticalAlarms();
-            if (records[med.id]) {
-              records[med.id].status = 'NOT_SCHEDULED';
-              saveScheduledCriticalAlarms(records);
-            }
-            return;
-          }
-
-          const records = loadScheduledCriticalAlarms();
-          if (scheduledResult !== false) {
-            records[med.id] = {
-              transitionKey,
-              alarmTime: criticalDateMs,
-              status: 'SCHEDULED',
-            };
-          } else {
-            if (records[med.id]) {
-              records[med.id].status = 'NOT_SCHEDULED';
-            }
-          }
-          saveScheduledCriticalAlarms(records);
-        } catch (err) {
-          console.warn('[critical-alarm] schedule failed:', err);
-          const records = loadScheduledCriticalAlarms();
-          if (records[med.id]) {
-            records[med.id].status = 'NOT_SCHEDULED';
-            saveScheduledCriticalAlarms(records);
-          }
-        }
-      });
+      enqueueCriticalAlarmOp(medId, () =>
+        runScheduleChain(medId, medName, criticalDateMs, unit, gen)
+      );
     }
 
-    // Cancel alarms for meds that are no longer in the list (deleted).
-    // Bump their generation so any in-flight schedule from a previous
-    // run bails. Enqueued so they serialize against in-flight ops.
+    // Cancel alarms for meds that are no longer present (deleted).
     for (const prevId of scheduledCriticalIdsRef.current) {
       if (!stillScheduled.has(prevId)) {
-        alarmGenerationRef.current.set(
-          prevId,
-          (alarmGenerationRef.current.get(prevId) ?? 0) + 1
-        );
-        enqueue(prevId, async () => {
+        nextGeneration(prevId);
+        enqueueCriticalAlarmOp(prevId, async () => {
           await cancelCriticalAlarm(prevId);
-          const records = loadScheduledCriticalAlarms();
-          if (records[prevId]) {
-            delete records[prevId];
-            saveScheduledCriticalAlarms(records);
-          }
         });
       }
     }
@@ -307,5 +365,6 @@ export function useCriticalAlarmScheduler({
     criticalStockAlertsEnabled,
     hydrated,
     isFirstRun,
+    resumeTick,
   ]);
 }

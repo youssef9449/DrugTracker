@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   effectiveCurrentPills,
   countDueAutoDoses,
+  computeDueDoseBreakdown,
   syncAutoDailyDeductions,
   settleDoseChange,
   settleAutoDeductToggle,
@@ -345,5 +346,193 @@ describe('reminderTime-gated auto-deduction timing', () => {
     expect(result.updatedMeds[0].currentPills).toBe(28); // unchanged
     expect(result.newLogs).toHaveLength(0);
     expect(effectiveCurrentPills(result.updatedMeds[0], '2026-09-11', now)).toBe(28);
+  });
+});
+
+/**
+ * Same-day regression: `lastSyncDate === today` must NOT prevent today's
+ * dose from becoming due at reminderTime. A med created/started today
+ * (lastSyncDate = today) with reminderEnabled + a valid reminderTime has
+ * today's dose pending reminderTime — the due-dose calculation must
+ * evaluate todayDue independently of past elapsed days.
+ */
+describe('same-day lastSyncDate === today (reminderTime-gated)', () => {
+  // ─── 1. same-day med before reminderTime → no deduction ─────────────
+  it('same-day med before reminderTime: today dose NOT due → 0', () => {
+    const now = at('2026-09-11T15:00:00Z'); // 15:00 < 20:00
+    const med = makeRemindedMed({
+      currentPills: 30,
+      dailyDose: 2,
+      lastSyncDate: '2026-09-11', // same day
+    });
+    expect(countDueAutoDoses(med, now, '2026-09-11')).toBe(0);
+    expect(effectiveCurrentPills(med, '2026-09-11', now)).toBe(30); // no deduction
+  });
+
+  // ─── 2. same-day med exactly at reminderTime → due ──────────────────
+  it('same-day med at reminderTime: today dose due → count=1, deduct dailyDose', () => {
+    const now = at('2026-09-11T20:00:00Z'); // 20:00 = reminderTime
+    const med = makeRemindedMed({
+      currentPills: 30,
+      dailyDose: 2,
+      lastSyncDate: '2026-09-11', // same day
+    });
+    expect(countDueAutoDoses(med, now, '2026-09-11')).toBe(1);
+    expect(effectiveCurrentPills(med, '2026-09-11', now)).toBe(28); // 30 - 2
+  });
+
+  // ─── 3. same-day med after reminderTime → due ───────────────────────
+  it('same-day med after reminderTime: today dose due', () => {
+    const now = at('2026-09-11T21:00:00Z'); // 21:00 > 20:00
+    const med = makeRemindedMed({
+      currentPills: 30,
+      dailyDose: 2,
+      lastSyncDate: '2026-09-11', // same day
+    });
+    expect(countDueAutoDoses(med, now, '2026-09-11')).toBe(1);
+    expect(effectiveCurrentPills(med, '2026-09-11', now)).toBe(28);
+  });
+
+  // ─── breakdown: todayDue is true for same-day at/after reminderTime ──
+  it('computeDueDoseBreakdown: same-day med reports todayDue=true at reminderTime, pastDueDoses=0', () => {
+    const now = at('2026-09-11T20:00:00Z');
+    const med = makeRemindedMed({
+      currentPills: 30,
+      dailyDose: 2,
+      lastSyncDate: '2026-09-11',
+    });
+    const bd = computeDueDoseBreakdown(med, now, '2026-09-11');
+    expect(bd.totalDays).toBe(0); // lastSyncDate === today
+    expect(bd.betweenDays).toBe(0);
+    expect(bd.todayDue).toBe(true);
+    expect(bd.fullDueDoses).toBe(1); // 0 past + 1 today
+    expect(bd.pastDueDoses).toBe(0); // today NOT settled by settlement
+  });
+
+  it('computeDueDoseBreakdown: same-day med before reminderTime reports todayDue=false', () => {
+    const now = at('2026-09-11T15:00:00Z');
+    const med = makeRemindedMed({
+      currentPills: 30,
+      dailyDose: 2,
+      lastSyncDate: '2026-09-11',
+    });
+    const bd = computeDueDoseBreakdown(med, now, '2026-09-11');
+    expect(bd.todayDue).toBe(false);
+    expect(bd.fullDueDoses).toBe(0);
+    expect(bd.pastDueDoses).toBe(0);
+  });
+
+  // ─── 4. same-day manual consume before reminderTime → no double at time
+  it('same-day manual consume before reminderTime: deduct once, no double at reminderTime', () => {
+    const now = at('2026-09-11T18:00:00Z'); // 18:00 < 20:00
+    const med = makeRemindedMed({
+      currentPills: 30,
+      dailyDose: 2,
+      lastSyncDate: '2026-09-11', // same day
+    });
+    const { updatedMed } = consumeDose(med, 'manual', '2026-09-11', now);
+    expect(updatedMed).not.toBeNull();
+    expect(updatedMed!.currentPills).toBe(28); // 30 - 2 (the manual dose only)
+    expect(updatedMed!.lastConsumedDate).toBe('2026-09-11');
+
+    // At 20:00 (reminderTime), NO additional deduction — lastConsumedDate
+    // = today blocks today's auto-dose.
+    const nowAtTime = at('2026-09-11T20:00:00Z');
+    expect(countDueAutoDoses(updatedMed!, nowAtTime, '2026-09-11')).toBe(0);
+    expect(effectiveCurrentPills(updatedMed!, '2026-09-11', nowAtTime)).toBe(28); // not 26
+  });
+
+  // ─── 5. same-day manual consume after reminderTime → no double ───────
+  it('same-day manual consume after reminderTime: auto dose dynamic due, manual replaces (no double)', () => {
+    const now = at('2026-09-11T20:01:00Z'); // 20:01 > 20:00 (today dose due)
+    const med = makeRemindedMed({
+      currentPills: 30,
+      dailyDose: 2,
+      lastSyncDate: '2026-09-11', // same day
+    });
+    // The auto projection before consume = 28 (todayDue=1, betweenDays=0).
+    expect(effectiveCurrentPills(med, '2026-09-11', now)).toBe(28);
+    // The manual consume REPLACES today's auto-dose (settle past-only = 30,
+    // then deduct the manual dose) → 28, NOT 26.
+    const { updatedMed } = consumeDose(med, 'manual', '2026-09-11', now);
+    expect(updatedMed).not.toBeNull();
+    expect(updatedMed!.currentPills).toBe(28); // not 26
+    expect(updatedMed!.lastConsumedDate).toBe('2026-09-11');
+  });
+
+  // ─── 6. same-day med with lastConsumedDate === today → no auto deduction
+  it('same-day med already consumed today: no auto deduction at any time', () => {
+    // The user manually consumed today (lastConsumedDate = today).
+    const med = makeRemindedMed({
+      currentPills: 28,
+      dailyDose: 2,
+      lastSyncDate: '2026-09-11',
+      lastConsumedDate: '2026-09-11',
+    });
+    // Before reminderTime: 0 due.
+    expect(countDueAutoDoses(med, at('2026-09-11T15:00:00Z'), '2026-09-11')).toBe(0);
+    // At reminderTime: still 0 (consumed today).
+    expect(countDueAutoDoses(med, at('2026-09-11T20:00:00Z'), '2026-09-11')).toBe(0);
+    // After reminderTime: still 0.
+    expect(countDueAutoDoses(med, at('2026-09-11T21:00:00Z'), '2026-09-11')).toBe(0);
+    expect(effectiveCurrentPills(med, '2026-09-11', at('2026-09-11T21:00:00Z'))).toBe(28);
+  });
+
+  // ─── 7. multi-day regression: past days still counted (PR #160 intact) ─
+  it('multi-day regression: past elapsed days still counted (PR #160 behavior)', () => {
+    const now = at('2026-09-13T15:00:00Z'); // 09-13 15:00 < 20:00
+    const med = makeRemindedMed({
+      currentPills: 30,
+      dailyDose: 2,
+      lastSyncDate: '2026-09-10', // 3 days elapsed (09-10 → 09-13)
+    });
+    // betweenDays = 2 (09-11, 09-12); today (09-13) NOT due (before 20:00).
+    expect(countDueAutoDoses(med, now, '2026-09-13')).toBe(2);
+    expect(effectiveCurrentPills(med, '2026-09-13', now)).toBe(26); // 30 - 2*2
+    // sync settles the 2 past days.
+    const result = syncAutoDailyDeductions([med], '2026-09-13', now);
+    expect(result.updatedMeds[0].currentPills).toBe(26);
+    expect(result.updatedMeds[0].lastSyncDate).toBe('2026-09-12'); // yesterday
+  });
+
+  it('multi-day regression: past days + today (after reminderTime)', () => {
+    const now = at('2026-09-13T21:00:00Z'); // 09-13 21:00 > 20:00
+    const med = makeRemindedMed({
+      currentPills: 30,
+      dailyDose: 2,
+      lastSyncDate: '2026-09-10',
+    });
+    // betweenDays = 2 + todayDue = 1 → 3 doses.
+    expect(countDueAutoDoses(med, now, '2026-09-13')).toBe(3);
+    expect(effectiveCurrentPills(med, '2026-09-13', now)).toBe(24); // 30 - 3*2
+  });
+
+  // ─── 8. legacy regression: reminderEnabled false → calendar-day behavior
+  it('legacy regression (reminder disabled, same-day): today settled → 0 due', () => {
+    const now = at('2026-09-11T15:00:00Z');
+    const med = makeRemindedMed({
+      currentPills: 30,
+      dailyDose: 2,
+      lastSyncDate: '2026-09-11', // same day
+      reminderEnabled: false,
+    });
+    // Legacy: lastSyncDate === today → today settled → 0 due (even at 15:00,
+    // and even at/after 20:00 — reminderTime is irrelevant for legacy).
+    expect(countDueAutoDoses(med, now, '2026-09-11')).toBe(0);
+    expect(effectiveCurrentPills(med, '2026-09-11', now)).toBe(30);
+    expect(countDueAutoDoses(med, at('2026-09-11T20:00:00Z'), '2026-09-11')).toBe(0);
+  });
+
+  it('legacy regression (reminder disabled, multi-day): calendar-day count', () => {
+    const now = at('2026-09-11T15:00:00Z');
+    const med = makeRemindedMed({
+      currentPills: 30,
+      dailyDose: 2,
+      lastSyncDate: '2026-09-10', // 1 day elapsed
+      reminderEnabled: false,
+    });
+    // Legacy: today (09-11) due at start of calendar day → 1 dose (even at 15:00).
+    expect(countDueAutoDoses(med, now, '2026-09-11')).toBe(1);
+    expect(effectiveCurrentPills(med, '2026-09-11', now)).toBe(28); // 30 - 1*2
   });
 });

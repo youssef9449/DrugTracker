@@ -741,24 +741,24 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
             />
           </div>
 
-          <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl space-y-3">
+          <div className="space-y-3">
             <div className="flex items-start gap-2">
-              <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
+              <div className="w-8 h-8 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
                 <Clock className="w-4 h-4" />
               </div>
               <div className="min-w-0">
-                <h4 className="text-xs font-bold text-amber-950">
+                <h4 className="text-xs font-bold text-slate-800">
                   ميعاد الجرعة اليومي <span className="text-red-500">*</span>
                 </h4>
-                <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
-                  حدد الساعة التي تأخذ فيها الجرعة يومياً. هذا الحقل إجباري لكل دواء.
+                <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                  حدد الساعة التي تأخذ فيها الجرعة يومياً.
                 </p>
               </div>
             </div>
 
             {/* الوقت ظاهر دائماً وإجباري — مستقل عن تفعيل الإشعار */}
             <div className="space-y-2">
-              <label className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
+              <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5" />
                 <span>وقت الجرعة</span>
               </label>
@@ -775,14 +775,14 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                 value={reminderTime}
                 onChange={setReminderTime}
               />
-              <div className="text-[11px] text-amber-800 bg-white/70 border border-amber-200 rounded-lg px-2 py-1 text-center font-bold">
+              <div className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-center font-bold">
                 {formatTimeArabic(reminderTime) || 'اختر الوقت'}
               </div>
             </div>
 
             {/* سطر مستقل: التوجل يتحكم فقط في إرسال إشعار التنبيه لهذا الدواء */}
-            <div className="flex items-center justify-between gap-3 pt-2 border-t border-amber-200/80">
-              <span className="text-xs font-bold text-amber-950 leading-snug">
+            <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-100">
+              <span className="text-xs font-bold text-slate-700 leading-snug">
                 تفعيل اشعار التنبيه بالجرعة
               </span>
               <Toggle

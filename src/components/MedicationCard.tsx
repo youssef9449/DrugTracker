@@ -92,8 +92,19 @@ export const MedicationCard: FC<MedicationCardProps> = ({
       )
     : null;
 
-  // Maximum visual scale for progress
-  const maxVisualRange = Math.max(medication.warningThresholdDays * VISUAL_RANGE_MULTIPLIER, MIN_VISUAL_RANGE_DAYS);
+  // Maximum visual scale for the stock progress bar.
+  // Prefer one full package worth of days so a just-refilled box reads
+  // near 100% and partial stock (e.g. 22 days left on a 30-day pack)
+  // maps to a proportional fill instead of always clamping to full.
+  const packageDays =
+    medication.packageSize && medication.packageSize > 0 && medication.dailyDose > 0
+      ? medication.packageSize / medication.dailyDose
+      : DAYS_PER_MONTH;
+  const maxVisualRange = Math.max(
+    packageDays,
+    medication.warningThresholdDays * VISUAL_RANGE_MULTIPLIER,
+    MIN_VISUAL_RANGE_DAYS
+  );
   const percentLeft = Math.min(
     100,
     Math.max(0, Math.round((statusInfo.daysLeft / maxVisualRange) * 100))

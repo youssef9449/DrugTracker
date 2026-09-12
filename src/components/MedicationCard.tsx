@@ -589,11 +589,22 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           />
         </div>
 
-        {!isAutoActive && (
-          <div className="mt-1.5 text-[10px] text-amber-700 bg-amber-50 border border-amber-200/70 px-2 py-0.5 rounded-md flex items-center justify-between">
+        <div
+          className={`mt-1.5 text-[10px] px-2 py-0.5 rounded-md flex items-center gap-1 border ${
+            isAutoActive
+              ? 'text-teal-700 bg-teal-50 border-teal-200/70'
+              : 'text-amber-700 bg-amber-50 border-amber-200/70'
+          }`}
+        >
+          {isAutoActive ? (
+            <>
+              <Zap className="w-3 h-3 shrink-0" />
+              <span>الخصم التلقائي مفعّل</span>
+            </>
+          ) : (
             <span>الخصم التلقائي متوقف لهذا الدواء</span>
-          </div>
-        )}
+          )}
+        </div>
         {undoRefillAction}
       </div>
     );

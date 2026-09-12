@@ -50,8 +50,10 @@ export function settleAndAdjust(
   // (exclude today's projected auto-dose) so a later manual consume can
   // replace today's dose without double-deduction; today's dose stays
   // dynamic (projected by effectiveCurrentPills via todayDue) and is
-  // settled on day rollover or a later mutation. For legacy, settle at
-  // the full effective balance (today included — pre-change behavior).
+  // settled at the next existing execution point (app-open sync or a
+  // later mutation), NOT automatically at the calendar-day boundary.
+  // For legacy, settle at the full effective balance (today included —
+  // pre-change behavior).
   const settleBase = breakdown.gated
     ? Math.max(0, med.currentPills - breakdown.pastDueDoses * med.dailyDose)
     : Math.max(0, effectiveCurrentPills(med, todayStr, now));

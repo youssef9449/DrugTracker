@@ -4,8 +4,10 @@ import {
   countDueAutoDoses,
   syncAutoDailyDeductions,
   settleDoseChange,
+  settleAutoDeductToggle,
+  reverseRefill,
 } from './dateCalculations';
-import { consumeDose } from './medActions';
+import { consumeDose, settleAndAdjust } from './medActions';
 import type { Medication } from '../types';
 
 /**
@@ -19,17 +21,29 @@ import type { Medication } from '../types';
  * (syncAutoDailyDeductions / mutations) is the only thing that updates
  * currentPills + lastSyncDate + logs.
  *
- * Key invariant the projection must uphold at the Sep 11 → Sep 12 rollover
- * (reminderTime 20:00): a dose becomes due only at its reminderTime, so
- * crossing midnight must NOT add Sep 12's dose. Sep 11's dose (which
- * became due at 20:00) stays counted (it shifts from `todayDue` to
- * `betweenDays`), so the projection is STABLE (28 → 28) across midnight
- * until Sep 12 20:00 (→ 26).
+ * IMPORTANT — what the app does NOT do: there is NO automatic settlement
+ * at the calendar-day boundary while the app stays open. syncAutoDailyDeductions
+ * runs only on app-open (App.tsx mount effect, once after hydration) and via
+ * mutations (refill / consume / dose-change / auto-deduct toggle). So while
+ * the app remains open across midnight, the snapshot is NOT physically
+ * settled at 00:00 — the previous day's dose becomes part of the past-day
+ * settlement basis (it shifts from `todayDue` to `betweenDays`) and is
+ * settled at the next existing execution point.
  *
- * These tests prove the CURRENT architecture already guarantees this —
- * no polling, no timer, no background runner, no state machine. The
- * snapshot settles on the existing execution points (sync on mount /
- * mutations); the projection is always correct.
+ * These tests explicitly DISTINGUISH the two concerns:
+ *   (A) Dynamic projection across midnight — effectiveCurrentPills() is
+ *       correct without any settlement (no sync call in the test).
+ *   (B) Actual settlement execution — syncAutoDailyDeductions() (or a
+ *       mutation) is explicitly called, and currentPills/lastSyncDate/logs
+ *       are verified. No test implies sync fires automatically at midnight.
+ *
+ * Key projection invariant at the Sep 11 → Sep 12 rollover (reminderTime
+ * 20:00): a dose becomes due only at its reminderTime, so crossing midnight
+ * must NOT add Sep 12's dose. Sep 11's dose (which became due at 20:00)
+ * stays counted (it shifts from `todayDue` to `betweenDays`), so the
+ * projection is STABLE (28 → 28) across midnight until Sep 12 20:00 (→ 26).
+ *
+ * No polling, no timer, no background runner, no state machine was added.
  */
 
 function makeRemindedMed(overrides: Partial<Medication> = {}): Medication {
@@ -65,7 +79,12 @@ function at(utcIso: string): Date {
 }
 
 // ─── A. Day rollover while the app remains open ──────────────────────
-describe('day rollover while app remains open (projection)', () => {
+describe('day rollover while app remains open (dynamic projection, no settlement)', () => {
+  // These tests call effectiveCurrentPills/countDueAutoDoses ONLY. They do NOT
+  // call syncAutoDailyDeductions or any mutation — they verify the live
+  // projection is correct across midnight WITHOUT any settlement, proving the
+  // displayed balance is right even though the snapshot is not physically
+  // settled at the calendar-day boundary.
   // A.1 Sep 11 21:00 → Sep 12 10:00 → Sep 12 20:00
   it('projection is stable across midnight: 28 → 28 → 26 (no premature next-day dose)', () => {
     const med = makeRemindedMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2026-09-10' });
@@ -133,19 +152,63 @@ describe('rollover settlement: settles past-due only, not the new day', () => {
     expect(effectiveCurrentPills(result.updatedMeds[0], '2026-09-12', now)).toBe(26);
   });
 
-  // B.3 mutation (refill) after rollover settles past only
-  it('mutation after rollover settles past-due (Sep 11), today (Sep 12) stays dynamic', () => {
+  // B.3 manual consume after rollover: past day settled first, then today's manual applied
+  it('manual consume after rollover (before today reminderTime): settles Sep 11 first, then Sep 12 manual (no double)', () => {
     const med = makeRemindedMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2026-09-10' });
-    const now = at('2026-09-12T10:00:00Z');
-    // refill +5 (uses settleAndAdjust via consumeDose? no — use a direct consumeDose path).
-    // Use consumeDose to settle (manual consume at Sep 12 10:00, before Sep 12 reminderTime).
+    const now = at('2026-09-12T10:00:00Z'); // Sep 12 10:00 (< 20:00)
     const { updatedMed } = consumeDose(med, 'manual', '2026-09-12', now);
-    // settleBase (past-only) = 30 - betweenDays(1)*2 = 28; deduct manual dose 2 → 26.
-    // Sep 11 settled (30→28), then the manual consume is Sep 12's dose (replaces the dynamic auto).
+    // settleBase (past-only) = 30 - betweenDays(1)*2 = 28 (Sep 11 settled);
+    // then the manual dose (2) replaces Sep 12's dynamic auto → 26.
     expect(updatedMed).not.toBeNull();
     expect(updatedMed!.currentPills).toBe(26); // 28 (Sep 11 settled) - 2 (manual Sep 12)
     expect(updatedMed!.lastSyncDate).toBe('2026-09-12'); // manual consume settles today
     expect(updatedMed!.lastConsumedDate).toBe('2026-09-12');
+    // No double: Sep 12's auto was dynamic (not settled); the manual replaced it.
+    expect(effectiveCurrentPills(updatedMed!, '2026-09-12', now)).toBe(26);
+  });
+});
+
+// ─── B.mutations. Other mutation paths after rollover (settle past first) ──
+describe('mutations after rollover settle past elapsed days before applying', () => {
+  // refill (settleAndAdjust +delta) after rollover
+  it('refill after rollover: settles Sep 11 (past), adds pills, Sep 12 stays dynamic', () => {
+    const med = makeRemindedMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2026-09-10' });
+    const now = at('2026-09-12T10:00:00Z');
+    const result = settleAndAdjust(med, 10, '2026-09-12', now); // refill +10
+    // settleBase (past-only) = 30 - betweenDays(1)*2 = 28; +10 → 38.
+    expect(result.updatedMed.currentPills).toBe(38);
+    expect(result.updatedMed.lastSyncDate).toBe('2026-09-11'); // yesterday (Sep 12 dynamic)
+    // Sep 12 (before 20:00) NOT due → projection = 38.
+    expect(effectiveCurrentPills(result.updatedMed, '2026-09-12', now)).toBe(38);
+    // At Sep 12 20:00, Sep 12 due → 38 - 2 = 36.
+    expect(effectiveCurrentPills(result.updatedMed, '2026-09-12', at('2026-09-12T20:00:00Z'))).toBe(36);
+  });
+
+  // reverse-refill after rollover
+  it('reverse-refill after rollover: settles Sep 11 (past), reverses from the live balance', () => {
+    const med = makeRemindedMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2026-09-10' });
+    const now = at('2026-09-12T10:00:00Z');
+    // reverse a +30 refill: settleBase (past-only) = 28 (Sep 11 projected).
+    // reversedAmount = min(refillAmount=30, settleBase=28) = 28; newCurrentPills = 28 - 28 = 0.
+    const result = reverseRefill(med, 30, '2026-09-12', now);
+    expect(result.reversedAmount).toBe(28); // only 28 available (Sep 11 projected)
+    expect(result.updatedMed.currentPills).toBe(0);
+    expect(result.updatedMed.lastSyncDate).toBe('2026-09-11'); // yesterday (Sep 12 dynamic)
+  });
+
+  // auto-deduct toggle (true→false) after rollover
+  it('auto-deduct toggle (true→false) after rollover: settles Sep 11 (past), freezes', () => {
+    const med = makeRemindedMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2026-09-10', autoDeductEnabled: true });
+    const now = at('2026-09-12T10:00:00Z');
+    const { updatedMed, log } = settleAutoDeductToggle(med, false, '2026-09-12', now);
+    // Settles Sep 11 (betweenDays=1) at 2 → 28. Sep 12 not settled (frozen now).
+    expect(updatedMed.currentPills).toBe(28);
+    expect(updatedMed.lastSyncDate).toBe('2026-09-11'); // yesterday (gated mutation rule)
+    expect(updatedMed.autoDeductEnabled).toBe(false);
+    expect(log).not.toBeNull();
+    expect(log!.amount).toBe(-2);
+    // Frozen → projection = snapshot unchanged.
+    expect(effectiveCurrentPills(updatedMed, '2026-09-12', now)).toBe(28);
   });
 });
 

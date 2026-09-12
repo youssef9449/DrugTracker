@@ -78,6 +78,40 @@ describe('doseSchedule helpers', () => {
     expect(schedule.map((d) => d.time)).toEqual(['08:00', '20:00']);
   });
 
+  it('sorts a stored out-of-order doseSchedule chronologically for the UI', () => {
+    const schedule = getDoseScheduleForUI({
+      dailyDose: 4,
+      dosesPerDay: 3,
+      doseSchedule: [
+        dose({ id: 'late', amount: 1, time: '21:00' }),
+        dose({ id: 'early', amount: 2, time: '08:00' }),
+        dose({ id: 'middle', amount: 1, time: '14:00' }),
+      ],
+    });
+    expect(schedule).toHaveLength(3);
+    expect(schedule.map((d) => d.id)).toEqual(['early', 'middle', 'late']);
+    expect(schedule.map((d) => d.time)).toEqual(['08:00', '14:00', '21:00']);
+    expect(schedule.map((d) => d.amount)).toEqual([2, 1, 1]);
+    // amounts stay tied to the correct IDs
+    expect(schedule.find((d) => d.id === 'early')?.amount).toBe(2);
+    expect(schedule.find((d) => d.id === 'middle')?.amount).toBe(1);
+    expect(schedule.find((d) => d.id === 'late')?.amount).toBe(1);
+  });
+
+  it('ignores conflicting dosesPerDay when sorting a stored schedule', () => {
+    const schedule = getDoseScheduleForUI({
+      dailyDose: 2,
+      dosesPerDay: 9, // deliberately wrong
+      doseSchedule: [
+        dose({ id: 'b', amount: 1, time: '20:00' }),
+        dose({ id: 'a', amount: 1, time: '08:00' }),
+      ],
+    });
+    expect(schedule).toHaveLength(2); // schedule length wins, not dosesPerDay
+    expect(schedule.map((d) => d.id)).toEqual(['a', 'b']);
+    expect(schedule.map((d) => d.time)).toEqual(['08:00', '20:00']);
+  });
+
   it('edit compatibility: returns both stored rows for a 2-dose med', () => {
     const schedule = getDoseScheduleForUI({
       dailyDose: 3,

@@ -107,8 +107,12 @@ export function hasDoseSchedule(med: Medication): boolean {
 
 /**
  * Dates on which `doseId` was manually consumed.
- * Prefers doseConsumptionHistory; falls back to doseConsumption last-date
- * as a single-element history (pre-Phase-3B data).
+ *
+ * Prefers {@link Medication.doseConsumptionHistory}. When history is
+ * absent (pre-Phase-3B data), falls back to
+ * {@link Medication.doseConsumption} as a **single** known date — not a
+ * reconstructed multi-day ledger. Overwritten last-dates from the old
+ * model cannot be recovered and are never invented here.
  */
 export function getDoseConsumedDates(med: Medication, doseId: string): string[] {
   const hist = med.doseConsumptionHistory?.[doseId];
@@ -130,8 +134,8 @@ export function getDoseConsumedDates(med: Medication, doseId: string): string[] 
 
 /**
  * Whether a specific dose slot was manually consumed on `dateStr`.
- * Multi-dose: history includes date, or (compat) doseConsumption[doseId] === date.
- * Legacy (no schedule): lastConsumedDate === dateStr covers the single slot.
+ * Multi-dose: true when history (or pre-3B last-date fallback) includes
+ * that exact date. Legacy (no schedule): lastConsumedDate === dateStr.
  */
 export function isDoseConsumedOnDate(
   med: Medication,
@@ -149,7 +153,10 @@ export function isDoseConsumedOnDate(
 
 /**
  * Record a manual consumption of `doseId` on `dateStr`.
- * Updates both last-date map and append-only history (no duplicates).
+ * Updates last-date map (`doseConsumption`) and append-only history
+ * (`doseConsumptionHistory`, no duplicate dates). Seeds history from
+ * any pre-existing last-date entries so first post-upgrade consume does
+ * not drop the one known pre-3B date.
  */
 export function recordDoseConsumed(
   med: Medication,
@@ -183,9 +190,19 @@ export function recordDoseConsumed(
 
 /**
  * Units still auto-due on a single historical calendar day (all slots
- * that day are fully elapsed). Manually consumed slots on that exact
- * date are excluded. Days with no recorded consumption use the full
- * schedule amount (unknown-history fallback — same as pure auto days).
+ * that day are fully elapsed).
+ *
+ * Known history: slots with a recorded consume on `dateStr` are skipped
+ * (already settled by consumeDose — never double-deducted).
+ *
+ * Unknown history: when no recorded consumption exists for a slot on
+ * that date, the implementation cannot distinguish "user did not
+ * consume" from "consumption was never recorded". It therefore uses the
+ * **current** schedule amount for that unrecorded slot (deterministic
+ * full-schedule fallback). This is not historical reconstruction of
+ * past amounts/times — schedule amount/time edits do not rewrite
+ * recorded consume *dates*, but unrecorded historical slots are valued
+ * with today's schedule definition.
  */
 export function historicalDayDueUnits(med: Medication, dateStr: string): number {
   if (!hasDoseSchedule(med) || !med.doseSchedule) {
@@ -204,7 +221,9 @@ export function historicalDayDueUnits(med: Medication, dateStr: string): number 
 /**
  * Sum of {@link historicalDayDueUnits} for each calendar day strictly
  * after `fromDateExclusive` and strictly before `toDateExclusive`
- * (i.e. the betweenDays window used by gated settlement).
+ * (the betweenDays window used by gated settlement). Each day is
+ * settled independently so consecutive partially-consumed days do not
+ * collapse into one incorrect aggregate.
  */
 export function historicalRangeDueUnits(
   med: Medication,
@@ -307,10 +326,9 @@ export function getDaysDifference(fromDateStr: string, toDateStr: string): numbe
  * The dynamic balance that the UI actually displays.
  *
  * `med.currentPills` is the last "settled" snapshot — the value at
- * `med.lastSyncDate`. From that snapshot, we project forward by the
- * number of auto-deductible doses currently due (see
- * {@link countDueAutoDoses}), deducting `dailyDose` per dose. The
- * result is clamped at 0 so the displayed balance never goes negative.
+ * `med.lastSyncDate`. From that snapshot, we project forward by
+ * {@link computeDueDoseBreakdown}'s `fullDueUnits` (units, not days).
+ * The result is clamped at 0 so the displayed balance never goes negative.
  *
  * This is the SINGLE source of truth for "how many pills does the user
  * actually have right now" in the entire UI. Callers should NEVER read
@@ -337,7 +355,7 @@ export function getDaysDifference(fromDateStr: string, toDateStr: string): numbe
  *     effective balance).
  *   - `dailyDose <= 0` → returns `currentPills` (no consumption rate to
  *     project forward; effectively "unknown rate" — show the snapshot).
- *   - Otherwise: `max(0, currentPills - countDueAutoDoses(med, now, today) * dailyDose)`.
+ *   - Otherwise: `max(0, currentPills - fullDueUnits)`.
  *
  * @param med The medication.
  * @param todayStr Optional "today" override (YYYY-MM-DD) — used by
@@ -360,31 +378,6 @@ export function effectiveCurrentPills(
   return Math.max(0, med.currentPills - fullDueUnits);
 }
 
-/**
- * Count the number of auto-deductible daily doses currently due for
- * `med` — the dynamic projection count consumed by
- * {@link effectiveCurrentPills}.
- *
- * Deterministic from: currentPills (caller clamps), lastSyncDate,
- * dailyDose, reminderEnabled, reminderTime, lastConsumedDate, and the
- * current moment (`now`).
- *
- * Gating:
- *   - `reminderEnabled === true` with a valid `reminderTime`: a day's
- *     dose becomes due at `reminderTime` on that calendar day (local
- *     time). Fully-elapsed past days (strictly between lastSyncDate and
- *     today) are each due. Today's dose is due iff `now` is on the same
- *     local calendar day as `todayStr` AND `now >= today's reminderTime`
- *     AND the user has not already consumed it manually
- *     (`lastConsumedDate !== todayStr`).
- *   - Otherwise (reminder disabled / no valid reminderTime): legacy
- *     calendar-day behavior — every calendar day strictly after
- *     lastSyncDate up to and including today is due.
- *
- * Returns 0 when `dailyDose <= 0`, when no days have passed, or when
- * the user already consumed today's dose manually (the manual consume
- * pre-settled the projection).
- */
 /**
  * Count of individual multi-dose *slots* that are currently auto-due
  * (historical unconsumed slots + today's time-elapsed unconsumed slots).
@@ -424,13 +417,21 @@ export function countDueDoseEvents(
   return events;
 }
 
+/**
+ * Count of auto-due dose *events* or *days*, depending on med type.
+ *
+ * - Legacy / single-dose: integer number of due calendar days.
+ * - Multi-dose: integer count of due **dose slots** (via
+ *   {@link countDueDoseEvents}). Not units and not day-equivalents.
+ *
+ * Stock / projection must use {@link computeDueDoseBreakdown}.fullDueUnits.
+ * Do not multiply this return value by dailyDose for multi-dose meds.
+ */
 export function countDueAutoDoses(
   med: Medication,
   now: Date = new Date(),
   todayStr: string = getTodayDateString()
 ): number {
-  // Legacy: day-count of due doses. Multi-dose: integer due *dose events*
-  // (slots). Stock math must use computeDueDoseBreakdown(...).fullDueUnits.
   if (hasDoseSchedule(med)) {
     return countDueDoseEvents(med, now, todayStr);
   }
@@ -474,7 +475,7 @@ export interface DueDoseBreakdown {
   todayDue: boolean;
   consumedToday: boolean;
   gated: boolean;
-  /** Day-count of due doses (legacy). For multi-dose, approximate day-equivalents. */
+  /** Day-count of due doses for legacy paths. Multi-dose still fills this for log copy; stock uses fullDueUnits. */
   fullDueDoses: number;
   pastDueDoses: number;
   /** Units of stock due (authoritative for projection + settlement). */
@@ -522,9 +523,9 @@ export function computeDueDoseBreakdown(
 
   if (med.autoDeductEnabled !== false && dayAmount > 0) {
     if (multi) {
-      // Each fully-elapsed past day contributes only the slots NOT already
-      // manually consumed on that exact date (Phase 3B). Unknown history
-      // (no records for that day) falls back to the full schedule amount.
+      // Each fully-elapsed past day: skip slots with known consume on that
+      // date; unrecorded slots use current schedule amounts (unknown-
+      // history fallback — not reconstructed past configuration).
       const lastSync = med.lastSyncDate || todayStr;
       pastDueUnits = historicalRangeDueUnits(med, lastSync, todayStr);
       fullDueUnits = pastDueUnits + todayUnits;

@@ -43,18 +43,62 @@ export interface Medication {
   lastConsumedDate?: string;
 }
 
-export interface CriticalTransitionState {
-  transitionKey: string;
-  enteredAt: number;
-  notificationSent: boolean;
-}
+// ─────────────────────────────────────────────────────────────────────
+// Critical-stock notification claim (the ONE business state model).
+//
+// For each medication, during one continuous Critical/Out-of-Stock
+// episode, the user receives AT MOST ONE critical-stock notification.
+// This tiny persistent record answers exactly one question:
+//
+//     "Has this medication's current critical episode already claimed
+//      its critical notification?"
+//
+// Episode semantics:
+//   - Sufficient → Critical/OutOfStock starts an episode.
+//   - Critical → Critical / → OutOfStock is the SAME episode (a day
+//     passing, auto-deduction, manual consumption, refills-while-
+//     critical, app restarts and moving projections never start a new
+//     one).
+//   - Critical → Sufficient ends it (useStockAlerts clears the claim
+//     synchronously on that render → a later critical episode gets a
+//     fresh notification opportunity).
+//
+// `claimed === true` means the episode's single notification
+// opportunity has been consumed:
+//   - `alarmTime: number` — a native one-shot alarm was successfully
+//     scheduled at that epoch ms. While alarmTime is in the future the
+//     alarm provably has NOT fired yet; once it is in the past the
+//     opportunity is consumed regardless of whether Android physically
+//     displayed it (the app deliberately does NOT reconstruct delivery
+//     state after the fact).
+//   - `alarmTime: null` — the foreground fallback sent the notification
+//     directly.
+//
+// A failed schedule or a failed foreground send leaves
+// `claimed === false`, so the remaining path (scheduled alarm or
+// foreground fallback) stays available. Disabling notifications never
+// consumes the opportunity: while disabled nothing is sent and nothing
+// is marked claimed.
+// ─────────────────────────────────────────────────────────────────────
 
-export type ScheduledCriticalAlarmStatus = 'NOT_SCHEDULED' | 'SCHEDULED' | 'DELIVERED';
-
-export interface ScheduledCriticalAlarmRecord {
-  transitionKey: string;
-  alarmTime: number;
-  status: ScheduledCriticalAlarmStatus;
+export interface CriticalNotificationClaim {
+  /**
+   * True once this episode's notification opportunity has been taken:
+   * a future alarm was scheduled natively, or the foreground sent the
+   * notification. Business dedup state — NOT proof that a native alarm
+   * still exists (the scheduler verifies/re-arms actual native alarms
+   * against the platform; a lost alarm opens the claim again).
+   */
+  claimed: boolean;
+  /**
+   * Fire time (epoch ms) recorded by the last successful native
+   * schedule, or null when the claim came from a foreground send. Purely
+   * informational bookkeeping — it lets callers distinguish "a future
+   * alarm was scheduled here" from "already sent / window passed". It is
+   * never treated as evidence that the alarm is still armed or that
+   * anything was delivered.
+   */
+  alarmTime: number | null;
 }
 
 /**

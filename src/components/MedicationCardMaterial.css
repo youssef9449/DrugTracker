@@ -1,0 +1,138 @@
+/* Material-inspired visual treatment shared by every MedicationCard view. */
+[id^="med-card-"] {
+  border-radius: 1rem !important;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 0.08), 0 1px 2px rgb(15 23 42 / 0.04) !important;
+  overflow: visible !important;
+  transition: box-shadow 160ms ease, transform 160ms ease, border-color 160ms ease;
+}
+
+[id^="med-card-"]:hover {
+  box-shadow: 0 6px 16px rgb(15 23 42 / 0.09), 0 2px 4px rgb(15 23 42 / 0.05) !important;
+}
+
+.medication-menu-root {
+  flex-wrap: nowrap;
+}
+
+.medication-menu-root > button,
+.medication-menu-root > .medication-type-icon {
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease,
+    box-shadow 160ms ease, transform 120ms ease;
+}
+
+.medication-menu-root > button:active {
+  transform: scale(0.94);
+}
+
+.medication-type-icon {
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.05);
+}
+
+/* Compact cards: remove the first-pass emoji and replace it with a unit-aware visual cue. */
+[id^="med-card-"][class*="border-r-2"]:has(.medication-menu-root)
+  > div:nth-child(2) > span:nth-child(4)::before {
+  content: none !important;
+}
+
+[id^="med-card-"][class*="border-r-2"]:has(.medication-type-icon[title="نوع الدواء: قرص"])
+  > div:nth-child(2) > span:nth-child(4)::before {
+  content: "◉" !important;
+  font-size: 0.65rem;
+}
+
+[id^="med-card-"][class*="border-r-2"]:has(.medication-type-icon[title="نوع الدواء: كبسولة"])
+  > div:nth-child(2) > span:nth-child(4)::before {
+  content: "💊" !important;
+  font-size: 0.65rem;
+}
+
+[id^="med-card-"][class*="border-r-2"]:has(.medication-type-icon[title="نوع الدواء: مل"])
+  > div:nth-child(2) > span:nth-child(4)::before {
+  content: "💧" !important;
+  font-size: 0.65rem;
+}
+
+[id^="med-card-"][class*="border-r-2"]:has(.medication-type-icon[title="نوع الدواء: جرعة"])
+  > div:nth-child(2) > span:nth-child(4)::before {
+  content: "💉" !important;
+  font-size: 0.65rem;
+}
+
+[id^="med-card-"][class*="border-r-2"]:has(.medication-type-icon[title="نوع الدواء: كيس"])
+  > div:nth-child(2) > span:nth-child(4)::before {
+  content: "▣" !important;
+  font-size: 0.65rem;
+}
+
+[id^="med-card-"][class*="border-r-2"] .medication-type-icon {
+  display: none;
+}
+
+/* Compact action bar: edit / auto-deduct / delete are directly reachable. */
+[id^="med-card-"][class*="border-r-2"] .medication-menu-root {
+  gap: 0.125rem;
+}
+
+[id^="med-card-"][class*="border-r-2"] .medication-menu-root > button {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
+[id^="med-card-"][class*="border-r-2"] .medication-menu-root > button[aria-label="خيارات إضافية"] {
+  display: none;
+}
+
+[id^="med-card-"][class*="border-r-2"] > div:first-child {
+  align-items: center;
+}
+
+[id^="med-card-"][class*="border-r-2"] .medication-menu-root > button[aria-label="تعديل الدواء"] {
+  color: rgb(71 85 105);
+  background: rgb(248 250 252);
+}
+
+[id^="med-card-"][class*="border-r-2"] .medication-menu-root > button[aria-label="حذف الدواء"] {
+  color: rgb(225 29 72);
+  background: rgb(255 241 242);
+}
+
+/* Compact undo: preserve the existing callback but represent it as a tiny icon-style affordance. */
+[id^="med-card-"][class*="border-r-2"] > button {
+  width: 1.875rem;
+  min-height: 1.875rem;
+  margin-inline-start: auto;
+  margin-top: 0.25rem;
+  padding: 0 !important;
+  border-radius: 9999px !important;
+  font-size: 0 !important;
+  line-height: 1;
+}
+
+[id^="med-card-"][class*="border-r-2"] > button::before {
+  content: "↶";
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+/* Roomier views use a restrained Material-like surface and explicit touch-friendly actions. */
+[id^="med-card-"]:not([class*="border-r-2"]) .medication-menu-root > button,
+[id^="med-card-"]:not([class*="border-r-2"]) .medication-type-icon {
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+}
+
+[id^="med-card-"]:not([class*="border-r-2"]) .medication-type-icon {
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  background: rgb(248 250 252);
+}
+
+@media (max-width: 360px) {
+  [id^="med-card-"][class*="border-r-2"] .medication-menu-root > button {
+    width: 1.625rem;
+    height: 1.625rem;
+  }
+
+  [id^="med-card-"][class*="border-r-2"] > div:nth-child(2) > span:nth-child(6) {
+    max-width: 6rem;
+  }
+}

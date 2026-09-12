@@ -449,7 +449,57 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   // details (Name, Stock, Unit, Strips, Daily Dose, Depletion date,
   // status badge, visual progress bar, refill, consume, and menu).
   // -------------------------------------------------------------
+  // -------------------------------------------------------------
+  // COMPACT (MINI) VIEW: dense grid tiles — name + progress + auto-deduct
+  // -------------------------------------------------------------
   if (isCompact && viewFilter === 'all') {
+    const isOut = statusInfo.status === 'out_of_stock';
+    const isCrit = statusInfo.status === 'critical';
+
+    return (
+      <div
+        id={`med-card-${medication.id}`}
+        className={`bg-white rounded-xl border border-slate-200/90 p-2 shadow-2xs transition relative overflow-hidden border-r-2 ${tag.border} ${
+          isOut ? 'bg-red-50/30' : isCrit ? 'bg-rose-50/25' : ''
+        }`}
+        title={medication.name}
+      >
+        <h3 className="text-[11px] font-bold text-slate-900 leading-snug break-words line-clamp-2 min-h-[2rem]">
+          {medication.name}
+        </h3>
+
+        <div className="mt-1.5 w-full h-1 bg-slate-100 rounded-full overflow-hidden">
+          <div
+            className={`h-full transition-all duration-500 ${getProgressColor()}`}
+            style={{ width: `${percentLeft}%` }}
+          />
+        </div>
+
+        <div
+          className={`mt-1.5 text-[9px] px-1.5 py-0.5 rounded flex items-center gap-0.5 leading-tight ${
+            isAutoActive
+              ? 'text-teal-700 bg-teal-50'
+              : 'text-amber-700 bg-amber-50'
+          }`}
+        >
+          {isAutoActive ? (
+            <>
+              <Zap className="w-2.5 h-2.5 shrink-0" />
+              <span className="truncate">خصم تلقائي مفعّل</span>
+            </>
+          ) : (
+            <span className="truncate">خصم تلقائي متوقف</span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // -------------------------------------------------------------
+  // DETAILED VIEW for "all": former compact card (medium density)
+  // -------------------------------------------------------------
+  if (viewFilter === 'all') {
+
     const isOut = statusInfo.status === 'out_of_stock';
     const isCrit = statusInfo.status === 'critical';
     const isWarn = statusInfo.status === 'warning';
@@ -621,189 +671,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     );
   }
 
-  return (
-    <div
-      id={`med-card-${medication.id}`}
-      className={`bg-white rounded-2xl border border-slate-200/80 p-4 shadow-xs hover:shadow-md transition relative overflow-hidden border-r-4 ${tag.border}`}
-    >
-      {/* Top row: Name, Category, Menu */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-start gap-3 min-w-0">
-          <div
-            className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 shadow-inner ${
-              statusInfo.status === 'out_of_stock'
-                ? 'bg-red-100 text-red-600'
-                : statusInfo.status === 'critical'
-                ? 'bg-rose-100 text-rose-600'
-                : statusInfo.status === 'warning'
-                ? 'bg-amber-100 text-amber-600'
-                : tag.bg
-            }`}
-          >
-            <Pill className="w-5 h-5 rotate-45" />
-          </div>
 
-          <div className="min-w-0">
-            <h3 className="text-base font-bold text-slate-900 leading-snug truncate">
-              {medication.name}
-            </h3>
-            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap text-xs">
-              {medication.category && (
-                <span className="text-[11px] font-medium bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md">
-                  {medication.category}
-                </span>
-              )}
-              {hasStrips && (
-                <StripsBadge medication={medication} className="text-[11px] text-teal-800 bg-teal-50 border border-teal-200/60 px-2 py-0.5 rounded-md gap-1" />
-              )}
-              {!isSolid && medication.packageSize && medication.packageSize > 0 && (
-                <PackageSizeBadge medication={medication} className="text-[11px] text-teal-800 bg-teal-50 border border-teal-200/60 px-2 py-0.5 rounded-md gap-1" />
-              )}
-              {medication.notes && (
-                <span className="text-[11px] text-slate-500 truncate max-w-[170px]">
-                  {medication.notes}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Options Menu (extracted — see MedicationMenu.tsx) */}
-        <MedicationMenu
-          medication={medication}
-          isAutoActive={isAutoActive}
-          showRefillInMenu={false}
-          onOpenRefill={onOpenRefill}
-          onEdit={onEdit}
-          onDelete={onDelete}
-          onToggleAutoDeduct={onToggleAutoDeduct}
-        />
-      </div>
-
-      {/* Pill count & Auto deduction rate display */}
-      <div className="mt-3 pt-3 border-t border-slate-100 grid grid-cols-2 gap-2 bg-slate-50/80 p-2.5 rounded-xl">
-        <div>
-          <span className="text-[11px] text-slate-500 block">المخزون الحالي</span>
-          <div className="flex items-baseline gap-1 mt-0.5">
-            <span
-              className={`text-2xl font-extrabold font-mono ${
-                effPills === 0
-                  ? 'text-red-600'
-                  : effPills <= medication.dailyDose * 2
-                  ? 'text-rose-600'
-                  : 'text-slate-800'
-              }`}
-            >
-              {effPills}
-            </span>
-            <span className="text-xs text-slate-600 font-medium">
-              {medication.unit || 'قرص'}
-            </span>
-          </div>
-          {stripsDesc && (
-            <span className="text-[11px] text-slate-500 font-medium block mt-0.5">
-              ({stripsDesc})
-            </span>
-          )}
-        </div>
-
-        <div>
-          <span className="text-[11px] text-slate-500 block flex items-center gap-1">
-            <Zap className="w-3 h-3 text-teal-600" />
-            <span>الخصم اليومي</span>
-          </span>
-          <div className="flex items-baseline gap-1 mt-0.5">
-            <span className="text-2xl font-extrabold font-mono text-teal-800">
-              {medication.dailyDose}
-            </span>
-            <span className="text-xs text-slate-600 font-medium">
-              {medication.unit} / يوم
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Depletion calculation card */}
-      <div className="mt-2.5 p-2 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between text-xs">
-        <div className="flex items-center gap-1.5 text-slate-600">
-          <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-          <span className="text-[11px]">موعد النفاذ المتوقع:</span>
-        </div>
-        <span
-          className={`font-bold text-[11px] px-2 py-0.5 rounded-md border ${
-            statusInfo.status === 'out_of_stock'
-              ? 'bg-red-50 text-red-700 border-red-200'
-              : statusInfo.status === 'critical'
-              ? 'bg-rose-50 text-rose-700 border-rose-200 font-bold'
-              : statusInfo.status === 'warning'
-              ? 'bg-amber-50 text-amber-700 border-amber-200'
-              : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-          }`}
-        >
-          {depletion.formattedArabic} ({statusInfo.daysLeft} {statusInfo.daysLeft === 1 ? 'يوم' : statusInfo.daysLeft === 2 ? 'يومين' : 'أيام'})
-        </span>
-      </div>
-
-      {/* Visual Stock Progress Bar */}
-      <div className="mt-2.5">
-        <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-          <div
-            className={`h-full transition-all duration-500 ${getProgressColor()}`}
-            style={{ width: `${percentLeft}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Status note if paused */}
-      {!isAutoActive && <AutoDeductPausedNote />}
-      {undoRefillAction}
-
-      {/* Scheduled Reminder Badge (extracted — see ReminderBadge.tsx) */}
-      <ReminderBadge
-        medication={medication}
-        containerClass="bg-teal-50/70 border-teal-200/80 mt-2.5"
-        textClass="text-teal-950"
-        badgeClass="text-teal-900 bg-teal-100"
-      />
-
-      {/* Consume-pill feature: "تناول جرعة" button + consumed-today badge.
-          When the user clicks it, the dailyDose is subtracted from
-          currentPills and the auto-deduction for today is blocked. */}
-      {onConsumeDose && (
-        <div className="mt-2.5">
-          {medication.lastConsumedDate === getTodayDateString() ? (
-            <div className="w-full py-2 px-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center justify-center gap-1.5">
-              <CheckCircle className="w-4 h-4" />
-              <span>تم تناول جرعة اليوم — لن يتم الخصم التلقائي</span>
-            </div>
-          ) : (
-            <button
-              onClick={() => onConsumeDose(medication.id)}
-              disabled={effPills <= 0 || medication.dailyDose <= 0}
-              className={`w-full py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 ${
-                effPills <= 0 || medication.dailyDose <= 0
-                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200'
-              }`}
-            >
-              <Pill className="w-4 h-4 text-emerald-600" />
-              <span>تناول جرعة (-{medication.dailyDose} {medication.unit})</span>
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Action: Refill button upon purchasing new medicine */}
-      <div className="mt-3 pt-2 flex items-center gap-2">
-        <button
-          onClick={() => onOpenRefill(medication)}
-          className="w-full py-2 px-3 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 shadow-2xs"
-        >
-          <Plus className="w-4 h-4 text-teal-600" />
-          <span>تعبئة رصيد</span>
-        </button>
-      </div>
-    </div>
-  );
 };
 

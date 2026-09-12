@@ -665,10 +665,12 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
           </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                الاستهلاك اليومي التلقائي ({unit}) <span className="text-red-500">*</span>
+          {/* items-end keeps the two input boxes on the same baseline even when
+              the daily-dose label is longer and wraps to a second line. */}
+          <div className="grid grid-cols-2 gap-3 items-end">
+            <div className="min-w-0">
+              <label className="block text-xs font-bold text-slate-700 mb-1.5 leading-snug">
+                الاستهلاك اليومي ({unit}) <span className="text-red-500">*</span>
               </label>
               <input
                 type="number"
@@ -681,8 +683,10 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
               />
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">التنبيه قبل النفاذ بـ</label>
+            <div className="min-w-0">
+              <label className="block text-xs font-bold text-slate-700 mb-1.5 leading-snug">
+                التنبيه قبل النفاذ (أيام)
+              </label>
               <input
                 type="number"
                 min="1"

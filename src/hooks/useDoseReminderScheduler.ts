@@ -7,7 +7,7 @@ import {
   cancelSnoozedDoseReminder,
   isDoseReminderTimeStillAhead,
 } from '../utils/notifications';
-import { clearSnoozedDoseForMed } from './useDoseReminders';
+import { clearSnoozedDoseForMed } from '../utils/doseReminderStorage';
 
 /**
  * Options for {@link useDoseReminderScheduler}.

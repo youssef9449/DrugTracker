@@ -4,6 +4,7 @@ type ToggleColor = 'teal' | 'rose';
 type ToggleSize = 'sm' | 'md';
 
 interface ToggleProps {
+  id?: string;
   checked: boolean;
   onChange: () => void;
   /** Accessible label (screen-reader text). */
@@ -25,6 +26,7 @@ interface ToggleProps {
  * AppSettingsModal variants previously only had `aria-label`).
  */
 export const Toggle: FC<ToggleProps> = ({
+  id,
   checked,
   onChange,
   label,
@@ -40,6 +42,7 @@ export const Toggle: FC<ToggleProps> = ({
 
   return (
     <button
+      id={id}
       type="button"
       role="switch"
       aria-checked={checked}

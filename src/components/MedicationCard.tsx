@@ -49,6 +49,7 @@ function colorTagClasses(colorTag: string | undefined): { bg: string; border: st
 interface MedicationCardProps {
   medication: Medication;
   viewFilter?: 'all' | 'alerts' | 'sufficient';
+  isCompact?: boolean;
   onOpenRefill: (medication: Medication) => void;
   onEdit: (medication: Medication) => void;
   onDelete: (id: string) => void;
@@ -63,6 +64,7 @@ interface MedicationCardProps {
 export const MedicationCard: FC<MedicationCardProps> = ({
   medication,
   viewFilter = 'all',
+  isCompact = false,
   onOpenRefill,
   onEdit,
   onDelete,
@@ -429,6 +431,174 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   // the color choice is visible even when the status color overrides
   // the icon box).
   const tag = colorTagClasses(medication.colorTag);
+
+  // -------------------------------------------------------------
+  // COMPACT VIEW: "جميع الأدوية" (ALL - COMPACT MODE)
+  // Dense layout: reduces height by ~70% while keeping all critical
+  // details (Name, Stock, Unit, Strips, Daily Dose, Depletion date,
+  // status badge, visual progress bar, refill, consume, and menu).
+  // -------------------------------------------------------------
+  if (isCompact && viewFilter === 'all') {
+    const isOut = statusInfo.status === 'out_of_stock';
+    const isCrit = statusInfo.status === 'critical';
+    const isWarn = statusInfo.status === 'warning';
+    const isConsumedToday = medication.lastConsumedDate === getTodayDateString();
+
+    return (
+      <div
+        id={`med-card-${medication.id}`}
+        className={`bg-white rounded-2xl border border-slate-200/90 p-3 shadow-2xs hover:shadow-xs transition relative overflow-hidden border-r-4 ${tag.border} ${
+          isOut
+            ? 'bg-red-50/20'
+            : isCrit
+            ? 'bg-rose-50/20'
+            : isWarn
+            ? 'bg-amber-50/15'
+            : ''
+        }`}
+      >
+        {/* Top line: Name + Category + Status Badge + Actions */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0 flex-wrap">
+            <h3 className="text-sm font-bold text-slate-900 leading-tight truncate max-w-[150px] sm:max-w-xs">
+              {medication.name}
+            </h3>
+            {medication.category && (
+              <span className="text-[10px] font-medium bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded-md">
+                {medication.category}
+              </span>
+            )}
+            {isOut ? (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700 flex items-center gap-1 shrink-0">
+                <AlertCircle className="w-3 h-3" />
+                <span>نفد المخزون</span>
+              </span>
+            ) : isCrit ? (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 flex items-center gap-1 shrink-0">
+                <Clock className="w-3 h-3" />
+                <span>حرج ({statusInfo.daysLeft} {statusInfo.daysLeft === 1 ? 'يوم' : statusInfo.daysLeft === 2 ? 'يومان' : 'أيام'})</span>
+              </span>
+            ) : isWarn ? (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 flex items-center gap-1 shrink-0">
+                <Clock className="w-3 h-3" />
+                <span>تنبيه ({statusInfo.daysLeft} أيام)</span>
+              </span>
+            ) : (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 flex items-center gap-1 shrink-0">
+                <CheckCircle2 className="w-3 h-3" />
+                <span>آمن ({statusInfo.daysLeft} يوم)</span>
+              </span>
+            )}
+          </div>
+
+          {/* Quick Actions at top left */}
+          <div className="flex items-center gap-1 shrink-0">
+            {onConsumeDose && (
+              isConsumedToday ? (
+                <span
+                  title="تم تناول جرعة اليوم"
+                  className="w-7 h-7 flex items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-200 text-xs"
+                >
+                  <CheckCircle className="w-3.5 h-3.5" />
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onConsumeDose(medication.id)}
+                  disabled={effPills <= 0 || medication.dailyDose <= 0}
+                  title={`تناول جرعة اليوم (-${medication.dailyDose} ${medication.unit})`}
+                  className={`w-7 h-7 flex items-center justify-center rounded-lg border text-xs transition active:scale-95 ${
+                    effPills <= 0 || medication.dailyDose <= 0
+                      ? 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed'
+                      : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
+                  }`}
+                >
+                  <Pill className="w-3.5 h-3.5 rotate-45" />
+                </button>
+              )
+            )}
+
+            <button
+              type="button"
+              onClick={() => onOpenRefill(medication)}
+              title="تعبئة رصيد"
+              className="w-7 h-7 flex items-center justify-center rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 transition active:scale-95"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+
+            <MedicationMenu
+              medication={medication}
+              isAutoActive={isAutoActive}
+              showRefillInMenu={false}
+              onOpenRefill={onOpenRefill}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              onToggleAutoDeduct={onToggleAutoDeduct}
+            />
+          </div>
+        </div>
+
+        {/* Second line: Crucial details (Remaining stock, daily dose, depletion date) */}
+        <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between gap-2 text-xs flex-wrap">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-[11px] text-slate-500 font-medium">المتبقي:</span>
+            <span
+              className={`font-extrabold font-mono text-sm ${
+                effPills === 0
+                  ? 'text-red-600'
+                  : effPills <= medication.dailyDose * 2
+                  ? 'text-rose-600'
+                  : 'text-slate-800'
+              }`}
+            >
+              {effPills}
+            </span>
+            <span className="text-[11px] text-slate-600 font-medium">
+              {medication.unit || 'قرص'}
+            </span>
+            {stripsDesc && (
+              <span className="text-[10px] text-slate-400 font-medium truncate">
+                ({stripsDesc})
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 text-[11px] text-slate-600">
+            <div className="flex items-center gap-1">
+              <span className="text-slate-400">الجرعة:</span>
+              <span className="font-mono font-bold text-teal-800">{medication.dailyDose}</span>
+              <span className="text-slate-400 text-[10px]">/يوم</span>
+            </div>
+
+            <span className="text-slate-300">•</span>
+
+            <div className="flex items-center gap-1">
+              <Calendar className="w-3 h-3 text-slate-400" />
+              <span className="text-slate-400">النفاذ:</span>
+              <span className="font-bold text-slate-800">{depletion.formattedArabic}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Mini Visual Stock Progress Bar */}
+        <div className="mt-2 w-full h-1 bg-slate-100 rounded-full overflow-hidden">
+          <div
+            className={`h-full transition-all duration-500 ${getProgressColor()}`}
+            style={{ width: `${percentLeft}%` }}
+          />
+        </div>
+
+        {!isAutoActive && (
+          <div className="mt-1.5 text-[10px] text-amber-700 bg-amber-50 border border-amber-200/70 px-2 py-0.5 rounded-md flex items-center justify-between">
+            <span>الخصم التلقائي متوقف لهذا الدواء</span>
+          </div>
+        )}
+        {undoRefillAction}
+      </div>
+    );
+  }
+
   return (
     <div
       id={`med-card-${medication.id}`}

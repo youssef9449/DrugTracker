@@ -32,6 +32,7 @@ import { AndroidFab } from './components/AndroidFab';
 import { EmptyState } from './components/EmptyState';
 import { DoseAlarmModal } from './components/DoseAlarmModal';
 import { UpdatePrompt } from './components/UpdatePrompt';
+import { Toggle } from './components/ui/Toggle';
 import { playSuccessChime } from './utils/sound';
 
 import {
@@ -86,6 +87,8 @@ const FONT_SIZE_KEY = 'android_med_tracker_font_size_v1';
 // threshold itself is derived per-medication from warningThresholdDays
 // via getCriticalThresholdDays() — see src/types.ts.
 const CRITICAL_STOCK_ALERTS_KEY = 'android_med_tracker_critical_alerts_v1';
+// Compact card view preference for "All Medications" tab
+const COMPACT_VIEW_KEY = 'android_med_tracker_compact_view_v1';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(getInitialTab);
@@ -163,6 +166,8 @@ export default function App() {
   // Font size toggle: 'normal' (default) or 'large'. Persisted to
   // localStorage and applied as a CSS class on the phone-frame.
   const [fontScale, setFontScale] = useState<'normal' | 'large'>('normal');
+  // Compact card view for "All Medications" tab
+  const [isCompactView, setIsCompactView] = useState<boolean>(false);
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
   const restoreInFlightRef = useRef<Set<string>>(new Set());
   const refillUndoInFlightRef = useRef<Set<string>>(new Set());
@@ -281,6 +286,11 @@ export default function App() {
 
     // Global auto-deduct — default true.
     setGlobalAutoDeductEnabled(loadString(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'true') !== 'false');
+
+    // Compact view preference for All Medications
+    if (loadString(COMPACT_VIEW_KEY, 'false') === 'true') {
+      setIsCompactView(true);
+    }
 
     // Initialize the in-app notifications flag from the async permission
     // state if no preference has been explicitly saved yet by the user.
@@ -455,6 +465,15 @@ export default function App() {
     json: false,
     enabled: hydrated,
     failureMessage: PERSIST_FAILURE_MESSAGES.autoDeduct,
+    showToast,
+  });
+
+  usePersistentEffect({
+    storageKey: COMPACT_VIEW_KEY,
+    value: String(isCompactView),
+    json: false,
+    enabled: hydrated,
+    failureMessage: 'تعذر حفظ خيار العرض',
     showToast,
   });
 
@@ -1346,14 +1365,16 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-                  <div className="mx-4 mt-3 grid grid-cols-2 items-start gap-2 text-center text-xs">
-                    <div className="bg-white p-2.5 rounded-2xl border border-slate-200/80 shadow-xs">
-                      <span className="text-[10px] text-slate-500 block">إجمالي الأدوية</span>
-                      <span className="text-base font-extrabold font-mono text-slate-800">{medications.length}</span>
+                  <div className="mx-4 mt-3 grid grid-cols-2 items-stretch gap-2 text-center text-xs">
+                    <div className="bg-white p-2.5 rounded-2xl border border-slate-200/80 shadow-xs h-full flex flex-col justify-center">
+                      <span className="text-[10px] text-slate-500 block leading-tight">إجمالي الأدوية</span>
+                      <div className="h-6 flex items-center justify-center mt-0.5">
+                        <span className="text-base font-extrabold font-mono text-slate-800 leading-none">{medications.length}</span>
+                      </div>
                     </div>
-                    <div className="bg-white p-2.5 rounded-2xl border border-slate-200/80 shadow-xs">
-                      <span className="text-[10px] text-slate-500 block">حالة المخزون</span>
-                      <div className="flex items-center justify-center gap-1.5 mt-0.5 text-[11px]">
+                    <div className="bg-white p-2.5 rounded-2xl border border-slate-200/80 shadow-xs h-full flex flex-col justify-center">
+                      <span className="text-[10px] text-slate-500 block leading-tight">حالة المخزون</span>
+                      <div className="h-6 flex items-center justify-center gap-1.5 mt-0.5 text-[11px] leading-none">
                         <span className="text-emerald-700 font-bold font-mono">{sufficientCount} آمن</span>
                         <span className="text-slate-300">•</span>
                         <span className={`font-mono font-bold ${alertsCount > 0 ? 'text-rose-600' : 'text-slate-500'}`}>
@@ -1362,6 +1383,37 @@ export default function App() {
                       </div>
                     </div>
                   </div>
+
+                  {/* View mode toggle: compact vs detailed cards */}
+                  <div className="mx-4 mt-3 flex items-center justify-between bg-white px-3 py-2 rounded-2xl border border-slate-200/80 shadow-2xs">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-800">قائمة الأدوية</span>
+                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-mono font-bold">
+                        {filteredMedications.length}
+                      </span>
+                    </div>
+
+                    <label
+                      htmlFor="toggle-compact-view"
+                      className="flex items-center gap-2 cursor-pointer select-none"
+                    >
+                      <span className="text-xs font-medium text-slate-700">
+                        {isCompactView ? 'عرض مختصر' : 'عرض تفصيلي'}
+                      </span>
+                      <Toggle
+                        id="toggle-compact-view"
+                        checked={isCompactView}
+                        onChange={() => {
+                          const next = !isCompactView;
+                          setIsCompactView(next);
+                          showToast(next ? 'تم تفعيل العرض المختصر' : 'تم تفعيل العرض التفصيلي');
+                        }}
+                        label="تبديل العرض بين المختصر والتفصيلي"
+                        size="sm"
+                        color="teal"
+                      />
+                    </label>
+                  </div>
                 </div>
               )}
 
@@ -1369,7 +1421,7 @@ export default function App() {
                 <LowStockBanner medicationsWithStatus={medicationsWithStatus} onNavigateToShopping={() => setActiveTab('shopping')} />
               )}
 
-              <div className="p-4 space-y-3">
+              <div className={`p-4 ${isCompactView && filter === 'all' ? 'space-y-2' : 'space-y-3'}`}>
                 {filteredMedications.length === 0 ? (
                   <EmptyState
                     hasSearch={Boolean(searchQuery.trim())}
@@ -1384,6 +1436,7 @@ export default function App() {
                       key={med.id}
                       medication={med}
                       viewFilter={filter}
+                      isCompact={isCompactView}
                       onOpenRefill={setRefillMedication}
                       onEdit={(m) => {
                         setEditingMedication(m);

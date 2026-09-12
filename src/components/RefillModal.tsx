@@ -42,7 +42,7 @@ export const RefillModal: FC<RefillModalProps> = ({
 
   const sz = getMedSizes(medication);
   const isSolid = sz.isSolid;
-  const availableUnits = getAvailableUnits(sz);
+  const availableUnits = getAvailableUnits(sz, medication.unit);
   const boxLabel = medication.unit === 'مل' ? 'عبوة' : 'علبة';
 
   // Convert unit qty → pills.
@@ -144,39 +144,38 @@ export const RefillModal: FC<RefillModalProps> = ({
                 <span>مواصفات العلبة: {medication.stripsPerBox} أشرطة × {medication.pillsPerStrip} {medication.unit}</span>
               </div>
             )}
-            {!isSolid && medication.packageSize && medication.packageSize > 0 && (
+            {!isSolid && (
               <div className="mt-1 text-[11px] text-teal-800 bg-teal-50 px-2 py-0.5 rounded-md border border-teal-200/60 inline-flex items-center gap-1">
                 <Box className="w-3 h-3 text-teal-600" />
-                <span>سعة العبوة: {medication.packageSize} {medication.unit}</span>
+                <span>سعة العبوة: {sz.boxSize} {medication.unit}</span>
               </div>
             )}
           </div>
 
           {/* Unit selector chips */}
-          {availableUnits.length > 1 && (
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {availableUnits.map((u) => {
-                const isActive = refillUnit === u;
-                const icon = u === 'pills' ? <Pill className="w-3 h-3" /> : u === 'boxes' ? <Box className="w-3 h-3" /> : <Layers className="w-3 h-3" />;
-                const label = u === 'pills' ? medication.unit : u === 'boxes' ? boxLabel : 'شريط';
-                return (
-                  <button
-                    key={u}
-                    type="button"
-                    onClick={() => handleUnitChange(u)}
-                    className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition ${
-                      isActive
-                        ? 'bg-teal-700 text-white shadow-xs'
-                        : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    {icon}
-                    <span>{label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {availableUnits.map((u) => {
+              const isActive = refillUnit === u;
+              const icon = u === 'pills' ? <Pill className="w-3 h-3" /> : u === 'boxes' ? <Box className="w-3 h-3" /> : <Layers className="w-3 h-3" />;
+              const label = u === 'pills' ? medication.unit : u === 'boxes' ? boxLabel : 'شريط';
+              return (
+                <button
+                  key={u}
+                  type="button"
+                  onClick={() => handleUnitChange(u)}
+                  disabled={availableUnits.length === 1}
+                  className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition ${
+                    isActive
+                      ? 'bg-teal-700 text-white shadow-xs'
+                      : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  {icon}
+                  <span>{label}</span>
+                </button>
+              );
+            })}
+          </div>
 
           {/* Quantity input with +/- in the selected unit */}
           <div className="flex items-center justify-center gap-2">
@@ -243,7 +242,11 @@ export const RefillModal: FC<RefillModalProps> = ({
 // getAvailableUnits is local to this modal — it seeds ['pills'] (distinct
 // from PharmacyShoppingView's getAvailableUnits which seeds ['boxes']).
 
-function getAvailableUnits(sz: ReturnType<typeof getMedSizes>): RefillUnit[] {
+function getAvailableUnits(sz: ReturnType<typeof getMedSizes>, medUnit?: string): RefillUnit[] {
+  // For liquid medications in 'مل', restocking is measured exclusively in bottles ('عبوة')
+  if (medUnit === 'مل') {
+    return ['boxes'];
+  }
   const units: RefillUnit[] = ['pills'];
   if (sz.boxSize > 0) units.push('boxes');
   if (sz.hasStrips && sz.stripSize > 0) units.push('strips');

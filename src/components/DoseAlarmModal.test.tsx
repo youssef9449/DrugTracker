@@ -167,6 +167,11 @@ describe('DoseAlarmModal', () => {
       expect(screen.getByText('Test Med')).toBeInTheDocument();
       const root = document.querySelector('[data-dose-id="d2"]');
       expect(root).toBeTruthy();
+      // Slot amount is 1 — must not show medication dailyDose (4) as the dose.
+      expect(root!.textContent).toMatch(/1/);
+      expect(root!.textContent).not.toMatch(/الجرعة المطلوبة:\s*4\b/);
+      // 14:00 → Arabic 12h "2:00 م"
+      expect(root!.textContent).toMatch(/2:00\s*م/);
     });
 
     it('Take Dose passes the exact doseId from the alarm', () => {

@@ -4,6 +4,7 @@ import { renderHook, cleanup } from '@testing-library/react';
 import type { Medication } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
 import { useDoseReminderScheduler, getDoseReminderSlots } from './useDoseReminderScheduler';
+import { LEGACY_DOSE_ID } from '../utils/notifications';
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: { getPlatform: () => 'web' },
@@ -1016,5 +1017,69 @@ describe('Phase 4 — dose-scoped cancel on removal', () => {
     const slots = getDoseReminderSlots(med);
     expect(slots.map((s) => s.doseId)).toEqual(['d1', 'd2']);
     expect(slots.find((s) => s.doseId === 'd1')?.amount).toBe(1);
+  });
+
+  it('skips empty doseIds (does not map to LEGACY_DOSE_ID)', () => {
+    const med = makeMed({
+      doseSchedule: [
+        { id: '', amount: 1, time: '08:00' },
+        { id: 'd2', amount: 1, time: '14:00' },
+      ],
+      dosesPerDay: 2,
+    });
+    const slots = getDoseReminderSlots(med);
+    expect(slots.map((s) => s.doseId)).toEqual(['d2']);
+    expect(slots.every((s) => s.doseId !== LEGACY_DOSE_ID)).toBe(true);
+  });
+
+  it('skips whitespace-only doseIds', () => {
+    const med = makeMed({
+      doseSchedule: [
+        { id: '   ', amount: 1, time: '08:00' },
+        { id: 'd2', amount: 1, time: '14:00' },
+      ],
+      dosesPerDay: 2,
+    });
+    const slots = getDoseReminderSlots(med);
+    expect(slots.map((s) => s.doseId)).toEqual(['d2']);
+  });
+
+  it('skips missing doseIds rather than becoming LEGACY_DOSE_ID', () => {
+    const med = makeMed({
+      doseSchedule: [
+        { id: undefined as unknown as string, amount: 1, time: '08:00' },
+        { id: 'd2', amount: 1, time: '14:00' },
+      ],
+      dosesPerDay: 2,
+    });
+    const slots = getDoseReminderSlots(med);
+    expect(slots.map((s) => s.doseId)).toEqual(['d2']);
+    expect(slots.some((s) => s.doseId === LEGACY_DOSE_ID)).toBe(false);
+  });
+
+  it('two empty-id rows do not collapse into one legacy slot', () => {
+    const med = makeMed({
+      doseSchedule: [
+        { id: '', amount: 1, time: '08:00' },
+        { id: '', amount: 2, time: '14:00' },
+      ],
+      dosesPerDay: 2,
+    });
+    const slots = getDoseReminderSlots(med);
+    expect(slots).toEqual([]);
+  });
+
+  it('legacy med without doseSchedule still uses LEGACY_DOSE_ID', () => {
+    const med = makeMed({
+      doseSchedule: undefined,
+      dosesPerDay: undefined,
+      reminderEnabled: true,
+      reminderTime: '09:00',
+      dailyDose: 1,
+    });
+    const slots = getDoseReminderSlots(med);
+    expect(slots).toHaveLength(1);
+    expect(slots[0].doseId).toBe(LEGACY_DOSE_ID);
+    expect(slots[0].time).toBe('09:00');
   });
 });

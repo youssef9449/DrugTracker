@@ -1,5 +1,10 @@
 import { Medication, ConsumptionLog } from '../types';
-import { getTodayDateString, effectiveCurrentPills } from './dateCalculations';
+import {
+  getTodayDateString,
+  effectiveCurrentPills,
+  computeDueDoseBreakdown,
+  mutationSettlementLastSyncDate,
+} from './dateCalculations';
 import { generateId } from './id';
 
 /**
@@ -37,15 +42,32 @@ interface SettleAndAdjustResult {
 export function settleAndAdjust(
   med: Medication,
   delta: number,
-  todayStr: string = getTodayDateString()
+  todayStr: string = getTodayDateString(),
+  now: Date = new Date()
 ): SettleAndAdjustResult {
-  const effPills = effectiveCurrentPills(med, todayStr);
-  const newSnapshot = Math.max(0, effPills + delta);
+  const breakdown = computeDueDoseBreakdown(med, now, todayStr);
+  // For the reminderTime-gated path, settle at the PAST-only balance
+  // (exclude today's projected auto-dose) so a later manual consume can
+  // replace today's dose without double-deduction; today's dose stays
+  // dynamic (projected by effectiveCurrentPills via todayDue) and is
+  // settled at the next existing execution point (app-open sync or a
+  // later mutation), NOT automatically at the calendar-day boundary.
+  // For legacy, settle at the full effective balance (today included —
+  // pre-change behavior).
+  const settleBase = breakdown.gated
+    ? Math.max(0, med.currentPills - breakdown.pastDueDoses * med.dailyDose)
+    : Math.max(0, effectiveCurrentPills(med, todayStr, now));
+  const newSnapshot = Math.max(0, settleBase + delta);
+  const newLastSync = mutationSettlementLastSyncDate(
+    todayStr,
+    breakdown.consumedToday,
+    breakdown.gated
+  );
   return {
     updatedMed: {
       ...med,
       currentPills: newSnapshot,
-      lastSyncDate: todayStr,
+      lastSyncDate: newLastSync,
     },
     appliedDelta: delta,
   };
@@ -82,18 +104,31 @@ interface ConsumeDoseResult {
 export function consumeDose(
   med: Medication,
   source: 'alarm' | 'manual',
-  todayStr: string = getTodayDateString()
+  todayStr: string = getTodayDateString(),
+  now: Date = new Date()
 ): ConsumeDoseResult {
-  const effPills = effectiveCurrentPills(med, todayStr);
-  const doseAmount = Math.min(med.dailyDose, effPills);
+  const breakdown = computeDueDoseBreakdown(med, now, todayStr);
+  // For the reminderTime-gated path, settle at the PAST-only balance
+  // (exclude today's projected auto-dose): the manual dose IS today's
+  // dose — it must REPLACE today's auto-dose, not add to it. This
+  // prevents double-deduction whether the manual consume happens
+  // before or after reminderTime. For legacy, settle at the full
+  // effective balance (today included — pre-change behavior).
+  const settleBase = breakdown.gated
+    ? Math.max(0, med.currentPills - breakdown.pastDueDoses * med.dailyDose)
+    : Math.max(0, effectiveCurrentPills(med, todayStr, now));
+  const doseAmount = Math.min(med.dailyDose, settleBase);
   if (doseAmount <= 0) {
     return { updatedMed: null, doseAmount: 0, log: null };
   }
-  const newSnapshot = Math.max(0, effPills - doseAmount);
+  const newSnapshot = Math.max(0, settleBase - doseAmount);
   const updatedMed: Medication = {
     ...med,
     currentPills: newSnapshot,
     lastConsumedDate: todayStr,
+    // Manual consume settles today's dose (the manual one) → lastSyncDate
+    // = today (today's dose is now done; effectiveCurrentPills returns
+    // currentPills as-is, no re-projection via the lastConsumedDate guard).
     lastSyncDate: todayStr,
   };
   const description =

@@ -5,6 +5,12 @@
  * changing auto-deduction or notification scheduling. The existing
  * engine continues to use `dailyDose` (total units per day) and a single
  * `reminderTime`.
+ *
+ * Source of truth:
+ *   When a non-empty `doseSchedule` is present, `doseSchedule.length` is
+ *   authoritative for the number of dose events. `dosesPerDay` is the
+ *   persisted/derived count and is kept in sync on save
+ *   (`dosesPerDay === doseSchedule.length`).
  */
 import type { Medication, MedicationDose } from '../types';
 import { generateId } from './id';
@@ -13,8 +19,19 @@ import { timeToMinutes } from './time';
 /** Sensible UI maximum for doses per day (compact mobile form). */
 export const MAX_DOSES_PER_DAY = 6;
 
-/** Default times used when expanding the schedule (HH:mm). */
-export const DEFAULT_DOSE_TIMES = ['08:00', '14:00', '21:00', '12:00', '18:00', '22:00'] as const;
+/**
+ * Default times used when expanding the schedule (HH:mm).
+ * Must already be chronological so empty/resized schedules display in order
+ * without relying solely on save-time sorting.
+ */
+export const DEFAULT_DOSE_TIMES = [
+  '08:00',
+  '12:00',
+  '14:00',
+  '18:00',
+  '21:00',
+  '22:00',
+] as const;
 
 const TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
 
@@ -49,8 +66,14 @@ export function totalDailyAmount(schedule: MedicationDose[]): number {
 
 /**
  * Map a medication (legacy or new) to a UI-ready schedule.
- * Legacy: one row from dailyDose + reminderTime (default 09:00).
- * New: use stored doseSchedule when present and non-empty.
+ *
+ * Source-of-truth rule:
+ *   If a non-empty stored `doseSchedule` exists, it is authoritative
+ *   (including its length). `dosesPerDay` is ignored when the two disagree.
+ *   Legacy meds without a schedule map to one row from dailyDose + reminderTime
+ *   (default time 09:00 when reminderTime is missing/invalid).
+ *
+ * Existing dose IDs are preserved; missing IDs get a new stable id once.
  */
 export function getDoseScheduleForUI(
   med: Pick<Medication, 'dailyDose' | 'reminderTime' | 'dosesPerDay' | 'doseSchedule'>
@@ -78,8 +101,12 @@ export function getDoseScheduleForUI(
 
 /**
  * Build / resize a working schedule when the user changes dosesPerDay.
- * Preserves existing rows when increasing; keeps the first N when decreasing.
- * New rows get default times and amount 1.
+ *
+ * - Increasing: existing rows are preserved (same id/amount/time objects);
+ *   new rows get amount 1 and unused chronological default times.
+ *   Result is sorted chronologically so the in-memory UI is already ordered.
+ * - Decreasing: keeps the first N rows of the current array unmodified;
+ *   extra rows are dropped.
  */
 export function resizeDoseSchedule(
   current: MedicationDose[],
@@ -90,13 +117,35 @@ export function resizeDoseSchedule(
   if (current.length > n) {
     return current.slice(0, n);
   }
-  const next = [...current];
-  const usedTimes = new Set(next.map((d) => normalizeTimeString(d.time)));
+
+  const next = current.map((d) => d); // shallow copy; keep same row objects
+  const usedTimes = new Set(
+    next.map((d) => normalizeTimeString(d.time)).filter((t) => isValidDoseTime(t))
+  );
+
   for (let i = next.length; i < n; i++) {
-    let time = DEFAULT_DOSE_TIMES[i] ?? '09:00';
-    if (usedTimes.has(time)) {
-      const fallback = DEFAULT_DOSE_TIMES.find((t) => !usedTimes.has(t));
-      if (fallback) time = fallback;
+    let time: string | undefined = DEFAULT_DOSE_TIMES.find((t) => !usedTimes.has(t));
+    if (!time) {
+      // All defaults taken — step +1h from last used, wrapping within the day.
+      let minutes = 8 * 60;
+      if (usedTimes.size > 0) {
+        const maxUsed = Math.max(
+          ...[...usedTimes].map((t) => timeToMinutes(t)).filter((m) => m >= 0)
+        );
+        minutes = (maxUsed + 60) % (24 * 60);
+      }
+      // Find a free slot
+      for (let attempt = 0; attempt < 24 * 60; attempt++) {
+        const h = Math.floor(minutes / 60);
+        const m = minutes % 60;
+        const candidate = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        if (!usedTimes.has(candidate)) {
+          time = candidate;
+          break;
+        }
+        minutes = (minutes + 60) % (24 * 60);
+      }
+      time = time ?? '09:00';
     }
     usedTimes.add(time);
     next.push({
@@ -105,7 +154,10 @@ export function resizeDoseSchedule(
       time,
     });
   }
-  return next;
+
+  // Keep in-memory schedule chronological after growth (IDs/amounts/times of
+  // existing rows are unchanged; only order may change).
+  return sortDoseSchedule(next);
 }
 
 export type DoseScheduleValidationError =
@@ -131,6 +183,7 @@ export interface DoseScheduleValidationResult {
 /**
  * Validate and normalize a working schedule before save.
  * Rejects zero/negative amounts, invalid times, and duplicate times.
+ * On success, `dosesPerDay` is always `schedule.length` (source of truth).
  */
 export function validateAndNormalizeDoseSchedule(
   dosesPerDay: number,

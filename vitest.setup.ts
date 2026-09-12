@@ -14,7 +14,17 @@
  *
  * Also registers the @testing-library/jest-dom matchers (toBeInTheDocument,
  * toBeVisible, etc.) on vitest's expect.
+ *
+ * Forces the test process timezone to UTC so the reminderTime-gated
+ * auto-deduction timing tests (which compare `now`'s local time-of-day
+ * to a `reminderTime` "HH:MM") are deterministic across machines. In
+ * production the device's real timezone is used (reminderTime is the
+ * user's local dose time); this only affects the test environment.
+ * Assigning `process.env.TZ` causes Node to re-evaluate the local
+ * timezone for subsequent Date operations.
  */
+process.env.TZ = 'UTC';
+
 import '@testing-library/jest-dom/vitest';
 import { vi } from 'vitest';
 

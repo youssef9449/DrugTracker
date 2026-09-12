@@ -187,13 +187,17 @@ export default function App() {
   // latest values.
   useEffect(() => {
     registerBackButtonHandler(() => {
+      // Top-most interactive overlay first.
       if (alarmingMedication) { dismissAlarm(); return true; }
+      // Phase 3A: explicit dose selector must dismiss on Android Back
+      // without exiting the app.
+      if (selectDoseMed) { setSelectDoseMed(null); return true; }
       if (isAddModalOpen) { setIsAddModalOpen(false); setEditingMedication(null); return true; }
       if (refillMedication) { setRefillMedication(null); return true; }
       if (isSettingsModalOpen) { setIsSettingsModalOpen(false); return true; }
       return false;
     });
-  }, [alarmingMedication, isAddModalOpen, refillMedication, isSettingsModalOpen, dismissAlarm]);
+  }, [alarmingMedication, selectDoseMed, isAddModalOpen, refillMedication, isSettingsModalOpen, dismissAlarm]);
 
   // #38: on unmount, remove all Capacitor listeners so duplicate
   // listeners don't accumulate across HMR re-initializations. Also

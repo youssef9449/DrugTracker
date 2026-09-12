@@ -12,6 +12,7 @@ import {
   Package,
 } from 'lucide-react';
 import { Medication } from '../types';
+import './MedicationCardMaterial.css';
 
 interface MedicationMenuProps {
   medication: Medication;
@@ -52,7 +53,7 @@ export function MedicationMenu({
 
   const updateMenuPosition = () => {
     const trigger = triggerRef.current;
-    if (!trigger) return;
+    if (!trigger || typeof window === 'undefined') return;
 
     const rect = trigger.getBoundingClientRect();
     const menuWidth = 192;

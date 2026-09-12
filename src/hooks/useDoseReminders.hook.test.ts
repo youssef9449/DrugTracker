@@ -197,6 +197,39 @@ describe('useDoseReminders', () => {
     });
   });
 
+
+    it('stores the notification doseId so Take Dose can consume that exact slot', () => {
+      const med = makeMed({
+        id: 'med-dose-id',
+        doseSchedule: [
+          { id: 'd1', amount: 2, time: '08:00' },
+          { id: 'd2', amount: 1, time: '14:00' },
+        ],
+        dosesPerDay: 2,
+        dailyDose: 3,
+      });
+      const { result } = renderHook(() =>
+        useDoseReminders(defaultOpts({ medications: [med] }))
+      );
+      act(() => {
+        result.current.openAlarm('med-dose-id', 'd2');
+      });
+      expect(result.current.alarmingMedication?.id).toBe('med-dose-id');
+      expect(result.current.alarmingDoseId).toBe('d2');
+    });
+
+    it('legacy openAlarm without doseId leaves alarmingDoseId null', () => {
+      const med = makeMed({ id: 'med-legacy-alarm' });
+      const { result } = renderHook(() =>
+        useDoseReminders(defaultOpts({ medications: [med] }))
+      );
+      act(() => {
+        result.current.openAlarm('med-legacy-alarm');
+      });
+      expect(result.current.alarmingMedication?.id).toBe('med-legacy-alarm');
+      expect(result.current.alarmingDoseId).toBeNull();
+    });
+
   describe('testAlarm', () => {
     it('opens the modal without writing FIRED_KEY', () => {
       const med = makeMed({ id: 'med-test' });

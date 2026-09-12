@@ -994,16 +994,28 @@ export async function cancelDoseReminder(medId: string, doseId?: string): Promis
   }
 }
 
-/** Cancel the current and legacy one-shot snooze IDs for a medication. */
-export async function cancelSnoozedDoseReminder(medId: string): Promise<void> {
+/**
+ * Cancel pending one-shot snooze notification(s) for a medication.
+ *
+ * - cancelSnoozedDoseReminder(medId) — legacy med-only + historical dose id.
+ * - cancelSnoozedDoseReminder(medId, doseId) — that dose's snooze id only
+ *   (plus the legacy med-only id when doseId is LEGACY_DOSE_ID / omitted).
+ */
+export async function cancelSnoozedDoseReminder(
+  medId: string,
+  doseId?: string
+): Promise<void> {
   if (!isNativePlatform()) return;
   try {
-    await LocalNotifications.cancel({
-      notifications: [
-        { id: snoozeDoseReminderId(medId) },
-        { id: notificationId('dose', medId) },
-      ],
-    });
+    const ids: { id: number }[] = [
+      { id: snoozeDoseReminderId(medId, doseId) },
+    ];
+    // Always clear historical med-only / immediate-dose ids so a
+    // pre-Phase-3B snooze cannot linger (including when cancelling a
+    // multi-dose slot that may share an old med-level pending notif).
+    ids.push({ id: snoozeDoseReminderId(medId) });
+    ids.push({ id: notificationId('dose', medId) });
+    await LocalNotifications.cancel({ notifications: ids });
   } catch (err) {
     console.warn('[notifications] cancelSnoozedDoseReminder failed:', err);
   }
@@ -1013,13 +1025,13 @@ export async function cancelSnoozedDoseReminder(medId: string): Promise<void> {
  * Schedule a ONE-SHOT dose-reminder notification `minutes` in the future.
  *
  * Called by useDoseReminders.snoozeAlarm when the user hits "غفوة" on the
- * DoseAlarmModal. Uses the immediate 'dose' id band (3M) so the snoozed
- * notification replaces (not duplicates) any pending immediate dose
- * notification. When it fires (foreground or background):
+ * DoseAlarmModal. Uses the doseSnooze id band so the snoozed notification
+ * replaces (not duplicates) any pending snooze for the same med/dose.
+ * When it fires (foreground or background):
  *   - Background: shown in the system tray with the channel's default
  *     sound.
  *   - Foreground: the localNotificationReceived listener calls
- *     openAlarm → re-opens the DoseAlarmModal.
+ *     openAlarm → re-opens the DoseAlarmModal (with doseId in extra).
  *
  * This replaces the old polling-based snooze, which only re-opened the
  * modal while the app was in the foreground. Now the snoozed reminder
@@ -1027,7 +1039,10 @@ export async function cancelSnoozedDoseReminder(medId: string): Promise<void> {
  *
  * NOTE: the snoozed notification does NOT repeat — it fires once. The
  * recurring daily reminder (scheduleDoseReminder, doseAlarm band) is
- * unaffected and will still fire tomorrow at reminderTime.
+ * unaffected and will still fire on later days at the slot time.
+ *
+ * Phase 3B: optional `doseId` scopes the notification id and payload so
+ * snoozing one multi-dose slot does not cancel or replace another.
  */
 export async function scheduleSnoozedDoseReminder(
   medId: string,
@@ -1036,6 +1051,7 @@ export async function scheduleSnoozedDoseReminder(
   unit: string,
   reminderTime: string | undefined,
   minutes: number,
+  doseId?: string
 ): Promise<void> {
   const fireAt = new Date(Date.now() + minutes * 60_000);
   const timeHint = reminderTime ? ` (موعد الجرعة الأصلي ${reminderTime})` : '';
@@ -1054,7 +1070,7 @@ export async function scheduleSnoozedDoseReminder(
       await LocalNotifications.schedule({
         notifications: [
           {
-            id: snoozeDoseReminderId(medId),
+            id: snoozeDoseReminderId(medId, doseId),
             title,
             body,
             schedule: {
@@ -1068,6 +1084,7 @@ export async function scheduleSnoozedDoseReminder(
             autoCancel: true,
             extra: {
               medicationId: medId,
+              ...(doseId && doseId !== LEGACY_DOSE_ID ? { doseId } : {}),
             },
           },
         ],

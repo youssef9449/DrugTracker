@@ -811,6 +811,47 @@ export default function App() {
     if (soundEnabled) playSuccessChime();
   };
 
+
+  /** Drop doseConsumption / history entries whose doseId is no longer on the schedule. */
+  const pruneDoseConsumption = (
+    medData: Omit<Medication, 'id' | 'createdAt'>,
+    existing?: Medication
+  ): Omit<Medication, 'id' | 'createdAt'> => {
+    const schedule = medData.doseSchedule;
+    if (!Array.isArray(schedule) || schedule.length === 0) {
+      // Legacy / cleared schedule: do not force-migrate doseConsumption.
+      return medData;
+    }
+    const valid = new Set(schedule.map((d) => d.id));
+    const prev = medData.doseConsumption ?? existing?.doseConsumption;
+    const prevHist =
+      medData.doseConsumptionHistory ?? existing?.doseConsumptionHistory;
+    let changed = false;
+    let next = prev;
+    if (prev) {
+      next = {};
+      for (const [id, date] of Object.entries(prev)) {
+        if (valid.has(id)) next[id] = date;
+        else changed = true;
+      }
+      if (Object.keys(next).length !== Object.keys(prev).length) changed = true;
+    }
+    let nextHist = prevHist;
+    if (prevHist) {
+      nextHist = {};
+      for (const [id, dates] of Object.entries(prevHist)) {
+        if (valid.has(id)) nextHist[id] = dates;
+        else changed = true;
+      }
+    }
+    if (!changed && next === prev && nextHist === prevHist) return medData;
+    return {
+      ...medData,
+      ...(next ? { doseConsumption: next } : {}),
+      ...(nextHist ? { doseConsumptionHistory: nextHist } : {}),
+    };
+  };
+
   const handleSaveMedication = (medData: Omit<Medication, 'id' | 'createdAt'>, editId?: string) => {
     if (editId) {
       // Settlement: if the user is changing the dailyDose, we MUST NOT
@@ -832,12 +873,13 @@ export default function App() {
         // Merge the settled med with the rest of the form data (name,
         // category, reminder settings, etc.) — but keep the settled
         // currentPills + lastSyncDate (don't let the form overwrite them).
+        const pruned = pruneDoseConsumption(medData, existing);
         setMedications((prev) =>
           prev.map((m) =>
             m.id === editId
               ? {
                   ...m,
-                  ...medData,
+                  ...pruned,
                   // Override medData.currentPills + lastSyncDate with
                   // the settled values. medData.currentPills in edit
                   // mode equals initialData.currentPills (the input is
@@ -857,7 +899,8 @@ export default function App() {
         }
       } else {
         // No dose change (or new med): just save normally.
-        setMedications((prev) => prev.map((m) => (m.id === editId ? { ...m, ...medData } : m)));
+        const pruned = pruneDoseConsumption(medData, existing);
+        setMedications((prev) => prev.map((m) => (m.id === editId ? { ...m, ...pruned } : m)));
       }
       showToast(
         medData.reminderEnabled

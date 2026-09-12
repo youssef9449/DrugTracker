@@ -10,6 +10,7 @@ import {
   Droplets,
   Syringe,
   Package,
+  X,
 } from 'lucide-react';
 import { Medication } from '../types';
 import './MedicationCardMaterial.css';
@@ -47,6 +48,7 @@ export function MedicationMenu({
   onToggleAutoDeduct,
 }: MedicationMenuProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -94,7 +96,28 @@ export function MedicationMenu({
     };
   }, [menuOpen, updateMenuPosition]);
 
+  useEffect(() => {
+    if (!deleteConfirmOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setDeleteConfirmOpen(false);
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [deleteConfirmOpen]);
+
   const closeMenu = () => setMenuOpen(false);
+
+  const requestDeleteConfirmation = () => {
+    closeMenu();
+    setDeleteConfirmOpen(true);
+  };
+
+  const confirmDelete = () => {
+    setDeleteConfirmOpen(false);
+    onDelete(medication.id);
+  };
 
   const runAction = (action: () => void) => {
     closeMenu();
@@ -144,12 +167,80 @@ export function MedicationMenu({
           <button
             type="button"
             role="menuitem"
-            onClick={() => runAction(() => onDelete(medication.id))}
+            onClick={requestDeleteConfirmation}
             className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-right text-rose-600 transition hover:bg-rose-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
           >
             <Trash2 className="h-4 w-4" aria-hidden="true" />
             <span className="font-medium">حذف الدواء</span>
           </button>
+        </div>,
+        document.body
+      )
+    : null;
+
+  const deleteDialog = deleteConfirmOpen && typeof document !== 'undefined'
+    ? createPortal(
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-[2px]"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setDeleteConfirmOpen(false);
+          }}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby={`delete-medication-title-${medication.id}`}
+            aria-describedby={`delete-medication-description-${medication.id}`}
+            dir="rtl"
+            className="w-full max-w-sm overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20"
+          >
+            <div className="flex items-start gap-3 p-5 pb-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-rose-50 text-rose-600">
+                <Trash2 className="h-5 w-5" aria-hidden="true" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2
+                  id={`delete-medication-title-${medication.id}`}
+                  className="text-base font-bold text-slate-900"
+                >
+                  حذف الدواء؟
+                </h2>
+                <p
+                  id={`delete-medication-description-${medication.id}`}
+                  className="mt-1 text-sm leading-6 text-slate-600"
+                >
+                  هل أنت متأكد من حذف «{medication.name}»؟ لا يمكن التراجع عن هذا الإجراء.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmOpen(false)}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500"
+                aria-label="إغلاق"
+                title="إلغاء"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+
+            <div className="flex gap-2 border-t border-slate-100 bg-slate-50/70 p-4">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmOpen(false)}
+                className="min-h-10 flex-1 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                className="min-h-10 flex-1 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+              >
+                حذف الدواء
+              </button>
+            </div>
+          </div>
         </div>,
         document.body
       )
@@ -196,7 +287,7 @@ export function MedicationMenu({
 
       <button
         type="button"
-        onClick={() => onDelete(medication.id)}
+        onClick={requestDeleteConfirmation}
         className={`${iconButtonClass} border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100`}
         aria-label="حذف الدواء"
         title="حذف الدواء"
@@ -220,6 +311,7 @@ export function MedicationMenu({
       </button>
 
       {menu}
+      {deleteDialog}
     </div>
   );
 }

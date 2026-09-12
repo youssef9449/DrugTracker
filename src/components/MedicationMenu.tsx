@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   MoreVertical,
@@ -51,7 +51,7 @@ export function MedicationMenu({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const updateMenuPosition = () => {
+  const updateMenuPosition = useCallback(() => {
     const trigger = triggerRef.current;
     if (!trigger || typeof window === 'undefined') return;
 
@@ -70,7 +70,7 @@ export function MedicationMenu({
         : Math.max(viewportPadding, rect.top - estimatedHeight - 8);
 
     setMenuPosition({ top, left });
-  };
+  }, []);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -83,35 +83,16 @@ export function MedicationMenu({
       setMenuOpen(false);
     };
 
-    const handleViewportChange = () => {
-      const trigger = triggerRef.current;
-      if (!trigger) return;
-      const rect = trigger.getBoundingClientRect();
-      const menuWidth = 192;
-      const viewportPadding = 8;
-      const left = Math.max(
-        viewportPadding,
-        Math.min(rect.left, window.innerWidth - menuWidth - viewportPadding)
-      );
-      const estimatedHeight = 180;
-      const below = rect.bottom + 8;
-      const top =
-        below + estimatedHeight <= window.innerHeight - viewportPadding
-          ? below
-          : Math.max(viewportPadding, rect.top - estimatedHeight - 8);
-      setMenuPosition({ top, left });
-    };
-
     document.addEventListener('pointerdown', handlePointerDown);
-    window.addEventListener('resize', handleViewportChange);
-    window.addEventListener('scroll', handleViewportChange, true);
+    window.addEventListener('resize', updateMenuPosition);
+    window.addEventListener('scroll', updateMenuPosition, true);
 
     return () => {
       document.removeEventListener('pointerdown', handlePointerDown);
-      window.removeEventListener('resize', handleViewportChange);
-      window.removeEventListener('scroll', handleViewportChange, true);
+      window.removeEventListener('resize', updateMenuPosition);
+      window.removeEventListener('scroll', updateMenuPosition, true);
     };
-  }, [menuOpen]);
+  }, [menuOpen, updateMenuPosition]);
 
   const closeMenu = () => setMenuOpen(false);
 

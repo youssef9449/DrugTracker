@@ -532,10 +532,13 @@ export function effectiveDaysLeft(
   med: Medication,
   todayStr: string = getTodayDateString()
 ): number {
-  if (med.dailyDose <= 0) return NEVER_DEPLETES_DAYS;
+  // Prefer schedule sum so multi-dose stays correct even if dailyDose
+  // was briefly out of sync with doseSchedule amounts.
+  const dayAmt = dailyScheduleAmount(med);
+  if (dayAmt <= 0) return NEVER_DEPLETES_DAYS;
   const eff = effectiveCurrentPills(med, todayStr);
   if (eff <= 0) return 0;
-  return Math.floor(eff / med.dailyDose);
+  return Math.floor(eff / dayAmt);
 }
 
 export function getDepletionDate(med: Medication): {
@@ -911,7 +914,7 @@ export function getCriticalAlarmDate(
   todayStr: string = getTodayDateString()
 ): number | null {
   // No consumption rate → no projected crossing. Caller skips.
-  if (med.dailyDose <= 0) return null;
+  if (dailyScheduleAmount(med) <= 0) return null;
 
   const criticalThresholdDays = getCriticalThresholdDays(med);
   const daysLeft = effectiveDaysLeft(med, todayStr);

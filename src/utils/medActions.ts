@@ -113,6 +113,11 @@ export function consumeDose(
     Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0;
 
   // Resolve which dose slot is being consumed.
+  // Phase 3B: UI paths (card + SelectDoseModal, alarm) should always
+  // pass an explicit doseId for multi-dose meds. The fallback below
+  // (earliest unconsumed schedule row) exists only for internal /
+  // legacy callers that omit doseId; it is intentional, not a guess
+  // from wall-clock time.
   let targetDoseId = doseId;
   let targetAmount = med.dailyDose;
   if (multi) {
@@ -121,7 +126,7 @@ export function consumeDose(
       ? schedule.find((d) => d.id === targetDoseId)
       : undefined;
     if (!target) {
-      // Earliest unconsumed slot for today.
+      // Fallback: earliest unconsumed slot for today (stable order).
       target = schedule.find((d) => med.doseConsumption?.[d.id] !== todayStr);
     }
     if (!target) {

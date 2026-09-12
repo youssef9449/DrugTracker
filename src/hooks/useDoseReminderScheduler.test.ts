@@ -386,7 +386,7 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
       { skipToday: true }
     );
     // Any pending snoozed one-shot for the taken dose was cancelled.
-    expect(mocks.cancelSnoozed).toHaveBeenCalledWith('med-consumed');
+    expect(mocks.cancelSnoozed).toHaveBeenCalledWith('med-consumed', 'legacy');
   });
 
   it('Test 1b — live manual consumption while the app is running: suppression fires on the consumedSignature change', async () => {
@@ -426,7 +426,7 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
       { skipToday: true }
     );
     // Pending snoozed reminder for the taken dose cancelled too.
-    expect(mocks.cancelSnoozed).toHaveBeenCalledWith('med-live');
+    expect(mocks.cancelSnoozed).toHaveBeenCalledWith('med-live', 'legacy');
   });
 
   it('Test 2 — suppression re-arm is the recurring daily schedule (tomorrow covered at unit level)', async () => {
@@ -477,7 +477,7 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
     // A pending snoozed one-shot (e.g. a 90-min snooze from the 20:00
     // fire) is still cancelled — a snoozed reminder for a taken dose
     // must never fire.
-    expect(mocks.cancelSnoozed).toHaveBeenCalledWith('med-after');
+    expect(mocks.cancelSnoozed).toHaveBeenCalledWith('med-after', 'legacy');
   });
 
   it('Test 4/5 — app resume after a manual dose re-applies the suppression (reconciliation)', async () => {
@@ -532,7 +532,7 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
     rerender({ medications: [{ ...med, lastConsumedDate: getTodayDateString() }] });
     await flushUntil(() => mocks.cancelSnoozed.mock.calls.length >= 1);
 
-    expect(mocks.cancelSnoozed).toHaveBeenCalledWith('med-snooze-consumed');
+    expect(mocks.cancelSnoozed).toHaveBeenCalledWith('med-snooze-consumed', 'legacy');
     const snooze = JSON.parse(localStorage.getItem(SNOOZE_KEY) || '{}') as Record<string, number>;
     expect(snooze['med-snooze-consumed']).toBeUndefined();
   });

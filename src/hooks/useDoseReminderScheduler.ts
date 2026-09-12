@@ -8,7 +8,7 @@ import {
   isDoseReminderTimeStillAhead,
   LEGACY_DOSE_ID,
 } from '../utils/notifications';
-import { clearSnoozedDoseForMed } from '../utils/doseReminderStorage';
+import { clearSnoozedDose } from '../utils/doseReminderStorage';
 import { isValidDoseTime } from '../utils/doseSchedule';
 import { isDoseConsumedOnDate } from '../utils/dateCalculations';
 
@@ -337,16 +337,16 @@ export function useDoseReminderScheduler({
       );
       if (consumedSlots.length === 0) continue;
 
-      // Clear med-level snooze marker once (storage is still per-med).
-      clearSnoozedDoseForMed(med.id);
-
       for (const slot of consumedSlots) {
+        // Phase 3B: clear only this slot's snooze marker (med-only for legacy).
+        clearSnoozedDose(med.id, slot.doseId);
+
         const key = doseScheduleKey(slot.medId, slot.doseId);
         const gen = bumpGen(key);
         const { medId, doseId, time, amount, name, unit } = slot;
 
         enqueue(key, () =>
-          cancelSnoozedDoseReminder(medId).then(() => {
+          cancelSnoozedDoseReminder(medId, doseId).then(() => {
             // After today's reminder time for THIS slot, the recurring
             // alarm has already fired (or was suppressed): never retract
             // a fired notification. Only slots still ahead need cancel +

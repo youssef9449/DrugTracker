@@ -96,7 +96,7 @@
   background: rgb(255 241 242);
 }
 
-/* Compact undo: preserve the existing callback but represent it as a tiny icon affordance. */
+/* Compact undo: preserve the existing callback but represent it as a tiny icon-style affordance. */
 [id^="med-card-"][class*="border-r-2"] > button {
   width: 1.875rem;
   min-height: 1.875rem;

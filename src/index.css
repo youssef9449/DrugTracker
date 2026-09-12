@@ -75,3 +75,177 @@ html.font-scale-large {
   font-size: 0.875rem !important;
   line-height: 1.35rem !important;
 }
+
+/*
+ * Compact medication cards
+ * ------------------------
+ * The compact JSX intentionally remains unchanged. These styles improve
+ * hierarchy at small widths without changing any medication behavior or
+ * callback wiring. The selector uses the compact card's existing p-1.5 /
+ * border-r-2 structure plus its auto-deduct title, so the detailed "all"
+ * card is not affected.
+ */
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) {
+  padding: 0.625rem;
+  border-radius: 0.875rem;
+  border-right-width: 3px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.05);
+}
+
+/* Header: give the medication name breathing room and keep actions compact. */
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) > div:first-child {
+  min-height: 2rem;
+  gap: 0.375rem;
+}
+
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) h3 {
+  font-size: 0.8125rem;
+  line-height: 1.15rem;
+  letter-spacing: -0.01em;
+}
+
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) > div:first-child > div:last-child {
+  gap: 0.125rem;
+}
+
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) > div:first-child > div:last-child > button,
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) > div:first-child > div:last-child > span {
+  width: 1.875rem;
+  height: 1.875rem;
+  border-radius: 0.5rem;
+}
+
+/* Status remains textual for clarity, but gets enough room to read. */
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) > div:first-child > span {
+  min-width: max-content;
+  font-size: 0.625rem;
+  line-height: 0.875rem;
+  padding-inline: 0.375rem;
+  padding-block: 0.125rem;
+  border-radius: 9999px;
+}
+
+/* Row 2: turn the compressed data stream into three readable information groups. */
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) > div:nth-child(2) {
+  margin-top: 0.375rem;
+  gap: 0.375rem;
+  font-size: 0.6875rem;
+  line-height: 1rem;
+  align-items: center;
+}
+
+/* Current stock is the primary value. */
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) > div:nth-child(2) > span:first-child {
+  font-size: 1.125rem;
+  line-height: 1.25rem;
+  font-weight: 800;
+}
+
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) > div:nth-child(2) > span:nth-child(2) {
+  font-size: 0.625rem;
+  line-height: 1rem;
+  margin-inline-start: -0.125rem;
+}
+
+/* The separator dots add visual noise in compact mode. */
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) > div:nth-child(2) > span:nth-child(3),
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) > div:nth-child(2) > span:nth-child(5) {
+  display: none;
+}
+
+/* Daily dose: compact visual chip with a pill glyph instead of another label. */
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) > div:nth-child(2) > span:nth-child(4) {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.375rem;
+  background: rgb(240 253 250);
+  color: rgb(17 94 89);
+  font-size: 0.625rem;
+  line-height: 0.875rem;
+  font-weight: 700;
+}
+
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) > div:nth-child(2) > span:nth-child(4)::before {
+  content: "💊";
+  font-size: 0.625rem;
+}
+
+/* Depletion date: small calendar-style chip; long dates truncate gracefully. */
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) > div:nth-child(2) > span:nth-child(6) {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  min-width: 0;
+  max-width: 8.5rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.375rem;
+  background: rgb(248 250 252);
+  color: rgb(71 85 105);
+  font-size: 0.625rem;
+  line-height: 0.875rem;
+  border: 1px solid rgb(226 232 240);
+}
+
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) > div:nth-child(2) > span:nth-child(6)::before {
+  content: "📅";
+  font-size: 0.625rem;
+}
+
+/* Row 3: progress is slightly more legible; auto-deduct becomes an icon-only state. */
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) > div:nth-child(3) {
+  margin-top: 0.375rem;
+  gap: 0.375rem;
+}
+
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) > div:nth-child(3) > div {
+  height: 0.25rem;
+}
+
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) > div:nth-child(3) > span {
+  width: 1.875rem;
+  height: 1.875rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 0.5rem;
+  font-size: 0;
+  line-height: 1;
+  border: 1px solid currentColor;
+  background: rgb(248 250 252);
+}
+
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title="خصم تلقائي مفعّل"]) > div:nth-child(3) > span::before {
+  content: "⚡";
+  font-size: 0.75rem;
+}
+
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title="خصم تلقائي متوقف"]) > div:nth-child(3) > span::before {
+  content: "⚡";
+  font-size: 0.75rem;
+  opacity: 0.5;
+}
+
+/* Undo-refill stays available, but no longer consumes an entire compact row. */
+[id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) > button {
+  width: fit-content;
+  margin-top: 0.375rem;
+  margin-inline-start: auto;
+  padding: 0.125rem 0.5rem;
+  border-radius: 0.5rem;
+  font-size: 0.625rem;
+  line-height: 0.875rem;
+}
+
+/* Narrow phones: let the depletion chip yield before stock/actions do. */
+@media (max-width: 360px) {
+  [id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) > div:nth-child(2) > span:nth-child(6) {
+    max-width: 6.5rem;
+  }
+
+  [id^="med-card-"][class*="p-1.5"][class*="border-r-2"]:has(span[title^="خصم تلقائي"]) > div:first-child > span {
+    font-size: 0.5625rem;
+  }
+}

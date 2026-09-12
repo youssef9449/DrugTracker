@@ -1,43 +1,29 @@
 import { type FC } from 'react';
-import { Pill, Bell, BellOff, Search, Smartphone, Monitor, ShoppingCart, History, Settings, AlertTriangle, Type, Store, ContactRound } from 'lucide-react';
+import { Bell, BellOff, Search, Smartphone, Monitor, Settings, AlertTriangle, Type } from 'lucide-react';
 import { ActiveTab } from './AndroidBottomNav';
 import { ICON_BUTTON_CLASS } from '../lib/styles';
 
-// #84: Single map replacing the 3 parallel switch statements
-// (getHeaderIcon / getHeaderTitle / getHeaderSubtitle).
 const HEADER_BY_TAB: Record<ActiveTab, {
-  icon: typeof Pill;
-  iconClassName: string;
   title: string;
   subtitle: string;
 }> = {
   stock: {
-    icon: Pill,
-    iconClassName: 'w-5 h-5 rotate-45 text-white',
     title: 'متابع مخزون الأدوية',
     subtitle: 'حساب استهلاك الحبوب وتنبيهات النفاذ تلقائياً',
   },
   shopping: {
-    icon: ShoppingCart,
-    iconClassName: 'w-5 h-5 text-white',
     title: 'قائمة الشراء والصيدلية',
     subtitle: 'تجهيز طلب الواتساب وحساب الكميات',
   },
   pharmacies: {
-    icon: Store,
-    iconClassName: 'w-5 h-5 text-white',
     title: 'إدارة الصيدليات',
     subtitle: 'أرقام وعناوين الصيدليات لطلب الأدوية عبر واتساب',
   },
   'user-data': {
-    icon: ContactRound,
-    iconClassName: 'w-5 h-5 text-white',
     title: 'بياناتي',
     subtitle: 'أرقام التواصل وعناوين التوصيل لطلب الأدوية',
   },
   logs: {
-    icon: History,
-    iconClassName: 'w-5 h-5 text-white',
     title: 'سجل الاستهلاك اليومي',
     subtitle: 'تتبع الخصم التلقائي عبر مرور الأيام',
   },
@@ -83,22 +69,16 @@ export const AppHeader: FC<AppHeaderProps> = ({
   // 'pharmacies' falls back to the stock values (same as the old default
   // case — no separate pharmacies header was defined).
   const header = HEADER_BY_TAB[activeTab] ?? HEADER_BY_TAB.stock;
-  const HeaderIcon = header.icon;
 
   return (
     <header className="bg-teal-800 text-white shadow-xs">
       {/* Top App Bar */}
       <div className="px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-teal-700/80 border border-teal-600/50 flex items-center justify-center text-teal-100 shadow-xs">
-            <HeaderIcon className={header.iconClassName} />
-          </div>
-          <div>
-            <h1 className="text-base font-bold tracking-tight">{header.title}</h1>
-            <p className="text-[11px] text-teal-200/90 font-medium">
-              {header.subtitle}
-            </p>
-          </div>
+        <div>
+          <h1 className="text-base font-bold tracking-tight">{header.title}</h1>
+          <p className="text-[11px] text-teal-200/90 font-medium">
+            {header.subtitle}
+          </p>
         </div>
 
         {/* Quick Action Icons */}

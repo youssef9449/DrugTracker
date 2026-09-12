@@ -1,5 +1,8 @@
 /* Material-inspired visual treatment shared by every MedicationCard view. */
 [id^="med-card-"] {
+  box-sizing: border-box !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
   border-radius: 1rem !important;
   box-shadow: 0 1px 3px rgb(15 23 42 / 0.08), 0 1px 2px rgb(15 23 42 / 0.04) !important;
   overflow: hidden !important;
@@ -11,8 +14,11 @@
 }
 
 .medication-menu-root {
-  flex-wrap: nowrap;
-  min-width: 0;
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
 }
 
 .medication-menu-root > button,
@@ -29,108 +35,176 @@
   box-shadow: 0 1px 2px rgb(15 23 42 / 0.05);
 }
 
-/* Compact cards: remove the first-pass emoji and replace it with a unit-aware visual cue. */
-[id^="med-card-"][class*="border-r-2"]:has(.medication-menu-root)
-  > div:nth-child(2) > span:nth-child(4)::before {
-  content: none !important;
+/* Every non-compact card header gets a vertical rhythm:
+   content first, actions second. This prevents the action cluster from
+   stealing width from long medication names. */
+[id^="med-card-"]:not([class*="border-r-2"]) > div:first-child {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 0.4rem !important;
+  min-width: 0 !important;
+  width: 100% !important;
 }
 
-[id^="med-card-"][class*="border-r-2"]:has(.medication-type-icon[title="نوع الدواء: قرص"])
-  > div:nth-child(2) > span:nth-child(4)::before {
-  content: "◉" !important;
-  font-size: 0.65rem;
+[id^="med-card-"]:not([class*="border-r-2"]) > div:first-child > div:first-child {
+  min-width: 0 !important;
+  width: 100% !important;
 }
 
-[id^="med-card-"][class*="border-r-2"]:has(.medication-type-icon[title="نوع الدواء: كبسولة"])
-  > div:nth-child(2) > span:nth-child(4)::before {
-  content: "💊" !important;
-  font-size: 0.65rem;
+[id^="med-card-"]:not([class*="border-r-2"]) > div:first-child > .medication-menu-root {
+  flex: 0 0 auto !important;
+  align-self: flex-start !important;
+  max-width: 100% !important;
 }
 
-[id^="med-card-"][class*="border-r-2"]:has(.medication-type-icon[title="نوع الدواء: مل"])
-  > div:nth-child(2) > span:nth-child(4)::before {
-  content: "💧" !important;
-  font-size: 0.65rem;
+/* Alerts + sufficient views: keep the status content intact, but give the
+   medication name its own line so badges can never force truncation. */
+[id^="med-card-"]:not([class*="border-r-2"]):not([class*="border-r-4"])
+  > div:first-child > div:first-child {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 0.75rem !important;
 }
 
-[id^="med-card-"][class*="border-r-2"]:has(.medication-type-icon[title="نوع الدواء: جرعة"])
-  > div:nth-child(2) > span:nth-child(4)::before {
-  content: "💉" !important;
-  font-size: 0.65rem;
+[id^="med-card-"]:not([class*="border-r-2"]):not([class*="border-r-4"])
+  > div:first-child > div:first-child > div:last-child {
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
 }
 
-[id^="med-card-"][class*="border-r-2"]:has(.medication-type-icon[title="نوع الدواء: كيس"])
-  > div:nth-child(2) > span:nth-child(4)::before {
-  content: "▣" !important;
-  font-size: 0.65rem;
+[id^="med-card-"]:not([class*="border-r-2"]):not([class*="border-r-4"])
+  > div:first-child > div:first-child > div:last-child > div:first-child {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  min-width: 0 !important;
+  gap: 0.375rem !important;
 }
 
-[id^="med-card-"][class*="border-r-2"] .medication-type-icon {
-  display: none;
+[id^="med-card-"]:not([class*="border-r-2"]):not([class*="border-r-4"])
+  > div:first-child > div:first-child > div:last-child > div:first-child > h3 {
+  flex: 0 0 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  overflow-wrap: anywhere !important;
+  white-space: normal !important;
+  line-height: 1.35 !important;
 }
 
-/* Compact header: reserve the left edge for all quick actions so they never push outside the card. */
+[id^="med-card-"]:not([class*="border-r-2"]):not([class*="border-r-4"])
+  > div:first-child > div:first-child > div:last-child > div:nth-child(2) {
+  min-width: 0 !important;
+}
+
+/* Detailed "All medications" view: the title gets the entire first row.
+   Category/status stay below it, and quick actions move to their own row. */
+[id^="med-card-"][class*="border-r-4"] > div:first-child > div:first-child {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 0.4rem !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+[id^="med-card-"][class*="border-r-4"] > div:first-child > div:first-child > h3 {
+  flex: 0 0 100% !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  margin: 0 !important;
+  overflow: visible !important;
+  overflow-wrap: anywhere !important;
+  text-overflow: clip !important;
+  white-space: normal !important;
+  line-height: 1.4 !important;
+}
+
+[id^="med-card-"][class*="border-r-4"] > div:first-child > div:first-child > span {
+  flex: 0 0 auto !important;
+  max-width: 100% !important;
+}
+
+[id^="med-card-"][class*="border-r-4"] > div:first-child > .medication-menu-root {
+  align-self: flex-start !important;
+  width: auto !important;
+  max-width: 100% !important;
+}
+
+/* Compact cards: use a real two-row grid instead of fixed left padding.
+   This keeps every action button inside the card even at narrow widths. */
 [id^="med-card-"][class*="border-r-2"] > div:first-child {
-  position: relative;
-  align-items: center;
-  min-width: 0;
-  padding-left: 7.5rem;
-  padding-right: 1.875rem;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  grid-template-areas:
+    "title status"
+    "actions actions" !important;
+  align-items: center !important;
+  column-gap: 0.3rem !important;
+  row-gap: 0.2rem !important;
+  min-width: 0 !important;
+  width: 100% !important;
+  padding: 0 !important;
 }
 
 [id^="med-card-"][class*="border-r-2"] > div:first-child > h3 {
-  min-width: 0;
-  flex: 1 1 auto;
-  max-width: none;
+  grid-area: title !important;
+  display: block !important;
+  min-width: 0 !important;
+  width: 100% !important;
+  max-width: none !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
 }
 
 [id^="med-card-"][class*="border-r-2"] > div:first-child > span {
-  flex-shrink: 0;
+  grid-area: status !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
 }
 
 [id^="med-card-"][class*="border-r-2"] > div:first-child > div:last-child {
-  position: absolute;
-  left: 0.25rem;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  align-items: center;
-  gap: 0.0625rem;
-  width: 7.125rem;
-  max-width: calc(100% - 0.5rem);
-  min-width: 0;
-  overflow: hidden;
+  grid-area: actions !important;
+  position: static !important;
+  transform: none !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 0.15rem !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
 }
 
 [id^="med-card-"][class*="border-r-2"] .medication-menu-root {
-  gap: 0.0625rem;
-  flex-shrink: 0;
-  overflow: visible;
+  flex: 0 1 auto !important;
+  gap: 0.15rem !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
 }
 
-[id^="med-card-"][class*="border-r-2"] .medication-menu-root > button {
-  width: 1.375rem;
-  height: 1.375rem;
-  min-width: 1.375rem;
-  padding: 0;
+[id^="med-card-"][class*="border-r-2"] .medication-type-icon {
+  display: none !important;
 }
 
-[id^="med-card-"][class*="border-r-2"] .medication-menu-root > button[aria-label="تعديل الدواء"] {
-  color: rgb(71 85 105);
-  background: rgb(248 250 252);
+[id^="med-card-"][class*="border-r-2"] .medication-menu-root > button,
+[id^="med-card-"][class*="border-r-2"] > div:first-child > div:last-child > button {
+  width: 1.5rem !important;
+  height: 1.5rem !important;
+  min-width: 1.5rem !important;
+  padding: 0 !important;
 }
 
-[id^="med-card-"][class*="border-r-2"] .medication-menu-root > button[aria-label="حذف الدواء"] {
-  color: rgb(225 29 72);
-  background: rgb(255 241 242);
-}
-
-/* Compact auto-deduct is represented by the single toggle icon in the header. */
+/* Compact auto-deduct remains represented by the single toggle icon. */
 [id^="med-card-"][class*="border-r-2"] > div:nth-child(3) > span {
   display: none !important;
 }
 
-/* The compact undo action is an icon in the top edge, not a separate row. */
+/* Compact undo stays an icon badge in the card corner, never a full-width row. */
 [id^="med-card-"][class*="border-r-2"] > button {
   position: absolute;
   inset-inline-end: 0.375rem;
@@ -158,84 +232,59 @@
   font-weight: 800;
 }
 
-/* Detailed all-medications view: force a two-column header so actions never wrap below the title. */
-[id^="med-card-"][class*="border-r-4"] > div:first-child {
-  display: grid !important;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start !important;
-  gap: 0.5rem !important;
+/* Keep every secondary row inside the card width. */
+[id^="med-card-"] .flex,
+[id^="med-card-"] .grid {
   min-width: 0;
 }
 
-[id^="med-card-"][class*="border-r-4"] > div:first-child > div:first-child {
-  min-width: 0;
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: nowrap;
+[id^="med-card-"] img,
+[id^="med-card-"] svg,
+[id^="med-card-"] button,
+[id^="med-card-"] span,
+[id^="med-card-"] div {
+  max-width: 100%;
 }
 
-[id^="med-card-"][class*="border-r-4"] > div:first-child > div:first-child > h3 {
-  flex: 1 1 auto;
-  min-width: 0;
-  max-width: none !important;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-[id^="med-card-"][class*="border-r-4"] > div:first-child > div:first-child > span {
-  flex-shrink: 0;
-}
-
-[id^="med-card-"][class*="border-r-4"] > div:first-child > .medication-menu-root {
-  grid-column: 2;
-  grid-row: 1;
-  flex-shrink: 0;
-  min-width: max-content;
-}
-
-/* Detailed auto-deduct is represented by the header toggle only; hide the old full-width status strip. */
-[id^="med-card-"][class*="border-r-4"] > div:nth-child(4) {
-  display: none !important;
-}
-
-/* Roomier views use a restrained Material-like surface and explicit touch-friendly actions. */
-[id^="med-card-"]:not([class*="border-r-2"]) .medication-menu-root > button,
-[id^="med-card-"]:not([class*="border-r-2"]) .medication-type-icon {
-  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
-}
-
-[id^="med-card-"]:not([class*="border-r-2"]) .medication-type-icon {
-  min-width: 2.25rem;
-  min-height: 2.25rem;
-  background: rgb(248 250 252);
-}
-
-@media (max-width: 360px) {
-  [id^="med-card-"][class*="border-r-2"] > div:first-child {
-    padding-left: 7rem;
-    padding-right: 1.75rem;
+/* Tablet: detailed / alert / sufficient cards get two balanced columns.
+   A card stays a complete unit; no internal element is allowed to define
+   the column width beyond minmax(0, 1fr). */
+@media (min-width: 768px) {
+  .p-3.space-y-2:has(> [id^="med-card-"]) {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 0.75rem !important;
+    align-items: start !important;
   }
 
-  [id^="med-card-"][class*="border-r-2"] > div:first-child > div:last-child {
-    width: 6.625rem;
+  .p-3.space-y-2:has(> [id^="med-card-"]) > [id^="med-card-"] {
+    width: 100% !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+  }
+}
+
+/* Very wide desktop: three cards become comfortable again. */
+@media (min-width: 1280px) {
+  .p-3.space-y-2:has(> [id^="med-card-"]) {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 420px) {
+  [id^="med-card-"][class*="border-r-2"] > div:first-child {
+    column-gap: 0.2rem !important;
   }
 
   [id^="med-card-"][class*="border-r-2"] .medication-menu-root > button,
   [id^="med-card-"][class*="border-r-2"] > div:first-child > div:last-child > button {
-    width: 1.25rem;
-    height: 1.25rem;
-    min-width: 1.25rem;
+    width: 1.375rem !important;
+    height: 1.375rem !important;
+    min-width: 1.375rem !important;
   }
 
   [id^="med-card-"][class*="border-r-2"] > button {
     width: 1.375rem;
     min-height: 1.375rem;
-  }
-
-  [id^="med-card-"][class*="border-r-2"] > div:nth-child(2) > span:nth-child(6) {
-    max-width: 6rem;
   }
 }

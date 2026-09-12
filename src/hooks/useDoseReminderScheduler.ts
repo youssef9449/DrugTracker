@@ -6,8 +6,10 @@ import {
   cancelDoseReminder,
   cancelSnoozedDoseReminder,
   isDoseReminderTimeStillAhead,
+  LEGACY_DOSE_ID,
 } from '../utils/notifications';
 import { clearSnoozedDoseForMed } from '../utils/doseReminderStorage';
+import { isValidDoseTime } from '../utils/doseSchedule';
 
 /**
  * Options for {@link useDoseReminderScheduler}.
@@ -40,75 +42,87 @@ export interface UseDoseReminderSchedulerOptions {
 }
 
 /**
+ * One schedulable dose slot derived from a medication.
+ * - Multi-dose meds: one entry per `doseSchedule` row (stable dose id).
+ * - Legacy meds (no schedule): single entry with {@link LEGACY_DOSE_ID}.
+ */
+export interface DoseReminderSlot {
+  medId: string;
+  doseId: string;
+  time: string;
+  amount: number;
+  name: string;
+  unit: string;
+}
+
+/** Tracker key: medId::doseId — independent cancel/schedule identity. */
+export function doseScheduleKey(medId: string, doseId: string): string {
+  return `${medId}::${doseId}`;
+}
+
+export function parseDoseScheduleKey(key: string): { medId: string; doseId: string } {
+  const idx = key.indexOf('::');
+  if (idx < 0) return { medId: key, doseId: LEGACY_DOSE_ID };
+  return { medId: key.slice(0, idx), doseId: key.slice(idx + 2) };
+}
+
+/**
+ * Build the list of dose reminder slots for a medication.
+ *
+ * Source of truth for multi-dose: non-empty `doseSchedule` (by dose id).
+ * Legacy: single slot at `reminderTime` with amount = `dailyDose`.
+ * Invalid/missing times are skipped.
+ *
+ * Does not mutate the medication. Does not implement stock logic.
+ */
+export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
+  const name = med.name;
+  const unit = med.unit || 'قرص';
+
+  if (Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) {
+    return med.doseSchedule
+      .filter((d) => d && isValidDoseTime(d.time) && Number(d.amount) > 0)
+      .map((d) => ({
+        medId: med.id,
+        doseId: d.id || LEGACY_DOSE_ID,
+        time: d.time,
+        amount: Number(d.amount),
+        name,
+        unit,
+      }));
+  }
+
+  if (med.reminderTime && isValidDoseTime(med.reminderTime)) {
+    return [
+      {
+        medId: med.id,
+        doseId: LEGACY_DOSE_ID,
+        time: med.reminderTime,
+        amount: Number(med.dailyDose) > 0 ? Number(med.dailyDose) : 1,
+        name,
+        unit,
+      },
+    ];
+  }
+
+  return [];
+}
+
+/**
  * Native recurring daily dose-reminder scheduler.
  *
- * For each medication with `reminderEnabled + reminderTime`, schedules a
- * RECURRING daily notification at the reminderTime via Android's
- * AlarmManager (or iOS's UNUserNotificationCenter). The reminder fires
- * EVERY DAY at the configured time — even when the app is killed, the
- * device is in Doze, or the user never opens the app. The user sees the
- * reminder in their notification drawer.
+ * Phase 2: for each medication with `reminderEnabled`, schedules one
+ * RECURRING daily notification per dose slot (multi-dose `doseSchedule`,
+ * or a single legacy `reminderTime` slot). Each slot uses a stable
+ * notification id derived from medicationId + doseId.
  *
- * The native notification uses a SEPARATE id band (doseAlarm = 6M) from
- * the immediate dose notification (dose = 3M) so the two never collide.
- * Both use the SAME channel (`dose-reminder-v2`) with the bundled native
- * sound. There is NO foreground/background channel switching.
+ * The recurring alarm is config-driven. Consumption suppression still
+ * uses medication-level `lastConsumedDate` (not per-dose) — Phase 3
+ * will refine that. skipToday therefore applies to all of a med's
+ * dose slots when the med was marked consumed today.
  *
- * === Consumption suppression (today's dose already taken) ===
- * The recurring alarm is config-driven and knows NOTHING about
- * consumption: without extra handling it would fire at reminderTime even
- * on a day whose dose the user already took (lastConsumedDate === today
- * — set by BOTH the manual card action and the notification's take-dose
- * action, via consumeDose). Two cooperating mechanisms close that gap:
- *
- *   1. Consumption-aware scheduling (main effect): every schedule this
- *      hook makes bakes `skipToday: lastConsumedDate === today` into
- *      scheduleDoseReminder, so a (re)scheduled recurring alarm always
- *      starts from TOMORROW for a consumed day. This covers every
- *      reschedule trigger: cold start, reminder-config change, and
- *      notifications/exact-alarm re-enable. Without it, ANY later
- *      reschedule (e.g. a med rename) would resurrect today's reminder
- *      for a consumed dose.
- *
- *   2. Consumption-suppression effect (below): reacts to the
- *      consumed-day signature (i.e. a dose was consumed while the app is
- *      running), to cold start, and to every resume (resumeTick). For
- *      each reminder-enabled medication consumed TODAY it:
- *        - cancels any pending SNOOZED one-shot reminder and clears the
- *          persisted snooze marker — a snoozed reminder for a taken dose
- *          must never fire, whether or not today's reminder time has
- *          already passed;
- *        - while today's reminder time is still ahead: cancels the
- *          pending recurring alarm and re-arms the SAME recurring daily
- *          schedule starting TOMORROW (skipToday). The re-armed alarm is
- *          persisted by the plugin (and re-armed on BOOT_COMPLETED), so
- *          tomorrow's reminder works with the app completely closed;
- *        - after today's reminder time has passed: touches nothing else
- *          — a notification that already fired is never retracted and
- *          the dismiss/snooze handling of the fired reminder is
- *          untouched (the plugin re-armed tomorrow's occurrence itself).
- *
- *      The suppression is NOT foreground-only logic: the consumption
- *      itself always happens in-app (card or notification action), so
- *      the hook is alive at that moment and the native cancel/schedule
- *      calls persist. Restart + resume reconciliation repairs any
- *      attempt that failed.
- *
- * Race protection — stale-async guard + per-med serialization:
- *   Same pattern as useCriticalAlarmScheduler. All cancel/schedule ops
- *   for a given med are chained onto a per-med Promise so they run in
- *   order. A generation counter lets a stale async bail before
- *   scheduling. Both effects share the chain and the counter, so a
- *   consumption landing while a config reschedule is in flight (or vice
- *   versa) serializes cleanly and the newest consumption-aware op wins.
- *
- * Boot persistence: scheduled notifications are persisted by the
- * @capacitor/local-notifications plugin and re-armed on BOOT_COMPLETED.
- *
- * This hook knows NOTHING about:
- *   - sounds (native channel owns the sound)
- *   - currentPills / lastSyncDate (those are stock/auto-deduct concerns;
- *     stock changes without consumption do NOT reschedule anything)
+ * Generation counter + per-key serialization chain prevent races when
+ * config changes quickly or resume reconciliation overlaps a schedule op.
  */
 export function useDoseReminderScheduler({
   medications,
@@ -118,69 +132,72 @@ export function useDoseReminderScheduler({
   exactAlarmEnabled,
   resumeTick,
 }: UseDoseReminderSchedulerOptions): void {
+  const medicationsRef = useRef(medications);
+  medicationsRef.current = medications;
+
+  /** Keys currently believed scheduled: `${medId}::${doseId}`. */
   const scheduledDoseIdsRef = useRef<Set<string>>(new Set());
+  /** Per-key generation counters — stale async ops no-op when gen mismatches. */
   const doseGenerationRef = useRef<Map<string, number>>(new Map());
+  /** Per-key promise chain so cancel→schedule for one slot never interleaves. */
   const doseChainRef = useRef<Map<string, Promise<void>>>(new Map());
 
-  const medicationsRef = useRef(medications);
-  useEffect(() => {
-    medicationsRef.current = medications;
-  }, [medications]);
-
-  // Stable signature capturing ONLY the fields that affect the scheduled
-  // notification: id, enabled state, reminder time, dose amount, unit, name.
-  // currentPills and lastSyncDate are deliberately excluded — they affect
-  // stock alert / auto-deduction systems, NOT the dose reminder schedule.
-  // A pure stock change (refill, balance edit) must NOT trigger
-  // cancel+reschedule of the daily reminder.
-  //
-  // Consumption (lastConsumedDate) is deliberately NOT part of this
-  // signature either — but for the OPPOSITE reason: a consumption must
-  // not trigger the full cancel+reschedule of EVERY medication, only a
-  // targeted suppression of the consumed med. That is the separate
-  // consumption-suppression effect below (keyed on its own
-  // consumed-day signature). This effect still READS lastConsumedDate
-  // at schedule time (skipToday) so any reschedule it does make can
-  // never resurrect today's reminder for a consumed dose.
   const doseSignature = useMemo(
     () =>
       medications
-        .map((m) =>
-          [
+        .map((m) => {
+          const schedulePart =
+            Array.isArray(m.doseSchedule) && m.doseSchedule.length > 0
+              ? m.doseSchedule
+                  .map((d) => `${d.id}@${d.time}@${d.amount}`)
+                  .join(',')
+              : '';
+          return [
             m.id,
-            m.reminderEnabled ? 1 : 0,
+            m.reminderEnabled === true ? '1' : '0',
             m.reminderTime ?? '',
+            schedulePart,
             m.name,
             m.dailyDose,
             m.unit ?? '',
-          ].join('|')
-        )
+          ].join('|');
+        })
         .sort()
         .join('\n'),
     [medications]
   );
 
-  const enqueue = (medId: string, op: () => Promise<void>): Promise<void> => {
-    const prev = doseChainRef.current.get(medId) ?? Promise.resolve();
+  const enqueue = (key: string, op: () => Promise<void>): Promise<void> => {
+    const prev = doseChainRef.current.get(key) ?? Promise.resolve();
     const next = prev.then(op, op);
-    doseChainRef.current.set(medId, next);
+    doseChainRef.current.set(key, next);
     next.catch(() => void 0);
     return next;
+  };
+
+  const bumpGen = (key: string): number => {
+    const gen = (doseGenerationRef.current.get(key) ?? 0) + 1;
+    doseGenerationRef.current.set(key, gen);
+    return gen;
   };
 
   useEffect(() => {
     if (!hydrated || isFirstRun) return;
 
+    const cancelSlot = (medId: string, doseId: string): void => {
+      const key = doseScheduleKey(medId, doseId);
+      bumpGen(key);
+      enqueue(key, () =>
+        cancelDoseReminder(medId, doseId).then(() => cancelSnoozedDoseReminder(medId))
+      );
+    };
+
     // User disabled notifications OR exact-alarm permission is missing →
-    // cancel all previously-scheduled dose reminders and clear the
-    // tracker. Exact-alarm is MANDATORY for medication dose reminders.
+    // cancel all previously-scheduled dose reminders and clear the tracker.
     if (!notificationsEnabled || exactAlarmEnabled !== true) {
-      scheduledDoseIdsRef.current.forEach((id) => {
-        doseGenerationRef.current.set(
-          id,
-          (doseGenerationRef.current.get(id) ?? 0) + 1
-        );
-        enqueue(id, () => cancelDoseReminder(id).then(() => cancelSnoozedDoseReminder(id)));
+      scheduledDoseIdsRef.current.forEach((key) => {
+        const { medId, doseId } = parseDoseScheduleKey(key);
+        cancelSlot(medId, doseId);
       });
       scheduledDoseIdsRef.current.clear();
       return;
@@ -189,67 +206,81 @@ export function useDoseReminderScheduler({
     const stillScheduled = new Set<string>();
 
     for (const med of medicationsRef.current) {
-      const gen = (doseGenerationRef.current.get(med.id) ?? 0) + 1;
-      doseGenerationRef.current.set(med.id, gen);
-
-      if (!med.reminderEnabled || !med.reminderTime) {
-        if (scheduledDoseIdsRef.current.has(med.id)) {
-          enqueue(med.id, () => cancelDoseReminder(med.id).then(() => cancelSnoozedDoseReminder(med.id)));
+      if (!med.reminderEnabled) {
+        // Disable: cancel every previously scheduled slot for this med.
+        for (const key of scheduledDoseIdsRef.current) {
+          const { medId, doseId } = parseDoseScheduleKey(key);
+          if (medId === med.id) {
+            cancelSlot(medId, doseId);
+          }
         }
         continue;
       }
 
-      const unit = med.unit || 'قرص';
-      const name = med.name;
-      const reminderTime = med.reminderTime;
-      const dailyDose = med.dailyDose;
-      // Consumption-aware scheduling: when today's dose was already
-      // consumed (manual card action or the notification's take-dose
-      // action), the recurring alarm must (re)start from TOMORROW —
-      // never today. Captured at effect-run time like the other
-      // schedule inputs; the generation guard keeps a stale op
-      // powerless if a newer run (or the suppression effect) supersedes
-      // it before the async op executes.
-      const consumedToday = med.lastConsumedDate === getTodayDateString();
+      const slots = getDoseReminderSlots(med);
+      if (slots.length === 0) {
+        for (const key of scheduledDoseIdsRef.current) {
+          const { medId, doseId } = parseDoseScheduleKey(key);
+          if (medId === med.id) {
+            cancelSlot(medId, doseId);
+          }
+        }
+        continue;
+      }
 
-      enqueue(med.id, () =>
-        cancelDoseReminder(med.id)
-          .then(() => {
-            if (doseGenerationRef.current.get(med.id) !== gen) return;
+      const consumedToday = med.lastConsumedDate === getTodayDateString();
+      const activeDoseIds = new Set(slots.map((s) => s.doseId));
+
+      // Cancel slots that were scheduled for this med but are no longer
+      // in the current schedule (removed dose rows).
+      for (const key of scheduledDoseIdsRef.current) {
+        const { medId, doseId } = parseDoseScheduleKey(key);
+        if (medId === med.id && !activeDoseIds.has(doseId)) {
+          cancelSlot(medId, doseId);
+        }
+      }
+
+      for (const slot of slots) {
+        const key = doseScheduleKey(slot.medId, slot.doseId);
+        const gen = bumpGen(key);
+        const doseId = slot.doseId;
+        const time = slot.time;
+        const amount = slot.amount;
+        const name = slot.name;
+        const unit = slot.unit;
+        const medId = slot.medId;
+
+        enqueue(key, () =>
+          cancelDoseReminder(medId, doseId).then(() => {
+            if (doseGenerationRef.current.get(key) !== gen) return;
+            const opts =
+              doseId === LEGACY_DOSE_ID
+                ? consumedToday
+                  ? { skipToday: true as const }
+                  : undefined
+                : {
+                    doseId,
+                    ...(consumedToday ? { skipToday: true as const } : {}),
+                  };
             return (
-              consumedToday
-                ? scheduleDoseReminder(
-                    med.id,
-                    name,
-                    reminderTime,
-                    dailyDose,
-                    unit,
-                    { skipToday: true }
-                  )
-                : scheduleDoseReminder(
-                    med.id,
-                    name,
-                    reminderTime,
-                    dailyDose,
-                    unit
-                  )
+              opts
+                ? scheduleDoseReminder(medId, name, time, amount, unit, opts)
+                : scheduleDoseReminder(medId, name, time, amount, unit)
             ).then(() => {
-              if (doseGenerationRef.current.get(med.id) !== gen) {
-                return cancelDoseReminder(med.id);
+              if (doseGenerationRef.current.get(key) !== gen) {
+                return cancelDoseReminder(medId, doseId);
               }
             });
           })
-      );
-      stillScheduled.add(med.id);
+        );
+        stillScheduled.add(key);
+      }
     }
 
-    for (const prevId of scheduledDoseIdsRef.current) {
-      if (!stillScheduled.has(prevId)) {
-        doseGenerationRef.current.set(
-          prevId,
-          (doseGenerationRef.current.get(prevId) ?? 0) + 1
-        );
-        enqueue(prevId, () => cancelDoseReminder(prevId).then(() => cancelSnoozedDoseReminder(prevId)));
+    for (const prevKey of scheduledDoseIdsRef.current) {
+      if (!stillScheduled.has(prevKey)) {
+        const { medId, doseId } = parseDoseScheduleKey(prevKey);
+        cancelSlot(medId, doseId);
       }
     }
     scheduledDoseIdsRef.current = stillScheduled;
@@ -263,17 +294,10 @@ export function useDoseReminderScheduler({
 
   // ─────────────────────────────────────────────────────────────
   // Consumption-suppression effect — today's dose was taken, so today's
-  // reminder must not fire. See the header doc (mechanism 2) for the
-  // full design: snooze-cancel always; recurring cancel + skipToday
-  // re-arm only while today's reminder time is still ahead; nothing
-  // after it fired.
-  //
-  // Runs when the consumed-day signature changes (a dose was consumed,
-  // or a day's consumption record changed), on cold start (mount), and
-  // on every app resume (resumeTick) — the reconciliation points that
-  // make the suppression survive process death and repair failures.
-  // Declared AFTER the main scheduling effect so both mount effects
-  // enqueue in a deterministic order on the shared per-med chain.
+  // reminders must not fire. Phase 2 still uses medication-level
+  // lastConsumedDate: when set to today, EVERY dose slot for that med
+  // is suppressed for today (skipToday re-arm). Per-dose consumption
+  // state is Phase 3.
   // ─────────────────────────────────────────────────────────────
   const consumedSignature = useMemo(
     () =>
@@ -284,8 +308,6 @@ export function useDoseReminderScheduler({
     [medications]
   );
 
-  // resumeTick is optional (tests/older callers omit it) — normalize it
-  // once so the effect dependency list stays statically checkable.
   const resumeTickValue = resumeTick ?? 0;
 
   useEffect(() => {
@@ -294,52 +316,44 @@ export function useDoseReminderScheduler({
 
     const today = getTodayDateString();
     for (const med of medicationsRef.current) {
-      if (!med.reminderEnabled || !med.reminderTime) continue;
+      if (!med.reminderEnabled) continue;
       if (med.lastConsumedDate !== today) continue;
 
-      const gen = (doseGenerationRef.current.get(med.id) ?? 0) + 1;
-      doseGenerationRef.current.set(med.id, gen);
+      const slots = getDoseReminderSlots(med);
+      if (slots.length === 0) continue;
 
-      const unit = med.unit || 'قرص';
-      const name = med.name;
-      const reminderTime = med.reminderTime;
-      const dailyDose = med.dailyDose;
+      // Clear med-level snooze marker once (storage is still per-med).
+      clearSnoozedDoseForMed(med.id);
 
-      enqueue(med.id, () =>
-        // 1) A pending snoozed one-shot for a taken dose must never
-        // fire — regardless of the reminder time (the user can snooze
-        // long past reminderTime). Also clear the persisted snooze
-        // marker so no stale snooze state survives the taken dose.
-        cancelSnoozedDoseReminder(med.id)
-          .then(() => {
-            clearSnoozedDoseForMed(med.id);
-            // 2) After today's reminder time, the recurring alarm has
-            // already fired (or was already suppressed): never retract
-            // a fired notification — tomorrow was re-armed by the
-            // plugin itself when it fired. Only the snooze cleanup
-            // above applies.
-            if (!isDoseReminderTimeStillAhead(reminderTime)) return;
-            // 3) Still ahead: cancel the pending recurring occurrence
-            // for today and re-arm the SAME recurring daily schedule
-            // starting TOMORROW. Persisted natively — survives the app
-            // closing right after.
-            return cancelDoseReminder(med.id).then(() => {
-              if (doseGenerationRef.current.get(med.id) !== gen) return;
-              return scheduleDoseReminder(
-                med.id,
-                name,
-                reminderTime,
-                dailyDose,
-                unit,
-                { skipToday: true }
-              ).then(() => {
-                if (doseGenerationRef.current.get(med.id) !== gen) {
-                  return cancelDoseReminder(med.id);
+      for (const slot of slots) {
+        const key = doseScheduleKey(slot.medId, slot.doseId);
+        const gen = bumpGen(key);
+        const { medId, doseId, time, amount, name, unit } = slot;
+
+        enqueue(key, () =>
+          cancelSnoozedDoseReminder(medId).then(() => {
+            // After today's reminder time for THIS slot, the recurring
+            // alarm has already fired (or was suppressed): never retract
+            // a fired notification. Only slots still ahead need cancel +
+            // skipToday re-arm.
+            if (!isDoseReminderTimeStillAhead(time)) return;
+            return cancelDoseReminder(medId, doseId).then(() => {
+              if (doseGenerationRef.current.get(key) !== gen) return;
+              const opts =
+                doseId === LEGACY_DOSE_ID
+                  ? { skipToday: true as const }
+                  : { doseId, skipToday: true as const };
+              return scheduleDoseReminder(medId, name, time, amount, unit, opts).then(
+                () => {
+                  if (doseGenerationRef.current.get(key) !== gen) {
+                    return cancelDoseReminder(medId, doseId);
+                  }
                 }
-              });
+              );
             });
           })
-      );
+        );
+      }
     }
   }, [
     consumedSignature,

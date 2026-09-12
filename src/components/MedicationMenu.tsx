@@ -83,7 +83,24 @@ export function MedicationMenu({
       setMenuOpen(false);
     };
 
-    const handleViewportChange = () => updateMenuPosition();
+    const handleViewportChange = () => {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const menuWidth = 192;
+      const viewportPadding = 8;
+      const left = Math.max(
+        viewportPadding,
+        Math.min(rect.left, window.innerWidth - menuWidth - viewportPadding)
+      );
+      const estimatedHeight = 180;
+      const below = rect.bottom + 8;
+      const top =
+        below + estimatedHeight <= window.innerHeight - viewportPadding
+          ? below
+          : Math.max(viewportPadding, rect.top - estimatedHeight - 8);
+      setMenuPosition({ top, left });
+    };
 
     document.addEventListener('pointerdown', handlePointerDown);
     window.addEventListener('resize', handleViewportChange);

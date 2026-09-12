@@ -63,8 +63,8 @@ describe('time/numeric constants (#99)', () => {
     expect(VISUAL_RANGE_MULTIPLIER).toBe(3);
   });
 
-  it('MIN_VISUAL_RANGE_DAYS is 20', () => {
-    expect(MIN_VISUAL_RANGE_DAYS).toBe(20);
+  it('MIN_VISUAL_RANGE_DAYS is 30', () => {
+    expect(MIN_VISUAL_RANGE_DAYS).toBe(30);
   });
 
   it('MAX_LOG_ROWS is 15', () => {

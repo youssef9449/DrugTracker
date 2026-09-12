@@ -43,11 +43,11 @@ export const PHARMACY_PERSIST_DEBOUNCE_MS = 400;
 export const SW_READY_TIMEOUT_MS = 2000;
 
 /** Visual-range multiplier for the stock progress bar
- *  (Math.max(warningThresholdDays * 3, MIN_VISUAL_RANGE_DAYS)). */
+ *  (Math.max(packageDays, warningThresholdDays * 3, MIN_VISUAL_RANGE_DAYS)). */
 export const VISUAL_RANGE_MULTIPLIER = 3;
 
-/** Minimum visual-range days for the stock progress bar. */
-export const MIN_VISUAL_RANGE_DAYS = 20;
+/** Minimum visual-range days for the stock progress bar (≈ one month). */
+export const MIN_VISUAL_RANGE_DAYS = 30;
 
 /** Maximum number of consumption-log rows rendered in the list. */
 export const MAX_LOG_ROWS = 15;

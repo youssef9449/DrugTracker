@@ -15,9 +15,9 @@ import { useMemo, type FC } from 'react';
  *    the same color background — making the text effectively
  *    invisible.
  *
- * 2. The OS picker's visual style doesn't match the app's teal/amber
+ * 2. The OS picker's visual style doesn't match the app's teal
  *    theme. We get a Material-style blue/purple picker instead of
- *    the app's warm amber reminder block.
+ *    the app's teal form controls.
  *
  * Solution: render three styled <select> elements that match the
  * app theme. The dropdown options inherit the app's text color
@@ -65,7 +65,7 @@ export const CustomTimePicker: FC<CustomTimePickerProps> = ({
   };
 
   const selectClass =
-    'flex-1 px-2 py-2 rounded-xl border border-amber-300 bg-white text-sm font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 appearance-none cursor-pointer';
+    'flex-1 px-2 py-2 rounded-xl border border-slate-300 bg-white text-sm font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 appearance-none cursor-pointer';
 
   return (
     <div className="flex items-stretch gap-2">
@@ -85,12 +85,12 @@ export const CustomTimePicker: FC<CustomTimePickerProps> = ({
             </option>
           ))}
         </select>
-        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-amber-700 text-[10px] pointer-events-none font-bold">
+        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] pointer-events-none font-bold">
           ساعة
         </span>
       </div>
 
-      <span className="self-center text-amber-700 font-bold text-lg">:</span>
+      <span className="self-center text-slate-400 font-bold text-lg">:</span>
 
       {/* Minute (00-59) */}
       <div className="flex-1 relative">
@@ -108,7 +108,7 @@ export const CustomTimePicker: FC<CustomTimePickerProps> = ({
             </option>
           ))}
         </select>
-        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-amber-700 text-[10px] pointer-events-none font-bold">
+        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] pointer-events-none font-bold">
           دقيقة
         </span>
       </div>
@@ -121,7 +121,7 @@ export const CustomTimePicker: FC<CustomTimePickerProps> = ({
           onChange={(e) =>
             update(parsed.hour12, parsed.minute, e.target.value === 'PM')
           }
-          className="w-full px-2 py-2 rounded-xl border border-amber-300 bg-amber-50 text-sm font-bold text-amber-900 focus:outline-none focus:ring-2 focus:ring-amber-500 appearance-none cursor-pointer text-center"
+          className="w-full px-2 py-2 rounded-xl border border-slate-300 bg-slate-50 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 appearance-none cursor-pointer text-center"
         >
           <option value="AM">ص</option>
           <option value="PM">م</option>

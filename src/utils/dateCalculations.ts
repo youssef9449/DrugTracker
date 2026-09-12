@@ -218,11 +218,17 @@ export function countDueAutoDoses(
   todayStr: string = getTodayDateString()
 ): number {
   if (med.dailyDose <= 0) return 0;
+  // A manual consume today pre-settles the projection — no auto-dose
+  // due today (regardless of reminderTime). Checked before totalDays so
+  // a same-day med that was just consumed returns 0.
+  if (med.lastConsumedDate === todayStr) return 0;
   const lastDate = med.lastSyncDate || todayStr;
   const totalDays = getDaysDifference(lastDate, todayStr);
-  if (totalDays <= 0) return 0;
-  if (med.lastConsumedDate === todayStr) return 0;
   if (isReminderTimeGated(med)) {
+    // For gated meds, today's due-ness is evaluated INDEPENDENTLY of past
+    // elapsed days: a same-day med (lastSyncDate === today, totalDays === 0)
+    // still has today's dose pending reminderTime. `betweenDays` (past
+    // elapsed) is 0 in that case, so the count is just todayDue.
     const betweenDays = Math.max(0, totalDays - 1);
     const reminderMin = timeToMinutes(med.reminderTime as string);
     const todayDue =
@@ -231,6 +237,10 @@ export function countDueAutoDoses(
         : 0;
     return betweenDays + todayDue;
   }
+  // Legacy: today's dose is due at the start of the calendar day, so
+  // lastSyncDate === today (totalDays === 0) means today is already
+  // settled → 0 due doses.
+  if (totalDays <= 0) return 0;
   return totalDays;
 }
 
@@ -269,9 +279,11 @@ export function computeDueDoseBreakdown(
   const gated = isReminderTimeGated(med);
   const betweenDays = gated ? Math.max(0, totalDays - 1) : 0;
   const reminderMin = gated ? timeToMinutes(med.reminderTime as string) : -1;
+  // For gated meds, todayDue is evaluated INDEPENDENTLY of totalDays: a
+  // same-day med (lastSyncDate === today, totalDays === 0) still has
+  // today's dose pending reminderTime (and thus due at/after reminderTime).
   const todayDue =
     gated &&
-    totalDays > 0 &&
     !consumedToday &&
     localDateStr(now) === todayStr &&
     nowMinutesLocal(now) >= reminderMin;
@@ -281,11 +293,17 @@ export function computeDueDoseBreakdown(
   // its snapshot IS the live balance, so settlement must not project any
   // past auto-doses either. (effectiveCurrentPills checks this itself;
   // the settlement helpers read pastDueDoses/fullDueDoses here.)
-  if (med.autoDeductEnabled !== false && med.dailyDose > 0 && totalDays > 0 && !consumedToday) {
+  if (med.autoDeductEnabled !== false && med.dailyDose > 0 && !consumedToday) {
     if (gated) {
+      // Gated: fullDueDoses includes todayDue even when totalDays === 0
+      // (same-day med). pastDueDoses stays betweenDays (0 for same-day),
+      // so settlement settles only past days and leaves today dynamic.
       fullDueDoses = betweenDays + (todayDue ? 1 : 0);
       pastDueDoses = betweenDays;
-    } else {
+    } else if (totalDays > 0) {
+      // Legacy: today's dose is due at the start of the calendar day, so
+      // lastSyncDate === today (totalDays === 0) → 0 due doses (today
+      // already settled). Only count when past calendar days have elapsed.
       fullDueDoses = totalDays;
       pastDueDoses = totalDays;
     }

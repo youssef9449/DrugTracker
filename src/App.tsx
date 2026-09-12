@@ -31,6 +31,7 @@ import { AppSettingsModal } from './components/AppSettingsModal';
 import { AndroidFab } from './components/AndroidFab';
 import { EmptyState } from './components/EmptyState';
 import { DoseAlarmModal } from './components/DoseAlarmModal';
+import { SelectDoseModal } from './components/SelectDoseModal';
 import { UpdatePrompt } from './components/UpdatePrompt';
 import { Toggle } from './components/ui/Toggle';
 import { playSuccessChime } from './utils/sound';
@@ -172,9 +173,12 @@ export default function App() {
   const restoreInFlightRef = useRef<Set<string>>(new Set());
   const refillUndoInFlightRef = useRef<Set<string>>(new Set());
 
-  const { alarmingMedication, openAlarm, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
+  const { alarmingMedication, alarmingDoseId, openAlarm, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
     medications,
   });
+
+  // Phase 3A: multi-dose manual consume requires explicit dose selection.
+  const [selectDoseMed, setSelectDoseMed] = useState<Medication | null>(null);
 
   // #21: register a back-button handler that closes the top modal
   // instead of exiting the app. The handler returns true (modal was
@@ -1064,8 +1068,8 @@ export default function App() {
   // bundled sound. openAlarm is stable (empty-deps useCallback) so this
   // effect only registers once.
   useEffect(() => {
-    registerDoseReceivedHandler((medicationId) => {
-      openAlarm(medicationId);
+    registerDoseReceivedHandler((medicationId, doseId) => {
+      openAlarm(medicationId, doseId);
     });
     return () => registerDoseReceivedHandler(null);
   }, [openAlarm]);
@@ -1134,9 +1138,23 @@ export default function App() {
     const med = medications.find((m) => m.id === medicationId);
     if (!med) return;
     const today = getTodayDateString();
+    const isMulti =
+      Array.isArray(med.doseSchedule) && med.doseSchedule.length > 1;
+
+    // Multi-dose: never guess — open explicit selector when doseId missing.
+    if (isMulti && !doseId) {
+      setSelectDoseMed(med);
+      return;
+    }
+
+    // Single-dose schedule (length === 1): use that dose id if present.
+    const resolvedDoseId =
+      doseId ??
+      (Array.isArray(med.doseSchedule) && med.doseSchedule.length === 1
+        ? med.doseSchedule[0].id
+        : undefined);
+
     // Legacy: block double-consume for the single daily slot.
-    // Multi-dose: consumeDose itself rejects an already-consumed slot and
-    // picks the next pending slot when doseId is omitted.
     if (
       !(Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) &&
       med.lastConsumedDate === today
@@ -1144,12 +1162,13 @@ export default function App() {
       showToast(TOAST_MESSAGES.doseAlreadyTaken(med.name));
       return;
     }
+
     const { updatedMed, doseAmount, log } = consumeDose(
       med,
       'manual',
       today,
       new Date(),
-      doseId
+      resolvedDoseId
     );
     if (doseAmount <= 0) {
       showToast(TOAST_MESSAGES.doseAlreadyTaken(med.name));
@@ -1161,6 +1180,7 @@ export default function App() {
       );
       setLogs((prev) => [log, ...prev]);
     }
+    setSelectDoseMed(null);
     showToast(TOAST_MESSAGES.doseTaken(med.name, doseAmount, med.unit));
     if (soundEnabled) playSuccessChime();
   };
@@ -1590,9 +1610,16 @@ export default function App() {
       <DoseAlarmModal
         isOpen={Boolean(alarmingMedication)}
         medication={alarmingMedication}
+        doseId={alarmingDoseId}
         onTakeDose={handleTakeDoseFromAlarm}
         onSnooze={handleSnoozeFromAlarm}
         onDismiss={dismissAlarm}
+      />
+      <SelectDoseModal
+        isOpen={Boolean(selectDoseMed)}
+        medication={selectDoseMed}
+        onSelect={(medId, doseId) => handleConsumeDose(medId, doseId)}
+        onClose={() => setSelectDoseMed(null)}
       />
     </div>
   );

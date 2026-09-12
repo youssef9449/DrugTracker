@@ -12,7 +12,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { Medication, calculateMedicationStatus, describeStockInStrips, isSolidUnit } from '../types';
-import { getDepletionDate, getTodayDateString, effectiveCurrentPills } from '../utils/dateCalculations';
+import { getDepletionDate, getTodayDateString, effectiveCurrentPills, isDoseConsumedOnDate } from '../utils/dateCalculations';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { VISUAL_RANGE_MULTIPLIER, MIN_VISUAL_RANGE_DAYS, DAYS_PER_MONTH } from '../utils/time';
 import { MedicationMenu } from './MedicationMenu';
@@ -56,7 +56,7 @@ interface MedicationCardProps {
   onToggleAutoDeduct: (id: string) => void;
   onNavigateToShopping?: () => void;
   onTriggerAlarm?: (medication: Medication) => void;
-  onConsumeDose?: (medicationId: string) => void;
+  onConsumeDose?: (medicationId: string, doseId?: string) => void;
   lastRefillQuantity?: number;
   onUndoRefill?: () => void;
 }
@@ -456,7 +456,13 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const isOut = statusInfo.status === 'out_of_stock';
     const isCrit = statusInfo.status === 'critical';
     const isWarn = statusInfo.status === 'warning';
-    const isConsumedToday = medication.lastConsumedDate === getTodayDateString();
+    const todayStr = getTodayDateString();
+    const isConsumedToday =
+      Array.isArray(medication.doseSchedule) && medication.doseSchedule.length > 0
+        ? medication.doseSchedule.every((d) =>
+            isDoseConsumedOnDate(medication, d.id, todayStr)
+          )
+        : medication.lastConsumedDate === todayStr;
 
     const statusLabel = isOut
       ? 'نفد'
@@ -581,7 +587,13 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const isOut = statusInfo.status === 'out_of_stock';
     const isCrit = statusInfo.status === 'critical';
     const isWarn = statusInfo.status === 'warning';
-    const isConsumedToday = medication.lastConsumedDate === getTodayDateString();
+    const todayStr = getTodayDateString();
+    const isConsumedToday =
+      Array.isArray(medication.doseSchedule) && medication.doseSchedule.length > 0
+        ? medication.doseSchedule.every((d) =>
+            isDoseConsumedOnDate(medication, d.id, todayStr)
+          )
+        : medication.lastConsumedDate === todayStr;
 
     return (
       <div

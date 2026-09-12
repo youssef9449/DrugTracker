@@ -66,7 +66,6 @@
   font-size: 0.65rem;
 }
 
-/* The type icon is hidden in the mini card because the same type cue stays with the dose chip. */
 [id^="med-card-"][class*="border-r-2"] .medication-type-icon {
   display: none;
 }
@@ -81,7 +80,6 @@
   height: 1.75rem;
 }
 
-/* The three-dot overflow is redundant in the mini presentation; its actions are now first-class buttons. */
 [id^="med-card-"][class*="border-r-2"] .medication-menu-root > button[aria-label="خيارات إضافية"] {
   display: none;
 }
@@ -130,7 +128,6 @@
   background: rgb(248 250 252);
 }
 
-/* Preserve compact readability on narrow phones. */
 @media (max-width: 360px) {
   [id^="med-card-"][class*="border-r-2"] .medication-menu-root > button {
     width: 1.625rem;

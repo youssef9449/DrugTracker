@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, type FC, type FormEvent } from 'react';
-import { X, Pill, ShieldAlert, Check, Zap, Layers, Box, Calculator, Bell, Clock } from 'lucide-react';
+import { X, Pill, ShieldAlert, Check, Zap, Layers, Box, Calculator, Clock } from 'lucide-react';
 import { Medication, describeStockInStrips, formatTimeArabic, isSolidUnit } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
 import { CustomTimePicker } from './CustomTimePicker';
@@ -243,8 +243,9 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       setError('معدل الاستهلاك يجب أن يكون أكبر من صفر');
       return;
     }
-    if (reminderEnabled && !reminderTime) {
-      setError('اختر وقت التذكير اليومي');
+    // ميعاد الجرعة اليومي إجباري دائماً (مستقل عن تفعيل الإشعار)
+    if (!reminderTime || !/^([01]?\d|2[0-3]):[0-5]\d$/.test(reminderTime)) {
+      setError('يرجى تحديد ميعاد الجرعة اليومي');
       return;
     }
 
@@ -300,7 +301,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
         pillsPerStrip: pillsPerStripNum,
         packageSize: calculatedPkgSize,
         reminderEnabled,
-        reminderTime: reminderEnabled ? reminderTime : undefined,
+        reminderTime,
       },
       initialData ? initialData.id : undefined
     );
@@ -741,50 +742,56 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
           </div>
 
           <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl space-y-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-start gap-2">
-                <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
-                  <Bell className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-amber-950">إشعار يومي بميعاد تحدده أنت</h4>
-                  <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
-                    فعّل التذكير واختر الساعة التي تريد سماع التنبيه فيها كل يوم.
-                  </p>
-                </div>
+            <div className="flex items-start gap-2">
+              <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
+                <Clock className="w-4 h-4" />
               </div>
+              <div className="min-w-0">
+                <h4 className="text-xs font-bold text-amber-950">
+                  ميعاد الجرعة اليومي <span className="text-red-500">*</span>
+                </h4>
+                <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+                  حدد الساعة التي تأخذ فيها الجرعة يومياً. هذا الحقل إجباري لكل دواء.
+                </p>
+              </div>
+            </div>
+
+            {/* الوقت ظاهر دائماً وإجباري — مستقل عن تفعيل الإشعار */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5" />
+                <span>وقت الجرعة</span>
+              </label>
+              {/* Custom time picker (replaces the native <input type="time">
+                  which on Android shows the OS time picker with default
+                  Material colors — text invisible in AM/PM dropdown due
+                  to the OS using the system theme color for the option
+                  text against a same-color background). We use 3
+                  theme-styled <select> dropdowns instead: hour (1-12),
+                  minute (00-59), and AM/PM. The selected value is
+                  converted to/from 24-hour "HH:MM" format used by
+                  reminderTime state. */}
+              <CustomTimePicker
+                value={reminderTime}
+                onChange={setReminderTime}
+              />
+              <div className="text-[11px] text-amber-800 bg-white/70 border border-amber-200 rounded-lg px-2 py-1 text-center font-bold">
+                {formatTimeArabic(reminderTime) || 'اختر الوقت'}
+              </div>
+            </div>
+
+            {/* سطر مستقل: التوجل يتحكم فقط في إرسال إشعار التنبيه لهذا الدواء */}
+            <div className="flex items-center justify-between gap-3 pt-2 border-t border-amber-200/80">
+              <span className="text-xs font-bold text-amber-950 leading-snug">
+                تفعيل اشعار التنبيه بالجرعة
+              </span>
               <Toggle
                 checked={reminderEnabled}
                 onChange={() => setReminderEnabled(!reminderEnabled)}
-                label="تفعيل تذكير يومي بموعد محدد"
+                label="تفعيل اشعار التنبيه بالجرعة"
                 size="md"
               />
             </div>
-
-            {reminderEnabled && (
-              <div className="space-y-2 pt-1 border-t border-amber-200/80">
-                <label className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5" />
-                  <span>وقت التذكير اليومي</span>
-                </label>
-                {/* Custom time picker (replaces the native <input type="time">
-                    which on Android shows the OS time picker with default
-                    Material colors — text invisible in AM/PM dropdown due
-                    to the OS using the system theme color for the option
-                    text against a same-color background). We use 3
-                    theme-styled <select> dropdowns instead: hour (1-12),
-                    minute (00-59), and AM/PM. The selected value is
-                    converted to/from 24-hour "HH:MM" format used by
-                    reminderTime state. */}
-                <CustomTimePicker
-                  value={reminderTime}
-                  onChange={setReminderTime}
-                />
-                <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 text-center font-bold">
-                  {formatTimeArabic(reminderTime) || 'اختر الوقت'}
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Per-medication sound selector removed — all dose reminders

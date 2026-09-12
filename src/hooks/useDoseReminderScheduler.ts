@@ -81,13 +81,16 @@ export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
   const unit = med.unit || 'قرص';
 
   if (Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) {
-    // Skip invalid rows; keep first occurrence of each doseId (stable
-    // identity — never let a duplicate row steal another slot's id).
+    // Multi-dose path: every scheduled row must carry a non-empty stable
+    // doseId. Missing/empty/whitespace ids are skipped — never mapped to
+    // LEGACY_DOSE_ID (that identity is only for meds without a usable
+    // doseSchedule). Keep first occurrence of each valid doseId.
     const seen = new Set<string>();
     const slots: DoseReminderSlot[] = [];
     for (const d of med.doseSchedule) {
       if (!d || !isValidDoseTime(d.time) || !(Number(d.amount) > 0)) continue;
-      const doseId = (d.id && String(d.id).trim()) || LEGACY_DOSE_ID;
+      const doseId = typeof d.id === 'string' ? d.id.trim() : '';
+      if (!doseId) continue;
       if (seen.has(doseId)) continue;
       seen.add(doseId);
       slots.push({

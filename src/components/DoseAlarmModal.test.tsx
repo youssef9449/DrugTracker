@@ -99,4 +99,46 @@ describe('DoseAlarmModal', () => {
     );
     expect(screen.queryByText('Test Med')).toBeNull();
   });
+
+  it('passes the triggering doseId to onTakeDose', () => {
+    const onTakeDose = vi.fn();
+    const med = makeMed({
+      doseSchedule: [
+        { id: 'slot-a', amount: 2, time: '08:00' },
+        { id: 'slot-b', amount: 1, time: '20:00' },
+      ],
+      dosesPerDay: 2,
+      dailyDose: 3,
+    });
+    render(
+      <DoseAlarmModal
+        isOpen={true}
+        medication={med}
+        doseId="slot-b"
+        onTakeDose={onTakeDose}
+        onSnooze={() => {}}
+        onDismiss={() => {}}
+      />
+    );
+    fireEvent.click(screen.getByTestId('alarm-take-dose'));
+    expect(onTakeDose).toHaveBeenCalledTimes(1);
+    expect(onTakeDose.mock.calls[0][0].id).toBe('med-alarm');
+    expect(onTakeDose.mock.calls[0][1]).toBe('slot-b');
+  });
+
+  it('legacy alarm without doseId still calls onTakeDose with undefined doseId', () => {
+    const onTakeDose = vi.fn();
+    const med = makeMed();
+    render(
+      <DoseAlarmModal
+        isOpen={true}
+        medication={med}
+        onTakeDose={onTakeDose}
+        onSnooze={() => {}}
+        onDismiss={() => {}}
+      />
+    );
+    fireEvent.click(screen.getByTestId('alarm-take-dose'));
+    expect(onTakeDose).toHaveBeenCalledWith(med, undefined);
+  });
 });

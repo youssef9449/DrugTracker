@@ -15,6 +15,11 @@ export interface ConsumptionLog {
   reversedAt?: string;
   /** Links a refill_undo log to the original refill log. */
   relatedLogId?: string;
+  /**
+   * Stable MedicationDose.id when this log is for a specific dose slot
+   * (Phase 3). Legacy dose_taken logs omit it.
+   */
+  doseId?: string;
 }
 
 export interface Medication {
@@ -50,10 +55,19 @@ export interface Medication {
    */
   doseSchedule?: MedicationDose[];
   /** YYYY-MM-DD of the last day the user manually consumed a dose.
-   * When this equals today, syncAutoDailyDeductions skips the auto-
-   * deduction for this med (the user already took the dose manually)
-   * and the card shows a "تم تناول جرعة اليوم" badge. */
+   * Legacy single-dose: when this equals today, auto-deduction and
+   * reminders for the med are suppressed for today.
+   * Multi-dose: kept for compatibility / UI badge when ALL today's
+   * slots are consumed; authoritative per-slot state is doseConsumption.
+   */
   lastConsumedDate?: string;
+  /**
+   * Per-dose consumption map (Phase 3): doseId → YYYY-MM-DD of the last
+   * date that slot was manually consumed. Authoritative for multi-dose
+   * meds; suppresses only that dose's auto-deduction and reminder for
+   * the given date. Missing/undefined is fine for legacy meds.
+   */
+  doseConsumption?: Record<string, string>;
 }
 
 /** One individual dose event within a day (Phase 1 multi-dose model). */

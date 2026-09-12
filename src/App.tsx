@@ -31,6 +31,7 @@ import { AppSettingsModal } from './components/AppSettingsModal';
 import { AndroidFab } from './components/AndroidFab';
 import { EmptyState } from './components/EmptyState';
 import { DoseAlarmModal } from './components/DoseAlarmModal';
+import { SelectDoseModal } from './components/SelectDoseModal';
 import { UpdatePrompt } from './components/UpdatePrompt';
 import { Toggle } from './components/ui/Toggle';
 import { playSuccessChime } from './utils/sound';
@@ -172,9 +173,12 @@ export default function App() {
   const restoreInFlightRef = useRef<Set<string>>(new Set());
   const refillUndoInFlightRef = useRef<Set<string>>(new Set());
 
-  const { alarmingMedication, openAlarm, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
+  const { alarmingMedication, alarmingDoseId, openAlarm, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
     medications,
   });
+
+  // Phase 3A: multi-dose manual consume requires explicit dose selection.
+  const [selectDoseMed, setSelectDoseMed] = useState<Medication | null>(null);
 
   // #21: register a back-button handler that closes the top modal
   // instead of exiting the app. The handler returns true (modal was
@@ -183,13 +187,17 @@ export default function App() {
   // latest values.
   useEffect(() => {
     registerBackButtonHandler(() => {
+      // Top-most interactive overlay first.
       if (alarmingMedication) { dismissAlarm(); return true; }
+      // Phase 3A: explicit dose selector must dismiss on Android Back
+      // without exiting the app.
+      if (selectDoseMed) { setSelectDoseMed(null); return true; }
       if (isAddModalOpen) { setIsAddModalOpen(false); setEditingMedication(null); return true; }
       if (refillMedication) { setRefillMedication(null); return true; }
       if (isSettingsModalOpen) { setIsSettingsModalOpen(false); return true; }
       return false;
     });
-  }, [alarmingMedication, isAddModalOpen, refillMedication, isSettingsModalOpen, dismissAlarm]);
+  }, [alarmingMedication, selectDoseMed, isAddModalOpen, refillMedication, isSettingsModalOpen, dismissAlarm]);
 
   // #38: on unmount, remove all Capacitor listeners so duplicate
   // listeners don't accumulate across HMR re-initializations. Also
@@ -1032,11 +1040,10 @@ export default function App() {
   };
 
 
-  const handleTakeDoseFromAlarm = useCallback((med: Medication) => {
+  const handleTakeDoseFromAlarm = useCallback((med: Medication, doseId?: string) => {
     const today = getTodayDateString();
-    // Shared consume-dose logic (audit #77): settle at effPills, deduct the
-    // dose (clamped at 0), mark lastConsumedDate=today, produce dose_taken log.
-    const { updatedMed, doseAmount, log } = consumeDose(med, 'alarm', today);
+    // Phase 3: optional doseId selects the slot (from notification extra).
+    const { updatedMed, doseAmount, log } = consumeDose(med, 'alarm', today, new Date(), doseId);
     if (updatedMed && log) {
       setMedications((prev) =>
         prev.map((m) => (m.id === med.id ? updatedMed : m))
@@ -1049,10 +1056,10 @@ export default function App() {
   }, [dismissAlarm, soundEnabled]);
 
   useEffect(() => {
-    registerNotificationActionHandler((actionId, medicationId) => {
+    registerNotificationActionHandler((actionId, medicationId, doseId) => {
       if (actionId !== 'take_dose') return;
       const medication = medications.find((med) => med.id === medicationId);
-      if (medication) handleTakeDoseFromAlarm(medication);
+      if (medication) handleTakeDoseFromAlarm(medication, doseId);
     });
     return () => registerNotificationActionHandler(null);
   }, [medications, handleTakeDoseFromAlarm]);
@@ -1065,8 +1072,8 @@ export default function App() {
   // bundled sound. openAlarm is stable (empty-deps useCallback) so this
   // effect only registers once.
   useEffect(() => {
-    registerDoseReceivedHandler((medicationId) => {
-      openAlarm(medicationId);
+    registerDoseReceivedHandler((medicationId, doseId) => {
+      openAlarm(medicationId, doseId);
     });
     return () => registerDoseReceivedHandler(null);
   }, [openAlarm]);
@@ -1131,24 +1138,53 @@ export default function App() {
   // Consume-pill feature: manually consume a dose from the card.
   // Subtracts dailyDose from currentPills, marks the med as consumed
   // today (blocks auto-deduction for today), creates a dose_taken log.
-  const handleConsumeDose = (medicationId: string) => {
+  const handleConsumeDose = (medicationId: string, doseId?: string) => {
     const med = medications.find((m) => m.id === medicationId);
     if (!med) return;
     const today = getTodayDateString();
-    // If already consumed today, don't double-consume.
-    if (med.lastConsumedDate === today) {
+    const isMulti =
+      Array.isArray(med.doseSchedule) && med.doseSchedule.length > 1;
+
+    // Multi-dose: never guess — open explicit selector when doseId missing.
+    if (isMulti && !doseId) {
+      setSelectDoseMed(med);
+      return;
+    }
+
+    // Single-dose schedule (length === 1): use that dose id if present.
+    const resolvedDoseId =
+      doseId ??
+      (Array.isArray(med.doseSchedule) && med.doseSchedule.length === 1
+        ? med.doseSchedule[0].id
+        : undefined);
+
+    // Legacy: block double-consume for the single daily slot.
+    if (
+      !(Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) &&
+      med.lastConsumedDate === today
+    ) {
       showToast(TOAST_MESSAGES.doseAlreadyTaken(med.name));
       return;
     }
-    // Shared consume-dose logic (audit #77).
-    const { updatedMed, doseAmount, log } = consumeDose(med, 'manual', today);
-    if (doseAmount <= 0) return;
+
+    const { updatedMed, doseAmount, log } = consumeDose(
+      med,
+      'manual',
+      today,
+      new Date(),
+      resolvedDoseId
+    );
+    if (doseAmount <= 0) {
+      showToast(TOAST_MESSAGES.doseAlreadyTaken(med.name));
+      return;
+    }
     if (updatedMed && log) {
       setMedications((prev) =>
         prev.map((m) => (m.id === medicationId ? updatedMed : m))
       );
       setLogs((prev) => [log, ...prev]);
     }
+    setSelectDoseMed(null);
     showToast(TOAST_MESSAGES.doseTaken(med.name, doseAmount, med.unit));
     if (soundEnabled) playSuccessChime();
   };
@@ -1578,9 +1614,16 @@ export default function App() {
       <DoseAlarmModal
         isOpen={Boolean(alarmingMedication)}
         medication={alarmingMedication}
+        doseId={alarmingDoseId}
         onTakeDose={handleTakeDoseFromAlarm}
         onSnooze={handleSnoozeFromAlarm}
         onDismiss={dismissAlarm}
+      />
+      <SelectDoseModal
+        isOpen={Boolean(selectDoseMed)}
+        medication={selectDoseMed}
+        onSelect={(medId, doseId) => handleConsumeDose(medId, doseId)}
+        onClose={() => setSelectDoseMed(null)}
       />
     </div>
   );

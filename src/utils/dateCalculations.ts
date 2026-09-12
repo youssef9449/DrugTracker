@@ -100,6 +100,78 @@ function nowMinutesLocal(now: Date): number {
   return now.getHours() * 60 + now.getMinutes();
 }
 
+/** True when the med has a non-empty multi-dose schedule (Phase 1+). */
+export function hasDoseSchedule(med: Medication): boolean {
+  return Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0;
+}
+
+/**
+ * Whether a specific dose slot was manually consumed on `dateStr`.
+ * Multi-dose: reads doseConsumption[doseId].
+ * Legacy (no schedule): lastConsumedDate === dateStr covers the single slot.
+ */
+export function isDoseConsumedOnDate(
+  med: Medication,
+  doseId: string,
+  dateStr: string
+): boolean {
+  if (med.doseConsumption && med.doseConsumption[doseId] === dateStr) {
+    return true;
+  }
+  if (!hasDoseSchedule(med) && med.lastConsumedDate === dateStr) {
+    return true;
+  }
+  return false;
+}
+
+/** Sum of per-dose amounts, or dailyDose for legacy. */
+export function dailyScheduleAmount(med: Medication): number {
+  if (hasDoseSchedule(med)) {
+    return med.doseSchedule!.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+  }
+  return Number(med.dailyDose) || 0;
+}
+
+/**
+ * Units of stock that are due TODAY from the schedule (local time),
+ * excluding slots already manually consumed today.
+ */
+export function todayDueUnits(
+  med: Medication,
+  now: Date,
+  todayStr: string
+): number {
+  if (med.autoDeductEnabled === false) return 0;
+  if (localDateStr(now) !== todayStr) return 0;
+
+  if (hasDoseSchedule(med)) {
+    const nowMin = nowMinutesLocal(now);
+    let units = 0;
+    for (const d of med.doseSchedule!) {
+      const amount = Number(d.amount) || 0;
+      if (amount <= 0) continue;
+      const tMin = timeToMinutes(d.time);
+      if (tMin < 0) continue;
+      if (nowMin < tMin) continue;
+      if (isDoseConsumedOnDate(med, d.id, todayStr)) continue;
+      units += amount;
+    }
+    return units;
+  }
+
+  // Legacy single dose
+  if (med.dailyDose <= 0) return 0;
+  if (med.lastConsumedDate === todayStr) return 0;
+  if (isReminderTimeGated(med)) {
+    const reminderMin = timeToMinutes(med.reminderTime as string);
+    return nowMinutesLocal(now) >= reminderMin ? med.dailyDose : 0;
+  }
+  // Non-gated legacy: today's dose is due at start of calendar day —
+  // but only if lastSyncDate is before today (handled by caller via
+  // totalDays). This helper only answers "is today's slot time-due?".
+  return med.dailyDose;
+}
+
 // MS_PER_DAY is now imported from ./time (#99).
 
 export function formatArabicDate(dateStr: string, includeWeekday: boolean = true): string {
@@ -184,11 +256,10 @@ export function effectiveCurrentPills(
   // Auto-deduction paused → the stored snapshot IS the live balance.
   if (med.autoDeductEnabled === false) return med.currentPills;
   // No consumption rate → can't project forward meaningfully.
-  if (med.dailyDose <= 0) return med.currentPills;
-  const dueDoses = countDueAutoDoses(med, now, todayStr);
-  if (dueDoses <= 0) return med.currentPills;
-  const projected = med.currentPills - dueDoses * med.dailyDose;
-  return Math.max(0, projected);
+  if (dailyScheduleAmount(med) <= 0) return med.currentPills;
+  const { fullDueUnits } = computeDueDoseBreakdown(med, now, todayStr);
+  if (fullDueUnits <= 0) return med.currentPills;
+  return Math.max(0, med.currentPills - fullDueUnits);
 }
 
 /**
@@ -221,18 +292,24 @@ export function countDueAutoDoses(
   now: Date = new Date(),
   todayStr: string = getTodayDateString()
 ): number {
+  // Phase 3: prefer unit-based breakdown. For legacy single-dose meds this
+  // still returns a day-count (fullDueUnits / dailyDose). For multi-dose,
+  // returns the count of *dose events* due (not day-count) so callers that
+  // only need "is anything due" still work; stock math uses fullDueUnits.
+  const breakdown = computeDueDoseBreakdown(med, now, todayStr);
+  if (hasDoseSchedule(med)) {
+    // Number of individual dose slots due today + full past days * slots/day
+    // is not recovered here; expose day-equivalent via units / daily amount
+    // for approximate compatibility.
+    const dayAmt = dailyScheduleAmount(med);
+    if (dayAmt <= 0) return 0;
+    return breakdown.fullDueUnits / dayAmt;
+  }
   if (med.dailyDose <= 0) return 0;
-  // A manual consume today pre-settles the projection — no auto-dose
-  // due today (regardless of reminderTime). Checked before totalDays so
-  // a same-day med that was just consumed returns 0.
   if (med.lastConsumedDate === todayStr) return 0;
   const lastDate = med.lastSyncDate || todayStr;
   const totalDays = getDaysDifference(lastDate, todayStr);
   if (isReminderTimeGated(med)) {
-    // For gated meds, today's due-ness is evaluated INDEPENDENTLY of past
-    // elapsed days: a same-day med (lastSyncDate === today, totalDays === 0)
-    // still has today's dose pending reminderTime. `betweenDays` (past
-    // elapsed) is 0 in that case, so the count is just todayDue.
     const betweenDays = Math.max(0, totalDays - 1);
     const reminderMin = timeToMinutes(med.reminderTime as string);
     const todayDue =
@@ -241,9 +318,6 @@ export function countDueAutoDoses(
         : 0;
     return betweenDays + todayDue;
   }
-  // Legacy: today's dose is due at the start of the calendar day, so
-  // lastSyncDate === today (totalDays === 0) means today is already
-  // settled → 0 due doses.
   if (totalDays <= 0) return 0;
   return totalDays;
 }
@@ -271,8 +345,14 @@ export interface DueDoseBreakdown {
   todayDue: boolean;
   consumedToday: boolean;
   gated: boolean;
+  /** Day-count of due doses (legacy). For multi-dose, approximate day-equivalents. */
   fullDueDoses: number;
   pastDueDoses: number;
+  /** Units of stock due (authoritative for projection + settlement). */
+  fullDueUnits: number;
+  pastDueUnits: number;
+  /** Units due from today's schedule only (time-elapsed, not consumed). */
+  todayDueUnits: number;
 }
 
 export function computeDueDoseBreakdown(
@@ -281,39 +361,59 @@ export function computeDueDoseBreakdown(
   todayStr: string
 ): DueDoseBreakdown {
   const totalDays = getDaysDifference(med.lastSyncDate || todayStr, todayStr);
-  const consumedToday = med.lastConsumedDate === todayStr;
-  const gated = isReminderTimeGated(med);
+  const multi = hasDoseSchedule(med);
+  // Multi-dose is always time-gated per slot. Legacy uses reminderTime gate.
+  const gated = multi || isReminderTimeGated(med);
   const betweenDays = gated ? Math.max(0, totalDays - 1) : 0;
-  const reminderMin = gated ? timeToMinutes(med.reminderTime as string) : -1;
-  // For gated meds, todayDue is evaluated INDEPENDENTLY of totalDays: a
-  // same-day med (lastSyncDate === today, totalDays === 0) still has
-  // today's dose pending reminderTime (and thus due at/after reminderTime).
-  const todayDue =
-    gated &&
-    !consumedToday &&
-    localDateStr(now) === todayStr &&
-    nowMinutesLocal(now) >= reminderMin;
+
+  // consumedToday: legacy = lastConsumedDate; multi = all slots consumed today
+  // (used by mutation lastSync rules). Per-slot consumption is checked in
+  // todayDueUnits.
+  let consumedToday = med.lastConsumedDate === todayStr;
+  if (multi && med.doseSchedule) {
+    const allConsumed =
+      med.doseSchedule.length > 0 &&
+      med.doseSchedule.every((d) => isDoseConsumedOnDate(med, d.id, todayStr));
+    consumedToday = allConsumed;
+  }
+
+  const dayAmount = dailyScheduleAmount(med);
+  let todayUnits = 0;
+  let todayDue = false;
+
+  if (med.autoDeductEnabled !== false && dayAmount > 0) {
+    todayUnits = todayDueUnits(med, now, todayStr);
+    todayDue = todayUnits > 0;
+  }
+
   let fullDueDoses = 0;
   let pastDueDoses = 0;
-  // A frozen med (autoDeductEnabled === false) is NOT auto-deducted —
-  // its snapshot IS the live balance, so settlement must not project any
-  // past auto-doses either. (effectiveCurrentPills checks this itself;
-  // the settlement helpers read pastDueDoses/fullDueDoses here.)
-  if (med.autoDeductEnabled !== false && med.dailyDose > 0 && !consumedToday) {
-    if (gated) {
-      // Gated: fullDueDoses includes todayDue even when totalDays === 0
-      // (same-day med). pastDueDoses stays betweenDays (0 for same-day),
-      // so settlement settles only past days and leaves today dynamic.
-      fullDueDoses = betweenDays + (todayDue ? 1 : 0);
+  let pastDueUnits = 0;
+  let fullDueUnits = 0;
+
+  if (med.autoDeductEnabled !== false && dayAmount > 0) {
+    if (multi) {
+      // Full past calendar days between lastSync and today each contribute
+      // the full daily schedule amount. Today's contribution is per-slot.
+      pastDueUnits = betweenDays * dayAmount;
+      fullDueUnits = pastDueUnits + todayUnits;
       pastDueDoses = betweenDays;
+      fullDueDoses = betweenDays + (todayDue ? 1 : 0);
+    } else if (gated) {
+      if (!consumedToday) {
+        fullDueDoses = betweenDays + (todayDue ? 1 : 0);
+        pastDueDoses = betweenDays;
+        pastDueUnits = pastDueDoses * med.dailyDose;
+        fullDueUnits = fullDueDoses * med.dailyDose;
+      }
     } else if (totalDays > 0) {
-      // Legacy: today's dose is due at the start of the calendar day, so
-      // lastSyncDate === today (totalDays === 0) → 0 due doses (today
-      // already settled). Only count when past calendar days have elapsed.
       fullDueDoses = totalDays;
       pastDueDoses = totalDays;
+      pastDueUnits = totalDays * med.dailyDose;
+      fullDueUnits = pastDueUnits;
     }
   }
+
   return {
     totalDays,
     betweenDays,
@@ -322,6 +422,9 @@ export function computeDueDoseBreakdown(
     gated,
     fullDueDoses,
     pastDueDoses,
+    fullDueUnits,
+    pastDueUnits,
+    todayDueUnits: todayUnits,
   };
 }
 
@@ -395,7 +498,7 @@ export function reverseRefill(
   // replace today's dose without double-deduction. For legacy, settle
   // at the full effective balance (today included — pre-change behavior).
   const settleBase = breakdown.gated
-    ? Math.max(0, med.currentPills - breakdown.pastDueDoses * med.dailyDose)
+    ? Math.max(0, med.currentPills - breakdown.pastDueUnits)
     : Math.max(0, effectiveCurrentPills(med, todayStr, now));
   const reversedAmount = Math.min(Math.max(0, refillAmount), settleBase);
   const newLastSync = mutationSettlementLastSyncDate(
@@ -510,10 +613,16 @@ export function syncAutoDailyDeductions(
     // next app-open sync), NOT automatically at the calendar-day
     // boundary. For the legacy path, sync settles totalDays (today
     // included) — the pre-change behavior.
+    const dueUnits = breakdown.gated ? breakdown.pastDueUnits : breakdown.fullDueUnits;
     const dueDoses = breakdown.gated ? breakdown.pastDueDoses : breakdown.fullDueDoses;
 
-    if (med.autoDeductEnabled !== false && med.dailyDose > 0 && dueDoses > 0 && !breakdown.consumedToday) {
-      const pillsToDeduct = Math.min(med.currentPills, dueDoses * med.dailyDose);
+    if (
+      med.autoDeductEnabled !== false &&
+      dailyScheduleAmount(med) > 0 &&
+      dueUnits > 0 &&
+      !breakdown.consumedToday
+    ) {
+      const pillsToDeduct = Math.min(med.currentPills, dueUnits);
       const newPills = Math.max(0, med.currentPills - pillsToDeduct);
       const newLastSync = settlementLastSyncDate(
         med,
@@ -606,13 +715,14 @@ export function settleDoseChange(
   // path, settle past days only (betweenDays) — today's dose is left
   // dynamic. For legacy, settle totalDays (today included).
   const dueDoses = breakdown.gated ? breakdown.pastDueDoses : breakdown.fullDueDoses;
+  // Prefer unit-based settlement (Phase 3). When multi-dose, pastDueUnits
+  // already reflects the OLD schedule amounts on the med.
+  const dueUnits = breakdown.gated ? breakdown.pastDueUnits : breakdown.fullDueUnits;
 
-  // Compute the settled balance using the OLD dose.
-  // Only deduct when autoDeduct is active and there's a positive old rate.
   let pillsDeducted = 0;
   let settledPills = med.currentPills;
-  if (med.autoDeductEnabled !== false && oldDose > 0 && dueDoses > 0) {
-    pillsDeducted = Math.min(med.currentPills, dueDoses * oldDose);
+  if (med.autoDeductEnabled !== false && oldDose > 0 && dueUnits > 0) {
+    pillsDeducted = Math.min(med.currentPills, dueUnits);
     settledPills = Math.max(0, med.currentPills - pillsDeducted);
   }
 
@@ -705,6 +815,7 @@ export function settleAutoDeductToggle(
   // projection is off), and turning ON must start fresh from today (no
   // retroactive deduction for the frozen period).
   const dueDoses = breakdown.gated ? breakdown.pastDueDoses : breakdown.fullDueDoses;
+  const dueUnits = breakdown.gated ? breakdown.pastDueUnits : breakdown.fullDueUnits;
 
   let pillsDeducted = 0;
   let settledPills = med.currentPills;
@@ -713,11 +824,11 @@ export function settleAutoDeductToggle(
   //   - the med WAS being auto-deducted (wasActive === true), AND
   //   - we're turning it OFF (newState === false), AND
   //   - there's a positive consumption rate, AND
-  //   - due doses exist.
+  //   - due units exist.
   // For the false→true transition, we explicitly do NOT deduct
   // retroactively for the frozen period — currentPills stays unchanged.
-  if (wasActive && !newState && med.dailyDose > 0 && dueDoses > 0) {
-    pillsDeducted = Math.min(med.currentPills, dueDoses * med.dailyDose);
+  if (wasActive && !newState && dailyScheduleAmount(med) > 0 && dueUnits > 0) {
+    pillsDeducted = Math.min(med.currentPills, dueUnits);
     settledPills = Math.max(0, med.currentPills - pillsDeducted);
   }
 

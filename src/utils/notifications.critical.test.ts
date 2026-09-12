@@ -61,10 +61,6 @@ describe('scheduleCriticalAlarm (web path)', () => {
     expect(mocks.schedule).not.toHaveBeenCalled();
   });
 
-  it('treats a past criticalDateMs as "immediate" (fires 1s out)', async () => {
-    await scheduleCriticalAlarm('med-1', 'Test Med', Date.now() - 1000, 'قرص');
-    expect(mocks.schedule).not.toHaveBeenCalled();
-  });
 });
 
 describe('scheduleCriticalAlarm — native path (android)', () => {
@@ -89,14 +85,15 @@ describe('scheduleCriticalAlarm — native path (android)', () => {
     expect(notif.channelId).toBe('low-stock');
   });
 
-  it('fires immediately (1s out) when criticalDateMs is in the past', async () => {
-    const past = Date.now() - 60_000;
-    await scheduleCriticalAlarm('med-1', 'Test Med', past, 'قرص');
+  it('passes the alarm time to the platform exactly as given (no rewriting)', async () => {
+    // The scheduler only ever passes future timestamps; the persisted
+    // claim's alarmTime must match the actually-armed alarm, so no
+    // past-date fallback rewriting happens here.
+    const future = Date.now() + 3 * 24 * 60 * 60 * 1000;
+    await scheduleCriticalAlarm('med-1', 'Test Med', future, 'قرص');
 
     const notif = mocks.schedule.mock.calls[0][0].notifications[0];
-    const fireAt = notif.schedule.at.getTime();
-    expect(fireAt).toBeGreaterThan(Date.now());
-    expect(fireAt).toBeLessThan(Date.now() + 2000);
+    expect(notif.schedule.at.getTime()).toBe(future);
   });
 
   it('skips scheduling when permission is not granted', async () => {

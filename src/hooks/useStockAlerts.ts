@@ -1,22 +1,16 @@
-import { useEffect, useRef } from 'react';
-import { Medication, calculateMedicationStatus, CriticalTransitionState } from '../types';
+import { useEffect } from 'react';
+import { Medication, calculateMedicationStatus } from '../types';
 import { effectiveCurrentPills } from '../utils/dateCalculations';
+import { sendCriticalStockAlert, cancelCriticalAlarm } from '../utils/notifications';
 import {
-  sendCriticalStockAlert,
-  getDeliveredNotificationIds,
-  criticalAlarmId,
-  cancelCriticalAlarm,
-} from '../utils/notifications';
-import {
-  loadCriticalTransitions,
-  saveCriticalTransitions,
-  loadScheduledCriticalAlarms,
-  saveScheduledCriticalAlarms,
-  loadOwnershipRevisions,
-  saveOwnershipRevisions,
-  reconcileCriticalEpisode,
-  applyDeliveredCriticalEvidence,
-} from '../utils/criticalTransitions';
+  loadCriticalNotificationClaims,
+  saveCriticalNotificationClaims,
+  getCriticalNotificationClaim,
+  setCriticalNotificationClaim,
+  clearCriticalNotificationClaim,
+  claimsEqual,
+  enqueueCriticalAlarmOp,
+} from '../utils/criticalNotificationClaims';
 
 interface UseStockAlertsOptions {
   medications: Medication[];
@@ -26,101 +20,71 @@ interface UseStockAlertsOptions {
   isFirstRun: boolean;
 }
 
+/** The claim value an in-flight foreground send has written. */
+const IN_FLIGHT_CLAIM = { claimed: true, alarmTime: null } as const;
+
 /**
- * Watch the medications array + notification flags and OWN the logical
- * critical-stock episode lifecycle.
+ * Foreground critical-stock notification fallback.
  *
- * == Responsibilities (this hook is the single episode owner) ==
- * - Calculate current status (user-configured threshold ONLY:
- *   daysLeft <= warningThresholdDays → critical; effPills <= 0 →
- *   out_of_stock; no hidden derived sub-threshold).
- * - Create + persist a transition EXACTLY ONCE per continuous episode
- *   via the authoritative {@link reconcileCriticalEpisode} in
- *   criticalTransitions.ts (sufficient → critical/out_of_stock, or
- *   initial reconciliation of an already-critical med with no record).
- * - Preserve the transition (same key, same notification state)
- *   while the med stays critical/out_of_stock — across re-renders,
- *   days passing, auto deduction, manual consumption, refill-while-
- *   critical, lastSyncDate changes, app restarts, scheduler
- *   rescheduling, and the projected critical date moving.
- * - Delete the transition when the med becomes sufficient (episode end)
- *   and clear that episode's bound scheduled claim so a stale record
- *   can never suppress a future episode.
- * - Decide whether the foreground notification is still required:
- *   at most ONE user-facing notification per continuous transition.
+ * Business rule (the whole point of this hook): for each medication,
+ * during ONE continuous Critical/Out-of-Stock episode, the user gets AT
+ * MOST ONE critical notification. The persistent claim
+ * (criticalNotificationClaims.ts) is the source of truth for whether the
+ * current episode already claimed it.
  *
- * == Notification ownership ==
- *   Path A (foreground): transition.notificationState NONE → send → SENT.
- *   ANY armed SCHEDULED claim for the medication is neutralized at that
- *   moment (see reconcileCriticalEpisode) AND the native alarm behind it
- *   is cancelled here (fire-and-forget, see below).
- *   Path B (scheduled):  a validly-registered native alarm owns the
- *   episode's single notification → the episode is adopted/bound with
- *   notificationState 'SCHEDULED' and the foreground stays quiet.
- *   SCHEDULED does NOT mean delivered: once the claim's firing window
- *   passes (alarmTime <= now) the episode becomes 'FIRED_OR_DUE' —
- *   delivery UNKNOWN, claim consumed, never re-armed, foreground stays
- *   quiet. Elapsed alarmTime is never treated as proof of delivery.
- *   Only positive native evidence (the alarm notification actually
- *   visible in the drawer, checked asynchronously below) upgrades an
- *   episode to 'SENT'.
+ * Per medication, per pass:
  *
- * == Disabled / Re-enabled Notifications ==
- * If critical alerts or notifications are disabled when the medication
- * becomes critical, notificationState stays 'NONE' (never 'SENT').
- * When alerts are enabled later, exactly ONE notification fires for
- * the still-active episode.
+ *   sufficient / frozen         → nothing (the scheduler owns claims for
+ *                                 non-critical meds: it arms the future
+ *                                 alarm or clears the ended episode's
+ *                                 claim).
+ *   notifications/alerts off    → nothing, and the claim is NEVER
+ *                                 written (disabling must not consume the
+ *                                 opportunity; re-enabling while still
+ *                                 critical allows exactly one
+ *                                 notification).
+ *   critical + claimed          → nothing. No duplicate. Covers the
+ *                                 foreground send, the scheduled alarm
+ *                                 whose window passed (fired while the
+ *                                 app was closed, or missed — delivery
+ *                                 is deliberately NOT reconstructed),
+ *                                 app restarts, days passing, auto-
+ *                                 deduction, manual consumption and
+ *                                 Critical → Out-of-Stock (same episode).
+ *   critical + claimed by a     → the alarm provably has not fired yet
+ *   STILL-FUTURE alarm            (one-shot AlarmManager alarm with a
+ *                                 future fire time) but the med is
+ *                                 already critical (early crossing).
+ *                                 Release the stale alarm and send NOW —
+ *                                 still exactly one notification for the
+ *                                 episode.
+ *   critical + unclaimed        → send ONE foreground notification.
  *
- * == Race safety ==
- * All state lives in synchronous localStorage and this effect is the
- * only transition creator. The scheduler (useCriticalAlarmScheduler)
- * writes scheduled-alarm records ONLY through the ownership helpers in
- * criticalTransitions.ts (updateScheduledAlarm / invalidateScheduledAlarm /
- * clearScheduledAlarm), which read the authoritative active transition at
- * write time (read-only), preserve the active episode's binding, refuse
- * stale-generation writes, refuse SCHEDULED claims for SENT episodes,
- * and never generate identity — so React effect execution order between
- * the two hooks cannot produce contradictory state. Every episode-owner
- * lifecycle change made here bumps the medication's ownership revision
- * (see criticalTransitions.ts), which invalidates any async scheduler
- * operation captured before it — no late scheduler write can erase this
- * owner's binding, resurrect a dead episode's claim, or re-arm a
- * notification for a SENT episode. No artificial delays are used or
- * needed.
+ * Claim write timing (foreground send): the claim is marked
+ * synchronously when the send starts and reverted if the send fails, so
+ * re-renders while the send is in flight can never start a second send,
+ * and a failed send restores the opportunity (the fallback is never
+ * suppressed). After a successful foreground send any armed native alarm
+ * for the med is cancelled (it could only ever fire a second
+ * notification for the same claimed episode).
  *
- * == Native cancellation on foreground consumption (why HERE) ==
- * When the foreground consumes an episode's notification (NONE → SENT),
- * this hook fires a fire-and-forget cancelCriticalAlarm(med.id). At that
- * moment the med is CRITICAL, and the scheduler never arms alarms for
- * critical meds — so ANY armed critical alarm for this med is stale and
- * can only ever fire a SECOND user-facing notification for the consumed
- * episode. Cancelling here makes the consumption self-contained instead
- * of relying on the scheduler's effect re-running: the crossing may be
- * observed on a render where NO alarm-relevant med field changed (e.g.
- * the threshold was crossed by the calendar advancing while the app was
- * open across midnight — the scheduler's criticalSignature is unchanged
- * and its effect does not re-run), so the scheduler's cross-session
- * staleness cancel would never fire and the armed alarm would
- * eventually ring as a duplicate.
+ * Deleted medications have their claim entries removed here (the
+ * scheduler cancels their native alarms).
  *
- * This cancel is safe against in-flight scheduler operations: a
- * schedule operation that armed an alarm for the pre-crossing
- * projection re-verifies its captured ownership context AFTER the
- * native schedule resolves; the foreground send bumped the ownership
- * revision, so the stale operation compensates by cancelling the very
- * alarm it armed — the orphan cannot survive either way. The cancel is
- * also idempotent and writes NO persistent state (the claim was
- * already neutralized synchronously above).
- *
- * The owner deliberately does NOT cancel at EPISODE END (med became
- * sufficient): there the armed alarm may be the legitimate projected
- * alarm for the med's NEXT crossing, and an out-of-chain cancel could
- * race the scheduler's cancel-old→schedule-new chain and kill the NEW
- * alarm (both share the same stable per-med alarm id). Episode-end
- * cancellation is the scheduler's job — it always re-runs on episode
- * end (sufficiency only changes via refill/threshold/dose edits, all
- * of which are in its signature) and serializes cancel+reschedule
- * per-med.
+ * Race safety (all local, nothing persisted for it):
+ *   - Every claim write is a synchronous load → write → save of the map
+ *     (localStorage is synchronous); JS single-threading makes each
+ *     write atomic.
+ *   - The foreground writes claims only for CRITICAL meds; the scheduler
+ *     only for SUFFICIENT ones — they never race on the same state.
+ *   - The send resolves asynchronously; the failure-revert is a tiny
+ *     CAS: if the claim moved since this pass marked it (episode ended +
+ *     scheduler armed the next crossing, med deleted, …), the revert is
+ *     skipped — a stale foreground result can never overwrite newer
+ *     business state.
+ *   - Native alarm cancels go through the shared per-medication
+ *     operation queue so they serialize against the scheduler's
+ *     cancel/schedule chain.
  */
 export function useStockAlerts({
   medications,
@@ -129,118 +93,86 @@ export function useStockAlerts({
   hydrated,
   isFirstRun,
 }: UseStockAlertsOptions): void {
-  // In-memory mirror of the persistent transition map. Loaded once per
-  // JS session, mutated by every reconcile pass, persisted when dirty.
-  const transitionsRef = useRef<Record<string, CriticalTransitionState> | null>(null);
-
   useEffect(() => {
     if (!hydrated) return;
     if (isFirstRun) return;
 
-    if (transitionsRef.current === null) {
-      transitionsRef.current = loadCriticalTransitions();
+    const claims = loadCriticalNotificationClaims();
+    let changed = false;
+
+    // Clean up claims for deleted medications (the scheduler cancels
+    // their native alarms on its side).
+    const medIdSet = new Set(medications.map((m) => m.id));
+    for (const id of Object.keys(claims)) {
+      if (!medIdSet.has(id)) {
+        clearCriticalNotificationClaim(claims, id);
+        changed = true;
+      }
     }
-    const transitions = transitionsRef.current;
-    const scheduled = loadScheduledCriticalAlarms();
-    const ownershipRevisions = loadOwnershipRevisions();
-    const dirty = { transitions: false, scheduled: false, ownership: false };
-    const now = Date.now();
-    /** Meds whose episode notification the foreground consumed this pass. */
-    const foregroundConsumed: string[] = [];
+
+    const canNotify = notificationsEnabled && criticalStockAlertsEnabled;
 
     for (const med of medications) {
       const { status, daysLeft } = calculateMedicationStatus(med);
-      const effPills = effectiveCurrentPills(med);
       const isCriticalish = status === 'critical' || status === 'out_of_stock';
+      if (!isCriticalish) continue;
 
-      const result = reconcileCriticalEpisode(
-        transitions,
-        scheduled,
-        ownershipRevisions,
-        {
-          medId: med.id,
-          isCriticalish,
-          canNotify: notificationsEnabled && criticalStockAlertsEnabled,
-          now,
-          send: () => {
-            void sendCriticalStockAlert(med.id, med.name, daysLeft, effPills, med.unit || 'قرص');
-          },
-        },
-        dirty
-      );
-      if (result?.notificationSent) {
-        foregroundConsumed.push(med.id);
+      // Disabled: never send, never claim. The episode logically stays
+      // critical and its notification opportunity stays open.
+      if (!canNotify) continue;
+
+      const claim = getCriticalNotificationClaim(claims, med.id);
+      if (claim?.claimed && (claim.alarmTime === null || claim.alarmTime <= Date.now())) {
+        // This episode's notification opportunity is already consumed
+        // (foreground sent, or the scheduled alarm's window passed).
+        // Do nothing — at most one notification per episode.
+        continue;
       }
-    }
 
-    // The foreground consumed these episodes' single notification
-    // opportunity — cancel any armed native critical alarm for them
-    // (fire-and-forget; see the doc comment above for why this lives
-    // here and why it is race-safe).
-    for (const id of foregroundConsumed) {
-      void cancelCriticalAlarm(id);
-    }
-
-    // Clean up transitions for deleted medications.
-    const medIds = medications.map((m) => m.id);
-    const medIdSet = new Set(medIds);
-    for (const id of Object.keys(transitions)) {
-      if (!medIdSet.has(id)) {
-        delete transitions[id];
-        dirty.transitions = true;
+      // Either unclaimed, or claimed by a still-future alarm (early
+      // crossing — that alarm has provably not fired yet). Release the
+      // stale armed alarm (if any) and send the one foreground
+      // notification for this episode.
+      if (claim?.claimed && claim.alarmTime !== null) {
+        void enqueueCriticalAlarmOp(med.id, () => cancelCriticalAlarm(med.id));
       }
-    }
-    // (Scheduled records of deleted meds are the SCHEDULER's
-    // responsibility — it owns the native alarm cancellation and bumps
-    // the ownership revision for deleted meds there.)
 
-    if (dirty.transitions) {
-      saveCriticalTransitions(transitions);
-    }
-    if (dirty.scheduled) {
-      saveScheduledCriticalAlarms(scheduled);
-    }
-    if (dirty.ownership) {
-      saveOwnershipRevisions(ownershipRevisions);
-    }
+      // Mark the episode's opportunity as claimed NOW, synchronously, so
+      // concurrent effect passes (any re-render re-runs this effect)
+      // cannot start a second send while this one is in flight — and so
+      // an app death mid-send can never produce a duplicate on the next
+      // launch. A failed send reverts the mark (below).
+      setCriticalNotificationClaim(claims, med.id, { ...IN_FLIGHT_CLAIM });
+      changed = true;
 
-    // ── Delivery-evidence reconciliation (strict semantics) ──
-    // For episodes whose notification ownership is not yet terminal
-    // ('SCHEDULED' = claim pending/consumed-window-not-yet-marked,
-    // 'FIRED_OR_DUE' = claim consumed, delivery unknown), check (native
-    // only, best effort) whether the scheduled alarm notification is
-    // ACTUALLY visible in the Android drawer. That is positive evidence
-    // of delivery; absence proves nothing and changes nothing. This
-    // pass NEVER treats elapsed alarmTime as delivery.
-    const hasEvidenceCandidates = medIds.some((id) => {
-      const state = transitions[id]?.notificationState;
-      return state === 'SCHEDULED' || state === 'FIRED_OR_DUE';
-    });
-    if (hasEvidenceCandidates) {
-      void getDeliveredNotificationIds()
-        .then((deliveredIds) => {
-          // Re-load the ownership revisions AND the scheduled records
-          // INSIDE this async callback: the scheduler may have written
-          // records (or bumped revisions, e.g. medication deleted) while
-          // the drawer query was in flight — a read-modify-write of a
-          // stale map here could clobber those writes.
-          const currentRevisions = loadOwnershipRevisions();
-          const currentScheduled = loadScheduledCriticalAlarms();
-          const changed = applyDeliveredCriticalEvidence(
-            medIds,
-            deliveredIds,
-            transitions,
-            currentScheduled,
-            currentRevisions,
-            criticalAlarmId
-          );
-          if (changed) {
-            saveCriticalTransitions(transitions);
-            saveScheduledCriticalAlarms(currentScheduled);
-            saveOwnershipRevisions(currentRevisions);
+      const effPills = effectiveCurrentPills(med);
+      const unit = med.unit || 'قرص';
+      Promise.resolve(sendCriticalStockAlert(med.id, med.name, daysLeft, effPills, unit))
+        .then((sent) => sent === true)
+        .catch(() => false)
+        .then((sent) => {
+          if (sent) {
+            // The foreground consumed the episode's notification — make
+            // sure no armed critical alarm for this med survives as a
+            // second user-facing notification. Serialized through the
+            // per-medication queue; idempotent.
+            void enqueueCriticalAlarmOp(med.id, () => cancelCriticalAlarm(med.id));
+            return;
           }
-        })
-        .catch(() => undefined);
+          // Send failed → un-claim so the opportunity stays available
+          // (never suppress the fallback). CAS: only revert the mark we
+          // ourselves wrote; if the claim moved under us (episode ended,
+          // med deleted, …) the newer state wins and we do nothing.
+          const fresh = loadCriticalNotificationClaims();
+          const current = getCriticalNotificationClaim(fresh, med.id);
+          if (!claimsEqual(current, IN_FLIGHT_CLAIM)) return;
+          setCriticalNotificationClaim(fresh, med.id, { claimed: false, alarmTime: null });
+          saveCriticalNotificationClaims(fresh);
+        });
+    }
+
+    if (changed) {
+      saveCriticalNotificationClaims(claims);
     }
   }, [medications, notificationsEnabled, criticalStockAlertsEnabled, hydrated, isFirstRun]);
 }

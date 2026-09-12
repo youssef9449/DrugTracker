@@ -484,11 +484,11 @@ export default function App() {
   }, [hydrated]);
 
   // ─────────────────────────────────────────────────────────────
-  // Alert effect: watches the (post-deduction) medications array and
-  // fires a notification the FIRST time a medication transitions into
-  // critical/out_of_stock. Uses a persistent dedup map so the same
-  // transition can never produce two notifications (foreground +
-  // scheduled alarm + app restart are all deduped).
+  // Foreground critical-stock fallback: for each medication, during one
+  // continuous Critical/Out-of-Stock episode, sends AT MOST ONE critical
+  // notification. The persistent notification claim
+  // (utils/criticalNotificationClaims.ts) is the business source of
+  // truth: claimed=true ⇒ quiet, claimed=false ⇒ send once.
   //
   // Extracted into useStockAlerts for testability (#87).
   useStockAlerts({
@@ -500,17 +500,19 @@ export default function App() {
   });
 
   // ─────────────────────────────────────────────────────────────
-  // One-shot critical-alarm scheduling — extracted into a hook for
-  // testability + race protection. See useCriticalAlarmScheduler.ts
-  // for the full doc (boot persistence, reschedule triggers, stale-
-  // async generation guard, edge cases). The hook handles:
-  //   - scheduling a one-shot alarm at each med's projected critical
-  //     date
+  // One-shot critical-alarm scheduling — the native EXECUTOR for the
+  // critical notification claim. Extracted into a hook for testability
+  // + race protection. See useCriticalAlarmScheduler.ts for the full
+  // doc (boot persistence, reschedule triggers, per-med operation
+  // queue + generation guard). The hook handles:
+  //   - scheduling a one-shot alarm at each sufficient med's projected
+  //     critical date and persisting claim=true only after success
   //   - cancel + reschedule when any of the 6 trigger fields change
   //   - cancel for deleted meds
-  //   - cancel all when the user opts out of either flag
-  //   - per-med generation guard so an older async effect cannot
-  //     recreate a stale alarm after a newer state or after deletion
+  //   - cancel all when the user opts out of either flag (re-opening
+  //     claims whose future alarm was cancelled before firing)
+  //   - per-med operation queue + generation guard so a stale async
+  //     operation can never overwrite newer claim state
   // ─────────────────────────────────────────────────────────────
   useCriticalAlarmScheduler({
     medications,

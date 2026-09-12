@@ -54,27 +54,46 @@ export interface Medication {
    * (sum of schedule amounts when a schedule exists).
    */
   doseSchedule?: MedicationDose[];
-  /** YYYY-MM-DD of the last day the user manually consumed a dose.
+  /**
+   * YYYY-MM-DD of the last day the user manually consumed a dose.
    * Legacy single-dose: when this equals today, auto-deduction and
    * reminders for the med are suppressed for today.
-   * Multi-dose: kept for compatibility / UI badge when ALL today's
-   * slots are consumed; authoritative per-slot state is doseConsumption.
+   * Multi-dose: compatibility / UI badge when ALL of today's schedule
+   * slots are consumed. Per-slot authority is
+   * {@link doseConsumptionHistory} (with {@link doseConsumption} as
+   * last-date compat).
    */
   lastConsumedDate?: string;
   /**
-   * Per-dose last-consumption map (Phase 3): doseId → YYYY-MM-DD of the
-   * most recent date that slot was manually consumed. Used for "consumed
-   * today?" reminder suppression and as a backward-compatible signal.
-   * Historical catch-up prefers {@link doseConsumptionHistory}.
+   * Per-dose **last** consumption date (Phase 3 / 3B compat):
+   * doseId → YYYY-MM-DD of the most recent manual consume for that slot.
+   *
+   * This is NOT a complete historical ledger. It is kept so:
+   * - "consumed today?" checks and reminder suppression stay cheap
+   * - pre-Phase-3B persisted data remains readable
+   *
+   * Detailed multi-dose catch-up uses {@link doseConsumptionHistory}.
+   * When history is absent, readers may treat this last-date value as
+   * a single known consumed date for that doseId. Dates that the old
+   * last-date-only model overwrote are unrecoverable and must not be
+   * invented.
    */
   doseConsumption?: Record<string, string>;
   /**
    * Per-dose consumption history (Phase 3B): doseId → YYYY-MM-DD dates
    * on which that slot was manually consumed (unique, chronological).
-   * Authoritative for historical multi-dose catch-up so a partial day
-   * does not double-deduct slots already settled by consumeDose.
+   *
+   * Authoritative source for multi-dose historical catch-up: a slot
+   * recorded as consumed on date D is never auto-deducted again for D.
+   *
+   * Retention (intentional current design):
+   * - Local, lightweight date strings only
+   * - Grows with consume events; no date-based pruning
+   * - Orphan doseIds are removed when that id leaves the schedule
+   * - App scale does not currently justify a retention subsystem
+   *
    * Missing/undefined is fine for legacy meds and pre-3B data; readers
-   * fall back to {@link doseConsumption} as a single-date history.
+   * fall back to {@link doseConsumption} as a one-date history.
    */
   doseConsumptionHistory?: Record<string, string[]>;
 }

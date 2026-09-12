@@ -520,11 +520,28 @@ describe('Phase 3B BLOCKER — historical partial consumption (no double deducti
       ],
       dailyDose: 5,
     });
-    // History still marks d1 consumed on Sep 11 regardless of new amount
+    // Recorded consume *date* survives amount/time edit (stable doseId).
     expect(isDoseConsumedOnDate(med, 'd1', '2024-09-11')).toBe(true);
-    // Historical settlement for Sep 11 uses CURRENT schedule amounts for
-    // unconsumed slots only; d1 skipped, d2+d3 = 2
+    // Unrecorded historical slots use CURRENT schedule amounts (fallback,
+    // not reconstructed past config): d1 skipped, d2+d3 = 1+1 = 2.
     expect(historicalDayDueUnits(med, '2024-09-11')).toBe(2);
+  });
+
+  it('unconsumed historical slot uses current amount after edit (documented fallback)', () => {
+    // Yesterday d2 was never consumed; schedule later edits d2 1 → 5.
+    const med = makeMed({
+      lastSyncDate: '2024-09-11',
+      currentPills: 40,
+      doseSchedule: [
+        { id: 'd1', amount: 2, time: '08:00' },
+        { id: 'd2', amount: 5, time: '14:00' }, // edited
+        { id: 'd3', amount: 1, time: '21:00' },
+      ],
+      dailyDose: 8,
+      // no history for Sep 12
+    });
+    // Unknown-history day: full current schedule = 2+5+1 = 8 (not old 4)
+    expect(historicalDayDueUnits(med, '2024-09-12')).toBe(8);
   });
 });
 

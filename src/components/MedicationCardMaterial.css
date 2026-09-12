@@ -153,7 +153,7 @@
 }
 
 /* Detailed auto-deduct is represented by the header toggle only; remove the duplicate status strip. */
-[id^="med-card-"][class*="border-r-4"] > div:nth-last-child(2) {
+[id^="med-card-"][class*="border-r-4"] > div[class*="mt-1 text-[9px]"] {
   display: none;
 }
 

@@ -1232,8 +1232,8 @@ export async function scheduleDoseReminder(
             autoCancel: true,
             extra: {
               medicationId: medId,
-              // Phase 2 metadata for future Phase 3 per-dose handling.
-              // take_dose still consumes at medication level (unchanged).
+              // Phase 3/4: doseId identifies the exact schedule slot for
+              // openAlarm / take-dose (legacy omits doseId).
               ...(doseId ? { doseId } : {}),
             },
           },

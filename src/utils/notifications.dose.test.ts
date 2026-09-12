@@ -27,6 +27,7 @@ vi.mock('@capacitor/local-notifications', () => ({
 import {
   scheduleDoseReminder,
   doseReminderAlarmId,
+  doseReminderAlarmIdForDose,
   isDoseReminderTimeStillAhead,
 } from './notifications';
 
@@ -173,5 +174,24 @@ describe('isDoseReminderTimeStillAhead — suppression boundary', () => {
     expect(isDoseReminderTimeStillAhead('')).toBe(false);
     expect(isDoseReminderTimeStillAhead('99:99')).toBe(false);
     expect(isDoseReminderTimeStillAhead('ab:cd')).toBe(false);
+  });
+});
+
+describe('Phase 4 — doseId in notification extra', () => {
+  it('scheduleDoseReminder embeds doseId in extra for multi-dose slots', async () => {
+    await scheduleDoseReminder('med-x', 'Drug', '14:00', 1, 'قرص', { doseId: 'd2' });
+    expect(mocks.schedule).toHaveBeenCalled();
+    const notif = mocks.schedule.mock.calls[0][0].notifications[0];
+    expect(notif.extra.medicationId).toBe('med-x');
+    expect(notif.extra.doseId).toBe('d2');
+    expect(notif.id).toBe(doseReminderAlarmIdForDose('med-x', 'd2'));
+  });
+
+  it('two doses get distinct notification ids', async () => {
+    await scheduleDoseReminder('med-x', 'Drug', '08:00', 2, 'قرص', { doseId: 'd1' });
+    await scheduleDoseReminder('med-x', 'Drug', '14:00', 1, 'قرص', { doseId: 'd2' });
+    const id1 = mocks.schedule.mock.calls[0][0].notifications[0].id;
+    const id2 = mocks.schedule.mock.calls[1][0].notifications[0].id;
+    expect(id1).not.toBe(id2);
   });
 });

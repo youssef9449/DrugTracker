@@ -17,13 +17,24 @@
  *   - android_med_tracker_critical_transition_v2  (episode state machine)
  *   - android_med_tracker_scheduled_critical_v2   (scheduled-claim records)
  *   - android_med_tracker_critical_ownership_v2   (ownership revisions)
- * An ongoing episode whose notification was already consumed
- * (SCHEDULED / FIRED_OR_DUE / SENT) migrates to claimed=true so
- * upgrading users do not get a duplicate notification. An episode that
- * had NOT yet consumed its notification (NONE) migrates to claimed=false
- * so its remaining opportunity is preserved. A scheduled record that was
- * armed for a future crossing without an episode carries over as
- * claimed=true with its alarm time.
+ *
+ * The migration inspects BOTH legacy stores together — never the
+ * transition state alone:
+ *   - SENT / FIRED_OR_DUE            → { claimed: true,  alarmTime: null }
+ *     (the notification was already delivered; a still-armed record
+ *     alongside these states is stale residue — never resurrected)
+ *   - valid FUTURE scheduled alarm   → { claimed: true,  alarmTime }
+ *     (preserved REGARDLESS of the transition state — SCHEDULED included —
+ *     so the new scheduler recognises the armed alarm instead of
+ *     cancelling/re-arming it, which could lose it on a failed re-arm)
+ *   - elapsed (alarmTime <= now)
+ *     scheduled alarm                → { claimed: true,  alarmTime: null }
+ *     (never pretend it is still future; delivery state is not
+ *     reconstructed, so it migrates as consumed — this prevents a
+ *     duplicate foreground notification right after the upgrade)
+ *   - NONE / no transition, nothing
+ *     armed                          → { claimed: false, alarmTime: null }
+ *     (the opportunity was never consumed — it stays open)
  */
 
 import type { CriticalNotificationClaim } from '../types';
@@ -61,6 +72,16 @@ function removeLegacyKeys(): void {
 /**
  * Migrate the previous state-machine stores into the simple claim map.
  * Pure function over the parsed legacy values.
+ *
+ * Decision order per medication (see the file-header rules):
+ *   1. SENT / FIRED_OR_DUE      → consumed (alarmTime: null, always —
+ *      a still-armed record next to these states is stale residue).
+ *   2. Valid FUTURE armed alarm → preserved with its alarmTime, no
+ *      matter the transition state (SCHEDULED included).
+ *   3. Elapsed armed alarm      → consumed (alarmTime: null).
+ *   4. NONE / no transition     → open opportunity (claimed: false).
+ *   5. SCHEDULED without any    → consumed.
+ *      armed record
  */
 export function migrateLegacyClaims(
   legacyTransitions: unknown,
@@ -77,6 +98,7 @@ export function migrateLegacyClaims(
       ? (legacyScheduled as Record<string, { alarmTime?: unknown; status?: unknown }>)
       : {};
 
+  const now = Date.now();
   const ids = new Set([...Object.keys(transitions), ...Object.keys(scheduled)]);
   for (const medId of ids) {
     const transitionState = transitions[medId]?.notificationState;
@@ -87,22 +109,49 @@ export function migrateLegacyClaims(
         // Records written before statuses existed: a positive alarmTime
         // meant the alarm was successfully registered.
         (record.status === undefined && typeof record.alarmTime === 'number' && record.alarmTime > 0));
+    const armedAlarmTime =
+      recordScheduled && typeof record?.alarmTime === 'number' ? record.alarmTime : null;
+    // A successfully armed alarm whose fire time is still ahead of us.
+    // It must survive migration WITH its time: nulling it would make the
+    // new scheduler treat the claim as mismatched, cancel/re-arm the
+    // live alarm, and a failed re-arm would lose the future notification
+    // while the medication is still Sufficient.
+    const hasFutureAlarm = armedAlarmTime !== null && armedAlarmTime > now;
+
+    if (transitionState === 'SENT' || transitionState === 'FIRED_OR_DUE') {
+      // The notification was already delivered by a foreground send
+      // (SENT) or a fired/due native alarm (FIRED_OR_DUE). A still-armed
+      // record alongside these states is stale legacy residue — never
+      // resurrect it for an already-sent notification.
+      claims[medId] = { claimed: true, alarmTime: null };
+      continue;
+    }
+
+    if (hasFutureAlarm) {
+      // A valid FUTURE scheduled alarm takes precedence over the
+      // transition state (SCHEDULED / NONE / none): preserve it exactly
+      // as armed.
+      claims[medId] = { claimed: true, alarmTime: armedAlarmTime };
+      continue;
+    }
 
     if (transitionState === undefined || transitionState === 'NONE') {
-      // The episode had not consumed its notification opportunity yet —
-      // preserve it. If a future alarm was armed for the (upcoming)
-      // crossing, carry the claim with its alarm time; otherwise the
-      // opportunity stays open with no claim.
-      if (recordScheduled && typeof record?.alarmTime === 'number' && record.alarmTime > 0) {
-        claims[medId] = { claimed: true, alarmTime: record.alarmTime };
+      if (armedAlarmTime !== null) {
+        // Elapsed armed alarm: the new architecture deliberately does
+        // not reconstruct Android delivery state, so it migrates as a
+        // consumed opportunity — this prevents a duplicate foreground
+        // notification right after the upgrade.
+        claims[medId] = { claimed: true, alarmTime: null };
       } else {
+        // The episode had not consumed its notification opportunity —
+        // it stays open.
         claims[medId] = { claimed: false, alarmTime: null };
       }
       continue;
     }
 
-    // SCHEDULED / FIRED_OR_DUE / SENT — the episode's notification
-    // opportunity was consumed. claimed=true, no delivery reconstruction.
+    // SCHEDULED with an elapsed or absent scheduled record: consumed,
+    // no delivery reconstruction.
     claims[medId] = { claimed: true, alarmTime: null };
   }
   return claims;

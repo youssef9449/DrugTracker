@@ -55,7 +55,7 @@ export function settleAndAdjust(
   // For legacy, settle at the full effective balance (today included —
   // pre-change behavior).
   const settleBase = breakdown.gated
-    ? Math.max(0, med.currentPills - breakdown.pastDueDoses * med.dailyDose)
+    ? Math.max(0, med.currentPills - breakdown.pastDueUnits)
     : Math.max(0, effectiveCurrentPills(med, todayStr, now));
   const newSnapshot = Math.max(0, settleBase + delta);
   const newLastSync = mutationSettlementLastSyncDate(
@@ -105,31 +105,75 @@ export function consumeDose(
   med: Medication,
   source: 'alarm' | 'manual',
   todayStr: string = getTodayDateString(),
-  now: Date = new Date()
+  now: Date = new Date(),
+  doseId?: string
 ): ConsumeDoseResult {
   const breakdown = computeDueDoseBreakdown(med, now, todayStr);
-  // For the reminderTime-gated path, settle at the PAST-only balance
-  // (exclude today's projected auto-dose): the manual dose IS today's
-  // dose — it must REPLACE today's auto-dose, not add to it. This
-  // prevents double-deduction whether the manual consume happens
-  // before or after reminderTime. For legacy, settle at the full
-  // effective balance (today included — pre-change behavior).
+  const multi =
+    Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0;
+
+  // Resolve which dose slot is being consumed.
+  let targetDoseId = doseId;
+  let targetAmount = med.dailyDose;
+  if (multi) {
+    const schedule = med.doseSchedule!;
+    let target = targetDoseId
+      ? schedule.find((d) => d.id === targetDoseId)
+      : undefined;
+    if (!target) {
+      // Earliest unconsumed slot for today.
+      target = schedule.find((d) => med.doseConsumption?.[d.id] !== todayStr);
+    }
+    if (!target) {
+      return { updatedMed: null, doseAmount: 0, log: null };
+    }
+    if (med.doseConsumption?.[target.id] === todayStr) {
+      return { updatedMed: null, doseAmount: 0, log: null };
+    }
+    targetDoseId = target.id;
+    targetAmount = Number(target.amount) || 0;
+  } else if (med.lastConsumedDate === todayStr) {
+    return { updatedMed: null, doseAmount: 0, log: null };
+  }
+
+  // Settle past-only for gated/multi; full effective for legacy non-gated.
   const settleBase = breakdown.gated
-    ? Math.max(0, med.currentPills - breakdown.pastDueDoses * med.dailyDose)
+    ? Math.max(0, med.currentPills - breakdown.pastDueUnits)
     : Math.max(0, effectiveCurrentPills(med, todayStr, now));
-  const doseAmount = Math.min(med.dailyDose, settleBase);
+  const doseAmount = Math.min(targetAmount, settleBase);
   if (doseAmount <= 0) {
     return { updatedMed: null, doseAmount: 0, log: null };
   }
   const newSnapshot = Math.max(0, settleBase - doseAmount);
+
+  const doseConsumption: Record<string, string> = {
+    ...(med.doseConsumption ?? {}),
+  };
+  if (multi && targetDoseId) {
+    doseConsumption[targetDoseId] = todayStr;
+  }
+
+  const allSlotsConsumedToday =
+    multi &&
+    !!med.doseSchedule &&
+    med.doseSchedule.every((d) => doseConsumption[d.id] === todayStr);
+
+  const lastConsumedDate = !multi || allSlotsConsumedToday ? todayStr : med.lastConsumedDate;
+
+  // Multi/gated with remaining slots today: lastSync = yesterday so past
+  // days stay settled and remaining today's slots stay projectable.
+  // Fully consumed (or legacy): lastSync = today.
+  const lastSyncDate =
+    breakdown.gated && multi && !allSlotsConsumedToday
+      ? mutationSettlementLastSyncDate(todayStr, false, true)
+      : todayStr;
+
   const updatedMed: Medication = {
     ...med,
     currentPills: newSnapshot,
-    lastConsumedDate: todayStr,
-    // Manual consume settles today's dose (the manual one) → lastSyncDate
-    // = today (today's dose is now done; effectiveCurrentPills returns
-    // currentPills as-is, no re-projection via the lastConsumedDate guard).
-    lastSyncDate: todayStr,
+    lastConsumedDate,
+    lastSyncDate,
+    ...(multi ? { doseConsumption } : {}),
   };
   const description =
     source === 'alarm'
@@ -144,6 +188,7 @@ export function consumeDose(
     date: todayStr,
     timestamp: new Date().toISOString(),
     description,
+    ...(targetDoseId ? { doseId: targetDoseId } : {}),
   };
   return { updatedMed, doseAmount, log };
 }

@@ -10,6 +10,7 @@ import {
 } from '../utils/notifications';
 import { clearSnoozedDoseForMed } from '../utils/doseReminderStorage';
 import { isValidDoseTime } from '../utils/doseSchedule';
+import { isDoseConsumedOnDate } from '../utils/dateCalculations';
 
 /**
  * Options for {@link useDoseReminderScheduler}.
@@ -117,9 +118,8 @@ export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
  * notification id derived from medicationId + doseId.
  *
  * The recurring alarm is config-driven. Consumption suppression still
- * uses medication-level `lastConsumedDate` (not per-dose) — Phase 3
- * will refine that. skipToday therefore applies to all of a med's
- * dose slots when the med was marked consumed today.
+ * uses per-dose consumption (`doseConsumption` / legacy lastConsumedDate).
+ * skipToday applies only to slots consumed today.
  *
  * Generation counter + per-key serialization chain prevent races when
  * config changes quickly or resume reconciliation overlaps a schedule op.
@@ -228,7 +228,7 @@ export function useDoseReminderScheduler({
         continue;
       }
 
-      const consumedToday = med.lastConsumedDate === getTodayDateString();
+      const today = getTodayDateString();
       const activeDoseIds = new Set(slots.map((s) => s.doseId));
 
       // Cancel slots that were scheduled for this med but are no longer
@@ -249,18 +249,20 @@ export function useDoseReminderScheduler({
         const name = slot.name;
         const unit = slot.unit;
         const medId = slot.medId;
+        // Phase 3: suppress only this dose slot when it was consumed today.
+        const slotConsumedToday = isDoseConsumedOnDate(med, doseId, today);
 
         enqueue(key, () =>
           cancelDoseReminder(medId, doseId).then(() => {
             if (doseGenerationRef.current.get(key) !== gen) return;
             const opts =
               doseId === LEGACY_DOSE_ID
-                ? consumedToday
+                ? slotConsumedToday
                   ? { skipToday: true as const }
                   : undefined
                 : {
                     doseId,
-                    ...(consumedToday ? { skipToday: true as const } : {}),
+                    ...(slotConsumedToday ? { skipToday: true as const } : {}),
                   };
             return (
               opts
@@ -302,7 +304,15 @@ export function useDoseReminderScheduler({
   const consumedSignature = useMemo(
     () =>
       medications
-        .map((m) => `${m.id}|${m.lastConsumedDate ?? ''}`)
+        .map((m) => {
+          const perDose = m.doseConsumption
+            ? Object.entries(m.doseConsumption)
+                .map(([id, d]) => `${id}=${d}`)
+                .sort()
+                .join(',')
+            : '';
+          return `${m.id}|${m.lastConsumedDate ?? ''}|${perDose}`;
+        })
         .sort()
         .join('\n'),
     [medications]
@@ -317,15 +327,20 @@ export function useDoseReminderScheduler({
     const today = getTodayDateString();
     for (const med of medicationsRef.current) {
       if (!med.reminderEnabled) continue;
-      if (med.lastConsumedDate !== today) continue;
 
       const slots = getDoseReminderSlots(med);
       if (slots.length === 0) continue;
 
+      // Only slots consumed today need suppression.
+      const consumedSlots = slots.filter((s) =>
+        isDoseConsumedOnDate(med, s.doseId, today)
+      );
+      if (consumedSlots.length === 0) continue;
+
       // Clear med-level snooze marker once (storage is still per-med).
       clearSnoozedDoseForMed(med.id);
 
-      for (const slot of slots) {
+      for (const slot of consumedSlots) {
         const key = doseScheduleKey(slot.medId, slot.doseId);
         const gen = bumpGen(key);
         const { medId, doseId, time, amount, name, unit } = slot;

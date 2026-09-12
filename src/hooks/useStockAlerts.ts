@@ -5,6 +5,7 @@ import {
   sendCriticalStockAlert,
   getDeliveredNotificationIds,
   criticalAlarmId,
+  cancelCriticalAlarm,
 } from '../utils/notifications';
 import {
   loadCriticalTransitions,
@@ -50,8 +51,9 @@ interface UseStockAlertsOptions {
  *
  * == Notification ownership ==
  *   Path A (foreground): transition.notificationState NONE → send → SENT.
- *   Any claim bound to the episode is neutralized at that moment (the
- *   foreground consumed the episode's single notification opportunity).
+ *   ANY armed SCHEDULED claim for the medication is neutralized at that
+ *   moment (see reconcileCriticalEpisode) AND the native alarm behind it
+ *   is cancelled here (fire-and-forget, see below).
  *   Path B (scheduled):  a validly-registered native alarm owns the
  *   episode's single notification → the episode is adopted/bound with
  *   notificationState 'SCHEDULED' and the foreground stays quiet.
@@ -85,6 +87,40 @@ interface UseStockAlertsOptions {
  * owner's binding, resurrect a dead episode's claim, or re-arm a
  * notification for a SENT episode. No artificial delays are used or
  * needed.
+ *
+ * == Native cancellation on foreground consumption (why HERE) ==
+ * When the foreground consumes an episode's notification (NONE → SENT),
+ * this hook fires a fire-and-forget cancelCriticalAlarm(med.id). At that
+ * moment the med is CRITICAL, and the scheduler never arms alarms for
+ * critical meds — so ANY armed critical alarm for this med is stale and
+ * can only ever fire a SECOND user-facing notification for the consumed
+ * episode. Cancelling here makes the consumption self-contained instead
+ * of relying on the scheduler's effect re-running: the crossing may be
+ * observed on a render where NO alarm-relevant med field changed (e.g.
+ * the threshold was crossed by the calendar advancing while the app was
+ * open across midnight — the scheduler's criticalSignature is unchanged
+ * and its effect does not re-run), so the scheduler's cross-session
+ * staleness cancel would never fire and the armed alarm would
+ * eventually ring as a duplicate.
+ *
+ * This cancel is safe against in-flight scheduler operations: a
+ * schedule operation that armed an alarm for the pre-crossing
+ * projection re-verifies its captured ownership context AFTER the
+ * native schedule resolves; the foreground send bumped the ownership
+ * revision, so the stale operation compensates by cancelling the very
+ * alarm it armed — the orphan cannot survive either way. The cancel is
+ * also idempotent and writes NO persistent state (the claim was
+ * already neutralized synchronously above).
+ *
+ * The owner deliberately does NOT cancel at EPISODE END (med became
+ * sufficient): there the armed alarm may be the legitimate projected
+ * alarm for the med's NEXT crossing, and an out-of-chain cancel could
+ * race the scheduler's cancel-old→schedule-new chain and kill the NEW
+ * alarm (both share the same stable per-med alarm id). Episode-end
+ * cancellation is the scheduler's job — it always re-runs on episode
+ * end (sufficiency only changes via refill/threshold/dose edits, all
+ * of which are in its signature) and serializes cancel+reschedule
+ * per-med.
  */
 export function useStockAlerts({
   medications,
@@ -109,13 +145,15 @@ export function useStockAlerts({
     const ownershipRevisions = loadOwnershipRevisions();
     const dirty = { transitions: false, scheduled: false, ownership: false };
     const now = Date.now();
+    /** Meds whose episode notification the foreground consumed this pass. */
+    const foregroundConsumed: string[] = [];
 
     for (const med of medications) {
       const { status, daysLeft } = calculateMedicationStatus(med);
       const effPills = effectiveCurrentPills(med);
       const isCriticalish = status === 'critical' || status === 'out_of_stock';
 
-      reconcileCriticalEpisode(
+      const result = reconcileCriticalEpisode(
         transitions,
         scheduled,
         ownershipRevisions,
@@ -130,6 +168,17 @@ export function useStockAlerts({
         },
         dirty
       );
+      if (result?.notificationSent) {
+        foregroundConsumed.push(med.id);
+      }
+    }
+
+    // The foreground consumed these episodes' single notification
+    // opportunity — cancel any armed native critical alarm for them
+    // (fire-and-forget; see the doc comment above for why this lives
+    // here and why it is race-safe).
+    for (const id of foregroundConsumed) {
+      void cancelCriticalAlarm(id);
     }
 
     // Clean up transitions for deleted medications.

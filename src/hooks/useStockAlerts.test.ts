@@ -13,6 +13,7 @@ vi.mock('../utils/notifications', () => ({
   sendCriticalStockAlert: vi.fn(),
   getDeliveredNotificationIds: vi.fn(() => Promise.resolve(new Set<number>())),
   criticalAlarmId: vi.fn((id: string) => id.length),
+  cancelCriticalAlarm: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock('../utils/storage', () => ({

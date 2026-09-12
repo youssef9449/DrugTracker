@@ -1347,6 +1347,53 @@ describe('reconcileCriticalEpisode — foreground send consumes the bound claim 
     expect(rec.alarmTime).toBe(alarmTime);
   });
 
+  it('foreground send neutralizes a MISMATCHED-BOUND SCHEDULED claim left over from a dead episode (no valid claim survives a SENT episode)', () => {
+    // Pre-existing NONE episode (e.g. migrated legacy transition or a
+    // crash between the owner's two store writes) plus an armed
+    // SCHEDULED claim still bound to a DIFFERENT (dead) key. The
+    // foreground consumes the episode's notification; the stale armed
+    // claim must not survive — otherwise its native alarm could only
+    // ever fire a SECOND user-facing notification for the SENT episode.
+    const alarmTime = Date.now() + 86400000;
+    writeTransitions({
+      'med-1': { transitionKey: 'crit_med-1_LIVE', enteredAt: 1, notificationState: 'NONE' },
+    });
+    writeScheduled({
+      'med-1': { transitionKey: 'crit_med-1_DEAD', alarmTime, status: 'SCHEDULED' },
+    });
+
+    const { result, sent } = pass({ isCriticalish: true, canNotify: true });
+    expect(sent).toBe(1);
+    expect(result!.transition.notificationState).toBe('SENT');
+    expect(result!.transition.transitionKey).toBe('crit_med-1_LIVE');
+
+    const rec = loadScheduledCriticalAlarms()['med-1'];
+    expect(rec.status).toBe('NOT_SCHEDULED');
+    // Binding is not the sender's to erase, but the claim is no longer
+    // a valid SCHEDULED claim for ANY key.
+    expect(rec.transitionKey).toBe('crit_med-1_DEAD');
+    expect(rec.alarmTime).toBe(alarmTime);
+  });
+
+  it('foreground send neutralizes an UNBOUND SCHEDULED claim orphaned by a crash between the owner\u2019s writes', () => {
+    // Episode persisted (NONE) but the bind write never landed: the
+    // claim is still unbound (''). The armed alarm must not survive the
+    // foreground consumption.
+    const alarmTime = Date.now() + 86400000;
+    writeTransitions({
+      'med-1': { transitionKey: 'crit_med-1_LIVE', enteredAt: 1, notificationState: 'NONE' },
+    });
+    writeScheduled({ 'med-1': { transitionKey: '', alarmTime, status: 'SCHEDULED' } });
+
+    const { result, sent } = pass({ isCriticalish: true, canNotify: true });
+    expect(sent).toBe(1);
+    expect(result!.transition.notificationState).toBe('SENT');
+
+    const rec = loadScheduledCriticalAlarms()['med-1'];
+    expect(rec.status).toBe('NOT_SCHEDULED');
+    expect(rec.alarmTime).toBe(alarmTime);
+  });
+
   it('a second reconcile pass after the foreground send keeps everything terminal (idempotent)', () => {
     writeScheduled({ 'med-1': { transitionKey: '', alarmTime: Date.now() + 86400000, status: 'SCHEDULED' } });
 

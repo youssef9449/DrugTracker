@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, cleanup } from '@testing-library/react';
 import type { Medication } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
-import { useDoseReminderScheduler } from './useDoseReminderScheduler';
+import { useDoseReminderScheduler, getDoseReminderSlots } from './useDoseReminderScheduler';
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: { getPlatform: () => 'web' },
@@ -955,3 +955,66 @@ describe('useDoseReminderScheduler — multi-dose (Phase 2)', () => {
 });
 
 
+
+describe('Phase 4 — dose-scoped cancel on removal', () => {
+  it('removing d2 cancels only d2 snooze notification and storage', async () => {
+    const med = makeMed({
+      id: 'med-rm-snooze',
+      name: 'RmSnooze',
+      doseSchedule: [
+        { id: 'd1', amount: 1, time: '08:00' },
+        { id: 'd2', amount: 1, time: '14:00' },
+      ],
+      dosesPerDay: 2,
+    });
+    const { rerender } = renderHook(
+      ({ medications }) => useDoseReminderScheduler(defaultOpts({ medications })),
+      { initialProps: { medications: [med] } }
+    );
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
+
+    // Pending snooze for d2 only
+    const { SNOOZE_KEY } = await import('../utils/doseReminderStorage');
+    localStorage.setItem(
+      SNOOZE_KEY,
+      JSON.stringify({
+        'med-rm-snooze::d1': Date.now() + 60_000,
+        'med-rm-snooze::d2': Date.now() + 60_000,
+      })
+    );
+
+    mocks.cancel.mockClear();
+    mocks.cancelSnoozed.mockClear();
+
+    const shrunk = {
+      ...med,
+      dosesPerDay: 1,
+      doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+    };
+    rerender({ medications: [shrunk] });
+    await flushUntil(() =>
+      mocks.cancel.mock.calls.some((c) => c[0] === 'med-rm-snooze' && c[1] === 'd2')
+    );
+
+    expect(mocks.cancel).toHaveBeenCalledWith('med-rm-snooze', 'd2');
+    expect(mocks.cancelSnoozed).toHaveBeenCalledWith('med-rm-snooze', 'd2');
+    // d1 snooze storage must remain
+    const snooze = JSON.parse(localStorage.getItem(SNOOZE_KEY) || '{}');
+    expect(snooze['med-rm-snooze::d1']).toBeDefined();
+    expect(snooze['med-rm-snooze::d2']).toBeUndefined();
+  });
+
+  it('getDoseReminderSlots skips duplicate doseIds', () => {
+    const med = makeMed({
+      doseSchedule: [
+        { id: 'd1', amount: 1, time: '08:00' },
+        { id: 'd1', amount: 9, time: '09:00' }, // duplicate id ignored
+        { id: 'd2', amount: 1, time: '14:00' },
+      ],
+      dosesPerDay: 3,
+    });
+    const slots = getDoseReminderSlots(med);
+    expect(slots.map((s) => s.doseId)).toEqual(['d1', 'd2']);
+    expect(slots.find((s) => s.doseId === 'd1')?.amount).toBe(1);
+  });
+});

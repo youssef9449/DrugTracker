@@ -71,9 +71,18 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
         </div>
 
         <div className="p-5 space-y-4">
-          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center space-y-1.5">
+          <div
+            className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center space-y-1.5"
+            data-dose-id={doseId ?? undefined}
+          >
             <div className="text-xs font-bold text-slate-500">اسم الدواء</div>
             <div className="text-lg font-black text-slate-900 leading-tight">{medication.name}</div>
+
+            {dose ? (
+              <div className="text-[11px] font-bold text-teal-700 pt-0.5">
+                جرعة الساعة {formatTimeArabic(dose.time)}
+              </div>
+            ) : null}
 
             <div className="inline-flex items-center gap-1.5 bg-teal-100/80 text-teal-900 border border-teal-200 px-3 py-1 rounded-xl text-sm font-extrabold mt-1">
               <span>الجرعة المطلوبة:</span>

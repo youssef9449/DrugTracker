@@ -81,16 +81,25 @@ export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
   const unit = med.unit || 'قرص';
 
   if (Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) {
-    return med.doseSchedule
-      .filter((d) => d && isValidDoseTime(d.time) && Number(d.amount) > 0)
-      .map((d) => ({
+    // Skip invalid rows; keep first occurrence of each doseId (stable
+    // identity — never let a duplicate row steal another slot's id).
+    const seen = new Set<string>();
+    const slots: DoseReminderSlot[] = [];
+    for (const d of med.doseSchedule) {
+      if (!d || !isValidDoseTime(d.time) || !(Number(d.amount) > 0)) continue;
+      const doseId = (d.id && String(d.id).trim()) || LEGACY_DOSE_ID;
+      if (seen.has(doseId)) continue;
+      seen.add(doseId);
+      slots.push({
         medId: med.id,
-        doseId: d.id || LEGACY_DOSE_ID,
+        doseId,
         time: d.time,
         amount: Number(d.amount),
         name,
         unit,
-      }));
+      });
+    }
+    return slots;
   }
 
   if (med.reminderTime && isValidDoseTime(med.reminderTime)) {
@@ -187,8 +196,13 @@ export function useDoseReminderScheduler({
     const cancelSlot = (medId: string, doseId: string): void => {
       const key = doseScheduleKey(medId, doseId);
       bumpGen(key);
+      // Phase 4: clear dose-scoped snooze storage + cancel that slot's
+      // recurring alarm and one-shot snooze (not sibling doses).
+      clearSnoozedDose(medId, doseId);
       enqueue(key, () =>
-        cancelDoseReminder(medId, doseId).then(() => cancelSnoozedDoseReminder(medId))
+        cancelDoseReminder(medId, doseId).then(() =>
+          cancelSnoozedDoseReminder(medId, doseId)
+        )
       );
     };
 

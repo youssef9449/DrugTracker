@@ -222,40 +222,21 @@ export function useDoseReminderScheduler({
 
     const stillScheduled = new Set<string>();
 
+    // Active slots are added to stillScheduled. Stale keys (disabled med,
+    // empty slots, removed dose rows, deleted meds) are cancelled exactly
+    // once in the final stillScheduled reconciliation below — do not call
+    // cancelSlot earlier for those cases or the same key is enqueued twice.
     for (const med of medicationsRef.current) {
       if (!med.reminderEnabled) {
-        // Disable: cancel every previously scheduled slot for this med.
-        for (const key of scheduledDoseIdsRef.current) {
-          const { medId, doseId } = parseDoseScheduleKey(key);
-          if (medId === med.id) {
-            cancelSlot(medId, doseId);
-          }
-        }
         continue;
       }
 
       const slots = getDoseReminderSlots(med);
       if (slots.length === 0) {
-        for (const key of scheduledDoseIdsRef.current) {
-          const { medId, doseId } = parseDoseScheduleKey(key);
-          if (medId === med.id) {
-            cancelSlot(medId, doseId);
-          }
-        }
         continue;
       }
 
       const today = getTodayDateString();
-      const activeDoseIds = new Set(slots.map((s) => s.doseId));
-
-      // Cancel slots that were scheduled for this med but are no longer
-      // in the current schedule (removed dose rows).
-      for (const key of scheduledDoseIdsRef.current) {
-        const { medId, doseId } = parseDoseScheduleKey(key);
-        if (medId === med.id && !activeDoseIds.has(doseId)) {
-          cancelSlot(medId, doseId);
-        }
-      }
 
       for (const slot of slots) {
         const key = doseScheduleKey(slot.medId, slot.doseId);

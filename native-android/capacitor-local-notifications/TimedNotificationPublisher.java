@@ -1,6 +1,5 @@
 package com.capacitorjs.plugins.localnotifications;
 
-import android.app.ActivityManager;
 import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationManager;
@@ -16,29 +15,21 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 
 /**
- * DrugTracker-owned delivery path for Capacitor scheduled local notifications.
+ * Capacitor Local Notifications 6.1.3 TimedNotificationPublisher
+ * + DrugTracker delivery-time dose-reminder channel selection.
  *
- * Vendored from @capacitor/local-notifications (6.1.x) TimedNotificationPublisher
- * and extended with delivery-time dose-reminder channel selection.
+ * Upstream base: @capacitor/local-notifications@6.1.3
+ * (package/android/.../TimedNotificationPublisher.java)
  *
- * Why this file exists:
- * Capacitor binds Android channelId when the Notification is built at schedule
- * time. JS cancel+reschedule on appStateChange is the fast path, but if the
- * process is killed before that async work completes, a silent
- * dose-reminder-foreground-v1 notification can survive and fire with no system
- * sound. This receiver re-selects the channel at DELIVERY time based on the
- * current process importance so killed-process reminders use dose-reminder-v3.
+ * DrugTracker addition: after fireReceived, dose reminders may be rewritten
+ * onto the channel that matches AppForegroundState (process-local, set from
+ * MainActivity onResume/onPause). Fresh process defaults to background →
+ * dose-reminder-v3 so killed-process reminders produce the system sound.
  *
- * Deployment:
- * scripts/prepare-android.mjs copies this file over the Capacitor plugin source
- * under node_modules after every `cap sync`. It is a whole-file vendor override
- * (not a string patch). Fail the prepare step if the target is missing.
+ * Channel change uses NotificationCompat.Builder(context, notification)
+ * so existing notification fields are preserved; only setChannelId is applied.
  *
- * Channel IDs must stay in sync with src/utils/notifications.ts:
- *   DOSE_REMINDER_CHANNEL_ID            = dose-reminder-v3
- *   DOSE_REMINDER_FOREGROUND_CHANNEL_ID  = dose-reminder-foreground-v1
- *
- * Unrelated notifications (e.g. low-stock) are left completely untouched.
+ * Installed by scripts/prepare-android.mjs (whole-file copy, not a string patch).
  */
 public class TimedNotificationPublisher extends BroadcastReceiver {
 
@@ -51,7 +42,7 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
     static final String DOSE_FG_CHANNEL = "dose-reminder-foreground-v1";
 
     /**
-     * Restore and present notification.
+     * Restore and present notification
      */
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -75,7 +66,7 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
         JSObject notificationJson = storage.getSavedNotificationAsJSObject(Integer.toString(id));
         LocalNotificationsPlugin.fireReceived(notificationJson);
 
-        // DrugTracker: delivery-time channel safeguard for dose reminders only.
+        // DrugTracker: delivery-time channel for dose reminders only.
         notification = applyDoseReminderChannelIfNeeded(context, notification, notificationJson);
 
         notificationManager.notify(id, notification);
@@ -90,19 +81,13 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
     }
 
     /**
-     * If this is a DrugTracker dose reminder, ensure the channel matches the
-     * current process foreground state. Uses NotificationCompat.Builder's
-     * copy constructor so all existing Notification fields are preserved;
-     * only the channel id is changed when necessary.
-     *
-     * Package-visible helpers below exist so the decision logic can be reasoned
-     * about without reconstructing Android framework objects in documentation.
+     * Dose reminders only: align channel with AppForegroundState.
+     * Unrelated notifications (e.g. low-stock) are returned unchanged.
      */
     Notification applyDoseReminderChannelIfNeeded(Context context, Notification notification, JSObject notificationJson) {
         if (notification == null) {
             return notification;
         }
-
         if (!isDoseReminderNotification(notification, notificationJson)) {
             return notification;
         }
@@ -112,22 +97,18 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
             currentChannel = notification.getChannelId();
         }
 
-        boolean foreground = isProcessInForeground();
-        String desired = resolveDoseReminderChannel(foreground);
-
+        String desired = resolveDoseReminderChannel(AppForegroundState.isForeground());
         if (desired.equals(currentChannel)) {
             return notification;
         }
 
         try {
-            // Platform-supported equivalent rebuild: copies the existing
-            // Notification then overrides only the channel id.
             Notification rewritten = new NotificationCompat.Builder(context, notification)
                 .setChannelId(desired)
                 .build();
             Logger.debug(
                 Logger.tags("LN"),
-                "DrugTracker: dose reminder channel " + currentChannel + " → " + desired + " (foreground=" + foreground + ")"
+                "DrugTracker: dose reminder channel " + currentChannel + " → " + desired
             );
             return rewritten;
         } catch (Exception e) {
@@ -137,9 +118,8 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
     }
 
     /**
-     * Identify DrugTracker dose reminders via existing metadata only:
-     * - extra.medicationId (set by scheduleDoseReminder / scheduleSnoozedDoseReminder)
-     * - or already on one of the two dose-reminder channels
+     * DrugTracker dose reminder if extra.medicationId is set, or the
+     * notification is already on a dose-reminder channel.
      */
     static boolean isDoseReminderNotification(Notification notification, JSObject notificationJson) {
         if (notificationJson != null) {
@@ -149,7 +129,7 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
                     return true;
                 }
             } catch (Exception ignored) {
-                // fall through to channel check
+                // fall through
             }
         }
         if (notification != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -159,27 +139,9 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
         return false;
     }
 
-    /**
-     * Pure channel decision used at delivery time.
-     * Non-foreground (including unknown / killed) → sound-capable v3.
-     */
-    static String resolveDoseReminderChannel(boolean processForeground) {
-        return processForeground ? DOSE_FG_CHANNEL : DOSE_BG_CHANNEL;
-    }
-
-    /**
-     * Process importance check. On failure, returns false so we prefer the
-     * sound-capable channel (safer for killed-process reminders).
-     */
-    static boolean isProcessInForeground() {
-        try {
-            ActivityManager.RunningAppProcessInfo info = new ActivityManager.RunningAppProcessInfo();
-            ActivityManager.getMyMemoryState(info);
-            return info.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
-                || info.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE;
-        } catch (Exception e) {
-            return false;
-        }
+    /** Pure channel decision for unit testing. */
+    static String resolveDoseReminderChannel(boolean appForeground) {
+        return appForeground ? DOSE_FG_CHANNEL : DOSE_BG_CHANNEL;
     }
 
     private boolean rescheduleNotificationIfNeeded(Context context, Intent intent, int id) {

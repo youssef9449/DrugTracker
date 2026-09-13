@@ -97,11 +97,11 @@ export const DOSE_REMINDER_FOREGROUND_CHANNEL_ID = 'dose-reminder-foreground-v1'
 // process death: if the app is killed after setAppInForeground(false)
 // but before cancel+reschedule completes, a silent foreground-channel
 // notification could still be pending. The authority for killed-process
-// correctness is the repository-owned TimedNotificationPublisher in
-// native-android/capacitor-local-notifications/ (installed by
-// scripts/prepare-android.mjs after cap sync). It re-selects the
-// dose-reminder channel at DELIVERY time from current process importance.
-// JS reconciliation remains the fast path for live transitions.
+// correctness is the repository-owned TimedNotificationPublisher +
+// AppForegroundState in native-android/ (installed by prepare-android.mjs).
+// Delivery uses process-local MainActivity onResume/onPause state; a fresh
+// process defaults to false → dose-reminder-v3. JS reconciliation remains
+// the fast path for live transitions.
 // ─────────────────────────────────────────────────────────────
 let appInForeground = true;
 

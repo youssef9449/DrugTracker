@@ -5,21 +5,17 @@ import { fileURLToPath } from 'node:url';
 /**
  * Post-`cap sync` Android preparation for Drug Tracker.
  *
- * Responsibilities:
- *  1. Ensure SCHEDULE_EXACT_ALARM is present in AndroidManifest.xml
- *  2. Remove legacy dose_reminder.wav if present (v3 uses system default)
- *  3. Install the repository-owned TimedNotificationPublisher override into
- *     the Capacitor Local Notifications Android sources so delivery-time
- *     dose-reminder channel selection is compiled into the APK.
+ * 1. Ensure SCHEDULE_EXACT_ALARM in AndroidManifest.xml
+ * 2. Remove legacy dose_reminder.wav (v3 uses system default sound)
+ * 3. Install repository-owned notification delivery sources:
+ *    - TimedNotificationPublisher.java  (Capacitor 6.1.3 + delivery channel)
+ *    - AppForegroundState.java          (process-local lifecycle flag)
+ *    - MainActivity.java                (onResume/onPause → AppForegroundState)
  *
- * The override is a whole-file vendor copy from:
- *   native-android/capacitor-local-notifications/TimedNotificationPublisher.java
- * It is NOT a string/regex patch of dependency source.
+ * Whole-file copies only. No string/regex patching of dependency source.
+ * Fails hard if required destinations are missing.
  *
- * This script MUST run after every `cap sync android` (see package.json
- * cap:sync / apk:debug / cap:studio). If the Capacitor plugin source is
- * missing, the script exits non-zero so a production APK cannot be built
- * without the delivery-time safeguard.
+ * Requires @capacitor/local-notifications exactly 6.1.3 (pinned in package.json).
  */
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -31,6 +27,10 @@ if (!fs.existsSync(androidDir)) {
 
 // ── 1. Exact-alarm permission ──────────────────────────────────────────
 const manifestPath = path.join(androidDir, 'app', 'src', 'main', 'AndroidManifest.xml');
+if (!fs.existsSync(manifestPath)) {
+  console.error('[prepare-android] FATAL: AndroidManifest.xml missing at', manifestPath);
+  process.exit(1);
+}
 let manifest = fs.readFileSync(manifestPath, 'utf8');
 const exactPermission = '<uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />';
 manifest = manifest.replace(/\s*<uses-permission android:name="android\.permission\.USE_EXACT_ALARM"\s*\/>/g, '');
@@ -47,109 +47,83 @@ if (fs.existsSync(soundPath)) {
   console.info('Removed legacy dose_reminder.wav (channel now uses system default sound).');
 }
 
-// ── 3. Install repository-owned TimedNotificationPublisher ─────────────
-installTimedNotificationPublisherOverride();
+// ── 3. Install repository-owned native sources ─────────────────────────
+const pluginJavaDir = path.join(
+  root,
+  'node_modules',
+  '@capacitor',
+  'local-notifications',
+  'android',
+  'src',
+  'main',
+  'java',
+  'com',
+  'capacitorjs',
+  'plugins',
+  'localnotifications'
+);
 
-console.info('Prepared Android exact-alarm permission + dose-reminder delivery override.');
+const vendorDir = path.join(root, 'native-android', 'capacitor-local-notifications');
+const appVendorDir = path.join(root, 'native-android', 'app');
 
-/**
- * Copy the repository-owned TimedNotificationPublisher.java over the
- * Capacitor Local Notifications plugin source so the delivery-time channel
- * safeguard is compiled into the plugin AAR / app.
- *
- * Fails hard if the expected Capacitor source path is not present — a build
- * without this override would silently lose killed-process sound guarantees.
- */
-function installTimedNotificationPublisherOverride() {
-  const vendorPath = path.join(
-    root,
-    'native-android',
-    'capacitor-local-notifications',
-    'TimedNotificationPublisher.java'
-  );
-  if (!fs.existsSync(vendorPath)) {
+const copies = [
+  {
+    src: path.join(vendorDir, 'TimedNotificationPublisher.java'),
+    dest: path.join(pluginJavaDir, 'TimedNotificationPublisher.java'),
+    marker: 'DrugTracker delivery-time dose-reminder channel selection',
+  },
+  {
+    src: path.join(vendorDir, 'AppForegroundState.java'),
+    dest: path.join(pluginJavaDir, 'AppForegroundState.java'),
+    marker: 'Process-local foreground flag for DrugTracker',
+  },
+  {
+    src: path.join(appVendorDir, 'MainActivity.java'),
+    dest: path.join(
+      androidDir,
+      'app',
+      'src',
+      'main',
+      'java',
+      'app',
+      'drugtracker',
+      'MainActivity.java'
+    ),
+    marker: 'AppForegroundState',
+  },
+];
+
+for (const { src, dest, marker } of copies) {
+  if (!fs.existsSync(src)) {
+    console.error('[prepare-android] FATAL: missing vendor source:', src);
+    process.exit(1);
+  }
+  const body = fs.readFileSync(src, 'utf8');
+  if (!body.includes(marker)) {
+    console.error('[prepare-android] FATAL: vendor file missing expected marker:', src);
+    process.exit(1);
+  }
+  const destDir = path.dirname(dest);
+  if (!fs.existsSync(destDir)) {
     console.error(
-      '[prepare-android] FATAL: missing repository-owned TimedNotificationPublisher at\n  ' +
-        vendorPath
+      '[prepare-android] FATAL: destination directory missing (run cap sync first):\n  ' + destDir
     );
     process.exit(1);
   }
-
-  const relativePluginPath = path.join(
-    'android',
-    'src',
-    'main',
-    'java',
-    'com',
-    'capacitorjs',
-    'plugins',
-    'localnotifications',
-    'TimedNotificationPublisher.java'
-  );
-
-  const destinations = [
-    path.join(root, 'node_modules', '@capacitor', 'local-notifications', relativePluginPath),
-  ];
-
-  // Also overwrite any materialised copy under android/ (rare, but keep consistent).
-  function walk(dir, depth = 0) {
-    if (depth > 10 || !fs.existsSync(dir)) return;
-    let entries;
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      const full = path.join(dir, e.name);
-      if (e.isFile() && e.name === 'TimedNotificationPublisher.java') {
-        destinations.push(full);
-      } else if (
-        e.isDirectory() &&
-        e.name !== 'build' &&
-        e.name !== '.git' &&
-        e.name !== 'node_modules'
-      ) {
-        walk(full, depth + 1);
-      }
-    }
-  }
-  walk(androidDir);
-
-  const unique = [...new Set(destinations)];
-  const existing = unique.filter((p) => fs.existsSync(p));
-
-  // The primary required target is the Capacitor plugin under node_modules.
-  const primary = path.join(
-    root,
-    'node_modules',
-    '@capacitor',
-    'local-notifications',
-    relativePluginPath
-  );
-  if (!fs.existsSync(primary)) {
+  // TimedNotificationPublisher must overwrite an existing Capacitor file.
+  if (
+    path.basename(dest) === 'TimedNotificationPublisher.java' &&
+    !fs.existsSync(dest)
+  ) {
     console.error(
-      '[prepare-android] FATAL: Capacitor Local Notifications Android source not found at\n  ' +
-        primary +
-        '\nRun npm install (or equivalent) then cap sync, then re-run this script.\n' +
-        'Refusing to continue without the delivery-time channel override.'
+      '[prepare-android] FATAL: Capacitor TimedNotificationPublisher.java not found at\n  ' +
+        dest +
+        '\nPin @capacitor/local-notifications@6.1.3, run npm install + cap sync, then re-run.'
     );
     process.exit(1);
   }
-
-  const vendorSource = fs.readFileSync(vendorPath, 'utf8');
-  // Sanity: the vendor file must identify itself as DrugTracker-owned.
-  if (!vendorSource.includes('DrugTracker-owned delivery path')) {
-    console.error(
-      '[prepare-android] FATAL: vendor TimedNotificationPublisher.java is missing expected DrugTracker marker.'
-    );
-    process.exit(1);
-  }
-
-  for (const dest of existing) {
-    fs.copyFileSync(vendorPath, dest);
-    console.info(
-      `[prepare-android] Installed dose-reminder delivery override → ${path.relative(root, dest)}`
-    );
-  }
+  fs.copyFileSync(src, dest);
+  console.info(`[prepare-android] Installed ${path.relative(root, src)} → ${path.relative(root, dest)}`);
 }
+
+console.info('Prepared Android exact-alarm permission + dose-reminder delivery sources.');

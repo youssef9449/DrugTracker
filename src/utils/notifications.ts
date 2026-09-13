@@ -375,12 +375,14 @@ export async function sendCriticalStockAlert(
 }
 
 /**
- * Send a "dose reminder" notification — fires when the user has a
- * medication with `reminderEnabled + reminderTime` set and the
- * current time matches the reminder time.
+ * LEGACY-ONLY: med-scoped dose reminder (no doseId).
  *
- * Uses the single `dose-reminder-v2` channel with the bundled native
- * sound. No JS sound playback is involved.
+ * Uses only `medId` + `dailyDose` — **not** valid for multi-dose
+ * `doseSchedule` slots. Production multi-dose scheduling must use
+ * {@link scheduleDoseReminder} which keys by `medId + doseId`.
+ *
+ * Kept for backward-compatible tests and any historical med-only
+ * reminder callers. Do not call this for multi-dose medications.
  *
  * @param medId Stable medication id (for a unique notification id)
  * @param medicineName Medication name (title)

@@ -5,6 +5,7 @@ import { formatTimeArabic } from '../types';
 import {
   getTodayDateString,
   isDoseConsumedOnDate,
+  isDoseSkippedOnDate,
 } from '../utils/dateCalculations';
 import { isDoseCompletedToday } from '../utils/doseSchedule';
 import {
@@ -30,7 +31,9 @@ export interface SelectDoseModalProps {
  * Day + time labels are presentation only; selection still uses doseId.
  *
  * mode='take' (default): selectable = not completed today.
- * mode='restore': selectable = completed today (manual or auto), not yet restored.
+ * mode='restore': selectable = completed today (manual or auto) and not already
+ * skipped/restored for that date. Already-skipped doses stay visible but disabled
+ * when any restorable sibling exists; pure empty day shows the empty state.
  */
 export const SelectDoseModal: FC<SelectDoseModalProps> = ({
   isOpen,
@@ -111,10 +114,14 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
           ) : (
             items.map(({ dose, eventDate }) => {
               const completed = isDoseCompletedToday(medication, dose, today, now);
-              // Take: disable completed. Restore: enable only completed.
-              const isSelectable = isRestore ? completed : !completed;
-              const isDone = !isSelectable;
+              const skipped = isDoseSkippedOnDate(medication, dose.id, today);
               const consumed = isDoseConsumedOnDate(medication, dose.id, today);
+              // Take: disable completed (manual/auto). Restore: only completed,
+              // never already-skipped (skipped ⇒ isDoseCompletedToday false).
+              const isSelectable = isRestore
+                ? completed && !skipped
+                : !completed;
+              const isDone = !isSelectable;
               const dayLabel = relativeDoseDayLabel(eventDate, today);
               const timeLabel = formatTimeArabic(dose.time);
               const whenLabel = `${dayLabel} • ${timeLabel}`;
@@ -126,6 +133,9 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                 if (isSelectable) {
                   ariaLabel = `استرجاع ${whenLabel} — ${amountLabel}`;
                   statusLabel = 'استرجاع';
+                } else if (skipped) {
+                  ariaLabel = `تم استرجاع ${whenLabel} — ${amountLabel}`;
+                  statusLabel = 'تم الاسترجاع';
                 } else {
                   ariaLabel = `غير قابلة للاسترجاع ${whenLabel} — ${amountLabel}`;
                   statusLabel = 'غير متاحة';

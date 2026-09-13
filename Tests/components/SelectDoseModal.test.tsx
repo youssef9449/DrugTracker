@@ -287,21 +287,30 @@ describe('SelectDoseModal', () => {
 
     it('disables already-restored (skipped) doses', () => {
       const today = getTodayDateString();
+      // d2 still manually consumed → list is shown (not empty state).
+      // d1 skipped → present with data-dose-id, real disabled, not actionable.
       render(
         <SelectDoseModal
           isOpen
           mode="restore"
           medication={makeMulti({
             doseSkippedHistory: { d1: [today] },
+            doseConsumption: { d2: today },
           })}
           onSelect={() => {}}
           onClose={() => {}}
         />
       );
-      const d1 = screen
+      const doseButtons = screen
         .getAllByRole('button')
-        .find((b) => b.getAttribute('data-dose-id') === 'd1');
+        .filter((b) => b.getAttribute('data-dose-id'));
+      const d1 = doseButtons.find((b) => b.getAttribute('data-dose-id') === 'd1');
+      const d2 = doseButtons.find((b) => b.getAttribute('data-dose-id') === 'd2');
+      expect(d1).toBeTruthy();
       expect(d1).toBeDisabled();
+      expect(d1).toHaveTextContent(/تم الاسترجاع/);
+      expect(d2).toBeTruthy();
+      expect(d2).not.toBeDisabled();
     });
 
     it('shows empty state when nothing is restorable', () => {

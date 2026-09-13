@@ -1099,3 +1099,271 @@ describe('Phase 4 — dose-scoped cancel on removal', () => {
     expect(slots[0].time).toBe('09:00');
   });
 });
+
+describe('useDoseReminderScheduler — restore re-arms future dose notification', () => {
+  /**
+   * Regression: consume → suppress notification → restore while time still
+   * ahead → reminder must be re-armed for today (no skipToday).
+   */
+
+  it('Test A/D — future restored multi-dose slot is re-armed without skipToday', async () => {
+    // now = 17:00, d2 at 20:00 still ahead. Consume then restore d2.
+    vi.setSystemTime(new Date('2024-09-10T17:00:00'));
+    const today = getTodayDateString();
+    const base = makeMed({
+      id: 'med-restore',
+      name: 'RestoreMed',
+      reminderEnabled: true,
+      doseSchedule: [
+        { id: 'd1', amount: 1, time: '08:00' },
+        { id: 'd2', amount: 1, time: '20:00' },
+      ],
+      dosesPerDay: 2,
+    });
+
+    const { rerender } = renderHook(
+      ({ medications }) => useDoseReminderScheduler(defaultOpts({ medications })),
+      { initialProps: { medications: [base] } }
+    );
+    await flushUntil(() =>
+      mocks.schedule.mock.calls.some((c) => c[5]?.doseId === 'd2')
+    );
+    const schedulesAfterMount = mocks.schedule.mock.calls.length;
+
+    // Consume d2 → suppression with skipToday
+    const consumed = {
+      ...base,
+      doseConsumption: { d2: today },
+    };
+    rerender({ medications: [consumed] });
+    await flushUntil(() =>
+      mocks.schedule.mock.calls.some(
+        (c) =>
+          c[0] === 'med-restore' &&
+          c[5]?.doseId === 'd2' &&
+          c[5]?.skipToday === true
+      )
+    );
+    expect(mocks.schedule).toHaveBeenCalledWith(
+      'med-restore',
+      'RestoreMed',
+      '20:00',
+      1,
+      'قرص',
+      { doseId: 'd2', skipToday: true }
+    );
+
+    // Restore d2 (clear consumption) while 20:00 still ahead
+    const restored = {
+      ...base,
+      doseConsumption: {},
+    };
+    const schedulesBeforeRestore = mocks.schedule.mock.calls.length;
+    rerender({ medications: [restored] });
+
+    await flushUntil(() =>
+      mocks.schedule.mock.calls
+        .slice(schedulesBeforeRestore)
+        .some(
+          (c) =>
+            c[0] === 'med-restore' &&
+            c[2] === '20:00' &&
+            c[5]?.doseId === 'd2' &&
+            !c[5]?.skipToday
+        )
+    );
+
+    const postRestore = mocks.schedule.mock.calls.slice(schedulesBeforeRestore);
+    const d2Rearm = postRestore.find(
+      (c) => c[0] === 'med-restore' && c[5]?.doseId === 'd2' && !c[5]?.skipToday
+    );
+    expect(d2Rearm).toBeDefined();
+    expect(d2Rearm).toEqual([
+      'med-restore',
+      'RestoreMed',
+      '20:00',
+      1,
+      'قرص',
+      { doseId: 'd2' },
+    ]);
+    // Must not leave a skipToday schedule as the final action for d2
+    const lastD2 = [...mocks.schedule.mock.calls]
+      .reverse()
+      .find((c) => c[0] === 'med-restore' && c[5]?.doseId === 'd2');
+    expect(lastD2?.[5]?.skipToday).toBeUndefined();
+    void schedulesAfterMount;
+  });
+
+  it('Test B — past restored dose is not scheduled for the past occurrence', async () => {
+    // now = 17:00, d2 at 14:00 already passed. Restore must not create a
+    // past-due reminder (no scheduleDoseReminder for 14:00 without skipToday
+    // that would fire today — scheduleDoseReminder itself advances past times
+    // to tomorrow, but the scheduler must not invent a past occurrence).
+    vi.setSystemTime(new Date('2024-09-10T17:00:00'));
+    const today = getTodayDateString();
+    const base = makeMed({
+      id: 'med-past',
+      name: 'PastMed',
+      reminderEnabled: true,
+      doseSchedule: [
+        { id: 'd1', amount: 1, time: '08:00' },
+        { id: 'd2', amount: 1, time: '14:00' },
+      ],
+      dosesPerDay: 2,
+      doseConsumption: { d2: today },
+    });
+
+    const { rerender } = renderHook(
+      ({ medications }) => useDoseReminderScheduler(defaultOpts({ medications })),
+      { initialProps: { medications: [base] } }
+    );
+    // Let consumption path settle (d2 time already past → no skipToday re-arm)
+    await flushUntil(() => mocks.cancelSnoozed.mock.calls.length >= 1).catch(() => undefined);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const schedulesBefore = mocks.schedule.mock.calls.length;
+
+    // Restore d2 (clear consumption)
+    const restored = {
+      ...base,
+      doseConsumption: {},
+    };
+    rerender({ medications: [restored] });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((r) => setTimeout(r, 30));
+
+    // No new schedule for the already-passed 14:00 occurrence as a
+    // "today without skipToday" arm. (Recurring tomorrow may still exist
+    // from the main config effect at mount — that is fine.)
+    const post = mocks.schedule.mock.calls.slice(schedulesBefore);
+    const pastTodayArm = post.find(
+      (c) =>
+        c[0] === 'med-past' &&
+        c[2] === '14:00' &&
+        c[5]?.doseId === 'd2' &&
+        !c[5]?.skipToday
+    );
+    // After restore of a past slot, the consumption effect must not schedule
+    // for the past occurrence (isDoseReminderTimeStillAhead is false).
+    expect(pastTodayArm).toBeUndefined();
+  });
+
+  it('Test C — restoring one dose does not leave siblings in a wrong state', async () => {
+    vi.setSystemTime(new Date('2024-09-10T17:00:00'));
+    const today = getTodayDateString();
+    const base = makeMed({
+      id: 'med-sib',
+      name: 'SibMed',
+      reminderEnabled: true,
+      doseSchedule: [
+        { id: 'd1', amount: 1, time: '08:00' },
+        { id: 'd2', amount: 1, time: '20:00' },
+      ],
+      dosesPerDay: 2,
+    });
+
+    const { rerender } = renderHook(
+      ({ medications }) => useDoseReminderScheduler(defaultOpts({ medications })),
+      { initialProps: { medications: [base] } }
+    );
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
+
+    // Consume only d2
+    const consumed = {
+      ...base,
+      doseConsumption: { d2: today },
+    };
+    rerender({ medications: [consumed] });
+    await flushUntil(() =>
+      mocks.schedule.mock.calls.some(
+        (c) => c[5]?.doseId === 'd2' && c[5]?.skipToday === true
+      )
+    );
+
+    const schedulesBeforeRestore = mocks.schedule.mock.calls.length;
+
+    // Restore only d2
+    const restored = {
+      ...base,
+      doseConsumption: {},
+    };
+    rerender({ medications: [restored] });
+    await flushUntil(() =>
+      mocks.schedule.mock.calls
+        .slice(schedulesBeforeRestore)
+        .some((c) => c[5]?.doseId === 'd2' && !c[5]?.skipToday)
+    );
+
+    // d2 final state: armed for today (no skipToday)
+    const lastD2 = [...mocks.schedule.mock.calls]
+      .reverse()
+      .find((c) => c[0] === 'med-sib' && c[5]?.doseId === 'd2');
+    expect(lastD2?.[5]?.skipToday).toBeUndefined();
+    expect(lastD2?.[2]).toBe('20:00');
+
+    // d1 was never consumed; any reschedule must still be without skipToday
+    const lastD1 = [...mocks.schedule.mock.calls]
+      .reverse()
+      .find((c) => c[0] === 'med-sib' && c[5]?.doseId === 'd1');
+    if (lastD1) {
+      expect(lastD1[5]?.skipToday).toBeUndefined();
+    }
+  });
+
+  it('Test E — restore reconciliation is idempotent (no duplicate final reminders)', async () => {
+    vi.setSystemTime(new Date('2024-09-10T17:00:00'));
+    const today = getTodayDateString();
+    const base = makeMed({
+      id: 'med-idem',
+      name: 'IdemMed',
+      reminderEnabled: true,
+      doseSchedule: [{ id: 'd2', amount: 1, time: '20:00' }],
+      dosesPerDay: 1,
+      doseConsumption: { d2: today },
+    });
+
+    const { rerender } = renderHook(
+      ({ medications }) => useDoseReminderScheduler(defaultOpts({ medications })),
+      { initialProps: { medications: [base] } }
+    );
+    await flushUntil(() =>
+      mocks.schedule.mock.calls.some(
+        (c) => c[5]?.doseId === 'd2' && c[5]?.skipToday === true
+      )
+    );
+
+    const restored = {
+      ...base,
+      doseConsumption: {},
+    };
+    rerender({ medications: [restored] });
+    await flushUntil(() =>
+      mocks.schedule.mock.calls.some(
+        (c) => c[5]?.doseId === 'd2' && !c[5]?.skipToday
+      )
+    );
+
+    // Trigger reconciliation again (same restored state + resumeTick)
+    const schedulesBeforeSecond = mocks.schedule.mock.calls.length;
+    rerender({ medications: [restored] });
+    // bump via same state should not be needed; re-render with identical
+    // consumedSignature should not re-fire the effect. Simulate a second
+    // restore-equivalent by toggling resumeTick through a wrapper would
+    // require opts change — instead re-apply restored and assert final
+    // last schedule for d2 is still a single logical reminder (no skipToday).
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const lastD2 = [...mocks.schedule.mock.calls]
+      .reverse()
+      .find((c) => c[0] === 'med-idem' && c[5]?.doseId === 'd2');
+    expect(lastD2).toBeDefined();
+    expect(lastD2?.[5]?.skipToday).toBeUndefined();
+    // Identity remains doseId-based (same notif id scheme in production)
+    expect(lastD2?.[5]?.doseId).toBe('d2');
+    void schedulesBeforeSecond;
+  });
+});

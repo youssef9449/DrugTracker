@@ -293,11 +293,18 @@ export function useDoseReminderScheduler({
   ]);
 
   // ─────────────────────────────────────────────────────────────
-  // Consumption-suppression effect — today's dose was taken, so today's
-  // reminders must not fire. Phase 2 still uses medication-level
-  // lastConsumedDate: when set to today, EVERY dose slot for that med
-  // is suppressed for today (skipToday re-arm). Per-dose consumption
-  // state is Phase 3.
+  // Consumption / restore reconciliation effect.
+  //
+  // Consume path: today's dose was taken → suppress today's reminder
+  // (cancel + re-arm with skipToday) when the time is still ahead.
+  //
+  // Restore path: a previously consumed dose is cleared → if its
+  // scheduled time is still ahead today, re-arm WITHOUT skipToday so
+  // today's occurrence fires again. Only slots that transition from
+  // consumed → not-consumed are re-armed (tracked via prevConsumedKeysRef)
+  // so cold-start / config scheduling remains owned by the main effect.
+  //
+  // Per-dose identity is always medId + doseId; siblings are independent.
   // ─────────────────────────────────────────────────────────────
   const consumedSignature = useMemo(
     () =>
@@ -316,6 +323,11 @@ export function useDoseReminderScheduler({
     [medications]
   );
 
+  /** Keys (medId::doseId) that were consumed on the last reconciliation. */
+  const prevConsumedKeysRef = useRef<Set<string>>(new Set());
+  /** Previous resumeTick — resume forces full re-suppress of still-consumed slots. */
+  const prevResumeTickRef = useRef<number | null>(null);
+
   const resumeTickValue = resumeTick ?? 0;
 
   useEffect(() => {
@@ -323,51 +335,90 @@ export function useDoseReminderScheduler({
     if (!notificationsEnabled || exactAlarmEnabled !== true) return;
 
     const today = getTodayDateString();
+    const nextConsumedKeys = new Set<string>();
+    // Resume (or first observation of resumeTick) re-applies suppression for
+    // every still-consumed slot. Signature-only changes process transitions
+    // only so restoring d2 does not re-touch a still-consumed sibling d1.
+    const resumeChanged =
+      prevResumeTickRef.current === null ||
+      prevResumeTickRef.current !== resumeTickValue;
+    prevResumeTickRef.current = resumeTickValue;
+
     for (const med of medicationsRef.current) {
       if (!med.reminderEnabled) continue;
 
       const slots = getDoseReminderSlots(med);
       if (slots.length === 0) continue;
 
-      // Only slots consumed today need suppression.
-      const consumedSlots = slots.filter((s) =>
-        isDoseConsumedOnDate(med, s.doseId, today)
-      );
-      if (consumedSlots.length === 0) continue;
-
-      for (const slot of consumedSlots) {
-        // Phase 3B: clear only this slot's snooze marker (med-only for legacy).
-        clearSnoozedDose(med.id, slot.doseId);
-
+      for (const slot of slots) {
+        const slotConsumedToday = isDoseConsumedOnDate(med, slot.doseId, today);
         const key = doseScheduleKey(slot.medId, slot.doseId);
-        const gen = bumpGen(key);
         const { medId, doseId, time, amount, name, unit } = slot;
+        const wasConsumed = prevConsumedKeysRef.current.has(key);
 
-        enqueue(key, () =>
-          cancelSnoozedDoseReminder(medId, doseId).then(() => {
-            // After today's reminder time for THIS slot, the recurring
-            // alarm has already fired (or was suppressed): never retract
-            // a fired notification. Only slots still ahead need cancel +
-            // skipToday re-arm.
-            if (!isDoseReminderTimeStillAhead(time)) return;
-            return cancelDoseReminder(medId, doseId).then(() => {
+        if (slotConsumedToday) {
+          nextConsumedKeys.add(key);
+          // Suppress only when newly consumed, or when resume forces a full
+          // re-apply. Still-consumed siblings must not be cancelled/rescheduled
+          // merely because a different dose was restored.
+          const newlyConsumed = !wasConsumed;
+          if (!newlyConsumed && !resumeChanged) {
+            continue;
+          }
+          clearSnoozedDose(med.id, doseId);
+          const gen = bumpGen(key);
+          enqueue(key, () =>
+            cancelSnoozedDoseReminder(medId, doseId).then(() => {
+              // After today's reminder time the recurring alarm has already
+              // fired (or was suppressed): never retract a fired
+              // notification. Only slots still ahead need cancel +
+              // skipToday re-arm.
+              if (!isDoseReminderTimeStillAhead(time)) return;
+              return cancelDoseReminder(medId, doseId).then(() => {
+                if (doseGenerationRef.current.get(key) !== gen) return;
+                const opts =
+                  doseId === LEGACY_DOSE_ID
+                    ? { skipToday: true as const }
+                    : { doseId, skipToday: true as const };
+                return scheduleDoseReminder(medId, name, time, amount, unit, opts).then(
+                  () => {
+                    if (doseGenerationRef.current.get(key) !== gen) {
+                      return cancelDoseReminder(medId, doseId);
+                    }
+                  }
+                );
+              });
+            })
+          );
+        } else if (wasConsumed && isDoseReminderTimeStillAhead(time)) {
+          // Restore transition: this slot was consumed on the previous
+          // reconciliation and is no longer consumed, with today's time
+          // still ahead → re-arm without skipToday (exact dose identity).
+          // Past-due restored slots are intentionally skipped (no fabricated
+          // past reminder). Cold start / never-consumed slots are left to
+          // the main config effect.
+          const gen = bumpGen(key);
+          enqueue(key, () =>
+            cancelDoseReminder(medId, doseId).then(() => {
               if (doseGenerationRef.current.get(key) !== gen) return;
               const opts =
-                doseId === LEGACY_DOSE_ID
-                  ? { skipToday: true as const }
-                  : { doseId, skipToday: true as const };
-              return scheduleDoseReminder(medId, name, time, amount, unit, opts).then(
-                () => {
-                  if (doseGenerationRef.current.get(key) !== gen) {
-                    return cancelDoseReminder(medId, doseId);
-                  }
+                doseId === LEGACY_DOSE_ID ? undefined : { doseId };
+              return (
+                opts
+                  ? scheduleDoseReminder(medId, name, time, amount, unit, opts)
+                  : scheduleDoseReminder(medId, name, time, amount, unit)
+              ).then(() => {
+                if (doseGenerationRef.current.get(key) !== gen) {
+                  return cancelDoseReminder(medId, doseId);
                 }
-              );
-            });
-          })
-        );
+              });
+            })
+          );
+        }
       }
     }
+
+    prevConsumedKeysRef.current = nextConsumedKeys;
   }, [
     consumedSignature,
     resumeTickValue,

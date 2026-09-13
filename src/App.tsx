@@ -605,7 +605,6 @@ export default function App() {
     const restoreKey = resolvedDoseId
       ? `${medicationId}:${resolvedDoseId}:${today}`
       : `${medicationId}:${today}`;
-    if (restoreInFlightRef.current.has(restoreKey)) return false;
     if (med.autoDeductEnabled === false) {
       showToast(TOAST_MESSAGES.autoDeductOff(med.name));
       return false;
@@ -628,6 +627,7 @@ export default function App() {
       showToast(TOAST_MESSAGES.doseAlreadyRestored(med.name));
       return false;
     }
+    if (restoreInFlightRef.current.has(restoreKey)) return false;
     restoreInFlightRef.current.add(restoreKey);
     const restoredAmount = resolved.amount;
     // Shared settle+adjust logic (audit #78): settle at effPills, add the

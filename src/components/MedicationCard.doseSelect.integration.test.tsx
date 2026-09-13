@@ -293,6 +293,64 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     expect(log?.doseId).toBe('only');
   });
 
+  it('displays next upcoming dose amount (-2) instead of daily aggregate (-5) and disables past doses', async () => {
+    // Current time: 12:00 PM (12:00)
+    // 08:00 AM dose (3 pills) is past and auto-deducted
+    // 14:00 (2:00 PM) dose (2 pills) is next upcoming dose
+    localStorage.setItem(
+      STORAGE_MEDS_KEY,
+      JSON.stringify([
+        makeMulti({
+          name: 'Test',
+          dailyDose: 5,
+          currentPills: 20,
+          unit: 'قرص',
+          doseSchedule: [
+            { id: 'dose-8am', amount: 3, time: '08:00' },
+            { id: 'dose-2pm', amount: 2, time: '14:00' },
+          ],
+        }),
+      ])
+    );
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Test')).toBeInTheDocument();
+    });
+
+    // The button must display (-2) because 2 PM is the next dose, NOT (-5)
+    const consumeBtn = screen.getByTitle('تناول جرعة (-2)');
+    expect(consumeBtn).toBeInTheDocument();
+
+    // Clicking opens SelectDoseModal
+    fireEvent.click(consumeBtn);
+    expect(screen.getByText(/اختر الجرعة التي تناولتها/)).toBeInTheDocument();
+
+    // 8 AM dose is disabled with "خصم تلقائي"
+    const btn8am = screen
+      .getAllByRole('button')
+      .find((b) => b.getAttribute('data-dose-id') === 'dose-8am');
+    expect(btn8am).toBeDisabled();
+    expect(btn8am).toHaveTextContent('خصم تلقائي');
+
+    // 2 PM dose is enabled with "اختيار"
+    const btn2pm = screen
+      .getAllByRole('button')
+      .find((b) => b.getAttribute('data-dose-id') === 'dose-2pm');
+    expect(btn2pm).toBeEnabled();
+    expect(btn2pm).toHaveTextContent('اختيار');
+
+    // Clicking 2 PM dose consumes it
+    fireEvent.click(btn2pm!);
+
+    const today = getTodayDateString();
+    await waitFor(() => {
+      const med = readMeds().find((m) => m.name === 'Test');
+      expect(med?.doseConsumption?.['dose-2pm']).toBe(today);
+    });
+  });
+
   it('all slots consumed shows completed badge and no take action', async () => {
     const today = getTodayDateString();
     localStorage.setItem(
@@ -313,3 +371,4 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     expect(screen.getByTitle(/تم تناول جرعة اليوم/)).toBeInTheDocument();
   });
 });
+

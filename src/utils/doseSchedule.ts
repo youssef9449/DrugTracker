@@ -15,6 +15,7 @@
 import type { Medication, MedicationDose } from '../types';
 import { generateId } from './id';
 import { timeToMinutes } from './time';
+import { isDoseConsumedOnDate, getTodayDateString } from './dateCalculations';
 
 /** Sensible UI maximum for doses per day (compact mobile form). */
 export const MAX_DOSES_PER_DAY = 6;
@@ -262,3 +263,92 @@ export function validateAndNormalizeDoseSchedule(
     reminderTime: sorted[0]?.time ?? '09:00',
   };
 }
+
+/**
+ * Returns true if the dose time has already passed today based on local wall clock.
+ */
+export function isDoseTimeElapsedToday(
+  timeStr: string,
+  now: Date = new Date()
+): boolean {
+  const tMin = timeToMinutes(timeStr);
+  if (tMin < 0) return false;
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  return nowMin >= tMin;
+}
+
+/**
+ * Returns true if a dose slot is completed today (either manually consumed or auto-deducted because its time elapsed).
+ */
+export function isDoseCompletedToday(
+  med: Medication,
+  dose: MedicationDose,
+  todayStr: string = getTodayDateString(),
+  now: Date = new Date()
+): boolean {
+  if (isDoseConsumedOnDate(med, dose.id, todayStr)) {
+    return true;
+  }
+  if (med.autoDeductEnabled !== false && isDoseTimeElapsedToday(dose.time, now)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Finds the next scheduled dose that the user is supposed to take right now.
+ * 1. Prioritizes the earliest upcoming dose today that is neither consumed nor elapsed (auto-deducted).
+ * 2. If all remaining unconsumed doses have elapsed (e.g. autoDeduct is false or fallback), picks the earliest unconsumed dose.
+ */
+export function getNextScheduledDose(
+  med: Medication,
+  now: Date = new Date(),
+  todayStr: string = getTodayDateString()
+): MedicationDose | null {
+  if (!Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0) {
+    return null;
+  }
+  const schedule = sortDoseSchedule(med.doseSchedule);
+
+  // 1. Next upcoming available dose (not consumed and not auto-deducted)
+  const nextAvailable = schedule.find(
+    (d) => !isDoseCompletedToday(med, d, todayStr, now)
+  );
+  if (nextAvailable) {
+    return nextAvailable;
+  }
+
+  // 2. Fallback: earliest unconsumed dose (if any)
+  const unconsumed = schedule.find(
+    (d) => !isDoseConsumedOnDate(med, d.id, todayStr)
+  );
+  if (unconsumed) {
+    return unconsumed;
+  }
+
+  // 3. If all doses consumed/done, return the first schedule row as nominal fallback
+  return schedule[0] || null;
+}
+
+/**
+ * Returns the dose amount for the next upcoming dose.
+ * For single-dose medications without a schedule, returns `med.dailyDose`.
+ * For multi-dose medications, returns the amount of the next scheduled dose.
+ */
+export function getNextDoseAmount(
+  med: Medication,
+  now: Date = new Date(),
+  todayStr: string = getTodayDateString()
+): number {
+  if (Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) {
+    const nextDose = getNextScheduledDose(med, now, todayStr);
+    if (nextDose && Number(nextDose.amount) > 0) {
+      return Number(nextDose.amount);
+    }
+    return (
+      Number(med.doseSchedule[0]?.amount) || Number(med.dailyDose) || 1
+    );
+  }
+  return Number(med.dailyDose) || 1;
+}
+

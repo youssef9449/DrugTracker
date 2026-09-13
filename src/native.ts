@@ -208,16 +208,40 @@ export async function initNativeBridge(): Promise<void> {
     // the lock screen).
     //
     // Two dose-reminder channels:
-    // 1. dose-reminder-v3 — BACKGROUND/KILLED channel. No `sound`
-    //    property → Android uses the default system notification sound.
+    //
+    // 1. dose-reminder-v3 — BACKGROUND/KILLED channel.
+    //    No `sound` property is set. This is NOT silent — it produces
+    //    the Android default system notification sound. The chain is:
+    //      - Capacitor 6.x NotificationChannelManager.createChannel()
+    //        (node_modules/@capacitor/local-notifications/android/.../
+    //         NotificationChannelManager.java lines 91-102) reads
+    //        `sound` and ONLY calls NotificationChannel.setSound() when
+    //        sound is a non-empty string. When sound is omitted (as we
+    //        do here), setSound() is never called.
+    //      - The Android NotificationChannel constructor
+    //        (new NotificationChannel(id, name, importance)) sets the
+    //        default sound to Settings.System.DEFAULT_NOTIFICATION_URI
+    //        — the user's chosen default notification sound.
+    //      - So: sound omitted → no setSound call → constructor
+    //        default → system default notification sound. ✓
+    //    Additionally, LocalNotificationManager.buildNotification()
+    //        (line 203) calls mBuilder.setDefaults(DEFAULT_ALL) when
+    //        the notification has no per-notification sound AND no
+    //        global sound is configured in capacitor.config — which is
+    //        our case. DEFAULT_ALL includes DEFAULT_SOUND, providing a
+    //        second path to the system default sound.
     //    HIGH importance so the user gets a heads-up + sound when the
     //    app is not open.
-    // 2. dose-reminder-foreground-v1 — FOREGROUND channel. SILENT
-    //    (LOW importance, no `sound` property) so the scheduled
-    //    notification triggers `localNotificationReceived` (which opens
-    //    the DoseAlarmModal + plays the in-app chime) WITHOUT producing
-    //    an audible Android notification. The notification still appears
-    //    in the shade (silently) as a fallback.
+    //
+    // 2. dose-reminder-foreground-v1 — FOREGROUND channel. SILENT.
+    //    LOW importance (2) → Android produces no sound, no heads-up.
+    //    No `sound` property → no setSound call (same as above), but
+    //    LOW importance overrides: LOW channels never make sound
+    //    regardless of the sound URI. The scheduled notification still
+    //    triggers `localNotificationReceived` (which opens the
+    //    DoseAlarmModal + plays the in-app chime) WITHOUT producing an
+    //    audible Android notification. The notification appears in the
+    //    shade (silently) as a fallback.
     //
     // The previous v2 channel used a custom 'dose_reminder.wav' that
     // users found unpleasant; since channel sound is immutable, we
@@ -229,6 +253,8 @@ export async function initNativeBridge(): Promise<void> {
         description: 'تذكيرات يومية بمواعيد الأدوية',
         importance: 4 as Importance,
         visibility: 1 as Visibility,
+        // No `sound` property → system default notification sound.
+        // See the comment above for the full Capacitor + Android chain.
       },
       {
         id: DOSE_REMINDER_FOREGROUND_CHANNEL_ID,

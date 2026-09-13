@@ -117,6 +117,12 @@ interface ConsumeDoseResult {
   doseAmount: number;
   /** The consumption log to prepend (or null if no dose was consumed). */
   log: ConsumptionLog | null;
+  /**
+   * Present when no dose was consumed due to identity failure on a multi-dose
+   * schedule (mirrors {@link resolveRestoreDoseAmount} reasons).
+   * Omitted for legacy zero-balance / already-consumed cases.
+   */
+  reason?: 'missing_dose_id' | 'invalid_dose_id' | 'no_dose' | 'already_consumed';
 }
 
 /**
@@ -146,36 +152,69 @@ export function consumeDose(
   doseId?: string
 ): ConsumeDoseResult {
   const breakdown = computeDueDoseBreakdown(med, now, todayStr);
-  const multi =
-    Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0;
+  const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
+  const multi = schedule.length > 0;
 
   // Resolve which dose slot is being consumed.
-  // Phase 3B: UI paths (card + SelectDoseModal, alarm) should always
-  // pass an explicit doseId for multi-dose meds. The fallback below
-  // (earliest unconsumed schedule row) exists only for internal /
-  // legacy callers that omit doseId; it is intentional, not a guess
-  // from wall-clock time.
+  // Multi-dose identity is strict: medicationId + doseId + date.
+  // - length > 1: doseId is required (no "first unconsumed" / index / time guess).
+  // - length === 1: omitted doseId resolves to that slot's real id (compat).
+  // - empty schedule (legacy): dailyDose + lastConsumedDate, no doseId.
   let targetDoseId = doseId;
   let targetAmount = med.dailyDose;
   if (multi) {
-    const schedule = med.doseSchedule!;
-    let target = targetDoseId
-      ? schedule.find((d) => d.id === targetDoseId)
-      : undefined;
+    let target =
+      targetDoseId != null && targetDoseId !== ''
+        ? schedule.find((d) => d.id === targetDoseId)
+        : undefined;
+
     if (!target) {
-      // Fallback: earliest unconsumed slot for today (stable order).
-      target = schedule.find((d) => !isDoseConsumedOnDate(med, d.id, todayStr));
+      if (targetDoseId != null && targetDoseId !== '') {
+        // Explicit but unknown id
+        return {
+          updatedMed: null,
+          doseAmount: 0,
+          log: null,
+          reason: 'invalid_dose_id',
+        };
+      }
+      if (schedule.length === 1) {
+        target = schedule[0];
+      } else {
+        return {
+          updatedMed: null,
+          doseAmount: 0,
+          log: null,
+          reason: 'missing_dose_id',
+        };
+      }
     }
-    if (!target) {
-      return { updatedMed: null, doseAmount: 0, log: null };
-    }
+
     if (isDoseConsumedOnDate(med, target.id, todayStr)) {
-      return { updatedMed: null, doseAmount: 0, log: null };
+      return {
+        updatedMed: null,
+        doseAmount: 0,
+        log: null,
+        reason: 'already_consumed',
+      };
     }
     targetDoseId = target.id;
     targetAmount = Number(target.amount) || 0;
+    if (targetAmount <= 0) {
+      return {
+        updatedMed: null,
+        doseAmount: 0,
+        log: null,
+        reason: 'no_dose',
+      };
+    }
   } else if (med.lastConsumedDate === todayStr) {
-    return { updatedMed: null, doseAmount: 0, log: null };
+    return {
+      updatedMed: null,
+      doseAmount: 0,
+      log: null,
+      reason: 'already_consumed',
+    };
   }
 
   // Settle past-only for gated/multi; full effective for legacy non-gated.

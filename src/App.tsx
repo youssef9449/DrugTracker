@@ -49,9 +49,10 @@ import {
   reverseRefill,
   settleDoseChange,
   settleAutoDeductToggle,
+  isDoseSkippedOnDate,
 } from './utils/dateCalculations';
 import { OrderItem } from './utils/whatsapp';
-import { consumeDose, settleAndAdjust, resolveRestoreDoseAmount } from './utils/medActions';
+import { consumeDose, settleAndAdjust, resolveRestoreDoseAmount, restoreDose } from './utils/medActions';
 import { useDoseReminders } from './hooks/useDoseReminders';
 import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
 import { useDoseReminderScheduler } from './hooks/useDoseReminderScheduler';
@@ -593,81 +594,59 @@ export default function App() {
     const med = medications.find((m) => m.id === medicationId);
     if (!med) return false;
     const today = getTodayDateString();
-    const resolved = resolveRestoreDoseAmount(med, doseId);
-    if (!resolved.ok) {
-      if (resolved.reason === 'missing_dose_id') {
+
+    // Resolve identity early for duplicate / in-flight guards (production
+    // pure restoreDose also resolves; we need the id before calling it).
+    const preResolved = resolveRestoreDoseAmount(med, doseId);
+    if (!preResolved.ok) {
+      if (preResolved.reason === 'missing_dose_id') {
         showToast('اختر الجرعة المراد استرجاعها');
       }
       return false;
     }
-    const resolvedDoseId = resolved.doseId;
-    // Per-dose in-flight / duplicate guard (multi); med-level for legacy.
+    const resolvedDoseId = preResolved.doseId;
     const restoreKey = resolvedDoseId
       ? `${medicationId}:${resolvedDoseId}:${today}`
       : `${medicationId}:${today}`;
+
     if (med.autoDeductEnabled === false) {
       showToast(TOAST_MESSAGES.autoDeductOff(med.name));
       return false;
     }
-    const alreadyRestored = logs.some((log) => {
-      if (
-        log.medicationId !== medicationId ||
-        log.type !== 'skipped_day' ||
-        log.date !== today
-      ) {
-        return false;
-      }
-      if (resolvedDoseId) {
-        return log.doseId === resolvedDoseId;
-      }
-      // Legacy: any skipped_day for this med today blocks another restore.
-      return !log.doseId;
-    });
+    // Outstanding-restore guard (not a permanent blacklist):
+    // - Scheduled doseId: blocked while doseSkippedHistory still marks
+    //   this doseId+date (cleared by consumeDose on Take → allows
+    //   Restore → Take → Restore).
+    // - Legacy (no doseId): still uses skipped_day log for the day.
+    const alreadyRestored = resolvedDoseId
+      ? isDoseSkippedOnDate(med, resolvedDoseId, today)
+      : logs.some(
+          (log) =>
+            log.medicationId === medicationId &&
+            log.type === 'skipped_day' &&
+            log.date === today &&
+            !log.doseId
+        );
     if (alreadyRestored) {
       showToast(TOAST_MESSAGES.doseAlreadyRestored(med.name));
       return false;
     }
     if (restoreInFlightRef.current.has(restoreKey)) return false;
     restoreInFlightRef.current.add(restoreKey);
-    const restoredAmount = resolved.amount;
-    // Shared settle+adjust logic (audit #78): settle at effPills, add the
-    // restored slot amount (not full dailyDose for multi-dose).
-    const { updatedMed } = settleAndAdjust(med, restoredAmount, today);
-    // Clear the manual consumption mark for this dose/date so the slot is
-    // available again (Take→Restore→Take lifecycle). History keeps other
-    // dates; only today's entry for this doseId is removed.
-    let medAfterRestore = updatedMed;
-    if (resolvedDoseId) {
-      const nextConsumption = { ...(updatedMed.doseConsumption ?? {}) };
-      if (nextConsumption[resolvedDoseId] === today) {
-        delete nextConsumption[resolvedDoseId];
+
+    // Production pure restore (stock + skip + clear consume).
+    const result = restoreDose(med, doseId, today);
+    if (!result.ok) {
+      if (result.reason === 'auto_deduct_off') {
+        showToast(TOAST_MESSAGES.autoDeductOff(med.name));
+      } else if (result.reason === 'missing_dose_id') {
+        showToast('اختر الجرعة المراد استرجاعها');
       }
-      const nextHistory = { ...(updatedMed.doseConsumptionHistory ?? {}) };
-      if (Array.isArray(nextHistory[resolvedDoseId])) {
-        nextHistory[resolvedDoseId] = nextHistory[resolvedDoseId].filter(
-          (d) => d !== today
-        );
-        if (nextHistory[resolvedDoseId].length === 0) {
-          delete nextHistory[resolvedDoseId];
-        }
-      }
-      const allStillConsumed =
-        Array.isArray(updatedMed.doseSchedule) &&
-        updatedMed.doseSchedule.every((d) =>
-          d.id === resolvedDoseId
-            ? false
-            : (nextConsumption[d.id] === today ||
-                (nextHistory[d.id] ?? []).includes(today))
-        );
-      medAfterRestore = {
-        ...updatedMed,
-        doseConsumption: nextConsumption,
-        doseConsumptionHistory: nextHistory,
-        lastConsumedDate: allStillConsumed ? today : undefined,
-      };
-    } else if (med.lastConsumedDate === today) {
-      medAfterRestore = { ...updatedMed, lastConsumedDate: undefined };
+      restoreInFlightRef.current.delete(restoreKey);
+      return false;
     }
+
+    const { updatedMed: medAfterRestore, restoredAmount } = result;
     setMedications((prev) =>
       prev.map((m) => (m.id === medicationId ? medAfterRestore : m))
     );
@@ -681,10 +660,12 @@ export default function App() {
         date: today,
         timestamp: new Date().toISOString(),
         description: `استرجاع جرعة (${reason}) (+${restoredAmount} ${med.unit})`,
-        ...(resolvedDoseId ? { doseId: resolvedDoseId } : {}),
+        ...(result.doseId ? { doseId: result.doseId } : {}),
       },
       ...prev,
     ]);
+    // Clear in-flight so a later valid Restore (after Take) is not blocked.
+    restoreInFlightRef.current.delete(restoreKey);
     if (soundEnabled) playSuccessChime();
     return true;
   };

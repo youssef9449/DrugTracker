@@ -189,6 +189,65 @@ export function recordDoseConsumed(
 }
 
 /**
+ * Whether a specific dose slot was restored/skipped on `dateStr`
+ * (Auto-Deduct → Restore bookkeeping). Skipped slots are not auto-due
+ * again for that date and are available for a later manual Take.
+ */
+export function isDoseSkippedOnDate(
+  med: Medication,
+  doseId: string,
+  dateStr: string
+): boolean {
+  const hist = med.doseSkippedHistory?.[doseId];
+  return Array.isArray(hist) && hist.includes(dateStr);
+}
+
+/**
+ * Record that `doseId` was restored/skipped on `dateStr` so auto-sync
+ * and projection will not re-deduct that slot for that date.
+ * Idempotent per doseId+date.
+ */
+export function recordDoseSkipped(
+  med: Medication,
+  doseId: string,
+  dateStr: string
+): { doseSkippedHistory: Record<string, string[]> } {
+  const doseSkippedHistory: Record<string, string[]> = {
+    ...(med.doseSkippedHistory ?? {}),
+  };
+  const prev = doseSkippedHistory[doseId] ?? [];
+  if (!prev.includes(dateStr)) {
+    doseSkippedHistory[doseId] = [...prev, dateStr];
+  } else {
+    doseSkippedHistory[doseId] = prev;
+  }
+  return { doseSkippedHistory };
+}
+
+/**
+ * Clear a skip mark for `doseId` on `dateStr` (e.g. after manual Take
+ * following Restore). Does not touch other dates or doseIds.
+ */
+export function clearDoseSkippedOnDate(
+  med: Medication,
+  doseId: string,
+  dateStr: string
+): { doseSkippedHistory: Record<string, string[]> } {
+  const doseSkippedHistory: Record<string, string[]> = {
+    ...(med.doseSkippedHistory ?? {}),
+  };
+  const prev = doseSkippedHistory[doseId] ?? [];
+  const next = prev.filter((d) => d !== dateStr);
+  if (next.length === 0) {
+    delete doseSkippedHistory[doseId];
+  } else {
+    doseSkippedHistory[doseId] = next;
+  }
+  return { doseSkippedHistory };
+}
+
+
+/**
  * Units still auto-due on a single historical calendar day (all slots
  * that day are fully elapsed).
  *
@@ -213,6 +272,7 @@ export function historicalDayDueUnits(med: Medication, dateStr: string): number 
     const amount = Number(d.amount) || 0;
     if (amount <= 0) continue;
     if (isDoseConsumedOnDate(med, d.id, dateStr)) continue;
+    if (isDoseSkippedOnDate(med, d.id, dateStr)) continue;
     units += amount;
   }
   return units;
@@ -271,6 +331,7 @@ export function todayDueUnits(
       if (tMin < 0) continue;
       if (nowMin < tMin) continue;
       if (isDoseConsumedOnDate(med, d.id, todayStr)) continue;
+      if (isDoseSkippedOnDate(med, d.id, todayStr)) continue;
       units += amount;
     }
     return units;
@@ -400,6 +461,7 @@ export function countDueDoseEvents(
     for (const d of med.doseSchedule) {
       if ((Number(d.amount) || 0) <= 0) continue;
       if (isDoseConsumedOnDate(med, d.id, day)) continue;
+      if (isDoseSkippedOnDate(med, d.id, day)) continue;
       events += 1;
     }
   }
@@ -411,6 +473,7 @@ export function countDueDoseEvents(
       const tMin = timeToMinutes(d.time);
       if (tMin < 0 || nowMin < tMin) continue;
       if (isDoseConsumedOnDate(med, d.id, todayStr)) continue;
+      if (isDoseSkippedOnDate(med, d.id, todayStr)) continue;
       events += 1;
     }
   }

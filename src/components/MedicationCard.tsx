@@ -12,8 +12,8 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { Medication, calculateMedicationStatus, describeStockInStrips, isSolidUnit } from '../types';
-import { getDepletionDate, getTodayDateString, effectiveCurrentPills, isDoseConsumedOnDate } from '../utils/dateCalculations';
-import { getNextDoseAmount } from '../utils/doseSchedule';
+import { getDepletionDate, getTodayDateString, effectiveCurrentPills } from '../utils/dateCalculations';
+import { getCardDoseToggleTarget } from '../utils/doseSchedule';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { VISUAL_RANGE_MULTIPLIER, MIN_VISUAL_RANGE_DAYS, DAYS_PER_MONTH } from '../utils/time';
 import { MedicationMenu } from './MedicationMenu';
@@ -58,6 +58,8 @@ interface MedicationCardProps {
   onNavigateToShopping?: () => void;
   onTriggerAlarm?: (medication: Medication) => void;
   onConsumeDose?: (medicationId: string, doseId?: string) => void;
+  /** Restore a manually consumed dose via the same App path as logs. */
+  onRestoreDose?: (medicationId: string, doseId?: string) => void;
   lastRefillQuantity?: number;
   onUndoRefill?: () => void;
 }
@@ -72,6 +74,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   onToggleAutoDeduct,
   onNavigateToShopping,
   onConsumeDose,
+  onRestoreDose,
   lastRefillQuantity,
   onUndoRefill,
 }) => {
@@ -457,14 +460,8 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const isOut = statusInfo.status === 'out_of_stock';
     const isCrit = statusInfo.status === 'critical';
     const isWarn = statusInfo.status === 'warning';
-    const todayStr = getTodayDateString();
-    const isConsumedToday =
-      Array.isArray(medication.doseSchedule) && medication.doseSchedule.length > 0
-        ? medication.doseSchedule.every((d) =>
-            isDoseConsumedOnDate(medication, d.id, todayStr)
-          )
-        : medication.lastConsumedDate === todayStr;
-    const nextDoseAmount = getNextDoseAmount(medication);
+    const doseToggle = getCardDoseToggleTarget(medication);
+    const nextDoseAmount = doseToggle.amount;
 
     const statusLabel = isOut
       ? 'نفد'
@@ -497,15 +494,20 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             {statusLabel}
           </span>
           <div className="flex items-center shrink-0">
-            {onConsumeDose && (
-              isConsumedToday ? (
-                <span title="تم تناول جرعة اليوم" className="w-5 h-5 flex items-center justify-center text-emerald-600">
-                  <CheckCircle className="w-3 h-3" />
-                </span>
-              ) : (
+            {(onConsumeDose || onRestoreDose) && (
+              doseToggle.canRestore && onRestoreDose ? (
                 <button
                   type="button"
-                  onClick={() => onConsumeDose(medication.id)}
+                  onClick={() => onRestoreDose(medication.id, doseToggle.doseId)}
+                  title={`استرجاع الجرعة (+${nextDoseAmount})`}
+                  className="w-5 h-5 flex items-center justify-center rounded text-emerald-600 hover:bg-emerald-50"
+                >
+                  <CheckCircle className="w-3 h-3" />
+                </button>
+              ) : doseToggle.canTake && onConsumeDose ? (
+                <button
+                  type="button"
+                  onClick={() => onConsumeDose(medication.id, doseToggle.doseId)}
                   disabled={effPills <= 0 || nextDoseAmount <= 0}
                   title={`تناول جرعة (-${nextDoseAmount})`}
                   className={`w-5 h-5 flex items-center justify-center rounded ${
@@ -516,6 +518,10 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 >
                   <Pill className="w-3 h-3 rotate-45" />
                 </button>
+              ) : (
+                <span title="تم تناول جرعة اليوم" className="w-5 h-5 flex items-center justify-center text-emerald-600">
+                  <CheckCircle className="w-3 h-3" />
+                </span>
               )
             )}
             <button
@@ -589,14 +595,8 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const isOut = statusInfo.status === 'out_of_stock';
     const isCrit = statusInfo.status === 'critical';
     const isWarn = statusInfo.status === 'warning';
-    const todayStr = getTodayDateString();
-    const isConsumedToday =
-      Array.isArray(medication.doseSchedule) && medication.doseSchedule.length > 0
-        ? medication.doseSchedule.every((d) =>
-            isDoseConsumedOnDate(medication, d.id, todayStr)
-          )
-        : medication.lastConsumedDate === todayStr;
-    const nextDoseAmount = getNextDoseAmount(medication);
+    const doseToggle = getCardDoseToggleTarget(medication);
+    const nextDoseAmount = doseToggle.amount;
 
     return (
       <div
@@ -647,18 +647,20 @@ export const MedicationCard: FC<MedicationCardProps> = ({
 
           {/* Quick Actions at top left */}
           <div className="flex items-center gap-1 shrink-0">
-            {onConsumeDose && (
-              isConsumedToday ? (
-                <span
-                  title="تم تناول جرعة اليوم"
-                  className="w-6 h-6 flex items-center justify-center rounded-md bg-emerald-50 text-emerald-600 border border-emerald-200"
-                >
-                  <CheckCircle className="w-3 h-3" />
-                </span>
-              ) : (
+            {(onConsumeDose || onRestoreDose) && (
+              doseToggle.canRestore && onRestoreDose ? (
                 <button
                   type="button"
-                  onClick={() => onConsumeDose(medication.id)}
+                  onClick={() => onRestoreDose(medication.id, doseToggle.doseId)}
+                  title={`استرجاع الجرعة (+${nextDoseAmount})`}
+                  className="w-6 h-6 flex items-center justify-center rounded-md bg-emerald-50 text-emerald-600 border border-emerald-200 transition active:scale-95 hover:bg-emerald-100"
+                >
+                  <CheckCircle className="w-3 h-3" />
+                </button>
+              ) : doseToggle.canTake && onConsumeDose ? (
+                <button
+                  type="button"
+                  onClick={() => onConsumeDose(medication.id, doseToggle.doseId)}
                   disabled={effPills <= 0 || nextDoseAmount <= 0}
                   title={`تناول جرعة (-${nextDoseAmount})`}
                   className={`w-6 h-6 flex items-center justify-center rounded-md border transition active:scale-95 ${
@@ -669,6 +671,13 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 >
                   <Pill className="w-3 h-3 rotate-45" />
                 </button>
+              ) : (
+                <span
+                  title="تم تناول جرعة اليوم"
+                  className="w-6 h-6 flex items-center justify-center rounded-md bg-emerald-50 text-emerald-600 border border-emerald-200"
+                >
+                  <CheckCircle className="w-3 h-3" />
+                </span>
               )
             )}
 

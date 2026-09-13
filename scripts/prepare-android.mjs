@@ -18,32 +18,14 @@ if (!manifest.includes(exactPermission)) {
 }
 fs.writeFileSync(manifestPath, manifest);
 
+// Remove the legacy custom dose-reminder sound if it exists from a previous
+// build. The dose-reminder channel (v3) now uses the default system
+// notification sound, so the bundled 'dose_reminder.wav' is no longer needed.
 const rawDir = path.join(androidDir, 'app', 'src', 'main', 'res', 'raw');
-fs.mkdirSync(rawDir, { recursive: true });
 const soundPath = path.join(rawDir, 'dose_reminder.wav');
-if (!fs.existsSync(soundPath)) {
-  const sampleRate = 8000;
-  const samples = Math.floor(sampleRate * 0.35);
-  const data = Buffer.alloc(samples * 2);
-  for (let index = 0; index < samples; index += 1) {
-    const envelope = Math.min(1, index / 240, (samples - index) / 240);
-    const sample = Math.sin((2 * Math.PI * 880 * index) / sampleRate) * 0.35 * envelope;
-    data.writeInt16LE(Math.round(sample * 32767), index * 2);
-  }
-  const header = Buffer.alloc(44);
-  header.write('RIFF', 0);
-  header.writeUInt32LE(36 + data.length, 4);
-  header.write('WAVEfmt ', 8);
-  header.writeUInt32LE(16, 16);
-  header.writeUInt16LE(1, 20);
-  header.writeUInt16LE(1, 22);
-  header.writeUInt32LE(sampleRate, 24);
-  header.writeUInt32LE(sampleRate * 2, 28);
-  header.writeUInt16LE(2, 32);
-  header.writeUInt16LE(16, 34);
-  header.write('data', 36);
-  header.writeUInt32LE(data.length, 40);
-  fs.writeFileSync(soundPath, Buffer.concat([header, data]));
+if (fs.existsSync(soundPath)) {
+  fs.unlinkSync(soundPath);
+  console.info('Removed legacy dose_reminder.wav (channel now uses system default sound).');
 }
 
-console.info('Prepared Android exact-alarm permission and dose reminder sound.');
+console.info('Prepared Android exact-alarm permission.');

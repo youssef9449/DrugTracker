@@ -1540,9 +1540,18 @@ export default function App() {
                   <div className="mx-4 mt-3 flex items-center justify-between bg-white px-3 py-2 rounded-2xl border border-slate-200/80 shadow-2xs">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-bold text-slate-800">قائمة الأدوية</span>
-                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-mono font-bold">
-                        {filteredMedications.length}
-                      </span>
+                      {/* Only surface a count here when it adds information the
+                          "إجمالي الأدوية" stat card above doesn't already give —
+                          i.e. an active search is narrowing the list. Otherwise
+                          this badge would just repeat the same total number. */}
+                      {searchQuery.trim() && filteredMedications.length !== medications.length && (
+                        <span
+                          className="text-[11px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-700 font-mono font-bold"
+                          aria-label={`${filteredMedications.length} نتيجة بحث من إجمالي ${medications.length}`}
+                        >
+                          {filteredMedications.length} نتيجة
+                        </span>
+                      )}
                     </div>
 
                     <label

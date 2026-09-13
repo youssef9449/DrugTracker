@@ -6,6 +6,7 @@ import {
   mutationSettlementLastSyncDate,
   recordDoseConsumed,
   isDoseConsumedOnDate,
+  clearDoseSkippedOnDate,
 } from './dateCalculations';
 import { generateId } from './id';
 
@@ -229,10 +230,19 @@ export function consumeDose(
 
   let doseConsumption = med.doseConsumption;
   let doseConsumptionHistory = med.doseConsumptionHistory;
+  let doseSkippedHistory = med.doseSkippedHistory;
   if (multi && targetDoseId) {
     const recorded = recordDoseConsumed(med, targetDoseId, todayStr);
     doseConsumption = recorded.doseConsumption;
     doseConsumptionHistory = recorded.doseConsumptionHistory;
+    // Clear any prior restore/skip for this dose+date so Take after
+    // Restore is a single clean manual consumption.
+    const cleared = clearDoseSkippedOnDate(
+      { ...med, doseSkippedHistory },
+      targetDoseId,
+      todayStr
+    );
+    doseSkippedHistory = cleared.doseSkippedHistory;
   }
 
   const allSlotsConsumedToday =
@@ -266,7 +276,7 @@ export function consumeDose(
     lastConsumedDate,
     lastSyncDate,
     ...(multi
-      ? { doseConsumption, doseConsumptionHistory }
+      ? { doseConsumption, doseConsumptionHistory, doseSkippedHistory }
       : {}),
   };
   const description =

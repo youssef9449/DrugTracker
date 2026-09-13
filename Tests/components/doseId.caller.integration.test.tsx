@@ -417,7 +417,7 @@ describe('doseId propagation — production callers (integration)', () => {
     expect(effectiveCurrentPills(med)).toBe(29);
   });
 
-  it('auto-due d1 + In-App DoseAlarm Take: one deduction only; repeat is no-op; d2 untouched', async () => {
+  it('auto-due d1 + In-App DoseAlarm Take: one deduction; duplicate notification does not reopen modal; d2 untouched', async () => {
     vi.setSystemTime(new Date('2024-09-10T09:00:00'));
     seed(
       makeMulti({
@@ -469,17 +469,24 @@ describe('doseId propagation — production callers (integration)', () => {
       doseConsumptionHistory: JSON.stringify(med.doseConsumptionHistory ?? {}),
     };
 
-    // Open alarm again and press Take for the same doseId
-    doseReceivedHandler!('med-multi', 'd1');
+    // Dismiss any residual modal UI, then deliver a duplicate/stale notification
+    // for the same medicationId + doseId. openAlarm must return early because
+    // d1 is already consumed today — modal MUST NOT reopen.
+    const dismissBtn = screen.queryByText(/إغلاق التنبيه/);
+    if (dismissBtn) fireEvent.click(dismissBtn);
     await waitFor(() => {
-      expect(screen.getByTestId('alarm-take-dose')).toBeInTheDocument();
+      expect(screen.queryByTestId('alarm-take-dose')).not.toBeInTheDocument();
     });
-    fireEvent.click(screen.getByTestId('alarm-take-dose'));
 
+    doseReceivedHandler!('med-multi', 'd1');
+
+    // Give effects a tick; modal must stay closed (not reopen).
     await waitFor(() => {
-      expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(1);
+      expect(screen.queryByTestId('alarm-take-dose')).not.toBeInTheDocument();
     });
+
     med = readMeds()[0]!;
+    expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(1);
     expect(med.currentPills).toBe(afterFirst.currentPills);
     expect(med.lastSyncDate).toBe(afterFirst.lastSyncDate);
     expect({ ...(med.doseConsumption ?? {}) }).toEqual(afterFirst.doseConsumption);

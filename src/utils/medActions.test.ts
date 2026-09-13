@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { settleAndAdjust, consumeDose } from './medActions';
+import { settleAndAdjust, consumeDose, resolveRestoreDoseAmount } from './medActions';
 import type { Medication } from '../types';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
@@ -129,5 +129,107 @@ describe('consumeDose (#77)', () => {
     const result = consumeDose(med, 'manual', '2024-01-10');
     // generateId('consume') → 'consume-<uuid>' (40 chars). Not 'consume-<timestamp>'.
     expect(result.log!.id).toMatch(/^consume-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  });
+});
+
+
+describe('resolveRestoreDoseAmount (multi-dose restore)', () => {
+  const multi = makeMed({
+    dailyDose: 4,
+    doseSchedule: [
+      { id: 'd1', amount: 1, time: '08:00' },
+      { id: 'd2', amount: 1, time: '14:00' },
+      { id: 'd3', amount: 2, time: '20:00' },
+    ],
+    dosesPerDay: 3,
+  });
+
+  it('returns dose.amount for explicit multi-dose id (not dailyDose)', () => {
+    expect(resolveRestoreDoseAmount(multi, 'd1')).toEqual({
+      ok: true,
+      amount: 1,
+      doseId: 'd1',
+    });
+    expect(resolveRestoreDoseAmount(multi, 'd3')).toEqual({
+      ok: true,
+      amount: 2,
+      doseId: 'd3',
+    });
+  });
+
+  it('rejects multi-dose restore without doseId', () => {
+    expect(resolveRestoreDoseAmount(multi)).toEqual({
+      ok: false,
+      amount: 0,
+      reason: 'missing_dose_id',
+    });
+  });
+
+  it('rejects invalid doseId', () => {
+    expect(resolveRestoreDoseAmount(multi, 'missing')).toEqual({
+      ok: false,
+      amount: 0,
+      reason: 'invalid_dose_id',
+    });
+  });
+
+  it('single-slot schedule uses that slot amount when doseId omitted', () => {
+    const one = makeMed({
+      dailyDose: 5,
+      doseSchedule: [{ id: 'only', amount: 3, time: '09:00' }],
+      dosesPerDay: 1,
+    });
+    expect(resolveRestoreDoseAmount(one)).toEqual({
+      ok: true,
+      amount: 3,
+      doseId: 'only',
+    });
+  });
+
+  it('legacy med uses dailyDose', () => {
+    const legacy = makeMed({ dailyDose: 2, doseSchedule: undefined });
+    expect(resolveRestoreDoseAmount(legacy)).toEqual({ ok: true, amount: 2 });
+  });
+
+  it('settleAndAdjust with resolved multi amount adds only that amount', () => {
+    // lastSync = today so no past projection; +1 restore → currentPills + 1
+    const med = makeMed({
+      currentPills: 10,
+      dailyDose: 4,
+      lastSyncDate: '2024-09-13',
+      doseSchedule: [
+        { id: 'd1', amount: 1, time: '08:00' },
+        { id: 'd2', amount: 1, time: '14:00' },
+        { id: 'd3', amount: 2, time: '20:00' },
+      ],
+    });
+    const resolved = resolveRestoreDoseAmount(med, 'd1');
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    const { updatedMed, appliedDelta } = settleAndAdjust(
+      med,
+      resolved.amount,
+      '2024-09-13'
+    );
+    expect(appliedDelta).toBe(1);
+    expect(updatedMed.currentPills).toBe(11);
+  });
+
+  it('restore of 20:00 slot adds 2 not dailyDose 4', () => {
+    const med = makeMed({
+      currentPills: 10,
+      dailyDose: 4,
+      lastSyncDate: '2024-09-13',
+      doseSchedule: [
+        { id: 'd1', amount: 1, time: '08:00' },
+        { id: 'd2', amount: 1, time: '14:00' },
+        { id: 'd3', amount: 2, time: '20:00' },
+      ],
+    });
+    const resolved = resolveRestoreDoseAmount(med, 'd3');
+    expect(resolved.ok && resolved.amount).toBe(2);
+    if (!resolved.ok) return;
+    const { updatedMed } = settleAndAdjust(med, resolved.amount, '2024-09-13');
+    expect(updatedMed.currentPills).toBe(12);
   });
 });

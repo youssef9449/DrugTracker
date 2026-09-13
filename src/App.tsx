@@ -51,7 +51,7 @@ import {
   settleAutoDeductToggle,
 } from './utils/dateCalculations';
 import { OrderItem } from './utils/whatsapp';
-import { consumeDose, settleAndAdjust } from './utils/medActions';
+import { consumeDose, settleAndAdjust, resolveRestoreDoseAmount } from './utils/medActions';
 import { useDoseReminders } from './hooks/useDoseReminders';
 import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
 import { useDoseReminderScheduler } from './hooks/useDoseReminderScheduler';
@@ -585,28 +585,53 @@ export default function App() {
     resumeTick: doseAlarmResumeTick,
   });
 
-  const handleRestoreDose = (medicationId: string, reason: string): boolean => {
+  const handleRestoreDose = (
+    medicationId: string,
+    reason: string,
+    doseId?: string
+  ): boolean => {
     const med = medications.find((m) => m.id === medicationId);
     if (!med) return false;
     const today = getTodayDateString();
-    const restoreKey = `${medicationId}:${today}`;
+    const resolved = resolveRestoreDoseAmount(med, doseId);
+    if (!resolved.ok) {
+      if (resolved.reason === 'missing_dose_id') {
+        showToast('اختر الجرعة المراد استرجاعها');
+      }
+      return false;
+    }
+    const resolvedDoseId = resolved.doseId;
+    // Per-dose in-flight / duplicate guard (multi); med-level for legacy.
+    const restoreKey = resolvedDoseId
+      ? `${medicationId}:${resolvedDoseId}:${today}`
+      : `${medicationId}:${today}`;
     if (restoreInFlightRef.current.has(restoreKey)) return false;
     if (med.autoDeductEnabled === false) {
       showToast(TOAST_MESSAGES.autoDeductOff(med.name));
       return false;
     }
-    if (logs.some((log) =>
-      log.medicationId === medicationId &&
-      log.type === 'skipped_day' &&
-      log.date === today
-    )) {
+    const alreadyRestored = logs.some((log) => {
+      if (
+        log.medicationId !== medicationId ||
+        log.type !== 'skipped_day' ||
+        log.date !== today
+      ) {
+        return false;
+      }
+      if (resolvedDoseId) {
+        return log.doseId === resolvedDoseId;
+      }
+      // Legacy: any skipped_day for this med today blocks another restore.
+      return !log.doseId;
+    });
+    if (alreadyRestored) {
       showToast(TOAST_MESSAGES.doseAlreadyRestored(med.name));
       return false;
     }
     restoreInFlightRef.current.add(restoreKey);
-    const restoredAmount = med.dailyDose;
+    const restoredAmount = resolved.amount;
     // Shared settle+adjust logic (audit #78): settle at effPills, add the
-    // restored dose, set lastSyncDate=today.
+    // restored slot amount (not full dailyDose for multi-dose).
     const { updatedMed } = settleAndAdjust(med, restoredAmount, today);
     setMedications((prev) =>
       prev.map((m) => (m.id === medicationId ? updatedMed : m))
@@ -621,6 +646,7 @@ export default function App() {
         date: today,
         timestamp: new Date().toISOString(),
         description: `استرجاع جرعة (${reason}) (+${restoredAmount} ${med.unit})`,
+        ...(resolvedDoseId ? { doseId: resolvedDoseId } : {}),
       },
       ...prev,
     ]);

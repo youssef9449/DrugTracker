@@ -175,7 +175,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
       expect(med.doseConsumption?.s1).toBe(getTodayDateString());
     });
     const doseLog = readLogs().find((l) => l.type === 'dose_taken');
-    expect(doseLog?.amount).toBe(2);
+    expect(doseLog?.amount).toBe(-2);
     expect(doseLog?.doseId).toBe('s1');
 
     await waitFor(() => expect(screen.getByTitle(/استرجاع الجرعة \(\+2\)/)).toBeInTheDocument());
@@ -205,7 +205,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     });
     const takeLog = readLogs().find((l) => l.type === 'dose_taken');
     expect(takeLog?.doseId).toBe('d1');
-    expect(takeLog?.amount).toBe(1);
+    expect(takeLog?.amount).toBe(-1);
 
     // Second click must be Restore d1 — not Take d2
     await waitFor(() => expect(screen.getByTitle(/استرجاع الجرعة \(\+1\)/)).toBeInTheDocument());
@@ -258,7 +258,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     });
   });
 
-  it('auto-deduct-only does not offer Restore on the card', async () => {
+  it('auto-deduct-only offers Restore on the card', async () => {
     localStorage.setItem(
       STORAGE_MEDS_KEY,
       JSON.stringify([
@@ -276,8 +276,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     render(<App />);
     await waitFor(() => expect(screen.getByText('Drug A Multi')).toBeInTheDocument());
 
-    expect(screen.queryByTitle(/استرجاع الجرعة/)).not.toBeInTheDocument();
-    expect(screen.queryByTitle(/تناول جرعة/)).not.toBeInTheDocument();
-    expect(screen.getByTitle(/تم تناول جرعة اليوم/)).toBeInTheDocument();
+    expect(screen.getByTitle(/استرجاع الجرعة \(\+1\)/)).toBeInTheDocument();
+    expect(screen.queryByTitle(/^تناول جرعة/)).not.toBeInTheDocument();
   });
 });

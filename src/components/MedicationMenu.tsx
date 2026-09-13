@@ -21,20 +21,22 @@ interface MedicationMenuProps {
   onEdit: (medication: Medication) => void;
   onDelete: (id: string) => void;
   onToggleAutoDeduct: (id: string) => void;
+  size?: 'xs' | 'sm' | 'md';
+  showTypeIcon?: boolean;
 }
 
-function MedicationTypeIcon({ unit }: { unit: string }) {
+export function MedicationTypeIcon({ unit, className = "h-3.5 w-3.5" }: { unit: string; className?: string }) {
   switch (unit) {
     case 'مل':
-      return <Droplets className="h-4 w-4" aria-hidden="true" />;
+      return <Droplets className={className} aria-hidden="true" />;
     case 'جرعة':
-      return <Syringe className="h-4 w-4" aria-hidden="true" />;
+      return <Syringe className={className} aria-hidden="true" />;
     case 'كيس':
-      return <Package className="h-4 w-4" aria-hidden="true" />;
+      return <Package className={className} aria-hidden="true" />;
     case 'كبسولة':
     case 'قرص':
     default:
-      return <Pill className="h-4 w-4" aria-hidden="true" />;
+      return <Pill className={className} aria-hidden="true" />;
   }
 }
 
@@ -44,6 +46,8 @@ export function MedicationMenu({
   onEdit,
   onDelete,
   onToggleAutoDeduct,
+  size = 'sm',
+  showTypeIcon = false,
 }: MedicationMenuProps) {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
@@ -65,8 +69,16 @@ export function MedicationMenu({
     onDelete(medication.id);
   };
 
-  const iconButtonClass =
-    'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-1';
+  const btnDims =
+    size === 'xs'
+      ? 'h-5 w-5 rounded-md'
+      : size === 'md'
+      ? 'h-8 w-8 rounded-xl'
+      : 'h-6 w-6 rounded-lg';
+
+  const iconDims = size === 'xs' ? 'h-3 w-3' : 'h-3.5 w-3.5';
+
+  const iconButtonClass = `inline-flex ${btnDims} shrink-0 items-center justify-center border transition active:scale-95 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-teal-500`;
 
   const deleteDialog = deleteConfirmOpen && typeof document !== 'undefined'
     ? createPortal(
@@ -138,43 +150,49 @@ export function MedicationMenu({
 
   return (
     <div className="medication-menu-root flex items-center gap-1" dir="ltr">
-      <span
-        className="medication-type-icon inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-500"
-        title={`نوع الدواء: ${medication.unit || 'غير محدد'}`}
-        aria-label={`نوع الدواء: ${medication.unit || 'غير محدد'}`}
-      >
-        <MedicationTypeIcon unit={medication.unit} />
-      </span>
+      {showTypeIcon && (
+        <span
+          className={`medication-type-icon inline-flex ${btnDims} shrink-0 items-center justify-center border border-slate-200 bg-slate-50 text-slate-500`}
+          title={`نوع الدواء: ${medication.unit || 'غير محدد'}`}
+          aria-label={`نوع الدواء: ${medication.unit || 'غير محدد'}`}
+        >
+          <MedicationTypeIcon unit={medication.unit} className={iconDims} />
+        </span>
+      )}
 
       <button
         type="button"
         onClick={() => onEdit(medication)}
-        className={`${iconButtonClass} border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-800`}
+        className={`${iconButtonClass} border-slate-200/90 bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-800 shadow-2xs`}
         aria-label="تعديل الدواء"
         title="تعديل الدواء"
       >
-        <Edit3 className="h-3.5 w-3.5" aria-hidden="true" />
+        <Edit3 className={iconDims} aria-hidden="true" />
       </button>
 
       <button
         type="button"
         onClick={() => onToggleAutoDeduct(medication.id)}
-        className={`${iconButtonClass} border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100`}
+        className={`${iconButtonClass} ${
+          isAutoActive
+            ? 'border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100'
+            : 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
+        } shadow-2xs`}
         aria-label={isAutoActive ? 'إيقاف الخصم التلقائي' : 'تفعيل الخصم التلقائي'}
         title={isAutoActive ? 'الخصم التلقائي مفعّل — اضغط للإيقاف' : 'الخصم التلقائي متوقف — اضغط للتفعيل'}
         aria-pressed={isAutoActive}
       >
-        <Zap className="h-3.5 w-3.5" aria-hidden="true" />
+        <Zap className={`${iconDims} ${isAutoActive ? 'fill-teal-600/30' : ''}`} aria-hidden="true" />
       </button>
 
       <button
         type="button"
         onClick={requestDeleteConfirmation}
-        className={`${iconButtonClass} border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100`}
+        className={`${iconButtonClass} border-rose-200/90 bg-rose-50 text-rose-600 hover:bg-rose-100 shadow-2xs`}
         aria-label="حذف الدواء"
         title="حذف الدواء"
       >
-        <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+        <Trash2 className={iconDims} aria-hidden="true" />
       </button>
 
       {deleteDialog}

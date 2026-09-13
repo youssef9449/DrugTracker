@@ -16,7 +16,7 @@ import { getDepletionDate, getTodayDateString, effectiveCurrentPills } from '../
 import { getCardDoseToggleTarget } from '../utils/doseSchedule';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { VISUAL_RANGE_MULTIPLIER, MIN_VISUAL_RANGE_DAYS, DAYS_PER_MONTH } from '../utils/time';
-import { MedicationMenu } from './MedicationMenu';
+import { MedicationMenu, MedicationTypeIcon } from './MedicationMenu';
 import { ReminderBadge } from './ReminderBadge';
 import { StripsBadge, PackageSizeBadge, AutoDeductPausedNote } from './medicationCardParts';
 
@@ -453,7 +453,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   // details (Name, Stock, Unit, Strips, Daily Dose, Depletion date,
   // status badge, visual progress bar, refill, consume, and menu).
   // -------------------------------------------------------------
-  // -------------------------------------------------------------
   // COMPACT (MINI) VIEW: same features, aggressively compressed height
   // -------------------------------------------------------------
   if (isCompact && viewFilter === 'all') {
@@ -463,44 +462,51 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const doseToggle = getCardDoseToggleTarget(medication);
     const nextDoseAmount = doseToggle.amount;
 
-    const statusLabel = isOut
-      ? 'نفد'
-      : isCrit
-      ? `حرج ${statusInfo.daysLeft}ي`
-      : isWarn
-      ? `تنبيه ${statusInfo.daysLeft}ي`
-      : `آمن ${statusInfo.daysLeft}ي`;
-    const statusClass = isOut
-      ? 'bg-red-100 text-red-700'
-      : isCrit
-      ? 'bg-rose-100 text-rose-700'
-      : isWarn
-      ? 'bg-amber-100 text-amber-800'
-      : 'bg-emerald-100 text-emerald-800';
-
     return (
       <div
         id={`med-card-${medication.id}`}
-        className={`bg-white rounded-lg border border-slate-200/90 p-1.5 shadow-2xs transition relative overflow-hidden border-r-2 ${tag.border} ${
+        className={`bg-white rounded-2xl border border-slate-200/90 p-2 shadow-2xs hover:shadow-xs transition relative overflow-hidden border-r-[3px] ${tag.border} ${
           isOut ? 'bg-red-50/25' : isCrit ? 'bg-rose-50/20' : isWarn ? 'bg-amber-50/10' : ''
         }`}
       >
         {/* Row 1: name + status + actions */}
-        <div className="flex items-center gap-1">
-          <h3 className="flex-1 min-w-0 text-[10px] font-bold text-slate-900 leading-tight truncate" title={medication.name}>
-            {medication.name}
-          </h3>
-          <span className={`shrink-0 text-[8px] font-bold px-1 py-px rounded ${statusClass}`}>
-            {statusLabel}
-          </span>
-          <div className="flex items-center shrink-0">
+        <div className="flex items-center justify-between gap-1.5 min-w-0">
+          <div className="flex items-center gap-1.5 min-w-0 flex-1">
+            <h3 className="text-[11px] font-bold text-slate-900 leading-tight truncate" title={medication.name}>
+              {medication.name}
+            </h3>
+            {isOut ? (
+              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 flex items-center gap-0.5 shrink-0">
+                <AlertCircle className="w-2 h-2" />
+                <span>نفد</span>
+              </span>
+            ) : isCrit ? (
+              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 flex items-center gap-0.5 shrink-0">
+                <Clock className="w-2 h-2" />
+                <span>حرج ({statusInfo.daysLeft}ي)</span>
+              </span>
+            ) : isWarn ? (
+              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 flex items-center gap-0.5 shrink-0">
+                <Clock className="w-2 h-2" />
+                <span>تنبيه ({statusInfo.daysLeft}ي)</span>
+              </span>
+            ) : (
+              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 flex items-center gap-0.5 shrink-0">
+                <CheckCircle2 className="w-2 h-2" />
+                <span>آمن ({statusInfo.daysLeft}ي)</span>
+              </span>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-1 shrink-0">
             {(onConsumeDose || onRestoreDose) && (
               doseToggle.canRestore && onRestoreDose ? (
                 <button
                   type="button"
                   onClick={() => onRestoreDose(medication.id, doseToggle.doseId)}
                   title={`استرجاع الجرعة (+${nextDoseAmount})`}
-                  className="w-5 h-5 flex items-center justify-center rounded text-emerald-600 hover:bg-emerald-50"
+                  className="w-5 h-5 flex items-center justify-center rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition active:scale-95 shadow-2xs"
                 >
                   <CheckCircle className="w-3 h-3" />
                 </button>
@@ -510,16 +516,16 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   onClick={() => onConsumeDose(medication.id, doseToggle.doseId)}
                   disabled={effPills <= 0 || nextDoseAmount <= 0}
                   title={`تناول جرعة (-${nextDoseAmount})`}
-                  className={`w-5 h-5 flex items-center justify-center rounded ${
+                  className={`w-5 h-5 flex items-center justify-center rounded-md border transition active:scale-95 shadow-2xs ${
                     effPills <= 0 || nextDoseAmount <= 0
-                      ? 'text-slate-300 cursor-not-allowed'
-                      : 'text-emerald-700 hover:bg-emerald-50'
+                      ? 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed'
+                      : 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
                   }`}
                 >
                   <Pill className="w-3 h-3 rotate-45" />
                 </button>
               ) : (
-                <span title="تم تناول جرعة اليوم" className="w-5 h-5 flex items-center justify-center text-emerald-600">
+                <span title="تم تناول جرعة اليوم" className="w-5 h-5 flex items-center justify-center rounded-md bg-emerald-50 text-emerald-600 border border-emerald-200">
                   <CheckCircle className="w-3 h-3" />
                 </span>
               )
@@ -528,7 +534,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               type="button"
               onClick={() => onOpenRefill(medication)}
               title="تعبئة"
-              className="w-5 h-5 flex items-center justify-center rounded text-teal-700 hover:bg-teal-50"
+              className="w-5 h-5 flex items-center justify-center rounded-md bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 transition active:scale-95 shadow-2xs"
             >
               <Plus className="w-3 h-3" />
             </button>
@@ -540,37 +546,51 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               onEdit={onEdit}
               onDelete={onDelete}
               onToggleAutoDeduct={onToggleAutoDeduct}
+              size="xs"
             />
           </div>
         </div>
 
-        {/* Row 2: stock · dose · depletion (one line) */}
-        <div className="mt-1 flex items-center gap-1 text-[9px] text-slate-600 leading-none truncate">
-          <span className={`font-mono font-bold ${effPills === 0 ? 'text-red-600' : 'text-slate-800'}`}>
-            {effPills}
-          </span>
-          <span className="text-slate-400">{medication.unit || 'قرص'}</span>
-          <span className="text-slate-300">·</span>
-          <span className="font-mono text-teal-800">{medication.dailyDose}/ي</span>
-          <span className="text-slate-300">·</span>
-          <span className="truncate text-slate-500">{depletion.formattedArabic}</span>
+        {/* Row 2: stock · dose · depletion */}
+        <div className="mt-1.5 p-1 bg-slate-50/90 rounded-lg border border-slate-100/90 flex items-center justify-between gap-1 text-[9px] min-w-0">
+          <div className="flex items-baseline gap-0.5 min-w-0">
+            <span className="text-[8px] text-slate-400">المتبقي:</span>
+            <span className={`font-mono font-extrabold text-[11px] leading-none ${effPills === 0 ? 'text-red-600' : 'text-slate-900'}`}>
+              {effPills}
+            </span>
+            <span className="text-[8px] text-slate-500 truncate">{medication.unit || 'قرص'}</span>
+          </div>
+
+          <div className="flex items-center gap-1 shrink-0">
+            <div className="flex items-center gap-0.5 bg-white px-1 py-0.5 rounded border border-slate-200/60 font-mono text-teal-800 font-bold" title={`الجرعة: ${medication.dailyDose}/يوم`}>
+              <Clock className="w-2 h-2 text-teal-600" />
+              <span>{medication.dailyDose}/ي</span>
+            </div>
+            <div className="flex items-center gap-0.5 bg-white px-1 py-0.5 rounded border border-slate-200/60 text-slate-600 truncate max-w-[80px]" title={`النفاذ: ${depletion.formattedArabic}`}>
+              <Calendar className="w-2 h-2 text-slate-400 shrink-0" />
+              <span className="truncate">{depletion.formattedArabic}</span>
+            </div>
+          </div>
         </div>
 
         {/* Row 3: progress + auto-deduct */}
-        <div className="mt-1 flex items-center gap-1">
-          <div className="flex-1 h-0.5 bg-slate-100 rounded-full overflow-hidden min-w-0">
+        <div className="mt-1 flex items-center gap-1.5">
+          <div className="flex-1 h-1 bg-slate-100 rounded-full overflow-hidden min-w-0">
             <div
-              className={`h-full ${getProgressColor()}`}
+              className={`h-full rounded-full transition-all duration-300 ${getProgressColor()}`}
               style={{ width: `${percentLeft}%` }}
             />
           </div>
           <span
-            className={`shrink-0 text-[8px] font-bold leading-none ${
-              isAutoActive ? 'text-teal-600' : 'text-amber-600'
+            className={`shrink-0 text-[8px] font-bold px-1 py-0.5 rounded-md flex items-center gap-0.5 border leading-none ${
+              isAutoActive
+                ? 'text-teal-700 bg-teal-50 border-teal-200/70'
+                : 'text-amber-700 bg-amber-50 border-amber-200/70'
             }`}
             title={isAutoActive ? 'خصم تلقائي مفعّل' : 'خصم تلقائي متوقف'}
           >
-            {isAutoActive ? 'خصم✓' : 'خصم✗'}
+            <Zap className={`w-2 h-2 shrink-0 ${isAutoActive ? 'fill-teal-600/40' : ''}`} />
+            <span>{isAutoActive ? 'خصم✓' : 'خصم✗'}</span>
           </span>
         </div>
 
@@ -578,7 +598,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           <button
             type="button"
             onClick={onUndoRefill}
-            className="mt-1 w-full text-[8px] font-bold text-rose-700 bg-amber-50 border border-amber-200 rounded px-1 py-0.5"
+            className="mt-1 w-full text-[8px] font-bold text-rose-700 bg-amber-50 border border-amber-200 rounded px-1 py-0.5 transition active:scale-95"
           >
             تراجع +{lastRefillQuantity}
           </button>
@@ -601,7 +621,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     return (
       <div
         id={`med-card-${medication.id}`}
-        className={`bg-white rounded-xl border border-slate-200/90 p-2.5 shadow-2xs hover:shadow-xs transition relative overflow-hidden border-r-4 ${tag.border} ${
+        className={`bg-white rounded-2xl border border-slate-200/90 p-2.5 shadow-2xs hover:shadow-xs transition relative overflow-hidden border-r-[3px] ${tag.border} ${
           isOut
             ? 'bg-red-50/20'
             : isCrit
@@ -611,38 +631,43 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             : ''
         }`}
       >
-        {/* Top line: Name + Category + Status Badge + Actions */}
+        {/* Top line: Icon + Name + Category + Status Badge + Actions */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0 flex-wrap">
-            <h3 className="text-xs font-bold text-slate-900 leading-tight truncate max-w-[140px] sm:max-w-xs">
-              {medication.name}
-            </h3>
-            {medication.category && (
-              <span className="text-[9px] font-medium bg-slate-100 text-slate-600 px-1 py-0.5 rounded">
-                {medication.category}
-              </span>
-            )}
-            {isOut ? (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 flex items-center gap-0.5 shrink-0">
-                <AlertCircle className="w-2.5 h-2.5" />
-                <span>نفد</span>
-              </span>
-            ) : isCrit ? (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 flex items-center gap-0.5 shrink-0">
-                <Clock className="w-2.5 h-2.5" />
-                <span>حرج ({statusInfo.daysLeft}ي)</span>
-              </span>
-            ) : isWarn ? (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 flex items-center gap-0.5 shrink-0">
-                <Clock className="w-2.5 h-2.5" />
-                <span>تنبيه ({statusInfo.daysLeft}ي)</span>
-              </span>
-            ) : (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 flex items-center gap-0.5 shrink-0">
-                <CheckCircle2 className="w-2.5 h-2.5" />
-                <span>آمن ({statusInfo.daysLeft}ي)</span>
-              </span>
-            )}
+            <div className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 border border-slate-200/70 shadow-2xs ${tag.bg}`}>
+              <MedicationTypeIcon unit={medication.unit} className="w-3.5 h-3.5" />
+            </div>
+            <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+              <h3 className="text-xs font-bold text-slate-900 leading-tight truncate max-w-[130px] sm:max-w-xs" title={medication.name}>
+                {medication.name}
+              </h3>
+              {medication.category && (
+                <span className="text-[9px] font-medium bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-md shrink-0">
+                  {medication.category}
+                </span>
+              )}
+              {isOut ? (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 flex items-center gap-0.5 shrink-0">
+                  <AlertCircle className="w-2.5 h-2.5" />
+                  <span>نفد</span>
+                </span>
+              ) : isCrit ? (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 flex items-center gap-0.5 shrink-0">
+                  <Clock className="w-2.5 h-2.5" />
+                  <span>حرج ({statusInfo.daysLeft}ي)</span>
+                </span>
+              ) : isWarn ? (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 flex items-center gap-0.5 shrink-0">
+                  <Clock className="w-2.5 h-2.5" />
+                  <span>تنبيه ({statusInfo.daysLeft}ي)</span>
+                </span>
+              ) : (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 flex items-center gap-0.5 shrink-0">
+                  <CheckCircle2 className="w-2.5 h-2.5" />
+                  <span>آمن ({statusInfo.daysLeft}ي)</span>
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Quick Actions at top left */}
@@ -653,9 +678,9 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   type="button"
                   onClick={() => onRestoreDose(medication.id, doseToggle.doseId)}
                   title={`استرجاع الجرعة (+${nextDoseAmount})`}
-                  className="w-6 h-6 flex items-center justify-center rounded-md bg-emerald-50 text-emerald-600 border border-emerald-200 transition active:scale-95 hover:bg-emerald-100"
+                  className="w-6 h-6 flex items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 transition active:scale-95 hover:bg-emerald-100 shadow-2xs"
                 >
-                  <CheckCircle className="w-3 h-3" />
+                  <CheckCircle className="w-3.5 h-3.5" />
                 </button>
               ) : doseToggle.canTake && onConsumeDose ? (
                 <button
@@ -663,20 +688,20 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   onClick={() => onConsumeDose(medication.id, doseToggle.doseId)}
                   disabled={effPills <= 0 || nextDoseAmount <= 0}
                   title={`تناول جرعة (-${nextDoseAmount})`}
-                  className={`w-6 h-6 flex items-center justify-center rounded-md border transition active:scale-95 ${
+                  className={`w-6 h-6 flex items-center justify-center rounded-lg border transition active:scale-95 shadow-2xs ${
                     effPills <= 0 || nextDoseAmount <= 0
                       ? 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed'
-                      : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
+                      : 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
                   }`}
                 >
-                  <Pill className="w-3 h-3 rotate-45" />
+                  <Pill className="w-3.5 h-3.5 rotate-45" />
                 </button>
               ) : (
                 <span
                   title="تم تناول جرعة اليوم"
-                  className="w-6 h-6 flex items-center justify-center rounded-md bg-emerald-50 text-emerald-600 border border-emerald-200"
+                  className="w-6 h-6 flex items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-200"
                 >
-                  <CheckCircle className="w-3 h-3" />
+                  <CheckCircle className="w-3.5 h-3.5" />
                 </span>
               )
             )}
@@ -685,7 +710,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               type="button"
               onClick={() => onOpenRefill(medication)}
               title="تعبئة رصيد"
-              className="w-6 h-6 flex items-center justify-center rounded-md bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 transition active:scale-95"
+              className="w-6 h-6 flex items-center justify-center rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 transition active:scale-95 shadow-2xs"
             >
               <Plus className="w-3.5 h-3.5" />
             </button>
@@ -698,12 +723,13 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               onEdit={onEdit}
               onDelete={onDelete}
               onToggleAutoDeduct={onToggleAutoDeduct}
+              size="sm"
             />
           </div>
         </div>
 
         {/* Second line: Crucial details (Remaining stock, daily dose, depletion date) */}
-        <div className="mt-1.5 pt-1.5 border-t border-slate-100 flex items-center justify-between gap-2 text-[11px] flex-wrap">
+        <div className="mt-2 p-1.5 px-2 bg-slate-50/80 rounded-xl border border-slate-100 flex items-center justify-between gap-2 text-[11px] flex-wrap">
           <div className="flex items-center gap-1 min-w-0">
             <span className="text-[10px] text-slate-500 font-medium">المتبقي:</span>
             <span
@@ -721,22 +747,21 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               {medication.unit || 'قرص'}
             </span>
             {stripsDesc && (
-              <span className="text-[9px] text-slate-400 font-medium truncate">
+              <span className="text-[9px] text-teal-800 bg-teal-50 px-1.5 py-0.5 rounded border border-teal-100 font-medium truncate">
                 ({stripsDesc})
               </span>
             )}
           </div>
 
           <div className="flex items-center gap-1.5 text-[10px] text-slate-600">
-            <div className="flex items-center gap-0.5">
+            <div className="flex items-center gap-1 bg-white px-1.5 py-0.5 rounded-md border border-slate-200/60 font-medium">
+              <Clock className="w-2.5 h-2.5 text-teal-600" />
               <span className="text-slate-400">الجرعة:</span>
               <span className="font-mono font-bold text-teal-800">{medication.dailyDose}</span>
               <span className="text-slate-400">/يوم</span>
             </div>
 
-            <span className="text-slate-300">•</span>
-
-            <div className="flex items-center gap-0.5">
+            <div className="flex items-center gap-1 bg-white px-1.5 py-0.5 rounded-md border border-slate-200/60 font-medium">
               <Calendar className="w-2.5 h-2.5 text-slate-400" />
               <span className="text-slate-400">النفاذ:</span>
               <span className="font-bold text-slate-800">{depletion.formattedArabic}</span>
@@ -745,28 +770,25 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         </div>
 
         {/* Mini Visual Stock Progress Bar */}
-        <div className="mt-1.5 w-full h-0.5 bg-slate-100 rounded-full overflow-hidden">
+        <div className="mt-2 w-full h-1 bg-slate-100 rounded-full overflow-hidden">
           <div
-            className={`h-full transition-all duration-500 ${getProgressColor()}`}
+            className={`h-full rounded-full transition-all duration-500 ${getProgressColor()}`}
             style={{ width: `${percentLeft}%` }}
           />
         </div>
 
         <div
-          className={`mt-1 text-[9px] px-1.5 py-0.5 rounded flex items-center gap-1 border ${
+          className={`mt-1.5 text-[9px] px-2 py-1 rounded-lg flex items-center justify-between border ${
             isAutoActive
               ? 'text-teal-700 bg-teal-50 border-teal-200/70'
               : 'text-amber-700 bg-amber-50 border-amber-200/70'
           }`}
         >
-          {isAutoActive ? (
-            <>
-              <Zap className="w-3 h-3 shrink-0" />
-              <span>الخصم التلقائي مفعّل</span>
-            </>
-          ) : (
-            <span>الخصم التلقائي متوقف لهذا الدواء</span>
-          )}
+          <div className="flex items-center gap-1">
+            <Zap className={`w-3 h-3 shrink-0 ${isAutoActive ? 'fill-teal-600/30' : 'opacity-60'}`} />
+            <span>{isAutoActive ? 'الخصم التلقائي مفعّل' : 'الخصم التلقائي متوقف لهذا الدواء'}</span>
+          </div>
+          {isAutoActive && <span className="text-[8px] text-teal-600/80 font-medium">منتصف الليل</span>}
         </div>
         {undoRefillAction}
       </div>

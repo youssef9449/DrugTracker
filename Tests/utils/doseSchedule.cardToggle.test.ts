@@ -43,12 +43,14 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
   });
 
   it('single-slot: amount is slot amount not dailyDose', () => {
+    const early = new Date(`${getTodayDateString()}T06:00:00`);
     const t = getCardDoseToggleTarget(
       makeMed({
         dailyDose: 4,
         doseSchedule: [{ id: 's1', amount: 2, time: '08:00' }],
         dosesPerDay: 1,
-      })
+      }),
+      early
     );
     expect(t.canTake).toBe(true);
     expect(t.doseId).toBe('s1');

@@ -207,7 +207,7 @@ export default function App() {
   // #113: clear any pending toast auto-dismiss timer.
   useEffect(() => {
     return () => {
-      cleanupNativeListeners().catch(() => {});
+      cleanupNativeListeners()?.catch?.(() => {});
       if (toastTimerRef.current) {
         clearTimeout(toastTimerRef.current);
         toastTimerRef.current = null;

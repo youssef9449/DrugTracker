@@ -19,3 +19,8 @@ bun.lockb
 android/
 ios/
 node_modules/
+
+# Signing keystores — never commit these.
+*.keystore
+*.jks
+*.p12

@@ -6,6 +6,10 @@ import {
   getTodayDateString,
   isDoseConsumedOnDate,
 } from '../utils/dateCalculations';
+import {
+  relativeDoseDayLabel,
+  sortDoseSelectItems,
+} from '../utils/doseSelectDisplay';
 import { Modal } from './ui/Modal';
 
 export interface SelectDoseModalProps {
@@ -18,6 +22,7 @@ export interface SelectDoseModalProps {
 /**
  * Explicit multi-dose selection UI (Phase 3A).
  * Does not guess a dose — the user must pick a specific doseId.
+ * Day + time labels are presentation only; selection still uses doseId.
  */
 export const SelectDoseModal: FC<SelectDoseModalProps> = ({
   isOpen,
@@ -31,6 +36,11 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
   const schedule: MedicationDose[] = Array.isArray(medication.doseSchedule)
     ? medication.doseSchedule
     : [];
+  // Manual consume targets today's slots; each row carries today's event date
+  // so day labels and chronological order stay date-aware (not time-only).
+  const items = sortDoseSelectItems(
+    schedule.map((dose) => ({ dose, eventDate: today }))
+  );
   const unit = medication.unit || 'قرص';
   const allConsumed =
     schedule.length > 0 &&
@@ -70,10 +80,15 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
               </p>
             </div>
           ) : (
-            schedule.map((dose) => {
+            items.map(({ dose, eventDate }) => {
               const consumed = isDoseConsumedOnDate(medication, dose.id, today);
+              const dayLabel = relativeDoseDayLabel(eventDate, today);
               const timeLabel = formatTimeArabic(dose.time);
-              const label = `${timeLabel} — ${dose.amount} ${unit}`;
+              const whenLabel = `${dayLabel} • ${timeLabel}`;
+              const amountLabel = `${dose.amount} ${unit}`;
+              const ariaLabel = consumed
+                ? `تم تناول ${whenLabel} — ${amountLabel}`
+                : `تناول ${whenLabel} — ${amountLabel}`;
               return (
                 <button
                   key={dose.id}
@@ -89,7 +104,8 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                       : 'bg-white border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 text-slate-800'
                   }`}
                   data-dose-id={dose.id}
-                  aria-label={consumed ? `تم تناول ${label}` : `تناول ${label}`}
+                  data-event-date={eventDate}
+                  aria-label={ariaLabel}
                 >
                   <span className="flex items-center gap-2 min-w-0">
                     <span
@@ -101,8 +117,13 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                     >
                       {consumed ? <Check className="w-3 h-3" /> : null}
                     </span>
-                    <span className="text-sm font-semibold truncate">
-                      {label}
+                    <span className="min-w-0 text-right">
+                      <span className="block text-sm font-semibold truncate">
+                        {whenLabel}
+                      </span>
+                      <span className="block text-xs text-slate-500 truncate">
+                        {amountLabel}
+                      </span>
                     </span>
                   </span>
                   {!consumed && (

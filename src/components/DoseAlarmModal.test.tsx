@@ -141,4 +141,70 @@ describe('DoseAlarmModal', () => {
     fireEvent.click(screen.getByTestId('alarm-take-dose'));
     expect(onTakeDose).toHaveBeenCalledWith(med, undefined);
   });
+
+  describe('Phase 4 multi-dose alarm identity', () => {
+    const multi = makeMed({
+      dailyDose: 4,
+      doseSchedule: [
+        { id: 'd1', amount: 2, time: '08:00' },
+        { id: 'd2', amount: 1, time: '14:00' },
+        { id: 'd3', amount: 1, time: '21:00' },
+      ],
+      dosesPerDay: 3,
+    });
+
+    it('displays the exact slot amount for doseId d2 (not dailyDose)', () => {
+      render(
+        <DoseAlarmModal
+          isOpen={true}
+          medication={multi}
+          doseId="d2"
+          onTakeDose={() => {}}
+          onSnooze={() => {}}
+          onDismiss={() => {}}
+        />
+      );
+      expect(screen.getByText('Test Med')).toBeInTheDocument();
+      const root = document.querySelector('[data-dose-id="d2"]');
+      expect(root).toBeTruthy();
+      // Slot amount is 1 — must not show medication dailyDose (4) as the dose.
+      expect(root!.textContent).toMatch(/1/);
+      expect(root!.textContent).not.toMatch(/الجرعة المطلوبة:\s*4\b/);
+      // 14:00 → Arabic 12h "2:00 م"
+      expect(root!.textContent).toMatch(/2:00\s*م/);
+    });
+
+    it('Take Dose passes the exact doseId from the alarm', () => {
+      const onTakeDose = vi.fn();
+      render(
+        <DoseAlarmModal
+          isOpen={true}
+          medication={multi}
+          doseId="d2"
+          onTakeDose={onTakeDose}
+          onSnooze={() => {}}
+          onDismiss={() => {}}
+        />
+      );
+      fireEvent.click(screen.getByTestId('alarm-take-dose'));
+      expect(onTakeDose).toHaveBeenCalledWith(multi, 'd2');
+    });
+
+    it('does not call take-dose with a different dose id', () => {
+      const onTakeDose = vi.fn();
+      render(
+        <DoseAlarmModal
+          isOpen={true}
+          medication={multi}
+          doseId="d1"
+          onTakeDose={onTakeDose}
+          onSnooze={() => {}}
+          onDismiss={() => {}}
+        />
+      );
+      fireEvent.click(screen.getByTestId('alarm-take-dose'));
+      expect(onTakeDose.mock.calls[0][1]).toBe('d1');
+      expect(onTakeDose.mock.calls[0][1]).not.toBe('d2');
+    });
+  });
 });

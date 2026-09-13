@@ -81,16 +81,28 @@ export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
   const unit = med.unit || 'قرص';
 
   if (Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) {
-    return med.doseSchedule
-      .filter((d) => d && isValidDoseTime(d.time) && Number(d.amount) > 0)
-      .map((d) => ({
+    // Multi-dose path: every scheduled row must carry a non-empty stable
+    // doseId. Missing/empty/whitespace ids are skipped — never mapped to
+    // LEGACY_DOSE_ID (that identity is only for meds without a usable
+    // doseSchedule). Keep first occurrence of each valid doseId.
+    const seen = new Set<string>();
+    const slots: DoseReminderSlot[] = [];
+    for (const d of med.doseSchedule) {
+      if (!d || !isValidDoseTime(d.time) || !(Number(d.amount) > 0)) continue;
+      const doseId = typeof d.id === 'string' ? d.id.trim() : '';
+      if (!doseId) continue;
+      if (seen.has(doseId)) continue;
+      seen.add(doseId);
+      slots.push({
         medId: med.id,
-        doseId: d.id || LEGACY_DOSE_ID,
+        doseId,
         time: d.time,
         amount: Number(d.amount),
         name,
         unit,
-      }));
+      });
+    }
+    return slots;
   }
 
   if (med.reminderTime && isValidDoseTime(med.reminderTime)) {
@@ -187,8 +199,13 @@ export function useDoseReminderScheduler({
     const cancelSlot = (medId: string, doseId: string): void => {
       const key = doseScheduleKey(medId, doseId);
       bumpGen(key);
+      // Phase 4: clear dose-scoped snooze storage + cancel that slot's
+      // recurring alarm and one-shot snooze (not sibling doses).
+      clearSnoozedDose(medId, doseId);
       enqueue(key, () =>
-        cancelDoseReminder(medId, doseId).then(() => cancelSnoozedDoseReminder(medId))
+        cancelDoseReminder(medId, doseId).then(() =>
+          cancelSnoozedDoseReminder(medId, doseId)
+        )
       );
     };
 
@@ -205,40 +222,21 @@ export function useDoseReminderScheduler({
 
     const stillScheduled = new Set<string>();
 
+    // Active slots are added to stillScheduled. Stale keys (disabled med,
+    // empty slots, removed dose rows, deleted meds) are cancelled exactly
+    // once in the final stillScheduled reconciliation below — do not call
+    // cancelSlot earlier for those cases or the same key is enqueued twice.
     for (const med of medicationsRef.current) {
       if (!med.reminderEnabled) {
-        // Disable: cancel every previously scheduled slot for this med.
-        for (const key of scheduledDoseIdsRef.current) {
-          const { medId, doseId } = parseDoseScheduleKey(key);
-          if (medId === med.id) {
-            cancelSlot(medId, doseId);
-          }
-        }
         continue;
       }
 
       const slots = getDoseReminderSlots(med);
       if (slots.length === 0) {
-        for (const key of scheduledDoseIdsRef.current) {
-          const { medId, doseId } = parseDoseScheduleKey(key);
-          if (medId === med.id) {
-            cancelSlot(medId, doseId);
-          }
-        }
         continue;
       }
 
       const today = getTodayDateString();
-      const activeDoseIds = new Set(slots.map((s) => s.doseId));
-
-      // Cancel slots that were scheduled for this med but are no longer
-      // in the current schedule (removed dose rows).
-      for (const key of scheduledDoseIdsRef.current) {
-        const { medId, doseId } = parseDoseScheduleKey(key);
-        if (medId === med.id && !activeDoseIds.has(doseId)) {
-          cancelSlot(medId, doseId);
-        }
-      }
 
       for (const slot of slots) {
         const key = doseScheduleKey(slot.medId, slot.doseId);

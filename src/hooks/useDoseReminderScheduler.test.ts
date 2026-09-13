@@ -3,7 +3,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, cleanup } from '@testing-library/react';
 import type { Medication } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
-import { useDoseReminderScheduler } from './useDoseReminderScheduler';
+import { useDoseReminderScheduler, getDoseReminderSlots } from './useDoseReminderScheduler';
+import { LEGACY_DOSE_ID } from '../utils/notifications';
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: { getPlatform: () => 'web' },
@@ -789,6 +790,8 @@ describe('useDoseReminderScheduler — multi-dose (Phase 2)', () => {
     );
     await flushUntil(() => mocks.schedule.mock.calls.length >= 3);
     mocks.cancel.mockClear();
+    mocks.cancelSnoozed.mockClear();
+    mocks.schedule.mockClear();
 
     const shrunk = {
       ...med,
@@ -801,7 +804,21 @@ describe('useDoseReminderScheduler — multi-dose (Phase 2)', () => {
     rerender({ medications: [shrunk] });
     await flushUntil(() => mocks.cancel.mock.calls.some((c) => c[0] === 'med-rm' && c[1] === 'b'));
 
-    expect(mocks.cancel).toHaveBeenCalledWith('med-rm', 'b');
+    // Removed dose cancelled exactly once (no duplicate cancelSlot path).
+    const cancelB = mocks.cancel.mock.calls.filter(
+      (c) => c[0] === 'med-rm' && c[1] === 'b'
+    );
+    expect(cancelB).toHaveLength(1);
+
+    const cancelSnoozedB = mocks.cancelSnoozed.mock.calls.filter(
+      (c) => c[0] === 'med-rm' && c[1] === 'b'
+    );
+    expect(cancelSnoozedB).toHaveLength(1);
+
+    // Siblings still rescheduled; removed dose is not.
+    expect(mocks.schedule.mock.calls.some((c) => c[5]?.doseId === 'a')).toBe(true);
+    expect(mocks.schedule.mock.calls.some((c) => c[5]?.doseId === 'c')).toBe(true);
+    expect(mocks.schedule.mock.calls.some((c) => c[5]?.doseId === 'b')).toBe(false);
   });
 
   it('reconciles when a dose time changes (same dose id)', async () => {
@@ -955,3 +972,130 @@ describe('useDoseReminderScheduler — multi-dose (Phase 2)', () => {
 });
 
 
+
+describe('Phase 4 — dose-scoped cancel on removal', () => {
+  it('removing d2 cancels only d2 snooze notification and storage', async () => {
+    const med = makeMed({
+      id: 'med-rm-snooze',
+      name: 'RmSnooze',
+      doseSchedule: [
+        { id: 'd1', amount: 1, time: '08:00' },
+        { id: 'd2', amount: 1, time: '14:00' },
+      ],
+      dosesPerDay: 2,
+    });
+    const { rerender } = renderHook(
+      ({ medications }) => useDoseReminderScheduler(defaultOpts({ medications })),
+      { initialProps: { medications: [med] } }
+    );
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
+
+    // Pending snooze for d2 only
+    const { SNOOZE_KEY } = await import('../utils/doseReminderStorage');
+    localStorage.setItem(
+      SNOOZE_KEY,
+      JSON.stringify({
+        'med-rm-snooze::d1': Date.now() + 60_000,
+        'med-rm-snooze::d2': Date.now() + 60_000,
+      })
+    );
+
+    mocks.cancel.mockClear();
+    mocks.cancelSnoozed.mockClear();
+
+    const shrunk = {
+      ...med,
+      dosesPerDay: 1,
+      doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+    };
+    rerender({ medications: [shrunk] });
+    await flushUntil(() =>
+      mocks.cancel.mock.calls.some((c) => c[0] === 'med-rm-snooze' && c[1] === 'd2')
+    );
+
+    expect(mocks.cancel).toHaveBeenCalledWith('med-rm-snooze', 'd2');
+    expect(mocks.cancelSnoozed).toHaveBeenCalledWith('med-rm-snooze', 'd2');
+    // d1 snooze storage must remain
+    const snooze = JSON.parse(localStorage.getItem(SNOOZE_KEY) || '{}');
+    expect(snooze['med-rm-snooze::d1']).toBeDefined();
+    expect(snooze['med-rm-snooze::d2']).toBeUndefined();
+  });
+
+  it('getDoseReminderSlots skips duplicate doseIds', () => {
+    const med = makeMed({
+      doseSchedule: [
+        { id: 'd1', amount: 1, time: '08:00' },
+        { id: 'd1', amount: 9, time: '09:00' }, // duplicate id ignored
+        { id: 'd2', amount: 1, time: '14:00' },
+      ],
+      dosesPerDay: 3,
+    });
+    const slots = getDoseReminderSlots(med);
+    expect(slots.map((s) => s.doseId)).toEqual(['d1', 'd2']);
+    expect(slots.find((s) => s.doseId === 'd1')?.amount).toBe(1);
+  });
+
+  it('skips empty doseIds (does not map to LEGACY_DOSE_ID)', () => {
+    const med = makeMed({
+      doseSchedule: [
+        { id: '', amount: 1, time: '08:00' },
+        { id: 'd2', amount: 1, time: '14:00' },
+      ],
+      dosesPerDay: 2,
+    });
+    const slots = getDoseReminderSlots(med);
+    expect(slots.map((s) => s.doseId)).toEqual(['d2']);
+    expect(slots.every((s) => s.doseId !== LEGACY_DOSE_ID)).toBe(true);
+  });
+
+  it('skips whitespace-only doseIds', () => {
+    const med = makeMed({
+      doseSchedule: [
+        { id: '   ', amount: 1, time: '08:00' },
+        { id: 'd2', amount: 1, time: '14:00' },
+      ],
+      dosesPerDay: 2,
+    });
+    const slots = getDoseReminderSlots(med);
+    expect(slots.map((s) => s.doseId)).toEqual(['d2']);
+  });
+
+  it('skips missing doseIds rather than becoming LEGACY_DOSE_ID', () => {
+    const med = makeMed({
+      doseSchedule: [
+        { id: undefined as unknown as string, amount: 1, time: '08:00' },
+        { id: 'd2', amount: 1, time: '14:00' },
+      ],
+      dosesPerDay: 2,
+    });
+    const slots = getDoseReminderSlots(med);
+    expect(slots.map((s) => s.doseId)).toEqual(['d2']);
+    expect(slots.some((s) => s.doseId === LEGACY_DOSE_ID)).toBe(false);
+  });
+
+  it('two empty-id rows do not collapse into one legacy slot', () => {
+    const med = makeMed({
+      doseSchedule: [
+        { id: '', amount: 1, time: '08:00' },
+        { id: '', amount: 2, time: '14:00' },
+      ],
+      dosesPerDay: 2,
+    });
+    const slots = getDoseReminderSlots(med);
+    expect(slots).toEqual([]);
+  });
+
+  it('legacy med without doseSchedule still uses LEGACY_DOSE_ID', () => {
+    const med = makeMed({
+      doseSchedule: undefined,
+      dosesPerDay: undefined,
+      reminderEnabled: true,
+      reminderTime: '09:00',
+      dailyDose: 1,
+    });
+    const slots = getDoseReminderSlots(med);
+    expect(slots).toHaveLength(1);
+    expect(slots[0].doseId).toBe(LEGACY_DOSE_ID);
+    expect(slots[0].time).toBe('09:00');
+  });
+});

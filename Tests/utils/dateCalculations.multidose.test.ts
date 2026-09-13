@@ -339,7 +339,7 @@ describe('Phase 3 consumeDose multi-dose', () => {
     expect(result.updatedMed?.lastConsumedDate).toBe('2024-09-12');
   });
 
-  it('fallback without doseId picks earliest unconsumed slot', () => {
+  it('multi-dose without doseId fails (no silent first-unconsumed fallback)', () => {
     const med = makeMed({
       lastSyncDate: '2024-09-12',
       currentPills: 30,
@@ -347,8 +347,12 @@ describe('Phase 3 consumeDose multi-dose', () => {
     });
     const now = at('2024-09-12T16:00:00');
     const result = consumeDose(med, 'alarm', '2024-09-12', now);
-    expect(result.doseAmount).toBe(1);
-    expect(result.log?.doseId).toBe('d2');
+    expect(result.doseAmount).toBe(0);
+    expect(result.updatedMed).toBeNull();
+    expect(result.log).toBeNull();
+    expect(result.reason).toBe('missing_dose_id');
+    // Sibling slots untouched
+    expect(med.doseConsumption?.d1).toBe('2024-09-12');
   });
 });
 

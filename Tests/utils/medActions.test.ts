@@ -233,3 +233,159 @@ describe('resolveRestoreDoseAmount (multi-dose restore)', () => {
     expect(updatedMed.currentPills).toBe(12);
   });
 });
+
+describe('consumeDose strict doseId identity', () => {
+  const multi = (overrides: Partial<Medication> = {}): Medication =>
+    makeMed({
+      currentPills: 30,
+      dailyDose: 4,
+      lastSyncDate: '2024-09-13',
+      doseSchedule: [
+        { id: 'd1', amount: 1, time: '08:00' },
+        { id: 'd2', amount: 2, time: '14:00' },
+        { id: 'd3', amount: 1, time: '20:00' },
+      ],
+      dosesPerDay: 3,
+      ...overrides,
+    });
+
+  it('multi + explicit d2 consumes d2 amount and logs d2 only', () => {
+    const med = multi();
+    const result = consumeDose(med, 'manual', '2024-09-13', new Date('2024-09-13T15:00:00'), 'd2');
+    expect(result.doseAmount).toBe(2);
+    expect(result.log?.doseId).toBe('d2');
+    expect(result.updatedMed?.doseConsumption?.d2).toBe('2024-09-13');
+    expect(result.updatedMed?.doseConsumption?.d1).toBeUndefined();
+    expect(result.updatedMed?.doseConsumption?.d3).toBeUndefined();
+  });
+
+  it('multi + missing doseId fails with missing_dose_id and mutates nothing', () => {
+    const med = multi();
+    const result = consumeDose(med, 'manual', '2024-09-13', new Date('2024-09-13T15:00:00'));
+    expect(result.reason).toBe('missing_dose_id');
+    expect(result.doseAmount).toBe(0);
+    expect(result.updatedMed).toBeNull();
+    expect(result.log).toBeNull();
+  });
+
+  it('multi + invalid doseId fails with invalid_dose_id', () => {
+    const med = multi();
+    const result = consumeDose(
+      med,
+      'manual',
+      '2024-09-13',
+      new Date('2024-09-13T15:00:00'),
+      'not-a-slot'
+    );
+    expect(result.reason).toBe('invalid_dose_id');
+    expect(result.doseAmount).toBe(0);
+    expect(result.updatedMed).toBeNull();
+  });
+
+  it('single-slot schedule + omitted doseId resolves to that slot id and amount', () => {
+    const med = makeMed({
+      currentPills: 20,
+      dailyDose: 4,
+      lastSyncDate: '2024-09-13',
+      doseSchedule: [{ id: 'only', amount: 2, time: '09:00' }],
+      dosesPerDay: 1,
+    });
+    const result = consumeDose(med, 'manual', '2024-09-13', new Date('2024-09-13T10:00:00'));
+    expect(result.doseAmount).toBe(2);
+    expect(result.log?.doseId).toBe('only');
+    expect(result.updatedMed?.doseConsumption?.only).toBe('2024-09-13');
+  });
+
+  it('legacy + omitted doseId uses dailyDose (unchanged)', () => {
+    const med = makeMed({
+      currentPills: 10,
+      dailyDose: 1,
+      lastSyncDate: '2024-09-13',
+      doseSchedule: undefined,
+      dosesPerDay: undefined,
+    });
+    const result = consumeDose(med, 'manual', '2024-09-13', new Date('2024-09-13T10:00:00'));
+    expect(result.doseAmount).toBe(1);
+    expect(result.log?.doseId).toBeUndefined();
+    expect(result.updatedMed?.lastConsumedDate).toBe('2024-09-13');
+  });
+
+  it('reordering schedule does not change which doseId is consumed', () => {
+    const med = multi({
+      doseSchedule: [
+        { id: 'd3', amount: 1, time: '20:00' },
+        { id: 'd1', amount: 1, time: '08:00' },
+        { id: 'd2', amount: 2, time: '14:00' },
+      ],
+    });
+    const result = consumeDose(med, 'manual', '2024-09-13', new Date('2024-09-13T15:00:00'), 'd2');
+    expect(result.log?.doseId).toBe('d2');
+    expect(result.doseAmount).toBe(2);
+  });
+
+  it('changing slot time does not change doseId identity', () => {
+    const med = multi({
+      doseSchedule: [
+        { id: 'd1', amount: 1, time: '07:00' },
+        { id: 'd2', amount: 2, time: '15:30' },
+        { id: 'd3', amount: 1, time: '22:00' },
+      ],
+    });
+    const result = consumeDose(med, 'manual', '2024-09-13', new Date('2024-09-13T16:00:00'), 'd2');
+    expect(result.log?.doseId).toBe('d2');
+    expect(result.doseAmount).toBe(2);
+  });
+});
+
+describe('resolveRestoreDoseAmount strict doseId identity', () => {
+  const multi = (overrides: Partial<Medication> = {}): Medication =>
+    makeMed({
+      currentPills: 20,
+      dailyDose: 4,
+      lastSyncDate: '2024-09-13',
+      doseSchedule: [
+        { id: 'd1', amount: 1, time: '08:00' },
+        { id: 'd2', amount: 2, time: '14:00' },
+        { id: 'd3', amount: 1, time: '20:00' },
+      ],
+      dosesPerDay: 3,
+      ...overrides,
+    });
+
+  it('multi + explicit d2 restores amount 2 only', () => {
+    const resolved = resolveRestoreDoseAmount(multi(), 'd2');
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(resolved.amount).toBe(2);
+    expect(resolved.doseId).toBe('d2');
+  });
+
+  it('multi + missing doseId fails with missing_dose_id', () => {
+    const resolved = resolveRestoreDoseAmount(multi());
+    expect(resolved.ok).toBe(false);
+    if (resolved.ok) return;
+    expect(resolved.reason).toBe('missing_dose_id');
+  });
+
+  it('single-slot + omitted doseId resolves to the only slot', () => {
+    const med = makeMed({
+      doseSchedule: [{ id: 'only', amount: 3, time: '10:00' }],
+      dosesPerDay: 1,
+      dailyDose: 3,
+    });
+    const resolved = resolveRestoreDoseAmount(med);
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(resolved.doseId).toBe('only');
+    expect(resolved.amount).toBe(3);
+  });
+
+  it('legacy restore uses dailyDose without doseId', () => {
+    const med = makeMed({ doseSchedule: undefined, dailyDose: 2 });
+    const resolved = resolveRestoreDoseAmount(med);
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(resolved.amount).toBe(2);
+    expect(resolved.doseId).toBeUndefined();
+  });
+});

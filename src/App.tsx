@@ -49,6 +49,7 @@ import {
   reverseRefill,
   settleDoseChange,
   settleAutoDeductToggle,
+  recordDoseSkipped,
 } from './utils/dateCalculations';
 import { OrderItem } from './utils/whatsapp';
 import { consumeDose, settleAndAdjust, resolveRestoreDoseAmount } from './utils/medActions';
@@ -651,6 +652,13 @@ export default function App() {
           delete nextHistory[resolvedDoseId];
         }
       }
+      // Bookkeeping: mark this doseId+date as skipped so auto-projection
+      // and syncAutoDailyDeductions do not re-deduct after Restore.
+      const { doseSkippedHistory } = recordDoseSkipped(
+        updatedMed,
+        resolvedDoseId,
+        today
+      );
       const allStillConsumed =
         Array.isArray(updatedMed.doseSchedule) &&
         updatedMed.doseSchedule.every((d) =>
@@ -663,6 +671,7 @@ export default function App() {
         ...updatedMed,
         doseConsumption: nextConsumption,
         doseConsumptionHistory: nextHistory,
+        doseSkippedHistory,
         lastConsumedDate: allStillConsumed ? today : undefined,
       };
     } else if (med.lastConsumedDate === today) {

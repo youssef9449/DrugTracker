@@ -65,17 +65,19 @@ function at(h: number, m = 0): Date {
 }
 
 describe('production restoreDose + syncAutoDailyDeductions lifecycle', () => {
-  it('1 — expired slots project exact amounts; Card targets auto-completed d1', () => {
+  it('1 — expired slots project exact amounts; Card Take advances past auto-only d1', () => {
     const med = makeMulti();
     const now = at(15);
     // Real projection path used by UI
     expect(todayDueUnits(med, now, TODAY)).toBe(1 + 1); // d1+d2
     expect(effectiveCurrentPills(med, TODAY, now)).toBe(28);
 
+    // PR #196: auto-elapsed only is NOT Card Restore; Take advances to next incomplete.
     const t = getCardDoseToggleTarget(med, now, TODAY);
-    expect(t.canRestore).toBe(true);
-    expect(t.doseId).toBe('d1');
-    expect(t.amount).toBe(1);
+    expect(t.canRestore).toBe(false);
+    expect(t.canTake).toBe(true);
+    expect(t.doseId).toBe('d3'); // d1+d2 auto-completed at 15:00; d3@20:00 still open
+    expect(t.amount).toBe(2);
     expect(
       isDoseCompletedToday(med, med.doseSchedule![0], TODAY, now)
     ).toBe(true);
@@ -110,7 +112,8 @@ describe('production restoreDose + syncAutoDailyDeductions lifecycle', () => {
   });
 
   it('3 — after restore, real syncAutoDailyDeductions does not re-deduct d1', () => {
-    const med = makeMulti({ lastSyncDate: YESTERDAY, currentPills: 30 });
+    // lastSync must be strictly before the past day to settle (exclusive range).
+    const med = makeMulti({ lastSyncDate: '2024-09-10', currentPills: 30 });
     const now = at(15);
 
     // First sync settles YESTERDAY fully into snapshot (past days only).

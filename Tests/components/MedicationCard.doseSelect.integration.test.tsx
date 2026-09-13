@@ -119,7 +119,7 @@ afterEach(() => {
 });
 
 describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
-  it('Take Dose opens SelectDoseModal; selecting d2 consumes only d2 via App path', async () => {
+  it('Card Take passes next doseId and consumes d1 directly (no modal)', async () => {
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeMulti()]));
     localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
 
@@ -129,53 +129,28 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
       expect(screen.getByText('Drug A Multi')).toBeInTheDocument();
     });
 
-    // Real card Take Dose → real handleConsumeDose (multi, no doseId) → selector
     fireEvent.click(screen.getByTitle(/تناول جرعة/));
-
-    await waitFor(() => {
-      expect(screen.getByText(/اختر الجرعة التي تناولتها/)).toBeInTheDocument();
-    });
-
-    // Opening selector must not have written consumption yet.
-    expect(readMeds()[0]?.doseConsumption?.d2).toBeUndefined();
-    expect(readMeds()[0]?.doseConsumption?.d1).toBeUndefined();
-
-    const doseButtons = screen
-      .getAllByRole('button')
-      .filter((b) => b.getAttribute('data-dose-id'));
-    expect(doseButtons.map((b) => b.getAttribute('data-dose-id'))).toEqual([
-      'd1',
-      'd2',
-      'd3',
-    ]);
-
-    // Explicit non-first slot
-    fireEvent.click(
-      doseButtons.find((b) => b.getAttribute('data-dose-id') === 'd2')!
-    );
 
     const today = getTodayDateString();
     await waitFor(() => {
-      const meds = readMeds();
-      const med = meds.find((m) => m.id === 'med-multi');
-      expect(med?.doseConsumption?.d2).toBe(today);
+      const med = readMeds().find((m) => m.id === 'med-multi');
+      expect(med?.doseConsumption?.d1).toBe(today);
     });
 
+    expect(screen.queryByText(/اختر الجرعة التي تناولتها/)).not.toBeInTheDocument();
     const med = readMeds().find((m) => m.id === 'med-multi')!;
-    expect(med.doseConsumption?.d1).toBeUndefined();
+    expect(med.doseConsumption?.d2).toBeUndefined();
     expect(med.doseConsumption?.d3).toBeUndefined();
-    expect(med.doseConsumption?.d2).toBe(today);
 
-    await waitFor(() => {
-      const logs = readLogs();
-      const doseLog = logs.find(
-        (l) => l.type === 'dose_taken' && l.medicationId === 'med-multi'
-      );
-      expect(doseLog?.doseId).toBe('d2');
-    });
+    const doseLog = readLogs().find(
+      (l) => l.type === 'dose_taken' && l.medicationId === 'med-multi'
+    );
+    expect(doseLog?.doseId).toBe('d1');
+    expect(doseLog?.amount).toBe(2);
   });
 
-  it('consumed slot stays disabled; another slot can still be selected', async () => {
+
+  it('after d1 manually consumed, Card shows Restore d1 (same doseId) not Take d2', async () => {
     const today = getTodayDateString();
     localStorage.setItem(
       STORAGE_MEDS_KEY,
@@ -188,31 +163,13 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
       expect(screen.getByText('Drug A Multi')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByTitle(/تناول جرعة/));
-    await waitFor(() => {
-      expect(screen.getByText(/اختر الجرعة التي تناولتها/)).toBeInTheDocument();
-    });
-
-    const d1 = screen
-      .getAllByRole('button')
-      .find((b) => b.getAttribute('data-dose-id') === 'd1');
-    const d2 = screen
-      .getAllByRole('button')
-      .find((b) => b.getAttribute('data-dose-id') === 'd2');
-    expect(d1).toBeDisabled();
-    fireEvent.click(d1!);
-
-    // Still only d1 marked consumed
-    expect(readMeds()[0]?.doseConsumption?.d2).toBeUndefined();
-
-    fireEvent.click(d2!);
-    await waitFor(() => {
-      expect(readMeds()[0]?.doseConsumption?.d2).toBe(today);
-    });
-    expect(readMeds()[0]?.doseConsumption?.d1).toBe(today);
+    // Toggle stays on d1 for restore — does not advance to d2 take
+    expect(screen.queryByTitle(/تناول جرعة/)).not.toBeInTheDocument();
+    expect(screen.getByTitle(/استرجاع الجرعة/)).toBeInTheDocument();
   });
 
-  it('closing the selector without selecting does not consume', async () => {
+
+  it('Card Take with known doseId commits immediately (no abandoned modal state)', async () => {
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeMulti()]));
     localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
 
@@ -223,18 +180,11 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
 
     fireEvent.click(screen.getByTitle(/تناول جرعة/));
     await waitFor(() => {
-      expect(screen.getByText(/اختر الجرعة التي تناولتها/)).toBeInTheDocument();
+      expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(1);
     });
-
-    fireEvent.click(screen.getByLabelText('إغلاق'));
-
-    await waitFor(() => {
-      expect(screen.queryByText(/اختر الجرعة التي تناولتها/)).toBeNull();
-    });
-
-    expect(readMeds()[0]?.doseConsumption).toBeUndefined();
-    expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(0);
+    expect(screen.queryByText(/اختر الجرعة التي تناولتها/)).not.toBeInTheDocument();
   });
+
 
   it('legacy medication Take Dose consumes without opening the selector', async () => {
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeLegacy()]));
@@ -319,28 +269,17 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     const consumeBtn = screen.getByTitle('تناول جرعة (-2)');
     expect(consumeBtn).toBeInTheDocument();
 
+    // Card takes next dose (2pm / amount 2) with explicit doseId — no modal
     fireEvent.click(consumeBtn);
-    expect(screen.getByText(/اختر الجرعة التي تناولتها/)).toBeInTheDocument();
-
-    const btn8am = screen
-      .getAllByRole('button')
-      .find((b) => b.getAttribute('data-dose-id') === 'dose-8am');
-    expect(btn8am).toBeDisabled();
-    expect(btn8am).toHaveTextContent('خصم تلقائي');
-
-    const btn2pm = screen
-      .getAllByRole('button')
-      .find((b) => b.getAttribute('data-dose-id') === 'dose-2pm');
-    expect(btn2pm).toBeEnabled();
-    expect(btn2pm).toHaveTextContent('اختيار');
-
-    fireEvent.click(btn2pm!);
-
     const today = getTodayDateString();
     await waitFor(() => {
       const med = readMeds().find((m) => m.name === 'Test');
       expect(med?.doseConsumption?.['dose-2pm']).toBe(today);
     });
+    expect(screen.queryByText(/اختر الجرعة التي تناولتها/)).not.toBeInTheDocument();
+    const doseLog = readLogs().find((l) => l.type === 'dose_taken');
+    expect(doseLog?.doseId).toBe('dose-2pm');
+    expect(doseLog?.amount).toBe(2);
   });
 
   it('all slots consumed shows completed badge and no take action', async () => {
@@ -360,6 +299,6 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     });
 
     expect(screen.queryByTitle(/^تناول جرعة/)).toBeNull();
-    expect(screen.getByTitle(/تم تناول جرعة اليوم/)).toBeInTheDocument();
+    expect(screen.getByTitle(/استرجاع الجرعة/)).toBeInTheDocument();
   });
 });

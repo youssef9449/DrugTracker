@@ -313,4 +313,196 @@ describe('production restoreDose + syncAutoDailyDeductions lifecycle', () => {
       todayDueUnits(reloaded, now, TODAY)
     );
   });
+
+  /**
+   * Regression gap 1 — REAL production Auto-Deduct → Restore → Auto-Sync.
+   *
+   * Multi-dose sync settles only *past* calendar days into currentPills.
+   * We make Sep 11 due solely for d1 (d2/d3 already recorded consumed that day)
+   * so syncAutoDailyDeductions deducts exactly d1.amount = 1.
+   *
+   * After restoreDose(d1, Sep 11), skip is durable. To prove the skip rule
+   * itself (not merely lastSync advancing past the day), we re-open Sep 11
+   * by setting lastSyncDate back to Sep 10 and run sync again — the same
+   * production historicalDayDueUnits path must exclude d1 and must not
+   * deduct a second time.
+   */
+  it('REGRESSION: production sync auto-deducts d1 → restoreDose → re-sync does not re-deduct d1', () => {
+    const pastDay = '2024-09-11';
+    const today = '2024-09-12';
+    const nowBeforeTodaySlots = new Date('2024-09-12T07:00:00');
+
+    const med: Medication = {
+      id: 'med-1',
+      name: 'Multi',
+      currentPills: 30,
+      dailyDose: 4,
+      unit: 'قرص',
+      warningThresholdDays: 5,
+      colorTag: 'teal',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      lastSyncDate: '2024-09-10',
+      autoDeductEnabled: true,
+      doseSchedule: [
+        { id: 'd1', amount: 1, time: '08:00' },
+        { id: 'd2', amount: 1, time: '14:00' },
+        { id: 'd3', amount: 2, time: '20:00' },
+      ],
+      dosesPerDay: 3,
+      // Sep 11: only d1 still auto-due; d2/d3 already consumed that day
+      doseConsumption: { d2: pastDay, d3: pastDay },
+      doseConsumptionHistory: {
+        d2: [pastDay],
+        d3: [pastDay],
+      },
+    };
+
+    // 1) Real production auto-deduction — exactly d1.amount
+    const sync1 = syncAutoDailyDeductions([med], today, nowBeforeTodaySlots);
+    const afterSync1 = sync1.updatedMeds[0];
+    expect(sync1.deductedSummary.length).toBe(1);
+    expect(sync1.deductedSummary[0].pillsDeducted).toBe(1);
+    expect(afterSync1.currentPills).toBe(29);
+    expect(afterSync1.lastSyncDate).not.toBe('2024-09-10');
+
+    // Sibling consumption marks intact
+    expect(isDoseConsumedOnDate(afterSync1, 'd2', pastDay)).toBe(true);
+    expect(isDoseConsumedOnDate(afterSync1, 'd3', pastDay)).toBe(true);
+    expect(isDoseConsumedOnDate(afterSync1, 'd1', pastDay)).toBe(false);
+
+    // 2) Production restore for the same doseId + pastDay that was settled
+    const restored = restoreDose(afterSync1, 'd1', pastDay, nowBeforeTodaySlots);
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) return;
+    expect(restored.doseId).toBe('d1');
+    expect(restored.restoredAmount).toBe(1);
+    expect(restored.wasManual).toBe(false);
+    // Auto-only path: skip recorded (durable identity)
+    expect(isDoseSkippedOnDate(restored.updatedMed, 'd1', pastDay)).toBe(true);
+    // d2/d3 unchanged
+    expect(isDoseConsumedOnDate(restored.updatedMed, 'd2', pastDay)).toBe(true);
+    expect(isDoseConsumedOnDate(restored.updatedMed, 'd3', pastDay)).toBe(true);
+    expect(isDoseSkippedOnDate(restored.updatedMed, 'd2', pastDay)).toBe(false);
+    expect(isDoseSkippedOnDate(restored.updatedMed, 'd3', pastDay)).toBe(false);
+
+    // 3) Re-open pastDay eligibility (lastSync rewound) so second sync is NOT a
+    // no-op from lastSync alone — it re-enters historicalDayDueUnits for pastDay.
+    // Skip must cause past due for pastDay to be 0 (d1 skipped; d2/d3 consumed).
+    const reopened: Medication = {
+      ...restored.updatedMed,
+      lastSyncDate: '2024-09-10',
+      currentPills: restored.updatedMed.currentPills, // still 29 after auto-only restore
+    };
+    const pillsBeforeSecond = reopened.currentPills;
+    const sync2 = syncAutoDailyDeductions([reopened], today, nowBeforeTodaySlots);
+    const afterSync2 = sync2.updatedMeds[0];
+
+    // No second deduction of d1 (and no other past units left)
+    expect(afterSync2.currentPills).toBe(pillsBeforeSecond);
+    expect(sync2.deductedSummary.length).toBe(0);
+    expect(isDoseSkippedOnDate(afterSync2, 'd1', pastDay)).toBe(true);
+    // Siblings still untouched
+    expect(isDoseConsumedOnDate(afterSync2, 'd2', pastDay)).toBe(true);
+    expect(isDoseConsumedOnDate(afterSync2, 'd3', pastDay)).toBe(true);
+  });
+
+  /**
+   * Regression gap 2 — Double Restore must not credit stock twice.
+   *
+   * Pure production restoreDose:
+   * - First auto-only restore records skip; currentPills unchanged (projection model).
+   * - Second restoreDose on same doseId+date: still wasManual=false, skip idempotent,
+   *   currentPills still unchanged (no second credit).
+   *
+   * Manual path (stock moves): first restore +amount once; second sees wasManual=false
+   * after consumption cleared, so does not settleAndAdjust again.
+   *
+   * App-layer skipped_day log guard remains the UI duplicate-restore protection;
+   * this test covers the production pure helper stock contract.
+   */
+  it('REGRESSION: double production restoreDose does not credit dose.amount twice', () => {
+    const today = '2024-09-12';
+    const now = new Date('2024-09-12T15:00:00');
+
+    // --- Auto-only double restore (today projected slot) ---
+    const medAuto: Medication = {
+      id: 'med-1',
+      name: 'Multi',
+      currentPills: 30,
+      dailyDose: 4,
+      unit: 'قرص',
+      warningThresholdDays: 5,
+      colorTag: 'teal',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      lastSyncDate: today,
+      autoDeductEnabled: true,
+      doseSchedule: [
+        { id: 'd1', amount: 1, time: '08:00' },
+        { id: 'd2', amount: 1, time: '14:00' },
+        { id: 'd3', amount: 2, time: '20:00' },
+      ],
+      dosesPerDay: 3,
+    };
+
+    const firstAuto = restoreDose(medAuto, 'd1', today, now);
+    expect(firstAuto.ok).toBe(true);
+    if (!firstAuto.ok) return;
+    expect(firstAuto.wasManual).toBe(false);
+    expect(firstAuto.restoredAmount).toBe(1);
+    expect(firstAuto.updatedMed.currentPills).toBe(30);
+    expect(isDoseSkippedOnDate(firstAuto.updatedMed, 'd1', today)).toBe(true);
+    expect(firstAuto.updatedMed.doseSkippedHistory?.d1).toEqual([today]);
+
+    const secondAuto = restoreDose(firstAuto.updatedMed, 'd1', today, now);
+    expect(secondAuto.ok).toBe(true);
+    if (!secondAuto.ok) return;
+    // No second stock credit
+    expect(secondAuto.updatedMed.currentPills).toBe(30);
+    // Skip remains a single date entry (idempotent recordDoseSkipped)
+    expect(secondAuto.updatedMed.doseSkippedHistory?.d1).toEqual([today]);
+    // Siblings never skipped
+    expect(isDoseSkippedOnDate(secondAuto.updatedMed, 'd2', today)).toBe(false);
+    expect(isDoseSkippedOnDate(secondAuto.updatedMed, 'd3', today)).toBe(false);
+
+    // --- Manual Take → Restore → Restore again (stock moves once) ---
+    let medManual: Medication = {
+      ...medAuto,
+      currentPills: 30,
+    };
+    const taken = consumeDose(medManual, 'manual', today, now, 'd2');
+    expect(taken.doseAmount).toBe(1);
+    medManual = taken.updatedMed!;
+    const pillsAfterTake = medManual.currentPills;
+
+    const firstManualRestore = restoreDose(medManual, 'd2', today, now);
+    expect(firstManualRestore.ok).toBe(true);
+    if (!firstManualRestore.ok) return;
+    expect(firstManualRestore.wasManual).toBe(true);
+    expect(firstManualRestore.restoredAmount).toBe(1);
+    expect(firstManualRestore.updatedMed.currentPills).toBe(pillsAfterTake + 1);
+    const pillsAfterFirstRestore = firstManualRestore.updatedMed.currentPills;
+
+    const secondManualRestore = restoreDose(
+      firstManualRestore.updatedMed,
+      'd2',
+      today,
+      now
+    );
+    expect(secondManualRestore.ok).toBe(true);
+    if (!secondManualRestore.ok) return;
+    // Second restore is no longer "manual" (consume cleared) → no second +amount
+    expect(secondManualRestore.wasManual).toBe(false);
+    expect(secondManualRestore.updatedMed.currentPills).toBe(pillsAfterFirstRestore);
+    expect(isDoseSkippedOnDate(secondManualRestore.updatedMed, 'd2', today)).toBe(
+      true
+    );
+    // d1/d3 still not skipped/consumed
+    expect(isDoseSkippedOnDate(secondManualRestore.updatedMed, 'd1', today)).toBe(
+      false
+    );
+    expect(isDoseConsumedOnDate(secondManualRestore.updatedMed, 'd3', today)).toBe(
+      false
+    );
+  });
+
 });

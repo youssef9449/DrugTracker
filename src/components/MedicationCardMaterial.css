@@ -1,21 +1,26 @@
 /* Material 3 Android Card Styling for Medication Tracker */
 
-/* Base Material Card Container */
+/* Base Material Card Container — elevation level 1 */
 [id^="med-card-"] {
   box-sizing: border-box;
   min-width: 0;
   max-width: 100%;
-  border-radius: 1rem;
+  border-radius: 1rem; /* 16dp — Material 3 medium card */
   background-color: #ffffff;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05), 0 1px 2px rgba(15, 23, 42, 0.03);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 1px 3px rgba(15, 23, 42, 0.06);
   overflow: hidden;
-  transition: box-shadow 180ms cubic-bezier(0.4, 0, 0.2, 1),
-              transform 180ms cubic-bezier(0.4, 0, 0.2, 1),
-              border-color 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition:
+    box-shadow 180ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 180ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* Elevation on hover (level 2) — matches bottom-nav / card hierarchy */
 [id^="med-card-"]:hover {
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08), 0 2px 4px rgba(15, 23, 42, 0.04);
+  box-shadow:
+    0 2px 4px rgba(15, 23, 42, 0.06),
+    0 4px 12px rgba(15, 23, 42, 0.08);
 }
 
 /* Material Design Action Buttons and Micro-Interactions */
@@ -28,16 +33,17 @@
 
 .medication-menu-root > button,
 [id^="med-card-"] button {
-  transition: background-color 150ms ease,
-              border-color 150ms ease,
-              color 150ms ease,
-              box-shadow 150ms ease,
-              transform 100ms ease;
+  transition:
+    background-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 100ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .medication-menu-root > button:active,
 [id^="med-card-"] button:active {
-  transform: scale(0.93);
+  transform: scale(0.92);
 }
 
 /* Keep every secondary container strictly within card bounds */

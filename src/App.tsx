@@ -633,8 +633,43 @@ export default function App() {
     // Shared settle+adjust logic (audit #78): settle at effPills, add the
     // restored slot amount (not full dailyDose for multi-dose).
     const { updatedMed } = settleAndAdjust(med, restoredAmount, today);
+    // Clear the manual consumption mark for this dose/date so the slot is
+    // available again (Take→Restore→Take lifecycle). History keeps other
+    // dates; only today's entry for this doseId is removed.
+    let medAfterRestore = updatedMed;
+    if (resolvedDoseId) {
+      const nextConsumption = { ...(updatedMed.doseConsumption ?? {}) };
+      if (nextConsumption[resolvedDoseId] === today) {
+        delete nextConsumption[resolvedDoseId];
+      }
+      const nextHistory = { ...(updatedMed.doseConsumptionHistory ?? {}) };
+      if (Array.isArray(nextHistory[resolvedDoseId])) {
+        nextHistory[resolvedDoseId] = nextHistory[resolvedDoseId].filter(
+          (d) => d !== today
+        );
+        if (nextHistory[resolvedDoseId].length === 0) {
+          delete nextHistory[resolvedDoseId];
+        }
+      }
+      const allStillConsumed =
+        Array.isArray(updatedMed.doseSchedule) &&
+        updatedMed.doseSchedule.every((d) =>
+          d.id === resolvedDoseId
+            ? false
+            : (nextConsumption[d.id] === today ||
+                (nextHistory[d.id] ?? []).includes(today))
+        );
+      medAfterRestore = {
+        ...updatedMed,
+        doseConsumption: nextConsumption,
+        doseConsumptionHistory: nextHistory,
+        lastConsumedDate: allStillConsumed ? today : undefined,
+      };
+    } else if (med.lastConsumedDate === today) {
+      medAfterRestore = { ...updatedMed, lastConsumedDate: undefined };
+    }
     setMedications((prev) =>
-      prev.map((m) => (m.id === medicationId ? updatedMed : m))
+      prev.map((m) => (m.id === medicationId ? medAfterRestore : m))
     );
     setLogs((prev) => [
       {
@@ -1258,6 +1293,17 @@ export default function App() {
     if (soundEnabled) playSuccessChime();
   };
 
+  /** Card toggle restore — same production path as ConsumptionLogView. */
+  const handleCardRestoreDose = (medicationId: string, doseId?: string) => {
+    const ok = handleRestoreDose(medicationId, 'card', doseId);
+    if (ok) {
+      const med = medications.find((m) => m.id === medicationId);
+      if (med) {
+        showToast(`تم استرجاع الجرعة — ${med.name}`);
+      }
+    }
+  };
+
   // #79: extracted from two byte-identical inline handlers passed to
   // AppHeader and AppSettingsModal. useCallback so both props get the
   // same stable reference.
@@ -1574,6 +1620,7 @@ export default function App() {
                       onNavigateToShopping={() => setActiveTab('shopping')}
                       onTriggerAlarm={testAlarm}
                       onConsumeDose={handleConsumeDose}
+                      onRestoreDose={handleCardRestoreDose}
                       lastRefillQuantity={(() => {
                         const lastRefill = lastRefillByMed.get(med.id);
                         return lastRefill && lastRefill.amount > 0 ? lastRefill.amount : undefined;

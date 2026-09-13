@@ -156,22 +156,68 @@ describe('native.ts — two-channel dose-reminder design', () => {
     );
     const createdIds = new Set(created.map((c) => c.id));
 
-    // Background channel: HIGH importance, no custom sound.
+    // ── Background channel (dose-reminder-v3) ──
+    // Must produce the Android SYSTEM DEFAULT notification sound (not silence,
+    // not a custom wav). The chain is:
+    //   1. We pass NO `sound` property on the channel object.
+    //   2. Capacitor 6.x NotificationChannelManager.createChannel() reads
+    //      `sound` and only calls NotificationChannel.setSound() when it's a
+    //      non-empty string. With no `sound`, setSound is never called.
+    //   3. The Android NotificationChannel constructor sets the default sound
+    //      to Settings.System.DEFAULT_NOTIFICATION_URI.
+    //   4. HIGH importance (4) makes the channel audible + heads-up.
+    // So: no sound key + HIGH importance = system default sound. ✓
     expect(createdIds.has(DOSE_REMINDER_CHANNEL_ID)).toBe(true);
     const bgChannel = created.find((c) => c.id === DOSE_REMINDER_CHANNEL_ID)!;
-    expect(bgChannel.importance).toBe(4); // HIGH
-    expect(bgChannel.sound).toBeUndefined(); // no custom sound → system default
+    expect(bgChannel.importance).toBe(4); // HIGH → audible
+    // The `sound` key must be ABSENT (not just null/empty). Capacitor's
+    // createChannel only calls setSound for non-empty strings, so an absent
+    // sound key → no setSound call → constructor default → system sound.
+    expect(bgChannel.sound).toBeUndefined();
+    expect('sound' in bgChannel).toBe(false); // key truly absent
 
-    // Foreground channel: LOW importance (silent), no custom sound.
+    // ── Foreground channel (dose-reminder-foreground-v1) ──
+    // Must be SILENT. Achieved via LOW importance (2) — Android never plays
+    // sound for LOW-importance channels regardless of the sound URI. The
+    // absent `sound` property is consistent with the background channel but
+    // the silence is GUARANTEED by importance=2, not by the missing sound.
     expect(createdIds.has(DOSE_REMINDER_FOREGROUND_CHANNEL_ID)).toBe(true);
     const fgChannel = created.find(
       (c) => c.id === DOSE_REMINDER_FOREGROUND_CHANNEL_ID
     )!;
-    expect(fgChannel.importance).toBe(2); // LOW — no sound, no heads-up
-    expect(fgChannel.sound).toBeUndefined(); // no custom sound
+    expect(fgChannel.importance).toBe(2); // LOW → guaranteed silent
+    expect(fgChannel.sound).toBeUndefined();
 
     // Low-stock channel also created.
     expect(createdIds.has('low-stock')).toBe(true);
+  });
+
+  it('background channel would NOT pass a sound string to createChannel (the only path Capacitor treats as custom sound)', async () => {
+    // This test guards against a future regression where someone adds a
+    // `sound` field to the background channel thinking it's needed for
+    // "system default". In Capacitor 6.x, ANY non-empty sound string is
+    // treated as a custom res/raw/ resource — passing one would BREAK
+    // the system-default behavior. The background channel must have NO
+    // sound string at all.
+    vi.resetModules();
+
+    const { LocalNotifications } = await import('@capacitor/local-notifications');
+    const { initNativeBridge } = await import('@/native');
+    const { DOSE_REMINDER_CHANNEL_ID } = await import('@/utils/notifications');
+
+    vi.mocked(LocalNotifications.listChannels).mockResolvedValue({ channels: [] });
+    vi.mocked(LocalNotifications.createChannel).mockClear();
+    await initNativeBridge();
+
+    const created = vi.mocked(LocalNotifications.createChannel).mock.calls.map(
+      (c) => c[0]
+    );
+    const bgChannel = created.find((c) => c.id === DOSE_REMINDER_CHANNEL_ID)!;
+
+    // A non-empty string here would make Capacitor call setSound() with a
+    // res/raw/<sound> URI — a custom sound. Must be absent.
+    expect(typeof bgChannel.sound).not.toBe('string');
+    expect(bgChannel.sound).toBeFalsy();
   });
 
   it('deletes old dose-reminder and dose-reminder-v2 channels on migration', async () => {

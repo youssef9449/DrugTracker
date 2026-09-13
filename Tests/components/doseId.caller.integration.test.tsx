@@ -7,20 +7,30 @@
  *   MedicationCard → handleConsumeDose(medId, doseId) → consumeDose
  *   SelectDoseModal → handleConsumeDose(medId, selectedId) → consumeDose
  *   DoseAlarmModal  → handleTakeDoseFromAlarm(med, doseId) → consumeDose
+ *   Push take_dose  → registerNotificationActionHandler → handleTakeDoseFromAlarm
  *   Missing doseId  → SelectDoseModal only (no mutation until selection)
  *   Take → Restore same doseId
+ *   Auto-due d1 + Take (push / in-app) → single deduction only
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 
 type DoseReceivedHandler = ((medicationId: string, doseId?: string) => void) | null;
+type NotificationActionHandler = ((
+  actionId: string,
+  medicationId: string,
+  doseId?: string
+) => void) | null;
 let doseReceivedHandler: DoseReceivedHandler = null;
+let notificationActionHandler: NotificationActionHandler = null;
 
 vi.mock('@/native', () => ({
   initNativeBridge: vi.fn(() => Promise.resolve()),
   openAppSettings: vi.fn(() => Promise.resolve(false)),
   registerBackButtonHandler: vi.fn(),
-  registerNotificationActionHandler: vi.fn(),
+  registerNotificationActionHandler: vi.fn((handler: NotificationActionHandler) => {
+    notificationActionHandler = handler;
+  }),
   registerDoseReceivedHandler: vi.fn((handler: DoseReceivedHandler) => {
     doseReceivedHandler = handler;
   }),
@@ -136,6 +146,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   doseReceivedHandler = null;
+  notificationActionHandler = null;
 });
 
 afterEach(() => {
@@ -314,5 +325,154 @@ describe('doseId propagation — production callers (integration)', () => {
     const restoreLog = readLogs().find((l) => l.type === 'skipped_day');
     expect(restoreLog?.doseId).toBe('d1');
     expect(restoreLog?.amount).toBe(1);
+  });
+
+  it('auto-due d1 + Push take_dose: one deduction only; repeat is no-op; d2 untouched', async () => {
+    // 09:00 → d1 (08:00) elapsed/projected; d2 (20:00) still future.
+    // Same-day multi is projection-only: sync never settles today into currentPills.
+    vi.setSystemTime(new Date('2024-09-10T09:00:00'));
+    seed(
+      makeMulti({
+        currentPills: 30,
+        doseSchedule: [
+          { id: 'd1', amount: 1, time: '08:00' },
+          { id: 'd2', amount: 2, time: '20:00' },
+        ],
+        dailyDose: 3,
+        dosesPerDay: 2,
+      })
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Drug Multi')).toBeInTheDocument();
+    });
+
+    expect(notificationActionHandler).toBeTypeOf('function');
+    // Pre: projection only — effective 29, snapshot 30 until Take settles.
+    expect(effectiveCurrentPills(readMeds()[0]!)).toBe(29);
+    expect(readMeds()[0]!.currentPills).toBe(30);
+    expect(readLogs().filter((l) => l.type === 'auto_daily')).toHaveLength(0);
+
+    // Production path: localNotificationActionPerformed → take_dose → handleTakeDoseFromAlarm
+    notificationActionHandler!('take_dose', 'med-multi', 'd1');
+
+    const today = getTodayDateString();
+    await waitFor(() => {
+      expect(readMeds()[0]?.doseConsumption?.d1).toBe(today);
+    });
+
+    let med = readMeds()[0]!;
+    // Transition 30 → 29 is the settled Take (not a second projection hit).
+    expect(med.currentPills).toBe(29);
+    expect(med.doseConsumption?.d1).toBe(today);
+    expect(med.doseConsumption?.d2).toBeUndefined();
+    expect(effectiveCurrentPills(med)).toBe(29);
+
+    const doseLogs = readLogs().filter((l) => l.type === 'dose_taken');
+    expect(doseLogs).toHaveLength(1);
+    expect(doseLogs[0]!.doseId).toBe('d1');
+    expect(doseLogs[0]!.medicationId).toBe('med-multi');
+    expect(doseLogs[0]!.amount).toBe(-1);
+    expect(doseLogs[0]!.date).toBe(today);
+    expect(readLogs().filter((l) => l.type === 'auto_daily')).toHaveLength(0);
+
+    const afterFirst = {
+      currentPills: med.currentPills,
+      lastSyncDate: med.lastSyncDate,
+      doseConsumption: { ...(med.doseConsumption ?? {}) },
+      doseSkippedHistory: JSON.stringify(med.doseSkippedHistory ?? {}),
+      doseConsumptionHistory: JSON.stringify(med.doseConsumptionHistory ?? {}),
+    };
+
+    // Repeat same push action → no second log / no second deduction / no field drift
+    notificationActionHandler!('take_dose', 'med-multi', 'd1');
+    await waitFor(() => {
+      expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(1);
+    });
+    med = readMeds()[0]!;
+    expect(med.currentPills).toBe(afterFirst.currentPills);
+    expect(med.lastSyncDate).toBe(afterFirst.lastSyncDate);
+    expect({ ...(med.doseConsumption ?? {}) }).toEqual(afterFirst.doseConsumption);
+    expect(JSON.stringify(med.doseSkippedHistory ?? {})).toBe(afterFirst.doseSkippedHistory);
+    expect(JSON.stringify(med.doseConsumptionHistory ?? {})).toBe(
+      afterFirst.doseConsumptionHistory
+    );
+    expect(med.doseConsumption?.d2).toBeUndefined();
+    expect(effectiveCurrentPills(med)).toBe(29);
+  });
+
+  it('auto-due d1 + In-App DoseAlarm Take: one deduction only; repeat is no-op; d2 untouched', async () => {
+    vi.setSystemTime(new Date('2024-09-10T09:00:00'));
+    seed(
+      makeMulti({
+        currentPills: 30,
+        doseSchedule: [
+          { id: 'd1', amount: 1, time: '08:00' },
+          { id: 'd2', amount: 2, time: '20:00' },
+        ],
+        dailyDose: 3,
+        dosesPerDay: 2,
+      })
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Drug Multi')).toBeInTheDocument();
+    });
+
+    expect(doseReceivedHandler).toBeTypeOf('function');
+    // Pre: projection path (snapshot 30, effective 29)
+    expect(readMeds()[0]!.currentPills).toBe(30);
+    expect(effectiveCurrentPills(readMeds()[0]!)).toBe(29);
+
+    doseReceivedHandler!('med-multi', 'd1');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('alarm-take-dose')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('alarm-take-dose'));
+
+    const today = getTodayDateString();
+    await waitFor(() => {
+      expect(readMeds()[0]?.doseConsumption?.d1).toBe(today);
+    });
+
+    let med = readMeds()[0]!;
+    expect(med.currentPills).toBe(29);
+    expect(med.doseConsumption?.d2).toBeUndefined();
+    expect(effectiveCurrentPills(med)).toBe(29);
+    expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(1);
+    expect(readLogs().find((l) => l.type === 'dose_taken')?.doseId).toBe('d1');
+    expect(readLogs().find((l) => l.type === 'dose_taken')?.amount).toBe(-1);
+    expect(readLogs().filter((l) => l.type === 'auto_daily')).toHaveLength(0);
+
+    const afterFirst = {
+      currentPills: med.currentPills,
+      lastSyncDate: med.lastSyncDate,
+      doseConsumption: { ...(med.doseConsumption ?? {}) },
+      doseSkippedHistory: JSON.stringify(med.doseSkippedHistory ?? {}),
+      doseConsumptionHistory: JSON.stringify(med.doseConsumptionHistory ?? {}),
+    };
+
+    // Open alarm again and press Take for the same doseId
+    doseReceivedHandler!('med-multi', 'd1');
+    await waitFor(() => {
+      expect(screen.getByTestId('alarm-take-dose')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('alarm-take-dose'));
+
+    await waitFor(() => {
+      expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(1);
+    });
+    med = readMeds()[0]!;
+    expect(med.currentPills).toBe(afterFirst.currentPills);
+    expect(med.lastSyncDate).toBe(afterFirst.lastSyncDate);
+    expect({ ...(med.doseConsumption ?? {}) }).toEqual(afterFirst.doseConsumption);
+    expect(JSON.stringify(med.doseSkippedHistory ?? {})).toBe(afterFirst.doseSkippedHistory);
+    expect(JSON.stringify(med.doseConsumptionHistory ?? {})).toBe(
+      afterFirst.doseConsumptionHistory
+    );
+    expect(med.doseConsumption?.d1).toBe(today);
+    expect(med.doseConsumption?.d2).toBeUndefined();
+    expect(effectiveCurrentPills(med)).toBe(29);
   });
 });

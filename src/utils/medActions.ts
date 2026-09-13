@@ -10,6 +10,7 @@ import {
   recordDoseSkipped,
   hasDoseSchedule,
 } from './dateCalculations';
+import { isDoseTimeElapsedToday } from './doseSchedule';
 import { generateId } from './id';
 
 /**
@@ -118,12 +119,20 @@ export function resolveRestoreDoseAmount(
  *
  * Accounting model (must match settlement / projection):
  * - Manual consume already deducted from the settled snapshot → restore
- *   adds exact amount back via settleAndAdjust, clears consumption, and
- *   records doseSkippedHistory so auto-projection cannot re-deduct.
+ *   adds exact amount back via settleAndAdjust and clears consumption.
  * - Auto-only (elapsed projection, never manually consumed today) never
  *   mutated currentPills for today's slot → restore records skip only.
  *   Adding to currentPills would double-count because projection already
  *   reduced effectiveCurrentPills; skip alone reverses the projection.
+ *
+ * Durable skip (doseSkippedHistory) is ONLY recorded when the slot's
+ * scheduled time has already elapsed today. That protects past-due
+ * restores from a second Auto-Deduct for the same dose/date.
+ *
+ * When the slot's scheduled time is still ahead, Restore must NOT record
+ * a durable skip: the dose remains eligible for normal time-gated
+ * Auto-Deduct when its scheduled time arrives (and is not deducted
+ * immediately — todayDueUnits already requires now >= dose.time).
  *
  * Identity is always medicationId + doseId + date for scheduled meds.
  */
@@ -182,17 +191,25 @@ export function restoreDose(
       }
     }
 
-    // Durable skip so auto-sync / projection cannot re-deduct this slot/date.
-    const baseForSkip: Medication = {
-      ...med,
-      doseConsumption: nextConsumption,
-      doseConsumptionHistory: nextHistory,
-    };
-    const { doseSkippedHistory } = recordDoseSkipped(
-      baseForSkip,
-      resolvedDoseId,
-      todayStr
-    );
+    const slot = med.doseSchedule!.find((d) => d.id === resolvedDoseId);
+    // Past-due: durable skip protects against a second auto-deduct today.
+    // Still ahead: do NOT skip — dose stays eligible when its time arrives.
+    const timeElapsed =
+      slot != null && isDoseTimeElapsedToday(slot.time, now);
+
+    let doseSkippedHistory = med.doseSkippedHistory;
+    if (timeElapsed) {
+      const baseForSkip: Medication = {
+        ...med,
+        doseConsumption: nextConsumption,
+        doseConsumptionHistory: nextHistory,
+      };
+      doseSkippedHistory = recordDoseSkipped(
+        baseForSkip,
+        resolvedDoseId,
+        todayStr
+      ).doseSkippedHistory;
+    }
 
     const allStillConsumed =
       Array.isArray(med.doseSchedule) &&
@@ -233,7 +250,9 @@ export function restoreDose(
         lastConsumedDate: allStillConsumed ? todayStr : undefined,
       };
     } else {
-      // Auto-only: projection undo via skip — do not inflate currentPills.
+      // Auto-only: projection undo via skip when past-due — do not inflate
+      // currentPills. Future auto-only restore leaves skip unset so the
+      // slot can still auto-deduct at its scheduled time.
       updatedMed = {
         ...med,
         doseConsumption: nextConsumption,

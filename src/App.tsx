@@ -50,7 +50,9 @@ import {
   settleDoseChange,
   settleAutoDeductToggle,
   isDoseSkippedOnDate,
+  isDoseConsumedOnDate,
 } from './utils/dateCalculations';
+import { isDoseTimeElapsedToday } from './utils/doseSchedule';
 import { OrderItem } from './utils/whatsapp';
 import { consumeDose, settleAndAdjust, resolveRestoreDoseAmount, restoreDose } from './utils/medActions';
 import { useDoseReminders } from './hooks/useDoseReminders';
@@ -614,12 +616,20 @@ export default function App() {
       return false;
     }
     // Outstanding-restore guard (not a permanent blacklist):
-    // - Scheduled doseId: blocked while doseSkippedHistory still marks
-    //   this doseId+date (cleared by consumeDose on Take → allows
-    //   Restore → Take → Restore).
+    // - Past-due: blocked while doseSkippedHistory marks this doseId+date
+    //   (cleared by consumeDose on Take → allows Restore → Take → Restore).
+    // - Future slot already undone (not consumed, time still ahead): nothing
+    //   left to restore until Take or the scheduled time elapses — blocks
+    //   repeated Restore after a future restore that does not record skip.
     // - Legacy (no doseId): still uses skipped_day log for the day.
     const alreadyRestored = resolvedDoseId
-      ? isDoseSkippedOnDate(med, resolvedDoseId, today)
+      ? isDoseSkippedOnDate(med, resolvedDoseId, today) ||
+        (() => {
+          if (isDoseConsumedOnDate(med, resolvedDoseId, today)) return false;
+          const slot = med.doseSchedule?.find((d) => d.id === resolvedDoseId);
+          if (!slot) return false;
+          return !isDoseTimeElapsedToday(slot.time);
+        })()
       : logs.some(
           (log) =>
             log.medicationId === medicationId &&

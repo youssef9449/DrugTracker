@@ -246,4 +246,78 @@ describe('SelectDoseModal', () => {
     );
     expect(screen.getByText(/تم تناول جميع جرعات اليوم/)).toBeInTheDocument();
   });
+
+  describe('mode=restore', () => {
+    it('shows restore subtitle and enables only completed doses', () => {
+      const today = getTodayDateString();
+      const onSelect = vi.fn();
+      // 12:00 — d1 elapsed (auto), d2/d3 still ahead
+      vi.setSystemTime(new Date(2026, 8, 13, 12, 0, 0));
+      render(
+        <SelectDoseModal
+          isOpen
+          mode="restore"
+          medication={makeMulti({ doseConsumption: { d2: today } })}
+          onSelect={onSelect}
+          onClose={() => {}}
+        />
+      );
+      expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
+
+      const d1 = screen
+        .getAllByRole('button')
+        .find((b) => b.getAttribute('data-dose-id') === 'd1');
+      const d2 = screen
+        .getAllByRole('button')
+        .find((b) => b.getAttribute('data-dose-id') === 'd2');
+      const d3 = screen
+        .getAllByRole('button')
+        .find((b) => b.getAttribute('data-dose-id') === 'd3');
+
+      // d1 auto-elapsed → restorable
+      expect(d1).not.toBeDisabled();
+      // d2 manually consumed → restorable
+      expect(d2).not.toBeDisabled();
+      // d3 not yet elapsed or consumed → not restorable
+      expect(d3).toBeDisabled();
+
+      fireEvent.click(d2!);
+      expect(onSelect).toHaveBeenCalledWith('med-multi', 'd2');
+    });
+
+    it('disables already-restored (skipped) doses', () => {
+      const today = getTodayDateString();
+      render(
+        <SelectDoseModal
+          isOpen
+          mode="restore"
+          medication={makeMulti({
+            doseSkippedHistory: { d1: [today] },
+          })}
+          onSelect={() => {}}
+          onClose={() => {}}
+        />
+      );
+      const d1 = screen
+        .getAllByRole('button')
+        .find((b) => b.getAttribute('data-dose-id') === 'd1');
+      expect(d1).toBeDisabled();
+    });
+
+    it('shows empty state when nothing is restorable', () => {
+      vi.setSystemTime(new Date(2026, 8, 13, 7, 0, 0)); // before all times
+      render(
+        <SelectDoseModal
+          isOpen
+          mode="restore"
+          medication={makeMulti()}
+          onSelect={() => {}}
+          onClose={() => {}}
+        />
+      );
+      expect(
+        screen.getByText(/لا توجد جرعات قابلة للاسترجاع اليوم/)
+      ).toBeInTheDocument();
+    });
+  });
 });

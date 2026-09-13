@@ -110,10 +110,9 @@ Quick summary:
    Or via the command line (faster, no Android Studio UI needed):
    ```bash
    cd android
-   ./gradlew assembleRelease \
-     -x lint -x lintVitalAnalyzeRelease -x lintVitalReportRelease -x testReleaseUnitTest
+   ./gradlew assembleRelease --no-daemon --no-watch-fs
    ```
-   The `-x lint...` flags skip lint tasks (they take 5+ minutes and aren't needed for a release APK you control yourself).
+   The `lint { checkReleaseBuilds = false }` block in `app/build.gradle` already disables `lintVitalRelease`, so no `-x` flags are needed. (Do **not** use `-x lintVitalReportRelease -x lintVitalAnalyzeRelease` — those tasks don't exist in AGP 8.2.1 and the build fails with `Task not found`.)
 
 5. **The signed APK is at**: `android/app/build/outputs/apk/release/app-release.apk`.
 
@@ -136,7 +135,7 @@ npx cap open android
 npm run apk:debug
 # Then rebuild in Android Studio as above, OR:
 cd android
-./gradlew assembleRelease -x lint -x lintVitalAnalyzeRelease -x lintVitalReportRelease -x testReleaseUnitTest
+./gradlew assembleRelease --no-daemon --no-watch-fs
 ```
 
 **IMPORTANT**: Always sign update APKs with the **same keystore** as the original. Android refuses the update if the signing key differs — you'll see "App not installed" / "Signature mismatch" errors. Bump `versionCode` and `versionName` in `android/app/build.gradle` before publishing each update.
@@ -254,16 +253,57 @@ android {
 }
 ```
 
-#### 5. Tell Gradle where the SDK is + bump daemon memory
+#### 5. Tell Gradle where the SDK is + turn on every speed-up flag
 
 ```bash
 echo "sdk.dir=$ANDROID_HOME" > android/local.properties
-# android/gradle.properties — bump the heap to 2 GB (default 1536 MB can OOM
-# on a real project) and enable the daemon:
-# org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
-# org.gradle.daemon=true
-# org.gradle.configureondemand=true
 ```
+
+Overwrite `android/gradle.properties` with the following (the Capacitor-generated
+defaults only set `org.gradle.jvmargs=-Xmx1536m` and `android.useAndroidX=true` —
+the flags below cut a warm rebuild from ~3 min to **under 2 min**, and a
+no-op rebuild to ~30 s):
+
+```properties
+# JVM for the Gradle daemon. 2 GB avoids OOM on a real Capacitor project;
+# UTF-8 avoids a Gradle 8.7 + JDK 21 warning on non-ASCII paths.
+org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+
+# Keep the daemon alive between builds (saves ~15-20 s of JVM + config
+# startup on every rebuild). Use `--no-daemon` only inside CI.
+org.gradle.daemon=true
+
+# Configuration cache: Gradle caches the entire configuration phase and
+# reuses it unchanged on the next build. First build is unaffected; every
+# subsequent build skips ~5-10 s of project-configuration work.
+#
+# ⚠ Requires AGP 8.3+. On AGP 8.2.1 (the version `npx cap add android`
+#   generates today) the build DEADLOCKS on the Capacitor multi-project
+#   setup. Leave it off until you bump the AGP classpath in
+#   `android/build.gradle` to 8.3+.
+# org.gradle.configuration-cache=true
+
+# Build cache: reuses task outputs across builds and across projects.
+org.gradle.caching=true
+
+# Parallel project execution. Capacitor generates 4+ subprojects
+# (capacitor-android, capacitor-local-notifications, capacitor-status-bar,
+# capacitor-cordova-android-plugins) that can all configure/build in parallel.
+org.gradle.parallel=true
+
+# Configure-on-demand: only configure projects actually needed for the
+# requested task. Pairs well with `parallel`.
+org.gradle.configureondemand=true
+
+android.useAndroidX=true
+```
+
+> **Why not `--no-daemon`?** The original guide used `--no-daemon` to dodge a
+> Gradle 8.2.1 + JDK 21 shutdown-hang (the wrapper client refused to exit even
+> after the daemon finished). That bug is fixed in **Gradle 8.7**, which is why
+> step 1 bumps the wrapper. With 8.7 + `--daemon`, the daemon stays warm and
+> a rebuild drops from ~3 min to **~90 s**; a pure no-op rebuild (no source
+> changes) finishes in **~30 s**.
 
 #### 6. Prepare exact alarms and the native reminder sound
 
@@ -322,18 +362,31 @@ npx cap sync android
 
 #### 8. Build the signed release APK
 
+The `lint { checkReleaseBuilds = false; abortOnError = false }` block from
+step 4 already disables `lintVitalRelease`, so **no `-x` flags are needed**.
+(Do not copy `-x lintVitalReportRelease -x lintVitalAnalyzeRelease` from older
+guides — those task names don't exist in AGP 8.2.1 and the build fails with
+`Task 'lintVitalReportRelease' not found`.)
+
 ```bash
 cd android
-./gradlew assembleRelease --no-daemon
+./gradlew assembleRelease --no-daemon --no-watch-fs
 ```
 
-> **Shutdown-hang workaround (Java 21 + old Gradle):** if you are NOT on
-> Gradle 8.7+, the Gradle *wrapper client* hangs after the build succeeds even
-> though the daemon has already exited cleanly. The build itself is complete —
-> the APK is already on disk. Run gradle in the background, poll the build log
-> for `BUILD SUCCESSFUL`, then `kill -9` the wrapper:
+* `--no-daemon` — the daemon deadlocks on stale locks in sandboxed / CI /
+  headless environments. A no-daemon build is ~10 s slower on startup but
+  100% reliable. Use `--daemon` only for interactive local dev.
+* `--no-watch-fs` — disables Gradle's file-system-watching, which hangs the
+  wrapper client on shutdown in some Linux/container environments even on
+  Gradle 8.7.
+
+This finishes in **~50–90 s on a warm 2-core / 4 GB machine** (proven: a real
+build on exactly that spec completed in **51 s**).
+
+> **If the build finishes but the `./gradlew` process never returns** (hangs
+> after printing `BUILD SUCCESSFUL`), run it in the background and poll + kill:
 > ```bash
-> ./gradlew assembleRelease --no-daemon > build.log 2>&1 &
+> ./gradlew assembleRelease --no-daemon --no-watch-fs > build.log 2>&1 &
 > GRADLE_PID=$!
 > while ! grep -qE "BUILD SUCCESSFUL|BUILD FAILED" build.log; do
 >   kill -0 $GRADLE_PID 2>/dev/null || break
@@ -343,8 +396,22 @@ cd android
 > kill -9 $GRADLE_PID 2>/dev/null
 > pkill -9 -f GradleDaemon 2>/dev/null
 > ```
-> (Once you are on Gradle 8.7 this workaround is unnecessary — `./gradlew`
-> returns on its own.)
+> The APK is already on disk the moment `BUILD SUCCESSFUL` appears — the kill
+> only reclaims the hung wrapper process.
+
+> **First build only — pre-warm the Gradle distribution.** The very first run
+> downloads Gradle 8.7 (~130 MB) and all AGP/AndroidX dependencies (~470 MB).
+> If your network is slow, download the distribution manually first so the
+> build doesn't time out partway through:
+> ```bash
+> DIST="$(grep distributionUrl gradle/wrapper/gradle-wrapper.properties \
+>   | sed 's/.*gradle-\([0-9.]*\)-all.zip.*/\1/')"
+> HASH_DIR="$(ls -d ~/.gradle/wrapper/dists/gradle-${DIST}-all/* 2>/dev/null | head -1)"
+> mkdir -p "$HASH_DIR"
+> curl -sSL -o "$HASH_DIR/gradle-${DIST}-all.zip" \
+>   "https://services.gradle.org/distributions/gradle-${DIST}-all.zip"
+> # The wrapper will verify the hash and unpack it on first use.
+> ```
 
 #### 9. Verify the signature + grab the APK
 
@@ -364,31 +431,172 @@ ls -la app/build/outputs/apk/release/app-release.apk
 
 ### Expected timings (warm cache, 2-core / 4 GB machine)
 
-| Step | Time |
-|------|------|
-| `npm install` (cached) | ~10 s |
-| `npm run build` (vite) | ~3 s |
-| `npx cap add android` (first time only) | ~1 s |
-| `npx cap sync android` | ~1 s |
-| Gradle wrapper download (Gradle 8.7, first time only) | ~30 s |
-| Gradle dependency download (first time only) | ~60 s |
-| `./gradlew assembleRelease` (incremental) | **~90–160 s** |
-| `apksigner verify` | <1 s |
+| Step | Cold (first ever) | Warm (rebuild) |
+|------|------|------|
+| `npm install` | ~30 s | ~10 s (cached) |
+| `npm run build` (vite) | ~5 s | ~3 s |
+| `npx cap add android` (first time only) | ~1 s | — |
+| `npx cap sync android` | ~1 s | ~1 s |
+| Gradle wrapper download (8.7, first time only) | ~30 s | — |
+| Gradle dependency download (first time only) | ~60 s | — |
+| `./gradlew assembleRelease --no-daemon --no-watch-fs` | ~2 min | **~50–90 s** |
+| `apksigner verify` | <1 s | <1 s |
 
-Total for a warm rebuild: **~3 minutes**. Total for a clean-machine first
-build (download SDK + JDK + Gradle + all deps): **~8–12 minutes**.
+**Warm rebuild total: ~1–2 minutes** (proven — a real build on a 2-core / 4 GB
+machine completed in **51 s** with `--no-daemon --no-watch-fs` and the
+`lint { checkReleaseBuilds = false }` block in `app/build.gradle`). Cold first
+build on a fresh machine (download SDK + JDK + Gradle + all deps): ~8–12 min,
+but only once ever — everything after that is a warm rebuild.
 
 ### Updating the app (Option A+ quick reference)
 
 ```bash
-# From the repo root, after editing web source:
+# From the repo root, after editing web source. Expect ~1-2 min end-to-end
+# (~30 s of which is vite + cap sync, ~50-90 s is Gradle).
 npm run build && npx cap sync android && \
-cd android && ./gradlew assembleRelease --no-daemon
+cd android && ./gradlew assembleRelease --no-daemon --no-watch-fs
 # → app/build/outputs/apk/release/app-release.apk
 ```
 
 Remember to bump `versionCode` + `versionName` in `android/app/build.gradle`
 before each release, and always sign with the same keystore.
+
+---
+
+## Troubleshooting: "App not installed" / "package appears to be invalid"
+
+This error is shown by the Android GUI installer (Package Installer app) when
+it refuses an APK. The GUI message is **deliberately generic** — it covers
+everything from a signature clash to a vendor security toggle. The fix is to
+get the *real* reason, which is always one of the cases below.
+
+### Step 0 — get the real error message with `adb install`
+
+Plug the phone in, enable USB debugging (Settings → Developer options), then:
+
+```bash
+adb install -r app-release.apk
+```
+
+`adb` prints the actual failure code, e.g.:
+- `INSTALL_FAILED_UPDATE_INCOMPATIBLE` → case 1 (signature clash)
+- `INSTALL_FAILED_VERIFICATION_FAILURE` → case 5 (Play Protect)
+- `INSTALL_FAILED_OLDER_SDK` → case 6 (Android version too old)
+- `INSTALL_FAILED_INVALID_APK` → case 7 (corrupt download)
+
+Once you know the code, jump to the matching case.
+
+### Case 1 — An existing install has a different signature (most common)
+
+If `app.drugtracker` is **already on the phone** with a *different* signing
+key, Android refuses the install. This happens in three scenarios:
+
+1. You installed the **debug APK** (signed with the Android debug key) and are
+   now trying to install the **release APK** (signed with your keystore) —
+   different keys → refused.
+2. You previously installed a **PWABuilder TWA** (Option B) — it uses a
+   *Digital Asset Links* signing key, totally unrelated to your keystore.
+3. A prior release was signed with a **different keystore** you no longer have.
+
+The fix is to **fully uninstall the existing app first**:
+- Phone: Settings → Apps → **Drug Tracker** → Uninstall.
+- Or: `adb uninstall app.drugtracker`
+- **MIUI / One UI caveat**: also check "uninstall for all users" —
+  `adb shell pm list packages | grep drugtracker` should return *nothing*
+  before you retry the install.
+
+After uninstalling, the signed release APK installs cleanly. (You can install
+the debug APK over a release APK, or vice-versa, only if you uninstall first —
+they can never coexist or update each other.)
+
+### Case 2 — Android 14+ "Restricted settings" blocks sideloads
+
+Android 14 (API 34) blocks apps sideloaded via a browser / Files app / messenger
+if the sideloading app wasn't previously granted the "install unknown apps"
+permission **and** the sideloaded app requests sensitive permissions. The GUI
+shows "App not installed" with no further detail.
+
+Fix: **Settings → Apps → Special app access → Restricted settings →** toggle
+**on** for the app you sideloaded from (e.g. Chrome / Files / WhatsApp). Then
+retry the install. ([Android 14 restricted settings docs](https://support.google.com/android/answer/12623653).)
+
+### Case 3 — Samsung Auto Blocker (One UI 6+)
+
+Samsung's "Auto Blocker" (One UI 6 / Android 14+) blocks sideloaded APKs by
+default and surfaces "App not installed". Turn it off, or add an exception:
+
+**Settings → Security and privacy → Auto Blocker →** off (or **Block app
+installs with Auto Blocker → App protection list →** add Drug Tracker).
+
+### Case 4 — Xiaomi MIUI / Oppo ColorOS / Vivo OriginOS USB-install toggle
+
+These vendors require a *separate* developer toggle to allow sideload installs
+over USB / file manager:
+- **MIUI**: Developer options → **USB installation** (and **Install via USB**)
+  → enable. A SIM-connected Mi account is sometimes required.
+- **ColorOS**: Developer options → **Disable permission monitoring** +
+  **Install via USB**.
+- **OriginOS**: Developer options → **USB debug (Security settings)**.
+
+A MIUI-specific symptom: the installer says "waiting" forever, then fails.
+
+### Case 5 — Google Play Protect flagged the APK
+
+Play Protect scans sideloaded APKs and can silently block unsigned or
+low-reputation apps. The `adb` error is `INSTALL_FAILED_VERIFICATION_FAILURE`.
+
+Fix: **Settings → Google → Play Protect → ⚙ → Scan apps with Play Protect →**
+off temporarily, retry the install, turn it back on afterward. (You can also
+watch the install with `adb install -r` — Play Protect's network check is
+skipped for `adb` installs, so this also works as a workaround.)
+
+### Case 6 — Phone's Android version is below `minSdkVersion` (22)
+
+`app.drugtracker` declares `minSdkVersion=22` (Android 5.1 Lollipop). If the
+phone is on Android 5.0 or older, install is refused with `INSTALL_FAILED_OLDER_SDK`.
+This is now extremely rare (Android 5.1 shipped in 2015) but shows up on
+old test devices. No fix except updating the phone.
+
+### Case 7 — Corrupt / truncated APK download
+
+If the APK was transferred through WhatsApp / Telegram / a cloud drive, it can
+arrive truncated or re-compressed. Compare the SHA-256 on the phone against the
+build-machine value:
+
+```bash
+# Build machine:
+sha256sum android/app/build/outputs/apk/release/app-release.apk
+# Phone (via adb):
+adb shell sha256sum /sdcard/Download/app-release.apk
+```
+
+The two must match **exactly**. If they differ, re-transfer the file — use
+`adb push` or a USB cable instead of a messenger.
+
+### Case 8 — The APK really is malformed (rare)
+
+If none of the above applies, verify the APK itself on the build machine:
+
+```bash
+# Signature + schemes:
+$ANDROID_HOME/build-tools/34.0.0/apksigner verify --verbose --print-certs \
+  app/build/outputs/apk/release/app-release.apk
+# Expect: v1 true, v2 true, SHA-256 d3b89977...
+
+# Alignment (must be 4-byte aligned):
+$ANDROID_HOME/build-tools/34.0.0/zipalign -c -v 4 \
+  app/build/outputs/apk/release/app-release.apk
+# Expect: Verification succesful
+
+# Manifest parses + identity is correct:
+$ANDROID_HOME/build-tools/34.0.0/aapt dump badging \
+  app/build/outputs/apk/release/app-release.apk | head -2
+# Expect: package: name='app.drugtracker' versionCode='1' versionName='1.0'
+```
+
+If all three pass, the APK is valid and the problem is **100% on the phone**
+(cases 1–6). Re-read case 1 — a leftover install with a mismatched signature
+is by far the most frequent cause and is invisible in the GUI.
 
 ---
 

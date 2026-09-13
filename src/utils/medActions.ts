@@ -33,7 +33,7 @@ interface SettleAndAdjustResult {
  * without mutating the input.
  *
  * Used by:
- * - handleRestoreDose (delta = +dailyDose)
+ * - handleRestoreDose (delta = +resolved dose amount, not always dailyDose)
  * - handleConfirmRefill (delta = +addedPills)
  *
  * @param med The medication to adjust.
@@ -73,6 +73,41 @@ export function settleAndAdjust(
     },
     appliedDelta: delta,
   };
+}
+
+/**
+ * Resolve how many units to restore for a skipped dose.
+ *
+ * - Multi-dose (doseSchedule present): uses the slot amount for `doseId`.
+ *   Requires an explicit doseId when there is more than one slot (no
+ *   silent dailyDose fallback).
+ * - Single-slot schedule with omitted doseId: uses that slot's amount.
+ * - Legacy (no schedule): uses dailyDose (unchanged).
+ */
+export function resolveRestoreDoseAmount(
+  med: Medication,
+  doseId?: string
+): { ok: true; amount: number; doseId?: string } | { ok: false; amount: 0; reason: 'missing_dose_id' | 'invalid_dose_id' | 'no_dose' } {
+  const schedule = med.doseSchedule;
+  if (Array.isArray(schedule) && schedule.length > 0) {
+    if (!doseId) {
+      if (schedule.length === 1) {
+        const only = schedule[0];
+        const amount = Number(only.amount) || 0;
+        if (amount <= 0) return { ok: false, amount: 0, reason: 'no_dose' };
+        return { ok: true, amount, doseId: only.id };
+      }
+      return { ok: false, amount: 0, reason: 'missing_dose_id' };
+    }
+    const slot = schedule.find((d) => d.id === doseId);
+    if (!slot) return { ok: false, amount: 0, reason: 'invalid_dose_id' };
+    const amount = Number(slot.amount) || 0;
+    if (amount <= 0) return { ok: false, amount: 0, reason: 'no_dose' };
+    return { ok: true, amount, doseId: slot.id };
+  }
+  const amount = Number(med.dailyDose) || 0;
+  if (amount <= 0) return { ok: false, amount: 0, reason: 'no_dose' };
+  return { ok: true, amount };
 }
 
 interface ConsumeDoseResult {

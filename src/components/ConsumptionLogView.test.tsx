@@ -124,6 +124,59 @@ describe('ConsumptionLogView — derived selection (#69)', () => {
     fireEvent.click(screen.getByText(/إعادة الجرعة المخصومة/));
     // The call should target 'med-a' (the fallback), NOT 'med-b' (the stale
     // stored selection that no longer exists).
-    expect(onRestoreDose).toHaveBeenCalledWith('med-a', expect.any(String));
+    expect(onRestoreDose).toHaveBeenCalledWith('med-a', expect.any(String), undefined);
+  });
+});
+
+describe('ConsumptionLogView — multi-dose restore', () => {
+  function makeMulti(): Medication {
+    return {
+      ...makeMed('med-multi', 'Multi Med'),
+      dailyDose: 4,
+      doseSchedule: [
+        { id: 'd1', amount: 1, time: '08:00' },
+        { id: 'd2', amount: 1, time: '14:00' },
+        { id: 'd3', amount: 2, time: '20:00' },
+      ],
+      dosesPerDay: 3,
+    };
+  }
+
+  afterEach(() => cleanup());
+
+  it('shows dose selector and passes selected doseId (not dailyDose amount in handler)', () => {
+    const onRestoreDose = vi.fn(() => true);
+    render(
+      <ConsumptionLogView
+        medications={[makeMulti()]}
+        logs={emptyLogs}
+        onRestoreDose={onRestoreDose}
+        showToast={noop}
+      />
+    );
+    expect(screen.getByLabelText('اختر الجرعة')).toBeInTheDocument();
+    // Default first slot d1
+    fireEvent.click(screen.getByText(/إعادة الجرعة المخصومة/));
+    expect(onRestoreDose).toHaveBeenCalledWith('med-multi', expect.any(String), 'd1');
+
+    onRestoreDose.mockClear();
+    fireEvent.change(screen.getByLabelText('اختر الجرعة'), { target: { value: 'd3' } });
+    fireEvent.click(screen.getByText(/إعادة الجرعة المخصومة/));
+    expect(onRestoreDose).toHaveBeenCalledWith('med-multi', expect.any(String), 'd3');
+  });
+
+  it('button preview shows selected slot amount not dailyDose', () => {
+    render(
+      <ConsumptionLogView
+        medications={[makeMulti()]}
+        logs={emptyLogs}
+        onRestoreDose={noop}
+        showToast={noop}
+      />
+    );
+    // d1 amount 1
+    expect(screen.getByText(/\(\+1 قرص\)/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('اختر الجرعة'), { target: { value: 'd3' } });
+    expect(screen.getByText(/\(\+2 قرص\)/)).toBeInTheDocument();
   });
 });

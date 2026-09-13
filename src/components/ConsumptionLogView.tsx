@@ -7,7 +7,7 @@ import { MAX_LOG_ROWS, DAYS_PER_MONTH } from '../utils/time';
 interface ConsumptionLogViewProps {
   medications: Medication[];
   logs: ConsumptionLog[];
-  onRestoreDose: (medicationId: string, reason: string) => boolean;
+  onRestoreDose: (medicationId: string, reason: string, doseId?: string) => boolean;
   showToast: (message: string) => void;
 }
 
@@ -18,6 +18,7 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
   showToast,
 }) => {
   const [selectedMedIdInput, setSelectedMedIdInput] = useState<string>(medications[0]?.id || '');
+  const [selectedDoseId, setSelectedDoseId] = useState<string>('');
   const [skipReason, setSkipReason] = useState<string>('نسيان الجرعة');
 
   // Derive the effective selection: if the stored id no longer matches a
@@ -32,6 +33,33 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
   // #111: derived from the IIFE that was inline in the JSX — the
   // selected med object, or undefined when no meds exist.
   const selectedMed = medications.find((m) => m.id === selectedMedId);
+
+  const multiSchedule =
+    selectedMed &&
+    Array.isArray(selectedMed.doseSchedule) &&
+    selectedMed.doseSchedule.length > 0
+      ? selectedMed.doseSchedule
+      : null;
+
+  // Effective doseId for restore: explicit multi selection, sole schedule
+  // slot, or undefined for legacy (dailyDose).
+  const effectiveRestoreDoseId = (() => {
+    if (!multiSchedule) return undefined;
+    if (multiSchedule.length === 1) return multiSchedule[0].id;
+    if (selectedDoseId && multiSchedule.some((d) => d.id === selectedDoseId)) {
+      return selectedDoseId;
+    }
+    return multiSchedule[0]?.id;
+  })();
+
+  const restorePreviewAmount = (() => {
+    if (!selectedMed) return 0;
+    if (multiSchedule && effectiveRestoreDoseId) {
+      const slot = multiSchedule.find((d) => d.id === effectiveRestoreDoseId);
+      return Number(slot?.amount) || 0;
+    }
+    return Number(selectedMed.dailyDose) || 0;
+  })();
 
   // Total monthly DOSES across all active meds.
   // A "جرعة" (dose) = one daily intake event, regardless of how many
@@ -55,9 +83,25 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
     const med = medications.find((m) => m.id === selectedMedId);
     if (!med) return;
 
-    const restored = onRestoreDose(selectedMedId, skipReason);
+    const doseId =
+      multiSchedule && multiSchedule.length > 1
+        ? effectiveRestoreDoseId
+        : multiSchedule && multiSchedule.length === 1
+          ? multiSchedule[0].id
+          : undefined;
+
+    if (multiSchedule && multiSchedule.length > 1 && !doseId) {
+      showToast('اختر الجرعة المراد استرجاعها');
+      return;
+    }
+
+    const restored = onRestoreDose(selectedMedId, skipReason, doseId);
     if (restored) {
-      showToast(`تم استرجاع جرعة (${med.dailyDose} ${med.unit}) إلى مخزون "${med.name}"`);
+      const amount =
+        doseId && multiSchedule
+          ? Number(multiSchedule.find((d) => d.id === doseId)?.amount) || restorePreviewAmount
+          : restorePreviewAmount;
+      showToast(`تم استرجاع جرعة (${amount} ${med.unit}) إلى مخزون "${med.name}"`);
     }
   };
 
@@ -123,13 +167,16 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
             </label>
             <select
               value={selectedMedId}
-              onChange={(e) => setSelectedMedIdInput(e.target.value)}
+              onChange={(e) => {
+                setSelectedMedIdInput(e.target.value);
+                setSelectedDoseId('');
+              }}
               aria-label="اختر الدواء"
               className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs focus:ring-1 focus:ring-teal-500"
             >
               {medications.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.name} (+{m.dailyDose} {m.unit})
+                  {m.name}
                 </option>
               ))}
             </select>
@@ -152,6 +199,26 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
           </div>
         </div>
 
+        {multiSchedule && multiSchedule.length > 1 ? (
+          <div className="mt-2">
+            <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+              اختر الجرعة:
+            </label>
+            <select
+              value={effectiveRestoreDoseId || ''}
+              onChange={(e) => setSelectedDoseId(e.target.value)}
+              aria-label="اختر الجرعة"
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs focus:ring-1 focus:ring-teal-500"
+            >
+              {multiSchedule.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.time} — {d.amount} {selectedMed?.unit || 'قرص'}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+
         <button
           onClick={handleSkipDose}
           className="mt-3 w-full py-2 px-3 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition active:scale-98"
@@ -159,7 +226,9 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
           <Plus className="w-3.5 h-3.5 text-teal-600" />
           <span>
             إعادة الجرعة المخصومة للمخزون{' '}
-            {selectedMed ? `(+${selectedMed.dailyDose} ${selectedMed.unit})` : '(+1 جرعة)'}
+            {selectedMed
+              ? `(+${restorePreviewAmount} ${selectedMed.unit})`
+              : '(+1 جرعة)'}
           </span>
         </button>
       </div>

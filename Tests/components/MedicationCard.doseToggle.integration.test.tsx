@@ -278,7 +278,9 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     });
   });
 
-  it('auto-deduct-only offers Restore on the card', async () => {
+  it('auto-deduct-only does NOT offer Restore; card is non-interactive when only auto-elapsed', async () => {
+    // PR #196: auto-elapsed-only is not Card Restore. Single slot fully auto-completed
+    // → canTake false, canRestore false → no Take/Restore title on the card.
     localStorage.setItem(
       STORAGE_MEDS_KEY,
       JSON.stringify([
@@ -287,6 +289,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
           doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
           dosesPerDay: 1,
           dailyDose: 1,
+          // no doseConsumption — elapsed only via auto
         }),
       ])
     );
@@ -296,7 +299,47 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     render(<App />);
     await waitFor(() => expect(screen.getByText('Drug A Multi')).toBeInTheDocument());
 
-    expect(screen.getByTitle(/استرجاع الجرعة \(\+1\)/)).toBeInTheDocument();
+    expect(screen.queryByTitle(/استرجاع الجرعة/)).not.toBeInTheDocument();
     expect(screen.queryByTitle(/^تناول جرعة/)).not.toBeInTheDocument();
   });
+
+  it('auto-elapsed d1 advances Card Take to next incomplete d2 (not Restore d1)', async () => {
+    // PR #196: after d1 auto-only, card targets next incomplete doseId.
+    localStorage.setItem(
+      STORAGE_MEDS_KEY,
+      JSON.stringify([
+        makeMulti({
+          currentPills: 30,
+          doseSchedule: [
+            { id: 'd1', amount: 1, time: '08:00' },
+            { id: 'd2', amount: 2, time: '14:00' },
+          ],
+          dosesPerDay: 2,
+          dailyDose: 3,
+        }),
+      ])
+    );
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+    // 12:00 — d1 elapsed (auto), d2 still ahead
+    vi.setSystemTime(new Date('2024-09-10T12:00:00'));
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Drug A Multi')).toBeInTheDocument());
+
+    expect(screen.queryByTitle(/استرجاع الجرعة/)).not.toBeInTheDocument();
+    const takeBtn = screen.getByTitle(/تناول جرعة \(-2\)/);
+    expect(takeBtn).toBeInTheDocument();
+    fireEvent.click(takeBtn);
+
+    const today = getTodayDateString();
+    await waitFor(() => {
+      const med = readMeds().find((m) => m.id === 'med-multi');
+      expect(med?.doseConsumption?.d2).toBe(today);
+    });
+    expect(readMeds()[0]?.doseConsumption?.d1).toBeUndefined();
+    const log = readLogs().find((l) => l.type === 'dose_taken');
+    expect(log?.doseId).toBe('d2');
+    expect(log?.amount).toBe(-2);
+  });
 });
+

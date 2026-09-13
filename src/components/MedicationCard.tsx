@@ -531,9 +531,20 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               doseToggle.canRestore && onRestoreDose ? (
                 <button
                   type="button"
-                  onClick={() => onRestoreDose(medication.id, doseToggle.doseId)}
+                  onClick={() => {
+                    // Multi-dose: omit doseId so App opens SelectDoseModal (restore mode).
+                    // Single-dose / legacy: pass toggle doseId for direct restore.
+                    const isMulti =
+                      Array.isArray(medication.doseSchedule) &&
+                      medication.doseSchedule.length > 1;
+                    onRestoreDose(
+                      medication.id,
+                      isMulti ? undefined : doseToggle.doseId
+                    );
+                  }}
                   title={`استرجاع الجرعة (+${nextDoseAmount})`}
                   className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors active:scale-95"
+                  data-testid={`restore-dose-${medication.id}`}
                 >
                   <CheckCircle className="w-3 h-3" />
                 </button>
@@ -687,9 +698,20 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               doseToggle.canRestore && onRestoreDose ? (
                 <button
                   type="button"
-                  onClick={() => onRestoreDose(medication.id, doseToggle.doseId)}
+                  onClick={() => {
+                    // Multi-dose: omit doseId so App opens SelectDoseModal (restore mode).
+                    // Single-dose / legacy: pass toggle doseId for direct restore.
+                    const isMulti =
+                      Array.isArray(medication.doseSchedule) &&
+                      medication.doseSchedule.length > 1;
+                    onRestoreDose(
+                      medication.id,
+                      isMulti ? undefined : doseToggle.doseId
+                    );
+                  }}
                   title={`استرجاع الجرعة (+${nextDoseAmount})`}
                   className="w-6 h-6 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-800 transition-colors active:scale-95 hover:bg-emerald-200"
+                  data-testid={`restore-dose-${medication.id}`}
                 >
                   <CheckCircle className="w-3.5 h-3.5" />
                 </button>

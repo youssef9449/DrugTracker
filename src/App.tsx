@@ -180,8 +180,9 @@ export default function App() {
     medications,
   });
 
-  // Phase 3A: multi-dose manual consume requires explicit dose selection.
+  // Phase 3A: multi-dose manual consume / restore requires explicit dose selection.
   const [selectDoseMed, setSelectDoseMed] = useState<Medication | null>(null);
+  const [selectDoseMode, setSelectDoseMode] = useState<'take' | 'restore'>('take');
 
   // #21: register a back-button handler that closes the top modal
   // instead of exiting the app. The handler returns true (modal was
@@ -194,7 +195,11 @@ export default function App() {
       if (alarmingMedication) { dismissAlarm(); return true; }
       // Phase 3A: explicit dose selector must dismiss on Android Back
       // without exiting the app.
-      if (selectDoseMed) { setSelectDoseMed(null); return true; }
+      if (selectDoseMed) {
+        setSelectDoseMed(null);
+        setSelectDoseMode('take');
+        return true;
+      }
       if (isAddModalOpen) { setIsAddModalOpen(false); setEditingMedication(null); return true; }
       if (refillMedication) { setRefillMedication(null); return true; }
       if (isSettingsModalOpen) { setIsSettingsModalOpen(false); return true; }
@@ -1242,6 +1247,7 @@ export default function App() {
 
     // Multi-dose: never guess — open explicit selector when doseId missing.
     if (isMulti && !doseId) {
+      setSelectDoseMode('take');
       setSelectDoseMed(med);
       return;
     }
@@ -1280,18 +1286,41 @@ export default function App() {
       setLogs((prev) => [log, ...prev]);
     }
     setSelectDoseMed(null);
+    setSelectDoseMode('take');
     showToast(TOAST_MESSAGES.doseTaken(med.name, doseAmount, med.unit));
     if (soundEnabled) playSuccessChime();
   };
 
-  /** Card toggle restore — same production path as ConsumptionLogView. */
+  /**
+   * Card toggle restore.
+   * Multi-dose without doseId → same SelectDoseModal UX as Take (restore mode).
+   * Single-dose / legacy / explicit doseId → direct restoreDose path.
+   */
   const handleCardRestoreDose = (medicationId: string, doseId?: string) => {
+    const med = medications.find((m) => m.id === medicationId);
+    if (!med) return;
+    const isMulti =
+      Array.isArray(med.doseSchedule) && med.doseSchedule.length > 1;
+
+    if (isMulti && !doseId) {
+      setSelectDoseMode('restore');
+      setSelectDoseMed(med);
+      return;
+    }
+
     const ok = handleRestoreDose(medicationId, 'card', doseId);
     if (ok) {
-      const med = medications.find((m) => m.id === medicationId);
-      if (med) {
-        showToast(`تم استرجاع الجرعة — ${med.name}`);
-      }
+      setSelectDoseMed(null);
+      setSelectDoseMode('take');
+      showToast(`تم استرجاع الجرعة — ${med.name}`);
+    }
+  };
+
+  const handleSelectDoseFromModal = (medicationId: string, doseId: string) => {
+    if (selectDoseMode === 'restore') {
+      handleCardRestoreDose(medicationId, doseId);
+    } else {
+      handleConsumeDose(medicationId, doseId);
     }
   };
 
@@ -1492,8 +1521,8 @@ export default function App() {
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-slate-900 block text-[11px]">
                             {globalAutoDeductEnabled
-                              ? 'الخصم التلقائي اليومي نشط'
-                              : 'الخصم التلقائي اليومي متوقف'}
+                              ? 'الخصم التلقائي نشط'
+                              : 'الخصم التلقائي متوقف'}
                           </span>
                           <span
                             className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
@@ -1506,13 +1535,13 @@ export default function App() {
                           </span>
                         </div>
                         <p
-                          className={`text-[10px] ${
+                          className={`text-[10px] leading-tight ${
                             globalAutoDeductEnabled ? 'text-teal-800' : 'text-amber-800'
                           }`}
                         >
                           {globalAutoDeductEnabled
-                            ? 'يتم احتساب الجرعات بمرور الأيام لتحديث رصيدك وموعد النفاذ بدقة.'
-                            : 'تم إيقاف خصم الجرعات تلقائياً. المخزون الحالي ثابت.'}
+                            ? 'يُخصم تلقائياً عند ميعاد كل جرعة.'
+                            : 'المخزون ثابت — لا خصم تلقائي.'}
                         </p>
                       </div>
                     </div>
@@ -1738,8 +1767,12 @@ export default function App() {
       <SelectDoseModal
         isOpen={Boolean(selectDoseMed)}
         medication={selectDoseMed}
-        onSelect={(medId, doseId) => handleConsumeDose(medId, doseId)}
-        onClose={() => setSelectDoseMed(null)}
+        mode={selectDoseMode}
+        onSelect={handleSelectDoseFromModal}
+        onClose={() => {
+          setSelectDoseMed(null);
+          setSelectDoseMode('take');
+        }}
       />
     </div>
   );

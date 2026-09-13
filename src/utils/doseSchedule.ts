@@ -15,7 +15,7 @@
 import type { Medication, MedicationDose } from '../types';
 import { generateId } from './id';
 import { timeToMinutes } from './time';
-import { isDoseConsumedOnDate, getTodayDateString } from './dateCalculations';
+import { isDoseConsumedOnDate, isDoseSkippedOnDate, getTodayDateString } from './dateCalculations';
 
 /** Sensible UI maximum for doses per day (compact mobile form). */
 export const MAX_DOSES_PER_DAY = 6;
@@ -289,6 +289,10 @@ export function isDoseCompletedToday(
   if (isDoseConsumedOnDate(med, dose.id, todayStr)) {
     return true;
   }
+  // Restored/skipped after auto-deduct: available for Take; not "completed".
+  if (isDoseSkippedOnDate(med, dose.id, todayStr)) {
+    return false;
+  }
   if (med.autoDeductEnabled !== false && isDoseTimeElapsedToday(dose.time, now)) {
     return true;
   }
@@ -362,11 +366,12 @@ export function getNextDoseAmount(
  *
  * Priority:
  * 1. While any slot is still incomplete: chronological scan —
- *    incomplete → Take; completed+manual → Restore that same doseId
- *    (Take d1 is immediately reversible; does NOT advance to d2).
+ *    incomplete → Take; completed (manual or auto-deduct) → Restore that
+ *    same doseId (Take d1 is immediately reversible; does NOT advance to d2).
  * 2. When **all** slots are completed today: Restore the **last**
- *    chronologically manually consumed slot (by schedule time / dose.id).
- * 3. All completed via auto-deduct only → non-interactive (no fake restore).
+ *    chronologically manually consumed slot; if none, the last
+ *    auto-completed (elapsed, not skipped) slot.
+ * 3. Nothing left to restore/take → non-interactive.
  *
  * Legacy (no schedule): lastConsumedDate / dailyDose.
  */
@@ -399,7 +404,7 @@ export function getCardDoseToggleTarget(
 
   if (anyIncomplete) {
     // Chronological scan while something is still open:
-    // incomplete → Take; completed+manual → Restore same doseId (not next).
+    // incomplete → Take; completed (manual or auto) → Restore same doseId.
     for (const d of sorted) {
       if (!isDoseCompletedToday(med, d, todayStr, now)) {
         const amount = Number(d.amount) || 0;
@@ -410,15 +415,14 @@ export function getCardDoseToggleTarget(
           canRestore: false,
         };
       }
-      if (isDoseConsumedOnDate(med, d.id, todayStr)) {
-        const amount = Number(d.amount) || 0;
-        return {
-          doseId: d.id,
-          amount,
-          canTake: false,
-          canRestore: amount > 0,
-        };
-      }
+      // Completed via manual consume or auto-deduct → allow Restore.
+      const amount = Number(d.amount) || 0;
+      return {
+        doseId: d.id,
+        amount,
+        canTake: false,
+        canRestore: amount > 0,
+      };
     }
   }
 
@@ -439,7 +443,23 @@ export function getCardDoseToggleTarget(
     };
   }
 
-  // All completed via auto-deduct only — no fake restore
+  // All completed via auto-deduct only — Restore last chronological slot.
+  let lastAuto: (typeof sorted)[number] | undefined;
+  for (const d of sorted) {
+    if (isDoseCompletedToday(med, d, todayStr, now)) {
+      lastAuto = d;
+    }
+  }
+  if (lastAuto) {
+    const amount = Number(lastAuto.amount) || 0;
+    return {
+      doseId: lastAuto.id,
+      amount,
+      canTake: false,
+      canRestore: amount > 0,
+    };
+  }
+
   const nominal = sorted[0];
   return {
     doseId: nominal?.id,

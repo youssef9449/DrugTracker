@@ -71,7 +71,7 @@ export default defineConfig(() => {
       // pure-utils tests run fine under jsdom too — they don't rely on
       // node-only APIs.
       environment: 'jsdom',
-      include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+      include: ['Tests/**/*.test.ts', 'Tests/**/*.test.tsx'],
       globals: false,
       setupFiles: ['./vitest.setup.ts'],
     },

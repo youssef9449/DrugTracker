@@ -310,7 +310,16 @@ describe('doseId propagation — production callers (integration)', () => {
     await waitFor(() => {
       expect(screen.getByTitle(/استرجاع الجرعة \(\+1\)/)).toBeInTheDocument();
     });
+    // Multi-dose Restore opens SelectDoseModal — pick d1 explicitly.
     fireEvent.click(screen.getByTitle(/استرجاع الجرعة \(\+1\)/));
+    await waitFor(() => {
+      expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
+    });
+    const d1RestoreBtn = screen
+      .getAllByRole('button')
+      .find((b) => b.getAttribute('data-dose-id') === 'd1');
+    expect(d1RestoreBtn).toBeTruthy();
+    fireEvent.click(d1RestoreBtn!);
 
     await waitFor(() => {
       const med = readMeds()[0]!;

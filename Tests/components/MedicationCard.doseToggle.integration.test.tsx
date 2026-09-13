@@ -207,11 +207,21 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     expect(takeLog?.doseId).toBe('d1');
     expect(takeLog?.amount).toBe(-1);
 
-    // Second click must be Restore d1 — not Take d2
+    // Second click must be Restore (not Take d2) — multi-dose opens selector
     await waitFor(() => expect(screen.getByTitle(/استرجاع الجرعة \(\+1\)/)).toBeInTheDocument());
     expect(screen.queryByTitle(/تناول جرعة/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTitle(/استرجاع الجرعة \(\+1\)/));
+    await waitFor(() => {
+      expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
+    });
+    const d1Btn = screen
+      .getAllByRole('button')
+      .find((b) => b.getAttribute('data-dose-id') === 'd1');
+    expect(d1Btn).toBeTruthy();
+    expect(d1Btn).not.toBeDisabled();
+    fireEvent.click(d1Btn!);
+
     await waitFor(() => {
       const med = readMeds().find((m) => m.id === 'med-multi')!;
       expect(effectiveCurrentPills(med)).toBe(20);
@@ -227,7 +237,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     expect(getNextScheduledDose(med, new Date('2024-09-10T06:00:00'))?.id).toBe('d1');
   });
 
-  it('multi: restoring d3 uses amount 2 not dailyDose 4', async () => {
+  it('multi: restoring d3 via selector uses amount 2 not dailyDose 4', async () => {
     const today = getTodayDateString();
     localStorage.setItem(
       STORAGE_MEDS_KEY,
@@ -248,8 +258,18 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     render(<App />);
     await waitFor(() => expect(screen.getByText('Drug A Multi')).toBeInTheDocument());
 
-    await waitFor(() => expect(screen.getByTitle(/استرجاع الجرعة \(\+2\)/)).toBeInTheDocument());
-    fireEvent.click(screen.getByTitle(/استرجاع الجرعة \(\+2\)/));
+    await waitFor(() => expect(screen.getByTitle(/استرجاع الجرعة/)).toBeInTheDocument());
+    fireEvent.click(screen.getByTitle(/استرجاع الجرعة/));
+
+    await waitFor(() => {
+      expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
+    });
+    const d3Btn = screen
+      .getAllByRole('button')
+      .find((b) => b.getAttribute('data-dose-id') === 'd3');
+    expect(d3Btn).toBeTruthy();
+    expect(d3Btn).not.toBeDisabled();
+    fireEvent.click(d3Btn!);
 
     await waitFor(() => {
       const restoreLog = readLogs().find((l) => l.type === 'skipped_day');

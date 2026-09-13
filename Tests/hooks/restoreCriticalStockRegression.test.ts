@@ -67,7 +67,8 @@ afterEach(() => {
 
 describe('restore dose → critical stock reconciliation', () => {
   it('Critical → Restore → Sufficient: exact dose restore clears the old critical claim', () => {
-    const med = makeMed({ currentPills: 2, warningThresholdDays: 1 });
+    // floor(4/3)=1 day left at threshold 1 → critical; after +2 → floor(6/3)=2 → sufficient
+    const med = makeMed({ currentPills: 4, warningThresholdDays: 1 });
     const { rerender } = renderHook(({ medications }) => useAlerts(medications), {
       initialProps: { medications: [med] },
     });
@@ -80,10 +81,11 @@ describe('restore dose → critical stock reconciliation', () => {
     if (!resolved.ok) throw new Error('Expected evening dose to resolve');
 
     const { updatedMed } = settleAndAdjust(med, resolved.amount, TEST_DATE, TEST_NOW);
-    expect(updatedMed.currentPills).toBe(4);
+    expect(updatedMed.currentPills).toBe(6);
     expect(updatedMed.currentPills - med.currentPills).toBe(2);
     expect(updatedMed.currentPills - med.currentPills).not.toBe(med.dailyDose);
-    expect(updatedMed.currentPills / updatedMed.dailyDose).toBeGreaterThan(
+    // Integer days-left (floor) must exceed threshold to leave critical
+    expect(Math.floor(updatedMed.currentPills / updatedMed.dailyDose)).toBeGreaterThan(
       updatedMed.warningThresholdDays
     );
 
@@ -93,7 +95,7 @@ describe('restore dose → critical stock reconciliation', () => {
   });
 
   it('Critical → Restore → Sufficient → Critical: a new episode gets exactly one new notification', () => {
-    const med = makeMed({ currentPills: 2, warningThresholdDays: 1 });
+    const med = makeMed({ currentPills: 4, warningThresholdDays: 1 });
     const { rerender } = renderHook(({ medications }) => useAlerts(medications), {
       initialProps: { medications: [med] },
     });
@@ -102,11 +104,13 @@ describe('restore dose → critical stock reconciliation', () => {
     const resolved = resolveRestoreDoseAmount(med, 'evening');
     if (!resolved.ok) throw new Error('Expected evening dose to resolve');
     const sufficientMed = settleAndAdjust(med, resolved.amount, TEST_DATE, TEST_NOW).updatedMed;
+    expect(sufficientMed.currentPills).toBe(6);
 
     rerender({ medications: [sufficientMed] });
     expect(readClaims()['med-restore']).toBeUndefined();
     expect(sendMock).toHaveBeenCalledTimes(1);
 
+    // Drop back into critical for a new episode
     rerender({ medications: [{ ...sufficientMed, currentPills: 2 }] });
     expect(sendMock).toHaveBeenCalledTimes(2);
   });

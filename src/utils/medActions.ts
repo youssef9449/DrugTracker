@@ -125,14 +125,16 @@ export function resolveRestoreDoseAmount(
  *   Adding to currentPills would double-count because projection already
  *   reduced effectiveCurrentPills; skip alone reverses the projection.
  *
- * Durable skip (doseSkippedHistory) is ONLY recorded when the slot's
- * scheduled time has already elapsed today. That protects past-due
- * restores from a second Auto-Deduct for the same dose/date.
+ * Durable skip (doseSkippedHistory) is recorded when the restored
+ * dose/date is already past-due relative to `now`:
+ *   - the restore date is a prior calendar day, OR
+ *   - the restore date is today and the slot's scheduled time has elapsed.
+ * That protects the same doseId+date from a second Auto-Deduct.
  *
- * When the slot's scheduled time is still ahead, Restore must NOT record
- * a durable skip: the dose remains eligible for normal time-gated
- * Auto-Deduct when its scheduled time arrives (and is not deducted
- * immediately — todayDueUnits already requires now >= dose.time).
+ * When the restore date is today and the slot's scheduled time is still
+ * ahead, Restore must NOT record a durable skip: the dose remains
+ * eligible for normal time-gated Auto-Deduct when its time arrives
+ * (todayDueUnits already requires now >= dose.time).
  *
  * Identity is always medicationId + doseId + date for scheduled meds.
  */
@@ -192,13 +194,21 @@ export function restoreDose(
     }
 
     const slot = med.doseSchedule!.find((d) => d.id === resolvedDoseId);
-    // Past-due: durable skip protects against a second auto-deduct today.
-    // Still ahead: do NOT skip — dose stays eligible when its time arrives.
-    const timeElapsed =
+    // Past-due relative to `now`: prior calendar day, or today after slot time.
+    // Still ahead on today: do NOT skip — dose stays eligible at its time.
+    const nowLocalDate = (() => {
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const d = String(now.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    })();
+    const restoreDateIsPastDay = todayStr < nowLocalDate;
+    const timeElapsedToday =
       slot != null && isDoseTimeElapsedToday(slot.time, now);
+    const isPastDueForSkip = restoreDateIsPastDay || timeElapsedToday;
 
     let doseSkippedHistory = med.doseSkippedHistory;
-    if (timeElapsed) {
+    if (isPastDueForSkip) {
       const baseForSkip: Medication = {
         ...med,
         doseConsumption: nextConsumption,

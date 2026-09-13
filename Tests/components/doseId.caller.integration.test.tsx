@@ -328,7 +328,8 @@ describe('doseId propagation — production callers (integration)', () => {
   });
 
   it('auto-due d1 + Push take_dose: one deduction only; repeat is no-op; d2 untouched', async () => {
-    // 09:00 → d1 (08:00) elapsed/projected; d2 (20:00) still future
+    // 09:00 → d1 (08:00) elapsed/projected; d2 (20:00) still future.
+    // Same-day multi is projection-only: sync never settles today into currentPills.
     vi.setSystemTime(new Date('2024-09-10T09:00:00'));
     seed(
       makeMulti({
@@ -347,11 +348,12 @@ describe('doseId propagation — production callers (integration)', () => {
     });
 
     expect(notificationActionHandler).toBeTypeOf('function');
-    // Pre: projected due only — effective is 29, snapshot still 30 until Take
+    // Pre: projection only — effective 29, snapshot 30 until Take settles.
     expect(effectiveCurrentPills(readMeds()[0]!)).toBe(29);
     expect(readMeds()[0]!.currentPills).toBe(30);
+    expect(readLogs().filter((l) => l.type === 'auto_daily')).toHaveLength(0);
 
-    // Production path: localNotificationActionPerformed → take_dose
+    // Production path: localNotificationActionPerformed → take_dose → handleTakeDoseFromAlarm
     notificationActionHandler!('take_dose', 'med-multi', 'd1');
 
     const today = getTodayDateString();
@@ -360,22 +362,41 @@ describe('doseId propagation — production callers (integration)', () => {
     });
 
     let med = readMeds()[0]!;
+    // Transition 30 → 29 is the settled Take (not a second projection hit).
     expect(med.currentPills).toBe(29);
+    expect(med.doseConsumption?.d1).toBe(today);
     expect(med.doseConsumption?.d2).toBeUndefined();
     expect(effectiveCurrentPills(med)).toBe(29);
 
     const doseLogs = readLogs().filter((l) => l.type === 'dose_taken');
     expect(doseLogs).toHaveLength(1);
     expect(doseLogs[0]!.doseId).toBe('d1');
+    expect(doseLogs[0]!.medicationId).toBe('med-multi');
     expect(doseLogs[0]!.amount).toBe(-1);
+    expect(doseLogs[0]!.date).toBe(today);
+    expect(readLogs().filter((l) => l.type === 'auto_daily')).toHaveLength(0);
 
-    // Repeat same push action → no second log / no second deduction
+    const afterFirst = {
+      currentPills: med.currentPills,
+      lastSyncDate: med.lastSyncDate,
+      doseConsumption: { ...(med.doseConsumption ?? {}) },
+      doseSkippedHistory: JSON.stringify(med.doseSkippedHistory ?? {}),
+      doseConsumptionHistory: JSON.stringify(med.doseConsumptionHistory ?? {}),
+    };
+
+    // Repeat same push action → no second log / no second deduction / no field drift
     notificationActionHandler!('take_dose', 'med-multi', 'd1');
     await waitFor(() => {
       expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(1);
     });
     med = readMeds()[0]!;
-    expect(med.currentPills).toBe(29);
+    expect(med.currentPills).toBe(afterFirst.currentPills);
+    expect(med.lastSyncDate).toBe(afterFirst.lastSyncDate);
+    expect({ ...(med.doseConsumption ?? {}) }).toEqual(afterFirst.doseConsumption);
+    expect(JSON.stringify(med.doseSkippedHistory ?? {})).toBe(afterFirst.doseSkippedHistory);
+    expect(JSON.stringify(med.doseConsumptionHistory ?? {})).toBe(
+      afterFirst.doseConsumptionHistory
+    );
     expect(med.doseConsumption?.d2).toBeUndefined();
     expect(effectiveCurrentPills(med)).toBe(29);
   });
@@ -399,6 +420,10 @@ describe('doseId propagation — production callers (integration)', () => {
     });
 
     expect(doseReceivedHandler).toBeTypeOf('function');
+    // Pre: projection path (snapshot 30, effective 29)
+    expect(readMeds()[0]!.currentPills).toBe(30);
+    expect(effectiveCurrentPills(readMeds()[0]!)).toBe(29);
+
     doseReceivedHandler!('med-multi', 'd1');
 
     await waitFor(() => {
@@ -417,6 +442,16 @@ describe('doseId propagation — production callers (integration)', () => {
     expect(effectiveCurrentPills(med)).toBe(29);
     expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(1);
     expect(readLogs().find((l) => l.type === 'dose_taken')?.doseId).toBe('d1');
+    expect(readLogs().find((l) => l.type === 'dose_taken')?.amount).toBe(-1);
+    expect(readLogs().filter((l) => l.type === 'auto_daily')).toHaveLength(0);
+
+    const afterFirst = {
+      currentPills: med.currentPills,
+      lastSyncDate: med.lastSyncDate,
+      doseConsumption: { ...(med.doseConsumption ?? {}) },
+      doseSkippedHistory: JSON.stringify(med.doseSkippedHistory ?? {}),
+      doseConsumptionHistory: JSON.stringify(med.doseConsumptionHistory ?? {}),
+    };
 
     // Open alarm again and press Take for the same doseId
     doseReceivedHandler!('med-multi', 'd1');
@@ -429,7 +464,13 @@ describe('doseId propagation — production callers (integration)', () => {
       expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(1);
     });
     med = readMeds()[0]!;
-    expect(med.currentPills).toBe(29);
+    expect(med.currentPills).toBe(afterFirst.currentPills);
+    expect(med.lastSyncDate).toBe(afterFirst.lastSyncDate);
+    expect({ ...(med.doseConsumption ?? {}) }).toEqual(afterFirst.doseConsumption);
+    expect(JSON.stringify(med.doseSkippedHistory ?? {})).toBe(afterFirst.doseSkippedHistory);
+    expect(JSON.stringify(med.doseConsumptionHistory ?? {})).toBe(
+      afterFirst.doseConsumptionHistory
+    );
     expect(med.doseConsumption?.d1).toBe(today);
     expect(med.doseConsumption?.d2).toBeUndefined();
     expect(effectiveCurrentPills(med)).toBe(29);

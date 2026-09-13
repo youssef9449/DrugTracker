@@ -1521,8 +1521,8 @@ export default function App() {
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-slate-900 block text-[11px]">
                             {globalAutoDeductEnabled
-                              ? 'الخصم التلقائي اليومي نشط'
-                              : 'الخصم التلقائي اليومي متوقف'}
+                              ? 'الخصم التلقائي نشط'
+                              : 'الخصم التلقائي متوقف'}
                           </span>
                           <span
                             className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
@@ -1535,13 +1535,13 @@ export default function App() {
                           </span>
                         </div>
                         <p
-                          className={`text-[10px] ${
+                          className={`text-[10px] leading-tight ${
                             globalAutoDeductEnabled ? 'text-teal-800' : 'text-amber-800'
                           }`}
                         >
                           {globalAutoDeductEnabled
-                            ? 'يتم احتساب الجرعات بمرور الأيام لتحديث رصيدك وموعد النفاذ بدقة.'
-                            : 'تم إيقاف خصم الجرعات تلقائياً. المخزون الحالي ثابت.'}
+                            ? 'يُخصم تلقائياً عند ميعاد كل جرعة.'
+                            : 'المخزون ثابت — لا خصم تلقائي.'}
                         </p>
                       </div>
                     </div>

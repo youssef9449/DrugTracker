@@ -452,7 +452,8 @@ but only once ever — everything after that is a warm rebuild.
 
 ```bash
 # From the repo root, after editing web source. Expect ~1-2 min end-to-end
-# (~30 s of which is vite + cap sync, ~50-90 s is Gradle).
+# (~30 s of which is vite + cap sync, ~50-90 s is Gradle; an incremental
+# rebuild with only versionCode changed is ~20 s).
 npm run build && npx cap sync android && \
 cd android && ./gradlew assembleRelease --no-daemon --no-watch-fs
 # → app/build/outputs/apk/release/app-release.apk
@@ -460,6 +461,98 @@ cd android && ./gradlew assembleRelease --no-daemon --no-watch-fs
 
 Remember to bump `versionCode` + `versionName` in `android/app/build.gradle`
 before each release, and always sign with the same keystore.
+
+### Bumping the version for an update (releases a new installable APK)
+
+Android refuses to install an APK whose `versionCode` is **lower than or equal
+to** the currently-installed one — the installer shows *"App not installed"*
+with no further detail. Every release you want users to install **over** an
+existing copy must have a higher `versionCode` AND be signed with the **same
+keystore**.
+
+#### The three rules for an in-place update
+
+| Rule | Why | Where |
+|------|-----|-------|
+| Same `applicationId` (`app.drugtracker`) | Android matches apps by package name | `android/app/build.gradle` → `defaultConfig.applicationId` |
+| Higher `versionCode` (monotonic increase) | Android refuses downgrades / no-ops | `android/app/build.gradle` → `defaultConfig.versionCode` |
+| Same signing key (identical SHA-256) | Android refuses cross-key updates | `signingConfigs.release` (same keystore file) |
+
+Meet all three → the APK installs as an **update** (keeps all user data:
+medications, history, settings). Break any one → *"App not installed"* /
+*"package appears to be invalid"* and the user must uninstall first (losing
+data).
+
+#### Versioning scheme
+
+`versionCode` is an integer Android compares numerically; `versionName` is a
+string shown to users. A clean scheme:
+
+| Release | `versionCode` | `versionName` |
+|---------|---------------|---------------|
+| Initial | `1` | `"1.0"` |
+| Patch   | `2` | `"1.0.1"` |
+| Minor   | `12` | `"1.2"` |
+| Next minor | `13` | `"1.3"` |
+| Next minor | `14` | `"1.4"` |
+
+`versionCode` jumps in steps of 1 (or 10 if you want room for hotfixes
+in-between). **Never reuse a `versionCode`** — Android caches the highest one
+seen and won't let the same code install twice as an update.
+
+#### Step-by-step: ship v1.3 over an installed v1.2
+
+1. **Edit `android/app/build.gradle`** — inside `defaultConfig { … }`:
+   ```gradle
+   versionCode 13
+   versionName "1.3"
+   ```
+   (Pick the next integer above whatever the previous release used. If you
+   don't know the previous `versionCode`, run this against the installed APK:
+   ```bash
+   $ANDROID_HOME/build-tools/34.0.0/aapt dump badging \
+     app/build/outputs/apk/release/app-release.apk | grep versionCode
+   # → package: name='app.drugtracker' versionCode='12' versionName='1.2'
+   ```
+   Then use `13`.)
+
+2. **Rebuild with the SAME keystore** (no other change needed):
+   ```bash
+   cd android
+   ./gradlew assembleRelease --no-daemon --no-watch-fs
+   # → app/build/outputs/apk/release/app-release.apk  (now versionCode 13 / 1.3)
+   ```
+   An incremental rebuild (only `versionCode` changed, sources cached) is
+   **~20 s**.
+
+3. **Verify the bump + signature**:
+   ```bash
+   $ANDROID_HOME/build-tools/34.0.0/aapt dump badging \
+     app/build/outputs/apk/release/app-release.apk | head -1
+   # Expect: package: name='app.drugtracker' versionCode='13' versionName='1.3'
+
+   $ANDROID_HOME/build-tools/34.0.0/apksigner verify --print-certs \
+     app/build/outputs/apk/release/app-release.apk | grep SHA-256
+   # Expect: d3b89977…9506088  (SAME as the v1.2 key)
+   ```
+
+4. **Distribute.** The user taps the new APK → Android sees same package +
+   higher `versionCode` + same key → prompts **"Install update?"** → replaces
+   v1.2, keeps all data. No uninstall required.
+
+#### Quick sanity check before distributing
+
+```bash
+# Does versionCode strictly increase over the previous release?
+echo "new: $(aapt dump badging new.apk | grep -o 'versionCode=[^ ]*')"
+echo "old: $(aapt dump badging old.apk | grep -o 'versionCode=[^ ]*')"
+# new versionCode MUST be > old versionCode.
+
+# Same signing key?
+diff <(apksigner verify --print-certs new.apk | grep SHA-256) \
+     <(apksigner verify --print-certs old.apk | grep SHA-256)
+# No output = identical fingerprints = good.
+```
 
 ---
 

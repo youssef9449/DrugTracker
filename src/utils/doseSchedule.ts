@@ -426,45 +426,20 @@ export function getCardDoseToggleTarget(
     }
   }
 
-  // All slots completed today: prefer last chronologically manual consume.
+  // All slots completed today: prefer last chronologically manual consume,
+  // falling back to the last slot (e.g. auto-deducted).
   let lastManual: (typeof sorted)[number] | undefined;
   for (const d of sorted) {
     if (isDoseConsumedOnDate(med, d.id, todayStr)) {
       lastManual = d;
     }
   }
-  if (lastManual) {
-    const amount = Number(lastManual.amount) || 0;
-    return {
-      doseId: lastManual.id,
-      amount,
-      canTake: false,
-      canRestore: amount > 0,
-    };
-  }
-
-  // All completed via auto-deduct only — Restore last chronological slot.
-  let lastAuto: (typeof sorted)[number] | undefined;
-  for (const d of sorted) {
-    if (isDoseCompletedToday(med, d, todayStr, now)) {
-      lastAuto = d;
-    }
-  }
-  if (lastAuto) {
-    const amount = Number(lastAuto.amount) || 0;
-    return {
-      doseId: lastAuto.id,
-      amount,
-      canTake: false,
-      canRestore: amount > 0,
-    };
-  }
-
-  const nominal = sorted[0];
+  const target = lastManual || sorted[sorted.length - 1];
+  const amount = Number(target?.amount) || Number(med.dailyDose) || 0;
   return {
-    doseId: nominal?.id,
-    amount: Number(nominal?.amount) || Number(med.dailyDose) || 0,
+    doseId: target?.id,
+    amount,
     canTake: false,
-    canRestore: false,
+    canRestore: amount > 0,
   };
 }

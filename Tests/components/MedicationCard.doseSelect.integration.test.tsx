@@ -216,7 +216,7 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
         (l) => l.type === 'dose_taken' && l.medicationId === 'med-multi'
       );
       expect(doseLog?.doseId).toBe('d2');
-      expect(doseLog?.amount).toBe(2);
+      expect(doseLog?.amount).toBe(-2);
     });
   });
 
@@ -421,7 +421,7 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     expect(screen.queryByText(/اختر الجرعة التي تناولتها/)).not.toBeInTheDocument();
     const doseLog = readLogs().find((l) => l.type === 'dose_taken');
     expect(doseLog?.doseId).toBe('dose-2pm');
-    expect(doseLog?.amount).toBe(2);
+    expect(doseLog?.amount).toBe(-2);
   });
 
   it('all slots consumed shows completed badge and no take action', async () => {

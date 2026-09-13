@@ -3,7 +3,6 @@ import {
   Pill,
   Plus,
   Calendar,
-  Zap,
   AlertCircle,
   CheckCircle2,
   CheckCircle,
@@ -16,7 +15,7 @@ import { getDepletionDate, getTodayDateString, effectiveCurrentPills } from '../
 import { getCardDoseToggleTarget } from '../utils/doseSchedule';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { VISUAL_RANGE_MULTIPLIER, MIN_VISUAL_RANGE_DAYS, DAYS_PER_MONTH } from '../utils/time';
-import { MedicationMenu, MedicationTypeIcon } from './MedicationMenu';
+import { MedicationMenu } from './MedicationMenu';
 import { ReminderBadge } from './ReminderBadge';
 import { StripsBadge, PackageSizeBadge, AutoDeductPausedNote } from './medicationCardParts';
 
@@ -469,31 +468,33 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           isOut ? 'bg-red-50/25' : isCrit ? 'bg-rose-50/20' : isWarn ? 'bg-amber-50/10' : ''
         }`}
       >
-        {/* Row 1: name + status + actions */}
-        <div className="flex items-center justify-between gap-1.5 min-w-0">
-          <div className="flex items-center gap-1.5 min-w-0 flex-1">
-            <h3 className="text-[11px] font-bold text-slate-900 leading-tight tracking-tight truncate" title={medication.name}>
-              {medication.name}
-            </h3>
+        {/* Row 1: name on its own line */}
+        <h3 className="text-[11px] font-bold text-slate-900 leading-tight tracking-tight truncate" title={medication.name}>
+          {medication.name}
+        </h3>
+
+        {/* Row 2: status + actions */}
+        <div className="flex items-center justify-between gap-1.5 mt-0.5 min-w-0">
+          <div className="min-w-0 flex-1 overflow-hidden">
             {isOut ? (
-              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 flex items-center gap-0.5 shrink-0">
+              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 flex items-center gap-0.5 shrink-0 w-fit">
                 <AlertCircle className="w-2 h-2" />
                 <span>نفد</span>
               </span>
             ) : isCrit ? (
-              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800 flex items-center gap-0.5 shrink-0">
+              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800 flex items-center gap-0.5 shrink-0 w-fit">
                 <Clock className="w-2 h-2" />
-                <span>حرج ({statusInfo.daysLeft}ي)</span>
+                <span>{statusInfo.daysLeft}ي</span>
               </span>
             ) : isWarn ? (
-              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 flex items-center gap-0.5 shrink-0">
+              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 flex items-center gap-0.5 shrink-0 w-fit">
                 <Clock className="w-2 h-2" />
-                <span>تنبيه ({statusInfo.daysLeft}ي)</span>
+                <span>{statusInfo.daysLeft}ي</span>
               </span>
             ) : (
-              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 flex items-center gap-0.5 shrink-0">
+              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 flex items-center gap-0.5 shrink-0 w-fit">
                 <CheckCircle2 className="w-2 h-2" />
-                <span>آمن ({statusInfo.daysLeft}ي)</span>
+                <span>{statusInfo.daysLeft}ي</span>
               </span>
             )}
           </div>
@@ -573,25 +574,12 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           </div>
         </div>
 
-        {/* Row 3: progress + auto-deduct */}
-        <div className="mt-1 flex items-center gap-1.5">
-          <div className="flex-1 h-1 bg-slate-200/70 rounded-full overflow-hidden min-w-0">
-            <div
-              className={`h-full rounded-full transition-all duration-300 ${getProgressColor()}`}
-              style={{ width: `${percentLeft}%` }}
-            />
-          </div>
-          <span
-            className={`shrink-0 text-[8px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 leading-none ${
-              isAutoActive
-                ? 'text-teal-800 bg-teal-100'
-                : 'text-amber-900 bg-amber-100'
-            }`}
-            title={isAutoActive ? 'خصم تلقائي مفعّل' : 'خصم تلقائي متوقف'}
-          >
-            <Zap className={`w-2 h-2 shrink-0 ${isAutoActive ? 'fill-teal-600/40' : ''}`} />
-            <span>{isAutoActive ? 'خصم✓' : 'خصم✗'}</span>
-          </span>
+        {/* Row 3: progress only */}
+        <div className="mt-1 w-full h-1 bg-slate-200/70 rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-300 ${getProgressColor()}`}
+            style={{ width: `${percentLeft}%` }}
+          />
         </div>
 
         {lastRefillQuantity && onUndoRefill ? (
@@ -631,16 +619,13 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             : ''
         }`}
       >
-        {/* Top line: Icon + Name + Category + Status Badge + Actions */}
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0 flex-wrap">
-            <div className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 ${tag.bg}`}>
-              <MedicationTypeIcon unit={medication.unit} className="w-3.5 h-3.5" />
-            </div>
-            <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-              <h3 className="text-xs font-bold text-slate-900 leading-tight tracking-tight truncate max-w-[130px] sm:max-w-xs" title={medication.name}>
-                {medication.name}
-              </h3>
+        {/* Top block: Name (own line) + Category + Status Badge + Actions */}
+        <div className="flex items-start justify-between gap-2 min-w-0">
+          <div className="min-w-0 flex-1">
+            <h3 className="text-xs font-bold text-slate-900 leading-tight tracking-tight truncate" title={medication.name}>
+              {medication.name}
+            </h3>
+            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
               {medication.category && (
                 <span className="text-[9px] font-medium bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded-full shrink-0">
                   {medication.category}
@@ -775,20 +760,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             className={`h-full rounded-full transition-all duration-500 ${getProgressColor()}`}
             style={{ width: `${percentLeft}%` }}
           />
-        </div>
-
-        <div
-          className={`mt-1.5 text-[9px] px-2 py-1 rounded-full flex items-center justify-between ${
-            isAutoActive
-              ? 'text-teal-800 bg-teal-50'
-              : 'text-amber-900 bg-amber-50'
-          }`}
-        >
-          <div className="flex items-center gap-1">
-            <Zap className={`w-3 h-3 shrink-0 ${isAutoActive ? 'fill-teal-600/30' : 'opacity-60'}`} />
-            <span>{isAutoActive ? 'الخصم التلقائي مفعّل' : 'الخصم التلقائي متوقف لهذا الدواء'}</span>
-          </div>
-          {isAutoActive && <span className="text-[8px] text-teal-700/80 font-medium">منتصف الليل</span>}
         </div>
         {undoRefillAction}
       </div>

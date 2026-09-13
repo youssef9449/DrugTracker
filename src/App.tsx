@@ -49,6 +49,7 @@ import {
   reverseRefill,
   settleDoseChange,
   settleAutoDeductToggle,
+  isDoseSkippedOnDate,
 } from './utils/dateCalculations';
 import { OrderItem } from './utils/whatsapp';
 import { consumeDose, settleAndAdjust, resolveRestoreDoseAmount, restoreDose } from './utils/medActions';
@@ -612,19 +613,20 @@ export default function App() {
       showToast(TOAST_MESSAGES.autoDeductOff(med.name));
       return false;
     }
-    const alreadyRestored = logs.some((log) => {
-      if (
-        log.medicationId !== medicationId ||
-        log.type !== 'skipped_day' ||
-        log.date !== today
-      ) {
-        return false;
-      }
-      if (resolvedDoseId) {
-        return log.doseId === resolvedDoseId;
-      }
-      return !log.doseId;
-    });
+    // Outstanding-restore guard (not a permanent blacklist):
+    // - Scheduled doseId: blocked while doseSkippedHistory still marks
+    //   this doseId+date (cleared by consumeDose on Take → allows
+    //   Restore → Take → Restore).
+    // - Legacy (no doseId): still uses skipped_day log for the day.
+    const alreadyRestored = resolvedDoseId
+      ? isDoseSkippedOnDate(med, resolvedDoseId, today)
+      : logs.some(
+          (log) =>
+            log.medicationId === medicationId &&
+            log.type === 'skipped_day' &&
+            log.date === today &&
+            !log.doseId
+        );
     if (alreadyRestored) {
       showToast(TOAST_MESSAGES.doseAlreadyRestored(med.name));
       return false;
@@ -662,6 +664,8 @@ export default function App() {
       },
       ...prev,
     ]);
+    // Clear in-flight so a later valid Restore (after Take) is not blocked.
+    restoreInFlightRef.current.delete(restoreKey);
     if (soundEnabled) playSuccessChime();
     return true;
   };

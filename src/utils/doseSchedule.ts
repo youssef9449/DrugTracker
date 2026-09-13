@@ -352,3 +352,76 @@ export function getNextDoseAmount(
   return Number(med.dailyDose) || 1;
 }
 
+
+/**
+ * Resolve the MedicationCard Take/Restore toggle target for one dose slot.
+ *
+ * Distinct from {@link getNextScheduledDose} / {@link getNextDoseAmount}:
+ * those answer "what is the next dose to take in the schedule".
+ * This helper answers "which single doseId should the Card toggle right now".
+ *
+ * Priority (chronological schedule order):
+ * 1. Earliest **manually consumed** slot today → Restore that exact doseId
+ *    (so Take d1 is immediately reversible; does NOT advance to d2).
+ * 2. Earliest slot that is not completed today (manual or auto) → Take.
+ * 3. Otherwise non-interactive (auto-deduct-only completion, or empty).
+ *
+ * Legacy (no schedule): lastConsumedDate / dailyDose.
+ */
+export function getCardDoseToggleTarget(
+  med: Medication,
+  now: Date = new Date(),
+  todayStr: string = getTodayDateString()
+): {
+  doseId?: string;
+  amount: number;
+  canTake: boolean;
+  canRestore: boolean;
+} {
+  const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
+  if (schedule.length === 0) {
+    const taken = med.lastConsumedDate === todayStr;
+    const amount = Number(med.dailyDose) || 1;
+    return {
+      amount,
+      canTake: !taken && amount > 0,
+      canRestore: taken,
+    };
+  }
+
+  const sorted = sortDoseSchedule(schedule);
+
+  // Chronological scan: at each slot either Take (available) or Restore (manual).
+  // Checking availability before restore-on-later-slots keeps earlier open slots
+  // actionable, while a just-taken slot (completed+manual) still resolves to
+  // Restore for that same doseId — not the next incomplete slot.
+  for (const d of sorted) {
+    if (!isDoseCompletedToday(med, d, todayStr, now)) {
+      const amount = Number(d.amount) || 0;
+      return {
+        doseId: d.id,
+        amount,
+        canTake: amount > 0,
+        canRestore: false,
+      };
+    }
+    if (isDoseConsumedOnDate(med, d.id, todayStr)) {
+      const amount = Number(d.amount) || 0;
+      return {
+        doseId: d.id,
+        amount,
+        canTake: false,
+        canRestore: amount > 0,
+      };
+    }
+  }
+
+  // All completed via auto-deduct only — no fake restore
+  const nominal = sorted[0];
+  return {
+    doseId: nominal?.id,
+    amount: Number(nominal?.amount) || Number(med.dailyDose) || 0,
+    canTake: false,
+    canRestore: false,
+  };
+}

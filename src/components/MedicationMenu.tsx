@@ -3,8 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   Edit3,
   Trash2,
-  PauseCircle,
-  PlayCircle,
+  Zap,
   Pill,
   Droplets,
   Syringe,
@@ -160,20 +159,12 @@ export function MedicationMenu({
       <button
         type="button"
         onClick={() => onToggleAutoDeduct(medication.id)}
-        className={`${iconButtonClass} ${
-          isAutoActive
-            ? 'border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100'
-            : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'
-        }`}
+        className={`${iconButtonClass} border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100`}
         aria-label={isAutoActive ? 'إيقاف الخصم التلقائي' : 'تفعيل الخصم التلقائي'}
         title={isAutoActive ? 'الخصم التلقائي مفعّل — اضغط للإيقاف' : 'الخصم التلقائي متوقف — اضغط للتفعيل'}
         aria-pressed={isAutoActive}
       >
-        {isAutoActive ? (
-          <PauseCircle className="h-3.5 w-3.5" aria-hidden="true" />
-        ) : (
-          <PlayCircle className="h-3.5 w-3.5" aria-hidden="true" />
-        )}
+        <Zap className="h-3.5 w-3.5" aria-hidden="true" />
       </button>
 
       <button

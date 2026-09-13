@@ -233,7 +233,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-800">الخصم التلقائي اليومي للمخزون</span>
+                        <span className="text-xs font-bold text-slate-800">الخصم التلقائي للمخزون</span>
                         <span
                           className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
                             autoDeductEnabled ? 'bg-teal-200 text-teal-900' : 'bg-slate-200 text-slate-700'
@@ -242,8 +242,8 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                           {autoDeductEnabled ? 'مفعّل' : 'متوقف'}
                         </span>
                       </div>
-                      <p className="text-[10px] text-slate-500">
-                        خصم الجرعات تلقائياً بمرور الأيام لتحديث رصيدك وموعد النفاذ
+                      <p className="text-[10px] text-slate-500 leading-tight">
+                        يُخصم تلقائياً عند ميعاد كل جرعة
                       </p>
                     </div>
                   </div>
@@ -251,14 +251,14 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     <Toggle
                       checked={autoDeductEnabled}
                       onChange={onToggleAutoDeduct}
-                      label="تبديل الخصم التلقائي اليومي"
+                      label="تبديل الخصم التلقائي"
                     />
                   )}
                 </div>
-                <p className="text-[10px] text-slate-500 leading-relaxed border-t border-teal-100/80 pt-2">
+                <p className="text-[10px] text-slate-500 leading-tight border-t border-teal-100/80 pt-2">
                   {autoDeductEnabled
-                    ? 'عند التفعيل، يحسب التطبيق الجرعات اليومية تلقائياً ويحدّث رصيد المخزون وموعد نفاد كل دواء.'
-                    : 'عند الإيقاف، يتوقف الخصم التلقائي ويبقى رصيد الأدوية ثابتاً حتى تقوم بالخصم اليدوي.'}
+                    ? 'عند التفعيل يُخصم عند ميعاد الجرعات ويُحدَّث الرصيد وموعد النفاذ.'
+                    : 'عند الإيقاف يتوقف الخصم التلقائي ويبقى الرصيد ثابتاً.'}
                 </p>
               </div>
 

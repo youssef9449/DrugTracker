@@ -45,10 +45,14 @@ import {
 /**
  * The single Android notification channel for dose reminders.
  * Versioned because Android channel sound settings are immutable —
- * bumping the suffix is the only way to change the bundled sound.
+ * bumping the suffix is the only way to change the sound.
+ *
+ * v3: uses the default system notification sound (no custom sound).
+ * v2: used a custom 'dose_reminder.wav' (removed — users found it
+ *      unpleasant).
  *
  * The channel is created in native.ts with:
- *   - sound: 'dose_reminder.wav' (bundled native sound)
+ *   - no custom sound → Android default system notification sound
  *   - importance: HIGH (heads-up + sound)
  *   - visibility: PUBLIC (lock screen)
  *
@@ -57,7 +61,7 @@ import {
  * native notification sound is the ONLY sound for dose reminders —
  * no JS sound playback is involved.
  */
-export const DOSE_REMINDER_CHANNEL_ID = 'dose-reminder-v2';
+export const DOSE_REMINDER_CHANNEL_ID = 'dose-reminder-v3';
 
 /**
  * Returns 'android' when running on Android, 'ios' when on iOS, or
@@ -1174,8 +1178,8 @@ export function isDoseReminderTimeStillAhead(
  *
  * `allowWhileIdle: true` lets the alarm fire even in Doze mode.
  *
- * The notification uses the `dose-reminder-v2` channel with the bundled
- * native sound (`dose_reminder.wav`). No JS sound playback is involved.
+ * The notification uses the `dose-reminder-v3` channel, which plays
+ * the default system notification sound. No JS sound playback is involved.
  */
 export async function scheduleDoseReminder(
   medId: string,

@@ -13,8 +13,8 @@
  *     on the dark teal background.
  *   - Listen for the Android hardware back button and close the
  *     top modal if one is open, or exit the app if none (#21).
- *   - Create the Android notification channel `dose-reminder-v2`
- *     with the bundled native sound `dose_reminder.wav`.
+ *   - Create the Android notification channel `dose-reminder-v3`
+ *     using the default system notification sound (no custom sound).
  *   - Listen for `appStateChange` to re-check exact-alarm permission
  *     when the app resumes.
  *   - Listen for `localNotificationReceived` to open the in-app
@@ -153,7 +153,7 @@ export async function initNativeBridge(): Promise<void> {
   // Without an Android NotificationChannel, scheduled notifications
   // silently fail on Android 8.0+. Capacitor LocalNotifications
   // creates a default channel automatically, but the notification
-  // channel id used in `schedule({ channelId: 'dose-reminder-v2' })`
+  // channel id used in `schedule({ channelId: DOSE_REMINDER_CHANNEL_ID })`
   // must be created first or Android will fall back to the default
   // channel (which is acceptable but means we lose the ability to
   // later customize per-channel importance / sound / vibration).
@@ -192,12 +192,17 @@ export async function initNativeBridge(): Promise<void> {
     // Importance: 4 = HIGH (makes a sound + shows as heads-up
     // notification briefly). Visibility: 1 = PUBLIC (shows on
     // the lock screen).
+    //
+    // No `sound` property is set → Android uses the default system
+    // notification sound (the one the user picked in Settings → Sound).
+    // The previous v2 channel used a custom 'dose_reminder.wav' that
+    // users found unpleasant; since channel sound is immutable, we
+    // bump to a new channel id (v3) and delete the old one below.
     const channels: Channel[] = [
       {
         id: DOSE_REMINDER_CHANNEL_ID,
         name: 'تذكير الجرعات',
         description: 'تذكيرات يومية بمواعيد الأدوية',
-        sound: 'dose_reminder.wav',
         importance: 4 as Importance,
         visibility: 1 as Visibility,
       },
@@ -210,11 +215,15 @@ export async function initNativeBridge(): Promise<void> {
       },
     ];
 
-    // Android channel sound is immutable. Delete the old v1 channel
-    // if it exists so the v2 channel with the bundled sound takes over.
-    if (existingIds.has('dose-reminder')) {
-      await LocalNotifications.deleteChannel({ id: 'dose-reminder' });
-      console.info('[native] Migrated dose-reminder channel to dose-reminder-v2');
+    // Android channel sound is immutable. Delete the old v1 and v2
+    // channels so the v3 channel with the default system sound takes
+    // over. (v1 used a default sound; v2 used the custom 'dose_reminder.wav';
+    // v3 uses the system default again.)
+    for (const oldId of ['dose-reminder', 'dose-reminder-v2']) {
+      if (existingIds.has(oldId)) {
+        await LocalNotifications.deleteChannel({ id: oldId });
+        console.info(`[native] Migrated ${oldId} channel to ${DOSE_REMINDER_CHANNEL_ID}`);
+      }
     }
 
     for (const ch of channels) {
@@ -256,8 +265,8 @@ export async function initNativeBridge(): Promise<void> {
   // App.tsx can open the DoseAlarmModal.
   //
   // NO sound playback happens here. The notification's sound is played
-  // by the Android notification channel (bundled native sound
-  // 'dose_reminder.wav'). There is no JS sound path for dose reminders.
+  // by the Android notification channel (the default system notification
+  // sound). There is no JS sound path for dose reminders.
   //
   // #38: await the addListener and store the handle so it can be
   // removed if needed (prevents duplicate listeners across HMR).

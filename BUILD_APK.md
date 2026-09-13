@@ -314,9 +314,9 @@ declares the `SCHEDULE_EXACT_ALARM` permission and the user grants it.
 
 The repeatable `npm run cap:sync` and `npm run apk:debug` commands run
 `scripts/prepare-android.mjs` after Capacitor sync. It injects the
-`SCHEDULE_EXACT_ALARM` permission into the generated manifest and creates the
-bundled `dose_reminder.wav` resource used by the versioned dose notification
-channel. No manual manifest edit is required after a sync.
+`SCHEDULE_EXACT_ALARM` permission into the generated manifest and removes any
+legacy `dose_reminder.wav` from a previous build (the dose channel now uses
+the default system sound). No manual manifest edit is required after a sync.
 
 **Why `SCHEDULE_EXACT_ALARM` and not `USE_EXACT_ALARM`?**
 - `USE_EXACT_ALARM` is for apps whose core purpose IS an alarm clock or
@@ -337,22 +337,19 @@ alarms are unacceptable for medication reminders).
 
 Android notification channels cannot change their sound after creation, and
 Capacitor Local Notifications 6 posts the native notification after emitting
-the foreground `localNotificationReceived` event. The app therefore uses two
-fixed dose channels:
+the foreground `localNotificationReceived` event. The app uses a single
+dose-reminder channel:
 
-- `dose-reminder-foreground-v1` is silent. While the app is active, the
-   foreground handler plays one global custom, per-medication synthesized, or
-   default chime and opens the modal.
-- `dose-reminder-v2` contains the bundled `dose_reminder.wav`. When the app
-   is backgrounded or killed, Android plays this native sound without
-   JavaScript.
+- `dose-reminder-v3` uses the **default system notification sound** (the one
+  the user picked in Settings → Sound). No custom sound is bundled — the
+  previous `dose_reminder.wav` was removed because users found it unpleasant.
+  Since channel sound is immutable, bumping from v2 to v3 was the only way to
+  switch the sound; the old v2 channel is deleted on first launch.
 
-Lifecycle transitions re-arm the same stable notification IDs onto the
-appropriate channel. The global uploaded sound remains in IndexedDB and is
-never copied into native notification extras. The `soundEnabled` setting
-controls foreground JavaScript playback; Android may still play the native
-background fallback because channel sound cannot be toggled per notification
-without creating uncontrolled channel state.
+The `soundEnabled` setting controls foreground JavaScript playback (the
+in-app chime when the app is active). When the app is backgrounded or killed,
+Android plays the system default notification sound via the v3 channel — no
+JavaScript is involved.
 
 #### 7. Sync the web build into the Android project
 

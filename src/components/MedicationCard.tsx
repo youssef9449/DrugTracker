@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Medication, calculateMedicationStatus, describeStockInStrips, isSolidUnit } from '../types';
 import { getDepletionDate, getTodayDateString, effectiveCurrentPills, isDoseConsumedOnDate } from '../utils/dateCalculations';
+import { getNextDoseAmount } from '../utils/doseSchedule';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { VISUAL_RANGE_MULTIPLIER, MIN_VISUAL_RANGE_DAYS, DAYS_PER_MONTH } from '../utils/time';
 import { MedicationMenu } from './MedicationMenu';
@@ -463,6 +464,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             isDoseConsumedOnDate(medication, d.id, todayStr)
           )
         : medication.lastConsumedDate === todayStr;
+    const nextDoseAmount = getNextDoseAmount(medication);
 
     const statusLabel = isOut
       ? 'نفد'
@@ -504,10 +506,10 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 <button
                   type="button"
                   onClick={() => onConsumeDose(medication.id)}
-                  disabled={effPills <= 0 || medication.dailyDose <= 0}
-                  title={`تناول جرعة (-${medication.dailyDose})`}
+                  disabled={effPills <= 0 || nextDoseAmount <= 0}
+                  title={`تناول جرعة (-${nextDoseAmount})`}
                   className={`w-5 h-5 flex items-center justify-center rounded ${
-                    effPills <= 0 || medication.dailyDose <= 0
+                    effPills <= 0 || nextDoseAmount <= 0
                       ? 'text-slate-300 cursor-not-allowed'
                       : 'text-emerald-700 hover:bg-emerald-50'
                   }`}
@@ -594,6 +596,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             isDoseConsumedOnDate(medication, d.id, todayStr)
           )
         : medication.lastConsumedDate === todayStr;
+    const nextDoseAmount = getNextDoseAmount(medication);
 
     return (
       <div
@@ -656,10 +659,10 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 <button
                   type="button"
                   onClick={() => onConsumeDose(medication.id)}
-                  disabled={effPills <= 0 || medication.dailyDose <= 0}
-                  title={`تناول جرعة اليوم (-${medication.dailyDose} ${medication.unit})`}
+                  disabled={effPills <= 0 || nextDoseAmount <= 0}
+                  title={`تناول جرعة (-${nextDoseAmount})`}
                   className={`w-6 h-6 flex items-center justify-center rounded-md border transition active:scale-95 ${
-                    effPills <= 0 || medication.dailyDose <= 0
+                    effPills <= 0 || nextDoseAmount <= 0
                       ? 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed'
                       : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
                   }`}

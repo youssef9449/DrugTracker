@@ -160,7 +160,8 @@ describe('SelectDoseModal', () => {
     expect(onSelect).toHaveBeenCalledWith('med-multi', 'd2');
   });
 
-  it('selecting dose A passes doseId = d1', () => {
+  it('selecting dose A passes doseId = d1 when upcoming', () => {
+    vi.setSystemTime(new Date(2026, 8, 13, 7, 0, 0));
     const onSelect = vi.fn();
     render(
       <SelectDoseModal
@@ -173,8 +174,41 @@ describe('SelectDoseModal', () => {
     const a = screen
       .getAllByRole('button')
       .find((btn) => btn.getAttribute('data-dose-id') === 'd1');
+    expect(a).toBeEnabled();
     fireEvent.click(a!);
     expect(onSelect).toHaveBeenCalledWith('med-multi', 'd1');
+  });
+
+  it('disables past doses (time elapsed today) and marks them auto-deducted with checked checkbox', () => {
+    // System time is 12:00: d1 (08:00) is past, d2 (14:00) is upcoming
+    vi.setSystemTime(new Date(2026, 8, 13, 12, 0, 0));
+    const onSelect = vi.fn();
+    render(
+      <SelectDoseModal
+        isOpen
+        medication={makeMulti()}
+        onSelect={onSelect}
+        onClose={() => {}}
+      />
+    );
+    const d1Btn = screen
+      .getAllByRole('button')
+      .find((btn) => btn.getAttribute('data-dose-id') === 'd1');
+    const d2Btn = screen
+      .getAllByRole('button')
+      .find((btn) => btn.getAttribute('data-dose-id') === 'd2');
+
+    // d1 is past -> disabled and marked with auto-deduct
+    expect(d1Btn).toBeDisabled();
+    expect(d1Btn).toHaveTextContent('خصم تلقائي');
+    fireEvent.click(d1Btn!);
+    expect(onSelect).not.toHaveBeenCalled();
+
+    // d2 is upcoming -> enabled and selectable
+    expect(d2Btn).toBeEnabled();
+    expect(d2Btn).toHaveTextContent('اختيار');
+    fireEvent.click(d2Btn!);
+    expect(onSelect).toHaveBeenCalledWith('med-multi', 'd2');
   });
 
   it('marks consumed doses and blocks re-selection', () => {

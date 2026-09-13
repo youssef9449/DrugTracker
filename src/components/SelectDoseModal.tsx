@@ -7,6 +7,10 @@ import {
   isDoseConsumedOnDate,
 } from '../utils/dateCalculations';
 import {
+  isDoseCompletedToday,
+  isDoseTimeElapsedToday,
+} from '../utils/doseSchedule';
+import {
   relativeDoseDayLabel,
   sortDoseSelectItems,
 } from '../utils/doseSelectDisplay';
@@ -33,6 +37,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
   if (!medication) return null;
 
   const today = getTodayDateString();
+  const now = new Date();
   const schedule: MedicationDose[] = Array.isArray(medication.doseSchedule)
     ? medication.doseSchedule
     : [];
@@ -44,7 +49,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
   const unit = medication.unit || 'قرص';
   const allConsumed =
     schedule.length > 0 &&
-    schedule.every((d) => isDoseConsumedOnDate(medication, d.id, today));
+    schedule.every((d) => isDoseCompletedToday(medication, d, today, now));
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} label="اختر الجرعة" variant="center">
@@ -82,24 +87,30 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
           ) : (
             items.map(({ dose, eventDate }) => {
               const consumed = isDoseConsumedOnDate(medication, dose.id, today);
+              const autoDeducted =
+                medication.autoDeductEnabled !== false &&
+                isDoseTimeElapsedToday(dose.time, now);
+              const isDone = consumed || autoDeducted;
               const dayLabel = relativeDoseDayLabel(eventDate, today);
               const timeLabel = formatTimeArabic(dose.time);
               const whenLabel = `${dayLabel} • ${timeLabel}`;
               const amountLabel = `${dose.amount} ${unit}`;
-              const ariaLabel = consumed
-                ? `تم تناول ${whenLabel} — ${amountLabel}`
+              const ariaLabel = isDone
+                ? (consumed
+                    ? `تم تناول ${whenLabel} — ${amountLabel}`
+                    : `تم خصم ${whenLabel} تلقائياً — ${amountLabel}`)
                 : `تناول ${whenLabel} — ${amountLabel}`;
               return (
                 <button
                   key={dose.id}
                   type="button"
-                  disabled={consumed}
+                  disabled={isDone}
                   onClick={() => {
-                    if (consumed) return;
+                    if (isDone) return;
                     onSelect(medication.id, dose.id);
                   }}
                   className={`w-full flex items-center justify-between gap-3 px-3 py-3 rounded-xl border text-right transition active:scale-[0.99] ${
-                    consumed
+                    isDone
                       ? 'bg-emerald-50 border-emerald-200 text-emerald-700 cursor-not-allowed opacity-90'
                       : 'bg-white border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 text-slate-800'
                   }`}
@@ -110,12 +121,12 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                   <span className="flex items-center gap-2 min-w-0">
                     <span
                       className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${
-                        consumed
+                        isDone
                           ? 'bg-emerald-500 border-emerald-500 text-white'
                           : 'border-slate-300 text-transparent'
                       }`}
                     >
-                      {consumed ? <Check className="w-3 h-3" /> : null}
+                      {isDone ? <Check className="w-3 h-3" /> : null}
                     </span>
                     <span className="min-w-0 text-right">
                       <span className="block text-sm font-semibold truncate">
@@ -126,7 +137,11 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                       </span>
                     </span>
                   </span>
-                  {!consumed && (
+                  {isDone ? (
+                    <span className="text-[11px] font-medium text-emerald-700/80 shrink-0">
+                      {consumed ? 'تم التناول' : 'خصم تلقائي'}
+                    </span>
+                  ) : (
                     <span className="text-xs font-bold text-emerald-600 shrink-0">
                       اختيار
                     </span>

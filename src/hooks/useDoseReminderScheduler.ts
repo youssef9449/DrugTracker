@@ -325,6 +325,8 @@ export function useDoseReminderScheduler({
 
   /** Keys (medId::doseId) that were consumed on the last reconciliation. */
   const prevConsumedKeysRef = useRef<Set<string>>(new Set());
+  /** Previous resumeTick — resume forces full re-suppress of still-consumed slots. */
+  const prevResumeTickRef = useRef<number | null>(null);
 
   const resumeTickValue = resumeTick ?? 0;
 
@@ -334,6 +336,13 @@ export function useDoseReminderScheduler({
 
     const today = getTodayDateString();
     const nextConsumedKeys = new Set<string>();
+    // Resume (or first observation of resumeTick) re-applies suppression for
+    // every still-consumed slot. Signature-only changes process transitions
+    // only so restoring d2 does not re-touch a still-consumed sibling d1.
+    const resumeChanged =
+      prevResumeTickRef.current === null ||
+      prevResumeTickRef.current !== resumeTickValue;
+    prevResumeTickRef.current = resumeTickValue;
 
     for (const med of medicationsRef.current) {
       if (!med.reminderEnabled) continue;
@@ -345,10 +354,17 @@ export function useDoseReminderScheduler({
         const slotConsumedToday = isDoseConsumedOnDate(med, slot.doseId, today);
         const key = doseScheduleKey(slot.medId, slot.doseId);
         const { medId, doseId, time, amount, name, unit } = slot;
+        const wasConsumed = prevConsumedKeysRef.current.has(key);
 
         if (slotConsumedToday) {
           nextConsumedKeys.add(key);
-          // Suppress today's occurrence for a consumed slot.
+          // Suppress only when newly consumed, or when resume forces a full
+          // re-apply. Still-consumed siblings must not be cancelled/rescheduled
+          // merely because a different dose was restored.
+          const newlyConsumed = !wasConsumed;
+          if (!newlyConsumed && !resumeChanged) {
+            continue;
+          }
           clearSnoozedDose(med.id, doseId);
           const gen = bumpGen(key);
           enqueue(key, () =>
@@ -374,10 +390,7 @@ export function useDoseReminderScheduler({
               });
             })
           );
-        } else if (
-          prevConsumedKeysRef.current.has(key) &&
-          isDoseReminderTimeStillAhead(time)
-        ) {
+        } else if (wasConsumed && isDoseReminderTimeStillAhead(time)) {
           // Restore transition: this slot was consumed on the previous
           // reconciliation and is no longer consumed, with today's time
           // still ahead → re-arm without skipToday (exact dose identity).

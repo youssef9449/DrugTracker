@@ -43,21 +43,94 @@ import {
 } from './time';
 
 /**
- * The single Android notification channel for dose reminders.
+ * The BACKGROUND/KILLED dose-reminder notification channel.
  * Versioned because Android channel sound settings are immutable —
- * bumping the suffix is the only way to change the bundled sound.
+ * bumping the suffix is the only way to change the sound.
+ *
+ * v3: uses the default system notification sound (no custom sound).
+ * v2: used a custom 'dose_reminder.wav' (removed — users found it
+ *      unpleasant).
  *
  * The channel is created in native.ts with:
- *   - sound: 'dose_reminder.wav' (bundled native sound)
+ *   - no custom sound → Android default system notification sound
  *   - importance: HIGH (heads-up + sound)
  *   - visibility: PUBLIC (lock screen)
  *
- * There is NO foreground/background channel switching. The same channel
- * is used whether the app is foreground, background, or killed. The
- * native notification sound is the ONLY sound for dose reminders —
- * no JS sound playback is involved.
+ * This channel is used when the app is in the BACKGROUND or KILLED.
+ * When the app is in the FOREGROUND, {@link DOSE_REMINDER_FOREGROUND_CHANNEL_ID}
+ * is used instead (silent — no Android sound) so only the in-app
+ * DoseAlarmModal + chime are produced.
  */
-export const DOSE_REMINDER_CHANNEL_ID = 'dose-reminder-v2';
+export const DOSE_REMINDER_CHANNEL_ID = 'dose-reminder-v3';
+
+/**
+ * The FOREGROUND dose-reminder notification channel — SILENT.
+ *
+ * Used when the app is in the foreground so the scheduled notification
+ * triggers the `localNotificationReceived` event (which opens the
+ * DoseAlarmModal + plays the in-app chime) WITHOUT producing an audible
+ * Android notification sound.
+ *
+ * Created in native.ts with:
+ *   - no `sound` property → no sound
+ *   - importance: LOW (no sound, no heads-up, appears in shade only)
+ *   - visibility: PUBLIC (lock screen)
+ *
+ * Versioned (v1) so the sound config can be changed if ever needed
+ * (Android channel sound is immutable after creation).
+ */
+export const DOSE_REMINDER_FOREGROUND_CHANNEL_ID = 'dose-reminder-foreground-v1';
+
+// ─────────────────────────────────────────────────────────────
+// App foreground/background state tracker.
+//
+// Updated by native.ts on appStateChange. Controls which channel dose
+// reminders are scheduled on:
+//   foreground → DOSE_REMINDER_FOREGROUND_CHANNEL_ID (silent)
+//   background → DOSE_REMINDER_CHANNEL_ID (system default sound)
+//
+// The scheduler (useDoseReminderScheduler) re-arms all pending dose
+// reminders on every lifecycle transition (via lifecycleTick), so the
+// channel matches the current app state for the common case.
+//
+// IMPORTANT — schedule-time channel is not a hard guarantee under
+// process death: if the app is killed after setAppInForeground(false)
+// but before cancel+reschedule completes, a silent foreground-channel
+// notification could still be pending. The authority for killed-process
+// correctness is the repository-owned TimedNotificationPublisher +
+// AppForegroundState in native-android/ (installed by prepare-android.mjs).
+// Delivery uses process-local MainActivity onResume/onPause state; a fresh
+// process defaults to false → dose-reminder-v3. JS reconciliation remains
+// the fast path for live transitions.
+// ─────────────────────────────────────────────────────────────
+let appInForeground = true;
+
+/**
+ * Set the current app foreground/background state. Called by native.ts
+ * on appStateChange, BEFORE the scheduler re-arms reminders, so
+ * {@link getDoseReminderChannelId} returns the correct channel.
+ */
+export function setAppInForeground(value: boolean): void {
+  appInForeground = value;
+}
+
+/**
+ * Returns true if the app is currently in the foreground.
+ */
+export function isAppInForeground(): boolean {
+  return appInForeground;
+}
+
+/**
+ * The channel ID to use for dose reminders based on the current app state.
+ * - Foreground: silent channel (no Android sound; in-app chime handles audio)
+ * - Background/Killed: system-default-sound channel (dose-reminder-v3)
+ */
+export function getDoseReminderChannelId(): string {
+  return appInForeground
+    ? DOSE_REMINDER_FOREGROUND_CHANNEL_ID
+    : DOSE_REMINDER_CHANNEL_ID;
+}
 
 /**
  * Returns 'android' when running on Android, 'ios' when on iOS, or
@@ -405,7 +478,7 @@ export async function sendMedicationDoseReminder(
     id: notificationId('dose', medId),
     title,
     body,
-    channelId: DOSE_REMINDER_CHANNEL_ID,
+    channelId: getDoseReminderChannelId(),
     smallIcon: 'ic_launcher',
     actionTypeId: 'dose-reminder',
     extra: { medicationId: medId },
@@ -475,7 +548,7 @@ export async function sendTestAlertNotification(): Promise<void> {
     id: notificationId('test'),
     title: '🔔 إشعار تجريبي: متابع الأدوية',
     body: 'الإشعارات والتنبيهات تعمل بشكل سليم على جهازك!',
-    channelId: DOSE_REMINDER_CHANNEL_ID,
+    channelId: getDoseReminderChannelId(),
     smallIcon: 'ic_launcher',
   });
 }
@@ -1080,7 +1153,7 @@ export async function scheduleSnoozedDoseReminder(
               allowWhileIdle: true,
             },
             smallIcon: 'ic_launcher',
-            channelId: DOSE_REMINDER_CHANNEL_ID,
+            channelId: getDoseReminderChannelId(),
             actionTypeId: 'dose-reminder',
             ongoing: false,
             autoCancel: true,
@@ -1174,8 +1247,8 @@ export function isDoseReminderTimeStillAhead(
  *
  * `allowWhileIdle: true` lets the alarm fire even in Doze mode.
  *
- * The notification uses the `dose-reminder-v2` channel with the bundled
- * native sound (`dose_reminder.wav`). No JS sound playback is involved.
+ * The notification uses the `dose-reminder-v3` channel, which plays
+ * the default system notification sound. No JS sound playback is involved.
  */
 export async function scheduleDoseReminder(
   medId: string,
@@ -1228,7 +1301,7 @@ export async function scheduleDoseReminder(
               allowWhileIdle: true,
             },
             smallIcon: 'ic_launcher',
-            channelId: DOSE_REMINDER_CHANNEL_ID,
+            channelId: getDoseReminderChannelId(),
             actionTypeId: 'dose-reminder',
             ongoing: false,
             autoCancel: true,

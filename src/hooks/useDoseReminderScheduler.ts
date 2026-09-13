@@ -40,6 +40,15 @@ export interface UseDoseReminderSchedulerOptions {
    * scheduler's resumeTick pattern.
    */
   resumeTick?: number;
+  /**
+   * Bumped by App.tsx on EVERY app state transition (foreground ↔
+   * background). Drives the main scheduling effect to re-arm all
+   * pending dose reminders on the correct channel: silent foreground
+   * channel when the app is open, system-sound background channel when
+   * the app is backgrounded/killed. This is separate from resumeTick
+   * (which is foreground-only and drives the consumption effect).
+   */
+  lifecycleTick?: number;
 }
 
 /**
@@ -143,6 +152,7 @@ export function useDoseReminderScheduler({
   isFirstRun,
   exactAlarmEnabled,
   resumeTick,
+  lifecycleTick,
 }: UseDoseReminderSchedulerOptions): void {
   const medicationsRef = useRef(medications);
   medicationsRef.current = medications;
@@ -290,6 +300,7 @@ export function useDoseReminderScheduler({
     exactAlarmEnabled,
     hydrated,
     isFirstRun,
+    lifecycleTick,
   ]);
 
   // ─────────────────────────────────────────────────────────────

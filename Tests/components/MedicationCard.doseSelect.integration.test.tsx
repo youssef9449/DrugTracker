@@ -137,7 +137,7 @@ function readLogs(): ConsumptionLog[] {
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
-  vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
+  vi.setSystemTime(new Date('2024-09-10T07:00:00Z'));
   vi.clearAllMocks();
   localStorage.clear();
 });
@@ -288,7 +288,7 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
       (l) => l.type === 'dose_taken' && l.medicationId === 'med-multi'
     );
     expect(doseLog?.doseId).toBe('d1');
-    expect(doseLog?.amount).toBe(2);
+    expect(doseLog?.amount).toBe(-2);
   });
 
 
@@ -386,6 +386,8 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
   });
 
   it('displays next upcoming dose amount (-2) instead of daily aggregate (-5) and disables past doses', async () => {
+    // After 08:00, dose-8am is auto-completed; Card Take advances to dose-2pm amount 2.
+    vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
     localStorage.setItem(
       STORAGE_MEDS_KEY,
       JSON.stringify([

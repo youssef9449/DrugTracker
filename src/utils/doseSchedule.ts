@@ -366,12 +366,12 @@ export function getNextDoseAmount(
  *
  * Priority:
  * 1. While any slot is still incomplete: chronological scan —
- *    incomplete → Take; completed (manual or auto-deduct) → Restore that
- *    same doseId (Take d1 is immediately reversible; does NOT advance to d2).
+ *    incomplete → Take; completed+manual → Restore that same doseId
+ *    (Take d1 is immediately reversible; does NOT advance to d2).
+ *    Auto-deduct-only slots are skipped (not offered as Card Restore).
  * 2. When **all** slots are completed today: Restore the **last**
- *    chronologically manually consumed slot; if none, the last
- *    auto-completed (elapsed, not skipped) slot.
- * 3. Nothing left to restore/take → non-interactive.
+ *    chronologically manually consumed slot (by schedule time / dose.id).
+ * 3. All completed via auto-deduct only → non-interactive (no fake restore).
  *
  * Legacy (no schedule): lastConsumedDate / dailyDose.
  */
@@ -404,7 +404,8 @@ export function getCardDoseToggleTarget(
 
   if (anyIncomplete) {
     // Chronological scan while something is still open:
-    // incomplete → Take; completed (manual or auto) → Restore same doseId.
+    // incomplete → Take; completed+manual → Restore same doseId (not next).
+    // Auto-deduct-only completions are skipped so Take can advance past them.
     for (const d of sorted) {
       if (!isDoseCompletedToday(med, d, todayStr, now)) {
         const amount = Number(d.amount) || 0;
@@ -415,31 +416,41 @@ export function getCardDoseToggleTarget(
           canRestore: false,
         };
       }
-      // Completed via manual consume or auto-deduct → allow Restore.
-      const amount = Number(d.amount) || 0;
-      return {
-        doseId: d.id,
-        amount,
-        canTake: false,
-        canRestore: amount > 0,
-      };
+      if (isDoseConsumedOnDate(med, d.id, todayStr)) {
+        const amount = Number(d.amount) || 0;
+        return {
+          doseId: d.id,
+          amount,
+          canTake: false,
+          canRestore: amount > 0,
+        };
+      }
     }
   }
 
-  // All slots completed today: prefer last chronologically manual consume,
-  // falling back to the last slot (e.g. auto-deducted).
+  // All slots completed today: prefer last chronologically manual consume.
   let lastManual: (typeof sorted)[number] | undefined;
   for (const d of sorted) {
     if (isDoseConsumedOnDate(med, d.id, todayStr)) {
       lastManual = d;
     }
   }
-  const target = lastManual || sorted[sorted.length - 1];
-  const amount = Number(target?.amount) || Number(med.dailyDose) || 0;
+  if (lastManual) {
+    const amount = Number(lastManual.amount) || 0;
+    return {
+      doseId: lastManual.id,
+      amount,
+      canTake: false,
+      canRestore: amount > 0,
+    };
+  }
+
+  // All completed via auto-deduct only — no fake restore
+  const nominal = sorted[0];
   return {
-    doseId: target?.id,
-    amount,
+    doseId: nominal?.id,
+    amount: Number(nominal?.amount) || Number(med.dailyDose) || 0,
     canTake: false,
-    canRestore: amount > 0,
+    canRestore: false,
   };
 }

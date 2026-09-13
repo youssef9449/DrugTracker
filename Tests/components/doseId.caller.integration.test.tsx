@@ -142,7 +142,7 @@ function seed(med: Medication) {
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
-  vi.setSystemTime(new Date('2024-09-10T15:00:00'));
+  vi.setSystemTime(new Date('2024-09-10T13:00:00'));
   vi.clearAllMocks();
   localStorage.clear();
   doseReceivedHandler = null;
@@ -156,7 +156,7 @@ afterEach(() => {
 
 describe('doseId propagation — production callers (integration)', () => {
   it('MedicationCard Take targets exact next doseId (d2 after d1 auto-elapsed) via App → consumeDose', async () => {
-    // 15:00 → d1 (08:00) auto-completed; Card Take should be d2 amount 2
+    // 13:00 → d1 (08:00) auto-completed; Card Take should be d2 amount 2 (14:00 still ahead)
     seed(makeMulti({ currentPills: 30 }));
     render(<App />);
 
@@ -176,7 +176,9 @@ describe('doseId propagation — production callers (integration)', () => {
     const med = readMeds().find((m) => m.id === 'med-multi')!;
     expect(med.doseConsumption?.d1).toBeUndefined();
     expect(med.doseConsumption?.d3).toBeUndefined();
-    expect(effectiveCurrentPills(med)).toBe(28);
+    // Snapshot reduced by d2.amount (2) only; d1 still projects as auto-due → 27
+    expect(med.currentPills).toBe(28);
+    expect(effectiveCurrentPills(med)).toBe(27);
 
     const doseLog = readLogs().find(
       (l) => l.type === 'dose_taken' && l.medicationId === 'med-multi'
@@ -231,7 +233,9 @@ describe('doseId propagation — production callers (integration)', () => {
     const med = readMeds()[0]!;
     expect(med.doseConsumption?.d1).toBeUndefined();
     expect(med.doseConsumption?.d3).toBeUndefined();
-    expect(effectiveCurrentPills(med)).toBe(28);
+    expect(med.currentPills).toBe(28);
+    // d1 (08:00) still auto-due projected
+    expect(effectiveCurrentPills(med)).toBe(27);
 
     const doseLog = readLogs().find((l) => l.type === 'dose_taken');
     expect(doseLog?.doseId).toBe('d2');
@@ -253,7 +257,9 @@ describe('doseId propagation — production callers (integration)', () => {
     const med = readMeds()[0]!;
     expect(med.doseConsumption).toBeUndefined();
     expect(med.doseConsumptionHistory).toBeUndefined();
-    expect(effectiveCurrentPills(med)).toBe(30);
+    // No consume mutation; snapshot unchanged. d1 auto-due still projects.
+    expect(med.currentPills).toBe(30);
+    expect(effectiveCurrentPills(med)).toBe(29);
     expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(0);
   });
 
@@ -282,7 +288,8 @@ describe('doseId propagation — production callers (integration)', () => {
     const med = readMeds()[0]!;
     expect(med.doseConsumption?.d1).toBeUndefined();
     expect(med.doseConsumption?.d3).toBeUndefined();
-    expect(effectiveCurrentPills(med)).toBe(28);
+    expect(med.currentPills).toBe(28);
+    expect(effectiveCurrentPills(med)).toBe(27);
 
     const doseLog = readLogs().find((l) => l.type === 'dose_taken');
     expect(doseLog?.doseId).toBe('d2');

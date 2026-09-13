@@ -164,6 +164,11 @@ export default function App() {
   // reminder, even if a previous suppression attempt failed while the
   // process was backgrounded/killed. Mirrors criticalAlarmResumeTick.
   const [doseAlarmResumeTick, setDoseAlarmResumeTick] = useState(0);
+  // Bumped on EVERY app state transition (foreground ↔ background) so the
+  // dose-reminder scheduler re-runs and re-arms all pending reminders on
+  // the correct channel: silent foreground channel when the app is open,
+  // system-sound background channel when the app is backgrounded/killed.
+  const [doseLifecycleTick, setDoseLifecycleTick] = useState(0);
   const [globalAutoDeductEnabled, setGlobalAutoDeductEnabled] = useState<boolean>(true);
 
   const [isPhoneFrame, setIsPhoneFrame] = useState(true);
@@ -591,6 +596,7 @@ export default function App() {
     isFirstRun,
     exactAlarmEnabled,
     resumeTick: doseAlarmResumeTick,
+    lifecycleTick: doseLifecycleTick,
   });
 
   const handleRestoreDose = (
@@ -1168,15 +1174,17 @@ export default function App() {
   // notification fires while the app is in the foreground, the
   // localNotificationReceived listener in native.ts calls this handler
   // with the medicationId, which opens the DoseAlarmModal via openAlarm.
-  // No sound is played here — the native notification channel plays the
-  // bundled sound. openAlarm is stable (empty-deps useCallback) so this
-  // effect only registers once.
+  // The notification was scheduled on the SILENT foreground channel
+  // (dose-reminder-foreground-v1), so Android produces no sound. The
+  // in-app chime (playSuccessChime) is the ONLY sound — gated by the
+  // existing soundEnabled setting, exactly like all other UI feedback.
   useEffect(() => {
     registerDoseReceivedHandler((medicationId, doseId) => {
       openAlarm(medicationId, doseId);
+      if (soundEnabled) playSuccessChime();
     });
     return () => registerDoseReceivedHandler(null);
-  }, [openAlarm]);
+  }, [openAlarm, soundEnabled]);
 
   // ─────────────────────────────────────────────────────────────
   // App-resume handler: re-check exact-alarm permission when the app
@@ -1201,6 +1209,13 @@ export default function App() {
   // ─────────────────────────────────────────────────────────────
   useEffect(() => {
     registerAppResumeHandler((isActive) => {
+      // Always bump the lifecycle tick on BOTH foreground and background
+      // transitions so useDoseReminderScheduler re-arms all pending dose
+      // reminders on the correct channel (silent foreground / system-sound
+      // background). native.ts already called setAppInForeground(isActive)
+      // before this handler runs, so getDoseReminderChannelId() returns
+      // the right channel when the scheduler re-schedules.
+      setDoseLifecycleTick((tick) => tick + 1);
       if (isActive) {
         setCriticalAlarmResumeTick((tick) => tick + 1);
         setDoseAlarmResumeTick((tick) => tick + 1);

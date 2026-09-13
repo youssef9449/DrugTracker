@@ -24,6 +24,7 @@ vi.mock('@capacitor/local-notifications', () => ({
   LocalNotifications: {
     listChannels: vi.fn(() => Promise.resolve({ channels: [] })),
     createChannel: vi.fn(() => Promise.resolve()),
+    deleteChannel: vi.fn(() => Promise.resolve()),
     registerActionTypes: vi.fn(() => Promise.resolve()),
     addListener: vi.fn(() => Promise.resolve({ remove: vi.fn(() => Promise.resolve()) })),
   },
@@ -119,5 +120,85 @@ describe('native.ts — createChannel cast removed (#37)', () => {
     // exist, tsc would fail. The mock provides the runtime; the
     // real .d.ts provides the types. The test passes by compiling
     // successfully — no runtime assertion needed (#122).
+  });
+});
+
+/**
+ * Notification channel creation — verifies the two-channel design:
+ * - dose-reminder-v3: background/killed channel, HIGH importance, no
+ *   custom sound (system default).
+ * - dose-reminder-foreground-v1: foreground channel, LOW importance
+ *   (silent — no Android sound), no custom sound.
+ * - Old v1/v2 channels are deleted on migration.
+ * - The unrelated low-stock channel is also created.
+ */
+describe('native.ts — two-channel dose-reminder design', () => {
+  it('creates both dose-reminder channels + low-stock with correct config', async () => {
+    // Reset the initialized flag so initNativeBridge runs again.
+    vi.resetModules();
+
+    const { LocalNotifications } = await import('@capacitor/local-notifications');
+    const { initNativeBridge } = await import('@/native');
+    const {
+      DOSE_REMINDER_CHANNEL_ID,
+      DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
+    } = await import('@/utils/notifications');
+
+    vi.mocked(LocalNotifications.listChannels).mockResolvedValue({ channels: [] });
+    vi.mocked(LocalNotifications.createChannel).mockClear();
+    vi.mocked(LocalNotifications.deleteChannel).mockClear();
+
+    await initNativeBridge();
+
+    // createChannel should have been called for each channel.
+    const created = vi.mocked(LocalNotifications.createChannel).mock.calls.map(
+      (c) => c[0]
+    );
+    const createdIds = new Set(created.map((c) => c.id));
+
+    // Background channel: HIGH importance, no custom sound.
+    expect(createdIds.has(DOSE_REMINDER_CHANNEL_ID)).toBe(true);
+    const bgChannel = created.find((c) => c.id === DOSE_REMINDER_CHANNEL_ID)!;
+    expect(bgChannel.importance).toBe(4); // HIGH
+    expect(bgChannel.sound).toBeUndefined(); // no custom sound → system default
+
+    // Foreground channel: LOW importance (silent), no custom sound.
+    expect(createdIds.has(DOSE_REMINDER_FOREGROUND_CHANNEL_ID)).toBe(true);
+    const fgChannel = created.find(
+      (c) => c.id === DOSE_REMINDER_FOREGROUND_CHANNEL_ID
+    )!;
+    expect(fgChannel.importance).toBe(2); // LOW — no sound, no heads-up
+    expect(fgChannel.sound).toBeUndefined(); // no custom sound
+
+    // Low-stock channel also created.
+    expect(createdIds.has('low-stock')).toBe(true);
+  });
+
+  it('deletes old dose-reminder and dose-reminder-v2 channels on migration', async () => {
+    vi.resetModules();
+
+    const { LocalNotifications } = await import('@capacitor/local-notifications');
+    const { initNativeBridge } = await import('@/native');
+
+    // Simulate an existing install with old v1 + v2 channels.
+    vi.mocked(LocalNotifications.listChannels).mockResolvedValue({
+      channels: [
+        { id: 'dose-reminder', name: 'old' },
+        { id: 'dose-reminder-v2', name: 'old' },
+        { id: 'low-stock', name: 'stock' },
+      ],
+    });
+    vi.mocked(LocalNotifications.deleteChannel).mockClear();
+    vi.mocked(LocalNotifications.createChannel).mockClear();
+
+    await initNativeBridge();
+
+    const deleted = vi.mocked(LocalNotifications.deleteChannel).mock.calls.map(
+      (c) => c[0].id
+    );
+    expect(deleted).toContain('dose-reminder');
+    expect(deleted).toContain('dose-reminder-v2');
+    // low-stock is NOT deleted (unrelated channel preserved).
+    expect(deleted).not.toContain('low-stock');
   });
 });

@@ -13,9 +13,13 @@
  *     on the dark teal background.
  *   - Listen for the Android hardware back button and close the
  *     top modal if one is open, or exit the app if none (#21).
- *   - Create the Android notification channel `dose-reminder-v3`
- *     using the default system notification sound (no custom sound).
- *   - Listen for `appStateChange` to re-check exact-alarm permission
+ *   - Create two Android notification channels for dose reminders:
+ *     `dose-reminder-v3` (background/killed — system default sound) and
+ *     `dose-reminder-foreground-v1` (foreground — silent, so only the
+ *     in-app DoseAlarmModal + chime are produced).
+ *   - Listen for `appStateChange` to update the foreground/background
+ *     state tracker (setAppInForeground) so dose reminders are scheduled
+ *     on the correct channel, and to re-check exact-alarm permission
  *     when the app resumes.
  *   - Listen for `localNotificationReceived` to open the in-app
  *     DoseAlarmModal when a dose reminder fires in the foreground.
@@ -27,7 +31,7 @@ import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { App } from '@capacitor/app';
 import { LocalNotifications, type Channel, type Importance, type Visibility } from '@capacitor/local-notifications';
-import { DOSE_REMINDER_CHANNEL_ID } from './utils/notifications';
+import { DOSE_REMINDER_CHANNEL_ID, DOSE_REMINDER_FOREGROUND_CHANNEL_ID, setAppInForeground } from './utils/notifications';
 
 let initialized = false;
 
@@ -70,8 +74,9 @@ export function registerNotificationActionHandler(
  * Register the handler called when a dose-reminder notification fires
  * while the app is in the foreground. The handler receives the
  * medicationId (from the notification's `extra.medicationId` field) and
- * is responsible for opening the DoseAlarmModal. No sound is played —
- * the native notification channel plays the bundled sound.
+ * is responsible for opening the DoseAlarmModal + playing the in-app
+ * chime. No Android notification sound is produced — the foreground
+ * channel (dose-reminder-foreground-v1) is silent.
  *
  * Pass null to unregister (e.g. on App unmount / HMR).
  */
@@ -129,12 +134,21 @@ export async function initNativeBridge(): Promise<void> {
 
   // ─────────────────────────────────────────────────────────────
   // App state listener — fires on foreground/background transitions.
-  // Used to re-check exact-alarm permission when the app resumes
-  // (the user may have just granted/denied SCHEDULE_EXACT_ALARM in
-  // the Android settings screen).
+  //
+  // 1. Updates the foreground/background state tracker
+  //    (setAppInForeground) so getDoseReminderChannelId() returns the
+  //    correct channel for subsequent scheduling. This MUST happen
+  //    before appResumeHandler so the scheduler sees the new state
+  //    when it re-arms reminders.
+  //
+  // 2. Calls appResumeHandler (App.tsx) which bumps lifecycleTick →
+  //    useDoseReminderScheduler re-schedules all pending dose reminders
+  //    on the now-correct channel (silent foreground / sound background).
+  //    Also re-checks exact-alarm permission on resume.
   // ─────────────────────────────────────────────────────────────
   try {
     appStateHandle = await App.addListener('appStateChange', ({ isActive }) => {
+      setAppInForeground(isActive);
       if (appResumeHandler) {
         try {
           appResumeHandler(isActive);
@@ -193,8 +207,18 @@ export async function initNativeBridge(): Promise<void> {
     // notification briefly). Visibility: 1 = PUBLIC (shows on
     // the lock screen).
     //
-    // No `sound` property is set → Android uses the default system
-    // notification sound (the one the user picked in Settings → Sound).
+    // Two dose-reminder channels:
+    // 1. dose-reminder-v3 — BACKGROUND/KILLED channel. No `sound`
+    //    property → Android uses the default system notification sound.
+    //    HIGH importance so the user gets a heads-up + sound when the
+    //    app is not open.
+    // 2. dose-reminder-foreground-v1 — FOREGROUND channel. SILENT
+    //    (LOW importance, no `sound` property) so the scheduled
+    //    notification triggers `localNotificationReceived` (which opens
+    //    the DoseAlarmModal + plays the in-app chime) WITHOUT producing
+    //    an audible Android notification. The notification still appears
+    //    in the shade (silently) as a fallback.
+    //
     // The previous v2 channel used a custom 'dose_reminder.wav' that
     // users found unpleasant; since channel sound is immutable, we
     // bump to a new channel id (v3) and delete the old one below.
@@ -205,6 +229,14 @@ export async function initNativeBridge(): Promise<void> {
         description: 'تذكيرات يومية بمواعيد الأدوية',
         importance: 4 as Importance,
         visibility: 1 as Visibility,
+      },
+      {
+        id: DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
+        name: 'تذكير الجرعات (أثناء التشغيل)',
+        description: 'تذكيرات صامتة أثناء فتح التطبيق',
+        importance: 2 as Importance, // LOW — no sound, no heads-up
+        visibility: 1 as Visibility,
+        // No `sound` property → no sound (silent channel).
       },
       {
         id: 'low-stock',
@@ -264,9 +296,12 @@ export async function initNativeBridge(): Promise<void> {
   // to extract the medicationId and call the registered handler so
   // App.tsx can open the DoseAlarmModal.
   //
-  // NO sound playback happens here. The notification's sound is played
-  // by the Android notification channel (the default system notification
-  // sound). There is no JS sound path for dose reminders.
+  // NO sound playback happens here. When the app is in the foreground,
+  // the notification was scheduled on the SILENT foreground channel
+  // (dose-reminder-foreground-v1), so Android produces no audible alert.
+  // The in-app chime (playSuccessChime, gated by soundEnabled) is played
+  // by App.tsx's doseReceivedHandler — that is the ONLY sound in the
+  // foreground. There is no other JS sound path for dose reminders.
   //
   // #38: await the addListener and store the handle so it can be
   // removed if needed (prevents duplicate listeners across HMR).

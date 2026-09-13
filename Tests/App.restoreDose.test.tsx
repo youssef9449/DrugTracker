@@ -153,6 +153,8 @@ async function takeDoseViaSelectModal(doseId: string): Promise<void> {
   );
   const target = doseButtons.find((b) => b.getAttribute('data-dose-id') === doseId);
   expect(target).toBeTruthy();
+  // Restored/skipped doses must remain selectable despite elapsed time (Case D).
+  expect(target).not.toBeDisabled();
   fireEvent.click(target!);
 }
 

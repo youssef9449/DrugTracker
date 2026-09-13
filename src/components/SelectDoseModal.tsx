@@ -6,10 +6,7 @@ import {
   getTodayDateString,
   isDoseConsumedOnDate,
 } from '../utils/dateCalculations';
-import {
-  isDoseCompletedToday,
-  isDoseTimeElapsedToday,
-} from '../utils/doseSchedule';
+import { isDoseCompletedToday } from '../utils/doseSchedule';
 import {
   relativeDoseDayLabel,
   sortDoseSelectItems,
@@ -86,11 +83,11 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
             </div>
           ) : (
             items.map(({ dose, eventDate }) => {
+              // Canonical completed semantics (same as isDoseCompletedToday):
+              // consumed > skipped/restored > elapsed auto-deduct.
+              // A restored/skipped dose remains selectable for Take.
+              const isDone = isDoseCompletedToday(medication, dose, today, now);
               const consumed = isDoseConsumedOnDate(medication, dose.id, today);
-              const autoDeducted =
-                medication.autoDeductEnabled !== false &&
-                isDoseTimeElapsedToday(dose.time, now);
-              const isDone = consumed || autoDeducted;
               const dayLabel = relativeDoseDayLabel(eventDate, today);
               const timeLabel = formatTimeArabic(dose.time);
               const whenLabel = `${dayLabel} • ${timeLabel}`;

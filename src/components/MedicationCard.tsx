@@ -46,6 +46,32 @@ function colorTagClasses(colorTag: string | undefined): { bg: string; border: st
   }
 }
 
+/**
+ * A SHORT depletion label for the tight "جميع الأدوية" card rows
+ * (compact + detailed). `getDepletionDate().formattedArabic` includes
+ * the full weekday name for far-future dates (e.g. "الأربعاء، ٣٠
+ * سبتمبر"), which is too long for the small pill in these rows and
+ * overlaps neighboring content. Here we drop the weekday and only
+ * keep "يوم شهر" (e.g. "٣٠ سبتمبر"), while keeping the near-term
+ * wording ("اليوم"/"غداً"/"بعد غد"/"نفد المخزون") unchanged.
+ */
+function shortDepletionLabel(
+  depletion: { dateStr: string; daysLeft: number },
+  isOut: boolean
+): string {
+  if (isOut) return 'نفد المخزون';
+  if (depletion.daysLeft === 0) return 'اليوم';
+  if (depletion.daysLeft === 1) return 'غداً';
+  if (depletion.daysLeft === 2) return 'بعد غد';
+  const target = new Date(`${depletion.dateStr}T00:00:00Z`);
+  if (Number.isNaN(target.getTime())) return depletion.dateStr;
+  return target.toLocaleDateString('ar-EG', {
+    day: 'numeric',
+    month: 'long',
+    timeZone: 'UTC',
+  });
+}
+
 interface MedicationCardProps {
   medication: Medication;
   viewFilter?: 'all' | 'alerts' | 'sufficient';
@@ -468,13 +494,13 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           isOut ? 'bg-red-50/25' : isCrit ? 'bg-rose-50/20' : isWarn ? 'bg-amber-50/10' : ''
         }`}
       >
-        {/* Row 1: name on its own line */}
-        <h3 className="text-[11px] font-bold text-slate-900 leading-tight tracking-tight truncate" title={medication.name}>
+        {/* Row 1: name — alone on its own full-width line */}
+        <h3 className="block w-full text-[11px] font-bold text-slate-900 leading-tight tracking-tight truncate mb-1" title={medication.name}>
           {medication.name}
         </h3>
 
         {/* Row 2: status + actions */}
-        <div className="flex items-center justify-between gap-1.5 mt-0.5 min-w-0">
+        <div className="flex items-center justify-between gap-1.5 min-w-0">
           <div className="min-w-0 flex-1 overflow-hidden">
             {isOut ? (
               <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 flex items-center gap-0.5 shrink-0 w-fit">
@@ -567,9 +593,9 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               <Clock className="w-2 h-2 text-teal-600" />
               <span>{medication.dailyDose}/ي</span>
             </div>
-            <div className="flex items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 text-slate-600 truncate max-w-[80px]" title={`النفاذ: ${depletion.formattedArabic}`}>
+            <div className="flex items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 text-slate-600 truncate max-w-[70px]" title={`النفاذ: ${depletion.formattedArabic}`}>
               <Calendar className="w-2 h-2 text-slate-400 shrink-0" />
-              <span className="truncate">{depletion.formattedArabic}</span>
+              <span className="truncate">{shortDepletionLabel(depletion, isOut)}</span>
             </div>
           </div>
         </div>
@@ -619,40 +645,40 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             : ''
         }`}
       >
-        {/* Top block: Name (own line) + Category + Status Badge + Actions */}
-        <div className="flex items-start justify-between gap-2 min-w-0">
-          <div className="min-w-0 flex-1">
-            <h3 className="text-xs font-bold text-slate-900 leading-tight tracking-tight truncate" title={medication.name}>
-              {medication.name}
-            </h3>
-            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-              {medication.category && (
-                <span className="text-[9px] font-medium bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded-full shrink-0">
-                  {medication.category}
-                </span>
-              )}
-              {isOut ? (
-                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 flex items-center gap-0.5 shrink-0">
-                  <AlertCircle className="w-2.5 h-2.5" />
-                  <span>نفد</span>
-                </span>
-              ) : isCrit ? (
-                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800 flex items-center gap-0.5 shrink-0">
-                  <Clock className="w-2.5 h-2.5" />
-                  <span>حرج ({statusInfo.daysLeft}ي)</span>
-                </span>
-              ) : isWarn ? (
-                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 flex items-center gap-0.5 shrink-0">
-                  <Clock className="w-2.5 h-2.5" />
-                  <span>تنبيه ({statusInfo.daysLeft}ي)</span>
-                </span>
-              ) : (
-                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 flex items-center gap-0.5 shrink-0">
-                  <CheckCircle2 className="w-2.5 h-2.5" />
-                  <span>آمن ({statusInfo.daysLeft}ي)</span>
-                </span>
-              )}
-            </div>
+        {/* Row 1: Name — alone on its own full-width line */}
+        <h3 className="text-xs font-bold text-slate-900 leading-tight tracking-tight truncate" title={medication.name}>
+          {medication.name}
+        </h3>
+
+        {/* Row 2: Category + Status Badge (right) / Actions (left) */}
+        <div className="flex items-center justify-between gap-2 mt-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+            {medication.category && (
+              <span className="text-[9px] font-medium bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded-full shrink-0">
+                {medication.category}
+              </span>
+            )}
+            {isOut ? (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 flex items-center gap-0.5 shrink-0">
+                <AlertCircle className="w-2.5 h-2.5" />
+                <span>نفد</span>
+              </span>
+            ) : isCrit ? (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800 flex items-center gap-0.5 shrink-0">
+                <Clock className="w-2.5 h-2.5" />
+                <span>حرج ({statusInfo.daysLeft}ي)</span>
+              </span>
+            ) : isWarn ? (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 flex items-center gap-0.5 shrink-0">
+                <Clock className="w-2.5 h-2.5" />
+                <span>تنبيه ({statusInfo.daysLeft}ي)</span>
+              </span>
+            ) : (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 flex items-center gap-0.5 shrink-0">
+                <CheckCircle2 className="w-2.5 h-2.5" />
+                <span>آمن ({statusInfo.daysLeft}ي)</span>
+              </span>
+            )}
           </div>
 
           {/* Quick Actions — tonal / filled icon buttons (Material 3) */}
@@ -746,10 +772,10 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               <span className="text-slate-400">/يوم</span>
             </div>
 
-            <div className="flex items-center gap-1 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 font-medium">
-              <Calendar className="w-2.5 h-2.5 text-slate-400" />
-              <span className="text-slate-400">النفاذ:</span>
-              <span className="font-bold text-slate-800">{depletion.formattedArabic}</span>
+            <div className="flex items-center gap-1 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 font-medium min-w-0">
+              <Calendar className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+              <span className="text-slate-400 shrink-0">النفاذ:</span>
+              <span className="font-bold text-slate-800 truncate max-w-[90px]">{shortDepletionLabel(depletion, isOut)}</span>
             </div>
           </div>
         </div>

@@ -505,4 +505,125 @@ describe('production restoreDose + syncAutoDailyDeductions lifecycle', () => {
     );
   });
 
+  /**
+   * Future restore must NOT durable-skip the slot: when the scheduled time
+   * arrives, time-gated Auto-Deduct (todayDueUnits) must still count it.
+   */
+  it('Test A/B — future restored dose is not skipped and becomes due at scheduled time', () => {
+    // d3 = 20:00 amount 2; now = 17:00 (still ahead)
+    const nowEarly = at(17);
+    const nowAtDue = at(20);
+    let med = makeMulti({ currentPills: 30, lastSyncDate: TODAY });
+
+    // Premature manual deduction of future d3, then Restore
+    const taken = consumeDose(med, 'manual', TODAY, nowEarly, 'd3');
+    expect(taken.doseAmount).toBe(2);
+    med = taken.updatedMed!;
+    expect(isDoseConsumedOnDate(med, 'd3', TODAY)).toBe(true);
+
+    const restored = restoreDose(med, 'd3', TODAY, nowEarly);
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) return;
+    expect(restored.wasManual).toBe(true);
+    expect(restored.restoredAmount).toBe(2);
+    // Future restore: NO durable skip
+    expect(isDoseSkippedOnDate(restored.updatedMed, 'd3', TODAY)).toBe(false);
+    expect(isDoseConsumedOnDate(restored.updatedMed, 'd3', TODAY)).toBe(false);
+
+    // Test B — immediately after restore, still before 20:00: not due
+    expect(todayDueUnits(restored.updatedMed, nowEarly, TODAY)).toBe(
+      todayDueUnits(makeMulti({ lastSyncDate: TODAY }), nowEarly, TODAY)
+    );
+    // d1+d2 elapsed (08:00, 14:00) = 2; d3 not yet
+    expect(todayDueUnits(restored.updatedMed, nowEarly, TODAY)).toBe(1 + 1);
+
+    // Test A — at 20:00, d3 becomes due exactly once (amount 2)
+    expect(todayDueUnits(restored.updatedMed, nowAtDue, TODAY)).toBe(1 + 1 + 2);
+    const effAtDue = effectiveCurrentPills(restored.updatedMed, TODAY, nowAtDue);
+    expect(effAtDue).toBe(restored.updatedMed.currentPills - (1 + 1 + 2));
+  });
+
+  it('Test C — past-due auto restore still records skip and blocks re-deduct', () => {
+    const med = makeMulti();
+    const now = at(15); // d1 and d2 elapsed
+    const result = restoreDose(med, 'd1', TODAY, now);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(isDoseSkippedOnDate(result.updatedMed, 'd1', TODAY)).toBe(true);
+    const dueAfter = todayDueUnits(result.updatedMed, now, TODAY);
+    const sync = syncAutoDailyDeductions([result.updatedMed], TODAY, now);
+    expect(isDoseSkippedOnDate(sync.updatedMeds[0], 'd1', TODAY)).toBe(true);
+    expect(todayDueUnits(sync.updatedMeds[0], now, TODAY)).toBe(dueAfter);
+  });
+
+  it('Test D — past-due manual Take → Restore remains protected from auto re-deduct', () => {
+    let med = makeMulti({ currentPills: 30, lastSyncDate: TODAY });
+    const now = at(15);
+    const taken = consumeDose(med, 'manual', TODAY, now, 'd2');
+    med = taken.updatedMed!;
+    const restored = restoreDose(med, 'd2', TODAY, now);
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) return;
+    expect(isDoseSkippedOnDate(restored.updatedMed, 'd2', TODAY)).toBe(true);
+    expect(todayDueUnits(restored.updatedMed, now, TODAY)).toBe(1); // only d1
+    const sync = syncAutoDailyDeductions([restored.updatedMed], TODAY, now);
+    expect(isDoseSkippedOnDate(sync.updatedMeds[0], 'd2', TODAY)).toBe(true);
+    expect(todayDueUnits(sync.updatedMeds[0], now, TODAY)).toBe(1);
+  });
+
+  it('Test E — sibling isolation: future restore of d3 does not touch d1/d2', () => {
+    let med = makeMulti({ currentPills: 30, lastSyncDate: TODAY });
+    const now = at(17);
+    const taken = consumeDose(med, 'manual', TODAY, now, 'd3');
+    med = taken.updatedMed!;
+    // Also mark d1 consumed so we can see isolation
+    const takenD1 = consumeDose(med, 'manual', TODAY, now, 'd1');
+    med = takenD1.updatedMed!;
+
+    const restored = restoreDose(med, 'd3', TODAY, now);
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) return;
+    expect(isDoseSkippedOnDate(restored.updatedMed, 'd3', TODAY)).toBe(false);
+    expect(isDoseConsumedOnDate(restored.updatedMed, 'd1', TODAY)).toBe(true);
+    expect(isDoseSkippedOnDate(restored.updatedMed, 'd1', TODAY)).toBe(false);
+    expect(isDoseSkippedOnDate(restored.updatedMed, 'd2', TODAY)).toBe(false);
+    expect(isDoseConsumedOnDate(restored.updatedMed, 'd3', TODAY)).toBe(false);
+  });
+
+  it('Test F — future restore of d3 adjusts by exact amount 2 not dailyDose', () => {
+    let med = makeMulti({ currentPills: 30, lastSyncDate: TODAY });
+    const now = at(17);
+    const taken = consumeDose(med, 'manual', TODAY, now, 'd3');
+    expect(taken.doseAmount).toBe(2);
+    med = taken.updatedMed!;
+    const pillsAfter = med.currentPills;
+    const restored = restoreDose(med, 'd3', TODAY, now);
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) return;
+    expect(restored.restoredAmount).toBe(2);
+    expect(restored.restoredAmount).not.toBe(med.dailyDose);
+    expect(restored.updatedMed.currentPills).toBe(pillsAfter + 2);
+  });
+
+  it('future restore then evaluate after scheduled time still due once (app reopen path)', () => {
+    // Simulate app reopen after scheduled time: same med state, later `now`.
+    const nowEarly = at(17);
+    let med = makeMulti({ currentPills: 30, lastSyncDate: TODAY });
+    const taken = consumeDose(med, 'manual', TODAY, nowEarly, 'd3');
+    med = taken.updatedMed!;
+    const restored = restoreDose(med, 'd3', TODAY, nowEarly);
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) return;
+    const afterRestore = restored.updatedMed;
+    expect(isDoseSkippedOnDate(afterRestore, 'd3', TODAY)).toBe(false);
+
+    // "Reopen" at 21:00 — d3 due via projection; still not skipped
+    const nowLate = at(21);
+    expect(isDoseSkippedOnDate(afterRestore, 'd3', TODAY)).toBe(false);
+    expect(todayDueUnits(afterRestore, nowLate, TODAY)).toBe(1 + 1 + 2);
+    // Sync settles past days only (gated); today's due stays projected
+    const sync = syncAutoDailyDeductions([afterRestore], TODAY, nowLate);
+    expect(isDoseSkippedOnDate(sync.updatedMeds[0], 'd3', TODAY)).toBe(false);
+    expect(todayDueUnits(sync.updatedMeds[0], nowLate, TODAY)).toBe(1 + 1 + 2);
+  });
 });

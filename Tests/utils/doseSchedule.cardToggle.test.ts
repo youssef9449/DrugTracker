@@ -164,7 +164,7 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
     expect(t.amount).toBe(2);
   });
 
-  it('auto-deduct-only slot is restorable with exact doseId', () => {
+  it('auto-deduct-only single slot: no Card Restore (manual consume never happened)', () => {
     const today = getTodayDateString();
     const late = new Date(`${today}T20:00:00`);
     const t = getCardDoseToggleTarget(
@@ -176,13 +176,14 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
       }),
       late
     );
+    // Auto-only completion is not restorable from the Card toggle.
     expect(t.canTake).toBe(false);
-    expect(t.canRestore).toBe(true);
+    expect(t.canRestore).toBe(false);
     expect(t.doseId).toBe('d1');
     expect(t.amount).toBe(1);
   });
 
-  it('auto-deducted earlier slot: restore that auto slot before advancing to future Take', () => {
+  it('auto-deducted earlier slot: Card Take advances to next incomplete (not Restore auto)', () => {
     const today = getTodayDateString();
     const noon = new Date(`${today}T12:00:00`);
     const t = getCardDoseToggleTarget(
@@ -191,14 +192,13 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
         autoDeductEnabled: true,
         doseSchedule: multiSchedule,
         dosesPerDay: 3,
-        // no doseConsumption — d1 elapsed → auto completed
+        // no doseConsumption — d1 elapsed → auto completed; skip to d2 Take
       }),
       noon
     );
-    // Chronological: d1 completed via auto → Restore d1 first (not advance to d2).
-    expect(t.canRestore).toBe(true);
-    expect(t.canTake).toBe(false);
-    expect(t.doseId).toBe('d1');
+    expect(t.canRestore).toBe(false);
+    expect(t.canTake).toBe(true);
+    expect(t.doseId).toBe('d2');
     expect(t.amount).toBe(1);
   });
 

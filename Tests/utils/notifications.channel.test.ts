@@ -384,3 +384,62 @@ describe('lifecycle transition race — channel selector is synchronous', () => 
   });
 });
 
+
+// ---------------------------------------------------------------------------
+// Process-death / incomplete-reschedule race (JS-level guarantees only)
+//
+// The critical failure mode is:
+//   1. Reminder scheduled on silent foreground channel
+//   2. User backgrounds app → setAppInForeground(false) (sync)
+//   3. Scheduler starts cancel+reschedule (async) but process is killed
+//      before it completes
+//   4. Old silent notification remains and fires with no system sound
+//
+// JS unit tests cannot simulate Android process death or the Capacitor
+// TimedNotificationPublisher BroadcastReceiver. The defensible guarantee
+// for that case lives in scripts/prepare-android.mjs, which patches
+// TimedNotificationPublisher to re-select dose-reminder-v3 vs
+// dose-reminder-foreground-v1 at DELIVERY time based on process
+// importance (ActivityManager.getMyMemoryState).
+//
+// These tests document the JS-side contract and assert that:
+//   - channel selection stays synchronous under rapid transitions
+//   - the final schedule after any completed reconciliation matches
+//     the latest lifecycle state (stale ops must not win)
+// ---------------------------------------------------------------------------
+
+describe('lifecycle race — rapid transitions converge on latest state', () => {
+  it('rapid foreground↔background transitions: last schedule uses latest channel', async () => {
+    // Start foreground.
+    setAppInForeground(true);
+    await scheduleDoseReminder('med-rapid', 'Test', '10:00', 1, 'قرص');
+    expect(lastScheduledChannelId()).toBe(DOSE_REMINDER_FOREGROUND_CHANNEL_ID);
+
+    // Simulate rapid transitions with interleaved schedule calls
+    // (as would happen if multiple async scheduler generations complete
+    // out of order without generation guards — here we model the
+    // channel selector itself remaining correct).
+    setAppInForeground(false);
+    setAppInForeground(true);
+    setAppInForeground(false);
+
+    // After the dust settles, app is backgrounded. Any NEW schedule
+    // must use the background channel.
+    expect(isAppInForeground()).toBe(false);
+    expect(getDoseReminderChannelId()).toBe(DOSE_REMINDER_CHANNEL_ID);
+
+    await scheduleDoseReminder('med-rapid', 'Test', '10:00', 1, 'قرص');
+    expect(lastScheduledChannelId()).toBe(DOSE_REMINDER_CHANNEL_ID);
+  });
+
+  it('documents process-death limitation: JS cannot rewrite an already-scheduled Notification channel', () => {
+    // This is an explicit documentation assertion, not a runtime check.
+    // Capacitor bakes channelId into the Notification at schedule time
+    // (LocalNotificationManager.buildNotification → PendingIntent extras).
+    // TimedNotificationPublisher.onReceive posts that pre-built object.
+    // Only a native rebuild at delivery time (prepare-android.mjs patch)
+    // can correct the channel after process death.
+    expect(DOSE_REMINDER_CHANNEL_ID).toBe('dose-reminder-v3');
+    expect(DOSE_REMINDER_FOREGROUND_CHANNEL_ID).toBe('dose-reminder-foreground-v1');
+  });
+});

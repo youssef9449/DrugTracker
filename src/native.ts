@@ -246,6 +246,13 @@ export async function initNativeBridge(): Promise<void> {
     // The previous v2 channel used a custom 'dose_reminder.wav' that
     // users found unpleasant; since channel sound is immutable, we
     // bump to a new channel id (v3) and delete the old one below.
+    //
+    // Delivery-time safety net: scripts/prepare-android.mjs patches
+    // Capacitor TimedNotificationPublisher so that when a dose-reminder
+    // alarm fires, the notification is rewritten onto the channel that
+    // matches the process's current foreground state. This closes the
+    // window where a silent foreground-channel notification could
+    // survive process death after a background transition.
     const channels: Channel[] = [
       {
         id: DOSE_REMINDER_CHANNEL_ID,

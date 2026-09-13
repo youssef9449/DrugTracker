@@ -32,6 +32,6 @@
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*", "vite.config.ts", "vitest.config.ts", "capacitor.config.ts"],
+  "include": ["src/**/*", "vite.config.ts", "vitest.config.ts", "capacitor.config.ts", "Tests/**/*"],
   "exclude": ["node_modules", "dist"]
 }

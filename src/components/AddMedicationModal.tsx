@@ -434,7 +434,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                   }`}
                 />
               </div>
-              <div>
+              <div className="h-full flex flex-col justify-end">
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">نوع الوحدة</label>
                 <select
                   value={unit}

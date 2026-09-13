@@ -71,14 +71,14 @@ export function MedicationMenu({
 
   const btnDims =
     size === 'xs'
-      ? 'h-5 w-5 rounded-md'
+      ? 'h-5 w-5 rounded-full'
       : size === 'md'
       ? 'h-8 w-8 rounded-xl'
-      : 'h-6 w-6 rounded-lg';
+      : 'h-6 w-6 rounded-full';
 
   const iconDims = size === 'xs' ? 'h-3 w-3' : 'h-3.5 w-3.5';
 
-  const iconButtonClass = `inline-flex ${btnDims} shrink-0 items-center justify-center border transition active:scale-95 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-teal-500`;
+  const iconButtonClass = `inline-flex ${btnDims} shrink-0 items-center justify-center transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/40`;
 
   const deleteDialog = deleteConfirmOpen && typeof document !== 'undefined'
     ? createPortal(
@@ -163,7 +163,7 @@ export function MedicationMenu({
       <button
         type="button"
         onClick={() => onEdit(medication)}
-        className={`${iconButtonClass} border-slate-200/90 bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-800 shadow-2xs`}
+        className={`${iconButtonClass} bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800`}
         aria-label="تعديل الدواء"
         title="تعديل الدواء"
       >
@@ -175,9 +175,9 @@ export function MedicationMenu({
         onClick={() => onToggleAutoDeduct(medication.id)}
         className={`${iconButtonClass} ${
           isAutoActive
-            ? 'border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100'
-            : 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
-        } shadow-2xs`}
+            ? 'bg-teal-100 text-teal-800 hover:bg-teal-200'
+            : 'bg-amber-100 text-amber-900 hover:bg-amber-200'
+        }`}
         aria-label={isAutoActive ? 'إيقاف الخصم التلقائي' : 'تفعيل الخصم التلقائي'}
         title={isAutoActive ? 'الخصم التلقائي مفعّل — اضغط للإيقاف' : 'الخصم التلقائي متوقف — اضغط للتفعيل'}
         aria-pressed={isAutoActive}
@@ -188,7 +188,7 @@ export function MedicationMenu({
       <button
         type="button"
         onClick={requestDeleteConfirmation}
-        className={`${iconButtonClass} border-rose-200/90 bg-rose-50 text-rose-600 hover:bg-rose-100 shadow-2xs`}
+        className={`${iconButtonClass} bg-rose-100 text-rose-700 hover:bg-rose-200`}
         aria-label="حذف الدواء"
         title="حذف الدواء"
       >

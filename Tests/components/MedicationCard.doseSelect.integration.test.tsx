@@ -45,9 +45,38 @@ vi.mock('@/utils/sound', () => ({
   stopAllSounds: vi.fn(),
 }));
 
+/**
+ * Card always passes an explicit doseId for its toggle target.
+ * To exercise App.handleConsumeDose(medId) WITHOUT doseId → SelectDoseModal,
+ * wrap MedicationCard with a test-only trigger that omits doseId while
+ * still using the real App callback wiring.
+ */
+vi.mock('@/components/MedicationCard', async (importOriginal) => {
+  const React = await import('react');
+  const actual = await importOriginal<typeof import('@/components/MedicationCard')>();
+  return {
+    ...actual,
+    MedicationCard: (props: React.ComponentProps<typeof actual.MedicationCard>) =>
+      React.createElement(
+        React.Fragment,
+        null,
+        React.createElement(
+          'button',
+          {
+            type: 'button',
+            'data-testid': `consume-no-doseid-${props.medication.id}`,
+            onClick: () => props.onConsumeDose?.(props.medication.id),
+          },
+          'consume-without-doseId'
+        ),
+        React.createElement(actual.MedicationCard, props)
+      ),
+  };
+});
+
 import App from '@/App';
 import type { Medication, ConsumptionLog } from '@/types';
-import { getTodayDateString } from '@/utils/dateCalculations';
+import { getTodayDateString, effectiveCurrentPills } from '@/utils/dateCalculations';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
@@ -119,6 +148,119 @@ afterEach(() => {
 });
 
 describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
+  it('missing doseId opens SelectDoseModal; selecting d2 consumes only d2 via App path', async () => {
+    // d1=1, d2=2 so selecting d2 proves amount is slot amount, not dailyDose (4)
+    localStorage.setItem(
+      STORAGE_MEDS_KEY,
+      JSON.stringify([
+        makeMulti({
+          currentPills: 30,
+          dailyDose: 4,
+          doseSchedule: [
+            { id: 'd1', amount: 1, time: '08:00' },
+            { id: 'd2', amount: 2, time: '14:00' },
+            { id: 'd3', amount: 1, time: '21:00' },
+          ],
+          dosesPerDay: 3,
+        }),
+      ])
+    );
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Drug A Multi')).toBeInTheDocument();
+    });
+
+    // Real App path: handleConsumeDose(medId) without doseId → SelectDoseModal
+    fireEvent.click(screen.getByTestId('consume-no-doseid-med-multi'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/اختر الجرعة التي تناولتها/)).toBeInTheDocument();
+    });
+
+    // Opening selector must not have written consumption yet.
+    expect(readMeds()[0]?.doseConsumption?.d1).toBeUndefined();
+    expect(readMeds()[0]?.doseConsumption?.d2).toBeUndefined();
+    expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(0);
+
+    const doseButtons = screen
+      .getAllByRole('button')
+      .filter((b) => b.getAttribute('data-dose-id'));
+    expect(doseButtons.map((b) => b.getAttribute('data-dose-id'))).toEqual([
+      'd1',
+      'd2',
+      'd3',
+    ]);
+
+    fireEvent.click(
+      doseButtons.find((b) => b.getAttribute('data-dose-id') === 'd2')!
+    );
+
+    const today = getTodayDateString();
+    await waitFor(() => {
+      const med = readMeds().find((m) => m.id === 'med-multi');
+      expect(med?.doseConsumption?.d2).toBe(today);
+    });
+
+    const med = readMeds().find((m) => m.id === 'med-multi')!;
+    expect(med.doseConsumption?.d1).toBeUndefined();
+    expect(med.doseConsumption?.d3).toBeUndefined();
+    expect(med.doseConsumption?.d2).toBe(today);
+    // Stock reduced by d2.amount (2), not dailyDose (4)
+    expect(effectiveCurrentPills(med)).toBe(28);
+
+    await waitFor(() => {
+      const doseLog = readLogs().find(
+        (l) => l.type === 'dose_taken' && l.medicationId === 'med-multi'
+      );
+      expect(doseLog?.doseId).toBe('d2');
+      expect(doseLog?.amount).toBe(2);
+    });
+  });
+
+  it('closing SelectDoseModal without selecting does not consume', async () => {
+    localStorage.setItem(
+      STORAGE_MEDS_KEY,
+      JSON.stringify([
+        makeMulti({
+          currentPills: 30,
+          dailyDose: 4,
+          doseSchedule: [
+            { id: 'd1', amount: 1, time: '08:00' },
+            { id: 'd2', amount: 2, time: '14:00' },
+            { id: 'd3', amount: 1, time: '21:00' },
+          ],
+          dosesPerDay: 3,
+        }),
+      ])
+    );
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Drug A Multi')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('consume-no-doseid-med-multi'));
+    await waitFor(() => {
+      expect(screen.getByText(/اختر الجرعة التي تناولتها/)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('إغلاق'));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/اختر الجرعة التي تناولتها/)).toBeNull();
+    });
+
+    const med = readMeds().find((m) => m.id === 'med-multi')!;
+    expect(med.doseConsumption).toBeUndefined();
+    expect(med.doseConsumptionHistory).toBeUndefined();
+    expect(effectiveCurrentPills(med)).toBe(30);
+    expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(0);
+  });
+
   it('Card Take passes next doseId and consumes d1 directly (no modal)', async () => {
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeMulti()]));
     localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));

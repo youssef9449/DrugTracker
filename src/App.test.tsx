@@ -174,17 +174,16 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
     vi.restoreAllMocks();
   });
 
-  /** Open the MedicationMenu dropdown and click the toggle item. */
+  /** Click the MedicationMenu auto-deduct icon button (no dropdown). */
   function clickToggleFor(): void {
-    // The MedicationMenu's "خيارات" button (aria-label) opens the dropdown.
-    const menuButton = screen.getByRole('button', { name: 'خيارات' });
-    fireEvent.click(menuButton);
-    // The toggle item text depends on the current state:
-    //   - auto active → "إيقاف الخصم التلقائي مؤقتاً"
+    // Phase 4 menu redesign: toggle is a direct icon button, not a
+    // "خيارات" dropdown item. aria-label switches with state:
+    //   - auto active → "إيقاف الخصم التلقائي"
     //   - auto paused → "تفعيل الخصم التلقائي"
-    // Use a regex to match either.
-    const toggleItem = screen.getByText(/إيقاف الخصم التلقائي مؤقتاً|تفعيل الخصم التلقائي/);
-    fireEvent.click(toggleItem);
+    const toggleBtn = screen.getByRole('button', {
+      name: /إيقاف الخصم التلقائي|تفعيل الخصم التلقائي/,
+    });
+    fireEvent.click(toggleBtn);
   }
 
   /** Seed a single med in localStorage so App renders one MedicationCard. */

@@ -70,7 +70,7 @@ export const CustomTimePicker: FC<CustomTimePickerProps> = ({
   return (
     <div className="flex items-stretch gap-2">
       {/* Hour (1-12) */}
-      <div className="flex-1 relative">
+      <div className="flex-1">
         <select
           aria-label="ساعة"
           value={parsed.hour12}
@@ -85,15 +85,12 @@ export const CustomTimePicker: FC<CustomTimePickerProps> = ({
             </option>
           ))}
         </select>
-        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] pointer-events-none font-bold">
-          ساعة
-        </span>
       </div>
 
       <span className="self-center text-slate-400 font-bold text-lg">:</span>
 
       {/* Minute (00-59) */}
-      <div className="flex-1 relative">
+      <div className="flex-1">
         <select
           aria-label="دقيقة"
           value={parsed.minute}
@@ -108,9 +105,6 @@ export const CustomTimePicker: FC<CustomTimePickerProps> = ({
             </option>
           ))}
         </select>
-        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] pointer-events-none font-bold">
-          دقيقة
-        </span>
       </div>
 
       {/* AM/PM */}

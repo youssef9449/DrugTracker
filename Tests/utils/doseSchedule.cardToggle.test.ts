@@ -162,7 +162,7 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
     expect(t.amount).toBe(2);
   });
 
-  it('auto-deduct-only slot is not restorable', () => {
+  it('auto-deduct-only slot is restorable with exact doseId', () => {
     const today = getTodayDateString();
     const late = new Date(`${today}T20:00:00`);
     const t = getCardDoseToggleTarget(
@@ -175,10 +175,12 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
       late
     );
     expect(t.canTake).toBe(false);
-    expect(t.canRestore).toBe(false);
+    expect(t.canRestore).toBe(true);
+    expect(t.doseId).toBe('d1');
+    expect(t.amount).toBe(1);
   });
 
-  it('auto-deducted earlier slot + future available: take future, do not restore auto', () => {
+  it('auto-deducted earlier slot: restore that auto slot before advancing to future Take', () => {
     const today = getTodayDateString();
     const noon = new Date(`${today}T12:00:00`);
     const t = getCardDoseToggleTarget(
@@ -191,9 +193,28 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
       }),
       noon
     );
-    expect(t.canRestore).toBe(false);
+    // Chronological: d1 completed via auto → Restore d1 first (not advance to d2).
+    expect(t.canRestore).toBe(true);
+    expect(t.canTake).toBe(false);
+    expect(t.doseId).toBe('d1');
+    expect(t.amount).toBe(1);
+  });
+
+  it('after skip of auto d1, target advances to next incomplete', () => {
+    const today = getTodayDateString();
+    const noon = new Date(`${today}T12:00:00`);
+    const t = getCardDoseToggleTarget(
+      makeMed({
+        dailyDose: 4,
+        autoDeductEnabled: true,
+        doseSchedule: multiSchedule,
+        dosesPerDay: 3,
+        doseSkippedHistory: { d1: [today] },
+      }),
+      noon
+    );
     expect(t.canTake).toBe(true);
-    expect(t.doseId).toBe('d2');
+    expect(t.doseId).toBe('d1'); // skipped → not completed → Take d1 again
     expect(t.amount).toBe(1);
   });
 

@@ -6,6 +6,9 @@ import {
   mutationSettlementLastSyncDate,
   recordDoseConsumed,
   isDoseConsumedOnDate,
+  clearDoseSkippedOnDate,
+  recordDoseSkipped,
+  hasDoseSchedule,
 } from './dateCalculations';
 import { generateId } from './id';
 
@@ -108,6 +111,166 @@ export function resolveRestoreDoseAmount(
   const amount = Number(med.dailyDose) || 0;
   if (amount <= 0) return { ok: false, amount: 0, reason: 'no_dose' };
   return { ok: true, amount };
+}
+
+/**
+ * Production restore for one dose slot (or legacy daily dose).
+ *
+ * Accounting model (must match settlement / projection):
+ * - Manual consume already deducted from the settled snapshot → restore
+ *   adds exact amount back via settleAndAdjust, clears consumption, and
+ *   records doseSkippedHistory so auto-projection cannot re-deduct.
+ * - Auto-only (elapsed projection, never manually consumed today) never
+ *   mutated currentPills for today's slot → restore records skip only.
+ *   Adding to currentPills would double-count because projection already
+ *   reduced effectiveCurrentPills; skip alone reverses the projection.
+ *
+ * Identity is always medicationId + doseId + date for scheduled meds.
+ */
+export type RestoreDoseResult =
+  | {
+      ok: true;
+      updatedMed: Medication;
+      restoredAmount: number;
+      doseId?: string;
+      /** True when undoing a manual consume settlement. */
+      wasManual: boolean;
+    }
+  | {
+      ok: false;
+      reason:
+        | 'missing_dose_id'
+        | 'invalid_dose_id'
+        | 'no_dose'
+        | 'auto_deduct_off';
+    };
+
+export function restoreDose(
+  med: Medication,
+  doseId?: string,
+  todayStr: string = getTodayDateString(),
+  now: Date = new Date()
+): RestoreDoseResult {
+  if (med.autoDeductEnabled === false) {
+    return { ok: false, reason: 'auto_deduct_off' };
+  }
+
+  const resolved = resolveRestoreDoseAmount(med, doseId);
+  if (!resolved.ok) {
+    return { ok: false, reason: resolved.reason };
+  }
+
+  const resolvedDoseId = resolved.doseId;
+  const restoredAmount = resolved.amount;
+
+  // --- Multi-dose / scheduled slot ---
+  if (hasDoseSchedule(med) && resolvedDoseId) {
+    const wasManual = isDoseConsumedOnDate(med, resolvedDoseId, todayStr);
+
+    // Clear manual consumption for this doseId + date (if any).
+    const nextConsumption = { ...(med.doseConsumption ?? {}) };
+    if (nextConsumption[resolvedDoseId] === todayStr) {
+      delete nextConsumption[resolvedDoseId];
+    }
+    const nextHistory = { ...(med.doseConsumptionHistory ?? {}) };
+    if (Array.isArray(nextHistory[resolvedDoseId])) {
+      nextHistory[resolvedDoseId] = nextHistory[resolvedDoseId].filter(
+        (d) => d !== todayStr
+      );
+      if (nextHistory[resolvedDoseId].length === 0) {
+        delete nextHistory[resolvedDoseId];
+      }
+    }
+
+    // Durable skip so auto-sync / projection cannot re-deduct this slot/date.
+    const baseForSkip: Medication = {
+      ...med,
+      doseConsumption: nextConsumption,
+      doseConsumptionHistory: nextHistory,
+    };
+    const { doseSkippedHistory } = recordDoseSkipped(
+      baseForSkip,
+      resolvedDoseId,
+      todayStr
+    );
+
+    const allStillConsumed =
+      Array.isArray(med.doseSchedule) &&
+      med.doseSchedule.every((d) =>
+        d.id === resolvedDoseId
+          ? false
+          : isDoseConsumedOnDate(
+              {
+                ...med,
+                doseConsumption: nextConsumption,
+                doseConsumptionHistory: nextHistory,
+              },
+              d.id,
+              todayStr
+            )
+      );
+
+    let updatedMed: Medication;
+    if (wasManual) {
+      // Undo the manual settlement: add exact amount back to snapshot.
+      const { updatedMed: settled } = settleAndAdjust(
+        {
+          ...med,
+          doseConsumption: nextConsumption,
+          doseConsumptionHistory: nextHistory,
+          doseSkippedHistory,
+          lastConsumedDate: allStillConsumed ? todayStr : undefined,
+        },
+        restoredAmount,
+        todayStr,
+        now
+      );
+      updatedMed = {
+        ...settled,
+        doseConsumption: nextConsumption,
+        doseConsumptionHistory: nextHistory,
+        doseSkippedHistory,
+        lastConsumedDate: allStillConsumed ? todayStr : undefined,
+      };
+    } else {
+      // Auto-only: projection undo via skip — do not inflate currentPills.
+      updatedMed = {
+        ...med,
+        doseConsumption: nextConsumption,
+        doseConsumptionHistory: nextHistory,
+        doseSkippedHistory,
+        lastConsumedDate: allStillConsumed ? todayStr : undefined,
+      };
+    }
+
+    return {
+      ok: true,
+      updatedMed,
+      restoredAmount,
+      doseId: resolvedDoseId,
+      wasManual,
+    };
+  }
+
+  // --- Legacy (no schedule) ---
+  const { updatedMed: settled } = settleAndAdjust(
+    med,
+    restoredAmount,
+    todayStr,
+    now
+  );
+  const updatedMed: Medication =
+    med.lastConsumedDate === todayStr
+      ? { ...settled, lastConsumedDate: undefined }
+      : settled;
+
+  return {
+    ok: true,
+    updatedMed,
+    restoredAmount,
+    doseId: resolvedDoseId,
+    wasManual: med.lastConsumedDate === todayStr,
+  };
 }
 
 interface ConsumeDoseResult {
@@ -229,10 +392,19 @@ export function consumeDose(
 
   let doseConsumption = med.doseConsumption;
   let doseConsumptionHistory = med.doseConsumptionHistory;
+  let doseSkippedHistory = med.doseSkippedHistory;
   if (multi && targetDoseId) {
     const recorded = recordDoseConsumed(med, targetDoseId, todayStr);
     doseConsumption = recorded.doseConsumption;
     doseConsumptionHistory = recorded.doseConsumptionHistory;
+    // Clear any prior restore/skip for this dose+date so Take after
+    // Restore is a single clean manual consumption.
+    const cleared = clearDoseSkippedOnDate(
+      { ...med, doseSkippedHistory },
+      targetDoseId,
+      todayStr
+    );
+    doseSkippedHistory = cleared.doseSkippedHistory;
   }
 
   const allSlotsConsumedToday =
@@ -266,7 +438,7 @@ export function consumeDose(
     lastConsumedDate,
     lastSyncDate,
     ...(multi
-      ? { doseConsumption, doseConsumptionHistory }
+      ? { doseConsumption, doseConsumptionHistory, doseSkippedHistory }
       : {}),
   };
   const description =

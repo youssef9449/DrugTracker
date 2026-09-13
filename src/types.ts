@@ -96,6 +96,13 @@ export interface Medication {
    * fall back to {@link doseConsumption} as a one-date history.
    */
   doseConsumptionHistory?: Record<string, string[]>;
+  /**
+   * Per-dose skip/restore history: doseId → YYYY-MM-DD dates on which
+   * that slot was restored after auto-deduct (or after manual consume).
+   * Skipped slots are not auto-due again for that date and remain
+   * available for a later manual Take (idempotent Auto-Deduct → Restore).
+   */
+  doseSkippedHistory?: Record<string, string[]>;
 }
 
 /** One individual dose event within a day (Phase 1 multi-dose model). */

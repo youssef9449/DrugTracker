@@ -1,52 +1,49 @@
 # Capacitor Local Notifications — DrugTracker delivery override
 
-## Purpose
+**Pinned upstream:** `@capacitor/local-notifications@6.1.3`
 
-Capacitor binds Android `channelId` when a local notification is **scheduled**.
-JS lifecycle reconciliation (`setAppInForeground` + cancel/reschedule) is the
-fast path, but cannot guarantee correct channel selection if the process is
-killed before async reschedule completes.
+## Files
 
-This directory owns a modified `TimedNotificationPublisher` that re-selects
-the dose-reminder channel at **delivery** time based on process importance:
+| File | Role |
+|------|------|
+| `TimedNotificationPublisher.java` | Capacitor 6.1.3 receiver + delivery-time channel selection |
+| `AppForegroundState.java` | Process-local `volatile` foreground flag (default `false`) |
 
-| Process state | Channel |
-|---|---|
-| Foreground / visible | `dose-reminder-foreground-v1` (silent) |
-| Background / unknown / killed | `dose-reminder-v3` (system default sound) |
+App lifecycle wiring lives in `native-android/app/MainActivity.java`
+(`onResume` → true, `onPause` → false).
 
-Only notifications identified as DrugTracker dose reminders
-(`extra.medicationId` or already on a dose-reminder channel) are rewritten.
-All other notifications are untouched.
+## Behavior
 
-Channel changes use `NotificationCompat.Builder(context, existingNotification)`
-so the platform copies the existing notification; only `setChannelId` is applied.
+At alarm delivery, if the notification is a DrugTracker dose reminder
+(`extra.medicationId` or a dose-reminder channel):
 
-## How it is installed
+| `AppForegroundState.isForeground()` | Channel |
+|-------------------------------------|---------|
+| `true` | `dose-reminder-foreground-v1` (silent) |
+| `false` (incl. fresh process after kill) | `dose-reminder-v3` (system default sound) |
 
-`scripts/prepare-android.mjs` (runs after every `cap sync` via package.json
-scripts) **copies** this file over:
+Channel rewrite uses `NotificationCompat.Builder(context, notification).setChannelId(...)`.
+Only the channel changes; other notification fields are preserved by AndroidX.
+
+Unrelated notifications (e.g. low-stock) are never rewritten.
+
+## Install
+
+`scripts/prepare-android.mjs` (after every `cap sync`) copies these files to:
 
 ```text
 node_modules/@capacitor/local-notifications/android/src/main/java/
-  com/capacitorjs/plugins/localnotifications/TimedNotificationPublisher.java
+  com/capacitorjs/plugins/localnotifications/
+    TimedNotificationPublisher.java
+    AppForegroundState.java
+
+android/app/src/main/java/app/drugtracker/MainActivity.java
 ```
 
-This is a whole-file vendor override for `@capacitor/local-notifications`
-**6.1.x**, not a runtime string patch of dependency source.
+Fails hard if destinations are missing. No string/regex patching.
 
-If the Capacitor plugin source is missing, prepare-android **exits non-zero**.
+## Upgrade note
 
-## Upstream base
-
-Based on Capacitor Local Notifications 6.1.x `TimedNotificationPublisher`.
-When upgrading `@capacitor/local-notifications`, re-diff this file against the
-new upstream class and re-apply the dose-reminder channel logic.
-
-## Manual device checks
-
-1. Foreground: silent Android notification + DoseAlarmModal + JS chime
-2. Background: system default notification sound via v3
-3. Schedule while foreground → background → kill process before reschedule →
-   reminder should still sound via v3 (delivery-time rewrite)
-4. Background → reopen → later dose: silent + modal/chime
+When changing the pinned Capacitor Local Notifications version, re-diff
+`TimedNotificationPublisher.java` against that exact upstream release and
+re-apply only the minimal DrugTracker channel logic.

@@ -391,11 +391,10 @@ describe('lifecycle transition race — channel selector is synchronous', () => 
 // JS unit tests cover synchronous channel selection and post-transition
 // scheduling. They do NOT claim to prove killed-process delivery.
 //
-// The killed-process guarantee lives in:
-//   native-android/capacitor-local-notifications/TimedNotificationPublisher.java
-// which re-selects dose-reminder-v3 vs dose-reminder-foreground-v1 at
-// Android alarm delivery from process importance. That class is installed
-// by scripts/prepare-android.mjs (whole-file vendor override).
+// Killed-process guarantee (native):
+//   AppForegroundState defaults to false in a fresh process
+//   → TimedNotificationPublisher resolves dose-reminder-v3
+//   MainActivity onResume/onPause owns the live foreground flag.
 // ---------------------------------------------------------------------------
 
 describe('lifecycle race — rapid transitions converge on latest state', () => {

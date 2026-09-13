@@ -95,8 +95,9 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
     expect(t.canTake).toBe(true);
   });
 
-  it('multi: when d1+d2 manual, restore prefers earliest manual d1 (exact doseId)', () => {
+  it('multi: when d1+d2 manual and all remaining completed, restore prefers last manual d2', () => {
     const today = getTodayDateString();
+    // 22:00 so d3 is also completed (auto); only d1+d2 are manual
     const t = getCardDoseToggleTarget(
       makeMed({
         dailyDose: 4,
@@ -104,14 +105,14 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
         dosesPerDay: 3,
         doseConsumption: { d1: today, d2: today },
       }),
-      new Date(`${today}T18:00:00`)
+      new Date(`${today}T22:00:00`)
     );
     expect(t.canRestore).toBe(true);
-    expect(t.doseId).toBe('d1');
+    expect(t.doseId).toBe('d2');
     expect(t.amount).toBe(1);
   });
 
-  it('multi: all manual including d3 amount 2 — restore d1 first with amount 1 not dailyDose', () => {
+  it('multi: all manual including d3 amount 2 — restore last manual d3 with amount 2 not dailyDose', () => {
     const today = getTodayDateString();
     const t = getCardDoseToggleTarget(
       makeMed({
@@ -124,8 +125,8 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
       new Date(`${today}T22:00:00`)
     );
     expect(t.canRestore).toBe(true);
-    expect(t.doseId).toBe('d1');
-    expect(t.amount).toBe(1);
+    expect(t.doseId).toBe('d3');
+    expect(t.amount).toBe(2);
   });
 
   it('multi: only d3 manual with earlier open slots → Take earliest available d1', () => {

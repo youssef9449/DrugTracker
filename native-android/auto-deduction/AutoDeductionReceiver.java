@@ -1,13 +1,23 @@
 package app.drugtracker.autodeduction;
 
+import android.app.AlarmManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Build;
 import android.util.Log;
 
 /**
  * Dedicated BroadcastReceiver for exact-time auto-deduction alarms.
  * Persists FIRED events only — does NOT mutate stock or depend on WebView.
+ *
+ * Handles:
+ * <ul>
+ *   <li>{@link AutoDeductionContract#ACTION_AUTO_DEDUCTION} — exact fire path</li>
+ *   <li>{@link Intent#ACTION_BOOT_COMPLETED} / QUICKBOOT — restore future schedules</li>
+ *   <li>{@link AlarmManager#ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED}
+ *       — re-restore when exact-alarm permission is granted again (API 31+)</li>
+ * </ul>
  *
  * FIRED insertion result drives next-occurrence scheduling:
  * <ul>
@@ -29,7 +39,15 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
         String action = intent.getAction();
         if (Intent.ACTION_BOOT_COMPLETED.equals(action)
                 || "android.intent.action.QUICKBOOT_POWERON".equals(action)) {
-            onBoot(context);
+            onBootOrPermissionRestored(context, "BOOT");
+            return;
+        }
+
+        // API 31+: exact-alarm permission granted/revoked. When granted again,
+        // re-install future alarms from durable schedule metadata.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                && AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED.equals(action)) {
+            onBootOrPermissionRestored(context, "EXACT_ALARM_PERMISSION");
             return;
         }
 
@@ -67,10 +85,6 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 scheduleNextIfPossible(context, medicationId, doseId, calendarDate, timeHhmm, amount);
                 break;
             case FAILED:
-                // Primary ledger write failed. A pending-fire record may exist
-                // (result.pendingRecorded). Do NOT advance recurrence.
-                // Recovery: promotePendingFires on boot / listEvents, and
-                // past-schedule promotion in restoreFutureSchedules.
                 Log.e(TAG, "FIRED persistence FAILED (pendingRecorded="
                         + result.pendingRecorded + ") — not advancing next occurrence: "
                         + medicationId + "/" + doseId + "/" + calendarDate);
@@ -97,19 +111,22 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
         }
     }
 
-    private void onBoot(Context context) {
+    private void onBootOrPermissionRestored(Context context, String reason) {
         try {
-            // Promote any pending-fire records left by earlier commit failures.
             AutoDeductionEventStore store = new AutoDeductionEventStore(context);
             int promoted = store.promotePendingFires();
             if (promoted > 0) {
-                Log.i(TAG, "BOOT: promoted " + promoted + " pending-fire record(s) to FIRED");
+                Log.i(TAG, reason + ": promoted " + promoted + " pending-fire record(s) to FIRED");
             }
             AutoDeductionScheduler scheduler = new AutoDeductionScheduler(context);
+            if (!scheduler.canScheduleExactAlarms()) {
+                Log.w(TAG, reason + ": exact alarm permission not granted — skip restore");
+                return;
+            }
             int n = scheduler.restoreFutureSchedules();
-            Log.i(TAG, "BOOT_COMPLETED: restored " + n + " future auto-deduction alarms");
+            Log.i(TAG, reason + ": restored " + n + " future auto-deduction alarms");
         } catch (Exception e) {
-            Log.e(TAG, "BOOT restore failed", e);
+            Log.e(TAG, reason + " restore failed", e);
         }
     }
 }

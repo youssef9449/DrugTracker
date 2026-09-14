@@ -11,6 +11,7 @@ import { LEGACY_DOSE_ID } from '../utils/notifications';
 import {
   cancelAutoDeduction,
   scheduleAutoDeduction,
+  restoreFutureAutoDeductionSchedules,
 } from '../utils/autoDeductionNative';
 
 export interface UseAutoDeductionSchedulerOptions {
@@ -188,6 +189,15 @@ export function useAutoDeductionScheduler({
     }
 
     chainRef.current = chainRef.current.then(async () => {
+      if (gen !== generationRef.current) return;
+
+      // Re-install any durable future schedules from native metadata
+      // (covers permission re-grant and force-stop recovery).
+      try {
+        await restoreFutureAutoDeductionSchedules();
+      } catch {
+        // Non-fatal: JS desired-slot scheduling still runs below.
+      }
       if (gen !== generationRef.current) return;
 
       for (const key of Array.from(trackedRef.current)) {

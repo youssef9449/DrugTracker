@@ -812,6 +812,91 @@ public final class AutoDeductionScheduler {
     }
 
     /**
+     * Schedule the next calendar-date occurrence only if durable schedule metadata
+     * for that successor does not already exist.
+     *
+     * <p>Under {@link #SCHEDULE_LOCK}: if D+1 is already present, return success
+     * without rewriting amount/time/alarm (duplicate/stale D payload must not
+     * overwrite a newer authoritative successor). If absent, install via
+     * {@link #scheduleOccurrenceLocked}.
+     *
+     * <p>Used by live fire recurrence ({@code AutoDeductionReceiver}) so
+     * {@code ALREADY_EXISTS} / pending recovery cannot corrupt an existing D+1.
+     */
+    public ScheduleResult scheduleNextOccurrenceIfAbsent(
+            String medicationId,
+            String doseId,
+            String fromCalendarDate,
+            String timeHhmm,
+            double amount
+    ) {
+        if (medicationId == null || medicationId.isEmpty()
+                || doseId == null || doseId.isEmpty()
+                || !AutoDeductionContract.isValidCalendarDate(fromCalendarDate)
+                || !AutoDeductionContract.isValidTimeHhmm(timeHhmm)
+                || !AutoDeductionContract.isValidAmount(amount)) {
+            return ScheduleResult.fail("invalid_args");
+        }
+
+        String nextDate = nextCalendarDate(fromCalendarDate);
+        if (nextDate == null) {
+            return ScheduleResult.fail("invalid_next_date");
+        }
+        Long epoch = computeEpochMs(nextDate, timeHhmm);
+        if (epoch == null) {
+            return ScheduleResult.fail("invalid_next_datetime");
+        }
+        if (epoch <= System.currentTimeMillis()) {
+            nextDate = nextCalendarDate(nextDate);
+            if (nextDate == null) return ScheduleResult.fail("invalid_next_date");
+            epoch = computeEpochMs(nextDate, timeHhmm);
+            if (epoch == null) return ScheduleResult.fail("invalid_next_datetime");
+        }
+
+        final String resolvedNextDate = nextDate;
+        final long triggerAt = epoch;
+        final String nextKey = AutoDeductionContract.occurrenceKey(
+                medicationId, doseId, resolvedNextDate);
+        final String nextPrefKey = SCHEDULE_KEY_PREFIX + nextKey;
+
+        if (!canScheduleExactAlarms()) {
+            synchronized (SCHEDULE_LOCK) {
+                if (schedulePrefs.contains(nextPrefKey)) {
+                    return ScheduleResult.success(nextKey);
+                }
+            }
+            return ScheduleResult.fail("exact_alarm_permission_denied");
+        }
+
+        JSONObject payload = new JSONObject();
+        try {
+            payload.put("medicationId", medicationId);
+            payload.put("doseId", doseId);
+            payload.put("calendarDate", resolvedNextDate);
+            payload.put("timeHhmm", timeHhmm);
+            payload.put("amount", amount);
+            payload.put("scheduledAtEpochMs", triggerAt);
+        } catch (JSONException e) {
+            Log.e(TAG, "scheduleNextOccurrenceIfAbsent payload failed", e);
+            return ScheduleResult.fail("payload_failed");
+        }
+
+        Intent intent = buildOccurrenceIntent(
+                medicationId, doseId, resolvedNextDate, triggerAt, amount, timeHhmm);
+        PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
+
+        synchronized (SCHEDULE_LOCK) {
+            if (schedulePrefs.contains(nextPrefKey)) {
+                Log.i(TAG, "scheduleNextOccurrenceIfAbsent: successor already present — "
+                        + "not overwriting " + nextPrefKey);
+                return ScheduleResult.success(nextKey);
+            }
+            return scheduleOccurrenceLocked(
+                    nextPrefKey, nextKey, payload, triggerAt, pi, /*requiredVersion*/ null);
+        }
+    }
+
+    /**
      * After a past occurrence is recovered as a durable fire, continue the
      * recurrence chain and only then resolve snapshot-owned schedule metadata.
      *

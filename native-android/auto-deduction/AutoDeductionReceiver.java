@@ -19,10 +19,14 @@ import android.util.Log;
  *
  * Fire linearization result drives next-occurrence scheduling:
  * <ul>
- *   <li>CREATED / ALREADY_EXISTS / FAILED with pending-fire — schedule next</li>
+ *   <li>CREATED / ALREADY_EXISTS / FAILED with pending-fire — ensure next via
+ *       {@link AutoDeductionScheduler#scheduleNextOccurrenceIfAbsent} (never
+ *       overwrite an already-present successor with this delivery's payload)</li>
  *   <li>CANCELLED — no recurrence</li>
  *   <li>FAILED without pending — do not advance recurrence</li>
  * </ul>
+ * The receiver payload for a duplicate D delivery is not authoritative recurrence
+ * configuration for an existing D+1.
  */
 public class AutoDeductionReceiver extends BroadcastReceiver {
 
@@ -97,8 +101,10 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
         if (timeHhmm == null || !AutoDeductionContract.isValidTimeHhmm(timeHhmm)) {
             return;
         }
+        // Create-if-absent: duplicate/stale D payload must not overwrite an
+        // already-correct D+1 (amount/time) that durable schedule metadata holds.
         AutoDeductionScheduler scheduler = new AutoDeductionScheduler(context);
-        AutoDeductionScheduler.ScheduleResult next = scheduler.scheduleNextOccurrence(
+        AutoDeductionScheduler.ScheduleResult next = scheduler.scheduleNextOccurrenceIfAbsent(
                 medicationId, doseId, calendarDate, timeHhmm, amount);
         if (!next.ok) {
             Log.w(TAG, "next occurrence not scheduled: " + next.error);

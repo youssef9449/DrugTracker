@@ -149,3 +149,125 @@ describe('amount validation boundary (JS)', () => {
     expect(slots.map((s) => s.doseId)).toEqual(['ok']);
   });
 });
+
+import {
+  isMetadataOwnedByVersion,
+  conditionalRollback,
+  buildSchedulePayload,
+} from '../../src/utils/autoDeductionScheduleOwnership';
+
+describe('schedule metadata ownership / conditional rollback', () => {
+  const key = 'sch:med\u001fdose\u001f2026-09-14';
+
+  it('simple rollback: A writes, A fails → A metadata removed', () => {
+    const store = new Map<string, string>();
+    const versionA = 'v-A-1';
+    store.set(
+      key,
+      buildSchedulePayload({
+        medicationId: 'med',
+        doseId: 'dose',
+        calendarDate: '2026-09-14',
+        timeHhmm: '08:00',
+        amount: 1,
+        scheduledAtEpochMs: 1,
+        scheduleVersion: versionA,
+      })
+    );
+    expect(conditionalRollback(store, key, versionA)).toBe(true);
+    expect(store.has(key)).toBe(false);
+  });
+
+  it('stale rollback cannot remove newer metadata: A writes, B writes, A fails → B remains', () => {
+    const store = new Map<string, string>();
+    const versionA = 'v-A-1';
+    const versionB = 'v-B-2';
+    store.set(
+      key,
+      buildSchedulePayload({
+        medicationId: 'med',
+        doseId: 'dose',
+        calendarDate: '2026-09-14',
+        scheduleVersion: versionA,
+      })
+    );
+    // B overwrites same occurrence key with newer version
+    store.set(
+      key,
+      buildSchedulePayload({
+        medicationId: 'med',
+        doseId: 'dose',
+        calendarDate: '2026-09-14',
+        timeHhmm: '08:00',
+        amount: 1,
+        scheduledAtEpochMs: 2,
+        scheduleVersion: versionB,
+      })
+    );
+    expect(conditionalRollback(store, key, versionA)).toBe(false);
+    expect(store.has(key)).toBe(true);
+    const remaining = JSON.parse(store.get(key)!);
+    expect(remaining.scheduleVersion).toBe(versionB);
+  });
+
+  it('successful newer schedule remains: A writes, B writes, B succeeds, A fails → B remains', () => {
+    const store = new Map<string, string>();
+    const versionA = 'v-A-1';
+    const versionB = 'v-B-2';
+    store.set(
+      key,
+      buildSchedulePayload({
+        medicationId: 'med',
+        doseId: 'dose',
+        calendarDate: '2026-09-14',
+        scheduleVersion: versionA,
+      })
+    );
+    store.set(
+      key,
+      buildSchedulePayload({
+        medicationId: 'med',
+        doseId: 'dose',
+        calendarDate: '2026-09-14',
+        scheduleVersion: versionB,
+      })
+    );
+    // B "succeeded" — no rollback for B
+    // A fails
+    expect(conditionalRollback(store, key, versionA)).toBe(false);
+    expect(JSON.parse(store.get(key)!).scheduleVersion).toBe(versionB);
+  });
+
+  it('same occurrence identity → one current schedule entry after sequential writes', () => {
+    const store = new Map<string, string>();
+    store.set(key, buildSchedulePayload({ scheduleVersion: 'v1' }));
+    store.set(key, buildSchedulePayload({ scheduleVersion: 'v2' }));
+    store.set(key, buildSchedulePayload({ scheduleVersion: 'v3' }));
+    expect(store.size).toBe(1);
+    expect(JSON.parse(store.get(key)!).scheduleVersion).toBe('v3');
+  });
+
+  it('different occurrences are isolated', () => {
+    const store = new Map<string, string>();
+    const kA = 'sch:m\u001fd1\u001f2026-09-14';
+    const kB = 'sch:m\u001fd2\u001f2026-09-14';
+    store.set(kA, buildSchedulePayload({ scheduleVersion: 'va', doseId: 'd1' }));
+    store.set(kB, buildSchedulePayload({ scheduleVersion: 'vb', doseId: 'd2' }));
+    expect(conditionalRollback(store, kA, 'va')).toBe(true);
+    expect(store.has(kA)).toBe(false);
+    expect(store.has(kB)).toBe(true);
+  });
+
+  it('isMetadataOwnedByVersion rejects missing/empty version', () => {
+    expect(isMetadataOwnedByVersion(null, 'v1')).toBe(false);
+    expect(isMetadataOwnedByVersion('{"scheduleVersion":"v1"}', '')).toBe(false);
+    expect(isMetadataOwnedByVersion('{"scheduleVersion":"v1"}', 'v2')).toBe(false);
+    expect(isMetadataOwnedByVersion('{"scheduleVersion":"v1"}', 'v1')).toBe(true);
+  });
+
+  it('legacy metadata without scheduleVersion is not owned by any attempt', () => {
+    // Old PR #203 entries without version: failed attempts must not delete them
+    // via version-owned path (cancel/restore may still drop intentionally).
+    expect(isMetadataOwnedByVersion('{"medicationId":"m"}', 'v-any')).toBe(false);
+  });
+});

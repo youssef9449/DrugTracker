@@ -17,6 +17,7 @@ import { autoDeductionOccurrenceKey } from './autoDeductionNative';
 import {
   computeDueDoseBreakdown,
   getTodayDateString,
+  historicalRangeDueUnits,
   isDoseConsumedOnDate,
   isDoseSkippedOnDate,
   recordDoseConsumed,
@@ -128,6 +129,25 @@ export function isExactAutoOccurrenceApplied(
   return false;
 }
 
+
+/** Local calendar day before YYYY-MM-DD, or null if invalid. */
+function calendarDayBefore(calendarDate: string): string | null {
+  if (!calendarDate || calendarDate.length !== 10) return null;
+  try {
+    const y = parseInt(calendarDate.slice(0, 4), 10);
+    const m = parseInt(calendarDate.slice(5, 7), 10);
+    const d = parseInt(calendarDate.slice(8, 10), 10);
+    const dt = new Date(y, m - 1, d);
+    dt.setDate(dt.getDate() - 1);
+    const yy = dt.getFullYear();
+    const mm = String(dt.getMonth() + 1).padStart(2, '0');
+    const dd = String(dt.getDate()).padStart(2, '0');
+    return `${yy}-${mm}-${dd}`;
+  } catch {
+    return null;
+  }
+}
+
 export function applyExactAutoEventToMedication(
   med: Medication,
   event: AutoDeductionEvent,
@@ -148,10 +168,21 @@ export function applyExactAutoEventToMedication(
     return { ok: false, reason: 'already_applied' };
   }
 
+  // Historical settlement while applying exact event on day D must cover only
+  // days strictly after lastSync and strictly before D — never the event day
+  // itself (that occurrence is charged solely via event.amount). Same-day
+  // sibling doses on D are left for their own exact events / later legacy path.
   const breakdown = computeDueDoseBreakdown(med, now, todayStr);
-  const settleBase = breakdown.gated
-    ? Math.max(0, med.currentPills - breakdown.pastDueUnits)
-    : Math.max(0, med.currentPills);
+  const lastSync = med.lastSyncDate || todayStr;
+  let priorHistoricalUnits = 0;
+  if (
+    breakdown.gated &&
+    med.autoDeductEnabled !== false &&
+    calendarDate > lastSync
+  ) {
+    priorHistoricalUnits = historicalRangeDueUnits(med, lastSync, calendarDate);
+  }
+  const settleBase = Math.max(0, med.currentPills - priorHistoricalUnits);
 
   const amount = event.amount;
   const newPills = Math.max(0, settleBase - amount);
@@ -189,9 +220,16 @@ export function applyExactAutoEventToMedication(
     }
   }
 
+  // If prior days (after lastSync, before event day) were folded into the
+  // snapshot, advance lastSync to the day before the event (end of that
+  // exclusive-end window). Do NOT jump to today — that would imply the
+  // rest of the event day and later days were settled.
   let lastSyncDate = med.lastSyncDate || todayStr;
-  if (breakdown.gated && breakdown.pastDueUnits > 0) {
-    lastSyncDate = todayStr;
+  if (priorHistoricalUnits > 0) {
+    const prev = calendarDayBefore(calendarDate);
+    if (prev && prev > lastSyncDate) {
+      lastSyncDate = prev;
+    }
   }
 
   const updatedMed: Medication = {

@@ -351,6 +351,19 @@ in-app chime when the app is active). When the app is backgrounded or killed,
 Android plays the system default notification sound via the v3 channel — no
 JavaScript is involved.
 
+Foreground dose reminders use a separate silent channel
+(`dose-reminder-foreground-v1`). Delivery-time channel selection for
+scheduled alarms is enforced in
+`native-android/capacitor-local-notifications/TimedNotificationPublisher.java`
+using process-local `AppForegroundState` (see `MainActivity` onResume/onPause).
+
+**Runtime validation (device/emulator):** TypeScript tests cannot prove
+Android `NotificationManager` channel properties or the channel ID on a
+*delivered* notification. Follow the reproducible procedure in
+[`docs/ANDROID_NOTIFICATION_RUNTIME_VALIDATION.md`](docs/ANDROID_NOTIFICATION_RUNTIME_VALIDATION.md)
+(clean channel state, foreground / background / killed-process cases, `adb`
+inspection). Do not treat Gradle compile success as sound verification.
+
 #### 7. Sync the web build into the Android project
 
 ```bash

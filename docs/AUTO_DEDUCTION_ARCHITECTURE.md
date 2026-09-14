@@ -979,3 +979,60 @@ for the same occurrence identity.
 - `Tests/hooks/useAutoDeductionScheduler.test.ts`
 - `docs/AUTO_DEDUCTION_ARCHITECTURE.md` (this section)
 
+
+---
+
+## Phase 3 Implementation Decisions
+
+*JS reconciliation of native FIRED exact auto-deduction events into application stock.*
+
+### Source of truth
+- **That the occurrence fired at wall-clock time:** native ledger row (`FIRED` / `RECONCILED`).
+- **Persistent stock:** `Medication.currentPills` (+ history) in localStorage (`android_med_tracker_items_v2`).
+- **Display balance:** `effectiveCurrentPills` — after reconcile, consumption markers remove the slot from projection so display and snapshot stay consistent.
+
+### JS reconciliation module
+- Pure engine: `src/utils/autoDeductionReconciliation.ts` (`reconcileFiredEvents`, `applyExactAutoEventToMedication`)
+- Orchestrator: `src/utils/runAutoDeductionReconciliation.ts` (list FIRED → apply → **persist** → mark RECONCILED)
+- Lifecycle: `src/hooks/useExactAutoDeductionReconciliation.ts` (hydration + resume tick)
+
+### Occurrence identity
+```text
+medicationId + doseId + calendarDate
+```
+Multi-dose uses **`event.amount`** (never `dailyDose` as substitute). Legacy uses `LEGACY_DOSE_ID` + event amount (typically dailyDose at schedule time).
+
+### JS idempotency marker
+Durable marker = **dose consumption / skip history** for the occurrence:
+- `doseConsumption` / `doseConsumptionHistory` via `recordDoseConsumed`
+- `doseSkippedHistory` / `lastConsumedDate` (legacy) also terminal
+
+Query: `isExactAutoOccurrenceApplied(med, doseId, calendarDate)`.
+
+### Crash / restart protocol
+```text
+FIRED + no marker  → apply stock + marker → persist localStorage → mark RECONCILED
+FIRED + marker     → no stock change → mark RECONCILED only
+persist fails      → do not mark RECONCILED
+mark fails         → marker remains; next run acknowledges without re-deduct
+```
+
+### When event becomes RECONCILED
+Only after JS has either:
+1. Successfully persisted applied stock/marker, or
+2. Determined no-op is correct (already applied, deleted med, disabled auto, invalid amount)
+
+### Projection interaction
+Applying an occurrence records consumption so `todayDueUnits` no longer includes that slot. Stock is reduced by `event.amount` in the same apply step so UI does not double-subtract (projection alone then snapshot alone).
+
+### Lifecycle triggers
+- After `hydrated` (and not first-run)
+- On `resumeTick` (app resume)
+- Serialized via module promise chain (no concurrent parallel apply)
+
+### Concurrency protection
+`runAutoDeductionReconciliation` chains promises globally so startup + resume cannot interleave two applies of the same FIRED set.
+
+### Known Phase 4 dependency
+Full Take/Restore race matrix (restore after exact auto, future suppress policy) remains Phase 4. Phase 3 uses consumption/skip markers so Take’s `already_consumed` and Restore’s history remain the primary business guards.
+

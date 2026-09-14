@@ -34,7 +34,6 @@ import {
  */
 
 const TODAY = '2024-09-12';
-const YESTERDAY = '2024-09-11';
 
 function makeMulti(overrides: Partial<Medication> = {}): Medication {
   return {

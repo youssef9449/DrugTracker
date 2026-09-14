@@ -812,16 +812,25 @@ public final class AutoDeductionScheduler {
     }
 
     /**
-     * Schedule the next calendar-date occurrence only if durable schedule metadata
-     * for that successor does not already exist.
+     * Schedule the next calendar-date occurrence only if it is absent and not
+     * effectively cancelled.
      *
-     * <p>Under {@link #SCHEDULE_LOCK}: if D+1 is already present, return success
-     * without rewriting amount/time/alarm (duplicate/stale D payload must not
-     * overwrite a newer authoritative successor). If absent, install via
-     * {@link #scheduleOccurrenceLocked}.
+     * <p>Under one continuous {@link #SCHEDULE_LOCK} critical section:
+     * <ul>
+     *   <li>If D+1 durable schedule metadata already exists — return success
+     *       without rewriting amount/time/alarm (duplicate/stale D payload must
+     *       not overwrite a newer authoritative successor).</li>
+     *   <li>If D+1 metadata is absent but the occurrence is effectively cancelled
+     *       ({@link #isOccurrenceCancelledKey}) — return success without calling
+     *       {@link #scheduleOccurrenceLocked}. Creating would clear the
+     *       cancellation tombstone and resurrect a previously cancelled D+1.</li>
+     *   <li>If D+1 is absent and not cancelled — install via
+     *       {@link #scheduleOccurrenceLocked}.</li>
+     * </ul>
      *
      * <p>Used by live fire recurrence ({@code AutoDeductionReceiver}) so
-     * {@code ALREADY_EXISTS} / pending recovery cannot corrupt an existing D+1.
+     * {@code ALREADY_EXISTS} / pending recovery cannot corrupt an existing D+1
+     * or resurrect a cancelled successor.
      */
     public ScheduleResult scheduleNextOccurrenceIfAbsent(
             String medicationId,
@@ -864,6 +873,12 @@ public final class AutoDeductionScheduler {
                 if (schedulePrefs.contains(nextPrefKey)) {
                     return ScheduleResult.success(nextKey);
                 }
+                // Absent + cancelled: do not report permission denial as a need to create.
+                if (isOccurrenceCancelledKey(nextKey)) {
+                    Log.i(TAG, "scheduleNextOccurrenceIfAbsent: successor cancelled — "
+                            + "not recreating " + nextKey);
+                    return ScheduleResult.success(nextKey);
+                }
             }
             return ScheduleResult.fail("exact_alarm_permission_denied");
         }
@@ -889,6 +904,14 @@ public final class AutoDeductionScheduler {
             if (schedulePrefs.contains(nextPrefKey)) {
                 Log.i(TAG, "scheduleNextOccurrenceIfAbsent: successor already present — "
                         + "not overwriting " + nextPrefKey);
+                return ScheduleResult.success(nextKey);
+            }
+            // Metadata absent but cancellation tombstone still effective: must not
+            // call scheduleOccurrenceLocked (it would clear the tombstone and
+            // resurrect the cancelled D+1 from a stale/duplicate D delivery).
+            if (isOccurrenceCancelledKey(nextKey)) {
+                Log.i(TAG, "scheduleNextOccurrenceIfAbsent: successor cancelled — "
+                        + "not recreating " + nextKey);
                 return ScheduleResult.success(nextKey);
             }
             return scheduleOccurrenceLocked(

@@ -372,7 +372,13 @@ Lock order is always `SCHEDULE_LOCK` then nested `EventStore.LOCK` (never the re
 | CANCELLED | No |
 | FAILED without pending | No |
 
-Live fire recurrence uses `scheduleNextOccurrenceIfAbsent`: under `SCHEDULE_LOCK`, if durable schedule metadata for the successor already exists, the delivery's payload (`timeHhmm` / `amount`) is **not** applied. A duplicate/stale D alarm must not replace a correct D+1 that was scheduled with newer parameters. The fire event itself remains insert-if-absent (`ALREADY_EXISTS`); only successor **configuration** is protected this way.
+Live fire recurrence uses `scheduleNextOccurrenceIfAbsent`. Under one continuous `SCHEDULE_LOCK` critical section:
+
+- If durable schedule metadata for D+1 already exists, the delivery's payload (`timeHhmm` / `amount`) is **not** applied. A duplicate/stale D alarm must not replace a correct D+1 that was scheduled with newer parameters.
+- If D+1 metadata is absent but the successor is **effectively cancelled** (`isOccurrenceCancelledKey`), the helper returns success without creating D+1. Calling the normal schedule path would clear the cancellation tombstone and resurrect a previously cancelled occurrence from a stale/duplicate D delivery — that must not happen.
+- If D+1 is absent and not cancelled, it is installed via the normal schedule transaction.
+
+The fire event itself remains insert-if-absent (`ALREADY_EXISTS`); create-if-absent recurrence respects both existing successor metadata and effective occurrence cancellation.
 
 ### Past-schedule recovery and recurrence
 

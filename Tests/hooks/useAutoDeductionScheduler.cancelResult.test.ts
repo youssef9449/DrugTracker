@@ -105,12 +105,18 @@ describe('useAutoDeductionScheduler CancelResult handling', () => {
     expect(cancelMock).toHaveBeenCalled();
     // A subsequent enable→disable cycle should retry cancel (tracked retained)
     cancelMock.mockClear();
+    cancelMock.mockResolvedValue({
+      ok: false,
+      status: 'FAILED',
+      error: 'schedule_metadata_remove_failed',
+    });
     rerender({ meds: [med], enabled: true });
     await new Promise((r) => setTimeout(r, 20));
     rerender({ meds: [med], enabled: false });
     await new Promise((r) => setTimeout(r, 30));
-    // If tracking was retained, cancel is attempted again
-    expect(cancelMock.mock.calls.length).toBeGreaterThanOrEqual(0);
+    // Tracking retained after FAILED cancel → cancel is attempted again
+    expect(cancelMock).toHaveBeenCalled();
+    expect(cancelMock.mock.calls.length).toBeGreaterThan(0);
     unmount();
   });
 });

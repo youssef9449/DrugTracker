@@ -337,7 +337,8 @@ Native owns timing, AlarmManager install/cancel, boot/permission restore, and du
 - Manifest registers `SCHEDULE_EXACT_ALARM` and `RECEIVE_BOOT_COMPLETED`.
 - **Receiver separation (security):**
   - `AutoDeductionReceiver` — `ACTION_AUTO_DEDUCTION` only, `android:exported="false"` (explicit AlarmManager PendingIntent).
-  - `AutoDeductionSystemReceiver` — `BOOT_COMPLETED` / `QUICKBOOT_POWERON` / `ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED` only, `android:exported="true"` (system broadcasts on API 31+). Invokes `AutoDeductionLifecycle.promoteAndRestore`.
+  - `AutoDeductionSystemReceiver` — `BOOT_COMPLETED` / `QUICKBOOT_POWERON` / `TIMEZONE_CHANGED` / `ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED`, `android:exported="true"` (system broadcasts on API 31+). Invokes `AutoDeductionLifecycle.promoteAndRestore`.
+- On `TIMEZONE_CHANGED`, future alarms are rebuilt from durable schedule metadata using the current default timezone (`calendarDate` + `timeHhmm`); historical FIRED/RECONCILED events are not altered and occurrence identity is unchanged.
 - JS desired-state reconciliation lists native schedule metadata via `listScheduledOccurrences` and cancels keys not in the desired set (avoids resurrecting stale schedules after process restart). System restore is **not** invoked on every JS schedule pass.
 
 ### FIRED durability and recovery
@@ -360,9 +361,16 @@ Native owns timing, AlarmManager install/cancel, boot/permission restore, and du
 
 ### Restore / cancel
 
-- `scheduleOccurrenceLocked` holds `SCHEDULE_LOCK` for ownership check + metadata + AlarmManager install (restore uses `requiredVersion`).
-- Cancel cannot be undone by a stale restore snapshot.
-- Past schedule metadata is removed only when FIRED exists or pending was durably recorded.
+- `scheduleOccurrenceLocked` holds `SCHEDULE_LOCK` for ownership check + metadata + AlarmManager install (restore uses `requiredVersion`). The authoritative `scheduleVersion` (`{millis}-{seq}-{uuid}`) is allocated **inside** this lock so its ordering token reflects serialized operation order, not the wall-clock time at which a thread waited for the lock.
+- The `seq` component is a **durable monotonic counter** in a dedicated SharedPreferences namespace (`PREFS_ORDERING` / `lastAllocatedSequence`). Allocation is read → increment → `commit` under `SCHEDULE_LOCK`. This is not an in-memory `AtomicLong`: after process death the counter resumes from the last persisted value, so a new operation always receives a strictly newer seq than any previously durable token. Skipped sequence numbers after a crash are acceptable; reusing an older durable seq is not. If the counter commit fails, the schedule/cancel operation fails (no volatile fallback).
+- Cancel writes a durable cancellation tombstone (occurrence identity + the same style of ordering token) before AlarmManager.cancel and schedule-metadata removal — also under `SCHEDULE_LOCK`. Same-millisecond schedule vs cancel and post-restart ordering are both distinguished by the durable sequence.
+- **Effective cancellation** is evaluated from durable state only (`isOccurrenceCancelled`):
+  - tombstone present and no schedule metadata → cancelled
+  - both present → compare ordering tokens by (millis, seq); a strictly newer schedule supersedes the tombstone (active); a strictly newer cancel remains cancelled
+  - no tombstone → not cancelled
+- Cancelled occurrences are blocked in **both** lifecycle restore and `AutoDeductionReceiver` fire handling: no synthetic FIRED, no next recurrence. A stale alarm that races with cancel is ignored when the tombstone is durable.
+- A later legitimate `scheduleOccurrence` writes new schedule metadata (lock-ordered `scheduleVersion`) then best-effort clears the tombstone. If tombstone removal fails, version ordering still treats the newer schedule as active so reboot/restore and fire delivery do not suppress it.
+- Past schedule metadata is removed only when FIRED exists or pending was durably recorded (genuine fire recovery), never when the occurrence is effectively cancelled.
 
 ### Platform limitations
 

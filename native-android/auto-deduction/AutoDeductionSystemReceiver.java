@@ -8,7 +8,7 @@ import android.os.Build;
 import android.util.Log;
 
 /**
- * System lifecycle receiver only — boot and exact-alarm permission changes.
+ * System lifecycle receiver only — boot, exact-alarm permission, and timezone changes.
  * Does NOT handle {@link AutoDeductionContract#ACTION_AUTO_DEDUCTION}.
  * Must not accept custom medication payloads.
  */
@@ -25,6 +25,14 @@ public class AutoDeductionSystemReceiver extends BroadcastReceiver {
         if (Intent.ACTION_BOOT_COMPLETED.equals(action)
                 || "android.intent.action.QUICKBOOT_POWERON".equals(action)) {
             AutoDeductionLifecycle.promoteAndRestore(context, "BOOT");
+            return;
+        }
+
+        if (Intent.ACTION_TIMEZONE_CHANGED.equals(action)) {
+            // Rebuild future exact alarms from durable schedule metadata using the
+            // new default timezone. Does not synthesize duplicate FIRED events;
+            // historical FIRED/RECONCILED rows are left unchanged.
+            AutoDeductionLifecycle.promoteAndRestore(context, "TIMEZONE_CHANGED");
             return;
         }
 

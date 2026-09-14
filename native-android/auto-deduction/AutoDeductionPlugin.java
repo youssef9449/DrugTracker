@@ -128,6 +128,30 @@ public class AutoDeductionPlugin extends Plugin {
         call.resolve(ret);
     }
 
+    /**
+     * List durable schedule metadata so JS can cancel stale occurrences
+     * after process restart (trackedRef is empty).
+     */
+    @PluginMethod
+    public void listScheduledOccurrences(PluginCall call) {
+        AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
+        java.util.List<JSONObject> rows = scheduler.listScheduledOccurrences();
+        JSArray arr = new JSArray();
+        for (JSONObject o : rows) {
+            JSObject js = new JSObject();
+            js.put("medicationId", o.optString("medicationId", ""));
+            js.put("doseId", o.optString("doseId", ""));
+            js.put("calendarDate", o.optString("calendarDate", ""));
+            js.put("timeHhmm", o.optString("timeHhmm", ""));
+            js.put("amount", o.optDouble("amount", 0));
+            js.put("scheduledAtEpochMs", o.optLong("scheduledAtEpochMs", 0L));
+            arr.put(js);
+        }
+        JSObject ret = new JSObject();
+        ret.put("schedules", arr);
+        call.resolve(ret);
+    }
+
     private static JSObject toJSObject(JSONObject o) {
         JSObject js = new JSObject();
         js.put("medicationId", o.optString("medicationId", ""));

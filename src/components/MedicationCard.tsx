@@ -512,21 +512,19 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           isOut ? 'bg-red-50/25' : isCrit ? 'bg-rose-50/20' : isWarn ? 'bg-amber-50/10' : ''
         }`}
       >
-        {/* Row 1: name + category */}
-        <div className="flex items-center justify-between gap-1 mb-1 min-w-0">
-          <h3 className="text-[11px] font-bold text-slate-900 leading-tight tracking-tight truncate" title={medication.name}>
-            {medication.name}
-          </h3>
-          {medication.category && (
-            <span className={`text-[8px] font-medium px-1.5 py-0.2 rounded-full shrink-0 ${tag.badge}`}>
-              {medication.category}
-            </span>
-          )}
-        </div>
+        {/* Row 1: name — alone on its own full-width line */}
+        <h3 className="block w-full text-[11px] font-bold text-slate-900 leading-tight tracking-tight truncate mb-1" title={medication.name}>
+          {medication.name}
+        </h3>
 
-        {/* Row 2: status + actions */}
+        {/* Row 2: Category + status + actions */}
         <div className="flex items-center justify-between gap-1.5 min-w-0">
-          <div className="min-w-0 flex-1 overflow-hidden">
+          <div className="min-w-0 flex-1 overflow-hidden flex items-center gap-1 flex-wrap">
+            {medication.category && (
+              <span className={`text-[8px] font-medium px-1.5 py-0.2 rounded-full shrink-0 ${tag.badge}`}>
+                {medication.category}
+              </span>
+            )}
             {isOut ? (
               <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 flex items-center gap-0.5 shrink-0 w-fit">
                 <AlertCircle className="w-2 h-2" />

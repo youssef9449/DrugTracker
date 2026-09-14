@@ -146,4 +146,28 @@ describe('MedicationCard — Category Badge Color matching colorTag', () => {
     expect(badge).toHaveClass('bg-rose-50');
     expect(badge).toHaveClass('text-rose-800');
   });
+
+  it('renders medication name on its own full-width line in compact view, with category in row 2', () => {
+    render(
+      <MedicationCard
+        medication={{ ...baseMed, colorTag: 'sky', category: 'السكري' }}
+        isCompact={true}
+        viewFilter="all"
+        onOpenRefill={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onToggleAutoDeduct={vi.fn()}
+      />
+    );
+
+    const heading = screen.getByRole('heading', { level: 3 });
+    expect(heading).toHaveTextContent(baseMed.name);
+    expect(heading).toHaveClass('block');
+    expect(heading).toHaveClass('w-full');
+
+    const badge = screen.getByText('السكري');
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveClass('bg-sky-50');
+    expect(badge).toHaveClass('text-sky-800');
+  });
 });

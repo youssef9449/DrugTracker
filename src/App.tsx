@@ -32,6 +32,7 @@ import { AndroidFab } from './components/AndroidFab';
 import { EmptyState } from './components/EmptyState';
 import { DoseAlarmModal } from './components/DoseAlarmModal';
 import { SelectDoseModal } from './components/SelectDoseModal';
+import { AutoDeductPromptModal } from './components/AutoDeductPromptModal';
 import { UpdatePrompt } from './components/UpdatePrompt';
 import { Toggle } from './components/ui/Toggle';
 import { playSuccessChime } from './utils/sound';
@@ -81,6 +82,7 @@ import { Zap, ZapOff } from 'lucide-react';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 const STORAGE_GLOBAL_AUTO_DEDUCT_KEY = 'android_med_tracker_auto_deduct_v1';
+const STORAGE_AUTO_DEDUCT_PROMPTED_KEY = 'android_med_tracker_auto_deduct_prompted_v1';
 const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
 const STORAGE_PHARMACY_KEY = 'android_med_tracker_pharmacy_v2';
 const SOUND_KEY = 'android_med_tracker_sound_v1';
@@ -127,6 +129,7 @@ export default function App() {
   // seed data is a demo — don't fire auto-deductions, notifications, or
   // alarms for it. Set during hydration.
   const [isFirstRun, setIsFirstRun] = useState(false);
+  const [isAutoDeductPromptOpen, setIsAutoDeductPromptOpen] = useState(false);
 
   const [filter, setFilter] = useState<'all' | 'alerts' | 'sufficient'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -208,12 +211,17 @@ export default function App() {
         setSelectDoseMode('take');
         return true;
       }
+      if (isAutoDeductPromptOpen) {
+        setIsAutoDeductPromptOpen(false);
+        persist(STORAGE_AUTO_DEDUCT_PROMPTED_KEY, 'true', { json: false });
+        return true;
+      }
       if (isAddModalOpen) { setIsAddModalOpen(false); setEditingMedication(null); return true; }
       if (refillMedication) { setRefillMedication(null); return true; }
       if (isSettingsModalOpen) { setIsSettingsModalOpen(false); return true; }
       return false;
     });
-  }, [alarmingMedication, selectDoseMed, isAddModalOpen, refillMedication, isSettingsModalOpen, dismissAlarm]);
+  }, [alarmingMedication, selectDoseMed, isAutoDeductPromptOpen, isAddModalOpen, refillMedication, isSettingsModalOpen, dismissAlarm]);
 
   // #38: on unmount, remove all Capacitor listeners so duplicate
   // listeners don't accumulate across HMR re-initializations. Also
@@ -242,11 +250,15 @@ export default function App() {
     // detection distinguishes "no key set" (null) from "empty array
     // explicitly saved" (loadJson returns []).
     const savedMedsRaw = localStorage.getItem(STORAGE_MEDS_KEY);
+    const autoDeductPromptedRaw = localStorage.getItem(STORAGE_AUTO_DEDUCT_PROMPTED_KEY);
     if (savedMedsRaw === null) {
       // First-ever open: no saved meds. The seed data is a demo —
       // flag it so the auto-deduction + alert + reminder effects
       // don't fire ghost notifications/alarms for seed meds.
       setIsFirstRun(true);
+      if (autoDeductPromptedRaw === null) {
+        setIsAutoDeductPromptOpen(true);
+      }
     } else {
       // #15: accept an empty array here (don't gate on length > 0).
       // Otherwise, when the user deletes all medications, the persisted
@@ -917,6 +929,19 @@ export default function App() {
     if (soundEnabled) playSuccessChime();
   };
 
+  const handleConfirmAutoDeductPrompt = (enable: boolean) => {
+    setIsAutoDeductPromptOpen(false);
+    persist(STORAGE_AUTO_DEDUCT_PROMPTED_KEY, 'true', { json: false });
+    setGlobalAutoDeductEnabled(enable);
+    persist(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, String(enable), { json: false });
+    if (soundEnabled) playSuccessChime();
+    showToast(
+      enable
+        ? 'تم تفعيل الخصم التلقائي لمخزون الأدوية ⚡'
+        : 'تم إيقاف الخصم التلقائي ⏸️ (المخزون ثابت حتى تسجل الجرعة يدوياً)'
+    );
+  };
+
 
   /** Drop doseConsumption / history entries whose doseId is no longer on the schedule. */
   const pruneDoseConsumption = (
@@ -1557,33 +1582,33 @@ export default function App() {
               {filter === 'all' && (
                 <div>
                   <div
-                    className={`mx-4 mt-3.5 p-4 rounded-2xl shadow-xs border transition-all duration-200 ${
+                    className={`mx-4 mt-2 px-3 py-2 rounded-xl shadow-2xs border transition-all duration-200 ${
                       globalAutoDeductEnabled
                         ? 'bg-teal-50/90 border-teal-200/90'
                         : 'bg-amber-50/90 border-amber-200/90'
                     }`}
                   >
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-2">
                       <div
-                        className={`w-7 h-7 rounded-xl text-white flex items-center justify-center shrink-0 ${
+                        className={`w-6 h-6 rounded-lg text-white flex items-center justify-center shrink-0 ${
                           globalAutoDeductEnabled ? 'bg-teal-600' : 'bg-amber-600'
                         }`}
                       >
                         {globalAutoDeductEnabled ? (
-                          <Zap className="w-4 h-4" />
+                          <Zap className="w-3.5 h-3.5" />
                         ) : (
-                          <ZapOff className="w-4 h-4" />
+                          <ZapOff className="w-3.5 h-3.5" />
                         )}
                       </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-900 block text-[11px]">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-slate-900 block text-[11px] leading-tight">
                             {globalAutoDeductEnabled
                               ? 'الخصم التلقائي نشط'
                               : 'الخصم التلقائي متوقف'}
                           </span>
                           <span
-                            className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                            className={`text-[9.5px] px-1.5 py-0.2 rounded-full font-bold ${
                               globalAutoDeductEnabled
                                 ? 'bg-teal-100 text-teal-800'
                                 : 'bg-amber-100 text-amber-800'
@@ -1593,7 +1618,7 @@ export default function App() {
                           </span>
                         </div>
                         <p
-                          className={`text-[10px] leading-tight ${
+                          className={`text-[9.5px] leading-tight mt-0.5 truncate ${
                             globalAutoDeductEnabled ? 'text-teal-800' : 'text-amber-800'
                           }`}
                         >
@@ -1604,19 +1629,19 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-                  <div className="mx-4 mt-3 grid grid-cols-2 items-stretch gap-2 text-center text-xs">
-                    <div className="bg-white p-2.5 rounded-2xl border border-slate-200/80 shadow-xs h-full flex flex-col justify-center">
-                      <span className="text-[10px] text-slate-500 block leading-tight">إجمالي الأدوية</span>
-                      <div className="h-6 flex items-center justify-center mt-0.5">
-                        <span className="text-base font-extrabold font-mono text-slate-800 leading-none">{medications.length}</span>
+                  <div className="mx-4 mt-2 grid grid-cols-2 items-stretch gap-2 text-center text-xs">
+                    <div className="bg-white px-2.5 py-1.5 rounded-xl border border-slate-200/80 shadow-2xs h-full flex flex-col justify-center">
+                      <span className="text-[9.5px] text-slate-500 block leading-tight">إجمالي الأدوية</span>
+                      <div className="h-5 flex items-center justify-center mt-0.5">
+                        <span className="text-sm font-bold font-mono text-slate-800 leading-none">{medications.length}</span>
                       </div>
                     </div>
-                    <div className="bg-white p-2.5 rounded-2xl border border-slate-200/80 shadow-xs h-full flex flex-col justify-center">
-                      <span className="text-[10px] text-slate-500 block leading-tight">حالة المخزون</span>
-                      <div className="h-6 flex items-center justify-center gap-1.5 mt-0.5 text-[11px] leading-none">
-                        <span className="text-emerald-700 font-bold font-mono">{sufficientCount} آمن</span>
+                    <div className="bg-white px-2.5 py-1.5 rounded-xl border border-slate-200/80 shadow-2xs h-full flex flex-col justify-center">
+                      <span className="text-[9.5px] text-slate-500 block leading-tight">حالة المخزون</span>
+                      <div className="h-5 flex items-center justify-center gap-1.5 mt-0.5 text-[10.5px] leading-none font-mono font-bold">
+                        <span className="text-emerald-700">{sufficientCount} آمن</span>
                         <span className="text-slate-300">•</span>
-                        <span className={`font-mono font-bold ${alertsCount > 0 ? 'text-rose-600' : 'text-slate-500'}`}>
+                        <span className={alertsCount > 0 ? 'text-rose-600' : 'text-slate-500'}>
                           {alertsCount} ناقص
                         </span>
                       </div>
@@ -1831,6 +1856,10 @@ export default function App() {
           setSelectDoseMed(null);
           setSelectDoseMode('take');
         }}
+      />
+      <AutoDeductPromptModal
+        isOpen={isAutoDeductPromptOpen}
+        onConfirm={handleConfirmAutoDeductPrompt}
       />
     </div>
   );

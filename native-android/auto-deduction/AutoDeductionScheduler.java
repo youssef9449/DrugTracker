@@ -160,6 +160,20 @@ public final class AutoDeductionScheduler {
         }
     }
 
+    /**
+     * Whether past-schedule metadata may be deleted after an insertFiredIfAbsent
+     * attempt during restore. Metadata must survive when neither the main FIRED
+     * ledger nor a pending-fire record was durably established.
+     *
+     * Package-visible for focused verification of the recovery matrix.
+     */
+    static boolean shouldRemovePastScheduleMetadata(
+            AutoDeductionEventStore.InsertFiredResult ir) {
+        if (ir == null) return false;
+        return ir.isCreated() || ir.isAlreadyExists() || ir.pendingRecorded;
+    }
+
+
     private Intent buildOccurrenceIntent(
             String medicationId,
             String doseId,
@@ -506,20 +520,31 @@ public final class AutoDeductionScheduler {
                     epoch = computed;
                 }
 
-                // Past occurrence: promote to FIRED (recovers failed primary insert)
-                // then drop schedule metadata.
+                // Past occurrence: promote to FIRED (recovers failed primary insert).
+                // Only drop schedule metadata when a durable recovery source exists:
+                //   CREATED / ALREADY_EXISTS → main FIRED ledger
+                //   FAILED + pendingRecorded → pending-fire record
+                // If both main and pending writes failed, KEEP schedule metadata
+                // as the last recovery source for a later restore attempt.
                 if (epoch <= System.currentTimeMillis()) {
                     AutoDeductionEventStore.InsertFiredResult ir =
                             eventStore.insertFiredIfAbsent(medId, doseId, date, epoch, amount);
-                    if (ir.isCreated() || ir.isAlreadyExists()) {
-                        Log.i(TAG, "restore past: promoted/ensured FIRED for "
-                                + medId + "/" + doseId + "/" + date);
+                    if (shouldRemovePastScheduleMetadata(ir)) {
+                        if (ir.isCreated() || ir.isAlreadyExists()) {
+                            Log.i(TAG, "restore past: promoted/ensured FIRED for "
+                                    + medId + "/" + doseId + "/" + date);
+                        } else {
+                            Log.i(TAG, "restore past: pending-fire recorded for "
+                                    + medId + "/" + doseId + "/" + date
+                                    + "; dropping schedule metadata");
+                        }
+                        removeScheduleMetadata(prefKey);
                     } else {
-                        Log.w(TAG, "restore past: could not ensure FIRED for "
+                        Log.e(TAG, "restore past: FIRED and pending both failed for "
                                 + medId + "/" + doseId + "/" + date
-                                + " (pendingRecorded=" + ir.pendingRecorded + ")");
+                                + " — preserving schedule metadata as recovery source");
+                        // Do NOT removeScheduleMetadata — last durable source.
                     }
-                    removeScheduleMetadata(prefKey);
                     continue;
                 }
 

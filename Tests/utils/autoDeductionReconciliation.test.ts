@@ -503,3 +503,164 @@ describe('deterministicLogPreventsDuplicate', () => {
     expect(r.medications[0].currentPills).toBe(4);
   });
 });
+
+describe('exact event day must not be double-settled', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-14T15:00:00'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('exactEventOnPastUnsettledDayDoesNotDoubleDeduct', () => {
+    // lastSync=09-12, event=09-13 amount 2, current=10 → 8 (not 6)
+    const med = baseMed({
+      doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
+      currentPills: 10,
+      lastSyncDate: '2026-09-12',
+      dailyDose: 2,
+    });
+    const r = reconcileFiredEvents(
+      [med],
+      [],
+      [
+        fired({
+          medicationId: 'med-1',
+          doseId: 'd',
+          calendarDate: '2026-09-13',
+          amount: 2,
+        }),
+      ]
+    );
+    expect(r.details[0].outcome).toBe('applied');
+    expect(r.medications[0].currentPills).toBe(8);
+  });
+
+  it('partialMultiDoseDayDoesNotDeductSibling', () => {
+    // morning only on historical day — evening must remain uncharged
+    const med = baseMed({
+      doseSchedule: [
+        { id: 'morning', amount: 2, time: '08:00' },
+        { id: 'evening', amount: 3, time: '20:00' },
+      ],
+      currentPills: 10,
+      lastSyncDate: '2026-09-12',
+      dailyDose: 5,
+    });
+    const r = reconcileFiredEvents(
+      [med],
+      [],
+      [
+        fired({
+          medicationId: 'med-1',
+          doseId: 'morning',
+          calendarDate: '2026-09-13',
+          amount: 2,
+          scheduledAtEpochMs: 1,
+        }),
+      ]
+    );
+    expect(r.medications[0].currentPills).toBe(8);
+    expect(isExactAutoOccurrenceApplied(r.medications[0], 'morning', '2026-09-13')).toBe(
+      true
+    );
+    expect(isExactAutoOccurrenceApplied(r.medications[0], 'evening', '2026-09-13')).toBe(
+      false
+    );
+  });
+
+  it('twoEventsOnSameHistoricalDayDeductOnlyTheirOwnAmounts', () => {
+    const med = baseMed({
+      doseSchedule: [
+        { id: 'morning', amount: 2, time: '08:00' },
+        { id: 'evening', amount: 3, time: '20:00' },
+      ],
+      currentPills: 10,
+      lastSyncDate: '2026-09-12',
+      dailyDose: 5,
+    });
+    const events = [
+      fired({
+        medicationId: 'med-1',
+        doseId: 'morning',
+        calendarDate: '2026-09-13',
+        amount: 2,
+        scheduledAtEpochMs: 100,
+      }),
+      fired({
+        medicationId: 'med-1',
+        doseId: 'evening',
+        calendarDate: '2026-09-13',
+        amount: 3,
+        scheduledAtEpochMs: 200,
+      }),
+    ];
+    const r = reconcileFiredEvents([med], [], events);
+    expect(r.medications[0].currentPills).toBe(5);
+    expect(r.newExactLogs).toHaveLength(2);
+  });
+
+  it('priorHistoricalDaysBeforeEventDayStillSettle', () => {
+    // lastSync=09-10, event=09-13 amount 2; days 11+12 still due (2 each) → 10-4-2=4
+    const med = baseMed({
+      doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
+      currentPills: 10,
+      lastSyncDate: '2026-09-10',
+      dailyDose: 2,
+    });
+    const r = reconcileFiredEvents(
+      [med],
+      [],
+      [
+        fired({
+          medicationId: 'med-1',
+          doseId: 'd',
+          calendarDate: '2026-09-13',
+          amount: 2,
+        }),
+      ]
+    );
+    expect(r.medications[0].currentPills).toBe(4);
+  });
+
+  it('sameDayExactEventDoesNotUsePastDueWindow', () => {
+    const med = baseMed({
+      doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
+      currentPills: 10,
+      lastSyncDate: '2026-09-14',
+      dailyDose: 2,
+    });
+    const r = reconcileFiredEvents(
+      [med],
+      [],
+      [
+        fired({
+          medicationId: 'med-1',
+          doseId: 'd',
+          calendarDate: '2026-09-14',
+          amount: 2,
+        }),
+      ]
+    );
+    expect(r.medications[0].currentPills).toBe(8);
+  });
+
+  it('duplicateExactOccurrenceIsIdempotent', () => {
+    const med = baseMed({
+      doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
+      currentPills: 10,
+      lastSyncDate: '2026-09-12',
+      dailyDose: 2,
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd',
+      calendarDate: '2026-09-13',
+      amount: 2,
+    });
+    const r = reconcileFiredEvents([med], [], [e, e]);
+    expect(r.medications[0].currentPills).toBe(8);
+    expect(r.newExactLogs).toHaveLength(1);
+  });
+});

@@ -86,6 +86,49 @@ public final class AutoDeductionScheduler {
     }
 
     /**
+     * Result of a cancelOccurrence attempt.
+     * <ul>
+     *   <li>{@link Status#SUCCESS} — alarm canceled (or was absent) and metadata removed
+     *       (or was already absent); intended terminal state achieved</li>
+     *   <li>{@link Status#ALREADY_ABSENT} — no alarm metadata and cancel path completed
+     *       (subset of SUCCESS for callers that care)</li>
+     *   <li>{@link Status#FAILED} — AlarmManager unavailable, or metadata remove commit failed;
+     *       intended cancellation state not fully confirmed</li>
+     * </ul>
+     */
+    public static final class CancelResult {
+        public enum Status {
+            SUCCESS,
+            ALREADY_ABSENT,
+            FAILED
+        }
+
+        public final Status status;
+        public final String error;
+
+        public CancelResult(Status status, String error) {
+            this.status = status;
+            this.error = error;
+        }
+
+        public boolean isOk() {
+            return status == Status.SUCCESS || status == Status.ALREADY_ABSENT;
+        }
+
+        public static CancelResult success() {
+            return new CancelResult(Status.SUCCESS, null);
+        }
+
+        public static CancelResult alreadyAbsent() {
+            return new CancelResult(Status.ALREADY_ABSENT, null);
+        }
+
+        public static CancelResult fail(String error) {
+            return new CancelResult(Status.FAILED, error);
+        }
+    }
+
+    /**
      * Unique attempt token for one metadata write.
      * Not part of occurrence identity (med/dose/date).
      */
@@ -116,6 +159,20 @@ public final class AutoDeductionScheduler {
             return false;
         }
     }
+
+    /**
+     * Whether past-schedule metadata may be deleted after an insertFiredIfAbsent
+     * attempt during restore. Metadata must survive when neither the main FIRED
+     * ledger nor a pending-fire record was durably established.
+     *
+     * Package-visible for focused verification of the recovery matrix.
+     */
+    static boolean shouldRemovePastScheduleMetadata(
+            AutoDeductionEventStore.InsertFiredResult ir) {
+        if (ir == null) return false;
+        return ir.isCreated() || ir.isAlreadyExists() || ir.pendingRecorded;
+    }
+
 
     private Intent buildOccurrenceIntent(
             String medicationId,
@@ -219,45 +276,71 @@ public final class AutoDeductionScheduler {
             return ScheduleResult.fail("payload_build_failed");
         }
 
-        // Pre-build Intent/PI outside lock is fine; identity is deterministic.
         Intent intent = buildOccurrenceIntent(
                 medicationId, doseId, calendarDate, triggerAt, amount, timeHhmm);
         PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
 
-        // ── Serialized scheduling transaction ──
         synchronized (SCHEDULE_LOCK) {
-            boolean metaWritten = schedulePrefs.edit()
-                    .putString(prefKey, payload.toString())
-                    .commit();
-            if (!metaWritten) {
-                Log.e(TAG, "schedule metadata commit failed for key=" + key);
-                return ScheduleResult.fail("schedule_metadata_write_failed");
-            }
-
-            AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
-            if (am == null) {
-                removeScheduleMetadataIfVersionLocked(prefKey, myVersion);
-                return ScheduleResult.fail("alarm_manager_unavailable");
-            }
-
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi);
-                } else {
-                    am.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pi);
-                }
-            } catch (SecurityException se) {
-                Log.w(TAG, "setExactAndAllowWhileIdle denied", se);
-                removeScheduleMetadataIfVersionLocked(prefKey, myVersion);
-                return ScheduleResult.fail("exact_alarm_permission_denied");
-            } catch (Exception e) {
-                Log.e(TAG, "schedule failed", e);
-                removeScheduleMetadataIfVersionLocked(prefKey, myVersion);
-                return ScheduleResult.fail("schedule_failed");
-            }
-
-            return ScheduleResult.success(key);
+            return scheduleOccurrenceLocked(
+                    prefKey, key, myVersion, payload, triggerAt, pi, /*requiredVersion*/ null);
         }
+    }
+
+    /**
+     * Core scheduling transaction. Caller MUST hold {@link #SCHEDULE_LOCK}.
+     *
+     * @param requiredVersion if non-null, abort unless current metadata is still
+     *                        owned by this version (restore ownership guard).
+     *                        null means unconditional schedule (normal path).
+     */
+    private ScheduleResult scheduleOccurrenceLocked(
+            String prefKey,
+            String key,
+            String myVersion,
+            JSONObject payload,
+            long triggerAt,
+            PendingIntent pi,
+            String requiredVersion
+    ) {
+        if (requiredVersion != null) {
+            String current = schedulePrefs.getString(prefKey, null);
+            if (!isMetadataOwnedByVersion(current, requiredVersion)) {
+                Log.i(TAG, "scheduleOccurrenceLocked: skip — ownership lost for " + prefKey);
+                return ScheduleResult.fail("ownership_lost");
+            }
+        }
+
+        boolean metaWritten = schedulePrefs.edit()
+                .putString(prefKey, payload.toString())
+                .commit();
+        if (!metaWritten) {
+            Log.e(TAG, "schedule metadata commit failed for key=" + key);
+            return ScheduleResult.fail("schedule_metadata_write_failed");
+        }
+
+        AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
+        if (am == null) {
+            removeScheduleMetadataIfVersionLocked(prefKey, myVersion);
+            return ScheduleResult.fail("alarm_manager_unavailable");
+        }
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi);
+            } else {
+                am.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pi);
+            }
+        } catch (SecurityException se) {
+            Log.w(TAG, "setExactAndAllowWhileIdle denied", se);
+            removeScheduleMetadataIfVersionLocked(prefKey, myVersion);
+            return ScheduleResult.fail("exact_alarm_permission_denied");
+        } catch (Exception e) {
+            Log.e(TAG, "schedule failed", e);
+            removeScheduleMetadataIfVersionLocked(prefKey, myVersion);
+            return ScheduleResult.fail("schedule_failed");
+        }
+
+        return ScheduleResult.success(key);
     }
 
     /**
@@ -301,9 +384,19 @@ public final class AutoDeductionScheduler {
      * Cancel using the same Intent identity as schedule (action + data URI).
      * Alarm cancel + metadata remove run under SCHEDULE_LOCK so they cannot
      * interleave with a concurrent scheduleOccurrence for the same occurrence.
+     *
+     * Returns an explicit CancelResult:
+     * SUCCESS / ALREADY_ABSENT only when the intended native state is achieved
+     * (no live alarm for this occurrence + no schedule metadata, or metadata
+     * removal confirmed). FAILED when AlarmManager is unavailable or metadata
+     * remove commit fails (stale metadata must not be reported as success).
      */
-    public boolean cancelOccurrence(String medicationId, String doseId, String calendarDate) {
-        if (medicationId == null || doseId == null || calendarDate == null) return false;
+    public CancelResult cancelOccurrence(String medicationId, String doseId, String calendarDate) {
+        if (medicationId == null || medicationId.isEmpty()
+                || doseId == null || doseId.isEmpty()
+                || !AutoDeductionContract.isValidCalendarDate(calendarDate)) {
+            return CancelResult.fail("invalid_args");
+        }
         String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
         String prefKey = SCHEDULE_KEY_PREFIX + key;
 
@@ -311,14 +404,29 @@ public final class AutoDeductionScheduler {
         PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
 
         synchronized (SCHEDULE_LOCK) {
+            boolean hadMetadata = schedulePrefs.contains(prefKey);
+
             AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
-            if (am != null && pi != null) {
+            if (am == null) {
+                Log.e(TAG, "cancelOccurrence: AlarmManager unavailable for " + key);
+                return CancelResult.fail("alarm_manager_unavailable");
+            }
+            if (pi != null) {
                 am.cancel(pi);
                 pi.cancel();
             }
-            removeScheduleMetadataLocked(prefKey);
+
+            if (!hadMetadata) {
+                return CancelResult.alreadyAbsent();
+            }
+
+            boolean removed = schedulePrefs.edit().remove(prefKey).commit();
+            if (!removed) {
+                Log.e(TAG, "cancelOccurrence: metadata remove commit failed for " + key);
+                return CancelResult.fail("schedule_metadata_remove_failed");
+            }
+            return CancelResult.success();
         }
-        return true;
     }
 
     public ScheduleResult scheduleNextOccurrence(
@@ -342,31 +450,54 @@ public final class AutoDeductionScheduler {
             epoch = computeEpochMs(nextDate, timeHhmm);
             if (epoch == null) return ScheduleResult.fail("invalid_next_datetime");
         }
-        // Normal path — full serialized scheduleOccurrence transaction.
         return scheduleOccurrence(medicationId, doseId, nextDate, timeHhmm, amount, epoch);
     }
 
     /**
      * Restore future alarms from persisted schedule payloads (reboot).
-     * Snapshot under lock, then each entry uses scheduleOccurrence() which
-     * runs its own short SCHEDULE_LOCK transaction (reentrant-safe).
+     *
+     * Snapshot under lock (prefKey + raw JSON + observed scheduleVersion).
+     * For each future entry, ownership validation + AlarmManager install +
+     * metadata rewrite run under one continuous SCHEDULE_LOCK critical section
+     * so cancel cannot interleave and resurrect a canceled schedule.
+     *
+     * Past schedule entries: promote to FIRED (idempotent insert) then remove
+     * metadata — recovers occurrences whose alarm fired but primary FIRED
+     * commit failed (schedule metadata still present).
      */
     public int restoreFutureSchedules() {
         if (!canScheduleExactAlarms()) {
             Log.w(TAG, "restoreFutureSchedules: exact alarm permission denied");
-            return 0;
+            // Still attempt past-schedule promotion to FIRED.
         }
         int restored = 0;
-        Map<String, ?> all;
+
+        java.util.List<String[]> snapshot = new java.util.ArrayList<>();
         synchronized (SCHEDULE_LOCK) {
-            all = schedulePrefs.getAll();
+            Map<String, ?> all = schedulePrefs.getAll();
+            for (Map.Entry<String, ?> e : all.entrySet()) {
+                if (!e.getKey().startsWith(SCHEDULE_KEY_PREFIX)) continue;
+                Object v = e.getValue();
+                if (!(v instanceof String)) continue;
+                String raw = (String) v;
+                String observedVersion = "";
+                try {
+                    JSONObject tmp = new JSONObject(raw);
+                    observedVersion = tmp.optString(FIELD_SCHEDULE_VERSION, "");
+                } catch (JSONException ignored) {
+                }
+                snapshot.add(new String[]{ e.getKey(), raw, observedVersion });
+            }
         }
-        for (Map.Entry<String, ?> e : all.entrySet()) {
-            if (!e.getKey().startsWith(SCHEDULE_KEY_PREFIX)) continue;
-            Object v = e.getValue();
-            if (!(v instanceof String)) continue;
+
+        AutoDeductionEventStore eventStore = new AutoDeductionEventStore(appContext);
+
+        for (String[] entry : snapshot) {
+            String prefKey = entry[0];
+            String raw = entry[1];
+            String observedVersion = entry[2];
             try {
-                JSONObject o = new JSONObject((String) v);
+                JSONObject o = new JSONObject(raw);
                 String medId = o.optString("medicationId", "");
                 String doseId = o.optString("doseId", "");
                 String date = o.optString("calendarDate", "");
@@ -377,25 +508,83 @@ public final class AutoDeductionScheduler {
                         || !AutoDeductionContract.isValidCalendarDate(date)
                         || !AutoDeductionContract.isValidTimeHhmm(time)
                         || !AutoDeductionContract.isValidAmount(amount)) {
-                    removeScheduleMetadata(e.getKey());
+                    removeScheduleMetadata(prefKey);
                     continue;
                 }
                 if (epoch <= 0) {
                     Long computed = computeEpochMs(date, time);
                     if (computed == null) {
-                        removeScheduleMetadata(e.getKey());
+                        removeScheduleMetadata(prefKey);
                         continue;
                     }
                     epoch = computed;
                 }
+
+                // Past occurrence: promote to FIRED (recovers failed primary insert).
+                // Only drop schedule metadata when a durable recovery source exists:
+                //   CREATED / ALREADY_EXISTS → main FIRED ledger
+                //   FAILED + pendingRecorded → pending-fire record
+                // If both main and pending writes failed, KEEP schedule metadata
+                // as the last recovery source for a later restore attempt.
                 if (epoch <= System.currentTimeMillis()) {
-                    removeScheduleMetadata(e.getKey());
+                    AutoDeductionEventStore.InsertFiredResult ir =
+                            eventStore.insertFiredIfAbsent(medId, doseId, date, epoch, amount);
+                    if (shouldRemovePastScheduleMetadata(ir)) {
+                        if (ir.isCreated() || ir.isAlreadyExists()) {
+                            Log.i(TAG, "restore past: promoted/ensured FIRED for "
+                                    + medId + "/" + doseId + "/" + date);
+                        } else {
+                            Log.i(TAG, "restore past: pending-fire recorded for "
+                                    + medId + "/" + doseId + "/" + date
+                                    + "; dropping schedule metadata");
+                        }
+                        removeScheduleMetadata(prefKey);
+                    } else {
+                        Log.e(TAG, "restore past: FIRED and pending both failed for "
+                                + medId + "/" + doseId + "/" + date
+                                + " — preserving schedule metadata as recovery source");
+                        // Do NOT removeScheduleMetadata — last durable source.
+                    }
                     continue;
                 }
-                ScheduleResult r = scheduleOccurrence(medId, doseId, date, time, amount, epoch);
-                if (r.ok) restored++;
+
+                if (!canScheduleExactAlarms()) {
+                    continue;
+                }
+
+                // Future: atomic ownership check + schedule under one lock.
+                String key = AutoDeductionContract.occurrenceKey(medId, doseId, date);
+                String myVersion = newScheduleVersion();
+                JSONObject payload = new JSONObject();
+                try {
+                    payload.put("medicationId", medId);
+                    payload.put("doseId", doseId);
+                    payload.put("calendarDate", date);
+                    payload.put("timeHhmm", time);
+                    payload.put("amount", amount);
+                    payload.put("scheduledAtEpochMs", epoch);
+                    payload.put(FIELD_SCHEDULE_VERSION, myVersion);
+                } catch (JSONException e) {
+                    Log.e(TAG, "restore payload build failed", e);
+                    continue;
+                }
+                Intent intent = buildOccurrenceIntent(medId, doseId, date, epoch, amount, time);
+                PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
+
+                synchronized (SCHEDULE_LOCK) {
+                    ScheduleResult r = scheduleOccurrenceLocked(
+                            prefKey, key, myVersion, payload, epoch, pi, observedVersion);
+                    if (r.ok) {
+                        restored++;
+                    } else if ("ownership_lost".equals(r.error)) {
+                        // Canceled or replaced after snapshot — correct skip.
+                        Log.i(TAG, "restore skip (ownership lost): " + prefKey);
+                    } else {
+                        Log.w(TAG, "restore schedule failed for " + prefKey + ": " + r.error);
+                    }
+                }
             } catch (JSONException ignored) {
-                removeScheduleMetadata(e.getKey());
+                removeScheduleMetadata(prefKey);
             }
         }
         return restored;

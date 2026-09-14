@@ -32,8 +32,9 @@ public final class AutoDeductionContract {
     public static final String PREFS_PENDING = "drugtracker_auto_deduction_pending_v1";
     /**
      * Durable cancellation tombstones keyed by occurrence identity.
-     * Survives process death so restore cannot promote a cancelled occurrence to FIRED
-     * when schedule metadata removal failed after a successful AlarmManager.cancel.
+     * Survives process death so restore and AutoDeductionReceiver cannot promote a
+     * cancelled occurrence to FIRED (stale schedule metadata or stale alarm delivery).
+     * A later schedule with newer scheduleVersion supersedes the tombstone.
      */
     public static final String PREFS_CANCELLED = "drugtracker_auto_deduction_cancelled_v1";
 

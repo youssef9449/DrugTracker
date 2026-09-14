@@ -362,10 +362,14 @@ Native owns timing, AlarmManager install/cancel, boot/permission restore, and du
 ### Restore / cancel
 
 - `scheduleOccurrenceLocked` holds `SCHEDULE_LOCK` for ownership check + metadata + AlarmManager install (restore uses `requiredVersion`).
-- Cancel writes a durable cancellation tombstone (occurrence identity) before AlarmManager.cancel and schedule-metadata removal. If metadata removal fails after a successful alarm cancel, the tombstone remains so a later reboot/restore must not promote the stale schedule to FIRED.
-- A later legitimate `scheduleOccurrence` for the same occurrence identity clears the tombstone and installs a new active schedule.
-- Cancel cannot be undone by a stale restore snapshot; cancelled keys are skipped during restore (no synthetic FIRED).
-- Past schedule metadata is removed only when FIRED exists or pending was durably recorded (genuine fire recovery), never when a cancellation tombstone is present.
+- Cancel writes a durable cancellation tombstone (occurrence identity, cancel epoch millis) before AlarmManager.cancel and schedule-metadata removal.
+- **Effective cancellation** is evaluated from durable state only (`isOccurrenceCancelled`):
+  - tombstone present and no schedule metadata → cancelled
+  - both present → scheduleVersion leading millis at/after cancel epoch supersedes the tombstone (active); otherwise cancelled
+  - no tombstone → not cancelled
+- Cancelled occurrences are blocked in **both** lifecycle restore and `AutoDeductionReceiver` fire handling: no synthetic FIRED, no next recurrence. A stale alarm that races with cancel is ignored when the tombstone is durable.
+- A later legitimate `scheduleOccurrence` writes new schedule metadata (new `scheduleVersion`) then best-effort clears the tombstone. If tombstone removal fails, version ordering still treats the new schedule as active so reboot/restore and fire delivery do not suppress it.
+- Past schedule metadata is removed only when FIRED exists or pending was durably recorded (genuine fire recovery), never when the occurrence is effectively cancelled.
 
 ### Platform limitations
 

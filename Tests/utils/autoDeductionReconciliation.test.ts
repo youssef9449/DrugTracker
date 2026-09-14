@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Medication, ConsumptionLog } from '../../src/types';
 import {
   reconcileFiredEvents,
@@ -65,9 +65,14 @@ describe('stock gate — fresh durable state', () => {
 
   afterEach(() => {
     __setAutoStockGateTestHooks(null);
+    vi.useRealTimers();
   });
 
   beforeEach(() => {
+    // Pin calendar so lastSync / event dates are independent of machine clock.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-14T15:00:00'));
+
     durable = {
       medications: [
         baseMed({
@@ -129,30 +134,65 @@ describe('stock gate — fresh durable state', () => {
   });
 
   it('nativeThenLegacyDoesNotDoubleDeduct', async () => {
+    // Scenario B (native-first): lastSync has NOT yet settled the event day.
+    // today=2026-09-14 (pinned), lastSync=2026-09-12, event=2026-09-13 amount=2.
+    durable.medications = [
+      baseMed({
+        doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
+        currentPills: 10,
+        lastSyncDate: '2026-09-12',
+        dailyDose: 2,
+      }),
+    ];
     const e = fired({
       medicationId: 'med-1',
       doseId: 'd',
       calendarDate: '2026-09-13',
       amount: 2,
     });
-    // Past day + lastSync after apply path uses markers
+
     await withAutoStockMutationGate(async (fresh) => {
       const r = reconcileFiredEvents(fresh.medications, fresh.logs, [e]);
+      expect(r.details[0]?.outcome).toBe('applied');
       commitDurableAutoStockState({ medications: r.medications, logs: r.logs });
     });
     expect(durable.medications[0].currentPills).toBe(8);
+    expect(isExactAutoOccurrenceApplied(durable.medications[0], 'd', '2026-09-13')).toBe(true);
 
     await withAutoStockMutationGate((fresh) => {
       const sync = syncAutoDailyDeductions(fresh.medications, '2026-09-14');
-      if (sync.newLogs.length > 0) {
-        commitDurableAutoStockState({
-          medications: sync.updatedMeds,
-          logs: [...sync.newLogs, ...fresh.logs],
-        });
-      }
+      commitDurableAutoStockState({
+        medications: sync.updatedMeds,
+        logs: [...sync.newLogs, ...fresh.logs],
+      });
     });
-    // Must not be 6
-    expect(durable.medications[0].currentPills).toBeGreaterThanOrEqual(8);
+    // Same occurrence must not be charged again (8, not 6)
+    expect(durable.medications[0].currentPills).toBe(8);
+  });
+
+  it('legacyThenNativeDoesNotDoubleDeduct', async () => {
+    // Scenario A: legacy day settlement already advanced lastSync over the event day.
+    // today=2026-09-14, lastSync=2026-09-13, event=2026-09-13 → already reflected.
+    durable.medications = [
+      baseMed({
+        doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
+        currentPills: 8,
+        lastSyncDate: '2026-09-13',
+        dailyDose: 2,
+      }),
+    ];
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd',
+      calendarDate: '2026-09-13',
+      amount: 2,
+    });
+    await withAutoStockMutationGate(async (fresh) => {
+      const r = reconcileFiredEvents(fresh.medications, fresh.logs, [e]);
+      expect(r.details[0]?.outcome).toBe('already_applied');
+      commitDurableAutoStockState({ medications: r.medications, logs: r.logs });
+    });
+    expect(durable.medications[0].currentPills).toBe(8);
   });
 
   it('twoExactEventsSerializeCorrectly', async () => {
@@ -199,6 +239,15 @@ describe('stock gate — fresh durable state', () => {
 });
 
 describe('BLOCKER 2 — partial native acknowledgement', () => {
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-14T15:00:00'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('partialNativeAcknowledgementIsRecoverable', async () => {
     const med = baseMed({
       doseSchedule: [
@@ -352,6 +401,15 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
 });
 
 describe('multi-dose', () => {
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-14T15:00:00'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('exactAmountIsUsed and siblingDoseIsIndependent', () => {
     const med = baseMed({
       doseSchedule: [
@@ -388,6 +446,15 @@ describe('multi-dose', () => {
 });
 
 describe('projection', () => {
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-14T15:00:00'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('effectiveCurrentPillsMatchesCommittedSnapshot', () => {
     const med = baseMed({
       doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
@@ -410,6 +477,15 @@ describe('projection', () => {
 });
 
 describe('deterministicLogPreventsDuplicate', () => {
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-14T15:00:00'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('duplicate FIRED → one log', () => {
     const med = baseMed({
       doseSchedule: [{ id: 'd', amount: 1, time: '08:00' }],

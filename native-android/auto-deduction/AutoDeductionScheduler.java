@@ -265,8 +265,9 @@ public final class AutoDeductionScheduler {
 
         String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
         String prefKey = SCHEDULE_KEY_PREFIX + key;
-        String myVersion = newScheduleVersion();
 
+        // Payload without scheduleVersion — authoritative version is assigned inside
+        // SCHEDULE_LOCK so ordering vs cancellation tombstones matches lock order.
         JSONObject payload = new JSONObject();
         try {
             payload.put("medicationId", medicationId);
@@ -275,7 +276,6 @@ public final class AutoDeductionScheduler {
             payload.put("timeHhmm", timeHhmm);
             payload.put("amount", amount);
             payload.put("scheduledAtEpochMs", triggerAt);
-            payload.put(FIELD_SCHEDULE_VERSION, myVersion);
         } catch (JSONException e) {
             Log.e(TAG, "schedule payload build failed", e);
             return ScheduleResult.fail("payload_build_failed");
@@ -287,12 +287,16 @@ public final class AutoDeductionScheduler {
 
         synchronized (SCHEDULE_LOCK) {
             return scheduleOccurrenceLocked(
-                    prefKey, key, myVersion, payload, triggerAt, pi, /*requiredVersion*/ null);
+                    prefKey, key, payload, triggerAt, pi, /*requiredVersion*/ null);
         }
     }
 
     /**
      * Core scheduling transaction. Caller MUST hold {@link #SCHEDULE_LOCK}.
+     *
+     * scheduleVersion is generated here (inside the lock) so its leading millis
+     * reflects serialized operation order versus concurrent cancelOccurrence
+     * tombstones — not the wall-clock time at which a thread waited for the lock.
      *
      * @param requiredVersion if non-null, abort unless current metadata is still
      *                        owned by this version (restore ownership guard).
@@ -301,7 +305,6 @@ public final class AutoDeductionScheduler {
     private ScheduleResult scheduleOccurrenceLocked(
             String prefKey,
             String key,
-            String myVersion,
             JSONObject payload,
             long triggerAt,
             PendingIntent pi,
@@ -315,6 +318,16 @@ public final class AutoDeductionScheduler {
             }
         }
 
+        // Authoritative ordering/version for this scheduling attempt — only after
+        // acquiring SCHEDULE_LOCK (same serialization boundary as cancel tombstones).
+        final String myVersion = newScheduleVersion();
+        try {
+            payload.put(FIELD_SCHEDULE_VERSION, myVersion);
+        } catch (JSONException e) {
+            Log.e(TAG, "schedule version attach failed", e);
+            return ScheduleResult.fail("payload_build_failed");
+        }
+
         boolean metaWritten = schedulePrefs.edit()
                 .putString(prefKey, payload.toString())
                 .commit();
@@ -323,8 +336,8 @@ public final class AutoDeductionScheduler {
             return ScheduleResult.fail("schedule_metadata_write_failed");
         }
 
-        // New schedule metadata (with current scheduleVersion millis) supersedes any
-        // prior cancellation tombstone. Clear is best-effort: if the remove commit
+        // New schedule metadata (with lock-ordered scheduleVersion millis) supersedes
+        // any prior cancellation tombstone. Clear is best-effort: if the remove commit
         // fails, isOccurrenceCancelledKey still treats scheduleVersion >= cancel
         // millis as active so restore/receiver do not suppress the new schedule.
         clearCancellationTombstoneLocked(key);
@@ -729,8 +742,9 @@ public final class AutoDeductionScheduler {
                 epoch = recomputed;
 
                 // Future: atomic ownership check + schedule under one lock.
+                // scheduleVersion is assigned inside scheduleOccurrenceLocked (under
+                // SCHEDULE_LOCK) so ordering vs concurrent cancel is correct.
                 String key = occurrenceKey;
-                String myVersion = newScheduleVersion();
                 JSONObject payload = new JSONObject();
                 try {
                     payload.put("medicationId", medId);
@@ -739,7 +753,6 @@ public final class AutoDeductionScheduler {
                     payload.put("timeHhmm", time);
                     payload.put("amount", amount);
                     payload.put("scheduledAtEpochMs", epoch);
-                    payload.put(FIELD_SCHEDULE_VERSION, myVersion);
                 } catch (JSONException e) {
                     Log.e(TAG, "restore payload build failed", e);
                     continue;
@@ -749,7 +762,7 @@ public final class AutoDeductionScheduler {
 
                 synchronized (SCHEDULE_LOCK) {
                     ScheduleResult r = scheduleOccurrenceLocked(
-                            prefKey, key, myVersion, payload, epoch, pi, observedVersion);
+                            prefKey, key, payload, epoch, pi, observedVersion);
                     if (r.ok) {
                         restored++;
                     } else if ("ownership_lost".equals(r.error)) {

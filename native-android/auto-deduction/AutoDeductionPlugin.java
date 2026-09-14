@@ -55,9 +55,12 @@ public class AutoDeductionPlugin extends Plugin {
         String doseId = call.getString("doseId");
         String calendarDate = call.getString("calendarDate");
         AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
-        boolean cancelled = scheduler.cancelOccurrence(medicationId, doseId, calendarDate);
+        AutoDeductionScheduler.CancelResult result = scheduler.cancelOccurrence(
+                medicationId, doseId, calendarDate);
         JSObject ret = new JSObject();
-        ret.put("ok", cancelled);
+        ret.put("ok", result.isOk());
+        ret.put("status", result.status.name());
+        if (result.error != null) ret.put("error", result.error);
         call.resolve(ret);
     }
 

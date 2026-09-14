@@ -8,6 +8,14 @@ import android.util.Log;
 /**
  * Dedicated BroadcastReceiver for exact-time auto-deduction alarms.
  * Persists FIRED events only — does NOT mutate stock or depend on WebView.
+ *
+ * FIRED insertion result drives next-occurrence scheduling:
+ * <ul>
+ *   <li>CREATED / ALREADY_EXISTS — current occurrence is durably recorded;
+ *       schedule next is safe/idempotent</li>
+ *   <li>FAILED — current occurrence is NOT confirmed durable; do not advance
+ *       recurrence as though the fire succeeded</li>
+ * </ul>
  */
 public class AutoDeductionReceiver extends BroadcastReceiver {
 
@@ -44,21 +52,46 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
         }
 
         AutoDeductionEventStore store = new AutoDeductionEventStore(context);
-        boolean created = store.insertFiredIfAbsent(
+        AutoDeductionEventStore.InsertFiredResult result = store.insertFiredIfAbsent(
                 medicationId, doseId, calendarDate, scheduledAt, amount);
-        if (created) {
-            Log.i(TAG, "FIRED event persisted: " + medicationId + "/" + doseId + "/" + calendarDate);
-        } else {
-            Log.i(TAG, "duplicate fire ignored (idempotent)");
-        }
 
-        if (timeHhmm != null && AutoDeductionContract.isValidTimeHhmm(timeHhmm)) {
-            AutoDeductionScheduler scheduler = new AutoDeductionScheduler(context);
-            AutoDeductionScheduler.ScheduleResult next = scheduler.scheduleNextOccurrence(
-                    medicationId, doseId, calendarDate, timeHhmm, amount);
-            if (!next.ok) {
-                Log.w(TAG, "next occurrence not scheduled: " + next.error);
-            }
+        switch (result.status) {
+            case CREATED:
+                Log.i(TAG, "FIRED event persisted: " + medicationId + "/" + doseId + "/" + calendarDate);
+                scheduleNextIfPossible(context, medicationId, doseId, calendarDate, timeHhmm, amount);
+                break;
+            case ALREADY_EXISTS:
+                Log.i(TAG, "duplicate fire ignored (idempotent): "
+                        + medicationId + "/" + doseId + "/" + calendarDate);
+                // Current occurrence already durable; next-occurrence scheduling remains safe.
+                scheduleNextIfPossible(context, medicationId, doseId, calendarDate, timeHhmm, amount);
+                break;
+            case FAILED:
+                // Do NOT treat as duplicate. Do NOT advance recurrence: the current
+                // occurrence is not confirmed durable. The alarm already fired; a
+                // future boot restore or JS reschedule can recover when possible.
+                Log.e(TAG, "FIRED persistence FAILED — not advancing next occurrence: "
+                        + medicationId + "/" + doseId + "/" + calendarDate);
+                break;
+        }
+    }
+
+    private void scheduleNextIfPossible(
+            Context context,
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            String timeHhmm,
+            double amount
+    ) {
+        if (timeHhmm == null || !AutoDeductionContract.isValidTimeHhmm(timeHhmm)) {
+            return;
+        }
+        AutoDeductionScheduler scheduler = new AutoDeductionScheduler(context);
+        AutoDeductionScheduler.ScheduleResult next = scheduler.scheduleNextOccurrence(
+                medicationId, doseId, calendarDate, timeHhmm, amount);
+        if (!next.ok) {
+            Log.w(TAG, "next occurrence not scheduled: " + next.error);
         }
     }
 

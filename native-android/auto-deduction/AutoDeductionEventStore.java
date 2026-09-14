@@ -42,13 +42,49 @@ public final class AutoDeductionEventStore {
     }
 
     /**
+     * Result of an insertFiredIfAbsent attempt.
+     * <ul>
+     *   <li>{@link Status#CREATED} — event did not exist and was durably committed</li>
+     *   <li>{@link Status#ALREADY_EXISTS} — event already present for the occurrence identity</li>
+     *   <li>{@link Status#FAILED} — could not confirm durable insertion (invalid payload,
+     *       JSON failure, or SharedPreferences commit failure). Never treated as duplicate.</li>
+     * </ul>
+     */
+    public static final class InsertFiredResult {
+        public enum Status {
+            CREATED,
+            ALREADY_EXISTS,
+            FAILED
+        }
+
+        public final Status status;
+
+        public InsertFiredResult(Status status) {
+            this.status = status;
+        }
+
+        public boolean isCreated() {
+            return status == Status.CREATED;
+        }
+
+        public boolean isAlreadyExists() {
+            return status == Status.ALREADY_EXISTS;
+        }
+
+        public boolean isFailed() {
+            return status == Status.FAILED;
+        }
+    }
+
+    /**
      * Insert a FIRED event if and only if no event exists for the key.
-     * Returns true if this call created the event; false if one already existed
-     * or the payload was invalid.
+     *
+     * Distinguishes CREATED / ALREADY_EXISTS / FAILED so a persistence failure
+     * is never silently treated as a duplicate fire.
      *
      * Thread-safe across instances: check + durable write under {@link #LOCK}.
      */
-    public boolean insertFiredIfAbsent(
+    public InsertFiredResult insertFiredIfAbsent(
             String medicationId,
             String doseId,
             String calendarDate,
@@ -60,7 +96,7 @@ public final class AutoDeductionEventStore {
                 || !AutoDeductionContract.isValidCalendarDate(calendarDate)
                 || !AutoDeductionContract.isValidAmount(amount)) {
             Log.w(TAG, "reject insert: invalid payload");
-            return false;
+            return new InsertFiredResult(InsertFiredResult.Status.FAILED);
         }
 
         final String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
@@ -68,7 +104,7 @@ public final class AutoDeductionEventStore {
 
         synchronized (LOCK) {
             if (prefs.contains(prefKey)) {
-                return false;
+                return new InsertFiredResult(InsertFiredResult.Status.ALREADY_EXISTS);
             }
             long now = System.currentTimeMillis();
             JSONObject obj = new JSONObject();
@@ -83,16 +119,16 @@ public final class AutoDeductionEventStore {
                 obj.put("reconciledAtEpochMs", JSONObject.NULL);
             } catch (JSONException e) {
                 Log.e(TAG, "JSON build failed", e);
-                return false;
+                return new InsertFiredResult(InsertFiredResult.Status.FAILED);
             }
             // commit() so the event is on disk before the receiver returns
             // (important if the process is killed immediately after fire).
             boolean written = prefs.edit().putString(prefKey, obj.toString()).commit();
             if (!written) {
                 Log.e(TAG, "commit failed for key=" + key);
-                return false;
+                return new InsertFiredResult(InsertFiredResult.Status.FAILED);
             }
-            return true;
+            return new InsertFiredResult(InsertFiredResult.Status.CREATED);
         }
     }
 

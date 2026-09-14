@@ -278,16 +278,49 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                       )}
                     </div>
                     <div>
-                      <span className="text-xs font-bold text-slate-800">التنبيهات وإشعارات الهاتف</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-800">التنبيهات وإشعارات الهاتف</span>
+                        <span
+                          className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                            notificationsEnabled ? 'bg-amber-100 text-amber-900 border border-amber-300/50' : 'bg-slate-200 text-slate-700'
+                          }`}
+                        >
+                          {notificationsEnabled ? 'مفعّلة' : 'متوقفة'}
+                        </span>
+                      </div>
                       <p className="text-[10px] text-slate-500">منبه مواعيد الجرعات وتنبيهات المخزون</p>
                     </div>
                   </div>
                   {onToggleNotifications && (
-                    <Toggle
-                      checked={notificationsEnabled}
-                      onChange={onToggleNotifications}
-                      label="تبديل التنبيهات"
-                    />
+                    <button
+                      type="button"
+                      onClick={onToggleNotifications}
+                      title={
+                        notificationsEnabled
+                          ? 'التنبيهات مفعلة (انقر للإيقاف المؤقت)'
+                          : 'التنبيهات متوقفة (انقر لتفعيل التنبيهات والمنبه)'
+                      }
+                      aria-label={
+                        notificationsEnabled
+                          ? 'التنبيهات مفعلة — انقر للإيقاف'
+                          : 'التنبيهات متوقفة — انقر للتفعيل'
+                      }
+                      aria-pressed={notificationsEnabled}
+                      className={`p-2 rounded-xl transition active:scale-95 relative border ${
+                        notificationsEnabled
+                          ? 'bg-amber-400/20 text-amber-600 border-amber-400/40 ring-1 ring-amber-400/30 shadow-xs'
+                          : 'bg-slate-200 text-slate-600 hover:text-slate-800 hover:bg-slate-300/80 border-slate-300'
+                      }`}
+                    >
+                      {notificationsEnabled ? (
+                        <>
+                          <Bell className="w-4 h-4 fill-amber-500 text-amber-600" />
+                          <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-emerald-500 ring-1 ring-white animate-pulse" />
+                        </>
+                      ) : (
+                        <BellOff className="w-4 h-4" />
+                      )}
+                    </button>
                   )}
                 </div>
 
@@ -308,19 +341,48 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                       />
                     </div>
                     <div>
-                      <span className="text-xs font-bold text-slate-800">تنبيهات النفاذ الحرج للمخزون</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-800">تنبيهات النفاذ الحرج للمخزون</span>
+                        <span
+                          className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                            criticalStockAlertsEnabled ? 'bg-rose-100 text-rose-800 border border-rose-300/50' : 'bg-slate-200 text-slate-700'
+                          }`}
+                        >
+                          {criticalStockAlertsEnabled ? 'مفعّلة' : 'متوقفة'}
+                        </span>
+                      </div>
                       <p className="text-[10px] text-slate-500">
                         إشعار فوري عند اقتراب نفاد الدواء أو نفاذه (حسب إعداد كل دواء)
                       </p>
                     </div>
                   </div>
                   {onToggleCriticalStockAlerts && (
-                    <Toggle
-                      checked={criticalStockAlertsEnabled}
-                      onChange={onToggleCriticalStockAlerts}
-                      label="تبديل تنبيهات النفاذ الحرج"
-                      color="rose"
-                    />
+                    <button
+                      type="button"
+                      onClick={onToggleCriticalStockAlerts}
+                      title={
+                        criticalStockAlertsEnabled
+                          ? 'تنبيه النفاذ الحرج مفعّل (انقر للإيقاف)'
+                          : 'تنبيه النفاذ الحرج متوقف (انقر للتفعيل)'
+                      }
+                      aria-label={
+                        criticalStockAlertsEnabled
+                          ? 'تنبيه النفاذ الحرج مفعّل'
+                          : 'تنبيه النفاذ الحرج متوقف'
+                      }
+                      aria-pressed={criticalStockAlertsEnabled}
+                      className={`p-2 rounded-xl transition active:scale-95 relative border ${
+                        criticalStockAlertsEnabled
+                          ? 'bg-rose-500/20 text-rose-600 border-rose-400/50 ring-1 ring-rose-400/30 shadow-xs'
+                          : 'bg-slate-200 text-slate-600 hover:text-slate-800 hover:bg-slate-300/80 border-slate-300'
+                      }`}
+                    >
+                      <AlertTriangle
+                        className={`w-4 h-4 ${
+                          criticalStockAlertsEnabled ? 'fill-rose-500/30 text-rose-600' : 'opacity-70'
+                        }`}
+                      />
+                    </button>
                   )}
                 </div>
 

@@ -9,7 +9,7 @@ const HEADER_BY_TAB: Record<ActiveTab, {
 }> = {
   stock: {
     title: 'متابع مخزون الأدوية',
-    subtitle: 'حساب استهلاك الحبوب وتنبيهات النفاذ تلقائياً',
+    subtitle: 'حساب استهلاك الأدوية وتنبيهات النفاذ تلقائياً',
   },
   shopping: {
     title: 'قائمة الشراء والصيدلية',

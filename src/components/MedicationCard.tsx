@@ -22,27 +22,47 @@ import { StripsBadge, PackageSizeBadge, AutoDeductPausedNote } from './medicatio
 /**
  * Map a medication's `colorTag` (the user-selected card color from the
  * AddMedicationModal color picker) to Tailwind classes used for the card's
- * icon box + left border accent. The status-based color (red/rose/amber
- * for out-of-stock/critical/warning) still takes priority for the icon
- * box in the alerts view, but the left border always shows the user's
- * chosen color so the selection has a visible effect.
+ * icon box + left border accent + category badge. The status-based color
+ * (red/rose/amber for out-of-stock/critical/warning) still takes priority
+ * for the icon box in the alerts view, but the left border and category
+ * badge always show the user's chosen color so the selection has a visible effect.
  *
- * Returns a { bg, border } pair of class strings. Unknown tags default
+ * Returns a { bg, border, badge } triplet of class strings. Unknown tags default
  * to teal (the app's primary theme).
  */
-function colorTagClasses(colorTag: string | undefined): { bg: string; border: string } {
+function colorTagClasses(colorTag: string | undefined): { bg: string; border: string; badge: string } {
   switch (colorTag) {
     case 'rose':
-      return { bg: 'bg-rose-50 text-rose-700', border: 'border-r-rose-400' };
+      return {
+        bg: 'bg-rose-50 text-rose-700',
+        border: 'border-r-rose-400',
+        badge: 'bg-rose-50 text-rose-800 border border-rose-200/80',
+      };
     case 'amber':
-      return { bg: 'bg-amber-50 text-amber-700', border: 'border-r-amber-400' };
+      return {
+        bg: 'bg-amber-50 text-amber-700',
+        border: 'border-r-amber-400',
+        badge: 'bg-amber-50 text-amber-900 border border-amber-200/80',
+      };
     case 'sky':
-      return { bg: 'bg-sky-50 text-sky-700', border: 'border-r-sky-400' };
+      return {
+        bg: 'bg-sky-50 text-sky-700',
+        border: 'border-r-sky-400',
+        badge: 'bg-sky-50 text-sky-800 border border-sky-200/80',
+      };
     case 'violet':
-      return { bg: 'bg-violet-50 text-violet-700', border: 'border-r-violet-400' };
+      return {
+        bg: 'bg-violet-50 text-violet-700',
+        border: 'border-r-violet-400',
+        badge: 'bg-violet-50 text-violet-800 border border-violet-200/80',
+      };
     case 'teal':
     default:
-      return { bg: 'bg-teal-50 text-teal-700', border: 'border-r-teal-400' };
+      return {
+        bg: 'bg-teal-50 text-teal-700',
+        border: 'border-r-teal-400',
+        badge: 'bg-teal-50 text-teal-800 border border-teal-200/80',
+      };
   }
 }
 
@@ -120,6 +140,9 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         medication.unit
       )
     : null;
+
+  // The user-selected colorTag drives the icon box background, accent border, and category badge
+  const tag = colorTagClasses(medication.colorTag);
 
   // Maximum visual scale for the stock progress bar.
   // Prefer one full package worth of days so a just-refilled box reads
@@ -223,7 +246,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
 
               <div className="flex items-center gap-1.5 mt-0.5 text-xs text-slate-500 flex-wrap">
                 {medication.category && (
-                  <span className="font-medium bg-white/80 border border-slate-200 px-1.5 py-0.2 rounded text-[10px] text-slate-600">
+                  <span className={`font-medium px-1.5 py-0.2 rounded text-[10px] ${tag.badge}`}>
                     {medication.category}
                   </span>
                 )}
@@ -362,7 +385,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
 
               <div className="flex items-center gap-1.5 mt-0.5 text-xs text-slate-500 flex-wrap">
                 {medication.category && (
-                  <span className="font-medium bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded text-[10px]">
+                  <span className={`font-medium px-1.5 py-0.2 rounded text-[10px] ${tag.badge}`}>
                     {medication.category}
                   </span>
                 )}
@@ -466,11 +489,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   // -------------------------------------------------------------
   // VIEW 3: "جميع الأدوية" (ALL) - Comprehensive Inventory Management
   // -------------------------------------------------------------
-  // The user-selected colorTag drives the icon box background (when
-  // status is normal) and the card's right accent border (always, so
-  // the color choice is visible even when the status color overrides
-  // the icon box).
-  const tag = colorTagClasses(medication.colorTag);
 
   // -------------------------------------------------------------
   // COMPACT VIEW: "جميع الأدوية" (ALL - COMPACT MODE)
@@ -494,10 +512,17 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           isOut ? 'bg-red-50/25' : isCrit ? 'bg-rose-50/20' : isWarn ? 'bg-amber-50/10' : ''
         }`}
       >
-        {/* Row 1: name — alone on its own full-width line */}
-        <h3 className="block w-full text-[11px] font-bold text-slate-900 leading-tight tracking-tight truncate mb-1" title={medication.name}>
-          {medication.name}
-        </h3>
+        {/* Row 1: name + category */}
+        <div className="flex items-center justify-between gap-1 mb-1 min-w-0">
+          <h3 className="text-[11px] font-bold text-slate-900 leading-tight tracking-tight truncate" title={medication.name}>
+            {medication.name}
+          </h3>
+          {medication.category && (
+            <span className={`text-[8px] font-medium px-1.5 py-0.2 rounded-full shrink-0 ${tag.badge}`}>
+              {medication.category}
+            </span>
+          )}
+        </div>
 
         {/* Row 2: status + actions */}
         <div className="flex items-center justify-between gap-1.5 min-w-0">
@@ -665,7 +690,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         <div className="flex items-center justify-between gap-2 mt-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap min-w-0">
             {medication.category && (
-              <span className="text-[9px] font-medium bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded-full shrink-0">
+              <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${tag.badge}`}>
                 {medication.category}
               </span>
             )}

@@ -38,6 +38,7 @@ import {
   scheduleCriticalAlarm,
   cancelCriticalAlarm,
 } from '@/utils/notifications';
+import { initNativeBridge } from '@/native';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 
@@ -105,6 +106,31 @@ describe('App — hydration (#15)', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Custom Test Med')).toBeInTheDocument();
+    });
+  });
+
+  it('does not hydrate until initNativeBridge completes (ordering race guard)', async () => {
+    // Regression: previously permissions resolved → setHydrated(true) while
+    // initNativeBridge was still in flight, so the scheduler could run before
+    // Android notification channels existed. hydrated must wait for the bridge.
+    let resolveBridge!: () => void;
+    const bridgePending = new Promise<void>((resolve) => {
+      resolveBridge = resolve;
+    });
+    vi.mocked(initNativeBridge).mockReturnValueOnce(bridgePending);
+
+    localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([]));
+    render(<App />);
+
+    // Permissions resolve immediately (default mocks). Bridge is still pending.
+    // EmptyState is the post-hydration marker for an empty inventory.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(screen.queryByText('لا توجد أدوية مسجلة حالياً')).toBeNull();
+
+    resolveBridge();
+    await waitFor(() => {
+      expect(screen.getByText('لا توجد أدوية مسجلة حالياً')).toBeInTheDocument();
     });
   });
 });

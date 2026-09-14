@@ -912,6 +912,37 @@ Repeated `scheduleOccurrence` for the same occurrence key overwrites the same me
 Receiver path still: insert FIRED (static-lock idempotent) → `scheduleNextOccurrence` (same durable ordering for the next calendar day).
 
 
+
+
+### Schedule rollback concurrency
+
+Each schedule metadata write stamps a unique `scheduleVersion` (attempt generation token).
+This token is **not** part of occurrence identity (`medicationId + doseId + calendarDate`).
+
+Durability order is unchanged:
+
+```text
+validate
+  → commit schedule metadata (includes scheduleVersion)
+  → AlarmManager.setExactAndAllowWhileIdle
+  → on failure: conditional rollback
+```
+
+Conditional rollback (under process-wide `SCHEDULE_LOCK`):
+
+```text
+read current metadata for occurrence key
+  → if scheduleVersion still equals this attempt's version → remove
+  → else → do nothing (a newer attempt owns the entry)
+```
+
+Therefore a stale failed attempt **cannot** delete metadata written by a newer successful (or in-flight) attempt for the same occurrence.
+
+Intentional `cancelOccurrence` and restore cleanup of past/malformed rows still use unconditional remove (user/system intent, not install-failure rollback).
+
+Legacy schedule entries without `scheduleVersion` are not owned by any attempt under the version path; `restoreFutureSchedules` tolerates missing version and assigns a fresh one when rewriting via `scheduleOccurrence`.
+
+
 ### Files touched (Phase 2)
 - `native-android/auto-deduction/*`
 - `native-android/app/MainActivity.java` (plugin registration)

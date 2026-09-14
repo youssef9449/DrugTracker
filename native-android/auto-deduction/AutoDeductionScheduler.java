@@ -15,6 +15,8 @@ import java.util.Calendar;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TimeZone;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * One-shot exact-time auto-deduction scheduler (AlarmManager).
@@ -23,18 +25,17 @@ import java.util.TimeZone;
  *   - ACTION_AUTO_DEDUCTION
  *   - data URI = occurrenceUri(med, dose, date)  [full identity]
  *   - fixed request code PENDING_INTENT_REQUEST_CODE (namespace only)
- * Uniqueness does NOT depend on a 32-bit hash of the key.
  *
  * Schedule durability ordering:
  *   1. validate
- *   2. persist schedule payload with commit()  (reboot recovery metadata)
+ *   2. persist schedule payload with commit() including scheduleVersion
  *   3. install exact alarm
- *   4. on install failure → remove schedule payload
+ *   4. on install failure → remove metadata ONLY if still owned by this attempt's version
  *
- * Crash recovery:
- *   - metadata persisted, alarm not installed → restoreFutureSchedules reinstalls
- *   - alarm installed, process dies → metadata already durable; boot restores same identity
- *   - install fails after persist → payload removed so restore does not loop on a dead schedule
+ * Schedule rollback concurrency:
+ *   Each write stamps a unique scheduleVersion. A failed/stale attempt may only
+ *   delete metadata when the currently stored version still matches its own.
+ *   Newer successful writes are never deleted by older failures.
  *
  * Does not use polling, WorkManager periodic, or foreground services.
  */
@@ -42,9 +43,14 @@ public final class AutoDeductionScheduler {
 
     private static final String TAG = "AutoDeductionScheduler";
     private static final String SCHEDULE_KEY_PREFIX = "sch:";
+    /** JSON field: attempt generation token (not part of occurrence identity). */
+    public static final String FIELD_SCHEDULE_VERSION = "scheduleVersion";
 
-    /** Process-wide lock for schedule metadata check+write. */
+    /** Process-wide lock for schedule metadata check+write+conditional remove. */
     private static final Object SCHEDULE_LOCK = new Object();
+
+    /** Monotonic sequence mixed into version tokens to avoid pure-clock collisions. */
+    private static final AtomicLong VERSION_SEQ = new AtomicLong(0);
 
     private final Context appContext;
     private final SharedPreferences schedulePrefs;
@@ -76,9 +82,41 @@ public final class AutoDeductionScheduler {
     }
 
     /**
-     * Build the deterministic Intent used for both schedule and cancel.
-     * Identity = action + data URI (full occurrence) + component.
+     * Unique attempt token for one metadata write.
+     * Not part of occurrence identity (med/dose/date).
      */
+    static String newScheduleVersion() {
+        return System.currentTimeMillis()
+                + "-"
+                + VERSION_SEQ.incrementAndGet()
+                + "-"
+                + UUID.randomUUID().toString();
+    }
+
+    /**
+     * Pure ownership check used by conditional rollback.
+     * Package-visible for focused verification.
+     *
+     * @param currentJson raw schedule prefs value, or null if absent
+     * @param expectedVersion version token of the attempt that wants to roll back
+     * @return true if current metadata is still owned by expectedVersion
+     */
+    static boolean isMetadataOwnedByVersion(String currentJson, String expectedVersion) {
+        if (expectedVersion == null || expectedVersion.isEmpty()) {
+            return false;
+        }
+        if (currentJson == null || currentJson.isEmpty()) {
+            return false;
+        }
+        try {
+            JSONObject o = new JSONObject(currentJson);
+            String current = o.optString(FIELD_SCHEDULE_VERSION, "");
+            return expectedVersion.equals(current);
+        } catch (JSONException e) {
+            return false;
+        }
+    }
+
     private Intent buildOccurrenceIntent(
             String medicationId,
             String doseId,
@@ -114,10 +152,11 @@ public final class AutoDeductionScheduler {
     }
 
     /**
-     * Schedule a single occurrence. Idempotent: same occurrence identity
-     * replaces the prior alarm (FLAG_UPDATE_CURRENT + same data URI).
+     * Schedule a single occurrence. Idempotent on occurrence identity
+     * (FLAG_UPDATE_CURRENT + same data URI).
      *
-     * Ordering: durable schedule metadata first, then AlarmManager install.
+     * Ordering: durable metadata (with scheduleVersion) first, then AlarmManager.
+     * Failure cleanup is version-owned only.
      */
     public ScheduleResult scheduleOccurrence(
             String medicationId,
@@ -162,6 +201,7 @@ public final class AutoDeductionScheduler {
 
         String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
         String prefKey = SCHEDULE_KEY_PREFIX + key;
+        String myVersion = newScheduleVersion();
 
         // ── Phase A: durable schedule metadata BEFORE alarm install ──
         JSONObject payload = new JSONObject();
@@ -172,6 +212,7 @@ public final class AutoDeductionScheduler {
             payload.put("timeHhmm", timeHhmm);
             payload.put("amount", amount);
             payload.put("scheduledAtEpochMs", triggerAt);
+            payload.put(FIELD_SCHEDULE_VERSION, myVersion);
         } catch (JSONException e) {
             Log.e(TAG, "schedule payload build failed", e);
             return ScheduleResult.fail("payload_build_failed");
@@ -187,14 +228,14 @@ public final class AutoDeductionScheduler {
             }
         }
 
-        // ── Phase B: install exact alarm ──
+        // ── Phase B: install exact alarm (outside lock; may be slow) ──
         Intent intent = buildOccurrenceIntent(
                 medicationId, doseId, calendarDate, triggerAt, amount, timeHhmm);
         PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
 
         AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
         if (am == null) {
-            removeScheduleMetadata(prefKey);
+            removeScheduleMetadataIfVersion(prefKey, myVersion);
             return ScheduleResult.fail("alarm_manager_unavailable");
         }
 
@@ -206,20 +247,40 @@ public final class AutoDeductionScheduler {
             }
         } catch (SecurityException se) {
             Log.w(TAG, "setExactAndAllowWhileIdle denied", se);
-            removeScheduleMetadata(prefKey);
+            removeScheduleMetadataIfVersion(prefKey, myVersion);
             return ScheduleResult.fail("exact_alarm_permission_denied");
         } catch (Exception e) {
             Log.e(TAG, "schedule failed", e);
-            removeScheduleMetadata(prefKey);
+            removeScheduleMetadataIfVersion(prefKey, myVersion);
             return ScheduleResult.fail("schedule_failed");
         }
 
-        // Metadata already durable. If process dies here the alarm is
-        // installed and boot restore will recreate the same PendingIntent
-        // identity from the committed payload.
         return ScheduleResult.success(key);
     }
 
+    /**
+     * Conditional rollback: remove metadata only if it is still owned by
+     * {@code expectedVersion}. Serialized with metadata writes under SCHEDULE_LOCK
+     * so a concurrent newer write cannot be deleted by a stale failure.
+     *
+     * @return true if this call removed the entry
+     */
+    boolean removeScheduleMetadataIfVersion(String prefKey, String expectedVersion) {
+        synchronized (SCHEDULE_LOCK) {
+            String current = schedulePrefs.getString(prefKey, null);
+            if (!isMetadataOwnedByVersion(current, expectedVersion)) {
+                Log.i(TAG, "skip stale rollback for " + prefKey
+                        + " (current metadata not owned by this attempt)");
+                return false;
+            }
+            return schedulePrefs.edit().remove(prefKey).commit();
+        }
+    }
+
+    /**
+     * Unconditional remove — intentional cancel / malformed restore cleanup only.
+     * Must NOT be used for install-failure rollback.
+     */
     private void removeScheduleMetadata(String prefKey) {
         synchronized (SCHEDULE_LOCK) {
             schedulePrefs.edit().remove(prefKey).commit();
@@ -228,13 +289,13 @@ public final class AutoDeductionScheduler {
 
     /**
      * Cancel using the same Intent identity as schedule (action + data URI).
+     * Intentional cancel removes current metadata regardless of version.
      */
     public boolean cancelOccurrence(String medicationId, String doseId, String calendarDate) {
         if (medicationId == null || doseId == null || calendarDate == null) return false;
         String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
         String prefKey = SCHEDULE_KEY_PREFIX + key;
 
-        // Identity-matching Intent (extras optional for cancel; data URI is required).
         Intent intent = buildOccurrenceIntent(medicationId, doseId, calendarDate, 0L, 0d, null);
         PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
         AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
@@ -247,11 +308,6 @@ public final class AutoDeductionScheduler {
         return true;
     }
 
-    /**
-     * After a fire, schedule the next local-calendar occurrence for the
-     * same med/dose (same HH:mm on the following calendar day).
-     * Does not use previousTrigger + 24h arithmetic.
-     */
     public ScheduleResult scheduleNextOccurrence(
             String medicationId,
             String doseId,
@@ -273,14 +329,14 @@ public final class AutoDeductionScheduler {
             epoch = computeEpochMs(nextDate, timeHhmm);
             if (epoch == null) return ScheduleResult.fail("invalid_next_datetime");
         }
+        // Same durable path (metadata + version + conditional rollback).
         return scheduleOccurrence(medicationId, doseId, nextDate, timeHhmm, amount, epoch);
     }
 
     /**
      * Restore future alarms from persisted schedule payloads (reboot).
-     * Skips past triggers. Does not replay old events.
-     * Uses the same scheduleOccurrence path (metadata already present →
-     * commit overwrites same key; alarm reinstalled with same identity).
+     * Extra scheduleVersion field is tolerated; scheduleOccurrence stamps a
+     * fresh version when rewriting. Past/malformed entries are dropped.
      */
     public int restoreFutureSchedules() {
         if (!canScheduleExactAlarms()) {
@@ -304,11 +360,12 @@ public final class AutoDeductionScheduler {
                 String time = o.optString("timeHhmm", "");
                 double amount = o.optDouble("amount", Double.NaN);
                 long epoch = o.optLong("scheduledAtEpochMs", 0L);
+                // Missing scheduleVersion (legacy PR #203 entries) is OK —
+                // scheduleOccurrence will assign a new one on rewrite.
                 if (medId.isEmpty() || doseId.isEmpty()
                         || !AutoDeductionContract.isValidCalendarDate(date)
                         || !AutoDeductionContract.isValidTimeHhmm(time)
                         || !AutoDeductionContract.isValidAmount(amount)) {
-                    // Malformed — drop so restore does not loop forever.
                     removeScheduleMetadata(e.getKey());
                     continue;
                 }
@@ -321,7 +378,6 @@ public final class AutoDeductionScheduler {
                     epoch = computed;
                 }
                 if (epoch <= System.currentTimeMillis()) {
-                    // Past: drop schedule entry; event may already be in ledger.
                     removeScheduleMetadata(e.getKey());
                     continue;
                 }

@@ -7,7 +7,6 @@ import {
 } from '../../src/utils/autoDeductionReconciliation';
 import { autoDeductionOccurrenceKey } from '../../src/utils/autoDeductionNative';
 import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
-import { LEGACY_DOSE_ID } from '../../src/utils/notifications';
 import { runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
 import {
   withAutoStockMutationGate,
@@ -285,7 +284,7 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
       logs: logsStore,
       globalAutoDeductEnabled: true,
       listFired: async () => events,
-      markReconciled: async (medicationId, doseId, calendarDate) => {
+      markReconciled: async (_medicationId, doseId, _calendarDate) => {
         const k = `${doseId}`;
         if (k === 'b' && failB) return { ok: false, changed: false };
         marked.add(k);

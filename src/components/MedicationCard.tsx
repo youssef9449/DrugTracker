@@ -603,16 +603,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             style={{ width: `${percentLeft}%` }}
           />
         </div>
-
-        {lastRefillQuantity && onUndoRefill ? (
-          <button
-            type="button"
-            onClick={onUndoRefill}
-            className="mt-1 w-full text-[8px] font-bold text-rose-800 bg-amber-50 border border-amber-200/80 rounded-full px-1 py-0.5 transition active:scale-95 hover:bg-amber-100"
-          >
-            تراجع +{lastRefillQuantity}
-          </button>
-        ) : null}
       </div>
     );
   }

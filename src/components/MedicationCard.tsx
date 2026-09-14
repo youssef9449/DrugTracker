@@ -8,7 +8,6 @@ import {
   CheckCircle,
   ShoppingCart,
   Clock,
-  ShieldCheck,
 } from 'lucide-react';
 import { Medication, calculateMedicationStatus, describeStockInStrips, isSolidUnit } from '../types';
 import { getDepletionDate, effectiveCurrentPills } from '../utils/dateCalculations';
@@ -203,62 +202,41 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             : 'bg-amber-50/30 border-amber-200'
         }`}
       >
-        {/* Header: Name + Urgency Badge + Menu */}
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-start gap-3 min-w-0">
-            <div
-              className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 shadow-xs ${
+        {/* Row 1: Name — alone on its own full-width line */}
+        <h3 className="text-base font-bold text-slate-900 leading-snug tracking-tight truncate mb-1.5 block w-full" title={medication.name}>
+          {medication.name}
+        </h3>
+
+        {/* Row 2: Badges (Status, Category, Strips) + Quick Menu */}
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          <div className="flex items-center gap-1.5 text-xs text-slate-500 flex-wrap min-w-0">
+            <span
+              className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
                 isOut
                   ? 'bg-red-600 text-white'
                   : isCrit
                   ? 'bg-rose-600 text-white'
-                  : 'bg-amber-500 text-white'
+                  : 'bg-amber-600 text-white'
               }`}
             >
-              {isOut ? (
-                <AlertCircle className="w-5 h-5 animate-pulse" />
-              ) : (
-                <Clock className="w-5 h-5" />
-              )}
-            </div>
-
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <h3 className="text-base font-bold text-slate-900 leading-snug">
-                  {medication.name}
-                </h3>
-                <span
-                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                    isOut
-                      ? 'bg-red-600 text-white'
-                      : isCrit
-                      ? 'bg-rose-600 text-white'
-                      : 'bg-amber-600 text-white'
-                  }`}
-                >
-                  {isOut
-                    ? 'نفد المخزون بالكامل'
-                    : isCrit
-                    ? `حرج: ينفد خلال ${pluralizeArabic(statusInfo.daysLeft, 'يوم')}`
-                    : `تنبيه: متبقي ${statusInfo.daysLeft} أيام`}
-                </span>
-              </div>
-
-              <div className="flex items-center gap-1.5 mt-0.5 text-xs text-slate-500 flex-wrap">
-                {medication.category && (
-                  <span className={`font-medium px-1.5 py-0.2 rounded text-[10px] ${tag.badge}`}>
-                    {medication.category}
-                  </span>
-                )}
-                <span>معدل الخصم: {medication.dailyDose} {medication.unit}/يوم</span>
-                {hasStrips && (
-                  <StripsBadge medication={medication} className="text-[10px] text-teal-800 bg-white/90 border border-teal-200 px-1.5 py-0.5 rounded" />
-                )}
-                {!isSolid && medication.packageSize && medication.packageSize > 0 && (
-                  <PackageSizeBadge medication={medication} className="text-[10px] text-teal-800 bg-white/90 border border-teal-200 px-1.5 py-0.5 rounded" />
-                )}
-              </div>
-            </div>
+              {isOut
+                ? 'نفد المخزون بالكامل'
+                : isCrit
+                ? `حرج: ينفد خلال ${pluralizeArabic(statusInfo.daysLeft, 'يوم')}`
+                : `تنبيه: متبقي ${statusInfo.daysLeft} أيام`}
+            </span>
+            {medication.category && (
+              <span className={`font-medium px-1.5 py-0.2 rounded text-[10px] shrink-0 ${tag.badge}`}>
+                {medication.category}
+              </span>
+            )}
+            <span>معدل الخصم: {medication.dailyDose} {medication.unit}/يوم</span>
+            {hasStrips && (
+              <StripsBadge medication={medication} className="text-[10px] text-teal-800 bg-white/90 border border-teal-200 px-1.5 py-0.5 rounded shrink-0" />
+            )}
+            {!isSolid && medication.packageSize && medication.packageSize > 0 && (
+              <PackageSizeBadge medication={medication} className="text-[10px] text-teal-800 bg-white/90 border border-teal-200 px-1.5 py-0.5 rounded shrink-0" />
+            )}
           </div>
 
           {/* Quick Menu (extracted — see MedicationMenu.tsx) */}
@@ -330,7 +308,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             className="flex-1 py-2 px-3 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 shadow-xs"
           >
             <Plus className="w-4 h-4" />
-            <span>تعبئة رصيد (+ {medication.unit === 'مل' ? 'عبوة' : 'علبة'})</span>
+            <span>تعبئة رصيد</span>
           </button>
 
           {onNavigateToShopping && (
@@ -365,43 +343,34 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         id={`med-card-${medication.id}`}
         className="bg-white rounded-2xl border border-emerald-200/80 p-4 shadow-xs hover:shadow-md transition relative overflow-hidden"
       >
-        {/* Header: Name + Safety Indicator */}
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-start gap-3 min-w-0">
-            <div className="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-700 border border-emerald-100 flex items-center justify-center shrink-0 shadow-inner">
-              <ShieldCheck className="w-6 h-6 text-emerald-600" />
-            </div>
+        {/* Row 1: Name — alone on its own full-width line */}
+        <h3 className="text-base font-bold text-slate-900 leading-snug tracking-tight truncate mb-1.5 block w-full" title={medication.name}>
+          {medication.name}
+        </h3>
 
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <h3 className="text-base font-bold text-slate-900 leading-snug">
-                  {medication.name}
-                </h3>
-                <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                  <span>مخزون آمن ومريح</span>
-                </span>
-              </div>
-
-              <div className="flex items-center gap-1.5 mt-0.5 text-xs text-slate-500 flex-wrap">
-                {medication.category && (
-                  <span className={`font-medium px-1.5 py-0.2 rounded text-[10px] ${tag.badge}`}>
-                    {medication.category}
-                  </span>
-                )}
-                {hasStrips && (
-                  <StripsBadge medication={medication} className="text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/50" />
-                )}
-                {!isSolid && medication.packageSize && medication.packageSize > 0 && (
-                  <PackageSizeBadge medication={medication} className="text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/50" />
-                )}
-                {medication.notes && (
-                  <span className="text-[11px] text-slate-400 truncate max-w-[180px]">
-                    {medication.notes}
-                  </span>
-                )}
-              </div>
-            </div>
+        {/* Row 2: Badges (Safety, Category, Strips) + Options Menu */}
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          <div className="flex items-center gap-1.5 text-xs text-slate-500 flex-wrap min-w-0">
+            <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
+              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+              <span>مخزون آمن ومريح</span>
+            </span>
+            {medication.category && (
+              <span className={`font-medium px-1.5 py-0.2 rounded text-[10px] shrink-0 ${tag.badge}`}>
+                {medication.category}
+              </span>
+            )}
+            {hasStrips && (
+              <StripsBadge medication={medication} className="text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/50 shrink-0" />
+            )}
+            {!isSolid && medication.packageSize && medication.packageSize > 0 && (
+              <PackageSizeBadge medication={medication} className="text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/50 shrink-0" />
+            )}
+            {medication.notes && (
+              <span className="text-[11px] text-slate-400 truncate max-w-[180px]">
+                {medication.notes}
+              </span>
+            )}
           </div>
 
           {/* Options Menu (extracted — see MedicationMenu.tsx) */}

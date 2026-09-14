@@ -170,4 +170,50 @@ describe('MedicationCard — Category Badge Color matching colorTag', () => {
     expect(badge).toHaveClass('bg-sky-50');
     expect(badge).toHaveClass('text-sky-800');
   });
+
+  it('renders medication name on its own line in alerts view with badges below it and simplified refill button', () => {
+    render(
+      <MedicationCard
+        medication={{ ...baseMed, currentPills: 1, colorTag: 'rose', category: 'السكري' }}
+        viewFilter="alerts"
+        onOpenRefill={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onToggleAutoDeduct={vi.fn()}
+      />
+    );
+
+    const heading = screen.getByRole('heading', { level: 3 });
+    expect(heading).toHaveTextContent(baseMed.name);
+    expect(heading).toHaveClass('block');
+    expect(heading).toHaveClass('w-full');
+    expect(screen.getAllByText('نفد المخزون بالكامل').length).toBeGreaterThan(0);
+    expect(screen.getByText('السكري')).toBeInTheDocument();
+
+    // Refill button has "تعبئة رصيد" only without (+ علبة)
+    const refillBtn = screen.getByRole('button', { name: /تعبئة رصيد/i });
+    expect(refillBtn).toBeInTheDocument();
+    expect(refillBtn).toHaveTextContent('تعبئة رصيد');
+    expect(refillBtn).not.toHaveTextContent('علبة');
+  });
+
+  it('renders medication name on its own line in sufficient view with badges below it', () => {
+    render(
+      <MedicationCard
+        medication={{ ...baseMed, currentPills: 100, colorTag: 'teal', category: 'السكري' }}
+        viewFilter="sufficient"
+        onOpenRefill={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onToggleAutoDeduct={vi.fn()}
+      />
+    );
+
+    const heading = screen.getByRole('heading', { level: 3 });
+    expect(heading).toHaveTextContent(baseMed.name);
+    expect(heading).toHaveClass('block');
+    expect(heading).toHaveClass('w-full');
+    expect(screen.getByText('مخزون آمن ومريح')).toBeInTheDocument();
+    expect(screen.getByText('السكري')).toBeInTheDocument();
+  });
 });

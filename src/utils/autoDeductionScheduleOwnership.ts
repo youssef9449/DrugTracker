@@ -63,3 +63,47 @@ export function buildSchedulePayload(
 ): string {
   return JSON.stringify(fields);
 }
+
+/**
+ * Minimal model of the serialized scheduler transaction for unit tests.
+ * Proves ordering: metadata write + "install" + rollback cannot interleave
+ * with another transaction for the same key when guarded by a mutex.
+ */
+export type AlarmState = { version: string; triggerAt: number } | null;
+
+export interface SchedulerTxnState {
+  metadata: Map<string, string>;
+  alarms: Map<string, AlarmState>;
+}
+
+export function runSerializedScheduleTxn(
+  state: SchedulerTxnState,
+  prefKey: string,
+  payload: { scheduleVersion: string; scheduledAtEpochMs: number },
+  installSucceeds: boolean
+): { ok: boolean } {
+  // Entire txn is atomic from the caller's perspective (models SCHEDULE_LOCK).
+  const json = buildSchedulePayload({
+    scheduleVersion: payload.scheduleVersion,
+    scheduledAtEpochMs: payload.scheduledAtEpochMs,
+  });
+  state.metadata.set(prefKey, json);
+  if (!installSucceeds) {
+    conditionalRollback(state.metadata, prefKey, payload.scheduleVersion);
+    state.alarms.set(prefKey, null);
+    return { ok: false };
+  }
+  state.alarms.set(prefKey, {
+    version: payload.scheduleVersion,
+    triggerAt: payload.scheduledAtEpochMs,
+  });
+  return { ok: true };
+}
+
+export function runSerializedCancelTxn(
+  state: SchedulerTxnState,
+  prefKey: string
+): void {
+  state.alarms.set(prefKey, null);
+  state.metadata.delete(prefKey);
+}

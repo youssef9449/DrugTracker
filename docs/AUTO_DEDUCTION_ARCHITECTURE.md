@@ -943,6 +943,32 @@ Intentional `cancelOccurrence` and restore cleanup of past/malformed rows still 
 Legacy schedule entries without `scheduleVersion` are not owned by any attempt under the version path; `restoreFutureSchedules` tolerates missing version and assigns a fresh one when rewriting via `scheduleOccurrence`.
 
 
+
+### Scheduler transaction serialization
+
+`SCHEDULE_LOCK` is process-wide and serializes the full scheduling transaction for auto-deduction:
+
+```text
+metadata persistence (commit + scheduleVersion)
++ AlarmManager installation (setExact / setExactAndAllowWhileIdle)
++ ownership-safe failure rollback
++ cancellation (AlarmManager.cancel + metadata remove)
+```
+
+Validation stays outside the lock. Intent/PendingIntent construction may occur outside; the lock covers state-changing steps only.
+
+`scheduleVersion` remains the ownership guard for metadata rollback (in addition to the lock).
+
+This prevents in-process interleaving that could leave:
+
+```text
+metadata = B
+alarm = A
+```
+
+for the same occurrence identity.
+
+
 ### Files touched (Phase 2)
 - `native-android/auto-deduction/*`
 - `native-android/app/MainActivity.java` (plugin registration)

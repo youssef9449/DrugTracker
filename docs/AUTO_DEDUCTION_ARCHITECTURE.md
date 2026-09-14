@@ -795,3 +795,90 @@ Feature flag / gradual enable recommended so exact auto can be tested without fo
 ---
 
 *End of Phase 1 document.*
+
+---
+
+## Phase 2 Implementation Decisions
+
+*Implemented: exact-time native scheduling + durable event ledger only. No JS stock reconciliation.*
+
+### Chosen native storage
+- **SharedPreferences**
+  - Events: `drugtracker_auto_deduction_events_v1` (keys `evt:<occurrenceKey>`)
+  - Active schedules (reboot restore): `drugtracker_auto_deduction_schedules_v1` (keys `sch:<occurrenceKey>`)
+
+### Native event schema (JSON per occurrence)
+| Field | Notes |
+|-------|--------|
+| `medicationId` | immutable |
+| `doseId` | real id or `legacy` |
+| `calendarDate` | YYYY-MM-DD local |
+| `scheduledAtEpochMs` | intended wall time |
+| `amount` | dose.amount (or legacy dailyDose) |
+| `status` | `FIRED` → `RECONCILED` |
+| `createdAtEpochMs` | native write time |
+| `reconciledAtEpochMs` | set by JS (Phase 3); null while FIRED |
+
+### Canonical key
+```text
+medicationId + U+001F + doseId + U+001F + calendarDate
+```
+Implemented in `AutoDeductionContract.occurrenceKey` and mirrored by `autoDeductionOccurrenceKey` in JS.
+
+### Receiver / scheduler / plugin
+| Component | Class / name |
+|-----------|----------------|
+| Receiver | `app.drugtracker.autodeduction.AutoDeductionReceiver` |
+| Scheduler | `AutoDeductionScheduler` |
+| Ledger | `AutoDeductionEventStore` |
+| Capacitor plugin | `AutoDeduction` (`AutoDeductionPlugin`) |
+| Bridge JS | `src/utils/autoDeductionNative.ts` |
+| App scheduler hook | `src/hooks/useAutoDeductionScheduler.ts` |
+
+### PendingIntent identity
+- Request code = `pendingIntentRequestCode(occurrenceKey)` = `(hash ^ 0xAD00DED) & 0x7fffffff` (non-zero)
+- Action: `app.drugtracker.action.AUTO_DEDUCTION`
+- Separate from Local Notifications request-code space
+
+### Exact alarm API
+- `AlarmManager.setExactAndAllowWhileIdle(RTC_WAKEUP, …)` on API 23+
+- Permission denied → schedule returns `{ ok: false, error: "exact_alarm_permission_denied" }` (no silent inexact fallback)
+
+### Scheduling model
+- One-shot per local calendar occurrence (`calendarDate` + `HH:mm`)
+- JS schedules today (if still ahead) + tomorrow per eligible slot
+- Receiver, after FIRED insert, schedules the **next local calendar day** at the same HH:mm (not `+24h`)
+- Cancel uses the same deterministic PendingIntent identity
+
+### Reboot behavior
+- `AutoDeductionReceiver` handles `BOOT_COMPLETED` / `QUICKBOOT_POWERON`
+- Restores future alarms from persisted schedule payloads
+- Does **not** replay past occurrences; existing ledger rows are preserved
+- Limitation: if exact-alarm permission is missing at boot, restore is skipped until app open re-arms
+
+### Permission behavior
+- Reuses existing exact-alarm permission gate (`exactAlarmEnabled` from JS)
+- When false/null: future auto-deduction alarms are not scheduled; tracked alarms cancelled when explicitly false
+
+### Settings
+- Global `globalAutoDeductEnabled` + per-med `autoDeductEnabled === false`
+- Disable → cancel future tracked alarms; **historical FIRED events are not deleted**
+- Re-enable → schedule only future eligible occurrences (no history replay)
+
+### Unresolved / deferred to later phases
+- JS reconciliation of FIRED → stock / ConsumptionLog (Phase 3)
+- Interaction matrix with Take / Restore (Phase 4)
+- Destructive retention cleanup of old RECONCILED events (must not delete unreconciled)
+- DST non-existent local times: relies on `Calendar` set semantics; document after device validation
+- Full emulator matrix (foreground / background / killed) — not executed in this environment
+
+### Files touched (Phase 2)
+- `native-android/auto-deduction/*`
+- `native-android/app/MainActivity.java` (plugin registration)
+- `scripts/prepare-android.mjs` (copy sources + manifest receiver)
+- `src/utils/autoDeductionNative.ts`
+- `src/hooks/useAutoDeductionScheduler.ts`
+- `src/App.tsx` (hook wiring only)
+- `Tests/hooks/useAutoDeductionScheduler.test.ts`
+- `docs/AUTO_DEDUCTION_ARCHITECTURE.md` (this section)
+

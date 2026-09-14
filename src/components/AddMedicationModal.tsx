@@ -60,7 +60,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
   const [unit, setUnit] = useState('قرص');
   const [warningThresholdDays, setWarningThresholdDays] = useState<string>('5');
   const [category, setCategory] = useState('');
-  const [notes, setNotes] = useState('');
   const [colorTag, setColorTag] = useState('teal');
   // Strips-per-box and pills-per-strip use a STRING state for the
   // same reason as dailyDose — so the user can clear the field and
@@ -116,7 +115,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       setUnit(initUnit);
       setWarningThresholdDays(String(initialData.warningThresholdDays ?? 5));
       setCategory(initialData.category || '');
-      setNotes(initialData.notes || '');
       setColorTag(initialData.colorTag || 'teal');
       const isSolid = isSolidUnit(initUnit);
       const hasStrips = isSolid && Boolean(
@@ -153,7 +151,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       setUnit('قرص');
       setWarningThresholdDays('5');
       setCategory('');
-      setNotes('');
       setColorTag('teal');
       setStripsPerBox('3');
       setPillsPerStrip('10');
@@ -310,7 +307,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
         unit,
         warningThresholdDays: Number(warningThresholdDays) || 5,
         category: category.trim(),
-        notes: notes.trim(),
+        notes: initialData?.notes || '',
         colorTag,
         lastSyncDate: initialData?.lastSyncDate || getTodayDateString(),
         autoDeductEnabled: initialData?.autoDeductEnabled ?? true,
@@ -390,7 +387,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
 
           <div>
             <div className="grid grid-cols-2 gap-3">
-              <div>
+              <div className="h-full flex flex-col justify-between">
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
                   {unit === 'مل'
                     ? 'الكمية المتوفرة حالياً (مل)'
@@ -429,17 +426,17 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                     // If empty/invalid, leave currentPills at its previous
                     // value — the submit handler falls back to it.
                   }}
-                  className={`w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white ${
+                  className={`w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white mt-auto ${
                     initialData ? 'opacity-60 cursor-not-allowed' : ''
                   }`}
                 />
               </div>
-              <div className="h-full flex flex-col justify-end">
+              <div className="h-full flex flex-col justify-between">
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">نوع الوحدة</label>
                 <select
                   value={unit}
                   onChange={(e) => handleUnitChange(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white mt-auto"
                 >
                   <option value="قرص">قرص (حبّة)</option>
                   <option value="كبسولة">كبسولة</option>
@@ -751,17 +748,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                 ))}
               </div>
             </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1.5">ملاحظات الجرعة (اختياري)</label>
-            <input
-              type="text"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="مثال: بعد الإفطار، مع اللبن..."
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
-            />
           </div>
 
           <div className="space-y-3">

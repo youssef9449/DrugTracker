@@ -38,6 +38,16 @@ public final class AutoDeductionContract {
      */
     public static final String PREFS_CANCELLED = "drugtracker_auto_deduction_cancelled_v1";
 
+    /**
+     * Durable monotonic ordering sequence for scheduleVersion / cancellation tokens.
+     * Survives process death so (millis, seq) comparisons remain reconstructible
+     * after reboot. Key {@link #KEY_ORDERING_SEQ} holds the last allocated value.
+     */
+    public static final String PREFS_ORDERING = "drugtracker_auto_deduction_ordering_v1";
+
+    /** SharedPreferences key: last allocated durable ordering sequence (long). */
+    public static final String KEY_ORDERING_SEQ = "lastAllocatedSequence";
+
     public static final String STATUS_FIRED = "FIRED";
     public static final String STATUS_RECONCILED = "RECONCILED";
 

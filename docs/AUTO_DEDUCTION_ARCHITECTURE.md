@@ -979,3 +979,53 @@ for the same occurrence identity.
 - `Tests/hooks/useAutoDeductionScheduler.test.ts`
 - `docs/AUTO_DEDUCTION_ARCHITECTURE.md` (this section)
 
+
+---
+
+## Phase 2 — Implementation status (closure)
+
+Native owns timing, AlarmManager install/cancel, boot/permission restore, and durable FIRED (plus pending-fire recovery namespace). JavaScript owns stock mutation, reconciliation, and RECONCILED acknowledgement (Phase 3).
+
+### Exact-alarm permission lifecycle
+
+- Schedule paths require `canScheduleExactAlarms()` (API 31+).
+- Manifest registers `SCHEDULE_EXACT_ALARM` and `RECEIVE_BOOT_COMPLETED`.
+- `AutoDeductionReceiver` handles:
+  - `BOOT_COMPLETED` / `QUICKBOOT_POWERON` → promote pending + `restoreFutureSchedules`
+  - `AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED` (API 31+) → same when permission is granted again
+- JS `useAutoDeductionScheduler` also calls `restoreFutureAutoDeductionSchedules()` when exact-alarm is enabled and the desired set is applied (permission re-grant / resume).
+
+### FIRED durability and recovery
+
+| Path | Behavior |
+|------|----------|
+| Primary FIRED commit success | Event in main ledger; pending cleared |
+| Primary fail + retry success | Same |
+| Primary + retry fail, pending commit success | Pending in separate SharedPreferences file; promoted on boot / listEvents |
+| Primary + retry + pending all fail | Schedule metadata for that occurrence is **kept** on past restore (last recovery source) |
+| Duplicate delivery | `ALREADY_EXISTS`; no second event |
+
+### Receiver next-occurrence truth table
+
+| Insert result | Schedule next |
+|---------------|---------------|
+| CREATED | Yes |
+| ALREADY_EXISTS | Yes (idempotent) |
+| FAILED | No |
+
+### Restore / cancel
+
+- `scheduleOccurrenceLocked` holds `SCHEDULE_LOCK` for ownership check + metadata + AlarmManager install (restore uses `requiredVersion`).
+- Cancel cannot be undone by a stale restore snapshot.
+- Past schedule metadata is removed only when FIRED exists or pending was durably recorded.
+
+### Runtime validation status
+
+- Automated JS contract tests exist for identity, CancelResult, and past-schedule recovery matrix.
+- Full Android emulator/device matrix (Doze, OEM force-stop, permission toggle) is **not executed** in the CI/sandbox environment used for this work; requires a real `android/` project + device/emulator.
+
+### Known platform limitations
+
+- Force-stop cancels alarms on stock Android; recovery is boot restore and/or JS reschedule after next launch.
+- OEM aggressive battery managers may delay exact alarms; architecture remains reconstructible from durable schedule metadata + FIRED/pending stores.
+- Pending and main FIRED both use SharedPreferences (separate files); they are separate durable namespaces, not a different storage technology.

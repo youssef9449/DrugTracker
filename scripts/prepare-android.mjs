@@ -166,9 +166,11 @@ if (!manifest.includes(bootPermission)) {
   manifest = manifest.replace(/(<manifest\b[^>]*>)/, `$1\n    ${bootPermission}`);
 }
 
+// exported=true is required for system BOOT_COMPLETED delivery on API 31+.
+// ACTION_AUTO_DEDUCTION is still targeted via explicit PendingIntent (AlarmManager).
 const receiverBlock = `        <receiver
             android:name="app.drugtracker.autodeduction.AutoDeductionReceiver"
-            android:exported="false"
+            android:exported="true"
             android:enabled="true">
             <intent-filter>
                 <action android:name="app.drugtracker.action.AUTO_DEDUCTION" />
@@ -177,17 +179,24 @@ const receiverBlock = `        <receiver
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
         </receiver>`;
 
-if (!manifest.includes('app.drugtracker.autodeduction.AutoDeductionReceiver')) {
-  if (manifest.includes('</application>')) {
-    manifest = manifest.replace('</application>', `${receiverBlock}\n    </application>`);
-  } else {
-    console.error('[prepare-android] FATAL: </application> not found in AndroidManifest.xml');
-    process.exit(1);
+if (manifest.includes('app.drugtracker.autodeduction.AutoDeductionReceiver')) {
+  // Replace existing receiver block so exported / intent-filters stay current.
+  const receiverRe = /\s*<receiver[\s\S]*?app\.drugtracker\.autodeduction\.AutoDeductionReceiver[\s\S]*?<\/receiver>/;
+  if (receiverRe.test(manifest)) {
+    manifest = manifest.replace(receiverRe, '\n' + receiverBlock);
   }
+} else if (manifest.includes('</application>')) {
+  manifest = manifest.replace('</application>', `${receiverBlock}\n    </application>`);
+} else {
+  console.error('[prepare-android] FATAL: </application> not found in AndroidManifest.xml');
+  process.exit(1);
 }
 fs.writeFileSync(manifestPath, manifest);
-console.info('[prepare-android] Ensured AutoDeductionReceiver + RECEIVE_BOOT_COMPLETED in manifest.');
+console.info('[prepare-android] Ensured AutoDeductionReceiver + boot + exact-alarm permission lifecycle in manifest.');
 
 console.info('Prepared Android exact-alarm permission + dose-reminder delivery sources + auto-deduction.');

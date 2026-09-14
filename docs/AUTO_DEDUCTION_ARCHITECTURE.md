@@ -337,7 +337,8 @@ Native owns timing, AlarmManager install/cancel, boot/permission restore, and du
 - Manifest registers `SCHEDULE_EXACT_ALARM` and `RECEIVE_BOOT_COMPLETED`.
 - **Receiver separation (security):**
   - `AutoDeductionReceiver` — `ACTION_AUTO_DEDUCTION` only, `android:exported="false"` (explicit AlarmManager PendingIntent).
-  - `AutoDeductionSystemReceiver` — `BOOT_COMPLETED` / `QUICKBOOT_POWERON` / `ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED` only, `android:exported="true"` (system broadcasts on API 31+). Invokes `AutoDeductionLifecycle.promoteAndRestore`.
+  - `AutoDeductionSystemReceiver` — `BOOT_COMPLETED` / `QUICKBOOT_POWERON` / `TIMEZONE_CHANGED` / `ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED`, `android:exported="true"` (system broadcasts on API 31+). Invokes `AutoDeductionLifecycle.promoteAndRestore`.
+- On `TIMEZONE_CHANGED`, future alarms are rebuilt from durable schedule metadata using the current default timezone (`calendarDate` + `timeHhmm`); historical FIRED/RECONCILED events are not altered and occurrence identity is unchanged.
 - JS desired-state reconciliation lists native schedule metadata via `listScheduledOccurrences` and cancels keys not in the desired set (avoids resurrecting stale schedules after process restart). System restore is **not** invoked on every JS schedule pass.
 
 ### FIRED durability and recovery
@@ -361,8 +362,10 @@ Native owns timing, AlarmManager install/cancel, boot/permission restore, and du
 ### Restore / cancel
 
 - `scheduleOccurrenceLocked` holds `SCHEDULE_LOCK` for ownership check + metadata + AlarmManager install (restore uses `requiredVersion`).
-- Cancel cannot be undone by a stale restore snapshot.
-- Past schedule metadata is removed only when FIRED exists or pending was durably recorded.
+- Cancel writes a durable cancellation tombstone (occurrence identity) before AlarmManager.cancel and schedule-metadata removal. If metadata removal fails after a successful alarm cancel, the tombstone remains so a later reboot/restore must not promote the stale schedule to FIRED.
+- A later legitimate `scheduleOccurrence` for the same occurrence identity clears the tombstone and installs a new active schedule.
+- Cancel cannot be undone by a stale restore snapshot; cancelled keys are skipped during restore (no synthetic FIRED).
+- Past schedule metadata is removed only when FIRED exists or pending was durably recorded (genuine fire recovery), never when a cancellation tombstone is present.
 
 ### Platform limitations
 

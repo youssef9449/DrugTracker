@@ -1,5 +1,7 @@
 package app.drugtracker.autodeduction;
 
+import android.net.Uri;
+
 /**
  * Shared constants and canonical occurrence-key helpers for exact-time
  * automatic dose deduction (Phase 2).
@@ -7,9 +9,8 @@ package app.drugtracker.autodeduction;
  * Occurrence identity (hard requirement):
  *   medicationId + doseId + calendarDate (YYYY-MM-DD)
  *
- * Canonical storage / PendingIntent key is deterministic, stable, and
- * collision-resistant given repository ID constraints (UUID-prefixed ids
- * and LEGACY_DOSE_ID = "legacy"; neither contains the unit separator).
+ * Canonical storage key and PendingIntent data URI are both derived from
+ * the full occurrence identity — never from a 32-bit hash alone.
  */
 public final class AutoDeductionContract {
 
@@ -31,8 +32,25 @@ public final class AutoDeductionContract {
     public static final String STATUS_FIRED = "FIRED";
     public static final String STATUS_RECONCILED = "RECONCILED";
 
+    /**
+     * Shared request-code namespace for auto-deduction PendingIntents.
+     * NOT a unique identity: uniqueness comes from Intent action + data URI
+     * (see {@link #occurrenceUri}). Kept constant so cancel/schedule always
+     * match on the same request-code + data pair.
+     */
+    public static final int PENDING_INTENT_REQUEST_CODE = 0xAD00DED;
+
+    /** Content-authority style path for auto-deduction occurrence URIs. */
+    private static final String URI_SCHEME = "content";
+    private static final String URI_AUTHORITY = "app.drugtracker.autodeduction";
+    private static final String URI_PATH_PREFIX = "occurrence";
+
     private static final char SEP = '\u001f';
 
+    /**
+     * Deterministic canonical key for one automatic occurrence.
+     * Must match the identity used by JS reconciliation (Phase 3).
+     */
     public static String occurrenceKey(String medicationId, String doseId, String calendarDate) {
         if (medicationId == null) medicationId = "";
         if (doseId == null) doseId = "";
@@ -40,10 +58,37 @@ public final class AutoDeductionContract {
         return medicationId + SEP + doseId + SEP + calendarDate;
     }
 
+    /**
+     * Deterministic Intent data URI for PendingIntent matching.
+     * Full occurrence identity participates — two different
+     * (med, dose, date) triples never share the same URI.
+     *
+     * Format: content://app.drugtracker.autodeduction/occurrence/{med}/{dose}/{date}
+     * Components are Uri-encoded so special characters cannot collapse identities.
+     */
+    public static Uri occurrenceUri(String medicationId, String doseId, String calendarDate) {
+        if (medicationId == null) medicationId = "";
+        if (doseId == null) doseId = "";
+        if (calendarDate == null) calendarDate = "";
+        return new Uri.Builder()
+                .scheme(URI_SCHEME)
+                .authority(URI_AUTHORITY)
+                .appendPath(URI_PATH_PREFIX)
+                .appendPath(medicationId)
+                .appendPath(doseId)
+                .appendPath(calendarDate)
+                .build();
+    }
+
+    /**
+     * @deprecated Prefer {@link #PENDING_INTENT_REQUEST_CODE} with
+     * {@link #occurrenceUri}. Kept only for reference; must not be used
+     * as the sole PendingIntent identity.
+     */
+    @Deprecated
     public static int pendingIntentRequestCode(String occurrenceKey) {
-        int h = occurrenceKey.hashCode();
-        int code = (h ^ 0xAD00DED) & 0x7fffffff;
-        return code == 0 ? 0xAD00DED : code;
+        // Stable helper only — Intent data URI is the uniqueness source.
+        return PENDING_INTENT_REQUEST_CODE;
     }
 
     public static boolean isValidAmount(double amount) {

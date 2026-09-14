@@ -1,3 +1,9 @@
+/**
+ * Phase 2 unit tests for auto-deduction identity helpers and scheduling slots.
+ * Does not require Android runtime. PendingIntent URI identity is validated
+ * at the native layer (see AutoDeductionContract.occurrenceUri); these tests
+ * cover the parallel JS occurrence-key contract and multi-dose amount isolation.
+ */
 import { describe, it, expect } from 'vitest';
 import type { Medication } from '../../src/types';
 import {
@@ -24,29 +30,45 @@ function baseMed(over: Partial<Medication> = {}): Medication {
   };
 }
 
-describe('auto-deduction occurrence identity', () => {
+describe('auto-deduction occurrence identity (full key, not hash)', () => {
   it('same med + dose + date → same key', () => {
     const a = autoDeductionOccurrenceKey('m1', 'd1', '2026-09-14');
     const b = autoDeductionOccurrenceKey('m1', 'd1', '2026-09-14');
     expect(a).toBe(b);
   });
 
-  it('different dose → different key', () => {
-    expect(autoDeductionOccurrenceKey('m1', 'd1', '2026-09-14')).not.toBe(
-      autoDeductionOccurrenceKey('m1', 'd2', '2026-09-14')
-    );
+  it('different dose → different full key (not merely different hash)', () => {
+    const a = autoDeductionOccurrenceKey('m1', 'd1', '2026-09-14');
+    const b = autoDeductionOccurrenceKey('m1', 'd2', '2026-09-14');
+    expect(a).not.toBe(b);
+    // Full identity includes doseId literally — collision-free by construction
+    expect(a.includes('d1')).toBe(true);
+    expect(b.includes('d2')).toBe(true);
   });
 
-  it('different date → different key', () => {
-    expect(autoDeductionOccurrenceKey('m1', 'd1', '2026-09-14')).not.toBe(
-      autoDeductionOccurrenceKey('m1', 'd1', '2026-09-15')
-    );
+  it('different date → different full key', () => {
+    const a = autoDeductionOccurrenceKey('m1', 'd1', '2026-09-14');
+    const b = autoDeductionOccurrenceKey('m1', 'd1', '2026-09-15');
+    expect(a).not.toBe(b);
+    expect(a.endsWith('2026-09-14') || a.includes('2026-09-14')).toBe(true);
+    expect(b.includes('2026-09-15')).toBe(true);
   });
 
-  it('schedule key distinguishes date', () => {
+  it('schedule key distinguishes date and dose', () => {
     expect(autoDeductionScheduleKey('m', 'd', '2026-09-14')).not.toBe(
       autoDeductionScheduleKey('m', 'd', '2026-09-15')
     );
+    expect(autoDeductionScheduleKey('m', 'dA', '2026-09-14')).not.toBe(
+      autoDeductionScheduleKey('m', 'dB', '2026-09-14')
+    );
+  });
+
+  it('multi-dose same day yields three independent schedule keys', () => {
+    const date = '2026-09-14';
+    const kA = autoDeductionScheduleKey('M', 'dose-a', date);
+    const kB = autoDeductionScheduleKey('M', 'dose-b', date);
+    const kC = autoDeductionScheduleKey('M', 'dose-c', date);
+    expect(new Set([kA, kB, kC]).size).toBe(3);
   });
 });
 
@@ -65,6 +87,15 @@ describe('multi-dose amount isolation', () => {
     expect(slots.find((s) => s.doseId === 'dose-a')?.amount).toBe(1);
     expect(slots.find((s) => s.doseId === 'dose-b')?.amount).toBe(2);
     expect(slots.find((s) => s.doseId === 'dose-c')?.amount).toBe(3);
+  });
+
+  it('does not use dailyDose for multi-dose slots', () => {
+    const med = baseMed({
+      doseSchedule: [{ id: 'dose-a', amount: 1.5, time: '09:00' }],
+      dailyDose: 99,
+    });
+    const slots = getAutoDeductionSlotsForDate(med, '2026-09-14');
+    expect(slots[0].amount).toBe(1.5);
   });
 });
 
@@ -102,5 +133,19 @@ describe('local calendar helpers', () => {
     const ms = localEpochMs('2026-09-14', '08:00');
     expect(ms).not.toBeNull();
     expect(Number.isFinite(ms!)).toBe(true);
+  });
+});
+
+describe('amount validation boundary (JS)', () => {
+  it('rejects non-positive amounts at slot build', () => {
+    const med = baseMed({
+      doseSchedule: [
+        { id: 'ok', amount: 1, time: '08:00' },
+        { id: 'zero', amount: 0, time: '09:00' },
+        { id: 'neg', amount: -1, time: '10:00' },
+      ],
+    });
+    const slots = getAutoDeductionSlotsForDate(med, '2026-09-14');
+    expect(slots.map((s) => s.doseId)).toEqual(['ok']);
   });
 });

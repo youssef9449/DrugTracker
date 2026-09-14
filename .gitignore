@@ -24,3 +24,7 @@ node_modules/
 *.keystore
 *.jks
 *.p12
+
+# Phase 2 JVM unit-test module build output
+native-android/jvm-tests/.gradle/
+native-android/jvm-tests/build/

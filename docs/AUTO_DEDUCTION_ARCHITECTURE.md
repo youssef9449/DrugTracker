@@ -351,12 +351,24 @@ Native owns timing, AlarmManager install/cancel, boot/permission restore, and du
 | Primary + retry + pending all fail | Schedule metadata for that occurrence is **kept** on past restore (last recovery source) |
 | Duplicate delivery | `ALREADY_EXISTS`; no second event |
 
+### Fire-vs-cancel linearization
+
+Native fire and cancellation are serialized on the same process-wide `SCHEDULE_LOCK` so that **exactly one** operation linearizes first:
+
+- If **fire** linearizes first (`fireOccurrenceIfNotCancelled`): the effective-cancellation check and durable FIRED (or pending-fire) transition run as one critical section. A later cancel cannot retroactively erase that fire. Pending-fire recovery after process death remains valid for fires that already linearized.
+- If **cancellation** linearizes first (`cancelOccurrence` tombstone under the same lock): a subsequent or in-flight stale alarm delivery observes effective cancellation inside the same critical section and must **not** create FIRED, pending FIRED, or recurrence.
+
+A separate cancel check *outside* the FIRED write is not sufficient: that would leave a TOCTOU window between “not cancelled” and durable fire persistence.
+
+Lock order is always `SCHEDULE_LOCK` then nested `EventStore.LOCK` (never the reverse).
+
 ### Receiver next-occurrence truth table
 
-| Insert result | Schedule next |
-|---------------|---------------|
+| Fire linearization result | Schedule next |
+|---------------------------|---------------|
 | CREATED | Yes |
 | ALREADY_EXISTS | Yes (idempotent) |
+| CANCELLED | No |
 | FAILED | No |
 
 ### Restore / cancel
@@ -368,7 +380,7 @@ Native owns timing, AlarmManager install/cancel, boot/permission restore, and du
   - tombstone present and no schedule metadata → cancelled
   - both present → compare ordering tokens by (millis, seq); a strictly newer schedule supersedes the tombstone (active); a strictly newer cancel remains cancelled
   - no tombstone → not cancelled
-- Cancelled occurrences are blocked in **both** lifecycle restore and `AutoDeductionReceiver` fire handling: no synthetic FIRED, no next recurrence. A stale alarm that races with cancel is ignored when the tombstone is durable.
+- Cancelled occurrences are blocked in **both** lifecycle restore and `AutoDeductionReceiver` fire handling via the same serialized fire transition: no synthetic FIRED, no pending FIRED, no next recurrence when cancel linearizes first. A stale alarm that races with cancel cannot win the fire linearization after the tombstone is durable under `SCHEDULE_LOCK`.
 - A later legitimate `scheduleOccurrence` writes new schedule metadata (lock-ordered `scheduleVersion`) then best-effort clears the tombstone. If tombstone removal fails, version ordering still treats the newer schedule as active so reboot/restore and fire delivery do not suppress it.
 - Past schedule metadata is removed only when FIRED exists or pending was durably recorded (genuine fire recovery), never when the occurrence is effectively cancelled.
 

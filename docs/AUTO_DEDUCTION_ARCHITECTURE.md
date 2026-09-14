@@ -795,3 +795,187 @@ Feature flag / gradual enable recommended so exact auto can be tested without fo
 ---
 
 *End of Phase 1 document.*
+
+---
+
+## Phase 2 Implementation Decisions
+
+*Implemented: exact-time native scheduling + durable event ledger only. No JS stock reconciliation.*
+
+### Chosen native storage
+- **SharedPreferences**
+  - Events: `drugtracker_auto_deduction_events_v1` (keys `evt:<occurrenceKey>`)
+  - Active schedules (reboot restore): `drugtracker_auto_deduction_schedules_v1` (keys `sch:<occurrenceKey>`)
+
+### Native event schema (JSON per occurrence)
+| Field | Notes |
+|-------|--------|
+| `medicationId` | immutable |
+| `doseId` | real id or `legacy` |
+| `calendarDate` | YYYY-MM-DD local |
+| `scheduledAtEpochMs` | intended wall time |
+| `amount` | dose.amount (or legacy dailyDose) |
+| `status` | `FIRED` → `RECONCILED` |
+| `createdAtEpochMs` | native write time |
+| `reconciledAtEpochMs` | set by JS (Phase 3); null while FIRED |
+
+### Canonical key
+```text
+medicationId + U+001F + doseId + U+001F + calendarDate
+```
+Implemented in `AutoDeductionContract.occurrenceKey` and mirrored by `autoDeductionOccurrenceKey` in JS.
+
+### Receiver / scheduler / plugin
+| Component | Class / name |
+|-----------|----------------|
+| Receiver | `app.drugtracker.autodeduction.AutoDeductionReceiver` |
+| Scheduler | `AutoDeductionScheduler` |
+| Ledger | `AutoDeductionEventStore` |
+| Capacitor plugin | `AutoDeduction` (`AutoDeductionPlugin`) |
+| Bridge JS | `src/utils/autoDeductionNative.ts` |
+| App scheduler hook | `src/hooks/useAutoDeductionScheduler.ts` |
+
+### PendingIntent identity
+- Request code = `pendingIntentRequestCode(occurrenceKey)` = `(hash ^ 0xAD00DED) & 0x7fffffff` (non-zero)
+- Action: `app.drugtracker.action.AUTO_DEDUCTION`
+- Separate from Local Notifications request-code space
+
+### Exact alarm API
+- `AlarmManager.setExactAndAllowWhileIdle(RTC_WAKEUP, …)` on API 23+
+- Permission denied → schedule returns `{ ok: false, error: "exact_alarm_permission_denied" }` (no silent inexact fallback)
+
+### Scheduling model
+- One-shot per local calendar occurrence (`calendarDate` + `HH:mm`)
+- JS schedules today (if still ahead) + tomorrow per eligible slot
+- Receiver, after FIRED insert, schedules the **next local calendar day** at the same HH:mm (not `+24h`)
+- Cancel uses the same deterministic PendingIntent identity
+
+### Reboot behavior
+- `AutoDeductionReceiver` handles `BOOT_COMPLETED` / `QUICKBOOT_POWERON`
+- Restores future alarms from persisted schedule payloads
+- Does **not** replay past occurrences; existing ledger rows are preserved
+- Limitation: if exact-alarm permission is missing at boot, restore is skipped until app open re-arms
+
+### Permission behavior
+- Reuses existing exact-alarm permission gate (`exactAlarmEnabled` from JS)
+- When false/null: future auto-deduction alarms are not scheduled; tracked alarms cancelled when explicitly false
+
+### Settings
+- Global `globalAutoDeductEnabled` + per-med `autoDeductEnabled === false`
+- Disable → cancel future tracked alarms; **historical FIRED events are not deleted**
+- Re-enable → schedule only future eligible occurrences (no history replay)
+
+### Unresolved / deferred to later phases
+- JS reconciliation of FIRED → stock / ConsumptionLog (Phase 3)
+- Interaction matrix with Take / Restore (Phase 4)
+- Destructive retention cleanup of old RECONCILED events (must not delete unreconciled)
+- DST non-existent local times: relies on `Calendar` set semantics; document after device validation
+- Full emulator matrix (foreground / background / killed) — not executed in this environment
+
+
+
+### PR #203 review fixes (EventStore lock, PendingIntent identity, schedule durability)
+
+#### EventStore synchronization
+- `AutoDeductionEventStore` uses a **process-wide** `private static final Object LOCK`.
+- `insertFiredIfAbsent` / `hasEvent` / `markReconciled` / `listEvents` all synchronize on that static lock.
+- Multiple EventStore instances (e.g. concurrent receiver deliveries) still serialize check+commit.
+- Event writes use `SharedPreferences.commit()` (not `apply()`) so the FIRED row is on disk before the receiver returns.
+
+#### PendingIntent identity (no sole dependence on 32-bit hash)
+- Uniqueness comes from **Intent action + data URI**, not from `String.hashCode()`.
+- Data URI: `content://app.drugtracker.autodeduction/occurrence/{medId}/{doseId}/{calendarDate}`
+  built via `AutoDeductionContract.occurrenceUri(...)` (path segments are Uri-encoded by the builder).
+- Request code is a **fixed namespace constant** `PENDING_INTENT_REQUEST_CODE = 0xAD00DED` shared by all auto-deduction alarms; it is **not** the uniqueness source.
+- `scheduleOccurrence` and `cancelOccurrence` build the same Intent (same action, same data URI, same request code) so cancel always matches schedule.
+- Auto-deduction remains isolated from Local Notifications request-code / channel space.
+
+#### Schedule durability ordering
+```text
+validate input
+  → persist schedule payload with commit()   // reboot recovery metadata first
+  → AlarmManager.setExactAndAllowWhileIdle
+  → on install failure: remove schedule payload
+  → return success
+```
+
+Crash / failure model:
+| Scenario | Recovery |
+|----------|----------|
+| Metadata committed, process dies before alarm install | `restoreFutureSchedules()` / boot sees future payload and reinstalls the same PendingIntent identity |
+| Alarm installed, process dies | Metadata already durable; boot restore recreates the same identity (idempotent) |
+| Metadata committed, alarm install throws | Payload is **removed**; no permanent stale "scheduled" row without an install attempt path |
+| Malformed / past payload on restore | Dropped from schedule prefs; past keys are not replayed |
+
+Repeated `scheduleOccurrence` for the same occurrence key overwrites the same metadata key and uses `FLAG_UPDATE_CURRENT` on the same Intent identity → one logical alarm.
+
+Receiver path still: insert FIRED (static-lock idempotent) → `scheduleNextOccurrence` (same durable ordering for the next calendar day).
+
+
+
+
+### Schedule rollback concurrency
+
+Each schedule metadata write stamps a unique `scheduleVersion` (attempt generation token).
+This token is **not** part of occurrence identity (`medicationId + doseId + calendarDate`).
+
+Durability order is unchanged:
+
+```text
+validate
+  → commit schedule metadata (includes scheduleVersion)
+  → AlarmManager.setExactAndAllowWhileIdle
+  → on failure: conditional rollback
+```
+
+Conditional rollback (under process-wide `SCHEDULE_LOCK`):
+
+```text
+read current metadata for occurrence key
+  → if scheduleVersion still equals this attempt's version → remove
+  → else → do nothing (a newer attempt owns the entry)
+```
+
+Therefore a stale failed attempt **cannot** delete metadata written by a newer successful (or in-flight) attempt for the same occurrence.
+
+Intentional `cancelOccurrence` and restore cleanup of past/malformed rows still use unconditional remove (user/system intent, not install-failure rollback).
+
+Legacy schedule entries without `scheduleVersion` are not owned by any attempt under the version path; `restoreFutureSchedules` tolerates missing version and assigns a fresh one when rewriting via `scheduleOccurrence`.
+
+
+
+### Scheduler transaction serialization
+
+`SCHEDULE_LOCK` is process-wide and serializes the full scheduling transaction for auto-deduction:
+
+```text
+metadata persistence (commit + scheduleVersion)
++ AlarmManager installation (setExact / setExactAndAllowWhileIdle)
++ ownership-safe failure rollback
++ cancellation (AlarmManager.cancel + metadata remove)
+```
+
+Validation stays outside the lock. Intent/PendingIntent construction may occur outside; the lock covers state-changing steps only.
+
+`scheduleVersion` remains the ownership guard for metadata rollback (in addition to the lock).
+
+This prevents in-process interleaving that could leave:
+
+```text
+metadata = B
+alarm = A
+```
+
+for the same occurrence identity.
+
+
+### Files touched (Phase 2)
+- `native-android/auto-deduction/*`
+- `native-android/app/MainActivity.java` (plugin registration)
+- `scripts/prepare-android.mjs` (copy sources + manifest receiver)
+- `src/utils/autoDeductionNative.ts`
+- `src/hooks/useAutoDeductionScheduler.ts`
+- `src/App.tsx` (hook wiring only)
+- `Tests/hooks/useAutoDeductionScheduler.test.ts`
+- `docs/AUTO_DEDUCTION_ARCHITECTURE.md` (this section)
+

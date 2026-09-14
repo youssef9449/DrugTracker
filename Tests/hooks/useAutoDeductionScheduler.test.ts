@@ -271,3 +271,60 @@ describe('schedule metadata ownership / conditional rollback', () => {
     expect(isMetadataOwnedByVersion('{"medicationId":"m"}', 'v-any')).toBe(false);
   });
 });
+
+import {
+  runSerializedScheduleTxn,
+  runSerializedCancelTxn,
+  type SchedulerTxnState,
+} from '../../src/utils/autoDeductionScheduleOwnership';
+
+describe('scheduler transaction serialization (model)', () => {
+  const key = 'sch:med\u001fdose\u001f2026-09-14';
+
+  function emptyState(): SchedulerTxnState {
+    return { metadata: new Map(), alarms: new Map() };
+  }
+
+  it('A then B → final metadata and alarm both B', () => {
+    const state = emptyState();
+    runSerializedScheduleTxn(state, key, { scheduleVersion: 'A', scheduledAtEpochMs: 1 }, true);
+    runSerializedScheduleTxn(state, key, { scheduleVersion: 'B', scheduledAtEpochMs: 2 }, true);
+    expect(JSON.parse(state.metadata.get(key)!).scheduleVersion).toBe('B');
+    expect(state.alarms.get(key)?.version).toBe('B');
+  });
+
+  it('A fails then B succeeds → metadata and alarm both B', () => {
+    const state = emptyState();
+    runSerializedScheduleTxn(state, key, { scheduleVersion: 'A', scheduledAtEpochMs: 1 }, false);
+    runSerializedScheduleTxn(state, key, { scheduleVersion: 'B', scheduledAtEpochMs: 2 }, true);
+    expect(JSON.parse(state.metadata.get(key)!).scheduleVersion).toBe('B');
+    expect(state.alarms.get(key)?.version).toBe('B');
+  });
+
+  it('serialized A-fail then B never yields metadata=B alarm=A', () => {
+    const state = emptyState();
+    // Under SCHEDULE_LOCK, B cannot install until A fully completes (including rollback).
+    runSerializedScheduleTxn(state, key, { scheduleVersion: 'A', scheduledAtEpochMs: 1 }, false);
+    runSerializedScheduleTxn(state, key, { scheduleVersion: 'B', scheduledAtEpochMs: 2 }, true);
+    const metaV = JSON.parse(state.metadata.get(key)!).scheduleVersion;
+    const alarmV = state.alarms.get(key)?.version;
+    expect(metaV).toBe(alarmV);
+    expect(metaV).toBe('B');
+  });
+
+  it('schedule then cancel → canceled final state', () => {
+    const state = emptyState();
+    runSerializedScheduleTxn(state, key, { scheduleVersion: 'A', scheduledAtEpochMs: 1 }, true);
+    runSerializedCancelTxn(state, key);
+    expect(state.metadata.has(key)).toBe(false);
+    expect(state.alarms.get(key)).toBeNull();
+  });
+
+  it('cancel then schedule → scheduled final state', () => {
+    const state = emptyState();
+    runSerializedCancelTxn(state, key);
+    runSerializedScheduleTxn(state, key, { scheduleVersion: 'A', scheduledAtEpochMs: 1 }, true);
+    expect(JSON.parse(state.metadata.get(key)!).scheduleVersion).toBe('A');
+    expect(state.alarms.get(key)?.version).toBe('A');
+  });
+});

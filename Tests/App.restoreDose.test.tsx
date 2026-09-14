@@ -61,6 +61,7 @@ vi.mock('@/components/MedicationCard', async (importOriginal) => {
       React.createElement(
         React.Fragment,
         null,
+        // Open SelectDoseModal take path without a pre-selected doseId (card always passes one).
         React.createElement(
           'button',
           {
@@ -70,7 +71,24 @@ vi.mock('@/components/MedicationCard', async (importOriginal) => {
           },
           'consume-without-doseId'
         ),
-        React.createElement(actual.MedicationCard, props)
+        // Open App restore path without doseId → multi-dose SelectDoseModal (restore mode).
+        // Same semantic entry as handleCardRestoreDose(medId); required because the card
+        // toggle only surfaces restore-dose-* when canRestore (manual take), not for
+        // auto-deduct-only slots — while App restore lifecycle still uses this handler.
+        React.createElement(
+          'button',
+          {
+            type: 'button',
+            'data-testid': `restore-dose-${props.medication.id}`,
+            onClick: () => props.onRestoreDose?.(props.medication.id),
+          },
+          'restore-open-modal'
+        ),
+        React.createElement(actual.MedicationCard, {
+          ...props,
+          // Avoid duplicate restore-dose-* when the real card also renders canRestore.
+          onRestoreDose: undefined,
+        })
       ),
   };
 });

@@ -740,8 +740,8 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
   });
 
   it('restores a dose once per day via MedicationCard (logs restore UI removed)', async () => {
-    // Legacy single-dose: card restore calls handleRestoreDose directly.
-    // Logs-tab restore controls were intentionally removed from ConsumptionLogView.
+    // Legacy single-dose: card shows restore only when lastConsumedDate is today
+    // (canRestore). Logs-tab restore controls were intentionally removed.
     const today = new Date().toISOString().slice(0, 10);
     localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([{
       id: 'med-restore',
@@ -753,6 +753,7 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
       colorTag: 'teal',
       createdAt: '2024-01-01T00:00:00.000Z',
       lastSyncDate: today,
+      lastConsumedDate: today,
       autoDeductEnabled: true,
       reminderEnabled: false,
     }]));
@@ -765,7 +766,7 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
     );
 
     fireEvent.click(screen.getByTestId('restore-dose-med-restore'));
-    // Duplicate click: outstanding-skip / already-restored guard
+    // Duplicate click: outstanding-skip / already-restored guard → single skipped_day log
     fireEvent.click(screen.getByTestId('restore-dose-med-restore'));
 
     await waitFor(() => {

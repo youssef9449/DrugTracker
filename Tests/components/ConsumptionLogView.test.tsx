@@ -108,7 +108,8 @@ describe('ConsumptionLogView', () => {
       />
     );
 
-    expect(screen.getByText('Med A')).toBeInTheDocument();
+    // Two log rows both belong to Med A (auto_daily + refill) — name appears twice by design.
+    expect(screen.getAllByText('Med A')).toHaveLength(2);
     expect(screen.getByText('خصم تلقائي لليوم')).toBeInTheDocument();
     expect(screen.getByText('تمت التعبئة')).toBeInTheDocument();
     expect(screen.getByText('-1')).toBeInTheDocument();

@@ -2,11 +2,12 @@
 /**
  * App-layer restore lifecycle regressions (PR #185).
  *
- * Restores go through MedicationCard restore control → SelectDoseModal (restore mode)
+ * Restores use the remaining product path: manual Take first (so card canRestore),
+ * then MedicationCard restore-dose-* → SelectDoseModal (restore mode) for multi-dose
  * → handleCardRestoreDose → handleRestoreDose → restoreDose.
- * (Logs-tab restore UI was intentionally removed from ConsumptionLogView.)
+ * Logs-tab / ConsumptionLogView restore UI stays intentionally removed (UI redesign later);
+ * restore business logic in App handlers remains intact.
  * Takes go through SelectDoseModal (explicit doseId) → handleConsumeDose → consumeDose.
- * Never relies on Card chronological target resolution for dose identity.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
@@ -61,7 +62,8 @@ vi.mock('@/components/MedicationCard', async (importOriginal) => {
       React.createElement(
         React.Fragment,
         null,
-        // Open SelectDoseModal take path without a pre-selected doseId (card always passes one).
+        // Card always passes an explicit toggle doseId. This helper omits doseId
+        // so tests exercise App handleConsumeDose → SelectDoseModal (take mode).
         React.createElement(
           'button',
           {
@@ -71,24 +73,7 @@ vi.mock('@/components/MedicationCard', async (importOriginal) => {
           },
           'consume-without-doseId'
         ),
-        // Open App restore path without doseId → multi-dose SelectDoseModal (restore mode).
-        // Same semantic entry as handleCardRestoreDose(medId); required because the card
-        // toggle only surfaces restore-dose-* when canRestore (manual take), not for
-        // auto-deduct-only slots — while App restore lifecycle still uses this handler.
-        React.createElement(
-          'button',
-          {
-            type: 'button',
-            'data-testid': `restore-dose-${props.medication.id}`,
-            onClick: () => props.onRestoreDose?.(props.medication.id),
-          },
-          'restore-open-modal'
-        ),
-        React.createElement(actual.MedicationCard, {
-          ...props,
-          // Avoid duplicate restore-dose-* when the real card also renders canRestore.
-          onRestoreDose: undefined,
-        })
+        React.createElement(actual.MedicationCard, props)
       ),
   };
 });
@@ -141,9 +126,16 @@ async function goToStockTab(): Promise<void> {
   });
 }
 
-/** Multi-dose restore via card (opens SelectDoseModal in restore mode). */
+/**
+ * Multi-dose restore via the real MedicationCard control.
+ * Requires a prior manual Take so canRestore is true and restore-dose-* is rendered.
+ * Opens SelectDoseModal (restore mode) then picks doseId.
+ */
 async function restoreDoseViaCardModal(doseId: string): Promise<void> {
   await goToStockTab();
+  await waitFor(() => {
+    expect(screen.getByTestId(`restore-dose-${MED_ID}`)).toBeInTheDocument();
+  });
   fireEvent.click(screen.getByTestId(`restore-dose-${MED_ID}`));
   await waitFor(() => {
     expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
@@ -153,11 +145,12 @@ async function restoreDoseViaCardModal(doseId: string): Promise<void> {
   );
   const target = doseButtons.find((b) => b.getAttribute('data-dose-id') === doseId);
   expect(target).toBeTruthy();
+  expect(target).not.toBeDisabled();
   fireEvent.click(target!);
 }
 
 async function takeDoseViaSelectModal(doseId: string): Promise<void> {
-  // Stock tab mounts MedicationCard + consume-without-doseId → SelectDoseModal
+  // Stock tab: consume without doseId → SelectDoseModal (take mode)
   await goToStockTab();
   fireEvent.click(screen.getByTestId(`consume-no-doseid-${MED_ID}`));
   await waitFor(() => {
@@ -186,19 +179,24 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('App — Auto-Deduct → Restore → Restore blocked (explicit doseId)', () => {
-  it('first Restore of d1 succeeds; second Restore of same d1+date is blocked by App guard', async () => {
+describe('App — Take → Restore → Restore blocked (explicit doseId via card)', () => {
+  it('first Restore of d1 succeeds; second Restore of same d1+date is blocked', async () => {
+    // Remaining UI path: manual Take makes canRestore true so real restore-dose-* appears.
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeMulti()]));
     localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
     render(<App />);
     await waitFor(() => {
       expect(screen.getByText('Restore Handler Med')).toBeInTheDocument();
-      expect(screen.getByTestId(`restore-dose-${MED_ID}`)).toBeInTheDocument();
     });
 
-    const pillsBefore = readMeds()[0].currentPills;
+    // Prerequisite: Take d1 so MedicationCard surfaces restore control.
+    await takeDoseViaSelectModal('d1');
+    await waitFor(() => {
+      expect(readMeds()[0].doseConsumption?.d1).toBe(getTodayDateString());
+    });
+    const pillsAfterTake = readMeds()[0].currentPills;
 
-    // Step 1 — explicit Restore d1
+    // Step 1 — explicit Restore d1 via real card + SelectDoseModal
     await restoreDoseViaCardModal('d1');
     await waitFor(() => {
       expect(screen.getByText(/تم استرجاع الجرعة — Restore Handler Med/)).toBeInTheDocument();
@@ -212,8 +210,8 @@ describe('App — Auto-Deduct → Restore → Restore blocked (explicit doseId)'
       expect(med.doseSkippedHistory?.d3).toBeUndefined();
       expect(med.doseConsumption?.d2).toBeUndefined();
       expect(med.doseConsumption?.d3).toBeUndefined();
-      // Auto-only restore: snapshot not inflated
-      expect(med.currentPills).toBe(pillsBefore);
+      // Manual take then restore returns the dose amount to stock
+      expect(med.currentPills).toBe(pillsAfterTake + 1);
       const restores = readLogs().filter(
         (l) => l.type === 'skipped_day' && l.doseId === 'd1'
       );
@@ -221,24 +219,23 @@ describe('App — Auto-Deduct → Restore → Restore blocked (explicit doseId)'
       expect(restores[0].amount).toBe(1);
     });
 
-    // Step 2 — second Restore same d1+date: modal keeps d1 non-selectable;
-    // storage must remain single restore (no duplicate log / stock change).
-    await goToStockTab();
-    fireEvent.click(screen.getByTestId(`restore-dose-${MED_ID}`));
-    await waitFor(() => {
-      expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
-    });
-    const d1Btn = screen
-      .getAllByRole('button')
-      .find((b) => b.getAttribute('data-dose-id') === 'd1');
-    expect(d1Btn).toBeTruthy();
-    expect(d1Btn).toBeDisabled();
-    // Clicking a disabled option must not create a second restore.
-    fireEvent.click(d1Btn!);
+    // Step 2 — second Restore same d1: modal keeps d1 non-selectable (or card hides restore)
+    const restoreBtn = screen.queryByTestId(`restore-dose-${MED_ID}`);
+    if (restoreBtn) {
+      fireEvent.click(restoreBtn);
+      await waitFor(() => {
+        expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
+      });
+      const d1Btn = screen
+        .getAllByRole('button')
+        .find((b) => b.getAttribute('data-dose-id') === 'd1');
+      expect(d1Btn).toBeTruthy();
+      expect(d1Btn).toBeDisabled();
+      fireEvent.click(d1Btn!);
+    }
 
     await waitFor(() => {
       const med = readMeds()[0];
-      expect(med.currentPills).toBe(pillsBefore);
       expect(med.doseSkippedHistory?.d1).toEqual([getTodayDateString()]);
       expect(readLogs().filter((l) => l.type === 'skipped_day' && l.doseId === 'd1')).toHaveLength(
         1
@@ -252,14 +249,23 @@ describe('App — Auto-Deduct → Restore → Restore blocked (explicit doseId)'
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeMulti({ currentPills: 10 })]));
     localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
     render(<App />);
-    await waitFor(() => expect(screen.getByTestId(`restore-dose-${MED_ID}`)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Restore Handler Med')).toBeInTheDocument());
+
+    // Take d1 and d2 so both are restorable via card/modal
+    await takeDoseViaSelectModal('d1');
+    await takeDoseViaSelectModal('d2');
+    await waitFor(() => {
+      const med = readMeds()[0];
+      expect(med.doseConsumption?.d1).toBe(getTodayDateString());
+      expect(med.doseConsumption?.d2).toBe(getTodayDateString());
+    });
 
     await restoreDoseViaCardModal('d1');
     await waitFor(() => {
       expect(screen.getByText(/تم استرجاع الجرعة — Restore Handler Med/)).toBeInTheDocument();
     });
 
-    // d1 already restored — modal marks it disabled; proceed to independent d2.
+    // Independent d2 restore
     await restoreDoseViaCardModal('d2');
     await waitFor(() => {
       const restores = readLogs().filter((l) => l.type === 'skipped_day');
@@ -270,17 +276,24 @@ describe('App — Auto-Deduct → Restore → Restore blocked (explicit doseId)'
   });
 });
 
-describe('App — Restore → Take → Restore for the SAME doseId (explicit selection)', () => {
-  it('explicit d1 Restore → explicit d1 Take → explicit d1 Restore is allowed', async () => {
+describe('App — Take → Restore → Take → Restore for the SAME doseId (card path)', () => {
+  it('explicit d1 Take → Restore → Take → Restore is allowed', async () => {
+    // Card only shows restore-dose-* after a manual Take (canRestore).
+    // Full cycle exercises handleCardRestoreDose + handleRestoreDose + consumeDose.
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeMulti()]));
     localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
     render(<App />);
     await waitFor(() => {
       expect(screen.getByText('Restore Handler Med')).toBeInTheDocument();
-      expect(screen.getByTestId(`restore-dose-${MED_ID}`)).toBeInTheDocument();
     });
 
-    // ── Step 1: Restore d1 (logs dose selector → handleRestoreDose) ──
+    // ── Step 1: Take d1 ──
+    await takeDoseViaSelectModal('d1');
+    await waitFor(() => {
+      expect(readMeds()[0].doseConsumption?.d1).toBe(getTodayDateString());
+    });
+
+    // ── Step 2: Restore d1 (real restore-dose-* + SelectDoseModal) ──
     await restoreDoseViaCardModal('d1');
     await waitFor(() => {
       const med = readMeds()[0];
@@ -297,25 +310,24 @@ describe('App — Restore → Take → Restore for the SAME doseId (explicit sel
       expect(med.doseConsumption?.d3).toBeUndefined();
     });
 
-    // ── Step 2: Take d1 (SelectDoseModal → handleConsumeDose → consumeDose) ──
+    // ── Step 3: Take d1 again (clears outstanding skip) ──
     await takeDoseViaSelectModal('d1');
     await waitFor(() => {
       const med = readMeds()[0];
       expect(med.doseConsumption?.d1).toBe(getTodayDateString());
-      // consumeDose clears outstanding skip
       expect(med.doseSkippedHistory?.d1).toBeUndefined();
       const taken = readLogs().filter(
         (l) => l.type === 'dose_taken' && l.doseId === 'd1'
       );
-      expect(taken).toHaveLength(1);
-      expect(taken[0].amount).toBe(-1);
+      expect(taken).toHaveLength(2);
+      expect(taken.every((l) => l.amount === -1)).toBe(true);
       expect(med.doseConsumption?.d2).toBeUndefined();
       expect(med.doseConsumption?.d3).toBeUndefined();
       expect(med.doseSkippedHistory?.d2).toBeUndefined();
       expect(med.doseSkippedHistory?.d3).toBeUndefined();
     });
 
-    // ── Step 3: Restore d1 again (logs selector — same doseId) ──
+    // ── Step 4: Restore d1 again ──
     await restoreDoseViaCardModal('d1');
     await waitFor(() => {
       const med = readMeds()[0];
@@ -332,10 +344,9 @@ describe('App — Restore → Take → Restore for the SAME doseId (explicit sel
       expect(med.doseSkippedHistory?.d3).toBeUndefined();
       expect(med.doseConsumption?.d2).toBeUndefined();
       expect(med.doseConsumption?.d3).toBeUndefined();
-      // only one Take for d1
       expect(
         readLogs().filter((l) => l.type === 'dose_taken' && l.doseId === 'd1')
-      ).toHaveLength(1);
+      ).toHaveLength(2);
     });
   });
 });

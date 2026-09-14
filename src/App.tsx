@@ -315,9 +315,18 @@ export default function App() {
 
     // Initialize the in-app notifications flag from the async permission
     // state if no preference has been explicitly saved yet by the user.
-    // Also check exact-alarm permission (Android 12+).
-    // Hydration completes AFTER these async checks resolve so the
-    // scheduler effects see the correct permission state on first run.
+    // Also check exact-alarm permission (Android 12+) and run native
+    // bridge initialization (notification channels, listeners).
+    //
+    // Hydration MUST complete only AFTER all three settle so the
+    // scheduler effects never run before Android notification channels
+    // exist. Previously initNativeBridge ran fire-and-forget alongside
+    // the permission Promise.all, which allowed hydrated===true while
+    // channel creation was still in flight.
+    //
+    // Each task catches its own errors so a single failure cannot
+    // prevent the others from completing, and .finally still marks
+    // the app ready (matching the previous fault-tolerant policy).
     Promise.all([
       getNotificationPermission()
         .then((perm) => {
@@ -364,14 +373,14 @@ export default function App() {
         .catch((err) => {
           console.warn('[App] getExactAlarmPermission failed:', err);
         }),
+      // Native bridge: status bar, back button, notification channels,
+      // and listeners. No-op on web — see src/native.ts. Included in
+      // Promise.all so setHydrated cannot race ahead of channel setup.
+      initNativeBridge().catch((err) => {
+        console.warn('[App] Native bridge init failed:', err);
+      }),
     ]).finally(() => {
       setHydrated(true);
-    });
-
-    // Initialize the Capacitor native bridge (status bar color, back
-    // button). No-op on the web — see src/native.ts.
-    initNativeBridge().catch((err) => {
-      console.warn('[App] Native bridge init failed:', err);
     });
   }, []);
 

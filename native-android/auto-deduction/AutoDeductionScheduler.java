@@ -16,7 +16,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.TimeZone;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * One-shot exact-time auto-deduction scheduler (AlarmManager).
@@ -51,17 +50,11 @@ public final class AutoDeductionScheduler {
     /** Process-wide lock: metadata + AlarmManager install/cancel + rollback. */
     private static final Object SCHEDULE_LOCK = new Object();
 
-    /**
-     * Monotonic sequence mixed into version / cancel-ordering tokens.
-     * Token = millis + "-" + seq + "-" + UUID. Under SCHEDULE_LOCK the seq
-     * provides a strict total order even when wall-clock millis are identical.
-     * Values are persisted in schedule metadata and cancellation tombstones.
-     */
-    private static final AtomicLong VERSION_SEQ = new AtomicLong(0);
-
     private final Context appContext;
     private final SharedPreferences schedulePrefs;
     private final SharedPreferences cancelPrefs;
+    /** Durable last-allocated ordering sequence (survives process death). */
+    private final SharedPreferences orderingPrefs;
 
     public AutoDeductionScheduler(Context context) {
         this.appContext = context.getApplicationContext();
@@ -69,6 +62,8 @@ public final class AutoDeductionScheduler {
                 AutoDeductionContract.PREFS_SCHEDULES, Context.MODE_PRIVATE);
         this.cancelPrefs = appContext.getSharedPreferences(
                 AutoDeductionContract.PREFS_CANCELLED, Context.MODE_PRIVATE);
+        this.orderingPrefs = appContext.getSharedPreferences(
+                AutoDeductionContract.PREFS_ORDERING, Context.MODE_PRIVATE);
     }
 
     public static final class ScheduleResult {
@@ -135,15 +130,29 @@ public final class AutoDeductionScheduler {
     }
 
     /**
-     * Unique attempt token for one metadata write / cancel tombstone.
+     * Allocate a durable ordering token for one schedule or cancel operation.
      * Format: "{millis}-{seq}-{uuid}". Not part of occurrence identity (med/dose/date).
-     * Generated under SCHEDULE_LOCK so (millis, seq) reflects serialized operation order
-     * even when multiple operations share the same wall-clock millisecond.
+     * <p>
+     * Caller MUST hold {@link #SCHEDULE_LOCK}. Sequence is read-increment-commit from
+     * durable SharedPreferences so ordering survives process death. Skipped values
+     * after a crash are acceptable; reusing an older durable seq is not.
+     *
+     * @return token, or {@code null} if the durable counter commit failed (caller
+     *         must fail the operation — do not fall back to volatile memory).
      */
-    static String newScheduleVersion() {
+    private String allocateOrderingTokenLocked() {
+        long last = orderingPrefs.getLong(AutoDeductionContract.KEY_ORDERING_SEQ, 0L);
+        long next = last + 1L;
+        boolean committed = orderingPrefs.edit()
+                .putLong(AutoDeductionContract.KEY_ORDERING_SEQ, next)
+                .commit();
+        if (!committed) {
+            Log.e(TAG, "allocateOrderingTokenLocked: durable sequence commit failed");
+            return null;
+        }
         return System.currentTimeMillis()
                 + "-"
-                + VERSION_SEQ.incrementAndGet()
+                + next
                 + "-"
                 + UUID.randomUUID().toString();
     }
@@ -322,9 +331,12 @@ public final class AutoDeductionScheduler {
             }
         }
 
-        // Authoritative ordering/version for this scheduling attempt — only after
-        // acquiring SCHEDULE_LOCK (same serialization boundary as cancel tombstones).
-        final String myVersion = newScheduleVersion();
+        // Authoritative durable ordering/version for this scheduling attempt — only
+        // after acquiring SCHEDULE_LOCK (same serialization boundary as cancel).
+        final String myVersion = allocateOrderingTokenLocked();
+        if (myVersion == null) {
+            return ScheduleResult.fail("ordering_sequence_write_failed");
+        }
         try {
             payload.put(FIELD_SCHEDULE_VERSION, myVersion);
         } catch (JSONException e) {
@@ -442,11 +454,14 @@ public final class AutoDeductionScheduler {
             boolean alreadyCancelled = cancelPrefs.contains(cancelKey);
 
             // Durable cancellation intent before AlarmManager.cancel / metadata remove.
-            // Ordering token (same format as scheduleVersion) is generated under
-            // SCHEDULE_LOCK so same-millisecond schedule/cancel is strictly ordered
-            // by VERSION_SEQ and remains comparable after process death.
+            // Ordering token (same format as scheduleVersion) is allocated under
+            // SCHEDULE_LOCK from a durable sequence so same-millisecond ops and
+            // post-restart ops remain strictly ordered and reconstructible.
             if (!alreadyCancelled) {
-                final String cancelToken = newScheduleVersion();
+                final String cancelToken = allocateOrderingTokenLocked();
+                if (cancelToken == null) {
+                    return CancelResult.fail("ordering_sequence_write_failed");
+                }
                 boolean tombstoneWritten = cancelPrefs.edit()
                         .putString(cancelKey, cancelToken)
                         .commit();
@@ -498,7 +513,8 @@ public final class AutoDeductionScheduler {
      *   <li>Both present → compare durable ordering tokens (millis then seq from
      *       scheduleVersion / cancel tombstone). A strictly newer schedule
      *       supersedes the tombstone (active); a strictly newer cancel remains
-     *       cancelled. Same-millisecond operations are ordered by VERSION_SEQ.</li>
+     *       cancelled. Same-millisecond ops and post-restart ops are ordered
+     *       by the durable sequence allocated under SCHEDULE_LOCK.</li>
      * </ul>
      * This allows a legitimate reschedule to win even if tombstone removal failed
      * after the new schedule metadata commit, while still blocking cancel-then-
@@ -594,7 +610,7 @@ public final class AutoDeductionScheduler {
 
     /**
      * True if (aMillis, aSeq) is strictly newer than (bMillis, bSeq).
-     * Primary key: millis; secondary: seq (VERSION_SEQ under SCHEDULE_LOCK).
+     * Primary key: millis; secondary: durable seq allocated under SCHEDULE_LOCK.
      */
     private static boolean isOrderingNewer(long aMillis, long aSeq, long bMillis, long bSeq) {
         if (aMillis != bMillis) {

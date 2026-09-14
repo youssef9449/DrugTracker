@@ -37,6 +37,15 @@ export interface ScheduleOccurrenceResult {
   occurrenceKey?: string;
 }
 
+export interface ScheduledOccurrence {
+  medicationId: string;
+  doseId: string;
+  calendarDate: string;
+  timeHhmm?: string;
+  amount?: number;
+  scheduledAtEpochMs?: number;
+}
+
 export type CancelOccurrenceStatus = "SUCCESS" | "ALREADY_ABSENT" | "FAILED";
 
 export interface CancelOccurrenceResult {
@@ -61,6 +70,7 @@ interface AutoDeductionPlugin {
   }): Promise<MarkReconciledResult>;
   canScheduleExactAlarms(): Promise<{ granted: boolean }>;
   restoreFutureSchedules(): Promise<{ restored: number }>;
+  listScheduledOccurrences(): Promise<{ schedules: ScheduledOccurrence[] }>;
 }
 
 const AutoDeduction = registerPlugin<AutoDeductionPlugin>('AutoDeduction');
@@ -178,5 +188,15 @@ export async function restoreFutureAutoDeductionSchedules(): Promise<number> {
     return res.restored ?? 0;
   } catch {
     return 0;
+  }
+}
+
+export async function listScheduledAutoDeductionOccurrences(): Promise<ScheduledOccurrence[]> {
+  if (!isNativeAndroid()) return [];
+  try {
+    const res = await AutoDeduction.listScheduledOccurrences();
+    return res.schedules ?? [];
+  } catch {
+    return [];
   }
 }

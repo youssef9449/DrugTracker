@@ -6,16 +6,14 @@ import android.content.Intent;
 import android.util.Log;
 
 /**
- * Dedicated BroadcastReceiver for exact-time auto-deduction alarms.
- * Persists FIRED events only — does NOT mutate stock or depend on WebView.
+ * Private exact-alarm delivery receiver for ACTION_AUTO_DEDUCTION only.
+ * Registered android:exported="false" — targeted solely via explicit
+ * AlarmManager PendingIntent. Does NOT handle boot or permission broadcasts.
  *
  * FIRED insertion result drives next-occurrence scheduling:
  * <ul>
- *   <li>CREATED / ALREADY_EXISTS — current occurrence is durably recorded;
- *       schedule next is safe/idempotent</li>
- *   <li>FAILED — current occurrence is NOT confirmed in the main ledger;
- *       a pending-fire record may have been written for later promotion.
- *       Do not advance recurrence as though the fire succeeded.</li>
+ *   <li>CREATED / ALREADY_EXISTS — schedule next is safe/idempotent</li>
+ *   <li>FAILED — do not advance recurrence</li>
  * </ul>
  */
 public class AutoDeductionReceiver extends BroadcastReceiver {
@@ -27,12 +25,6 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
         if (intent == null) return;
 
         String action = intent.getAction();
-        if (Intent.ACTION_BOOT_COMPLETED.equals(action)
-                || "android.intent.action.QUICKBOOT_POWERON".equals(action)) {
-            onBoot(context);
-            return;
-        }
-
         if (!AutoDeductionContract.ACTION_AUTO_DEDUCTION.equals(action)) {
             return;
         }
@@ -67,10 +59,6 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 scheduleNextIfPossible(context, medicationId, doseId, calendarDate, timeHhmm, amount);
                 break;
             case FAILED:
-                // Primary ledger write failed. A pending-fire record may exist
-                // (result.pendingRecorded). Do NOT advance recurrence.
-                // Recovery: promotePendingFires on boot / listEvents, and
-                // past-schedule promotion in restoreFutureSchedules.
                 Log.e(TAG, "FIRED persistence FAILED (pendingRecorded="
                         + result.pendingRecorded + ") — not advancing next occurrence: "
                         + medicationId + "/" + doseId + "/" + calendarDate);
@@ -94,22 +82,6 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 medicationId, doseId, calendarDate, timeHhmm, amount);
         if (!next.ok) {
             Log.w(TAG, "next occurrence not scheduled: " + next.error);
-        }
-    }
-
-    private void onBoot(Context context) {
-        try {
-            // Promote any pending-fire records left by earlier commit failures.
-            AutoDeductionEventStore store = new AutoDeductionEventStore(context);
-            int promoted = store.promotePendingFires();
-            if (promoted > 0) {
-                Log.i(TAG, "BOOT: promoted " + promoted + " pending-fire record(s) to FIRED");
-            }
-            AutoDeductionScheduler scheduler = new AutoDeductionScheduler(context);
-            int n = scheduler.restoreFutureSchedules();
-            Log.i(TAG, "BOOT_COMPLETED: restored " + n + " future auto-deduction alarms");
-        } catch (Exception e) {
-            Log.e(TAG, "BOOT restore failed", e);
         }
     }
 }

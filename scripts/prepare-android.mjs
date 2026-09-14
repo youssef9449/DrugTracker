@@ -143,6 +143,8 @@ const autoDeductionFiles = [
   'AutoDeductionEventStore.java',
   'AutoDeductionScheduler.java',
   'AutoDeductionReceiver.java',
+  'AutoDeductionSystemReceiver.java',
+  'AutoDeductionLifecycle.java',
   'AutoDeductionPlugin.java',
 ];
 if (!fs.existsSync(autoDeductionDestDir)) {
@@ -159,35 +161,99 @@ for (const file of autoDeductionFiles) {
   console.info(`[prepare-android] Installed ${path.relative(root, src)} → ${path.relative(root, dest)}`);
 }
 
-// ── 5. Phase 2: register AutoDeductionReceiver + RECEIVE_BOOT_COMPLETED ─
+// ── 5. Phase 2: register private alarm receiver + system lifecycle receiver ─
 manifest = fs.readFileSync(manifestPath, 'utf8');
 const bootPermission = '<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />';
 if (!manifest.includes(bootPermission)) {
   manifest = manifest.replace(/(<manifest\b[^>]*>)/, `$1\n    ${bootPermission}`);
 }
 
-const receiverBlock = `        <receiver
+/**
+ * Replace or insert a single <receiver> whose android:name matches exactly.
+ * Scans for the unique name attribute, then expands outward to the enclosing
+ * <receiver>...</receiver> without crossing other receiver elements.
+ * Returns { manifest, changed }.
+ */
+function upsertReceiverByName(xml, androidName, receiverXml) {
+  const nameAttr = `android:name="${androidName}"`;
+  const nameIdx = xml.indexOf(nameAttr);
+  if (nameIdx === -1) {
+    if (!xml.includes('</application>')) {
+      console.error('[prepare-android] FATAL: </application> not found in AndroidManifest.xml');
+      process.exit(1);
+    }
+    return {
+      manifest: xml.replace('</application>', `${receiverXml}\n    </application>`),
+      changed: true,
+    };
+  }
+  // Walk backward to the nearest <receiver that starts this element.
+  const openTag = '<receiver';
+  let openIdx = xml.lastIndexOf(openTag, nameIdx);
+  if (openIdx === -1) {
+    console.error('[prepare-android] FATAL: could not find <receiver opening for', androidName);
+    process.exit(1);
+  }
+  // Ensure no other </receiver> sits between openIdx and nameIdx (malformed guard).
+  const between = xml.slice(openIdx, nameIdx);
+  if (between.includes('</receiver>')) {
+    console.error('[prepare-android] FATAL: ambiguous receiver block for', androidName);
+    process.exit(1);
+  }
+  const closeTag = '</receiver>';
+  const closeIdx = xml.indexOf(closeTag, nameIdx);
+  if (closeIdx === -1) {
+    console.error('[prepare-android] FATAL: unclosed <receiver for', androidName);
+    process.exit(1);
+  }
+  // Include any leading whitespace/newline before the open tag for clean replace.
+  let start = openIdx;
+  while (start > 0 && (xml[start - 1] === ' ' || xml[start - 1] === '\t')) start--;
+  if (start > 0 && xml[start - 1] === '\n') start--;
+  const end = closeIdx + closeTag.length;
+  const next = xml.slice(0, start) + '\n' + receiverXml + xml.slice(end);
+  return { manifest: next, changed: true };
+}
+
+// Private alarm delivery — explicit PendingIntent only; not externally invocable.
+const privateAlarmReceiver = `        <receiver
             android:name="app.drugtracker.autodeduction.AutoDeductionReceiver"
             android:exported="false"
             android:enabled="true">
             <intent-filter>
                 <action android:name="app.drugtracker.action.AUTO_DEDUCTION" />
             </intent-filter>
+        </receiver>`;
+
+// System lifecycle only — BOOT + exact-alarm permission state (API 31+).
+// exported=true is required for system-delivered broadcasts on API 31+.
+const systemLifecycleReceiver = `        <receiver
+            android:name="app.drugtracker.autodeduction.AutoDeductionSystemReceiver"
+            android:exported="true"
+            android:enabled="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
         </receiver>`;
 
-if (!manifest.includes('app.drugtracker.autodeduction.AutoDeductionReceiver')) {
-  if (manifest.includes('</application>')) {
-    manifest = manifest.replace('</application>', `${receiverBlock}\n    </application>`);
-  } else {
-    console.error('[prepare-android] FATAL: </application> not found in AndroidManifest.xml');
-    process.exit(1);
-  }
-}
+({ manifest } = upsertReceiverByName(
+  manifest,
+  'app.drugtracker.autodeduction.AutoDeductionReceiver',
+  privateAlarmReceiver
+));
+({ manifest } = upsertReceiverByName(
+  manifest,
+  'app.drugtracker.autodeduction.AutoDeductionSystemReceiver',
+  systemLifecycleReceiver
+));
+
 fs.writeFileSync(manifestPath, manifest);
-console.info('[prepare-android] Ensured AutoDeductionReceiver + RECEIVE_BOOT_COMPLETED in manifest.');
+console.info(
+  '[prepare-android] Ensured AutoDeductionReceiver (private) + AutoDeductionSystemReceiver (lifecycle).'
+);
 
 console.info('Prepared Android exact-alarm permission + dose-reminder delivery sources + auto-deduction.');

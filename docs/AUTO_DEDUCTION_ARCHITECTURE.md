@@ -327,6 +327,53 @@ After an exact occurrence is applied, markers remove that slot from due helpers 
 
 ---
 
+## Phase 2 native platform notes (closure)
+
+Native owns timing, AlarmManager install/cancel, boot/permission restore, and durable FIRED (plus pending-fire recovery namespace). JavaScript owns stock mutation, reconciliation, and RECONCILED acknowledgement (Phase 3) as specified above.
+
+### Exact-alarm permission lifecycle
+
+- Schedule paths require `canScheduleExactAlarms()` (API 31+).
+- Manifest registers `SCHEDULE_EXACT_ALARM` and `RECEIVE_BOOT_COMPLETED`.
+- **Receiver separation (security):**
+  - `AutoDeductionReceiver` — `ACTION_AUTO_DEDUCTION` only, `android:exported="false"` (explicit AlarmManager PendingIntent).
+  - `AutoDeductionSystemReceiver` — `BOOT_COMPLETED` / `QUICKBOOT_POWERON` / `ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED` only, `android:exported="true"` (system broadcasts on API 31+). Invokes `AutoDeductionLifecycle.promoteAndRestore`.
+- JS desired-state reconciliation lists native schedule metadata via `listScheduledOccurrences` and cancels keys not in the desired set (avoids resurrecting stale schedules after process restart). System restore is **not** invoked on every JS schedule pass.
+
+### FIRED durability and recovery
+
+| Path | Behavior |
+|------|----------|
+| Primary FIRED commit success | Event in main ledger; pending cleared |
+| Primary fail + retry success | Same |
+| Primary + retry fail, pending commit success | Pending in separate SharedPreferences file; promoted on boot / listEvents |
+| Primary + retry + pending all fail | Schedule metadata for that occurrence is **kept** on past restore (last recovery source) |
+| Duplicate delivery | `ALREADY_EXISTS`; no second event |
+
+### Receiver next-occurrence truth table
+
+| Insert result | Schedule next |
+|---------------|---------------|
+| CREATED | Yes |
+| ALREADY_EXISTS | Yes (idempotent) |
+| FAILED | No |
+
+### Restore / cancel
+
+- `scheduleOccurrenceLocked` holds `SCHEDULE_LOCK` for ownership check + metadata + AlarmManager install (restore uses `requiredVersion`).
+- Cancel cannot be undone by a stale restore snapshot.
+- Past schedule metadata is removed only when FIRED exists or pending was durably recorded.
+
+### Platform limitations
+
+- Force-stop cancels alarms on stock Android; recovery is boot restore and/or JS reschedule after next launch.
+- OEM aggressive battery managers may delay exact alarms; architecture remains reconstructible from durable schedule metadata + FIRED/pending stores.
+- Pending and main FIRED both use SharedPreferences (separate files); they are separate durable namespaces, not a different storage technology.
+- Full Android emulator/device matrix (Doze, OEM force-stop, permission toggle) is environment-dependent; see Validation status above.
+
+---
+
 ## Future work (narrow)
 
 Further product-level completion of the Take / Restore × exact-native-auto interaction matrix beyond the occurrence-level compatibility already shared via consumption/skip markers. Notification and scheduling UX remain outside this subsystem’s stock path.
+

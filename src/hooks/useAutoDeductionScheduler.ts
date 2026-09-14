@@ -11,6 +11,7 @@ import { LEGACY_DOSE_ID } from '../utils/notifications';
 import {
   cancelAutoDeduction,
   scheduleAutoDeduction,
+  listScheduledAutoDeductionOccurrences,
 } from '../utils/autoDeductionNative';
 
 export interface UseAutoDeductionSchedulerOptions {
@@ -188,6 +189,39 @@ export function useAutoDeductionScheduler({
     }
 
     chainRef.current = chainRef.current.then(async () => {
+      if (gen !== generationRef.current) return;
+
+      // Reconcile against durable native schedule metadata (not process-local
+      // trackedRef alone). After restart trackedRef is empty; native may still
+      // hold stale schedules for disabled/deleted meds — cancel those first.
+      // System boot / permission re-grant restore is handled by
+      // AutoDeductionSystemReceiver, not this normal desired-state pass.
+      try {
+        const nativeSchedules = await listScheduledAutoDeductionOccurrences();
+        for (const s of nativeSchedules) {
+          if (gen !== generationRef.current) return;
+          const key = autoDeductionScheduleKey(
+            s.medicationId,
+            s.doseId,
+            s.calendarDate
+          );
+          if (!desired.has(key)) {
+            const res = await cancelAutoDeduction(
+              s.medicationId,
+              s.doseId,
+              s.calendarDate
+            );
+            if (res.ok) {
+              trackedRef.current.delete(key);
+            }
+          } else {
+            // Still desired — track so later passes can cancel if removed.
+            trackedRef.current.add(key);
+          }
+        }
+      } catch {
+        // Non-fatal: fall through to trackedRef + schedule paths.
+      }
       if (gen !== generationRef.current) return;
 
       for (const key of Array.from(trackedRef.current)) {

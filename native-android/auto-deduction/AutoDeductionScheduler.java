@@ -18,12 +18,33 @@ import java.util.TimeZone;
 
 /**
  * One-shot exact-time auto-deduction scheduler (AlarmManager).
- * Uses setExactAndAllowWhileIdle. PendingIntent identity is deterministic.
+ *
+ * PendingIntent identity:
+ *   - ACTION_AUTO_DEDUCTION
+ *   - data URI = occurrenceUri(med, dose, date)  [full identity]
+ *   - fixed request code PENDING_INTENT_REQUEST_CODE (namespace only)
+ * Uniqueness does NOT depend on a 32-bit hash of the key.
+ *
+ * Schedule durability ordering:
+ *   1. validate
+ *   2. persist schedule payload with commit()  (reboot recovery metadata)
+ *   3. install exact alarm
+ *   4. on install failure → remove schedule payload
+ *
+ * Crash recovery:
+ *   - metadata persisted, alarm not installed → restoreFutureSchedules reinstalls
+ *   - alarm installed, process dies → metadata already durable; boot restores same identity
+ *   - install fails after persist → payload removed so restore does not loop on a dead schedule
+ *
+ * Does not use polling, WorkManager periodic, or foreground services.
  */
 public final class AutoDeductionScheduler {
 
     private static final String TAG = "AutoDeductionScheduler";
     private static final String SCHEDULE_KEY_PREFIX = "sch:";
+
+    /** Process-wide lock for schedule metadata check+write. */
+    private static final Object SCHEDULE_LOCK = new Object();
 
     private final Context appContext;
     private final SharedPreferences schedulePrefs;
@@ -54,6 +75,50 @@ public final class AutoDeductionScheduler {
         }
     }
 
+    /**
+     * Build the deterministic Intent used for both schedule and cancel.
+     * Identity = action + data URI (full occurrence) + component.
+     */
+    private Intent buildOccurrenceIntent(
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            long triggerAt,
+            double amount,
+            String timeHhmm
+    ) {
+        Intent intent = new Intent(appContext, AutoDeductionReceiver.class);
+        intent.setAction(AutoDeductionContract.ACTION_AUTO_DEDUCTION);
+        intent.setData(AutoDeductionContract.occurrenceUri(medicationId, doseId, calendarDate));
+        intent.putExtra(AutoDeductionContract.EXTRA_MEDICATION_ID, medicationId);
+        intent.putExtra(AutoDeductionContract.EXTRA_DOSE_ID, doseId);
+        intent.putExtra(AutoDeductionContract.EXTRA_CALENDAR_DATE, calendarDate);
+        intent.putExtra(AutoDeductionContract.EXTRA_SCHEDULED_AT_EPOCH_MS, triggerAt);
+        intent.putExtra(AutoDeductionContract.EXTRA_AMOUNT, amount);
+        if (timeHhmm != null) {
+            intent.putExtra(AutoDeductionContract.EXTRA_TIME_HHMM, timeHhmm);
+        }
+        return intent;
+    }
+
+    private PendingIntent buildPendingIntent(Intent intent, int flags) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            flags |= PendingIntent.FLAG_IMMUTABLE;
+        }
+        return PendingIntent.getBroadcast(
+                appContext,
+                AutoDeductionContract.PENDING_INTENT_REQUEST_CODE,
+                intent,
+                flags
+        );
+    }
+
+    /**
+     * Schedule a single occurrence. Idempotent: same occurrence identity
+     * replaces the prior alarm (FLAG_UPDATE_CURRENT + same data URI).
+     *
+     * Ordering: durable schedule metadata first, then AlarmManager install.
+     */
     public ScheduleResult scheduleOccurrence(
             String medicationId,
             String doseId,
@@ -96,25 +161,40 @@ public final class AutoDeductionScheduler {
         }
 
         String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
-        int requestCode = AutoDeductionContract.pendingIntentRequestCode(key);
+        String prefKey = SCHEDULE_KEY_PREFIX + key;
 
-        Intent intent = new Intent(appContext, AutoDeductionReceiver.class);
-        intent.setAction(AutoDeductionContract.ACTION_AUTO_DEDUCTION);
-        intent.putExtra(AutoDeductionContract.EXTRA_MEDICATION_ID, medicationId);
-        intent.putExtra(AutoDeductionContract.EXTRA_DOSE_ID, doseId);
-        intent.putExtra(AutoDeductionContract.EXTRA_CALENDAR_DATE, calendarDate);
-        intent.putExtra(AutoDeductionContract.EXTRA_SCHEDULED_AT_EPOCH_MS, triggerAt);
-        intent.putExtra(AutoDeductionContract.EXTRA_AMOUNT, amount);
-        intent.putExtra(AutoDeductionContract.EXTRA_TIME_HHMM, timeHhmm);
-
-        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            flags |= PendingIntent.FLAG_IMMUTABLE;
+        // ── Phase A: durable schedule metadata BEFORE alarm install ──
+        JSONObject payload = new JSONObject();
+        try {
+            payload.put("medicationId", medicationId);
+            payload.put("doseId", doseId);
+            payload.put("calendarDate", calendarDate);
+            payload.put("timeHhmm", timeHhmm);
+            payload.put("amount", amount);
+            payload.put("scheduledAtEpochMs", triggerAt);
+        } catch (JSONException e) {
+            Log.e(TAG, "schedule payload build failed", e);
+            return ScheduleResult.fail("payload_build_failed");
         }
-        PendingIntent pi = PendingIntent.getBroadcast(appContext, requestCode, intent, flags);
+
+        synchronized (SCHEDULE_LOCK) {
+            boolean metaWritten = schedulePrefs.edit()
+                    .putString(prefKey, payload.toString())
+                    .commit();
+            if (!metaWritten) {
+                Log.e(TAG, "schedule metadata commit failed for key=" + key);
+                return ScheduleResult.fail("schedule_metadata_write_failed");
+            }
+        }
+
+        // ── Phase B: install exact alarm ──
+        Intent intent = buildOccurrenceIntent(
+                medicationId, doseId, calendarDate, triggerAt, amount, timeHhmm);
+        PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
 
         AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
         if (am == null) {
+            removeScheduleMetadata(prefKey);
             return ScheduleResult.fail("alarm_manager_unavailable");
         }
 
@@ -126,50 +206,52 @@ public final class AutoDeductionScheduler {
             }
         } catch (SecurityException se) {
             Log.w(TAG, "setExactAndAllowWhileIdle denied", se);
+            removeScheduleMetadata(prefKey);
             return ScheduleResult.fail("exact_alarm_permission_denied");
         } catch (Exception e) {
             Log.e(TAG, "schedule failed", e);
+            removeScheduleMetadata(prefKey);
             return ScheduleResult.fail("schedule_failed");
         }
 
-        try {
-            JSONObject payload = new JSONObject();
-            payload.put("medicationId", medicationId);
-            payload.put("doseId", doseId);
-            payload.put("calendarDate", calendarDate);
-            payload.put("timeHhmm", timeHhmm);
-            payload.put("amount", amount);
-            payload.put("scheduledAtEpochMs", triggerAt);
-            schedulePrefs.edit().putString(SCHEDULE_KEY_PREFIX + key, payload.toString()).apply();
-        } catch (JSONException e) {
-            Log.w(TAG, "schedule payload persist failed", e);
-        }
-
+        // Metadata already durable. If process dies here the alarm is
+        // installed and boot restore will recreate the same PendingIntent
+        // identity from the committed payload.
         return ScheduleResult.success(key);
     }
 
+    private void removeScheduleMetadata(String prefKey) {
+        synchronized (SCHEDULE_LOCK) {
+            schedulePrefs.edit().remove(prefKey).commit();
+        }
+    }
+
+    /**
+     * Cancel using the same Intent identity as schedule (action + data URI).
+     */
     public boolean cancelOccurrence(String medicationId, String doseId, String calendarDate) {
         if (medicationId == null || doseId == null || calendarDate == null) return false;
         String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
-        int requestCode = AutoDeductionContract.pendingIntentRequestCode(key);
+        String prefKey = SCHEDULE_KEY_PREFIX + key;
 
-        Intent intent = new Intent(appContext, AutoDeductionReceiver.class);
-        intent.setAction(AutoDeductionContract.ACTION_AUTO_DEDUCTION);
-        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            flags |= PendingIntent.FLAG_IMMUTABLE;
-        }
-        PendingIntent pi = PendingIntent.getBroadcast(appContext, requestCode, intent, flags);
+        // Identity-matching Intent (extras optional for cancel; data URI is required).
+        Intent intent = buildOccurrenceIntent(medicationId, doseId, calendarDate, 0L, 0d, null);
+        PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
         AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
         if (am != null && pi != null) {
             am.cancel(pi);
             pi.cancel();
         }
 
-        schedulePrefs.edit().remove(SCHEDULE_KEY_PREFIX + key).apply();
+        removeScheduleMetadata(prefKey);
         return true;
     }
 
+    /**
+     * After a fire, schedule the next local-calendar occurrence for the
+     * same med/dose (same HH:mm on the following calendar day).
+     * Does not use previousTrigger + 24h arithmetic.
+     */
     public ScheduleResult scheduleNextOccurrence(
             String medicationId,
             String doseId,
@@ -194,13 +276,22 @@ public final class AutoDeductionScheduler {
         return scheduleOccurrence(medicationId, doseId, nextDate, timeHhmm, amount, epoch);
     }
 
+    /**
+     * Restore future alarms from persisted schedule payloads (reboot).
+     * Skips past triggers. Does not replay old events.
+     * Uses the same scheduleOccurrence path (metadata already present →
+     * commit overwrites same key; alarm reinstalled with same identity).
+     */
     public int restoreFutureSchedules() {
         if (!canScheduleExactAlarms()) {
             Log.w(TAG, "restoreFutureSchedules: exact alarm permission denied");
             return 0;
         }
         int restored = 0;
-        Map<String, ?> all = schedulePrefs.getAll();
+        Map<String, ?> all;
+        synchronized (SCHEDULE_LOCK) {
+            all = schedulePrefs.getAll();
+        }
         for (Map.Entry<String, ?> e : all.entrySet()) {
             if (!e.getKey().startsWith(SCHEDULE_KEY_PREFIX)) continue;
             Object v = e.getValue();
@@ -217,20 +308,27 @@ public final class AutoDeductionScheduler {
                         || !AutoDeductionContract.isValidCalendarDate(date)
                         || !AutoDeductionContract.isValidTimeHhmm(time)
                         || !AutoDeductionContract.isValidAmount(amount)) {
+                    // Malformed — drop so restore does not loop forever.
+                    removeScheduleMetadata(e.getKey());
                     continue;
                 }
                 if (epoch <= 0) {
                     Long computed = computeEpochMs(date, time);
-                    if (computed == null) continue;
+                    if (computed == null) {
+                        removeScheduleMetadata(e.getKey());
+                        continue;
+                    }
                     epoch = computed;
                 }
                 if (epoch <= System.currentTimeMillis()) {
-                    schedulePrefs.edit().remove(e.getKey()).apply();
+                    // Past: drop schedule entry; event may already be in ledger.
+                    removeScheduleMetadata(e.getKey());
                     continue;
                 }
                 ScheduleResult r = scheduleOccurrence(medId, doseId, date, time, amount, epoch);
                 if (r.ok) restored++;
             } catch (JSONException ignored) {
+                removeScheduleMetadata(e.getKey());
             }
         }
         return restored;

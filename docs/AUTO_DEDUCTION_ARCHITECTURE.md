@@ -872,6 +872,46 @@ Implemented in `AutoDeductionContract.occurrenceKey` and mirrored by `autoDeduct
 - DST non-existent local times: relies on `Calendar` set semantics; document after device validation
 - Full emulator matrix (foreground / background / killed) — not executed in this environment
 
+
+
+### PR #203 review fixes (EventStore lock, PendingIntent identity, schedule durability)
+
+#### EventStore synchronization
+- `AutoDeductionEventStore` uses a **process-wide** `private static final Object LOCK`.
+- `insertFiredIfAbsent` / `hasEvent` / `markReconciled` / `listEvents` all synchronize on that static lock.
+- Multiple EventStore instances (e.g. concurrent receiver deliveries) still serialize check+commit.
+- Event writes use `SharedPreferences.commit()` (not `apply()`) so the FIRED row is on disk before the receiver returns.
+
+#### PendingIntent identity (no sole dependence on 32-bit hash)
+- Uniqueness comes from **Intent action + data URI**, not from `String.hashCode()`.
+- Data URI: `content://app.drugtracker.autodeduction/occurrence/{medId}/{doseId}/{calendarDate}`
+  built via `AutoDeductionContract.occurrenceUri(...)` (path segments are Uri-encoded by the builder).
+- Request code is a **fixed namespace constant** `PENDING_INTENT_REQUEST_CODE = 0xAD00DED` shared by all auto-deduction alarms; it is **not** the uniqueness source.
+- `scheduleOccurrence` and `cancelOccurrence` build the same Intent (same action, same data URI, same request code) so cancel always matches schedule.
+- Auto-deduction remains isolated from Local Notifications request-code / channel space.
+
+#### Schedule durability ordering
+```text
+validate input
+  → persist schedule payload with commit()   // reboot recovery metadata first
+  → AlarmManager.setExactAndAllowWhileIdle
+  → on install failure: remove schedule payload
+  → return success
+```
+
+Crash / failure model:
+| Scenario | Recovery |
+|----------|----------|
+| Metadata committed, process dies before alarm install | `restoreFutureSchedules()` / boot sees future payload and reinstalls the same PendingIntent identity |
+| Alarm installed, process dies | Metadata already durable; boot restore recreates the same identity (idempotent) |
+| Metadata committed, alarm install throws | Payload is **removed**; no permanent stale "scheduled" row without an install attempt path |
+| Malformed / past payload on restore | Dropped from schedule prefs; past keys are not replayed |
+
+Repeated `scheduleOccurrence` for the same occurrence key overwrites the same metadata key and uses `FLAG_UPDATE_CURRENT` on the same Intent identity → one logical alarm.
+
+Receiver path still: insert FIRED (static-lock idempotent) → `scheduleNextOccurrence` (same durable ordering for the next calendar day).
+
+
 ### Files touched (Phase 2)
 - `native-android/auto-deduction/*`
 - `native-android/app/MainActivity.java` (plugin registration)

@@ -142,8 +142,8 @@ describe('A — Today projection path: auto-due + Take (alarm) — one deduction
     expect(effectiveCurrentPills(after, TODAY, now)).toBe(29);
     expect(todayDueUnits(after, now, TODAY)).toBe(0);
 
-    // Accounting: exactly one dose_taken unit of -1 for this identity.
-    expect(take.log!.amount).toBe(-(after.currentPills - 30 + 30 - 29)); // -1
+    // Accounting: log amount matches the persisted stock delta (30 → 29).
+    expect(take.log!.amount).toBe(-(30 - after.currentPills));
   });
 
   it('repeating alarm Take on same doseId does not deduct or mutate identity fields', () => {

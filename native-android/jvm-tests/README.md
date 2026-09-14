@@ -1,24 +1,42 @@
 # Phase 2 auto-deduction JVM unit tests
 
 These tests execute the **real** Java sources under `native-android/auto-deduction/`
-(via a Gradle sync copy into the module classpath). They use **Robolectric** so
-`Context` / `SharedPreferences` / `AlarmManager` APIs run on the JVM without a
-device or emulator.
+(via a Gradle sync-copy into the module build directory at compile time). They use
+**Robolectric** so `Context` / `SharedPreferences` / `AlarmManager` APIs are available
+on the JVM without a device or emulator.
+
+Production sources are taken from the live repository tree (`../auto-deduction`),
+not from checked-in duplicates inside this module. `AutoDeductionPlugin` (Capacitor
+bridge) is excluded.
 
 ## What is covered
 
 - `AutoDeductionContract` identity and validation
 - `AutoDeductionScheduler.nextCalendarDate`
-- Effective cancellation / tombstones (`isOccurrenceCancelled` / prefs state)
+- Effective cancellation / tombstones (`isOccurrenceCancelled` + durable prefs)
 - `scheduleNextOccurrenceIfAbsent` (#220 cancelled-successor non-resurrection)
 - `AutoDeductionEventStore.insertFiredIfAbsent`
-- Deterministic fire-vs-cancel outcomes via public scheduler APIs
+- Deterministic fire-vs-cancel durable outcomes (cancel-first / fire-first)
+- Snapshot ownership helpers used by past-recovery (#219)
 
-## What is not covered here
+## Concurrency limitation
 
-- Capacitor `AutoDeductionPlugin` bridge (requires Capacitor)
-- True multi-threaded interleaving races (no production test barriers)
-- Full boot / timezone restore integration on a device
+Deterministic linearization **outcomes** are tested (cancel-before-fire and
+fire-before-cancel via sequential public API calls). **True concurrent**
+`SCHEDULE_LOCK` interleavings are **not** tested: production has no test
+barriers, and `Thread.sleep`-based races would be flaky.
+
+## Robolectric vs real Android device
+
+Robolectric exercises native code paths that call Android framework classes, but
+this harness does **not** validate real-device behavior:
+
+- OEM `AlarmManager` scheduling quirks
+- Doze / battery optimizations
+- exact-alarm permission grants on a physical device
+- boot / quick-boot restore on a physical device
+
+Do not treat a green `./gradlew test` as device or OEM validation.
 
 ## Run
 

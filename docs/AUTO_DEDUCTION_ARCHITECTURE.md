@@ -1093,3 +1093,17 @@ native reconciliation
 8. **Partial native acknowledgement (Option B):** after successful JS meds+logs commit, envelope is cleared even if some marks fail. Remaining FIRED + JS markers + deterministic logs recover on next run without second deduction.
 9. **`effectiveCurrentPills`** respects applied occurrence markers (no double projection).
 
+
+### Exact-event historical settlement window
+
+When applying a native exact event on calendar day `D`, historical settlement folded into the snapshot covers only:
+
+```text
+days strictly after lastSyncDate
+AND strictly before D
+```
+
+Then `event.amount` is subtracted for the occurrence on `D`.
+
+The event day itself is **not** included in that historical window (sibling multi-dose slots on `D` remain independent). This prevents double-counting the exact occurrence via `pastDueUnits` (which otherwise extends to today and can include `D`).
+

@@ -590,6 +590,37 @@ public final class AutoDeductionScheduler {
         return restored;
     }
 
+
+    /**
+     * List durable schedule metadata entries (not AlarmManager state).
+     * Used by JS to reconcile desired set against native after process restart
+     * so stale schedules can be canceled even when trackedRef is empty.
+     */
+    public java.util.List<JSONObject> listScheduledOccurrences() {
+        java.util.List<JSONObject> out = new java.util.ArrayList<>();
+        synchronized (SCHEDULE_LOCK) {
+            Map<String, ?> all = schedulePrefs.getAll();
+            for (Map.Entry<String, ?> e : all.entrySet()) {
+                if (!e.getKey().startsWith(SCHEDULE_KEY_PREFIX)) continue;
+                Object v = e.getValue();
+                if (!(v instanceof String)) continue;
+                try {
+                    JSONObject o = new JSONObject((String) v);
+                    String medId = o.optString("medicationId", "");
+                    String doseId = o.optString("doseId", "");
+                    String date = o.optString("calendarDate", "");
+                    if (medId.isEmpty() || doseId.isEmpty()
+                            || !AutoDeductionContract.isValidCalendarDate(date)) {
+                        continue;
+                    }
+                    out.add(o);
+                } catch (JSONException ignored) {
+                }
+            }
+        }
+        return out;
+    }
+
     public boolean canScheduleExactAlarms() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             return true;

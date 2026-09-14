@@ -990,10 +990,10 @@ Native owns timing, AlarmManager install/cancel, boot/permission restore, and du
 
 - Schedule paths require `canScheduleExactAlarms()` (API 31+).
 - Manifest registers `SCHEDULE_EXACT_ALARM` and `RECEIVE_BOOT_COMPLETED`.
-- `AutoDeductionReceiver` handles:
-  - `BOOT_COMPLETED` / `QUICKBOOT_POWERON` → promote pending + `restoreFutureSchedules`
-  - `AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED` (API 31+) → same when permission is granted again
-- JS `useAutoDeductionScheduler` also calls `restoreFutureAutoDeductionSchedules()` when exact-alarm is enabled and the desired set is applied (permission re-grant / resume).
+- **Receiver separation (security):**
+  - `AutoDeductionReceiver` — `ACTION_AUTO_DEDUCTION` only, `android:exported="false"` (explicit AlarmManager PendingIntent).
+  - `AutoDeductionSystemReceiver` — `BOOT_COMPLETED` / `QUICKBOOT_POWERON` / `ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED` only, `android:exported="true"` (system broadcasts on API 31+). Invokes `AutoDeductionLifecycle.promoteAndRestore`.
+- JS desired-state reconciliation lists native schedule metadata via `listScheduledOccurrences` and cancels keys not in the desired set (avoids resurrecting stale schedules after process restart). System restore is **not** invoked on every JS schedule pass.
 
 ### FIRED durability and recovery
 

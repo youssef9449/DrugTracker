@@ -96,7 +96,7 @@ Used consistently for:
 ## Native scheduling and fire path
 
 1. After hydration (and when exact-alarm capability allows), JS requests `scheduleOccurrence` with medication, dose, calendar date, time, and **amount**.
-2. Native persists schedule metadata, then installs a one-shot exact alarm under a process-wide schedule lock (metadata + install + failure rollback are one logical transaction).
+2. Native persists schedule metadata and installs the one-shot alarm inside a serialized, process-wide scheduling critical section (durable metadata write, then AlarmManager install, with ownership-safe / conditional metadata rollback if installation fails). This is not an ACID transaction spanning SharedPreferences and AlarmManager; it is a process-local serialization of those steps.
 3. PendingIntent identity matches schedule and cancel: action `AUTO_DEDUCTION` + occurrence URI from the identity triple.
 4. On fire, `AutoDeductionReceiver` calls `insertFiredIfAbsent` — durable **FIRED** row; **no** stock update; may schedule the next one-shot occurrence.
 5. On boot / quick boot, the same receiver restores future alarms from schedule preferences.
@@ -269,7 +269,7 @@ Clearing the JS envelope after durable application does **not** imply every nati
 
 ## Hydration, resume, reboot
 
-- **Hydration:** Permission init, exact-alarm capability, and `initNativeBridge()` participate in readiness before `hydrated` is set so hydration-gated effects (persistence, legacy sync, exact reconcile, native schedule hook) do not run against an incomplete native surface.
+- **Hydration:** `hydrated` is set only after the initialization work required by the app’s hydration flow completes, including permission initialization and `initNativeBridge()`, so hydration-gated effects (persistence, legacy sync, exact reconcile, native schedule hook) do not run against an incomplete native surface. **Exact-alarm capability is separate:** it controls whether exact-alarm scheduling flows may install or restore alarms, and is **not** a general prerequisite for completing hydration itself. The app can finish hydration even when exact-alarm capability is unavailable; scheduling paths handle that capability according to the implementation.
 - **First run** (`isFirstRun`): seed inventory skips auto deduction / reconcile effects.
 - **Resume:** resume tick can re-enter reconciliation for remaining FIRED events.
 - **Reboot:** native restores future schedule alarms; FIRED rows remain until JS acknowledges.

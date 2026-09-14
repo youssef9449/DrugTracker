@@ -161,6 +161,8 @@ async function runOnce(
       });
     }
     if (writeFailed) {
+      // JS persistence/recovery failed — no native markReconciled was attempted.
+      // partialNativeAck must only reflect actual native acknowledgement failure.
       return {
         medications: baseMeds,
         logs: baseLogs,
@@ -170,7 +172,7 @@ async function runOnce(
         newExactLogs: [],
         markedCount: 0,
         recoveredEnvelope: true,
-        partialNativeAck: true,
+        partialNativeAck: false,
       };
     }
     const { markedCount, failed } = await markAll(existing.toAcknowledge, mark);

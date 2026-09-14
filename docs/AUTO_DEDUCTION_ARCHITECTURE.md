@@ -362,14 +362,26 @@ A separate cancel check *outside* the FIRED write is not sufficient: that would 
 
 Lock order is always `SCHEDULE_LOCK` then nested `EventStore.LOCK` (never the reverse).
 
-### Receiver next-occurrence truth table
+### Receiver / recovery next-occurrence truth table
 
 | Fire linearization result | Schedule next |
 |---------------------------|---------------|
 | CREATED | Yes |
 | ALREADY_EXISTS | Yes (idempotent) |
+| FAILED + pending-fire recorded | Yes (durable fire representation) |
 | CANCELLED | No |
-| FAILED | No |
+| FAILED without pending | No |
+
+### Past-schedule recovery and recurrence
+
+A past schedule entry still present at restore (device was unavailable at fire time, or primary FIRED commit failed while schedule metadata remained) is recovered via `fireOccurrenceIfNotCancelled`. That recovery **counts as a consumed occurrence for recurrence purposes**: the occurrence is durably represented as FIRED (or pending-fire, later promoted).
+
+After a durable fire outcome:
+
+1. Schedule the successor (`scheduleNextOccurrence` for `calendarDate + 1` with the same dose identity and amount).
+2. Only then resolve the past schedule metadata with ownership-safe `removeScheduleMetadataIfVersion(observedVersion)`.
+
+If successor scheduling fails, past metadata is **kept** so a later restore can retry. Cancellation still does not schedule a successor. Repeated restore is idempotent: `ALREADY_EXISTS` + scheduling the same next occurrence identity does not create duplicate logical occurrences.
 
 ### Restore / cancel
 
@@ -382,7 +394,7 @@ Lock order is always `SCHEDULE_LOCK` then nested `EventStore.LOCK` (never the re
   - no tombstone → not cancelled
 - Cancelled occurrences are blocked in **both** lifecycle restore and `AutoDeductionReceiver` fire handling via the same serialized fire transition: no synthetic FIRED, no pending FIRED, no next recurrence when cancel linearizes first. A stale alarm that races with cancel cannot win the fire linearization after the tombstone is durable under `SCHEDULE_LOCK`.
 - A later legitimate `scheduleOccurrence` writes new schedule metadata (lock-ordered `scheduleVersion`) then best-effort clears the tombstone. If tombstone removal fails, version ordering still treats the newer schedule as active so reboot/restore and fire delivery do not suppress it.
-- Past schedule metadata is removed only when FIRED exists, pending was durably recorded (genuine fire recovery), or cancel linearized first — and **only if** the current `scheduleVersion` still matches the restore snapshot’s `observedVersion`. A newer legitimate reschedule that replaced the snapshot row after the fire transition unlocked must not be deleted. Missing metadata is treated as already gone (no recreate). `scheduleVersion` is thus an ownership guard for restore metadata mutation as well as schedule install/rollback.
+- Past schedule recovery treats a durable fire (FIRED or pending-fire) as a consumed occurrence for recurrence: the successor is scheduled before ownership-safe removal of the past metadata. Metadata is removed only when cancel linearized first, or when durable fire recovery succeeded **and** successor scheduling succeeded — and **only if** the current `scheduleVersion` still matches the restore snapshot’s `observedVersion`. A newer legitimate reschedule that replaced the snapshot row must not be deleted. If successor scheduling fails, past metadata is kept for retry. Missing metadata is treated as already gone (no recreate).
 
 ### Platform limitations
 

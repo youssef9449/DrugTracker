@@ -189,9 +189,15 @@ public final class AutoDeductionScheduler {
             return status == Status.CANCELLED;
         }
 
-        /** True when recurrence scheduling is safe (durable fire outcome present). */
+        /**
+         * True when recurrence scheduling is safe because a durable fire outcome
+         * exists: primary FIRED (created or already present) or pending-fire record.
+         * CANCELLED and FAILED-without-pending must not advance recurrence.
+         */
         public boolean allowsRecurrence() {
-            return status == Status.CREATED || status == Status.ALREADY_EXISTS;
+            return status == Status.CREATED
+                    || status == Status.ALREADY_EXISTS
+                    || (status == Status.FAILED && pendingRecorded);
         }
     }
 
@@ -310,7 +316,9 @@ public final class AutoDeductionScheduler {
     static boolean shouldRemovePastScheduleMetadata(FireResult fr) {
         if (fr == null) return false;
         if (fr.isCancelled()) return true;
-        return fr.allowsRecurrence() || fr.pendingRecorded;
+        // Durable fire (primary or pending) — metadata may be resolved after
+        // successor scheduling succeeds; see continueRecurrenceAfterPastRecovery.
+        return fr.allowsRecurrence();
     }
 
 
@@ -804,6 +812,66 @@ public final class AutoDeductionScheduler {
     }
 
     /**
+     * After a past occurrence is recovered as a durable fire, continue the
+     * recurrence chain and only then resolve snapshot-owned schedule metadata.
+     *
+     * <p>State table:
+     * <ul>
+     *   <li>CANCELLED — no successor; ownership-safe remove of stale V1</li>
+     *   <li>CREATED / ALREADY_EXISTS / FAILED+pending — schedule D+1; remove V1
+     *       only if successor schedule reported ok (else keep V1 for retry)</li>
+     *   <li>FAILED without pending — no successor; keep metadata as recovery source</li>
+     * </ul>
+     * Successor scheduling is idempotent via {@link #scheduleOccurrence} for the
+     * next calendar date identity. Ownership-safe removal never deletes a newer
+     * scheduleVersion that replaced the restore snapshot.
+     */
+    private void continueRecurrenceAfterPastRecovery(
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            String timeHhmm,
+            double amount,
+            FireResult fr,
+            String prefKey,
+            String observedVersion
+    ) {
+        if (fr == null) {
+            return;
+        }
+        if (fr.isCancelled()) {
+            if (!removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
+                Log.i(TAG, "restore past cancel cleanup skipped (ownership lost): " + prefKey);
+            }
+            return;
+        }
+        if (!fr.allowsRecurrence()) {
+            // FAILED with no durable fire/pending — keep schedule metadata.
+            Log.e(TAG, "restore past: FIRED and pending both failed for "
+                    + medicationId + "/" + doseId + "/" + calendarDate
+                    + " — preserving schedule metadata as recovery source");
+            return;
+        }
+
+        // Durable fire accepted → ensure successor exists before dropping D metadata.
+        ScheduleResult next = scheduleNextOccurrence(
+                medicationId, doseId, calendarDate, timeHhmm, amount);
+        if (!next.ok) {
+            Log.w(TAG, "restore past: successor not scheduled (" + next.error
+                    + ") — keeping past metadata for retry: "
+                    + medicationId + "/" + doseId + "/" + calendarDate);
+            return;
+        }
+        Log.i(TAG, "restore past: recurrence continued to next occurrence for "
+                + medicationId + "/" + doseId + "/" + calendarDate
+                + " (fire=" + fr.status + ", pendingRecorded=" + fr.pendingRecorded + ")");
+
+        if (!removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
+            Log.i(TAG, "restore past metadata keep (ownership lost / already gone): " + prefKey);
+        }
+    }
+
+    /**
      * Restore future alarms from persisted schedule payloads (reboot).
      *
      * Snapshot under lock (prefKey + raw JSON + observed scheduleVersion).
@@ -811,11 +879,12 @@ public final class AutoDeductionScheduler {
      * metadata rewrite run under one continuous SCHEDULE_LOCK critical section
      * so cancel cannot interleave and resurrect a canceled schedule.
      *
-     * Past schedule entries: promote via fireOccurrenceIfNotCancelled then
-     * ownership-safe metadata removal — recovers occurrences whose alarm fired
-     * but primary FIRED commit failed. Metadata is removed only when the current
-     * scheduleVersion still matches the snapshot observedVersion, so a newer
-     * legitimate reschedule is never deleted.
+     * Past schedule entries: promote via fireOccurrenceIfNotCancelled, schedule
+     * the next occurrence when the fire is durable (CREATED / ALREADY_EXISTS /
+     * pending), then ownership-safe metadata removal. Metadata is removed only
+     * when the current scheduleVersion still matches the snapshot observedVersion
+     * and successor scheduling succeeded (or the occurrence was CANCELLED), so a
+     * newer legitimate reschedule is never deleted and recurrence is not lost.
      */
     public int restoreFutureSchedules() {
         if (!canScheduleExactAlarms()) {
@@ -884,30 +953,14 @@ public final class AutoDeductionScheduler {
                             medId, doseId, date, epoch, amount);
                     if (fr.isCancelled()) {
                         Log.i(TAG, "restore skip (cancelled): " + medId + "/" + doseId + "/" + date);
-                        // Drop only the snapshot-owned schedule row; a newer reschedule
-                        // that replaced V1 with V2 after unlock must not be deleted.
-                        if (!removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
-                            Log.i(TAG, "restore past cancel cleanup skipped (ownership lost): "
-                                    + prefKey);
-                        }
-                    } else if (shouldRemovePastScheduleMetadata(fr)) {
-                        if (fr.allowsRecurrence()) {
-                            Log.i(TAG, "restore past: promoted/ensured FIRED for "
-                                    + medId + "/" + doseId + "/" + date);
-                        } else {
-                            Log.i(TAG, "restore past: pending-fire recorded for "
-                                    + medId + "/" + doseId + "/" + date
-                                    + "; dropping schedule metadata if still owned");
-                        }
-                        if (!removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
-                            Log.i(TAG, "restore past metadata keep (ownership lost / already gone): "
-                                    + prefKey);
-                        }
-                    } else {
-                        Log.e(TAG, "restore past: FIRED and pending both failed for "
+                    } else if (fr.allowsRecurrence()) {
+                        Log.i(TAG, "restore past: durable fire for "
                                 + medId + "/" + doseId + "/" + date
-                                + " — preserving schedule metadata as recovery source");
+                                + " status=" + fr.status
+                                + " pendingRecorded=" + fr.pendingRecorded);
                     }
+                    continueRecurrenceAfterPastRecovery(
+                            medId, doseId, date, time, amount, fr, prefKey, observedVersion);
                     continue;
                 }
 
@@ -941,15 +994,12 @@ public final class AutoDeductionScheduler {
                     continue;
                 }
                 if (recomputed <= System.currentTimeMillis()) {
-                    // After TZ change this occurrence is now in the past: serialized promote.
+                    // After TZ change this occurrence is now in the past: serialized
+                    // promote + recurrence continuation.
                     FireResult fr = fireOccurrenceIfNotCancelled(
                             medId, doseId, date, recomputed, amount);
-                    if (shouldRemovePastScheduleMetadata(fr)) {
-                        if (!removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
-                            Log.i(TAG, "restore TZ-past metadata keep (ownership lost / already gone): "
-                                    + prefKey);
-                        }
-                    }
+                    continueRecurrenceAfterPastRecovery(
+                            medId, doseId, date, time, amount, fr, prefKey, observedVersion);
                     continue;
                 }
                 epoch = recomputed;

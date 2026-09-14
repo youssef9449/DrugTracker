@@ -32,7 +32,23 @@ vi.mock('@/utils/sound', () => ({
   stopAllSounds: vi.fn(),
 }));
 
+vi.mock('@/utils/runAutoDeductionReconciliation', () => ({
+  runAutoDeductionReconciliation: vi.fn(async () => ({
+    medications: [],
+    logs: [],
+    toAcknowledge: [],
+    details: [],
+    mutated: false,
+    newExactLogs: [],
+    markedCount: 0,
+    recoveredEnvelope: false,
+    partialNativeAck: false,
+  })),
+}));
+
 import App from '@/App';
+import { runAutoDeductionReconciliation } from '@/utils/runAutoDeductionReconciliation';
+
 import { getInitialMedications } from '@/data/initialData';
 import {
   scheduleCriticalAlarm,
@@ -110,27 +126,31 @@ describe('App — hydration (#15)', () => {
   });
 
   it('does not hydrate until initNativeBridge completes (ordering race guard)', async () => {
-    // Regression: previously permissions resolved → setHydrated(true) while
-    // initNativeBridge was still in flight, so the scheduler could run before
-    // Android notification channels existed. hydrated must wait for the bridge.
+    // Regression: permissions must not set hydrated=true while initNativeBridge
+    // is still in flight (scheduler / exact-reconcile effects are hydration-gated).
+    // EmptyState is NOT a hydration marker — it renders whenever medications is [].
+    // Observe a real hydration-gated side effect: Phase 3 reconciliation runner.
     let resolveBridge!: () => void;
     const bridgePending = new Promise<void>((resolve) => {
       resolveBridge = resolve;
     });
     vi.mocked(initNativeBridge).mockReturnValueOnce(bridgePending);
+    vi.mocked(runAutoDeductionReconciliation).mockClear();
 
+    // Explicit empty inventory (not first-run null key) so isFirstRun=false and
+    // hydration-gated auto effects are eligible once hydrated flips true.
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([]));
     render(<App />);
 
-    // Permissions resolve immediately (default mocks). Bridge is still pending.
-    // EmptyState is the post-hydration marker for an empty inventory.
+    // Permissions / exact-alarm mocks resolve; bridge still pending → hydrated false
     await Promise.resolve();
     await Promise.resolve();
-    expect(screen.queryByText('لا توجد أدوية مسجلة حالياً')).toBeNull();
+    await Promise.resolve();
+    expect(runAutoDeductionReconciliation).not.toHaveBeenCalled();
 
     resolveBridge();
     await waitFor(() => {
-      expect(screen.getByText('لا توجد أدوية مسجلة حالياً')).toBeInTheDocument();
+      expect(runAutoDeductionReconciliation).toHaveBeenCalled();
     });
   });
 });

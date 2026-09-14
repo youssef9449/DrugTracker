@@ -11,7 +11,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { Medication, calculateMedicationStatus, describeStockInStrips, isSolidUnit } from '../types';
-import { getDepletionDate, getTodayDateString, effectiveCurrentPills } from '../utils/dateCalculations';
+import { getDepletionDate, effectiveCurrentPills } from '../utils/dateCalculations';
 import { getCardDoseToggleTarget } from '../utils/doseSchedule';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { VISUAL_RANGE_MULTIPLIER, MIN_VISUAL_RANGE_DAYS, DAYS_PER_MONTH } from '../utils/time';

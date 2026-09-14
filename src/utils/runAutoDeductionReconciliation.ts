@@ -15,6 +15,7 @@ import {
   listFiredAutoDeductionEvents,
   markAutoDeductionEventReconciled,
   type AutoDeductionEvent,
+  type MarkReconciledResult,
 } from './autoDeductionNative';
 import {
   reconcileFiredEvents,
@@ -48,7 +49,11 @@ export interface RunReconciliationInput {
   medications?: Medication[];
   logs?: ConsumptionLog[];
   listFired?: () => Promise<AutoDeductionEvent[]>;
-  markReconciled?: (medicationId: string, doseId: string, calendarDate: string) => Promise<void>;
+  markReconciled?: (
+    medicationId: string,
+    doseId: string,
+    calendarDate: string
+  ) => Promise<MarkReconciledResult>;
   persistMeds?: (meds: Medication[]) => string | null;
   persistLogs?: (logs: ConsumptionLog[]) => string | null;
   loadEnvelope?: () => ExactAutoEnvelope | null;
@@ -100,14 +105,24 @@ export function runAutoDeductionReconciliation(
 
 async function markAll(
   acks: Array<{ medicationId: string; doseId: string; calendarDate: string }>,
-  mark: (medicationId: string, doseId: string, calendarDate: string) => Promise<void>
+  mark: (
+    medicationId: string,
+    doseId: string,
+    calendarDate: string
+  ) => Promise<MarkReconciledResult>
 ): Promise<{ markedCount: number; failed: typeof acks }> {
   let markedCount = 0;
   const failed: typeof acks = [];
   for (const ack of acks) {
     try {
-      await mark(ack.medicationId, ack.doseId, ack.calendarDate);
-      markedCount += 1;
+      const result = await mark(ack.medicationId, ack.doseId, ack.calendarDate);
+      // ok=true (whether changed or already RECONCILED) is successful terminal ack.
+      // ok=false is a real native acknowledgement failure and must remain retryable.
+      if (result && result.ok === true) {
+        markedCount += 1;
+      } else {
+        failed.push(ack);
+      }
     } catch {
       failed.push(ack);
     }
@@ -122,9 +137,8 @@ async function runOnce(
   const listFired = input.listFired ?? listFiredAutoDeductionEvents;
   const mark =
     input.markReconciled ??
-    (async (medicationId: string, doseId: string, calendarDate: string) => {
-      await markAutoDeductionEventReconciled(medicationId, doseId, calendarDate);
-    });
+    ((medicationId: string, doseId: string, calendarDate: string) =>
+      markAutoDeductionEventReconciled(medicationId, doseId, calendarDate));
   const loadEnvelope = input.loadEnvelope ?? defaultLoadEnvelope;
   const saveEnvelope = input.saveEnvelope ?? defaultSaveEnvelope;
 
@@ -147,6 +161,8 @@ async function runOnce(
       });
     }
     if (writeFailed) {
+      // JS persistence/recovery failed — no native markReconciled was attempted.
+      // partialNativeAck must only reflect actual native acknowledgement failure.
       return {
         medications: baseMeds,
         logs: baseLogs,
@@ -156,7 +172,7 @@ async function runOnce(
         newExactLogs: [],
         markedCount: 0,
         recoveredEnvelope: true,
-        partialNativeAck: true,
+        partialNativeAck: false,
       };
     }
     const { markedCount, failed } = await markAll(existing.toAcknowledge, mark);

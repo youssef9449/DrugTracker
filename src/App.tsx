@@ -58,6 +58,7 @@ import { consumeDose, settleAndAdjust, resolveRestoreDoseAmount, restoreDose } f
 import { useDoseReminders } from './hooks/useDoseReminders';
 import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
 import { useDoseReminderScheduler } from './hooks/useDoseReminderScheduler';
+import { useAutoDeductionScheduler } from './hooks/useAutoDeductionScheduler';
 import { usePersistentEffect } from './hooks/usePersistentEffect';
 import { useStockAlerts } from './hooks/useStockAlerts';
 import {
@@ -606,6 +607,17 @@ export default function App() {
     exactAlarmEnabled,
     resumeTick: doseAlarmResumeTick,
     lifecycleTick: doseLifecycleTick,
+  });
+
+  // Phase 2: exact-time auto-deduction alarms (independent of notifications).
+  // Records durable native FIRED events only — no stock mutation here.
+  useAutoDeductionScheduler({
+    medications,
+    globalAutoDeductEnabled,
+    hydrated,
+    isFirstRun,
+    exactAlarmEnabled,
+    resumeTick: doseAlarmResumeTick,
   });
 
   const handleRestoreDose = (

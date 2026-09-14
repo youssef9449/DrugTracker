@@ -33,6 +33,16 @@ import java.util.UUID;
  *   cancelOccurrence uses the same lock for alarm cancel + metadata remove.
  *   This prevents interleaving that could leave metadata=B while alarm=A.
  *
+ * Fire-vs-cancel linearization (same SCHEDULE_LOCK):
+ *   fireOccurrenceIfNotCancelled performs the effective-cancellation check and
+ *   the durable FIRED/pending transition under one continuous critical section
+ *   shared with cancelOccurrence. Exactly one of fire or cancel linearizes first.
+ *   If cancel linearizes first, a stale alarm delivery cannot create FIRED/pending
+ *   or advance recurrence. If fire linearizes first, a later cancel cannot
+ *   retroactively erase that fire.
+ *   Lock order is always SCHEDULE_LOCK then (nested) EventStore.LOCK — never the
+ *   reverse — so nesting cannot deadlock.
+ *
  * scheduleVersion remains an ownership guard for rollback (belt-and-suspenders
  * with the lock, and for any future path that invokes rollback).
  *
@@ -130,6 +140,109 @@ public final class AutoDeductionScheduler {
     }
 
     /**
+     * Result of a serialized fire transition ({@link #fireOccurrenceIfNotCancelled}).
+     * <ul>
+     *   <li>{@link Status#CANCELLED} — cancellation linearized first; no FIRED/pending</li>
+     *   <li>{@link Status#CREATED} — fire linearized; FIRED event newly committed</li>
+     *   <li>{@link Status#ALREADY_EXISTS} — fire linearized; event already present</li>
+     *   <li>{@link Status#FAILED} — fire linearized (not cancelled) but durable write
+     *       could not be confirmed; {@link #pendingRecorded} may still be true</li>
+     * </ul>
+     */
+    public static final class FireResult {
+        public enum Status {
+            CANCELLED,
+            CREATED,
+            ALREADY_EXISTS,
+            FAILED
+        }
+
+        public final Status status;
+        /** True if a pending-fire record was durably written after primary failure. */
+        public final boolean pendingRecorded;
+
+        public FireResult(Status status, boolean pendingRecorded) {
+            this.status = status;
+            this.pendingRecorded = pendingRecorded;
+        }
+
+        public static FireResult cancelled() {
+            return new FireResult(Status.CANCELLED, false);
+        }
+
+        public static FireResult fromInsert(AutoDeductionEventStore.InsertFiredResult ir) {
+            if (ir == null) {
+                return new FireResult(Status.FAILED, false);
+            }
+            switch (ir.status) {
+                case CREATED:
+                    return new FireResult(Status.CREATED, ir.pendingRecorded);
+                case ALREADY_EXISTS:
+                    return new FireResult(Status.ALREADY_EXISTS, ir.pendingRecorded);
+                case FAILED:
+                default:
+                    return new FireResult(Status.FAILED, ir.pendingRecorded);
+            }
+        }
+
+        public boolean isCancelled() {
+            return status == Status.CANCELLED;
+        }
+
+        /** True when recurrence scheduling is safe (durable fire outcome present). */
+        public boolean allowsRecurrence() {
+            return status == Status.CREATED || status == Status.ALREADY_EXISTS;
+        }
+    }
+
+    /**
+     * Authoritative fire transition serialized with cancellation on {@link #SCHEDULE_LOCK}.
+     *
+     * <p>Under one continuous critical section:
+     * <ol>
+     *   <li>Evaluate effective cancellation (tombstone vs schedule ordering)</li>
+     *   <li>If cancelled → return {@link FireResult.Status#CANCELLED} (no FIRED, no pending)</li>
+     *   <li>Otherwise persist FIRED via {@link AutoDeductionEventStore#insertFiredIfAbsent}
+     *       (including pending-fire fallback on primary commit failure)</li>
+     * </ol>
+     *
+     * <p>Because {@link #cancelOccurrence} writes its tombstone under the same lock,
+     * the TOCTOU window (check not-cancelled → cancel → insert FIRED) cannot occur.
+     * EventStore.LOCK is nested only while SCHEDULE_LOCK is already held; no path
+     * acquires EventStore.LOCK then SCHEDULE_LOCK.
+     */
+    public FireResult fireOccurrenceIfNotCancelled(
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            long scheduledAtEpochMs,
+            double amount
+    ) {
+        if (medicationId == null || medicationId.isEmpty()
+                || doseId == null || doseId.isEmpty()
+                || !AutoDeductionContract.isValidCalendarDate(calendarDate)
+                || !AutoDeductionContract.isValidAmount(amount)) {
+            Log.w(TAG, "fireOccurrenceIfNotCancelled: invalid payload");
+            return new FireResult(FireResult.Status.FAILED, false);
+        }
+        final String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
+        synchronized (SCHEDULE_LOCK) {
+            // Re-entrant: isOccurrenceCancelledKey also synchronizes on SCHEDULE_LOCK.
+            if (isOccurrenceCancelledKey(key)) {
+                Log.i(TAG, "fire linearization: CANCELLED wins for " + key);
+                return FireResult.cancelled();
+            }
+            AutoDeductionEventStore store = new AutoDeductionEventStore(appContext);
+            AutoDeductionEventStore.InsertFiredResult ir = store.insertFiredIfAbsent(
+                    medicationId, doseId, calendarDate, scheduledAtEpochMs, amount);
+            FireResult result = FireResult.fromInsert(ir);
+            Log.i(TAG, "fire linearization: " + result.status
+                    + " pendingRecorded=" + result.pendingRecorded + " for " + key);
+            return result;
+        }
+    }
+
+    /**
      * Allocate a durable ordering token for one schedule or cancel operation.
      * Format: "{millis}-{seq}-{uuid}". Not part of occurrence identity (med/dose/date).
      * <p>
@@ -188,6 +301,16 @@ public final class AutoDeductionScheduler {
             AutoDeductionEventStore.InsertFiredResult ir) {
         if (ir == null) return false;
         return ir.isCreated() || ir.isAlreadyExists() || ir.pendingRecorded;
+    }
+
+    /**
+     * Same recovery matrix as {@link #shouldRemovePastScheduleMetadata(AutoDeductionEventStore.InsertFiredResult)}
+     * plus CANCELLED (drop stale schedule metadata; fire must not be synthesized).
+     */
+    static boolean shouldRemovePastScheduleMetadata(FireResult fr) {
+        if (fr == null) return false;
+        if (fr.isCancelled()) return true;
+        return fr.allowsRecurrence() || fr.pendingRecorded;
     }
 
 
@@ -717,8 +840,6 @@ public final class AutoDeductionScheduler {
             }
         }
 
-        AutoDeductionEventStore eventStore = new AutoDeductionEventStore(appContext);
-
         for (String[] entry : snapshot) {
             String prefKey = entry[0];
             String raw = entry[1];
@@ -740,20 +861,6 @@ public final class AutoDeductionScheduler {
                 }
 
                 String occurrenceKey = AutoDeductionContract.occurrenceKey(medId, doseId, date);
-                // Effectively cancelled: never promote to FIRED; drop stale schedule metadata.
-                // A newer schedule metadata (version millis >= cancel millis) supersedes
-                // a leftover tombstone so legitimate reschedule is not suppressed.
-                if (isOccurrenceCancelledKey(occurrenceKey)) {
-                    Log.i(TAG, "restore skip (cancelled): " + medId + "/" + doseId + "/" + date);
-                    removeScheduleMetadata(prefKey);
-                    continue;
-                }
-                // Leftover tombstone under a superseding schedule: best-effort cleanup.
-                if (hasCancellationTombstone(occurrenceKey)) {
-                    synchronized (SCHEDULE_LOCK) {
-                        clearCancellationTombstoneLocked(occurrenceKey);
-                    }
-                }
 
                 if (epoch <= 0) {
                     Long computed = computeEpochMs(date, time);
@@ -764,17 +871,19 @@ public final class AutoDeductionScheduler {
                     epoch = computed;
                 }
 
-                // Past occurrence: promote to FIRED (recovers failed primary insert).
-                // Only drop schedule metadata when a durable recovery source exists:
-                //   CREATED / ALREADY_EXISTS → main FIRED ledger
-                //   FAILED + pendingRecorded → pending-fire record
+                // Past occurrence: serialized fire transition (cancel-check + FIRED/pending).
+                // Only drop schedule metadata when a durable recovery source exists or
+                // cancel linearized first (stale schedule must not remain).
                 // If both main and pending writes failed, KEEP schedule metadata
                 // as the last recovery source for a later restore attempt.
                 if (epoch <= System.currentTimeMillis()) {
-                    AutoDeductionEventStore.InsertFiredResult ir =
-                            eventStore.insertFiredIfAbsent(medId, doseId, date, epoch, amount);
-                    if (shouldRemovePastScheduleMetadata(ir)) {
-                        if (ir.isCreated() || ir.isAlreadyExists()) {
+                    FireResult fr = fireOccurrenceIfNotCancelled(
+                            medId, doseId, date, epoch, amount);
+                    if (fr.isCancelled()) {
+                        Log.i(TAG, "restore skip (cancelled): " + medId + "/" + doseId + "/" + date);
+                        removeScheduleMetadata(prefKey);
+                    } else if (shouldRemovePastScheduleMetadata(fr)) {
+                        if (fr.allowsRecurrence()) {
                             Log.i(TAG, "restore past: promoted/ensured FIRED for "
                                     + medId + "/" + doseId + "/" + date);
                         } else {
@@ -787,9 +896,23 @@ public final class AutoDeductionScheduler {
                         Log.e(TAG, "restore past: FIRED and pending both failed for "
                                 + medId + "/" + doseId + "/" + date
                                 + " — preserving schedule metadata as recovery source");
-                        // Do NOT removeScheduleMetadata — last durable source.
                     }
                     continue;
+                }
+
+                // Future: effectively cancelled → never reinstall; drop stale metadata.
+                // A newer schedule metadata supersedes a leftover tombstone so legitimate
+                // reschedule is not suppressed.
+                if (isOccurrenceCancelledKey(occurrenceKey)) {
+                    Log.i(TAG, "restore skip (cancelled): " + medId + "/" + doseId + "/" + date);
+                    removeScheduleMetadata(prefKey);
+                    continue;
+                }
+                // Leftover tombstone under a superseding schedule: best-effort cleanup.
+                if (hasCancellationTombstone(occurrenceKey)) {
+                    synchronized (SCHEDULE_LOCK) {
+                        clearCancellationTombstoneLocked(occurrenceKey);
+                    }
                 }
 
                 if (!canScheduleExactAlarms()) {
@@ -804,11 +927,10 @@ public final class AutoDeductionScheduler {
                     continue;
                 }
                 if (recomputed <= System.currentTimeMillis()) {
-                    // After TZ change this occurrence is now in the past: promote path.
-                    AutoDeductionEventStore.InsertFiredResult ir =
-                            eventStore.insertFiredIfAbsent(
-                                    medId, doseId, date, recomputed, amount);
-                    if (shouldRemovePastScheduleMetadata(ir)) {
+                    // After TZ change this occurrence is now in the past: serialized promote.
+                    FireResult fr = fireOccurrenceIfNotCancelled(
+                            medId, doseId, date, recomputed, amount);
+                    if (shouldRemovePastScheduleMetadata(fr)) {
                         removeScheduleMetadata(prefKey);
                     }
                     continue;

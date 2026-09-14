@@ -10,13 +10,17 @@ import android.util.Log;
  * Registered android:exported="false" — targeted solely via explicit
  * AlarmManager PendingIntent. Does NOT handle boot or permission broadcasts.
  *
- * Durable cancellation is authoritative at fire time: if the occurrence is
- * effectively cancelled (tombstone, not superseded by a newer schedule), this
- * delivery is treated as stale — no FIRED, no next recurrence.
+ * Fire vs cancel is linearized under the scheduler SCHEDULE_LOCK via
+ * {@link AutoDeductionScheduler#fireOccurrenceIfNotCancelled}: the effective
+ * cancellation check and durable FIRED/pending transition are one serialized
+ * operation. If cancel linearizes first, this delivery is stale — no FIRED,
+ * no pending, no next recurrence. If fire linearizes first, FIRED/pending is
+ * durable before any concurrent cancel can observe the occurrence as still open.
  *
- * FIRED insertion result drives next-occurrence scheduling:
+ * Fire linearization result drives next-occurrence scheduling:
  * <ul>
  *   <li>CREATED / ALREADY_EXISTS — schedule next is safe/idempotent</li>
+ *   <li>CANCELLED — no recurrence</li>
  *   <li>FAILED — do not advance recurrence</li>
  * </ul>
  */
@@ -48,20 +52,18 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
             return;
         }
 
-        // Stale delivery after durable cancel (or cancel that lost the AlarmManager race):
-        // do not create FIRED and do not advance recurrence.
+        // Serialized fire transition: cancel-check + FIRED/pending under SCHEDULE_LOCK.
+        // Eliminates TOCTOU where cancel could interleave after a non-cancelled check
+        // but before durable FIRED persistence.
         AutoDeductionScheduler scheduler = new AutoDeductionScheduler(context);
-        if (scheduler.isOccurrenceCancelled(medicationId, doseId, calendarDate)) {
-            Log.i(TAG, "stale fire ignored (cancelled): "
-                    + medicationId + "/" + doseId + "/" + calendarDate);
-            return;
-        }
-
-        AutoDeductionEventStore store = new AutoDeductionEventStore(context);
-        AutoDeductionEventStore.InsertFiredResult result = store.insertFiredIfAbsent(
+        AutoDeductionScheduler.FireResult result = scheduler.fireOccurrenceIfNotCancelled(
                 medicationId, doseId, calendarDate, scheduledAt, amount);
 
         switch (result.status) {
+            case CANCELLED:
+                Log.i(TAG, "stale fire ignored (cancel linearized first): "
+                        + medicationId + "/" + doseId + "/" + calendarDate);
+                break;
             case CREATED:
                 Log.i(TAG, "FIRED event persisted: " + medicationId + "/" + doseId + "/" + calendarDate);
                 scheduleNextIfPossible(context, medicationId, doseId, calendarDate, timeHhmm, amount);

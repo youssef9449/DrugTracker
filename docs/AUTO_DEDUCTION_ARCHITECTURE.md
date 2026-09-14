@@ -1072,3 +1072,24 @@ Native `RECONCILED` is never the sole durability proof of JS stock — markers +
 #### Phase 4 still deferred
 Full Take/Restore race product rules remain Phase 4; Phase 3 shares consume/skip identity with Take for basic double-deduct prevention.
 
+
+### Phase 3 corrected stock mutation protocol
+
+```text
+legacy sync
+       \
+        → withAutoStockMutationGate(fresh durable state)
+       /
+native reconciliation
+```
+
+1. **Caller snapshots are not authoritative** inside the gate (no pre-captured React `medications`).
+2. **Gate loads fresh durable state** from `android_med_tracker_items_v2` / `android_med_tracker_logs_v2` at the start of each serialized job.
+3. **Mutation commits durable state** (`commitDurableAutoStockState`) before React is updated.
+4. **React state follows** the committed durable result via `setMedications` / `setLogs`.
+5. **Exact occurrence markers** (consume/skip + lastSync day horizon for past settlement) prevent duplicate stock deduction across legacy sync and exact reconcile.
+6. **Deterministic log ids** `exact-auto:{med}:{dose}:{date}` prevent duplicate exact auto logs on retry.
+7. **Native FIRED remains retryable** until `markReconciled` succeeds.
+8. **Partial native acknowledgement (Option B):** after successful JS meds+logs commit, envelope is cleared even if some marks fail. Remaining FIRED + JS markers + deterministic logs recover on next run without second deduction.
+9. **`effectiveCurrentPills`** respects applied occurrence markers (no double projection).
+

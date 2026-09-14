@@ -1,18 +1,13 @@
 /**
- * Phase 3 orchestrator — durable envelope + persist + native mark.
+ * Phase 3 orchestrator — runs inside withAutoStockMutationGate so it always
+ * mutates FRESH durable state (not a React snapshot captured before the gate).
  *
- * localStorage meds/logs are separate keys (not a true DB transaction).
- * Protocol:
- *   1. Recover any incomplete envelope from prior crash
- *   2. Reconcile FIRED events in memory
- *   3. Persist envelope (meds + logs + acks) as single JSON record
- *   4. Write meds key, then logs key from envelope
- *   5. Mark native RECONCILED for acks
- *   6. Clear envelope
- *
- * Recovery: envelope present → rewrite meds/logs from envelope (idempotent
- * via deterministic log ids + markers), mark native, clear envelope.
- * Never mark RECONCILED without envelope or equivalent durable JS state.
+ * Durability (Option B for partial native ack):
+ *   Once meds + logs are successfully written, exact markers + deterministic
+ *   log ids are the JS recovery source. Native remaining FIRED events are
+ *   re-listed and acknowledged on retry without a second stock/log mutation.
+ *   Envelope is cleared after successful meds+logs commit even if some native
+ *   marks fail — those marks retry via listFired + already_applied.
  */
 
 import type { ConsumptionLog, Medication } from '../types';
@@ -24,14 +19,14 @@ import {
 import {
   reconcileFiredEvents,
   type ReconcileFiredResult,
-  findExactAutoLog,
-  exactAutoLogId,
 } from './autoDeductionReconciliation';
-import { withAutoStockMutationGate } from './autoDeductionStockGate';
+import {
+  withAutoStockMutationGate,
+  commitDurableAutoStockState,
+  type AutoStockDurableState,
+} from './autoDeductionStockGate';
 import { loadJson, persist } from './storage';
 
-const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
-const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
 const STORAGE_ENVELOPE_KEY = 'android_med_tracker_exact_auto_envelope_v1';
 
 export interface ExactAutoEnvelope {
@@ -48,21 +43,26 @@ export interface ExactAutoEnvelope {
 }
 
 export interface RunReconciliationInput {
-  medications: Medication[];
-  logs: ConsumptionLog[];
   globalAutoDeductEnabled: boolean;
+  /** Prefer omit — gate loads durable state. Kept for tests that inject. */
+  medications?: Medication[];
+  logs?: ConsumptionLog[];
   listFired?: () => Promise<AutoDeductionEvent[]>;
   markReconciled?: (medicationId: string, doseId: string, calendarDate: string) => Promise<void>;
   persistMeds?: (meds: Medication[]) => string | null;
   persistLogs?: (logs: ConsumptionLog[]) => string | null;
   loadEnvelope?: () => ExactAutoEnvelope | null;
   saveEnvelope?: (env: ExactAutoEnvelope | null) => string | null;
+  /** When true, skip outer gate (caller already holds it). */
+  alreadyInGate?: boolean;
   now?: Date;
 }
 
 export interface RunReconciliationOutput extends ReconcileFiredResult {
   markedCount: number;
   recoveredEnvelope: boolean;
+  /** True when at least one native mark failed after JS commit (retryable). */
+  partialNativeAck: boolean;
 }
 
 function defaultLoadEnvelope(): ExactAutoEnvelope | null {
@@ -89,56 +89,79 @@ function defaultSaveEnvelope(env: ExactAutoEnvelope | null): string | null {
 export function runAutoDeductionReconciliation(
   input: RunReconciliationInput
 ): Promise<RunReconciliationOutput> {
-  return withAutoStockMutationGate(() => runOnce(input));
+  if (input.alreadyInGate) {
+    return runOnce(input, {
+      medications: input.medications ?? [],
+      logs: input.logs ?? [],
+    });
+  }
+  return withAutoStockMutationGate((fresh) => runOnce(input, fresh));
 }
 
-async function finishEnvelope(
-  env: ExactAutoEnvelope,
-  mark: (medicationId: string, doseId: string, calendarDate: string) => Promise<void>,
-  persistMeds: (meds: Medication[]) => string | null,
-  persistLogs: (logs: ConsumptionLog[]) => string | null,
-  saveEnvelope: (env: ExactAutoEnvelope | null) => string | null
-): Promise<{ markedCount: number; ok: boolean }> {
-  const medErr = persistMeds(env.medications);
-  const logErr = persistLogs(env.logs);
-  if (medErr || logErr) {
-    return { markedCount: 0, ok: false };
-  }
-
+async function markAll(
+  acks: Array<{ medicationId: string; doseId: string; calendarDate: string }>,
+  mark: (medicationId: string, doseId: string, calendarDate: string) => Promise<void>
+): Promise<{ markedCount: number; failed: typeof acks }> {
   let markedCount = 0;
-  for (const ack of env.toAcknowledge) {
+  const failed: typeof acks = [];
+  for (const ack of acks) {
     try {
       await mark(ack.medicationId, ack.doseId, ack.calendarDate);
       markedCount += 1;
     } catch {
-      /* leave FIRED; markers/logs durable */
+      failed.push(ack);
     }
   }
-
-  saveEnvelope(null);
-  return { markedCount, ok: true };
+  return { markedCount, failed };
 }
 
-async function runOnce(input: RunReconciliationInput): Promise<RunReconciliationOutput> {
+async function runOnce(
+  input: RunReconciliationInput,
+  fresh: AutoStockDurableState
+): Promise<RunReconciliationOutput> {
   const listFired = input.listFired ?? listFiredAutoDeductionEvents;
   const mark =
     input.markReconciled ??
     (async (medicationId: string, doseId: string, calendarDate: string) => {
       await markAutoDeductionEventReconciled(medicationId, doseId, calendarDate);
     });
-  const persistMeds =
-    input.persistMeds ??
-    ((meds: Medication[]) => persist(STORAGE_MEDS_KEY, meds, { json: true }));
-  const persistLogs =
-    input.persistLogs ??
-    ((logs: ConsumptionLog[]) => persist(STORAGE_LOGS_KEY, logs, { json: true }));
   const loadEnvelope = input.loadEnvelope ?? defaultLoadEnvelope;
   const saveEnvelope = input.saveEnvelope ?? defaultSaveEnvelope;
 
-  // ── Recover incomplete envelope from prior crash ──
+  // Prefer explicit inject for tests; otherwise durable gate state.
+  const baseMeds = input.medications ?? fresh.medications;
+  const baseLogs = input.logs ?? fresh.logs;
+
+  // ── Envelope recovery (incomplete prior crash before meds/logs settle) ──
   const existing = loadEnvelope();
   if (existing) {
-    const fin = await finishEnvelope(existing, mark, persistMeds, persistLogs, saveEnvelope);
+    let writeFailed = false;
+    if (input.persistMeds || input.persistLogs) {
+      const medErr = input.persistMeds ? input.persistMeds(existing.medications) : null;
+      const logErr = input.persistLogs ? input.persistLogs(existing.logs) : null;
+      writeFailed = !!(medErr || logErr);
+    } else {
+      writeFailed = !!commitDurableAutoStockState({
+        medications: existing.medications,
+        logs: existing.logs,
+      });
+    }
+    if (writeFailed) {
+      return {
+        medications: baseMeds,
+        logs: baseLogs,
+        toAcknowledge: existing.toAcknowledge,
+        details: [],
+        mutated: false,
+        newExactLogs: [],
+        markedCount: 0,
+        recoveredEnvelope: true,
+        partialNativeAck: true,
+      };
+    }
+    const { markedCount, failed } = await markAll(existing.toAcknowledge, mark);
+    // Option B: JS state durable → clear envelope; remaining FIRED recoverable
+    saveEnvelope(null);
     return {
       medications: existing.medications,
       logs: existing.logs,
@@ -153,8 +176,9 @@ async function runOnce(input: RunReconciliationInput): Promise<RunReconciliation
       })),
       mutated: true,
       newExactLogs: [],
-      markedCount: fin.markedCount,
+      markedCount,
       recoveredEnvelope: true,
+      partialNativeAck: failed.length > 0,
     };
   }
 
@@ -167,42 +191,44 @@ async function runOnce(input: RunReconciliationInput): Promise<RunReconciliation
 
   if (!events.length) {
     return {
-      medications: input.medications,
-      logs: input.logs,
+      medications: baseMeds,
+      logs: baseLogs,
       toAcknowledge: [],
       details: [],
       mutated: false,
       newExactLogs: [],
       markedCount: 0,
       recoveredEnvelope: false,
+      partialNativeAck: false,
     };
   }
 
-  const result = reconcileFiredEvents(input.medications, input.logs, events, {
+  const result = reconcileFiredEvents(baseMeds, baseLogs, events, {
     globalAutoDeductEnabled: input.globalAutoDeductEnabled,
     now: input.now,
   });
 
   if (!result.mutated && result.toAcknowledge.length === 0) {
-    return { ...result, markedCount: 0, recoveredEnvelope: false };
+    return {
+      ...result,
+      markedCount: 0,
+      recoveredEnvelope: false,
+      partialNativeAck: false,
+    };
   }
 
-  // Acknowledge-only (no stock mutation): still mark native; no envelope needed
-  // because JS state already durable (markers / lastSync).
+  // Acknowledge-only: markers already durable in baseMeds
   if (!result.mutated) {
-    let markedCount = 0;
-    for (const ack of result.toAcknowledge) {
-      try {
-        await mark(ack.medicationId, ack.doseId, ack.calendarDate);
-        markedCount += 1;
-      } catch {
-        /* retry later */
-      }
-    }
-    return { ...result, markedCount, recoveredEnvelope: false };
+    const { markedCount, failed } = await markAll(result.toAcknowledge, mark);
+    return {
+      ...result,
+      markedCount,
+      recoveredEnvelope: false,
+      partialNativeAck: failed.length > 0,
+    };
   }
 
-  // Mutating path: write envelope first, then meds/logs, then mark.
+  // Mutating path: envelope → meds+logs → mark → clear (Option B)
   const envelope: ExactAutoEnvelope = {
     version: 1,
     status: 'js_ready',
@@ -215,55 +241,57 @@ async function runOnce(input: RunReconciliationInput): Promise<RunReconciliation
   const envErr = saveEnvelope(envelope);
   if (envErr) {
     return {
-      medications: input.medications,
-      logs: input.logs,
+      medications: baseMeds,
+      logs: baseLogs,
       toAcknowledge: [],
       details: result.details,
       mutated: false,
       newExactLogs: [],
       markedCount: 0,
       recoveredEnvelope: false,
+      partialNativeAck: false,
     };
   }
 
-  const fin = await finishEnvelope(envelope, mark, persistMeds, persistLogs, saveEnvelope);
-  if (!fin.ok) {
-    // Envelope remains for recovery; do not report mutated to React until durable
-    // meds+logs both written — but envelope holds the intended state.
-    // Surface intended state so caller can setState if meds write partially succeeded
-    // is complex; keep prior React state and let recovery on next run complete.
+  let writeOk = true;
+  if (input.persistMeds || input.persistLogs) {
+    const medErr = input.persistMeds
+      ? input.persistMeds(result.medications)
+      : null;
+    const logErr = input.persistLogs ? input.persistLogs(result.logs) : null;
+    if (medErr || logErr) writeOk = false;
+  } else {
+    const err = commitDurableAutoStockState({
+      medications: result.medications,
+      logs: result.logs,
+    });
+    if (err) writeOk = false;
+  }
+
+  if (!writeOk) {
+    // Keep envelope for recovery; do not mark native
     return {
-      medications: input.medications,
-      logs: input.logs,
+      medications: baseMeds,
+      logs: baseLogs,
       toAcknowledge: result.toAcknowledge,
       details: result.details,
       mutated: false,
       newExactLogs: result.newExactLogs,
       markedCount: 0,
       recoveredEnvelope: false,
+      partialNativeAck: false,
     };
   }
 
+  const { markedCount, failed } = await markAll(result.toAcknowledge, mark);
+  // Option B: JS durable → clear envelope even if some marks failed.
+  // Remaining FIRED + markers + deterministic logs recover on next run.
+  saveEnvelope(null);
+
   return {
     ...result,
-    markedCount: fin.markedCount,
+    markedCount,
     recoveredEnvelope: false,
+    partialNativeAck: failed.length > 0,
   };
 }
-
-/** Test helper: merge logs without duplicating exact-auto ids. */
-export function mergeLogsIdempotent(
-  existing: ConsumptionLog[],
-  incoming: ConsumptionLog[]
-): ConsumptionLog[] {
-  const ids = new Set(existing.map((l) => l.id));
-  const out = [...existing];
-  for (const l of incoming) {
-    if (ids.has(l.id)) continue;
-    ids.add(l.id);
-    out.unshift(l);
-  }
-  return out;
-}
-
-export { exactAutoLogId, findExactAutoLog };

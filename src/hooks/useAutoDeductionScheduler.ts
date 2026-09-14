@@ -154,10 +154,13 @@ export function useAutoDeductionScheduler({
           for (const key of toCancel) {
             const [medId, doseId, date] = key.split('::');
             if (medId && doseId && date) {
-              await cancelAutoDeduction(medId, doseId, date);
+              const res = await cancelAutoDeduction(medId, doseId, date);
+              // Only drop tracking when native reports terminal success.
+              if (res.ok && gen === generationRef.current) {
+                trackedRef.current.delete(key);
+              }
             }
           }
-          if (gen === generationRef.current) trackedRef.current.clear();
         });
       }
       return;
@@ -191,9 +194,14 @@ export function useAutoDeductionScheduler({
         if (!desired.has(key)) {
           const [medId, doseId, date] = key.split('::');
           if (medId && doseId && date) {
-            await cancelAutoDeduction(medId, doseId, date);
+            const res = await cancelAutoDeduction(medId, doseId, date);
+            // Retain tracking on FAILED so a later pass can retry cancellation.
+            if (res.ok) {
+              trackedRef.current.delete(key);
+            }
+          } else {
+            trackedRef.current.delete(key);
           }
-          trackedRef.current.delete(key);
         }
       }
 

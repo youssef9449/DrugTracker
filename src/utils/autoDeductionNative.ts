@@ -37,13 +37,21 @@ export interface ScheduleOccurrenceResult {
   occurrenceKey?: string;
 }
 
+export type CancelOccurrenceStatus = "SUCCESS" | "ALREADY_ABSENT" | "FAILED";
+
+export interface CancelOccurrenceResult {
+  ok: boolean;
+  status: CancelOccurrenceStatus;
+  error?: string;
+}
+
 interface AutoDeductionPlugin {
   scheduleOccurrence(options: ScheduleOccurrenceParams): Promise<ScheduleOccurrenceResult>;
   cancelOccurrence(options: {
     medicationId: string;
     doseId: string;
     calendarDate: string;
-  }): Promise<{ ok: boolean }>;
+  }): Promise<CancelOccurrenceResult>;
   listFiredEvents(): Promise<{ events: AutoDeductionEvent[] }>;
   listEvents(): Promise<{ events: AutoDeductionEvent[] }>;
   markReconciled(options: {
@@ -97,16 +105,22 @@ export async function cancelAutoDeduction(
   medicationId: string,
   doseId: string,
   calendarDate: string
-): Promise<{ ok: boolean }> {
-  if (!isNativeAndroid()) return { ok: false };
+): Promise<CancelOccurrenceResult> {
+  if (!isNativeAndroid()) {
+    return { ok: false, status: "FAILED", error: "not_android" };
+  }
   try {
     return await AutoDeduction.cancelOccurrence({
       medicationId,
       doseId: doseId || LEGACY_DOSE_ID,
       calendarDate,
     });
-  } catch {
-    return { ok: false };
+  } catch (e) {
+    return {
+      ok: false,
+      status: "FAILED",
+      error: e instanceof Error ? e.message : "cancel_failed",
+    };
   }
 }
 

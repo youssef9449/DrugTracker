@@ -1,6 +1,7 @@
 /**
- * Phase 3 — run native FIRED event reconciliation on hydrate + resume.
- * Serialized; does not touch notification scheduling.
+ * Phase 3 — reconcile native FIRED events after hydrate/resume.
+ * Does NOT pass React snapshots into the mutation gate; the orchestrator
+ * loads durable state inside withAutoStockMutationGate.
  */
 
 import { useEffect, useRef } from 'react';
@@ -8,20 +9,15 @@ import type { ConsumptionLog, Medication } from '../types';
 import { runAutoDeductionReconciliation } from '../utils/runAutoDeductionReconciliation';
 
 export interface UseExactAutoDeductionReconciliationOptions {
-  medications: Medication[];
-  logs: ConsumptionLog[];
   setMedications: (meds: Medication[] | ((prev: Medication[]) => Medication[])) => void;
   setLogs: (logs: ConsumptionLog[] | ((prev: ConsumptionLog[]) => ConsumptionLog[])) => void;
   globalAutoDeductEnabled: boolean;
   hydrated: boolean;
   isFirstRun: boolean;
-  /** Resume tick from App (same pattern as dose alarm resume). */
   resumeTick?: number;
 }
 
 export function useExactAutoDeductionReconciliation({
-  medications,
-  logs,
   setMedications,
   setLogs,
   globalAutoDeductEnabled,
@@ -29,12 +25,6 @@ export function useExactAutoDeductionReconciliation({
   isFirstRun,
   resumeTick = 0,
 }: UseExactAutoDeductionReconciliationOptions): void {
-  // Keep latest state without re-firing on every med mutation
-  const medsRef = useRef(medications);
-  const logsRef = useRef(logs);
-  medsRef.current = medications;
-  logsRef.current = logs;
-
   const globalRef = useRef(globalAutoDeductEnabled);
   globalRef.current = globalAutoDeductEnabled;
 
@@ -45,12 +35,11 @@ export function useExactAutoDeductionReconciliation({
 
     void (async () => {
       const result = await runAutoDeductionReconciliation({
-        medications: medsRef.current,
-        logs: logsRef.current,
         globalAutoDeductEnabled: globalRef.current,
       });
       if (cancelled) return;
-      if (result.mutated) {
+      // React follows durable committed state (not the pre-gate snapshot)
+      if (result.mutated || result.recoveredEnvelope) {
         setMedications(result.medications);
         setLogs(result.logs);
       }

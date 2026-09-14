@@ -59,6 +59,8 @@ import { useDoseReminders } from './hooks/useDoseReminders';
 import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
 import { useDoseReminderScheduler } from './hooks/useDoseReminderScheduler';
 import { useAutoDeductionScheduler } from './hooks/useAutoDeductionScheduler';
+import { useExactAutoDeductionReconciliation } from './hooks/useExactAutoDeductionReconciliation';
+import { withAutoStockMutationGate, commitDurableAutoStockState } from './utils/autoDeductionStockGate';
 import { usePersistentEffect } from './hooks/usePersistentEffect';
 import { useStockAlerts } from './hooks/useStockAlerts';
 import {
@@ -534,15 +536,24 @@ export default function App() {
       return;
     }
 
-    const today = getTodayDateString();
-    const result = syncAutoDailyDeductions(medications, today);
-
-    if (result.newLogs.length > 0) {
-      setMedications(result.updatedMeds);
-      setLogs((prev) => [...result.newLogs, ...prev]);
-      const totalPills = result.deductedSummary.reduce((sum, item) => sum + item.pillsDeducted, 0);
-      showToast(TOAST_MESSAGES.autoDeductSummary(totalPills));
-    }
+    // Shared gate loads FRESH durable meds/logs — do not use React snapshot.
+    void withAutoStockMutationGate((fresh) => {
+      const today = getTodayDateString();
+      const result = syncAutoDailyDeductions(fresh.medications, today);
+      if (result.newLogs.length > 0) {
+        const nextLogs = [...result.newLogs, ...fresh.logs];
+        const err = commitDurableAutoStockState({
+          medications: result.updatedMeds,
+          logs: nextLogs,
+        });
+        if (!err) {
+          setMedications(result.updatedMeds);
+          setLogs(nextLogs);
+          const totalPills = result.deductedSummary.reduce((sum, item) => sum + item.pillsDeducted, 0);
+          showToast(TOAST_MESSAGES.autoDeductSummary(totalPills));
+        }
+      }
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated]);
 
@@ -617,6 +628,17 @@ export default function App() {
     hydrated,
     isFirstRun,
     exactAlarmEnabled,
+    resumeTick: doseAlarmResumeTick,
+  });
+
+  // Phase 3: reconcile native FIRED exact auto-deduction events into JS stock.
+  // Runs after hydration and on resume; serialized; crash-safe persist-then-mark.
+  useExactAutoDeductionReconciliation({
+    setMedications,
+    setLogs,
+    globalAutoDeductEnabled,
+    hydrated,
+    isFirstRun,
     resumeTick: doseAlarmResumeTick,
   });
 

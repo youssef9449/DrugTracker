@@ -28,6 +28,8 @@ public final class AutoDeductionContract {
 
     public static final String PREFS_EVENTS = "drugtracker_auto_deduction_events_v1";
     public static final String PREFS_SCHEDULES = "drugtracker_auto_deduction_schedules_v1";
+    /** Independent prefs for pending-fire recovery when primary FIRED commit fails. */
+    public static final String PREFS_PENDING = "drugtracker_auto_deduction_pending_v1";
 
     public static final String STATUS_FIRED = "FIRED";
     public static final String STATUS_RECONCILED = "RECONCILED";

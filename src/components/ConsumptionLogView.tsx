@@ -1,5 +1,5 @@
-import { useState, type FC } from 'react';
-import { Plus, Clock, ShieldCheck, ArrowUpRight, ArrowDownLeft, RotateCcw } from 'lucide-react';
+import { type FC } from 'react';
+import { Clock, ShieldCheck, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { Medication, ConsumptionLog } from '../types';
 import { getTodayDateString, formatArabicDate } from '../utils/dateCalculations';
 import { MAX_LOG_ROWS, DAYS_PER_MONTH } from '../utils/time';
@@ -11,99 +11,25 @@ interface ConsumptionLogViewProps {
   showToast: (message: string) => void;
 }
 
+/**
+ * Consumption / sync activity timeline.
+ * Dose restore controls were intentionally removed from this view;
+ * restore remains available via MedicationCard + SelectDoseModal.
+ * Props onRestoreDose/showToast are retained for App wiring compatibility.
+ */
 export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
   medications,
   logs,
-  onRestoreDose,
-  showToast,
 }) => {
-  const [selectedMedIdInput, setSelectedMedIdInput] = useState<string>(medications[0]?.id || '');
-  const [selectedDoseId, setSelectedDoseId] = useState<string>('');
-  const [skipReason, setSkipReason] = useState<string>('نسيان الجرعة');
-
-  // Derive the effective selection: if the stored id no longer matches a
-  // displayed medication (e.g. it was deleted), fall back to the first.
-  // This replaces the previous useEffect that mutated selectedMedId while
-  // it was in its own dependency array (audit issue #69) — a derived value
-  // is simpler, has no stale-closure risk, and never thrashes.
-  const selectedMedId = medications.some((m) => m.id === selectedMedIdInput)
-    ? selectedMedIdInput
-    : (medications[0]?.id || '');
-
-  // #111: derived from the IIFE that was inline in the JSX — the
-  // selected med object, or undefined when no meds exist.
-  const selectedMed = medications.find((m) => m.id === selectedMedId);
-
-  const multiSchedule =
-    selectedMed &&
-    Array.isArray(selectedMed.doseSchedule) &&
-    selectedMed.doseSchedule.length > 0
-      ? selectedMed.doseSchedule
-      : null;
-
-  // Effective doseId for restore: explicit multi selection, sole schedule
-  // slot, or undefined for legacy (dailyDose).
-  const effectiveRestoreDoseId = (() => {
-    if (!multiSchedule) return undefined;
-    if (multiSchedule.length === 1) return multiSchedule[0].id;
-    if (selectedDoseId && multiSchedule.some((d) => d.id === selectedDoseId)) {
-      return selectedDoseId;
-    }
-    return multiSchedule[0]?.id;
-  })();
-
-  const restorePreviewAmount = (() => {
-    if (!selectedMed) return 0;
-    if (multiSchedule && effectiveRestoreDoseId) {
-      const slot = multiSchedule.find((d) => d.id === effectiveRestoreDoseId);
-      return Number(slot?.amount) || 0;
-    }
-    return Number(selectedMed.dailyDose) || 0;
-  })();
-
   // Total monthly DOSES across all active meds.
   // A "جرعة" (dose) = one daily intake event, regardless of how many
   // pills it contains. Each active med (auto-deduct enabled, positive
   // dailyDose) is taken once per day → DAYS_PER_MONTH doses/month.
-  //
-  // The previous implementation summed `dailyDose * 30`, which is the
-  // total PILLS/month — that's wrong for two reasons:
-  //   1. The stat label is "جرعة / شهر" (doses/month), not pills/month.
-  //      A med with dailyDose=2 taken once a day = 30 doses/month, not 60.
-  //   2. Summing pills across different units (قرص + مل + كيس) is
-  //      meaningless and produced an inflated, nonsensical number.
   const totalMonthlyDoses = medications.reduce(
     (acc, m) =>
       acc + (m.autoDeductEnabled !== false && m.dailyDose > 0 ? DAYS_PER_MONTH : 0),
     0
   );
-
-  const handleSkipDose = () => {
-    if (!selectedMedId) return;
-    const med = medications.find((m) => m.id === selectedMedId);
-    if (!med) return;
-
-    const doseId =
-      multiSchedule && multiSchedule.length > 1
-        ? effectiveRestoreDoseId
-        : multiSchedule && multiSchedule.length === 1
-          ? multiSchedule[0].id
-          : undefined;
-
-    if (multiSchedule && multiSchedule.length > 1 && !doseId) {
-      showToast('اختر الجرعة المراد استرجاعها');
-      return;
-    }
-
-    const restored = onRestoreDose(selectedMedId, skipReason, doseId);
-    if (restored) {
-      const amount =
-        doseId && multiSchedule
-          ? Number(multiSchedule.find((d) => d.id === doseId)?.amount) || restorePreviewAmount
-          : restorePreviewAmount;
-      showToast(`تم استرجاع جرعة (${amount} ${med.unit}) إلى مخزون "${med.name}"`);
-    }
-  };
 
   return (
     <div className="p-4 space-y-4">
@@ -117,8 +43,8 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
             <h2 className="text-base font-bold text-slate-900">
               سجل الاستهلاك التلقائي
             </h2>
-            <p className="text-xs text-slate-500">
-              تتبع خصم الجرعات بمرور الأيام واسترجاع الجرعات المنسية
+            <p className="text-xs text-slate-500 mt-0.5">
+              ملخص المزامنة اليومية والجرعات المنسية
             </p>
           </div>
         </div>

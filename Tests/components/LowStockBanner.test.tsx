@@ -36,8 +36,10 @@ describe('LowStockBanner (Material 3 Design)', () => {
         statusInfo: {
           status: 'out_of_stock',
           daysLeft: 0,
-          depletionDate: new Date(),
-          isLow: true,
+          statusLabel: 'نفد',
+          statusColorClass: 'text-rose-600',
+          badgeBg: 'bg-rose-50',
+          badgeText: 'text-rose-700',
         },
       },
     ];

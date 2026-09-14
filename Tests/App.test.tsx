@@ -739,7 +739,9 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
     });
   });
 
-  it('restores a dose once per day and does not restore when auto-deduct is disabled', async () => {
+  it('restores a dose once per day via MedicationCard (logs restore UI removed)', async () => {
+    // Legacy single-dose: card restore calls handleRestoreDose directly.
+    // Logs-tab restore controls were intentionally removed from ConsumptionLogView.
     const today = new Date().toISOString().slice(0, 10);
     localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([{
       id: 'med-restore',
@@ -757,18 +759,24 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
     localStorage.setItem('android_med_tracker_logs_v2', '[]');
 
     render(<App />);
-    await waitFor(() => expect(screen.getByText('سجل الاستهلاك')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('سجل الاستهلاك'));
-    await waitFor(() => expect(screen.getByRole('button', { name: /إعادة الجرعة المخصومة/ })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /إعادة الجرعة المخصومة/ }));
-    fireEvent.click(screen.getByRole('button', { name: /إعادة الجرعة المخصومة/ }));
+    await waitFor(() => expect(screen.getByText('Restore Med')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId('restore-dose-med-restore')).toBeInTheDocument()
+    );
+
+    fireEvent.click(screen.getByTestId('restore-dose-med-restore'));
+    // Duplicate click: outstanding-skip / already-restored guard
+    fireEvent.click(screen.getByTestId('restore-dose-med-restore'));
 
     await waitFor(() => {
-      const savedMedications = JSON.parse(localStorage.getItem('android_med_tracker_items_v2') || '[]');
-      expect(savedMedications[0].currentPills).toBe(12);
+      const savedLogs = JSON.parse(localStorage.getItem('android_med_tracker_logs_v2') || '[]');
+      expect(
+        savedLogs.filter(
+          (log: { type: string; date: string }) =>
+            log.type === 'skipped_day' && log.date === today
+        )
+      ).toHaveLength(1);
     });
-    const savedLogs = JSON.parse(localStorage.getItem('android_med_tracker_logs_v2') || '[]');
-    expect(savedLogs.filter((log: { type: string; date: string }) => log.type === 'skipped_day' && log.date === today)).toHaveLength(1);
   });
 
   it('persists notificationsEnabled=false across app launch and respects saved state over OS permission', async () => {

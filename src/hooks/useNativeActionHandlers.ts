@@ -21,7 +21,7 @@ export function useNativeActionHandlers(opts: {
   setDoseLifecycleTick: Dispatch<SetStateAction<number>>;
   setCriticalAlarmResumeTick: Dispatch<SetStateAction<number>>;
   setDoseAlarmResumeTick: Dispatch<SetStateAction<number>>;
-  setExactAlarmEnabled: Dispatch<SetStateAction<boolean>>;
+  setExactAlarmEnabled: Dispatch<SetStateAction<boolean | null>>;
 }): void {
   const {
     medications,

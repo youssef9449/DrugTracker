@@ -36,7 +36,7 @@ export interface AppHydrationSetters {
   setSoundEnabled: Dispatch<SetStateAction<boolean>>;
   setNotificationsEnabled: Dispatch<SetStateAction<boolean>>;
   setCriticalStockAlertsEnabled: Dispatch<SetStateAction<boolean>>;
-  setExactAlarmEnabled: Dispatch<SetStateAction<boolean>>;
+  setExactAlarmEnabled: Dispatch<SetStateAction<boolean | null>>;
   setGlobalAutoDeductEnabled: Dispatch<SetStateAction<boolean>>;
   setFontScale: Dispatch<SetStateAction<'normal' | 'large'>>;
   setIsCompactView: Dispatch<SetStateAction<boolean>>;

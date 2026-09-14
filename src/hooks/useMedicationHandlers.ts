@@ -46,9 +46,11 @@ export interface MedicationHandlersDeps {
   setCriticalStockAlertsEnabled: Dispatch<SetStateAction<boolean>>;
   setSelectDoseMed: Dispatch<SetStateAction<Medication | null>>;
   setSelectDoseMode: Dispatch<SetStateAction<'take' | 'restore'>>;
+  setEditingMedication: Dispatch<SetStateAction<Medication | null>>;
   showToast: (message: string) => void;
   dismissAlarm: () => void;
-  snoozeAlarm: (minutes: number) => void;
+  /** Matches useDoseReminders.snoozeAlarm(med, minutes?). */
+  snoozeAlarm: (medication: Medication, minutes?: number) => void;
 }
 
 /**
@@ -72,6 +74,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     setCriticalStockAlertsEnabled,
     setSelectDoseMed,
     setSelectDoseMode,
+    setEditingMedication,
     showToast,
     dismissAlarm,
     snoozeAlarm,

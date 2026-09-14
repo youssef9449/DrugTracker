@@ -474,6 +474,7 @@ export default function App() {
     setCriticalStockAlertsEnabled,
     setSelectDoseMed,
     setSelectDoseMode,
+    setEditingMedication,
     showToast,
     dismissAlarm,
     snoozeAlarm,

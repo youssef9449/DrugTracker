@@ -1,10 +1,10 @@
 /// <reference types="@testing-library/jest-dom/vitest" />
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { describe, it, expect, afterEach } from 'vitest';
+import { render, screen, cleanup } from '@testing-library/react';
 import { ConsumptionLogView } from '@/components/ConsumptionLogView';
 import type { Medication, ConsumptionLog } from '@/types';
 
-function makeMed(id: string, name: string): Medication {
+function makeMed(id: string, name: string, overrides: Partial<Medication> = {}): Medication {
   return {
     id,
     name,
@@ -16,167 +16,102 @@ function makeMed(id: string, name: string): Medication {
     createdAt: '2024-01-01T00:00:00.000Z',
     lastSyncDate: '2024-01-01',
     autoDeductEnabled: true,
+    ...overrides,
   };
 }
 
-const noop = vi.fn();
-const emptyLogs: ConsumptionLog[] = [];
+function makeLog(overrides: Partial<ConsumptionLog> = {}): ConsumptionLog {
+  return {
+    id: 'log-1',
+    medicationId: 'med-a',
+    medicationName: 'Med A',
+    type: 'auto_daily',
+    amount: -1,
+    date: '2024-01-02',
+    timestamp: '2024-01-02T08:00:00.000Z',
+    description: 'خصم تلقائي لليوم',
+    ...overrides,
+  };
+}
 
-describe('ConsumptionLogView — derived selection (#69)', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
+afterEach(() => cleanup());
 
-  afterEach(() => {
-    cleanup();
-  });
-
-  it('defaults to the first medication when none was previously selected', () => {
-    const meds = [makeMed('med-a', 'Med A'), makeMed('med-b', 'Med B')];
+describe('ConsumptionLogView', () => {
+  it('renders the remaining consumption-log UI without the removed restore controls', () => {
     render(
       <ConsumptionLogView
-        medications={meds}
-        logs={emptyLogs}
-        onRestoreDose={noop}
-        showToast={noop}
-      />
-    );
-    const select = screen.getByLabelText('اختر الدواء') as HTMLSelectElement;
-    expect(select.value).toBe('med-a');
-  });
-
-  it('falls back to the first medication when the stored selection is deleted (no effect thrash)', () => {
-    // The component initializes selectedMedIdInput = medications[0]?.id = 'med-a'.
-    // We simulate the user selecting 'med-b', then the parent removing 'med-b'
-    // from the list. The derived `selectedMedId` must fall back to 'med-a'
-    // WITHOUT a useEffect that mutates state in its own dep array (#69).
-    const meds = [makeMed('med-a', 'Med A'), makeMed('med-b', 'Med B')];
-    const { rerender } = render(
-      <ConsumptionLogView
-        medications={meds}
-        logs={emptyLogs}
-        onRestoreDose={noop}
-        showToast={noop}
-      />
-    );
-    const select = screen.getByLabelText('اختر الدواء') as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: 'med-b' } });
-    expect(select.value).toBe('med-b');
-
-    // Parent removes 'med-b' from the list.
-    rerender(
-      <ConsumptionLogView
         medications={[makeMed('med-a', 'Med A')]}
-        logs={emptyLogs}
-        onRestoreDose={noop}
-        showToast={noop}
+        logs={[]}
+        onRestoreDose={() => true}
+        showToast={() => {}}
       />
     );
-    const selectAfter = screen.getByLabelText('اختر الدواء') as HTMLSelectElement;
-    // Derived selection falls back to 'med-a' (the first remaining med).
-    expect(selectAfter.value).toBe('med-a');
+
+    expect(screen.getByText('سجل الاستهلاك التلقائي')).toBeInTheDocument();
+    expect(screen.getByText('إجمالي جرعاتك الشهرية')).toBeInTheDocument();
+    expect(screen.getByText('سجل العمليات والمزامنة الأخيرة:')).toBeInTheDocument();
+
+    expect(screen.queryByText(/لم تتناول جرعتك اليوم/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/إعادة الجرعة المخصومة للمخزون/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('اختر الدواء')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('اختر الجرعة')).not.toBeInTheDocument();
   });
 
-  it('shows an empty-state when the medications list becomes empty', () => {
-    const { rerender } = render(
-      <ConsumptionLogView
-        medications={[makeMed('med-a', 'Med A')]}
-        logs={emptyLogs}
-        onRestoreDose={noop}
-        showToast={noop}
-      />
-    );
-    rerender(
-      <ConsumptionLogView
-        medications={[]}
-        logs={emptyLogs}
-        onRestoreDose={noop}
-        showToast={noop}
-      />
-    );
-    // The select still renders but with no options; selectedMedId resolves to ''.
-    const select = screen.getByLabelText('اختر الدواء') as HTMLSelectElement;
-    expect(select.value).toBe('');
-    expect(select.options).toHaveLength(0);
-  });
-
-  it('calls onRestoreDose with the derived (fallback) selection, not the stale stored one', () => {
-    const onRestoreDose = vi.fn(() => true);
-    const meds = [makeMed('med-a', 'Med A'), makeMed('med-b', 'Med B')];
-    const { rerender } = render(
-      <ConsumptionLogView
-        medications={meds}
-        logs={emptyLogs}
-        onRestoreDose={onRestoreDose}
-        showToast={noop}
-      />
-    );
-    // User selects med-b, then med-b is deleted, then user clicks skip-dose.
-    fireEvent.change(screen.getByLabelText('اختر الدواء'), { target: { value: 'med-b' } });
-    rerender(
-      <ConsumptionLogView
-        medications={[makeMed('med-a', 'Med A')]}
-        logs={emptyLogs}
-        onRestoreDose={onRestoreDose}
-        showToast={noop}
-      />
-    );
-    fireEvent.click(screen.getByText(/إعادة الجرعة المخصومة/));
-    // The call should target 'med-a' (the fallback), NOT 'med-b' (the stale
-    // stored selection that no longer exists).
-    expect(onRestoreDose).toHaveBeenCalledWith('med-a', expect.any(String), undefined);
-  });
-});
-
-describe('ConsumptionLogView — multi-dose restore', () => {
-  function makeMulti(): Medication {
-    return {
-      ...makeMed('med-multi', 'Multi Med'),
-      dailyDose: 4,
-      doseSchedule: [
-        { id: 'd1', amount: 1, time: '08:00' },
-        { id: 'd2', amount: 1, time: '14:00' },
-        { id: 'd3', amount: 2, time: '20:00' },
-      ],
-      dosesPerDay: 3,
-    };
-  }
-
-  afterEach(() => cleanup());
-
-  it('shows dose selector and passes selected doseId (not dailyDose amount in handler)', () => {
-    const onRestoreDose = vi.fn(() => true);
+  it('shows the correct monthly dose estimate for active auto-deduct medications', () => {
     render(
       <ConsumptionLogView
-        medications={[makeMulti()]}
-        logs={emptyLogs}
-        onRestoreDose={onRestoreDose}
-        showToast={noop}
+        medications={[
+          makeMed('med-a', 'Med A', { dailyDose: 2, autoDeductEnabled: true }),
+          makeMed('med-b', 'Med B', { dailyDose: 1, autoDeductEnabled: true }),
+          makeMed('med-c', 'Med C', { dailyDose: 3, autoDeductEnabled: false }),
+        ]}
+        logs={[]}
+        onRestoreDose={() => true}
+        showToast={() => {}}
       />
     );
-    expect(screen.getByLabelText('اختر الجرعة')).toBeInTheDocument();
-    // Default first slot d1
-    fireEvent.click(screen.getByText(/إعادة الجرعة المخصومة/));
-    expect(onRestoreDose).toHaveBeenCalledWith('med-multi', expect.any(String), 'd1');
 
-    onRestoreDose.mockClear();
-    fireEvent.change(screen.getByLabelText('اختر الجرعة'), { target: { value: 'd3' } });
-    fireEvent.click(screen.getByText(/إعادة الجرعة المخصومة/));
-    expect(onRestoreDose).toHaveBeenCalledWith('med-multi', expect.any(String), 'd3');
+    // Each active medication contributes one daily dose event, not dailyDose pills.
+    expect(screen.getByText('60')).toBeInTheDocument();
   });
 
-  it('button preview shows selected slot amount not dailyDose', () => {
+  it('renders an empty-state when there are no consumption logs', () => {
     render(
       <ConsumptionLogView
-        medications={[makeMulti()]}
-        logs={emptyLogs}
-        onRestoreDose={noop}
-        showToast={noop}
+        medications={[makeMed('med-a', 'Med A')]}
+        logs={[]}
+        onRestoreDose={() => true}
+        showToast={() => {}}
       />
     );
-    // d1 amount 1
-    expect(screen.getByText(/\(\+1 قرص\)/)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('اختر الجرعة'), { target: { value: 'd3' } });
-    expect(screen.getByText(/\(\+2 قرص\)/)).toBeInTheDocument();
+
+    expect(
+      screen.getByText('لا توجد سجلات بعد، ستظهر هنا حركات الخصم التلقائي والتعبئة.')
+    ).toBeInTheDocument();
+  });
+
+  it('renders consumption log entries with medication, description, amount, and date', () => {
+    render(
+      <ConsumptionLogView
+        medications={[makeMed('med-a', 'Med A')]}
+        logs={[
+          makeLog(),
+          makeLog({
+            id: 'log-2',
+            amount: 30,
+            type: 'refill',
+            description: 'تمت التعبئة',
+          }),
+        ]}
+        onRestoreDose={() => true}
+        showToast={() => {}}
+      />
+    );
+
+    expect(screen.getByText('Med A')).toBeInTheDocument();
+    expect(screen.getByText('خصم تلقائي لليوم')).toBeInTheDocument();
+    expect(screen.getByText('تمت التعبئة')).toBeInTheDocument();
+    expect(screen.getByText('-1')).toBeInTheDocument();
+    expect(screen.getByText('+30')).toBeInTheDocument();
   });
 });

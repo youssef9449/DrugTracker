@@ -979,3 +979,117 @@ for the same occurrence identity.
 - `Tests/hooks/useAutoDeductionScheduler.test.ts`
 - `docs/AUTO_DEDUCTION_ARCHITECTURE.md` (this section)
 
+
+---
+
+## Phase 3 Implementation Decisions
+
+*JS reconciliation of native FIRED exact auto-deduction events into application stock.*
+
+### Source of truth
+- **That the occurrence fired at wall-clock time:** native ledger row (`FIRED` / `RECONCILED`).
+- **Persistent stock:** `Medication.currentPills` (+ history) in localStorage (`android_med_tracker_items_v2`).
+- **Display balance:** `effectiveCurrentPills` — after reconcile, consumption markers remove the slot from projection so display and snapshot stay consistent.
+
+### JS reconciliation module
+- Pure engine: `src/utils/autoDeductionReconciliation.ts` (`reconcileFiredEvents`, `applyExactAutoEventToMedication`)
+- Orchestrator: `src/utils/runAutoDeductionReconciliation.ts` (list FIRED → apply → **persist** → mark RECONCILED)
+- Lifecycle: `src/hooks/useExactAutoDeductionReconciliation.ts` (hydration + resume tick)
+
+### Occurrence identity
+```text
+medicationId + doseId + calendarDate
+```
+Multi-dose uses **`event.amount`** (never `dailyDose` as substitute). Legacy uses `LEGACY_DOSE_ID` + event amount (typically dailyDose at schedule time).
+
+### JS idempotency marker
+Durable marker = **dose consumption / skip history** for the occurrence:
+- `doseConsumption` / `doseConsumptionHistory` via `recordDoseConsumed`
+- `doseSkippedHistory` / `lastConsumedDate` (legacy) also terminal
+
+Query: `isExactAutoOccurrenceApplied(med, doseId, calendarDate)`.
+
+### Crash / restart protocol
+```text
+FIRED + no marker  → apply stock + marker → persist localStorage → mark RECONCILED
+FIRED + marker     → no stock change → mark RECONCILED only
+persist fails      → do not mark RECONCILED
+mark fails         → marker remains; next run acknowledges without re-deduct
+```
+
+### When event becomes RECONCILED
+Only after JS has either:
+1. Successfully persisted applied stock/marker, or
+2. Determined no-op is correct (already applied, deleted med, disabled auto, invalid amount)
+
+### Projection interaction
+Applying an occurrence records consumption so `todayDueUnits` no longer includes that slot. Stock is reduced by `event.amount` in the same apply step so UI does not double-subtract (projection alone then snapshot alone).
+
+### Lifecycle triggers
+- After `hydrated` (and not first-run)
+- On `resumeTick` (app resume)
+- Serialized via module promise chain (no concurrent parallel apply)
+
+### Concurrency protection
+`runAutoDeductionReconciliation` chains promises globally so startup + resume cannot interleave two applies of the same FIRED set.
+
+### Known Phase 4 dependency
+Full Take/Restore race matrix (restore after exact auto, future suppress policy) remains Phase 4. Phase 3 uses consumption/skip markers so Take’s `already_consumed` and Restore’s history remain the primary business guards.
+
+
+### Phase 3 correction — legacy sync ↔ exact events + durability
+
+#### Double-deduction prevention (legacy sync × exact reconcile)
+Shared occurrence terminal conditions (`isExactAutoOccurrenceApplied`):
+
+1. **Per-dose markers** — `doseConsumption` / history / `doseSkippedHistory` / legacy `lastConsumedDate`
+2. **Day-settlement horizon** — if `calendarDate < today` and `calendarDate <= lastSyncDate`, the day was already folded into `currentPills` by `syncAutoDailyDeductions` (gated multi-dose uses `historicalDayDueUnits` which skips consumed/skipped slots)
+
+Exact reconcile **records consume markers** when it applies, so later legacy sync cannot re-charge that slot.
+
+Legacy sync does **not** invent exact consume markers for unrecorded historical slots; it keeps the existing day-settlement fallback. Exact FIRED events for those already-settled past days are acknowledged without a second stock hit via the lastSync horizon rule.
+
+#### Serialization
+`withAutoStockMutationGate` serializes legacy hydration sync and exact reconciliation so they cannot interleave from the same process snapshot.
+
+#### Durability (not a true multi-key transaction)
+`android_med_tracker_exact_auto_envelope_v1` holds the intended `{ medications, logs, toAcknowledge }` after a mutating reconcile.
+
+Order:
+
+```text
+write envelope
+  → write meds key
+  → write logs key
+  → mark native RECONCILED
+  → clear envelope
+```
+
+If meds/logs write fails, envelope remains; next startup recovers from envelope (idempotent log ids `exact-auto:{med}:{dose}:{date}`). React `usePersistentEffect` is **not** treated as a transaction.
+
+Native `RECONCILED` is never the sole durability proof of JS stock — markers + envelope + deterministic logs are.
+
+#### Phase 4 still deferred
+Full Take/Restore race product rules remain Phase 4; Phase 3 shares consume/skip identity with Take for basic double-deduct prevention.
+
+
+### Phase 3 corrected stock mutation protocol
+
+```text
+legacy sync
+       \
+        → withAutoStockMutationGate(fresh durable state)
+       /
+native reconciliation
+```
+
+1. **Caller snapshots are not authoritative** inside the gate (no pre-captured React `medications`).
+2. **Gate loads fresh durable state** from `android_med_tracker_items_v2` / `android_med_tracker_logs_v2` at the start of each serialized job.
+3. **Mutation commits durable state** (`commitDurableAutoStockState`) before React is updated.
+4. **React state follows** the committed durable result via `setMedications` / `setLogs`.
+5. **Exact occurrence markers** (consume/skip + lastSync day horizon for past settlement) prevent duplicate stock deduction across legacy sync and exact reconcile.
+6. **Deterministic log ids** `exact-auto:{med}:{dose}:{date}` prevent duplicate exact auto logs on retry.
+7. **Native FIRED remains retryable** until `markReconciled` succeeds.
+8. **Partial native acknowledgement (Option B):** after successful JS meds+logs commit, envelope is cleared even if some marks fail. Remaining FIRED + JS markers + deterministic logs recover on next run without second deduction.
+9. **`effectiveCurrentPills`** respects applied occurrence markers (no double projection).
+

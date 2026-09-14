@@ -60,6 +60,7 @@ import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
 import { useDoseReminderScheduler } from './hooks/useDoseReminderScheduler';
 import { useAutoDeductionScheduler } from './hooks/useAutoDeductionScheduler';
 import { useExactAutoDeductionReconciliation } from './hooks/useExactAutoDeductionReconciliation';
+import { withAutoStockMutationGate } from './utils/autoDeductionStockGate';
 import { usePersistentEffect } from './hooks/usePersistentEffect';
 import { useStockAlerts } from './hooks/useStockAlerts';
 import {
@@ -535,15 +536,19 @@ export default function App() {
       return;
     }
 
-    const today = getTodayDateString();
-    const result = syncAutoDailyDeductions(medications, today);
-
-    if (result.newLogs.length > 0) {
-      setMedications(result.updatedMeds);
-      setLogs((prev) => [...result.newLogs, ...prev]);
-      const totalPills = result.deductedSummary.reduce((sum, item) => sum + item.pillsDeducted, 0);
-      showToast(TOAST_MESSAGES.autoDeductSummary(totalPills));
-    }
+    // Share stock-mutation gate with exact native reconciliation so both
+    // paths cannot apply overlapping deductions from the same snapshot.
+    const medsSnapshot = medications;
+    void withAutoStockMutationGate(() => {
+      const today = getTodayDateString();
+      const result = syncAutoDailyDeductions(medsSnapshot, today);
+      if (result.newLogs.length > 0) {
+        setMedications(result.updatedMeds);
+        setLogs((prev) => [...result.newLogs, ...prev]);
+        const totalPills = result.deductedSummary.reduce((sum, item) => sum + item.pillsDeducted, 0);
+        showToast(TOAST_MESSAGES.autoDeductSummary(totalPills));
+      }
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated]);
 

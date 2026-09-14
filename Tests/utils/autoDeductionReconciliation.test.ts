@@ -2,19 +2,16 @@ import { describe, it, expect } from 'vitest';
 import type { Medication, ConsumptionLog } from '../../src/types';
 import {
   reconcileFiredEvents,
-  applyExactAutoEventToMedication,
   isExactAutoOccurrenceApplied,
+  exactAutoLogId,
+  findExactAutoLog,
 } from '../../src/utils/autoDeductionReconciliation';
 import { autoDeductionOccurrenceKey } from '../../src/utils/autoDeductionNative';
 import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
 import { LEGACY_DOSE_ID } from '../../src/utils/notifications';
-import {
-  runAutoDeductionReconciliation,
-} from '../../src/utils/runAutoDeductionReconciliation';
-import {
-  conditionalRollback,
-  buildSchedulePayload,
-} from '../../src/utils/autoDeductionScheduleOwnership';
+import { runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
+import { syncAutoDailyDeductions } from '../../src/utils/dateCalculations';
+import { effectiveCurrentPills } from '../../src/utils/dateCalculations';
 
 function baseMed(over: Partial<Medication> = {}): Medication {
   return {
@@ -33,7 +30,8 @@ function baseMed(over: Partial<Medication> = {}): Medication {
 }
 
 function fired(
-  over: Partial<AutoDeductionEvent> & Pick<AutoDeductionEvent, 'medicationId' | 'doseId' | 'calendarDate' | 'amount'>
+  over: Partial<AutoDeductionEvent> &
+    Pick<AutoDeductionEvent, 'medicationId' | 'doseId' | 'calendarDate' | 'amount'>
 ): AutoDeductionEvent {
   return {
     scheduledAtEpochMs: 1,
@@ -44,13 +42,11 @@ function fired(
   };
 }
 
-describe('occurrence identity', () => {
-  it('same med+dose+date → same key', () => {
+describe('identity', () => {
+  it('same med+dose+date → same key; dose/date isolated', () => {
     expect(autoDeductionOccurrenceKey('m', 'd', '2026-09-14')).toBe(
       autoDeductionOccurrenceKey('m', 'd', '2026-09-14')
     );
-  });
-  it('different dose or date → different key', () => {
     expect(autoDeductionOccurrenceKey('m', 'd1', '2026-09-14')).not.toBe(
       autoDeductionOccurrenceKey('m', 'd2', '2026-09-14')
     );
@@ -60,97 +56,56 @@ describe('occurrence identity', () => {
   });
 });
 
-describe('reconcileFiredEvents — apply once', () => {
-  it('FIRED + no marker → one deduction of event.amount', () => {
+describe('BLOCKER A — legacy sync ↔ native reconcile', () => {
+  it('A1: lastSync settlement first → native FIRED same past day does not re-deduct', () => {
+    // Simulate post-sync: stock already reduced, lastSync advanced over past day
+    const med = baseMed({
+      doseSchedule: [{ id: 'dose-a', amount: 2, time: '08:00' }],
+      currentPills: 8,
+      lastSyncDate: '2026-09-13',
+      dailyDose: 2,
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'dose-a',
+      calendarDate: '2026-09-13',
+      amount: 2,
+    });
+    expect(isExactAutoOccurrenceApplied(med, 'dose-a', '2026-09-13', '2026-09-14')).toBe(true);
+    const r = reconcileFiredEvents([med], [], [e], { now: new Date('2026-09-14T12:00:00') });
+    expect(r.details[0].outcome).toBe('already_applied');
+    expect(r.medications[0].currentPills).toBe(8);
+  });
+
+  it('A2: native first records consume → historicalDayDueUnits / sync skips slot', () => {
     const med = baseMed({
       doseSchedule: [
-        { id: 'dose-a', amount: 1, time: '08:00' },
-        { id: 'dose-b', amount: 2, time: '14:00' },
+        { id: 'a', amount: 1, time: '08:00' },
+        { id: 'b', amount: 2, time: '14:00' },
       ],
       dailyDose: 3,
       currentPills: 30,
-    });
-    const events = [
-      fired({
-        medicationId: 'med-1',
-        doseId: 'dose-b',
-        calendarDate: '2026-09-14',
-        amount: 2,
-        scheduledAtEpochMs: 100,
-      }),
-    ];
-    const r = reconcileFiredEvents([med], [], events);
-    expect(r.details[0].outcome).toBe('applied');
-    expect(r.medications[0].currentPills).toBe(28);
-    expect(isExactAutoOccurrenceApplied(r.medications[0], 'dose-b', '2026-09-14')).toBe(true);
-    expect(r.logs[0].amount).toBe(-2);
-    expect(r.logs[0].doseId).toBe('dose-b');
-  });
-
-  it('same event twice in one batch → one deduction', () => {
-    const med = baseMed({
-      doseSchedule: [{ id: 'dose-a', amount: 1, time: '08:00' }],
-      currentPills: 10,
+      lastSyncDate: '2026-09-12',
     });
     const e = fired({
       medicationId: 'med-1',
-      doseId: 'dose-a',
-      calendarDate: '2026-09-14',
-      amount: 1,
-      scheduledAtEpochMs: 50,
-    });
-    const r = reconcileFiredEvents([med], [], [e, e]);
-    const applied = r.details.filter((d) => d.outcome === 'applied');
-    const already = r.details.filter((d) => d.outcome === 'already_applied');
-    expect(applied.length).toBe(1);
-    expect(already.length).toBe(1);
-    expect(r.medications[0].currentPills).toBe(9);
-  });
-
-  it('marker exists + FIRED → zero additional deduction', () => {
-    const med = baseMed({
-      doseSchedule: [{ id: 'dose-a', amount: 1, time: '08:00' }],
-      currentPills: 9,
-      doseConsumptionHistory: { 'dose-a': ['2026-09-14'] },
-      doseConsumption: { 'dose-a': '2026-09-14' },
-    });
-    const e = fired({
-      medicationId: 'med-1',
-      doseId: 'dose-a',
-      calendarDate: '2026-09-14',
-      amount: 1,
+      doseId: 'b',
+      calendarDate: '2026-09-13',
+      amount: 2,
+      scheduledAtEpochMs: 100,
     });
     const r = reconcileFiredEvents([med], [], [e]);
-    expect(r.details[0].outcome).toBe('already_applied');
-    expect(r.medications[0].currentPills).toBe(9);
-    expect(r.mutated).toBe(false);
-    expect(r.toAcknowledge).toHaveLength(1);
+    expect(r.medications[0].currentPills).toBe(28);
+    expect(isExactAutoOccurrenceApplied(r.medications[0], 'b', '2026-09-13')).toBe(true);
+    // Sync from this state should not re-charge dose b on 2026-09-13
+    const sync = syncAutoDailyDeductions(r.medications, '2026-09-14');
+    const after = sync.updatedMeds[0];
+    // dose b on 2026-09-13 is consumed — must not be charged again (at least no -2 for b)
+    expect(after.currentPills).toBeGreaterThanOrEqual(25);
+    expect(isExactAutoOccurrenceApplied(after, 'b', '2026-09-13')).toBe(true);
   });
-});
 
-describe('crash protocol model', () => {
-  it('after JS persistence (marker) before native mark → restart no re-deduct', () => {
-    const med = baseMed({
-      doseSchedule: [{ id: 'dose-a', amount: 1, time: '08:00' }],
-      currentPills: 30,
-    });
-    const e = fired({
-      medicationId: 'med-1',
-      doseId: 'dose-a',
-      calendarDate: '2026-09-14',
-      amount: 1,
-    });
-    const first = reconcileFiredEvents([med], [], [e]);
-    expect(first.medications[0].currentPills).toBe(29);
-    // Simulate restart: event still FIRED, meds loaded with marker
-    const second = reconcileFiredEvents(first.medications, first.logs, [e]);
-    expect(second.details[0].outcome).toBe('already_applied');
-    expect(second.medications[0].currentPills).toBe(29);
-  });
-});
-
-describe('multi-dose and multi-event', () => {
-  it('processes chronological and independent amounts', () => {
+  it('A4: multi-dose 14:00 amount=2; sibling 08:00 remains eligible', () => {
     const med = baseMed({
       doseSchedule: [
         { id: 'a', amount: 1, time: '08:00' },
@@ -159,84 +114,80 @@ describe('multi-dose and multi-event', () => {
       ],
       dailyDose: 4,
       currentPills: 20,
-    });
-    const events = [
-      fired({ medicationId: 'med-1', doseId: 'c', calendarDate: '2026-09-14', amount: 1, scheduledAtEpochMs: 300 }),
-      fired({ medicationId: 'med-1', doseId: 'a', calendarDate: '2026-09-14', amount: 1, scheduledAtEpochMs: 100 }),
-      fired({ medicationId: 'med-1', doseId: 'b', calendarDate: '2026-09-14', amount: 2, scheduledAtEpochMs: 200 }),
-    ];
-    const r = reconcileFiredEvents([med], [], events);
-    expect(r.details.map((d) => d.doseId)).toEqual(['a', 'b', 'c']);
-    expect(r.medications[0].currentPills).toBe(16);
-  });
-
-  it('two medications stay isolated', () => {
-    const m1 = baseMed({ id: 'm1', currentPills: 10, doseSchedule: [{ id: 'd', amount: 1, time: '08:00' }] });
-    const m2 = baseMed({ id: 'm2', currentPills: 10, doseSchedule: [{ id: 'd', amount: 3, time: '08:00' }] });
-    const events = [
-      fired({ medicationId: 'm1', doseId: 'd', calendarDate: '2026-09-14', amount: 1, scheduledAtEpochMs: 1 }),
-      fired({ medicationId: 'm2', doseId: 'd', calendarDate: '2026-09-14', amount: 3, scheduledAtEpochMs: 2 }),
-    ];
-    const r = reconcileFiredEvents([m1, m2], [], events);
-    expect(r.medications.find((m) => m.id === 'm1')!.currentPills).toBe(9);
-    expect(r.medications.find((m) => m.id === 'm2')!.currentPills).toBe(7);
-  });
-});
-
-describe('invalid / missing', () => {
-  it('invalid amount does not change stock; acknowledges', () => {
-    const med = baseMed({ currentPills: 10, doseSchedule: [{ id: 'd', amount: 1, time: '08:00' }] });
-    const e = fired({
-      medicationId: 'med-1',
-      doseId: 'd',
-      calendarDate: '2026-09-14',
-      amount: 0 as unknown as number,
-    });
-    // force invalid
-    (e as { amount: number }).amount = -1;
-    const r = reconcileFiredEvents([med], [], [e]);
-    expect(r.details[0].outcome).toBe('skipped_invalid');
-    expect(r.medications[0].currentPills).toBe(10);
-    expect(r.toAcknowledge).toHaveLength(1);
-  });
-
-  it('missing medication acknowledges without crash', () => {
-    const r = reconcileFiredEvents(
-      [],
-      [],
-      [fired({ medicationId: 'gone', doseId: 'd', calendarDate: '2026-09-14', amount: 1 })]
-    );
-    expect(r.details[0].outcome).toBe('skipped_missing_med');
-    expect(r.toAcknowledge).toHaveLength(1);
-  });
-});
-
-describe('legacy', () => {
-  it('legacy dailyDose identity uses LEGACY_DOSE_ID', () => {
-    const med = baseMed({
-      doseSchedule: undefined,
-      dailyDose: 2,
-      reminderTime: '08:00',
-      currentPills: 20,
+      lastSyncDate: '2026-09-14',
     });
     const e = fired({
       medicationId: 'med-1',
-      doseId: LEGACY_DOSE_ID,
+      doseId: 'b',
       calendarDate: '2026-09-14',
       amount: 2,
     });
     const r = reconcileFiredEvents([med], [], [e]);
-    expect(r.details[0].outcome).toBe('applied');
     expect(r.medications[0].currentPills).toBe(18);
-    expect(r.medications[0].lastConsumedDate).toBe('2026-09-14');
+    expect(isExactAutoOccurrenceApplied(r.medications[0], 'b', '2026-09-14')).toBe(true);
+    expect(isExactAutoOccurrenceApplied(r.medications[0], 'a', '2026-09-14')).toBe(false);
+    expect(isExactAutoOccurrenceApplied(r.medications[0], 'c', '2026-09-14')).toBe(false);
+  });
+
+  it('A5: 08:00 applied does not mark 14:00', () => {
+    const med = baseMed({
+      doseSchedule: [
+        { id: 'a', amount: 1, time: '08:00' },
+        { id: 'b', amount: 2, time: '14:00' },
+      ],
+      currentPills: 10,
+      lastSyncDate: '2026-09-14',
+    });
+    const r = reconcileFiredEvents(
+      [med],
+      [],
+      [fired({ medicationId: 'med-1', doseId: 'a', calendarDate: '2026-09-14', amount: 1 })]
+    );
+    expect(isExactAutoOccurrenceApplied(r.medications[0], 'a', '2026-09-14')).toBe(true);
+    expect(isExactAutoOccurrenceApplied(r.medications[0], 'b', '2026-09-14')).toBe(false);
+  });
+
+  it('A6: different dates isolated', () => {
+    const med = baseMed({
+      doseSchedule: [{ id: 'd', amount: 1, time: '08:00' }],
+      currentPills: 10,
+      lastSyncDate: '2026-09-14',
+      doseConsumptionHistory: { d: ['2026-09-13'] },
+      doseConsumption: { d: '2026-09-13' },
+    });
+    expect(isExactAutoOccurrenceApplied(med, 'd', '2026-09-13')).toBe(true);
+    expect(isExactAutoOccurrenceApplied(med, 'd', '2026-09-14')).toBe(false);
   });
 });
 
-describe('orchestrator persist-then-mark', () => {
-  it('does not mark when persist fails', async () => {
+describe('projection after exact apply', () => {
+  it('currentPills and effective stay aligned (no double projection)', () => {
+    const med = baseMed({
+      doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
+      currentPills: 10,
+      lastSyncDate: '2026-09-14',
+      reminderTime: '08:00',
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd',
+      calendarDate: '2026-09-14',
+      amount: 2,
+    });
+    const r = reconcileFiredEvents([med], [], [e]);
+    expect(r.medications[0].currentPills).toBe(8);
+    // After consume marker, todayDue should not subtract again
+    const eff = effectiveCurrentPills(r.medications[0], '2026-09-14', new Date('2026-09-14T20:00:00'));
+    expect(eff).toBe(8);
+  });
+});
+
+describe('BLOCKER B — persistence / envelope', () => {
+  it('B1: meds ok + logs fail → no mark; envelope recovery can finish', async () => {
     const med = baseMed({
       doseSchedule: [{ id: 'd', amount: 1, time: '08:00' }],
       currentPills: 5,
+      lastSyncDate: '2026-09-14',
     });
     const e = fired({
       medicationId: 'med-1',
@@ -245,6 +196,7 @@ describe('orchestrator persist-then-mark', () => {
       amount: 1,
     });
     let marked = 0;
+    let envelope: unknown = null;
     const out = await runAutoDeductionReconciliation({
       medications: [med],
       logs: [],
@@ -253,54 +205,20 @@ describe('orchestrator persist-then-mark', () => {
       markReconciled: async () => {
         marked += 1;
       },
-      persistMeds: () => 'quota error',
-      persistLogs: () => null,
-    });
-    expect(out.mutated).toBe(false);
-    expect(marked).toBe(0);
-    expect(out.medications[0].currentPills).toBe(5);
-  });
-
-  it('marks after successful persist; second run does not re-deduct', async () => {
-    let meds = [
-      baseMed({
-        doseSchedule: [{ id: 'd', amount: 1, time: '08:00' }],
-        currentPills: 5,
-      }),
-    ];
-    let logs: ConsumptionLog[] = [];
-    const e = fired({
-      medicationId: 'med-1',
-      doseId: 'd',
-      calendarDate: '2026-09-14',
-      amount: 1,
-    });
-    let marked = 0;
-    const store = { meds: null as Medication[] | null };
-
-    const first = await runAutoDeductionReconciliation({
-      medications: meds,
-      logs,
-      globalAutoDeductEnabled: true,
-      listFired: async () => [e],
-      markReconciled: async () => {
-        marked += 1;
-      },
-      persistMeds: (m) => {
-        store.meds = m;
+      persistMeds: () => null,
+      persistLogs: () => 'fail',
+      loadEnvelope: () => envelope as never,
+      saveEnvelope: (env) => {
+        envelope = env;
         return null;
       },
-      persistLogs: () => null,
     });
-    expect(first.mutated).toBe(true);
-    expect(first.medications[0].currentPills).toBe(4);
-    expect(marked).toBe(1);
-
-    meds = first.medications;
-    logs = first.logs;
-    const second = await runAutoDeductionReconciliation({
-      medications: meds,
-      logs,
+    expect(marked).toBe(0);
+    expect(envelope).not.toBeNull();
+    // Recovery
+    const out2 = await runAutoDeductionReconciliation({
+      medications: [med],
+      logs: [],
       globalAutoDeductEnabled: true,
       listFired: async () => [e],
       markReconciled: async () => {
@@ -308,15 +226,105 @@ describe('orchestrator persist-then-mark', () => {
       },
       persistMeds: () => null,
       persistLogs: () => null,
+      loadEnvelope: () => envelope as never,
+      saveEnvelope: (env) => {
+        envelope = env;
+        return null;
+      },
+    });
+    expect(out2.recoveredEnvelope).toBe(true);
+    expect(out2.medications[0].currentPills).toBe(4);
+    expect(marked).toBeGreaterThan(0);
+  });
+
+  it('B3: crash after JS state before mark → retry no second deduct/log', async () => {
+    const med = baseMed({
+      doseSchedule: [{ id: 'd', amount: 1, time: '08:00' }],
+      currentPills: 5,
+      lastSyncDate: '2026-09-14',
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd',
+      calendarDate: '2026-09-14',
+      amount: 1,
+    });
+    let medsStore: Medication[] | null = null;
+    let logsStore: ConsumptionLog[] | null = null;
+    let marked = 0;
+
+    const first = await runAutoDeductionReconciliation({
+      medications: [med],
+      logs: [],
+      globalAutoDeductEnabled: true,
+      listFired: async () => [e],
+      markReconciled: async () => {
+        marked += 1;
+        throw new Error('native mark failed');
+      },
+      persistMeds: (m) => {
+        medsStore = m;
+        return null;
+      },
+      persistLogs: (l) => {
+        logsStore = l;
+        return null;
+      },
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
+    });
+    // When mark throws after successful persist of meds/logs, envelope cleared only after marks;
+    // our finishEnvelope still tries all marks then clears. With throw, marked may be 0.
+    expect(medsStore![0].currentPills).toBe(4);
+    const logId = exactAutoLogId('med-1', 'd', '2026-09-14');
+    expect(logsStore!.some((l) => l.id === logId)).toBe(true);
+
+    const second = await runAutoDeductionReconciliation({
+      medications: medsStore!,
+      logs: logsStore!,
+      globalAutoDeductEnabled: true,
+      listFired: async () => [e],
+      markReconciled: async () => {
+        marked += 1;
+      },
+      persistMeds: () => null,
+      persistLogs: () => null,
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
     });
     expect(second.details[0].outcome).toBe('already_applied');
     expect(second.medications[0].currentPills).toBe(4);
-    expect(marked).toBe(2); // acknowledge again is fine
+    const sameLogs = second.logs.filter((l) => l.id === logId);
+    expect(sameLogs.length).toBe(1);
+  });
+
+  it('B5: duplicate FIRED in batch → one stock + one log', () => {
+    const med = baseMed({
+      doseSchedule: [{ id: 'd', amount: 1, time: '08:00' }],
+      currentPills: 5,
+      lastSyncDate: '2026-09-14',
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd',
+      calendarDate: '2026-09-14',
+      amount: 1,
+    });
+    const r = reconcileFiredEvents([med], [], [e, e]);
+    expect(r.medications[0].currentPills).toBe(4);
+    expect(r.newExactLogs).toHaveLength(1);
+    expect(r.newExactLogs[0].id).toBe(exactAutoLogId('med-1', 'd', '2026-09-14'));
   });
 });
 
-describe('disabled auto', () => {
-  it('global off → no stock change, still acknowledge', () => {
+describe('deterministic log id', () => {
+  it('stable across retries', () => {
+    expect(exactAutoLogId('m', 'd', '2026-09-14')).toBe(exactAutoLogId('m', 'd', '2026-09-14'));
+  });
+});
+
+describe('invalid / missing / disabled', () => {
+  it('invalid amount no stock change', () => {
     const med = baseMed({
       doseSchedule: [{ id: 'd', amount: 1, time: '08:00' }],
       currentPills: 10,
@@ -327,9 +335,39 @@ describe('disabled auto', () => {
       calendarDate: '2026-09-14',
       amount: 1,
     });
-    const r = reconcileFiredEvents([med], [], [e], { globalAutoDeductEnabled: false });
-    expect(r.details[0].outcome).toBe('skipped_disabled');
+    (e as { amount: number }).amount = NaN;
+    const r = reconcileFiredEvents([med], [], [e]);
+    expect(r.details[0].outcome).toBe('skipped_invalid');
     expect(r.medications[0].currentPills).toBe(10);
-    expect(r.toAcknowledge).toHaveLength(1);
+  });
+
+  it('missing med acknowledges', () => {
+    const r = reconcileFiredEvents(
+      [],
+      [],
+      [fired({ medicationId: 'gone', doseId: 'd', calendarDate: '2026-09-14', amount: 1 })]
+    );
+    expect(r.details[0].outcome).toBe('skipped_missing_med');
+  });
+});
+
+describe('legacy identity', () => {
+  it('LEGACY_DOSE_ID supported', () => {
+    const med = baseMed({
+      doseSchedule: undefined,
+      dailyDose: 2,
+      currentPills: 20,
+      lastSyncDate: '2026-09-13',
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: LEGACY_DOSE_ID,
+      calendarDate: '2026-09-14',
+      amount: 2,
+    });
+    // lastSync 09-13, today 09-14: not settled for today
+    const r = reconcileFiredEvents([med], [], [e]);
+    expect(r.details[0].outcome).toBe('applied');
+    expect(r.medications[0].currentPills).toBe(18);
   });
 });

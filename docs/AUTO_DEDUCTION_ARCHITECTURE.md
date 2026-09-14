@@ -1036,3 +1036,39 @@ Applying an occurrence records consumption so `todayDueUnits` no longer includes
 ### Known Phase 4 dependency
 Full Take/Restore race matrix (restore after exact auto, future suppress policy) remains Phase 4. Phase 3 uses consumption/skip markers so Take’s `already_consumed` and Restore’s history remain the primary business guards.
 
+
+### Phase 3 correction — legacy sync ↔ exact events + durability
+
+#### Double-deduction prevention (legacy sync × exact reconcile)
+Shared occurrence terminal conditions (`isExactAutoOccurrenceApplied`):
+
+1. **Per-dose markers** — `doseConsumption` / history / `doseSkippedHistory` / legacy `lastConsumedDate`
+2. **Day-settlement horizon** — if `calendarDate < today` and `calendarDate <= lastSyncDate`, the day was already folded into `currentPills` by `syncAutoDailyDeductions` (gated multi-dose uses `historicalDayDueUnits` which skips consumed/skipped slots)
+
+Exact reconcile **records consume markers** when it applies, so later legacy sync cannot re-charge that slot.
+
+Legacy sync does **not** invent exact consume markers for unrecorded historical slots; it keeps the existing day-settlement fallback. Exact FIRED events for those already-settled past days are acknowledged without a second stock hit via the lastSync horizon rule.
+
+#### Serialization
+`withAutoStockMutationGate` serializes legacy hydration sync and exact reconciliation so they cannot interleave from the same process snapshot.
+
+#### Durability (not a true multi-key transaction)
+`android_med_tracker_exact_auto_envelope_v1` holds the intended `{ medications, logs, toAcknowledge }` after a mutating reconcile.
+
+Order:
+
+```text
+write envelope
+  → write meds key
+  → write logs key
+  → mark native RECONCILED
+  → clear envelope
+```
+
+If meds/logs write fails, envelope remains; next startup recovers from envelope (idempotent log ids `exact-auto:{med}:{dose}:{date}`). React `usePersistentEffect` is **not** treated as a transaction.
+
+Native `RECONCILED` is never the sole durability proof of JS stock — markers + envelope + deterministic logs are.
+
+#### Phase 4 still deferred
+Full Take/Restore race product rules remain Phase 4; Phase 3 shares consume/skip identity with Take for basic double-deduct prevention.
+

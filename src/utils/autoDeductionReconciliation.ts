@@ -1,21 +1,14 @@
 /**
  * Phase 3 — JS reconciliation of native exact-time auto-deduction FIRED events.
  *
- * Crash-safe protocol (localStorage + native SharedPreferences are not one TX):
+ * Idempotency vs legacy syncAutoDailyDeductions:
+ * - Per-dose consume/skip markers (same as Take)
+ * - lastSyncDate day-settlement horizon: past calendar days already folded
+ *   into currentPills by gated/legacy sync are treated as applied without
+ *   inventing fake consume markers for slots that were only day-settled
  *
- *   1. Read FIRED events from native
- *   2. For each event, if JS occurrence marker already applied → acknowledge only
- *   3. Else apply stock + marker in memory, persist localStorage synchronously,
- *      then mark native RECONCILED
- *   4. If crash after persist and before mark: restart sees marker → no re-deduct,
- *      only mark RECONCILED
- *   5. If crash before persist: restart applies once
- *
- * JS occurrence marker (durable): doseConsumption / doseConsumptionHistory
- * for the occurrence (medicationId + doseId + calendarDate), same as Take.
- * Skipped occurrences (doseSkippedHistory) are also treated as terminal.
- *
- * Does NOT redesign Take/Restore (Phase 4). Does NOT touch notifications.
+ * Log identity for exact events is deterministic so retries do not create
+ * duplicate ConsumptionLog rows.
  */
 
 import type { ConsumptionLog, Medication } from '../types';
@@ -28,7 +21,6 @@ import {
   isDoseSkippedOnDate,
   recordDoseConsumed,
 } from './dateCalculations';
-import { generateId } from './id';
 import { LEGACY_DOSE_ID } from './notifications';
 
 export type ReconcileEventOutcome =
@@ -50,53 +42,92 @@ export interface ReconcileEventDetail {
 export interface ReconcileFiredResult {
   medications: Medication[];
   logs: ConsumptionLog[];
-  /** Events that need native markReconciled (applied or already_applied or safe no-op). */
   toAcknowledge: Array<{
     medicationId: string;
     doseId: string;
     calendarDate: string;
   }>;
   details: ReconcileEventDetail[];
-  /** True if medications or logs changed (stock/log mutation). */
   mutated: boolean;
+  /** Newly created exact-auto logs in this pass (for durability envelope). */
+  newExactLogs: ConsumptionLog[];
 }
 
 function isValidEventAmount(amount: unknown): amount is number {
   return typeof amount === 'number' && Number.isFinite(amount) && amount > 0;
 }
 
-function normalizeDoseId(doseId: string | undefined | null): string {
+export function normalizeExactDoseId(doseId: string | undefined | null): string {
   if (doseId == null || doseId === '') return LEGACY_DOSE_ID;
   return doseId;
 }
 
 /**
- * Whether this occurrence was already applied in JS state
- * (manual take, prior exact auto, or skip/restore terminal).
+ * Deterministic log id for one exact auto occurrence (retry-safe).
+ * Not used for legacy bulk auto_daily logs from syncAutoDailyDeductions.
+ */
+export function exactAutoLogId(
+  medicationId: string,
+  doseId: string,
+  calendarDate: string
+): string {
+  const d = normalizeExactDoseId(doseId);
+  // Avoid characters that are awkward in some storage contexts; keep readable.
+  return `exact-auto:${medicationId}:${d}:${calendarDate}`;
+}
+
+export function findExactAutoLog(
+  logs: ConsumptionLog[],
+  medicationId: string,
+  doseId: string,
+  calendarDate: string
+): ConsumptionLog | undefined {
+  const id = exactAutoLogId(medicationId, doseId, calendarDate);
+  return logs.find((l) => l.id === id);
+}
+
+/**
+ * Whether this occurrence is already reflected in JS stock semantics.
+ *
+ * Sources (any one is enough):
+ * 1. dose consume / skip history (Take, prior exact apply, Restore skip)
+ * 2. legacy lastConsumedDate for single-dose
+ * 3. lastSyncDate day-settlement horizon — past days already settled into
+ *    currentPills by syncAutoDailyDeductions (no fake consume markers invented)
  */
 export function isExactAutoOccurrenceApplied(
   med: Medication,
   doseId: string,
-  calendarDate: string
+  calendarDate: string,
+  todayStr: string = getTodayDateString()
 ): boolean {
-  const id = normalizeDoseId(doseId);
-  if (id === LEGACY_DOSE_ID || !Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0) {
-    // Legacy: lastConsumedDate or consumption on synthetic id
+  const id = normalizeExactDoseId(doseId);
+  const multi = Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0;
+
+  if (!multi || id === LEGACY_DOSE_ID) {
     if (med.lastConsumedDate === calendarDate) return true;
     if (isDoseConsumedOnDate(med, LEGACY_DOSE_ID, calendarDate)) return true;
     if (isDoseSkippedOnDate(med, LEGACY_DOSE_ID, calendarDate)) return true;
-    return false;
+  } else {
+    if (isDoseConsumedOnDate(med, id, calendarDate)) return true;
+    if (isDoseSkippedOnDate(med, id, calendarDate)) return true;
   }
-  if (isDoseConsumedOnDate(med, id, calendarDate)) return true;
-  if (isDoseSkippedOnDate(med, id, calendarDate)) return true;
+
+  const lastSync = med.lastSyncDate;
+  if (lastSync && calendarDate.length === 10) {
+    // Past calendar day already included in day settlement into currentPills
+    if (calendarDate < todayStr && calendarDate <= lastSync) {
+      return true;
+    }
+    // Legacy non-schedule: sync settles today when lastSync advances to today
+    if (!multi && calendarDate === todayStr && lastSync === todayStr) {
+      return true;
+    }
+  }
+
   return false;
 }
 
-/**
- * Apply one exact auto event to a medication (pure).
- * Settles past due for gated multi-dose (mirrors consumeDose), then deducts
- * event.amount and records consumption marker.
- */
 export function applyExactAutoEventToMedication(
   med: Medication,
   event: AutoDeductionEvent,
@@ -106,21 +137,18 @@ export function applyExactAutoEventToMedication(
     return { ok: false, reason: 'invalid_amount' };
   }
 
-  const doseId = normalizeDoseId(event.doseId);
+  const doseId = normalizeExactDoseId(event.doseId);
   const calendarDate = event.calendarDate;
   if (!calendarDate || calendarDate.length !== 10) {
     return { ok: false, reason: 'invalid_calendarDate' };
   }
 
-  if (isExactAutoOccurrenceApplied(med, doseId, calendarDate)) {
+  const todayStr = getTodayDateString();
+  if (isExactAutoOccurrenceApplied(med, doseId, calendarDate, todayStr)) {
     return { ok: false, reason: 'already_applied' };
   }
 
-  const todayStr = getTodayDateString();
   const breakdown = computeDueDoseBreakdown(med, now, todayStr);
-
-  // Settle past fully-elapsed days into snapshot before deducting this slot
-  // (same idea as consumeDose for gated multi-dose).
   const settleBase = breakdown.gated
     ? Math.max(0, med.currentPills - breakdown.pastDueUnits)
     : Math.max(0, med.currentPills);
@@ -134,7 +162,6 @@ export function applyExactAutoEventToMedication(
 
   if (doseId === LEGACY_DOSE_ID || !Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0) {
     lastConsumedDate = calendarDate;
-    // Also record under LEGACY_DOSE_ID when history maps are used
     const recorded = recordDoseConsumed(med, LEGACY_DOSE_ID, calendarDate);
     nextConsumption = recorded.doseConsumption;
     nextHistory = recorded.doseConsumptionHistory;
@@ -162,12 +189,8 @@ export function applyExactAutoEventToMedication(
     }
   }
 
-  // lastSyncDate: after applying an occurrence, keep remaining same-day
-  // projection coherent — use calendarDate of the event when it is today
-  // or later; otherwise leave existing unless past settlement moved base.
   let lastSyncDate = med.lastSyncDate || todayStr;
   if (breakdown.gated && breakdown.pastDueUnits > 0) {
-    // Past units settled into snapshot; align lastSync like settlement helpers.
     lastSyncDate = todayStr;
   }
 
@@ -181,7 +204,7 @@ export function applyExactAutoEventToMedication(
   };
 
   const log: ConsumptionLog = {
-    id: generateId('log'),
+    id: exactAutoLogId(med.id, doseId, calendarDate),
     medicationId: med.id,
     medicationName: med.name,
     type: 'auto_daily',
@@ -195,12 +218,6 @@ export function applyExactAutoEventToMedication(
   return { ok: true, updatedMed, log };
 }
 
-/**
- * Pure reconciliation of a list of FIRED events against current JS state.
- * Deterministic order: scheduledAtEpochMs ascending, then occurrence key.
- *
- * Does not call native APIs. Caller persists and marks RECONCILED.
- */
 export function reconcileFiredEvents(
   medications: Medication[],
   logs: ConsumptionLog[],
@@ -212,6 +229,7 @@ export function reconcileFiredEvents(
 ): ReconcileFiredResult {
   const now = options.now ?? new Date();
   const globalOn = options.globalAutoDeductEnabled !== false;
+  const todayStr = getTodayDateString();
 
   const sorted = [...events].sort((a, b) => {
     const ta = Number(a.scheduledAtEpochMs) || 0;
@@ -227,14 +245,15 @@ export function reconcileFiredEvents(
     medById.set(m.id, m);
   }
 
-  const newLogs: ConsumptionLog[] = [];
+  let workingLogs = [...logs];
+  const newExactLogs: ConsumptionLog[] = [];
   const details: ReconcileEventDetail[] = [];
   const toAcknowledge: ReconcileFiredResult['toAcknowledge'] = [];
   let mutated = false;
 
   for (const event of sorted) {
     const medicationId = event.medicationId ?? '';
-    const doseId = normalizeDoseId(event.doseId);
+    const doseId = normalizeExactDoseId(event.doseId);
     const calendarDate = event.calendarDate ?? '';
     const occurrenceKey = autoDeductionOccurrenceKey(medicationId, doseId, calendarDate);
     const amount = event.amount;
@@ -249,13 +268,11 @@ export function reconcileFiredEvents(
 
     if (!medicationId || !calendarDate) {
       details.push({ ...baseDetail, outcome: 'skipped_invalid' });
-      // Do not acknowledge malformed identity — leave FIRED for inspection
       continue;
     }
 
     if (!isValidEventAmount(amount)) {
       details.push({ ...baseDetail, outcome: 'skipped_invalid' });
-      // Acknowledge invalid amount so the queue does not grow forever
       toAcknowledge.push({ medicationId, doseId, calendarDate });
       continue;
     }
@@ -263,19 +280,24 @@ export function reconcileFiredEvents(
     const med = medById.get(medicationId);
     if (!med) {
       details.push({ ...baseDetail, outcome: 'skipped_missing_med' });
-      // Deleted medication: acknowledge without stock change
       toAcknowledge.push({ medicationId, doseId, calendarDate });
       continue;
     }
 
     if (!globalOn || med.autoDeductEnabled === false) {
       details.push({ ...baseDetail, outcome: 'skipped_disabled' });
-      // Policy: no-op + acknowledge when auto disabled (avoid unbounded FIRED queue)
       toAcknowledge.push({ medicationId, doseId, calendarDate });
       continue;
     }
 
-    if (isExactAutoOccurrenceApplied(med, doseId, calendarDate)) {
+    // Durable log already present for this occurrence → stock marker path
+    if (findExactAutoLog(workingLogs, medicationId, doseId, calendarDate)) {
+      details.push({ ...baseDetail, outcome: 'already_applied' });
+      toAcknowledge.push({ medicationId, doseId, calendarDate });
+      continue;
+    }
+
+    if (isExactAutoOccurrenceApplied(med, doseId, calendarDate, todayStr)) {
       details.push({ ...baseDetail, outcome: 'already_applied' });
       toAcknowledge.push({ medicationId, doseId, calendarDate });
       continue;
@@ -294,19 +316,20 @@ export function reconcileFiredEvents(
     }
 
     medById.set(medicationId, applied.updatedMed);
-    newLogs.push(applied.log);
+    workingLogs = [applied.log, ...workingLogs];
+    newExactLogs.push(applied.log);
     mutated = true;
     details.push({ ...baseDetail, outcome: 'applied' });
     toAcknowledge.push({ medicationId, doseId, calendarDate });
   }
 
   const updatedMeds = medications.map((m) => medById.get(m.id) ?? m);
-  // Preserve order; also include any meds only in map if needed (same set)
   return {
     medications: updatedMeds,
-    logs: newLogs.length > 0 ? [...newLogs, ...logs] : logs,
+    logs: workingLogs,
     toAcknowledge,
     details,
     mutated,
+    newExactLogs,
   };
 }

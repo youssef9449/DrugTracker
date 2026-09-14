@@ -522,6 +522,48 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
       1
     );
   });
+
+  it('envelopePersistenceFailureDoesNotSetPartialNativeAck', async () => {
+    // Envelope present + JS recovery persist fails → recoveredEnvelope true,
+    // but no markReconciled attempt occurred, so partialNativeAck must be false.
+    const med = baseMed({
+      doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
+      currentPills: 8,
+      lastSyncDate: '2026-09-14',
+    });
+    const envelope = {
+      version: 1 as const,
+      status: 'js_ready' as const,
+      medications: [med],
+      logs: [],
+      toAcknowledge: [
+        { medicationId: 'med-1', doseId: 'd', calendarDate: '2026-09-14' },
+      ],
+      createdAt: '2026-09-14T12:00:00.000Z',
+    };
+    let markCalls = 0;
+
+    const result = await runAutoDeductionReconciliation({
+      alreadyInGate: true,
+      medications: [baseMed({ currentPills: 10, lastSyncDate: '2026-09-14' })],
+      logs: [],
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async () => {
+        markCalls += 1;
+        return { ok: true, changed: true };
+      },
+      persistMeds: () => 'persist_failed',
+      persistLogs: () => null,
+      loadEnvelope: () => envelope as never,
+      saveEnvelope: () => null,
+    });
+
+    expect(result.recoveredEnvelope).toBe(true);
+    expect(result.partialNativeAck).toBe(false);
+    expect(result.markedCount).toBe(0);
+    expect(markCalls).toBe(0);
+  });
 });
 
 describe('multi-dose', () => {

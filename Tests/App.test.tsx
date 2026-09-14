@@ -621,7 +621,8 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
     expect(scheduleCriticalAlarm).not.toHaveBeenCalled();
   });
 
-  it('undoes only the latest refill and persists the reversal marker', async () => {
+  // Undo refill was removed from the card UI per user request, logic retained for future usage
+  it.skip('undoes only the latest refill and persists the reversal marker', async () => {
     const today = new Date().toISOString().slice(0, 10);
     localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([{
       id: 'med-undo',
@@ -673,7 +674,8 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
     });
   });
 
-  it('allows undoing multiple refills sequentially (regression: undo only worked once)', async () => {
+  // Undo refill was removed from the card UI per user request, logic retained for future usage
+  it.skip('allows undoing multiple refills sequentially (regression: undo only worked once)', async () => {
     const today = new Date().toISOString().slice(0, 10);
     localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([{
       id: 'med-seq',

@@ -1,7 +1,6 @@
 import type { FC } from 'react';
 import { AlertTriangle, AlertCircle, ShoppingBag, ShoppingCart } from 'lucide-react';
 import { MedicationWithStatus } from '../types';
-import { getDepletionDate } from '../utils/dateCalculations';
 
 interface LowStockBannerProps {
   medicationsWithStatus: MedicationWithStatus[];
@@ -12,9 +11,7 @@ export const LowStockBanner: FC<LowStockBannerProps> = ({
   medicationsWithStatus,
   onNavigateToShopping,
 }) => {
-  // #97: consume the pre-computed medicationsWithStatus from App.tsx
-  // instead of calling calculateMedicationStatus 3x per med. The status
-  // was already computed once by the medicationsWithStatus memo (#88).
+  // Consume pre-computed status
   const lowStockMeds = medicationsWithStatus.filter(({ statusInfo }) =>
     statusInfo.status === 'out_of_stock' ||
     statusInfo.status === 'critical' ||
@@ -23,14 +20,14 @@ export const LowStockBanner: FC<LowStockBannerProps> = ({
 
   if (lowStockMeds.length === 0) {
     return (
-      <div className="mx-4 mt-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between shadow-xs">
+      <div className="mx-3 mt-2.5 p-3 bg-emerald-50/80 border border-emerald-200/70 rounded-2xl flex items-center justify-between shadow-2xs">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-600">
+          <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 shrink-0">
             <ShoppingBag className="w-4 h-4" />
           </div>
           <div>
-            <h4 className="text-xs font-bold text-emerald-900">مخزونك في أمان تام</h4>
-            <p className="text-[11px] text-emerald-700">الاستهلاك اليومي يُخصم تلقائياً وكل أدويتك تكفي لفترة مريحة.</p>
+            <h4 className="text-xs font-bold text-emerald-950">المخزون في أمان</h4>
+            <p className="text-[11px] text-emerald-700">جميع الأدوية تكفي لفترة كافية ولا توجد نواقص حالياً.</p>
           </div>
         </div>
       </div>
@@ -41,75 +38,62 @@ export const LowStockBanner: FC<LowStockBannerProps> = ({
     ({ statusInfo }) => statusInfo.status === 'out_of_stock'
   ).length;
 
+  const isUrgent = outOfStockCount > 0;
+
   return (
     <div
-      className={`mx-4 mt-3 p-3.5 rounded-2xl border transition-all shadow-xs ${
-        outOfStockCount > 0
-          ? 'bg-rose-50 border-rose-200 text-rose-950'
-          : 'bg-amber-50 border-amber-200 text-amber-950'
+      className={`mx-3 mt-2.5 p-3 rounded-2xl border transition-all shadow-2xs ${
+        isUrgent
+          ? 'bg-rose-50/70 border-rose-200/80'
+          : 'bg-amber-50/70 border-amber-200/80'
       }`}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-start gap-2.5">
+      <div className="flex items-center justify-between gap-2.5">
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
           <div
-            className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
-              outOfStockCount > 0
-                ? 'bg-rose-100 text-rose-600'
-                : 'bg-amber-100 text-amber-600'
+            className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
+              isUrgent
+                ? 'bg-rose-100 text-rose-700'
+                : 'bg-amber-100 text-amber-800'
             }`}
           >
-            {outOfStockCount > 0 ? (
+            {isUrgent ? (
               <AlertCircle className="w-5 h-5 animate-pulse" />
             ) : (
               <AlertTriangle className="w-5 h-5" />
             )}
           </div>
-          <div>
-            <h4 className="text-xs font-bold">
-              {outOfStockCount > 0
-                ? `تنبيه عاجل: ${outOfStockCount} دواء نفد مخزونه بالكامل!`
-                : `تنبيه: ${lowStockMeds.length} أدوية اقتربت من النفاذ`}
-            </h4>
-            <p className="text-[11px] mt-0.5 opacity-90 leading-relaxed">
-              بناءً على حساب الاستهلاك التلقائي، يُفضل شراء عبوات جديدة قريباً.
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <h4 className="text-xs font-bold text-slate-900">
+                {isUrgent
+                  ? `${outOfStockCount} دواء نفد مخزونه بالكامل`
+                  : `${lowStockMeds.length} أدوية اقتربت من النفاذ`}
+              </h4>
+              {isUrgent && lowStockMeds.length > outOfStockCount && (
+                <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-rose-100/90 text-rose-800 shrink-0">
+                  +{lowStockMeds.length - outOfStockCount} في خطر النفاذ
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-600 truncate mt-0.5">
+              يُفضل طلب عبوات جديدة قريباً لضمان استمرارية العلاج
             </p>
           </div>
         </div>
 
         <button
+          type="button"
           onClick={onNavigateToShopping}
-          className={`shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition active:scale-95 shadow-xs ${
-            outOfStockCount > 0
+          className={`shrink-0 h-8 px-3.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-transform active:scale-95 shadow-2xs ${
+            isUrgent
               ? 'bg-rose-600 hover:bg-rose-700 text-white'
               : 'bg-amber-600 hover:bg-amber-700 text-white'
           }`}
         >
           <ShoppingCart className="w-3.5 h-3.5" />
-          <span>فتح قائمة الشراء</span>
+          <span>قائمة الشراء</span>
         </button>
-      </div>
-
-      {/* Pill tags with depletion dates */}
-      <div className="mt-2.5 pt-2 border-t border-rose-200/50 flex flex-wrap gap-1.5">
-        {lowStockMeds.map(({ med, statusInfo }) => {
-          const { status } = statusInfo;
-          const depletion = getDepletionDate(med);
-          return (
-            <span
-              key={med.id}
-              className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-lg font-medium ${
-                status === 'out_of_stock'
-                  ? 'bg-rose-200 text-rose-900 font-bold'
-                  : 'bg-amber-100 text-amber-900'
-              }`}
-            >
-              <span>{med.name}:</span>
-              <span className="font-mono text-[10px]">
-                {status === 'out_of_stock' ? 'نفد اليوم' : `ينفد ${depletion.formattedArabic}`}
-              </span>
-            </span>
-          );
-        })}
       </div>
     </div>
   );

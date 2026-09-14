@@ -30,6 +30,23 @@ public final class AutoDeductionContract {
     public static final String PREFS_SCHEDULES = "drugtracker_auto_deduction_schedules_v1";
     /** Independent prefs for pending-fire recovery when primary FIRED commit fails. */
     public static final String PREFS_PENDING = "drugtracker_auto_deduction_pending_v1";
+    /**
+     * Durable cancellation tombstones keyed by occurrence identity.
+     * Survives process death so restore and AutoDeductionReceiver cannot promote a
+     * cancelled occurrence to FIRED (stale schedule metadata or stale alarm delivery).
+     * A later schedule with newer scheduleVersion supersedes the tombstone.
+     */
+    public static final String PREFS_CANCELLED = "drugtracker_auto_deduction_cancelled_v1";
+
+    /**
+     * Durable monotonic ordering sequence for scheduleVersion / cancellation tokens.
+     * Survives process death so (millis, seq) comparisons remain reconstructible
+     * after reboot. Key {@link #KEY_ORDERING_SEQ} holds the last allocated value.
+     */
+    public static final String PREFS_ORDERING = "drugtracker_auto_deduction_ordering_v1";
+
+    /** SharedPreferences key: last allocated durable ordering sequence (long). */
+    public static final String KEY_ORDERING_SEQ = "lastAllocatedSequence";
 
     public static final String STATUS_FIRED = "FIRED";
     public static final String STATUS_RECONCILED = "RECONCILED";
@@ -97,6 +114,11 @@ public final class AutoDeductionContract {
         return !Double.isNaN(amount) && !Double.isInfinite(amount) && amount > 0;
     }
 
+    /**
+     * Strict YYYY-MM-DD validation. Rejects structurally valid but impossible dates
+     * (e.g. 2026-02-31, 2026-13-01) without relying on Calendar lenient normalization.
+     * Leap-year February 29 is accepted only for leap years.
+     */
     public static boolean isValidCalendarDate(String date) {
         if (date == null || date.length() != 10) return false;
         for (int i = 0; i < 10; i++) {
@@ -107,7 +129,40 @@ public final class AutoDeductionContract {
                 return false;
             }
         }
-        return true;
+        int year;
+        int month;
+        int day;
+        try {
+            year = Integer.parseInt(date.substring(0, 4));
+            month = Integer.parseInt(date.substring(5, 7));
+            day = Integer.parseInt(date.substring(8, 10));
+        } catch (NumberFormatException e) {
+            return false;
+        }
+        if (month < 1 || month > 12) return false;
+        if (day < 1) return false;
+        int maxDay;
+        switch (month) {
+            case 1: case 3: case 5: case 7: case 8: case 10: case 12:
+                maxDay = 31;
+                break;
+            case 4: case 6: case 9: case 11:
+                maxDay = 30;
+                break;
+            case 2:
+                maxDay = isGregorianLeapYear(year) ? 29 : 28;
+                break;
+            default:
+                return false;
+        }
+        return day <= maxDay;
+    }
+
+    /** Gregorian leap-year rule (proleptic). */
+    static boolean isGregorianLeapYear(int year) {
+        if (year % 4 != 0) return false;
+        if (year % 100 != 0) return true;
+        return year % 400 == 0;
     }
 
     public static boolean isValidTimeHhmm(String time) {

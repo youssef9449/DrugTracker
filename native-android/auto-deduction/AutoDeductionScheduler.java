@@ -16,7 +16,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.TimeZone;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * One-shot exact-time auto-deduction scheduler (AlarmManager).
@@ -43,26 +42,28 @@ public final class AutoDeductionScheduler {
 
     private static final String TAG = "AutoDeductionScheduler";
     private static final String SCHEDULE_KEY_PREFIX = "sch:";
+    /** Prefs key prefix for durable cancellation tombstones (occurrence identity). */
+    private static final String CANCEL_KEY_PREFIX = "cancel:";
     /** JSON field: attempt generation token (not part of occurrence identity). */
     public static final String FIELD_SCHEDULE_VERSION = "scheduleVersion";
 
     /** Process-wide lock: metadata + AlarmManager install/cancel + rollback. */
     private static final Object SCHEDULE_LOCK = new Object();
 
-    /**
-     * Monotonic sequence mixed into version tokens.
-     * Version token = millis + "-" + seq + "-" + UUID so two attempts never share
-     * a token even under same-millisecond concurrent generation.
-     */
-    private static final AtomicLong VERSION_SEQ = new AtomicLong(0);
-
     private final Context appContext;
     private final SharedPreferences schedulePrefs;
+    private final SharedPreferences cancelPrefs;
+    /** Durable last-allocated ordering sequence (survives process death). */
+    private final SharedPreferences orderingPrefs;
 
     public AutoDeductionScheduler(Context context) {
         this.appContext = context.getApplicationContext();
         this.schedulePrefs = appContext.getSharedPreferences(
                 AutoDeductionContract.PREFS_SCHEDULES, Context.MODE_PRIVATE);
+        this.cancelPrefs = appContext.getSharedPreferences(
+                AutoDeductionContract.PREFS_CANCELLED, Context.MODE_PRIVATE);
+        this.orderingPrefs = appContext.getSharedPreferences(
+                AutoDeductionContract.PREFS_ORDERING, Context.MODE_PRIVATE);
     }
 
     public static final class ScheduleResult {
@@ -129,13 +130,29 @@ public final class AutoDeductionScheduler {
     }
 
     /**
-     * Unique attempt token for one metadata write.
-     * Not part of occurrence identity (med/dose/date).
+     * Allocate a durable ordering token for one schedule or cancel operation.
+     * Format: "{millis}-{seq}-{uuid}". Not part of occurrence identity (med/dose/date).
+     * <p>
+     * Caller MUST hold {@link #SCHEDULE_LOCK}. Sequence is read-increment-commit from
+     * durable SharedPreferences so ordering survives process death. Skipped values
+     * after a crash are acceptable; reusing an older durable seq is not.
+     *
+     * @return token, or {@code null} if the durable counter commit failed (caller
+     *         must fail the operation — do not fall back to volatile memory).
      */
-    static String newScheduleVersion() {
+    private String allocateOrderingTokenLocked() {
+        long last = orderingPrefs.getLong(AutoDeductionContract.KEY_ORDERING_SEQ, 0L);
+        long next = last + 1L;
+        boolean committed = orderingPrefs.edit()
+                .putLong(AutoDeductionContract.KEY_ORDERING_SEQ, next)
+                .commit();
+        if (!committed) {
+            Log.e(TAG, "allocateOrderingTokenLocked: durable sequence commit failed");
+            return null;
+        }
         return System.currentTimeMillis()
                 + "-"
-                + VERSION_SEQ.incrementAndGet()
+                + next
                 + "-"
                 + UUID.randomUUID().toString();
     }
@@ -260,8 +277,9 @@ public final class AutoDeductionScheduler {
 
         String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
         String prefKey = SCHEDULE_KEY_PREFIX + key;
-        String myVersion = newScheduleVersion();
 
+        // Payload without scheduleVersion — authoritative version is assigned inside
+        // SCHEDULE_LOCK so ordering vs cancellation tombstones matches lock order.
         JSONObject payload = new JSONObject();
         try {
             payload.put("medicationId", medicationId);
@@ -270,7 +288,6 @@ public final class AutoDeductionScheduler {
             payload.put("timeHhmm", timeHhmm);
             payload.put("amount", amount);
             payload.put("scheduledAtEpochMs", triggerAt);
-            payload.put(FIELD_SCHEDULE_VERSION, myVersion);
         } catch (JSONException e) {
             Log.e(TAG, "schedule payload build failed", e);
             return ScheduleResult.fail("payload_build_failed");
@@ -282,12 +299,17 @@ public final class AutoDeductionScheduler {
 
         synchronized (SCHEDULE_LOCK) {
             return scheduleOccurrenceLocked(
-                    prefKey, key, myVersion, payload, triggerAt, pi, /*requiredVersion*/ null);
+                    prefKey, key, payload, triggerAt, pi, /*requiredVersion*/ null);
         }
     }
 
     /**
      * Core scheduling transaction. Caller MUST hold {@link #SCHEDULE_LOCK}.
+     *
+     * scheduleVersion is generated here (inside the lock) so its (millis, seq)
+     * ordering token reflects serialized operation order versus concurrent
+     * cancelOccurrence tombstones — not the wall-clock time at which a thread
+     * waited for the lock. Same-millisecond operations are distinguished by seq.
      *
      * @param requiredVersion if non-null, abort unless current metadata is still
      *                        owned by this version (restore ownership guard).
@@ -296,7 +318,6 @@ public final class AutoDeductionScheduler {
     private ScheduleResult scheduleOccurrenceLocked(
             String prefKey,
             String key,
-            String myVersion,
             JSONObject payload,
             long triggerAt,
             PendingIntent pi,
@@ -310,6 +331,19 @@ public final class AutoDeductionScheduler {
             }
         }
 
+        // Authoritative durable ordering/version for this scheduling attempt — only
+        // after acquiring SCHEDULE_LOCK (same serialization boundary as cancel).
+        final String myVersion = allocateOrderingTokenLocked();
+        if (myVersion == null) {
+            return ScheduleResult.fail("ordering_sequence_write_failed");
+        }
+        try {
+            payload.put(FIELD_SCHEDULE_VERSION, myVersion);
+        } catch (JSONException e) {
+            Log.e(TAG, "schedule version attach failed", e);
+            return ScheduleResult.fail("payload_build_failed");
+        }
+
         boolean metaWritten = schedulePrefs.edit()
                 .putString(prefKey, payload.toString())
                 .commit();
@@ -317,6 +351,12 @@ public final class AutoDeductionScheduler {
             Log.e(TAG, "schedule metadata commit failed for key=" + key);
             return ScheduleResult.fail("schedule_metadata_write_failed");
         }
+
+        // New schedule metadata (with lock-ordered scheduleVersion token) supersedes
+        // any prior cancellation tombstone. Clear is best-effort: if the remove commit
+        // fails, isOccurrenceCancelledKey still treats a strictly newer schedule
+        // ordering token as active so restore/receiver do not suppress the new schedule.
+        clearCancellationTombstoneLocked(key);
 
         AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
         if (am == null) {
@@ -382,14 +422,19 @@ public final class AutoDeductionScheduler {
 
     /**
      * Cancel using the same Intent identity as schedule (action + data URI).
-     * Alarm cancel + metadata remove run under SCHEDULE_LOCK so they cannot
-     * interleave with a concurrent scheduleOccurrence for the same occurrence.
+     * Under SCHEDULE_LOCK:
+     *   1. Durable cancellation tombstone (survives process death)
+     *   2. AlarmManager.cancel
+     *   3. Remove active schedule metadata
+     * Tombstone first so a crash after alarm cancel but before metadata remove
+     * cannot later promote the stale schedule to FIRED on restore.
      *
      * Returns an explicit CancelResult:
      * SUCCESS / ALREADY_ABSENT only when the intended native state is achieved
      * (no live alarm for this occurrence + no schedule metadata, or metadata
-     * removal confirmed). FAILED when AlarmManager is unavailable or metadata
-     * remove commit fails (stale metadata must not be reported as success).
+     * removal confirmed). FAILED when AlarmManager is unavailable, tombstone
+     * write fails, or metadata remove commit fails (stale metadata must not
+     * be reported as success when cancellation intent is not durable).
      */
     public CancelResult cancelOccurrence(String medicationId, String doseId, String calendarDate) {
         if (medicationId == null || medicationId.isEmpty()
@@ -399,12 +444,32 @@ public final class AutoDeductionScheduler {
         }
         String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
         String prefKey = SCHEDULE_KEY_PREFIX + key;
+        String cancelKey = CANCEL_KEY_PREFIX + key;
 
         Intent intent = buildOccurrenceIntent(medicationId, doseId, calendarDate, 0L, 0d, null);
         PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
 
         synchronized (SCHEDULE_LOCK) {
             boolean hadMetadata = schedulePrefs.contains(prefKey);
+            boolean alreadyCancelled = cancelPrefs.contains(cancelKey);
+
+            // Durable cancellation intent before AlarmManager.cancel / metadata remove.
+            // Ordering token (same format as scheduleVersion) is allocated under
+            // SCHEDULE_LOCK from a durable sequence so same-millisecond ops and
+            // post-restart ops remain strictly ordered and reconstructible.
+            if (!alreadyCancelled) {
+                final String cancelToken = allocateOrderingTokenLocked();
+                if (cancelToken == null) {
+                    return CancelResult.fail("ordering_sequence_write_failed");
+                }
+                boolean tombstoneWritten = cancelPrefs.edit()
+                        .putString(cancelKey, cancelToken)
+                        .commit();
+                if (!tombstoneWritten) {
+                    Log.e(TAG, "cancelOccurrence: cancellation tombstone commit failed for " + key);
+                    return CancelResult.fail("cancellation_tombstone_write_failed");
+                }
+            }
 
             AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
             if (am == null) {
@@ -417,16 +482,178 @@ public final class AutoDeductionScheduler {
             }
 
             if (!hadMetadata) {
-                return CancelResult.alreadyAbsent();
+                return alreadyCancelled ? CancelResult.alreadyAbsent() : CancelResult.success();
             }
 
             boolean removed = schedulePrefs.edit().remove(prefKey).commit();
             if (!removed) {
-                Log.e(TAG, "cancelOccurrence: metadata remove commit failed for " + key);
+                Log.e(TAG, "cancelOccurrence: metadata remove commit failed for " + key
+                        + " (cancellation tombstone remains — restore will not promote to FIRED)");
                 return CancelResult.fail("schedule_metadata_remove_failed");
             }
             return CancelResult.success();
         }
+    }
+
+    /** True if a durable cancellation tombstone entry exists (raw presence). */
+    boolean hasCancellationTombstone(String occurrenceKey) {
+        if (occurrenceKey == null || occurrenceKey.isEmpty()) return false;
+        synchronized (SCHEDULE_LOCK) {
+            return cancelPrefs.contains(CANCEL_KEY_PREFIX + occurrenceKey);
+        }
+    }
+
+    /**
+     * Whether the occurrence is effectively cancelled for fire handling and restore.
+     * <p>
+     * Rules (deterministic from durable state only):
+     * <ul>
+     *   <li>No tombstone → not cancelled</li>
+     *   <li>Tombstone present, no schedule metadata → cancelled</li>
+     *   <li>Both present → compare durable ordering tokens (millis then seq from
+     *       scheduleVersion / cancel tombstone). A strictly newer schedule
+     *       supersedes the tombstone (active); a strictly newer cancel remains
+     *       cancelled. Same-millisecond ops and post-restart ops are ordered
+     *       by the durable sequence allocated under SCHEDULE_LOCK.</li>
+     * </ul>
+     * This allows a legitimate reschedule to win even if tombstone removal failed
+     * after the new schedule metadata commit, while still blocking cancel-then-
+     * failed-metadata-remove from promoting stale schedule metadata to FIRED.
+     */
+    public boolean isOccurrenceCancelled(
+            String medicationId, String doseId, String calendarDate) {
+        if (medicationId == null || medicationId.isEmpty()
+                || doseId == null || doseId.isEmpty()
+                || !AutoDeductionContract.isValidCalendarDate(calendarDate)) {
+            return false;
+        }
+        String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
+        return isOccurrenceCancelledKey(key);
+    }
+
+    /**
+     * Package-visible key-based check used by restore and tests.
+     */
+    boolean isOccurrenceCancelledKey(String occurrenceKey) {
+        if (occurrenceKey == null || occurrenceKey.isEmpty()) return false;
+        synchronized (SCHEDULE_LOCK) {
+            String cancelKey = CANCEL_KEY_PREFIX + occurrenceKey;
+            String cancelRaw = cancelPrefs.getString(cancelKey, null);
+            if (cancelRaw == null) {
+                return false;
+            }
+            String prefKey = SCHEDULE_KEY_PREFIX + occurrenceKey;
+            String scheduleRaw = schedulePrefs.getString(prefKey, null);
+            if (scheduleRaw == null || scheduleRaw.isEmpty()) {
+                return true;
+            }
+            long[] cancelOrd = parseOrderingToken(cancelRaw);
+            long[] scheduleOrd = parseScheduleVersionOrdering(scheduleRaw);
+            // Strict total order: (millis, seq). Schedule newer than cancel → active.
+            if (scheduleOrd[0] >= 0L && cancelOrd[0] >= 0L
+                    && isOrderingNewer(scheduleOrd[0], scheduleOrd[1], cancelOrd[0], cancelOrd[1])) {
+                return false;
+            }
+            // Ambiguous or cancel-after-schedule: treat as cancelled.
+            return true;
+        }
+    }
+
+    /**
+     * Parse a durable ordering token "{millis}-{seq}-..." or legacy pure millis.
+     * Returns long[2] = {millis, seq}; millis=-1 if unparseable. Legacy pure-millis
+     * tokens use seq=0 so they remain comparable with versioned tokens.
+     */
+    private static long[] parseOrderingToken(String raw) {
+        long[] out = new long[] { -1L, 0L };
+        if (raw == null || raw.isEmpty()) return out;
+        String s = raw.trim();
+        try {
+            int firstDash = s.indexOf('-');
+            if (firstDash <= 0) {
+                // Legacy pure-millis tombstone.
+                out[0] = Long.parseLong(s);
+                out[1] = 0L;
+                return out;
+            }
+            out[0] = Long.parseLong(s.substring(0, firstDash).trim());
+            int secondDash = s.indexOf('-', firstDash + 1);
+            String seqPart = secondDash > firstDash
+                    ? s.substring(firstDash + 1, secondDash)
+                    : s.substring(firstDash + 1);
+            out[1] = Long.parseLong(seqPart.trim());
+            return out;
+        } catch (NumberFormatException e) {
+            out[0] = -1L;
+            out[1] = 0L;
+            return out;
+        }
+    }
+
+    /**
+     * Extract (millis, seq) from schedule JSON scheduleVersion field.
+     * Returns {-1, 0} if missing/unparseable.
+     */
+    private static long[] parseScheduleVersionOrdering(String scheduleRaw) {
+        if (scheduleRaw == null || scheduleRaw.isEmpty()) {
+            return new long[] { -1L, 0L };
+        }
+        try {
+            JSONObject o = new JSONObject(scheduleRaw);
+            String version = o.optString(FIELD_SCHEDULE_VERSION, "");
+            if (version.isEmpty()) return new long[] { -1L, 0L };
+            return parseOrderingToken(version);
+        } catch (Exception e) {
+            return new long[] { -1L, 0L };
+        }
+    }
+
+    /**
+     * True if (aMillis, aSeq) is strictly newer than (bMillis, bSeq).
+     * Primary key: millis; secondary: durable seq allocated under SCHEDULE_LOCK.
+     */
+    private static boolean isOrderingNewer(long aMillis, long aSeq, long bMillis, long bSeq) {
+        if (aMillis != bMillis) {
+            return aMillis > bMillis;
+        }
+        return aSeq > bSeq;
+    }
+
+    /**
+     * Leading millis segment of scheduleVersion in schedule JSON payload.
+     * scheduleVersion format: "{millis}-{seq}-{uuid}". Returns -1 if missing.
+     * Retained for compatibility with any external/test callers that only need millis.
+     */
+    private static long parseScheduleVersionEpochMs(String scheduleRaw) {
+        long[] ord = parseScheduleVersionOrdering(scheduleRaw);
+        return ord[0];
+    }
+
+    /** Parse cancel tombstone ordering millis (legacy pure millis or versioned). -1 if unparseable. */
+    private static long parseCancelEpochMs(String cancelRaw) {
+        long[] ord = parseOrderingToken(cancelRaw);
+        return ord[0];
+    }
+
+    /**
+     * Clear cancellation tombstone when a new legitimate schedule is installed
+     * for the same occurrence identity (re-enable / reschedule after cancel).
+     * Caller must hold SCHEDULE_LOCK.
+     * Returns whether the remove commit reported success (best-effort; restore
+     * and fire paths use {@link #isOccurrenceCancelledKey} when clear fails).
+     */
+    private boolean clearCancellationTombstoneLocked(String occurrenceKey) {
+        if (occurrenceKey == null || occurrenceKey.isEmpty()) return true;
+        String cancelKey = CANCEL_KEY_PREFIX + occurrenceKey;
+        if (!cancelPrefs.contains(cancelKey)) {
+            return true;
+        }
+        boolean ok = cancelPrefs.edit().remove(cancelKey).commit();
+        if (!ok) {
+            Log.w(TAG, "clearCancellationTombstone commit failed for " + occurrenceKey
+                    + " — schedule metadata remains authoritative via version ordering");
+        }
+        return ok;
     }
 
     public ScheduleResult scheduleNextOccurrence(
@@ -511,6 +738,23 @@ public final class AutoDeductionScheduler {
                     removeScheduleMetadata(prefKey);
                     continue;
                 }
+
+                String occurrenceKey = AutoDeductionContract.occurrenceKey(medId, doseId, date);
+                // Effectively cancelled: never promote to FIRED; drop stale schedule metadata.
+                // A newer schedule metadata (version millis >= cancel millis) supersedes
+                // a leftover tombstone so legitimate reschedule is not suppressed.
+                if (isOccurrenceCancelledKey(occurrenceKey)) {
+                    Log.i(TAG, "restore skip (cancelled): " + medId + "/" + doseId + "/" + date);
+                    removeScheduleMetadata(prefKey);
+                    continue;
+                }
+                // Leftover tombstone under a superseding schedule: best-effort cleanup.
+                if (hasCancellationTombstone(occurrenceKey)) {
+                    synchronized (SCHEDULE_LOCK) {
+                        clearCancellationTombstoneLocked(occurrenceKey);
+                    }
+                }
+
                 if (epoch <= 0) {
                     Long computed = computeEpochMs(date, time);
                     if (computed == null) {
@@ -552,9 +796,29 @@ public final class AutoDeductionScheduler {
                     continue;
                 }
 
+                // Rebuild epoch from calendarDate + timeHhmm in the *current* default
+                // timezone so a TIMEZONE_CHANGED restore does not reinstall a stale epoch.
+                Long recomputed = computeEpochMs(date, time);
+                if (recomputed == null) {
+                    removeScheduleMetadata(prefKey);
+                    continue;
+                }
+                if (recomputed <= System.currentTimeMillis()) {
+                    // After TZ change this occurrence is now in the past: promote path.
+                    AutoDeductionEventStore.InsertFiredResult ir =
+                            eventStore.insertFiredIfAbsent(
+                                    medId, doseId, date, recomputed, amount);
+                    if (shouldRemovePastScheduleMetadata(ir)) {
+                        removeScheduleMetadata(prefKey);
+                    }
+                    continue;
+                }
+                epoch = recomputed;
+
                 // Future: atomic ownership check + schedule under one lock.
-                String key = AutoDeductionContract.occurrenceKey(medId, doseId, date);
-                String myVersion = newScheduleVersion();
+                // scheduleVersion is assigned inside scheduleOccurrenceLocked (under
+                // SCHEDULE_LOCK) so ordering vs concurrent cancel is correct.
+                String key = occurrenceKey;
                 JSONObject payload = new JSONObject();
                 try {
                     payload.put("medicationId", medId);
@@ -563,7 +827,6 @@ public final class AutoDeductionScheduler {
                     payload.put("timeHhmm", time);
                     payload.put("amount", amount);
                     payload.put("scheduledAtEpochMs", epoch);
-                    payload.put(FIELD_SCHEDULE_VERSION, myVersion);
                 } catch (JSONException e) {
                     Log.e(TAG, "restore payload build failed", e);
                     continue;
@@ -573,7 +836,7 @@ public final class AutoDeductionScheduler {
 
                 synchronized (SCHEDULE_LOCK) {
                     ScheduleResult r = scheduleOccurrenceLocked(
-                            prefKey, key, myVersion, payload, epoch, pi, observedVersion);
+                            prefKey, key, payload, epoch, pi, observedVersion);
                     if (r.ok) {
                         restored++;
                     } else if ("ownership_lost".equals(r.error)) {

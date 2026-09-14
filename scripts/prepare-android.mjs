@@ -225,7 +225,7 @@ const privateAlarmReceiver = `        <receiver
             </intent-filter>
         </receiver>`;
 
-// System lifecycle only — BOOT + exact-alarm permission state (API 31+).
+// System lifecycle only — BOOT + timezone + exact-alarm permission state (API 31+).
 // exported=true is required for system-delivered broadcasts on API 31+.
 const systemLifecycleReceiver = `        <receiver
             android:name="app.drugtracker.autodeduction.AutoDeductionSystemReceiver"
@@ -234,6 +234,7 @@ const systemLifecycleReceiver = `        <receiver
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />

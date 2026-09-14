@@ -19,9 +19,9 @@ import android.util.Log;
  *
  * Fire linearization result drives next-occurrence scheduling:
  * <ul>
- *   <li>CREATED / ALREADY_EXISTS — schedule next is safe/idempotent</li>
+ *   <li>CREATED / ALREADY_EXISTS / FAILED with pending-fire — schedule next</li>
  *   <li>CANCELLED — no recurrence</li>
- *   <li>FAILED — do not advance recurrence</li>
+ *   <li>FAILED without pending — do not advance recurrence</li>
  * </ul>
  */
 public class AutoDeductionReceiver extends BroadcastReceiver {
@@ -74,9 +74,14 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 scheduleNextIfPossible(context, medicationId, doseId, calendarDate, timeHhmm, amount);
                 break;
             case FAILED:
-                Log.e(TAG, "FIRED persistence FAILED (pendingRecorded="
-                        + result.pendingRecorded + ") — not advancing next occurrence: "
-                        + medicationId + "/" + doseId + "/" + calendarDate);
+                if (result.pendingRecorded) {
+                    Log.w(TAG, "FIRED primary failed but pending recorded — advancing recurrence: "
+                            + medicationId + "/" + doseId + "/" + calendarDate);
+                    scheduleNextIfPossible(context, medicationId, doseId, calendarDate, timeHhmm, amount);
+                } else {
+                    Log.e(TAG, "FIRED persistence FAILED (no pending) — not advancing next occurrence: "
+                            + medicationId + "/" + doseId + "/" + calendarDate);
+                }
                 break;
         }
     }

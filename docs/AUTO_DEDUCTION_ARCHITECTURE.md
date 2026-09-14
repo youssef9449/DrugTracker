@@ -99,7 +99,7 @@ Used consistently for:
 2. Native persists schedule metadata and installs the one-shot alarm inside a serialized, process-wide scheduling critical section (durable metadata write, then AlarmManager install, with ownership-safe / conditional metadata rollback if installation fails). This is not an ACID transaction spanning SharedPreferences and AlarmManager; it is a process-local serialization of those steps.
 3. PendingIntent identity matches schedule and cancel: action `AUTO_DEDUCTION` + occurrence URI from the identity triple.
 4. On fire, `AutoDeductionReceiver` calls `insertFiredIfAbsent` — durable **FIRED** row; **no** stock update; may schedule the next one-shot occurrence.
-5. On boot / quick boot, the same receiver restores future alarms from schedule preferences.
+5. On boot / quick boot, system restore promotes past schedules (serialized fire + ownership-safe metadata removal) and reinstalls future alarms from schedule preferences.
 
 Exact fire does **not** require WebView or a running JS bridge.
 
@@ -351,12 +351,24 @@ Native owns timing, AlarmManager install/cancel, boot/permission restore, and du
 | Primary + retry + pending all fail | Schedule metadata for that occurrence is **kept** on past restore (last recovery source) |
 | Duplicate delivery | `ALREADY_EXISTS`; no second event |
 
+### Fire-vs-cancel linearization
+
+Native fire and cancellation are serialized on the same process-wide `SCHEDULE_LOCK` so that **exactly one** operation linearizes first:
+
+- If **fire** linearizes first (`fireOccurrenceIfNotCancelled`): the effective-cancellation check and durable FIRED (or pending-fire) transition run as one critical section. A later cancel cannot retroactively erase that fire. Pending-fire recovery after process death remains valid for fires that already linearized.
+- If **cancellation** linearizes first (`cancelOccurrence` tombstone under the same lock): a subsequent or in-flight stale alarm delivery observes effective cancellation inside the same critical section and must **not** create FIRED, pending FIRED, or recurrence.
+
+A separate cancel check *outside* the FIRED write is not sufficient: that would leave a TOCTOU window between “not cancelled” and durable fire persistence.
+
+Lock order is always `SCHEDULE_LOCK` then nested `EventStore.LOCK` (never the reverse).
+
 ### Receiver next-occurrence truth table
 
-| Insert result | Schedule next |
-|---------------|---------------|
+| Fire linearization result | Schedule next |
+|---------------------------|---------------|
 | CREATED | Yes |
 | ALREADY_EXISTS | Yes (idempotent) |
+| CANCELLED | No |
 | FAILED | No |
 
 ### Restore / cancel
@@ -368,9 +380,9 @@ Native owns timing, AlarmManager install/cancel, boot/permission restore, and du
   - tombstone present and no schedule metadata → cancelled
   - both present → compare ordering tokens by (millis, seq); a strictly newer schedule supersedes the tombstone (active); a strictly newer cancel remains cancelled
   - no tombstone → not cancelled
-- Cancelled occurrences are blocked in **both** lifecycle restore and `AutoDeductionReceiver` fire handling: no synthetic FIRED, no next recurrence. A stale alarm that races with cancel is ignored when the tombstone is durable.
+- Cancelled occurrences are blocked in **both** lifecycle restore and `AutoDeductionReceiver` fire handling via the same serialized fire transition: no synthetic FIRED, no pending FIRED, no next recurrence when cancel linearizes first. A stale alarm that races with cancel cannot win the fire linearization after the tombstone is durable under `SCHEDULE_LOCK`.
 - A later legitimate `scheduleOccurrence` writes new schedule metadata (lock-ordered `scheduleVersion`) then best-effort clears the tombstone. If tombstone removal fails, version ordering still treats the newer schedule as active so reboot/restore and fire delivery do not suppress it.
-- Past schedule metadata is removed only when FIRED exists or pending was durably recorded (genuine fire recovery), never when the occurrence is effectively cancelled.
+- Past schedule metadata is removed only when FIRED exists, pending was durably recorded (genuine fire recovery), or cancel linearized first — and **only if** the current `scheduleVersion` still matches the restore snapshot’s `observedVersion`. A newer legitimate reschedule that replaced the snapshot row after the fire transition unlocked must not be deleted. Missing metadata is treated as already gone (no recreate). `scheduleVersion` is thus an ownership guard for restore metadata mutation as well as schedule install/rollback.
 
 ### Platform limitations
 

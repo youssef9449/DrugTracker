@@ -43,6 +43,8 @@ public final class AutoDeductionScheduler {
 
     private static final String TAG = "AutoDeductionScheduler";
     private static final String SCHEDULE_KEY_PREFIX = "sch:";
+    /** Prefs key prefix for durable cancellation tombstones (occurrence identity). */
+    private static final String CANCEL_KEY_PREFIX = "cancel:";
     /** JSON field: attempt generation token (not part of occurrence identity). */
     public static final String FIELD_SCHEDULE_VERSION = "scheduleVersion";
 
@@ -58,11 +60,14 @@ public final class AutoDeductionScheduler {
 
     private final Context appContext;
     private final SharedPreferences schedulePrefs;
+    private final SharedPreferences cancelPrefs;
 
     public AutoDeductionScheduler(Context context) {
         this.appContext = context.getApplicationContext();
         this.schedulePrefs = appContext.getSharedPreferences(
                 AutoDeductionContract.PREFS_SCHEDULES, Context.MODE_PRIVATE);
+        this.cancelPrefs = appContext.getSharedPreferences(
+                AutoDeductionContract.PREFS_CANCELLED, Context.MODE_PRIVATE);
     }
 
     public static final class ScheduleResult {
@@ -318,6 +323,9 @@ public final class AutoDeductionScheduler {
             return ScheduleResult.fail("schedule_metadata_write_failed");
         }
 
+        // New active schedule supersedes any prior cancellation tombstone.
+        clearCancellationTombstoneLocked(key);
+
         AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
         if (am == null) {
             removeScheduleMetadataIfVersionLocked(prefKey, myVersion);
@@ -382,14 +390,19 @@ public final class AutoDeductionScheduler {
 
     /**
      * Cancel using the same Intent identity as schedule (action + data URI).
-     * Alarm cancel + metadata remove run under SCHEDULE_LOCK so they cannot
-     * interleave with a concurrent scheduleOccurrence for the same occurrence.
+     * Under SCHEDULE_LOCK:
+     *   1. Durable cancellation tombstone (survives process death)
+     *   2. AlarmManager.cancel
+     *   3. Remove active schedule metadata
+     * Tombstone first so a crash after alarm cancel but before metadata remove
+     * cannot later promote the stale schedule to FIRED on restore.
      *
      * Returns an explicit CancelResult:
      * SUCCESS / ALREADY_ABSENT only when the intended native state is achieved
      * (no live alarm for this occurrence + no schedule metadata, or metadata
-     * removal confirmed). FAILED when AlarmManager is unavailable or metadata
-     * remove commit fails (stale metadata must not be reported as success).
+     * removal confirmed). FAILED when AlarmManager is unavailable, tombstone
+     * write fails, or metadata remove commit fails (stale metadata must not
+     * be reported as success when cancellation intent is not durable).
      */
     public CancelResult cancelOccurrence(String medicationId, String doseId, String calendarDate) {
         if (medicationId == null || medicationId.isEmpty()
@@ -399,12 +412,25 @@ public final class AutoDeductionScheduler {
         }
         String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
         String prefKey = SCHEDULE_KEY_PREFIX + key;
+        String cancelKey = CANCEL_KEY_PREFIX + key;
 
         Intent intent = buildOccurrenceIntent(medicationId, doseId, calendarDate, 0L, 0d, null);
         PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
 
         synchronized (SCHEDULE_LOCK) {
             boolean hadMetadata = schedulePrefs.contains(prefKey);
+            boolean alreadyCancelled = cancelPrefs.contains(cancelKey);
+
+            // Durable cancellation intent before AlarmManager.cancel / metadata remove.
+            if (!alreadyCancelled) {
+                boolean tombstoneWritten = cancelPrefs.edit()
+                        .putString(cancelKey, String.valueOf(System.currentTimeMillis()))
+                        .commit();
+                if (!tombstoneWritten) {
+                    Log.e(TAG, "cancelOccurrence: cancellation tombstone commit failed for " + key);
+                    return CancelResult.fail("cancellation_tombstone_write_failed");
+                }
+            }
 
             AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
             if (am == null) {
@@ -417,16 +443,35 @@ public final class AutoDeductionScheduler {
             }
 
             if (!hadMetadata) {
-                return CancelResult.alreadyAbsent();
+                return alreadyCancelled ? CancelResult.alreadyAbsent() : CancelResult.success();
             }
 
             boolean removed = schedulePrefs.edit().remove(prefKey).commit();
             if (!removed) {
-                Log.e(TAG, "cancelOccurrence: metadata remove commit failed for " + key);
+                Log.e(TAG, "cancelOccurrence: metadata remove commit failed for " + key
+                        + " (cancellation tombstone remains — restore will not promote to FIRED)");
                 return CancelResult.fail("schedule_metadata_remove_failed");
             }
             return CancelResult.success();
         }
+    }
+
+    /** True if a durable cancellation tombstone exists for this occurrence. */
+    boolean hasCancellationTombstone(String occurrenceKey) {
+        if (occurrenceKey == null || occurrenceKey.isEmpty()) return false;
+        synchronized (SCHEDULE_LOCK) {
+            return cancelPrefs.contains(CANCEL_KEY_PREFIX + occurrenceKey);
+        }
+    }
+
+    /**
+     * Clear cancellation tombstone when a new legitimate schedule is installed
+     * for the same occurrence identity (re-enable / reschedule after cancel).
+     * Caller must hold SCHEDULE_LOCK.
+     */
+    private void clearCancellationTombstoneLocked(String occurrenceKey) {
+        if (occurrenceKey == null || occurrenceKey.isEmpty()) return;
+        cancelPrefs.edit().remove(CANCEL_KEY_PREFIX + occurrenceKey).commit();
     }
 
     public ScheduleResult scheduleNextOccurrence(
@@ -511,6 +556,16 @@ public final class AutoDeductionScheduler {
                     removeScheduleMetadata(prefKey);
                     continue;
                 }
+
+                String occurrenceKey = AutoDeductionContract.occurrenceKey(medId, doseId, date);
+                // Cancelled occurrence: never promote to FIRED; drop stale schedule metadata.
+                // Tombstone remains until a later legitimate scheduleOccurrence clears it.
+                if (hasCancellationTombstone(occurrenceKey)) {
+                    Log.i(TAG, "restore skip (cancelled): " + medId + "/" + doseId + "/" + date);
+                    removeScheduleMetadata(prefKey);
+                    continue;
+                }
+
                 if (epoch <= 0) {
                     Long computed = computeEpochMs(date, time);
                     if (computed == null) {
@@ -552,8 +607,27 @@ public final class AutoDeductionScheduler {
                     continue;
                 }
 
+                // Rebuild epoch from calendarDate + timeHhmm in the *current* default
+                // timezone so a TIMEZONE_CHANGED restore does not reinstall a stale epoch.
+                Long recomputed = computeEpochMs(date, time);
+                if (recomputed == null) {
+                    removeScheduleMetadata(prefKey);
+                    continue;
+                }
+                if (recomputed <= System.currentTimeMillis()) {
+                    // After TZ change this occurrence is now in the past: promote path.
+                    AutoDeductionEventStore.InsertFiredResult ir =
+                            eventStore.insertFiredIfAbsent(
+                                    medId, doseId, date, recomputed, amount);
+                    if (shouldRemovePastScheduleMetadata(ir)) {
+                        removeScheduleMetadata(prefKey);
+                    }
+                    continue;
+                }
+                epoch = recomputed;
+
                 // Future: atomic ownership check + schedule under one lock.
-                String key = AutoDeductionContract.occurrenceKey(medId, doseId, date);
+                String key = occurrenceKey;
                 String myVersion = newScheduleVersion();
                 JSONObject payload = new JSONObject();
                 try {

@@ -17,6 +17,11 @@ export interface AutoDeductionEvent {
   reconciledAtEpochMs: number | null;
 }
 
+export interface MarkReconciledResult {
+  ok: boolean;
+  changed: boolean;
+}
+
 export interface ScheduleOccurrenceParams {
   medicationId: string;
   doseId: string;
@@ -62,7 +67,7 @@ interface AutoDeductionPlugin {
     medicationId: string;
     doseId: string;
     calendarDate: string;
-  }): Promise<{ ok: boolean; changed: boolean }>;
+  }): Promise<MarkReconciledResult>;
   canScheduleExactAlarms(): Promise<{ granted: boolean }>;
   restoreFutureSchedules(): Promise<{ restored: number }>;
   listScheduledOccurrences(): Promise<{ schedules: ScheduledOccurrence[] }>;
@@ -153,7 +158,7 @@ export async function markAutoDeductionEventReconciled(
   medicationId: string,
   doseId: string,
   calendarDate: string
-): Promise<{ ok: boolean; changed: boolean }> {
+): Promise<MarkReconciledResult> {
   if (!isNativeAndroid()) return { ok: false, changed: false };
   try {
     return await AutoDeduction.markReconciled({

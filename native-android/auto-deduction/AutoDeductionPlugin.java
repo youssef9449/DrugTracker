@@ -104,10 +104,10 @@ public class AutoDeductionPlugin extends Plugin {
         String doseId = call.getString("doseId");
         String calendarDate = call.getString("calendarDate");
         AutoDeductionEventStore store = new AutoDeductionEventStore(getContext());
-        boolean changed = store.markReconciled(medicationId, doseId, calendarDate);
+        AutoDeductionEventStore.MarkResult result = store.markReconciled(medicationId, doseId, calendarDate);
         JSObject ret = new JSObject();
-        ret.put("ok", true);
-        ret.put("changed", changed);
+        ret.put("ok", result.ok);
+        ret.put("changed", result.changed);
         call.resolve(ret);
     }
 

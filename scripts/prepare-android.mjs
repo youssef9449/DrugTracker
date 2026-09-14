@@ -126,4 +126,68 @@ for (const { src, dest, marker } of copies) {
   console.info(`[prepare-android] Installed ${path.relative(root, src)} → ${path.relative(root, dest)}`);
 }
 
-console.info('Prepared Android exact-alarm permission + dose-reminder delivery sources.');
+// ── 4. Phase 2: install auto-deduction native sources ──────────────────
+const autoDeductionSrcDir = path.join(root, 'native-android', 'auto-deduction');
+const autoDeductionDestDir = path.join(
+  androidDir,
+  'app',
+  'src',
+  'main',
+  'java',
+  'app',
+  'drugtracker',
+  'autodeduction'
+);
+const autoDeductionFiles = [
+  'AutoDeductionContract.java',
+  'AutoDeductionEventStore.java',
+  'AutoDeductionScheduler.java',
+  'AutoDeductionReceiver.java',
+  'AutoDeductionPlugin.java',
+];
+if (!fs.existsSync(autoDeductionDestDir)) {
+  fs.mkdirSync(autoDeductionDestDir, { recursive: true });
+}
+for (const file of autoDeductionFiles) {
+  const src = path.join(autoDeductionSrcDir, file);
+  const dest = path.join(autoDeductionDestDir, file);
+  if (!fs.existsSync(src)) {
+    console.error('[prepare-android] FATAL: missing auto-deduction source:', src);
+    process.exit(1);
+  }
+  fs.copyFileSync(src, dest);
+  console.info(`[prepare-android] Installed ${path.relative(root, src)} → ${path.relative(root, dest)}`);
+}
+
+// ── 5. Phase 2: register AutoDeductionReceiver + RECEIVE_BOOT_COMPLETED ─
+manifest = fs.readFileSync(manifestPath, 'utf8');
+const bootPermission = '<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />';
+if (!manifest.includes(bootPermission)) {
+  manifest = manifest.replace(/(<manifest\b[^>]*>)/, `$1\n    ${bootPermission}`);
+}
+
+const receiverBlock = `        <receiver
+            android:name="app.drugtracker.autodeduction.AutoDeductionReceiver"
+            android:exported="false"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="app.drugtracker.action.AUTO_DEDUCTION" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>`;
+
+if (!manifest.includes('app.drugtracker.autodeduction.AutoDeductionReceiver')) {
+  if (manifest.includes('</application>')) {
+    manifest = manifest.replace('</application>', `${receiverBlock}\n    </application>`);
+  } else {
+    console.error('[prepare-android] FATAL: </application> not found in AndroidManifest.xml');
+    process.exit(1);
+  }
+}
+fs.writeFileSync(manifestPath, manifest);
+console.info('[prepare-android] Ensured AutoDeductionReceiver + RECEIVE_BOOT_COMPLETED in manifest.');
+
+console.info('Prepared Android exact-alarm permission + dose-reminder delivery sources + auto-deduction.');

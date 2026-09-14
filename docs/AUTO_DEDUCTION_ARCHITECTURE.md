@@ -376,12 +376,13 @@ Lock order is always `SCHEDULE_LOCK` then nested `EventStore.LOCK` (never the re
 
 A past schedule entry still present at restore (device was unavailable at fire time, or primary FIRED commit failed while schedule metadata remained) is recovered via `fireOccurrenceIfNotCancelled`. That recovery **counts as a consumed occurrence for recurrence purposes**: the occurrence is durably represented as FIRED (or pending-fire, later promoted).
 
-After a durable fire outcome:
+Restore works from a **snapshot** (`prefKey`, payload, `observedVersion`). After a durable fire outcome:
 
-1. Schedule the successor (`scheduleNextOccurrence` for `calendarDate + 1` with the same dose identity and amount).
-2. Only then resolve the past schedule metadata with ownership-safe `removeScheduleMetadataIfVersion(observedVersion)`.
+1. Under `SCHEDULE_LOCK`, confirm the snapshot still **owns** the past schedule row (`scheduleVersion == observedVersion`). If the row was replaced or removed, the snapshot is **stale** — do **not** schedule or overwrite D+1 using obsolete `timeHhmm`/`amount`.
+2. If ownership holds and D+1 metadata is absent, install D+1 via the normal schedule transaction (same dose identity and snapshot amount/time). If D+1 already exists, leave it untouched.
+3. Only when the successor is established, resolve past metadata with ownership-safe `removeScheduleMetadataIfVersion(observedVersion)`.
 
-If successor scheduling fails, past metadata is **kept** so a later restore can retry. Cancellation still does not schedule a successor. Repeated restore is idempotent: `ALREADY_EXISTS` + scheduling the same next occurrence identity does not create duplicate logical occurrences.
+If successor scheduling fails for a non-stale reason, past metadata is **kept** so a later restore can retry. Stale snapshots neither overwrite D+1 nor delete a newer D. Cancellation still does not schedule a successor. Both normal past recovery and timezone-recomputed-past recovery use this rule. Repeated restore is idempotent: `ALREADY_EXISTS` + existing D+1 does not create duplicate logical occurrences.
 
 ### Restore / cancel
 

@@ -811,9 +811,11 @@ public final class AutoDeductionScheduler {
      * metadata rewrite run under one continuous SCHEDULE_LOCK critical section
      * so cancel cannot interleave and resurrect a canceled schedule.
      *
-     * Past schedule entries: promote to FIRED (idempotent insert) then remove
-     * metadata — recovers occurrences whose alarm fired but primary FIRED
-     * commit failed (schedule metadata still present).
+     * Past schedule entries: promote via fireOccurrenceIfNotCancelled then
+     * ownership-safe metadata removal — recovers occurrences whose alarm fired
+     * but primary FIRED commit failed. Metadata is removed only when the current
+     * scheduleVersion still matches the snapshot observedVersion, so a newer
+     * legitimate reschedule is never deleted.
      */
     public int restoreFutureSchedules() {
         if (!canScheduleExactAlarms()) {
@@ -856,7 +858,8 @@ public final class AutoDeductionScheduler {
                         || !AutoDeductionContract.isValidCalendarDate(date)
                         || !AutoDeductionContract.isValidTimeHhmm(time)
                         || !AutoDeductionContract.isValidAmount(amount)) {
-                    removeScheduleMetadata(prefKey);
+                    // Only drop the snapshot-owned row (never a newer replacement).
+                    removeScheduleMetadataIfVersion(prefKey, observedVersion);
                     continue;
                 }
 
@@ -865,7 +868,7 @@ public final class AutoDeductionScheduler {
                 if (epoch <= 0) {
                     Long computed = computeEpochMs(date, time);
                     if (computed == null) {
-                        removeScheduleMetadata(prefKey);
+                        removeScheduleMetadataIfVersion(prefKey, observedVersion);
                         continue;
                     }
                     epoch = computed;
@@ -881,7 +884,12 @@ public final class AutoDeductionScheduler {
                             medId, doseId, date, epoch, amount);
                     if (fr.isCancelled()) {
                         Log.i(TAG, "restore skip (cancelled): " + medId + "/" + doseId + "/" + date);
-                        removeScheduleMetadata(prefKey);
+                        // Drop only the snapshot-owned schedule row; a newer reschedule
+                        // that replaced V1 with V2 after unlock must not be deleted.
+                        if (!removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
+                            Log.i(TAG, "restore past cancel cleanup skipped (ownership lost): "
+                                    + prefKey);
+                        }
                     } else if (shouldRemovePastScheduleMetadata(fr)) {
                         if (fr.allowsRecurrence()) {
                             Log.i(TAG, "restore past: promoted/ensured FIRED for "
@@ -889,9 +897,12 @@ public final class AutoDeductionScheduler {
                         } else {
                             Log.i(TAG, "restore past: pending-fire recorded for "
                                     + medId + "/" + doseId + "/" + date
-                                    + "; dropping schedule metadata");
+                                    + "; dropping schedule metadata if still owned");
                         }
-                        removeScheduleMetadata(prefKey);
+                        if (!removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
+                            Log.i(TAG, "restore past metadata keep (ownership lost / already gone): "
+                                    + prefKey);
+                        }
                     } else {
                         Log.e(TAG, "restore past: FIRED and pending both failed for "
                                 + medId + "/" + doseId + "/" + date
@@ -905,7 +916,10 @@ public final class AutoDeductionScheduler {
                 // reschedule is not suppressed.
                 if (isOccurrenceCancelledKey(occurrenceKey)) {
                     Log.i(TAG, "restore skip (cancelled): " + medId + "/" + doseId + "/" + date);
-                    removeScheduleMetadata(prefKey);
+                    if (!removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
+                        Log.i(TAG, "restore future cancel cleanup skipped (ownership lost): "
+                                + prefKey);
+                    }
                     continue;
                 }
                 // Leftover tombstone under a superseding schedule: best-effort cleanup.
@@ -923,7 +937,7 @@ public final class AutoDeductionScheduler {
                 // timezone so a TIMEZONE_CHANGED restore does not reinstall a stale epoch.
                 Long recomputed = computeEpochMs(date, time);
                 if (recomputed == null) {
-                    removeScheduleMetadata(prefKey);
+                    removeScheduleMetadataIfVersion(prefKey, observedVersion);
                     continue;
                 }
                 if (recomputed <= System.currentTimeMillis()) {
@@ -931,7 +945,10 @@ public final class AutoDeductionScheduler {
                     FireResult fr = fireOccurrenceIfNotCancelled(
                             medId, doseId, date, recomputed, amount);
                     if (shouldRemovePastScheduleMetadata(fr)) {
-                        removeScheduleMetadata(prefKey);
+                        if (!removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
+                            Log.i(TAG, "restore TZ-past metadata keep (ownership lost / already gone): "
+                                    + prefKey);
+                        }
                     }
                     continue;
                 }
@@ -969,7 +986,8 @@ public final class AutoDeductionScheduler {
                     }
                 }
             } catch (JSONException ignored) {
-                removeScheduleMetadata(prefKey);
+                // Malformed snapshot payload: drop only if still the observed version.
+                removeScheduleMetadataIfVersion(prefKey, observedVersion);
             }
         }
         return restored;

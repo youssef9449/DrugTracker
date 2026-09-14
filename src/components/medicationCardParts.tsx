@@ -50,3 +50,30 @@ export const AutoDeductPausedNote: FC = () => (
     <span>الخصم التلقائي معلق — الجرعة اليدوية والخصم التلقائي معطلان لهذا اليوم.</span>
   </div>
 );
+
+export interface UndoRefillBannerProps {
+  lastRefillQuantity: number;
+  unit: string;
+  onUndoRefill: () => void;
+}
+
+/**
+ * Undo refill bar — preserved for future standalone / modal usage.
+ */
+export const UndoRefillBanner: FC<UndoRefillBannerProps> = ({
+  lastRefillQuantity,
+  unit,
+  onUndoRefill,
+}) => (
+  <div className="mt-2 flex items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+    <span>آخر تعبئة: +{lastRefillQuantity} {unit}</span>
+    <button
+      type="button"
+      onClick={onUndoRefill}
+      className="shrink-0 rounded-lg border border-rose-200 bg-white px-2.5 py-1 font-bold text-rose-700 hover:bg-rose-50"
+    >
+      تراجع عن التعبئة
+    </button>
+  </div>
+);
+

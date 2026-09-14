@@ -1,400 +1,332 @@
 # Exact-Time Automatic Dose Deduction — Architecture
 
-This document describes the **current** DrugTracker exact-time auto-deduction system as implemented on `main`. It is a specification of runtime behavior derived from the code, not a PR changelog.
+Current-state technical specification for DrugTracker’s exact-time automatic dose deduction. Behavior is defined by the implementation on the repository `main` line; this document is not a development history or changelog.
 
-Primary code map:
+## Code map
 
-| Layer | Location |
-|-------|----------|
-| JS schedule bridge | `src/utils/autoDeductionNative.ts`, `src/hooks/useAutoDeductionScheduler.ts` |
-| Native contract / store / scheduler / receiver | `native-android/auto-deduction/` |
-| Capacitor plugin | `AutoDeductionPlugin.java`, registered from `MainActivity` |
-| Reconciliation | `src/utils/autoDeductionReconciliation.ts` |
-| Orchestration + envelope | `src/utils/runAutoDeductionReconciliation.ts` |
-| Stock mutation gate | `src/utils/autoDeductionStockGate.ts` |
-| Lifecycle | `src/hooks/useExactAutoDeductionReconciliation.ts`, `src/App.tsx` |
-| Legacy day settlement / projection | `src/utils/dateCalculations.ts` (`syncAutoDailyDeductions`, `effectiveCurrentPills`, `historicalRangeDueUnits`) |
+| Concern | Primary location |
+|---------|------------------|
+| JS → native schedule / list / mark bridge | `src/utils/autoDeductionNative.ts` |
+| JS schedule requests (post-hydration) | `src/hooks/useAutoDeductionScheduler.ts` |
+| Native constants, occurrence key, PendingIntent URI | `native-android/auto-deduction/AutoDeductionContract.java` |
+| Durable native event store | `AutoDeductionEventStore.java` |
+| Exact alarm install / cancel / boot restore | `AutoDeductionScheduler.java` |
+| Alarm + boot receiver | `AutoDeductionReceiver.java` |
+| Capacitor plugin | `AutoDeductionPlugin.java` |
+| Pure reconcile / apply | `src/utils/autoDeductionReconciliation.ts` |
+| Orchestration, envelope, marks | `src/utils/runAutoDeductionReconciliation.ts` |
+| Serialized fresh durable-state gate | `src/utils/autoDeductionStockGate.ts` |
+| Hydration / resume entry | `src/hooks/useExactAutoDeductionReconciliation.ts`, `src/App.tsx` |
+| Legacy day settlement & projection | `src/utils/dateCalculations.ts` |
 
 ---
 
-## 1. Purpose and scope
+## Purpose and scope
 
-**Problem:** Dose times must fire at exact wall-clock times even when the app process is not running. Stock must still update safely when the user returns, without double-counting the same dose.
+**Purpose:** Fire dose times at exact wall-clock moments even when the app process is not running, then apply each fired occurrence to application stock at most once when JavaScript can run.
 
-**Pipeline layers:**
+**In scope today:**
+
+- One-shot native exact alarms and durable native occurrence events
+- JS reconciliation into medications, consumption markers, and logs
+- Coordination with existing day-level settlement (`syncAutoDailyDeductions`)
+- Multi-dose and legacy single-dose occurrence identity
+- Crash-oriented durability for JS commits and native acknowledgement retries
+
+**Non-goals of this document / this subsystem boundary:**
+
+- Redesigning notification channels, sounds, or reminder UI
+- Replacing AlarmManager with WorkManager/polling/foreground services
+- Claiming that every product-level Take × Restore × exact-auto interaction matrix is exhaustively closed as a dedicated product surface (see *Take / Restore compatibility* below)
+
+---
+
+## Architecture overview
 
 ```text
-Scheduling
-  → Native exact alarm execution
-  → Durable native event storage
-  → JS reconciliation
-  → Durable JS persistence (medications + logs)
-  → Native acknowledgement
-  → Projection (display balance)
-  → Recovery (restart / partial failure)
+Schedule (JS)
+    → Native exact alarm
+    → Receiver persists FIRED (no stock change)
+    → App start / resume after hydration
+    → Mutation gate loads fresh durable JS state
+    → Reconcile FIRED events
+    → Apply or no-op (idempotent)
+    → Persist medications + logs
+    → Mark native RECONCILED
 ```
 
-**In scope:** exact-time auto deduction for medications with auto-deduct enabled (global and per-med), multi-dose and legacy single-dose identities, interaction with existing day-level settlement (`syncAutoDailyDeductions`).
-
-**Out of scope (not redesigned here):** full Take / Restore product rules (Phase 4 territory), notification channels/sounds, reminder UI, WorkManager-based exact scheduling, SQLite.
-
----
-
-## 2. Source of truth
-
-### Native is responsible for
-
-- Installing one-shot exact alarms (`AlarmManager.setExactAndAllowWhileIdle` / `setExact`)
-- Firing via a dedicated `BroadcastReceiver` (`AutoDeductionReceiver`)
-- Persisting durable events in SharedPreferences (`drugtracker_auto_deduction_events_v1`)
-- Persisting schedule metadata for reboot restore (`drugtracker_auto_deduction_schedules_v1`)
-- Restoring future alarms on `BOOT_COMPLETED` / quick boot
-- Exposing bridge methods: schedule, cancel, list fired, list all, mark reconciled, restore schedules, exact-alarm permission probe
-- PendingIntent identity: `ACTION_AUTO_DEDUCTION` + data URI derived from the full occurrence key (not hash-only uniqueness)
-
-### JS is responsible for
-
-- Business stock mutation (`Medication.currentPills`)
-- Consumption / skip history and `lastConsumedDate`
-- `lastSyncDate` day-settlement horizon compatibility
-- Consumption logs (`type: 'auto_daily'` for exact events with deterministic ids)
-- Idempotency decisions (`isExactAutoOccurrenceApplied`)
-- Legacy bulk settlement (`syncAutoDailyDeductions`)
-- Display projection (`effectiveCurrentPills`)
-- Triggering reconciliation after hydration / on resume
-
-### Native does **not**
-
-- Mutate `currentPills` or any JS business state
-- Write `localStorage`
-- Run settlement / projection math
-- Depend on WebView being alive when the alarm fires
-
-When the alarm fires, native only writes a **FIRED** durable row (insert-if-absent) and may schedule the next one-shot occurrence. Stock changes only later, in JS.
+Native owns **timing and durable fire records**.  
+JavaScript owns **business stock, markers, logs, and acknowledgement**.
 
 ---
 
-## 3. End-to-end lifecycle
+## Source of truth
 
-```text
-Medication schedule (doseSchedule or legacy reminderTime + dailyDose)
-        ↓
-JS useAutoDeductionScheduler (after hydrated, exact alarm granted)
-        ↓
-Capacitor AutoDeduction.scheduleOccurrence(...)
-        ↓
-Native: schedule metadata commit + AlarmManager install (serialized under SCHEDULE_LOCK)
-        ↓
-Alarm fires at scheduled wall time
-        ↓
-AutoDeductionReceiver
-        ↓
-EventStore.insertFiredIfAbsent(...)  → status FIRED
-        ↓
-[No stock mutation]
-        ↓
-App process starts or resumes
-        ↓
-Hydration: permissions + exact-alarm probe + initNativeBridge() → setHydrated(true)
-        ↓
-useExactAutoDeductionReconciliation (hydrated && !isFirstRun)
-        ↓
-withAutoStockMutationGate → load fresh durable meds + logs from localStorage
-        ↓
-listFiredAutoDeductionEvents()
-        ↓
-reconcileFiredEvents (sort by scheduledAtEpochMs, then occurrence key)
-        ↓
-per event: validate → idempotency → applyExactAutoEventToMedication (or no-op)
-        ↓
-deterministic exact-auto log if applied
-        ↓
-mutating path: write envelope → persist meds → persist logs → markReconciled → clear envelope
-        ↓
-React state updated from committed durable result
-```
+| Question | Answer in current code |
+|----------|------------------------|
+| Did this occurrence fire at wall time while the app might be dead? | Native event store (SharedPreferences), status until successfully marked reconciled |
+| What is the app’s committed inventory? | `Medication.currentPills` (+ related history fields) in localStorage (`android_med_tracker_items_v2`) |
+| What does the UI show as “effective” remaining? | `effectiveCurrentPills(...)` — a **projection** from committed state + remaining due slots, **not** a second durable ledger |
+| What prevents applying the same dose twice? | Occurrence markers, legacy day horizon, deterministic exact-auto log ids, native insert-if-absent, serialized gate |
 
-### Transition notes
-
-1. **Schedule** — One-shot alarms only; next occurrence is scheduled from the receiver / scheduler helpers using local calendar date arithmetic (not “previous + 24h” polling).
-2. **Fire** — Receiver ignores malformed extras; insert is idempotent per occurrence key.
-3. **Reconcile** — Never runs before `hydrated`; first-run seed inventory skips auto effects (`isFirstRun`).
-4. **Apply** — Uses `event.amount`, not `med.dailyDose`, for the stock delta of that occurrence.
-5. **Acknowledge** — `markReconciled` sets native status to `RECONCILED` with `reconciledAtEpochMs`.
+**Native does not** write `currentPills`, does not write JS localStorage, and does not run settlement math.  
+**A FIRED native row is not a stock mutation.** Stock changes only in JS reconciliation (or other JS paths such as legacy sync / manual take).
 
 ---
 
-## 4. Native event states
+## Occurrence identity
 
-| Status | Meaning in code |
-|--------|-----------------|
-| **FIRED** | Alarm path persisted the occurrence; JS has not completed acknowledgement for this row (or mark failed and will retry). |
-| **RECONCILED** | JS called `markReconciled` successfully after the JS-side outcome for that occurrence (apply or intentional no-op ack). |
-
-There is no intermediate native status beyond these two in the current store.
-
-Event payload fields (as used across native + bridge):  
-`medicationId`, `doseId`, `calendarDate`, `scheduledAtEpochMs`, `amount`, `status`, `createdAtEpochMs`, `reconciledAtEpochMs`.
-
----
-
-## 5. Occurrence identity
-
-Canonical identity:
+Every exact auto occurrence is identified by:
 
 ```text
 medicationId + doseId + calendarDate
 ```
 
-- Storage / PendingIntent URI / JS key helpers all derive from this triple.
-- **Not** used as identity: array index, time string alone, `dailyDose`, “first dose”, “next dose”.
+Used consistently for:
 
-**Legacy / single-dose:** missing or empty `doseId` is normalized to `LEGACY_DOSE_ID` (`__legacy_daily__` from `src/utils/notifications.ts`) in JS reconciliation.
+- Native storage key and PendingIntent **data URI** (plus fixed action; request code is only a namespace, not the uniqueness mechanism)
+- JS occurrence keys and deterministic log ids
 
-JS key helper: `autoDeductionOccurrenceKey` (unit separator `\u001f`).  
-Native: `AutoDeductionContract.occurrenceKey` / `occurrenceUri`.
+**Not** used as identity: array index, time string alone, `dailyDose`, “first dose”, “next dose”, or schedule position.
+
+**Legacy / single-dose:** empty or missing `doseId` is normalized to `LEGACY_DOSE_ID` (`__legacy_daily__`) in JS reconciliation.
 
 ---
 
-## 6. Multi-dose semantics
+## Native scheduling and fire path
 
-Each schedule slot has its own `doseId`, `amount`, and `time`. An exact event carries the amount that was scheduled into the alarm payload.
+1. After hydration (and when exact-alarm capability allows), JS requests `scheduleOccurrence` with medication, dose, calendar date, time, and **amount**.
+2. Native persists schedule metadata, then installs a one-shot exact alarm under a process-wide schedule lock (metadata + install + failure rollback are one logical transaction).
+3. PendingIntent identity matches schedule and cancel: action `AUTO_DEDUCTION` + occurrence URI from the identity triple.
+4. On fire, `AutoDeductionReceiver` calls `insertFiredIfAbsent` — durable **FIRED** row; **no** stock update; may schedule the next one-shot occurrence.
+5. On boot / quick boot, the same receiver restores future alarms from schedule preferences.
 
-Example:
+Exact fire does **not** require WebView or a running JS bridge.
+
+---
+
+## Native event lifecycle: FIRED and RECONCILED
+
+| Status | Precise meaning |
+|--------|-----------------|
+| **FIRED** | The occurrence is durably recorded in the native event store and has **not yet been successfully acknowledged** as `RECONCILED` via `markReconciled`. |
+| **RECONCILED** | Native acknowledgement succeeded after JS reconciliation reached the required durable application-side outcome for that occurrence (apply or intentional no-op ack). |
+
+**Important:** `FIRED` does **not** mean “JS has never processed this occurrence.”
+
+Valid sequence:
+
+1. JS reads FIRED and applies stock + markers + log  
+2. JS persists durably  
+3. `markReconciled` fails  
+
+Native status remains **FIRED**, while JS already holds the applied markers. A later run must **acknowledge only**, not deduct again.
+
+---
+
+## JavaScript reconciliation
+
+Entry: `useExactAutoDeductionReconciliation` when `hydrated && !isFirstRun` (and on resume tick).
+
+Orchestration (`runAutoDeductionReconciliation`):
+
+1. Enter `withAutoStockMutationGate`
+2. Load **fresh** medications and logs from durable storage (not a pre-gate React snapshot)
+3. `listFired` native events
+4. `reconcileFiredEvents`: sort by `scheduledAtEpochMs`, then occurrence key
+5. Per event: validate amount/identity; check idempotency; apply or skip; collect acknowledgements
+6. On stock/log mutation: write durability envelope → persist meds → persist logs → mark native events → clear envelope (see durability)
+7. Update React from the **committed** durable result
+
+Outcomes include: `applied`, `already_applied`, `skipped_missing_med`, `skipped_disabled`, `skipped_invalid`. Missing medication and disabled auto-deduct acknowledge without stock change so FIRED queues do not grow forever on those cases.
+
+---
+
+## Exact-event historical settlement
+
+When applying an exact event on calendar date **D** for a gated medication, earlier unsettled days may still need folding into `currentPills`.
+
+**Rule:**
 
 ```text
-2026-09-13
-  morning  amount=2
-  evening  amount=3
+Prior historical units =
+  days strictly after lastSyncDate
+  AND strictly before D
+  (historicalRangeDueUnits(lastSync, D))
+
+Then apply event.amount for the occurrence on D.
 ```
 
-- A **morning** FIRED event applies **2** only and records consumption for `morning` on that date.
-- **Evening** remains unapplied until its own event (or other paths such as legacy day settlement of unrecorded slots).
-- Reconciliation never substitutes `med.dailyDose` for `event.amount`.
+Equivalently: settle eligible history with **dates &lt; D**, then apply exact occurrence **D**.  
+**Not:** settle history with **dates ≤ D**, then apply **D** again.
+
+That exclusion of **D** prevents double-charging the same occurrence when `pastDueUnits` measured through “today” would already include day D.
+
+Days **before** D that are still due continue to participate. Same-day **sibling** doses on D are **not** auto-settled by this prior window.
+
+After folding prior units, `lastSyncDate` may advance only to the end of that prior window (day before D), not automatically to “today.”
 
 ---
 
-## 7. Exact-event historical settlement window
+## Multi-dose behavior and sibling isolation
 
-When applying an exact event on calendar day **D**, gated medications may still need earlier unsettled days folded into `currentPills`. That prior window is **not** full `pastDueUnits` through today.
-
-**Rule (current code in `applyExactAutoEventToMedication`):**
-
-```text
-Historical units folded before the event amount =
-  historicalRangeDueUnits(med, lastSyncDate, D)
-  i.e. days strictly after lastSyncDate AND strictly before D
-
-Then:
-  currentPills := max(0, currentPills - priorUnits - event.amount)
-```
-
-**Why exclude day D:** Including D in `pastDueUnits` (through today) would charge every unrecorded slot on D, then charge `event.amount` again for the same occurrence → double deduction (classic bug: 10 → 6 instead of 10 → 8 for a 2-unit event).
-
-**Example:**
-
-```text
-today        = 2026-09-14
-lastSyncDate = 2026-09-12
-event day    = 2026-09-13
-event amount = 2
-currentPills = 10
-```
-
-Result after apply: **8**, not 6.
-
-**Sibling multi-dose on D:** morning event does not subtract evening’s 3 via historical settlement of day D.
-
-If there are due units on days between lastSync and D (e.g. lastSync = 09-10, event = 09-13), those prior days **are** still folded via `historicalRangeDueUnits`.
-
-After folding prior units, `lastSyncDate` may advance to the day before D (end of that exclusive-end window)—not automatically to “today”.
+- Each slot has its own `doseId` and scheduled amount.
+- Reconciliation uses **`event.amount`**, never medication-level `dailyDose` as a substitute for that occurrence.
+- On one medication and one `calendarDate`, doses A, B, C are **independent** occurrences:
+  - Applying A does not mark B applied
+  - Does not subtract B’s amount
+  - Does not share B’s deterministic log id
 
 ---
 
-## 8. Legacy compatibility (`syncAutoDailyDeductions`)
+## Legacy day settlement compatibility
 
-Legacy day settlement and exact reconciliation share stock, but use different markers.
+`syncAutoDailyDeductions` remains the bulk / day-horizon path. Exact reconciliation shares stock and markers with it.
 
-### Native-first
+**Native-first:** exact apply records consumption (or equivalent terminal markers) → later legacy `historicalDayDueUnits` skips consumed/skipped slots → no second charge of that occurrence.
 
-```text
-native FIRED → exact apply (markers + amount) → later syncAutoDailyDeductions
-→ historicalDayDueUnits skips consumed slots → no second charge of that occurrence
-```
+**Legacy-first:** day settlement advances `lastSyncDate` and reduces `currentPills` → later exact event with `calendarDate < today` and `calendarDate <= lastSync` is treated as already reflected → acknowledge only.
 
-### Legacy-first
+`lastSyncDate` is a **day-settlement horizon**, not a per-dose event ledger. Per-dose truth remains consumption / skip history (and legacy `lastConsumedDate` where applicable).
 
-```text
-sync advances lastSyncDate over past days and reduces currentPills
-→ later FIRED for a day with calendarDate < today && calendarDate <= lastSync
-→ isExactAutoOccurrenceApplied → already_applied → mark only, no stock change
-```
-
-**`lastSyncDate` is a day-settlement horizon**, not a per-dose event ledger. Per-dose truth uses `doseConsumption` / `doseConsumptionHistory` / `doseSkippedHistory` (and legacy `lastConsumedDate`).
-
-Both hydration sync and exact reconciliation enter `withAutoStockMutationGate` so they serialize and each job loads **fresh durable** meds/logs from localStorage—not a React snapshot captured before the gate.
+Hydration-time legacy sync and exact reconciliation both use the **same** stock mutation gate with fresh durable loads.
 
 ---
 
-## 9. Idempotency layers
+## Take / Restore compatibility (implemented vs further product work)
 
-| Mechanism | Role |
-|-----------|------|
-| Consume / skip history | Occurrence-level: `isDoseConsumedOnDate` / `isDoseSkippedOnDate` |
-| `lastConsumedDate` | Legacy single-dose terminal marker for a calendar date |
-| `lastSyncDate` horizon | Past day already folded by day settlement (`calendarDate < today && calendarDate <= lastSync`) |
-| Deterministic log id | `exact-auto:{medicationId}:{doseId}:{calendarDate}` — retries do not append a second log row for the same occurrence |
-| Native `insertFiredIfAbsent` | At most one FIRED/RECONCILED row per occurrence key |
-| Gate serialization | Prevents concurrent apply from independent callers |
+**Implemented today (compatibility / idempotency):**
 
-Duplicate FIRED rows in one batch: first apply wins; second sees marker / log → `already_applied`.
+Exact reconciliation uses the same occurrence-level consumption and skip history helpers used elsewhere in the app. A dose already taken or skipped for that `doseId` + date is `already_applied` for exact auto. Applying exact auto records consumption markers so a later manual take path that checks the same history can see the occurrence as already consumed. Restore and skip history remain part of the shared occurrence model.
+
+**Not claimed here:** a complete, product-level matrix of every race between Take, Restore, exact native fire, and legacy sync as a dedicated redesigned workflow. Further product tightening of that matrix is future work; it is **not** accurate to say Take/Restore “do not integrate” with exact auto today.
 
 ---
 
-## 10. Mutation gate (fresh durable state)
+## Idempotency (separate layers)
 
-`withAutoStockMutationGate` in `src/utils/autoDeductionStockGate.ts`:
+| Layer | Role |
+|-------|------|
+| **Occurrence markers** | `doseConsumption` / history, `doseSkippedHistory`, legacy `lastConsumedDate` — terminal for that dose+date |
+| **Legacy horizon** | `lastSyncDate` — past calendar days already folded by day settlement |
+| **Deterministic exact-auto log** | `exact-auto:{medicationId}:{doseId}:{calendarDate}` — retries do not create a second logical exact-auto log row |
+| **Native insert-if-absent** | One durable native row per occurrence key |
+| **Serialized gate** | One mutation job at a time, each on fresh durable state |
 
-1. Serialize jobs (process-local promise chain).
-2. At job start, **load** `android_med_tracker_items_v2` and `android_med_tracker_logs_v2`.
-3. Run mutation against that state.
-4. **Commit** durable writes when the caller/orchestrator persists.
-5. React `setMedications` / `setLogs` follow the **committed** result.
-
-React UI state is not the source of truth inside the gate. A pre-gate `medications` closure must not drive stock math.
+These are complementary checks, not a single undifferentiated “marker.”
 
 ---
 
-## 11. Persistence, envelope, and crash safety
+## Durable mutation gate
 
-Orchestrator: `runAutoDeductionReconciliation`.
+`withAutoStockMutationGate` is a **serialized mutation boundary on fresh durable state**, not a queue of stale React snapshots.
 
-**Mutating path protocol:**
+For each job:
+
+1. Enter the gate (wait for prior jobs)
+2. **Load** latest meds/logs from localStorage keys used by the app
+3. Compute the mutation from that state
+4. Persist the resulting durable state (caller / orchestrator)
+5. Let React follow the committed result
+
+This prevents concurrent “both started from currentPills = 10” overwrites when two auto paths interleave.
+
+---
+
+## Durability envelope and crash recovery
+
+Envelope key: `android_med_tracker_exact_auto_envelope_v1`  
+Holds intended medications, logs, and acknowledgement list after a mutating reconcile.
+
+**Logical order:**
 
 ```text
-write envelope (android_med_tracker_exact_auto_envelope_v1)
-  → write medications + logs (durable)
-  → mark native RECONCILED for each toAcknowledge
+write envelope
+  → write medications
+  → write logs
+  → mark native event(s) RECONCILED
   → clear envelope
 ```
 
-**Option B (current) for partial native ack:**  
-After meds+logs are successfully written, the envelope is cleared even if some `markReconciled` calls fail. Remaining native **FIRED** rows are recovered on the next run via `listFired` + JS markers / deterministic logs → `already_applied` → mark again without a second stock or log mutation.
+If meds/logs cannot be written, native marks are not performed for that mutating attempt; envelope remains for recovery.
 
-| Failure | Effect | Recovery |
-|---------|--------|----------|
-| App closed when alarm fires | Native FIRED persists | Next start/resume reconciliation |
-| Crash before envelope / meds+logs commit | No durable JS apply | Next run applies once from FIRED |
-| Crash after JS commit, before/during marks | Markers + logs durable; some events may stay FIRED | Next run acknowledges only |
-| Partial mark success | Some RECONCILED, some FIRED | Retry marks; no double stock |
-| Meds or logs write fails | Envelope kept (mutating path); no mark | Envelope recovery on next run |
-| Medication missing | `skipped_missing_med` + acknowledge | No stock mutation, no infinite FIRED loop |
-| Global or per-med auto-deduct disabled | `skipped_disabled` + acknowledge | No stock mutation |
-| Invalid amount | `skipped_invalid` + acknowledge | No stock corruption |
-| Duplicate FIRED | Idempotency | Single deduction + single exact-auto log |
-
-Acknowledge-only paths (already applied / disabled / missing med) do not require an envelope; they only call `markReconciled`.
+**After successful JS meds+logs commit:** the envelope is cleared even if some native marks fail. Remaining **FIRED** rows stay retryable. Application-side idempotency (markers + deterministic logs) prevents a second stock mutation or duplicate exact-auto log when marks are retried.
 
 ---
 
-## 12. Deterministic exact-auto log id
+## Partial native acknowledgement
 
-```text
-exact-auto:{medicationId}:{doseId}:{calendarDate}
-```
+Example: events A and B both applied in one JS commit; `markReconciled(A)` succeeds; `markReconciled(B)` fails.
 
-(`exactAutoLogId` in `autoDeductionReconciliation.ts`; dose id normalized with `LEGACY_DOSE_ID` when needed.)
+- Stock and logs for both occurrences are already durable
+- A is RECONCILED; B remains FIRED
+- Next reconciliation lists B, sees markers / log → **already_applied** → mark B only
+- No second deduction; no second exact-auto log id
 
-Legacy bulk logs from `syncAutoDailyDeductions` still use generated ids; only **exact** Phase-3 applies use this deterministic form.
-
----
-
-## 13. Hydration and when reconciliation runs
-
-From `App.tsx` and hooks:
-
-- `hydrated` becomes true only after permission init, exact-alarm capability init, and **`initNativeBridge()`** settle (bridge failures are logged; hydration still completes so the app is usable).
-- `usePersistentEffect` for meds/logs is gated on `hydrated`.
-- Legacy `syncAutoDailyDeductions` on session start is gated on `hydrated` and uses the stock gate with fresh durable state.
-- `useExactAutoDeductionReconciliation` runs when `hydrated && !isFirstRun`, and again when `resumeTick` changes (app resume).
-- Empty UI (“no medications”) is **not** a hydration signal; it can render whenever the medication list is empty while the bridge is still pending.
+Clearing the JS envelope after durable application does **not** imply every native acknowledgement succeeded.
 
 ---
 
-## 14. Resume and reboot
+## Hydration, resume, reboot
 
-**Resume:** App registers resume handling; `resumeTick` bumps → reconciliation may list remaining FIRED events.
-
-**Reboot:** `AutoDeductionReceiver` handles `BOOT_COMPLETED` / quick boot → `restoreFutureSchedules()` reinstalls future alarms from schedule SharedPreferences. Past FIRED events remain in the event store until JS acknowledges them.
-
-Native fire does **not** update stock in the background; stock updates when JS reconciliation runs.
-
----
-
-## 15. Committed stock vs projected balance
-
-| Concept | API | Role |
-|---------|-----|------|
-| Committed snapshot | `Medication.currentPills` (+ history fields) | Persisted inventory after settlement / exact apply / take / etc. |
-| Display / effective | `effectiveCurrentPills(med, today, now)` | Snapshot minus still-due projection (past unsettled + today’s elapsed unconsumed slots when auto-deduct is on) |
-
-After an exact occurrence is applied, consumption markers remove that slot from `todayDueUnits` / historical due helpers so projection does not subtract the same occurrence again on top of the snapshot.
+- **Hydration:** Permission init, exact-alarm capability, and `initNativeBridge()` participate in readiness before `hydrated` is set so hydration-gated effects (persistence, legacy sync, exact reconcile, native schedule hook) do not run against an incomplete native surface.
+- **First run** (`isFirstRun`): seed inventory skips auto deduction / reconcile effects.
+- **Resume:** resume tick can re-enter reconciliation for remaining FIRED events.
+- **Reboot:** native restores future schedule alarms; FIRED rows remain until JS acknowledges.
+- **Empty medication UI text is not a hydration marker**; it can appear whenever the list is empty while the bridge is still pending.
 
 ---
 
-## 16. Error / recovery matrix (summary)
+## Committed stock vs effective balance
 
-| Situation | Durable effect | Next step |
-|-----------|----------------|-----------|
-| App closed at fire time | FIRED in native prefs | Reconcile on start/resume |
-| JS interrupted mid-reconcile | FIRED remains; partial JS state only if persist succeeded | Restart reconciliation |
-| Partial JS persist | Envelope recovery path | Rewrite meds/logs from envelope, then mark |
-| Partial native ack | Some FIRED remain | already_applied + mark |
-| Deleted medication | Ack without stock change | Terminal for that event |
-| Auto-deduct disabled | Ack without stock change | Terminal |
-| Duplicate FIRED | Idempotent | One stock delta, one exact-auto log |
+- **`currentPills`:** committed, persisted application snapshot.
+- **`effectiveCurrentPills`:** derived projection (snapshot minus still-due auto amounts given markers and schedule). It is **not** an independent durable stock source of truth.
+
+After an exact occurrence is applied, markers remove that slot from due helpers so projection does not subtract the same occurrence again on top of the snapshot.
 
 ---
 
-## 17. Validation status (honest)
+## Recovery matrix
 
-### Proven in repository (static / unit tests)
-
-- Occurrence identity and multi-dose `event.amount`
-- Event-day exclusion from historical settlement (post–#207)
-- Native-first and legacy-first no double deduct (test models)
-- Deterministic log ids and duplicate batch handling
-- Gate fresh-state sequencing (test hooks)
-- Partial mark recovery models
-- Hydration ordering test observes reconciliation runner, not EmptyState text
-
-### Not proven in this project environment
-
-- **Android device / emulator end-to-end:** AlarmManager fire → FIRED → cold start → single stock apply → RECONCILED under real Doze / reboot conditions.
-- Full instrumented UI E2E on hardware.
-
-Until device validation is run, treat runtime behavior as **implemented and unit-covered**, not field-verified on Android.
+| Scenario | Expected behavior |
+|----------|-------------------|
+| Native fires, app closed | FIRED stored natively; no JS stock change yet |
+| App opens later | JS reconciles FIRED after hydration |
+| JS persistence fails | No native mark for mutating path; retry from FIRED / envelope |
+| Native ack fails after JS commit | Stays FIRED; retry is acknowledge-only if markers exist |
+| Duplicate FIRED delivery | No second stock deduction; one exact-auto log id |
+| Same med, different doseId | Independent occurrences |
+| Same doseId, different calendarDate | Independent occurrences |
+| Legacy settlement already covered the day | Exact event does not deduct again |
+| Native-first occurrence | Exact event applies once; later legacy skips it |
+| Medication deleted | Acknowledge without stock mutation |
+| Auto-deduct disabled | Acknowledge without stock mutation |
 
 ---
 
-## 18. Phase boundary (product)
+## Operational invariants
 
-| Phase | Status in architecture terms |
-|-------|------------------------------|
-| Native exact fire + durable FIRED | Implemented |
-| JS reconciliation + persistence + ack | Implemented |
-| Event-day settlement window fix | Implemented |
-| Full Take / Restore product integration with exact auto | Not this document’s feature set (future work) |
-| Notification architecture | Independent of stock auto-deduction path |
+1. Native exact fire does not mutate application stock and does not require WebView.
+2. Occurrence identity is always `medicationId + doseId + calendarDate`.
+3. Multi-dose exact apply uses `event.amount`.
+4. Historical settlement for an exact event on day D only includes eligible days **strictly before D**, then applies D’s `event.amount`.
+5. Sibling doses on the same date remain isolated.
+6. Stock mutations for auto paths load **fresh durable state** inside the mutation gate.
+7. Mutating reconcile persists JS state before relying on successful native acknowledgement; failed marks remain safely retryable.
+8. Duplicate reconciliation is idempotent for stock and exact-auto logs.
+9. `effectiveCurrentPills` is a projection over committed state, not a second ledger.
+10. Android device/emulator field verification of the full path is tracked explicitly (see below)—not implied by unit coverage alone.
 
 ---
 
-## 19. Invariants (checklist)
+## Validation status
 
-1. Same `(medicationId, doseId, calendarDate)` → at most one exact auto stock deduction and at most one deterministic exact-auto log.
-2. Native never mutates JS stock.
-3. Historical settlement for an exact event on day D never charges day D’s slots via `pastDueUnits`-to-today; only prior days, then `event.amount`.
-4. Multi-dose siblings on the same date remain independent until each is applied or otherwise marked.
-5. `lastSyncDate` horizon prevents re-applying exact events for days already folded by legacy settlement.
-6. Reconciliation and legacy sync share a fresh-state mutation gate.
-7. Native FIRED remains retryable until mark succeeds; JS markers prevent double apply on retry.
+**Repository:** Architecture and key invariants are covered by repository unit tests and static review of the implementation. **This documentation change does not execute those tests and does not alter production code.**
+
+**Android runtime / emulator / device:** End-to-end validation of AlarmManager fire → FIRED → cold start → single stock apply → RECONCILED under real device conditions remains **unverified in the environment used for this documentation work**. Do not treat the pipeline as field-proven on hardware until that validation is performed and recorded separately.
+
+---
+
+## Future work (narrow)
+
+Further product-level completion of the Take / Restore × exact-native-auto interaction matrix beyond the occurrence-level compatibility already shared via consumption/skip markers. Notification and scheduling UX remain outside this subsystem’s stock path.

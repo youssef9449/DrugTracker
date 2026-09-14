@@ -559,7 +559,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                     return (
                       <div key={unit} className="flex items-center justify-between gap-2">
                         <span className="text-[10px] text-slate-500 font-bold">{unitLabel(unit, med, unitQty)}</span>
-                        {getQuantityMode(med) === 'custom' ? (
+                        {getQuantityMode(med) === 'custom' && (
                           <input
                             type="number"
                             min="1"
@@ -568,8 +568,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                             className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-center font-mono font-bold text-sm focus:ring-1 focus:ring-teal-500"
                             aria-label={`كمية ${med.name}`}
                           />
-                        ) : (
-                          <span className="text-xs font-mono font-bold text-teal-800">{unitQty}</span>
                         )}
                       </div>
                     );

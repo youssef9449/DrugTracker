@@ -59,6 +59,7 @@ import { useDoseReminders } from './hooks/useDoseReminders';
 import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
 import { useDoseReminderScheduler } from './hooks/useDoseReminderScheduler';
 import { useAutoDeductionScheduler } from './hooks/useAutoDeductionScheduler';
+import { useExactAutoDeductionReconciliation } from './hooks/useExactAutoDeductionReconciliation';
 import { usePersistentEffect } from './hooks/usePersistentEffect';
 import { useStockAlerts } from './hooks/useStockAlerts';
 import {
@@ -617,6 +618,19 @@ export default function App() {
     hydrated,
     isFirstRun,
     exactAlarmEnabled,
+    resumeTick: doseAlarmResumeTick,
+  });
+
+  // Phase 3: reconcile native FIRED exact auto-deduction events into JS stock.
+  // Runs after hydration and on resume; serialized; crash-safe persist-then-mark.
+  useExactAutoDeductionReconciliation({
+    medications,
+    logs,
+    setMedications,
+    setLogs,
+    globalAutoDeductEnabled,
+    hydrated,
+    isFirstRun,
     resumeTick: doseAlarmResumeTick,
   });
 

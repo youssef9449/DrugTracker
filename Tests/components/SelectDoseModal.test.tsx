@@ -8,10 +8,6 @@ import {
 } from '@/utils/doseSelectDisplay';
 import type { Medication } from '@/types';
 import { getTodayDateString } from '@/utils/dateCalculations';
-import {
-  isDoseCompletedToday,
-  isDoseTimeElapsedToday,
-} from '@/utils/doseSchedule';
 
 function makeMulti(overrides: Partial<Medication> = {}): Medication {
   return {

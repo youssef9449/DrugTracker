@@ -7,7 +7,6 @@ import {
 } from '../../src/utils/autoDeductionReconciliation';
 import { autoDeductionOccurrenceKey } from '../../src/utils/autoDeductionNative';
 import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
-import { LEGACY_DOSE_ID } from '../../src/utils/notifications';
 import { runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
 import {
   withAutoStockMutationGate,
@@ -285,10 +284,11 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
       logs: logsStore,
       globalAutoDeductEnabled: true,
       listFired: async () => events,
-      markReconciled: async (medicationId, doseId, calendarDate) => {
+      markReconciled: async (_medicationId, doseId, _calendarDate) => {
         const k = `${doseId}`;
-        if (k === 'b' && failB) throw new Error('mark B failed');
+        if (k === 'b' && failB) return { ok: false, changed: false };
         marked.add(k);
+        return { ok: true, changed: true };
       },
       persistMeds: (m) => {
         medsStore = m;
@@ -321,6 +321,7 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
       listFired: async () => stillFired,
       markReconciled: async (_m, doseId) => {
         marked.add(doseId);
+        return { ok: true, changed: true };
       },
       persistMeds: (m) => {
         medsStore = m;
@@ -360,7 +361,7 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
       globalAutoDeductEnabled: true,
       listFired: async () => [e],
       markReconciled: async () => {
-        throw new Error('fail');
+        return { ok: false, changed: false };
       },
       persistMeds: (m) => {
         medsStore = m;
@@ -380,7 +381,7 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
       logs: logsStore,
       globalAutoDeductEnabled: true,
       listFired: async () => [e],
-      markReconciled: async () => {},
+      markReconciled: async () => ({ ok: true, changed: true }),
       persistMeds: (m) => {
         medsStore = m;
         return null;
@@ -397,6 +398,170 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
     expect(logsStore.filter((l) => l.id === exactAutoLogId('med-1', 'd', '2026-09-14')).length).toBe(
       1
     );
+  });
+
+  it('resolvedPromiseWithOkFalseIsAcknowledgementFailure', async () => {
+    // Resolved Promise + ok=false must be treated as failure (not throw).
+    const med = baseMed({
+      doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
+      currentPills: 10,
+      lastSyncDate: '2026-09-14',
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd',
+      calendarDate: '2026-09-14',
+      amount: 2,
+    });
+    let medsStore = [med];
+    let logsStore: ConsumptionLog[] = [];
+    let markCalls = 0;
+
+    const first = await runAutoDeductionReconciliation({
+      alreadyInGate: true,
+      medications: medsStore,
+      logs: logsStore,
+      globalAutoDeductEnabled: true,
+      listFired: async () => [e],
+      markReconciled: async () => {
+        markCalls += 1;
+        return { ok: false, changed: false };
+      },
+      persistMeds: (m) => {
+        medsStore = m;
+        return null;
+      },
+      persistLogs: (l) => {
+        logsStore = l;
+        return null;
+      },
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
+    });
+
+    expect(first.medications[0].currentPills).toBe(8);
+    expect(first.partialNativeAck).toBe(true);
+    expect(first.markedCount).toBe(0);
+    expect(logsStore.filter((l) => l.id === exactAutoLogId('med-1', 'd', '2026-09-14')).length).toBe(
+      1
+    );
+    expect(markCalls).toBe(1);
+
+    // Retry: markers prove already applied; no second stock/log; ack succeeds
+    const second = await runAutoDeductionReconciliation({
+      alreadyInGate: true,
+      medications: medsStore,
+      logs: logsStore,
+      globalAutoDeductEnabled: true,
+      listFired: async () => [e],
+      markReconciled: async () => {
+        markCalls += 1;
+        return { ok: true, changed: true };
+      },
+      persistMeds: (m) => {
+        medsStore = m;
+        return null;
+      },
+      persistLogs: (l) => {
+        logsStore = l;
+        return null;
+      },
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
+    });
+
+    expect(second.details[0].outcome).toBe('already_applied');
+    expect(second.medications[0].currentPills).toBe(8);
+    expect(second.partialNativeAck).toBe(false);
+    expect(second.markedCount).toBe(1);
+    expect(logsStore.filter((l) => l.id === exactAutoLogId('med-1', 'd', '2026-09-14')).length).toBe(
+      1
+    );
+    expect(markCalls).toBe(2);
+  });
+
+  it('alreadyReconciledOkTrueChangedFalseIsSuccessfulTerminalAck', async () => {
+    const med = baseMed({
+      doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
+      currentPills: 10,
+      lastSyncDate: '2026-09-14',
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd',
+      calendarDate: '2026-09-14',
+      amount: 2,
+    });
+    let medsStore = [med];
+    let logsStore: ConsumptionLog[] = [];
+
+    const result = await runAutoDeductionReconciliation({
+      alreadyInGate: true,
+      medications: medsStore,
+      logs: logsStore,
+      globalAutoDeductEnabled: true,
+      listFired: async () => [e],
+      markReconciled: async () => ({ ok: true, changed: false }),
+      persistMeds: (m) => {
+        medsStore = m;
+        return null;
+      },
+      persistLogs: (l) => {
+        logsStore = l;
+        return null;
+      },
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
+    });
+
+    expect(result.medications[0].currentPills).toBe(8);
+    expect(result.partialNativeAck).toBe(false);
+    expect(result.markedCount).toBe(1);
+    expect(logsStore.filter((l) => l.id === exactAutoLogId('med-1', 'd', '2026-09-14')).length).toBe(
+      1
+    );
+  });
+
+  it('envelopePersistenceFailureDoesNotSetPartialNativeAck', async () => {
+    // Envelope present + JS recovery persist fails → recoveredEnvelope true,
+    // but no markReconciled attempt occurred, so partialNativeAck must be false.
+    const med = baseMed({
+      doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
+      currentPills: 8,
+      lastSyncDate: '2026-09-14',
+    });
+    const envelope = {
+      version: 1 as const,
+      status: 'js_ready' as const,
+      medications: [med],
+      logs: [],
+      toAcknowledge: [
+        { medicationId: 'med-1', doseId: 'd', calendarDate: '2026-09-14' },
+      ],
+      createdAt: '2026-09-14T12:00:00.000Z',
+    };
+    let markCalls = 0;
+
+    const result = await runAutoDeductionReconciliation({
+      alreadyInGate: true,
+      medications: [baseMed({ currentPills: 10, lastSyncDate: '2026-09-14' })],
+      logs: [],
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async () => {
+        markCalls += 1;
+        return { ok: true, changed: true };
+      },
+      persistMeds: () => 'persist_failed',
+      persistLogs: () => null,
+      loadEnvelope: () => envelope as never,
+      saveEnvelope: () => null,
+    });
+
+    expect(result.recoveredEnvelope).toBe(true);
+    expect(result.partialNativeAck).toBe(false);
+    expect(result.markedCount).toBe(0);
+    expect(markCalls).toBe(0);
   });
 });
 

@@ -355,7 +355,6 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
 
     await waitFor(() => {
       expect(screen.queryByText(/اختر الجرعة المراد استرجاعها/)).not.toBeInTheDocument();
-      const med = readMeds().find((m) => m.id === 'med-legacy')!;
       // lastConsumedDate cleared by restore path for legacy via consume clear
       const restores = readLogs().filter(
         (l) => l.type === 'skipped_day' && l.medicationId === 'med-legacy'

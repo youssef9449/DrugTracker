@@ -104,27 +104,54 @@ public final class AutoDeductionEventStore {
     }
 
     /**
-     * Mark an existing FIRED event as RECONCILED. No-op if missing or already reconciled.
-     * Returns true if status transitioned to RECONCILED.
+     * Result of an acknowledgement attempt.
+     * <ul>
+     *   <li>{@code ok=true, changed=true} — FIRED → RECONCILED transition succeeded</li>
+     *   <li>{@code ok=true, changed=false} — already RECONCILED (terminal success, no retry)</li>
+     *   <li>{@code ok=false, changed=false} — real failure (missing, parse, or commit); remains retryable</li>
+     * </ul>
      */
-    public boolean markReconciled(String medicationId, String doseId, String calendarDate) {
+    public static final class MarkResult {
+        public final boolean ok;
+        public final boolean changed;
+
+        public MarkResult(boolean ok, boolean changed) {
+            this.ok = ok;
+            this.changed = changed;
+        }
+    }
+
+    /**
+     * Mark an existing FIRED event as RECONCILED.
+     * Returns explicit ok/changed so callers can distinguish success, already-terminal,
+     * and real acknowledgement failure without treating a resolved call as success.
+     */
+    public MarkResult markReconciled(String medicationId, String doseId, String calendarDate) {
         String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
         String prefKey = KEY_EVENT_PREFIX + key;
         synchronized (LOCK) {
             String raw = prefs.getString(prefKey, null);
-            if (raw == null) return false;
+            if (raw == null) {
+                // Missing event: cannot establish RECONCILED; treat as failure so JS retries.
+                return new MarkResult(false, false);
+            }
             try {
                 JSONObject obj = new JSONObject(raw);
                 String status = obj.optString("status", "");
                 if (AutoDeductionContract.STATUS_RECONCILED.equals(status)) {
-                    return false;
+                    return new MarkResult(true, false);
                 }
                 obj.put("status", AutoDeductionContract.STATUS_RECONCILED);
                 obj.put("reconciledAtEpochMs", System.currentTimeMillis());
-                return prefs.edit().putString(prefKey, obj.toString()).commit();
+                boolean committed = prefs.edit().putString(prefKey, obj.toString()).commit();
+                if (committed) {
+                    return new MarkResult(true, true);
+                }
+                Log.e(TAG, "markReconciled commit failed for " + key);
+                return new MarkResult(false, false);
             } catch (JSONException e) {
                 Log.e(TAG, "markReconciled parse failed", e);
-                return false;
+                return new MarkResult(false, false);
             }
         }
     }

@@ -13,8 +13,9 @@ import android.util.Log;
  * <ul>
  *   <li>CREATED / ALREADY_EXISTS — current occurrence is durably recorded;
  *       schedule next is safe/idempotent</li>
- *   <li>FAILED — current occurrence is NOT confirmed durable; do not advance
- *       recurrence as though the fire succeeded</li>
+ *   <li>FAILED — current occurrence is NOT confirmed in the main ledger;
+ *       a pending-fire record may have been written for later promotion.
+ *       Do not advance recurrence as though the fire succeeded.</li>
  * </ul>
  */
 public class AutoDeductionReceiver extends BroadcastReceiver {
@@ -63,14 +64,15 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
             case ALREADY_EXISTS:
                 Log.i(TAG, "duplicate fire ignored (idempotent): "
                         + medicationId + "/" + doseId + "/" + calendarDate);
-                // Current occurrence already durable; next-occurrence scheduling remains safe.
                 scheduleNextIfPossible(context, medicationId, doseId, calendarDate, timeHhmm, amount);
                 break;
             case FAILED:
-                // Do NOT treat as duplicate. Do NOT advance recurrence: the current
-                // occurrence is not confirmed durable. The alarm already fired; a
-                // future boot restore or JS reschedule can recover when possible.
-                Log.e(TAG, "FIRED persistence FAILED — not advancing next occurrence: "
+                // Primary ledger write failed. A pending-fire record may exist
+                // (result.pendingRecorded). Do NOT advance recurrence.
+                // Recovery: promotePendingFires on boot / listEvents, and
+                // past-schedule promotion in restoreFutureSchedules.
+                Log.e(TAG, "FIRED persistence FAILED (pendingRecorded="
+                        + result.pendingRecorded + ") — not advancing next occurrence: "
                         + medicationId + "/" + doseId + "/" + calendarDate);
                 break;
         }
@@ -97,6 +99,12 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
 
     private void onBoot(Context context) {
         try {
+            // Promote any pending-fire records left by earlier commit failures.
+            AutoDeductionEventStore store = new AutoDeductionEventStore(context);
+            int promoted = store.promotePendingFires();
+            if (promoted > 0) {
+                Log.i(TAG, "BOOT: promoted " + promoted + " pending-fire record(s) to FIRED");
+            }
             AutoDeductionScheduler scheduler = new AutoDeductionScheduler(context);
             int n = scheduler.restoreFutureSchedules();
             Log.i(TAG, "BOOT_COMPLETED: restored " + n + " future auto-deduction alarms");

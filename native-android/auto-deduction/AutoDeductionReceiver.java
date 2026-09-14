@@ -10,6 +10,10 @@ import android.util.Log;
  * Registered android:exported="false" — targeted solely via explicit
  * AlarmManager PendingIntent. Does NOT handle boot or permission broadcasts.
  *
+ * Durable cancellation is authoritative at fire time: if the occurrence is
+ * effectively cancelled (tombstone, not superseded by a newer schedule), this
+ * delivery is treated as stale — no FIRED, no next recurrence.
+ *
  * FIRED insertion result drives next-occurrence scheduling:
  * <ul>
  *   <li>CREATED / ALREADY_EXISTS — schedule next is safe/idempotent</li>
@@ -41,6 +45,15 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 || !AutoDeductionContract.isValidCalendarDate(calendarDate)
                 || !AutoDeductionContract.isValidAmount(amount)) {
             Log.w(TAG, "reject fire: invalid payload");
+            return;
+        }
+
+        // Stale delivery after durable cancel (or cancel that lost the AlarmManager race):
+        // do not create FIRED and do not advance recurrence.
+        AutoDeductionScheduler scheduler = new AutoDeductionScheduler(context);
+        if (scheduler.isOccurrenceCancelled(medicationId, doseId, calendarDate)) {
+            Log.i(TAG, "stale fire ignored (cancelled): "
+                    + medicationId + "/" + doseId + "/" + calendarDate);
             return;
         }
 

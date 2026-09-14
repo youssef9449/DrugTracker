@@ -323,7 +323,10 @@ public final class AutoDeductionScheduler {
             return ScheduleResult.fail("schedule_metadata_write_failed");
         }
 
-        // New active schedule supersedes any prior cancellation tombstone.
+        // New schedule metadata (with current scheduleVersion millis) supersedes any
+        // prior cancellation tombstone. Clear is best-effort: if the remove commit
+        // fails, isOccurrenceCancelledKey still treats scheduleVersion >= cancel
+        // millis as active so restore/receiver do not suppress the new schedule.
         clearCancellationTombstoneLocked(key);
 
         AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
@@ -456,7 +459,7 @@ public final class AutoDeductionScheduler {
         }
     }
 
-    /** True if a durable cancellation tombstone exists for this occurrence. */
+    /** True if a durable cancellation tombstone entry exists (raw presence). */
     boolean hasCancellationTombstone(String occurrenceKey) {
         if (occurrenceKey == null || occurrenceKey.isEmpty()) return false;
         synchronized (SCHEDULE_LOCK) {
@@ -465,13 +468,105 @@ public final class AutoDeductionScheduler {
     }
 
     /**
+     * Whether the occurrence is effectively cancelled for fire handling and restore.
+     * <p>
+     * Rules (deterministic from durable state only):
+     * <ul>
+     *   <li>No tombstone → not cancelled</li>
+     *   <li>Tombstone present, no schedule metadata → cancelled</li>
+     *   <li>Both present → compare tombstone cancel epoch vs scheduleVersion
+     *       leading millis; schedule at/after cancel supersedes (not cancelled);
+     *       cancel after schedule remains cancelled</li>
+     * </ul>
+     * This allows a legitimate reschedule to win even if tombstone removal failed
+     * after the new schedule metadata commit, while still blocking cancel-then-
+     * failed-metadata-remove from promoting stale schedule metadata to FIRED.
+     */
+    public boolean isOccurrenceCancelled(
+            String medicationId, String doseId, String calendarDate) {
+        if (medicationId == null || medicationId.isEmpty()
+                || doseId == null || doseId.isEmpty()
+                || !AutoDeductionContract.isValidCalendarDate(calendarDate)) {
+            return false;
+        }
+        String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
+        return isOccurrenceCancelledKey(key);
+    }
+
+    /**
+     * Package-visible key-based check used by restore and tests.
+     */
+    boolean isOccurrenceCancelledKey(String occurrenceKey) {
+        if (occurrenceKey == null || occurrenceKey.isEmpty()) return false;
+        synchronized (SCHEDULE_LOCK) {
+            String cancelKey = CANCEL_KEY_PREFIX + occurrenceKey;
+            String cancelRaw = cancelPrefs.getString(cancelKey, null);
+            if (cancelRaw == null) {
+                return false;
+            }
+            String prefKey = SCHEDULE_KEY_PREFIX + occurrenceKey;
+            String scheduleRaw = schedulePrefs.getString(prefKey, null);
+            if (scheduleRaw == null || scheduleRaw.isEmpty()) {
+                return true;
+            }
+            long cancelMs = parseCancelEpochMs(cancelRaw);
+            long scheduleMs = parseScheduleVersionEpochMs(scheduleRaw);
+            // Schedule metadata written at/after cancel supersedes the tombstone.
+            if (scheduleMs >= 0L && cancelMs >= 0L && scheduleMs >= cancelMs) {
+                return false;
+            }
+            // Ambiguous or cancel-after-schedule: treat as cancelled.
+            return true;
+        }
+    }
+
+    /** Parse cancel tombstone value (millis string). -1 if unparseable. */
+    private static long parseCancelEpochMs(String cancelRaw) {
+        if (cancelRaw == null || cancelRaw.isEmpty()) return -1L;
+        try {
+            return Long.parseLong(cancelRaw.trim());
+        } catch (NumberFormatException e) {
+            return -1L;
+        }
+    }
+
+    /**
+     * Leading millis segment of scheduleVersion in schedule JSON payload.
+     * scheduleVersion format: "{millis}-{seq}-{uuid}". Returns -1 if missing.
+     */
+    private static long parseScheduleVersionEpochMs(String scheduleRaw) {
+        if (scheduleRaw == null || scheduleRaw.isEmpty()) return -1L;
+        try {
+            JSONObject o = new JSONObject(scheduleRaw);
+            String version = o.optString(FIELD_SCHEDULE_VERSION, "");
+            if (version.isEmpty()) return -1L;
+            int dash = version.indexOf('-');
+            String head = dash > 0 ? version.substring(0, dash) : version;
+            return Long.parseLong(head.trim());
+        } catch (Exception e) {
+            return -1L;
+        }
+    }
+
+    /**
      * Clear cancellation tombstone when a new legitimate schedule is installed
      * for the same occurrence identity (re-enable / reschedule after cancel).
      * Caller must hold SCHEDULE_LOCK.
+     * Returns whether the remove commit reported success (best-effort; restore
+     * and fire paths use {@link #isOccurrenceCancelledKey} when clear fails).
      */
-    private void clearCancellationTombstoneLocked(String occurrenceKey) {
-        if (occurrenceKey == null || occurrenceKey.isEmpty()) return;
-        cancelPrefs.edit().remove(CANCEL_KEY_PREFIX + occurrenceKey).commit();
+    private boolean clearCancellationTombstoneLocked(String occurrenceKey) {
+        if (occurrenceKey == null || occurrenceKey.isEmpty()) return true;
+        String cancelKey = CANCEL_KEY_PREFIX + occurrenceKey;
+        if (!cancelPrefs.contains(cancelKey)) {
+            return true;
+        }
+        boolean ok = cancelPrefs.edit().remove(cancelKey).commit();
+        if (!ok) {
+            Log.w(TAG, "clearCancellationTombstone commit failed for " + occurrenceKey
+                    + " — schedule metadata remains authoritative via version ordering");
+        }
+        return ok;
     }
 
     public ScheduleResult scheduleNextOccurrence(
@@ -558,12 +653,19 @@ public final class AutoDeductionScheduler {
                 }
 
                 String occurrenceKey = AutoDeductionContract.occurrenceKey(medId, doseId, date);
-                // Cancelled occurrence: never promote to FIRED; drop stale schedule metadata.
-                // Tombstone remains until a later legitimate scheduleOccurrence clears it.
-                if (hasCancellationTombstone(occurrenceKey)) {
+                // Effectively cancelled: never promote to FIRED; drop stale schedule metadata.
+                // A newer schedule metadata (version millis >= cancel millis) supersedes
+                // a leftover tombstone so legitimate reschedule is not suppressed.
+                if (isOccurrenceCancelledKey(occurrenceKey)) {
                     Log.i(TAG, "restore skip (cancelled): " + medId + "/" + doseId + "/" + date);
                     removeScheduleMetadata(prefKey);
                     continue;
+                }
+                // Leftover tombstone under a superseding schedule: best-effort cleanup.
+                if (hasCancellationTombstone(occurrenceKey)) {
+                    synchronized (SCHEDULE_LOCK) {
+                        clearCancellationTombstoneLocked(occurrenceKey);
+                    }
                 }
 
                 if (epoch <= 0) {

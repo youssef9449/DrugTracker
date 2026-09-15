@@ -78,6 +78,11 @@ public final class AutoDeductionScheduler {
     private final SharedPreferences orderingPrefs;
     /** Active recurrence generation per (medicationId, doseId) — Issue #217. */
     private final SharedPreferences recurrenceAuthPrefs;
+    /**
+     * Test-only: when true, {@link #invalidateRecurrenceAuthorization} treats the
+     * generation commit as failed (fail-closed). Production code never sets this.
+     */
+    volatile boolean forceRecurrenceAuthCommitFailureForTest = false;
 
     public AutoDeductionScheduler(Context context) {
         this.appContext = context.getApplicationContext();
@@ -160,24 +165,41 @@ public final class AutoDeductionScheduler {
      * and already-installed successors are cancelled so lifecycle restore cannot
      * resurrect them (their stamped generation is no longer active).
      */
-    public void invalidateRecurrenceAuthorization(String medicationId, String doseId) {
+    /**
+     * Bump active recurrence generation under {@link #SCHEDULE_LOCK} and, only on
+     * durable commit success, cancel every scheduled occurrence for this dose slot.
+     *
+     * <p><b>Fail-closed:</b> if the generation {@code commit()} fails, this method
+     * returns {@code ok=false}, does <em>not</em> treat the chain as invalidated,
+     * and does <em>not</em> cancel futures (a concurrent receiver with the old
+     * generation could otherwise still create D+1 while callers believed disable
+     * succeeded). Callers must retry until {@code ok=true}.
+     */
+    public InvalidateResult invalidateRecurrenceAuthorization(
+            String medicationId,
+            String doseId
+    ) {
         if (medicationId == null || medicationId.isEmpty()
                 || doseId == null || doseId.isEmpty()) {
-            return;
+            return InvalidateResult.fail("invalid_args");
         }
         synchronized (SCHEDULE_LOCK) {
             String authKey = recurrenceAuthKey(medicationId, doseId);
             long prev = recurrenceAuthPrefs.getLong(authKey, 0L);
             long next = prev <= 0L ? 1L : prev + 1L;
-            if (!recurrenceAuthPrefs.edit().putLong(authKey, next).commit()) {
+            boolean committed = !forceRecurrenceAuthCommitFailureForTest
+                    && recurrenceAuthPrefs.edit().putLong(authKey, next).commit();
+            if (!committed) {
                 Log.e(TAG, "invalidateRecurrenceAuthorization: generation commit failed for "
-                        + medicationId + "/" + doseId);
-                // Still attempt to cancel futures — best-effort under same lock.
-            } else {
-                Log.i(TAG, "invalidateRecurrenceAuthorization: generation "
-                        + prev + " -> " + next + " for " + medicationId + "/" + doseId);
+                        + medicationId + "/" + doseId
+                        + " — fail-closed (no cancel, generation unchanged=" + prev + ")");
+                return InvalidateResult.fail("recurrence_generation_commit_failed");
             }
+            Log.i(TAG, "invalidateRecurrenceAuthorization: generation "
+                    + prev + " -> " + next + " for " + medicationId + "/" + doseId);
+            // Only after durable bump: cancel futures so restore cannot resurrect them.
             cancelAllSchedulesForDoseLocked(medicationId, doseId);
+            return InvalidateResult.success(next);
         }
     }
 
@@ -255,6 +277,31 @@ public final class AutoDeductionScheduler {
 
         public static ScheduleResult fail(String error) {
             return new ScheduleResult(false, error, null);
+        }
+    }
+
+    /**
+     * Result of {@link #invalidateRecurrenceAuthorization}.
+     * Fail-closed: {@code ok=true} only when the durable generation bump committed.
+     */
+    public static final class InvalidateResult {
+        public final boolean ok;
+        public final String error;
+        /** Active generation after a successful bump; 0 when failed / not bumped. */
+        public final long generation;
+
+        public InvalidateResult(boolean ok, String error, long generation) {
+            this.ok = ok;
+            this.error = error;
+            this.generation = generation;
+        }
+
+        public static InvalidateResult success(long generation) {
+            return new InvalidateResult(true, null, generation);
+        }
+
+        public static InvalidateResult fail(String error) {
+            return new InvalidateResult(false, error, 0L);
         }
     }
 

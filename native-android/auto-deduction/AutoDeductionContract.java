@@ -32,6 +32,12 @@ public final class AutoDeductionContract {
      * Distinct from per-occurrence scheduleVersion (ownership/rollback).
      */
     public static final String EXTRA_RECURRENCE_GENERATION = "recurrenceGeneration";
+    /**
+     * Per-schedule ownership token stamped into the PendingIntent when the alarm
+     * was installed (Issue #240). Delivery must match active schedule metadata
+     * or fire is rejected. Not part of occurrence identity.
+     */
+    public static final String EXTRA_SCHEDULE_VERSION = "scheduleVersion";
 
     public static final String PREFS_EVENTS = "drugtracker_auto_deduction_events_v1";
     public static final String PREFS_SCHEDULES = "drugtracker_auto_deduction_schedules_v1";

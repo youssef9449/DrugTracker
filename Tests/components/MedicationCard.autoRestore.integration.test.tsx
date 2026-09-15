@@ -48,7 +48,7 @@ vi.mock('@/utils/sound', () => ({
 }));
 
 import App from '@/App';
-import type { Medication, ConsumptionLog } from '@/types';
+import type { Medication } from '@/types';
 import {
   getTodayDateString,
   effectiveCurrentPills,
@@ -68,9 +68,6 @@ function readMeds(): Medication[] {
   return JSON.parse(localStorage.getItem(STORAGE_MEDS_KEY) || '[]');
 }
 
-function readLogs(): ConsumptionLog[] {
-  return JSON.parse(localStorage.getItem(STORAGE_LOGS_KEY) || '[]');
-}
 
 /** Single-dose pure auto-completed (time elapsed, no consumption mark). */
 function makeSingleAuto(overrides: Partial<Medication> = {}): Medication {
@@ -137,22 +134,14 @@ function makeLegacyAuto(overrides: Partial<Medication> = {}): Medication {
 }
 
 async function clickAutoRestore(medId: string = MED_ID): Promise<void> {
-  const btn = await screen.findByTestId(`auto-restore-dose-${medId}`);
-  fireEvent.click(btn);
+  // Multi → manage UI; single → auto-restore button
+  const manage = screen.queryByTestId(`manage-doses-${medId}`);
+  const auto = screen.queryByTestId(`auto-restore-dose-${medId}`);
+  const btn = manage || auto;
+  expect(btn).toBeTruthy();
+  fireEvent.click(btn!);
 }
 
-async function selectDoseInModal(doseId: string): Promise<void> {
-  await waitFor(() => {
-    expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
-  });
-  const doseButtons = screen.getAllByRole('button').filter((b) =>
-    b.getAttribute('data-dose-id')
-  );
-  const target = doseButtons.find((b) => b.getAttribute('data-dose-id') === doseId);
-  expect(target).toBeTruthy();
-  expect(target).not.toBeDisabled();
-  fireEvent.click(target!);
-}
 
 function cardRoot(name: string): HTMLElement {
   const title = screen.getByText(name);
@@ -262,6 +251,7 @@ describe('MedicationCard Auto Restore — hidden when auto inactive', () => {
     });
 
     expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
+    expect(screen.queryByTestId(`manage-doses-${MED_ID}`)).toBeNull();
   });
 
   it('medication auto OFF hides auto restore even if global auto ON', async () => {
@@ -278,6 +268,7 @@ describe('MedicationCard Auto Restore — hidden when auto inactive', () => {
     });
 
     expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
+    expect(screen.queryByTestId(`manage-doses-${MED_ID}`)).toBeNull();
   });
 });
 
@@ -303,6 +294,7 @@ describe('MedicationCard Auto ON → no Manual Take', () => {
     expect(screen.queryAllByTitle(/تناول جرعة/)).toHaveLength(0);
     // Time not elapsed → no auto restore either
     expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
+    expect(screen.queryByTestId(`manage-doses-${MED_ID}`)).toBeNull();
   });
 
   it('when isAutoActive and pure auto-completed, Auto Restore shows and Take stays hidden', async () => {
@@ -315,7 +307,7 @@ describe('MedicationCard Auto ON → no Manual Take', () => {
       expect(screen.getByText('Auto Restore Single')).toBeInTheDocument();
     });
 
-    expect(screen.getByTestId(`auto-restore-dose-${MED_ID}`)).toBeInTheDocument();
+    expect(screen.getByTestId(`manage-doses-${MED_ID}`)).toBeInTheDocument();
     expect(screen.queryAllByTitle(/تناول جرعة/)).toHaveLength(0);
   });
 });
@@ -334,7 +326,7 @@ describe('MedicationCard Auto Restore — Multi-dose SelectDoseModal', () => {
     });
 
     // Single Auto Restore button on the card
-    expect(screen.getByTestId(`auto-restore-dose-${MED_ID}`)).toBeInTheDocument();
+    expect(screen.getByTestId(`manage-doses-${MED_ID}`)).toBeInTheDocument();
 
     const pillsBefore = readMeds()[0].currentPills;
     const effBefore = effectiveCurrentPills(readMeds()[0]);
@@ -411,6 +403,7 @@ describe('MedicationCard Manual Take → Restore (auto OFF)', () => {
 
     // No auto restore when auto inactive
     expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
+    expect(screen.queryByTestId(`manage-doses-${MED_ID}`)).toBeNull();
 
     const takeBtn = screen.getByTitle(/تناول جرعة/);
     const pillsBefore = readMeds()[0].currentPills;
@@ -425,6 +418,7 @@ describe('MedicationCard Manual Take → Restore (auto OFF)', () => {
     // Manual restore
     const restoreBtn = await screen.findByTestId(`restore-dose-${MED_ID}`);
     expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
+    expect(screen.queryByTestId(`manage-doses-${MED_ID}`)).toBeNull();
     fireEvent.click(restoreBtn);
 
     await waitFor(() => {
@@ -433,6 +427,7 @@ describe('MedicationCard Manual Take → Restore (auto OFF)', () => {
       expect(isDoseSkippedOnDate(m, 's1', getTodayDateString())).toBe(true);
       expect(m.currentPills).toBe(pillsBefore);
       expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
+    expect(screen.queryByTestId(`manage-doses-${MED_ID}`)).toBeNull();
     });
   });
 });

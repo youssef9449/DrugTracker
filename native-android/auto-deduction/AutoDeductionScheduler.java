@@ -44,6 +44,15 @@ import java.util.UUID;
  *   reverse — so nesting cannot deadlock.
  *
  * scheduleVersion remains an ownership guard for rollback (belt-and-suspenders
+ * against concurrent metadata replace). It is NOT a medication-level disable epoch.
+ *
+ * Recurrence authorization (Issue #217):
+ *   PREFS_RECURRENCE_AUTH holds a monotonic generation per (medicationId, doseId).
+ *   scheduleOccurrence stamps the active generation into metadata + Intent.
+ *   invalidateRecurrenceAuthorization bumps the generation under SCHEDULE_LOCK and
+ *   cancels all future scheduled occurrences for that dose slot so post-fire
+ *   scheduleNextOccurrenceIfAbsent cannot create D+1 after disable, and restore
+ *   cannot resurrect a pre-disable successor.
  * with the lock, and for any future path that invokes rollback).
  *
  * Does not use polling, WorkManager periodic, or foreground services.
@@ -56,6 +65,8 @@ public final class AutoDeductionScheduler {
     private static final String CANCEL_KEY_PREFIX = "cancel:";
     /** JSON field: attempt generation token (not part of occurrence identity). */
     public static final String FIELD_SCHEDULE_VERSION = "scheduleVersion";
+    /** JSON/Intent field: medication+dose recurrence authorization generation. */
+    public static final String FIELD_RECURRENCE_GENERATION = "recurrenceGeneration";
 
     /** Process-wide lock: metadata + AlarmManager install/cancel + rollback. */
     private static final Object SCHEDULE_LOCK = new Object();
@@ -65,6 +76,8 @@ public final class AutoDeductionScheduler {
     private final SharedPreferences cancelPrefs;
     /** Durable last-allocated ordering sequence (survives process death). */
     private final SharedPreferences orderingPrefs;
+    /** Active recurrence generation per (medicationId, doseId) — Issue #217. */
+    private final SharedPreferences recurrenceAuthPrefs;
 
     public AutoDeductionScheduler(Context context) {
         this.appContext = context.getApplicationContext();
@@ -74,6 +87,155 @@ public final class AutoDeductionScheduler {
                 AutoDeductionContract.PREFS_CANCELLED, Context.MODE_PRIVATE);
         this.orderingPrefs = appContext.getSharedPreferences(
                 AutoDeductionContract.PREFS_ORDERING, Context.MODE_PRIVATE);
+        this.recurrenceAuthPrefs = appContext.getSharedPreferences(
+                AutoDeductionContract.PREFS_RECURRENCE_AUTH, Context.MODE_PRIVATE);
+    }
+
+
+    // ── Recurrence authorization (Issue #217) ─────────────────────────────
+
+    private static String recurrenceAuthKey(String medicationId, String doseId) {
+        return AutoDeductionContract.RECURRENCE_AUTH_KEY_PREFIX
+                + AutoDeductionContract.scheduleIdentityKey(medicationId, doseId);
+    }
+
+    /**
+     * Read active recurrence generation for a dose slot. Caller must hold
+     * {@link #SCHEDULE_LOCK}. Returns 0 when never scheduled/invalidated.
+     */
+    long getRecurrenceGenerationLocked(String medicationId, String doseId) {
+        return recurrenceAuthPrefs.getLong(recurrenceAuthKey(medicationId, doseId), 0L);
+    }
+
+    /**
+     * Under {@link #SCHEDULE_LOCK}: whether successor creation is still authorized.
+     *
+     * <ul>
+     *   <li>If {@code expectedGeneration > 0}: must equal the durable active generation.</li>
+     *   <li>If {@code expectedGeneration <= 0} (legacy delivery without stamp): authorized
+     *       only when active generation is 0 (never invalidated). After any invalidate,
+     *       active &gt; 0 and legacy receivers cannot create successors.</li>
+     * </ul>
+     */
+    private boolean isRecurrenceGenerationAuthorizedLocked(
+            String medicationId,
+            String doseId,
+            long expectedGeneration
+    ) {
+        long active = getRecurrenceGenerationLocked(medicationId, doseId);
+        if (expectedGeneration > 0L) {
+            return active == expectedGeneration;
+        }
+        // Legacy: only allow if never invalidated (active still 0) — first schedules
+        // set active to 1 inside scheduleOccurrenceLocked, so a fire from a schedule
+        // created after this code is deployed will always carry expectedGeneration > 0.
+        return active <= 0L;
+    }
+
+
+    /**
+     * Ensure a non-zero active generation exists for the dose slot (first schedule).
+     * Caller must hold {@link #SCHEDULE_LOCK}.
+     */
+    long ensureRecurrenceGenerationLocked(String medicationId, String doseId) {
+        String key = recurrenceAuthKey(medicationId, doseId);
+        long g = recurrenceAuthPrefs.getLong(key, 0L);
+        if (g > 0L) {
+            return g;
+        }
+        g = 1L;
+        if (!recurrenceAuthPrefs.edit().putLong(key, g).commit()) {
+            Log.e(TAG, "ensureRecurrenceGenerationLocked: commit failed for " + key);
+            return 0L;
+        }
+        return g;
+    }
+
+    /**
+     * Bump active recurrence generation under {@link #SCHEDULE_LOCK} and cancel every
+     * durable scheduled occurrence for this medication+dose slot (alarms + metadata).
+     *
+     * <p>Linearizes before any concurrent {@link #scheduleNextOccurrenceIfAbsent}:
+     * after this returns, a receiver holding a pre-bump generation cannot create D+1,
+     * and already-installed successors are cancelled so lifecycle restore cannot
+     * resurrect them (their stamped generation is no longer active).
+     */
+    public void invalidateRecurrenceAuthorization(String medicationId, String doseId) {
+        if (medicationId == null || medicationId.isEmpty()
+                || doseId == null || doseId.isEmpty()) {
+            return;
+        }
+        synchronized (SCHEDULE_LOCK) {
+            String authKey = recurrenceAuthKey(medicationId, doseId);
+            long prev = recurrenceAuthPrefs.getLong(authKey, 0L);
+            long next = prev <= 0L ? 1L : prev + 1L;
+            if (!recurrenceAuthPrefs.edit().putLong(authKey, next).commit()) {
+                Log.e(TAG, "invalidateRecurrenceAuthorization: generation commit failed for "
+                        + medicationId + "/" + doseId);
+                // Still attempt to cancel futures — best-effort under same lock.
+            } else {
+                Log.i(TAG, "invalidateRecurrenceAuthorization: generation "
+                        + prev + " -> " + next + " for " + medicationId + "/" + doseId);
+            }
+            cancelAllSchedulesForDoseLocked(medicationId, doseId);
+        }
+    }
+
+    /**
+     * Cancel AlarmManager + remove schedule metadata for every occurrence of
+     * this medication+dose. Caller must hold {@link #SCHEDULE_LOCK}.
+     * Also writes occurrence cancellation tombstones so fire cannot promote them.
+     */
+    private void cancelAllSchedulesForDoseLocked(String medicationId, String doseId) {
+        // Iterate a snapshot of all schedule keys and match medicationId + doseId.
+        java.util.Map<String, ?> all = schedulePrefs.getAll();
+        if (all == null || all.isEmpty()) {
+            return;
+        }
+        for (java.util.Map.Entry<String, ?> e : all.entrySet()) {
+            String prefKey = e.getKey();
+            if (prefKey == null || !prefKey.startsWith(SCHEDULE_KEY_PREFIX)) {
+                continue;
+            }
+            Object val = e.getValue();
+            if (!(val instanceof String)) {
+                continue;
+            }
+            String raw = (String) val;
+            try {
+                org.json.JSONObject o = new org.json.JSONObject(raw);
+                if (!medicationId.equals(o.optString("medicationId", ""))
+                        || !doseId.equals(o.optString("doseId", ""))) {
+                    continue;
+                }
+                String calendarDate = o.optString("calendarDate", "");
+                if (!AutoDeductionContract.isValidCalendarDate(calendarDate)) {
+                    // Malformed — drop metadata only.
+                    schedulePrefs.edit().remove(prefKey).commit();
+                    continue;
+                }
+                // Tombstone + alarm cancel + metadata remove (same as cancelOccurrence core).
+                String occKey = AutoDeductionContract.occurrenceKey(
+                        medicationId, doseId, calendarDate);
+                String cancelKey = CANCEL_KEY_PREFIX + occKey;
+                final String cancelToken = allocateOrderingTokenLocked();
+                if (cancelToken != null) {
+                    cancelPrefs.edit().putString(cancelKey, cancelToken).commit();
+                }
+                Intent intent = buildOccurrenceIntent(
+                        medicationId, doseId, calendarDate, 0L, 0d, null, 0L);
+                PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
+                AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
+                if (am != null && pi != null) {
+                    am.cancel(pi);
+                    pi.cancel();
+                }
+                schedulePrefs.edit().remove(prefKey).commit();
+                Log.i(TAG, "cancelAllSchedulesForDoseLocked: cancelled " + occKey);
+            } catch (org.json.JSONException ex) {
+                schedulePrefs.edit().remove(prefKey).commit();
+            }
+        }
     }
 
     public static final class ScheduleResult {
@@ -328,7 +490,8 @@ public final class AutoDeductionScheduler {
             String calendarDate,
             long triggerAt,
             double amount,
-            String timeHhmm
+            String timeHhmm,
+            long recurrenceGeneration
     ) {
         Intent intent = new Intent(appContext, AutoDeductionReceiver.class);
         intent.setAction(AutoDeductionContract.ACTION_AUTO_DEDUCTION);
@@ -340,6 +503,10 @@ public final class AutoDeductionScheduler {
         intent.putExtra(AutoDeductionContract.EXTRA_AMOUNT, amount);
         if (timeHhmm != null) {
             intent.putExtra(AutoDeductionContract.EXTRA_TIME_HHMM, timeHhmm);
+        }
+        if (recurrenceGeneration > 0L) {
+            intent.putExtra(
+                    AutoDeductionContract.EXTRA_RECURRENCE_GENERATION, recurrenceGeneration);
         }
         return intent;
     }
@@ -425,7 +592,7 @@ public final class AutoDeductionScheduler {
         }
 
         Intent intent = buildOccurrenceIntent(
-                medicationId, doseId, calendarDate, triggerAt, amount, timeHhmm);
+                medicationId, doseId, calendarDate, triggerAt, amount, timeHhmm, 0L);
         PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
 
         synchronized (SCHEDULE_LOCK) {
@@ -462,6 +629,15 @@ public final class AutoDeductionScheduler {
             }
         }
 
+        // Recurrence authorization generation (Issue #217) — under SCHEDULE_LOCK so
+        // concurrent invalidateRecurrenceAuthorization cannot race a stamp with a bump.
+        final String medIdForGen = payload.optString("medicationId", "");
+        final String doseIdForGen = payload.optString("doseId", "");
+        final long recurrenceGen = ensureRecurrenceGenerationLocked(medIdForGen, doseIdForGen);
+        if (recurrenceGen <= 0L) {
+            return ScheduleResult.fail("recurrence_generation_write_failed");
+        }
+
         // Authoritative durable ordering/version for this scheduling attempt — only
         // after acquiring SCHEDULE_LOCK (same serialization boundary as cancel).
         final String myVersion = allocateOrderingTokenLocked();
@@ -470,10 +646,20 @@ public final class AutoDeductionScheduler {
         }
         try {
             payload.put(FIELD_SCHEDULE_VERSION, myVersion);
+            payload.put(FIELD_RECURRENCE_GENERATION, recurrenceGen);
         } catch (JSONException e) {
             Log.e(TAG, "schedule version attach failed", e);
             return ScheduleResult.fail("payload_build_failed");
         }
+
+        // Rebuild PendingIntent with stamped generation so the receiver can refuse
+        // successor creation after a concurrent disable bumps the active generation.
+        final String calDate = payload.optString("calendarDate", "");
+        final String timeHhmm = payload.optString("timeHhmm", null);
+        final double amount = payload.optDouble("amount", Double.NaN);
+        Intent genIntent = buildOccurrenceIntent(
+                medIdForGen, doseIdForGen, calDate, triggerAt, amount, timeHhmm, recurrenceGen);
+        pi = buildPendingIntent(genIntent, PendingIntent.FLAG_UPDATE_CURRENT);
 
         boolean metaWritten = schedulePrefs.edit()
                 .putString(prefKey, payload.toString())
@@ -577,7 +763,7 @@ public final class AutoDeductionScheduler {
         String prefKey = SCHEDULE_KEY_PREFIX + key;
         String cancelKey = CANCEL_KEY_PREFIX + key;
 
-        Intent intent = buildOccurrenceIntent(medicationId, doseId, calendarDate, 0L, 0d, null);
+        Intent intent = buildOccurrenceIntent(medicationId, doseId, calendarDate, 0L, 0d, null, 0L);
         PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
 
         synchronized (SCHEDULE_LOCK) {
@@ -839,6 +1025,28 @@ public final class AutoDeductionScheduler {
             String timeHhmm,
             double amount
     ) {
+        return scheduleNextOccurrenceIfAbsent(
+                medicationId, doseId, fromCalendarDate, timeHhmm, amount, /*expectedGen*/ 0L);
+    }
+
+    /**
+     * @param expectedRecurrenceGeneration generation stamped on the firing occurrence's
+     *        Intent (Issue #217). When {@code > 0}, successor creation is refused unless
+     *        the active durable generation still matches — i.e. disable/cancel has not
+     *        invalidated this recurrence chain. When {@code 0} (legacy), still refuses if
+     *        active generation was invalidated (active {@code > 0} is always required to
+     *        create a new successor after an invalidate has run at least once... 
+     *        actually: if expected is 0, compare only when active > 0 and we require match
+     *        of metadata path). Prefer always passing the Intent generation.
+     */
+    public ScheduleResult scheduleNextOccurrenceIfAbsent(
+            String medicationId,
+            String doseId,
+            String fromCalendarDate,
+            String timeHhmm,
+            double amount,
+            long expectedRecurrenceGeneration
+    ) {
         if (medicationId == null || medicationId.isEmpty()
                 || doseId == null || doseId.isEmpty()
                 || !AutoDeductionContract.isValidCalendarDate(fromCalendarDate)
@@ -897,10 +1105,18 @@ public final class AutoDeductionScheduler {
         }
 
         Intent intent = buildOccurrenceIntent(
-                medicationId, doseId, resolvedNextDate, triggerAt, amount, timeHhmm);
+                medicationId, doseId, resolvedNextDate, triggerAt, amount, timeHhmm, 0L);
         PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
 
         synchronized (SCHEDULE_LOCK) {
+            // Issue #217: refuse successor if disable/cancel invalidated this chain.
+            if (!isRecurrenceGenerationAuthorizedLocked(
+                    medicationId, doseId, expectedRecurrenceGeneration)) {
+                Log.i(TAG, "scheduleNextOccurrenceIfAbsent: recurrence generation invalid — "
+                        + "not creating successor for " + medicationId + "/" + doseId
+                        + " expectedGen=" + expectedRecurrenceGeneration);
+                return ScheduleResult.fail("recurrence_authorization_invalid");
+            }
             if (schedulePrefs.contains(nextPrefKey)) {
                 Log.i(TAG, "scheduleNextOccurrenceIfAbsent: successor already present — "
                         + "not overwriting " + nextPrefKey);
@@ -1074,7 +1290,7 @@ public final class AutoDeductionScheduler {
         }
 
         Intent intent = buildOccurrenceIntent(
-                medicationId, doseId, resolvedNextDate, triggerAt, amount, timeHhmm);
+                medicationId, doseId, resolvedNextDate, triggerAt, amount, timeHhmm, 0L);
         PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
 
         synchronized (SCHEDULE_LOCK) {
@@ -1082,6 +1298,18 @@ public final class AutoDeductionScheduler {
             String currentPast = schedulePrefs.getString(pastPrefKey, null);
             if (!isMetadataOwnedByVersion(currentPast, observedVersion)) {
                 return ScheduleResult.fail("snapshot_stale");
+            }
+            // Issue #217: do not continue recurrence for an invalidated generation.
+            long snapGen = 0L;
+            try {
+                if (currentPast != null) {
+                    snapGen = new JSONObject(currentPast).optLong(FIELD_RECURRENCE_GENERATION, 0L);
+                }
+            } catch (JSONException ignored) { /* treat as 0 */ }
+            if (!isRecurrenceGenerationAuthorizedLocked(medicationId, doseId, snapGen)) {
+                Log.i(TAG, "restore past: recurrence generation invalid — no successor for "
+                        + medicationId + "/" + doseId);
+                return ScheduleResult.fail("recurrence_authorization_invalid");
             }
             // Never overwrite an existing successor with recovery snapshot params.
             if (schedulePrefs.contains(nextPrefKey)) {
@@ -1243,10 +1471,18 @@ public final class AutoDeductionScheduler {
                     Log.e(TAG, "restore payload build failed", e);
                     continue;
                 }
-                Intent intent = buildOccurrenceIntent(medId, doseId, date, epoch, amount, time);
+                Intent intent = buildOccurrenceIntent(medId, doseId, date, epoch, amount, time, 0L);
                 PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
 
                 synchronized (SCHEDULE_LOCK) {
+                    // Issue #217: drop future schedules whose generation was invalidated.
+                    long metaGen = o.optLong(FIELD_RECURRENCE_GENERATION, 0L);
+                    if (metaGen > 0L
+                            && !isRecurrenceGenerationAuthorizedLocked(medId, doseId, metaGen)) {
+                        Log.i(TAG, "restore skip (recurrence generation invalid): " + prefKey);
+                        removeScheduleMetadataIfVersionLocked(prefKey, observedVersion);
+                        continue;
+                    }
                     ScheduleResult r = scheduleOccurrenceLocked(
                             prefKey, key, payload, epoch, pi, observedVersion);
                     if (r.ok) {

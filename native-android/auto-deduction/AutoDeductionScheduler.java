@@ -245,7 +245,7 @@ public final class AutoDeductionScheduler {
                     cancelPrefs.edit().putString(cancelKey, cancelToken).commit();
                 }
                 Intent intent = buildOccurrenceIntent(
-                        medicationId, doseId, calendarDate, 0L, 0d, null, 0L);
+                        medicationId, doseId, calendarDate, 0L, 0d, null, 0L, null);
                 PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
                 AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
                 if (am != null && pi != null) {
@@ -426,12 +426,33 @@ public final class AutoDeductionScheduler {
      * EventStore.LOCK is nested only while SCHEDULE_LOCK is already held; no path
      * acquires EventStore.LOCK then SCHEDULE_LOCK.
      */
+    /**
+     * Authoritative fire transition serialized with cancellation and schedule
+     * ownership validation on {@link #SCHEDULE_LOCK} (Issue #240).
+     *
+     * <p>Under one continuous critical section:
+     * <ol>
+     *   <li>Evaluate effective cancellation (tombstone vs schedule ordering)</li>
+     *   <li>Require active schedule metadata for this occurrence</li>
+     *   <li>Require delivery {@code scheduleVersion} + {@code recurrenceGeneration}
+     *       to match that metadata exactly (reject stale queued alarms after
+     *       disable → re-enable reschedule)</li>
+     *   <li>If ownership holds → persist FIRED via insertFiredIfAbsent</li>
+     * </ol>
+     *
+     * @param deliveryScheduleVersion {@link AutoDeductionContract#EXTRA_SCHEDULE_VERSION}
+     *        from the firing Intent; must match active metadata
+     * @param deliveryRecurrenceGeneration {@link AutoDeductionContract#EXTRA_RECURRENCE_GENERATION}
+     *        from the firing Intent; must match active metadata
+     */
     public FireResult fireOccurrenceIfNotCancelled(
             String medicationId,
             String doseId,
             String calendarDate,
             long scheduledAtEpochMs,
-            double amount
+            double amount,
+            String deliveryScheduleVersion,
+            long deliveryRecurrenceGeneration
     ) {
         if (medicationId == null || medicationId.isEmpty()
                 || doseId == null || doseId.isEmpty()
@@ -447,6 +468,41 @@ public final class AutoDeductionScheduler {
                 Log.i(TAG, "fire linearization: CANCELLED wins for " + key);
                 return FireResult.cancelled();
             }
+
+            // Issue #240: delivery must own the *current* schedule row.
+            final String prefKey = SCHEDULE_KEY_PREFIX + key;
+            final String metaRaw = schedulePrefs.getString(prefKey, null);
+            if (metaRaw == null || metaRaw.isEmpty()) {
+                Log.i(TAG, "fire linearization: STALE (no active schedule metadata) for " + key);
+                return FireResult.cancelled();
+            }
+            if (deliveryScheduleVersion == null || deliveryScheduleVersion.isEmpty()
+                    || deliveryRecurrenceGeneration <= 0L) {
+                Log.i(TAG, "fire linearization: STALE (delivery missing version/generation) for "
+                        + key);
+                return FireResult.cancelled();
+            }
+            try {
+                JSONObject meta = new JSONObject(metaRaw);
+                String activeVersion = meta.optString(FIELD_SCHEDULE_VERSION, "");
+                long activeGen = meta.optLong(FIELD_RECURRENCE_GENERATION, 0L);
+                if (!deliveryScheduleVersion.equals(activeVersion)) {
+                    Log.i(TAG, "fire linearization: STALE scheduleVersion for " + key
+                            + " delivery=" + deliveryScheduleVersion
+                            + " active=" + activeVersion);
+                    return FireResult.cancelled();
+                }
+                if (deliveryRecurrenceGeneration != activeGen) {
+                    Log.i(TAG, "fire linearization: STALE recurrenceGeneration for " + key
+                            + " delivery=" + deliveryRecurrenceGeneration
+                            + " active=" + activeGen);
+                    return FireResult.cancelled();
+                }
+            } catch (JSONException e) {
+                Log.e(TAG, "fire linearization: malformed schedule metadata for " + key, e);
+                return FireResult.cancelled();
+            }
+
             AutoDeductionEventStore store = new AutoDeductionEventStore(appContext);
             AutoDeductionEventStore.InsertFiredResult ir = store.insertFiredIfAbsent(
                     medicationId, doseId, calendarDate, scheduledAtEpochMs, amount);
@@ -538,7 +594,8 @@ public final class AutoDeductionScheduler {
             long triggerAt,
             double amount,
             String timeHhmm,
-            long recurrenceGeneration
+            long recurrenceGeneration,
+            String scheduleVersion
     ) {
         Intent intent = new Intent(appContext, AutoDeductionReceiver.class);
         intent.setAction(AutoDeductionContract.ACTION_AUTO_DEDUCTION);
@@ -554,6 +611,12 @@ public final class AutoDeductionScheduler {
         if (recurrenceGeneration > 0L) {
             intent.putExtra(
                     AutoDeductionContract.EXTRA_RECURRENCE_GENERATION, recurrenceGeneration);
+        }
+        // Issue #240: bind this PendingIntent to the exact schedule row that
+        // installed it so a queued stale delivery cannot FIRE after reschedule.
+        if (scheduleVersion != null && !scheduleVersion.isEmpty()) {
+            intent.putExtra(
+                    AutoDeductionContract.EXTRA_SCHEDULE_VERSION, scheduleVersion);
         }
         return intent;
     }
@@ -639,7 +702,7 @@ public final class AutoDeductionScheduler {
         }
 
         Intent intent = buildOccurrenceIntent(
-                medicationId, doseId, calendarDate, triggerAt, amount, timeHhmm, 0L);
+                medicationId, doseId, calendarDate, triggerAt, amount, timeHhmm, 0L, null);
         PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
 
         synchronized (SCHEDULE_LOCK) {
@@ -705,7 +768,8 @@ public final class AutoDeductionScheduler {
         final String timeHhmm = payload.optString("timeHhmm", null);
         final double amount = payload.optDouble("amount", Double.NaN);
         Intent genIntent = buildOccurrenceIntent(
-                medIdForGen, doseIdForGen, calDate, triggerAt, amount, timeHhmm, recurrenceGen);
+                medIdForGen, doseIdForGen, calDate, triggerAt, amount, timeHhmm,
+                recurrenceGen, myVersion);
         pi = buildPendingIntent(genIntent, PendingIntent.FLAG_UPDATE_CURRENT);
 
         boolean metaWritten = schedulePrefs.edit()
@@ -810,7 +874,7 @@ public final class AutoDeductionScheduler {
         String prefKey = SCHEDULE_KEY_PREFIX + key;
         String cancelKey = CANCEL_KEY_PREFIX + key;
 
-        Intent intent = buildOccurrenceIntent(medicationId, doseId, calendarDate, 0L, 0d, null, 0L);
+        Intent intent = buildOccurrenceIntent(medicationId, doseId, calendarDate, 0L, 0d, null, 0L, null);
         PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
 
         synchronized (SCHEDULE_LOCK) {
@@ -1152,7 +1216,7 @@ public final class AutoDeductionScheduler {
         }
 
         Intent intent = buildOccurrenceIntent(
-                medicationId, doseId, resolvedNextDate, triggerAt, amount, timeHhmm, 0L);
+                medicationId, doseId, resolvedNextDate, triggerAt, amount, timeHhmm, 0L, null);
         PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
 
         synchronized (SCHEDULE_LOCK) {
@@ -1337,7 +1401,7 @@ public final class AutoDeductionScheduler {
         }
 
         Intent intent = buildOccurrenceIntent(
-                medicationId, doseId, resolvedNextDate, triggerAt, amount, timeHhmm, 0L);
+                medicationId, doseId, resolvedNextDate, triggerAt, amount, timeHhmm, 0L, null);
         PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
 
         synchronized (SCHEDULE_LOCK) {
@@ -1447,8 +1511,9 @@ public final class AutoDeductionScheduler {
                 // If both main and pending writes failed, KEEP schedule metadata
                 // as the last recovery source for a later restore attempt.
                 if (epoch <= System.currentTimeMillis()) {
+                    long snapGen = o.optLong(FIELD_RECURRENCE_GENERATION, 0L);
                     FireResult fr = fireOccurrenceIfNotCancelled(
-                            medId, doseId, date, epoch, amount);
+                            medId, doseId, date, epoch, amount, observedVersion, snapGen);
                     if (fr.isCancelled()) {
                         Log.i(TAG, "restore skip (cancelled): " + medId + "/" + doseId + "/" + date);
                     } else if (fr.allowsRecurrence()) {
@@ -1494,8 +1559,9 @@ public final class AutoDeductionScheduler {
                 if (recomputed <= System.currentTimeMillis()) {
                     // After TZ change this occurrence is now in the past: serialized
                     // promote + recurrence continuation.
+                    long snapGenTz = o.optLong(FIELD_RECURRENCE_GENERATION, 0L);
                     FireResult fr = fireOccurrenceIfNotCancelled(
-                            medId, doseId, date, recomputed, amount);
+                            medId, doseId, date, recomputed, amount, observedVersion, snapGenTz);
                     continueRecurrenceAfterPastRecovery(
                             medId, doseId, date, time, amount, fr, prefKey, observedVersion);
                     continue;
@@ -1518,7 +1584,7 @@ public final class AutoDeductionScheduler {
                     Log.e(TAG, "restore payload build failed", e);
                     continue;
                 }
-                Intent intent = buildOccurrenceIntent(medId, doseId, date, epoch, amount, time, 0L);
+                Intent intent = buildOccurrenceIntent(medId, doseId, date, epoch, amount, time, 0L, null);
                 PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
 
                 synchronized (SCHEDULE_LOCK) {

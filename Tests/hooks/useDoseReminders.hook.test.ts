@@ -42,10 +42,15 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
   };
 }
 
-/** Default hook options for tests. */
+/** Default hook options for tests.
+ * Manual-alarm suite default: Auto-Deduction OFF so openAlarm() is allowed
+ * to open the modal. Individual tests may still opt into auto-active mode
+ * via overrides ({ globalAutoDeductEnabled: true }).
+ */
 function defaultOpts(overrides: Record<string, unknown> = {}) {
   return {
     medications: [],
+    globalAutoDeductEnabled: false,
     ...overrides,
   };
 }

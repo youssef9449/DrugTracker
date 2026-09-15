@@ -11,7 +11,10 @@ import {
 } from 'lucide-react';
 import { Medication, calculateMedicationStatus, describeStockInStrips, isSolidUnit } from '../types';
 import { getDepletionDate, effectiveCurrentPills } from '../utils/dateCalculations';
-import { getCardDoseToggleTarget } from '../utils/doseSchedule';
+import {
+  getCardDoseToggleTarget,
+  getAutoRestorableDose,
+} from '../utils/doseSchedule';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { VISUAL_RANGE_MULTIPLIER, MIN_VISUAL_RANGE_DAYS, DAYS_PER_MONTH } from '../utils/time';
 import { MedicationMenu } from './MedicationMenu';
@@ -469,6 +472,10 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const isWarn = statusInfo.status === 'warning';
     const doseToggle = getCardDoseToggleTarget(medication);
     const nextDoseAmount = doseToggle.amount;
+    const autoRestorableDose = getAutoRestorableDose(medication);
+    const showAutoRestore =
+      isAutoActive && Boolean(onRestoreDose) && Boolean(autoRestorableDose);
+
 
     return (
       <div
@@ -482,46 +489,43 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           {medication.name}
         </h3>
 
-        {/* Row 2: Category + status + actions */}
-        <div className="flex items-center justify-between gap-1.5 min-w-0">
-          <div className="min-w-0 flex-1 overflow-hidden flex items-center gap-1 flex-wrap">
-            {medication.category && (
-              <span className={`text-[8px] font-medium px-1.5 py-0.2 rounded-full shrink-0 ${tag.badge}`}>
-                {medication.category}
-              </span>
-            )}
-            {isOut ? (
-              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 flex items-center gap-0.5 shrink-0 w-fit">
-                <AlertCircle className="w-2 h-2" />
-                <span>نفد</span>
-              </span>
-            ) : isCrit ? (
-              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800 flex items-center gap-0.5 shrink-0 w-fit">
-                <Clock className="w-2 h-2" />
-                <span>{statusInfo.daysLeft}ي</span>
-              </span>
-            ) : isWarn ? (
-              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 flex items-center gap-0.5 shrink-0 w-fit">
-                <Clock className="w-2 h-2" />
-                <span>{statusInfo.daysLeft}ي</span>
-              </span>
-            ) : (
-              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 flex items-center gap-0.5 shrink-0 w-fit">
-                <CheckCircle2 className="w-2 h-2" />
-                <span>{statusInfo.daysLeft}ي</span>
-              </span>
-            )}
-          </div>
+        {/* Row 2: Category + Status only (independent of name and actions) */}
+        <div className="flex items-center gap-1 flex-wrap min-w-0 mb-1">
+          {medication.category && (
+            <span className={`text-[8px] font-medium px-1.5 py-0.2 rounded-full shrink-0 ${tag.badge}`}>
+              {medication.category}
+            </span>
+          )}
+          {isOut ? (
+            <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 flex items-center gap-0.5 shrink-0 w-fit">
+              <AlertCircle className="w-2 h-2" />
+              <span>نفد</span>
+            </span>
+          ) : isCrit ? (
+            <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800 flex items-center gap-0.5 shrink-0 w-fit">
+              <Clock className="w-2 h-2" />
+              <span>حرج ({statusInfo.daysLeft}ي)</span>
+            </span>
+          ) : isWarn ? (
+            <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 flex items-center gap-0.5 shrink-0 w-fit">
+              <Clock className="w-2 h-2" />
+              <span>تنبيه ({statusInfo.daysLeft}ي)</span>
+            </span>
+          ) : (
+            <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 flex items-center gap-0.5 shrink-0 w-fit">
+              <CheckCircle2 className="w-2 h-2" />
+              <span>آمن ({statusInfo.daysLeft}ي)</span>
+            </span>
+          )}
+        </div>
 
-          {/* Actions — tonal / filled icon buttons (Material 3) */}
-          <div className="flex items-center gap-1 shrink-0">
+        {/* Actions row (independent of Category/Status) */}
+        <div className="flex items-center justify-end gap-1 shrink-0">
             {(onConsumeDose || onRestoreDose) && (
               doseToggle.canRestore && onRestoreDose ? (
                 <button
                   type="button"
                   onClick={() => {
-                    // Multi-dose: omit doseId so App opens SelectDoseModal (restore mode).
-                    // Single-dose / legacy: pass toggle doseId for direct restore.
                     const isMulti =
                       Array.isArray(medication.doseSchedule) &&
                       medication.doseSchedule.length > 1;
@@ -533,6 +537,26 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   title={`استرجاع الجرعة (+${nextDoseAmount})`}
                   className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors active:scale-95"
                   data-testid={`restore-dose-${medication.id}`}
+                >
+                  <CheckCircle className="w-3 h-3" />
+                </button>
+              ) : showAutoRestore && onRestoreDose ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const isMulti =
+                      Array.isArray(medication.doseSchedule) &&
+                      medication.doseSchedule.length > 1;
+                    // multi → undefined opens SelectDoseModal (restore mode)
+                    // single → real doseId; legacy → undefined
+                    const doseId = isMulti
+                      ? undefined
+                      : autoRestorableDose?.id || undefined;
+                    onRestoreDose(medication.id, doseId || undefined);
+                  }}
+                  title="استرجاع الجرعة"
+                  className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors active:scale-95"
+                  data-testid={`auto-restore-dose-${medication.id}`}
                 >
                   <CheckCircle className="w-3 h-3" />
                 </button>
@@ -551,7 +575,10 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   <Pill className="w-3 h-3 rotate-45" />
                 </button>
               ) : !isAutoActive ? (
-                <span title="تم تناول جرعة اليوم" className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                <span
+                  title="تم تناول جرعة اليوم"
+                  className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-700"
+                >
                   <CheckCircle className="w-3 h-3" />
                 </span>
               ) : null
@@ -574,10 +601,9 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               onToggleAutoDeduct={onToggleAutoDeduct}
               size="xs"
             />
-          </div>
         </div>
 
-        {/* Row 2: stock · dose · depletion — surface container */}
+        {/* Row 3: stock · dose · depletion — surface container */}
         <div className="mt-1.5 p-1 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between gap-1 text-[9px] min-w-0">
           <div className="flex items-baseline gap-0.5 min-w-0">
             <span className="text-[8px] text-slate-500">المتبقي:</span>
@@ -620,6 +646,10 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const isWarn = statusInfo.status === 'warning';
     const doseToggle = getCardDoseToggleTarget(medication);
     const nextDoseAmount = doseToggle.amount;
+    const autoRestorableDose = getAutoRestorableDose(medication);
+    const showAutoRestore =
+      isAutoActive && Boolean(onRestoreDose) && Boolean(autoRestorableDose);
+
 
     return (
       <div
@@ -639,46 +669,43 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           {medication.name}
         </h3>
 
-        {/* Row 2: Category + Status Badge (right) / Actions (left) */}
-        <div className="flex items-center justify-between gap-2 mt-1 min-w-0">
-          <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-            {medication.category && (
-              <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${tag.badge}`}>
-                {medication.category}
-              </span>
-            )}
-            {isOut ? (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 flex items-center gap-0.5 shrink-0">
-                <AlertCircle className="w-2.5 h-2.5" />
-                <span>نفد</span>
-              </span>
-            ) : isCrit ? (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800 flex items-center gap-0.5 shrink-0">
-                <Clock className="w-2.5 h-2.5" />
-                <span>حرج ({statusInfo.daysLeft}ي)</span>
-              </span>
-            ) : isWarn ? (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 flex items-center gap-0.5 shrink-0">
-                <Clock className="w-2.5 h-2.5" />
-                <span>تنبيه ({statusInfo.daysLeft}ي)</span>
-              </span>
-            ) : (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 flex items-center gap-0.5 shrink-0">
-                <CheckCircle2 className="w-2.5 h-2.5" />
-                <span>آمن ({statusInfo.daysLeft}ي)</span>
-              </span>
-            )}
-          </div>
+        {/* Row 2: Category + Status only (independent of name and actions) */}
+        <div className="flex items-center gap-1.5 flex-wrap min-w-0 mt-1">
+          {medication.category && (
+            <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${tag.badge}`}>
+              {medication.category}
+            </span>
+          )}
+          {isOut ? (
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 flex items-center gap-0.5 shrink-0">
+              <AlertCircle className="w-2.5 h-2.5" />
+              <span>نفد</span>
+            </span>
+          ) : isCrit ? (
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800 flex items-center gap-0.5 shrink-0">
+              <Clock className="w-2.5 h-2.5" />
+              <span>حرج ({statusInfo.daysLeft}ي)</span>
+            </span>
+          ) : isWarn ? (
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 flex items-center gap-0.5 shrink-0">
+              <Clock className="w-2.5 h-2.5" />
+              <span>تنبيه ({statusInfo.daysLeft}ي)</span>
+            </span>
+          ) : (
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 flex items-center gap-0.5 shrink-0">
+              <CheckCircle2 className="w-2.5 h-2.5" />
+              <span>آمن ({statusInfo.daysLeft}ي)</span>
+            </span>
+          )}
+        </div>
 
-          {/* Quick Actions — tonal / filled icon buttons (Material 3) */}
-          <div className="flex items-center gap-1 shrink-0">
+        {/* Actions row (independent of Category/Status) */}
+        <div className="flex items-center justify-end gap-1 shrink-0 mt-1">
             {(onConsumeDose || onRestoreDose) && (
               doseToggle.canRestore && onRestoreDose ? (
                 <button
                   type="button"
                   onClick={() => {
-                    // Multi-dose: omit doseId so App opens SelectDoseModal (restore mode).
-                    // Single-dose / legacy: pass toggle doseId for direct restore.
                     const isMulti =
                       Array.isArray(medication.doseSchedule) &&
                       medication.doseSchedule.length > 1;
@@ -688,8 +715,28 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                     );
                   }}
                   title={`استرجاع الجرعة (+${nextDoseAmount})`}
-                  className="w-6 h-6 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-800 transition-colors active:scale-95 hover:bg-emerald-200"
+                  className="w-6 h-6 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors active:scale-95"
                   data-testid={`restore-dose-${medication.id}`}
+                >
+                  <CheckCircle className="w-3.5 h-3.5" />
+                </button>
+              ) : showAutoRestore && onRestoreDose ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const isMulti =
+                      Array.isArray(medication.doseSchedule) &&
+                      medication.doseSchedule.length > 1;
+                    // multi → undefined opens SelectDoseModal (restore mode)
+                    // single → real doseId; legacy → undefined
+                    const doseId = isMulti
+                      ? undefined
+                      : autoRestorableDose?.id || undefined;
+                    onRestoreDose(medication.id, doseId || undefined);
+                  }}
+                  title="استرجاع الجرعة"
+                  className="w-6 h-6 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors active:scale-95"
+                  data-testid={`auto-restore-dose-${medication.id}`}
                 >
                   <CheckCircle className="w-3.5 h-3.5" />
                 </button>
@@ -736,7 +783,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               onToggleAutoDeduct={onToggleAutoDeduct}
               size="sm"
             />
-          </div>
         </div>
 
         {/* Second line: Crucial details — surface container */}

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Medication } from '@/types';
-import { getCardDoseToggleTarget, getNextScheduledDose } from '@/utils/doseSchedule';
+import { getCardDoseToggleTarget, getNextScheduledDose, getAutoRestorableDose, hasAutoRestorableDoseToday } from '@/utils/doseSchedule';
 import { getTodayDateString } from '@/utils/dateCalculations';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
@@ -237,5 +237,115 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
     );
     expect(t.doseId).toBe('early');
     expect(t.amount).toBe(1);
+  });
+});
+
+
+describe('getAutoRestorableDose — pure auto-completed only', () => {
+  const today = getTodayDateString();
+
+  it('returns null when medication autoDeductEnabled is false', () => {
+    const now = new Date(`${today}T16:00:00`);
+    const dose = getAutoRestorableDose(
+      makeMed({
+        autoDeductEnabled: false,
+        doseSchedule: multiSchedule,
+        dosesPerDay: 3,
+      }),
+      now,
+      today
+    );
+    expect(dose).toBeNull();
+    expect(hasAutoRestorableDoseToday(
+      makeMed({ autoDeductEnabled: false, doseSchedule: multiSchedule, dosesPerDay: 3 }),
+      now,
+      today
+    )).toBe(false);
+  });
+
+  it('returns first elapsed pure-auto dose (d1) when time passed and no marks', () => {
+    const now = new Date(`${today}T15:00:00`);
+    const dose = getAutoRestorableDose(
+      makeMed({ doseSchedule: multiSchedule, dosesPerDay: 3 }),
+      now,
+      today
+    );
+    expect(dose).not.toBeNull();
+    expect(dose!.id).toBe('d1');
+    expect(dose!.amount).toBe(1);
+  });
+
+  it('skips manually consumed dose and returns next pure-auto', () => {
+    const now = new Date(`${today}T15:00:00`);
+    const dose = getAutoRestorableDose(
+      makeMed({
+        doseSchedule: multiSchedule,
+        dosesPerDay: 3,
+        doseConsumption: { d1: today },
+      }),
+      now,
+      today
+    );
+    expect(dose).not.toBeNull();
+    expect(dose!.id).toBe('d2');
+  });
+
+  it('skips already-skipped dose', () => {
+    const now = new Date(`${today}T15:00:00`);
+    const dose = getAutoRestorableDose(
+      makeMed({
+        doseSchedule: multiSchedule,
+        dosesPerDay: 3,
+        doseSkippedHistory: { d1: [today] },
+      }),
+      now,
+      today
+    );
+    expect(dose).not.toBeNull();
+    expect(dose!.id).toBe('d2');
+  });
+
+  it('returns null before any dose time has elapsed', () => {
+    const early = new Date(`${today}T06:00:00`);
+    const dose = getAutoRestorableDose(
+      makeMed({ doseSchedule: multiSchedule, dosesPerDay: 3 }),
+      early,
+      today
+    );
+    expect(dose).toBeNull();
+  });
+
+  it('legacy: returns synthetic dose when time elapsed and not lastConsumed', () => {
+    const now = new Date(`${today}T16:00:00`);
+    const dose = getAutoRestorableDose(
+      makeMed({ dailyDose: 3, reminderTime: '09:00', autoDeductEnabled: true }),
+      now,
+      today
+    );
+    expect(dose).not.toBeNull();
+    expect(dose!.id).toBe(''); // no real doseId
+    expect(dose!.amount).toBe(3);
+  });
+
+  it('legacy: null when lastConsumedDate is today', () => {
+    const now = new Date(`${today}T16:00:00`);
+    const dose = getAutoRestorableDose(
+      makeMed({
+        dailyDose: 3,
+        reminderTime: '09:00',
+        lastConsumedDate: today,
+      }),
+      now,
+      today
+    );
+    expect(dose).toBeNull();
+  });
+
+  it('does not treat pure auto as getCardDoseToggleTarget canRestore', () => {
+    const now = new Date(`${today}T15:00:00`);
+    const med = makeMed({ doseSchedule: multiSchedule, dosesPerDay: 3 });
+    const toggle = getCardDoseToggleTarget(med, now, today);
+    expect(toggle.canRestore).toBe(false);
+    expect(getAutoRestorableDose(med, now, today)).not.toBeNull();
   });
 });

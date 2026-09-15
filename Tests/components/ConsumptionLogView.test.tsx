@@ -42,7 +42,6 @@ describe('ConsumptionLogView', () => {
       <ConsumptionLogView
         medications={[makeMed('med-a', 'Med A')]}
         logs={[]}
-        onRestoreDose={() => true}
         showToast={() => {}}
       />
     );
@@ -66,7 +65,6 @@ describe('ConsumptionLogView', () => {
           makeMed('med-c', 'Med C', { dailyDose: 3, autoDeductEnabled: false }),
         ]}
         logs={[]}
-        onRestoreDose={() => true}
         showToast={() => {}}
       />
     );
@@ -80,7 +78,6 @@ describe('ConsumptionLogView', () => {
       <ConsumptionLogView
         medications={[makeMed('med-a', 'Med A')]}
         logs={[]}
-        onRestoreDose={() => true}
         showToast={() => {}}
       />
     );
@@ -103,7 +100,6 @@ describe('ConsumptionLogView', () => {
             description: 'تمت التعبئة',
           }),
         ]}
-        onRestoreDose={() => true}
         showToast={() => {}}
       />
     );

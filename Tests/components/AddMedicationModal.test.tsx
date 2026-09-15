@@ -214,7 +214,6 @@ describe('ConsumptionLogView — onAddLog prop removed (#32)', () => {
       <ConsumptionLogView
         medications={[]}
         logs={[]}
-        onRestoreDose={vi.fn()}
         showToast={vi.fn()}
       />
     );

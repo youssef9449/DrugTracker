@@ -85,7 +85,7 @@ import { getTodayDateString } from '@/utils/dateCalculations';
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
 const TEST_DATE = '2024-09-10';
-const MED_ID = 'med-restore-handler';
+const MED_ID = 'med-restore';
 
 function readMeds(): Medication[] {
   return JSON.parse(localStorage.getItem(STORAGE_MEDS_KEY) || '[]');
@@ -127,16 +127,27 @@ async function goToStockTab(): Promise<void> {
 }
 
 /**
+ * Advance past d1/d2 scheduled times so restoreDose records doseSkippedHistory
+ * (past-due skip marker). Keep date = TEST_DATE. Call after Take, before Restore.
+ * Production only writes doseSkippedHistory when the slot time has elapsed.
+ */
+function advanceClockPastMorningDoses(): void {
+  vi.setSystemTime(new Date(`${TEST_DATE}T15:00:00`));
+}
+
+/**
  * Multi-dose restore via the real MedicationCard control.
- * Requires a prior manual Take so canRestore is true and restore-dose-* is rendered.
+ * Requires a prior manual Take so canRestore is true and restore-dose-med-restore is rendered.
  * Opens SelectDoseModal (restore mode) then picks doseId.
  */
 async function restoreDoseViaCardModal(doseId: string): Promise<void> {
+  // Past-due clock so restoreDose writes doseSkippedHistory[doseId] = [TEST_DATE]
+  advanceClockPastMorningDoses();
   await goToStockTab();
   await waitFor(() => {
-    expect(screen.getByTestId(`restore-dose-${MED_ID}`)).toBeInTheDocument();
+    expect(screen.getByTestId('restore-dose-med-restore')).toBeInTheDocument();
   });
-  fireEvent.click(screen.getByTestId(`restore-dose-${MED_ID}`));
+  fireEvent.click(screen.getByTestId('restore-dose-med-restore'));
   await waitFor(() => {
     expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
   });
@@ -151,8 +162,17 @@ async function restoreDoseViaCardModal(doseId: string): Promise<void> {
 
 async function takeDoseViaSelectModal(doseId: string): Promise<void> {
   // Stock tab: consume without doseId → SelectDoseModal (take mode).
-  // Requires wall clock before that dose's scheduled time (or a skipped slot),
-  // otherwise isDoseCompletedToday disables the option.
+  // Prefer morning clock so unconsumed slots are not auto-completed; skipped
+  // slots remain selectable even after 15:00 (isDoseCompletedToday false).
+  const scheduleTimes: Record<string, string> = { d1: '08:00', d2: '14:00', d3: '20:00' };
+  const slotTime = scheduleTimes[doseId];
+  if (slotTime) {
+    // Set clock one minute before this slot so Take is enabled for a fresh take
+    const [hh, mm] = slotTime.split(':').map(Number);
+    const before = new Date(`${TEST_DATE}T00:00:00`);
+    before.setHours(hh, Math.max(0, mm - 1), 0, 0);
+    vi.setSystemTime(before);
+  }
   await goToStockTab();
   fireEvent.click(screen.getByTestId(`consume-no-doseid-${MED_ID}`));
   await waitFor(() => {

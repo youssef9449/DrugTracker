@@ -47,6 +47,7 @@ vi.mock('@/utils/runAutoDeductionReconciliation', () => ({
 }));
 
 import App from '@/App';
+import { getTodayDateString } from '@/utils/dateCalculations';
 import { runAutoDeductionReconciliation } from '@/utils/runAutoDeductionReconciliation';
 
 import { getInitialMedications } from '@/data/initialData';
@@ -743,9 +744,7 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
     // Legacy (no doseSchedule): MedicationCard canRestore when lastConsumedDate === today
     // (local calendar, same as getTodayDateString). Real restore-dose-* then appears.
     // Logs-tab restore UI stays intentionally removed.
-    const now = new Date();
-    const today =
-      `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const today = getTodayDateString();
     localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([{
       id: 'med-restore',
       name: 'Restore Med',

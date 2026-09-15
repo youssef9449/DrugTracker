@@ -10,6 +10,7 @@ import {
 import {
   isDoseCompletedToday,
   isDoseTimeElapsedToday,
+  isMedicationAutoDeductActive,
 } from '../utils/doseSchedule';
 import {
   relativeDoseDayLabel,
@@ -32,6 +33,9 @@ export interface SelectDoseModalProps {
   onSelect: (medicationId: string, doseId: string) => void;
   /** Restore action in manage mode (falls back to onSelect if omitted). */
   onRestore?: (medicationId: string, doseId: string) => void;
+  /** Global Auto-Deduction toggle (defaults to true). Effective auto state
+   *  is isMedicationAutoDeductActive(medication, globalAutoDeductEnabled). */
+  globalAutoDeductEnabled?: boolean;
   onClose: () => void;
 }
 
@@ -52,6 +56,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
   mode = 'take',
   onSelect,
   onRestore,
+  globalAutoDeductEnabled = true,
   onClose,
 }) => {
   if (!medication) return null;
@@ -67,6 +72,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
   const unit = medication.unit || 'قرص';
   const isManage = mode === 'manage';
   const isRestore = mode === 'restore';
+  const isAutoActive = isMedicationAutoDeductActive(medication, globalAutoDeductEnabled);
 
   const title =
     isManage
@@ -139,51 +145,51 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
               const amountLabel = `${dose.amount} ${unit}`;
 
               if (isManage) {
-                // Explicit per-dose contract (auto ON vs OFF):
-                //   skipped/restored             → تم الاسترجاع   (no action)
-                //   manual consumed              → تم التناول     + استرجاع الجرعة
-                //   auto ON + auto-deducted     → تم الخصم تلقائيًا + استرجاع الجرعة
-                //   auto ON + future (!elapsed)  → لم يحن وقتها  (no action)
-                //   auto OFF (any time, incl.    → لم يتم التناول + تناول الجرعة
-                //     future) = manual mode;       (user is the source of truth)
-                // The Take/Restore actions always carry the exact dose.id and use
-                // dose.amount from doseSchedule (no index/first/dailyDose inference).
+                // Effective Auto-Deduction state = isAutoActive (single source:
+                // isMedicationAutoDeductActive). Auto OFF = manual mode; restored
+                // doses become takeable again (Take ↔ Restore cycle, unbounded).
+                // Auto ON = auto manages the dose; a restored/skipped dose waits
+                // for auto to re-deduct when due (no manual Take offered).
+                //
+                // Per-dose contract:
+                //   consumed (manual)            → تم التناول     + استرجاع الجرعة  (both auto states)
+                //   Auto ON + auto-deducted      → تم الخصم تلقائيًا + استرجاع الجرعة
+                //   Auto ON + future (!elapsed)  → لم يحن وقتها  (no action)
+                //   Auto ON + restored/skipped   → لم يتم التناول (no action — auto re-handles)
+                //   Auto OFF (any state incl.    → لم يتم التناول + تناول الجرعة
+                //     future/restored) = manual    (user is the source of truth)
+                // Actions always carry the exact dose.id + dose.amount from doseSchedule.
                 let statusText: string;
                 let action: 'take' | 'restore' | null;
                 let actionLabel: string;
-                let disabled: boolean;
 
-                if (skipped) {
-                  // Restored/skipped (auto ON or OFF): no action.
-                  statusText = 'تم الاسترجاع';
-                  action = null;
-                  actionLabel = '';
-                  disabled = true;
-                } else if (consumed) {
-                  // Manually consumed today: allow Restore.
+                if (consumed) {
+                  // Manually consumed today (either auto state): allow Restore.
                   statusText = 'تم التناول';
                   action = 'restore';
                   actionLabel = 'استرجاع الجرعة';
-                  disabled = false;
-                } else if (isPureAuto) {
+                } else if (isAutoActive && isPureAuto) {
                   // Auto ON, elapsed + auto-deducted (not manual, not skipped).
                   statusText = 'تم الخصم تلقائيًا';
                   action = 'restore';
                   actionLabel = 'استرجاع الجرعة';
-                  disabled = false;
-                } else if (medication.autoDeductEnabled !== false && !elapsed) {
+                } else if (isAutoActive && !elapsed) {
                   // Auto ON + future slot: not yet due, no action available.
                   statusText = 'لم يحن وقتها';
                   action = null;
                   actionLabel = '';
-                  disabled = true;
+                } else if (isAutoActive && skipped) {
+                  // Auto ON + restored/skipped: auto will re-deduct when due; no manual Take.
+                  statusText = 'لم يتم التناول';
+                  action = null;
+                  actionLabel = '';
                 } else {
-                  // Auto OFF (any time, including future) — manual mode, allow Take.
-                  // Also covers auto ON + elapsed-but-not-yet-deducted transient.
+                  // Auto OFF (any state: future, restored, previously-auto, never-taken)
+                  // → manual mode, allow Take. Restored doses are takeable again.
+                  // (Also covers Auto ON + elapsed-but-not-yet-deducted transient.)
                   statusText = 'لم يتم التناول';
                   action = 'take';
                   actionLabel = 'تناول الجرعة';
-                  disabled = false;
                 }
 
                 return (
@@ -194,15 +200,13 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                     data-event-date={eventDate}
                     data-select-mode="manage"
                     data-dose-status={
-                      skipped
-                        ? 'restored'
-                        : consumed
-                          ? 'consumed'
-                          : isPureAuto
-                            ? 'auto'
-                            : disabled
-                              ? 'future'
-                              : 'pending'
+                      consumed
+                        ? 'consumed'
+                        : isPureAuto
+                          ? 'auto'
+                          : action === 'take'
+                            ? 'pending'
+                            : 'inactive'
                     }
                   >
                     <div className="min-w-0 text-right flex-1">

@@ -692,6 +692,19 @@ export default function App() {
                             : 'المخزون ثابت — لا خصم تلقائي.'}
                         </p>
                       </div>
+                      <label
+                        htmlFor="toggle-global-auto-deduct"
+                        className="flex items-center gap-2 cursor-pointer select-none shrink-0"
+                      >
+                        <Toggle
+                          id="toggle-global-auto-deduct"
+                          checked={globalAutoDeductEnabled}
+                          onChange={handleToggleGlobalAutoDeduct}
+                          label="تبديل الخصم التلقائي لجميع الأدوية"
+                          size="sm"
+                          color="teal"
+                        />
+                      </label>
                     </div>
                   </div>
                   <div className="mx-4 mt-2 grid grid-cols-2 items-stretch gap-2 text-center text-xs">

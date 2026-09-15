@@ -176,7 +176,7 @@ export function MedicationMenu({
         className={`${iconButtonClass} ${
           isAutoActive
             ? 'bg-teal-100 text-teal-800 hover:bg-teal-200'
-            : 'bg-amber-100 text-amber-900 hover:bg-amber-200'
+            : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-600'
         }`}
         aria-label={isAutoActive ? 'إيقاف الخصم التلقائي' : 'تفعيل الخصم التلقائي'}
         title={isAutoActive ? 'الخصم التلقائي مفعّل — اضغط للإيقاف' : 'الخصم التلقائي متوقف — اضغط للتفعيل'}

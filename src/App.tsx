@@ -918,6 +918,7 @@ export default function App() {
         medication={selectDoseMed}
         mode={selectDoseMode}
         onSelect={handleSelectDoseFromModal}
+        onRestore={handleCardRestoreDose}
         onClose={() => {
           setSelectDoseMed(null);
           setSelectDoseMode('take');

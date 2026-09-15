@@ -47,6 +47,7 @@ vi.mock('@/utils/runAutoDeductionReconciliation', () => ({
 }));
 
 import App from '@/App';
+import { getTodayDateString } from '@/utils/dateCalculations';
 import { runAutoDeductionReconciliation } from '@/utils/runAutoDeductionReconciliation';
 
 import { getInitialMedications } from '@/data/initialData';
@@ -739,8 +740,11 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
     });
   });
 
-  it('restores a dose once per day and does not restore when auto-deduct is disabled', async () => {
-    const today = new Date().toISOString().slice(0, 10);
+  it('restores a dose once per day via MedicationCard (logs restore UI removed)', async () => {
+    // Legacy (no doseSchedule): MedicationCard canRestore when lastConsumedDate === today
+    // (local calendar, same as getTodayDateString). Real restore-dose-* then appears.
+    // Logs-tab restore UI stays intentionally removed.
+    const today = getTodayDateString();
     localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([{
       id: 'med-restore',
       name: 'Restore Med',
@@ -751,24 +755,40 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
       colorTag: 'teal',
       createdAt: '2024-01-01T00:00:00.000Z',
       lastSyncDate: today,
+      lastConsumedDate: today,
       autoDeductEnabled: true,
       reminderEnabled: false,
     }]));
     localStorage.setItem('android_med_tracker_logs_v2', '[]');
 
     render(<App />);
-    await waitFor(() => expect(screen.getByText('سجل الاستهلاك')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('سجل الاستهلاك'));
-    await waitFor(() => expect(screen.getByRole('button', { name: /إعادة الجرعة المخصومة/ })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /إعادة الجرعة المخصومة/ }));
-    fireEvent.click(screen.getByRole('button', { name: /إعادة الجرعة المخصومة/ }));
+    await waitFor(() => expect(screen.getByText('Restore Med')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId('restore-dose-med-restore')).toBeInTheDocument()
+    );
+
+    fireEvent.click(screen.getByTestId('restore-dose-med-restore'));
 
     await waitFor(() => {
-      const savedMedications = JSON.parse(localStorage.getItem('android_med_tracker_items_v2') || '[]');
-      expect(savedMedications[0].currentPills).toBe(12);
+      const savedLogs = JSON.parse(localStorage.getItem('android_med_tracker_logs_v2') || '[]');
+      expect(
+        savedLogs.filter(
+          (log: { type: string; date: string }) =>
+            log.type === 'skipped_day' && log.date === today
+        )
+      ).toHaveLength(1);
     });
+
+    // After successful restore, lastConsumedDate is cleared → canRestore false →
+    // real restore control is no longer rendered. A second restore must not add logs.
+    expect(screen.queryByTestId('restore-dose-med-restore')).not.toBeInTheDocument();
     const savedLogs = JSON.parse(localStorage.getItem('android_med_tracker_logs_v2') || '[]');
-    expect(savedLogs.filter((log: { type: string; date: string }) => log.type === 'skipped_day' && log.date === today)).toHaveLength(1);
+    expect(
+      savedLogs.filter(
+        (log: { type: string; date: string }) =>
+          log.type === 'skipped_day' && log.date === today
+      )
+    ).toHaveLength(1);
   });
 
   it('persists notificationsEnabled=false across app launch and respects saved state over OS permission', async () => {

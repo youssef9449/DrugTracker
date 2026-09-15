@@ -1,13 +1,9 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Medication,
   ConsumptionLog,
   PharmacySettings,
-  Pharmacy,
-  UserAddress,
-  UserContact,
   DEFAULT_PHARMACY_SETTINGS,
-  calculateMedicationStatus,
 } from './types';
 // NOTE: the app previously seeded 3 demo medications + 2 consumption
 // logs on a fresh install (src/data/initialData.ts). That seed data
@@ -35,69 +31,48 @@ import { SelectDoseModal } from './components/SelectDoseModal';
 import { AutoDeductPromptModal } from './components/AutoDeductPromptModal';
 import { UpdatePrompt } from './components/UpdatePrompt';
 import { Toggle } from './components/ui/Toggle';
-import { playSuccessChime } from './utils/sound';
-
 import {
   requestNotificationPermission,
   sendTestAlertNotification,
   getNotificationPermission,
-  getExactAlarmPermission,
   openExactAlarmSettings,
 } from './utils/notifications';
-import {
-  getTodayDateString,
-  syncAutoDailyDeductions,
-  reverseRefill,
-  settleDoseChange,
-  settleAutoDeductToggle,
-  isDoseSkippedOnDate,
-  isDoseConsumedOnDate,
-} from './utils/dateCalculations';
-import { isDoseTimeElapsedToday } from './utils/doseSchedule';
 import { OrderItem } from './utils/whatsapp';
-import { consumeDose, settleAndAdjust, resolveRestoreDoseAmount, restoreDose } from './utils/medActions';
+import { playSuccessChime } from './utils/sound';
 import { useDoseReminders } from './hooks/useDoseReminders';
 import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
 import { useDoseReminderScheduler } from './hooks/useDoseReminderScheduler';
 import { useAutoDeductionScheduler } from './hooks/useAutoDeductionScheduler';
 import { useExactAutoDeductionReconciliation } from './hooks/useExactAutoDeductionReconciliation';
-import { withAutoStockMutationGate, commitDurableAutoStockState } from './utils/autoDeductionStockGate';
 import { usePersistentEffect } from './hooks/usePersistentEffect';
 import { useStockAlerts } from './hooks/useStockAlerts';
+import { useAppHydration } from './hooks/useAppHydration';
+import { useStartupAutoDeduction } from './hooks/useStartupAutoDeduction';
+import { useMedicationHandlers } from './hooks/useMedicationHandlers';
+import { usePharmacyUserHandlers } from './hooks/usePharmacyUserHandlers';
+import { useNativeActionHandlers } from './hooks/useNativeActionHandlers';
+import { useDerivedMedications } from './hooks/useDerivedMedications';
 import {
-  initNativeBridge,
   registerBackButtonHandler,
-  registerNotificationActionHandler,
-  registerDoseReceivedHandler,
-  registerAppResumeHandler,
   cleanupNativeListeners,
 } from './native';
-import { migrateSchema } from './lib/migration';
 import { getInitialTab } from './lib/initialTab';
-import { generateId } from './utils/id';
-import { loadJson, loadString, persist } from './utils/storage';
+import { persist } from './utils/storage';
 import { TOAST_MESSAGES, PERSIST_FAILURE_MESSAGES } from './constants/uiStrings';
-import { TOAST_DURATION_MS, PHARMACY_PERSIST_DEBOUNCE_MS, DEFAULT_SNOOZE_MINUTES } from './utils/time';
+import {
+  STORAGE_MEDS_KEY,
+  STORAGE_LOGS_KEY,
+  STORAGE_PHARMACY_KEY,
+  STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
+  STORAGE_AUTO_DEDUCT_PROMPTED_KEY,
+  SOUND_KEY,
+  NOTIFICATIONS_KEY,
+  FONT_SIZE_KEY,
+  CRITICAL_STOCK_ALERTS_KEY,
+  COMPACT_VIEW_KEY,
+} from './constants/storageKeys';
+import { TOAST_DURATION_MS, PHARMACY_PERSIST_DEBOUNCE_MS } from './utils/time';
 import { Zap, ZapOff } from 'lucide-react';
-
-const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
-const STORAGE_GLOBAL_AUTO_DEDUCT_KEY = 'android_med_tracker_auto_deduct_v1';
-const STORAGE_AUTO_DEDUCT_PROMPTED_KEY = 'android_med_tracker_auto_deduct_prompted_v1';
-const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
-const STORAGE_PHARMACY_KEY = 'android_med_tracker_pharmacy_v2';
-const SOUND_KEY = 'android_med_tracker_sound_v1';
-const NOTIFICATIONS_KEY = 'android_med_tracker_notifications_v1';
-// Font size preference: 'normal' or 'large'. Persisted so it survives
-// app relaunch. Applied as a CSS class on the phone-frame container.
-const FONT_SIZE_KEY = 'android_med_tracker_font_size_v1';
-// Critical-stock alerts (the urgent "حرج" notifications) — user can
-// toggle this on/off from the AppHeader. Default true (enabled by
-// default — this is the headline feature of the app). The critical
-// threshold itself is derived per-medication from warningThresholdDays
-// via getCriticalThresholdDays() — see src/types.ts.
-const CRITICAL_STOCK_ALERTS_KEY = 'android_med_tracker_critical_alerts_v1';
-// Compact card view preference for "All Medications" tab
-const COMPACT_VIEW_KEY = 'android_med_tracker_compact_view_v1';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(getInitialTab);
@@ -184,8 +159,6 @@ export default function App() {
   // Compact card view for "All Medications" tab
   const [isCompactView, setIsCompactView] = useState<boolean>(false);
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
-  const restoreInFlightRef = useRef<Set<string>>(new Set());
-  const refillUndoInFlightRef = useRef<Set<string>>(new Set());
 
   const { alarmingMedication, alarmingDoseId, openAlarm, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
     medications,
@@ -236,168 +209,21 @@ export default function App() {
     };
   }, []);
 
-  // ─────────────────────────────────────────────────────────────
-  // Hydration: load persisted state from localStorage / IndexedDB
-  // AFTER mount. This effect runs only on the client and replaces
-  // the default values with whatever the user previously saved.
-  // ─────────────────────────────────────────────────────────────
-  useEffect(() => {
-    // M11: run schema migration first so any future key-shape changes
-    // are applied before we read the (possibly migrated) keys.
-    migrateSchema();
-
-    // Medications — use loadJson (silent fallback). The "first run"
-    // detection distinguishes "no key set" (null) from "empty array
-    // explicitly saved" (loadJson returns []).
-    const savedMedsRaw = localStorage.getItem(STORAGE_MEDS_KEY);
-    const autoDeductPromptedRaw = localStorage.getItem(STORAGE_AUTO_DEDUCT_PROMPTED_KEY);
-    if (savedMedsRaw === null) {
-      // First-ever open: no saved meds. The seed data is a demo —
-      // flag it so the auto-deduction + alert + reminder effects
-      // don't fire ghost notifications/alarms for seed meds.
-      setIsFirstRun(true);
-      if (autoDeductPromptedRaw === null) {
-        setIsAutoDeductPromptOpen(true);
-      }
-    } else {
-      // #15: accept an empty array here (don't gate on length > 0).
-      // Otherwise, when the user deletes all medications, the persisted
-      // "[]" is ignored on next launch, the seed INITIAL_MEDICATIONS
-      // stays in state, and the hydration-gated persistence effect
-      // overwrites the user's "[]" with the seed meds.
-      const parsed = loadJson<Medication[] | null>(STORAGE_MEDS_KEY, null);
-      if (Array.isArray(parsed)) setMedications(parsed);
-    }
-
-    // Logs
-    const savedLogs = loadJson<ConsumptionLog[] | null>(STORAGE_LOGS_KEY, null);
-    if (Array.isArray(savedLogs)) setLogs(savedLogs);
-
-    // Pharmacy settings — custom parsing for the legacy customerCode/
-    // pharmacyName shim, so we read the raw object via loadJson then
-    // post-process.
-    const parsed = loadJson<Partial<PharmacySettings> & { pharmacies?: unknown } | null>(
-      STORAGE_PHARMACY_KEY,
-      null
-    );
-    if (parsed && typeof parsed === 'object') {
-      // Clear legacy default customerCode ('14739') and legacy default pharmacyName ('الصيدلية')
-      const loadedCustomerCode =
-        parsed.customerCode === '14739' ? '' : (parsed.customerCode || '');
-      const loadedPharmacyName =
-        parsed.pharmacyName === 'الصيدلية' ? '' : (parsed.pharmacyName || '');
-      const legacyPharmacy = loadedPharmacyName || loadedCustomerCode || parsed.pharmacyPhone
-        ? [{
-            id: 'pharmacy-legacy',
-            name: loadedPharmacyName || 'صيدلية محفوظة',
-            phone: parsed.pharmacyPhone || '',
-            customerCode: loadedCustomerCode,
-          }]
-        : [];
-      const pharmacies = Array.isArray(parsed.pharmacies) ? parsed.pharmacies : legacyPharmacy;
-      setPharmacySettings({
-        ...DEFAULT_PHARMACY_SETTINGS,
-        ...parsed,
-        customerCode: loadedCustomerCode,
-        pharmacyName: loadedPharmacyName,
-        pharmacies,
-        selectedPharmacyId: parsed.selectedPharmacyId || pharmacies[0]?.id || '',
-      });
-    }
-
-    // Sound flag — persisted as 'true'/'false' string; default true.
-    setSoundEnabled(loadString(SOUND_KEY, 'true') !== 'false');
-
-    // Notifications flag — persisted as 'true'/'false' string if user explicitly set it.
-    const savedNotifications = loadString(NOTIFICATIONS_KEY, '');
-    if (savedNotifications === 'true' || savedNotifications === 'false') {
-      setNotificationsEnabled(savedNotifications === 'true');
-    }
-
-    // Font size — persisted as 'normal'/'large' string.
-    if (loadString(FONT_SIZE_KEY, 'normal') === 'large') setFontScale('large');
-
-    // Critical-stock alerts — default true (persisted as 'true'/'false').
-    setCriticalStockAlertsEnabled(loadString(CRITICAL_STOCK_ALERTS_KEY, 'true') !== 'false');
-
-    // Global auto-deduct — default true.
-    setGlobalAutoDeductEnabled(loadString(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'true') !== 'false');
-
-    // Compact view preference for All Medications
-    if (loadString(COMPACT_VIEW_KEY, 'false') === 'true') {
-      setIsCompactView(true);
-    }
-
-    // Initialize the in-app notifications flag from the async permission
-    // state if no preference has been explicitly saved yet by the user.
-    // Also check exact-alarm permission (Android 12+) and run native
-    // bridge initialization (notification channels, listeners).
-    //
-    // Hydration MUST complete only AFTER all three settle so the
-    // scheduler effects never run before Android notification channels
-    // exist. Previously initNativeBridge ran fire-and-forget alongside
-    // the permission Promise.all, which allowed hydrated===true while
-    // channel creation was still in flight.
-    //
-    // Each task catches its own errors so a single failure cannot
-    // prevent the others from completing, and .finally still marks
-    // the app ready (matching the previous fault-tolerant policy).
-    Promise.all([
-      getNotificationPermission()
-        .then((perm) => {
-          if (localStorage.getItem(NOTIFICATIONS_KEY) === null) {
-            setNotificationsEnabled(perm === 'granted');
-
-            // Auto-request notification permission on the FIRST app open
-            // after install. The browser only shows the permission prompt
-            // when the permission state is 'default' (user hasn't been asked
-            // yet). Once the user grants or denies, the browser remembers
-            // the decision and won't re-show the prompt. If the user denied
-            // permission, this becomes a no-op; the bell button in
-            // AppHeader then takes the user to OS settings to re-enable.
-            //
-            // Auto-requesting on mount is recommended by the Web Push API
-            // spec because it ensures the prompt shows after the user has
-            // had a chance to see the app's value (which is now true on
-            // first open, since the user has just installed it).
-            //
-            // On Android 13+ (Capacitor), this triggers the OS
-            // POST_NOTIFICATIONS permission dialog via
-            // LocalNotifications.requestPermissions(). On older Android,
-            // this is a no-op (notifications allowed by default).
-            if (perm === 'default') {
-              requestNotificationPermission()
-                .then((granted) => {
-                  if (localStorage.getItem(NOTIFICATIONS_KEY) === null) {
-                    setNotificationsEnabled(granted);
-                  }
-                })
-                .catch((err) => {
-                  console.warn('[App] Auto-request notification permission failed:', err);
-                });
-            }
-          }
-        })
-        .catch((err) => {
-          console.warn('[App] getNotificationPermission failed:', err);
-        }),
-      getExactAlarmPermission()
-        .then((state) => {
-          setExactAlarmEnabled(state === 'granted');
-        })
-        .catch((err) => {
-          console.warn('[App] getExactAlarmPermission failed:', err);
-        }),
-      // Native bridge: status bar, back button, notification channels,
-      // and listeners. No-op on web — see src/native.ts. Included in
-      // Promise.all so setHydrated cannot race ahead of channel setup.
-      initNativeBridge().catch((err) => {
-        console.warn('[App] Native bridge init failed:', err);
-      }),
-    ]).finally(() => {
-      setHydrated(true);
-    });
-  }, []);
+  useAppHydration({
+    setMedications,
+    setLogs,
+    setPharmacySettings,
+    setHydrated,
+    setIsFirstRun,
+    setIsAutoDeductPromptOpen,
+    setSoundEnabled,
+    setNotificationsEnabled,
+    setCriticalStockAlertsEnabled,
+    setExactAlarmEnabled,
+    setGlobalAutoDeductEnabled,
+    setFontScale,
+    setIsCompactView,
+  });
 
   // #113: track the toast auto-dismiss timer so it can be cleared on
   // unmount (prevents a setToast-after-unmount warning / leak).
@@ -522,52 +348,15 @@ export default function App() {
     showToast,
   });
 
-  // ─────────────────────────────────────────────────────────────
-  // Auto-deduction: runs ONCE per session, AFTER hydration completes
-  // (so it operates on the user's REAL saved medications, not the
-  // seed defaults). This fixes H8, where the old `[]`-dep effect ran
-  // during the mount pass with stale (default) data and silently
-  // skipped deductions for returning users.
-  //
-  // This effect only deducts + logs. Alerting is handled by a
-  // separate effect below that watches `medications` + the permission
-  // flags, so it fires with the correct `notificationsEnabled` value
-  // (which is resolved async after mount).
-  // ─────────────────────────────────────────────────────────────
-  const deductedRef = useRef(false);
-  useEffect(() => {
-    if (!hydrated || deductedRef.current) return;
-    // First-run: don't auto-deduct or fire notifications for seed data.
-    if (isFirstRun) {
-      deductedRef.current = true;
-      return;
-    }
-    deductedRef.current = true;
 
-    if (!globalAutoDeductEnabled) {
-      return;
-    }
-
-    // Shared gate loads FRESH durable meds/logs — do not use React snapshot.
-    void withAutoStockMutationGate((fresh) => {
-      const today = getTodayDateString();
-      const result = syncAutoDailyDeductions(fresh.medications, today);
-      if (result.newLogs.length > 0) {
-        const nextLogs = [...result.newLogs, ...fresh.logs];
-        const err = commitDurableAutoStockState({
-          medications: result.updatedMeds,
-          logs: nextLogs,
-        });
-        if (!err) {
-          setMedications(result.updatedMeds);
-          setLogs(nextLogs);
-          const totalPills = result.deductedSummary.reduce((sum, item) => sum + item.pillsDeducted, 0);
-          showToast(TOAST_MESSAGES.autoDeductSummary(totalPills));
-        }
-      }
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated]);
+  useStartupAutoDeduction({
+    hydrated,
+    isFirstRun,
+    globalAutoDeductEnabled,
+    setMedications,
+    setLogs,
+    showToast,
+  });
 
   // ─────────────────────────────────────────────────────────────
   // Foreground critical-stock fallback: for each medication, during one
@@ -654,508 +443,60 @@ export default function App() {
     resumeTick: doseAlarmResumeTick,
   });
 
-  const handleRestoreDose = (
-    medicationId: string,
-    reason: string,
-    doseId?: string
-  ): boolean => {
-    const med = medications.find((m) => m.id === medicationId);
-    if (!med) return false;
-    const today = getTodayDateString();
+  const {
+    handleRestoreDose,
+    handleConfirmRefill,
+    handleUndoRefill,
+    handleToggleAutoDeduct,
+    handleToggleGlobalAutoDeduct,
+    handleConfirmAutoDeductPrompt,
+    handleSaveMedication,
+    handleDeleteMedication,
+    handleTakeDoseFromAlarm,
+    handleSnoozeFromAlarm,
+    handleConsumeDose,
+    handleCardRestoreDose,
+    handleSelectDoseFromModal,
+    handleToggleCriticalStockAlerts,
+  } = useMedicationHandlers({
+    medications,
+    logs,
+    soundEnabled,
+    globalAutoDeductEnabled,
+    notificationsEnabled,
+    criticalStockAlertsEnabled,
+    selectDoseMode,
+    setMedications,
+    setLogs,
+    setGlobalAutoDeductEnabled,
+    setIsAutoDeductPromptOpen,
+    setNotificationsEnabled,
+    setCriticalStockAlertsEnabled,
+    setSelectDoseMed,
+    setSelectDoseMode,
+    setEditingMedication,
+    showToast,
+    dismissAlarm,
+    snoozeAlarm,
+  });
 
-    // Resolve identity early for duplicate / in-flight guards (production
-    // pure restoreDose also resolves; we need the id before calling it).
-    const preResolved = resolveRestoreDoseAmount(med, doseId);
-    if (!preResolved.ok) {
-      if (preResolved.reason === 'missing_dose_id') {
-        showToast('اختر الجرعة المراد استرجاعها');
-      }
-      return false;
-    }
-    const resolvedDoseId = preResolved.doseId;
-    const restoreKey = resolvedDoseId
-      ? `${medicationId}:${resolvedDoseId}:${today}`
-      : `${medicationId}:${today}`;
-
-    if (med.autoDeductEnabled === false) {
-      showToast(TOAST_MESSAGES.autoDeductOff(med.name));
-      return false;
-    }
-    // Outstanding-restore guard (not a permanent blacklist):
-    // - Past-due: blocked while doseSkippedHistory marks this doseId+date
-    //   (cleared by consumeDose on Take → allows Restore → Take → Restore).
-    // - Future slot already undone (not consumed, time still ahead): nothing
-    //   left to restore until Take or the scheduled time elapses — blocks
-    //   repeated Restore after a future restore that does not record skip.
-    // - Legacy (no doseId): still uses skipped_day log for the day.
-    const alreadyRestored = resolvedDoseId
-      ? isDoseSkippedOnDate(med, resolvedDoseId, today) ||
-        (() => {
-          if (isDoseConsumedOnDate(med, resolvedDoseId, today)) return false;
-          const slot = med.doseSchedule?.find((d) => d.id === resolvedDoseId);
-          if (!slot) return false;
-          return !isDoseTimeElapsedToday(slot.time);
-        })()
-      : logs.some(
-          (log) =>
-            log.medicationId === medicationId &&
-            log.type === 'skipped_day' &&
-            log.date === today &&
-            !log.doseId
-        );
-    if (alreadyRestored) {
-      showToast(TOAST_MESSAGES.doseAlreadyRestored(med.name));
-      return false;
-    }
-    if (restoreInFlightRef.current.has(restoreKey)) return false;
-    restoreInFlightRef.current.add(restoreKey);
-
-    // Production pure restore (stock + skip + clear consume).
-    const result = restoreDose(med, doseId, today);
-    if (!result.ok) {
-      if (result.reason === 'auto_deduct_off') {
-        showToast(TOAST_MESSAGES.autoDeductOff(med.name));
-      } else if (result.reason === 'missing_dose_id') {
-        showToast('اختر الجرعة المراد استرجاعها');
-      }
-      restoreInFlightRef.current.delete(restoreKey);
-      return false;
-    }
-
-    const { updatedMed: medAfterRestore, restoredAmount } = result;
-    setMedications((prev) =>
-      prev.map((m) => (m.id === medicationId ? medAfterRestore : m))
-    );
-    setLogs((prev) => [
-      {
-        id: generateId('restore'),
-        medicationId: med.id,
-        medicationName: med.name,
-        type: 'skipped_day',
-        amount: restoredAmount,
-        date: today,
-        timestamp: new Date().toISOString(),
-        description: `استرجاع جرعة (${reason}) (+${restoredAmount} ${med.unit})`,
-        ...(result.doseId ? { doseId: result.doseId } : {}),
-      },
-      ...prev,
-    ]);
-    // Clear in-flight so a later valid Restore (after Take) is not blocked.
-    restoreInFlightRef.current.delete(restoreKey);
-    if (soundEnabled) playSuccessChime();
-    return true;
-  };
-
-  const handleConfirmRefill = (medicationId: string, addedPills: number) => {
-    const med = medications.find((m) => m.id === medicationId);
-    if (!med || addedPills <= 0) return;
-    // A new refill creates a fresh undoable log entry, so clear the
-    // dedup guard that blocked rapid double-undo of the previous refill.
-    refillUndoInFlightRef.current.delete(medicationId);
-    const today = getTodayDateString();
-    // Shared settle+adjust logic (audit #78): settle at effPills, add the
-    // refill amount, set lastSyncDate=today.
-    const { updatedMed } = settleAndAdjust(med, addedPills, today);
-    setMedications((prev) =>
-      prev.map((m) => (m.id === medicationId ? updatedMed : m))
-    );
-    setLogs((prev) => [
-      {
-        id: generateId('refill'),
-        medicationId: med.id,
-        medicationName: med.name,
-        type: 'refill',
-        amount: addedPills,
-        date: today,
-        timestamp: new Date().toISOString(),
-        description: addedPills >= 0
-          ? `شراء وتعبئة مخزون (+${addedPills} ${med.unit})`
-          : `تراجع عن تعبئة مخزون (${Math.abs(addedPills)} ${med.unit})`,
-      },
-      ...prev,
-    ]);
-    if (soundEnabled) playSuccessChime();
-  };
-
-  const handleUndoRefill = (medicationId: string) => {
-    if (refillUndoInFlightRef.current.has(medicationId)) return;
-    const med = medications.find((m) => m.id === medicationId);
-    const refill = logs.find((log) =>
-      log.medicationId === medicationId &&
-      log.type === 'refill' &&
-      log.amount > 0 &&
-      !log.reversedAt
-    );
-    if (!med || !refill) return;
-    refillUndoInFlightRef.current.add(medicationId);
-
-    // Clear the guard after the current event-loop tick. This blocks a
-    // rapid double-click (same tick — the timeout hasn't fired yet) while
-    // allowing a legitimate subsequent undo of the NEXT refill (after the
-    // timeout fires and the state has updated). React's act() in tests
-    // flushes state updates but NOT setTimeout (a macrotask), so the guard
-    // stays set between synchronous fireEvent calls.
-    setTimeout(() => {
-      refillUndoInFlightRef.current.delete(medicationId);
-    }, 0);
-
-    const today = getTodayDateString();
-    const { updatedMed, reversedAmount } = reverseRefill(med, refill.amount, today);
-    const undoTimestamp = new Date().toISOString();
-
-    setMedications((prev) =>
-      prev.map((item) => item.id === medicationId ? updatedMed : item)
-    );
-    setLogs((prev) => [
-      {
-        id: generateId('refill-undo'),
-        medicationId: med.id,
-        medicationName: med.name,
-        type: 'refill_undo',
-        amount: -reversedAmount,
-        date: today,
-        timestamp: undoTimestamp,
-        relatedLogId: refill.id,
-        description: `تراجع عن تعبئة مخزون (${reversedAmount} ${med.unit})`,
-      },
-      ...prev.map((log) => log.id === refill.id ? { ...log, reversedAt: undoTimestamp } : log),
-    ]);
-    showToast(TOAST_MESSAGES.refillUndone(med.name));
-    if (soundEnabled) playSuccessChime();
-  };
-
-  const handleToggleAutoDeduct = (medicationId: string) => {
-    // Settle the snapshot at the live effective balance before the new
-    // auto-deduction state takes effect. This handles BOTH transitions:
-    //   - true → false: deduct the elapsed period at the OLD active
-    //     rate, then flip OFF. Without this, the displayed balance
-    //     would jump back up to the stale snapshot value the moment
-    //     the flag flips (because effectiveCurrentPills returns
-    //     currentPills unchanged when autoDeduct is false), undoing
-    //     all consumption since lastSyncDate.
-    //   - false → true: keep currentPills unchanged (the user wasn't
-    //     consuming during the frozen period), bump lastSyncDate=today
-    //     so the new auto-deduction starts fresh from today. Without
-    //     the lastSyncDate bump, enabling auto-deduction would
-    //     retroactively deduct daysPassed*dailyDose for the frozen
-    //     period.
-    //
-    // IMPORTANT: the settle calculation + all side effects (setLogs,
-    // showToast) must run OUTSIDE the setMedications updater. React
-    // updater functions must be pure — React may invoke them more than
-    // once in Strict Mode (which would create duplicate settlement
-    // logs and duplicate toasts). We compute the settle result once
-    // here, fire the side effects once, and pass the result into the
-    // updater as a closure value (which the updater only READS).
-    const med = medications.find((m) => m.id === medicationId);
-    if (!med) return;
-
-    const today = getTodayDateString();
-    // `autoDeductEnabled` defaults to true when undefined, so the
-    // effective current state is `!== false`. To toggle OFF from the
-    // default-true (undefined) state we must set false explicitly.
-    // #27: the previous `!m.autoDeductEnabled` formulation no-oped
-    // for the undefined case because `!undefined === true` — the
-    // first click on a med with autoDeductEnabled===undefined kept
-    // it ON. `med.autoDeductEnabled === false` correctly maps:
-    //   undefined → false (turn OFF the default-true)
-    //   true      → false (turn OFF)
-    //   false     → true  (turn ON)
-    const newState = med.autoDeductEnabled === false;
-    const { updatedMed, log: settleLog } = settleAutoDeductToggle(
-      med,
-      newState,
-      today
-    );
-
-    // Side effect 1: persist the settlement consumption log (if any
-    // pills were deducted during the true→false transition). Runs
-    // OUTSIDE the medications updater so Strict Mode double-invoke
-    // can't duplicate the log.
-    if (settleLog) {
-      setLogs((prevLogs) => [settleLog, ...prevLogs]);
-    }
-    // Side effect 2: toast the toggle result. Also outside the updater.
-    showToast(
-      newState ? `تم تفعيل الخصم التلقائي لـ "${med.name}"` : `تم إيقاف الخصم التلقائي مؤقتاً لـ "${med.name}"`
-    );
-
-    // Updater: pure — only reads `updatedMed` from the closure and
-    // returns the new medications array. No side effects inside.
-    setMedications((prev) =>
-      prev.map((m) => (m.id === medicationId ? updatedMed : m))
-    );
-  };
-
-  const handleToggleGlobalAutoDeduct = () => {
-    const next = !globalAutoDeductEnabled;
-    setGlobalAutoDeductEnabled(next);
-    const today = getTodayDateString();
-
-    if (!next) {
-      // Turning OFF: settle all medications at their current effective balance
-      let totalDeducted = 0;
-      const newLogs: ConsumptionLog[] = [];
-      const settledMeds = medications.map((med) => {
-        const { updatedMed, log } = settleAutoDeductToggle(med, false, today);
-        if (log) {
-          newLogs.push(log);
-          totalDeducted += Math.abs(log.amount);
-        }
-        return updatedMed;
-      });
-
-      setMedications(settledMeds);
-      if (newLogs.length > 0) {
-        setLogs((prev) => [...newLogs, ...prev]);
-      }
-
-      showToast(
-        totalDeducted > 0
-          ? `تم إيقاف الخصم التلقائي لجميع الأدوية (تمت تسوية خصم ${totalDeducted} قرص للأيام السابقة).`
-          : 'تم إيقاف الخصم التلقائي لجميع الأدوية ⏸️ (المخزون ثابت الآن)'
-      );
-    } else {
-      // Turning ON: reactivate all medications, resetting lastSyncDate to today
-      const reactivatedMeds = medications.map((med) => {
-        const { updatedMed } = settleAutoDeductToggle(med, true, today);
-        return updatedMed;
-      });
-
-      setMedications(reactivatedMeds);
-      showToast('تم تفعيل الخصم التلقائي اليومي لجميع الأدوية ⚡');
-    }
-
-    if (soundEnabled) playSuccessChime();
-  };
-
-  const handleConfirmAutoDeductPrompt = (enable: boolean) => {
-    setIsAutoDeductPromptOpen(false);
-    persist(STORAGE_AUTO_DEDUCT_PROMPTED_KEY, 'true', { json: false });
-    setGlobalAutoDeductEnabled(enable);
-    persist(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, String(enable), { json: false });
-    if (soundEnabled) playSuccessChime();
-    showToast(
-      enable
-        ? 'تم تفعيل الخصم التلقائي لمخزون الأدوية ⚡'
-        : 'تم إيقاف الخصم التلقائي ⏸️ (المخزون ثابت حتى تسجل الجرعة يدوياً)'
-    );
-  };
-
-
-  /** Drop doseConsumption / history entries whose doseId is no longer on the schedule. */
-  const pruneDoseConsumption = (
-    medData: Omit<Medication, 'id' | 'createdAt'>,
-    existing?: Medication
-  ): Omit<Medication, 'id' | 'createdAt'> => {
-    const schedule = medData.doseSchedule;
-    if (!Array.isArray(schedule) || schedule.length === 0) {
-      // Legacy / cleared schedule: do not force-migrate doseConsumption.
-      return medData;
-    }
-    const valid = new Set(schedule.map((d) => d.id));
-    const prev = medData.doseConsumption ?? existing?.doseConsumption;
-    const prevHist =
-      medData.doseConsumptionHistory ?? existing?.doseConsumptionHistory;
-    let changed = false;
-    let next = prev;
-    if (prev) {
-      next = {};
-      for (const [id, date] of Object.entries(prev)) {
-        if (valid.has(id)) next[id] = date;
-        else changed = true;
-      }
-      if (Object.keys(next).length !== Object.keys(prev).length) changed = true;
-    }
-    let nextHist = prevHist;
-    if (prevHist) {
-      nextHist = {};
-      for (const [id, dates] of Object.entries(prevHist)) {
-        if (valid.has(id)) nextHist[id] = dates;
-        else changed = true;
-      }
-    }
-    if (!changed && next === prev && nextHist === prevHist) return medData;
-    return {
-      ...medData,
-      ...(next ? { doseConsumption: next } : {}),
-      ...(nextHist ? { doseConsumptionHistory: nextHist } : {}),
-    };
-  };
-
-  const handleSaveMedication = (medData: Omit<Medication, 'id' | 'createdAt'>, editId?: string) => {
-    if (editId) {
-      // Settlement: if the user is changing the dailyDose, we MUST NOT
-      // just apply the new dose going forward from lastSyncDate — that
-      // would retroactively apply the new rate to all days that
-      // actually consumed at the OLD rate. Instead, settle the period
-      // [lastSyncDate, today] at the OLD dose first, then apply the
-      // new dose from today forward.
-      const existing = medications.find((m) => m.id === editId);
-      const today = getTodayDateString();
-      const isDoseChanging =
-        existing && medData.dailyDose !== existing.dailyDose;
-      if (existing && isDoseChanging) {
-        const { updatedMed, log } = settleDoseChange(
-          existing,
-          medData.dailyDose,
-          today
-        );
-        // Merge the settled med with the rest of the form data (name,
-        // category, reminder settings, etc.) — but keep the settled
-        // currentPills + lastSyncDate (don't let the form overwrite them).
-        const pruned = pruneDoseConsumption(medData, existing);
-        setMedications((prev) =>
-          prev.map((m) =>
-            m.id === editId
-              ? {
-                  ...m,
-                  ...pruned,
-                  // Override medData.currentPills + lastSyncDate with
-                  // the settled values. medData.currentPills in edit
-                  // mode equals initialData.currentPills (the input is
-                  // disabled), but settleDoseChange may have reduced it
-                  // for the elapsed days at the old dose — we MUST use
-                  // that reduced value, not the form's disabled-input
-                  // echo of the pre-edit snapshot.
-                  currentPills: updatedMed.currentPills,
-                  lastSyncDate: updatedMed.lastSyncDate,
-                }
-              : m
-          )
-        );
-        // Log the settlement consumption if any pills were deducted.
-        if (log) {
-          setLogs((prev) => [log, ...prev]);
-        }
-      } else {
-        // No dose change (or new med): just save normally.
-        const pruned = pruneDoseConsumption(medData, existing);
-        setMedications((prev) => prev.map((m) => (m.id === editId ? { ...m, ...pruned } : m)));
-      }
-      showToast(
-        medData.reminderEnabled
-          ? `تم حفظ "${medData.name}" مع تذكير يومي الساعة ${medData.reminderTime}`
-          : `تم تعديل بيانات "${medData.name}" بنجاح`
-      );
-    } else {
-      const newMed: Medication = {
-        ...medData,
-        id: 'med-' + Date.now(),
-        createdAt: new Date().toISOString(),
-        lastSyncDate: getTodayDateString(),
-        autoDeductEnabled: globalAutoDeductEnabled,
-      };
-      setMedications((prev) => [newMed, ...prev]);
-      showToast(
-        newMed.reminderEnabled
-          ? `تمت إضافة "${newMed.name}" مع تنبيه الساعة ${newMed.reminderTime}`
-          : `تمت إضافة "${newMed.name}"، وسيحسب استهلاكه تلقائياً`
-      );
-    }
-    if (soundEnabled) playSuccessChime();
-    setEditingMedication(null);
-  };
-
-  const handleSavePharmacySettings = (newSettings: PharmacySettings) => {
-    setPharmacySettings(newSettings);
-    showToast(
-      settingsModalMode === 'pharmacy'
-        ? 'تم حفظ إعدادات الصيدلية بنجاح!'
-        : 'تم حفظ الإعدادات بنجاح!'
-    );
-    if (soundEnabled) playSuccessChime();
-  };
-
-  const handleSavePharmacy = (pharmacy: Pharmacy) => {
-    setPharmacySettings((prev) => {
-      const pharmacies = prev.pharmacies || [];
-      const exists = pharmacies.some((item) => item.id === pharmacy.id);
-      return {
-        ...prev,
-        pharmacies: exists ? pharmacies.map((item) => item.id === pharmacy.id ? pharmacy : item) : [...pharmacies, pharmacy],
-        selectedPharmacyId: prev.selectedPharmacyId || pharmacy.id,
-      };
-    });
-  };
-
-  const handleDeletePharmacy = (id: string) => {
-    setPharmacySettings((prev) => {
-      const pharmacies = (prev.pharmacies || []).filter((item) => item.id !== id);
-      return { ...prev, pharmacies, selectedPharmacyId: prev.selectedPharmacyId === id ? pharmacies[0]?.id || '' : prev.selectedPharmacyId };
-    });
-    showToast('تم حذف الصيدلية.');
-  };
-
-  const userContacts: UserContact[] = pharmacySettings.whatsappContacts?.length
-    ? pharmacySettings.whatsappContacts
-    : pharmacySettings.contactPhone
-      ? [{ id: 'legacy-contact', label: 'رقم التواصل', phone: pharmacySettings.contactPhone }]
-      : [];
-  const userAddresses: UserAddress[] = pharmacySettings.whatsappAddresses?.length
-    ? pharmacySettings.whatsappAddresses
-    : pharmacySettings.address
-      ? [{ id: 'legacy-address', label: 'عنوان التوصيل', address: pharmacySettings.address }]
-      : [];
-
-  const handleSaveUserContact = (contact: UserContact) => {
-    setPharmacySettings((prev) => {
-      const contacts = prev.whatsappContacts?.length
-        ? prev.whatsappContacts
-        : prev.contactPhone
-          ? [{ id: 'legacy-contact', label: 'رقم التواصل', phone: prev.contactPhone }]
-          : [];
-      const exists = contacts.some((item) => item.id === contact.id);
-      return {
-        ...prev,
-        whatsappContacts: exists ? contacts.map((item) => item.id === contact.id ? contact : item) : [...contacts, contact],
-        contactPhone: contact.id === 'legacy-contact' ? contact.phone : prev.contactPhone,
-      };
-    });
-  };
-
-  const handleDeleteUserContact = (id: string) => {
-    setPharmacySettings((prev) => ({
-      ...prev,
-      whatsappContacts: (prev.whatsappContacts || []).filter((item) => item.id !== id),
-      selectedWhatsappContactIds: (prev.selectedWhatsappContactIds || []).filter((item) => item !== id),
-      contactPhone: id === 'legacy-contact' ? '' : prev.contactPhone,
-    }));
-    showToast('تم حذف رقم التليفون.');
-  };
-
-  const handleSaveUserAddress = (address: UserAddress) => {
-    setPharmacySettings((prev) => {
-      const addresses = prev.whatsappAddresses?.length
-        ? prev.whatsappAddresses
-        : prev.address
-          ? [{ id: 'legacy-address', label: 'عنوان التوصيل', address: prev.address }]
-          : [];
-      const exists = addresses.some((item) => item.id === address.id);
-      return {
-        ...prev,
-        whatsappAddresses: exists ? addresses.map((item) => item.id === address.id ? address : item) : [...addresses, address],
-        address: address.id === 'legacy-address' ? address.address : prev.address,
-      };
-    });
-  };
-
-  const handleDeleteUserAddress = (id: string) => {
-    setPharmacySettings((prev) => ({
-      ...prev,
-      whatsappAddresses: (prev.whatsappAddresses || []).filter((item) => item.id !== id),
-      selectedWhatsappAddressIds: (prev.selectedWhatsappAddressIds || []).filter((item) => item !== id),
-      address: id === 'legacy-address' ? '' : prev.address,
-    }));
-    showToast('تم حذف العنوان.');
-  };
-
-  const handleDeleteMedication = (id: string) => {
-    const med = medications.find((m) => m.id === id);
-    if (!med) return;
-    setMedications((prev) => prev.filter((m) => m.id !== id));
-    showToast(`تم حذف "${med.name}" من القائمة`);
-  };
+  const {
+    handleSavePharmacySettings,
+    handleSavePharmacy,
+    handleDeletePharmacy,
+    handleSaveUserContact,
+    handleDeleteUserContact,
+    handleSaveUserAddress,
+    handleDeleteUserAddress,
+    userContacts,
+    userAddresses,
+  } = usePharmacyUserHandlers({
+    soundEnabled,
+    settingsModalMode,
+    pharmacySettings,
+    setPharmacySettings,
+    showToast,
+  });
 
   const handleToggleNotifications = async () => {
     if (!notificationsEnabled) {
@@ -1214,100 +555,18 @@ export default function App() {
   };
 
 
-  const handleTakeDoseFromAlarm = useCallback((med: Medication, doseId?: string) => {
-    const today = getTodayDateString();
-    // Phase 3: optional doseId selects the slot (from notification extra).
-    const { updatedMed, doseAmount, log } = consumeDose(med, 'alarm', today, new Date(), doseId);
-    if (updatedMed && log) {
-      setMedications((prev) =>
-        prev.map((m) => (m.id === med.id ? updatedMed : m))
-      );
-      setLogs((prev) => [log, ...prev]);
-    }
-    dismissAlarm();
-    showToast(TOAST_MESSAGES.doseTaken(med.name, doseAmount, med.unit));
-    if (soundEnabled) playSuccessChime();
-  }, [dismissAlarm, soundEnabled]);
 
-  useEffect(() => {
-    registerNotificationActionHandler((actionId, medicationId, doseId) => {
-      if (actionId !== 'take_dose') return;
-      const medication = medications.find((med) => med.id === medicationId);
-      if (medication) handleTakeDoseFromAlarm(medication, doseId);
-    });
-    return () => registerNotificationActionHandler(null);
-  }, [medications, handleTakeDoseFromAlarm]);
+  useNativeActionHandlers({
+    medications,
+    handleTakeDoseFromAlarm,
+    openAlarm,
+    soundEnabled,
+    setDoseLifecycleTick,
+    setCriticalAlarmResumeTick,
+    setDoseAlarmResumeTick,
+    setExactAlarmEnabled,
+  });
 
-  // Register the dose-received handler: when a native dose-reminder
-  // notification fires while the app is in the foreground, the
-  // localNotificationReceived listener in native.ts calls this handler
-  // with the medicationId, which opens the DoseAlarmModal via openAlarm.
-  // The notification was scheduled on the SILENT foreground channel
-  // (dose-reminder-foreground-v1), so Android produces no sound. The
-  // in-app chime (playSuccessChime) is the ONLY sound — gated by the
-  // existing soundEnabled setting, exactly like all other UI feedback.
-  useEffect(() => {
-    registerDoseReceivedHandler((medicationId, doseId) => {
-      openAlarm(medicationId, doseId);
-      if (soundEnabled) playSuccessChime();
-    });
-    return () => registerDoseReceivedHandler(null);
-  }, [openAlarm, soundEnabled]);
-
-  // ─────────────────────────────────────────────────────────────
-  // App-resume handler: re-check exact-alarm permission when the app
-  // returns to the foreground. The user may have just granted/denied
-  // SCHEDULE_EXACT_ALARM in the Android settings screen (opened via the
-  // "السماح بالمنبهات الدقيقة" button in AppSettingsModal). When the
-  // permission state changes, the useDoseReminderScheduler effect
-  // (which depends on exactAlarmEnabled) re-runs and reschedules all
-  // dose reminders with the correct (exact or cancelled) policy.
-  //
-  // The resume also reconciles the CRITICAL alarms: every resume bumps
-  // criticalAlarmResumeTick → useCriticalAlarmScheduler re-runs and
-  // verifies each matching claim against the platform's actual pending
-  // notifications, re-arming any alarm the OS dropped (exact-alarm
-  // permission revoked, scheduled notification removed, …).
-  //
-  // …and the DOSE reminders: every resume bumps doseAlarmResumeTick →
-  // useDoseReminderScheduler's consumption-suppression effect re-runs,
-  // so a dose consumed today (manually or via the notification action)
-  // can never produce today's reminder after a resume — repairing any
-  // suppression attempt that failed.
-  // ─────────────────────────────────────────────────────────────
-  useEffect(() => {
-    registerAppResumeHandler((isActive) => {
-      // Always bump the lifecycle tick on BOTH foreground and background
-      // transitions so useDoseReminderScheduler re-arms all pending dose
-      // reminders on the correct channel (silent foreground / system-sound
-      // background). native.ts already called setAppInForeground(isActive)
-      // before this handler runs, so getDoseReminderChannelId() returns
-      // the right channel when the scheduler re-schedules.
-      setDoseLifecycleTick((tick) => tick + 1);
-      if (isActive) {
-        setCriticalAlarmResumeTick((tick) => tick + 1);
-        setDoseAlarmResumeTick((tick) => tick + 1);
-        getExactAlarmPermission()
-          .then((state) => {
-            setExactAlarmEnabled(state === 'granted');
-          })
-          .catch((err) => {
-            console.warn('[App] Resume exact-alarm re-check failed:', err);
-          });
-      }
-    });
-    return () => registerAppResumeHandler(null);
-  }, []);
-
-  const handleSnoozeFromAlarm = (med: Medication) => {
-    snoozeAlarm(med, DEFAULT_SNOOZE_MINUTES);
-    showToast(TOAST_MESSAGES.doseSnoozed(med.name));
-  };
-
-  // Open the Android exact-alarm settings screen so the user can grant
-  // SCHEDULE_EXACT_ALARM. On web this is a no-op. After the user returns
-  // to the app, the appStateChange listener re-checks the permission
-  // and updates exactAlarmEnabled → the scheduler reschedules.
   const handleOpenExactAlarmSettings = () => {
     openExactAlarmSettings()
       .then((opened) => {
@@ -1320,210 +579,14 @@ export default function App() {
 
   // Consume-pill feature: manually consume a dose from the card.
   // Subtracts dailyDose from currentPills, marks the med as consumed
-  // today (blocks auto-deduction for today), creates a dose_taken log.
-  const handleConsumeDose = (medicationId: string, doseId?: string) => {
-    const med = medications.find((m) => m.id === medicationId);
-    if (!med) return;
-    const today = getTodayDateString();
-    const isMulti =
-      Array.isArray(med.doseSchedule) && med.doseSchedule.length > 1;
 
-    // Multi-dose: never guess — open explicit selector when doseId missing.
-    if (isMulti && !doseId) {
-      setSelectDoseMode('take');
-      setSelectDoseMed(med);
-      return;
-    }
-
-    // Single-dose schedule (length === 1): use that dose id if present.
-    const resolvedDoseId =
-      doseId ??
-      (Array.isArray(med.doseSchedule) && med.doseSchedule.length === 1
-        ? med.doseSchedule[0].id
-        : undefined);
-
-    // Legacy: block double-consume for the single daily slot.
-    if (
-      !(Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) &&
-      med.lastConsumedDate === today
-    ) {
-      showToast(TOAST_MESSAGES.doseAlreadyTaken(med.name));
-      return;
-    }
-
-    const { updatedMed, doseAmount, log } = consumeDose(
-      med,
-      'manual',
-      today,
-      new Date(),
-      resolvedDoseId
-    );
-    if (doseAmount <= 0) {
-      showToast(TOAST_MESSAGES.doseAlreadyTaken(med.name));
-      return;
-    }
-    if (updatedMed && log) {
-      setMedications((prev) =>
-        prev.map((m) => (m.id === medicationId ? updatedMed : m))
-      );
-      setLogs((prev) => [log, ...prev]);
-    }
-    setSelectDoseMed(null);
-    setSelectDoseMode('take');
-    showToast(TOAST_MESSAGES.doseTaken(med.name, doseAmount, med.unit));
-    if (soundEnabled) playSuccessChime();
-  };
-
-  /**
-   * Card toggle restore.
-   * Multi-dose without doseId → same SelectDoseModal UX as Take (restore mode).
-   * Single-dose / legacy / explicit doseId → direct restoreDose path.
-   */
-  const handleCardRestoreDose = (medicationId: string, doseId?: string) => {
-    const med = medications.find((m) => m.id === medicationId);
-    if (!med) return;
-    const isMulti =
-      Array.isArray(med.doseSchedule) && med.doseSchedule.length > 1;
-
-    if (isMulti && !doseId) {
-      setSelectDoseMode('restore');
-      setSelectDoseMed(med);
-      return;
-    }
-
-    const ok = handleRestoreDose(medicationId, 'card', doseId);
-    if (ok) {
-      setSelectDoseMed(null);
-      setSelectDoseMode('take');
-      showToast(`تم استرجاع الجرعة — ${med.name}`);
-    }
-  };
-
-  const handleSelectDoseFromModal = (medicationId: string, doseId: string) => {
-    if (selectDoseMode === 'restore') {
-      handleCardRestoreDose(medicationId, doseId);
-    } else {
-      handleConsumeDose(medicationId, doseId);
-    }
-  };
-
-  // #79: extracted from two byte-identical inline handlers passed to
-  // AppHeader and AppSettingsModal. useCallback so both props get the
-  // same stable reference.
-  // handleToggleCriticalStockAlerts must be async because it requests
-  // notification permission when turning ON. Previously it was a sync
-  // useCallback that always flipped the toggle on without checking
-  // permission — now it requests permission first and does NOT activate
-  // if the user denies.
-  const handleToggleCriticalStockAlerts = useCallback(async () => {
-    const next = !criticalStockAlertsEnabled;
-    if (!next) {
-      // Turning OFF — always allowed.
-      setCriticalStockAlertsEnabled(false);
-      showToast(TOAST_MESSAGES.criticalAlertsOff);
-      return;
-    }
-
-    // Turning ON — ensure notification permission is granted first.
-    // If notifications aren't enabled yet (or permission is missing),
-    // request it. On denial, do NOT activate the toggle.
-    if (!notificationsEnabled) {
-      let pushAllowed = false;
-      try {
-        const currentPerm = await getNotificationPermission();
-        if (currentPerm === 'granted') {
-          pushAllowed = true;
-        } else if (currentPerm === 'default') {
-          pushAllowed = await requestNotificationPermission();
-        }
-      } catch (err) {
-        console.warn('[App] Notification permission error (critical toggle):', err);
-      }
-      if (!pushAllowed) {
-        showToast(TOAST_MESSAGES.notificationsPermissionDenied);
-        return;
-      }
-      // Permission granted → also flip the notifications toggle on.
-      setNotificationsEnabled(true);
-    }
-
-    setCriticalStockAlertsEnabled(true);
-    if (soundEnabled) playSuccessChime();
-    showToast(TOAST_MESSAGES.criticalAlertsOn);
-  }, [criticalStockAlertsEnabled, notificationsEnabled, soundEnabled, showToast]);
-
-  // #88: Single memoized medications-with-status array. Previously
-  // calculateMedicationStatus(med) was recomputed in 4 separate memos
-  // (filteredMedications, alertsCount, sufficientCount, totalStockByUnit)
-  // + inside LowStockBanner (3x per med). Now all derive from this one.
-  const medicationsWithStatus = useMemo(
-    () =>
-      medications.map((med) => ({
-        med,
-        statusInfo: calculateMedicationStatus(med),
-      })),
-    [medications]
-  );
-
-  // #89: Precompute a Map<medId, lastRefillLog> so the per-card render
-  // doesn't call logs.find() O(meds×logs) per render. Previously this was
-  // an inline IIFE inside the MedicationCard.map.
-  const lastRefillByMed = useMemo(() => {
-    const map = new Map<string, ConsumptionLog>();
-    for (const log of logs) {
-      if (
-        log.type === 'refill' &&
-        log.amount > 0 &&
-        !log.reversedAt
-      ) {
-        // logs are newest-first; keep the FIRST (latest) matching log per med.
-        if (!map.has(log.medicationId)) {
-          map.set(log.medicationId, log);
-        }
-      }
-    }
-    return map;
-  }, [logs]);
-
-  // Realtime search: filters on every keystroke (searchQuery updates immediately
-  // from the controlled input onChange/onInput — no debounce).
-  const filteredMedications = useMemo(() => {
-    const qRaw = searchQuery.trim().toLowerCase();
-    // Light Arabic normalization so typing أ/ا/إ still matches names stored with أ
-    const normalizeAr = (s: string) =>
-      s
-        .toLowerCase()
-        .replace(/[أإآٱ]/g, 'ا')
-        .replace(/ة/g, 'ه')
-        .replace(/ى/g, 'ي');
-    const q = qRaw ? normalizeAr(qRaw) : '';
-    return medicationsWithStatus.filter(({ med, statusInfo }) => {
-      if (q) {
-        const matchName = normalizeAr(med.name).includes(q);
-        const matchCat = med.category ? normalizeAr(med.category).includes(q) : false;
-        const matchNotes = med.notes ? normalizeAr(med.notes).includes(q) : false;
-        if (!matchName && !matchCat && !matchNotes) return false;
-      }
-      const { status } = statusInfo;
-      if (filter === 'alerts') return status === 'out_of_stock' || status === 'critical' || status === 'warning';
-      if (filter === 'sufficient') return status === 'sufficient';
-      return true;
-    }).map(({ med }) => med);
-  }, [medicationsWithStatus, searchQuery, filter]);
-
-  const alertsCount = useMemo(
-    () => medicationsWithStatus.filter(({ statusInfo }) =>
-      statusInfo.status === 'out_of_stock' ||
-      statusInfo.status === 'critical' ||
-      statusInfo.status === 'warning'
-    ).length,
-    [medicationsWithStatus]
-  );
-
-  const sufficientCount = useMemo(
-    () => medicationsWithStatus.filter(({ statusInfo }) => statusInfo.status === 'sufficient').length,
-    [medicationsWithStatus]
-  );
+  const {
+    medicationsWithStatus,
+    lastRefillByMed,
+    filteredMedications,
+    alertsCount,
+    sufficientCount,
+  } = useDerivedMedications(medications, logs, filter, searchQuery);
 
   const openAdd = () => {
     setEditingMedication(null);

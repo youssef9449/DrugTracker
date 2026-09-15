@@ -365,12 +365,13 @@ export function getNextDoseAmount(
  * This helper answers "which single doseId should the Card toggle right now".
  *
  * Priority:
- * 1. While any slot is still incomplete: chronological scan —
- *    incomplete → Take; completed+manual → Restore that same doseId
- *    (Take d1 is immediately reversible; does NOT advance to d2).
- *    Auto-deduct-only slots are skipped (not offered as Card Restore).
- * 2. When **all** slots are completed today: Restore the **last**
- *    chronologically manually consumed slot (by schedule time / dose.id).
+ * 1. **Manual consume wins:** first chronological dose with
+ *    {@link isDoseConsumedOnDate} today → Restore that same doseId
+ *    (`canRestore`, not Take). Later incomplete slots do NOT steal the
+ *    target — Take d1 is immediately reversible even while d2/d3 are open.
+ *    Auto-deduct-only completion is never a restore target (no consume mark).
+ * 2. Else first incomplete slot ({@link isDoseCompletedToday} false) → Take.
+ *    Skipped/restored slots are incomplete again so Take d1 works after Restore.
  * 3. All completed via auto-deduct only → non-interactive (no fake restore).
  *
  * Legacy (no schedule): lastConsumedDate / dailyDose.
@@ -398,54 +399,34 @@ export function getCardDoseToggleTarget(
 
   const sorted = sortDoseSchedule(schedule);
 
-  const anyIncomplete = sorted.some(
-    (d) => !isDoseCompletedToday(med, d, todayStr, now)
-  );
-
-  if (anyIncomplete) {
-    // Chronological scan while something is still open:
-    // incomplete → Take; completed+manual → Restore same doseId (not next).
-    // Auto-deduct-only completions are skipped so Take can advance past them.
-    for (const d of sorted) {
-      if (!isDoseCompletedToday(med, d, todayStr, now)) {
-        const amount = Number(d.amount) || 0;
-        return {
-          doseId: d.id,
-          amount,
-          canTake: amount > 0,
-          canRestore: false,
-        };
-      }
-      if (isDoseConsumedOnDate(med, d.id, todayStr)) {
-        const amount = Number(d.amount) || 0;
-        return {
-          doseId: d.id,
-          amount,
-          canTake: false,
-          canRestore: amount > 0,
-        };
-      }
-    }
-  }
-
-  // All slots completed today: prefer last chronologically manual consume.
-  let lastManual: (typeof sorted)[number] | undefined;
+  // 1) Manual consume today → Restore that doseId (chronological first).
+  //    Independent of whether later slots are still incomplete.
   for (const d of sorted) {
     if (isDoseConsumedOnDate(med, d.id, todayStr)) {
-      lastManual = d;
+      const amount = Number(d.amount) || 0;
+      return {
+        doseId: d.id,
+        amount,
+        canTake: false,
+        canRestore: amount > 0,
+      };
     }
   }
-  if (lastManual) {
-    const amount = Number(lastManual.amount) || 0;
-    return {
-      doseId: lastManual.id,
-      amount,
-      canTake: false,
-      canRestore: amount > 0,
-    };
+
+  // 2) No restorable manual mark → first incomplete slot for Take.
+  for (const d of sorted) {
+    if (!isDoseCompletedToday(med, d, todayStr, now)) {
+      const amount = Number(d.amount) || 0;
+      return {
+        doseId: d.id,
+        amount,
+        canTake: amount > 0,
+        canRestore: false,
+      };
+    }
   }
 
-  // All completed via auto-deduct only — no fake restore
+  // 3) All completed via auto-deduct only — no fake restore
   const nominal = sorted[0];
   return {
     doseId: nominal?.id,

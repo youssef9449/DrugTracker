@@ -94,6 +94,13 @@ public final class AutoDeductionScheduler {
      * durable stale-fire guard until retry completes cleanup).
      */
     volatile boolean forceScheduleMetadataRemovalFailureForTest = false;
+    /**
+     * Test-only: when true, {@link #allocateOrderingTokenLocked()} returns null
+     * (simulating a durable ordering-token allocation failure) to exercise the
+     * Issue #241 fail-closed path. Production never sets this; the durable
+     * ordering-token semantics are unchanged when it is false.
+     */
+    volatile boolean forceOrderingTokenAllocationFailureForTest = false;
 
     public AutoDeductionScheduler(Context context) {
         this.appContext = context.getApplicationContext();
@@ -589,6 +596,12 @@ public final class AutoDeductionScheduler {
      *         must fail the operation — do not fall back to volatile memory).
      */
     private String allocateOrderingTokenLocked() {
+        if (forceOrderingTokenAllocationFailureForTest) {
+            // Test-only (Issue #241): simulate a durable ordering-token allocation
+            // failure so cancelAll/invalidate can prove the fail-closed path.
+            // Production never sets this; allocation/commit semantics are unchanged.
+            return null;
+        }
         long last = orderingPrefs.getLong(AutoDeductionContract.KEY_ORDERING_SEQ, 0L);
         long next = last + 1L;
         boolean committed = orderingPrefs.edit()

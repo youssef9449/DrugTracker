@@ -215,4 +215,60 @@ public class RecurrenceInvalidationFailClosedTest {
         assertEquals(AutoDeductionScheduler.FireResult.Status.CANCELLED, stale.status);
         assertFalse(eventPrefs().contains(evtKey(key)));
     }
+
+    /** Test E: ordering-token allocation failure (allocateOrderingTokenLocked() == null)
+     *  → invalidate ok=false (no rollback); retry → ok=true (monotonic, no resurrection). */
+    @Test
+    public void testE_orderingTokenAllocationFailure_failClosed_retrySucceeds() throws Exception {
+        String med = "med-e";
+        String dose = "d1";
+        String date = futureCalendarDate(6);
+        String time = "11:00";
+        double amount = 1.0;
+        assertTrue(scheduler.scheduleOccurrence(
+                med, dose, date, time, amount, futureEpochMs(date, time)).ok);
+        long metaGen = genFromScheduleMeta(med, dose, date);
+        assertTrue("scheduled occurrence must carry a positive generation", metaGen > 0L);
+        String key = AutoDeductionContract.occurrenceKey(med, dose, date);
+
+        // Capture old ownership tokens for the resurrection check.
+        String raw = schedulePrefs().getString(schKey(key), null);
+        assertTrue(raw != null);
+        JSONObject meta = new JSONObject(raw);
+        String v1 = meta.getString("scheduleVersion");
+        long g1 = meta.getLong("recurrenceGeneration");
+
+        // Force allocateOrderingTokenLocked() to return null → cancellation fails.
+        scheduler.forceOrderingTokenAllocationFailureForTest = true;
+        AutoDeductionScheduler.InvalidateResult failed =
+                scheduler.invalidateRecurrenceAuthorization(med, dose);
+        scheduler.forceOrderingTokenAllocationFailureForTest = false;
+
+        assertFalse("ordering-token allocation failure must NOT report disable success", failed.ok);
+        assertEquals("ordering_sequence_write_failed", failed.error);
+        assertEquals("result generation must signal failure (0)", 0L, failed.generation);
+        // The generation bump committed BEFORE cancellation; no rollback → auth advanced.
+        long authGenAfterFailure = readAuthGeneration(med, dose);
+        assertTrue("generation must NOT roll back — it advanced past the metadata gen",
+                authGenAfterFailure > metaGen);
+        // No durable protection established yet (ordering failed before tombstone/metadata).
+        assertFalse(cancelPrefs().contains(cancelKey(key)));
+        assertTrue(hasSchedule(med, dose, date));
+
+        // Retry without failure injection → all durable steps succeed.
+        AutoDeductionScheduler.InvalidateResult retry =
+                scheduler.invalidateRecurrenceAuthorization(med, dose);
+        assertTrue("retry after ordering-token failure must reach ok=true", retry.ok);
+        long authGenAfterRetry = readAuthGeneration(med, dose);
+        assertTrue("generation must stay monotonic across retry", authGenAfterRetry > authGenAfterFailure);
+        // Cancellation fully established: metadata gone, tombstone present.
+        assertFalse(hasSchedule(med, dose, date));
+        assertTrue(cancelPrefs().contains(cancelKey(key)));
+
+        // No resurrection: a stale delivery with the old tokens cannot create FIRED.
+        AutoDeductionScheduler.FireResult stale = scheduler.fireOccurrenceIfNotCancelled(
+                med, dose, date, 1L, amount, v1, g1);
+        assertEquals(AutoDeductionScheduler.FireResult.Status.CANCELLED, stale.status);
+        assertFalse(eventPrefs().contains(evtKey(key)));
+    }
 }

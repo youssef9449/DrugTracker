@@ -39,7 +39,8 @@ export interface AppSettingsModalProps {
   activeOrderItems?: OrderItem[];
   onSaveSettings: (newSettings: PharmacySettings) => void;
   soundEnabled: boolean;
-  onToggleSound: () => void;
+  /** @deprecated Toggles are draft-only until Save; kept optional for compatibility. */
+  onToggleSound?: () => void;
   notificationsEnabled?: boolean;
   onToggleNotifications?: () => void;
   criticalStockAlertsEnabled?: boolean;
@@ -47,6 +48,16 @@ export interface AppSettingsModalProps {
   onSendTestNotification?: () => void;
   autoDeductEnabled?: boolean;
   onToggleAutoDeduct?: () => void;
+  /**
+   * Apply app preference toggles only when the user confirms with حفظ الإعدادات.
+   * Closing the modal without save discards draft changes.
+   */
+  onApplyAppPreferences?: (prefs: {
+    soundEnabled: boolean;
+    notificationsEnabled: boolean;
+    criticalStockAlertsEnabled: boolean;
+    autoDeductEnabled: boolean;
+  }) => void | Promise<void>;
   /** Whether exact-alarm permission (SCHEDULE_EXACT_ALARM) is granted
    *  on Android 12+. When false, dose reminders CANNOT be guaranteed
    *  to fire on time — the UI shows a warning + a button to open the
@@ -64,14 +75,11 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   activeOrderItems,
   onSaveSettings,
   soundEnabled,
-  onToggleSound,
   notificationsEnabled = true,
-  onToggleNotifications,
   criticalStockAlertsEnabled = true,
-  onToggleCriticalStockAlerts,
   onSendTestNotification,
   autoDeductEnabled = true,
-  onToggleAutoDeduct,
+  onApplyAppPreferences,
   exactAlarmEnabled = null,
   onOpenExactAlarmSettings,
   mode = 'all',
@@ -87,6 +95,12 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   const [address, setAddress] = useState(settings.address || '');
   const [contactPhone, setContactPhone] = useState(settings.contactPhone || '');
 
+  // App preference drafts — committed only on حفظ الإعدادات.
+  const [draftSound, setDraftSound] = useState(soundEnabled);
+  const [draftNotifications, setDraftNotifications] = useState(notificationsEnabled);
+  const [draftCritical, setDraftCritical] = useState(criticalStockAlertsEnabled);
+  const [draftAutoDeduct, setDraftAutoDeduct] = useState(autoDeductEnabled);
+
   // Synchronize state whenever modal opens. Intentionally only dep [isOpen]
   // — if the parent passes a new settings object reference while the modal
   // is already open, we must NOT reset the form (that would blow away
@@ -99,6 +113,11 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
       setCustomerCode((settings.customerCode === '14739' ? '' : settings.customerCode) || '');
       setAddress(settings.address || '');
       setContactPhone(settings.contactPhone || '');
+      // Reset preference drafts from committed parent state on open.
+      setDraftSound(soundEnabled);
+      setDraftNotifications(notificationsEnabled);
+      setDraftCritical(criticalStockAlertsEnabled);
+      setDraftAutoDeduct(autoDeductEnabled);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
@@ -154,7 +173,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSave = (e: FormEvent) => {
+  const handleSave = async (e: FormEvent) => {
     e.preventDefault();
     onSaveSettings({
       pharmacyPhone: isPharmacyOnly ? pharmacyPhone.trim() : settings.pharmacyPhone,
@@ -172,6 +191,15 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
       selectedWhatsappContactIds: settings.selectedWhatsappContactIds,
       selectedWhatsappAddressIds: settings.selectedWhatsappAddressIds,
     });
+    // Commit preference drafts only on explicit Save (not on close / dismiss).
+    if (!isPharmacyOnly && onApplyAppPreferences) {
+      await onApplyAppPreferences({
+        soundEnabled: draftSound,
+        notificationsEnabled: draftNotifications,
+        criticalStockAlertsEnabled: draftCritical,
+        autoDeductEnabled: draftAutoDeduct,
+      });
+    }
     onClose();
   };
 
@@ -226,20 +254,20 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                   <div className="flex items-center gap-2">
                     <div
                       className={`p-1.5 rounded-lg ${
-                        autoDeductEnabled ? 'bg-teal-600 text-white' : 'bg-slate-200 text-slate-500'
+                        draftAutoDeduct ? 'bg-teal-600 text-white' : 'bg-slate-200 text-slate-500'
                       }`}
                     >
-                      {autoDeductEnabled ? <Zap className="w-4 h-4" /> : <ZapOff className="w-4 h-4" />}
+                      {draftAutoDeduct ? <Zap className="w-4 h-4" /> : <ZapOff className="w-4 h-4" />}
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-bold text-slate-800">الخصم التلقائي للمخزون</span>
                         <span
                           className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-                            autoDeductEnabled ? 'bg-teal-200 text-teal-900' : 'bg-slate-200 text-slate-700'
+                            draftAutoDeduct ? 'bg-teal-200 text-teal-900' : 'bg-slate-200 text-slate-700'
                           }`}
                         >
-                          {autoDeductEnabled ? 'مفعّل' : 'متوقف'}
+                          {draftAutoDeduct ? 'مفعّل' : 'متوقف'}
                         </span>
                       </div>
                       <p className="text-[10px] text-slate-500 leading-tight">
@@ -247,16 +275,14 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                       </p>
                     </div>
                   </div>
-                  {onToggleAutoDeduct && (
-                    <Toggle
-                      checked={autoDeductEnabled}
-                      onChange={onToggleAutoDeduct}
-                      label="تبديل الخصم التلقائي"
-                    />
-                  )}
+                  <Toggle
+                    checked={draftAutoDeduct}
+                    onChange={() => setDraftAutoDeduct((v) => !v)}
+                    label="تبديل الخصم التلقائي"
+                  />
                 </div>
                 <p className="text-[10px] text-slate-500 leading-tight border-t border-teal-100/80 pt-2">
-                  {autoDeductEnabled
+                  {draftAutoDeduct
                     ? 'عند التفعيل يُخصم عند ميعاد الجرعات ويُحدَّث الرصيد وموعد النفاذ.'
                     : 'عند الإيقاف يتوقف الخصم التلقائي ويبقى الرصيد ثابتاً.'}
                 </p>
@@ -268,10 +294,10 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                   <div className="flex items-center gap-2">
                     <div
                       className={`p-1.5 rounded-lg ${
-                        notificationsEnabled ? 'bg-amber-100 text-amber-600' : 'bg-slate-200 text-slate-500'
+                        draftNotifications ? 'bg-amber-100 text-amber-600' : 'bg-slate-200 text-slate-500'
                       }`}
                     >
-                      {notificationsEnabled ? (
+                      {draftNotifications ? (
                         <Bell className="w-4 h-4 fill-amber-500" />
                       ) : (
                         <BellOff className="w-4 h-4" />
@@ -282,29 +308,26 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                         <span className="text-xs font-bold text-slate-800">التنبيهات وإشعارات الهاتف</span>
                         <span
                           className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-                            notificationsEnabled ? 'bg-amber-100 text-amber-900 border border-amber-300/50' : 'bg-slate-200 text-slate-700'
+                            draftNotifications ? 'bg-amber-100 text-amber-900 border border-amber-300/50' : 'bg-slate-200 text-slate-700'
                           }`}
                         >
-                          {notificationsEnabled ? 'مفعّلة' : 'متوقفة'}
+                          {draftNotifications ? 'مفعّلة' : 'متوقفة'}
                         </span>
                       </div>
                       <p className="text-[10px] text-slate-500">منبه مواعيد الجرعات وتنبيهات المخزون</p>
                     </div>
                   </div>
-                  {onToggleNotifications && (
-                    <Toggle
-                      id="settings-toggle-notifications"
-                      checked={notificationsEnabled}
-                      onChange={onToggleNotifications}
-                      label={
-                        notificationsEnabled
-                          ? 'التنبيهات مفعلة — انقر للإيقاف'
-                          : 'التنبيهات متوقفة — انقر للتفعيل'
-                      }
-                      color="amber"
-                      size="md"
-                    />
-                  )}
+                  <Toggle
+                    id="settings-toggle-notifications"
+                    checked={draftNotifications}
+                    onChange={() => setDraftNotifications((v) => !v)}
+                    label={
+                      draftNotifications
+                        ? 'التنبيهات مفعلة — انقر للإيقاف'
+                        : 'التنبيهات متوقفة — انقر للتفعيل'
+                    }
+                    color="amber"
+                  />
                 </div>
 
                 <hr className="border-slate-200" />
@@ -314,12 +337,12 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                   <div className="flex items-center gap-2">
                     <div
                       className={`p-1.5 rounded-lg ${
-                        criticalStockAlertsEnabled ? 'bg-rose-100 text-rose-600' : 'bg-slate-200 text-slate-500'
+                        draftCritical ? 'bg-rose-100 text-rose-600' : 'bg-slate-200 text-slate-500'
                       }`}
                     >
                       <AlertTriangle
                         className={`w-4 h-4 ${
-                          criticalStockAlertsEnabled ? 'fill-rose-500/30' : ''
+                          draftCritical ? 'fill-rose-500/30' : ''
                         }`}
                       />
                     </div>
@@ -328,10 +351,10 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                         <span className="text-xs font-bold text-slate-800">تنبيهات النفاذ الحرج للمخزون</span>
                         <span
                           className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-                            criticalStockAlertsEnabled ? 'bg-rose-100 text-rose-800 border border-rose-300/50' : 'bg-slate-200 text-slate-700'
+                            draftCritical ? 'bg-rose-100 text-rose-800 border border-rose-300/50' : 'bg-slate-200 text-slate-700'
                           }`}
                         >
-                          {criticalStockAlertsEnabled ? 'مفعّلة' : 'متوقفة'}
+                          {draftCritical ? 'مفعّلة' : 'متوقفة'}
                         </span>
                       </div>
                       <p className="text-[10px] text-slate-500">
@@ -339,20 +362,17 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                       </p>
                     </div>
                   </div>
-                  {onToggleCriticalStockAlerts && (
-                    <Toggle
-                      id="settings-toggle-critical-stock"
-                      checked={criticalStockAlertsEnabled}
-                      onChange={onToggleCriticalStockAlerts}
-                      label={
-                        criticalStockAlertsEnabled
-                          ? 'تنبيه النفاذ الحرج مفعّل'
-                          : 'تنبيه النفاذ الحرج متوقف'
-                      }
-                      color="rose"
-                      size="md"
-                    />
-                  )}
+                                    <Toggle
+                    id="settings-toggle-critical"
+                    checked={draftCritical}
+                    onChange={() => setDraftCritical((v) => !v)}
+                    label={
+                      draftCritical
+                        ? 'تنبيهات المخزون الحرج مفعلة — انقر للإيقاف'
+                        : 'تنبيهات المخزون الحرج متوقفة — انقر للتفعيل'
+                    }
+                    color="rose"
+                  />
                 </div>
 
                 {/* Test Notification Button */}
@@ -368,7 +388,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                 )}
 
                 {/* Exact-alarm permission warning (Android 12+) */}
-                {notificationsEnabled && !exactAlarmEnabled && onOpenExactAlarmSettings && (
+                {draftNotifications && !exactAlarmEnabled && onOpenExactAlarmSettings && (
                   <div className="bg-rose-50 border border-rose-300/80 rounded-xl p-3 space-y-2">
                     <div className="flex items-start gap-2">
                       <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
@@ -392,7 +412,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                 )}
 
                 {/* Exact-alarm granted indicator */}
-                {notificationsEnabled && exactAlarmEnabled && (
+                {draftNotifications && exactAlarmEnabled && (
                   <div className="flex items-center gap-1.5 text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-1.5">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                     <span>المنبهات الدقيقة مفعّلة — تذكيرات الجرعات مضمونة في موعدها</span>
@@ -404,7 +424,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
               <div className="bg-teal-50/70 border border-teal-200/80 rounded-2xl p-3.5 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
-                    {soundEnabled ? (
+                    {draftSound ? (
                       <Volume2 className="w-4 h-4 text-teal-600" />
                     ) : (
                       <VolumeX className="w-4 h-4 text-slate-400" />
@@ -412,8 +432,8 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     <span className="text-xs font-bold text-slate-700">تأثيرات صوتية في التطبيق</span>
                   </div>
                   <Toggle
-                    checked={soundEnabled}
-                    onChange={onToggleSound}
+                    checked={draftSound}
+                    onChange={() => setDraftSound((v) => !v)}
                     label="تبديل التأثيرات الصوتية"
                   />
                 </div>

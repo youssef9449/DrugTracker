@@ -97,9 +97,9 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
     expect(t.canTake).toBe(true);
   });
 
-  it('multi: when d1+d2 manual and all remaining completed, restore prefers last manual d2', () => {
+  it('multi: when d1+d2 manual, restore prefers first chronological manual d1', () => {
     const today = getTodayDateString();
-    // 22:00 so d3 is also completed (auto); only d1+d2 are manual
+    // 22:00 so d3 is also completed (auto); d1+d2 are manual
     const t = getCardDoseToggleTarget(
       makeMed({
         dailyDose: 4,
@@ -110,11 +110,11 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
       new Date(`${today}T22:00:00`)
     );
     expect(t.canRestore).toBe(true);
-    expect(t.doseId).toBe('d2');
+    expect(t.doseId).toBe('d1');
     expect(t.amount).toBe(1);
   });
 
-  it('multi: all manual including d3 amount 2 — restore last manual d3 with amount 2 not dailyDose', () => {
+  it('multi: all manual including d3 — restore first chronological manual d1 (amount 1)', () => {
     const today = getTodayDateString();
     const t = getCardDoseToggleTarget(
       makeMed({
@@ -127,11 +127,11 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
       new Date(`${today}T22:00:00`)
     );
     expect(t.canRestore).toBe(true);
-    expect(t.doseId).toBe('d3');
-    expect(t.amount).toBe(2);
+    expect(t.doseId).toBe('d1');
+    expect(t.amount).toBe(1);
   });
 
-  it('multi: only d3 manual with earlier open slots → Take earliest available d1', () => {
+  it('multi: only d3 manual with earlier open slots → Restore d3 (manual wins over incomplete)', () => {
     const today = getTodayDateString();
     const t = getCardDoseToggleTarget(
       makeMed({
@@ -142,9 +142,11 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
       }),
       new Date(`${today}T06:00:00`)
     );
-    expect(t.canTake).toBe(true);
-    expect(t.doseId).toBe('d1');
-    expect(t.amount).toBe(1);
+    // Manual consume has priority over later/earlier incomplete Take targets.
+    expect(t.canRestore).toBe(true);
+    expect(t.canTake).toBe(false);
+    expect(t.doseId).toBe('d3');
+    expect(t.amount).toBe(2);
   });
 
   it('multi: only d3 manual and earlier slots auto-completed → Restore d3 amount 2', () => {

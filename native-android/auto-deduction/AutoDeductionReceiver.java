@@ -47,6 +47,8 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
         long scheduledAt = intent.getLongExtra(AutoDeductionContract.EXTRA_SCHEDULED_AT_EPOCH_MS, 0L);
         double amount = intent.getDoubleExtra(AutoDeductionContract.EXTRA_AMOUNT, Double.NaN);
         String timeHhmm = intent.getStringExtra(AutoDeductionContract.EXTRA_TIME_HHMM);
+        long recurrenceGeneration = intent.getLongExtra(
+                AutoDeductionContract.EXTRA_RECURRENCE_GENERATION, 0L);
 
         if (medicationId == null || medicationId.isEmpty()
                 || doseId == null || doseId.isEmpty()
@@ -70,18 +72,24 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 break;
             case CREATED:
                 Log.i(TAG, "FIRED event persisted: " + medicationId + "/" + doseId + "/" + calendarDate);
-                scheduleNextIfPossible(context, medicationId, doseId, calendarDate, timeHhmm, amount);
+                scheduleNextIfPossible(
+                        context, medicationId, doseId, calendarDate, timeHhmm, amount,
+                        recurrenceGeneration);
                 break;
             case ALREADY_EXISTS:
                 Log.i(TAG, "duplicate fire ignored (idempotent): "
                         + medicationId + "/" + doseId + "/" + calendarDate);
-                scheduleNextIfPossible(context, medicationId, doseId, calendarDate, timeHhmm, amount);
+                scheduleNextIfPossible(
+                        context, medicationId, doseId, calendarDate, timeHhmm, amount,
+                        recurrenceGeneration);
                 break;
             case FAILED:
                 if (result.pendingRecorded) {
                     Log.w(TAG, "FIRED primary failed but pending recorded — advancing recurrence: "
                             + medicationId + "/" + doseId + "/" + calendarDate);
-                    scheduleNextIfPossible(context, medicationId, doseId, calendarDate, timeHhmm, amount);
+                    scheduleNextIfPossible(
+                            context, medicationId, doseId, calendarDate, timeHhmm, amount,
+                            recurrenceGeneration);
                 } else {
                     Log.e(TAG, "FIRED persistence FAILED (no pending) — not advancing next occurrence: "
                             + medicationId + "/" + doseId + "/" + calendarDate);
@@ -96,16 +104,19 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
             String doseId,
             String calendarDate,
             String timeHhmm,
-            double amount
+            double amount,
+            long recurrenceGeneration
     ) {
         if (timeHhmm == null || !AutoDeductionContract.isValidTimeHhmm(timeHhmm)) {
             return;
         }
         // Create-if-absent: duplicate/stale D payload must not overwrite an
         // already-correct D+1 (amount/time) that durable schedule metadata holds.
+        // Issue #217: pass firing generation so disable/cancel after FIRED cannot
+        // create a successor for an invalidated recurrence chain.
         AutoDeductionScheduler scheduler = new AutoDeductionScheduler(context);
         AutoDeductionScheduler.ScheduleResult next = scheduler.scheduleNextOccurrenceIfAbsent(
-                medicationId, doseId, calendarDate, timeHhmm, amount);
+                medicationId, doseId, calendarDate, timeHhmm, amount, recurrenceGeneration);
         if (!next.ok) {
             Log.w(TAG, "next occurrence not scheduled: " + next.error);
         }

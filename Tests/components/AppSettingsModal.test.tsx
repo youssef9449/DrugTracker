@@ -18,7 +18,7 @@ describe('AppSettingsModal — Notification Controls', () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(() => cleanup());
 
-  it('renders notification toggles as action buttons with the same logic and styling as AppHeader', () => {
+  it('renders notification toggles as MD3 switches with the same logic and styling as AppHeader', () => {
     const onToggleNotifications = vi.fn();
     const onToggleCriticalStockAlerts = vi.fn();
 
@@ -38,22 +38,22 @@ describe('AppSettingsModal — Notification Controls', () => {
       />
     );
 
-    const notifBtn = screen.getByRole('button', {
+    const notifSwitch = screen.getByRole('switch', {
       name: 'التنبيهات مفعلة — انقر للإيقاف',
     });
-    expect(notifBtn).toBeInTheDocument();
-    expect(notifBtn).toHaveAttribute('aria-pressed', 'true');
+    expect(notifSwitch).toBeInTheDocument();
+    expect(notifSwitch).toHaveAttribute('aria-checked', 'true');
 
-    const criticalBtn = screen.getByRole('button', {
+    const criticalSwitch = screen.getByRole('switch', {
       name: 'تنبيه النفاذ الحرج مفعّل',
     });
-    expect(criticalBtn).toBeInTheDocument();
-    expect(criticalBtn).toHaveAttribute('aria-pressed', 'true');
+    expect(criticalSwitch).toBeInTheDocument();
+    expect(criticalSwitch).toHaveAttribute('aria-checked', 'true');
 
-    fireEvent.click(notifBtn);
+    fireEvent.click(notifSwitch);
     expect(onToggleNotifications).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(criticalBtn);
+    fireEvent.click(criticalSwitch);
     expect(onToggleCriticalStockAlerts).toHaveBeenCalledTimes(1);
   });
 
@@ -74,16 +74,16 @@ describe('AppSettingsModal — Notification Controls', () => {
       />
     );
 
-    const notifBtn = screen.getByRole('button', {
+    const notifSwitch = screen.getByRole('switch', {
       name: 'التنبيهات متوقفة — انقر للتفعيل',
     });
-    expect(notifBtn).toBeInTheDocument();
-    expect(notifBtn).toHaveAttribute('aria-pressed', 'false');
+    expect(notifSwitch).toBeInTheDocument();
+    expect(notifSwitch).toHaveAttribute('aria-checked', 'false');
 
-    const criticalBtn = screen.getByRole('button', {
+    const criticalSwitch = screen.getByRole('switch', {
       name: 'تنبيه النفاذ الحرج متوقف',
     });
-    expect(criticalBtn).toBeInTheDocument();
-    expect(criticalBtn).toHaveAttribute('aria-pressed', 'false');
+    expect(criticalSwitch).toBeInTheDocument();
+    expect(criticalSwitch).toHaveAttribute('aria-checked', 'false');
   });
 });

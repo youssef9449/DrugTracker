@@ -162,6 +162,7 @@ export default function App() {
 
   const { alarmingMedication, alarmingDoseId, openAlarm, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
     medications,
+    globalAutoDeductEnabled,
   });
 
   // Phase 3A: multi-dose manual consume / restore requires explicit dose selection.
@@ -416,6 +417,7 @@ export default function App() {
     notificationsEnabled,
     hydrated,
     isFirstRun,
+    globalAutoDeductEnabled,
     exactAlarmEnabled,
     resumeTick: doseAlarmResumeTick,
     lifecycleTick: doseLifecycleTick,
@@ -785,6 +787,7 @@ export default function App() {
                       medication={med}
                       viewFilter={filter}
                       isCompact={isCompactView}
+                      globalAutoDeductEnabled={globalAutoDeductEnabled}
                       onOpenRefill={setRefillMedication}
                       onEdit={(m) => {
                         setEditingMedication(m);

@@ -20,6 +20,7 @@ export interface UseDoseReminderSchedulerOptions {
   notificationsEnabled: boolean;
   hydrated: boolean;
   isFirstRun: boolean;
+  globalAutoDeductEnabled?: boolean;
   /**
    * Whether exact-alarm permission is granted on Android 12+. When null,
    * the permission has not been checked yet (no scheduling). When false,
@@ -150,6 +151,7 @@ export function useDoseReminderScheduler({
   notificationsEnabled,
   hydrated,
   isFirstRun,
+  globalAutoDeductEnabled,
   exactAlarmEnabled,
   resumeTick,
   lifecycleTick,
@@ -182,11 +184,13 @@ export function useDoseReminderScheduler({
             m.name,
             m.dailyDose,
             m.unit ?? '',
+            m.autoDeductEnabled !== false ? '1' : '0',
+            globalAutoDeductEnabled === true ? '1' : '0',
           ].join('|');
         })
         .sort()
         .join('\n'),
-    [medications]
+    [medications, globalAutoDeductEnabled]
   );
 
   const enqueue = (key: string, op: () => Promise<void>): Promise<void> => {
@@ -263,17 +267,16 @@ export function useDoseReminderScheduler({
         enqueue(key, () =>
           cancelDoseReminder(medId, doseId).then(() => {
             if (doseGenerationRef.current.get(key) !== gen) return;
-            const opts =
-              doseId === LEGACY_DOSE_ID
-                ? slotConsumedToday
-                  ? { skipToday: true as const }
-                  : undefined
-                : {
-                    doseId,
-                    ...(slotConsumedToday ? { skipToday: true as const } : {}),
-                  };
+            const isAutoActive =
+              globalAutoDeductEnabled === true && med.autoDeductEnabled !== false;
+            const opts = {
+              ...(doseId !== LEGACY_DOSE_ID ? { doseId } : {}),
+              ...(slotConsumedToday ? { skipToday: true as const } : {}),
+              ...(isAutoActive ? { autoDeductEnabled: true } : {}),
+            };
+            const hasOpts = Object.keys(opts).length > 0;
             return (
-              opts
+              hasOpts
                 ? scheduleDoseReminder(medId, name, time, amount, unit, opts)
                 : scheduleDoseReminder(medId, name, time, amount, unit)
             ).then(() => {
@@ -296,6 +299,7 @@ export function useDoseReminderScheduler({
     scheduledDoseIdsRef.current = stillScheduled;
   }, [
     doseSignature,
+    globalAutoDeductEnabled,
     notificationsEnabled,
     exactAlarmEnabled,
     hydrated,
@@ -387,10 +391,13 @@ export function useDoseReminderScheduler({
               if (!isDoseReminderTimeStillAhead(time)) return;
               return cancelDoseReminder(medId, doseId).then(() => {
                 if (doseGenerationRef.current.get(key) !== gen) return;
-                const opts =
-                  doseId === LEGACY_DOSE_ID
-                    ? { skipToday: true as const }
-                    : { doseId, skipToday: true as const };
+                const isAutoActive =
+                  globalAutoDeductEnabled === true && med.autoDeductEnabled !== false;
+                const opts = {
+                  ...(doseId !== LEGACY_DOSE_ID ? { doseId } : {}),
+                  skipToday: true as const,
+                  ...(isAutoActive ? { autoDeductEnabled: true } : {}),
+                };
                 return scheduleDoseReminder(medId, name, time, amount, unit, opts).then(
                   () => {
                     if (doseGenerationRef.current.get(key) !== gen) {
@@ -412,10 +419,15 @@ export function useDoseReminderScheduler({
           enqueue(key, () =>
             cancelDoseReminder(medId, doseId).then(() => {
               if (doseGenerationRef.current.get(key) !== gen) return;
-              const opts =
-                doseId === LEGACY_DOSE_ID ? undefined : { doseId };
+              const isAutoActive =
+                globalAutoDeductEnabled === true && med.autoDeductEnabled !== false;
+              const opts = {
+                ...(doseId !== LEGACY_DOSE_ID ? { doseId } : {}),
+                ...(isAutoActive ? { autoDeductEnabled: true } : {}),
+              };
+              const hasOpts = Object.keys(opts).length > 0;
               return (
-                opts
+                hasOpts
                   ? scheduleDoseReminder(medId, name, time, amount, unit, opts)
                   : scheduleDoseReminder(medId, name, time, amount, unit)
               ).then(() => {
@@ -433,6 +445,7 @@ export function useDoseReminderScheduler({
   }, [
     consumedSignature,
     resumeTickValue,
+    globalAutoDeductEnabled,
     notificationsEnabled,
     exactAlarmEnabled,
     hydrated,

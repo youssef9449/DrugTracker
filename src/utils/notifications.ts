@@ -469,6 +469,7 @@ export async function sendMedicationDoseReminder(
   dailyDose: number,
   unit: string = 'قرص',
   reminderTime?: string,
+  autoDeductEnabled?: boolean,
 ): Promise<void> {
   const timeHint = reminderTime ? ` الساعة ${reminderTime}` : '';
   const title = `⏰ حان موعد دواء: ${medicineName}`;
@@ -480,7 +481,7 @@ export async function sendMedicationDoseReminder(
     body,
     channelId: getDoseReminderChannelId(),
     smallIcon: 'ic_launcher',
-    actionTypeId: 'dose-reminder',
+    actionTypeId: autoDeductEnabled ? undefined : 'dose-reminder',
     extra: { medicationId: medId },
   });
 }
@@ -1126,7 +1127,8 @@ export async function scheduleSnoozedDoseReminder(
   unit: string,
   reminderTime: string | undefined,
   minutes: number,
-  doseId?: string
+  doseId?: string,
+  autoDeductEnabled?: boolean,
 ): Promise<void> {
   const fireAt = new Date(Date.now() + minutes * 60_000);
   const timeHint = reminderTime ? ` (موعد الجرعة الأصلي ${reminderTime})` : '';
@@ -1154,7 +1156,7 @@ export async function scheduleSnoozedDoseReminder(
             },
             smallIcon: 'ic_launcher',
             channelId: getDoseReminderChannelId(),
-            actionTypeId: 'dose-reminder',
+            actionTypeId: autoDeductEnabled ? undefined : 'dose-reminder',
             ongoing: false,
             autoCancel: true,
             extra: {
@@ -1202,6 +1204,11 @@ export interface ScheduleDoseReminderOptions {
    * id is used (single-dose / legacy path).
    */
   doseId?: string;
+  /**
+   * When true, auto-deduction is active for this dose. The push notification
+   * will NOT show the "تم أخذ الجرعة" action button.
+   */
+  autoDeductEnabled?: boolean;
 }
 
 /**
@@ -1302,7 +1309,7 @@ export async function scheduleDoseReminder(
             },
             smallIcon: 'ic_launcher',
             channelId: getDoseReminderChannelId(),
-            actionTypeId: 'dose-reminder',
+            actionTypeId: options?.autoDeductEnabled ? undefined : 'dose-reminder',
             ongoing: false,
             autoCancel: true,
             extra: {

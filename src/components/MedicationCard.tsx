@@ -106,6 +106,7 @@ interface MedicationCardProps {
   onRestoreDose?: (medicationId: string, doseId?: string) => void;
   lastRefillQuantity?: number;
   onUndoRefill?: () => void;
+  globalAutoDeductEnabled?: boolean;
 }
 
 export const MedicationCard: FC<MedicationCardProps> = ({
@@ -121,7 +122,10 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   onRestoreDose,
   lastRefillQuantity,
   onUndoRefill,
+  globalAutoDeductEnabled = true,
 }) => {
+  const isAutoActive =
+    (globalAutoDeductEnabled !== false) && (medication.autoDeductEnabled !== false);
   const statusInfo = calculateMedicationStatus(medication);
   const depletion = getDepletionDate(medication);
   const isSolid = isSolidUnit(medication.unit);
@@ -174,7 +178,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     }
   };
 
-  const isAutoActive = medication.autoDeductEnabled !== false;
   // Retained for future use (per user instruction, not rendered inside cards):
   void lastRefillQuantity;
   void onUndoRefill;
@@ -533,7 +536,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 >
                   <CheckCircle className="w-3 h-3" />
                 </button>
-              ) : doseToggle.canTake && onConsumeDose ? (
+              ) : !isAutoActive && doseToggle.canTake && onConsumeDose ? (
                 <button
                   type="button"
                   onClick={() => onConsumeDose(medication.id, doseToggle.doseId)}
@@ -547,11 +550,11 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 >
                   <Pill className="w-3 h-3 rotate-45" />
                 </button>
-              ) : (
+              ) : !isAutoActive ? (
                 <span title="تم تناول جرعة اليوم" className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
                   <CheckCircle className="w-3 h-3" />
                 </span>
-              )
+              ) : null
             )}
             <button
               type="button"
@@ -690,7 +693,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 >
                   <CheckCircle className="w-3.5 h-3.5" />
                 </button>
-              ) : doseToggle.canTake && onConsumeDose ? (
+              ) : !isAutoActive && doseToggle.canTake && onConsumeDose ? (
                 <button
                   type="button"
                   onClick={() => onConsumeDose(medication.id, doseToggle.doseId)}
@@ -704,14 +707,14 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 >
                   <Pill className="w-3.5 h-3.5 rotate-45" />
                 </button>
-              ) : (
+              ) : !isAutoActive ? (
                 <span
                   title="تم تناول جرعة اليوم"
                   className="w-6 h-6 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-700"
                 >
                   <CheckCircle className="w-3.5 h-3.5" />
                 </span>
-              )
+              ) : null
             )}
 
             <button

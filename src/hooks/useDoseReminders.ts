@@ -20,6 +20,7 @@ function firedKey(medId: string, dateStr: string, doseId?: string) {
 
 interface UseDoseRemindersOptions {
   medications: Medication[];
+  globalAutoDeductEnabled?: boolean;
 }
 
 /**
@@ -37,6 +38,7 @@ interface UseDoseRemindersOptions {
  */
 export function useDoseReminders({
   medications,
+  globalAutoDeductEnabled = true,
 }: UseDoseRemindersOptions) {
   const [alarmingMedication, setAlarmingMedication] = useState<Medication | null>(null);
   const [alarmingDoseId, setAlarmingDoseId] = useState<string | null>(null);
@@ -48,6 +50,11 @@ export function useDoseReminders({
   useEffect(() => {
     medicationsRef.current = medications;
   }, [medications]);
+
+  const globalAutoDeductEnabledRef = useRef(globalAutoDeductEnabled);
+  useEffect(() => {
+    globalAutoDeductEnabledRef.current = globalAutoDeductEnabled;
+  }, [globalAutoDeductEnabled]);
 
   const dismissAlarm = useCallback(() => {
     const current = alarmingIdRef.current;
@@ -115,6 +122,11 @@ export function useDoseReminders({
   const openAlarm = useCallback((medId: string, doseId?: string) => {
     const med = medicationsRef.current.find((m) => m.id === medId);
     if (!med) return;
+
+    // Auto-deduction guard: internal alarm/notification must NOT show when auto-deduction is active.
+    const isAutoActive =
+      (globalAutoDeductEnabledRef.current !== false) && (med.autoDeductEnabled !== false);
+    if (isAutoActive) return;
 
     const today = getTodayDateString();
 

@@ -60,7 +60,7 @@ function makeLegacy(overrides: Partial<Medication> = {}): Medication {
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
     lastSyncDate: '2024-09-10',
-    autoDeductEnabled: true,
+    autoDeductEnabled: false,
     reminderEnabled: false,
     reminderTime: '20:00',
     ...overrides,
@@ -78,7 +78,7 @@ function makeSingle(overrides: Partial<Medication> = {}): Medication {
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
     lastSyncDate: '2024-09-10',
-    autoDeductEnabled: true,
+    autoDeductEnabled: false,
     reminderEnabled: false,
     reminderTime: '08:00',
     doseSchedule: [{ id: 's1', amount: 2, time: '08:00' }],
@@ -91,14 +91,14 @@ function makeMulti(overrides: Partial<Medication> = {}): Medication {
   return {
     id: 'med-multi',
     name: 'Drug A Multi',
-    currentPills: 20,
+    currentPills: 30,
     dailyDose: 4,
     unit: 'قرص',
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
     lastSyncDate: '2024-09-10',
-    autoDeductEnabled: true,
+    autoDeductEnabled: false,
     reminderEnabled: false,
     reminderTime: '08:00',
     doseSchedule: [
@@ -285,6 +285,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
       STORAGE_MEDS_KEY,
       JSON.stringify([
         makeMulti({
+          autoDeductEnabled: true,
           currentPills: 20,
           doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
           dosesPerDay: 1,
@@ -303,12 +304,12 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     expect(screen.queryByTitle(/^تناول جرعة/)).not.toBeInTheDocument();
   });
 
-  it('auto-elapsed d1 advances Card Take to next incomplete d2 (not Restore d1)', async () => {
-    // PR #196: after d1 auto-only, card targets next incomplete doseId.
+  it('suppresses Card Take button when auto-deduct is active (as requested)', async () => {
     localStorage.setItem(
       STORAGE_MEDS_KEY,
       JSON.stringify([
         makeMulti({
+          autoDeductEnabled: true,
           currentPills: 30,
           doseSchedule: [
             { id: 'd1', amount: 1, time: '08:00' },
@@ -320,26 +321,13 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
       ])
     );
     localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
-    // 12:00 — d1 elapsed (auto), d2 still ahead
     vi.setSystemTime(new Date('2024-09-10T12:00:00'));
 
     render(<App />);
     await waitFor(() => expect(screen.getByText('Drug A Multi')).toBeInTheDocument());
 
     expect(screen.queryByTitle(/استرجاع الجرعة/)).not.toBeInTheDocument();
-    const takeBtn = screen.getByTitle(/تناول جرعة \(-2\)/);
-    expect(takeBtn).toBeInTheDocument();
-    fireEvent.click(takeBtn);
-
-    const today = getTodayDateString();
-    await waitFor(() => {
-      const med = readMeds().find((m) => m.id === 'med-multi');
-      expect(med?.doseConsumption?.d2).toBe(today);
-    });
-    expect(readMeds()[0]?.doseConsumption?.d1).toBeUndefined();
-    const log = readLogs().find((l) => l.type === 'dose_taken');
-    expect(log?.doseId).toBe('d2');
-    expect(log?.amount).toBe(-2);
+    expect(screen.queryByTitle(/تناول جرعة/)).not.toBeInTheDocument();
   });
 });
 

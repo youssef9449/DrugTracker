@@ -113,7 +113,11 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       ? `${medicationId}:${resolvedDoseId}:${today}`
       : `${medicationId}:${today}`;
 
-    if (med.autoDeductEnabled === false) {
+    const wasManual = resolvedDoseId
+      ? isDoseConsumedOnDate(med, resolvedDoseId, today)
+      : med.lastConsumedDate === today;
+
+    if (med.autoDeductEnabled === false && !wasManual) {
       showToast(TOAST_MESSAGES.autoDeductOff(med.name));
       return false;
     }

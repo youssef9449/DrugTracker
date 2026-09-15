@@ -92,7 +92,7 @@ function makeMulti(overrides: Partial<Medication> = {}): Medication {
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
     lastSyncDate: '2024-09-10',
-    autoDeductEnabled: true,
+    autoDeductEnabled: false,
     reminderEnabled: false,
     reminderTime: '08:00',
     doseSchedule: [
@@ -116,7 +116,7 @@ function makeLegacy(overrides: Partial<Medication> = {}): Medication {
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
     lastSyncDate: '2024-09-10',
-    autoDeductEnabled: true,
+    autoDeductEnabled: false,
     reminderEnabled: false,
     reminderTime: '20:00',
     ...overrides,
@@ -385,14 +385,14 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     expect(log?.doseId).toBe('only');
   });
 
-  it('displays next upcoming dose amount (-2) instead of daily aggregate (-5) and disables past doses', async () => {
-    // After 08:00, dose-8am is auto-completed; Card Take advances to dose-2pm amount 2.
+  it('suppresses Card Take button when auto-deduct is enabled (as requested by user)', async () => {
     vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
     localStorage.setItem(
       STORAGE_MEDS_KEY,
       JSON.stringify([
         makeMulti({
           name: 'Test',
+          autoDeductEnabled: true,
           dailyDose: 5,
           currentPills: 20,
           unit: 'قرص',
@@ -410,20 +410,7 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
       expect(screen.getByText('Test')).toBeInTheDocument();
     });
 
-    const consumeBtn = screen.getByTitle('تناول جرعة (-2)');
-    expect(consumeBtn).toBeInTheDocument();
-
-    // Card takes next dose (2pm / amount 2) with explicit doseId — no modal
-    fireEvent.click(consumeBtn);
-    const today = getTodayDateString();
-    await waitFor(() => {
-      const med = readMeds().find((m) => m.name === 'Test');
-      expect(med?.doseConsumption?.['dose-2pm']).toBe(today);
-    });
-    expect(screen.queryByText(/اختر الجرعة التي تناولتها/)).not.toBeInTheDocument();
-    const doseLog = readLogs().find((l) => l.type === 'dose_taken');
-    expect(doseLog?.doseId).toBe('dose-2pm');
-    expect(doseLog?.amount).toBe(-2);
+    expect(screen.queryByTitle(/تناول جرعة/)).not.toBeInTheDocument();
   });
 
   it('all slots consumed shows completed badge and no take action', async () => {

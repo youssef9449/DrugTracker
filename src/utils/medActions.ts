@@ -162,10 +162,6 @@ export function restoreDose(
   todayStr: string = getTodayDateString(),
   now: Date = new Date()
 ): RestoreDoseResult {
-  if (med.autoDeductEnabled === false) {
-    return { ok: false, reason: 'auto_deduct_off' };
-  }
-
   const resolved = resolveRestoreDoseAmount(med, doseId);
   if (!resolved.ok) {
     return { ok: false, reason: resolved.reason };
@@ -173,6 +169,14 @@ export function restoreDose(
 
   const resolvedDoseId = resolved.doseId;
   const restoredAmount = resolved.amount;
+
+  const wasManual = resolvedDoseId
+    ? isDoseConsumedOnDate(med, resolvedDoseId, todayStr)
+    : med.lastConsumedDate === todayStr;
+
+  if (med.autoDeductEnabled === false && !wasManual) {
+    return { ok: false, reason: 'auto_deduct_off' };
+  }
 
   // --- Multi-dose / scheduled slot ---
   if (hasDoseSchedule(med) && resolvedDoseId) {

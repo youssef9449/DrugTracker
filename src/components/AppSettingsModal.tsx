@@ -292,35 +292,18 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     </div>
                   </div>
                   {onToggleNotifications && (
-                    <button
-                      type="button"
-                      onClick={onToggleNotifications}
-                      title={
-                        notificationsEnabled
-                          ? 'التنبيهات مفعلة (انقر للإيقاف المؤقت)'
-                          : 'التنبيهات متوقفة (انقر لتفعيل التنبيهات والمنبه)'
-                      }
-                      aria-label={
+                    <Toggle
+                      id="settings-toggle-notifications"
+                      checked={notificationsEnabled}
+                      onChange={onToggleNotifications}
+                      label={
                         notificationsEnabled
                           ? 'التنبيهات مفعلة — انقر للإيقاف'
                           : 'التنبيهات متوقفة — انقر للتفعيل'
                       }
-                      aria-pressed={notificationsEnabled}
-                      className={`p-2 rounded-xl transition active:scale-95 relative border ${
-                        notificationsEnabled
-                          ? 'bg-amber-400/20 text-amber-600 border-amber-400/40 ring-1 ring-amber-400/30 shadow-xs'
-                          : 'bg-slate-200 text-slate-600 hover:text-slate-800 hover:bg-slate-300/80 border-slate-300'
-                      }`}
-                    >
-                      {notificationsEnabled ? (
-                        <>
-                          <Bell className="w-4 h-4 fill-amber-500 text-amber-600" />
-                          <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-emerald-500 ring-1 ring-white animate-pulse" />
-                        </>
-                      ) : (
-                        <BellOff className="w-4 h-4" />
-                      )}
-                    </button>
+                      color="amber"
+                      size="md"
+                    />
                   )}
                 </div>
 
@@ -357,32 +340,18 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     </div>
                   </div>
                   {onToggleCriticalStockAlerts && (
-                    <button
-                      type="button"
-                      onClick={onToggleCriticalStockAlerts}
-                      title={
-                        criticalStockAlertsEnabled
-                          ? 'تنبيه النفاذ الحرج مفعّل (انقر للإيقاف)'
-                          : 'تنبيه النفاذ الحرج متوقف (انقر للتفعيل)'
-                      }
-                      aria-label={
+                    <Toggle
+                      id="settings-toggle-critical-stock"
+                      checked={criticalStockAlertsEnabled}
+                      onChange={onToggleCriticalStockAlerts}
+                      label={
                         criticalStockAlertsEnabled
                           ? 'تنبيه النفاذ الحرج مفعّل'
                           : 'تنبيه النفاذ الحرج متوقف'
                       }
-                      aria-pressed={criticalStockAlertsEnabled}
-                      className={`p-2 rounded-xl transition active:scale-95 relative border ${
-                        criticalStockAlertsEnabled
-                          ? 'bg-rose-500/20 text-rose-600 border-rose-400/50 ring-1 ring-rose-400/30 shadow-xs'
-                          : 'bg-slate-200 text-slate-600 hover:text-slate-800 hover:bg-slate-300/80 border-slate-300'
-                      }`}
-                    >
-                      <AlertTriangle
-                        className={`w-4 h-4 ${
-                          criticalStockAlertsEnabled ? 'fill-rose-500/30 text-rose-600' : 'opacity-70'
-                        }`}
-                      />
-                    </button>
+                      color="rose"
+                      size="md"
+                    />
                   )}
                 </div>
 

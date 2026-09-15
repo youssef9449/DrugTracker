@@ -53,11 +53,15 @@ export function useNativeActionHandlers(opts: {
   // existing soundEnabled setting, exactly like all other UI feedback.
   useEffect(() => {
     registerDoseReceivedHandler((medicationId, doseId) => {
+      const med = medications.find((m) => m.id === medicationId);
+      if (med && med.autoDeductEnabled !== false) {
+        return;
+      }
       openAlarm(medicationId, doseId);
       if (soundEnabled) playSuccessChime();
     });
     return () => registerDoseReceivedHandler(null);
-  }, [openAlarm, soundEnabled]);
+  }, [openAlarm, soundEnabled, medications]);
 
   // ─────────────────────────────────────────────────────────────
   // App-resume handler: re-check exact-alarm permission when the app

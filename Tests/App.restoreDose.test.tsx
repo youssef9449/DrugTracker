@@ -77,7 +77,7 @@ function makeMulti(overrides: Partial<Medication> = {}): Medication {
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
     lastSyncDate: TEST_DATE,
-    autoDeductEnabled: true,
+    autoDeductEnabled: false,
     reminderEnabled: false,
     doseSchedule: [
       { id: 'd1', amount: 1, time: '08:00' },
@@ -121,9 +121,21 @@ async function goToStockTab(): Promise<void> {
 async function takeDoseViaCard(doseId: string): Promise<void> {
   setClockBeforeDose(doseId);
   await goToStockTab();
-  const takeButton = await screen.findByTitle(/تناول جرعة \(-/);
-  expect(takeButton).not.toBeDisabled();
-  fireEvent.click(takeButton);
+  // Multi-dose Card → إدارة الجرعات → take action on exact doseId
+  const manage = await screen.findByTestId('manage-doses-med-restore');
+  fireEvent.click(manage);
+  await waitFor(() => {
+    expect(screen.getByText(/إدارة الجرعات|اختر الإجراء المناسب/)).toBeInTheDocument();
+  });
+  const target = screen
+    .getAllByRole('button')
+    .find(
+      (b) =>
+        b.getAttribute('data-dose-id') === doseId &&
+        b.getAttribute('data-dose-action') === 'take'
+    );
+  expect(target).toBeTruthy();
+  fireEvent.click(target!);
   await waitFor(() => {
     expect(readMeds()[0].doseConsumption?.[doseId]).toBe(getTodayDateString());
   });
@@ -136,17 +148,21 @@ async function takeDoseViaCard(doseId: string): Promise<void> {
 async function restoreDoseViaCardModal(doseId: string): Promise<void> {
   advanceClockPastMorningDoses();
   await goToStockTab();
+  // Multi-dose: unified إدارة الجرعات
   await waitFor(() => {
-    expect(screen.getByTestId('restore-dose-med-restore')).toBeInTheDocument();
+    expect(screen.getByTestId('manage-doses-med-restore')).toBeInTheDocument();
   });
-  fireEvent.click(screen.getByTestId('restore-dose-med-restore'));
+  fireEvent.click(screen.getByTestId('manage-doses-med-restore'));
   await waitFor(() => {
-    expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
+    expect(screen.getByText(/إدارة الجرعات|اختر الإجراء المناسب/)).toBeInTheDocument();
   });
-  const doseButtons = screen.getAllByRole('button').filter((b) =>
-    b.getAttribute('data-dose-id')
-  );
-  const target = doseButtons.find((b) => b.getAttribute('data-dose-id') === doseId);
+  const target = screen
+    .getAllByRole('button')
+    .find(
+      (b) =>
+        b.getAttribute('data-dose-id') === doseId &&
+        b.getAttribute('data-dose-action') === 'restore'
+    );
   expect(target).toBeTruthy();
   expect(target).not.toBeDisabled();
   fireEvent.click(target!);

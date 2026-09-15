@@ -1,7 +1,11 @@
 /**
  * Issue #217 — fail-closed JS reconciliation:
- * if invalidateAutoDeductionRecurrence fails, cancelAutoDeduction must NOT run
- * and tracking must be retained for a later pass.
+ * if invalidateAutoDeductionRecurrence fails, cancelAutoDeduction must NOT run.
+ *
+ * Retry sources (two independent paths):
+ * 1) nativeSchedules path — schedule stays in listScheduledAutoDeductionOccurrences()
+ *    (cancel was skipped), so a later pass re-discovers it. Not trackedRef.
+ * 2) trackedRef path — covered by the second test when native list is empty.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
@@ -65,9 +69,10 @@ describe('useAutoDeductionScheduler invalidate-before-cancel (Issue #217)', () =
     vi.clearAllMocks();
   });
 
-  it('does not call cancel when invalidate fails; keeps slot for retry', async () => {
+  it('does not cancel when invalidate fails; native schedule remains available for later reconciliation', async () => {
     const med = baseMed();
     // Native still holds a schedule that is no longer desired after disable.
+    // Retry is via re-listing this schedule — NOT via trackedRef on this path.
     listScheduledMock.mockResolvedValue([
       {
         medicationId: 'med-1',
@@ -96,7 +101,7 @@ describe('useAutoDeductionScheduler invalidate-before-cancel (Issue #217)', () =
 
     await wait(30);
 
-    // Disable auto-deduct → desired empty → must invalidate then cancel
+    // Disable auto-deduct → desired empty → invalidate then (only if ok) cancel.
     cancelMock.mockClear();
     invalidateMock.mockClear();
     listScheduledMock.mockResolvedValue([
@@ -116,13 +121,14 @@ describe('useAutoDeductionScheduler invalidate-before-cancel (Issue #217)', () =
     rerender({ meds: [med], enabled: false });
     await wait(40);
 
+    // invalidate attempted; cancel skipped — native row was not cancelled.
     expect(invalidateMock).toHaveBeenCalled();
     expect(cancelMock).not.toHaveBeenCalled();
 
-    // Later pass: invalidate succeeds → cancel runs
+    // Later reconciliation re-discovers the same native schedule (still listed).
+    // Retry source = listScheduledAutoDeductionOccurrences, not trackedRef.
     cancelMock.mockClear();
     invalidateMock.mockClear();
-    invalidateMock.mockResolvedValue({ ok: true, generation: 3 });
     listScheduledMock.mockResolvedValue([
       {
         medicationId: 'med-1',
@@ -132,9 +138,9 @@ describe('useAutoDeductionScheduler invalidate-before-cancel (Issue #217)', () =
         amount: 1,
       },
     ]);
+    invalidateMock.mockResolvedValue({ ok: true, generation: 3 });
 
-    // Force another reconcile by toggling exact alarm path via re-enable then disable
-    // (signature change). Simpler: re-render enabled true then false again.
+    // Trigger another reconcile pass (signature change via enable → disable).
     rerender({ meds: [med], enabled: true });
     await wait(20);
     cancelMock.mockClear();

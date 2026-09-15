@@ -437,69 +437,67 @@ export function getCardDoseToggleTarget(
 }
 
 /**
- * True when there is at least one pure auto-completed dose today that can be
- * restored (completed via elapsed time under auto-deduct, not manually
- * consumed, and not already skipped/restored).
+ * Returns the first pure auto-completed dose that can be restored today, or
+ * null if none.
  *
- * Independent of {@link getCardDoseToggleTarget} so the existing manual
- * Take/Restore Card semantics remain unchanged. Used only by the dedicated
+ * A dose is auto-restorable only when ALL of the following hold:
+ * 1. Medication auto-deduct is enabled (`autoDeductEnabled !== false`).
+ * 2. The dose time has already elapsed today (wall-clock).
+ * 3. There is no manual consumption mark for this doseId today.
+ * 4. The dose is not already skipped/restored today.
+ *
+ * This is independent of {@link getCardDoseToggleTarget} so manual Card
+ * Take/Restore semantics stay unchanged. Used only by the dedicated
  * auto-deduct Restore button in MedicationCard.
+ *
+ * For multi-dose, the Card still calls onRestoreDose(id, undefined) so App
+ * opens SelectDoseModal — this helper only answers "is there anything
+ * restorable" and supplies the single-dose doseId when needed.
+ *
+ * Legacy (no schedule): returns a synthetic dose with the reminderTime so
+ * callers can detect eligibility; identity remains undefined (no doseId).
+ */
+export function getAutoRestorableDose(
+  med: Medication,
+  now: Date = new Date(),
+  todayStr: string = getTodayDateString()
+): MedicationDose | null {
+  // Auto must be enabled on the medication itself.
+  if (med.autoDeductEnabled === false) return null;
+
+  const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
+
+  if (schedule.length === 0) {
+    // Legacy: auto-completed when time elapsed and no manual lastConsumedDate.
+    if (med.lastConsumedDate === todayStr) return null;
+    const time =
+      med.reminderTime && isValidDoseTime(med.reminderTime)
+        ? med.reminderTime
+        : '09:00';
+    if (!isDoseTimeElapsedToday(time, now)) return null;
+    // Synthetic marker — no real doseId for legacy path.
+    return { id: '', amount: Number(med.dailyDose) || 1, time };
+  }
+
+  const sorted = sortDoseSchedule(schedule);
+  for (const d of sorted) {
+    // Pure auto: time elapsed, not manually consumed, not skipped.
+    if (isDoseConsumedOnDate(med, d.id, todayStr)) continue;
+    if (isDoseSkippedOnDate(med, d.id, todayStr)) continue;
+    if (!isDoseTimeElapsedToday(d.time, now)) continue;
+    return d;
+  }
+  return null;
+}
+
+/**
+ * True when {@link getAutoRestorableDose} finds at least one eligible dose.
+ * Convenience for callers that only need a boolean.
  */
 export function hasAutoRestorableDoseToday(
   med: Medication,
   now: Date = new Date(),
   todayStr: string = getTodayDateString()
 ): boolean {
-  const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
-  if (schedule.length === 0) {
-    // Legacy path: auto-completed when auto is on, time elapsed, and no
-    // manual lastConsumedDate for today. Restore via restoreDose(undefined).
-    if (med.autoDeductEnabled === false) return false;
-    if (med.lastConsumedDate === todayStr) return false;
-    const time =
-      med.reminderTime && isValidDoseTime(med.reminderTime)
-        ? med.reminderTime
-        : '09:00';
-    return isDoseTimeElapsedToday(time, now);
-  }
-
-  for (const d of schedule) {
-    if (
-      isDoseCompletedToday(med, d, todayStr, now) &&
-      !isDoseConsumedOnDate(med, d.id, todayStr) &&
-      !isDoseSkippedOnDate(med, d.id, todayStr)
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
- * Resolve a concrete doseId for the auto-restore button when the medication
- * is single-dose (or legacy). For multi-dose returns undefined so App opens
- * SelectDoseModal in restore mode.
- */
-export function getAutoRestoreDoseId(
-  med: Medication,
-  now: Date = new Date(),
-  todayStr: string = getTodayDateString()
-): string | undefined {
-  const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
-  if (schedule.length > 1) {
-    return undefined; // multi → modal
-  }
-  if (schedule.length === 1) {
-    const d = schedule[0];
-    if (
-      isDoseCompletedToday(med, d, todayStr, now) &&
-      !isDoseConsumedOnDate(med, d.id, todayStr) &&
-      !isDoseSkippedOnDate(med, d.id, todayStr)
-    ) {
-      return d.id;
-    }
-    return undefined;
-  }
-  // Legacy: no doseId
-  return undefined;
+  return getAutoRestorableDose(med, now, todayStr) !== null;
 }

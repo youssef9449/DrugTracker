@@ -162,13 +162,22 @@ public class StaleQueuedFireTest {
                 med, dose, date, "13:00", 1.0, futureEpochMs(date, "13:00")).ok);
         DeliveryTokens t = tokensFromMeta(med, dose, date);
 
+        // The two deliveries share the EXACT same payload (medicationId, doseId,
+        // calendarDate, scheduledAtEpochMs, amount, scheduleVersion,
+        // recurrenceGeneration) — a true duplicate of one scheduled delivery.
+        final long scheduledAt = 1L;
+        final double amount = 1.0;
+
+        // First delivery of this occurrence → CREATED.
         AutoDeductionScheduler.FireResult first = s.fireOccurrenceIfNotCancelled(
-                med, dose, date, 1L, 1.0, t.scheduleVersion, t.recurrenceGeneration);
+                med, dose, date, scheduledAt, amount, t.scheduleVersion, t.recurrenceGeneration);
         assertEquals(AutoDeductionScheduler.FireResult.Status.CREATED, first.status);
 
+        // Second delivery with the identical payload → idempotent ALREADY_EXISTS.
         AutoDeductionScheduler.FireResult second = s.fireOccurrenceIfNotCancelled(
-                med, dose, date, 2L, 1.0, t.scheduleVersion, t.recurrenceGeneration);
+                med, dose, date, scheduledAt, amount, t.scheduleVersion, t.recurrenceGeneration);
         assertEquals(AutoDeductionScheduler.FireResult.Status.ALREADY_EXISTS, second.status);
+        // Exactly one durable FIRED — the duplicate delivery did not create a second row.
         assertTrue(hasFired(med, dose, date));
     }
 }

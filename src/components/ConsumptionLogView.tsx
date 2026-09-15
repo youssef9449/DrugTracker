@@ -7,7 +7,6 @@ import { MAX_LOG_ROWS, DAYS_PER_MONTH } from '../utils/time';
 interface ConsumptionLogViewProps {
   medications: Medication[];
   logs: ConsumptionLog[];
-  onRestoreDose: (medicationId: string, reason: string, doseId?: string) => boolean;
   showToast: (message: string) => void;
 }
 
@@ -15,7 +14,7 @@ interface ConsumptionLogViewProps {
  * Consumption / sync activity timeline.
  * Dose restore controls were intentionally removed from this view;
  * restore remains available via MedicationCard + SelectDoseModal.
- * Props onRestoreDose/showToast are retained for App wiring compatibility.
+ * The showToast prop is retained for App wiring compatibility.
  */
 export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
   medications,

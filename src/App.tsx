@@ -446,7 +446,6 @@ export default function App() {
   });
 
   const {
-    handleRestoreDose,
     handleConfirmRefill,
     handleUndoRefill,
     handleToggleAutoDeduct,
@@ -860,7 +859,6 @@ export default function App() {
             <ConsumptionLogView
               medications={medications}
               logs={logs}
-              onRestoreDose={handleRestoreDose}
               showToast={showToast}
             />
           )}

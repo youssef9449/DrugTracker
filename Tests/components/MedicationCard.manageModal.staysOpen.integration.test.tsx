@@ -48,7 +48,6 @@ import type { Medication } from '@/types';
 import {
   getTodayDateString,
   isDoseConsumedOnDate,
-  isDoseSkippedOnDate,
 } from '@/utils/dateCalculations';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';

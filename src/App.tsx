@@ -950,7 +950,13 @@ export default function App() {
       />
       <SelectDoseModal
         isOpen={Boolean(selectDoseMed)}
-        medication={selectDoseMed}
+        medication={
+          // Prefer live medications[] so Manage mode always re-derives dose rows
+          // from the latest Take/Restore result (not a stale open-time snapshot).
+          selectDoseMed
+            ? (medications.find((m) => m.id === selectDoseMed.id) ?? selectDoseMed)
+            : null
+        }
         mode={selectDoseMode}
         globalAutoDeductEnabled={globalAutoDeductEnabled}
         onSelect={handleSelectDoseFromModal}

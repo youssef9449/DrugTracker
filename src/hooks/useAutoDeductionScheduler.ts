@@ -10,6 +10,7 @@ import { isValidDoseTime, normalizeTimeString } from '../utils/doseSchedule';
 import { LEGACY_DOSE_ID } from '../utils/notifications';
 import {
   cancelAutoDeduction,
+  invalidateAutoDeductionRecurrence,
   scheduleAutoDeduction,
   listScheduledAutoDeductionOccurrences,
 } from '../utils/autoDeductionNative';
@@ -196,6 +197,7 @@ export function useAutoDeductionScheduler({
       // hold stale schedules for disabled/deleted meds — cancel those first.
       // System boot / permission re-grant restore is handled by
       // AutoDeductionSystemReceiver, not this normal desired-state pass.
+      const invalidatedSlots = new Set<string>();
       try {
         const nativeSchedules = await listScheduledAutoDeductionOccurrences();
         for (const s of nativeSchedules) {
@@ -206,6 +208,21 @@ export function useAutoDeductionScheduler({
             s.calendarDate
           );
           if (!desired.has(key)) {
+            // Issue #217: durable generation bump MUST succeed before any
+            // occurrence cancel. Cancel-without-invalidate leaves the old
+            // generation active so a concurrent receiver can still create D+1.
+            const slotId = `${s.medicationId}::${s.doseId}`;
+            if (!invalidatedSlots.has(slotId)) {
+              const inv = await invalidateAutoDeductionRecurrence(
+                s.medicationId,
+                s.doseId
+              );
+              if (!inv.ok) {
+                // Fail-closed: keep tracking, skip cancel, retry next pass.
+                continue;
+              }
+              invalidatedSlots.add(slotId);
+            }
             const res = await cancelAutoDeduction(
               s.medicationId,
               s.doseId,
@@ -228,8 +245,17 @@ export function useAutoDeductionScheduler({
         if (!desired.has(key)) {
           const [medId, doseId, date] = key.split('::');
           if (medId && doseId && date) {
+            const slotId = `${medId}::${doseId}`;
+            if (!invalidatedSlots.has(slotId)) {
+              const inv = await invalidateAutoDeductionRecurrence(medId, doseId);
+              if (!inv.ok) {
+                // Fail-closed: do not cancel occurrence; keep tracking for retry.
+                continue;
+              }
+              invalidatedSlots.add(slotId);
+            }
             const res = await cancelAutoDeduction(medId, doseId, date);
-            // Retain tracking on FAILED so a later pass can retry cancellation.
+            // Drop tracking only after successful cancel (invalidate already ok).
             if (res.ok) {
               trackedRef.current.delete(key);
             }

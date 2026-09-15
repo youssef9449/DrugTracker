@@ -563,7 +563,18 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               ) : !isAutoActive && doseToggle.canTake && onConsumeDose ? (
                 <button
                   type="button"
-                  onClick={() => onConsumeDose(medication.id, doseToggle.doseId)}
+                  onClick={() => {
+                    const isMulti =
+                      Array.isArray(medication.doseSchedule) &&
+                      medication.doseSchedule.length > 1;
+                    // Multi-dose: omit doseId so App opens SelectDoseModal
+                    // (take mode) for explicit user selection. Single/legacy:
+                    // direct take via doseToggle.doseId (unchanged).
+                    onConsumeDose(
+                      medication.id,
+                      isMulti ? undefined : doseToggle.doseId
+                    );
+                  }}
                   disabled={effPills <= 0 || nextDoseAmount <= 0}
                   title={`تناول جرعة (-${nextDoseAmount})`}
                   className={`w-5 h-5 flex items-center justify-center rounded-full transition-colors active:scale-95 ${
@@ -743,7 +754,18 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               ) : !isAutoActive && doseToggle.canTake && onConsumeDose ? (
                 <button
                   type="button"
-                  onClick={() => onConsumeDose(medication.id, doseToggle.doseId)}
+                  onClick={() => {
+                    const isMulti =
+                      Array.isArray(medication.doseSchedule) &&
+                      medication.doseSchedule.length > 1;
+                    // Multi-dose: omit doseId so App opens SelectDoseModal
+                    // (take mode) for explicit user selection. Single/legacy:
+                    // direct take via doseToggle.doseId (unchanged).
+                    onConsumeDose(
+                      medication.id,
+                      isMulti ? undefined : doseToggle.doseId
+                    );
+                  }}
                   disabled={effPills <= 0 || nextDoseAmount <= 0}
                   title={`تناول جرعة (-${nextDoseAmount})`}
                   className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors active:scale-95 ${

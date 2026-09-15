@@ -749,7 +749,7 @@ export default function App() {
                       className="flex items-center gap-2 cursor-pointer select-none"
                     >
                       <span className="text-xs font-medium text-slate-700">
-                        {isCompactView ? 'العرض المختصر' : 'الوضع الطبيعي'}
+                        {isCompactView ? 'العرض المختصر' : 'العرض الطبيعي'}
                       </span>
                       <Toggle
                         id="toggle-compact-view"
@@ -760,11 +760,11 @@ export default function App() {
                           showToast(
                             next
                               ? 'تم تفعيل العرض المختصر'
-                              : 'تم إرجاع الوضع الطبيعي'
+                              : 'تم إرجاع العرض الطبيعي'
                           );
                           if (soundEnabled) playSuccessChime();
                         }}
-                        label="تبديل العرض بين المختصر والوضع الطبيعي"
+                        label="تبديل العرض بين المختصر والعرض الطبيعي"
                         size="sm"
                         color="teal"
                       />

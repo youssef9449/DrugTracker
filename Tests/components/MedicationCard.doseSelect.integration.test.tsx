@@ -376,6 +376,115 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     expect(doseLog?.amount).toBe(-2);
   });
 
+  it('opening manage UI does not mutate state before an action is chosen', async () => {
+    localStorage.setItem(
+      STORAGE_MEDS_KEY,
+      JSON.stringify([makeMulti({ currentPills: 30 })])
+    );
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Drug A Multi')).toBeInTheDocument();
+    });
+
+    const before = readMeds()[0]!;
+    const beforeLogs = readLogs();
+    const beforePills = effectiveCurrentPills(before);
+
+    fireEvent.click(screen.getByTestId('manage-doses-med-multi'));
+    await waitFor(() => {
+      expect(
+        screen.getByText('اختر الإجراء المناسب لكل جرعة')
+      ).toBeInTheDocument();
+    });
+
+    // Opening the modal alone must not consume/restore/skip anything.
+    const after = readMeds()[0]!;
+    expect(effectiveCurrentPills(after)).toBe(beforePills);
+    expect(after.doseConsumption).toStrictEqual(before.doseConsumption);
+    expect(after.doseConsumptionHistory).toStrictEqual(
+      before.doseConsumptionHistory
+    );
+    expect(readLogs()).toStrictEqual(beforeLogs);
+  });
+
+  it('Auto OFF: future dose shows لم يتم التناول and is takeable (manual mode)', async () => {
+    // now = 07:00; scheduled doses (08:00+) are future. Auto OFF → manual mode.
+    localStorage.setItem(
+      STORAGE_MEDS_KEY,
+      JSON.stringify([makeMulti({ currentPills: 30, autoDeductEnabled: false })])
+    );
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Drug A Multi')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('manage-doses-med-multi'));
+    await waitFor(() => {
+      expect(
+        screen.getByText('اختر الإجراء المناسب لكل جرعة')
+      ).toBeInTheDocument();
+    });
+
+    // Future dose under Auto OFF is takeable: status لم يتم التناول + a Take action.
+    expect(screen.getAllByText(/الحالة: لم يتم التناول/).length).toBeGreaterThan(0);
+    const takeButtons = screen
+      .getAllByRole('button')
+      .filter(
+        (b) =>
+          b.getAttribute('data-dose-id') !== null &&
+          b.getAttribute('data-dose-action') === 'take'
+      );
+    expect(takeButtons.length).toBeGreaterThan(0);
+
+    // Selecting the future d1 consumes it with the exact doseId (no inference).
+    fireEvent.click(
+      takeButtons.find((b) => b.getAttribute('data-dose-id') === 'd1')!
+    );
+    const today = getTodayDateString();
+    await waitFor(() => {
+      const med = readMeds().find((m) => m.id === 'med-multi');
+      expect(med?.doseConsumption?.d1).toBe(today);
+    });
+  });
+
+  it('Auto ON: future dose shows لم يحن وقتها with no take action', async () => {
+    // now = 07:00; scheduled doses (08:00+) are future. Auto ON → not yet due.
+    localStorage.setItem(
+      STORAGE_MEDS_KEY,
+      JSON.stringify([makeMulti({ currentPills: 30, autoDeductEnabled: true })])
+    );
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Drug A Multi')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('manage-doses-med-multi'));
+    await waitFor(() => {
+      expect(
+        screen.getByText('اختر الإجراء المناسب لكل جرعة')
+      ).toBeInTheDocument();
+    });
+
+    // Future dose under Auto ON: status لم يحن وقتها, no Take action available.
+    expect(screen.getAllByText(/الحالة: لم يحن وقتها/).length).toBeGreaterThan(0);
+    const takeButtons = screen
+      .getAllByRole('button')
+      .filter(
+        (b) =>
+          b.getAttribute('data-dose-id') !== null &&
+          b.getAttribute('data-dose-action') === 'take'
+      );
+    expect(takeButtons).toHaveLength(0);
+    // No consumption from just opening the modal.
+    expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(0);
+  });
+
 
   it('after d1 manually consumed, Card shows Restore d1 (same doseId) not Take d2', async () => {
     const today = getTodayDateString();
@@ -405,7 +514,8 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
       expect(screen.getByText('Legacy One Dose')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByTestId('manage-doses-med-multi'));
+    // Legacy uses the Card Take button directly (no multi-dose management UI).
+    fireEvent.click(screen.getByTitle(/تناول جرعة/));
 
     // No multi-dose selector
     expect(screen.queryByText(/إدارة الجرعات/)).toBeNull();
@@ -440,7 +550,8 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
       expect(screen.getByText('Single Slot Med')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByTestId('manage-doses-med-multi'));
+    // Single-slot uses the Card Take button directly (no multi-dose management UI).
+    fireEvent.click(screen.getByTitle(/تناول جرعة/));
     expect(screen.queryByText(/إدارة الجرعات/)).toBeNull();
 
     const today = getTodayDateString();

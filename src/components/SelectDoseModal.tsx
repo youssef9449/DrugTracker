@@ -139,43 +139,47 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
               const amountLabel = `${dose.amount} ${unit}`;
 
               if (isManage) {
-                // Status + single available action per dose
-                let statusText = 'لم يتم التناول';
-                let action: 'take' | 'restore' | null = 'take';
-                let actionLabel = 'تناول الجرعة';
-                let disabled = false;
+                // Explicit per-dose contract (auto ON vs OFF):
+                //   skipped/restored             → تم الاسترجاع   (no action)
+                //   manual consumed              → تم التناول     + استرجاع الجرعة
+                //   auto ON + auto-deducted     → تم الخصم تلقائيًا + استرجاع الجرعة
+                //   auto ON + future (!elapsed)  → لم يحن وقتها  (no action)
+                //   auto OFF (any time, incl.    → لم يتم التناول + تناول الجرعة
+                //     future) = manual mode;       (user is the source of truth)
+                // The Take/Restore actions always carry the exact dose.id and use
+                // dose.amount from doseSchedule (no index/first/dailyDose inference).
+                let statusText: string;
+                let action: 'take' | 'restore' | null;
+                let actionLabel: string;
+                let disabled: boolean;
 
                 if (skipped) {
+                  // Restored/skipped (auto ON or OFF): no action.
                   statusText = 'تم الاسترجاع';
                   action = null;
+                  actionLabel = '';
                   disabled = true;
                 } else if (consumed) {
+                  // Manually consumed today: allow Restore.
                   statusText = 'تم التناول';
                   action = 'restore';
                   actionLabel = 'استرجاع الجرعة';
+                  disabled = false;
                 } else if (isPureAuto) {
+                  // Auto ON, elapsed + auto-deducted (not manual, not skipped).
                   statusText = 'تم الخصم تلقائيًا';
                   action = 'restore';
                   actionLabel = 'استرجاع الجرعة';
-                } else if (!elapsed && medication.autoDeductEnabled !== false) {
-                  // Future slot under auto: show as not yet due; still allow
-                  // manual take only when auto is inactive (contract).
+                  disabled = false;
+                } else if (medication.autoDeductEnabled !== false && !elapsed) {
+                  // Auto ON + future slot: not yet due, no action available.
                   statusText = 'لم يحن وقتها';
                   action = null;
+                  actionLabel = '';
                   disabled = true;
                 } else {
-                  statusText = 'لم يتم التناول';
-                  action = 'take';
-                  actionLabel = 'تناول الجرعة';
-                }
-
-                // When auto is off, future slots remain takeable (manual mode).
-                if (
-                  !consumed &&
-                  !skipped &&
-                  !completed &&
-                  medication.autoDeductEnabled === false
-                ) {
+                  // Auto OFF (any time, including future) — manual mode, allow Take.
+                  // Also covers auto ON + elapsed-but-not-yet-deducted transient.
                   statusText = 'لم يتم التناول';
                   action = 'take';
                   actionLabel = 'تناول الجرعة';
@@ -186,7 +190,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                   <div
                     key={dose.id}
                     className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-xl border border-slate-200 bg-white text-slate-800"
-                    data-dose-id={dose.id}
+                    data-dose-row-dose-id={dose.id}
                     data-event-date={eventDate}
                     data-select-mode="manage"
                     data-dose-status={

@@ -25,6 +25,13 @@ public final class AutoDeductionContract {
     public static final String EXTRA_SCHEDULED_AT_EPOCH_MS = "scheduledAtEpochMs";
     public static final String EXTRA_AMOUNT = "amount";
     public static final String EXTRA_TIME_HHMM = "timeHhmm";
+    /**
+     * Recurrence authorization generation stamped into the PendingIntent when the
+     * occurrence was scheduled. Receiver must pass this to successor creation so
+     * disable/cancel (which bumps the active generation) can refuse D+1.
+     * Distinct from per-occurrence scheduleVersion (ownership/rollback).
+     */
+    public static final String EXTRA_RECURRENCE_GENERATION = "recurrenceGeneration";
 
     public static final String PREFS_EVENTS = "drugtracker_auto_deduction_events_v1";
     public static final String PREFS_SCHEDULES = "drugtracker_auto_deduction_schedules_v1";
@@ -47,6 +54,29 @@ public final class AutoDeductionContract {
 
     /** SharedPreferences key: last allocated durable ordering sequence (long). */
     public static final String KEY_ORDERING_SEQ = "lastAllocatedSequence";
+
+    /**
+     * Medication+dose schedule recurrence authorization (Issue #217).
+     * Keyed by {@link #scheduleIdentityKey(String, String)}; value is a monotonic
+     * long generation. Disable/cancel bumps the generation under SCHEDULE_LOCK so
+     * post-fire successor creation for a stale generation cannot install D+1.
+     * Independent of per-occurrence scheduleVersion ownership tokens.
+     */
+    public static final String PREFS_RECURRENCE_AUTH =
+            "drugtracker_auto_deduction_recurrence_auth_v1";
+
+    /** Prefs key prefix for active recurrence generation (medicationId + doseId). */
+    public static final String RECURRENCE_AUTH_KEY_PREFIX = "rgen:";
+
+    /**
+     * Durable schedule-chain identity (medication + dose slot), NOT including
+     * calendarDate. Used only for recurrence authorization generation.
+     */
+    public static String scheduleIdentityKey(String medicationId, String doseId) {
+        if (medicationId == null) medicationId = "";
+        if (doseId == null) doseId = "";
+        return medicationId + SEP + doseId;
+    }
 
     public static final String STATUS_FIRED = "FIRED";
     public static final String STATUS_RECONCILED = "RECONCILED";

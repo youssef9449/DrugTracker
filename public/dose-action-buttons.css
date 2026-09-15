@@ -1,0 +1,97 @@
+/* Material 3-inspired dose action buttons used on MedicationCard. */
+
+button[data-testid^="restore-dose-"],
+button[data-testid^="auto-restore-dose-"] {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  background: #d9f4e5;
+  color: #075e45;
+  box-shadow: none;
+  transition: background-color 150ms ease, transform 100ms ease, box-shadow 150ms ease;
+}
+
+button[data-testid^="restore-dose-"]:hover,
+button[data-testid^="auto-restore-dose-"]:hover {
+  background: #c5ead7;
+}
+
+button[data-testid^="restore-dose-"]:active,
+button[data-testid^="auto-restore-dose-"]:active {
+  background: #b4e1ca;
+  transform: scale(0.96);
+}
+
+button[data-testid^="restore-dose-"]:focus-visible,
+button[data-testid^="auto-restore-dose-"]:focus-visible {
+  outline: 2px solid rgb(5 150 105 / 35%);
+  outline-offset: 2px;
+}
+
+button[data-testid^="restore-dose-"] svg,
+button[data-testid^="auto-restore-dose-"] svg {
+  display: none;
+}
+
+button[data-testid^="restore-dose-"]::before,
+button[data-testid^="auto-restore-dose-"]::before {
+  content: '↶';
+  display: block;
+  font-size: 22px;
+  line-height: 1;
+  font-weight: 700;
+}
+
+button[title^="تناول جرعة"] {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  box-shadow: none;
+  transition: background-color 150ms ease, transform 100ms ease, box-shadow 150ms ease;
+}
+
+button[title^="تناول جرعة"]:focus-visible {
+  outline: 2px solid rgb(5 150 105 / 35%);
+  outline-offset: 2px;
+}
+
+button[title^="تناول جرعة"]:not(:disabled) {
+  background: #059669;
+  color: #fff;
+}
+
+button[title^="تناول جرعة"]:not(:disabled):hover {
+  background: #047857;
+}
+
+button[title^="تناول جرعة"]:not(:disabled):active {
+  background: #065f46;
+  transform: scale(0.96);
+}
+
+button[title^="تناول جرعة"]:disabled {
+  background: #f1f5f9;
+  color: #cbd5e1;
+  cursor: not-allowed;
+}
+
+button[title^="تناول جرعة"] svg {
+  width: 18px;
+  height: 18px;
+}

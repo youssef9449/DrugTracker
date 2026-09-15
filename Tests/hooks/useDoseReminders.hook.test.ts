@@ -144,7 +144,7 @@ describe('useDoseReminders', () => {
       expect(result.current.alarmingMedication).toBeNull();
     });
 
-    it('does NOT open when today\u2019s dose was already consumed (manual or alarm-action consumption)', () => {
+    it('does NOT open when today’s dose was already consumed (manual or alarm-action consumption)', () => {
       const med = makeMed({
         id: 'med-consumed-today',
         lastConsumedDate: getTodayDateString(),
@@ -157,16 +157,13 @@ describe('useDoseReminders', () => {
         result.current.openAlarm('med-consumed-today');
       });
 
-      // The alarm modal must never ask the user to take an
-      // already-taken dose — even if the native alarm could not be
-      // suppressed (foreground safety net behind the scheduler).
       expect(result.current.alarmingMedication).toBeNull();
     });
 
     it('still opens when the dose was consumed YESTERDAY (guard is current-calendar-day based)', () => {
       const med = makeMed({
         id: 'med-consumed-yesterday',
-        lastConsumedDate: '2024-09-09', // yesterday (system time 2024-09-10)
+        lastConsumedDate: '2024-09-09',
       });
       const { result } = renderHook(() =>
         useDoseReminders(defaultOpts({ medications: [med] }))
@@ -202,38 +199,37 @@ describe('useDoseReminders', () => {
     });
   });
 
-
-    it('stores the notification doseId so Take Dose can consume that exact slot', () => {
-      const med = makeMed({
-        id: 'med-dose-id',
-        doseSchedule: [
-          { id: 'd1', amount: 2, time: '08:00' },
-          { id: 'd2', amount: 1, time: '14:00' },
-        ],
-        dosesPerDay: 2,
-        dailyDose: 3,
-      });
-      const { result } = renderHook(() =>
-        useDoseReminders(defaultOpts({ medications: [med] }))
-      );
-      act(() => {
-        result.current.openAlarm('med-dose-id', 'd2');
-      });
-      expect(result.current.alarmingMedication?.id).toBe('med-dose-id');
-      expect(result.current.alarmingDoseId).toBe('d2');
+  it('stores the notification doseId so Take Dose can consume that exact slot', () => {
+    const med = makeMed({
+      id: 'med-dose-id',
+      doseSchedule: [
+        { id: 'd1', amount: 2, time: '08:00' },
+        { id: 'd2', amount: 1, time: '14:00' },
+      ],
+      dosesPerDay: 2,
+      dailyDose: 3,
     });
-
-    it('legacy openAlarm without doseId leaves alarmingDoseId null', () => {
-      const med = makeMed({ id: 'med-legacy-alarm' });
-      const { result } = renderHook(() =>
-        useDoseReminders(defaultOpts({ medications: [med] }))
-      );
-      act(() => {
-        result.current.openAlarm('med-legacy-alarm');
-      });
-      expect(result.current.alarmingMedication?.id).toBe('med-legacy-alarm');
-      expect(result.current.alarmingDoseId).toBeNull();
+    const { result } = renderHook(() =>
+      useDoseReminders(defaultOpts({ medications: [med] }))
+    );
+    act(() => {
+      result.current.openAlarm('med-dose-id', 'd2');
     });
+    expect(result.current.alarmingMedication?.id).toBe('med-dose-id');
+    expect(result.current.alarmingDoseId).toBe('d2');
+  });
+
+  it('legacy openAlarm without doseId leaves alarmingDoseId null', () => {
+    const med = makeMed({ id: 'med-legacy-alarm' });
+    const { result } = renderHook(() =>
+      useDoseReminders(defaultOpts({ medications: [med] }))
+    );
+    act(() => {
+      result.current.openAlarm('med-legacy-alarm');
+    });
+    expect(result.current.alarmingMedication?.id).toBe('med-legacy-alarm');
+    expect(result.current.alarmingDoseId).toBeNull();
+  });
 
   describe('testAlarm', () => {
     it('opens the modal without writing FIRED_KEY', () => {
@@ -256,7 +252,6 @@ describe('useDoseReminders', () => {
       const fired = JSON.parse(
         localStorage.getItem(FIRED_KEY) || '{}'
       ) as Record<string, boolean>;
-      // testAlarm must NOT write FIRED_KEY.
       expect(Object.keys(fired).length).toBe(0);
     });
   });
@@ -279,7 +274,6 @@ describe('useDoseReminders', () => {
       });
       expect(result.current.alarmingMedication).toBeNull();
 
-      // Snooze must NOT write FIRED_KEY.
       const fired = JSON.parse(
         localStorage.getItem(FIRED_KEY) || '{}'
       ) as Record<string, boolean>;
@@ -315,7 +309,6 @@ describe('useDoseReminders', () => {
         useDoseReminders(defaultOpts({ medications: [med] }))
       );
 
-      // Reminder fires (foreground) → modal opens.
       act(() => {
         result.current.openAlarm('med-snooze-legit');
       });
@@ -323,15 +316,11 @@ describe('useDoseReminders', () => {
         expect.objectContaining({ id: 'med-snooze-legit' })
       );
 
-      // User snoozes.
       act(() => {
         result.current.snoozeAlarm(med, 10);
       });
       expect(result.current.alarmingMedication).toBeNull();
 
-      // Snoozed one-shot fires 10 minutes later — dose still NOT taken
-      // → the modal must open again (the consumed-today guard must not
-      // interfere with legitimate snoozes).
       act(() => {
         vi.setSystemTime(new Date('2024-09-10T12:10:00Z'));
         result.current.openAlarm('med-snooze-legit');
@@ -342,9 +331,6 @@ describe('useDoseReminders', () => {
     });
 
     it('snoozed reminder for an already-consumed dose does NOT reopen the modal (consumed-today guard)', () => {
-      // The user snoozed, then took the dose manually before the snooze
-      // fired; even if the native cancellation of the snoozed one-shot
-      // failed, the modal must not ask for the dose again.
       const med = makeMed({
         id: 'med-snooze-taken',
         reminderTime: '09:00',

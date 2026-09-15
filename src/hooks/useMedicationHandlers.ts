@@ -94,9 +94,9 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     medicationId: string,
     reason: string,
     doseId?: string
-  ): boolean => {
+  ): Medication | null => {
     const med = medicationsRef.current.find((m) => m.id === medicationId);
-    if (!med) return false;
+    if (!med) return null;
     const today = getTodayDateString();
 
     // Resolve identity early for duplicate / in-flight guards (production
@@ -106,7 +106,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       if (preResolved.reason === 'missing_dose_id') {
         showToast('اختر الجرعة المراد استرجاعها');
       }
-      return false;
+      return null;
     }
     const resolvedDoseId = preResolved.doseId;
     const restoreKey = resolvedDoseId
@@ -119,7 +119,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
 
     if (med.autoDeductEnabled === false && !wasManual) {
       showToast(TOAST_MESSAGES.autoDeductOff(med.name));
-      return false;
+      return null;
     }
     // Outstanding-restore guard (not a permanent blacklist):
     // - Past-due: blocked while doseSkippedHistory marks this doseId+date
@@ -131,9 +131,9 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     const alreadyRestored = resolvedDoseId
       ? isDoseSkippedOnDate(med, resolvedDoseId, today) ||
         (() => {
-          if (isDoseConsumedOnDate(med, resolvedDoseId, today)) return false;
+          if (isDoseConsumedOnDate(med, resolvedDoseId, today)) return null;
           const slot = med.doseSchedule?.find((d) => d.id === resolvedDoseId);
-          if (!slot) return false;
+          if (!slot) return null;
           return !isDoseTimeElapsedToday(slot.time);
         })()
       : logs.some(
@@ -145,9 +145,9 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         );
     if (alreadyRestored) {
       showToast(TOAST_MESSAGES.doseAlreadyRestored(med.name));
-      return false;
+      return null;
     }
-    if (restoreInFlightRef.current.has(restoreKey)) return false;
+    if (restoreInFlightRef.current.has(restoreKey)) return null;
     restoreInFlightRef.current.add(restoreKey);
 
     // Production pure restore (stock + skip + clear consume).
@@ -159,7 +159,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         showToast('اختر الجرعة المراد استرجاعها');
       }
       restoreInFlightRef.current.delete(restoreKey);
-      return false;
+      return null;
     }
 
     const { updatedMed: medAfterRestore, restoredAmount } = result;
@@ -183,7 +183,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     // Clear in-flight so a later valid Restore (after Take) is not blocked.
     restoreInFlightRef.current.delete(restoreKey);
     if (soundEnabled) playSuccessChime();
-    return true;
+    return medAfterRestore;
   };
 
   const handleConfirmRefill = (medicationId: string, addedPills: number) => {
@@ -542,8 +542,14 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       );
       setLogs((prev) => [log, ...prev]);
     }
-    setSelectDoseMed(null);
-    setSelectDoseMode('take');
+    // Management flow: keep modal open and refresh dose rows from latest med.
+    // take/restore single-purpose flows: close modal as before.
+    if (selectDoseModeRef.current === 'manage' && updatedMed) {
+      setSelectDoseMed(updatedMed);
+    } else {
+      setSelectDoseMed(null);
+      setSelectDoseMode('take');
+    }
     showToast(TOAST_MESSAGES.doseTaken(med.name, doseAmount, med.unit));
     if (soundEnabled) playSuccessChime();
   };
@@ -573,10 +579,15 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       return;
     }
 
-    const ok = handleRestoreDose(medicationId, 'card', doseId);
-    if (ok) {
-      setSelectDoseMed(null);
-      setSelectDoseMode('take');
+    const updated = handleRestoreDose(medicationId, 'card', doseId);
+    if (updated) {
+      // Keep Management modal open and refresh its medication snapshot.
+      if (selectDoseModeRef.current === 'manage') {
+        setSelectDoseMed(updated);
+      } else {
+        setSelectDoseMed(null);
+        setSelectDoseMode('take');
+      }
       showToast(`تم استرجاع الجرعة — ${med.name}`);
     }
   };

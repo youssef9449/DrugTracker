@@ -8,6 +8,7 @@ import {
   CheckCircle,
   ShoppingCart,
   Clock,
+  ListChecks,
 } from 'lucide-react';
 import { Medication, calculateMedicationStatus, describeStockInStrips, isSolidUnit } from '../types';
 import { getDepletionDate, effectiveCurrentPills } from '../utils/dateCalculations';
@@ -528,10 +529,11 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 type="button"
                 onClick={() => onConsumeDose(medication.id, undefined)}
                 title="إدارة الجرعات"
+                aria-label="إدارة الجرعات"
                 data-testid={`manage-doses-${medication.id}`}
-                className="h-5 px-2 rounded-full bg-teal-600 text-white text-[10px] font-bold hover:bg-teal-700 transition-colors active:scale-95"
+                className="w-5 h-5 flex items-center justify-center rounded-full bg-teal-600 text-white hover:bg-teal-700 transition-colors active:scale-95"
               >
-                إدارة الجرعات
+                <ListChecks className="w-3 h-3" strokeWidth={2.25} aria-hidden />
               </button>
             ) : (onConsumeDose || onRestoreDose) ? (
               doseToggle.canRestore && onRestoreDose ? (
@@ -707,10 +709,11 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 type="button"
                 onClick={() => onConsumeDose(medication.id, undefined)}
                 title="إدارة الجرعات"
+                aria-label="إدارة الجرعات"
                 data-testid={`manage-doses-${medication.id}`}
-                className="h-6 px-2.5 rounded-full bg-teal-600 text-white text-[11px] font-bold hover:bg-teal-700 transition-colors active:scale-95"
+                className="w-6 h-6 flex items-center justify-center rounded-full bg-teal-600 text-white hover:bg-teal-700 transition-colors active:scale-95"
               >
-                إدارة الجرعات
+                <ListChecks className="w-3.5 h-3.5" strokeWidth={2.25} aria-hidden />
               </button>
             ) : (onConsumeDose || onRestoreDose) ? (
               doseToggle.canRestore && onRestoreDose ? (

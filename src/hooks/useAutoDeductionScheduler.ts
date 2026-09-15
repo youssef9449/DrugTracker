@@ -212,15 +212,24 @@ export function useAutoDeductionScheduler({
             // concurrent post-fire scheduleNext cannot create D+1.
             const slotId = `${s.medicationId}::${s.doseId}`;
             if (!invalidatedSlots.has(slotId)) {
-              invalidatedSlots.add(slotId);
-              await invalidateAutoDeductionRecurrence(s.medicationId, s.doseId);
+              const inv = await invalidateAutoDeductionRecurrence(
+                s.medicationId,
+                s.doseId
+              );
+              // Fail-closed: only remember success so a failed generation commit
+              // is retried on a later reconciliation pass (do not treat as done).
+              if (inv.ok) {
+                invalidatedSlots.add(slotId);
+              }
             }
+            // Occurrence cancel still attempted; tracking retained when either
+            // cancel fails or generation bump has not succeeded yet (retry later).
             const res = await cancelAutoDeduction(
               s.medicationId,
               s.doseId,
               s.calendarDate
             );
-            if (res.ok) {
+            if (res.ok && invalidatedSlots.has(slotId)) {
               trackedRef.current.delete(key);
             }
           } else {
@@ -239,12 +248,15 @@ export function useAutoDeductionScheduler({
           if (medId && doseId && date) {
             const slotId = `${medId}::${doseId}`;
             if (!invalidatedSlots.has(slotId)) {
-              invalidatedSlots.add(slotId);
-              await invalidateAutoDeductionRecurrence(medId, doseId);
+              const inv = await invalidateAutoDeductionRecurrence(medId, doseId);
+              if (inv.ok) {
+                invalidatedSlots.add(slotId);
+              }
             }
             const res = await cancelAutoDeduction(medId, doseId, date);
-            // Retain tracking on FAILED so a later pass can retry cancellation.
-            if (res.ok) {
+            // Retain tracking until both occurrence cancel and generation bump
+            // have succeeded (fail-closed invalidate).
+            if (res.ok && invalidatedSlots.has(slotId)) {
               trackedRef.current.delete(key);
             }
           } else {

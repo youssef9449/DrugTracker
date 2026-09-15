@@ -4,6 +4,7 @@ import {
   type Dispatch,
   type SetStateAction,
 } from 'react';
+import { flushSync } from 'react-dom';
 import type { Medication, ConsumptionLog } from '../types';
 import {
   getTodayDateString,
@@ -82,13 +83,19 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
 
   const restoreInFlightRef = useRef<Set<string>>(new Set());
   const refillUndoInFlightRef = useRef<Set<string>>(new Set());
+  // Always-current snapshots so card/modal handlers never open SelectDoseModal
+  // with a pre-Take medication or a stale selectDoseMode after decomposition.
+  const medicationsRef = useRef(medications);
+  medicationsRef.current = medications;
+  const selectDoseModeRef = useRef(selectDoseMode);
+  selectDoseModeRef.current = selectDoseMode;
 
   const handleRestoreDose = (
     medicationId: string,
     reason: string,
     doseId?: string
   ): boolean => {
-    const med = medications.find((m) => m.id === medicationId);
+    const med = medicationsRef.current.find((m) => m.id === medicationId);
     if (!med) return false;
     const today = getTodayDateString();
 
@@ -483,7 +490,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
   // and updates exactAlarmEnabled → the scheduler reschedules.
 
   const handleConsumeDose = (medicationId: string, doseId?: string) => {
-    const med = medications.find((m) => m.id === medicationId);
+    const med = medicationsRef.current.find((m) => m.id === medicationId);
     if (!med) return;
     const today = getTodayDateString();
     const isMulti =
@@ -491,8 +498,10 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
 
     // Multi-dose: never guess — open explicit selector when doseId missing.
     if (isMulti && !doseId) {
-      setSelectDoseMode('take');
-      setSelectDoseMed(med);
+      flushSync(() => {
+        setSelectDoseMode('take');
+      });
+      setSelectDoseMed(medicationsRef.current.find((m) => m.id === medicationId) ?? med);
       return;
     }
 
@@ -539,15 +548,24 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
    * Card toggle restore.
    * Multi-dose without doseId → same SelectDoseModal UX as Take (restore mode).
    * Single-dose / legacy / explicit doseId → direct restoreDose path.
+   *
+   * Mode is committed with flushSync before selectDoseMed so the first
+   * SelectDoseModal render after open always sees mode='restore'. Otherwise
+   * a take-mode first paint marks manually-consumed doses disabled
+   * (isSelectable = !completed).
    */
   const handleCardRestoreDose = (medicationId: string, doseId?: string) => {
-    const med = medications.find((m) => m.id === medicationId);
+    const med = medicationsRef.current.find((m) => m.id === medicationId);
     if (!med) return;
     const isMulti =
       Array.isArray(med.doseSchedule) && med.doseSchedule.length > 1;
 
     if (isMulti && !doseId) {
-      setSelectDoseMode('restore');
+      // Commit restore mode before opening the modal (med non-null ⇒ isOpen).
+      flushSync(() => {
+        setSelectDoseMode('restore');
+      });
+      // Latest post-Take medication (doseConsumption) — not a pre-Take snapshot.
       setSelectDoseMed(med);
       return;
     }
@@ -561,7 +579,9 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
   };
 
   const handleSelectDoseFromModal = (medicationId: string, doseId: string) => {
-    if (selectDoseMode === 'restore') {
+    // Prefer ref so selection uses the mode that opened the modal, not a
+    // stale closure if the callback identity lagged one render.
+    if (selectDoseModeRef.current === 'restore') {
       handleCardRestoreDose(medicationId, doseId);
     } else {
       handleConsumeDose(medicationId, doseId);

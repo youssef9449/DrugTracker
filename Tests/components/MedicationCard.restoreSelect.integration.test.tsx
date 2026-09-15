@@ -131,19 +131,22 @@ function makeLegacy(overrides: Partial<Medication> = {}): Medication {
   };
 }
 
-async function clickCardRestore(medId: string = MED_ID): Promise<void> {
-  const btn = await screen.findByTestId(`restore-dose-${medId}`);
+async function clickCardManage(medId: string = MED_ID): Promise<void> {
+  const btn = await screen.findByTestId(`manage-doses-${medId}`);
   fireEvent.click(btn);
 }
 
-async function selectDoseInModal(doseId: string): Promise<void> {
+async function selectDoseInModal(doseId: string, action: 'take' | 'restore' = 'restore'): Promise<void> {
   await waitFor(() => {
-    expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
+    expect(screen.getByText(/إدارة الجرعات|اختر الإجراء المناسب/)).toBeInTheDocument();
   });
-  const doseButtons = screen.getAllByRole('button').filter((b) =>
-    b.getAttribute('data-dose-id')
-  );
-  const target = doseButtons.find((b) => b.getAttribute('data-dose-id') === doseId);
+  const target = screen
+    .getAllByRole('button')
+    .find(
+      (b) =>
+        b.getAttribute('data-dose-id') === doseId &&
+        b.getAttribute('data-dose-action') === action
+    );
   expect(target).toBeTruthy();
   expect(target).not.toBeDisabled();
   fireEvent.click(target!);
@@ -176,10 +179,10 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
     const pillsBefore = readMeds()[0].currentPills;
     const consumptionBefore = { ...readMeds()[0].doseConsumption };
 
-    await clickCardRestore();
+    await clickCardManage();
 
     await waitFor(() => {
-      expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
+      expect(screen.getByText(/إدارة الجرعات/)).toBeInTheDocument();
     });
 
     // No mutation until a dose is selected.
@@ -199,7 +202,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
 
     const pillsBefore = readMeds()[0].currentPills;
 
-    await clickCardRestore();
+    await clickCardManage();
     await selectDoseInModal('d2');
 
     await waitFor(() => {
@@ -226,7 +229,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
       expect(screen.getByText('Restore Select Med')).toBeInTheDocument();
     });
 
-    await clickCardRestore();
+    await clickCardManage();
     await selectDoseInModal('d2');
 
     await waitFor(() => {
@@ -252,7 +255,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
 
     const pillsBefore = readMeds()[0].currentPills;
 
-    await clickCardRestore();
+    await clickCardManage();
     await selectDoseInModal('d1');
 
     await waitFor(() => {
@@ -279,7 +282,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
       expect(screen.getByText('Restore Select Med')).toBeInTheDocument();
     });
 
-    await clickCardRestore();
+    await clickCardManage();
     await selectDoseInModal('d2');
 
     await waitFor(() => {
@@ -289,9 +292,9 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
     });
 
     // Card may still show Restore (d1 still restorable). Open modal again.
-    await clickCardRestore();
+    await clickCardManage();
     await waitFor(() => {
-      expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
+      expect(screen.getByText(/إدارة الجرعات/)).toBeInTheDocument();
     });
 
     // d2 should be disabled / not restorable in the modal.
@@ -310,7 +313,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
     // Close modal without selecting.
     fireEvent.click(screen.getByLabelText('إغلاق'));
     await waitFor(() => {
-      expect(screen.queryByText(/اختر الجرعة المراد استرجاعها/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/إدارة الجرعات/)).not.toBeInTheDocument();
     });
 
     expect(
@@ -327,10 +330,10 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
       expect(screen.getByText('Single Dose Med')).toBeInTheDocument();
     });
 
-    await clickCardRestore('med-single');
+    await clickCardManage('med-single');
 
     await waitFor(() => {
-      expect(screen.queryByText(/اختر الجرعة المراد استرجاعها/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/إدارة الجرعات/)).not.toBeInTheDocument();
       expect(screen.queryByText(/اختر الجرعة التي تناولتها/)).not.toBeInTheDocument();
       const med = readMeds().find((m) => m.id === 'med-single')!;
       expect(med.doseConsumption?.only).toBeUndefined();
@@ -351,10 +354,10 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
       expect(screen.getByText('Legacy Med')).toBeInTheDocument();
     });
 
-    await clickCardRestore('med-legacy');
+    await clickCardManage('med-legacy');
 
     await waitFor(() => {
-      expect(screen.queryByText(/اختر الجرعة المراد استرجاعها/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/إدارة الجرعات/)).not.toBeInTheDocument();
       // lastConsumedDate cleared by restore path for legacy via consume clear
       const restores = readLogs().filter(
         (l) => l.type === 'skipped_day' && l.medicationId === 'med-legacy'
@@ -389,7 +392,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
     const before = readMeds()[0].currentPills;
     const beforeEff = effectiveCurrentPills(readMeds()[0]);
 
-    await clickCardRestore();
+    await clickCardManage();
     await selectDoseInModal('d2');
 
     await waitFor(() => {
@@ -419,14 +422,14 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
 
     const before = JSON.stringify(readMeds()[0]);
 
-    await clickCardRestore();
+    await clickCardManage();
     await waitFor(() => {
-      expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
+      expect(screen.getByText(/إدارة الجرعات/)).toBeInTheDocument();
     });
     fireEvent.click(screen.getByLabelText('إغلاق'));
 
     await waitFor(() => {
-      expect(screen.queryByText(/اختر الجرعة المراد استرجاعها/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/إدارة الجرعات/)).not.toBeInTheDocument();
     });
     expect(JSON.stringify(readMeds()[0])).toBe(before);
     expect(readLogs()).toHaveLength(0);

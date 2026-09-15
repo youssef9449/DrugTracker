@@ -38,7 +38,7 @@ export interface MedicationHandlersDeps {
   globalAutoDeductEnabled: boolean;
   notificationsEnabled: boolean;
   criticalStockAlertsEnabled: boolean;
-  selectDoseMode: 'take' | 'restore';
+  selectDoseMode: 'take' | 'restore' | 'manage';
   setMedications: Dispatch<SetStateAction<Medication[]>>;
   setLogs: Dispatch<SetStateAction<ConsumptionLog[]>>;
   setGlobalAutoDeductEnabled: Dispatch<SetStateAction<boolean>>;
@@ -46,7 +46,7 @@ export interface MedicationHandlersDeps {
   setNotificationsEnabled: Dispatch<SetStateAction<boolean>>;
   setCriticalStockAlertsEnabled: Dispatch<SetStateAction<boolean>>;
   setSelectDoseMed: Dispatch<SetStateAction<Medication | null>>;
-  setSelectDoseMode: Dispatch<SetStateAction<'take' | 'restore'>>;
+  setSelectDoseMode: Dispatch<SetStateAction<'take' | 'restore' | 'manage'>>;
   setEditingMedication: Dispatch<SetStateAction<Medication | null>>;
   showToast: (message: string) => void;
   dismissAlarm: () => void;
@@ -500,10 +500,10 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     const isMulti =
       Array.isArray(med.doseSchedule) && med.doseSchedule.length > 1;
 
-    // Multi-dose: never guess — open explicit selector when doseId missing.
+    // Multi-dose: never guess — open unified management UI when doseId missing.
     if (isMulti && !doseId) {
       flushSync(() => {
-        setSelectDoseMode('take');
+        setSelectDoseMode('manage');
       });
       setSelectDoseMed(medicationsRef.current.find((m) => m.id === medicationId) ?? med);
       return;
@@ -565,11 +565,10 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       Array.isArray(med.doseSchedule) && med.doseSchedule.length > 1;
 
     if (isMulti && !doseId) {
-      // Commit restore mode before opening the modal (med non-null ⇒ isOpen).
+      // Unified management UI (Take + Restore per dose in one modal).
       flushSync(() => {
-        setSelectDoseMode('restore');
+        setSelectDoseMode('manage');
       });
-      // Latest post-Take medication (doseConsumption) — not a pre-Take snapshot.
       setSelectDoseMed(med);
       return;
     }
@@ -585,6 +584,8 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
   const handleSelectDoseFromModal = (medicationId: string, doseId: string) => {
     // Prefer ref so selection uses the mode that opened the modal, not a
     // stale closure if the callback identity lagged one render.
+    // mode='restore' → restore; mode='take' | 'manage' → consume (manage
+    // restore goes through SelectDoseModal.onRestore → handleCardRestoreDose).
     if (selectDoseModeRef.current === 'restore') {
       handleCardRestoreDose(medicationId, doseId);
     } else {

@@ -167,7 +167,7 @@ export default function App() {
 
   // Phase 3A: multi-dose manual consume / restore requires explicit dose selection.
   const [selectDoseMed, setSelectDoseMed] = useState<Medication | null>(null);
-  const [selectDoseMode, setSelectDoseMode] = useState<'take' | 'restore'>('take');
+  const [selectDoseMode, setSelectDoseMode] = useState<'take' | 'restore' | 'manage'>('take');
 
   // #21: register a back-button handler that closes the top modal
   // instead of exiting the app. The handler returns true (modal was
@@ -918,6 +918,7 @@ export default function App() {
         medication={selectDoseMed}
         mode={selectDoseMode}
         onSelect={handleSelectDoseFromModal}
+        onRestore={handleCardRestoreDose}
         onClose={() => {
           setSelectDoseMed(null);
           setSelectDoseMode('take');

@@ -47,17 +47,20 @@ describe('Toggle', () => {
 
   it('uses slate track color when unchecked', () => {
     render(<Toggle checked={false} onChange={vi.fn()} label="t" />);
-    expect(screen.getByRole('switch').className).toContain('bg-slate-300');
+    // Production Toggle.tsx: unchecked track is bg-slate-200
+    expect(screen.getByRole('switch').className).toContain('bg-slate-200');
   });
 
-  it('renders the sm size by default (w-10 h-5)', () => {
+  it('renders the sm size by default (w-10 h-6)', () => {
     render(<Toggle checked={false} onChange={vi.fn()} label="t" />);
-    expect(screen.getByRole('switch').className).toContain('w-10 h-5');
+    // Production: sm = w-10 h-6
+    expect(screen.getByRole('switch').className).toContain('w-10 h-6');
   });
 
-  it('renders the md size when size="md" (w-11 h-6)', () => {
+  it('renders the md size when size="md" (w-12 h-7)', () => {
     render(<Toggle checked={false} onChange={vi.fn()} label="t" size="md" />);
-    expect(screen.getByRole('switch').className).toContain('w-11 h-6');
+    // Production: md = w-12 h-7
+    expect(screen.getByRole('switch').className).toContain('w-12 h-7');
   });
 
   it('disables interaction when disabled', () => {

@@ -198,9 +198,9 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     await waitFor(() => expect(screen.getByText('Drug A Multi')).toBeInTheDocument());
 
     // Multi-dose Card Take opens SelectDoseModal (take mode); select d1 to consume it.
-    fireEvent.click(screen.getByTitle(/تناول جرعة \(-1\)/));
+    fireEvent.click(screen.getByTestId('manage-doses-med-multi'));
     await waitFor(() => {
-      expect(screen.getByText(/اختر الجرعة التي تناولتها/)).toBeInTheDocument();
+      expect(screen.getByText(/إدارة الجرعات/)).toBeInTheDocument();
     });
     const takeD1Btn = screen
       .getAllByRole('button')
@@ -222,7 +222,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
 
     fireEvent.click(screen.getByTitle(/استرجاع الجرعة \(\+1\)/));
     await waitFor(() => {
-      expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
+      expect(screen.getByText(/إدارة الجرعات/)).toBeInTheDocument();
     });
     const d1Btn = screen
       .getAllByRole('button')
@@ -271,7 +271,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     fireEvent.click(screen.getByTitle(/استرجاع الجرعة/));
 
     await waitFor(() => {
-      expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
+      expect(screen.getByText(/إدارة الجرعات/)).toBeInTheDocument();
     });
     const d3Btn = screen
       .getAllByRole('button')

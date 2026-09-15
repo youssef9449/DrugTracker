@@ -166,6 +166,9 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     setMedications((prev) =>
       prev.map((m) => (m.id === medicationId ? medAfterRestore : m))
     );
+    medicationsRef.current = medicationsRef.current.map((m) =>
+      m.id === medicationId ? medAfterRestore : m
+    );
     setLogs((prev) => [
       {
         id: generateId('restore'),

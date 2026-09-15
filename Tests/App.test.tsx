@@ -840,3 +840,165 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
   });
 });
 
+
+/**
+ * Success chime on UI toggle actions (Medication Auto-Deduct, Global Auto-Deduct, Display/Compact view).
+ * Each successful click must call playSuccessChime exactly once when soundEnabled is true,
+ * and never when soundEnabled is false. No duplicates from re-renders or dual branches.
+ */
+describe('Success chime on toggle actions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  function seedMed(overrides: Record<string, unknown> = {}): void {
+    localStorage.setItem(
+      'android_med_tracker_items_v2',
+      JSON.stringify([
+        {
+          id: 'med-chime',
+          name: 'Chime Med',
+          currentPills: 60,
+          dailyDose: 2,
+          unit: 'قرص',
+          warningThresholdDays: 5,
+          colorTag: 'teal',
+          createdAt: '2024-01-01T00:00:00.000Z',
+          lastSyncDate: new Date().toISOString().slice(0, 10),
+          autoDeductEnabled: true,
+          reminderEnabled: false,
+          ...overrides,
+        },
+      ])
+    );
+  }
+
+  it('Medication Auto-Deduct ON→OFF plays success chime once', async () => {
+    const { playSuccessChime } = await import('@/utils/sound');
+    seedMed({ autoDeductEnabled: true });
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Chime Med')).toBeInTheDocument());
+    const toggleBtn = screen.getByRole('button', {
+      name: /إيقاف الخصم التلقائي|تفعيل الخصم التلقائي/,
+    });
+    fireEvent.click(toggleBtn);
+    expect(playSuccessChime).toHaveBeenCalledTimes(1);
+  });
+
+  it('Medication Auto-Deduct OFF→ON plays success chime once', async () => {
+    const { playSuccessChime } = await import('@/utils/sound');
+    seedMed({ autoDeductEnabled: false });
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Chime Med')).toBeInTheDocument());
+    const toggleBtn = screen.getByRole('button', {
+      name: /إيقاف الخصم التلقائي|تفعيل الخصم التلقائي/,
+    });
+    fireEvent.click(toggleBtn);
+    expect(playSuccessChime).toHaveBeenCalledTimes(1);
+  });
+
+  it('Global Auto-Deduct ON→OFF plays success chime once', async () => {
+    const { playSuccessChime } = await import('@/utils/sound');
+    seedMed();
+    localStorage.setItem('android_med_tracker_auto_deduct_v1', 'true');
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Chime Med')).toBeInTheDocument());
+    // Global toggle is labeled for all meds
+    const globalToggle = screen.getByLabelText(/تبديل الخصم التلقائي لجميع الأدوية/);
+    fireEvent.click(globalToggle);
+    expect(playSuccessChime).toHaveBeenCalledTimes(1);
+  });
+
+  it('Global Auto-Deduct OFF→ON plays success chime once', async () => {
+    const { playSuccessChime } = await import('@/utils/sound');
+    seedMed({ autoDeductEnabled: false });
+    localStorage.setItem('android_med_tracker_auto_deduct_v1', 'false');
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Chime Med')).toBeInTheDocument());
+    const globalToggle = screen.getByLabelText(/تبديل الخصم التلقائي لجميع الأدوية/);
+    fireEvent.click(globalToggle);
+    expect(playSuccessChime).toHaveBeenCalledTimes(1);
+  });
+
+  it('Display toggle OFF shows "الوضع الطبيعي"; ON shows "العرض المختصر" (no شبكة)', async () => {
+    seedMed();
+    localStorage.setItem('android_med_tracker_compact_view_v1', 'false');
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Chime Med')).toBeInTheDocument());
+    expect(screen.getByText('الوضع الطبيعي')).toBeInTheDocument();
+    expect(screen.queryByText(/شبكة/)).toBeNull();
+    const displayToggle = screen.getByLabelText(/تبديل العرض بين المختصر والوضع الطبيعي/);
+    fireEvent.click(displayToggle);
+    await waitFor(() => {
+      expect(screen.getByText('العرض المختصر')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/شبكة/)).toBeNull();
+    // Toggle back to OFF
+    fireEvent.click(displayToggle);
+    await waitFor(() => {
+      expect(screen.getByText('الوضع الطبيعي')).toBeInTheDocument();
+    });
+  });
+
+  it('Display (compact view) OFF→ON plays success chime once and toast "تم تفعيل العرض المختصر"', async () => {
+    const { playSuccessChime } = await import('@/utils/sound');
+    seedMed();
+    localStorage.setItem('android_med_tracker_compact_view_v1', 'false');
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Chime Med')).toBeInTheDocument());
+    const displayToggle = screen.getByLabelText(/تبديل العرض بين المختصر والوضع الطبيعي/);
+    fireEvent.click(displayToggle);
+    expect(playSuccessChime).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(screen.getByText('تم تفعيل العرض المختصر')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/شبكة/)).toBeNull();
+  });
+
+  it('Display (compact view) ON→OFF plays success chime once and toast "تم إرجاع الوضع الطبيعي"', async () => {
+    const { playSuccessChime } = await import('@/utils/sound');
+    seedMed();
+    localStorage.setItem('android_med_tracker_compact_view_v1', 'true');
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Chime Med')).toBeInTheDocument());
+    const displayToggle = screen.getByLabelText(/تبديل العرض بين المختصر والوضع الطبيعي/);
+    fireEvent.click(displayToggle);
+    expect(playSuccessChime).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(screen.getByText('تم إرجاع الوضع الطبيعي')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/شبكة/)).toBeNull();
+  });
+
+  it('soundEnabled === false → no sound call on Medication Auto-Deduct toggle', async () => {
+    const { playSuccessChime } = await import('@/utils/sound');
+    seedMed();
+    localStorage.setItem('android_med_tracker_sound_v1', 'false');
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Chime Med')).toBeInTheDocument());
+    const toggleBtn = screen.getByRole('button', {
+      name: /إيقاف الخصم التلقائي|تفعيل الخصم التلقائي/,
+    });
+    fireEvent.click(toggleBtn);
+    expect(playSuccessChime).not.toHaveBeenCalled();
+  });
+
+  it('Medication Auto-Deduct toggle does not produce duplicate sound', async () => {
+    const { playSuccessChime } = await import('@/utils/sound');
+    seedMed();
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Chime Med')).toBeInTheDocument());
+    const toggleBtn = screen.getByRole('button', {
+      name: /إيقاف الخصم التلقائي|تفعيل الخصم التلقائي/,
+    });
+    fireEvent.click(toggleBtn);
+    // Allow any re-renders
+    await waitFor(() => {});
+    expect(playSuccessChime).toHaveBeenCalledTimes(1);
+  });
+});

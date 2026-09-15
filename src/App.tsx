@@ -749,7 +749,7 @@ export default function App() {
                       className="flex items-center gap-2 cursor-pointer select-none"
                     >
                       <span className="text-xs font-medium text-slate-700">
-                        {isCompactView ? 'عرض مختصر' : 'عرض تفصيلي'}
+                        {isCompactView ? 'العرض المختصر' : 'العرض الطبيعي'}
                       </span>
                       <Toggle
                         id="toggle-compact-view"
@@ -759,11 +759,12 @@ export default function App() {
                           setIsCompactView(next);
                           showToast(
                             next
-                              ? 'تم تفعيل العرض المختصر (شبكة)'
-                              : 'تم تفعيل العرض التفصيلي'
+                              ? 'تم تفعيل العرض المختصر'
+                              : 'تم إرجاع العرض الطبيعي'
                           );
+                          if (soundEnabled) playSuccessChime();
                         }}
-                        label="تبديل العرض بين المختصر (شبكة) والتفصيلي"
+                        label="تبديل العرض بين المختصر والعرض الطبيعي"
                         size="sm"
                         color="teal"
                       />

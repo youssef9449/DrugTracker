@@ -320,6 +320,8 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       newState ? `تم تفعيل الخصم التلقائي لـ "${med.name}"` : `تم إيقاف الخصم التلقائي مؤقتاً لـ "${med.name}"`
     );
 
+    if (soundEnabled) playSuccessChime();
+
     // Updater: pure — only reads `updatedMed` from the closure and
     // returns the new medications array. No side effects inside.
     setMedications((prev) =>

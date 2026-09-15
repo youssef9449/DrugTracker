@@ -907,16 +907,37 @@ export default function App() {
         activeOrderItems={activeOrderItems}
         onSaveSettings={handleSavePharmacySettings}
         soundEnabled={soundEnabled}
-        onToggleSound={() => setSoundEnabled(!soundEnabled)}
         notificationsEnabled={notificationsEnabled}
-        onToggleNotifications={handleToggleNotifications}
         criticalStockAlertsEnabled={criticalStockAlertsEnabled}
         autoDeductEnabled={globalAutoDeductEnabled}
-        onToggleAutoDeduct={handleToggleGlobalAutoDeduct}
-        onToggleCriticalStockAlerts={handleToggleCriticalStockAlerts}
         onSendTestNotification={handleSendTestNotification}
         exactAlarmEnabled={exactAlarmEnabled}
         onOpenExactAlarmSettings={handleOpenExactAlarmSettings}
+        onApplyAppPreferences={async (prefs) => {
+          // Commit drafts only after Save — closing the modal without Save
+          // leaves parent state (and persistence) unchanged.
+          if (prefs.soundEnabled !== soundEnabled) {
+            setSoundEnabled(prefs.soundEnabled);
+          }
+          if (prefs.autoDeductEnabled !== globalAutoDeductEnabled) {
+            handleToggleGlobalAutoDeduct();
+          }
+          if (prefs.notificationsEnabled !== notificationsEnabled) {
+            if (prefs.notificationsEnabled) {
+              await handleToggleNotifications();
+            } else {
+              setNotificationsEnabled(false);
+              showToast(TOAST_MESSAGES.notificationsOff);
+            }
+          }
+          if (prefs.criticalStockAlertsEnabled !== criticalStockAlertsEnabled) {
+            await handleToggleCriticalStockAlerts();
+          }
+          // Confirm feedback only when the committed preference leaves sound on.
+          if (prefs.soundEnabled) {
+            playSuccessChime();
+          }
+        }}
       />
       <DoseAlarmModal
         isOpen={Boolean(alarmingMedication)}

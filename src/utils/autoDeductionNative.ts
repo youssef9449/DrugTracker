@@ -65,7 +65,7 @@ interface AutoDeductionPlugin {
   invalidateRecurrenceAuthorization(options: {
     medicationId: string;
     doseId: string;
-  }): Promise<{ ok: boolean }>;
+  }): Promise<{ ok: boolean; error?: string; generation?: number }>;
   listFiredEvents(): Promise<{ events: AutoDeductionEvent[] }>;
   listEvents(): Promise<{ events: AutoDeductionEvent[] }>;
   markReconciled(options: {
@@ -148,11 +148,13 @@ export async function cancelAutoDeduction(
 export async function invalidateAutoDeductionRecurrence(
   medicationId: string,
   doseId: string
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; generation?: number }> {
   if (!isNativeAndroid()) {
     return { ok: false, error: "not_android" };
   }
   try {
+    // Pass through native ok/error — never coerce a failed generation commit
+    // into success (fail-closed for Issue #217 recurrence authorization).
     return await AutoDeduction.invalidateRecurrenceAuthorization({
       medicationId,
       doseId: doseId || LEGACY_DOSE_ID,

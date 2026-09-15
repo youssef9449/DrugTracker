@@ -14,6 +14,7 @@ import { getDepletionDate, effectiveCurrentPills } from '../utils/dateCalculatio
 import {
   getCardDoseToggleTarget,
   getAutoRestorableDose,
+  isMedicationAutoDeductActive,
 } from '../utils/doseSchedule';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { VISUAL_RANGE_MULTIPLIER, MIN_VISUAL_RANGE_DAYS, DAYS_PER_MONTH } from '../utils/time';
@@ -127,8 +128,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   onUndoRefill,
   globalAutoDeductEnabled = true,
 }) => {
-  const isAutoActive =
-    (globalAutoDeductEnabled !== false) && (medication.autoDeductEnabled !== false);
+  const isAutoActive = isMedicationAutoDeductActive(medication, globalAutoDeductEnabled);
   const statusInfo = calculateMedicationStatus(medication);
   const depletion = getDepletionDate(medication);
   const isSolid = isSolidUnit(medication.unit);

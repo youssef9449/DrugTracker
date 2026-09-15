@@ -17,6 +17,20 @@ import { generateId } from './id';
 import { timeToMinutes } from './time';
 import { isDoseConsumedOnDate, isDoseSkippedOnDate, getTodayDateString } from './dateCalculations';
 
+/**
+ * Effective Auto-Deduction state for a medication: active only when BOTH
+ * the global toggle and the medication's own toggle are enabled (not false).
+ * Single source of truth — used by MedicationCard and SelectDoseModal so
+ * Global OFF overrides Medication ON, and Global ON + Medication OFF is
+ * treated as manual mode (no auto-deduction).
+ */
+export function isMedicationAutoDeductActive(
+  medication: Medication,
+  globalAutoDeductEnabled: boolean
+): boolean {
+  return globalAutoDeductEnabled !== false && medication.autoDeductEnabled !== false;
+}
+
 /** Sensible UI maximum for doses per day (compact mobile form). */
 export const MAX_DOSES_PER_DAY = 6;
 

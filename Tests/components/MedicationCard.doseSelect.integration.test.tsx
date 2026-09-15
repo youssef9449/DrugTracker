@@ -611,4 +611,97 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     expect(screen.queryByTitle(/^تناول جرعة/)).toBeNull();
     expect(screen.getByTitle(/استرجاع الجرعة/)).toBeInTheDocument();
   });
+
+  it('Auto OFF lifecycle: Take d1 → Restore d1 → Take d1 again (unbounded Take↔Restore)', async () => {
+    localStorage.setItem(
+      STORAGE_MEDS_KEY,
+      JSON.stringify([makeMulti({ currentPills: 30 })])
+    );
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Drug A Multi')).toBeInTheDocument();
+    });
+
+    const today = getTodayDateString();
+    const openManage = () => {
+      fireEvent.click(screen.getByTestId('manage-doses-med-multi'));
+      return waitFor(() =>
+        expect(screen.getByText('اختر الإجراء المناسب لكل جرعة')).toBeInTheDocument()
+      );
+    };
+    const actionBtn = (doseId: string, action: 'take' | 'restore') =>
+      screen
+        .getAllByRole('button')
+        .find(
+          (b) =>
+            b.getAttribute('data-dose-id') === doseId &&
+            b.getAttribute('data-dose-action') === action
+        )!;
+
+    // 1. d1 is takeable initially (Auto OFF manual mode).
+    await openManage();
+    expect(actionBtn('d1', 'take')).toBeTruthy();
+    fireEvent.click(actionBtn('d1', 'take'));
+    await waitFor(() => {
+      expect(readMeds().find((m) => m.id === 'med-multi')?.doseConsumption?.d1).toBe(today);
+    });
+    let med = readMeds().find((m) => m.id === 'med-multi')!;
+    expect(effectiveCurrentPills(med)).toBe(28); // 30 - d1.amount(2)
+    expect(med.doseConsumption?.d2).toBeUndefined();
+    expect(med.doseConsumption?.d3).toBeUndefined();
+
+    // 2. After Take, d1 offers Restore.
+    await openManage();
+    expect(actionBtn('d1', 'restore')).toBeTruthy();
+    fireEvent.click(actionBtn('d1', 'restore'));
+    await waitFor(() => {
+      expect(
+        readMeds().find((m) => m.id === 'med-multi')?.doseConsumption?.d1
+      ).toBeUndefined();
+    });
+    med = readMeds().find((m) => m.id === 'med-multi')!;
+    expect(effectiveCurrentPills(med)).toBe(30); // restored
+    expect(med.doseConsumption?.d2).toBeUndefined();
+    expect(med.doseConsumption?.d3).toBeUndefined();
+
+    // 3. After Restore, d1 is takeable AGAIN — the cycle repeats (not terminal).
+    await openManage();
+    expect(actionBtn('d1', 'take')).toBeTruthy();
+    fireEvent.click(actionBtn('d1', 'take'));
+    await waitFor(() => {
+      expect(readMeds().find((m) => m.id === 'med-multi')?.doseConsumption?.d1).toBe(today);
+    });
+    med = readMeds().find((m) => m.id === 'med-multi')!;
+    expect(effectiveCurrentPills(med)).toBe(28); // 30 - 2 again
+  });
+
+  it('manage-doses button is always present for multi-dose (Auto ON and Auto OFF)', async () => {
+    // Auto OFF: med auto OFF, global default ON → effective OFF (manual mode).
+    localStorage.setItem(
+      STORAGE_MEDS_KEY,
+      JSON.stringify([makeMulti({ autoDeductEnabled: false })])
+    );
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+    const { unmount } = render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Drug A Multi')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('manage-doses-med-multi')).toBeInTheDocument();
+    unmount();
+
+    // Auto ON: med auto ON, global default ON → effective ON.
+    localStorage.clear();
+    localStorage.setItem(
+      STORAGE_MEDS_KEY,
+      JSON.stringify([makeMulti({ autoDeductEnabled: true })])
+    );
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Drug A Multi')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('manage-doses-med-multi')).toBeInTheDocument();
+  });
 });

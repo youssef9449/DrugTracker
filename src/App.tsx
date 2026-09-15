@@ -917,6 +917,7 @@ export default function App() {
         isOpen={Boolean(selectDoseMed)}
         medication={selectDoseMed}
         mode={selectDoseMode}
+        globalAutoDeductEnabled={globalAutoDeductEnabled}
         onSelect={handleSelectDoseFromModal}
         onRestore={handleCardRestoreDose}
         onClose={() => {

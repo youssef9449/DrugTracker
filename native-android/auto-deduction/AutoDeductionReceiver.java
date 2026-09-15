@@ -49,6 +49,8 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
         String timeHhmm = intent.getStringExtra(AutoDeductionContract.EXTRA_TIME_HHMM);
         long recurrenceGeneration = intent.getLongExtra(
                 AutoDeductionContract.EXTRA_RECURRENCE_GENERATION, 0L);
+        String scheduleVersion = intent.getStringExtra(
+                AutoDeductionContract.EXTRA_SCHEDULE_VERSION);
 
         if (medicationId == null || medicationId.isEmpty()
                 || doseId == null || doseId.isEmpty()
@@ -62,8 +64,11 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
         // Eliminates TOCTOU where cancel could interleave after a non-cancelled check
         // but before durable FIRED persistence.
         AutoDeductionScheduler scheduler = new AutoDeductionScheduler(context);
+        // Issue #240: pass delivery ownership tokens so a queued alarm from a
+        // prior scheduleVersion/generation cannot FIRE after disable→reschedule.
         AutoDeductionScheduler.FireResult result = scheduler.fireOccurrenceIfNotCancelled(
-                medicationId, doseId, calendarDate, scheduledAt, amount);
+                medicationId, doseId, calendarDate, scheduledAt, amount,
+                scheduleVersion, recurrenceGeneration);
 
         switch (result.status) {
             case CANCELLED:

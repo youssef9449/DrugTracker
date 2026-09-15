@@ -13,6 +13,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -55,8 +56,10 @@ public class FireVsCancelTest {
                 "med", "dose", date, "12:00", 1.0, futureEpochMs(date, "12:00")).ok);
         assertTrue(s.cancelOccurrence("med", "dose", date).isOk());
 
+        // After cancel, no active metadata — any delivery tokens are rejected (Issue #240).
         AutoDeductionScheduler.FireResult fire =
-                s.fireOccurrenceIfNotCancelled("med", "dose", date, 1_000L, 1.0);
+                s.fireOccurrenceIfNotCancelled(
+                        "med", "dose", date, 1_000L, 1.0, "stale-v", 1L);
 
         assertEquals(AutoDeductionScheduler.FireResult.Status.CANCELLED, fire.status);
         assertFalse(fire.pendingRecorded);
@@ -74,14 +77,16 @@ public class FireVsCancelTest {
     }
 
     @Test
-    public void fireFirst_createsFired_laterCancelDoesNotEraseFired() {
+    public void fireFirst_createsFired_laterCancelDoesNotEraseFired() throws Exception {
         String date = futureCalendarDate(3);
         AutoDeductionScheduler s = newScheduler();
         assertTrue(s.scheduleOccurrence(
                 "med", "dose", date, "13:00", 2.0, futureEpochMs(date, "13:00")).ok);
 
+        String[] vg = activeVersionAndGen("med", "dose", date);
         AutoDeductionScheduler.FireResult fire =
-                s.fireOccurrenceIfNotCancelled("med", "dose", date, 2_000L, 2.0);
+                s.fireOccurrenceIfNotCancelled(
+                        "med", "dose", date, 2_000L, 2.0, vg[0], Long.parseLong(vg[1]));
         assertEquals(AutoDeductionScheduler.FireResult.Status.CREATED, fire.status);
         assertTrue(fire.allowsRecurrence());
         assertTrue(receiverWouldScheduleNext(fire));
@@ -94,8 +99,10 @@ public class FireVsCancelTest {
         assertTrue(s.cancelOccurrence("med", "dose", date).isOk());
         assertTrue("FIRED remains after later cancel", eventPrefs().contains(evtKey(key)));
 
+        // Replay with the pre-cancel delivery tokens — cancelled / no metadata → no second FIRED.
         AutoDeductionScheduler.FireResult replay =
-                s.fireOccurrenceIfNotCancelled("med", "dose", date, 2_000L, 2.0);
+                s.fireOccurrenceIfNotCancelled(
+                        "med", "dose", date, 2_000L, 2.0, vg[0], Long.parseLong(vg[1]));
         assertTrue(eventPrefs().contains(evtKey(key)));
         assertEquals(AutoDeductionScheduler.FireResult.Status.CANCELLED, replay.status);
         assertFalse(replay.allowsRecurrence());
@@ -103,25 +110,37 @@ public class FireVsCancelTest {
     }
 
     @Test
-    public void duplicateFire_alreadyExists_allowsRecurrenceGate() {
+    public void duplicateFire_alreadyExists_allowsRecurrenceGate() throws Exception {
+        String date = futureCalendarDate(5);
         AutoDeductionScheduler s = newScheduler();
+        assertTrue(s.scheduleOccurrence(
+                "med", "dose", date, "14:00", 1.0, futureEpochMs(date, "14:00")).ok);
+        String[] vg = activeVersionAndGen("med", "dose", date);
+
         AutoDeductionScheduler.FireResult first =
-                s.fireOccurrenceIfNotCancelled("med", "dose", "2026-09-10", 1L, 1.0);
+                s.fireOccurrenceIfNotCancelled(
+                        "med", "dose", date, 1L, 1.0, vg[0], Long.parseLong(vg[1]));
         assertEquals(AutoDeductionScheduler.FireResult.Status.CREATED, first.status);
 
         AutoDeductionScheduler.FireResult second =
-                s.fireOccurrenceIfNotCancelled("med", "dose", "2026-09-10", 1L, 1.0);
+                s.fireOccurrenceIfNotCancelled(
+                        "med", "dose", date, 1L, 1.0, vg[0], Long.parseLong(vg[1]));
         assertEquals(AutoDeductionScheduler.FireResult.Status.ALREADY_EXISTS, second.status);
         assertTrue(second.allowsRecurrence());
         assertTrue(receiverWouldScheduleNext(second));
     }
 
     @Test
-    public void fireCreated_thenScheduleNextIfAbsent_createsSuccessorWhenActive() {
+    public void fireCreated_thenScheduleNextIfAbsent_createsSuccessorWhenActive()
+            throws Exception {
         String d = futureCalendarDate(10);
         AutoDeductionScheduler s = newScheduler();
+        assertTrue(s.scheduleOccurrence(
+                "med", "dose", d, "09:00", 1.0, futureEpochMs(d, "09:00")).ok);
+        String[] vg = activeVersionAndGen("med", "dose", d);
         AutoDeductionScheduler.FireResult fire =
-                s.fireOccurrenceIfNotCancelled("med", "dose", d, 1L, 1.0);
+                s.fireOccurrenceIfNotCancelled(
+                        "med", "dose", d, 1L, 1.0, vg[0], Long.parseLong(vg[1]));
         assertEquals(AutoDeductionScheduler.FireResult.Status.CREATED, fire.status);
         assertTrue(fire.allowsRecurrence());
         assertTrue(receiverWouldScheduleNext(fire));
@@ -142,6 +161,34 @@ public class FireVsCancelTest {
      * This is the public recurrence decision contract; the receiver's private helper
      * is not invoked from tests.
      */
+
+    /** Read durable ownership tokens stamped into schedule metadata after schedule. */
+    private static String[] activeVersionAndGen(String med, String dose, String date)
+            throws Exception {
+        String key = AutoDeductionContract.occurrenceKey(med, dose, date);
+        String raw = schedulePrefs().getString(schKey(key), null);
+        assertTrue("expected schedule metadata for " + key, raw != null && !raw.isEmpty());
+        JSONObject o = new JSONObject(raw);
+        String v = o.optString("scheduleVersion", "");
+        long g = o.optLong("recurrenceGeneration", 0L);
+        assertTrue("scheduleVersion present", v != null && !v.isEmpty());
+        assertTrue("recurrenceGeneration present", g > 0L);
+        return new String[] { v, Long.toString(g) };
+    }
+
+    private static AutoDeductionScheduler.FireResult fireWithActiveOwnership(
+            AutoDeductionScheduler s,
+            String med,
+            String dose,
+            String date,
+            long scheduledAt,
+            double amount
+    ) throws Exception {
+        String[] vg = activeVersionAndGen(med, dose, date);
+        return s.fireOccurrenceIfNotCancelled(
+                med, dose, date, scheduledAt, amount, vg[0], Long.parseLong(vg[1]));
+    }
+
     private static boolean receiverWouldScheduleNext(AutoDeductionScheduler.FireResult fire) {
         return fire.allowsRecurrence();
     }

@@ -263,4 +263,79 @@ describe('Management modal stays open after actions', () => {
     // No management modal opened
     expect(screen.queryByText(/اختر الإجراء المناسب لكل جرعة/)).toBeNull();
   });
+
+  it('Take → Restore → Take → Restore on d1 keeps modal open and updates stock', async () => {
+    localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeMulti()]));
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Manage Stay Open')).toBeInTheDocument();
+    });
+
+    await openManage();
+    const pills0 = readMeds()[0].currentPills;
+
+    fireEvent.click(actionButton('d1', 'take'));
+    await waitFor(() => {
+      expect(isDoseConsumedOnDate(readMeds()[0], 'd1', getTodayDateString())).toBe(true);
+      expect(readMeds()[0].currentPills).toBe(pills0 - 1);
+    });
+    expectManageStillOpen();
+    expect(actionButton('d1', 'restore')).toBeTruthy();
+
+    fireEvent.click(actionButton('d1', 'restore'));
+    await waitFor(() => {
+      expect(isDoseConsumedOnDate(readMeds()[0], 'd1', getTodayDateString())).toBe(false);
+      expect(readMeds()[0].currentPills).toBe(pills0);
+    });
+    expectManageStillOpen();
+    expect(actionButton('d1', 'take')).toBeTruthy();
+
+    fireEvent.click(actionButton('d1', 'take'));
+    await waitFor(() => {
+      expect(isDoseConsumedOnDate(readMeds()[0], 'd1', getTodayDateString())).toBe(true);
+      expect(readMeds()[0].currentPills).toBe(pills0 - 1);
+    });
+    expectManageStillOpen();
+    expect(actionButton('d1', 'restore')).toBeTruthy();
+
+    fireEvent.click(actionButton('d1', 'restore'));
+    await waitFor(() => {
+      expect(isDoseConsumedOnDate(readMeds()[0], 'd1', getTodayDateString())).toBe(false);
+      expect(readMeds()[0].currentPills).toBe(pills0);
+    });
+    expectManageStillOpen();
+    expect(actionButton('d1', 'take')).toBeTruthy();
+  });
+
+  it('manage-doses button stays present for multi-dose in Auto ON and Auto OFF', async () => {
+    // Auto OFF
+    localStorage.setItem(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'false');
+    localStorage.setItem(
+      STORAGE_MEDS_KEY,
+      JSON.stringify([makeMulti({ autoDeductEnabled: false })])
+    );
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+    const { unmount } = render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Manage Stay Open')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId(`manage-doses-${MED_ID}`)).toBeInTheDocument();
+    unmount();
+
+    // Auto ON
+    localStorage.setItem(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'true');
+    localStorage.setItem(
+      STORAGE_MEDS_KEY,
+      JSON.stringify([makeMulti({ autoDeductEnabled: true })])
+    );
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Manage Stay Open')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId(`manage-doses-${MED_ID}`)).toBeInTheDocument();
+  });
+
 });

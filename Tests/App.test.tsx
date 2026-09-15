@@ -925,26 +925,54 @@ describe('Success chime on toggle actions', () => {
     expect(playSuccessChime).toHaveBeenCalledTimes(1);
   });
 
-  it('Display (compact view) OFF→ON plays success chime once', async () => {
+  it('Display toggle OFF shows "العرض العادي"; ON shows "العرض المختصر" (no شبكة)', async () => {
+    seedMed();
+    localStorage.setItem('android_med_tracker_compact_view_v1', 'false');
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Chime Med')).toBeInTheDocument());
+    expect(screen.getByText('العرض العادي')).toBeInTheDocument();
+    expect(screen.queryByText(/شبكة/)).toBeNull();
+    const displayToggle = screen.getByLabelText(/تبديل العرض بين المختصر والعادي/);
+    fireEvent.click(displayToggle);
+    await waitFor(() => {
+      expect(screen.getByText('العرض المختصر')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/شبكة/)).toBeNull();
+    // Toggle back to OFF
+    fireEvent.click(displayToggle);
+    await waitFor(() => {
+      expect(screen.getByText('العرض العادي')).toBeInTheDocument();
+    });
+  });
+
+  it('Display (compact view) OFF→ON plays success chime once and toast "تم تفعيل العرض المختصر"', async () => {
     const { playSuccessChime } = await import('@/utils/sound');
     seedMed();
     localStorage.setItem('android_med_tracker_compact_view_v1', 'false');
     render(<App />);
     await waitFor(() => expect(screen.getByText('Chime Med')).toBeInTheDocument());
-    const displayToggle = screen.getByLabelText(/تبديل العرض بين المختصر/);
+    const displayToggle = screen.getByLabelText(/تبديل العرض بين المختصر والعادي/);
     fireEvent.click(displayToggle);
     expect(playSuccessChime).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(screen.getByText('تم تفعيل العرض المختصر')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/شبكة/)).toBeNull();
   });
 
-  it('Display (compact view) ON→OFF plays success chime once', async () => {
+  it('Display (compact view) ON→OFF plays success chime once and toast "تم إرجاع العرض العادي"', async () => {
     const { playSuccessChime } = await import('@/utils/sound');
     seedMed();
     localStorage.setItem('android_med_tracker_compact_view_v1', 'true');
     render(<App />);
     await waitFor(() => expect(screen.getByText('Chime Med')).toBeInTheDocument());
-    const displayToggle = screen.getByLabelText(/تبديل العرض بين المختصر/);
+    const displayToggle = screen.getByLabelText(/تبديل العرض بين المختصر والعادي/);
     fireEvent.click(displayToggle);
     expect(playSuccessChime).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(screen.getByText('تم إرجاع العرض العادي')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/شبكة/)).toBeNull();
   });
 
   it('soundEnabled === false → no sound call on Medication Auto-Deduct toggle', async () => {

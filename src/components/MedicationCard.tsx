@@ -531,7 +531,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 title="إدارة الجرعات"
                 aria-label="إدارة الجرعات"
                 data-testid={`manage-doses-${medication.id}`}
-                className="w-5 h-5 flex items-center justify-center rounded-full bg-teal-600 text-white hover:bg-teal-700 transition-colors active:scale-95"
+                className="w-5 h-5 flex items-center justify-center rounded-full bg-teal-100 text-teal-800 hover:bg-teal-200 transition-colors active:scale-95"
               >
                 <ListChecks className="w-3 h-3" strokeWidth={2.25} aria-hidden />
               </button>
@@ -711,7 +711,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 title="إدارة الجرعات"
                 aria-label="إدارة الجرعات"
                 data-testid={`manage-doses-${medication.id}`}
-                className="w-6 h-6 flex items-center justify-center rounded-full bg-teal-600 text-white hover:bg-teal-700 transition-colors active:scale-95"
+                className="w-6 h-6 flex items-center justify-center rounded-full bg-teal-100 text-teal-800 hover:bg-teal-200 transition-colors active:scale-95"
               >
                 <ListChecks className="w-3.5 h-3.5" strokeWidth={2.25} aria-hidden />
               </button>

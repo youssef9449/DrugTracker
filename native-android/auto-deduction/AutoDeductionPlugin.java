@@ -78,9 +78,12 @@ public class AutoDeductionPlugin extends Plugin {
             return;
         }
         AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
-        scheduler.invalidateRecurrenceAuthorization(medicationId, doseId);
+        AutoDeductionScheduler.InvalidateResult result =
+                scheduler.invalidateRecurrenceAuthorization(medicationId, doseId);
         JSObject ret = new JSObject();
-        ret.put("ok", true);
+        ret.put("ok", result.ok);
+        if (result.error != null) ret.put("error", result.error);
+        if (result.ok) ret.put("generation", result.generation);
         call.resolve(ret);
     }
 

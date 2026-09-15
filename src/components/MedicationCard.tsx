@@ -521,19 +521,23 @@ export const MedicationCard: FC<MedicationCardProps> = ({
 
         {/* Actions row (independent of Category/Status) */}
         <div className="flex items-center justify-end gap-1 shrink-0">
-            {(onConsumeDose || onRestoreDose) && (
+            {Array.isArray(medication.doseSchedule) &&
+            medication.doseSchedule.length > 1 &&
+            onConsumeDose ? (
+              <button
+                type="button"
+                onClick={() => onConsumeDose(medication.id, undefined)}
+                title="إدارة الجرعات"
+                data-testid={`manage-doses-${medication.id}`}
+                className="h-5 px-2 rounded-full bg-teal-600 text-white text-[10px] font-bold hover:bg-teal-700 transition-colors active:scale-95"
+              >
+                إدارة الجرعات
+              </button>
+            ) : (onConsumeDose || onRestoreDose) ? (
               doseToggle.canRestore && onRestoreDose ? (
                 <button
                   type="button"
-                  onClick={() => {
-                    const isMulti =
-                      Array.isArray(medication.doseSchedule) &&
-                      medication.doseSchedule.length > 1;
-                    onRestoreDose(
-                      medication.id,
-                      isMulti ? undefined : doseToggle.doseId
-                    );
-                  }}
+                  onClick={() => onRestoreDose(medication.id, doseToggle.doseId)}
                   title={`استرجاع الجرعة (+${nextDoseAmount})`}
                   className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors active:scale-95"
                   data-testid={`restore-dose-${medication.id}`}
@@ -543,17 +547,12 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               ) : showAutoRestore && onRestoreDose ? (
                 <button
                   type="button"
-                  onClick={() => {
-                    const isMulti =
-                      Array.isArray(medication.doseSchedule) &&
-                      medication.doseSchedule.length > 1;
-                    // multi → undefined opens SelectDoseModal (restore mode)
-                    // single → real doseId; legacy → undefined
-                    const doseId = isMulti
-                      ? undefined
-                      : autoRestorableDose?.id || undefined;
-                    onRestoreDose(medication.id, doseId || undefined);
-                  }}
+                  onClick={() =>
+                    onRestoreDose(
+                      medication.id,
+                      autoRestorableDose?.id || undefined
+                    )
+                  }
                   title="استرجاع الجرعة"
                   className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors active:scale-95"
                   data-testid={`auto-restore-dose-${medication.id}`}
@@ -563,18 +562,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               ) : !isAutoActive && doseToggle.canTake && onConsumeDose ? (
                 <button
                   type="button"
-                  onClick={() => {
-                    const isMulti =
-                      Array.isArray(medication.doseSchedule) &&
-                      medication.doseSchedule.length > 1;
-                    // Multi-dose: omit doseId so App opens SelectDoseModal
-                    // (take mode) for explicit user selection. Single/legacy:
-                    // direct take via doseToggle.doseId (unchanged).
-                    onConsumeDose(
-                      medication.id,
-                      isMulti ? undefined : doseToggle.doseId
-                    );
-                  }}
+                  onClick={() => onConsumeDose(medication.id, doseToggle.doseId)}
                   disabled={effPills <= 0 || nextDoseAmount <= 0}
                   title={`تناول جرعة (-${nextDoseAmount})`}
                   className={`w-5 h-5 flex items-center justify-center rounded-full transition-colors active:scale-95 ${
@@ -593,7 +581,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   <CheckCircle className="w-3 h-3" />
                 </span>
               ) : null
-            )}
+            ) : null}
             <button
               type="button"
               onClick={() => onOpenRefill(medication)}
@@ -712,19 +700,23 @@ export const MedicationCard: FC<MedicationCardProps> = ({
 
         {/* Actions row (independent of Category/Status) */}
         <div className="flex items-center justify-end gap-1 shrink-0 mt-1">
-            {(onConsumeDose || onRestoreDose) && (
+            {Array.isArray(medication.doseSchedule) &&
+            medication.doseSchedule.length > 1 &&
+            onConsumeDose ? (
+              <button
+                type="button"
+                onClick={() => onConsumeDose(medication.id, undefined)}
+                title="إدارة الجرعات"
+                data-testid={`manage-doses-${medication.id}`}
+                className="h-6 px-2.5 rounded-full bg-teal-600 text-white text-[11px] font-bold hover:bg-teal-700 transition-colors active:scale-95"
+              >
+                إدارة الجرعات
+              </button>
+            ) : (onConsumeDose || onRestoreDose) ? (
               doseToggle.canRestore && onRestoreDose ? (
                 <button
                   type="button"
-                  onClick={() => {
-                    const isMulti =
-                      Array.isArray(medication.doseSchedule) &&
-                      medication.doseSchedule.length > 1;
-                    onRestoreDose(
-                      medication.id,
-                      isMulti ? undefined : doseToggle.doseId
-                    );
-                  }}
+                  onClick={() => onRestoreDose(medication.id, doseToggle.doseId)}
                   title={`استرجاع الجرعة (+${nextDoseAmount})`}
                   className="w-6 h-6 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors active:scale-95"
                   data-testid={`restore-dose-${medication.id}`}
@@ -734,17 +726,12 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               ) : showAutoRestore && onRestoreDose ? (
                 <button
                   type="button"
-                  onClick={() => {
-                    const isMulti =
-                      Array.isArray(medication.doseSchedule) &&
-                      medication.doseSchedule.length > 1;
-                    // multi → undefined opens SelectDoseModal (restore mode)
-                    // single → real doseId; legacy → undefined
-                    const doseId = isMulti
-                      ? undefined
-                      : autoRestorableDose?.id || undefined;
-                    onRestoreDose(medication.id, doseId || undefined);
-                  }}
+                  onClick={() =>
+                    onRestoreDose(
+                      medication.id,
+                      autoRestorableDose?.id || undefined
+                    )
+                  }
                   title="استرجاع الجرعة"
                   className="w-6 h-6 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors active:scale-95"
                   data-testid={`auto-restore-dose-${medication.id}`}
@@ -754,18 +741,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               ) : !isAutoActive && doseToggle.canTake && onConsumeDose ? (
                 <button
                   type="button"
-                  onClick={() => {
-                    const isMulti =
-                      Array.isArray(medication.doseSchedule) &&
-                      medication.doseSchedule.length > 1;
-                    // Multi-dose: omit doseId so App opens SelectDoseModal
-                    // (take mode) for explicit user selection. Single/legacy:
-                    // direct take via doseToggle.doseId (unchanged).
-                    onConsumeDose(
-                      medication.id,
-                      isMulti ? undefined : doseToggle.doseId
-                    );
-                  }}
+                  onClick={() => onConsumeDose(medication.id, doseToggle.doseId)}
                   disabled={effPills <= 0 || nextDoseAmount <= 0}
                   title={`تناول جرعة (-${nextDoseAmount})`}
                   className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors active:scale-95 ${
@@ -784,7 +760,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   <CheckCircle className="w-3.5 h-3.5" />
                 </span>
               ) : null
-            )}
+            ) : null}
 
             <button
               type="button"

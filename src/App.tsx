@@ -692,6 +692,19 @@ export default function App() {
                             : 'المخزون ثابت — لا خصم تلقائي.'}
                         </p>
                       </div>
+                      <label
+                        htmlFor="toggle-global-auto-deduct"
+                        className="flex items-center gap-2 cursor-pointer select-none shrink-0"
+                      >
+                        <Toggle
+                          id="toggle-global-auto-deduct"
+                          checked={globalAutoDeductEnabled}
+                          onChange={handleToggleGlobalAutoDeduct}
+                          label="تبديل الخصم التلقائي لجميع الأدوية"
+                          size="sm"
+                          color="teal"
+                        />
+                      </label>
                     </div>
                   </div>
                   <div className="mx-4 mt-2 grid grid-cols-2 items-stretch gap-2 text-center text-xs">
@@ -736,7 +749,7 @@ export default function App() {
                       className="flex items-center gap-2 cursor-pointer select-none"
                     >
                       <span className="text-xs font-medium text-slate-700">
-                        {isCompactView ? 'عرض مختصر' : 'عرض تفصيلي'}
+                        {isCompactView ? 'العرض المختصر' : 'العرض الطبيعي'}
                       </span>
                       <Toggle
                         id="toggle-compact-view"
@@ -746,11 +759,12 @@ export default function App() {
                           setIsCompactView(next);
                           showToast(
                             next
-                              ? 'تم تفعيل العرض المختصر (شبكة)'
-                              : 'تم تفعيل العرض التفصيلي'
+                              ? 'تم تفعيل العرض المختصر'
+                              : 'تم إرجاع العرض الطبيعي'
                           );
+                          if (soundEnabled) playSuccessChime();
                         }}
-                        label="تبديل العرض بين المختصر (شبكة) والتفصيلي"
+                        label="تبديل العرض بين المختصر والعرض الطبيعي"
                         size="sm"
                         color="teal"
                       />
@@ -894,16 +908,37 @@ export default function App() {
         activeOrderItems={activeOrderItems}
         onSaveSettings={handleSavePharmacySettings}
         soundEnabled={soundEnabled}
-        onToggleSound={() => setSoundEnabled(!soundEnabled)}
         notificationsEnabled={notificationsEnabled}
-        onToggleNotifications={handleToggleNotifications}
         criticalStockAlertsEnabled={criticalStockAlertsEnabled}
         autoDeductEnabled={globalAutoDeductEnabled}
-        onToggleAutoDeduct={handleToggleGlobalAutoDeduct}
-        onToggleCriticalStockAlerts={handleToggleCriticalStockAlerts}
         onSendTestNotification={handleSendTestNotification}
         exactAlarmEnabled={exactAlarmEnabled}
         onOpenExactAlarmSettings={handleOpenExactAlarmSettings}
+        onApplyAppPreferences={async (prefs) => {
+          // Commit drafts only after Save — closing the modal without Save
+          // leaves parent state (and persistence) unchanged.
+          if (prefs.soundEnabled !== soundEnabled) {
+            setSoundEnabled(prefs.soundEnabled);
+          }
+          if (prefs.autoDeductEnabled !== globalAutoDeductEnabled) {
+            handleToggleGlobalAutoDeduct();
+          }
+          if (prefs.notificationsEnabled !== notificationsEnabled) {
+            if (prefs.notificationsEnabled) {
+              await handleToggleNotifications();
+            } else {
+              setNotificationsEnabled(false);
+              showToast(TOAST_MESSAGES.notificationsOff);
+            }
+          }
+          if (prefs.criticalStockAlertsEnabled !== criticalStockAlertsEnabled) {
+            await handleToggleCriticalStockAlerts();
+          }
+          // Confirm feedback only when the committed preference leaves sound on.
+          if (prefs.soundEnabled) {
+            playSuccessChime();
+          }
+        }}
       />
       <DoseAlarmModal
         isOpen={Boolean(alarmingMedication)}
@@ -915,7 +950,13 @@ export default function App() {
       />
       <SelectDoseModal
         isOpen={Boolean(selectDoseMed)}
-        medication={selectDoseMed}
+        medication={
+          // Prefer live medications[] so Manage mode always re-derives dose rows
+          // from the latest Take/Restore result (not a stale open-time snapshot).
+          selectDoseMed
+            ? (medications.find((m) => m.id === selectDoseMed.id) ?? selectDoseMed)
+            : null
+        }
         mode={selectDoseMode}
         globalAutoDeductEnabled={globalAutoDeductEnabled}
         onSelect={handleSelectDoseFromModal}

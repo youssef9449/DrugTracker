@@ -182,7 +182,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
     await clickCardManage();
 
     await waitFor(() => {
-      expect(screen.getByText(/إدارة الجرعات/)).toBeInTheDocument();
+      expect(screen.getByText('اختر الإجراء المناسب لكل جرعة')).toBeInTheDocument();
     });
 
     // No mutation until a dose is selected.
@@ -294,7 +294,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
     // Card may still show Restore (d1 still restorable). Open modal again.
     await clickCardManage();
     await waitFor(() => {
-      expect(screen.getByText(/إدارة الجرعات/)).toBeInTheDocument();
+      expect(screen.getByText('اختر الإجراء المناسب لكل جرعة')).toBeInTheDocument();
     });
 
     // d2 should be disabled / not restorable in the modal.
@@ -313,7 +313,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
     // Close modal without selecting.
     fireEvent.click(screen.getByLabelText('إغلاق'));
     await waitFor(() => {
-      expect(screen.queryByText(/إدارة الجرعات/)).not.toBeInTheDocument();
+      expect(screen.queryByText('اختر الإجراء المناسب لكل جرعة')).not.toBeInTheDocument();
     });
 
     expect(
@@ -333,7 +333,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
     await clickCardManage('med-single');
 
     await waitFor(() => {
-      expect(screen.queryByText(/إدارة الجرعات/)).not.toBeInTheDocument();
+      expect(screen.queryByText('اختر الإجراء المناسب لكل جرعة')).not.toBeInTheDocument();
       expect(screen.queryByText(/اختر الجرعة التي تناولتها/)).not.toBeInTheDocument();
       const med = readMeds().find((m) => m.id === 'med-single')!;
       expect(med.doseConsumption?.only).toBeUndefined();
@@ -357,7 +357,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
     await clickCardManage('med-legacy');
 
     await waitFor(() => {
-      expect(screen.queryByText(/إدارة الجرعات/)).not.toBeInTheDocument();
+      expect(screen.queryByText('اختر الإجراء المناسب لكل جرعة')).not.toBeInTheDocument();
       // lastConsumedDate cleared by restore path for legacy via consume clear
       const restores = readLogs().filter(
         (l) => l.type === 'skipped_day' && l.medicationId === 'med-legacy'
@@ -424,12 +424,12 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
 
     await clickCardManage();
     await waitFor(() => {
-      expect(screen.getByText(/إدارة الجرعات/)).toBeInTheDocument();
+      expect(screen.getByText('اختر الإجراء المناسب لكل جرعة')).toBeInTheDocument();
     });
     fireEvent.click(screen.getByLabelText('إغلاق'));
 
     await waitFor(() => {
-      expect(screen.queryByText(/إدارة الجرعات/)).not.toBeInTheDocument();
+      expect(screen.queryByText('اختر الإجراء المناسب لكل جرعة')).not.toBeInTheDocument();
     });
     expect(JSON.stringify(readMeds()[0])).toBe(before);
     expect(readLogs()).toHaveLength(0);

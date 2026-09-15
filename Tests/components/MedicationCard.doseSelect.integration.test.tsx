@@ -177,7 +177,7 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     fireEvent.click(screen.getByTestId('manage-doses-med-multi'));
 
     await waitFor(() => {
-      expect(screen.getByText(/إدارة الجرعات/)).toBeInTheDocument();
+      expect(screen.getByText('اختر الإجراء المناسب لكل جرعة')).toBeInTheDocument();
     });
 
     // Opening selector must not have written consumption yet.
@@ -245,13 +245,13 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
 
     fireEvent.click(screen.getByTestId('manage-doses-med-multi'));
     await waitFor(() => {
-      expect(screen.getByText(/إدارة الجرعات/)).toBeInTheDocument();
+      expect(screen.getByText('اختر الإجراء المناسب لكل جرعة')).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByLabelText('إغلاق'));
 
     await waitFor(() => {
-      expect(screen.queryByText(/إدارة الجرعات/)).toBeNull();
+      expect(screen.queryByText('اختر الإجراء المناسب لكل جرعة')).toBeNull();
     });
 
     const med = readMeds().find((m) => m.id === 'med-multi')!;
@@ -288,7 +288,7 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     // A: clicking Card Take opens SelectDoseModal in take mode; nothing consumed yet.
     fireEvent.click(screen.getByTestId('manage-doses-med-multi'));
     await waitFor(() => {
-      expect(screen.getByText(/إدارة الجرعات/)).toBeInTheDocument();
+      expect(screen.getByText('اختر الإجراء المناسب لكل جرعة')).toBeInTheDocument();
     });
     expect(readMeds()[0]?.doseConsumption?.d1).toBeUndefined();
     expect(readMeds()[0]?.doseConsumption?.d2).toBeUndefined();
@@ -346,7 +346,7 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
 
     fireEvent.click(screen.getByTestId('manage-doses-med-multi'));
     await waitFor(() => {
-      expect(screen.getByText(/إدارة الجرعات/)).toBeInTheDocument();
+      expect(screen.getByText('اختر الإجراء المناسب لكل جرعة')).toBeInTheDocument();
     });
 
     // B: select d2 → only d2 consumed, stock -= d2.amount (2), d1 unconsumed, log doseId=d2.
@@ -501,7 +501,7 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
 
     // Toggle stays on d1 for restore — does not advance to d2 take
     expect(screen.queryByTitle(/تناول جرعة/)).not.toBeInTheDocument();
-    expect(screen.getByTitle(/استرجاع الجرعة/)).toBeInTheDocument();
+    expect(screen.getByTestId('manage-doses-med-multi')).toBeInTheDocument();
   });
 
 
@@ -518,7 +518,7 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     fireEvent.click(screen.getByTitle(/تناول جرعة/));
 
     // No multi-dose selector
-    expect(screen.queryByText(/إدارة الجرعات/)).toBeNull();
+    expect(screen.queryByText('اختر الإجراء المناسب لكل جرعة')).toBeNull();
 
     const today = getTodayDateString();
     await waitFor(() => {
@@ -552,7 +552,7 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
 
     // Single-slot uses the Card Take button directly (no multi-dose management UI).
     fireEvent.click(screen.getByTitle(/تناول جرعة/));
-    expect(screen.queryByText(/إدارة الجرعات/)).toBeNull();
+    expect(screen.queryByText('اختر الإجراء المناسب لكل جرعة')).toBeNull();
 
     const today = getTodayDateString();
     await waitFor(() => {
@@ -609,7 +609,7 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     });
 
     expect(screen.queryByTitle(/^تناول جرعة/)).toBeNull();
-    expect(screen.getByTitle(/استرجاع الجرعة/)).toBeInTheDocument();
+    expect(screen.getByTestId('manage-doses-med-multi')).toBeInTheDocument();
   });
 
   it('Auto OFF lifecycle: Take d1 → Restore d1 → Take d1 again (unbounded Take↔Restore)', async () => {

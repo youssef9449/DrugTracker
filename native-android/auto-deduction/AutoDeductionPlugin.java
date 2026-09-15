@@ -64,6 +64,26 @@ public class AutoDeductionPlugin extends Plugin {
         call.resolve(ret);
     }
 
+    /**
+     * Issue #217: medication+dose recurrence disable — bumps durable generation under
+     * SCHEDULE_LOCK and cancels all future scheduled occurrences for that dose slot.
+     */
+    @PluginMethod
+    public void invalidateRecurrenceAuthorization(PluginCall call) {
+        String medicationId = call.getString("medicationId");
+        String doseId = call.getString("doseId");
+        if (medicationId == null || medicationId.isEmpty()
+                || doseId == null || doseId.isEmpty()) {
+            call.reject("invalid_args");
+            return;
+        }
+        AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
+        scheduler.invalidateRecurrenceAuthorization(medicationId, doseId);
+        JSObject ret = new JSObject();
+        ret.put("ok", true);
+        call.resolve(ret);
+    }
+
     @PluginMethod
     public void listFiredEvents(PluginCall call) {
         AutoDeductionEventStore store = new AutoDeductionEventStore(getContext());

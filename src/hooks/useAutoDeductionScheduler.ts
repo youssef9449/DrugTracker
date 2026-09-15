@@ -208,28 +208,27 @@ export function useAutoDeductionScheduler({
             s.calendarDate
           );
           if (!desired.has(key)) {
-            // Issue #217: invalidate recurrence chain before/with cancel so a
-            // concurrent post-fire scheduleNext cannot create D+1.
+            // Issue #217: durable generation bump MUST succeed before any
+            // occurrence cancel. Cancel-without-invalidate leaves the old
+            // generation active so a concurrent receiver can still create D+1.
             const slotId = `${s.medicationId}::${s.doseId}`;
             if (!invalidatedSlots.has(slotId)) {
               const inv = await invalidateAutoDeductionRecurrence(
                 s.medicationId,
                 s.doseId
               );
-              // Fail-closed: only remember success so a failed generation commit
-              // is retried on a later reconciliation pass (do not treat as done).
-              if (inv.ok) {
-                invalidatedSlots.add(slotId);
+              if (!inv.ok) {
+                // Fail-closed: keep tracking, skip cancel, retry next pass.
+                continue;
               }
+              invalidatedSlots.add(slotId);
             }
-            // Occurrence cancel still attempted; tracking retained when either
-            // cancel fails or generation bump has not succeeded yet (retry later).
             const res = await cancelAutoDeduction(
               s.medicationId,
               s.doseId,
               s.calendarDate
             );
-            if (res.ok && invalidatedSlots.has(slotId)) {
+            if (res.ok) {
               trackedRef.current.delete(key);
             }
           } else {
@@ -249,14 +248,15 @@ export function useAutoDeductionScheduler({
             const slotId = `${medId}::${doseId}`;
             if (!invalidatedSlots.has(slotId)) {
               const inv = await invalidateAutoDeductionRecurrence(medId, doseId);
-              if (inv.ok) {
-                invalidatedSlots.add(slotId);
+              if (!inv.ok) {
+                // Fail-closed: do not cancel occurrence; keep tracking for retry.
+                continue;
               }
+              invalidatedSlots.add(slotId);
             }
             const res = await cancelAutoDeduction(medId, doseId, date);
-            // Retain tracking until both occurrence cancel and generation bump
-            // have succeeded (fail-closed invalidate).
-            if (res.ok && invalidatedSlots.has(slotId)) {
+            // Drop tracking only after successful cancel (invalidate already ok).
+            if (res.ok) {
               trackedRef.current.delete(key);
             }
           } else {

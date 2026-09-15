@@ -860,7 +860,6 @@ export default function App() {
             <ConsumptionLogView
               medications={medications}
               logs={logs}
-              onRestoreDose={handleRestoreDose}
               showToast={showToast}
             />
           )}

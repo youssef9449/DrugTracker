@@ -197,7 +197,16 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     render(<App />);
     await waitFor(() => expect(screen.getByText('Drug A Multi')).toBeInTheDocument());
 
+    // Multi-dose Card Take opens SelectDoseModal (take mode); select d1 to consume it.
     fireEvent.click(screen.getByTitle(/تناول جرعة \(-1\)/));
+    await waitFor(() => {
+      expect(screen.getByText(/اختر الجرعة التي تناولتها/)).toBeInTheDocument();
+    });
+    const takeD1Btn = screen
+      .getAllByRole('button')
+      .find((b) => b.getAttribute('data-dose-id') === 'd1');
+    expect(takeD1Btn).toBeTruthy();
+    fireEvent.click(takeD1Btn!);
     await waitFor(() => {
       const med = readMeds().find((m) => m.id === 'med-multi')!;
       expect(med.doseConsumption?.d1).toBe(getTodayDateString());

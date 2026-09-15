@@ -61,6 +61,11 @@ interface AutoDeductionPlugin {
     doseId: string;
     calendarDate: string;
   }): Promise<CancelOccurrenceResult>;
+  /** Issue #217 — bump recurrence generation + cancel all futures for dose slot. */
+  invalidateRecurrenceAuthorization(options: {
+    medicationId: string;
+    doseId: string;
+  }): Promise<{ ok: boolean }>;
   listFiredEvents(): Promise<{ events: AutoDeductionEvent[] }>;
   listEvents(): Promise<{ events: AutoDeductionEvent[] }>;
   markReconciled(options: {
@@ -130,6 +135,32 @@ export async function cancelAutoDeduction(
       ok: false,
       status: "FAILED",
       error: e instanceof Error ? e.message : "cancel_failed",
+    };
+  }
+}
+
+/**
+ * Issue #217: disable recurrence for a medication+dose schedule chain.
+ * Bumps durable generation under native SCHEDULE_LOCK and cancels all
+ * future scheduled occurrences for that slot so post-fire D+1 cannot be
+ * created or restored after auto-deduction is turned off.
+ */
+export async function invalidateAutoDeductionRecurrence(
+  medicationId: string,
+  doseId: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isNativeAndroid()) {
+    return { ok: false, error: "not_android" };
+  }
+  try {
+    return await AutoDeduction.invalidateRecurrenceAuthorization({
+      medicationId,
+      doseId: doseId || LEGACY_DOSE_ID,
+    });
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "invalidate_failed",
     };
   }
 }

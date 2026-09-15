@@ -6,6 +6,7 @@ import {
   AlertCircle,
   CheckCircle2,
   CheckCircle,
+  RotateCcw,
   ShoppingCart,
   Clock,
   ListChecks,
@@ -531,7 +532,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 title="إدارة الجرعات"
                 aria-label="إدارة الجرعات"
                 data-testid={`manage-doses-${medication.id}`}
-                className="w-5 h-5 flex items-center justify-center rounded-full bg-teal-100 text-teal-800 hover:bg-teal-200 transition-colors active:scale-95"
+                className="w-5 h-5 flex items-center justify-center rounded-lg bg-teal-100 text-teal-800 hover:bg-teal-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
               >
                 <ListChecks className="w-3 h-3" strokeWidth={2.25} aria-hidden />
               </button>
@@ -541,10 +542,11 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   type="button"
                   onClick={() => onRestoreDose(medication.id, doseToggle.doseId)}
                   title={`استرجاع الجرعة (+${nextDoseAmount})`}
-                  className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors active:scale-95"
+                  aria-label={`استرجاع الجرعة (+${nextDoseAmount})`}
+                  className="w-5 h-5 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
                   data-testid={`restore-dose-${medication.id}`}
                 >
-                  <CheckCircle className="w-3 h-3" />
+                  <RotateCcw className="w-3 h-3" strokeWidth={2.25} aria-hidden />
                 </button>
               ) : showAutoRestore && onRestoreDose ? (
                 <button
@@ -556,10 +558,11 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                     )
                   }
                   title="استرجاع الجرعة"
-                  className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors active:scale-95"
+                  aria-label="استرجاع الجرعة"
+                  className="w-5 h-5 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
                   data-testid={`auto-restore-dose-${medication.id}`}
                 >
-                  <CheckCircle className="w-3 h-3" />
+                  <RotateCcw className="w-3 h-3" strokeWidth={2.25} aria-hidden />
                 </button>
               ) : !isAutoActive && doseToggle.canTake && onConsumeDose ? (
                 <button
@@ -567,18 +570,19 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   onClick={() => onConsumeDose(medication.id, doseToggle.doseId)}
                   disabled={effPills <= 0 || nextDoseAmount <= 0}
                   title={`تناول جرعة (-${nextDoseAmount})`}
-                  className={`w-5 h-5 flex items-center justify-center rounded-full transition-colors active:scale-95 ${
+                  aria-label={`تناول جرعة (-${nextDoseAmount})`}
+                  className={`w-5 h-5 flex items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 active:scale-95 ${
                     effPills <= 0 || nextDoseAmount <= 0
                       ? 'bg-slate-100 text-slate-300 cursor-not-allowed'
                       : 'bg-emerald-600 text-white hover:bg-emerald-700'
                   }`}
                 >
-                  <Pill className="w-3 h-3 rotate-45" />
+                  <Pill className="w-3 h-3 rotate-45" aria-hidden />
                 </button>
               ) : !isAutoActive ? (
                 <span
                   title="تم تناول جرعة اليوم"
-                  className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-700"
+                  className="w-5 h-5 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-700"
                 >
                   <CheckCircle className="w-3 h-3" />
                 </span>
@@ -711,7 +715,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 title="إدارة الجرعات"
                 aria-label="إدارة الجرعات"
                 data-testid={`manage-doses-${medication.id}`}
-                className="w-6 h-6 flex items-center justify-center rounded-full bg-teal-100 text-teal-800 hover:bg-teal-200 transition-colors active:scale-95"
+                className="w-6 h-6 flex items-center justify-center rounded-lg bg-teal-100 text-teal-800 hover:bg-teal-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
               >
                 <ListChecks className="w-3.5 h-3.5" strokeWidth={2.25} aria-hidden />
               </button>
@@ -721,10 +725,11 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   type="button"
                   onClick={() => onRestoreDose(medication.id, doseToggle.doseId)}
                   title={`استرجاع الجرعة (+${nextDoseAmount})`}
-                  className="w-6 h-6 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors active:scale-95"
+                  aria-label={`استرجاع الجرعة (+${nextDoseAmount})`}
+                  className="w-6 h-6 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
                   data-testid={`restore-dose-${medication.id}`}
                 >
-                  <CheckCircle className="w-3.5 h-3.5" />
+                  <RotateCcw className="w-3.5 h-3.5" strokeWidth={2.25} aria-hidden />
                 </button>
               ) : showAutoRestore && onRestoreDose ? (
                 <button
@@ -736,10 +741,11 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                     )
                   }
                   title="استرجاع الجرعة"
-                  className="w-6 h-6 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors active:scale-95"
+                  aria-label="استرجاع الجرعة"
+                  className="w-6 h-6 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
                   data-testid={`auto-restore-dose-${medication.id}`}
                 >
-                  <CheckCircle className="w-3.5 h-3.5" />
+                  <RotateCcw className="w-3.5 h-3.5" strokeWidth={2.25} aria-hidden />
                 </button>
               ) : !isAutoActive && doseToggle.canTake && onConsumeDose ? (
                 <button
@@ -747,18 +753,19 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   onClick={() => onConsumeDose(medication.id, doseToggle.doseId)}
                   disabled={effPills <= 0 || nextDoseAmount <= 0}
                   title={`تناول جرعة (-${nextDoseAmount})`}
-                  className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors active:scale-95 ${
+                  aria-label={`تناول جرعة (-${nextDoseAmount})`}
+                  className={`w-6 h-6 flex items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 active:scale-95 ${
                     effPills <= 0 || nextDoseAmount <= 0
                       ? 'bg-slate-100 text-slate-300 cursor-not-allowed'
                       : 'bg-emerald-600 text-white hover:bg-emerald-700'
                   }`}
                 >
-                  <Pill className="w-3.5 h-3.5 rotate-45" />
+                  <Pill className="w-3.5 h-3.5 rotate-45" aria-hidden />
                 </button>
               ) : !isAutoActive ? (
                 <span
                   title="تم تناول جرعة اليوم"
-                  className="w-6 h-6 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-700"
+                  className="w-6 h-6 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-700"
                 >
                   <CheckCircle className="w-3.5 h-3.5" />
                 </span>
@@ -840,4 +847,3 @@ export const MedicationCard: FC<MedicationCardProps> = ({
 
 
 };
-

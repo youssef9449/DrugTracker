@@ -2,15 +2,14 @@
 /**
  * Auto-deduct Restore button on MedicationCard — real App wiring.
  *
- * Covers:
- * - Compact + Detailed auto Restore visibility and callback
- * - Hidden when global or medication auto is off
- * - Multi-dose opens real SelectDoseModal (restore mode)
- * - Manual Take → Restore regression
- * - Legacy auto Restore path
+ * Contract (c54b325 + this PR):
+ * - isAutoActive → no Manual Take button
+ * - pure auto-completed dose → dedicated Auto Restore button
+ * - multi → SelectDoseModal restore mode (no silent pick)
+ * - manual Take/Restore only when auto inactive
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, fireEvent, within } from '@testing-library/react';
 
 vi.mock('@/native', () => ({
   initNativeBridge: vi.fn(() => Promise.resolve()),
@@ -73,7 +72,7 @@ function readLogs(): ConsumptionLog[] {
   return JSON.parse(localStorage.getItem(STORAGE_LOGS_KEY) || '[]');
 }
 
-/** Single-dose with pure auto-completed slot (time elapsed, no consumption mark). */
+/** Single-dose pure auto-completed (time elapsed, no consumption mark). */
 function makeSingleAuto(overrides: Partial<Medication> = {}): Medication {
   return {
     id: MED_ID,
@@ -83,6 +82,7 @@ function makeSingleAuto(overrides: Partial<Medication> = {}): Medication {
     unit: 'قرص',
     warningThresholdDays: 5,
     colorTag: 'teal',
+    category: 'مزمن',
     createdAt: '2024-01-01T00:00:00.000Z',
     lastSyncDate: TEST_DATE,
     autoDeductEnabled: true,
@@ -93,7 +93,7 @@ function makeSingleAuto(overrides: Partial<Medication> = {}): Medication {
   };
 }
 
-/** Multi-dose: d1@08:00 and d2@14:00 both auto-elapsed at 16:00. */
+/** Multi-dose: d1@08:00 and d2@14:00 both elapsed at 16:00. */
 function makeMultiAuto(overrides: Partial<Medication> = {}): Medication {
   return {
     id: MED_ID,
@@ -103,6 +103,7 @@ function makeMultiAuto(overrides: Partial<Medication> = {}): Medication {
     unit: 'قرص',
     warningThresholdDays: 5,
     colorTag: 'teal',
+    category: 'مزمن',
     createdAt: '2024-01-01T00:00:00.000Z',
     lastSyncDate: TEST_DATE,
     autoDeductEnabled: true,
@@ -125,6 +126,7 @@ function makeLegacyAuto(overrides: Partial<Medication> = {}): Medication {
     unit: 'قرص',
     warningThresholdDays: 5,
     colorTag: 'teal',
+    category: 'مزمن',
     createdAt: '2024-01-01T00:00:00.000Z',
     lastSyncDate: TEST_DATE,
     autoDeductEnabled: true,
@@ -152,13 +154,23 @@ async function selectDoseInModal(doseId: string): Promise<void> {
   fireEvent.click(target!);
 }
 
+function cardRoot(name: string): HTMLElement {
+  const title = screen.getByText(name);
+  // Walk up to the card container (id starts with med-card-)
+  let el: HTMLElement | null = title;
+  while (el && !el.id?.startsWith('med-card-')) {
+    el = el.parentElement;
+  }
+  if (!el) throw new Error(`card root not found for ${name}`);
+  return el;
+}
+
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
   // 16:00 — morning and afternoon slots elapsed.
   vi.setSystemTime(new Date(`${TEST_DATE}T16:00:00`));
   vi.clearAllMocks();
   localStorage.clear();
-  // Default: global auto ON, detailed view.
   localStorage.setItem(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'true');
   localStorage.setItem(COMPACT_VIEW_KEY, 'false');
   window.history.replaceState({}, '', '/?tab=stock');
@@ -169,8 +181,11 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+// ---------------------------------------------------------------------------
+// Test A — Compact + auto Restore
+// ---------------------------------------------------------------------------
 describe('MedicationCard Auto Restore — Compact', () => {
-  it('shows auto-restore button, no Take, and restores single-dose via real path', async () => {
+  it('shows auto-restore, no Take, restores single-dose via real path', async () => {
     localStorage.setItem(COMPACT_VIEW_KEY, 'true');
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeSingleAuto()]));
     localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
@@ -180,35 +195,31 @@ describe('MedicationCard Auto Restore — Compact', () => {
       expect(screen.getByText('Auto Restore Single')).toBeInTheDocument();
     });
 
-    // Auto restore present
-    const autoBtn = screen.getByTestId(`auto-restore-dose-${MED_ID}`);
-    expect(autoBtn).toBeInTheDocument();
-    // Manual restore / Take should not be the path for pure auto
+    expect(screen.getByTestId(`auto-restore-dose-${MED_ID}`)).toBeInTheDocument();
     expect(screen.queryByTestId(`restore-dose-${MED_ID}`)).toBeNull();
-    // No Take pill button when auto-active with completed slot
-    const takeCandidates = screen.queryAllByTitle(/تناول جرعة/);
-    expect(takeCandidates.length).toBe(0);
+    expect(screen.queryAllByTitle(/تناول جرعة/)).toHaveLength(0);
 
     const pillsBefore = readMeds()[0].currentPills;
     const effBefore = effectiveCurrentPills(readMeds()[0]);
 
-    fireEvent.click(autoBtn);
+    await clickAutoRestore();
 
     await waitFor(() => {
       const med = readMeds()[0];
-      // Pure auto restore records skip; projection undoes due units.
       expect(isDoseSkippedOnDate(med, 's1', getTodayDateString())).toBe(true);
       expect(isDoseConsumedOnDate(med, 's1', getTodayDateString())).toBe(false);
-      // Effective stock rises by slot amount (projection model).
-      expect(effectiveCurrentPills(med)).toBe(effBefore + 2);
-      // Snapshot unchanged for pure auto-only restore today.
+      // Pure auto today: snapshot unchanged; effective rises by slot amount.
       expect(med.currentPills).toBe(pillsBefore);
+      expect(effectiveCurrentPills(med)).toBe(effBefore + 2);
     });
   });
 });
 
+// ---------------------------------------------------------------------------
+// Test B — Detailed + auto Restore
+// ---------------------------------------------------------------------------
 describe('MedicationCard Auto Restore — Detailed', () => {
-  it('shows auto-restore button and same restore behavior as compact', async () => {
+  it('shows auto-restore and same restore behavior as compact', async () => {
     localStorage.setItem(COMPACT_VIEW_KEY, 'false');
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeSingleAuto()]));
     localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
@@ -220,7 +231,7 @@ describe('MedicationCard Auto Restore — Detailed', () => {
 
     expect(screen.getByTestId(`auto-restore-dose-${MED_ID}`)).toBeInTheDocument();
     expect(screen.queryByTestId(`restore-dose-${MED_ID}`)).toBeNull();
-    expect(screen.queryAllByTitle(/تناول جرعة/).length).toBe(0);
+    expect(screen.queryAllByTitle(/تناول جرعة/)).toHaveLength(0);
 
     const effBefore = effectiveCurrentPills(readMeds()[0]);
     await clickAutoRestore();
@@ -233,10 +244,16 @@ describe('MedicationCard Auto Restore — Detailed', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Test C — Auto Restore hidden when auto inactive
+// ---------------------------------------------------------------------------
 describe('MedicationCard Auto Restore — hidden when auto inactive', () => {
   it('global auto OFF hides auto restore even if medication auto ON', async () => {
     localStorage.setItem(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'false');
-    localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeSingleAuto({ autoDeductEnabled: true })]));
+    localStorage.setItem(
+      STORAGE_MEDS_KEY,
+      JSON.stringify([makeSingleAuto({ autoDeductEnabled: true })])
+    );
     localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
 
     render(<App />);
@@ -264,8 +281,50 @@ describe('MedicationCard Auto Restore — hidden when auto inactive', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Auto ON → no Manual Take (independent contract from c54b325)
+// ---------------------------------------------------------------------------
+describe('MedicationCard Auto ON → no Manual Take', () => {
+  it('when isAutoActive, Take button is never shown (even before slot time)', async () => {
+    // Before any slot elapsed — still no Take when auto active.
+    vi.setSystemTime(new Date(`${TEST_DATE}T07:00:00`));
+    localStorage.setItem(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'true');
+    localStorage.setItem(
+      STORAGE_MEDS_KEY,
+      JSON.stringify([makeSingleAuto({ autoDeductEnabled: true })])
+    );
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Auto Restore Single')).toBeInTheDocument();
+    });
+
+    expect(screen.queryAllByTitle(/تناول جرعة/)).toHaveLength(0);
+    // Time not elapsed → no auto restore either
+    expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
+  });
+
+  it('when isAutoActive and pure auto-completed, Auto Restore shows and Take stays hidden', async () => {
+    localStorage.setItem(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'true');
+    localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeSingleAuto()]));
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Auto Restore Single')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId(`auto-restore-dose-${MED_ID}`)).toBeInTheDocument();
+    expect(screen.queryAllByTitle(/تناول جرعة/)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test D — Multi-dose Auto Restore via real SelectDoseModal
+// ---------------------------------------------------------------------------
 describe('MedicationCard Auto Restore — Multi-dose SelectDoseModal', () => {
-  it('opens real SelectDoseModal; selecting d2 restores only d2', async () => {
+  it('opens modal; d1 and d2 selectable; restore d2 only; d1 remains restorable', async () => {
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeMultiAuto()]));
     localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
 
@@ -274,12 +333,13 @@ describe('MedicationCard Auto Restore — Multi-dose SelectDoseModal', () => {
       expect(screen.getByText('Auto Restore Multi')).toBeInTheDocument();
     });
 
+    // Single Auto Restore button on the card
     expect(screen.getByTestId(`auto-restore-dose-${MED_ID}`)).toBeInTheDocument();
 
     const pillsBefore = readMeds()[0].currentPills;
     const effBefore = effectiveCurrentPills(readMeds()[0]);
 
-    // Click does NOT restore immediately — opens modal
+    // Click does NOT restore immediately
     await clickAutoRestore();
     await waitFor(() => {
       expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
@@ -288,50 +348,57 @@ describe('MedicationCard Auto Restore — Multi-dose SelectDoseModal', () => {
     expect(isDoseSkippedOnDate(readMeds()[0], 'd1', getTodayDateString())).toBe(false);
     expect(isDoseSkippedOnDate(readMeds()[0], 'd2', getTodayDateString())).toBe(false);
 
-    await selectDoseInModal('d2');
+    // Both d1 and d2 are selectable
+    const doseButtons = screen.getAllByRole('button').filter((b) =>
+      b.getAttribute('data-dose-id')
+    );
+    const d1Btn = doseButtons.find((b) => b.getAttribute('data-dose-id') === 'd1');
+    const d2Btn = doseButtons.find((b) => b.getAttribute('data-dose-id') === 'd2');
+    expect(d1Btn).toBeTruthy();
+    expect(d2Btn).toBeTruthy();
+    expect(d1Btn).not.toBeDisabled();
+    expect(d2Btn).not.toBeDisabled();
+
+    // Select d2 only
+    fireEvent.click(d2Btn!);
 
     await waitFor(() => {
       const med = readMeds()[0];
       expect(isDoseSkippedOnDate(med, 'd2', getTodayDateString())).toBe(true);
       expect(isDoseSkippedOnDate(med, 'd1', getTodayDateString())).toBe(false);
-      // Auto-only: snapshot unchanged; effective rises by d2.amount
       expect(med.currentPills).toBe(pillsBefore);
       expect(effectiveCurrentPills(med)).toBe(effBefore + 2);
     });
 
-    // Same dose cannot be restored again — modal would show it disabled / empty
-    // Re-open: d2 already skipped so not selectable as restorable pure-auto in same way
-    // After restore, showAutoRestore may still be true (d1 still restorable)
-    await waitFor(() => {
-      // d1 still auto-restorable
-      expect(screen.getByTestId(`auto-restore-dose-${MED_ID}`)).toBeInTheDocument();
-    });
+    // Re-open: d2 disabled/not selectable, d1 still available
     await clickAutoRestore();
     await waitFor(() => {
       expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
     });
-    const doseButtons = screen.getAllByRole('button').filter((b) =>
+    const buttonsAgain = screen.getAllByRole('button').filter((b) =>
       b.getAttribute('data-dose-id')
     );
-    const d2Btn = doseButtons.find((b) => b.getAttribute('data-dose-id') === 'd2');
-    // d2 already skipped → not selectable
-    if (d2Btn) {
-      expect(d2Btn).toBeDisabled();
+    const d2Again = buttonsAgain.find((b) => b.getAttribute('data-dose-id') === 'd2');
+    const d1Again = buttonsAgain.find((b) => b.getAttribute('data-dose-id') === 'd1');
+    if (d2Again) {
+      expect(d2Again).toBeDisabled();
     }
-    // d1 still available
-    const d1Btn = doseButtons.find((b) => b.getAttribute('data-dose-id') === 'd1');
-    expect(d1Btn).toBeTruthy();
-    expect(d1Btn).not.toBeDisabled();
+    expect(d1Again).toBeTruthy();
+    expect(d1Again).not.toBeDisabled();
   });
 });
 
-describe('MedicationCard Manual Restore regression', () => {
-  it('manual Take → Restore still works with auto ON', async () => {
-    // Early morning so nothing is auto-elapsed yet; auto ON but time not passed.
-    vi.setSystemTime(new Date(`${TEST_DATE}T07:00:00`));
+// ---------------------------------------------------------------------------
+// Test E — Manual Take → Restore with auto OFF (valid contract)
+// ---------------------------------------------------------------------------
+describe('MedicationCard Manual Take → Restore (auto OFF)', () => {
+  it('Take then manual Restore works; auto-restore never appears', async () => {
+    // Auto fully OFF so Manual Take is allowed.
+    localStorage.setItem(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'false');
+    vi.setSystemTime(new Date(`${TEST_DATE}T10:00:00`));
 
     const med = makeSingleAuto({
-      // not yet elapsed
+      autoDeductEnabled: false,
       doseSchedule: [{ id: 's1', amount: 2, time: '08:00' }],
     });
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([med]));
@@ -342,8 +409,9 @@ describe('MedicationCard Manual Restore regression', () => {
       expect(screen.getByText('Auto Restore Single')).toBeInTheDocument();
     });
 
-    // Before take: Take available, no auto restore (time not elapsed)
+    // No auto restore when auto inactive
     expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
+
     const takeBtn = screen.getByTitle(/تناول جرعة/);
     const pillsBefore = readMeds()[0].currentPills;
     fireEvent.click(takeBtn);
@@ -354,7 +422,7 @@ describe('MedicationCard Manual Restore regression', () => {
       expect(m.currentPills).toBe(pillsBefore - 2);
     });
 
-    // Manual restore appears
+    // Manual restore
     const restoreBtn = await screen.findByTestId(`restore-dose-${MED_ID}`);
     expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
     fireEvent.click(restoreBtn);
@@ -363,13 +431,17 @@ describe('MedicationCard Manual Restore regression', () => {
       const m = readMeds()[0];
       expect(isDoseConsumedOnDate(m, 's1', getTodayDateString())).toBe(false);
       expect(isDoseSkippedOnDate(m, 's1', getTodayDateString())).toBe(true);
-      expect(m.currentPills).toBe(pillsBefore); // manual path restores snapshot
+      expect(m.currentPills).toBe(pillsBefore);
+      expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
     });
   });
 });
 
+// ---------------------------------------------------------------------------
+// Legacy Auto Restore — real outcome assertions
+// ---------------------------------------------------------------------------
 describe('MedicationCard Auto Restore — Legacy', () => {
-  it('legacy pure auto shows auto restore and uses existing restoreDose path', async () => {
+  it('legacy pure auto restores via existing path and adjusts stock', async () => {
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeLegacyAuto()]));
     localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
 
@@ -381,13 +453,85 @@ describe('MedicationCard Auto Restore — Legacy', () => {
     const autoBtn = screen.getByTestId('auto-restore-dose-med-legacy-auto');
     expect(autoBtn).toBeInTheDocument();
 
+    const before = readMeds().find((m) => m.id === 'med-legacy-auto')!;
+    const pillsBefore = before.currentPills;
+    const effBefore = effectiveCurrentPills(before);
+    expect(before.lastConsumedDate).toBeUndefined();
+
     fireEvent.click(autoBtn);
 
     await waitFor(() => {
       const med = readMeds().find((m) => m.id === 'med-legacy-auto')!;
-      // Legacy restore clears the auto-completed state via existing path
-      // (skip / lastConsumed handling inside restoreDose)
-      expect(med).toBeTruthy();
+      // Legacy restoreDose always settleAndAdjust by dailyDose.
+      expect(med.currentPills).toBe(pillsBefore + 3);
+      // After restore, lastConsumedDate stays cleared / not today.
+      expect(med.lastConsumedDate).not.toBe(getTodayDateString());
+      // Effective should not be lower than before.
+      expect(effectiveCurrentPills(med)).toBeGreaterThanOrEqual(effBefore);
     });
+
+    // No longer auto-restorable after successful restore (helper sees
+    // post-restore state — for legacy, if lastConsumed was never set,
+    // eligibility may depend on time still elapsed; the important
+    // contract is stock moved once via restoreDose).
+    // Double-click should not double-credit beyond one restore cycle.
+    const afterFirst = readMeds().find((m) => m.id === 'med-legacy-auto')!;
+    const pillsAfterFirst = afterFirst.currentPills;
+    if (screen.queryByTestId('auto-restore-dose-med-legacy-auto')) {
+      fireEvent.click(screen.getByTestId('auto-restore-dose-med-legacy-auto'));
+      await waitFor(() => {
+        const med = readMeds().find((m) => m.id === 'med-legacy-auto')!;
+        // At most one additional credit; production restoreDose is idempotent
+        // enough not to runaway-inflate. Soft bound:
+        expect(med.currentPills).toBeLessThanOrEqual(pillsAfterFirst + 3);
+      });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Layout structure — Compact + Detailed (no CSS coupling)
+// ---------------------------------------------------------------------------
+describe('MedicationCard layout — Name / Category+Status / Actions separation', () => {
+  it('Compact: name is independent of category/status row', async () => {
+    localStorage.setItem(COMPACT_VIEW_KEY, 'true');
+    localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeSingleAuto()]));
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Auto Restore Single')).toBeInTheDocument();
+    });
+
+    const root = cardRoot('Auto Restore Single');
+    const nameEl = within(root).getByText('Auto Restore Single');
+    expect(nameEl.tagName.toLowerCase()).toBe('h3');
+
+    // Category text exists and is NOT inside the name heading
+    const category = within(root).getByText('مزمن');
+    expect(nameEl.contains(category)).toBe(false);
+
+    // Status badge text (آمن or days) is also outside the name heading
+    // Name heading children should be only the name text
+    expect(nameEl.textContent?.trim()).toBe('Auto Restore Single');
+  });
+
+  it('Detailed: name is independent of category/status row', async () => {
+    localStorage.setItem(COMPACT_VIEW_KEY, 'false');
+    localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeSingleAuto()]));
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Auto Restore Single')).toBeInTheDocument();
+    });
+
+    const root = cardRoot('Auto Restore Single');
+    const nameEl = within(root).getByText('Auto Restore Single');
+    expect(nameEl.tagName.toLowerCase()).toBe('h3');
+
+    const category = within(root).getByText('مزمن');
+    expect(nameEl.contains(category)).toBe(false);
+    expect(nameEl.textContent?.trim()).toBe('Auto Restore Single');
   });
 });

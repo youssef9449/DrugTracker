@@ -13,8 +13,7 @@ import { Medication, calculateMedicationStatus, describeStockInStrips, isSolidUn
 import { getDepletionDate, effectiveCurrentPills } from '../utils/dateCalculations';
 import {
   getCardDoseToggleTarget,
-  hasAutoRestorableDoseToday,
-  getAutoRestoreDoseId,
+  getAutoRestorableDose,
 } from '../utils/doseSchedule';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { VISUAL_RANGE_MULTIPLIER, MIN_VISUAL_RANGE_DAYS, DAYS_PER_MONTH } from '../utils/time';
@@ -473,13 +472,9 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const isWarn = statusInfo.status === 'warning';
     const doseToggle = getCardDoseToggleTarget(medication);
     const nextDoseAmount = doseToggle.amount;
+    const autoRestorableDose = getAutoRestorableDose(medication);
     const showAutoRestore =
-      isAutoActive &&
-      Boolean(onRestoreDose) &&
-      hasAutoRestorableDoseToday(medication);
-    const autoRestoreDoseId = showAutoRestore
-      ? getAutoRestoreDoseId(medication)
-      : undefined;
+      isAutoActive && Boolean(onRestoreDose) && Boolean(autoRestorableDose);
 
 
     return (
@@ -549,7 +544,15 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    onRestoreDose(medication.id, autoRestoreDoseId);
+                    const isMulti =
+                      Array.isArray(medication.doseSchedule) &&
+                      medication.doseSchedule.length > 1;
+                    // multi → undefined opens SelectDoseModal (restore mode)
+                    // single → real doseId; legacy → undefined
+                    const doseId = isMulti
+                      ? undefined
+                      : autoRestorableDose?.id || undefined;
+                    onRestoreDose(medication.id, doseId || undefined);
                   }}
                   title="استرجاع الجرعة"
                   className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors active:scale-95"
@@ -567,7 +570,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                     effPills <= 0 || nextDoseAmount <= 0
                       ? 'bg-slate-100 text-slate-300 cursor-not-allowed'
                       : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                  }}`}}
+                  }`}
                 >
                   <Pill className="w-3 h-3 rotate-45" />
                 </button>
@@ -643,13 +646,9 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const isWarn = statusInfo.status === 'warning';
     const doseToggle = getCardDoseToggleTarget(medication);
     const nextDoseAmount = doseToggle.amount;
+    const autoRestorableDose = getAutoRestorableDose(medication);
     const showAutoRestore =
-      isAutoActive &&
-      Boolean(onRestoreDose) &&
-      hasAutoRestorableDoseToday(medication);
-    const autoRestoreDoseId = showAutoRestore
-      ? getAutoRestoreDoseId(medication)
-      : undefined;
+      isAutoActive && Boolean(onRestoreDose) && Boolean(autoRestorableDose);
 
 
     return (
@@ -725,7 +724,15 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    onRestoreDose(medication.id, autoRestoreDoseId);
+                    const isMulti =
+                      Array.isArray(medication.doseSchedule) &&
+                      medication.doseSchedule.length > 1;
+                    // multi → undefined opens SelectDoseModal (restore mode)
+                    // single → real doseId; legacy → undefined
+                    const doseId = isMulti
+                      ? undefined
+                      : autoRestorableDose?.id || undefined;
+                    onRestoreDose(medication.id, doseId || undefined);
                   }}
                   title="استرجاع الجرعة"
                   className="w-6 h-6 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors active:scale-95"
@@ -743,7 +750,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                     effPills <= 0 || nextDoseAmount <= 0
                       ? 'bg-slate-100 text-slate-300 cursor-not-allowed'
                       : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                  }}`}}
+                  }`}
                 >
                   <Pill className="w-3.5 h-3.5 rotate-45" />
                 </button>

@@ -83,6 +83,24 @@ public final class AutoDeductionScheduler {
      * generation commit as failed (fail-closed). Production code never sets this.
      */
     volatile boolean forceRecurrenceAuthCommitFailureForTest = false;
+    /**
+     * Test-only: when true, the cancellation tombstone write commit is forced to
+     * fail (no tombstone written) to exercise Issue #241 fail-closed behavior.
+     */
+    volatile boolean forceTombstoneCommitFailureForTest = false;
+    /**
+     * Test-only: when true, schedule metadata removal commit is forced to fail
+     * to exercise Issue #241 fail-closed behavior (the tombstone remains as the
+     * durable stale-fire guard until retry completes cleanup).
+     */
+    volatile boolean forceScheduleMetadataRemovalFailureForTest = false;
+    /**
+     * Test-only: when true, {@link #allocateOrderingTokenLocked()} returns null
+     * (simulating a durable ordering-token allocation failure) to exercise the
+     * Issue #241 fail-closed path. Production never sets this; the durable
+     * ordering-token semantics are unchanged when it is false.
+     */
+    volatile boolean forceOrderingTokenAllocationFailureForTest = false;
 
     public AutoDeductionScheduler(Context context) {
         this.appContext = context.getApplicationContext();
@@ -198,7 +216,18 @@ public final class AutoDeductionScheduler {
             Log.i(TAG, "invalidateRecurrenceAuthorization: generation "
                     + prev + " -> " + next + " for " + medicationId + "/" + doseId);
             // Only after durable bump: cancel futures so restore cannot resurrect them.
-            cancelAllSchedulesForDoseLocked(medicationId, doseId);
+            // Fail-closed (Issue #241): if any durable cancellation step fails, report
+            // ok=false WITHOUT rolling back the generation — the bump is durable and
+            // must stay monotonic (rollback itself can fail and create authorization
+            // ambiguity). The caller retries; retry is idempotent (existing tombstones
+            // and already-absent metadata are handled safely).
+            CancelResult cancel = cancelAllSchedulesForDoseLocked(medicationId, doseId);
+            if (!cancel.isOk()) {
+                Log.e(TAG, "invalidateRecurrenceAuthorization: cancellation failed for "
+                        + medicationId + "/" + doseId + " — generation " + next
+                        + " remains committed (no rollback); error=" + cancel.error);
+                return InvalidateResult.fail(cancel.error);
+            }
             return InvalidateResult.success(next);
         }
     }
@@ -207,12 +236,20 @@ public final class AutoDeductionScheduler {
      * Cancel AlarmManager + remove schedule metadata for every occurrence of
      * this medication+dose. Caller must hold {@link #SCHEDULE_LOCK}.
      * Also writes occurrence cancellation tombstones so fire cannot promote them.
+     *
+     * <p><b>Fail-closed (Issue #241):</b> returns {@link CancelResult#fail} when any
+     * durable cancellation step fails (ordering-token allocation, tombstone write
+     * commit, metadata removal commit, or AlarmManager unavailable). The caller
+     * ({@link #invalidateRecurrenceAuthorization}) must NOT report disable success
+     * until this returns ok. The generation bump stays committed on failure (no
+     * rollback). Retry is idempotent: occurrences already carrying a tombstone skip
+     * the tombstone rewrite, and occurrences with no metadata skip removal.
      */
-    private void cancelAllSchedulesForDoseLocked(String medicationId, String doseId) {
+    private CancelResult cancelAllSchedulesForDoseLocked(String medicationId, String doseId) {
         // Iterate a snapshot of all schedule keys and match medicationId + doseId.
         java.util.Map<String, ?> all = schedulePrefs.getAll();
         if (all == null || all.isEmpty()) {
-            return;
+            return CancelResult.success();
         }
         for (java.util.Map.Entry<String, ?> e : all.entrySet()) {
             String prefKey = e.getKey();
@@ -232,32 +269,66 @@ public final class AutoDeductionScheduler {
                 }
                 String calendarDate = o.optString("calendarDate", "");
                 if (!AutoDeductionContract.isValidCalendarDate(calendarDate)) {
-                    // Malformed — drop metadata only.
-                    schedulePrefs.edit().remove(prefKey).commit();
+                    // Malformed — drop metadata only; a removal failure is still durable.
+                    boolean removed = !forceScheduleMetadataRemovalFailureForTest
+                            && schedulePrefs.edit().remove(prefKey).commit();
+                    if (!removed) {
+                        return CancelResult.fail("schedule_metadata_removal_failed");
+                    }
                     continue;
                 }
-                // Tombstone + alarm cancel + metadata remove (same as cancelOccurrence core).
                 String occKey = AutoDeductionContract.occurrenceKey(
                         medicationId, doseId, calendarDate);
                 String cancelKey = CANCEL_KEY_PREFIX + occKey;
-                final String cancelToken = allocateOrderingTokenLocked();
-                if (cancelToken != null) {
-                    cancelPrefs.edit().putString(cancelKey, cancelToken).commit();
+                boolean hadMetadata = schedulePrefs.contains(prefKey);
+                boolean alreadyCancelled = cancelPrefs.contains(cancelKey);
+                // Retry-safe: do not rewrite a tombstone that is already present.
+                if (!alreadyCancelled) {
+                    final String cancelToken = allocateOrderingTokenLocked();
+                    if (cancelToken == null) {
+                        return CancelResult.fail("ordering_sequence_write_failed");
+                    }
+                    boolean tombstoneWritten = !forceTombstoneCommitFailureForTest
+                            && cancelPrefs.edit().putString(cancelKey, cancelToken).commit();
+                    if (!tombstoneWritten) {
+                        Log.e(TAG, "cancelAllSchedulesForDoseLocked: tombstone commit failed for " + occKey);
+                        return CancelResult.fail("cancellation_tombstone_write_failed");
+                    }
                 }
                 Intent intent = buildOccurrenceIntent(
                         medicationId, doseId, calendarDate, 0L, 0d, null, 0L, null);
                 PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
                 AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
-                if (am != null && pi != null) {
+                if (am == null) {
+                    // AlarmManager is not a durable guard, but mirror cancelOccurrence:
+                    // do not treat its absence as silent success.
+                    return CancelResult.fail("alarm_manager_unavailable");
+                }
+                if (pi != null) {
                     am.cancel(pi);
                     pi.cancel();
                 }
-                schedulePrefs.edit().remove(prefKey).commit();
+                // Retry-safe: skip metadata removal if already absent.
+                if (!hadMetadata) {
+                    continue;
+                }
+                boolean removed = !forceScheduleMetadataRemovalFailureForTest
+                        && schedulePrefs.edit().remove(prefKey).commit();
+                if (!removed) {
+                    Log.e(TAG, "cancelAllSchedulesForDoseLocked: metadata remove failed for " + occKey
+                            + " (tombstone remains — stale fire stays rejected)");
+                    return CancelResult.fail("schedule_metadata_removal_failed");
+                }
                 Log.i(TAG, "cancelAllSchedulesForDoseLocked: cancelled " + occKey);
             } catch (org.json.JSONException ex) {
-                schedulePrefs.edit().remove(prefKey).commit();
+                boolean removed = !forceScheduleMetadataRemovalFailureForTest
+                        && schedulePrefs.edit().remove(prefKey).commit();
+                if (!removed) {
+                    return CancelResult.fail("schedule_metadata_removal_failed");
+                }
             }
         }
+        return CancelResult.success();
     }
 
     public static final class ScheduleResult {
@@ -525,6 +596,12 @@ public final class AutoDeductionScheduler {
      *         must fail the operation — do not fall back to volatile memory).
      */
     private String allocateOrderingTokenLocked() {
+        if (forceOrderingTokenAllocationFailureForTest) {
+            // Test-only (Issue #241): simulate a durable ordering-token allocation
+            // failure so cancelAll/invalidate can prove the fail-closed path.
+            // Production never sets this; allocation/commit semantics are unchanged.
+            return null;
+        }
         long last = orderingPrefs.getLong(AutoDeductionContract.KEY_ORDERING_SEQ, 0L);
         long next = last + 1L;
         boolean committed = orderingPrefs.edit()

@@ -147,7 +147,8 @@ public class FireVsCancelTest {
 
         // Only after a recurrence-allowing fire result would the receiver invoke this API.
         AutoDeductionScheduler.ScheduleResult next =
-                s.scheduleNextOccurrenceIfAbsent("med", "dose", d, "08:00", 1.0);
+                s.scheduleNextOccurrenceIfAbsent("med", "dose", d, "08:00", 1.0,
+                        Long.parseLong(vg[1]));
         assertTrue("successor schedule: " + next.error, next.ok);
         String d1 = AutoDeductionScheduler.nextCalendarDate(d);
         String d1Key = AutoDeductionContract.occurrenceKey("med", "dose", d1);

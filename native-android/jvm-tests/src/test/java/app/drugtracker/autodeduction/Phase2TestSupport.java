@@ -112,6 +112,21 @@ final class Phase2TestSupport {
         return new AutoDeductionScheduler(appContext());
     }
 
+    /**
+     * Read the current durable recurrence-generation auth token for a med+dose slot.
+     * Returns 0 when never scheduled/invalidated. Use this to pass the CURRENT
+     * generation to {@code scheduleNextOccurrenceIfAbsent(..., expectedGen)} when
+     * the test intends successful successor creation (Issue #240 ownership contract).
+     */
+    static long readAuthGeneration(String medicationId, String doseId) {
+        SharedPreferences p = appContext().getSharedPreferences(
+                AutoDeductionContract.PREFS_RECURRENCE_AUTH, Context.MODE_PRIVATE);
+        return p.getLong(
+                AutoDeductionContract.RECURRENCE_AUTH_KEY_PREFIX
+                        + AutoDeductionContract.scheduleIdentityKey(medicationId, doseId),
+                0L);
+    }
+
     static AutoDeductionEventStore newEventStore() {
         return new AutoDeductionEventStore(appContext());
     }

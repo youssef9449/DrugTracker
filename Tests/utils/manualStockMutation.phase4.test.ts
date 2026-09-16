@@ -3,12 +3,11 @@ import type { Medication, ConsumptionLog } from '../../src/types';
 import {
   runGatedManualConsume,
   runGatedManualRestore,
+  shouldDismissAlarmAfterManualTake,
+  __setManualEnvelopeTestHooks,
+  type ManualStockEnvelope,
 } from '../../src/utils/manualStockMutation';
-import {
-  runAutoDeductionReconciliation,
-  __setExactAutoEnvelopeTestHooks,
-  type ExactAutoEnvelope,
-} from '../../src/utils/runAutoDeductionReconciliation';
+import { runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
 import {
   __setAutoStockGateTestHooks,
   type AutoStockDurableState,
@@ -329,22 +328,25 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
   });
 });
 
-describe('Phase 4 — crash consistency (partial meds/logs write)', () => {
+
+describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
   let durable: AutoStockDurableState;
-  let envelope: ExactAutoEnvelope | null;
+  let manualEnvelope: ManualStockEnvelope | null;
   let failLogs: boolean;
+  let marked: string[];
 
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(`${TODAY}T15:00:00`));
     durable = { medications: [med()], logs: [] };
-    envelope = null;
+    manualEnvelope = null;
     failLogs = false;
+    marked = [];
 
-    __setExactAutoEnvelopeTestHooks({
-      load: () => envelope,
+    __setManualEnvelopeTestHooks({
+      load: () => manualEnvelope,
       save: (env) => {
-        envelope = env;
+        manualEnvelope = env;
         return null;
       },
     });
@@ -354,7 +356,6 @@ describe('Phase 4 — crash consistency (partial meds/logs write)', () => {
         medications: durable.medications.map((m) => ({ ...m })),
         logs: durable.logs.map((l) => ({ ...l })),
       }),
-      // Simulate commitDurableAutoStockState: meds always land, logs may fail.
       commit: (state) => {
         durable.medications = state.medications.map((m) => ({ ...m }));
         if (failLogs) {
@@ -368,11 +369,11 @@ describe('Phase 4 — crash consistency (partial meds/logs write)', () => {
 
   afterEach(() => {
     __setAutoStockGateTestHooks(null);
-    __setExactAutoEnvelopeTestHooks(null);
+    __setManualEnvelopeTestHooks(null);
     vi.useRealTimers();
   });
 
-  it('Manual Take: meds ok + logs fail → recovery → Exact Auto does not double-deduct', async () => {
+  it('Manual Take partial write → Manual recovery restores JS only → no markReconciled until real FIRED', async () => {
     failLogs = true;
     const first = await runGatedManualConsume({
       medicationId: 'med-1',
@@ -381,36 +382,51 @@ describe('Phase 4 — crash consistency (partial meds/logs write)', () => {
       todayStr: TODAY,
     });
     expect(first.outcome).toBe('persist_failed');
-    expect(envelope).not.toBeNull();
-    // Partial durable: meds have consume marker, logs still empty of take.
+    expect(manualEnvelope).not.toBeNull();
+    expect(manualEnvelope?.status).toBe('manual_js_ready');
+    // Manual envelope must not look like Exact Auto ACK payload
+    expect((manualEnvelope as { toAcknowledge?: unknown }).toAcknowledge).toBeUndefined();
     expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
     expect(durable.logs.some((l) => l.type === 'dose_taken')).toBe(false);
+    expect(marked).toEqual([]);
 
-    // Restart path: logs can write again; recover envelope then reconcile FIRED.
+    // Recovery path via Exact Auto recon: finishes Manual meds+logs, still no ACK
+    // until a real FIRED event is listed.
     failLogs = false;
-    const recon = await runAutoDeductionReconciliation({
+    marked = [];
+    const reconEmpty = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        marked.push(`${medicationId}|${doseId}|${calendarDate}`);
+        return { ok: true, changed: true };
+      },
+    });
+    expect(manualEnvelope).toBeNull();
+    expect(durable.logs.some((l) => l.type === 'dose_taken')).toBe(true);
+    expect(durable.medications[0].currentPills).toBe(9);
+    // No FIRED listed → markReconciled must not run from Manual recovery.
+    expect(marked).toEqual([]);
+    expect(reconEmpty.markedCount).toBe(0);
+
+    // Later: real native FIRED for same occurrence → already_applied + ACK that event.
+    marked = [];
+    const reconFired = await runAutoDeductionReconciliation({
       globalAutoDeductEnabled: true,
       listFired: async () => [
         fired({ doseId: 'd1', calendarDate: TODAY, amount: 1 }),
       ],
-      markReconciled: async () => ({ ok: true, changed: true }),
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        marked.push(`${medicationId}|${doseId}|${calendarDate}`);
+        return { ok: true, changed: true };
+      },
     });
-
-    // Envelope recovery restores full meds+logs; FIRED is already_applied.
-    expect(envelope).toBeNull();
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
-    expect(durable.logs.some((l) => l.type === 'dose_taken')).toBe(true);
-    // One deduction only (Take amount 1 from 10 → 9), not auto again.
+    expect(reconFired.details[0]?.outcome).toBe('already_applied');
     expect(durable.medications[0].currentPills).toBe(9);
-    if (recon.details.length > 0) {
-      expect(recon.details.every((d) => d.outcome === 'already_applied')).toBe(
-        true
-      );
-    }
+    expect(marked).toEqual([`med-1|d1|${TODAY}`]);
   });
 
-  it('Manual Restore: meds ok + logs fail → recovery → no double restore stock', async () => {
-    // Successful Take first (full durable).
+  it('Manual Restore partial write → recovery is JS-only (no native mark)', async () => {
     failLogs = false;
     const take = await runGatedManualConsume({
       medicationId: 'med-1',
@@ -421,8 +437,8 @@ describe('Phase 4 — crash consistency (partial meds/logs write)', () => {
     expect(take.outcome).toBe('applied');
     expect(durable.medications[0].currentPills).toBe(9);
 
-    // Restore with logs failure after meds write.
     failLogs = true;
+    marked = [];
     const restoreFail = await runGatedManualRestore({
       medicationId: 'med-1',
       doseId: 'd1',
@@ -430,29 +446,36 @@ describe('Phase 4 — crash consistency (partial meds/logs write)', () => {
       makeLogId: () => 'restore-crash-1',
     });
     expect(restoreFail.outcome).toBe('persist_failed');
-    expect(envelope).not.toBeNull();
-    // Meds already reflect restored stock (10); logs missing restore entry.
+    expect(manualEnvelope).not.toBeNull();
+    expect((manualEnvelope as { toAcknowledge?: unknown }).toAcknowledge).toBeUndefined();
     expect(durable.medications[0].currentPills).toBe(10);
-    expect(durable.logs.some((l) => l.id === 'restore-crash-1')).toBe(false);
+    expect(marked).toEqual([]);
 
     failLogs = false;
-    // Recovery via another gate entry (envelope finish).
     const restoreRetry = await runGatedManualRestore({
       medicationId: 'med-1',
       doseId: 'd1',
       todayStr: TODAY,
       makeLogId: () => 'restore-crash-2',
     });
-    // After envelope recovery, consume marks cleared → second restore may be
-    // auto-only path without +pills; stock must stay at 10 (not 11).
     expect(durable.medications[0].currentPills).toBe(10);
-    expect(envelope).toBeNull();
+    expect(manualEnvelope).toBeNull();
     expect(durable.logs.some((l) => l.id === 'restore-crash-1')).toBe(true);
-    // Retry must not inflate stock.
+    expect(marked).toEqual([]);
     expect(
       restoreRetry.outcome === 'applied' ||
         restoreRetry.outcome === 'rejected' ||
         restoreRetry.outcome === 'persist_failed'
     ).toBe(true);
+  });
+});
+
+describe('shouldDismissAlarmAfterManualTake', () => {
+  it('dismisses only for applied and already_consumed', () => {
+    expect(shouldDismissAlarmAfterManualTake('applied')).toBe(true);
+    expect(shouldDismissAlarmAfterManualTake('already_consumed')).toBe(true);
+    expect(shouldDismissAlarmAfterManualTake('persist_failed')).toBe(false);
+    expect(shouldDismissAlarmAfterManualTake('rejected')).toBe(false);
+    expect(shouldDismissAlarmAfterManualTake('missing_med')).toBe(false);
   });
 });

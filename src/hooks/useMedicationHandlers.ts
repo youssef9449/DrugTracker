@@ -19,6 +19,7 @@ import { settleAndAdjust, resolveRestoreDoseAmount } from '../utils/medActions';
 import {
   runGatedManualConsume,
   runGatedManualRestore,
+  shouldDismissAlarmAfterManualTake,
 } from '../utils/manualStockMutation';
 import { generateId } from '../utils/id';
 import { playSuccessChime } from '../utils/sound';
@@ -478,7 +479,11 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       } else if (result.outcome === 'already_consumed') {
         showToast(TOAST_MESSAGES.doseAlreadyTaken(med.name));
       }
-      dismissAlarm();
+      // Dismiss only when durable Take applied or occurrence already settled.
+      // persist_failed must keep the alarm so the user can retry.
+      if (shouldDismissAlarmAfterManualTake(result.outcome)) {
+        dismissAlarm();
+      }
     })();
   }, [dismissAlarm, soundEnabled]);
 

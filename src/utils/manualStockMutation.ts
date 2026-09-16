@@ -6,13 +6,13 @@
  * fresh localStorage state, applies pure medActions helpers, commits, and
  * returns the post-commit durable arrays for React to follow.
  *
- * Crash consistency (reuse Phase 3 exact-auto envelope):
- *   1. Write js_ready envelope with intended meds+logs
+ * Crash consistency — dedicated Manual JS envelope (NOT Exact Auto envelope):
+ *   1. Write manual_js_ready envelope with intended meds+logs only
  *   2. commitDurableAutoStockState (meds then logs)
- *   3. Clear envelope on full success
- * If meds succeed and logs fail (or process dies mid-way), the envelope
- * remains. Next gate entry (manual or exact reconciliation) recovers both
- * keys so markers + logs stay consistent and exact auto cannot double-deduct.
+ *   3. Clear Manual envelope on full success
+ *
+ * Manual envelope never carries native toAcknowledge. Exact Auto reconciliation
+ * alone ACKs real FIRED events after reading the native ledger.
  *
  * Idempotency vs exact auto (same occurrence = medId + doseId + calendarDate):
  * - consume: no second stock deduct if consume markers, exact-auto log, or
@@ -31,11 +31,6 @@ import {
   isExactAutoOccurrenceApplied,
   normalizeExactDoseId,
 } from './autoDeductionReconciliation';
-import {
-  defaultLoadEnvelope,
-  defaultSaveEnvelope,
-  type ExactAutoEnvelope,
-} from './runAutoDeductionReconciliation';
 import { LEGACY_DOSE_ID } from './notifications';
 import { getTodayDateString } from './dateCalculations';
 import {
@@ -43,6 +38,23 @@ import {
   commitDurableAutoStockState,
   type AutoStockDurableState,
 } from './autoDeductionStockGate';
+import { loadJson, persist } from './storage';
+
+/** Dedicated Manual recovery key — must not share Exact Auto envelope storage. */
+export const STORAGE_MANUAL_ENVELOPE_KEY =
+  'android_med_tracker_manual_stock_envelope_v1';
+
+/**
+ * JS-only recovery payload for Manual Take/Restore partial writes.
+ * Intentionally has no toAcknowledge — native markReconciled is Exact Auto only.
+ */
+export interface ManualStockEnvelope {
+  version: 1;
+  status: 'manual_js_ready';
+  medications: Medication[];
+  logs: ConsumptionLog[];
+  createdAt: string;
+}
 
 export type GatedManualOutcome =
   | 'applied'
@@ -70,6 +82,61 @@ export interface GatedManualRestoreResult {
   reason?: string;
 }
 
+/** @internal test-only */
+let testLoadManualEnvelope: (() => ManualStockEnvelope | null) | null = null;
+let testSaveManualEnvelope:
+  | ((env: ManualStockEnvelope | null) => string | null)
+  | null = null;
+
+/** @internal test-only */
+export function __setManualEnvelopeTestHooks(hooks: {
+  load?: () => ManualStockEnvelope | null;
+  save?: (env: ManualStockEnvelope | null) => string | null;
+} | null): void {
+  testLoadManualEnvelope = hooks?.load ?? null;
+  testSaveManualEnvelope = hooks?.save ?? null;
+}
+
+export function loadManualStockEnvelope(): ManualStockEnvelope | null {
+  if (testLoadManualEnvelope) return testLoadManualEnvelope();
+  const raw = loadJson<ManualStockEnvelope | null>(
+    STORAGE_MANUAL_ENVELOPE_KEY,
+    null
+  );
+  if (!raw || raw.version !== 1 || raw.status !== 'manual_js_ready') return null;
+  if (!Array.isArray(raw.medications) || !Array.isArray(raw.logs)) return null;
+  return raw;
+}
+
+export function saveManualStockEnvelope(
+  env: ManualStockEnvelope | null
+): string | null {
+  if (testSaveManualEnvelope) return testSaveManualEnvelope(env);
+  if (env == null) {
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.removeItem(STORAGE_MANUAL_ENVELOPE_KEY);
+      } catch {
+        /* ignore */
+      }
+    }
+    return null;
+  }
+  return persist(STORAGE_MANUAL_ENVELOPE_KEY, env, { json: true });
+}
+
+
+/**
+ * Alarm UI dismiss contract after Manual Take from notification/alarm:
+ * only after durable success (applied) or occurrence already settled
+ * (already_consumed). Never after persist_failed.
+ */
+export function shouldDismissAlarmAfterManualTake(
+  outcome: GatedManualOutcome
+): boolean {
+  return outcome === 'applied' || outcome === 'already_consumed';
+}
+
 function resolveConsumeDoseId(med: Medication, doseId?: string): string | undefined {
   const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
   if (doseId != null && doseId !== '') return doseId;
@@ -79,13 +146,12 @@ function resolveConsumeDoseId(med: Medication, doseId?: string): string | undefi
 }
 
 /**
- * If a prior mutation left a js_ready envelope (crash between partial
- * storage writes), finish committing meds+logs and clear the envelope.
+ * Finish a prior Manual partial write: meds+logs only. Never markReconciled.
  */
-function recoverEnvelopeInto(
+function recoverManualEnvelopeInto(
   fresh: AutoStockDurableState
 ): { ok: true; state: AutoStockDurableState } | { ok: false; state: AutoStockDurableState } {
-  const existing = defaultLoadEnvelope();
+  const existing = loadManualStockEnvelope();
   if (!existing) {
     return { ok: true, state: fresh };
   }
@@ -94,10 +160,9 @@ function recoverEnvelopeInto(
     logs: existing.logs,
   });
   if (err) {
-    // Keep envelope for a later retry; surface current durable snapshot.
     return { ok: false, state: fresh };
   }
-  defaultSaveEnvelope(null);
+  saveManualStockEnvelope(null);
   return {
     ok: true,
     state: {
@@ -108,31 +173,27 @@ function recoverEnvelopeInto(
 }
 
 /**
- * Durability sequence shared with Phase 3 exact auto:
- * envelope → meds+logs commit → clear envelope.
+ * Manual durability: envelope (JS state only) → meds+logs → clear.
+ * No native acknowledgement list.
  */
-function commitWithEnvelope(
-  state: AutoStockDurableState,
-  toAcknowledge: ExactAutoEnvelope['toAcknowledge']
-): string | null {
-  const envelope: ExactAutoEnvelope = {
+function commitWithManualEnvelope(state: AutoStockDurableState): string | null {
+  const envelope: ManualStockEnvelope = {
     version: 1,
-    status: 'js_ready',
+    status: 'manual_js_ready',
     medications: state.medications,
     logs: state.logs,
-    toAcknowledge,
     createdAt: new Date().toISOString(),
   };
-  const envErr = defaultSaveEnvelope(envelope);
+  const envErr = saveManualStockEnvelope(envelope);
   if (envErr) return envErr;
 
   const commitErr = commitDurableAutoStockState(state);
   if (commitErr) {
-    // Leave envelope so recovery can finish both keys.
+    // Leave Manual envelope so recovery can finish both keys (no native ACK).
     return commitErr;
   }
 
-  defaultSaveEnvelope(null);
+  saveManualStockEnvelope(null);
   return null;
 }
 
@@ -150,7 +211,7 @@ export function runGatedManualConsume(opts: {
   const now = opts.now ?? new Date();
 
   return withAutoStockMutationGate((freshIn: AutoStockDurableState) => {
-    const recovered = recoverEnvelopeInto(freshIn);
+    const recovered = recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
         outcome: 'persist_failed' as const,
@@ -219,21 +280,10 @@ export function runGatedManualConsume(opts: {
       m.id === med.id ? result.updatedMed! : m
     );
     const logs = [result.log, ...fresh.logs];
-    const err = commitWithEnvelope(
-      { medications, logs },
-      [
-        {
-          medicationId: med.id,
-          doseId: doseKey,
-          calendarDate: todayStr,
-        },
-      ]
-    );
+    const err = commitWithManualEnvelope({ medications, logs });
     if (err) {
       return {
         outcome: 'persist_failed' as const,
-        // Prefer post-mutation snapshot for callers that still apply UI from
-        // returned arrays only on 'applied'; durable may be partial until recovery.
         medications: fresh.medications,
         logs: fresh.logs,
         doseAmount: 0,
@@ -266,7 +316,7 @@ export function runGatedManualRestore(opts: {
   const now = opts.now ?? new Date();
 
   return withAutoStockMutationGate((freshIn: AutoStockDurableState) => {
-    const recovered = recoverEnvelopeInto(freshIn);
+    const recovered = recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
         outcome: 'persist_failed' as const,
@@ -320,17 +370,7 @@ export function runGatedManualRestore(opts: {
     };
     const logs = [log, ...fresh.logs];
 
-    const doseKey = normalizeExactDoseId(result.doseId);
-    const err = commitWithEnvelope(
-      { medications, logs },
-      [
-        {
-          medicationId: med.id,
-          doseId: doseKey,
-          calendarDate: todayStr,
-        },
-      ]
-    );
+    const err = commitWithManualEnvelope({ medications, logs });
     if (err) {
       return {
         outcome: 'persist_failed' as const,

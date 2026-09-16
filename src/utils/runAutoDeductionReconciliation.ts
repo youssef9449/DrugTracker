@@ -26,6 +26,10 @@ import {
   commitDurableAutoStockState,
   type AutoStockDurableState,
 } from './autoDeductionStockGate';
+import {
+  loadManualStockEnvelope,
+  saveManualStockEnvelope,
+} from './manualStockMutation';
 import { loadJson, persist } from './storage';
 
 const STORAGE_ENVELOPE_KEY = 'android_med_tracker_exact_auto_envelope_v1';
@@ -195,10 +199,39 @@ async function runOnce(
   const saveEnvelope = input.saveEnvelope ?? defaultSaveEnvelope;
 
   // Prefer explicit inject for tests; otherwise durable gate state.
-  const baseMeds = input.medications ?? fresh.medications;
-  const baseLogs = input.logs ?? fresh.logs;
+  let baseMeds = input.medications ?? fresh.medications;
+  let baseLogs = input.logs ?? fresh.logs;
 
-  // ── Envelope recovery (incomplete prior crash before meds/logs settle) ──
+  // ── Manual JS envelope recovery (Phase 4) — meds+logs only, never native ACK ──
+  // Manual Take/Restore may have crashed between meds and logs writes. Finish
+  // that JS durable pair here without markReconciled (Exact Auto owns native ACK).
+  if (!(input.medications || input.logs)) {
+    const manualEnv = loadManualStockEnvelope();
+    if (manualEnv) {
+      let manualWriteFailed = false;
+      if (input.persistMeds || input.persistLogs) {
+        const medErr = input.persistMeds
+          ? input.persistMeds(manualEnv.medications)
+          : null;
+        const logErr = input.persistLogs ? input.persistLogs(manualEnv.logs) : null;
+        manualWriteFailed = !!(medErr || logErr);
+      } else {
+        manualWriteFailed = !!commitDurableAutoStockState({
+          medications: manualEnv.medications,
+          logs: manualEnv.logs,
+        });
+      }
+      if (!manualWriteFailed) {
+        saveManualStockEnvelope(null);
+        baseMeds = manualEnv.medications;
+        baseLogs = manualEnv.logs;
+      }
+      // If manual write still fails, leave Manual envelope; Exact Auto path continues
+      // on whatever durable base is available (markers may already be in meds).
+    }
+  }
+
+  // ── Exact Auto envelope recovery (incomplete prior exact reconciliation) ──
   const existing = loadEnvelope();
   if (existing) {
     let writeFailed = false;

@@ -585,6 +585,164 @@ public final class AutoDeductionScheduler {
     }
 
     /**
+     * Issue #243 — recover a historical missed occurrence as durable FIRED without
+     * requiring live schedule metadata for that calendar date (unlike a real
+     * AlarmManager delivery which must match scheduleVersion ownership).
+     *
+     * <p>Under {@link #SCHEDULE_LOCK}:
+     * <ol>
+     *   <li>Reject if the occurrence is effectively cancelled</li>
+     *   <li>Reject if {@code expectedRecurrenceGeneration} is no longer active</li>
+     *   <li>Idempotently {@link AutoDeductionEventStore#insertFiredIfAbsent}</li>
+     * </ol>
+     * Does not mutate JS stock / WebView state.
+     */
+    public FireResult recoverMissedOccurrence(
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            long scheduledAtEpochMs,
+            double amount,
+            long expectedRecurrenceGeneration
+    ) {
+        if (medicationId == null || medicationId.isEmpty()
+                || doseId == null || doseId.isEmpty()
+                || !AutoDeductionContract.isValidCalendarDate(calendarDate)
+                || !AutoDeductionContract.isValidAmount(amount)) {
+            Log.w(TAG, "recoverMissedOccurrence: invalid payload");
+            return new FireResult(FireResult.Status.FAILED, false);
+        }
+        final String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
+        synchronized (SCHEDULE_LOCK) {
+            if (isOccurrenceCancelledKey(key)) {
+                Log.i(TAG, "recoverMissed: CANCELLED occurrence " + key);
+                return FireResult.cancelled();
+            }
+            if (expectedRecurrenceGeneration > 0L
+                    && !isRecurrenceGenerationAuthorizedLocked(
+                            medicationId, doseId, expectedRecurrenceGeneration)) {
+                Log.i(TAG, "recoverMissed: generation not authorized for " + key
+                        + " expectedGen=" + expectedRecurrenceGeneration);
+                return FireResult.cancelled();
+            }
+            AutoDeductionEventStore store = new AutoDeductionEventStore(appContext);
+            AutoDeductionEventStore.InsertFiredResult ir = store.insertFiredIfAbsent(
+                    medicationId, doseId, calendarDate, scheduledAtEpochMs, amount);
+            FireResult result = FireResult.fromInsert(ir);
+            Log.i(TAG, "recoverMissed: " + result.status
+                    + " pendingRecorded=" + result.pendingRecorded + " for " + key);
+            return result;
+        }
+    }
+
+    /**
+     * Issue #243 — walk calendar dates from {@code fromCalendarDate} forward with no
+     * horizon: every due occurrence is recovered as FIRED; the first not-yet-due
+     * date becomes the sole live AlarmManager schedule for this dose slot.
+     *
+     * @return number of newly {@code CREATED} FIRED events in this invocation
+     */
+    int catchUpMissedOccurrencesAndScheduleNext(
+            String medicationId,
+            String doseId,
+            String fromCalendarDate,
+            String timeHhmm,
+            double amount,
+            long expectedRecurrenceGeneration,
+            String pastPrefKey,
+            String observedVersion
+    ) {
+        if (medicationId == null || doseId == null || fromCalendarDate == null
+                || timeHhmm == null) {
+            return 0;
+        }
+        synchronized (SCHEDULE_LOCK) {
+            if (expectedRecurrenceGeneration > 0L
+                    && !isRecurrenceGenerationAuthorizedLocked(
+                            medicationId, doseId, expectedRecurrenceGeneration)) {
+                Log.i(TAG, "catchUp: generation unauthorized — dropping snapshot "
+                        + pastPrefKey);
+                removeScheduleMetadataIfVersionLocked(pastPrefKey, observedVersion);
+                return 0;
+            }
+        }
+
+        final long nowMs = System.currentTimeMillis();
+        String walkDate = fromCalendarDate;
+        int created = 0;
+        boolean preserveSnapshotForRetry = false;
+
+        while (walkDate != null) {
+            Long epoch = computeEpochMs(walkDate, timeHhmm);
+            if (epoch == null) {
+                preserveSnapshotForRetry = true;
+                break;
+            }
+            if (epoch > nowMs) {
+                // First future occurrence — install only if generation still active.
+                boolean authorized;
+                synchronized (SCHEDULE_LOCK) {
+                    authorized = expectedRecurrenceGeneration <= 0L
+                            || isRecurrenceGenerationAuthorizedLocked(
+                                    medicationId, doseId, expectedRecurrenceGeneration);
+                }
+                if (authorized) {
+                    ScheduleResult sr = scheduleOccurrence(
+                            medicationId, doseId, walkDate, timeHhmm, amount, epoch);
+                    if (!sr.ok) {
+                        Log.w(TAG, "catchUp: future schedule failed (" + sr.error
+                                + ") for " + medicationId + "/" + doseId + "/" + walkDate);
+                        preserveSnapshotForRetry = true;
+                    } else {
+                        Log.i(TAG, "catchUp: scheduled next future "
+                                + medicationId + "/" + doseId + "/" + walkDate);
+                    }
+                } else {
+                    Log.i(TAG, "catchUp: skip future schedule — generation invalidated");
+                }
+                break;
+            }
+
+            // Due: recover FIRED for this calendar date (idempotent).
+            FireResult fr = recoverMissedOccurrence(
+                    medicationId, doseId, walkDate, epoch, amount,
+                    expectedRecurrenceGeneration);
+            if (fr.isCancelled()) {
+                synchronized (SCHEDULE_LOCK) {
+                    if (expectedRecurrenceGeneration > 0L
+                            && !isRecurrenceGenerationAuthorizedLocked(
+                                    medicationId, doseId, expectedRecurrenceGeneration)) {
+                        Log.i(TAG, "catchUp: generation invalidated mid-walk — stop");
+                        removeScheduleMetadataIfVersionLocked(pastPrefKey, observedVersion);
+                        return created;
+                    }
+                }
+                // Occurrence-level cancel: skip this date, continue chain.
+                walkDate = nextCalendarDate(walkDate);
+                continue;
+            }
+            if (fr.status == FireResult.Status.CREATED) {
+                created++;
+            }
+            if (!fr.allowsRecurrence()) {
+                Log.e(TAG, "catchUp: FIRED persistence failed for "
+                        + medicationId + "/" + doseId + "/" + walkDate
+                        + " — preserving snapshot for retry");
+                preserveSnapshotForRetry = true;
+                break;
+            }
+            walkDate = nextCalendarDate(walkDate);
+        }
+
+        if (!preserveSnapshotForRetry) {
+            if (!removeScheduleMetadataIfVersion(pastPrefKey, observedVersion)) {
+                Log.i(TAG, "catchUp: past metadata already gone/replaced: " + pastPrefKey);
+            }
+        }
+        return created;
+    }
+
+    /**
      * Allocate a durable ordering token for one schedule or cancel operation.
      * Format: "{millis}-{seq}-{uuid}". Not part of occurrence identity (med/dose/date).
      * <p>
@@ -1582,25 +1740,17 @@ public final class AutoDeductionScheduler {
                     epoch = computed;
                 }
 
-                // Past occurrence: serialized fire transition (cancel-check + FIRED/pending).
-                // Only drop schedule metadata when a durable recovery source exists or
-                // cancel linearized first (stale schedule must not remain).
-                // If both main and pending writes failed, KEEP schedule metadata
-                // as the last recovery source for a later restore attempt.
+                // Issue #243: multi-day catch-up — every due occurrence from this
+                // snapshot date forward is recovered as FIRED (no horizon); the first
+                // not-yet-due date becomes the live AlarmManager schedule.
                 if (epoch <= System.currentTimeMillis()) {
                     long snapGen = o.optLong(FIELD_RECURRENCE_GENERATION, 0L);
-                    FireResult fr = fireOccurrenceIfNotCancelled(
-                            medId, doseId, date, epoch, amount, observedVersion, snapGen);
-                    if (fr.isCancelled()) {
-                        Log.i(TAG, "restore skip (cancelled): " + medId + "/" + doseId + "/" + date);
-                    } else if (fr.allowsRecurrence()) {
-                        Log.i(TAG, "restore past: durable fire for "
-                                + medId + "/" + doseId + "/" + date
-                                + " status=" + fr.status
-                                + " pendingRecorded=" + fr.pendingRecorded);
+                    int n = catchUpMissedOccurrencesAndScheduleNext(
+                            medId, doseId, date, time, amount, snapGen,
+                            prefKey, observedVersion);
+                    if (n > 0) {
+                        restored += n;
                     }
-                    continueRecurrenceAfterPastRecovery(
-                            medId, doseId, date, time, amount, fr, prefKey, observedVersion);
                     continue;
                 }
 
@@ -1634,13 +1784,14 @@ public final class AutoDeductionScheduler {
                     continue;
                 }
                 if (recomputed <= System.currentTimeMillis()) {
-                    // After TZ change this occurrence is now in the past: serialized
-                    // promote + recurrence continuation.
+                    // After TZ change this occurrence is now in the past: multi-day catch-up.
                     long snapGenTz = o.optLong(FIELD_RECURRENCE_GENERATION, 0L);
-                    FireResult fr = fireOccurrenceIfNotCancelled(
-                            medId, doseId, date, recomputed, amount, observedVersion, snapGenTz);
-                    continueRecurrenceAfterPastRecovery(
-                            medId, doseId, date, time, amount, fr, prefKey, observedVersion);
+                    int n = catchUpMissedOccurrencesAndScheduleNext(
+                            medId, doseId, date, time, amount, snapGenTz,
+                            prefKey, observedVersion);
+                    if (n > 0) {
+                        restored += n;
+                    }
                     continue;
                 }
                 epoch = recomputed;

@@ -687,7 +687,7 @@ public final class AutoDeductionScheduler {
     ) {
         if (medicationId == null || doseId == null || fromCalendarDate == null
                 || timeHhmm == null) {
-            return 0;
+            return new CatchUpResult(0, false);
         }
         synchronized (SCHEDULE_LOCK) {
             if (!isRecurrenceGenerationAuthorizedLocked(

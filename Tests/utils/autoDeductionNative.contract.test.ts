@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import type {
   CancelOccurrenceResult,
   CancelOccurrenceStatus,
+  ListScheduledOccurrencesResult,
   ScheduleOccurrenceResult,
 } from '../../src/utils/autoDeductionNative';
 
@@ -50,5 +51,23 @@ describe('ScheduleOccurrenceResult contract', () => {
   it('failure carries error', () => {
     const r: ScheduleOccurrenceResult = { ok: false, error: 'trigger_in_past' };
     expect(r.ok).toBe(false);
+  });
+});
+
+describe('ListScheduledOccurrencesResult contract (Issue #242)', () => {
+  it('success empty is ok with empty schedules', () => {
+    const r: ListScheduledOccurrencesResult = { ok: true, schedules: [] };
+    expect(r.ok).toBe(true);
+    expect(r.schedules).toHaveLength(0);
+  });
+
+  it('failure is not ok and carries error', () => {
+    const r: ListScheduledOccurrencesResult = {
+      ok: false,
+      schedules: [],
+      error: 'list_schedules_failed',
+    };
+    expect(r.ok).toBe(false);
+    expect(r.error).toBeTruthy();
   });
 });

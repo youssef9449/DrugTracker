@@ -7,10 +7,13 @@ import { useDoseReminderScheduler, getDoseReminderSlots } from '@/hooks/useDoseR
 import {
   LEGACY_DOSE_ID,
   doseReminderAlarmIdForDose,
+  doseReminderAlarmId,
 } from '@/utils/notifications';
+import { Capacitor } from '@capacitor/core';
+import { LocalNotifications } from '@capacitor/local-notifications';
 
 vi.mock('@capacitor/core', () => ({
-  Capacitor: { getPlatform: () => 'web' },
+  Capacitor: { getPlatform: vi.fn(() => 'web') },
 }));
 vi.mock('@capacitor/local-notifications', () => ({
   LocalNotifications: {
@@ -18,6 +21,7 @@ vi.mock('@capacitor/local-notifications', () => ({
     cancel: vi.fn(),
     checkPermissions: vi.fn(),
     checkExactNotificationSetting: vi.fn(),
+    getPending: vi.fn(),
   },
 }));
 
@@ -41,7 +45,8 @@ vi.mock('@/utils/notifications', async () => {
     cancelSnoozedDoseReminder: mocks.cancelSnoozed,
     isDoseReminderPending: mocks.isPending,
     cancelLegacyDoseReminderAlarm: mocks.cancelLegacy,
-    cancelStaleDoseReminderAlarms: mocks.cancelStale,
+    // cancelStaleDoseReminderAlarms: NOT mocked — real implementation runs
+    // so the test can verify actual IDs sent to LocalNotifications.cancel.
   };
 });
 
@@ -88,7 +93,8 @@ beforeEach(() => {
   mocks.schedule.mockResolvedValue(undefined);
   mocks.isPending.mockResolvedValue(false);
   mocks.cancelLegacy.mockResolvedValue(undefined);
-  mocks.cancelStale.mockResolvedValue(undefined);
+  // Default: no pending notifications (web platform / no stale alarms).
+  LocalNotifications.getPending.mockResolvedValue({ notifications: [] });
   localStorage.clear();
 });
 
@@ -1615,13 +1621,86 @@ describe('idempotent lifecycle reconciliation', () => {
 
 describe('stale native pending cleanup', () => {
   it('cancels stale dose alarms from native pending on reconcile', async () => {
-    const med = makeMed({ reminderTime: '09:00' });
+    // Use native platform so cancelStaleDoseReminderAlarms exercises the
+    // real getPending + cancel path (not just a spy).
+    vi.mocked(Capacitor.getPlatform).mockReturnValue('android');
+
+    const med = makeMed({
+      reminderTime: '09:00',
+      doseSchedule: [{ id: 'd1', amount: 1, time: '09:00' }],
+      dosesPerDay: 1,
+    });
+
+    const currentId = doseReminderAlarmIdForDose(med.id, 'd1');
+    const staleDoseId = doseReminderAlarmIdForDose('med-stale', 'd-old');
+    const legacyMedId = doseReminderAlarmId(med.id);
+    const nonDoseAlarmId = 999_999_999; // outside doseAlarm band
+
+    // Mock getPending to contain current + stale + legacy + non-doseAlarm IDs.
+    LocalNotifications.getPending.mockResolvedValue({
+      notifications: [
+        { id: currentId },
+        { id: staleDoseId },
+        { id: legacyMedId },
+        { id: nonDoseAlarmId },
+      ],
+    });
+
     renderHook(() =>
       useDoseReminderScheduler(defaultOpts({ medications: [med] }))
     );
     await vi.advanceTimersByTimeAsync(0);
     await Promise.resolve();
     await Promise.resolve();
-    expect(mocks.cancelStale).toHaveBeenCalled();
+
+    // Verify actual IDs sent to cancel: stale + legacy cancelled,
+    // current + non-doseAlarm NOT cancelled.
+    expect(LocalNotifications.cancel).toHaveBeenCalled();
+    const cancelledIds = LocalNotifications.cancel.mock.calls.flatMap(
+      (call: unknown[]) =>
+        (call[0] as { notifications: { id: number }[] }).notifications.map(
+          (n) => n.id
+        )
+    );
+    expect(cancelledIds).toContain(staleDoseId);
+    expect(cancelledIds).toContain(legacyMedId);
+    expect(cancelledIds).not.toContain(currentId);
+    expect(cancelledIds).not.toContain(nonDoseAlarmId);
+  });
+});
+
+describe('delivery/reconciliation race', () => {
+  it('does not re-schedule when time is still ahead and pending is briefly empty (delivery transition)', async () => {
+    // Simulate delivery transition: isDoseReminderPending returns false
+    // (native AlarmManager fired, rescheduleDoseReminderNextDay is re-arming
+    // tomorrow via raw AlarmManager — not reflected in Capacitor getPending).
+    // The reminder time (23:00) is still ahead of now (12:00 UTC).
+    // JS must NOT re-schedule — would create a duplicate TODAY alarm.
+    mocks.isPending.mockResolvedValue(false);
+    const med = makeMed({
+      reminderTime: '23:00',
+      doseSchedule: [{ id: 'd1', amount: 1, time: '23:00' }],
+      dosesPerDay: 1,
+    });
+
+    // First render: signature changes (empty → sig) → schedules.
+    const { rerender } = renderHook(() =>
+      useDoseReminderScheduler(defaultOpts({ medications: [med] }))
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.schedule).toHaveBeenCalled();
+    mocks.schedule.mockClear();
+
+    // Second render: same signature (prevSig === sig), pending = false,
+    // time (23:00) is still ahead → should NOT re-schedule.
+    rerender(defaultOpts({ medications: [med], resumeTick: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    // scheduleDoseReminder must NOT have been called — delivery guard
+    // (isDoseReminderTimeStillAhead) prevents duplicate today alarm.
+    expect(mocks.schedule).not.toHaveBeenCalled();
   });
 });

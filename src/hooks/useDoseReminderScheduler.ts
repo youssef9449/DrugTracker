@@ -341,6 +341,16 @@ export function useDoseReminderScheduler({
           const pending = await isDoseReminderPending(medId, doseId);
           if (doseGenerationRef.current.get(key) !== gen) return;
           if (pending) return;
+          // If today's reminder time is still ahead, the alarm should be pending.
+          // getPending() returning false means the dose is likely in delivery
+          // transition (native TimedNotificationPublisher is re-arming tomorrow
+          // via raw AlarmManager — not reflected in Capacitor getPending()).
+          // Re-scheduling now risks creating a duplicate TODAY alarm
+          // (FLAG_CANCEL_CURRENT would replace the native tomorrow alarm).
+          // Skip — the next reconciliation will see the alarm once native
+          // re-arms it. If the time has passed, scheduleDoseReminder will
+          // schedule for tomorrow (today's time elapsed) — safe to proceed.
+          if (isDoseReminderTimeStillAhead(time)) return;
           const opts = {
             ...(doseId !== LEGACY_DOSE_ID ? { doseId } : {}),
             ...(slotConsumedToday ? { skipToday: true as const } : {}),

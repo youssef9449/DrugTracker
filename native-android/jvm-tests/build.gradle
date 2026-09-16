@@ -14,7 +14,8 @@ repositories {
 
 /**
  * Compile against the real production Phase 2 sources under
- * native-android/auto-deduction (excluding Capacitor Plugin bridge).
+ * native-android/auto-deduction (excluding Capacitor Plugin bridge)
+ * and DoseReminderRecurrenceStore (dose delivery/re-arm evidence).
  * Sources are synced into the standard package path before compile so
  * tests always exercise the repository's Java implementation, not a copy.
  */
@@ -29,11 +30,20 @@ def productionSources = fileTree("../auto-deduction") {
     )
 }
 
+def doseRecurrenceSource = file("../capacitor-local-notifications/DoseReminderRecurrenceStore.java")
+
 def syncedMain = layout.buildDirectory.dir("synced-main/app/drugtracker/autodeduction")
+def syncedDoseRecurrence = layout.buildDirectory.dir(
+        "synced-main/com/capacitorjs/plugins/localnotifications")
 
 tasks.register("syncProductionSources", Copy) {
     from productionSources
     into syncedMain
+}
+
+tasks.register("syncDoseRecurrenceStore", Copy) {
+    from doseRecurrenceSource
+    into syncedDoseRecurrence
 }
 
 sourceSets {
@@ -44,8 +54,12 @@ sourceSets {
     }
 }
 
-tasks.named("compileJava").configure { dependsOn("syncProductionSources") }
-tasks.named("processResources").configure { dependsOn("syncProductionSources") }
+tasks.named("compileJava").configure {
+    dependsOn("syncProductionSources", "syncDoseRecurrenceStore")
+}
+tasks.named("processResources").configure {
+    dependsOn("syncProductionSources", "syncDoseRecurrenceStore")
+}
 
 configurations {
     /**

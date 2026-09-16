@@ -26,11 +26,13 @@ import java.util.Locale;
  *
  * Recurrence architecture (Capacitor 6.1.3 LocalNotificationManager):
  * - schedule.at + repeats:true → AlarmManager.setRepeating with interval
- *   (at - now) — NOT safe for daily dose times (wrong interval).
+ *   (at - now) — NOT used for dose reminders (wrong interval).
  * - schedule.on (DateMatch) → CRON_KEY + setExact; next via rescheduleNotificationIfNeeded.
- * - DrugTracker dose path: JS schedules a ONE-SHOT {@code at} (no repeats).
- *   This class creates the next day's exact alarm from extra.reminderTime.
- *   That is the only recurrence path for dose reminders.
+ * - DrugTracker dose path: JS schedules a ONE-SHOT LocalNotifications.schedule {@code at}
+ *   (no repeats). This class creates the next calendar-day exact alarm from
+ *   extra.reminderTime and persists delivery/re-arm evidence in
+ *   {@link DoseReminderRecurrenceStore} (medicationId+doseId). That is the only
+ *   recurrence path for dose reminders.
  *
  * Channel rewrite (AppForegroundState) is independent of recurrence.
  * Installed by scripts/prepare-android.mjs (whole-file copy).
@@ -198,6 +200,10 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
      * Requires notification JSON extra:
      *   doseRecurring: true
      *   reminderTime: "HH:MM"
+     *   medicationId (optional doseId for multi-dose identity)
+     *
+     * After successful AlarmManager.set*: writes NotificationStorage schedule.at
+     * and {@link DoseReminderRecurrenceStore} for medicationId+doseId.
      */
     boolean rescheduleDoseReminderNextDay(
             Context context,
@@ -227,6 +233,16 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
                 return false;
             }
 
+            String medicationId = extra.getString("medicationId");
+            String doseId = null;
+            try {
+                if (extra.has("doseId")) {
+                    doseId = extra.getString("doseId");
+                }
+            } catch (Exception ignored) {
+                // optional doseId for multi-dose identity
+            }
+
             Calendar cal = Calendar.getInstance();
             cal.add(Calendar.DAY_OF_MONTH, 1);
             cal.set(Calendar.HOUR_OF_DAY, hour);
@@ -245,6 +261,7 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
                 flags = flags | PendingIntent.FLAG_MUTABLE;
             }
             PendingIntent pendingIntent = PendingIntent.getBroadcast(context, id, clone, flags);
+            // AlarmManager first — never persist delivery/re-arm state before success.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
                 Logger.warn(
                     "Capacitor/LocalNotification",
@@ -262,12 +279,17 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
                 "dose reminder " + id + " next day at " + sdf.format(new Date(trigger))
             );
             // Persist next `schedule.at` into Capacitor NotificationStorage so
-            // JS getPending() sees a future occurrence (delivery evidence), not
-            // a missing alarm. Same id → single pending entry.
+            // JS getPending() can see a future occurrence when the store is readable.
             persistDoseReminderNextAt(context, id, notificationJson, trigger);
+            // Authoritative delivery/re-arm evidence keyed by medicationId+doseId
+            // (survives process death; independent of getPending race windows).
+            if (medicationId != null && !medicationId.isEmpty()) {
+                DoseReminderRecurrenceStore.markReArmed(context, medicationId, doseId, trigger);
+            }
             return true;
         } catch (Exception e) {
             Logger.error(Logger.tags("LN"), "dose next-day reschedule failed", e);
+            // No markReArmed on failure — JS must detect missing alarm and repair.
             return false;
         }
     }

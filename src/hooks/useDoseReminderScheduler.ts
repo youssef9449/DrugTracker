@@ -7,7 +7,10 @@ import {
   cancelSnoozedDoseReminder,
   cancelLegacyDoseReminderAlarm,
   isDoseReminderPending,
+  isNativeDoseReminderReArmed,
   isDoseReminderTimeStillAhead,
+  doseReminderAlarmIdForDose,
+  cancelStaleDoseReminderAlarms,
   LEGACY_DOSE_ID,
 } from '../utils/notifications';
 import { clearSnoozedDose } from '../utils/doseReminderStorage';
@@ -151,8 +154,10 @@ export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
  * Lifecycle / hydration / resume re-runs are idempotent: unchanged dose
  * signatures with a still-pending native id are left untouched. Daily
  * recurrence after delivery is owned only by TimedNotificationPublisher
- * (next calendar day from extra.reminderTime). Stale native pending ids
- * (process death) are cancelled via getPending() against the desired set.
+ * (initial one-shot LocalNotifications.schedule + next calendar-day arm
+ * from extra.reminderTime; evidence in DoseReminderRecurrenceStore).
+ * Stale native pending ids (process death) are cancelled via getPending()
+ * against the desired set.
  */
 export function useDoseReminderScheduler({
   medications,
@@ -335,17 +340,19 @@ export function useDoseReminderScheduler({
         const gen = bumpGen(key);
         enqueue(key, async () => {
           if (doseGenerationRef.current.get(key) !== gen) return;
-          // During delivery, pending may be briefly empty while native arms
-          // tomorrow. Scheduling with the same stable id uses CANCEL_CURRENT
-          // so at most one alarm remains — never a second recurrence path.
-          // Valid future occurrence in plugin store → no-op.
-          // Missing / past-stale entry → repair with one scheduleDoseReminder
-          // (same stable id). After native delivery, TimedNotificationPublisher
-          // persists next-day schedule.at so isDoseReminderPending is true and
-          // we do not double-schedule.
+          // Reconciliation when signature is unchanged:
+          //   A) pending=true → no-op
+          //   B) pending=false + valid native re-arm (DoseReminderRecurrenceStore)
+          //      → no-op (delivery transition; TimedNotificationPublisher owns next day)
+          //   C) pending=false + no valid re-arm evidence → one repair schedule
+          //   D) expired/invalid re-arm → treated as absent (repair)
+          // Do not use wall-clock / isDoseReminderTimeStillAhead as delivery proxy.
           const pending = await isDoseReminderPending(medId, doseId);
           if (doseGenerationRef.current.get(key) !== gen) return;
           if (pending) return;
+          const nativeReArmed = await isNativeDoseReminderReArmed(medId, doseId);
+          if (doseGenerationRef.current.get(key) !== gen) return;
+          if (nativeReArmed) return;
           const opts = {
             ...(doseId !== LEGACY_DOSE_ID ? { doseId } : {}),
             ...(slotConsumedToday ? { skipToday: true as const } : {}),

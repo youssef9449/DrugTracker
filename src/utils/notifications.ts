@@ -35,12 +35,30 @@
  *    settings page where they can re-enable notifications.
  */
 
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import {
   NOTIFICATION_IMMEDIATE_OFFSET_MS,
   SW_READY_TIMEOUT_MS,
 } from './time';
+
+/**
+ * Native bridge for durable dose-reminder next-day re-arm evidence
+ * (TimedNotificationPublisher → DoseReminderRecurrenceStore).
+ * Web / missing plugin: query helpers no-op as invalid.
+ */
+interface DoseReminderNativePlugin {
+  getNextOccurrence(options: {
+    medicationId: string;
+    doseId?: string;
+  }): Promise<{ valid: boolean; nextOccurrenceMs: number }>;
+  clearReArm(options: {
+    medicationId: string;
+    doseId?: string;
+  }): Promise<{ ok: boolean }>;
+}
+
+const DoseReminderNative = registerPlugin<DoseReminderNativePlugin>('DoseReminder');
 
 /**
  * The BACKGROUND/KILLED dose-reminder notification channel.
@@ -1023,11 +1041,11 @@ export function doseReminderAlarmIdForDose(medId: string, doseId: string): numbe
  * True when a valid *future* dose-reminder occurrence is recorded for this
  * stable id in the plugin pending store.
  *
- * After delivery, TimedNotificationPublisher persists the next-day
- * schedule.at into NotificationStorage before returning — so a successful
- * native re-arm is visible here as a future `at`. A missing entry or an
- * entry whose `at` is already past means the alarm is not armed and JS may
- * repair with one scheduleDoseReminder (same id replaces, does not stack).
+ * After delivery, TimedNotificationPublisher also writes
+ * {@link isNativeDoseReminderReArmed} evidence keyed by medicationId+doseId.
+ * Prefer checking both during reconciliation: pending alone can lag during
+ * the delivery transition while the native next-day AlarmManager arm is
+ * already durable in DoseReminderRecurrenceStore.
  *
  * Recurrence owner remains TimedNotificationPublisher (next calendar day).
  * JS must not use Capacitor repeats/every.
@@ -1059,6 +1077,50 @@ export async function isDoseReminderPending(
   } catch (err) {
     console.warn('[notifications] isDoseReminderPending failed:', err);
     return false;
+  }
+}
+
+/**
+ * True when native TimedNotificationPublisher has persisted a valid
+ * next-occurrence re-arm for this medicationId + doseId in
+ * DoseReminderRecurrenceStore (SharedPreferences). Independent of
+ * getPending() / React memory. Expired or absent → false.
+ */
+export async function isNativeDoseReminderReArmed(
+  medId: string,
+  doseId: string = LEGACY_DOSE_ID
+): Promise<boolean> {
+  if (!isNativePlatform()) return false;
+  try {
+    const opts =
+      doseId && doseId !== LEGACY_DOSE_ID
+        ? { medicationId: medId, doseId }
+        : { medicationId: medId };
+    const result = await DoseReminderNative.getNextOccurrence(opts);
+    return result?.valid === true;
+  } catch (err) {
+    console.warn('[notifications] isNativeDoseReminderReArmed failed:', err);
+    return false;
+  }
+}
+
+/**
+ * Clear native re-arm evidence for a dose slot (cancel / signature change).
+ * Idempotent. Web no-op.
+ */
+export async function clearNativeDoseReminderReArm(
+  medId: string,
+  doseId: string = LEGACY_DOSE_ID
+): Promise<void> {
+  if (!isNativePlatform()) return;
+  try {
+    const opts =
+      doseId && doseId !== LEGACY_DOSE_ID
+        ? { medicationId: medId, doseId }
+        : { medicationId: medId };
+    await DoseReminderNative.clearReArm(opts);
+  } catch (err) {
+    console.warn('[notifications] clearNativeDoseReminderReArm failed:', err);
   }
 }
 
@@ -1144,6 +1206,8 @@ export async function cancelDoseReminder(medId: string, doseId?: string): Promis
     await LocalNotifications.cancel({
       notifications: [{ id }],
     });
+    // Drop delivery/re-arm evidence so a later missing-alarm check can repair.
+    await clearNativeDoseReminderReArm(medId, doseId ?? LEGACY_DOSE_ID);
   } catch (err) {
     console.warn('[notifications] cancelDoseReminder failed:', err);
   }
@@ -1366,11 +1430,12 @@ export async function scheduleDoseReminder(
       if (perm.display !== 'granted') {
         throw new Error('Notification permission is required for dose reminders');
       }
-      // Capacitor 6.1.3: at+repeats:true uses AlarmManager.setRepeating with
-      // interval=(at-now) — NOT daily. Dose reminders schedule a ONE-SHOT `at`.
-      // TimedNotificationPublisher.rescheduleDoseReminderNextDay is the sole
-      // recurrence owner (next calendar day at reminderTime). Same stable id
-      // means concurrent JS schedule replaces rather than duplicates.
+      // Dose path: initial ONE-SHOT LocalNotifications.schedule (`at`, no
+      // repeats). Capacitor at+repeats:true uses setRepeating with a wrong
+      // interval for daily wall-clock times — not used. Sole recurrence owner:
+      // TimedNotificationPublisher.rescheduleDoseReminderNextDay (next calendar
+      // day) + DoseReminderRecurrenceStore evidence. Same stable id means
+      // concurrent JS schedule replaces rather than duplicates.
       await LocalNotifications.schedule({
         notifications: [
           {

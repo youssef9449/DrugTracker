@@ -6,11 +6,24 @@
 
 | File | Role |
 |------|------|
-| `TimedNotificationPublisher.java` | Capacitor 6.1.3 receiver + delivery-time channel selection |
+| `TimedNotificationPublisher.java` | Capacitor 6.1.3 receiver + delivery-time channel selection + next-day dose re-arm |
 | `AppForegroundState.java` | Process-local `volatile` foreground flag (default `false`) |
+| `DoseReminderRecurrenceStore.java` | Durable medicationId+doseId next-occurrence evidence after successful AlarmManager re-arm |
 
 App lifecycle wiring lives in `native-android/app/MainActivity.java`
-(`onResume` → true, `onPause` → false).
+(`onResume` → true, `onPause` → false). Query bridge: `DoseReminderPlugin`
+(`native-android/dose-reminder/`).
+
+## Dose recurrence
+
+```text
+JS → initial ONE-SHOT LocalNotifications.schedule (no repeats)
+TimedNotificationPublisher → next calendar-day AlarmManager arm
+DoseReminderRecurrenceStore → persist next occurrence (after AlarmManager success only)
+```
+
+JS reconciliation must not treat `getPending() === false` alone as “needs repair”
+during delivery: check `isNativeDoseReminderReArmed` (this store) as well.
 
 ## Behavior
 
@@ -36,8 +49,10 @@ node_modules/@capacitor/local-notifications/android/src/main/java/
   com/capacitorjs/plugins/localnotifications/
     TimedNotificationPublisher.java
     AppForegroundState.java
+    DoseReminderRecurrenceStore.java
 
 android/app/src/main/java/app/drugtracker/MainActivity.java
+android/app/src/main/java/app/drugtracker/dosereminder/DoseReminderPlugin.java
 ```
 
 Fails hard if destinations are missing. No string/regex patching.
@@ -46,4 +61,4 @@ Fails hard if destinations are missing. No string/regex patching.
 
 When changing the pinned Capacitor Local Notifications version, re-diff
 `TimedNotificationPublisher.java` against that exact upstream release and
-re-apply only the minimal DrugTracker channel logic.
+re-apply only the minimal DrugTracker channel + dose recurrence logic.

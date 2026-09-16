@@ -156,16 +156,29 @@ afterEach(() => {
 
 describe('doseId propagation — production callers (integration)', () => {
   it('MedicationCard Take targets exact next doseId (d2 after d1 auto-elapsed) via App → consumeDose', async () => {
-    // 13:00 → d1 (08:00) auto-completed; Card Take should be d2 amount 2 (14:00 still ahead)
-    seed(makeMulti({ currentPills: 30 }));
+    // Multi-dose card surfaces the unified manage-doses control; the user
+    // explicitly picks d2 in the modal. Auto-deduction is OFF so each future
+    // slot stays manually takeable (auto ON would hide future-slot Take).
+    seed(makeMulti({ currentPills: 30, autoDeductEnabled: false }));
     render(<App />);
 
     await waitFor(() => {
       expect(screen.getByText('Drug Multi')).toBeInTheDocument();
     });
 
-    const takeBtn = screen.getByTitle(/تناول جرعة \(-2\)/);
-    fireEvent.click(takeBtn);
+    fireEvent.click(screen.getByTestId('manage-doses-med-multi'));
+    await waitFor(() => {
+      expect(screen.getByText(/إدارة الجرعات|اختر الإجراء المناسب/)).toBeInTheDocument();
+    });
+    const takeBtn = screen
+      .getAllByRole('button')
+      .find(
+        (b) =>
+          b.getAttribute('data-dose-id') === 'd2' &&
+          b.getAttribute('data-dose-action') === 'take'
+      );
+    expect(takeBtn).toBeTruthy();
+    fireEvent.click(takeBtn!);
 
     const today = getTodayDateString();
     await waitFor(() => {
@@ -176,9 +189,9 @@ describe('doseId propagation — production callers (integration)', () => {
     const med = readMeds().find((m) => m.id === 'med-multi')!;
     expect(med.doseConsumption?.d1).toBeUndefined();
     expect(med.doseConsumption?.d3).toBeUndefined();
-    // Snapshot reduced by d2.amount (2) only; d1 still projects as auto-due → 27
+    // Auto OFF → no projection; snapshot reduced by d2.amount (2) only → 28.
     expect(med.currentPills).toBe(28);
-    expect(effectiveCurrentPills(med)).toBe(27);
+    expect(effectiveCurrentPills(med)).toBe(28);
 
     const doseLog = readLogs().find(
       (l) => l.type === 'dose_taken' && l.medicationId === 'med-multi'
@@ -188,10 +201,12 @@ describe('doseId propagation — production callers (integration)', () => {
   });
 
   it('SelectDoseModal selecting d2 from disordered schedule consumes only d2', async () => {
-    // Array order is NOT chronological — identity must be dose.id, not index
+    // Array order is NOT chronological — identity must be dose.id, not index.
+    // Auto OFF so each slot stays manually takeable in manage mode.
     seed(
       makeMulti({
         currentPills: 30,
+        autoDeductEnabled: false,
         doseSchedule: [
           { id: 'd3', amount: 1, time: '20:00' },
           { id: 'd1', amount: 1, time: '08:00' },
@@ -207,7 +222,7 @@ describe('doseId propagation — production callers (integration)', () => {
 
     fireEvent.click(screen.getByTestId('consume-no-doseid-med-multi'));
     await waitFor(() => {
-      expect(screen.getByText(/اختر الجرعة التي تناولتها/)).toBeInTheDocument();
+      expect(screen.getByText(/اختر الإجراء المناسب لكل جرعة|إدارة الجرعات/)).toBeInTheDocument();
     });
 
     // Opening selector must not mutate
@@ -234,8 +249,8 @@ describe('doseId propagation — production callers (integration)', () => {
     expect(med.doseConsumption?.d1).toBeUndefined();
     expect(med.doseConsumption?.d3).toBeUndefined();
     expect(med.currentPills).toBe(28);
-    // d1 (08:00) still auto-due projected
-    expect(effectiveCurrentPills(med)).toBe(27);
+    // Auto OFF → no projection; effective == snapshot.
+    expect(effectiveCurrentPills(med)).toBe(28);
 
     const doseLog = readLogs().find((l) => l.type === 'dose_taken');
     expect(doseLog?.doseId).toBe('d2');
@@ -243,6 +258,9 @@ describe('doseId propagation — production callers (integration)', () => {
   });
 
   it('missing doseId opens SelectDoseModal and mutates nothing until selection', async () => {
+    // Auto ON keeps the auto-projection path (snapshot 30, effective 29)
+    // so this test still asserts that opening the manage modal never
+    // mutates storage until the user picks a dose.
     seed(makeMulti({ currentPills: 30 }));
     render(<App />);
     await waitFor(() => {
@@ -251,7 +269,7 @@ describe('doseId propagation — production callers (integration)', () => {
 
     fireEvent.click(screen.getByTestId('consume-no-doseid-med-multi'));
     await waitFor(() => {
-      expect(screen.getByText(/اختر الجرعة التي تناولتها/)).toBeInTheDocument();
+      expect(screen.getByText(/اختر الإجراء المناسب لكل جرعة|إدارة الجرعات/)).toBeInTheDocument();
     });
 
     const med = readMeds()[0]!;
@@ -264,7 +282,10 @@ describe('doseId propagation — production callers (integration)', () => {
   });
 
   it('alarm path for d2 → DoseAlarmModal → consumeDose only d2', async () => {
-    seed(makeMulti({ currentPills: 30 }));
+    // Auto OFF is required for the dose-received handler to open the alarm
+    // (production guard in useNativeActionHandlers: auto ON → early return,
+    // no alarm). Snapshot reflects the manual deduction only.
+    seed(makeMulti({ currentPills: 30, autoDeductEnabled: false }));
     render(<App />);
     await waitFor(() => {
       expect(screen.getByText('Drug Multi')).toBeInTheDocument();
@@ -289,7 +310,8 @@ describe('doseId propagation — production callers (integration)', () => {
     expect(med.doseConsumption?.d1).toBeUndefined();
     expect(med.doseConsumption?.d3).toBeUndefined();
     expect(med.currentPills).toBe(28);
-    expect(effectiveCurrentPills(med)).toBe(27);
+    // Auto OFF → effective == snapshot, no projection.
+    expect(effectiveCurrentPills(med)).toBe(28);
 
     const doseLog = readLogs().find((l) => l.type === 'dose_taken');
     expect(doseLog?.doseId).toBe('d2');
@@ -297,16 +319,31 @@ describe('doseId propagation — production callers (integration)', () => {
   });
 
   it('Card Take d1 then Restore d1 leaves d2/d3 untouched', async () => {
-    // Morning: d1 is the Take target
+    // Morning: d1 is the Take target. Auto OFF keeps every slot manually
+    // takeable in the unified manage modal; the modal stays open after
+    // Take so the same dose row re-renders with a Restore action.
     vi.setSystemTime(new Date('2024-09-10T07:00:00'));
-    seed(makeMulti({ currentPills: 30 }));
+    seed(makeMulti({ currentPills: 30, autoDeductEnabled: false }));
     render(<App />);
 
     await waitFor(() => {
       expect(screen.getByText('Drug Multi')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByTitle(/تناول جرعة \(-1\)/));
+    // Multi-dose card surfaces manage-doses → manage modal → d1 take action.
+    fireEvent.click(screen.getByTestId('manage-doses-med-multi'));
+    await waitFor(() => {
+      expect(screen.getByText(/إدارة الجرعات|اختر الإجراء المناسب/)).toBeInTheDocument();
+    });
+    const d1TakeBtn = screen
+      .getAllByRole('button')
+      .find(
+        (b) =>
+          b.getAttribute('data-dose-id') === 'd1' &&
+          b.getAttribute('data-dose-action') === 'take'
+      );
+    expect(d1TakeBtn).toBeTruthy();
+    fireEvent.click(d1TakeBtn!);
 
     const today = getTodayDateString();
     await waitFor(() => {
@@ -314,19 +351,25 @@ describe('doseId propagation — production callers (integration)', () => {
     });
     expect(readLogs().find((l) => l.type === 'dose_taken')?.doseId).toBe('d1');
 
+    // Modal stays open in manage mode; after Take, d1 row shows Restore.
     await waitFor(() => {
-      expect(screen.getByTitle(/استرجاع الجرعة \(\+1\)/)).toBeInTheDocument();
-    });
-    // Multi-dose Restore opens SelectDoseModal — pick d1 explicitly.
-    fireEvent.click(screen.getByTitle(/استرجاع الجرعة \(\+1\)/));
-    await waitFor(() => {
-      expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
+      const btn = screen
+        .getAllByRole('button')
+        .find(
+          (b) =>
+            b.getAttribute('data-dose-id') === 'd1' &&
+            b.getAttribute('data-dose-action') === 'restore'
+        );
+      expect(btn).toBeTruthy();
     });
     const d1RestoreBtn = screen
       .getAllByRole('button')
-      .find((b) => b.getAttribute('data-dose-id') === 'd1');
-    expect(d1RestoreBtn).toBeTruthy();
-    fireEvent.click(d1RestoreBtn!);
+      .find(
+        (b) =>
+          b.getAttribute('data-dose-id') === 'd1' &&
+          b.getAttribute('data-dose-action') === 'restore'
+      )!;
+    fireEvent.click(d1RestoreBtn);
 
     await waitFor(() => {
       const med = readMeds()[0]!;
@@ -418,10 +461,16 @@ describe('doseId propagation — production callers (integration)', () => {
   });
 
   it('auto-due d1 + In-App DoseAlarm Take: one deduction; duplicate notification does not reopen modal; d2 untouched', async () => {
+    // Auto OFF is required for the in-app dose-received handler to open the
+    // alarm (production guard: auto ON → early return). Without projection,
+    // snapshot and effective are equal — the test still asserts the alarm
+    // path produces a single deduction and a duplicate notification does not
+    // reopen the modal.
     vi.setSystemTime(new Date('2024-09-10T09:00:00'));
     seed(
       makeMulti({
         currentPills: 30,
+        autoDeductEnabled: false,
         doseSchedule: [
           { id: 'd1', amount: 1, time: '08:00' },
           { id: 'd2', amount: 2, time: '20:00' },
@@ -436,9 +485,9 @@ describe('doseId propagation — production callers (integration)', () => {
     });
 
     expect(doseReceivedHandler).toBeTypeOf('function');
-    // Pre: projection path (snapshot 30, effective 29)
+    // Pre: Auto OFF → no projection (snapshot 30, effective 30).
     expect(readMeds()[0]!.currentPills).toBe(30);
-    expect(effectiveCurrentPills(readMeds()[0]!)).toBe(29);
+    expect(effectiveCurrentPills(readMeds()[0]!)).toBe(30);
 
     doseReceivedHandler!('med-multi', 'd1');
 

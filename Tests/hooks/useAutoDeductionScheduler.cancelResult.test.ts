@@ -11,10 +11,20 @@ import type { Medication } from '../../src/types';
 
 const cancelMock = vi.fn();
 const scheduleMock = vi.fn();
+const invalidateMock = vi.fn();
+const listScheduledMock = vi.fn();
 
 vi.mock('../../src/utils/autoDeductionNative', () => ({
   cancelAutoDeduction: (...args: unknown[]) => cancelMock(...args),
   scheduleAutoDeduction: (...args: unknown[]) => scheduleMock(...args),
+  // Issue #241: the scheduler now gates every occurrence cancel through a
+  // durable recurrence-invalidation call (invalidateAutoDeductionRecurrence)
+  // and reconciles against native-side scheduled occurrences
+  // (listScheduledAutoDeductionOccurrences) before touching trackedRef.
+  invalidateAutoDeductionRecurrence: (...args: unknown[]) =>
+    invalidateMock(...args),
+  listScheduledAutoDeductionOccurrences: (...args: unknown[]) =>
+    listScheduledMock(...args),
   autoDeductionOccurrenceKey: (m: string, d: string, c: string) => `${m}\u001f${d}\u001f${c}`,
 }));
 
@@ -42,6 +52,13 @@ describe('useAutoDeductionScheduler CancelResult handling', () => {
   beforeEach(() => {
     cancelMock.mockReset();
     scheduleMock.mockReset();
+    invalidateMock.mockReset();
+    listScheduledMock.mockReset();
+    // Default: invalidate succeeds (recurrence generation bumped), so the
+    // scheduler may proceed to cancelAutoDeduction. Native schedule list is
+    // empty so the desired-state pass only operates on trackedRef.
+    invalidateMock.mockResolvedValue({ ok: true });
+    listScheduledMock.mockResolvedValue([]);
     scheduleMock.mockResolvedValue({ ok: true });
   });
 

@@ -1,6 +1,6 @@
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { AppSettingsModal } from '@/components/AppSettingsModal';
 import { PharmacySettings } from '@/types';
 
@@ -18,9 +18,13 @@ describe('AppSettingsModal — Notification Controls', () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(() => cleanup());
 
-  it('renders notification toggles as MD3 switches with the same logic and styling as AppHeader', () => {
-    const onToggleNotifications = vi.fn();
-    const onToggleCriticalStockAlerts = vi.fn();
+  it('renders notification toggles as MD3 switches; clicking flips draft state and Save commits via onApplyAppPreferences', async () => {
+    // The modal stores preference toggles as DRAFT state (setDraftNotifications /
+    // setDraftCritical) — the deprecated onToggleNotifications /
+    // onToggleCriticalStockAlerts callbacks are NOT wired into the modal body.
+    // Drafts are committed only on حفظ الإعدادات via onApplyAppPreferences.
+    const onApplyAppPreferences = vi.fn();
+    const onSaveSettings = vi.fn();
 
     render(
       <AppSettingsModal
@@ -28,13 +32,14 @@ describe('AppSettingsModal — Notification Controls', () => {
         onClose={vi.fn()}
         settings={mockSettings}
         medications={[]}
-        onSaveSettings={vi.fn()}
+        onSaveSettings={onSaveSettings}
         soundEnabled={true}
         onToggleSound={vi.fn()}
         notificationsEnabled={true}
-        onToggleNotifications={onToggleNotifications}
+        onToggleNotifications={vi.fn()}
         criticalStockAlertsEnabled={true}
-        onToggleCriticalStockAlerts={onToggleCriticalStockAlerts}
+        onToggleCriticalStockAlerts={vi.fn()}
+        onApplyAppPreferences={onApplyAppPreferences}
       />
     );
 
@@ -45,16 +50,29 @@ describe('AppSettingsModal — Notification Controls', () => {
     expect(notifSwitch).toHaveAttribute('aria-checked', 'true');
 
     const criticalSwitch = screen.getByRole('switch', {
-      name: 'تنبيه النفاذ الحرج مفعّل',
+      name: 'تنبيهات المخزون الحرج مفعلة — انقر للإيقاف',
     });
     expect(criticalSwitch).toBeInTheDocument();
     expect(criticalSwitch).toHaveAttribute('aria-checked', 'true');
 
+    // Clicking each switch flips its draft state (visible immediately as
+    // aria-checked flipping true → false). No onToggle* callback fires.
     fireEvent.click(notifSwitch);
-    expect(onToggleNotifications).toHaveBeenCalledTimes(1);
+    expect(notifSwitch).toHaveAttribute('aria-checked', 'false');
 
     fireEvent.click(criticalSwitch);
-    expect(onToggleCriticalStockAlerts).toHaveBeenCalledTimes(1);
+    expect(criticalSwitch).toHaveAttribute('aria-checked', 'false');
+
+    // Saving the form commits the (now-toggled) drafts via onApplyAppPreferences.
+    fireEvent.click(screen.getByRole('button', { name: 'حفظ الإعدادات' }));
+    await waitFor(() => {
+      expect(onApplyAppPreferences).toHaveBeenCalledWith(
+        expect.objectContaining({
+          notificationsEnabled: false,
+          criticalStockAlertsEnabled: false,
+        })
+      );
+    });
   });
 
   it('reflects disabled state titles and labels when toggled off', () => {
@@ -81,7 +99,7 @@ describe('AppSettingsModal — Notification Controls', () => {
     expect(notifSwitch).toHaveAttribute('aria-checked', 'false');
 
     const criticalSwitch = screen.getByRole('switch', {
-      name: 'تنبيه النفاذ الحرج متوقف',
+      name: 'تنبيهات المخزون الحرج متوقفة — انقر للتفعيل',
     });
     expect(criticalSwitch).toBeInTheDocument();
     expect(criticalSwitch).toHaveAttribute('aria-checked', 'false');

@@ -1712,6 +1712,83 @@ describe('delivery/reconciliation race', () => {
     expect(firstCalls).toBeGreaterThanOrEqual(1);
   });
 
+
+  it('post-delivery, no-open/no-action state (observable equivalent of shade dismiss): pending=false + D+1 evidence → zero schedule for D', async () => {
+    // State transition (not a literal shade swipe):
+    //   D delivered by TimedNotificationPublisher.onReceive
+    //   → native arms exactly one successor D+1 for same medicationId+doseId+reminderTime
+    //   → localNotificationActionPerformed / Take / Snooze / open never ran
+    //   → tray entry may leave getPending(); pending becomes false for "current" view
+    //   → DoseReminderRecurrenceStore still reports valid re-arm for this occurrence identity
+    // Reconciliation must not scheduleDoseReminder for same-day D.
+    const medicationId = 'med-1';
+    const doseId = 'd1';
+    const reminderTime = '09:00';
+    // Occurrence identity used by isNativeDoseReminderReArmed (must match slot).
+    const successorEvidence = {
+      medicationId,
+      doseId,
+      reminderTime,
+      // D+1 future successor — not same calendar day as delivered D.
+      nextOccurrenceKind: 'D+1' as const,
+    };
+
+    mocks.isPending.mockResolvedValue(false);
+    mocks.isNativeReArmed.mockImplementation(
+      async (medId: string, dId: string, time?: string) => {
+        // Only valid when identity matches the delivered dose's successor evidence.
+        return (
+          medId === successorEvidence.medicationId &&
+          dId === successorEvidence.doseId &&
+          time === successorEvidence.reminderTime &&
+          successorEvidence.nextOccurrenceKind === 'D+1'
+        );
+      }
+    );
+
+    const med = makeMed({
+      id: medicationId,
+      reminderTime,
+      doseSchedule: [{ id: doseId, amount: 1, time: reminderTime }],
+    });
+
+    const { rerender } = renderHook(
+      (props: { lifecycleTick: number }) =>
+        useDoseReminderScheduler(
+          defaultOpts({
+            medications: [med],
+            lifecycleTick: props.lifecycleTick,
+          })
+        ),
+      { initialProps: { lifecycleTick: 0 } }
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    mocks.schedule.mockClear();
+    mocks.cancel.mockClear();
+    mocks.isPending.mockClear();
+    mocks.isNativeReArmed.mockClear();
+
+    // Post-delivery reconciliation: signature unchanged, pending false, D+1 evidence valid.
+    mocks.isPending.mockResolvedValue(false);
+    rerender({ lifecycleTick: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mocks.isPending).toHaveBeenCalledWith(medicationId, doseId);
+    expect(mocks.isNativeReArmed).toHaveBeenCalledWith(
+      medicationId,
+      doseId,
+      reminderTime
+    );
+    // Zero new schedule for occurrence D (and no cancel of D+1 successor).
+    expect(mocks.schedule).not.toHaveBeenCalled();
+    expect(mocks.cancel).not.toHaveBeenCalled();
+  });
+
   it('no-op when pending=false but native re-arm state is valid (case B — real delivery race)', async () => {
     // Delivery transition: getPending may still report false while
     // TimedNotificationPublisher has already written DoseReminderRecurrenceStore

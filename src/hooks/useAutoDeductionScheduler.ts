@@ -201,72 +201,77 @@ export function useAutoDeductionScheduler({
       // Issue #242: native list is authoritative for durable-schedule discovery.
       // Distinguish success+empty from read failure — never treat failure as [].
       const listResult = await listScheduledAutoDeductionOccurrences();
-      if (!listResult.ok) {
-        // Fail closed (Issue #242): do not treat a failed read as schedules=[].
-        // Skip native discovery/cancellation only; leave trackedRef intact.
-        // trackedRef + schedule paths below still run; a later pass can re-list.
-      } else {
-      for (const s of listResult.schedules) {
-        if (gen !== generationRef.current) return;
-        const key = autoDeductionScheduleKey(
-          s.medicationId,
-          s.doseId,
-          s.calendarDate
-        );
-        if (!desired.has(key)) {
-          // Issue #217: durable generation bump MUST succeed before any
-          // occurrence cancel. Cancel-without-invalidate leaves the old
-          // generation active so a concurrent receiver can still create D+1.
-          const slotId = `${s.medicationId}::${s.doseId}`;
-          if (!invalidatedSlots.has(slotId)) {
-            const inv = await invalidateAutoDeductionRecurrence(
-              s.medicationId,
-              s.doseId
-            );
-            if (!inv.ok) {
-              // Fail-closed: keep tracking, skip cancel, retry next pass.
-              continue;
-            }
-            invalidatedSlots.add(slotId);
-          }
-          const res = await cancelAutoDeduction(
+      if (listResult.ok) {
+        // Authoritative native snapshot available — discover + reconcile.
+        for (const s of listResult.schedules) {
+          if (gen !== generationRef.current) return;
+          const key = autoDeductionScheduleKey(
             s.medicationId,
             s.doseId,
             s.calendarDate
           );
-          if (res.ok) {
-            trackedRef.current.delete(key);
-          }
-        } else {
-          // Still desired — track so later passes can cancel if removed.
-          trackedRef.current.add(key);
-        }
-      }
-      } // end listResult.ok native reconciliation
-      if (gen !== generationRef.current) return;
-
-      for (const key of Array.from(trackedRef.current)) {
-        if (!desired.has(key)) {
-          const [medId, doseId, date] = key.split('::');
-          if (medId && doseId && date) {
-            const slotId = `${medId}::${doseId}`;
+          if (!desired.has(key)) {
+            // Issue #217: durable generation bump MUST succeed before any
+            // occurrence cancel. Cancel-without-invalidate leaves the old
+            // generation active so a concurrent receiver can still create D+1.
+            const slotId = `${s.medicationId}::${s.doseId}`;
             if (!invalidatedSlots.has(slotId)) {
-              const inv = await invalidateAutoDeductionRecurrence(medId, doseId);
+              const inv = await invalidateAutoDeductionRecurrence(
+                s.medicationId,
+                s.doseId
+              );
               if (!inv.ok) {
-                // Fail-closed: do not cancel occurrence; keep tracking for retry.
+                // Fail-closed: keep tracking, skip cancel, retry next pass.
                 continue;
               }
               invalidatedSlots.add(slotId);
             }
-            const res = await cancelAutoDeduction(medId, doseId, date);
-            // Drop tracking only after successful cancel (invalidate already ok).
+            const res = await cancelAutoDeduction(
+              s.medicationId,
+              s.doseId,
+              s.calendarDate
+            );
             if (res.ok) {
               trackedRef.current.delete(key);
             }
           } else {
-            trackedRef.current.delete(key);
+            // Still desired — track so later passes can cancel if removed.
+            trackedRef.current.add(key);
           }
         }
+
+        if (gen !== generationRef.current) return;
+
+        // trackedRef destructive path also requires a successful native list:
+        // without an authoritative snapshot, absence from desired alone must
+        // not drive invalidate/cancel (Issue #242 fail-closed).
+        for (const key of Array.from(trackedRef.current)) {
+          if (!desired.has(key)) {
+            const [medId, doseId, date] = key.split('::');
+            if (medId && doseId && date) {
+              const slotId = `${medId}::${doseId}`;
+              if (!invalidatedSlots.has(slotId)) {
+                const inv = await invalidateAutoDeductionRecurrence(medId, doseId);
+                if (!inv.ok) {
+                  // Fail-closed: do not cancel occurrence; keep tracking for retry.
+                  continue;
+                }
+                invalidatedSlots.add(slotId);
+              }
+              const res = await cancelAutoDeduction(medId, doseId, date);
+              // Drop tracking only after successful cancel (invalidate already ok).
+              if (res.ok) {
+                trackedRef.current.delete(key);
+              }
+            } else {
+              trackedRef.current.delete(key);
+            }
+          }
+        }
+      } else {
+        // Fail closed (Issue #242): list failure ≠ empty native set.
+        // No invalidate/cancel from native absence or trackedRef in this pass.
+        // trackedRef is left unchanged for a later successful reconciliation.
       }
 
       if (gen !== generationRef.current) return;

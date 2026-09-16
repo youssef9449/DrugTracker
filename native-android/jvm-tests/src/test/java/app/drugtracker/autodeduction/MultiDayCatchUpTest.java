@@ -93,12 +93,13 @@ public class MultiDayCatchUpTest {
         long gen = 1L;
         String ver = putPastSnapshot(med, dose, start, time, 1.0, gen);
 
-        int n = s.catchUpMissedOccurrencesAndScheduleNext(
+        AutoDeductionScheduler.CatchUpResult r = s.catchUpMissedOccurrencesAndScheduleNext(
                 med, dose, start, time, 1.0, gen,
                 schKey(AutoDeductionContract.occurrenceKey(med, dose, start)), ver);
 
         // 09-01 .. 09-30 inclusive at 08:00 are due at 12:00 → 30 FIRED
-        assertEquals(30, n);
+        assertEquals(30, r.firedCreated);
+        assertTrue(r.futureInstalled);
         assertTrue(hasFired(med, dose, "2026-09-01"));
         assertTrue(hasFired(med, dose, "2026-09-15"));
         assertTrue(hasFired(med, dose, "2026-09-30"));
@@ -177,6 +178,13 @@ public class MultiDayCatchUpTest {
         assertEquals(2.0, new JSONObject(eventPrefs().getString(
                 evtKey(AutoDeductionContract.occurrenceKey(med, "B", day)), "{}"))
                 .getDouble("amount"), 0.001);
+
+        JSONObject cMeta = new JSONObject(schedulePrefs().getString(
+                schKey(AutoDeductionContract.occurrenceKey(med, "C", day)), "{}"));
+        assertEquals("C", cMeta.getString("doseId"));
+        assertEquals(3.0, cMeta.getDouble("amount"), 0.001);
+        assertEquals("20:00", cMeta.getString("timeHhmm"));
+        assertEquals(day, cMeta.getString("calendarDate"));
     }
 
     @Test
@@ -190,16 +198,17 @@ public class MultiDayCatchUpTest {
         String prefKey = schKey(AutoDeductionContract.occurrenceKey(med, dose, start));
         String ver = putPastSnapshot(med, dose, start, "08:00", 1.0, gen);
 
-        int first = s.catchUpMissedOccurrencesAndScheduleNext(
+        AutoDeductionScheduler.CatchUpResult first = s.catchUpMissedOccurrencesAndScheduleNext(
                 med, dose, start, "08:00", 1.0, gen, prefKey, ver);
-        assertEquals(3, first); // 28, 29, 30
+        assertEquals(3, first.firedCreated); // 28, 29, 30
+        assertTrue(first.futureInstalled);
         assertTrue(hasFired(med, dose, "2026-09-28"));
         assertTrue(hasSchedule(med, dose, "2026-10-01"));
 
         putPastSnapshot(med, dose, start, "08:00", 1.0, gen);
-        int second = s.catchUpMissedOccurrencesAndScheduleNext(
+        AutoDeductionScheduler.CatchUpResult second = s.catchUpMissedOccurrencesAndScheduleNext(
                 med, dose, start, "08:00", 1.0, gen, prefKey, ver);
-        assertEquals(0, second); // all ALREADY_EXISTS
+        assertEquals(0, second.firedCreated); // all ALREADY_EXISTS
         assertTrue(hasFired(med, dose, "2026-09-28"));
         assertTrue(hasSchedule(med, dose, "2026-10-01"));
     }
@@ -238,7 +247,8 @@ public class MultiDayCatchUpTest {
         Thread recovery = new Thread(() -> {
             created.set(s.catchUpMissedOccurrencesAndScheduleNext(
                     med, dose, start, "08:00", 1.0, gen,
-                    schKey(AutoDeductionContract.occurrenceKey(med, dose, start)), ver));
+                    schKey(AutoDeductionContract.occurrenceKey(med, dose, start)), ver)
+                    .firedCreated);
         });
         recovery.start();
 
@@ -263,10 +273,11 @@ public class MultiDayCatchUpTest {
         long gen = 1L;
         String ver = putPastSnapshot(med, dose, start, "08:00", 1.0, gen);
 
-        int n = s.catchUpMissedOccurrencesAndScheduleNext(
+        AutoDeductionScheduler.CatchUpResult n = s.catchUpMissedOccurrencesAndScheduleNext(
                 med, dose, start, "08:00", 1.0, gen,
                 schKey(AutoDeductionContract.occurrenceKey(med, dose, start)), ver);
-        assertEquals(1, n);
+        assertEquals(1, n.firedCreated);
+        assertTrue(n.futureInstalled);
         assertTrue(hasSchedule(med, dose, "2026-10-01"));
         long stamped = new JSONObject(schedulePrefs().getString(
                 schKey(AutoDeductionContract.occurrenceKey(med, dose, "2026-10-01")), "{}"))
@@ -276,5 +287,48 @@ public class MultiDayCatchUpTest {
         assertTrue(s.invalidateRecurrenceAuthorization(med, dose).ok);
         // Existing invalidate cancels futures for the dose
         assertFalse(hasSchedule(med, dose, "2026-10-01"));
+    }
+
+    @Test
+    public void cancelledFutureSuccessor_notResurrectedByCatchUp() throws Exception {
+        AutoDeductionScheduler s = newScheduler();
+        s.recoveryNowOverrideForTest = epoch("2026-09-30", "12:00");
+        String med = "med-canc-fut";
+        String dose = "d1";
+        String start = "2026-09-30"; // due at 08:00; first future = 2026-10-01
+        long gen = 1L;
+        String ver = putPastSnapshot(med, dose, start, "08:00", 1.0, gen);
+
+        // Cancel the future successor before recovery installs it.
+        assertTrue(s.cancelOccurrence(med, dose, "2026-10-01").isOk());
+        assertTrue(s.isOccurrenceCancelled(med, dose, "2026-10-01"));
+
+        AutoDeductionScheduler.CatchUpResult r = s.catchUpMissedOccurrencesAndScheduleNext(
+                med, dose, start, "08:00", 1.0, gen,
+                schKey(AutoDeductionContract.occurrenceKey(med, dose, start)), ver);
+
+        assertEquals(1, r.firedCreated);
+        assertFalse(r.futureInstalled);
+        assertTrue(hasFired(med, dose, start));
+        assertFalse(hasSchedule(med, dose, "2026-10-01"));
+        assertTrue(s.isOccurrenceCancelled(med, dose, "2026-10-01"));
+    }
+
+    @Test
+    public void restoreFutureSchedules_countsFutureAlarmsNotFiredRows() throws Exception {
+        AutoDeductionScheduler s = newScheduler();
+        s.recoveryNowOverrideForTest = epoch("2026-09-30", "12:00");
+        String med = "med-count";
+        String dose = "d1";
+        String start = "2026-09-28";
+        long gen = 1L;
+        putPastSnapshot(med, dose, start, "08:00", 1.0, gen);
+
+        int restored = s.restoreFutureSchedules();
+        // 3 FIRED (28-30) but only 1 future alarm (2026-10-01)
+        assertEquals(1, restored);
+        assertTrue(hasFired(med, dose, "2026-09-28"));
+        assertTrue(hasFired(med, dose, "2026-09-30"));
+        assertTrue(hasSchedule(med, dose, "2026-10-01"));
     }
 }

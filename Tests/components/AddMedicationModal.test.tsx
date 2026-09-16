@@ -218,7 +218,7 @@ describe('ConsumptionLogView — onAddLog prop removed (#32)', () => {
       />
     );
     // The header is always rendered.
-    expect(screen.getByText('سجل الاستهلاك التلقائي')).toBeInTheDocument();
+    expect(screen.getByText('سجل الاستهلاك')).toBeInTheDocument();
   });
 });
 

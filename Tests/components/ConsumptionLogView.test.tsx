@@ -2,7 +2,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import { ConsumptionLogView } from '@/components/ConsumptionLogView';
-import type { Medication, ConsumptionLog } from '@/types';
+import type { Medication, ConsumptionLog, MedicationDose } from '@/types';
 
 function makeMed(id: string, name: string, overrides: Partial<Medication> = {}): Medication {
   return {
@@ -18,6 +18,10 @@ function makeMed(id: string, name: string, overrides: Partial<Medication> = {}):
     autoDeductEnabled: true,
     ...overrides,
   };
+}
+
+function makeDose(id: string, amount: number, time: string): MedicationDose {
+  return { id, amount, time };
 }
 
 function makeLog(overrides: Partial<ConsumptionLog> = {}): ConsumptionLog {
@@ -37,7 +41,7 @@ function makeLog(overrides: Partial<ConsumptionLog> = {}): ConsumptionLog {
 afterEach(() => cleanup());
 
 describe('ConsumptionLogView', () => {
-  it('renders the remaining consumption-log UI without the removed restore controls', () => {
+  it('renders dose-occurrence copy without legacy sync / day-diff wording', () => {
     render(
       <ConsumptionLogView
         medications={[makeMed('med-a', 'Med A')]}
@@ -46,34 +50,99 @@ describe('ConsumptionLogView', () => {
       />
     );
 
-    expect(screen.getByText('سجل الاستهلاك التلقائي')).toBeInTheDocument();
-    expect(screen.getByText('إجمالي جرعاتك الشهرية')).toBeInTheDocument();
-    expect(screen.getByText('سجل العمليات والمزامنة الأخيرة:')).toBeInTheDocument();
+    expect(screen.getByText('سجل الاستهلاك')).toBeInTheDocument();
+    expect(screen.getByText('متابعة جرعاتك المسجلة وحركات المخزون')).toBeInTheDocument();
+    expect(screen.getByText('الجرعات المجدولة شهرياً')).toBeInTheDocument();
+    expect(screen.getByText('الجرعات المجدولة يومياً')).toBeInTheDocument();
+    expect(screen.getByText('سجل العمليات:')).toBeInTheDocument();
 
+    // Removed / legacy phrases must not appear
+    expect(screen.queryByText('تاريخ آخر مزامنة')).not.toBeInTheDocument();
+    expect(screen.queryByText(/فرق الأيام/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/منذ آخر تحديث/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/المزامنة اليومية/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/عبر مرور الأيام/)).not.toBeInTheDocument();
+    expect(screen.queryByText('سجل الاستهلاك التلقائي')).not.toBeInTheDocument();
+    expect(screen.queryByText('إجمالي جرعاتك الشهرية')).not.toBeInTheDocument();
+
+    // Restore controls stay removed from this view
     expect(screen.queryByText(/لم تتناول جرعتك اليوم/)).not.toBeInTheDocument();
     expect(screen.queryByText(/إعادة الجرعة المخصومة للمخزون/)).not.toBeInTheDocument();
     expect(screen.queryByLabelText('اختر الدواء')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('اختر الجرعة')).not.toBeInTheDocument();
   });
 
-  it('shows the correct monthly dose estimate for active auto-deduct medications', () => {
+  it('counts legacy single-dose medication as one daily slot (×30 monthly)', () => {
+    render(
+      <ConsumptionLogView
+        medications={[makeMed('med-a', 'Med A', { dailyDose: 2, autoDeductEnabled: true })]}
+        logs={[]}
+        showToast={() => {}}
+      />
+    );
+    // 1 slot/day × 30 = 30 (dailyDose is pills, not slots)
+    expect(screen.getByText('30')).toBeInTheDocument();
+    expect(screen.getByText('1')).toBeInTheDocument();
+  });
+
+  it('counts multi-dose doseSchedule length as daily slots', () => {
+    const schedule = [
+      makeDose('d1', 1, '08:00'),
+      makeDose('d2', 1, '14:00'),
+      makeDose('d3', 1, '21:00'),
+    ];
     render(
       <ConsumptionLogView
         medications={[
-          makeMed('med-a', 'Med A', { dailyDose: 2, autoDeductEnabled: true }),
-          makeMed('med-b', 'Med B', { dailyDose: 1, autoDeductEnabled: true }),
-          makeMed('med-c', 'Med C', { dailyDose: 3, autoDeductEnabled: false }),
+          makeMed('med-a', 'Med A', {
+            dailyDose: 3,
+            doseSchedule: schedule,
+            dosesPerDay: 3,
+            autoDeductEnabled: true,
+          }),
         ]}
         logs={[]}
         showToast={() => {}}
       />
     );
-
-    // Each active medication contributes one daily dose event, not dailyDose pills.
-    expect(screen.getByText('60')).toBeInTheDocument();
+    // 3 slots/day × 30 = 90
+    expect(screen.getByText('90')).toBeInTheDocument();
+    expect(screen.getByText('3')).toBeInTheDocument();
   });
 
-  it('renders an empty-state when there are no consumption logs', () => {
+  it('sums single-dose + multi-dose slots and excludes autoDeductEnabled === false', () => {
+    const multi = [
+      makeDose('d1', 1, '08:00'),
+      makeDose('d2', 1, '14:00'),
+      makeDose('d3', 1, '21:00'),
+    ];
+    render(
+      <ConsumptionLogView
+        medications={[
+          makeMed('med-a', 'Med A', { dailyDose: 1, autoDeductEnabled: true }),
+          makeMed('med-b', 'Med B', {
+            dailyDose: 3,
+            doseSchedule: multi,
+            dosesPerDay: 3,
+            autoDeductEnabled: true,
+          }),
+          makeMed('med-c', 'Med C', {
+            dailyDose: 2,
+            doseSchedule: [makeDose('x', 1, '09:00'), makeDose('y', 1, '21:00')],
+            dosesPerDay: 2,
+            autoDeductEnabled: false,
+          }),
+        ]}
+        logs={[]}
+        showToast={() => {}}
+      />
+    );
+    // 1 + 3 = 4 daily slots → 120 monthly; disabled med contributes 0
+    expect(screen.getByText('120')).toBeInTheDocument();
+    expect(screen.getByText('4')).toBeInTheDocument();
+  });
+
+  it('renders the updated empty-state copy', () => {
     render(
       <ConsumptionLogView
         medications={[makeMed('med-a', 'Med A')]}
@@ -83,8 +152,11 @@ describe('ConsumptionLogView', () => {
     );
 
     expect(
-      screen.getByText('لا توجد سجلات بعد، ستظهر هنا حركات الخصم التلقائي والتعبئة.')
+      screen.getByText('لا توجد سجلات بعد، ستظهر هنا عمليات الخصم والتعبئة والتغييرات على المخزون.')
     ).toBeInTheDocument();
+    expect(
+      screen.queryByText('لا توجد سجلات بعد، ستظهر هنا حركات الخصم التلقائي والتعبئة.')
+    ).not.toBeInTheDocument();
   });
 
   it('renders consumption log entries with medication, description, amount, and date', () => {
@@ -104,7 +176,6 @@ describe('ConsumptionLogView', () => {
       />
     );
 
-    // Two log rows both belong to Med A (auto_daily + refill) — name appears twice by design.
     expect(screen.getAllByText('Med A')).toHaveLength(2);
     expect(screen.getByText('خصم تلقائي لليوم')).toBeInTheDocument();
     expect(screen.getByText('تمت التعبئة')).toBeInTheDocument();

@@ -1,9 +1,11 @@
 package app.drugtracker.autodeduction;
 
+import android.app.AlarmManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.Shadows;
 
 import java.util.Calendar;
 import java.util.Locale;
@@ -23,6 +25,13 @@ final class Phase2TestSupport {
 
     static void clearAllDurableState() {
         Context ctx = appContext();
+        // Grant SCHEDULE_EXACT_ALARM in the Robolectric test environment so
+        // scheduleOccurrence/scheduleNextOccurrenceIfAbsent work under
+        // @Config(sdk = 33). Production canScheduleExactAlarms() is unchanged.
+        AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
+        if (am != null) {
+            Shadows.shadowOf(am).setCanScheduleExactAlarms(true);
+        }
         clearPrefs(ctx, AutoDeductionContract.PREFS_SCHEDULES);
         clearPrefs(ctx, AutoDeductionContract.PREFS_CANCELLED);
         clearPrefs(ctx, AutoDeductionContract.PREFS_EVENTS);

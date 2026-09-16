@@ -1,7 +1,7 @@
 import { type FC } from 'react';
 import { Clock, ShieldCheck, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { Medication, ConsumptionLog } from '../types';
-import { getTodayDateString, formatArabicDate, formatLogTime } from '../utils/dateCalculations';
+import { formatArabicDate, formatLogTime } from '../utils/dateCalculations';
 import { MAX_LOG_ROWS, DAYS_PER_MONTH } from '../utils/time';
 
 interface ConsumptionLogViewProps {
@@ -11,7 +11,21 @@ interface ConsumptionLogViewProps {
 }
 
 /**
- * Consumption / sync activity timeline.
+ * Count daily dose *slots* for a medication under the current model.
+ * Prefer doseSchedule length when present; otherwise legacy single-dose
+ * (one slot when auto-deduct is on and dailyDose > 0).
+ * Medications with autoDeductEnabled === false contribute zero slots.
+ */
+function dailyScheduledSlots(med: Medication): number {
+  if (med.autoDeductEnabled === false) return 0;
+  if (med.doseSchedule && med.doseSchedule.length > 0) {
+    return med.doseSchedule.length;
+  }
+  return med.dailyDose > 0 ? 1 : 0;
+}
+
+/**
+ * Consumption activity timeline (logs + scheduled-dose summary).
  * Dose restore controls were intentionally removed from this view;
  * restore remains available via MedicationCard + SelectDoseModal.
  * The showToast prop is retained for App wiring compatibility.
@@ -20,15 +34,13 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
   medications,
   logs,
 }) => {
-  // Total monthly DOSES across all active meds.
-  // A "جرعة" (dose) = one daily intake event, regardless of how many
-  // pills it contains. Each active med (auto-deduct enabled, positive
-  // dailyDose) is taken once per day → DAYS_PER_MONTH doses/month.
-  const totalMonthlyDoses = medications.reduce(
-    (acc, m) =>
-      acc + (m.autoDeductEnabled !== false && m.dailyDose > 0 ? DAYS_PER_MONTH : 0),
+  // Sum of daily dose slots across auto-deduct medications, then × DAYS_PER_MONTH.
+  // Multi-dose meds use doseSchedule.length; legacy single-dose counts as 1 slot.
+  const totalDailyScheduled = medications.reduce(
+    (acc, m) => acc + dailyScheduledSlots(m),
     0
   );
+  const totalMonthlyDoses = totalDailyScheduled * DAYS_PER_MONTH;
 
   return (
     <div className="p-4 space-y-4">
@@ -40,10 +52,10 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
           </div>
           <div>
             <h2 className="text-base font-bold text-slate-900">
-              سجل الاستهلاك التلقائي
+              سجل الاستهلاك
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              ملخص المزامنة اليومية والجرعات المنسية
+              متابعة جرعاتك المسجلة وحركات المخزون
             </p>
           </div>
         </div>
@@ -52,14 +64,14 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
         <div className="mt-3 p-3 bg-teal-50/70 border border-teal-100 rounded-xl text-xs text-teal-900 leading-relaxed flex items-start gap-2">
           <ShieldCheck className="w-4 h-4 text-teal-700 shrink-0 mt-0.5" />
           <div>
-            <strong>كيف يعمل النظام؟</strong> يحسب التطبيق فارق الأيام تلقائياً منذ آخر تحديث، ويخصم الجرعات بناءً على معدل استهلاكك اليومي فوراً دون الحاجة لتسجيل يدوي.
+            <strong>كيف يعمل النظام؟</strong> يتم احتساب الجرعات المستحقة حسب مواعيد الجرعات المجدولة، وتظهر عمليات الخصم والتعبئة والتغييرات هنا تلقائياً.
           </div>
         </div>
 
-        {/* Monthly Estimate Stats */}
+        {/* Scheduled-dose summary stats */}
         <div className="mt-3 grid grid-cols-2 gap-2 text-center text-xs">
           <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-            <span className="text-[11px] text-slate-500 block">إجمالي جرعاتك الشهرية</span>
+            <span className="text-[11px] text-slate-500 block">الجرعات المجدولة شهرياً</span>
             <span className="text-lg font-extrabold font-mono text-teal-800">
               {totalMonthlyDoses}
             </span>
@@ -67,10 +79,11 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
           </div>
 
           <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-            <span className="text-[11px] text-slate-500 block">تاريخ آخر مزامنة</span>
-            <span className="text-sm font-bold text-slate-800 block mt-1">
-              {formatArabicDate(getTodayDateString(), false)}
+            <span className="text-[11px] text-slate-500 block">الجرعات المجدولة يومياً</span>
+            <span className="text-lg font-extrabold font-mono text-teal-800 block mt-0.5">
+              {totalDailyScheduled}
             </span>
+            <span className="text-[11px] text-slate-600">جرعة / يوم</span>
           </div>
         </div>
       </div>
@@ -78,12 +91,12 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
       {/* Activity Timeline list */}
       <div className="space-y-2">
         <h3 className="text-xs font-bold text-slate-700 px-1">
-          سجل العمليات والمزامنة الأخيرة:
+          سجل العمليات:
         </h3>
 
         {logs.length === 0 ? (
           <div className="p-6 bg-white rounded-2xl text-center text-xs text-slate-400 border border-slate-200/80">
-            لا توجد سجلات بعد، ستظهر هنا حركات الخصم التلقائي والتعبئة.
+            لا توجد سجلات بعد، ستظهر هنا عمليات الخصم والتعبئة والتغييرات على المخزون.
           </div>
         ) : (
           <div className="space-y-2">

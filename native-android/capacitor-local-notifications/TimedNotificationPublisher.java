@@ -42,6 +42,20 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
     public static String NOTIFICATION_KEY = "NotificationPublisher.notification";
     public static String CRON_KEY = "NotificationPublisher.cron";
 
+    /**
+     * Optional package-visible probe for jvm-tests atomicity ordering only.
+     * Production never sets this. Events: alarmScheduled,
+     * notificationStorageCommitted, reArmEvidenceCommitted.
+     */
+    static volatile java.util.function.Consumer<String> atomicityProbe;
+
+    private static void emitAtomicityProbe(String event) {
+        java.util.function.Consumer<String> probe = atomicityProbe;
+        if (probe != null) {
+            probe.accept(event);
+        }
+    }
+
     /** Must match src/utils/notifications.ts DOSE_REMINDER_CHANNEL_ID */
     static final String DOSE_BG_CHANNEL = "dose-reminder-v3";
     /** Must match src/utils/notifications.ts DOSE_REMINDER_FOREGROUND_CHANNEL_ID */
@@ -275,6 +289,7 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
             } else {
                 alarmManager.setExact(AlarmManager.RTC, trigger, pendingIntent);
             }
+            emitAtomicityProbe("alarmScheduled");
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.US);
             Logger.debug(
                 Logger.tags("LN"),
@@ -290,6 +305,7 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
             if (persisted && medicationId != null && !medicationId.isEmpty()) {
                 DoseReminderRecurrenceStore.markReArmed(
                         context, medicationId, doseId, trigger, reminderTime, id);
+                emitAtomicityProbe("reArmEvidenceCommitted");
             } else if (!persisted) {
                 Logger.error(
                     Logger.tags("LN"),
@@ -340,8 +356,10 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
                     storage.edit().putString(Integer.toString(id), notificationJson.toString()).commit();
             if (!committed) {
                 Logger.error(Logger.tags("LN"), "persist dose next at: SharedPreferences commit failed", null);
+                return false;
             }
-            return committed;
+            emitAtomicityProbe("notificationStorageCommitted");
+            return true;
         } catch (Exception e) {
             Logger.error(Logger.tags("LN"), "persist dose next at failed", e);
             return false;

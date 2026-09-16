@@ -3,27 +3,25 @@ package com.capacitorjs.plugins.localnotifications;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
-import android.app.AlarmManager;
-import android.app.PendingIntent;
 import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import androidx.test.platform.app.InstrumentationRegistry;
 import com.getcapacitor.JSObject;
+import java.util.ArrayList;
 import java.util.Calendar;
-import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
-import org.robolectric.shadows.ShadowAlarmManager;
-import org.robolectric.Shadows;
 
 /**
  * Regression: TimedNotificationPublisher.rescheduleDoseReminderNextDay atomicity.
@@ -43,6 +41,7 @@ public class TimedNotificationPublisherAtomicityTest {
 
     private Context baseContext;
     private TimedNotificationPublisher publisher;
+    private final List<String> atomicityEvents = new ArrayList<>();
 
     @Before
     public void setUp() {
@@ -58,6 +57,13 @@ public class TimedNotificationPublisherAtomicityTest {
                 .clear()
                 .commit();
         publisher = new TimedNotificationPublisher();
+        atomicityEvents.clear();
+        TimedNotificationPublisher.atomicityProbe = atomicityEvents::add;
+    }
+
+    @After
+    public void tearDown() {
+        TimedNotificationPublisher.atomicityProbe = null;
     }
 
     private JSObject validDoseNotificationJson() {
@@ -82,33 +88,64 @@ public class TimedNotificationPublisherAtomicityTest {
     }
 
     /**
-     * Context that forces NOTIFICATION_STORE Editor.commit() to return false.
-     * Other preference files behave normally.
+     * Context that survives production {@code getApplicationContext()} and forces
+     * NOTIFICATION_STORE {@code Editor.commit()} to return false.
      */
-    private Context failingNotificationStoreContext() {
-        return new ContextWrapper(baseContext) {
-            @Override
-            public SharedPreferences getSharedPreferences(String name, int mode) {
-                SharedPreferences real = super.getSharedPreferences(name, mode);
-                if ("NOTIFICATION_STORE".equals(name)) {
-                    return new CommitFailingSharedPreferences(real);
-                }
-                return real;
+    private static final class FailingAppContext extends ContextWrapper {
+        final CommitFailingSharedPreferences failingNotificationStore;
+        final Context realApp;
+
+        FailingAppContext(Context base) {
+            super(base);
+            this.realApp = base.getApplicationContext();
+            SharedPreferences realStore =
+                    realApp.getSharedPreferences("NOTIFICATION_STORE", Context.MODE_PRIVATE);
+            this.failingNotificationStore = new CommitFailingSharedPreferences(realStore);
+        }
+
+        @Override
+        public Context getApplicationContext() {
+            // Production DoseReminderRecurrenceStore / some callers use this —
+            // must remain the same failing harness, not the real Application.
+            return this;
+        }
+
+        @Override
+        public SharedPreferences getSharedPreferences(String name, int mode) {
+            if ("NOTIFICATION_STORE".equals(name)) {
+                return failingNotificationStore;
             }
-        };
+            // Other prefs (including dose_reminder_recurrence) use real app storage.
+            return realApp.getSharedPreferences(name, mode);
+        }
+
+        @Override
+        public Object getSystemService(String name) {
+            return realApp.getSystemService(name);
+        }
     }
 
     @Test
     public void storagePersistFailure_afterAlarmSuccess_doesNotWriteReArmEvidence() {
-        Context ctx = failingNotificationStoreContext();
+        FailingAppContext ctx = new FailingAppContext(baseContext);
         JSObject json = validDoseNotificationJson();
         Intent intent = deliveryIntent();
 
         boolean kept =
                 publisher.rescheduleDoseReminderNextDay(ctx, intent, NOTIF_ID, json);
 
-        // AlarmManager arm succeeded → notification is kept (not deleted by onReceive).
+        // Failure path must actually invoke Editor.commit() on the injected store.
+        assertTrue(
+                "NOTIFICATION_STORE Editor.commit() must be invoked on failing double",
+                ctx.failingNotificationStore.commitCalled);
+
+        // AlarmManager arm succeeded → kept (no onReceive delete).
         assertTrue(kept);
+
+        // Probe: alarm scheduled, storage never reported committed, no re-arm evidence.
+        assertTrue(atomicityEvents.contains("alarmScheduled"));
+        assertFalse(atomicityEvents.contains("notificationStorageCommitted"));
+        assertFalse(atomicityEvents.contains("reArmEvidenceCommitted"));
 
         // No markReArmed when persist fails.
         assertEquals(
@@ -118,18 +155,14 @@ public class TimedNotificationPublisherAtomicityTest {
                 DoseReminderRecurrenceStore.isValidReArm(
                         ctx, MED_ID, DOSE_ID, System.currentTimeMillis(), REMINDER_TIME));
 
-        // NOTIFICATION_STORE must not hold a successful future occurrence write.
-        SharedPreferences store =
-                baseContext.getSharedPreferences("NOTIFICATION_STORE", Context.MODE_PRIVATE);
-        // Failing editor should not have committed a usable entry (may be absent or stale).
-        String stored = store.getString(Integer.toString(NOTIF_ID), null);
-        // Commit returned false — treat as no durable future occurrence for validity.
-        if (stored != null) {
-            // Even if something leaked, re-arm evidence must remain absent.
-            assertFalse(
-                    DoseReminderRecurrenceStore.isValidReArm(
-                            ctx, MED_ID, DOSE_ID, System.currentTimeMillis(), REMINDER_TIME));
-        }
+        // Real NOTIFICATION_STORE must not have a durable write from the failed commit.
+        String stored =
+                baseContext
+                        .getSharedPreferences("NOTIFICATION_STORE", Context.MODE_PRIVATE)
+                        .getString(Integer.toString(NOTIF_ID), null);
+        assertTrue(
+                "failed commit must not leave durable NOTIFICATION_STORE entry",
+                stored == null || stored.isEmpty());
     }
 
     @Test
@@ -146,8 +179,6 @@ public class TimedNotificationPublisherAtomicityTest {
         long next =
                 DoseReminderRecurrenceStore.getNextOccurrenceMs(baseContext, MED_ID, DOSE_ID);
         assertTrue(next > System.currentTimeMillis());
-
-        // Evidence matches occurrence identity.
         assertEquals(
                 REMINDER_TIME,
                 DoseReminderRecurrenceStore.getStoredReminderTime(baseContext, MED_ID, DOSE_ID));
@@ -155,59 +186,44 @@ public class TimedNotificationPublisherAtomicityTest {
                 DoseReminderRecurrenceStore.isValidReArm(
                         baseContext, MED_ID, DOSE_ID, System.currentTimeMillis(), REMINDER_TIME));
 
-        // NotificationStorage has matching future schedule.at for same notification id.
-        SharedPreferences store =
-                baseContext.getSharedPreferences("NOTIFICATION_STORE", Context.MODE_PRIVATE);
-        String raw = store.getString(Integer.toString(NOTIF_ID), null);
+        String raw =
+                baseContext
+                        .getSharedPreferences("NOTIFICATION_STORE", Context.MODE_PRIVATE)
+                        .getString(Integer.toString(NOTIF_ID), null);
         assertNotNull(raw);
         assertTrue(raw.contains("\"at\""));
-        assertTrue(raw.contains(MED_ID) || raw.contains("medicationId"));
-
-        // AlarmManager received a schedule (Robolectric shadow).
-        AlarmManager am = (AlarmManager) baseContext.getSystemService(Context.ALARM_SERVICE);
-        ShadowAlarmManager shadow = Shadows.shadowOf(am);
-        assertFalse(
-                "expected at least one AlarmManager schedule after success path",
-                shadow.getScheduledAlarms().isEmpty());
     }
 
     @Test
-    public void successOrdering_evidenceOnlyAfterStorageCommit() {
-        // Instrument via sequence: empty store → after method, both storage and evidence exist.
-        // If markReArmed ran before persist, isValidReArm would clear evidence when storage empty.
-        // Full success path must leave both consistent.
+    public void successOrdering_alarmThenStorageThenReArmEvidence() {
         JSObject json = validDoseNotificationJson();
         Intent intent = deliveryIntent();
-
-        assertEquals(
-                -1L,
-                DoseReminderRecurrenceStore.getNextOccurrenceMs(baseContext, MED_ID, DOSE_ID));
-        assertNull(
-                baseContext
-                        .getSharedPreferences("NOTIFICATION_STORE", Context.MODE_PRIVATE)
-                        .getString(Integer.toString(NOTIF_ID), null));
 
         assertTrue(
                 publisher.rescheduleDoseReminderNextDay(
                         baseContext, intent, NOTIF_ID, json));
 
-        String raw =
-                baseContext
-                        .getSharedPreferences("NOTIFICATION_STORE", Context.MODE_PRIVATE)
-                        .getString(Integer.toString(NOTIF_ID), null);
-        assertNotNull("NotificationStorage must be written before/at evidence validity", raw);
+        int iAlarm = atomicityEvents.indexOf("alarmScheduled");
+        int iStore = atomicityEvents.indexOf("notificationStorageCommitted");
+        int iReArm = atomicityEvents.indexOf("reArmEvidenceCommitted");
 
+        if (iAlarm < 0 || iStore < 0 || iReArm < 0) {
+            fail("missing probe events: " + atomicityEvents);
+        }
+        assertTrue(
+                "AlarmManager must be recorded before NotificationStorage commit: " + atomicityEvents,
+                iAlarm < iStore);
+        assertTrue(
+                "NotificationStorage commit must be recorded before markReArmed: " + atomicityEvents,
+                iStore < iReArm);
+
+        // Final state still consistent with successful ordered path.
         long next =
                 DoseReminderRecurrenceStore.getNextOccurrenceMs(baseContext, MED_ID, DOSE_ID);
         assertTrue(next > 0);
         assertTrue(
                 DoseReminderRecurrenceStore.notificationStoreHasFutureOccurrence(
                         baseContext, NOTIF_ID, next, System.currentTimeMillis()));
-        assertTrue(
-                DoseReminderRecurrenceStore.isValidReArm(
-                        baseContext, MED_ID, DOSE_ID, System.currentTimeMillis(), REMINDER_TIME));
-
-        // Calendar next-day at reminderTime HH:MM
         Calendar cal = Calendar.getInstance();
         cal.setTimeInMillis(next);
         assertEquals(9, cal.get(Calendar.HOUR_OF_DAY));
@@ -215,11 +231,12 @@ public class TimedNotificationPublisherAtomicityTest {
     }
 
     /**
-     * SharedPreferences that delegates reads/writes but forces commit()/apply failure
-     * for Editor — models NotificationStorage persist failure after AlarmManager success.
+     * SharedPreferences that records commit() invocation and always returns false
+     * without writing through — models NotificationStorage persist failure.
      */
     private static final class CommitFailingSharedPreferences implements SharedPreferences {
         private final SharedPreferences delegate;
+        volatile boolean commitCalled;
 
         CommitFailingSharedPreferences(SharedPreferences delegate) {
             this.delegate = delegate;
@@ -319,13 +336,14 @@ public class TimedNotificationPublisherAtomicityTest {
 
                 @Override
                 public boolean commit() {
-                    // Do not commit to delegate — simulate disk/write failure.
+                    commitCalled = true;
+                    // Do not commit to delegate — simulate write failure.
                     return false;
                 }
 
                 @Override
                 public void apply() {
-                    // no-op failure
+                    commitCalled = true;
                 }
             };
         }

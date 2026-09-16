@@ -198,47 +198,51 @@ export function useAutoDeductionScheduler({
       // System boot / permission re-grant restore is handled by
       // AutoDeductionSystemReceiver, not this normal desired-state pass.
       const invalidatedSlots = new Set<string>();
-      try {
-        const nativeSchedules = await listScheduledAutoDeductionOccurrences();
-        for (const s of nativeSchedules) {
-          if (gen !== generationRef.current) return;
-          const key = autoDeductionScheduleKey(
+      // Issue #242: native list is authoritative for durable-schedule discovery.
+      // Distinguish success+empty from read failure — never treat failure as [].
+      const listResult = await listScheduledAutoDeductionOccurrences();
+      if (!listResult.ok) {
+        // Fail closed (Issue #242): do not treat a failed read as schedules=[].
+        // Skip native discovery/cancellation only; leave trackedRef intact.
+        // trackedRef + schedule paths below still run; a later pass can re-list.
+      } else {
+      for (const s of listResult.schedules) {
+        if (gen !== generationRef.current) return;
+        const key = autoDeductionScheduleKey(
+          s.medicationId,
+          s.doseId,
+          s.calendarDate
+        );
+        if (!desired.has(key)) {
+          // Issue #217: durable generation bump MUST succeed before any
+          // occurrence cancel. Cancel-without-invalidate leaves the old
+          // generation active so a concurrent receiver can still create D+1.
+          const slotId = `${s.medicationId}::${s.doseId}`;
+          if (!invalidatedSlots.has(slotId)) {
+            const inv = await invalidateAutoDeductionRecurrence(
+              s.medicationId,
+              s.doseId
+            );
+            if (!inv.ok) {
+              // Fail-closed: keep tracking, skip cancel, retry next pass.
+              continue;
+            }
+            invalidatedSlots.add(slotId);
+          }
+          const res = await cancelAutoDeduction(
             s.medicationId,
             s.doseId,
             s.calendarDate
           );
-          if (!desired.has(key)) {
-            // Issue #217: durable generation bump MUST succeed before any
-            // occurrence cancel. Cancel-without-invalidate leaves the old
-            // generation active so a concurrent receiver can still create D+1.
-            const slotId = `${s.medicationId}::${s.doseId}`;
-            if (!invalidatedSlots.has(slotId)) {
-              const inv = await invalidateAutoDeductionRecurrence(
-                s.medicationId,
-                s.doseId
-              );
-              if (!inv.ok) {
-                // Fail-closed: keep tracking, skip cancel, retry next pass.
-                continue;
-              }
-              invalidatedSlots.add(slotId);
-            }
-            const res = await cancelAutoDeduction(
-              s.medicationId,
-              s.doseId,
-              s.calendarDate
-            );
-            if (res.ok) {
-              trackedRef.current.delete(key);
-            }
-          } else {
-            // Still desired — track so later passes can cancel if removed.
-            trackedRef.current.add(key);
+          if (res.ok) {
+            trackedRef.current.delete(key);
           }
+        } else {
+          // Still desired — track so later passes can cancel if removed.
+          trackedRef.current.add(key);
         }
-      } catch {
-        // Non-fatal: fall through to trackedRef + schedule paths.
       }
+      } // end listResult.ok native reconciliation
       if (gen !== generationRef.current) return;
 
       for (const key of Array.from(trackedRef.current)) {

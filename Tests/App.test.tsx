@@ -925,14 +925,14 @@ describe('Success chime on toggle actions', () => {
     expect(playSuccessChime).toHaveBeenCalledTimes(1);
   });
 
-  it('Display toggle OFF shows "الوضع الطبيعي"; ON shows "العرض المختصر" (no شبكة)', async () => {
+  it('Display toggle OFF shows "العرض الطبيعي"; ON shows "العرض المختصر" (no شبكة)', async () => {
     seedMed();
     localStorage.setItem('android_med_tracker_compact_view_v1', 'false');
     render(<App />);
     await waitFor(() => expect(screen.getByText('Chime Med')).toBeInTheDocument());
-    expect(screen.getByText('الوضع الطبيعي')).toBeInTheDocument();
+    expect(screen.getByText('العرض الطبيعي')).toBeInTheDocument();
     expect(screen.queryByText(/شبكة/)).toBeNull();
-    const displayToggle = screen.getByLabelText(/تبديل العرض بين المختصر والوضع الطبيعي/);
+    const displayToggle = screen.getByLabelText(/تبديل العرض بين المختصر والعرض الطبيعي/);
     fireEvent.click(displayToggle);
     await waitFor(() => {
       expect(screen.getByText('العرض المختصر')).toBeInTheDocument();
@@ -941,7 +941,7 @@ describe('Success chime on toggle actions', () => {
     // Toggle back to OFF
     fireEvent.click(displayToggle);
     await waitFor(() => {
-      expect(screen.getByText('الوضع الطبيعي')).toBeInTheDocument();
+      expect(screen.getByText('العرض الطبيعي')).toBeInTheDocument();
     });
   });
 
@@ -951,7 +951,7 @@ describe('Success chime on toggle actions', () => {
     localStorage.setItem('android_med_tracker_compact_view_v1', 'false');
     render(<App />);
     await waitFor(() => expect(screen.getByText('Chime Med')).toBeInTheDocument());
-    const displayToggle = screen.getByLabelText(/تبديل العرض بين المختصر والوضع الطبيعي/);
+    const displayToggle = screen.getByLabelText(/تبديل العرض بين المختصر والعرض الطبيعي/);
     fireEvent.click(displayToggle);
     expect(playSuccessChime).toHaveBeenCalledTimes(1);
     await waitFor(() => {
@@ -960,17 +960,17 @@ describe('Success chime on toggle actions', () => {
     expect(screen.queryByText(/شبكة/)).toBeNull();
   });
 
-  it('Display (compact view) ON→OFF plays success chime once and toast "تم إرجاع الوضع الطبيعي"', async () => {
+  it('Display (compact view) ON→OFF plays success chime once and toast "تم إرجاع العرض الطبيعي"', async () => {
     const { playSuccessChime } = await import('@/utils/sound');
     seedMed();
     localStorage.setItem('android_med_tracker_compact_view_v1', 'true');
     render(<App />);
     await waitFor(() => expect(screen.getByText('Chime Med')).toBeInTheDocument());
-    const displayToggle = screen.getByLabelText(/تبديل العرض بين المختصر والوضع الطبيعي/);
+    const displayToggle = screen.getByLabelText(/تبديل العرض بين المختصر والعرض الطبيعي/);
     fireEvent.click(displayToggle);
     expect(playSuccessChime).toHaveBeenCalledTimes(1);
     await waitFor(() => {
-      expect(screen.getByText('تم إرجاع الوضع الطبيعي')).toBeInTheDocument();
+      expect(screen.getByText('تم إرجاع العرض الطبيعي')).toBeInTheDocument();
     });
     expect(screen.queryByText(/شبكة/)).toBeNull();
   });

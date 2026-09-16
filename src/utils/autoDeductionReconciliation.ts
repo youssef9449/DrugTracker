@@ -184,8 +184,10 @@ export function applyExactAutoEventToMedication(
   }
   const settleBase = Math.max(0, med.currentPills - priorHistoricalUnits);
 
-  const amount = event.amount;
-  const newPills = Math.max(0, settleBase - amount);
+  const requested = event.amount;
+  // Actual stock change after clamping at zero (may be < requested).
+  const actualDeducted = Math.min(Math.max(0, requested), settleBase);
+  const newPills = settleBase - actualDeducted;
 
   let nextConsumption = med.doseConsumption;
   let nextHistory = med.doseConsumptionHistory;
@@ -246,10 +248,10 @@ export function applyExactAutoEventToMedication(
     medicationId: med.id,
     medicationName: med.name,
     type: 'auto_daily',
-    amount: -amount,
+    amount: -actualDeducted,
     date: calendarDate,
     timestamp: new Date(now).toISOString(),
-    description: `خصم تلقائي دقيق (−${amount} ${med.unit || 'وحدة'})`,
+    description: `خصم تلقائي دقيق (−${actualDeducted} ${med.unit || 'وحدة'})`,
     doseId: doseId === LEGACY_DOSE_ID ? undefined : doseId,
   };
 

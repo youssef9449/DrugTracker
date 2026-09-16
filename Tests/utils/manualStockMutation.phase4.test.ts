@@ -1275,6 +1275,81 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     expect(durable.medications[0].doseConsumption?.d2).toBe(TODAY);
   });
 
+
+  it('Restore uses actual clamped Auto amount not full slot amount', async () => {
+    // Slot amount 2 but only 1 pill was available → Auto deducted 1 (log amount -1).
+    durable = {
+      medications: [
+        med({
+          currentPills: 0,
+          doseSchedule: [
+            { id: 'd1', amount: 2, time: '08:00' },
+            { id: 'd2', amount: 1, time: '14:00' },
+          ],
+          doseConsumption: { d1: TODAY },
+          doseConsumptionHistory: { d1: [TODAY] },
+        }),
+      ],
+      logs: [
+        {
+          id: 'exact-clamped',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'auto_daily',
+          amount: -1,
+          date: TODAY,
+          timestamp: '',
+          description: '',
+          doseId: 'd1',
+        },
+      ],
+    };
+    const r = await runGatedManualRestore({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      todayStr: TODAY,
+      makeLogId: () => 'restore-clamped',
+    });
+    expect(r.outcome).toBe('applied');
+    expect(r.restoredAmount).toBe(1);
+    expect(durable.medications[0].currentPills).toBe(1);
+  });
+
+  it('zero actual Auto deduction Restore adds zero', async () => {
+    durable = {
+      medications: [
+        med({
+          currentPills: 0,
+          doseConsumption: { d1: TODAY },
+          doseConsumptionHistory: { d1: [TODAY] },
+        }),
+      ],
+      logs: [
+        {
+          id: 'exact-zero',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'auto_daily',
+          amount: 0,
+          date: TODAY,
+          timestamp: '',
+          description: '',
+          doseId: 'd1',
+        },
+      ],
+    };
+    const r = await runGatedManualRestore({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      todayStr: TODAY,
+      makeLogId: () => 'restore-zero',
+    });
+    expect(r.outcome).toBe('applied');
+    expect(r.restoredAmount).toBe(0);
+    expect(durable.medications[0].currentPills).toBe(0);
+    expect(durable.medications[0].doseConsumption?.d1).toBeUndefined();
+  });
+
 describe('shouldDismissAlarmAfterManualTake', () => {
   it('dismisses only for applied and already_consumed; never persist_failed', () => {
     expect(shouldDismissAlarmAfterManualTake('applied')).toBe(true);

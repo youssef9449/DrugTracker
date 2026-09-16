@@ -301,7 +301,7 @@ export function runGatedManualRestore(opts: {
       };
     }
 
-    const result = restoreDose(med, opts.doseId, todayStr, now);
+    const result = restoreDose(med, opts.doseId, todayStr, now, fresh.logs);
     if (!result.ok) {
       return {
         outcome: 'rejected' as const,
@@ -313,10 +313,9 @@ export function runGatedManualRestore(opts: {
       };
     }
 
-    // Idempotency: only undo a real stock deduction (manual or Exact Auto markers).
-    // restoreDose credits pills when wasManual; Exact Auto uses the same markers.
+    // Idempotency: only undo a real durable consumption marker.
     // Second Restore after markers cleared is already_restored.
-    if (!result.wasManual) {
+    if (!result.wasActuallyConsumed) {
       return {
         outcome: 'already_restored' as const,
         medications: fresh.medications,

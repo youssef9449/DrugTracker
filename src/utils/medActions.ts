@@ -144,8 +144,10 @@ export type RestoreDoseResult =
       updatedMed: Medication;
       restoredAmount: number;
       doseId?: string;
-      /** True when undoing a manual consume settlement. */
-      wasManual: boolean;
+      /**
+       * True when undoing a durable consumption marker (Manual Take or Exact Auto).
+       */
+      wasActuallyConsumed: boolean;
     }
   | {
       ok: false;
@@ -156,11 +158,43 @@ export type RestoreDoseResult =
         | 'auto_deduct_off';
     };
 
+/**
+ * Resolve the actual units previously deducted for this occurrence from logs
+ * (Manual dose_taken / Exact Auto auto_daily). Log amount is stored as negative.
+ * Falls back to null when no durable stock mutation log exists.
+ */
+export function findActualDeductedAmountForOccurrence(
+  logs: ConsumptionLog[],
+  medicationId: string,
+  doseId: string | undefined,
+  calendarDate: string
+): number | null {
+  const candidates = logs.filter((l) => {
+    if (l.medicationId !== medicationId) return false;
+    if (l.date !== calendarDate) return false;
+    if (l.type !== 'dose_taken' && l.type !== 'auto_daily') return false;
+    const logDose =
+      l.doseId != null && String(l.doseId) !== '' ? String(l.doseId) : null;
+    if (doseId != null && doseId !== '' && doseId !== 'legacy') {
+      // Multi-dose: require matching doseId on the log.
+      return logDose === doseId;
+    }
+    // Legacy / single: accept logs without doseId or with legacy id.
+    return logDose == null || logDose === 'legacy' || logDose === doseId;
+  });
+  if (!candidates.length) return null;
+  // Prefer auto_daily (Exact Auto) then dose_taken; use absolute amount.
+  const preferred =
+    candidates.find((l) => l.type === 'auto_daily') ?? candidates[0];
+  return Math.abs(Number(preferred.amount) || 0);
+}
+
 export function restoreDose(
   med: Medication,
   doseId?: string,
   todayStr: string = getTodayDateString(),
-  now: Date = new Date()
+  now: Date = new Date(),
+  logs: ConsumptionLog[] = []
 ): RestoreDoseResult {
   const resolved = resolveRestoreDoseAmount(med, doseId);
   if (!resolved.ok) {
@@ -168,21 +202,35 @@ export function restoreDose(
   }
 
   const resolvedDoseId = resolved.doseId;
-  const restoredAmount = resolved.amount;
+  const slotAmount = resolved.amount;
 
-  const wasManual = resolvedDoseId
+  const wasActuallyConsumed = resolvedDoseId
     ? isDoseConsumedOnDate(med, resolvedDoseId, todayStr)
     : med.lastConsumedDate === todayStr;
 
-  if (med.autoDeductEnabled === false && !wasManual) {
+  if (med.autoDeductEnabled === false && !wasActuallyConsumed) {
     return { ok: false, reason: 'auto_deduct_off' };
   }
 
+  // Prefer actual deducted amount from durable log; never invent slot amount
+  // when a log proves a different (e.g. clamped) deduction.
+  const actualFromLog = findActualDeductedAmountForOccurrence(
+    logs,
+    med.id,
+    resolvedDoseId,
+    todayStr
+  );
+  // Stock credit uses actual log amount when consumed; projection path keeps
+  // slotAmount only as metadata (pills unchanged).
+  const restoredAmount = wasActuallyConsumed
+    ? actualFromLog != null
+      ? actualFromLog
+      : slotAmount
+    : slotAmount;
+
   // --- Multi-dose / scheduled slot ---
   if (hasDoseSchedule(med) && resolvedDoseId) {
-    const wasManual = isDoseConsumedOnDate(med, resolvedDoseId, todayStr);
-
-    // Clear manual consumption for this doseId + date (if any).
+    // Clear consumption for this doseId + date (if any).
     const nextConsumption = { ...(med.doseConsumption ?? {}) };
     if (nextConsumption[resolvedDoseId] === todayStr) {
       delete nextConsumption[resolvedDoseId];
@@ -216,7 +264,7 @@ export function restoreDose(
     // prevents the same FIRED event from re-applying. Projection-only path
     // (no consumption marker) still uses past-due skip without +pills.
     let doseSkippedHistory = med.doseSkippedHistory;
-    if (wasManual) {
+    if (wasActuallyConsumed) {
       const nextSkip = { ...(med.doseSkippedHistory ?? {}) };
       if (Array.isArray(nextSkip[resolvedDoseId])) {
         nextSkip[resolvedDoseId] = nextSkip[resolvedDoseId].filter(
@@ -257,9 +305,9 @@ export function restoreDose(
       );
 
     let updatedMed: Medication;
-    if (wasManual) {
-      // Undo ONLY this occurrence's durable deduction. Do not re-run
-      // settleAndAdjust (that would fold sibling pastDueUnits into the snapshot).
+    if (wasActuallyConsumed) {
+      // Undo ONLY this occurrence's durable deduction (actual log amount).
+      // Do not re-run settleAndAdjust (would fold sibling pastDueUnits).
       updatedMed = {
         ...med,
         currentPills: med.currentPills + restoredAmount,
@@ -284,7 +332,7 @@ export function restoreDose(
       updatedMed,
       restoredAmount,
       doseId: resolvedDoseId,
-      wasManual,
+      wasActuallyConsumed,
     };
   }
 
@@ -297,22 +345,25 @@ export function restoreDose(
       updatedMed: med,
       restoredAmount: 0,
       doseId: resolvedDoseId,
-      wasManual: false,
+      wasActuallyConsumed: false,
     };
   }
+  const legacyActual =
+    findActualDeductedAmountForOccurrence(logs, med.id, resolvedDoseId, todayStr) ??
+    restoredAmount;
   // Undo this day's durable deduction only; do not re-settle other projected units.
   const updatedMed: Medication = {
     ...med,
-    currentPills: med.currentPills + restoredAmount,
+    currentPills: med.currentPills + legacyActual,
     lastConsumedDate: undefined,
   };
 
   return {
     ok: true,
     updatedMed,
-    restoredAmount,
+    restoredAmount: legacyActual,
     doseId: resolvedDoseId,
-    wasManual: true,
+    wasActuallyConsumed: true,
   };
 }
 

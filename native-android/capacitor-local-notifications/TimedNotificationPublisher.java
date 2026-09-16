@@ -12,24 +12,27 @@ import androidx.core.app.NotificationCompat;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Logger;
 import java.text.SimpleDateFormat;
+import java.util.Calendar;
 import java.util.Date;
+import java.util.Locale;
 
 /**
  * Capacitor Local Notifications 6.1.3 TimedNotificationPublisher
- * + DrugTracker delivery-time dose-reminder channel selection.
+ * + DrugTracker delivery-time dose-reminder channel selection
+ * + DrugTracker sole daily recurrence owner for dose reminders.
  *
  * Upstream base: @capacitor/local-notifications@6.1.3
- * (package/android/.../TimedNotificationPublisher.java)
  *
- * DrugTracker addition: after fireReceived, dose reminders may be rewritten
- * onto the channel that matches AppForegroundState (process-local, set from
- * MainActivity onResume/onPause). Fresh process defaults to background →
- * dose-reminder-v3 so killed-process reminders produce the system sound.
+ * Recurrence architecture (Capacitor 6.1.3 LocalNotificationManager):
+ * - schedule.at + repeats:true → AlarmManager.setRepeating with interval
+ *   (at - now) — NOT safe for daily dose times (wrong interval).
+ * - schedule.on (DateMatch) → CRON_KEY + setExact; next via rescheduleNotificationIfNeeded.
+ * - DrugTracker dose path: JS schedules a ONE-SHOT {@code at} (no repeats).
+ *   This class creates the next day's exact alarm from extra.reminderTime.
+ *   That is the only recurrence path for dose reminders.
  *
- * Channel change uses NotificationCompat.Builder(context, notification)
- * so existing notification fields are preserved; only setChannelId is applied.
- *
- * Installed by scripts/prepare-android.mjs (whole-file copy, not a string patch).
+ * Channel rewrite (AppForegroundState) is independent of recurrence.
+ * Installed by scripts/prepare-android.mjs (whole-file copy).
  */
 public class TimedNotificationPublisher extends BroadcastReceiver {
 
@@ -70,7 +73,12 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
         notification = applyDoseReminderChannelIfNeeded(context, notification, notificationJson);
 
         notificationManager.notify(id, notification);
-        if (!rescheduleNotificationIfNeeded(context, intent, id)) {
+        // Sole recurrence: CRON_KEY (non-dose Capacitor on-schedule) OR dose daily.
+        boolean kept = rescheduleNotificationIfNeeded(context, intent, id);
+        if (!kept) {
+            kept = rescheduleDoseReminderNextDay(context, intent, id, notificationJson);
+        }
+        if (!kept) {
             storage.deleteNotification(Integer.toString(id));
         }
     }
@@ -145,9 +153,9 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
     }
 
     /**
-     * Sole native recurrence owner for notifications scheduled with CRON_KEY
-     * (Capacitor repeats:true / every). JS lifecycle must not also create the
-     * next occurrence for the same notification id — that produced duplicates.
+     * Upstream CRON recurrence (schedule.on / DateMatch). Used for non-dose
+     * notifications that set CRON_KEY. Dose reminders use
+     * {@link #rescheduleDoseReminderNextDay} instead.
      */
     private boolean rescheduleNotificationIfNeeded(Context context, Intent intent, int id) {
         String dateString = intent.getStringExtra(CRON_KEY);
@@ -178,5 +186,84 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
         }
 
         return false;
+    }
+
+    /**
+     * DrugTracker dose reminders: after a one-shot delivery, arm exactly one
+     * next occurrence at the same local HH:MM on the next calendar day.
+     * Uses the same notification id / PendingIntent request code so a concurrent
+     * JS schedule with the same id replaces rather than duplicates.
+     *
+     * Requires notification JSON extra:
+     *   doseRecurring: true
+     *   reminderTime: "HH:MM"
+     */
+    boolean rescheduleDoseReminderNextDay(
+            Context context,
+            Intent intent,
+            int id,
+            JSObject notificationJson
+    ) {
+        if (notificationJson == null) {
+            return false;
+        }
+        try {
+            JSObject extra = notificationJson.getJSObject("extra");
+            if (extra == null) {
+                return false;
+            }
+            if (!Boolean.TRUE.equals(extra.getBool("doseRecurring"))) {
+                return false;
+            }
+            String reminderTime = extra.getString("reminderTime");
+            if (reminderTime == null || reminderTime.indexOf(':') < 0) {
+                return false;
+            }
+            int colon = reminderTime.indexOf(':');
+            int hour = Integer.parseInt(reminderTime.substring(0, colon));
+            int minute = Integer.parseInt(reminderTime.substring(colon + 1));
+            if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+                return false;
+            }
+
+            Calendar cal = Calendar.getInstance();
+            cal.add(Calendar.DAY_OF_MONTH, 1);
+            cal.set(Calendar.HOUR_OF_DAY, hour);
+            cal.set(Calendar.MINUTE, minute);
+            cal.set(Calendar.SECOND, 0);
+            cal.set(Calendar.MILLISECOND, 0);
+            long trigger = cal.getTimeInMillis();
+
+            AlarmManager alarmManager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+            if (alarmManager == null) {
+                return false;
+            }
+            Intent clone = (Intent) intent.clone();
+            int flags = PendingIntent.FLAG_CANCEL_CURRENT;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                flags = flags | PendingIntent.FLAG_MUTABLE;
+            }
+            PendingIntent pendingIntent = PendingIntent.getBroadcast(context, id, clone, flags);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
+                Logger.warn(
+                    "Capacitor/LocalNotification",
+                    "Exact alarms not allowed; dose reminder scheduled inexact."
+                );
+                alarmManager.set(AlarmManager.RTC, trigger, pendingIntent);
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger, pendingIntent);
+            } else {
+                alarmManager.setExact(AlarmManager.RTC, trigger, pendingIntent);
+            }
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.US);
+            Logger.debug(
+                Logger.tags("LN"),
+                "dose reminder " + id + " next day at " + sdf.format(new Date(trigger))
+            );
+            return true;
+        } catch (Exception e) {
+            Logger.error(Logger.tags("LN"), "dose next-day reschedule failed", e);
+            return false;
+        }
     }
 }

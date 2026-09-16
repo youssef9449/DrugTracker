@@ -15,7 +15,11 @@ import {
   isDoseConsumedOnDate,
 } from '../utils/dateCalculations';
 import { isDoseTimeElapsedToday } from '../utils/doseSchedule';
-import { consumeDose, settleAndAdjust, resolveRestoreDoseAmount, restoreDose } from '../utils/medActions';
+import { settleAndAdjust, resolveRestoreDoseAmount } from '../utils/medActions';
+import {
+  runGatedManualConsume,
+  runGatedManualRestore,
+} from '../utils/manualStockMutation';
 import { generateId } from '../utils/id';
 import { playSuccessChime } from '../utils/sound';
 import { persist } from '../utils/storage';
@@ -90,17 +94,15 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
   const selectDoseModeRef = useRef(selectDoseMode);
   selectDoseModeRef.current = selectDoseMode;
 
-  const handleRestoreDose = (
+  const handleRestoreDose = async (
     medicationId: string,
     reason: string,
     doseId?: string
-  ): Medication | null => {
+  ): Promise<Medication | null> => {
     const med = medicationsRef.current.find((m) => m.id === medicationId);
     if (!med) return null;
     const today = getTodayDateString();
 
-    // Resolve identity early for duplicate / in-flight guards (production
-    // pure restoreDose also resolves; we need the id before calling it).
     const preResolved = resolveRestoreDoseAmount(med, doseId);
     if (!preResolved.ok) {
       if (preResolved.reason === 'missing_dose_id') {
@@ -121,13 +123,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       showToast(TOAST_MESSAGES.autoDeductOff(med.name));
       return null;
     }
-    // Outstanding-restore guard (not a permanent blacklist):
-    // - Past-due: blocked while doseSkippedHistory marks this doseId+date
-    //   (cleared by consumeDose on Take → allows Restore → Take → Restore).
-    // - Future slot already undone (not consumed, time still ahead): nothing
-    //   left to restore until Take or the scheduled time elapses — blocks
-    //   repeated Restore after a future restore that does not record skip.
-    // - Legacy (no doseId): still uses skipped_day log for the day.
     const alreadyRestored = resolvedDoseId
       ? isDoseSkippedOnDate(med, resolvedDoseId, today) ||
         (() => {
@@ -150,43 +145,37 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     if (restoreInFlightRef.current.has(restoreKey)) return null;
     restoreInFlightRef.current.add(restoreKey);
 
-    // Production pure restore (stock + skip + clear consume).
-    const result = restoreDose(med, doseId, today);
-    if (!result.ok) {
+    try {
+      const result = await runGatedManualRestore({
+        medicationId,
+        doseId,
+        todayStr: today,
+        makeLogId: () => generateId('restore'),
+      });
+      if (result.outcome === 'applied' && result.log) {
+        const logsWithReason = result.logs.map((l, i) =>
+          i === 0
+            ? {
+                ...l,
+                description: `استرجاع جرعة (${reason}) (+${result.restoredAmount} ${med.unit})`,
+              }
+            : l
+        );
+        setMedications(result.medications);
+        medicationsRef.current = result.medications;
+        setLogs(logsWithReason);
+        if (soundEnabled) playSuccessChime();
+        return result.medications.find((m) => m.id === medicationId) ?? null;
+      }
       if (result.reason === 'auto_deduct_off') {
         showToast(TOAST_MESSAGES.autoDeductOff(med.name));
       } else if (result.reason === 'missing_dose_id') {
         showToast('اختر الجرعة المراد استرجاعها');
       }
-      restoreInFlightRef.current.delete(restoreKey);
       return null;
+    } finally {
+      restoreInFlightRef.current.delete(restoreKey);
     }
-
-    const { updatedMed: medAfterRestore, restoredAmount } = result;
-    setMedications((prev) =>
-      prev.map((m) => (m.id === medicationId ? medAfterRestore : m))
-    );
-    medicationsRef.current = medicationsRef.current.map((m) =>
-      m.id === medicationId ? medAfterRestore : m
-    );
-    setLogs((prev) => [
-      {
-        id: generateId('restore'),
-        medicationId: med.id,
-        medicationName: med.name,
-        type: 'skipped_day',
-        amount: restoredAmount,
-        date: today,
-        timestamp: new Date().toISOString(),
-        description: `استرجاع جرعة (${reason}) (+${restoredAmount} ${med.unit})`,
-        ...(result.doseId ? { doseId: result.doseId } : {}),
-      },
-      ...prev,
-    ]);
-    // Clear in-flight so a later valid Restore (after Take) is not blocked.
-    restoreInFlightRef.current.delete(restoreKey);
-    if (soundEnabled) playSuccessChime();
-    return medAfterRestore;
   };
 
   const handleConfirmRefill = (medicationId: string, addedPills: number) => {
@@ -473,18 +462,24 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
 
 
   const handleTakeDoseFromAlarm = useCallback((med: Medication, doseId?: string) => {
-    const today = getTodayDateString();
-    // Phase 3: optional doseId selects the slot (from notification extra).
-    const { updatedMed, doseAmount, log } = consumeDose(med, 'alarm', today, new Date(), doseId);
-    if (updatedMed && log) {
-      setMedications((prev) =>
-        prev.map((m) => (m.id === med.id ? updatedMed : m))
-      );
-      setLogs((prev) => [log, ...prev]);
-    }
-    dismissAlarm();
-    showToast(TOAST_MESSAGES.doseTaken(med.name, doseAmount, med.unit));
-    if (soundEnabled) playSuccessChime();
+    // Phase 4: durable gate — same serialization as exact auto reconciliation.
+    void (async () => {
+      const result = await runGatedManualConsume({
+        medicationId: med.id,
+        doseId,
+        source: 'alarm',
+      });
+      if (result.outcome === 'applied' && result.log) {
+        setMedications(result.medications);
+        medicationsRef.current = result.medications;
+        setLogs(result.logs);
+        showToast(TOAST_MESSAGES.doseTaken(med.name, result.doseAmount, med.unit));
+        if (soundEnabled) playSuccessChime();
+      } else if (result.outcome === 'already_consumed') {
+        showToast(TOAST_MESSAGES.doseAlreadyTaken(med.name));
+      }
+      dismissAlarm();
+    })();
   }, [dismissAlarm, soundEnabled]);
 
 
@@ -501,7 +496,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
   const handleConsumeDose = (medicationId: string, doseId?: string) => {
     const med = medicationsRef.current.find((m) => m.id === medicationId);
     if (!med) return;
-    const today = getTodayDateString();
     const isMulti =
       Array.isArray(med.doseSchedule) && med.doseSchedule.length > 1;
 
@@ -521,42 +515,37 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         ? med.doseSchedule[0].id
         : undefined);
 
-    // Legacy: block double-consume for the single daily slot.
-    if (
-      !(Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) &&
-      med.lastConsumedDate === today
-    ) {
+    // Phase 4: durable gate serialize with exact auto-deduction.
+    void (async () => {
+      const result = await runGatedManualConsume({
+        medicationId,
+        doseId: resolvedDoseId,
+        source: 'manual',
+      });
+      if (result.outcome === 'applied' && result.log) {
+        setMedications(result.medications);
+        medicationsRef.current = result.medications;
+        setLogs(result.logs);
+        const updatedMed = result.medications.find((m) => m.id === medicationId);
+        if (selectDoseModeRef.current === 'manage' && updatedMed) {
+          setSelectDoseMed(updatedMed);
+        } else {
+          setSelectDoseMed(null);
+          setSelectDoseMode('take');
+        }
+        showToast(TOAST_MESSAGES.doseTaken(med.name, result.doseAmount, med.unit));
+        if (soundEnabled) playSuccessChime();
+        return;
+      }
+      if (
+        result.outcome === 'already_consumed' ||
+        result.reason === 'already_consumed'
+      ) {
+        showToast(TOAST_MESSAGES.doseAlreadyTaken(med.name));
+        return;
+      }
       showToast(TOAST_MESSAGES.doseAlreadyTaken(med.name));
-      return;
-    }
-
-    const { updatedMed, doseAmount, log } = consumeDose(
-      med,
-      'manual',
-      today,
-      new Date(),
-      resolvedDoseId
-    );
-    if (doseAmount <= 0) {
-      showToast(TOAST_MESSAGES.doseAlreadyTaken(med.name));
-      return;
-    }
-    if (updatedMed && log) {
-      setMedications((prev) =>
-        prev.map((m) => (m.id === medicationId ? updatedMed : m))
-      );
-      setLogs((prev) => [log, ...prev]);
-    }
-    // Management flow: keep modal open and refresh dose rows from latest med.
-    // take/restore single-purpose flows: close modal as before.
-    if (selectDoseModeRef.current === 'manage' && updatedMed) {
-      setSelectDoseMed(updatedMed);
-    } else {
-      setSelectDoseMed(null);
-      setSelectDoseMode('take');
-    }
-    showToast(TOAST_MESSAGES.doseTaken(med.name, doseAmount, med.unit));
-    if (soundEnabled) playSuccessChime();
+    })();
   };
 
   /**
@@ -576,7 +565,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       Array.isArray(med.doseSchedule) && med.doseSchedule.length > 1;
 
     if (isMulti && !doseId) {
-      // Unified management UI (Take + Restore per dose in one modal).
       flushSync(() => {
         setSelectDoseMode('manage');
       });
@@ -584,17 +572,18 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       return;
     }
 
-    const updated = handleRestoreDose(medicationId, 'card', doseId);
-    if (updated) {
-      // Keep Management modal open and refresh its medication snapshot.
-      if (selectDoseModeRef.current === 'manage') {
-        setSelectDoseMed(updated);
-      } else {
-        setSelectDoseMed(null);
-        setSelectDoseMode('take');
+    void (async () => {
+      const updated = await handleRestoreDose(medicationId, 'card', doseId);
+      if (updated) {
+        if (selectDoseModeRef.current === 'manage') {
+          setSelectDoseMed(updated);
+        } else {
+          setSelectDoseMed(null);
+          setSelectDoseMode('take');
+        }
+        showToast(`تم استرجاع الجرعة — ${med.name}`);
       }
-      showToast(`تم استرجاع الجرعة — ${med.name}`);
-    }
+    })();
   };
 
   const handleSelectDoseFromModal = (medicationId: string, doseId: string) => {

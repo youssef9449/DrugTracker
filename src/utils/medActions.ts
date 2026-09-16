@@ -306,7 +306,7 @@ export function restoreDose(
   };
 }
 
-interface ConsumeDoseResult {
+export interface ConsumeDoseResult {
   /** The new medication object, or null if no dose was consumed (balance already 0). */
   updatedMed: Medication | null;
   /** The dose amount actually consumed (clamped to effective balance). */

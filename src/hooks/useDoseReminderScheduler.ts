@@ -151,7 +151,8 @@ export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
  * Lifecycle / hydration / resume re-runs are idempotent: unchanged dose
  * signatures with a still-pending native id are left untouched. Daily
  * recurrence after delivery is owned only by TimedNotificationPublisher
- * (CRON_KEY), not by cancel+schedule in this hook.
+ * (next calendar day from extra.reminderTime). Stale native pending ids
+ * (process death) are cancelled via getPending() against the desired set.
  */
 export function useDoseReminderScheduler({
   medications,
@@ -249,23 +250,29 @@ export function useDoseReminderScheduler({
     }
 
     const stillScheduled = new Set<string>();
+    const keepNativeIds = new Set<number>();
     const today = getTodayDateString();
 
-    // Desired slots: reconcile idempotently. Same signature + pending id
-    // → no cancel/schedule. Recurrence after delivery is owned solely by
-    // TimedNotificationPublisher (CRON_KEY), not by this effect.
+    type DesiredSlot = {
+      key: string;
+      medId: string;
+      doseId: string;
+      time: string;
+      amount: number;
+      name: string;
+      unit: string;
+      slotConsumedToday: boolean;
+      isAutoActive: boolean;
+      sig: string;
+    };
+    const desired: DesiredSlot[] = [];
+
+    // Build desired set from medication data (source of config truth).
     for (const med of medicationsRef.current) {
-      if (!med.reminderEnabled) {
-        continue;
-      }
-
+      if (!med.reminderEnabled) continue;
       const slots = getDoseReminderSlots(med);
-      if (slots.length === 0) {
-        continue;
-      }
+      if (slots.length === 0) continue;
 
-      // Multi-dose: drop legacy med-only alarm so it cannot fire alongside
-      // per-dose ids (idempotent cancel).
       if (slots.some((sl) => sl.doseId !== LEGACY_DOSE_ID)) {
         enqueue(doseScheduleKey(med.id, '__legacy_cleanup__'), () =>
           cancelLegacyDoseReminderAlarm(med.id)
@@ -274,75 +281,104 @@ export function useDoseReminderScheduler({
 
       for (const slot of slots) {
         const key = doseScheduleKey(slot.medId, slot.doseId);
-        const doseId = slot.doseId;
-        const time = slot.time;
-        const amount = slot.amount;
-        const name = slot.name;
-        const unit = slot.unit;
-        const medId = slot.medId;
-        const slotConsumedToday = isDoseConsumedOnDate(med, doseId, today);
+        const slotConsumedToday = isDoseConsumedOnDate(med, slot.doseId, today);
         const isAutoActive =
           globalAutoDeductEnabled === true && med.autoDeductEnabled !== false;
         const sig = [
-          time,
-          String(amount),
-          name,
-          unit,
+          slot.time,
+          String(slot.amount),
+          slot.name,
+          slot.unit,
           slotConsumedToday ? '1' : '0',
           isAutoActive ? '1' : '0',
         ].join('|');
-
         stillScheduled.add(key);
-
-        const prevSig = appliedSignatureRef.current.get(key);
-        if (prevSig === sig) {
-          // Config unchanged — only repair if the native pending entry is gone.
-          const gen = bumpGen(key);
-          enqueue(key, async () => {
-            if (doseGenerationRef.current.get(key) !== gen) return;
-            const pending = await isDoseReminderPending(medId, doseId);
-            if (doseGenerationRef.current.get(key) !== gen) return;
-            if (pending) return;
-            const opts = {
-              ...(doseId !== LEGACY_DOSE_ID ? { doseId } : {}),
-              ...(slotConsumedToday ? { skipToday: true as const } : {}),
-              ...(isAutoActive ? { autoDeductEnabled: true } : {}),
-            };
-            const hasOpts = Object.keys(opts).length > 0;
-            await (hasOpts
-              ? scheduleDoseReminder(medId, name, time, amount, unit, opts)
-              : scheduleDoseReminder(medId, name, time, amount, unit));
-            if (doseGenerationRef.current.get(key) !== gen) {
-              await cancelDoseReminder(medId, doseId);
-              return;
-            }
-            appliedSignatureRef.current.set(key, sig);
-          });
-          continue;
-        }
-
-        // Signature changed or first apply: cancel old + schedule replacement.
-        const gen = bumpGen(key);
-        enqueue(key, () =>
-          cancelDoseReminder(medId, doseId).then(async () => {
-            if (doseGenerationRef.current.get(key) !== gen) return;
-            const opts = {
-              ...(doseId !== LEGACY_DOSE_ID ? { doseId } : {}),
-              ...(slotConsumedToday ? { skipToday: true as const } : {}),
-              ...(isAutoActive ? { autoDeductEnabled: true } : {}),
-            };
-            const hasOpts = Object.keys(opts).length > 0;
-            await (hasOpts
-              ? scheduleDoseReminder(medId, name, time, amount, unit, opts)
-              : scheduleDoseReminder(medId, name, time, amount, unit));
-            if (doseGenerationRef.current.get(key) !== gen) {
-              await cancelDoseReminder(medId, doseId);
-              return;
-            }
-            appliedSignatureRef.current.set(key, sig);
-          })
-        );
+        keepNativeIds.add(doseReminderAlarmIdForDose(slot.medId, slot.doseId));
+        desired.push({
+          key,
+          medId: slot.medId,
+          doseId: slot.doseId,
+          time: slot.time,
+          amount: slot.amount,
+          name: slot.name,
+          unit: slot.unit,
+          slotConsumedToday,
+          isAutoActive,
+          sig,
+        });
       }
+    }
+
+    // Persisted native pending is authority for stale cleanup after process death.
+    enqueue('__stale_dose_alarm_cleanup__', () =>
+      cancelStaleDoseReminderAlarms(keepNativeIds)
+    );
+
+    // Reconcile each desired slot. Same signature + pending → no-op.
+    // Missing pending → schedule one-shot (native owns next-day recurrence).
+    // Signature change → cancel + one replacement.
+    for (const slot of desired) {
+      const {
+        key,
+        medId,
+        doseId,
+        time,
+        amount,
+        name,
+        unit,
+        slotConsumedToday,
+        isAutoActive,
+        sig,
+      } = slot;
+      const prevSig = appliedSignatureRef.current.get(key);
+      if (prevSig === sig) {
+        const gen = bumpGen(key);
+        enqueue(key, async () => {
+          if (doseGenerationRef.current.get(key) !== gen) return;
+          // During delivery, pending may be briefly empty while native arms
+          // tomorrow. Scheduling with the same stable id uses CANCEL_CURRENT
+          // so at most one alarm remains — never a second recurrence path.
+          const pending = await isDoseReminderPending(medId, doseId);
+          if (doseGenerationRef.current.get(key) !== gen) return;
+          if (pending) return;
+          const opts = {
+            ...(doseId !== LEGACY_DOSE_ID ? { doseId } : {}),
+            ...(slotConsumedToday ? { skipToday: true as const } : {}),
+            ...(isAutoActive ? { autoDeductEnabled: true } : {}),
+          };
+          const hasOpts = Object.keys(opts).length > 0;
+          await (hasOpts
+            ? scheduleDoseReminder(medId, name, time, amount, unit, opts)
+            : scheduleDoseReminder(medId, name, time, amount, unit));
+          if (doseGenerationRef.current.get(key) !== gen) {
+            await cancelDoseReminder(medId, doseId);
+            return;
+          }
+          appliedSignatureRef.current.set(key, sig);
+        });
+        continue;
+      }
+
+      const gen = bumpGen(key);
+      enqueue(key, () =>
+        cancelDoseReminder(medId, doseId).then(async () => {
+          if (doseGenerationRef.current.get(key) !== gen) return;
+          const opts = {
+            ...(doseId !== LEGACY_DOSE_ID ? { doseId } : {}),
+            ...(slotConsumedToday ? { skipToday: true as const } : {}),
+            ...(isAutoActive ? { autoDeductEnabled: true } : {}),
+          };
+          const hasOpts = Object.keys(opts).length > 0;
+          await (hasOpts
+            ? scheduleDoseReminder(medId, name, time, amount, unit, opts)
+            : scheduleDoseReminder(medId, name, time, amount, unit));
+          if (doseGenerationRef.current.get(key) !== gen) {
+            await cancelDoseReminder(medId, doseId);
+            return;
+          }
+          appliedSignatureRef.current.set(key, sig);
+        })
+      );
     }
 
     for (const prevKey of scheduledDoseIdsRef.current) {

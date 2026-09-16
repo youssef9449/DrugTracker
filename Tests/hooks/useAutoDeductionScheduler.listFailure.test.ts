@@ -81,27 +81,80 @@ describe('useAutoDeductionScheduler native list failure (Issue #242)', () => {
     unmount();
   });
 
-  it('failed native list read does not trigger stale cancellation', async () => {
+  it('list failure with populated trackedRef does not invalidate/cancel; recovers on success', async () => {
+    const med = baseMed();
+    const stale = {
+      medicationId: 'med-1',
+      doseId: 'd1',
+      calendarDate: '2099-06-01',
+      timeHhmm: '08:00',
+      amount: 1,
+    };
+
+    // ── Pass 1: auto ON → schedule succeeds → trackedRef gains the occurrence ──
+    listScheduledMock.mockResolvedValue({ ok: true, schedules: [] });
+    scheduleMock.mockResolvedValue({ ok: true });
+
+    const { rerender, unmount } = renderHook(
+      (props: {
+        enabled: boolean;
+        resumeTick: number;
+        meds: Medication[];
+      }) =>
+        useAutoDeductionScheduler({
+          medications: props.meds,
+          globalAutoDeductEnabled: props.enabled,
+          hydrated: true,
+          isFirstRun: false,
+          exactAlarmEnabled: true,
+          resumeTick: props.resumeTick,
+        }),
+      {
+        initialProps: {
+          enabled: true,
+          resumeTick: 0,
+          meds: [med],
+        },
+      }
+    );
+
+    await wait(50);
+    expect(scheduleMock).toHaveBeenCalled();
+    // No destructive cancel while schedules are desired.
+    expect(cancelMock).not.toHaveBeenCalled();
+    expect(invalidateMock).not.toHaveBeenCalled();
+
+    // ── Pass 2: desired empty + native list FAILS ──
+    // trackedRef still holds prior schedules; without fail-closed, the scheduler
+    // would invalidate+cancel them. Must not.
+    cancelMock.mockClear();
+    invalidateMock.mockClear();
+    scheduleMock.mockClear();
     listScheduledMock.mockResolvedValue({
       ok: false,
       schedules: [],
       error: 'list_schedules_failed',
     });
 
-    const { unmount } = renderHook(() =>
-      useAutoDeductionScheduler({
-        medications: [baseMed()],
-        globalAutoDeductEnabled: false,
-        hydrated: true,
-        isFirstRun: false,
-        exactAlarmEnabled: true,
-      })
-    );
-    await wait(40);
+    rerender({ enabled: false, resumeTick: 1, meds: [med] });
+    await wait(50);
 
     expect(listScheduledMock).toHaveBeenCalled();
-    expect(cancelMock).not.toHaveBeenCalled();
     expect(invalidateMock).not.toHaveBeenCalled();
+    expect(cancelMock).not.toHaveBeenCalled();
+
+    // ── Pass 3: list succeeds with durable stale row → normal #217 cancel path ──
+    cancelMock.mockClear();
+    invalidateMock.mockClear();
+    listScheduledMock.mockResolvedValue({ ok: true, schedules: [stale] });
+    invalidateMock.mockResolvedValue({ ok: true, generation: 3 });
+    cancelMock.mockResolvedValue({ ok: true, status: 'SUCCESS' });
+
+    rerender({ enabled: false, resumeTick: 2, meds: [med] });
+    await wait(50);
+
+    expect(invalidateMock).toHaveBeenCalledWith('med-1', 'd1');
+    expect(cancelMock).toHaveBeenCalledWith('med-1', 'd1', '2099-06-01');
     unmount();
   });
 

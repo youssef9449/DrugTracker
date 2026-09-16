@@ -46,6 +46,19 @@ export interface ScheduledOccurrence {
   scheduledAtEpochMs?: number;
 }
 
+/**
+ * Explicit result for native schedule listing (Issue #242).
+ * Successful empty list: { ok: true, schedules: [] }
+ * Native read failure:  { ok: false, schedules: [], error }
+ * Never conflate the two — callers must check ok before treating schedules
+ * as an authoritative native snapshot.
+ */
+export interface ListScheduledOccurrencesResult {
+  ok: boolean;
+  schedules: ScheduledOccurrence[];
+  error?: string;
+}
+
 export type CancelOccurrenceStatus = "SUCCESS" | "ALREADY_ABSENT" | "FAILED";
 
 export interface CancelOccurrenceResult {
@@ -224,12 +237,19 @@ export async function restoreFutureAutoDeductionSchedules(): Promise<number> {
   }
 }
 
-export async function listScheduledAutoDeductionOccurrences(): Promise<ScheduledOccurrence[]> {
-  if (!isNativeAndroid()) return [];
+export async function listScheduledAutoDeductionOccurrences(): Promise<ListScheduledOccurrencesResult> {
+  // Web / non-Android: no native AlarmManager — successful empty set (not a failure).
+  if (!isNativeAndroid()) {
+    return { ok: true, schedules: [] };
+  }
   try {
     const res = await AutoDeduction.listScheduledOccurrences();
-    return res.schedules ?? [];
-  } catch {
-    return [];
+    return { ok: true, schedules: res.schedules ?? [] };
+  } catch (e) {
+    return {
+      ok: false,
+      schedules: [],
+      error: e instanceof Error ? e.message : 'list_schedules_failed',
+    };
   }
 }

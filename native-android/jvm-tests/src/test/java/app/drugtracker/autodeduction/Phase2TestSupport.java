@@ -1,9 +1,11 @@
 package app.drugtracker.autodeduction;
 
+import android.app.AlarmManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.Shadows;
 
 import java.util.Calendar;
 import java.util.Locale;
@@ -23,6 +25,13 @@ final class Phase2TestSupport {
 
     static void clearAllDurableState() {
         Context ctx = appContext();
+        // Grant SCHEDULE_EXACT_ALARM in the Robolectric test environment so
+        // scheduleOccurrence/scheduleNextOccurrenceIfAbsent work under
+        // @Config(sdk = 33). Production canScheduleExactAlarms() is unchanged.
+        AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
+        if (am != null) {
+            Shadows.shadowOf(am).setCanScheduleExactAlarms(true);
+        }
         clearPrefs(ctx, AutoDeductionContract.PREFS_SCHEDULES);
         clearPrefs(ctx, AutoDeductionContract.PREFS_CANCELLED);
         clearPrefs(ctx, AutoDeductionContract.PREFS_EVENTS);
@@ -101,6 +110,21 @@ final class Phase2TestSupport {
 
     static AutoDeductionScheduler newScheduler() {
         return new AutoDeductionScheduler(appContext());
+    }
+
+    /**
+     * Read the current durable recurrence-generation auth token for a med+dose slot.
+     * Returns 0 when never scheduled/invalidated. Use this to pass the CURRENT
+     * generation to {@code scheduleNextOccurrenceIfAbsent(..., expectedGen)} when
+     * the test intends successful successor creation (Issue #240 ownership contract).
+     */
+    static long readAuthGeneration(String medicationId, String doseId) {
+        SharedPreferences p = appContext().getSharedPreferences(
+                AutoDeductionContract.PREFS_RECURRENCE_AUTH, Context.MODE_PRIVATE);
+        return p.getLong(
+                AutoDeductionContract.RECURRENCE_AUTH_KEY_PREFIX
+                        + AutoDeductionContract.scheduleIdentityKey(medicationId, doseId),
+                0L);
     }
 
     static AutoDeductionEventStore newEventStore() {

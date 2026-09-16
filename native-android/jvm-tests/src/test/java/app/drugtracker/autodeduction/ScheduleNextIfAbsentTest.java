@@ -6,6 +6,7 @@ import static app.drugtracker.autodeduction.Phase2TestSupport.clearAllDurableSta
 import static app.drugtracker.autodeduction.Phase2TestSupport.futureCalendarDate;
 import static app.drugtracker.autodeduction.Phase2TestSupport.futureEpochMs;
 import static app.drugtracker.autodeduction.Phase2TestSupport.newScheduler;
+import static app.drugtracker.autodeduction.Phase2TestSupport.readAuthGeneration;
 import static app.drugtracker.autodeduction.Phase2TestSupport.schKey;
 import static app.drugtracker.autodeduction.Phase2TestSupport.schedulePrefs;
 import static org.junit.Assert.assertEquals;
@@ -66,7 +67,8 @@ public class ScheduleNextIfAbsentTest {
 
         // Stale D delivery carries different amount/time — must not rewrite D+1.
         AutoDeductionScheduler.ScheduleResult r =
-                s.scheduleNextOccurrenceIfAbsent("med", "dose", d, "01:00", 9.9);
+                s.scheduleNextOccurrenceIfAbsent("med", "dose", d, "01:00", 9.9,
+                        readAuthGeneration("med", "dose"));
         assertTrue(r.ok);
 
         String d1Key = AutoDeductionContract.occurrenceKey("med", "dose", d1);
@@ -94,7 +96,8 @@ public class ScheduleNextIfAbsentTest {
 
         // Stale/duplicate D fire path: scheduleNextOccurrenceIfAbsent must no-op.
         AutoDeductionScheduler.ScheduleResult r =
-                s.scheduleNextOccurrenceIfAbsent("med", "dose", d, "10:00", 2.0);
+                s.scheduleNextOccurrenceIfAbsent("med", "dose", d, "10:00", 2.0,
+                        readAuthGeneration("med", "dose"));
         assertTrue("cancelled successor is success no-op, err=" + r.error, r.ok);
 
         assertFalse("D+1 must not be recreated", schedulePrefs().contains(schKey(d1Key)));
@@ -117,7 +120,8 @@ public class ScheduleNextIfAbsentTest {
         assertTrue(s.cancelOccurrence("med", "am", d1).isOk());
 
         // Stale delivery for AM dose must not recreate AM D+1; PM stays scheduled.
-        assertTrue(s.scheduleNextOccurrenceIfAbsent("med", "am", d, "08:00", 1.0).ok);
+        assertTrue(s.scheduleNextOccurrenceIfAbsent("med", "am", d, "08:00", 1.0,
+                readAuthGeneration("med", "am")).ok);
 
         String amKey = AutoDeductionContract.occurrenceKey("med", "am", d1);
         String pmKey = AutoDeductionContract.occurrenceKey("med", "pm", d1);
@@ -139,8 +143,10 @@ public class ScheduleNextIfAbsentTest {
         String firstRaw = schedulePrefs().getString(schKey(d1Key), null);
         assertNotNull(firstRaw);
 
-        assertTrue(s.scheduleNextOccurrenceIfAbsent("med", "dose", d, "07:00", 99.0).ok);
-        assertTrue(s.scheduleNextOccurrenceIfAbsent("med", "dose", d, "03:00", 0.5).ok);
+        assertTrue(s.scheduleNextOccurrenceIfAbsent("med", "dose", d, "07:00", 99.0,
+                readAuthGeneration("med", "dose")).ok);
+        assertTrue(s.scheduleNextOccurrenceIfAbsent("med", "dose", d, "03:00", 0.5,
+                readAuthGeneration("med", "dose")).ok);
 
         assertEquals(firstRaw, schedulePrefs().getString(schKey(d1Key), null));
     }

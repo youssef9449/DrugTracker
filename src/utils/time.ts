@@ -85,11 +85,13 @@ export function timeToMinutes(timeStr: string): number {
  */
 export function formatReminderTime12h(timeStr: string): string {
   if (!timeStr || typeof timeStr !== 'string') return timeStr;
-  const parts = timeStr.trim().split(':');
-  if (parts.length < 2) return timeStr;
-  const h = parseInt(parts[0], 10);
-  const m = parseInt(parts[1], 10);
-  if (Number.isNaN(h) || Number.isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59) {
+  // Strict HH:mm / H:mm only — reject partial garbage that parseInt would accept
+  // (e.g. "22abc:00", "09:30abc", "12.5:00", "1foo:30").
+  const match = /^(\d{1,2}):(\d{2})$/.exec(timeStr.trim());
+  if (!match) return timeStr;
+  const h = Number(match[1]);
+  const m = Number(match[2]);
+  if (h > 23 || m > 59) {
     return timeStr;
   }
   const period = h < 12 ? 'ص' : 'م';

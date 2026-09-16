@@ -25,4 +25,18 @@ describe('formatReminderTime12h — display-only 12h Arabic AM/PM', () => {
     expect(formatReminderTime12h('ab:cd')).toBe('ab:cd');
     expect(formatReminderTime12h('9')).toBe('9');
   });
+
+  it('rejects partially malformed strings that parseInt would partially accept', () => {
+    expect(formatReminderTime12h('22abc:00')).toBe('22abc:00');
+    expect(formatReminderTime12h('09:30abc')).toBe('09:30abc');
+    expect(formatReminderTime12h('12.5:00')).toBe('12.5:00');
+    expect(formatReminderTime12h('1foo:30')).toBe('1foo:30');
+    expect(formatReminderTime12h('09:3')).toBe('09:3');
+    expect(formatReminderTime12h('9:30:00')).toBe('9:30:00');
+  });
+
+  it('still accepts valid H:mm single-digit hour', () => {
+    expect(formatReminderTime12h('9:30')).toBe('09:30 ص');
+    expect(formatReminderTime12h('0:00')).toBe('12:00 ص');
+  });
 });

@@ -26,7 +26,11 @@ import {
   commitDurableAutoStockState,
   type AutoStockDurableState,
 } from './autoDeductionStockGate';
-import { recoverManualEnvelopeInto } from './manualStockMutation';
+import {
+  recoverManualEnvelopeInto,
+  recoverExactAutoEnvelopeState,
+} from './stockEnvelopeRecovery';
+import { allocateMutationSeq } from './stockMutationOrdering';
 import { loadJson, persist } from './storage';
 
 const STORAGE_ENVELOPE_KEY = 'android_med_tracker_exact_auto_envelope_v1';
@@ -42,6 +46,8 @@ export interface ExactAutoEnvelope {
     calendarDate: string;
   }>;
   createdAt: string;
+  /** Shared causal order with Manual envelopes (stockMutationOrdering). */
+  mutationSeq?: number;
 }
 
 export interface RunReconciliationInput {
@@ -219,23 +225,26 @@ async function runOnce(
     // (markers may already be in meds from the partial write).
   }
 
-  // ── Exact Auto envelope recovery (incomplete prior exact reconciliation) ──
+  // ── Exact Auto envelope recovery (ordered by mutationSeq vs lastApplied) ──
   const existing = loadEnvelope();
   if (existing) {
-    let writeFailed = false;
-    if (input.persistMeds || input.persistLogs) {
-      const medErr = input.persistMeds ? input.persistMeds(existing.medications) : null;
-      const logErr = input.persistLogs ? input.persistLogs(existing.logs) : null;
-      writeFailed = !!(medErr || logErr);
-    } else {
-      writeFailed = !!commitDurableAutoStockState({
-        medications: existing.medications,
-        logs: existing.logs,
+    const commitExact = (state: AutoStockDurableState): string | null => {
+      if (input.persistMeds || input.persistLogs) {
+        const medErr = input.persistMeds ? input.persistMeds(state.medications) : null;
+        const logErr = input.persistLogs ? input.persistLogs(state.logs) : null;
+        if (medErr || logErr) return medErr || logErr || 'persist_failed';
+        return null;
+      }
+      return commitDurableAutoStockState(state, {
+        appliedMutationSeq: existing.mutationSeq,
       });
-    }
-    if (writeFailed) {
-      // JS persistence/recovery failed — no native markReconciled was attempted.
-      // partialNativeAck must only reflect actual native acknowledgement failure.
+    };
+    const recovered = recoverExactAutoEnvelopeState(
+      existing,
+      { medications: baseMeds, logs: baseLogs },
+      commitExact
+    );
+    if (recovered.action === 'write_failed') {
       return {
         medications: baseMeds,
         logs: baseLogs,
@@ -248,12 +257,15 @@ async function runOnce(
         partialNativeAck: false,
       };
     }
-    const { markedCount, failed } = await markAll(existing.toAcknowledge, mark);
-    // Option B: JS state durable → clear envelope; remaining FIRED recoverable
+    // already_applied or apply: clear envelope; ACK only the real toAcknowledge list
+    // (ownership stays Exact Auto — these are FIRED events recorded at mutation time).
     saveEnvelope(null);
+    baseMeds = recovered.state.medications;
+    baseLogs = recovered.state.logs;
+    const { markedCount, failed } = await markAll(existing.toAcknowledge, mark);
     return {
-      medications: existing.medications,
-      logs: existing.logs,
+      medications: recovered.state.medications,
+      logs: recovered.state.logs,
       toAcknowledge: existing.toAcknowledge,
       details: existing.toAcknowledge.map((a) => ({
         medicationId: a.medicationId,
@@ -263,7 +275,7 @@ async function runOnce(
         outcome: 'already_applied' as const,
         occurrenceKey: `${a.medicationId}\u001f${a.doseId}\u001f${a.calendarDate}`,
       })),
-      mutated: true,
+      mutated: recovered.action === 'apply',
       newExactLogs: [],
       markedCount,
       recoveredEnvelope: true,
@@ -318,6 +330,7 @@ async function runOnce(
   }
 
   // Mutating path: envelope → meds+logs → mark → clear (Option B)
+  const mutationSeq = allocateMutationSeq();
   const envelope: ExactAutoEnvelope = {
     version: 1,
     status: 'js_ready',
@@ -325,6 +338,7 @@ async function runOnce(
     logs: result.logs,
     toAcknowledge: result.toAcknowledge,
     createdAt: new Date().toISOString(),
+    mutationSeq,
   };
 
   const envErr = saveEnvelope(envelope);
@@ -350,10 +364,13 @@ async function runOnce(
     const logErr = input.persistLogs ? input.persistLogs(result.logs) : null;
     if (medErr || logErr) writeOk = false;
   } else {
-    const err = commitDurableAutoStockState({
-      medications: result.medications,
-      logs: result.logs,
-    });
+    const err = commitDurableAutoStockState(
+      {
+        medications: result.medications,
+        logs: result.logs,
+      },
+      { appliedMutationSeq: mutationSeq }
+    );
     if (err) writeOk = false;
   }
 

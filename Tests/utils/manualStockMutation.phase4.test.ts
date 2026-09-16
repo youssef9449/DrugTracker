@@ -4,9 +4,14 @@ import {
   runGatedManualConsume,
   runGatedManualRestore,
   shouldDismissAlarmAfterManualTake,
-  __setManualEnvelopeTestHooks,
   type ManualStockEnvelope,
 } from '../../src/utils/manualStockMutation';
+import { __setManualEnvelopeTestHooks } from '../../src/utils/stockEnvelopeRecovery';
+import {
+  __setStockMutationOrderingTestHooks,
+  __resetStockMutationOrderingForTests,
+  loadLastAppliedMutationSeq,
+} from '../../src/utils/stockMutationOrdering';
 import { runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
 import {
   __setAutoStockGateTestHooks,
@@ -241,7 +246,7 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
     expect(isDoseConsumedOnDate(durable.medications[0], 'd2', TODAY)).toBe(true);
   });
 
-  it('Manual Restore after Take is idempotent on second Restore (in-flight/skip)', async () => {
+  it('Manual Restore after Take is idempotent on second Restore (stock + logs)', async () => {
     await runGatedManualConsume({
       medicationId: 'med-1',
       doseId: 'd1',
@@ -258,20 +263,29 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
     });
     expect(r1.outcome).toBe('applied');
     expect(durable.medications[0].currentPills).toBe(afterTake + 1);
+    expect(durable.logs.filter((l) => l.id === 'restore-1')).toHaveLength(1);
 
-    // Second restore: pure restoreDose still may "apply" for auto-only skip
-    // path; stock must not increase again if wasManual already cleared.
     const pillsAfterFirst = durable.medications[0].currentPills;
+    const logCountAfterFirst = durable.logs.length;
     const r2 = await runGatedManualRestore({
       medicationId: 'med-1',
       doseId: 'd1',
       todayStr: TODAY,
       makeLogId: () => 'restore-2',
     });
-    // After first restore, consume cleared; second restore is auto-only path
-    // (no +pills when past-due uses skip only).
+    // Behavioral contract: no second stock credit, no extra restore amount.
     expect(durable.medications[0].currentPills).toBe(pillsAfterFirst);
-    expect(r2.outcome === 'applied' || r2.outcome === 'rejected').toBe(true);
+    // Second path must not invent another +pills credit for same slot/date.
+    expect(durable.medications[0].currentPills).toBeLessThanOrEqual(10);
+    // Prefer rejected when pure restoreDose finds nothing to restore.
+    if (r2.outcome === 'applied') {
+      expect(r2.restoredAmount).toBe(0);
+    } else {
+      expect(r2.outcome).toBe('rejected');
+    }
+    // At most one restore-1 log; restore-2 only if a no-op applied path wrote it.
+    expect(durable.logs.filter((l) => l.id === 'restore-1')).toHaveLength(1);
+    expect(durable.logs.length).toBeGreaterThanOrEqual(logCountAfterFirst);
   });
 
   it('crash recovery: markers after Take prevent duplicate exact auto on restart', async () => {
@@ -341,7 +355,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
   let generation: number;
   let marked: string[];
 
-  beforeEach(() => {
+    beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(`${TODAY}T15:00:00`));
     durable = { medications: [med()], logs: [] };
@@ -351,9 +365,23 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     failBump = false;
     generation = 0;
     marked = [];
+    let lastApplied = 0;
+    let nextSeq = 0;
+    __resetStockMutationOrderingForTests();
+    __setStockMutationOrderingTestHooks({
+      loadLastApplied: () => lastApplied,
+      persistLastApplied: (seq) => {
+        lastApplied = seq;
+        return null;
+      },
+      allocate: () => {
+        nextSeq += 1;
+        return nextSeq;
+      },
+    });
 
     __setManualEnvelopeTestHooks({
-      load: () => manualEnvelope,
+    load: () => manualEnvelope,
       save: (env) => {
         if (env == null && failClear) {
           return 'envelope clear failed';
@@ -524,6 +552,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       logs: [],
       createdAt: new Date().toISOString(),
       baseGeneration: 0,
+      mutationSeq: 1,
     };
 
     marked = [];
@@ -634,6 +663,123 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     expect(result.log).toBeNull();
   });
 });
+
+
+  it('Manual + Exact Auto envelopes together: older seq never overwrites newer durable', async () => {
+    // Apply a successful Manual Take (seq=1) so durable is at pills=9.
+    const take = await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+    });
+    expect(take.outcome).toBe('applied');
+    expect(durable.medications[0].currentPills).toBe(9);
+    const newerLogs = durable.logs.map((l) => ({ ...l }));
+
+    // Plant older Manual envelope (seq 1 already applied) with contradictory stock=10.
+    manualEnvelope = {
+      version: 1,
+      status: 'manual_js_ready',
+      medications: [med({ currentPills: 10 })],
+      logs: [{ id: 'old-log', medicationId: 'med-1', medicationName: 'TestMed', type: 'dose_taken', amount: 1, date: TODAY, timestamp: '', description: '' }],
+      createdAt: new Date().toISOString(),
+      baseGeneration: 0,
+      mutationSeq: 1,
+    };
+
+    // Plant Exact Auto envelope with higher seq that matches current durable (no overwrite).
+    let exactEnv: {
+      version: 1;
+      status: 'js_ready';
+      medications: typeof durable.medications;
+      logs: typeof durable.logs;
+      toAcknowledge: Array<{ medicationId: string; doseId: string; calendarDate: string }>;
+      createdAt: string;
+      mutationSeq: number;
+    } | null = {
+      version: 1,
+      status: 'js_ready',
+      medications: durable.medications.map((m) => ({ ...m, currentPills: 8 })),
+      logs: [
+        ...newerLogs,
+        {
+          id: 'exact-extra',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'dose_taken',
+          amount: 1,
+          date: TODAY,
+          timestamp: '',
+          description: '',
+        },
+      ],
+      toAcknowledge: [
+        { medicationId: 'med-1', doseId: 'd2', calendarDate: TODAY },
+      ],
+      createdAt: new Date().toISOString(),
+      mutationSeq: 2,
+    };
+
+    marked = [];
+    const recon = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        marked.push(`${medicationId}|${doseId}|${calendarDate}`);
+        return { ok: true, changed: true };
+      },
+      loadEnvelope: () => exactEnv,
+      saveEnvelope: (env) => {
+        exactEnv = env as typeof exactEnv;
+        return null;
+      },
+    });
+
+    // Older Manual (seq 1) discarded; Exact Auto seq 2 applied once.
+    expect(manualEnvelope).toBeNull();
+    expect(exactEnv).toBeNull();
+    expect(durable.medications[0].currentPills).toBe(8);
+    expect(durable.logs.some((l) => l.id === 'exact-extra')).toBe(true);
+    // Manual old stock=10 must not win.
+    expect(durable.medications[0].currentPills).not.toBe(10);
+    // ACK only from Exact Auto toAcknowledge (FIRED ownership at envelope time).
+    expect(marked).toEqual([`med-1|d2|${TODAY}`]);
+    expect(recon.recoveredEnvelope).toBe(true);
+  });
+
+  it('old envelope log id present but newer durable mutation wins (no meds overwrite)', async () => {
+    await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+    });
+    expect(durable.medications[0].currentPills).toBe(9);
+    const takeLogId = durable.logs.find((l) => l.type === 'dose_taken')?.id;
+    expect(takeLogId).toBeTruthy();
+
+    // Stale envelope reuses same log id but wants stock=10 (wrong).
+    manualEnvelope = {
+      version: 1,
+      status: 'manual_js_ready',
+      medications: [med({ currentPills: 10 })],
+      logs: durable.logs.map((l) => ({ ...l })),
+      createdAt: new Date().toISOString(),
+      baseGeneration: 0,
+      mutationSeq: 1,
+    };
+
+    await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async () => ({ ok: true, changed: true }),
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
+    });
+    expect(manualEnvelope).toBeNull();
+    expect(durable.medications[0].currentPills).toBe(9);
+  });
 
 describe('shouldDismissAlarmAfterManualTake', () => {
   it('dismisses only for applied and already_consumed; never persist_failed', () => {

@@ -8,18 +8,17 @@
 
 import type { ConsumptionLog, Medication } from '../types';
 import { loadJson, loadString, persist } from './storage';
+import {
+  persistLastAppliedMutationSeq,
+} from './stockMutationOrdering';
 
 /** Same keys as App.tsx / existing persistence. */
 export const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 export const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
 /**
- * Monotonic durable generation for meds+logs commits.
- * Bumped after both meds and logs persist successfully (best-effort).
- * Manual envelope stores baseGeneration so recovery can detect a stale
- * snapshot when durable advanced past that mutation.
- *
- * Generation lag after a successful meds+logs pair is tolerated: recovery
- * uses content checks (log ids / markers) when generation has not advanced.
+ * Monotonic durable generation for meds+logs commits (diagnostic / lag signal).
+ * Causal ordering for envelope recovery uses mutationSeq + lastAppliedMutationSeq
+ * from stockMutationOrdering.ts — not generation alone.
  */
 export const STORAGE_STOCK_GEN_KEY = 'android_med_tracker_stock_generation_v1';
 
@@ -30,10 +29,6 @@ export interface AutoStockDurableState {
 
 let chain: Promise<unknown> = Promise.resolve();
 
-/**
- * Optional test injectors so pure unit tests can supply in-memory durable state
- * without touching real localStorage.
- */
 let testLoad: (() => AutoStockDurableState) | null = null;
 let testCommit: ((state: AutoStockDurableState) => string | null) | null = null;
 let testLoadGeneration: (() => number) | null = null;
@@ -59,10 +54,6 @@ export function loadStockGeneration(): number {
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
 }
 
-/**
- * Bump durable generation after a successful meds+logs pair write.
- * Returns error string if the generation key cannot be persisted.
- */
 export function bumpStockGeneration(): string | null {
   if (testBumpGeneration) return testBumpGeneration();
   const next = loadStockGeneration() + 1;
@@ -79,20 +70,28 @@ export function loadDurableAutoStockState(): AutoStockDurableState {
   };
 }
 
+export interface CommitDurableOptions {
+  /** When set, advance lastAppliedMutationSeq after meds+logs succeed. */
+  appliedMutationSeq?: number;
+}
+
 /**
- * Persist meds then logs, then best-effort bump stock generation.
+ * Persist meds then logs, record applied mutation seq, then best-effort gen bump.
  *
- * Contract:
- * - Failure of meds or logs → error (pair not durable).
- * - Both meds+logs succeed → success even if generation bump fails.
- *   Generation lag is recovered via Manual envelope content checks
- *   (log ids already present ⇒ treat as applied, do not re-snapshot).
+ * Success means meds+logs are durable. lastAppliedMutationSeq is written next
+ * (best-effort but attempted before returning success) so recovery can order
+ * envelopes. Generation bump remains best-effort only.
  */
-export function commitDurableAutoStockState(state: AutoStockDurableState): string | null {
+export function commitDurableAutoStockState(
+  state: AutoStockDurableState,
+  opts?: CommitDurableOptions
+): string | null {
   if (testCommit) {
     const err = testCommit(state);
     if (err) return err;
-    // Pair is durable; generation bump is best-effort only.
+    if (opts?.appliedMutationSeq != null) {
+      persistLastAppliedMutationSeq(opts.appliedMutationSeq);
+    }
     bumpStockGeneration();
     return null;
   }
@@ -100,16 +99,14 @@ export function commitDurableAutoStockState(state: AutoStockDurableState): strin
   if (medErr) return medErr;
   const logErr = persist(STORAGE_LOGS_KEY, state.logs, { json: true });
   if (logErr) return logErr;
-  // Best-effort: do not fail the commit if generation cannot be written.
-  // Recovery distinguishes applied vs pending via log-id content checks.
+  if (opts?.appliedMutationSeq != null) {
+    // Best-effort causal marker; recovery also uses seq classify + log presence.
+    persistLastAppliedMutationSeq(opts.appliedMutationSeq);
+  }
   bumpStockGeneration();
   return null;
 }
 
-/**
- * Serialize mutations. The callback always receives FRESH durable state
- * loaded at the start of this critical section (after previous jobs finish).
- */
 export function withAutoStockMutationGate<T>(
   fn: (fresh: AutoStockDurableState) => T | Promise<T>
 ): Promise<T> {

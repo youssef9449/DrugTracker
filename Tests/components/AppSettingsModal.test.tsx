@@ -4,6 +4,24 @@ import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/re
 import { AppSettingsModal } from '@/components/AppSettingsModal';
 import { PharmacySettings } from '@/types';
 
+import { TOAST_MESSAGES } from '@/constants/uiStrings';
+
+const notifMocks = vi.hoisted(() => ({
+  getPermission: vi.fn(),
+  requestPermission: vi.fn(),
+}));
+
+vi.mock('@/utils/notifications', async () => {
+  const actual = await vi.importActual<typeof import('@/utils/notifications')>(
+    '@/utils/notifications'
+  );
+  return {
+    ...actual,
+    getNotificationPermission: notifMocks.getPermission,
+    requestNotificationPermission: notifMocks.requestPermission,
+  };
+});
+
 const mockSettings: PharmacySettings = {
   pharmacyPhone: '01000000000',
   pharmacyName: 'صيدلية الأمل',
@@ -15,7 +33,11 @@ const mockSettings: PharmacySettings = {
 };
 
 describe('AppSettingsModal — Notification Controls', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    notifMocks.getPermission.mockResolvedValue('granted');
+    notifMocks.requestPermission.mockResolvedValue(true);
+  });
   afterEach(() => cleanup());
 
   it('renders notification toggles as MD3 switches; clicking flips draft state and Save commits via onApplyAppPreferences', async () => {
@@ -103,5 +125,208 @@ describe('AppSettingsModal — Notification Controls', () => {
     });
     expect(criticalSwitch).toBeInTheDocument();
     expect(criticalSwitch).toHaveAttribute('aria-checked', 'false');
+  });
+});
+
+
+describe('AppSettingsModal — permission guard on toggle ON', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    notifMocks.getPermission.mockResolvedValue('granted');
+    notifMocks.requestPermission.mockResolvedValue(true);
+  });
+  afterEach(() => cleanup());
+
+  it('notifications OFF→ON with permission granted becomes ON', async () => {
+    notifMocks.getPermission.mockResolvedValue('granted');
+    render(
+      <AppSettingsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        settings={mockSettings}
+        medications={[]}
+        onSaveSettings={vi.fn()}
+        soundEnabled={true}
+        notificationsEnabled={false}
+        criticalStockAlertsEnabled={false}
+        onApplyAppPreferences={vi.fn()}
+      />
+    );
+    const notifSwitch = screen.getByRole('switch', {
+      name: 'التنبيهات متوقفة — انقر للتفعيل',
+    });
+    fireEvent.click(notifSwitch);
+    await waitFor(() => {
+      expect(notifSwitch).toHaveAttribute('aria-checked', 'true');
+    });
+  });
+
+  it('notifications OFF→ON with permission denied stays OFF and toasts', async () => {
+    notifMocks.getPermission.mockResolvedValue('denied');
+    const showToast = vi.fn();
+    render(
+      <AppSettingsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        settings={mockSettings}
+        medications={[]}
+        onSaveSettings={vi.fn()}
+        soundEnabled={true}
+        notificationsEnabled={false}
+        criticalStockAlertsEnabled={false}
+        onApplyAppPreferences={vi.fn()}
+        showToast={showToast}
+      />
+    );
+    const notifSwitch = screen.getByRole('switch', {
+      name: 'التنبيهات متوقفة — انقر للتفعيل',
+    });
+    fireEvent.click(notifSwitch);
+    await waitFor(() => {
+      expect(showToast).toHaveBeenCalledWith(TOAST_MESSAGES.notificationsPermissionDenied);
+    });
+    expect(notifSwitch).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('notifications OFF→ON with permission error stays OFF and toasts', async () => {
+    notifMocks.getPermission.mockRejectedValue(new Error('boom'));
+    const showToast = vi.fn();
+    render(
+      <AppSettingsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        settings={mockSettings}
+        medications={[]}
+        onSaveSettings={vi.fn()}
+        soundEnabled={true}
+        notificationsEnabled={false}
+        criticalStockAlertsEnabled={false}
+        onApplyAppPreferences={vi.fn()}
+        showToast={showToast}
+      />
+    );
+    const notifSwitch = screen.getByRole('switch', {
+      name: 'التنبيهات متوقفة — انقر للتفعيل',
+    });
+    fireEvent.click(notifSwitch);
+    await waitFor(() => {
+      expect(showToast).toHaveBeenCalledWith(TOAST_MESSAGES.notificationsPermissionDenied);
+    });
+    expect(notifSwitch).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('critical OFF→ON with permission granted becomes ON', async () => {
+    notifMocks.getPermission.mockResolvedValue('granted');
+    render(
+      <AppSettingsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        settings={mockSettings}
+        medications={[]}
+        onSaveSettings={vi.fn()}
+        soundEnabled={true}
+        notificationsEnabled={false}
+        criticalStockAlertsEnabled={false}
+        onApplyAppPreferences={vi.fn()}
+      />
+    );
+    const criticalSwitch = screen.getByRole('switch', {
+      name: 'تنبيهات المخزون الحرج متوقفة — انقر للتفعيل',
+    });
+    fireEvent.click(criticalSwitch);
+    await waitFor(() => {
+      expect(criticalSwitch).toHaveAttribute('aria-checked', 'true');
+    });
+  });
+
+  it('critical OFF→ON with permission denied stays OFF and toasts', async () => {
+    notifMocks.getPermission.mockResolvedValue('denied');
+    const showToast = vi.fn();
+    render(
+      <AppSettingsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        settings={mockSettings}
+        medications={[]}
+        onSaveSettings={vi.fn()}
+        soundEnabled={true}
+        notificationsEnabled={false}
+        criticalStockAlertsEnabled={false}
+        onApplyAppPreferences={vi.fn()}
+        showToast={showToast}
+      />
+    );
+    const criticalSwitch = screen.getByRole('switch', {
+      name: 'تنبيهات المخزون الحرج متوقفة — انقر للتفعيل',
+    });
+    fireEvent.click(criticalSwitch);
+    await waitFor(() => {
+      expect(showToast).toHaveBeenCalledWith(TOAST_MESSAGES.notificationsPermissionDenied);
+    });
+    expect(criticalSwitch).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('critical OFF→ON with permission error stays OFF and toasts', async () => {
+    notifMocks.getPermission.mockRejectedValue(new Error('fail'));
+    const showToast = vi.fn();
+    render(
+      <AppSettingsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        settings={mockSettings}
+        medications={[]}
+        onSaveSettings={vi.fn()}
+        soundEnabled={true}
+        notificationsEnabled={false}
+        criticalStockAlertsEnabled={false}
+        onApplyAppPreferences={vi.fn()}
+        showToast={showToast}
+      />
+    );
+    const criticalSwitch = screen.getByRole('switch', {
+      name: 'تنبيهات المخزون الحرج متوقفة — انقر للتفعيل',
+    });
+    fireEvent.click(criticalSwitch);
+    await waitFor(() => {
+      expect(showToast).toHaveBeenCalledWith(TOAST_MESSAGES.notificationsPermissionDenied);
+    });
+    expect(criticalSwitch).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('permission failure then Save does not commit notificationsEnabled true', async () => {
+    notifMocks.getPermission.mockResolvedValue('denied');
+    const onApplyAppPreferences = vi.fn();
+    const showToast = vi.fn();
+    render(
+      <AppSettingsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        settings={mockSettings}
+        medications={[]}
+        onSaveSettings={vi.fn()}
+        soundEnabled={true}
+        notificationsEnabled={false}
+        criticalStockAlertsEnabled={false}
+        onApplyAppPreferences={onApplyAppPreferences}
+        showToast={showToast}
+      />
+    );
+    const notifSwitch = screen.getByRole('switch', {
+      name: 'التنبيهات متوقفة — انقر للتفعيل',
+    });
+    fireEvent.click(notifSwitch);
+    await waitFor(() => {
+      expect(showToast).toHaveBeenCalled();
+    });
+    expect(notifSwitch).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(screen.getByRole('button', { name: 'حفظ الإعدادات' }));
+    await waitFor(() => {
+      expect(onApplyAppPreferences).toHaveBeenCalledWith(
+        expect.objectContaining({
+          notificationsEnabled: false,
+          criticalStockAlertsEnabled: false,
+        })
+      );
+    });
   });
 });

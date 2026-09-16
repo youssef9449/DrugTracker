@@ -29,6 +29,11 @@ import {
 
 
 import { normalizeArabicDigits } from '../utils/whatsapp';
+import {
+  getNotificationPermission,
+  requestNotificationPermission,
+} from '../utils/notifications';
+import { TOAST_MESSAGES } from '../constants/uiStrings';
 
 export interface AppSettingsModalProps {
   isOpen: boolean;
@@ -65,6 +70,11 @@ export interface AppSettingsModalProps {
   exactAlarmEnabled?: boolean | null;
   /** Open the Android settings screen to grant exact-alarm permission. */
   onOpenExactAlarmSettings?: () => void;
+  /**
+   * Optional toast for permission-denial feedback when turning notification
+   * toggles ON. Same message as the home notification toggle.
+   */
+  showToast?: (message: string) => void;
 }
 
 export const AppSettingsModal: FC<AppSettingsModalProps> = ({
@@ -82,6 +92,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   onApplyAppPreferences,
   exactAlarmEnabled = null,
   onOpenExactAlarmSettings,
+  showToast,
   mode = 'all',
 }) => {
   const isPharmacyOnly = mode === 'pharmacy';
@@ -100,6 +111,68 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   const [draftNotifications, setDraftNotifications] = useState(notificationsEnabled);
   const [draftCritical, setDraftCritical] = useState(criticalStockAlertsEnabled);
   const [draftAutoDeduct, setDraftAutoDeduct] = useState(autoDeductEnabled);
+
+  /**
+   * OFF → ON for phone notifications: require OS notification permission
+   * (same flow as App.handleToggleNotifications). Do not flip draft to true
+   * on denial/error. ON → OFF is immediate.
+   */
+  const handleDraftNotificationsToggle = async () => {
+    if (draftNotifications) {
+      setDraftNotifications(false);
+      return;
+    }
+    let pushAllowed = false;
+    try {
+      const currentPerm = await getNotificationPermission();
+      if (currentPerm === 'granted') {
+        pushAllowed = true;
+      } else if (currentPerm === 'default') {
+        pushAllowed = await requestNotificationPermission();
+      }
+    } catch (err) {
+      console.warn('[AppSettingsModal] Notification permission error:', err);
+    }
+    if (!pushAllowed) {
+      showToast?.(TOAST_MESSAGES.notificationsPermissionDenied);
+      return;
+    }
+    setDraftNotifications(true);
+  };
+
+  /**
+   * OFF → ON for critical-stock alerts: require notification permission when
+   * phone notifications are not already draft-on (matches home critical toggle).
+   * On success also enables draftNotifications when it was off.
+   */
+  const handleDraftCriticalToggle = async () => {
+    if (draftCritical) {
+      setDraftCritical(false);
+      return;
+    }
+    if (!draftNotifications) {
+      let pushAllowed = false;
+      try {
+        const currentPerm = await getNotificationPermission();
+        if (currentPerm === 'granted') {
+          pushAllowed = true;
+        } else if (currentPerm === 'default') {
+          pushAllowed = await requestNotificationPermission();
+        }
+      } catch (err) {
+        console.warn(
+          '[AppSettingsModal] Notification permission error (critical toggle):',
+          err
+        );
+      }
+      if (!pushAllowed) {
+        showToast?.(TOAST_MESSAGES.notificationsPermissionDenied);
+        return;
+      }
+      setDraftNotifications(true);
+    }
+    setDraftCritical(true);
+  };
 
   // Synchronize state whenever modal opens. Intentionally only dep [isOpen]
   // — if the parent passes a new settings object reference while the modal
@@ -320,7 +393,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                   <Toggle
                     id="settings-toggle-notifications"
                     checked={draftNotifications}
-                    onChange={() => setDraftNotifications((v) => !v)}
+                    onChange={() => { void handleDraftNotificationsToggle(); }}
                     label={
                       draftNotifications
                         ? 'التنبيهات مفعلة — انقر للإيقاف'
@@ -365,7 +438,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                                     <Toggle
                     id="settings-toggle-critical"
                     checked={draftCritical}
-                    onChange={() => setDraftCritical((v) => !v)}
+                    onChange={() => { void handleDraftCriticalToggle(); }}
                     label={
                       draftCritical
                         ? 'تنبيهات المخزون الحرج مفعلة — انقر للإيقاف'

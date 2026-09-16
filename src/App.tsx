@@ -868,7 +868,7 @@ export default function App() {
         <AndroidBottomNav activeTab={activeTab} onTabChange={setActiveTab} alertsCount={alertsCount} />
 
         {toast && (
-          <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-40 max-w-[90%] px-4 py-2.5 bg-slate-900 text-white text-xs font-bold rounded-2xl shadow-xl text-center">
+          <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[60] max-w-[90%] px-4 py-2.5 bg-slate-900 text-white text-xs font-bold rounded-2xl shadow-xl text-center">
             {toast.message}
           </div>
         )}
@@ -912,6 +912,7 @@ export default function App() {
         onSendTestNotification={handleSendTestNotification}
         exactAlarmEnabled={exactAlarmEnabled}
         onOpenExactAlarmSettings={handleOpenExactAlarmSettings}
+        showToast={showToast}
         onApplyAppPreferences={async (prefs) => {
           // Commit drafts only after Save — closing the modal without Save
           // leaves parent state (and persistence) unchanged.

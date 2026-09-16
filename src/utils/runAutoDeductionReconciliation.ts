@@ -27,9 +27,11 @@ import {
   type AutoStockDurableState,
 } from './autoDeductionStockGate';
 import {
-  recoverManualEnvelopeInto,
-  recoverExactAutoEnvelopeState,
+  recoverAllPendingStockEnvelopes,
   loadManualStockEnvelope,
+  saveManualStockEnvelope,
+  finalizeMutationSeq,
+  type PendingEnvelopeRef,
 } from './stockEnvelopeRecovery';
 import { allocateMutationSeq } from './stockMutationOrdering';
 import { loadJson, persist } from './storage';
@@ -206,94 +208,100 @@ async function runOnce(
   let baseMeds = input.medications ?? fresh.medications;
   let baseLogs = input.logs ?? fresh.logs;
 
-  // ── Manual JS envelope recovery (Phase 4) — meds+logs pair only, never native ACK ──
-  // Uses the same durable-pair semantics as withAutoStockMutationGate.
-  // Envelope cleared only after both meds and logs succeed. Exact Auto alone
-  // ACKs real FIRED events after this recovered state is in baseMeds/baseLogs.
-  if (!(input.medications || input.logs)) {
-    const manualRecovered = recoverManualEnvelopeInto(
-      { medications: baseMeds, logs: baseLogs },
-      {
-        persistMeds: input.persistMeds,
-        persistLogs: input.persistLogs,
-      }
-    );
-    if (manualRecovered.ok) {
-      baseMeds = manualRecovered.state.medications;
-      baseLogs = manualRecovered.state.logs;
-    }
-    // On failure: Manual envelope remains; continue with current durable base
-    // (markers may already be in meds from the partial write).
-  }
-
-  // ── Exact Auto envelope recovery (ordered by mutationSeq vs lastApplied) ──
-  const existing = loadEnvelope();
-  if (existing) {
-    const commitExact = (state: AutoStockDurableState): string | null => {
-      if (input.persistMeds || input.persistLogs) {
-        const medErr = input.persistMeds ? input.persistMeds(state.medications) : null;
-        const logErr = input.persistLogs ? input.persistLogs(state.logs) : null;
-        if (medErr || logErr) return medErr || logErr || 'persist_failed';
-        return null;
-      }
-      return commitDurableAutoStockState(state, {
-        appliedMutationSeq: existing.mutationSeq,
-      });
-    };
+  // Unified Manual + Exact Auto envelope recovery (mutationSeq causal order).
+  // Highest seq above lastApplied is recovered first (full snapshot). Lower
+  // pending envelopes never overwrite while higher is unresolved. Manual path
+  // never performs native markReconciled — only Exact Auto toAcknowledge lists
+  // returned here are ACKed below.
+  {
+    const pending: PendingEnvelopeRef[] = [];
     const manualEnv = loadManualStockEnvelope();
-    const manualPending = manualEnv
-      ? [
-          {
-            mutationSeq: manualEnv.mutationSeq,
-            logs: manualEnv.logs,
-            medications: manualEnv.medications,
-          },
-        ]
-      : [];
-    const recovered = recoverExactAutoEnvelopeState(
-      existing,
-      { medications: baseMeds, logs: baseLogs },
-      commitExact,
-      manualPending
-    );
-    if (recovered.action === 'write_failed') {
-      // Keep Exact Auto envelope — pair and/or lastApplied incomplete.
-      return {
-        medications: baseMeds,
-        logs: baseLogs,
-        toAcknowledge: existing.toAcknowledge,
-        details: [],
-        mutated: false,
-        newExactLogs: [],
-        markedCount: 0,
-        recoveredEnvelope: true,
-        partialNativeAck: false,
-      };
+    if (manualEnv) {
+      pending.push({
+        kind: 'manual',
+        mutationSeq: manualEnv.mutationSeq,
+        medications: manualEnv.medications,
+        logs: manualEnv.logs,
+        clear: () => saveManualStockEnvelope(null),
+      });
     }
-    // already_applied / superseded / apply: lastApplied finalized (or superseded).
-    // Clear is best-effort; lastApplied is the durable applied proof.
-    saveEnvelope(null);
-    baseMeds = recovered.state.medications;
-    baseLogs = recovered.state.logs;
-    const { markedCount, failed } = await markAll(existing.toAcknowledge, mark);
-    return {
-      medications: recovered.state.medications,
-      logs: recovered.state.logs,
-      toAcknowledge: existing.toAcknowledge,
-      details: existing.toAcknowledge.map((a) => ({
-        medicationId: a.medicationId,
-        doseId: a.doseId,
-        calendarDate: a.calendarDate,
-        amount: 0,
-        outcome: 'already_applied' as const,
-        occurrenceKey: `${a.medicationId}\u001f${a.doseId}\u001f${a.calendarDate}`,
-      })),
-      mutated: recovered.action === 'apply',
-      newExactLogs: [],
-      markedCount,
-      recoveredEnvelope: true,
-      partialNativeAck: failed.length > 0,
-    };
+    const existingExact = loadEnvelope();
+    if (existingExact) {
+      pending.push({
+        kind: 'exact_auto',
+        mutationSeq: existingExact.mutationSeq ?? 0,
+        medications: existingExact.medications,
+        logs: existingExact.logs,
+        toAcknowledge: existingExact.toAcknowledge,
+        clear: () => saveEnvelope(null),
+      });
+    }
+
+    if (pending.length > 0) {
+      const commit = (
+        state: AutoStockDurableState,
+        appliedMutationSeq: number
+      ): string | null => {
+        if (input.persistMeds || input.persistLogs) {
+          const medErr = input.persistMeds
+            ? input.persistMeds(state.medications)
+            : null;
+          const logErr = input.persistLogs ? input.persistLogs(state.logs) : null;
+          if (medErr || logErr) return medErr || logErr || 'persist_failed';
+          return finalizeMutationSeq(appliedMutationSeq);
+        }
+        return commitDurableAutoStockState(state, { appliedMutationSeq });
+      };
+
+      const unified = recoverAllPendingStockEnvelopes(
+        { medications: baseMeds, logs: baseLogs },
+        pending,
+        commit
+      );
+
+      baseMeds = unified.state.medications;
+      baseLogs = unified.state.logs;
+
+      if (unified.exactToAcknowledge.length > 0) {
+        const { markedCount, failed } = await markAll(
+          unified.exactToAcknowledge,
+          mark
+        );
+        return {
+          medications: baseMeds,
+          logs: baseLogs,
+          toAcknowledge: unified.exactToAcknowledge,
+          details: unified.exactToAcknowledge.map((a) => ({
+            medicationId: a.medicationId,
+            doseId: a.doseId,
+            calendarDate: a.calendarDate,
+            amount: 0,
+            outcome: 'already_applied' as const,
+            occurrenceKey: `${a.medicationId}${a.doseId}${a.calendarDate}`,
+          })),
+          mutated: unified.recovered,
+          newExactLogs: [],
+          markedCount,
+          recoveredEnvelope: true,
+          partialNativeAck: failed.length > 0,
+        };
+      }
+
+      if (unified.blocked) {
+        return {
+          medications: baseMeds,
+          logs: baseLogs,
+          toAcknowledge: [],
+          details: [],
+          mutated: unified.recovered,
+          newExactLogs: [],
+          markedCount: 0,
+          recoveredEnvelope: true,
+          partialNativeAck: false,
+        };
+      }
+      // Manual-only recovery may have completed; fall through to listFired.
+    }
   }
 
   let events: AutoDeductionEvent[] = [];

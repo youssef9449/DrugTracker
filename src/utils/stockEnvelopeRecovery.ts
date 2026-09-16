@@ -1,7 +1,13 @@
 /**
  * Shared recovery for pending Manual / Exact Auto stock envelopes.
- * Orders by mutationSeq; never lets an older envelope overwrite newer durable
- * state (including when lastApplied lagged after a successful pair write).
+ *
+ * Causal rule: envelopes store full post-mutation snapshots. When several are
+ * pending above lastAppliedMutationSeq, recover the highest seq first; lower
+ * seqs become obsolete once lastApplied advances past them.
+ *
+ * lastAppliedMutationSeq is required finalization proof — not best-effort.
+ * Log IDs are only used to avoid duplicate log insertion, not as sole proof
+ * that a full medication snapshot is newest.
  */
 
 import type { ConsumptionLog, Medication } from '../types';
@@ -10,8 +16,6 @@ import {
   type AutoStockDurableState,
 } from './autoDeductionStockGate';
 import {
-  classifyEnvelopeBySeq,
-  envelopeLogIdsPresentInDurable,
   loadLastAppliedMutationSeq,
   persistLastAppliedMutationSeq,
 } from './stockMutationOrdering';
@@ -28,6 +32,20 @@ export interface ManualStockEnvelope {
   createdAt: string;
   baseGeneration: number;
   mutationSeq: number;
+}
+
+export interface PendingEnvelopeRef {
+  kind: 'manual' | 'exact_auto';
+  mutationSeq: number;
+  medications: Medication[];
+  logs: ConsumptionLog[];
+  /** Exact Auto only — native ACK ownership stays with Exact Auto path. */
+  toAcknowledge?: Array<{
+    medicationId: string;
+    doseId: string;
+    calendarDate: string;
+  }>;
+  clear: () => string | null;
 }
 
 let testLoadManual: (() => ManualStockEnvelope | null) | null = null;
@@ -71,31 +89,8 @@ export function saveManualStockEnvelope(
   return persist(STORAGE_MANUAL_ENVELOPE_KEY, env, { json: true });
 }
 
-export interface PendingEnvelopeRef {
-  mutationSeq: number;
-  logs: ConsumptionLog[];
-  medications: Medication[];
-}
-
 /**
- * True when a higher-seq pending envelope is already reflected in durable logs.
- * Older envelopes must not overwrite in that case (lastApplied may still lag).
- */
-export function isSupersededByHigherPending(
-  env: PendingEnvelopeRef,
-  durable: AutoStockDurableState,
-  allPending: PendingEnvelopeRef[]
-): boolean {
-  return allPending.some(
-    (other) =>
-      other.mutationSeq > env.mutationSeq &&
-      envelopeLogIdsPresentInDurable(other.logs, durable.logs)
-  );
-}
-
-/**
- * Finalize lastApplied for seq then allow envelope clear.
- * Returns error if lastApplied cannot be persisted — caller must keep envelope.
+ * Finalize lastApplied for seq. Idempotent: seq <= lastApplied is success.
  */
 export function finalizeMutationSeq(mutationSeq: number): string | null {
   if (!(mutationSeq > 0)) return null;
@@ -104,40 +99,157 @@ export function finalizeMutationSeq(mutationSeq: number): string | null {
   return persistLastAppliedMutationSeq(mutationSeq);
 }
 
-export type ResolveAction = 'apply' | 'already_applied' | 'superseded';
+/**
+ * Full meds+logs equality for "snapshot already on durable" without using
+ * log-id presence alone as ordering proof.
+ */
+export function durableMatchesEnvelopeSnapshot(
+  envelope: { medications: Medication[]; logs: ConsumptionLog[] },
+  durable: AutoStockDurableState
+): boolean {
+  if (envelope.logs.length !== durable.logs.length) return false;
+  const durLogIds = new Set(durable.logs.map((l) => l.id).filter(Boolean));
+  if (!envelope.logs.every((l) => l.id && durLogIds.has(l.id))) return false;
 
-export function resolveEnvelopeAction(
-  env: PendingEnvelopeRef,
-  durable: AutoStockDurableState,
-  allPending: PendingEnvelopeRef[]
-): ResolveAction {
-  const last = loadLastAppliedMutationSeq();
-  if (
-    env.mutationSeq > 0 &&
-    classifyEnvelopeBySeq(env.mutationSeq, last) === 'already_applied'
-  ) {
-    return 'already_applied';
+  const byId = new Map(durable.medications.map((m) => [m.id, m]));
+  if (envelope.medications.length !== durable.medications.length) {
+    // Allow durable to have same meds by id even if array length differs
   }
-  if (isSupersededByHigherPending(env, durable, allPending)) {
-    return 'superseded';
-  }
-  if (envelopeLogIdsPresentInDurable(env.logs, durable.logs)) {
-    return 'already_applied';
-  }
-  return 'apply';
+  return envelope.medications.every((em) => {
+    const d = byId.get(em.id);
+    return d != null && d.currentPills === em.currentPills;
+  });
+}
+
+export interface UnifiedRecoveryResult {
+  state: AutoStockDurableState;
+  /** Exact Auto toAcknowledge lists from recovered exact envelopes (for ACK). */
+  exactToAcknowledge: Array<{
+    medicationId: string;
+    doseId: string;
+    calendarDate: string;
+  }>;
+  recovered: boolean;
+  /** True when a write/finalization failed and evidence was kept. */
+  blocked: boolean;
 }
 
 /**
- * Recover Manual envelope only (Manual gate entry).
- * Never markReconciled.
+ * Recover all pending stock envelopes using mutationSeq causal order.
+ * Highest seq above lastApplied is applied/finalized first; lower pending
+ * envelopes are cleared only after lastApplied covers them.
+ */
+export function recoverAllPendingStockEnvelopes(
+  fresh: AutoStockDurableState,
+  pending: PendingEnvelopeRef[],
+  commit: (
+    state: AutoStockDurableState,
+    appliedMutationSeq: number
+  ) => string | null
+): UnifiedRecoveryResult {
+  let state = fresh;
+  let recovered = false;
+  let blocked = false;
+  const exactToAcknowledge: UnifiedRecoveryResult['exactToAcknowledge'] = [];
+
+  if (!pending.length) {
+    return { state, exactToAcknowledge, recovered: false, blocked: false };
+  }
+
+  let lastApplied = loadLastAppliedMutationSeq();
+
+  // Cleanup: envelopes already covered by lastApplied — finalize-only clear.
+  for (const env of pending) {
+    if (env.mutationSeq > 0 && env.mutationSeq <= lastApplied) {
+      // Already finalized causally — clear recovery evidence only.
+      env.clear();
+      recovered = true;
+    }
+  }
+
+  // Pending above lastApplied: process highest seq first (full snapshot).
+  const above = pending
+    .filter((e) => e.mutationSeq > lastApplied)
+    .sort((a, b) => b.mutationSeq - a.mutationSeq);
+
+  for (const env of above) {
+    // Re-check lastApplied — a prior higher finalize may have advanced it.
+    lastApplied = loadLastAppliedMutationSeq();
+    if (env.mutationSeq <= lastApplied) {
+      env.clear();
+      recovered = true;
+      continue;
+    }
+
+    // While a strictly higher pending still needs work, do not apply lower.
+    const higherStillPending = above.some(
+      (h) =>
+        h.mutationSeq > env.mutationSeq &&
+        h.mutationSeq > loadLastAppliedMutationSeq()
+    );
+    if (higherStillPending) {
+      // Leave lower envelope intact; higher must complete first.
+      continue;
+    }
+
+    // This is the highest unresolved pending snapshot.
+    if (durableMatchesEnvelopeSnapshot(env, state)) {
+      const finErr = finalizeMutationSeq(env.mutationSeq);
+      if (finErr) {
+        blocked = true;
+        break;
+      }
+      env.clear();
+      recovered = true;
+      lastApplied = loadLastAppliedMutationSeq();
+      if (env.kind === 'exact_auto' && env.toAcknowledge) {
+        exactToAcknowledge.push(...env.toAcknowledge);
+      }
+      continue;
+    }
+
+    const err = commit(
+      { medications: env.medications, logs: env.logs },
+      env.mutationSeq
+    );
+    if (err) {
+      blocked = true;
+      break;
+    }
+    state = { medications: env.medications, logs: env.logs };
+    env.clear();
+    recovered = true;
+    lastApplied = loadLastAppliedMutationSeq();
+    if (env.kind === 'exact_auto' && env.toAcknowledge) {
+      exactToAcknowledge.push(...env.toAcknowledge);
+    }
+  }
+
+  // After highest resolved, clear any lower still present if now covered.
+  lastApplied = loadLastAppliedMutationSeq();
+  for (const env of pending) {
+    if (env.mutationSeq > 0 && env.mutationSeq <= lastApplied) {
+      env.clear();
+    }
+  }
+
+  return { state, exactToAcknowledge, recovered, blocked };
+}
+
+/**
+ * Manual-only recovery at Manual gate entry (no Exact Auto envelope in scope).
+ * Pass otherPending when Exact Auto envelope is known to the caller.
  */
 export function recoverManualEnvelopeInto(
   fresh: AutoStockDurableState,
   opts?: {
     persistMeds?: (meds: Medication[]) => string | null;
     persistLogs?: (logs: ConsumptionLog[]) => string | null;
-    /** Other pending envelopes (e.g. Exact Auto) for supersession checks. */
-    otherPending?: PendingEnvelopeRef[];
+    otherPending?: Array<{
+      mutationSeq: number;
+      logs: ConsumptionLog[];
+      medications: Medication[];
+    }>;
   }
 ): { ok: true; state: AutoStockDurableState } | { ok: false; state: AutoStockDurableState } {
   const existing = loadManualStockEnvelope();
@@ -145,108 +257,101 @@ export function recoverManualEnvelopeInto(
     return { ok: true, state: fresh };
   }
 
-  const self: PendingEnvelopeRef = {
-    mutationSeq: existing.mutationSeq,
-    logs: existing.logs,
-    medications: existing.medications,
-  };
-  const allPending = [self, ...(opts?.otherPending ?? [])];
-  const action = resolveEnvelopeAction(self, fresh, allPending);
-
-  if (action === 'already_applied' || action === 'superseded') {
-    const finErr = finalizeMutationSeq(existing.mutationSeq);
-    if (finErr && action === 'already_applied') {
-      // Keep envelope until lastApplied is durable.
-      return { ok: false, state: fresh };
-    }
-    // superseded: clear without forcing lastApplied to older seq
-    if (action === 'superseded') {
-      saveManualStockEnvelope(null);
-      return { ok: true, state: fresh };
-    }
-    if (finErr) {
-      return { ok: false, state: fresh };
-    }
-    saveManualStockEnvelope(null);
-    return { ok: true, state: fresh };
-  }
-
-  const pair: AutoStockDurableState = {
-    medications: existing.medications,
-    logs: existing.logs,
-  };
-
-  let err: string | null;
-  if (opts?.persistMeds && opts?.persistLogs) {
-    const medErr = opts.persistMeds(pair.medications);
-    if (medErr) err = medErr;
-    else {
-      const logErr = opts.persistLogs(pair.logs);
-      err = logErr;
-      if (!err) {
-        err = finalizeMutationSeq(existing.mutationSeq);
-      }
-    }
-  } else {
-    err = commitDurableAutoStockState(pair, {
-      appliedMutationSeq: existing.mutationSeq,
+  const pending: PendingEnvelopeRef[] = [
+    {
+      kind: 'manual',
+      mutationSeq: existing.mutationSeq,
+      medications: existing.medications,
+      logs: existing.logs,
+      clear: () => saveManualStockEnvelope(null),
+    },
+  ];
+  for (const o of opts?.otherPending ?? []) {
+    pending.push({
+      kind: 'exact_auto',
+      mutationSeq: o.mutationSeq,
+      medications: o.medications,
+      logs: o.logs,
+      clear: () => null, // caller owns Exact Auto clear
     });
   }
 
-  if (err) {
+  const commit = (
+    state: AutoStockDurableState,
+    appliedMutationSeq: number
+  ): string | null => {
+    if (opts?.persistMeds && opts?.persistLogs) {
+      const medErr = opts.persistMeds(state.medications);
+      if (medErr) return medErr;
+      const logErr = opts.persistLogs(state.logs);
+      if (logErr) return logErr;
+      return finalizeMutationSeq(appliedMutationSeq);
+    }
+    return commitDurableAutoStockState(state, { appliedMutationSeq });
+  };
+
+  const result = recoverAllPendingStockEnvelopes(fresh, pending, commit);
+  if (result.blocked) {
     return { ok: false, state: fresh };
   }
-  saveManualStockEnvelope(null);
-  return { ok: true, state: pair };
+  return { ok: true, state: result.state };
 }
 
-export interface ExactAutoEnvelopeLike {
-  medications: Medication[];
-  logs: ConsumptionLog[];
-  mutationSeq?: number;
-  toAcknowledge: Array<{
-    medicationId: string;
-    doseId: string;
-    calendarDate: string;
-  }>;
-}
-
+/** @deprecated Prefer recoverAllPendingStockEnvelopes — kept for typed Exact Auto callers. */
 export function recoverExactAutoEnvelopeState(
-  existing: ExactAutoEnvelopeLike,
+  existing: {
+    medications: Medication[];
+    logs: ConsumptionLog[];
+    mutationSeq?: number;
+    toAcknowledge: Array<{
+      medicationId: string;
+      doseId: string;
+      calendarDate: string;
+    }>;
+  },
   fresh: AutoStockDurableState,
   commit: (state: AutoStockDurableState) => string | null,
-  otherPending?: PendingEnvelopeRef[]
+  otherPending?: Array<{
+    mutationSeq: number;
+    logs: ConsumptionLog[];
+    medications: Medication[];
+  }>
 ): {
   action: 'apply' | 'already_applied' | 'write_failed' | 'superseded';
   state: AutoStockDurableState;
   finalizeFailed?: boolean;
 } {
-  const seq = existing.mutationSeq ?? 0;
-  const self: PendingEnvelopeRef = {
-    mutationSeq: seq,
-    logs: existing.logs,
-    medications: existing.medications,
-  };
-  const allPending = [self, ...(otherPending ?? [])];
-  const action = resolveEnvelopeAction(self, fresh, allPending);
-
-  if (action === 'already_applied' || action === 'superseded') {
-    if (action === 'already_applied') {
-      const finErr = finalizeMutationSeq(seq);
-      if (finErr) {
-        return { action: 'write_failed', state: fresh, finalizeFailed: true };
-      }
+  const pending: PendingEnvelopeRef[] = [
+    {
+      kind: 'exact_auto',
+      mutationSeq: existing.mutationSeq ?? 0,
+      medications: existing.medications,
+      logs: existing.logs,
+      toAcknowledge: existing.toAcknowledge,
+      clear: () => null,
+    },
+    ...(otherPending ?? []).map((o) => ({
+      kind: 'manual' as const,
+      mutationSeq: o.mutationSeq,
+      medications: o.medications,
+      logs: o.logs,
+      clear: () => null,
+    })),
+  ];
+  const result = recoverAllPendingStockEnvelopes(
+    fresh,
+    pending,
+    (state, seq) => {
+      const err = commit(state);
+      if (err) return err;
+      return finalizeMutationSeq(seq);
     }
-    return { action, state: fresh };
+  );
+  if (result.blocked) {
+    return { action: 'write_failed', state: fresh, finalizeFailed: true };
   }
-
-  const pair = {
-    medications: existing.medications,
-    logs: existing.logs,
-  };
-  const err = commit(pair);
-  if (err) {
-    return { action: 'write_failed', state: fresh };
+  if (!result.recovered) {
+    return { action: 'already_applied', state: result.state };
   }
-  return { action: 'apply', state: pair };
+  return { action: 'apply', state: result.state };
 }

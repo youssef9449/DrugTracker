@@ -273,19 +273,18 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
       todayStr: TODAY,
       makeLogId: () => 'restore-2',
     });
-    // Behavioral contract: no second stock credit, no extra restore amount.
+    // Behavioral contract: stock restored exactly once; no second credit.
     expect(durable.medications[0].currentPills).toBe(pillsAfterFirst);
-    // Second path must not invent another +pills credit for same slot/date.
-    expect(durable.medications[0].currentPills).toBeLessThanOrEqual(10);
-    // Prefer rejected when pure restoreDose finds nothing to restore.
+    expect(durable.medications[0].currentPills).toBe(afterTake + 1);
+    expect(durable.logs.filter((l) => l.id === 'restore-1')).toHaveLength(1);
+    // Second call must not add another restore amount for same med+dose+date.
     if (r2.outcome === 'applied') {
       expect(r2.restoredAmount).toBe(0);
+      expect(durable.medications[0].currentPills).toBe(pillsAfterFirst);
     } else {
       expect(r2.outcome).toBe('rejected');
+      expect(durable.logs.filter((l) => l.id === 'restore-2')).toHaveLength(0);
     }
-    // At most one restore-1 log; restore-2 only if a no-op applied path wrote it.
-    expect(durable.logs.filter((l) => l.id === 'restore-1')).toHaveLength(1);
-    expect(durable.logs.length).toBeGreaterThanOrEqual(logCountAfterFirst);
   });
 
   it('crash recovery: markers after Take prevent duplicate exact auto on restart', async () => {
@@ -864,6 +863,170 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     expect(durable.medications[0].currentPills).toBe(8);
     expect(durable.logs.some((l) => l.id === 'seq2-log')).toBe(true);
     expect(durable.medications[0].currentPills).not.toBe(10);
+  });
+
+
+  it('both pending: higher Exact Auto seq recovered before older Manual can write', async () => {
+    // lastApplied=0; durable still at base stock=10
+    durable = { medications: [med({ currentPills: 10 })], logs: [] };
+
+    const seq10Logs = [
+      {
+        id: 'manual-seq10',
+        medicationId: 'med-1',
+        medicationName: 'TestMed',
+        type: 'dose_taken' as const,
+        amount: 1,
+        date: TODAY,
+        timestamp: '',
+        description: '',
+      },
+    ];
+    const seq11Logs = [
+      ...seq10Logs,
+      {
+        id: 'exact-seq11',
+        medicationId: 'med-1',
+        medicationName: 'TestMed',
+        type: 'dose_taken' as const,
+        amount: 1,
+        date: TODAY,
+        timestamp: '',
+        description: '',
+      },
+    ];
+
+    // Older Manual wants stock=9 (after one take)
+    manualEnvelope = {
+      version: 1,
+      status: 'manual_js_ready',
+      medications: [med({ currentPills: 9 })],
+      logs: seq10Logs,
+      createdAt: new Date().toISOString(),
+      baseGeneration: 0,
+      mutationSeq: 10,
+    };
+
+    // Newer Exact Auto full snapshot stock=8
+    let exactEnv: {
+      version: 1;
+      status: 'js_ready';
+      medications: ReturnType<typeof med>[];
+      logs: typeof seq11Logs;
+      toAcknowledge: Array<{ medicationId: string; doseId: string; calendarDate: string }>;
+      createdAt: string;
+      mutationSeq: number;
+    } | null = {
+      version: 1,
+      status: 'js_ready',
+      medications: [med({ currentPills: 8 })],
+      logs: seq11Logs,
+      toAcknowledge: [
+        { medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY },
+      ],
+      createdAt: new Date().toISOString(),
+      mutationSeq: 11,
+    };
+
+    marked = [];
+    await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        marked.push(`${medicationId}|${doseId}|${calendarDate}`);
+        return { ok: true, changed: true };
+      },
+      loadEnvelope: () => exactEnv,
+      saveEnvelope: (env) => {
+        exactEnv = env as typeof exactEnv;
+        return null;
+      },
+    });
+
+    // Higher seq wins: stock=8 not Manual's 9
+    expect(durable.medications[0].currentPills).toBe(8);
+    expect(durable.logs.some((l) => l.id === 'exact-seq11')).toBe(true);
+    expect(manualEnvelope).toBeNull();
+    expect(exactEnv).toBeNull();
+    expect(marked).toEqual([`med-1|d1|${TODAY}`]);
+  });
+
+  it('both pending reverse: higher Manual seq wins over older Exact Auto', async () => {
+    durable = { medications: [med({ currentPills: 10 })], logs: [] };
+
+    manualEnvelope = {
+      version: 1,
+      status: 'manual_js_ready',
+      medications: [med({ currentPills: 7 })],
+      logs: [
+        {
+          id: 'manual-seq11',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'dose_taken',
+          amount: 1,
+          date: TODAY,
+          timestamp: '',
+          description: '',
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      baseGeneration: 0,
+      mutationSeq: 11,
+    };
+
+    let exactEnv: {
+      version: 1;
+      status: 'js_ready';
+      medications: ReturnType<typeof med>[];
+      logs: Array<{
+        id: string;
+        medicationId: string;
+        medicationName: string;
+        type: 'dose_taken';
+        amount: number;
+        date: string;
+        timestamp: string;
+        description: string;
+      }>;
+      toAcknowledge: Array<{ medicationId: string; doseId: string; calendarDate: string }>;
+      createdAt: string;
+      mutationSeq: number;
+    } | null = {
+      version: 1,
+      status: 'js_ready',
+      medications: [med({ currentPills: 9 })],
+      logs: [
+        {
+          id: 'exact-seq10',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'dose_taken',
+          amount: 1,
+          date: TODAY,
+          timestamp: '',
+          description: '',
+        },
+      ],
+      toAcknowledge: [],
+      createdAt: new Date().toISOString(),
+      mutationSeq: 10,
+    };
+
+    await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async () => ({ ok: true, changed: true }),
+      loadEnvelope: () => exactEnv,
+      saveEnvelope: (env) => {
+        exactEnv = env as typeof exactEnv;
+        return null;
+      },
+    });
+
+    expect(durable.medications[0].currentPills).toBe(7);
+    expect(durable.logs.some((l) => l.id === 'manual-seq11')).toBe(true);
+    expect(durable.medications[0].currentPills).not.toBe(9);
   });
 
 describe('shouldDismissAlarmAfterManualTake', () => {

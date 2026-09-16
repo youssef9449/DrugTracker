@@ -102,6 +102,19 @@ public final class AutoDeductionScheduler {
      */
     volatile boolean forceOrderingTokenAllocationFailureForTest = false;
 
+    /**
+     * Test-only: when non-null, multi-day catch-up treats this as wall-clock "now"
+     * (Issue #243 determinism). Production leaves null → System.currentTimeMillis().
+     */
+    volatile Long recoveryNowOverrideForTest = null;
+
+    /**
+     * Test-only: CountDownLatch pair to interleave invalidate between generation
+     * authorization and locked successor install. Production leaves null.
+     */
+    volatile java.util.concurrent.CountDownLatch recoveryBeforeSuccessorInstallLatchForTest = null;
+    volatile java.util.concurrent.CountDownLatch recoveryResumeSuccessorInstallLatchForTest = null;
+
     public AutoDeductionScheduler(Context context) {
         this.appContext = context.getApplicationContext();
         this.schedulePrefs = appContext.getSharedPreferences(
@@ -618,9 +631,11 @@ public final class AutoDeductionScheduler {
                 Log.i(TAG, "recoverMissed: CANCELLED occurrence " + key);
                 return FireResult.cancelled();
             }
-            if (expectedRecurrenceGeneration > 0L
-                    && !isRecurrenceGenerationAuthorizedLocked(
-                            medicationId, doseId, expectedRecurrenceGeneration)) {
+            // Always apply the same generation contract as live recurrence:
+            // expected > 0 → active must equal expected;
+            // expected <= 0 → active must still be 0 (post-invalidate active > 0 rejects).
+            if (!isRecurrenceGenerationAuthorizedLocked(
+                    medicationId, doseId, expectedRecurrenceGeneration)) {
                 Log.i(TAG, "recoverMissed: generation not authorized for " + key
                         + " expectedGen=" + expectedRecurrenceGeneration);
                 return FireResult.cancelled();
@@ -657,9 +672,8 @@ public final class AutoDeductionScheduler {
             return 0;
         }
         synchronized (SCHEDULE_LOCK) {
-            if (expectedRecurrenceGeneration > 0L
-                    && !isRecurrenceGenerationAuthorizedLocked(
-                            medicationId, doseId, expectedRecurrenceGeneration)) {
+            if (!isRecurrenceGenerationAuthorizedLocked(
+                    medicationId, doseId, expectedRecurrenceGeneration)) {
                 Log.i(TAG, "catchUp: generation unauthorized — dropping snapshot "
                         + pastPrefKey);
                 removeScheduleMetadataIfVersionLocked(pastPrefKey, observedVersion);
@@ -667,7 +681,9 @@ public final class AutoDeductionScheduler {
             }
         }
 
-        final long nowMs = System.currentTimeMillis();
+        final long nowMs = recoveryNowOverrideForTest != null
+                ? recoveryNowOverrideForTest
+                : System.currentTimeMillis();
         String walkDate = fromCalendarDate;
         int created = 0;
         boolean preserveSnapshotForRetry = false;
@@ -679,45 +695,54 @@ public final class AutoDeductionScheduler {
                 break;
             }
             if (epoch > nowMs) {
-                // First future occurrence — install only if generation still active.
-                boolean authorized;
-                synchronized (SCHEDULE_LOCK) {
-                    authorized = expectedRecurrenceGeneration <= 0L
-                            || isRecurrenceGenerationAuthorizedLocked(
-                                    medicationId, doseId, expectedRecurrenceGeneration);
+                // First future occurrence — gen check + install under one SCHEDULE_LOCK.
+                // Test seam: optional latches only fire between outer gen probe and
+                // the locked install block when set (still re-checked under lock).
+                if (recoveryBeforeSuccessorInstallLatchForTest != null) {
+                    recoveryBeforeSuccessorInstallLatchForTest.countDown();
+                    try {
+                        if (recoveryResumeSuccessorInstallLatchForTest != null) {
+                            recoveryResumeSuccessorInstallLatchForTest.await(
+                                    5, java.util.concurrent.TimeUnit.SECONDS);
+                        }
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        preserveSnapshotForRetry = true;
+                        break;
+                    }
                 }
-                if (authorized) {
-                    ScheduleResult sr = scheduleOccurrence(
-                            medicationId, doseId, walkDate, timeHhmm, amount, epoch);
-                    if (!sr.ok) {
+                ScheduleResult sr = installFutureSuccessorIfGenerationHolds(
+                        medicationId, doseId, walkDate, timeHhmm, amount,
+                        epoch, expectedRecurrenceGeneration,
+                        pastPrefKey, observedVersion);
+                if (!sr.ok) {
+                    if ("recurrence_generation_unauthorized".equals(sr.error)
+                            || "snapshot_stale".equals(sr.error)) {
+                        Log.i(TAG, "catchUp: future install rejected (" + sr.error + ")");
+                    } else {
                         Log.w(TAG, "catchUp: future schedule failed (" + sr.error
                                 + ") for " + medicationId + "/" + doseId + "/" + walkDate);
                         preserveSnapshotForRetry = true;
-                    } else {
-                        Log.i(TAG, "catchUp: scheduled next future "
-                                + medicationId + "/" + doseId + "/" + walkDate);
                     }
                 } else {
-                    Log.i(TAG, "catchUp: skip future schedule — generation invalidated");
+                    Log.i(TAG, "catchUp: scheduled next future "
+                            + medicationId + "/" + doseId + "/" + walkDate);
                 }
                 break;
             }
 
-            // Due: recover FIRED for this calendar date (idempotent).
             FireResult fr = recoverMissedOccurrence(
                     medicationId, doseId, walkDate, epoch, amount,
                     expectedRecurrenceGeneration);
             if (fr.isCancelled()) {
                 synchronized (SCHEDULE_LOCK) {
-                    if (expectedRecurrenceGeneration > 0L
-                            && !isRecurrenceGenerationAuthorizedLocked(
-                                    medicationId, doseId, expectedRecurrenceGeneration)) {
+                    if (!isRecurrenceGenerationAuthorizedLocked(
+                            medicationId, doseId, expectedRecurrenceGeneration)) {
                         Log.i(TAG, "catchUp: generation invalidated mid-walk — stop");
                         removeScheduleMetadataIfVersionLocked(pastPrefKey, observedVersion);
                         return created;
                     }
                 }
-                // Occurrence-level cancel: skip this date, continue chain.
                 walkDate = nextCalendarDate(walkDate);
                 continue;
             }
@@ -741,6 +766,69 @@ public final class AutoDeductionScheduler {
         }
         return created;
     }
+
+    /**
+     * Issue #243 / #217 — under one continuous {@link #SCHEDULE_LOCK} section:
+     * re-validate expected recurrence generation, confirm past snapshot ownership
+     * when still present, and install the future successor via
+     * {@link #scheduleOccurrenceLocked} stamping that same generation.
+     * A concurrent invalidate either wins entirely or loses entirely; there is no
+     * window where G1 recovery installs a G2 successor.
+     */
+    private ScheduleResult installFutureSuccessorIfGenerationHolds(
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            String timeHhmm,
+            double amount,
+            long triggerAt,
+            long expectedRecurrenceGeneration,
+            String pastPrefKey,
+            String observedVersion
+    ) {
+        final String futureKey = AutoDeductionContract.occurrenceKey(
+                medicationId, doseId, calendarDate);
+        final String futurePrefKey = SCHEDULE_KEY_PREFIX + futureKey;
+        synchronized (SCHEDULE_LOCK) {
+            if (!isRecurrenceGenerationAuthorizedLocked(
+                    medicationId, doseId, expectedRecurrenceGeneration)) {
+                removeScheduleMetadataIfVersionLocked(pastPrefKey, observedVersion);
+                return ScheduleResult.fail("recurrence_generation_unauthorized");
+            }
+            // Past snapshot must still be the one we are recovering from (if present).
+            if (pastPrefKey != null && observedVersion != null && !observedVersion.isEmpty()) {
+                String cur = schedulePrefs.getString(pastPrefKey, null);
+                if (cur != null && !isMetadataOwnedByVersion(cur, observedVersion)) {
+                    return ScheduleResult.fail("snapshot_stale");
+                }
+            }
+            // If future already exists under same identity, do not replace.
+            String existing = schedulePrefs.getString(futurePrefKey, null);
+            if (existing != null && !existing.isEmpty()) {
+                return ScheduleResult.success(futureKey);
+            }
+
+            JSONObject payload = new JSONObject();
+            try {
+                payload.put("medicationId", medicationId);
+                payload.put("doseId", doseId);
+                payload.put("calendarDate", calendarDate);
+                payload.put("timeHhmm", timeHhmm);
+                payload.put("amount", amount);
+                payload.put("scheduledAtEpochMs", triggerAt);
+            } catch (JSONException e) {
+                return ScheduleResult.fail("payload_build_failed");
+            }
+            Intent intent = buildOccurrenceIntent(
+                    medicationId, doseId, calendarDate, triggerAt, amount, timeHhmm, 0L, null);
+            PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
+            // Pass expected generation so locked schedule cannot stamp a newer gen.
+            return scheduleOccurrenceLocked(
+                    futurePrefKey, futureKey, payload, triggerAt, pi, null,
+                    expectedRecurrenceGeneration);
+        }
+    }
+
 
     /**
      * Allocate a durable ordering token for one schedule or cancel operation.
@@ -966,6 +1054,24 @@ public final class AutoDeductionScheduler {
             PendingIntent pi,
             String requiredVersion
     ) {
+        return scheduleOccurrenceLocked(
+                prefKey, key, payload, triggerAt, pi, requiredVersion, null);
+    }
+
+    /**
+     * @param requiredRecurrenceGeneration when non-null, active generation must still
+     *        match this value and the schedule is stamped with it (recovery path).
+     *        When null, use {@link #ensureRecurrenceGenerationLocked} (normal schedule).
+     */
+    private ScheduleResult scheduleOccurrenceLocked(
+            String prefKey,
+            String key,
+            JSONObject payload,
+            long triggerAt,
+            PendingIntent pi,
+            String requiredVersion,
+            Long requiredRecurrenceGeneration
+    ) {
         if (requiredVersion != null) {
             String current = schedulePrefs.getString(prefKey, null);
             if (!isMetadataOwnedByVersion(current, requiredVersion)) {
@@ -978,9 +1084,31 @@ public final class AutoDeductionScheduler {
         // concurrent invalidateRecurrenceAuthorization cannot race a stamp with a bump.
         final String medIdForGen = payload.optString("medicationId", "");
         final String doseIdForGen = payload.optString("doseId", "");
-        final long recurrenceGen = ensureRecurrenceGenerationLocked(medIdForGen, doseIdForGen);
-        if (recurrenceGen <= 0L) {
-            return ScheduleResult.fail("recurrence_generation_write_failed");
+        final long recurrenceGen;
+        if (requiredRecurrenceGeneration != null) {
+            if (!isRecurrenceGenerationAuthorizedLocked(
+                    medIdForGen, doseIdForGen, requiredRecurrenceGeneration)) {
+                Log.i(TAG, "scheduleOccurrenceLocked: generation mismatch required="
+                        + requiredRecurrenceGeneration);
+                return ScheduleResult.fail("recurrence_generation_unauthorized");
+            }
+            if (requiredRecurrenceGeneration > 0L) {
+                recurrenceGen = requiredRecurrenceGeneration;
+            } else {
+                // Legacy expected 0 only authorized while active is still 0 —
+                // first install promotes via ensure under the same lock.
+                long ensured = ensureRecurrenceGenerationLocked(medIdForGen, doseIdForGen);
+                if (ensured <= 0L) {
+                    return ScheduleResult.fail("recurrence_generation_write_failed");
+                }
+                recurrenceGen = ensured;
+            }
+        } else {
+            long ensured = ensureRecurrenceGenerationLocked(medIdForGen, doseIdForGen);
+            if (ensured <= 0L) {
+                return ScheduleResult.fail("recurrence_generation_write_failed");
+            }
+            recurrenceGen = ensured;
         }
 
         // Authoritative durable ordering/version for this scheduling attempt — only

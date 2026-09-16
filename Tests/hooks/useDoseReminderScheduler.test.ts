@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   cancelSnoozed: vi.fn(),
   isPending: vi.fn(),
   cancelLegacy: vi.fn(),
+  cancelStale: vi.fn(),
 }));
 
 vi.mock('@/utils/notifications', async () => {
@@ -40,6 +41,7 @@ vi.mock('@/utils/notifications', async () => {
     cancelSnoozedDoseReminder: mocks.cancelSnoozed,
     isDoseReminderPending: mocks.isPending,
     cancelLegacyDoseReminderAlarm: mocks.cancelLegacy,
+    cancelStaleDoseReminderAlarms: mocks.cancelStale,
   };
 });
 
@@ -86,6 +88,7 @@ beforeEach(() => {
   mocks.schedule.mockResolvedValue(undefined);
   mocks.isPending.mockResolvedValue(false);
   mocks.cancelLegacy.mockResolvedValue(undefined);
+  mocks.cancelStale.mockResolvedValue(undefined);
   localStorage.clear();
 });
 
@@ -1610,3 +1613,15 @@ describe('idempotent lifecycle reconciliation', () => {
   });
 });
 
+describe('stale native pending cleanup', () => {
+  it('cancels stale dose alarms from native pending on reconcile', async () => {
+    const med = makeMed({ reminderTime: '09:00' });
+    renderHook(() =>
+      useDoseReminderScheduler(defaultOpts({ medications: [med] }))
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.cancelStale).toHaveBeenCalled();
+  });
+});

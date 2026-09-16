@@ -407,6 +407,7 @@ Given a persisted schedule snapshot on calendar date `D` for `(medicationId, dos
 5. Native still does **not** mutate `currentPills`, localStorage, or WebView state — recovered rows are FIRED only; JS reconciliation applies stock later.
 6. If recurrence generation was invalidated mid-walk, catch-up stops and does not schedule a future continuation for the stale generation.
 7. Crash mid-walk is retry-safe: already-FIRED dates become `ALREADY_EXISTS`; remaining due dates continue on the next restore.
+8. Installing the first future successor is atomic with generation re-validation under the same `SCHEDULE_LOCK`: either the successor is stamped with the recovery generation while it is still active, or invalidation wins and no successor is installed. Recovery never stamps a newer generation onto a stale recovery chain.
 
 ### Restore / cancel
 

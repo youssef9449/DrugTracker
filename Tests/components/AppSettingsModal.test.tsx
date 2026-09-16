@@ -644,4 +644,58 @@ describe('AppSettingsModal — draft-only until Save', () => {
     });
     expect(onApplyAppPreferences).not.toHaveBeenCalled();
   });
+
+  it('Critical ON then Notifications OFF → Save keeps independent finals', async () => {
+    const onApplyAppPreferences = vi.fn();
+    notifMocks.getPermission.mockResolvedValue('granted');
+    render(
+      <AppSettingsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        settings={mockSettings}
+        medications={[]}
+        onSaveSettings={vi.fn()}
+        soundEnabled={true}
+        notificationsEnabled={false}
+        criticalStockAlertsEnabled={false}
+        onApplyAppPreferences={onApplyAppPreferences}
+      />
+    );
+    // Critical ON (permission success also enables draftNotifications).
+    fireEvent.click(
+      screen.getByRole('switch', {
+        name: 'تنبيهات المخزون الحرج متوقفة — انقر للتفعيل',
+      })
+    );
+    await waitFor(() => {
+      expect(
+        screen.getByRole('switch', {
+          name: 'تنبيهات المخزون الحرج مفعلة — انقر للإيقاف',
+        })
+      ).toHaveAttribute('aria-checked', 'true');
+    });
+    // User then turns Notifications OFF while Critical stays ON.
+    fireEvent.click(
+      screen.getByRole('switch', {
+        name: 'التنبيهات مفعلة — انقر للإيقاف',
+      })
+    );
+    expect(
+      screen.getByRole('switch', {
+        name: 'التنبيهات متوقفة — انقر للتفعيل',
+      })
+    ).toHaveAttribute('aria-checked', 'false');
+    expect(onApplyAppPreferences).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'حفظ الإعدادات' }));
+    await waitFor(() => {
+      expect(onApplyAppPreferences).toHaveBeenCalledWith(
+        expect.objectContaining({
+          notificationsEnabled: false,
+          criticalStockAlertsEnabled: true,
+        })
+      );
+    });
+  });
+
 });

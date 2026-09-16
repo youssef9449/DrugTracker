@@ -914,8 +914,10 @@ export default function App() {
         onOpenExactAlarmSettings={handleOpenExactAlarmSettings}
         showToast={showToast}
         onApplyAppPreferences={async (prefs) => {
-          // Commit drafts only after Save — closing the modal without Save
-          // leaves parent state (and persistence) unchanged.
+          // Final prefs from Settings drafts — apply independently.
+          // Do NOT use handleToggleNotifications / handleToggleCriticalStockAlerts:
+          // those read committed state and can force notifications back ON when
+          // critical is enabled (or invert based on stale closures).
           if (prefs.soundEnabled !== soundEnabled) {
             setSoundEnabled(prefs.soundEnabled);
           }
@@ -923,15 +925,20 @@ export default function App() {
             handleToggleGlobalAutoDeduct();
           }
           if (prefs.notificationsEnabled !== notificationsEnabled) {
-            if (prefs.notificationsEnabled) {
-              await handleToggleNotifications();
-            } else {
-              setNotificationsEnabled(false);
-              showToast(TOAST_MESSAGES.notificationsOff);
-            }
+            setNotificationsEnabled(prefs.notificationsEnabled);
+            showToast(
+              prefs.notificationsEnabled
+                ? TOAST_MESSAGES.notificationsOn
+                : TOAST_MESSAGES.notificationsOff
+            );
           }
           if (prefs.criticalStockAlertsEnabled !== criticalStockAlertsEnabled) {
-            await handleToggleCriticalStockAlerts();
+            setCriticalStockAlertsEnabled(prefs.criticalStockAlertsEnabled);
+            showToast(
+              prefs.criticalStockAlertsEnabled
+                ? TOAST_MESSAGES.criticalAlertsOn
+                : TOAST_MESSAGES.criticalAlertsOff
+            );
           }
           // Confirm feedback only when the committed preference leaves sound on.
           if (prefs.soundEnabled) {

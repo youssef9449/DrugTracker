@@ -108,6 +108,12 @@ public final class AutoDeductionScheduler {
      */
     volatile Long recoveryNowOverrideForTest = null;
 
+    /** Wall-clock "now" for recovery; overridable in tests. */
+    private long recoveryNowMs() {
+        Long o = recoveryNowOverrideForTest;
+        return o != null ? o.longValue() : System.currentTimeMillis();
+    }
+
     /**
      * Test-only: CountDownLatch pair to interleave invalidate between generation
      * authorization and locked successor install. Production leaves null.
@@ -342,6 +348,18 @@ public final class AutoDeductionScheduler {
             }
         }
         return CancelResult.success();
+    }
+
+    /** Result of multi-day catch-up (Issue #243). FIRED count ≠ future alarms installed. */
+    static final class CatchUpResult {
+        final int firedCreated;
+        /** True only when a new future AlarmManager schedule was installed. */
+        final boolean futureInstalled;
+
+        CatchUpResult(int firedCreated, boolean futureInstalled) {
+            this.firedCreated = firedCreated;
+            this.futureInstalled = futureInstalled;
+        }
     }
 
     public static final class ScheduleResult {
@@ -657,7 +675,7 @@ public final class AutoDeductionScheduler {
      *
      * @return number of newly {@code CREATED} FIRED events in this invocation
      */
-    int catchUpMissedOccurrencesAndScheduleNext(
+    CatchUpResult catchUpMissedOccurrencesAndScheduleNext(
             String medicationId,
             String doseId,
             String fromCalendarDate,
@@ -677,15 +695,14 @@ public final class AutoDeductionScheduler {
                 Log.i(TAG, "catchUp: generation unauthorized — dropping snapshot "
                         + pastPrefKey);
                 removeScheduleMetadataIfVersionLocked(pastPrefKey, observedVersion);
-                return 0;
+                return new CatchUpResult(0, false);
             }
         }
 
-        final long nowMs = recoveryNowOverrideForTest != null
-                ? recoveryNowOverrideForTest
-                : System.currentTimeMillis();
+        final long nowMs = recoveryNowMs();
         String walkDate = fromCalendarDate;
         int created = 0;
+        boolean futureInstalled = false;
         boolean preserveSnapshotForRetry = false;
 
         while (walkDate != null) {
@@ -724,8 +741,13 @@ public final class AutoDeductionScheduler {
                                 + ") for " + medicationId + "/" + doseId + "/" + walkDate);
                         preserveSnapshotForRetry = true;
                     }
-                } else {
+                } else if (sr.error == null) {
+                    // Newly installed AlarmManager schedule for the first future date.
+                    futureInstalled = true;
                     Log.i(TAG, "catchUp: scheduled next future "
+                            + medicationId + "/" + doseId + "/" + walkDate);
+                } else {
+                    Log.i(TAG, "catchUp: future successor skipped (" + sr.error + ") for "
                             + medicationId + "/" + doseId + "/" + walkDate);
                 }
                 break;
@@ -740,7 +762,7 @@ public final class AutoDeductionScheduler {
                             medicationId, doseId, expectedRecurrenceGeneration)) {
                         Log.i(TAG, "catchUp: generation invalidated mid-walk — stop");
                         removeScheduleMetadataIfVersionLocked(pastPrefKey, observedVersion);
-                        return created;
+                        return new CatchUpResult(created, false);
                     }
                 }
                 walkDate = nextCalendarDate(walkDate);
@@ -764,7 +786,7 @@ public final class AutoDeductionScheduler {
                 Log.i(TAG, "catchUp: past metadata already gone/replaced: " + pastPrefKey);
             }
         }
-        return created;
+        return new CatchUpResult(created, futureInstalled);
     }
 
     /**
@@ -805,7 +827,14 @@ public final class AutoDeductionScheduler {
             // If future already exists under same identity, do not replace.
             String existing = schedulePrefs.getString(futurePrefKey, null);
             if (existing != null && !existing.isEmpty()) {
-                return ScheduleResult.success(futureKey);
+                return new ScheduleResult(true, "already_present", futureKey);
+            }
+            // Effective cancellation (tombstone) must not be cleared by recovery:
+            // scheduleOccurrenceLocked would clearCancellationTombstoneLocked.
+            if (isOccurrenceCancelledKey(futureKey)) {
+                Log.i(TAG, "catchUp: future successor cancelled — leave tombstone, no reinstall "
+                        + futureKey);
+                return new ScheduleResult(true, "cancelled_skip", futureKey);
             }
 
             JSONObject payload = new JSONObject();
@@ -1871,13 +1900,14 @@ public final class AutoDeductionScheduler {
                 // Issue #243: multi-day catch-up — every due occurrence from this
                 // snapshot date forward is recovered as FIRED (no horizon); the first
                 // not-yet-due date becomes the live AlarmManager schedule.
-                if (epoch <= System.currentTimeMillis()) {
+                if (epoch <= recoveryNowMs()) {
                     long snapGen = o.optLong(FIELD_RECURRENCE_GENERATION, 0L);
-                    int n = catchUpMissedOccurrencesAndScheduleNext(
+                    CatchUpResult catchUp = catchUpMissedOccurrencesAndScheduleNext(
                             medId, doseId, date, time, amount, snapGen,
                             prefKey, observedVersion);
-                    if (n > 0) {
-                        restored += n;
+                    // restored counts future AlarmManager installs only (not FIRED rows).
+                    if (catchUp.futureInstalled) {
+                        restored++;
                     }
                     continue;
                 }
@@ -1911,14 +1941,14 @@ public final class AutoDeductionScheduler {
                     removeScheduleMetadataIfVersion(prefKey, observedVersion);
                     continue;
                 }
-                if (recomputed <= System.currentTimeMillis()) {
+                if (recomputed <= recoveryNowMs()) {
                     // After TZ change this occurrence is now in the past: multi-day catch-up.
                     long snapGenTz = o.optLong(FIELD_RECURRENCE_GENERATION, 0L);
-                    int n = catchUpMissedOccurrencesAndScheduleNext(
+                    CatchUpResult catchUp = catchUpMissedOccurrencesAndScheduleNext(
                             medId, doseId, date, time, amount, snapGenTz,
                             prefKey, observedVersion);
-                    if (n > 0) {
-                        restored += n;
+                    if (catchUp.futureInstalled) {
+                        restored++;
                     }
                     continue;
                 }

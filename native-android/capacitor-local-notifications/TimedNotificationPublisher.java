@@ -144,6 +144,11 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
         return appForeground ? DOSE_FG_CHANNEL : DOSE_BG_CHANNEL;
     }
 
+    /**
+     * Sole native recurrence owner for notifications scheduled with CRON_KEY
+     * (Capacitor repeats:true / every). JS lifecycle must not also create the
+     * next occurrence for the same notification id — that produced duplicates.
+     */
     private boolean rescheduleNotificationIfNeeded(Context context, Intent intent, int id) {
         String dateString = intent.getStringExtra(CRON_KEY);
 

@@ -1020,12 +1020,17 @@ export function doseReminderAlarmIdForDose(medId: string, doseId: string): numbe
 }
 
 /**
- * Whether a recurring dose reminder is already present in the plugin pending list
- * for this stable notification id. Used for idempotent reconciliation: if the
- * correct id is already pending, lifecycle must not cancel+reschedule.
+ * True when a valid *future* dose-reminder occurrence is recorded for this
+ * stable id in the plugin pending store.
  *
- * Recurrence owner: TimedNotificationPublisher (CRON_KEY / nextTrigger) after the
- * initial schedule with repeats:true. JS must not create a second next occurrence.
+ * After delivery, TimedNotificationPublisher persists the next-day
+ * schedule.at into NotificationStorage before returning — so a successful
+ * native re-arm is visible here as a future `at`. A missing entry or an
+ * entry whose `at` is already past means the alarm is not armed and JS may
+ * repair with one scheduleDoseReminder (same id replaces, does not stack).
+ *
+ * Recurrence owner remains TimedNotificationPublisher (next calendar day).
+ * JS must not use Capacitor repeats/every.
  */
 export async function isDoseReminderPending(
   medId: string,
@@ -1035,7 +1040,22 @@ export async function isDoseReminderPending(
   try {
     const pending = await LocalNotifications.getPending();
     const id = doseReminderAlarmIdForDose(medId, doseId);
-    return pending.notifications.some((n) => n.id === id);
+    const entry = pending.notifications.find((n) => n.id === id);
+    if (!entry) return false;
+    const at = (entry.schedule as { at?: unknown } | undefined)?.at;
+    if (at == null) {
+      // Present without at: treat as armed (defensive; dose path always sets at).
+      return true;
+    }
+    const atMs =
+      typeof at === 'number'
+        ? at
+        : at instanceof Date
+          ? at.getTime()
+          : Date.parse(String(at));
+    if (Number.isNaN(atMs)) return true;
+    // Future (or within 60s tolerance for clock skew) counts as armed.
+    return atMs > Date.now() - 60_000;
   } catch (err) {
     console.warn('[notifications] isDoseReminderPending failed:', err);
     return false;

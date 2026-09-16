@@ -533,16 +533,29 @@ public class TimedNotificationPublisherAtomicityTest {
 
         AlarmManager am = (AlarmManager) baseContext.getSystemService(Context.ALARM_SERVICE);
         int matching = 0;
-        long todayStart = startOfTodayMs();
+        Calendar expectedNextDay = Calendar.getInstance();
+        expectedNextDay.add(Calendar.DAY_OF_MONTH, 1);
+        expectedNextDay.set(Calendar.HOUR_OF_DAY, 9);
+        expectedNextDay.set(Calendar.MINUTE, 15);
+        expectedNextDay.set(Calendar.SECOND, 0);
+        expectedNextDay.set(Calendar.MILLISECOND, 0);
         for (ShadowAlarmManager.ScheduledAlarm alarm :
                 Shadows.shadowOf(am).getScheduledAlarms()) {
             if (alarm.operation != null
                     && Shadows.shadowOf(alarm.operation).getRequestCode() == NOTIF_ID) {
                 matching++;
                 assertEquals(firstNext, alarm.triggerAtTime);
-                assertTrue(
-                        "must not arm same calendar day as delivery",
-                        alarm.triggerAtTime >= todayStart + 86_400_000L - 60_000L);
+                Calendar scheduled = Calendar.getInstance();
+                scheduled.setTimeInMillis(alarm.triggerAtTime);
+                assertEquals(expectedNextDay.get(Calendar.YEAR), scheduled.get(Calendar.YEAR));
+                assertEquals(
+                        expectedNextDay.get(Calendar.DAY_OF_YEAR),
+                        scheduled.get(Calendar.DAY_OF_YEAR));
+                assertEquals(
+                        expectedNextDay.get(Calendar.HOUR_OF_DAY),
+                        scheduled.get(Calendar.HOUR_OF_DAY));
+                assertEquals(
+                        expectedNextDay.get(Calendar.MINUTE), scheduled.get(Calendar.MINUTE));
             }
         }
         assertEquals(1, matching);
@@ -608,12 +621,4 @@ public class TimedNotificationPublisherAtomicityTest {
         assertEquals(1, matching);
     }
 
-    private static long startOfTodayMs() {
-        Calendar c = Calendar.getInstance();
-        c.set(Calendar.HOUR_OF_DAY, 0);
-        c.set(Calendar.MINUTE, 0);
-        c.set(Calendar.SECOND, 0);
-        c.set(Calendar.MILLISECOND, 0);
-        return c.getTimeInMillis();
-    }
 }

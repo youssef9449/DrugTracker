@@ -32,8 +32,10 @@ import {
   saveManualStockEnvelope,
   loadExactAutoStockEnvelope,
   saveExactAutoStockEnvelope,
+  ensureExactAutoEnvelopeMutationSeq,
   finalizeMutationSeq,
   type PendingEnvelopeRef,
+  type ExactAutoEnvelopeStored,
 } from './stockEnvelopeRecovery';
 import { allocateMutationSeq } from './stockMutationOrdering';
 import { loadJson, persist } from './storage';
@@ -104,42 +106,6 @@ export function defaultLoadEnvelope(): ExactAutoEnvelope | null {
 export function defaultSaveEnvelope(env: ExactAutoEnvelope | null): string | null {
   if (testSaveEnvelope) return testSaveEnvelope(env);
   return saveExactAutoStockEnvelope(env);
-}
-
-/**
- * Recover a prior js_ready envelope into durable meds+logs (Phase 3 Option B).
- * Used by exact reconciliation and Phase 4 manual Take/Restore after a crash
- * between partial storage writes.
- */
-export function recoverExactAutoEnvelopeIfPresent(
-  commit: (state: AutoStockDurableState) => string | null = commitDurableAutoStockState,
-  loadEnvelope: () => ExactAutoEnvelope | null = defaultLoadEnvelope,
-  saveEnvelope: (env: ExactAutoEnvelope | null) => string | null = defaultSaveEnvelope
-): {
-  recovered: boolean;
-  state: AutoStockDurableState | null;
-  writeFailed: boolean;
-} {
-  const existing = loadEnvelope();
-  if (!existing) {
-    return { recovered: false, state: null, writeFailed: false };
-  }
-  const err = commit({
-    medications: existing.medications,
-    logs: existing.logs,
-  });
-  if (err) {
-    return { recovered: true, state: null, writeFailed: true };
-  }
-  saveEnvelope(null);
-  return {
-    recovered: true,
-    state: {
-      medications: existing.medications,
-      logs: existing.logs,
-    },
-    writeFailed: false,
-  };
 }
 
 export function runAutoDeductionReconciliation(
@@ -214,7 +180,30 @@ async function runOnce(
         clear: () => saveManualStockEnvelope(null),
       });
     }
-    const existingExact = loadEnvelope();
+    // Migrate any legacy Exact Auto envelope (pre-mutationSeq) before it
+    // enters unified recovery: allocate + persist a durable sequence using
+    // the shared allocator (same path as Manual and Phase 4 Exact Auto).
+    // On migration failure, surface a blocked recovery so the orchestrator
+    // does NOT ACK or clear the unrecovered legacy envelope.
+    const legacyExact = loadEnvelope();
+    const migratedExact = ensureExactAutoEnvelopeMutationSeq(
+      legacyExact as ExactAutoEnvelopeStored | null,
+      saveEnvelope as (env: ExactAutoEnvelopeStored | null) => string | null
+    );
+    if (migratedExact.blocked) {
+      return {
+        medications: baseMeds,
+        logs: baseLogs,
+        toAcknowledge: [],
+        details: [],
+        mutated: false,
+        newExactLogs: [],
+        markedCount: 0,
+        recoveredEnvelope: false,
+        partialNativeAck: false,
+      };
+    }
+    const existingExact = migratedExact.envelope as ExactAutoEnvelope | null;
     if (existingExact) {
       pending.push({
         kind: 'exact_auto',

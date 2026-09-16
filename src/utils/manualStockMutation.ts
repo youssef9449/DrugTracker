@@ -17,10 +17,7 @@ import {
   restoreDose,
   type ConsumeDoseResult,
 } from './medActions';
-import {
-  isExactAutoOccurrenceApplied,
-  normalizeExactDoseId,
-} from './autoDeductionReconciliation';
+import { normalizeExactDoseId } from './autoDeductionReconciliation';
 import { markAutoDeductionEventReconciled } from './autoDeductionNative';
 import { isDoseConsumedOnDate, getTodayDateString } from './dateCalculations';
 import { LEGACY_DOSE_ID } from './notifications';
@@ -198,13 +195,18 @@ export function runGatedManualConsume(opts: {
     const resolvedId = resolveConsumeDoseId(med, opts.doseId);
     const doseKey = normalizeExactDoseId(resolvedId);
 
-    // Currently consumed only if durable markers still present (Exact Auto sets
-    // the same markers). Do not use log-id alone — that would block Take after
-    // Auto → Restore once the exact-auto log remains for audit.
-    if (
-      isDoseConsumedOnDate(med, doseKey, todayStr) ||
-      isExactAutoOccurrenceApplied(med, doseKey, todayStr, todayStr)
-    ) {
+    // Block a second Take only when a durable consumption marker is present
+    // (Manual Take or Exact Auto both set doseConsumption). Do NOT block on
+    // the durable skip marker: that marker is left by Restore (after Auto or
+    // Manual Take) precisely so projection/Exact-Auto do not re-deduct the
+    // same occurrence, while Take remains eligible to clear the skip and
+    // record a single manual consumption. isExactAutoOccurrenceApplied is
+    // therefore intentionally NOT used here — it includes skip, which would
+    // break Auto → Restore → Take (the skip would surface as already_consumed
+    // and Take could never replace the restored occurrence). Exact Auto
+    // reconciliation still treats skip as already_applied via its own
+    // isExactAutoOccurrenceApplied call in reconcileFiredEvents.
+    if (isDoseConsumedOnDate(med, doseKey, todayStr)) {
       return {
         outcome: 'already_consumed' as const,
         medications: fresh.medications,

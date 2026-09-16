@@ -18,6 +18,7 @@ import {
 import {
   loadLastAppliedMutationSeq,
   persistLastAppliedMutationSeq,
+  allocateMutationSeq,
 } from './stockMutationOrdering';
 import { loadJson, persist } from './storage';
 
@@ -80,6 +81,55 @@ export function saveExactAutoStockEnvelope(
     }
   }
   return persist(STORAGE_EXACT_AUTO_ENVELOPE_KEY, env, { json: true });
+}
+
+/**
+ * Ensure a legacy Exact Auto envelope (persisted before shared causal
+ * ordering with Manual envelopes — Phase 3 js_ready envelopes that carry
+ * no mutationSeq) is assigned a durable mutation sequence BEFORE it enters
+ * unified recovery. Without a positive mutationSeq the envelope would be
+ * invisible to recoverAllPendingStockEnvelopes (mutationSeq ?? 0 never
+ * exceeds lastApplied) and stay persisted unrecovered.
+ *
+ * Migration rule:
+ * 1. existing missing OR non-positive mutationSeq → allocate next sequence
+ *    via the same allocateMutationSeq() used by Manual and Phase 4 Exact
+ *    Auto envelopes.
+ * 2. persist the updated envelope BEFORE attempting snapshot apply or ACK.
+ * 3. after success, the saved sequence is authoritative — subsequent loads
+ *    see a positive mutationSeq and skip allocation (idempotent; no
+ *    repeated allocation on every startup).
+ * 4. on allocate OR persist failure: return blocked=true with the original
+ *    envelope so the caller does NOT ACK, does NOT clear, and surfaces a
+ *    retry state. The envelope is never erased on migration failure.
+ *
+ * Timestamps and log IDs are NOT used for ordering — only mutationSeq.
+ */
+export function ensureExactAutoEnvelopeMutationSeq(
+  existing: ExactAutoEnvelopeStored | null,
+  save: (env: ExactAutoEnvelopeStored | null) => string | null = saveExactAutoStockEnvelope
+): {
+  envelope: ExactAutoEnvelopeStored | null;
+  migrated: boolean;
+  blocked: boolean;
+} {
+  if (!existing) return { envelope: null, migrated: false, blocked: false };
+  if (typeof existing.mutationSeq === 'number' && existing.mutationSeq > 0) {
+    return { envelope: existing, migrated: false, blocked: false };
+  }
+  const alloc = allocateMutationSeq();
+  if (!alloc.ok) {
+    return { envelope: existing, migrated: false, blocked: true };
+  }
+  const updated: ExactAutoEnvelopeStored = {
+    ...existing,
+    mutationSeq: alloc.seq,
+  };
+  const err = save(updated);
+  if (err) {
+    return { envelope: existing, migrated: false, blocked: true };
+  }
+  return { envelope: updated, migrated: true, blocked: false };
 }
 
 
@@ -423,7 +473,20 @@ export function recoverManualEnvelopeInto(
       clear: () => saveManualStockEnvelope(null),
     });
   }
-  const exact = loadExactAutoStockEnvelope();
+  // Migrate any legacy Exact Auto envelope (pre-mutationSeq) before it
+  // enters unified recovery: assign + persist a durable sequence using the
+  // shared allocator. On migration failure, surface a blocked recovery so
+  // the caller does NOT ACK or clear the unrecovered envelope.
+  const exactRaw = loadExactAutoStockEnvelope();
+  const exactMigrated = ensureExactAutoEnvelopeMutationSeq(exactRaw);
+  if (exactMigrated.blocked) {
+    return {
+      ok: false,
+      state: fresh,
+      exactToAcknowledge: [],
+    };
+  }
+  const exact = exactMigrated.envelope;
   if (exact) {
     pending.push({
       kind: 'exact_auto',
@@ -468,61 +531,3 @@ export function recoverManualEnvelopeInto(
   };
 }
 
-/** @deprecated Prefer recoverAllPendingStockEnvelopes — kept for typed Exact Auto callers. */
-export function recoverExactAutoEnvelopeState(
-  existing: {
-    medications: Medication[];
-    logs: ConsumptionLog[];
-    mutationSeq?: number;
-    toAcknowledge: Array<{
-      medicationId: string;
-      doseId: string;
-      calendarDate: string;
-    }>;
-  },
-  fresh: AutoStockDurableState,
-  commit: (state: AutoStockDurableState) => string | null,
-  otherPending?: Array<{
-    mutationSeq: number;
-    logs: ConsumptionLog[];
-    medications: Medication[];
-  }>
-): {
-  action: 'apply' | 'already_applied' | 'write_failed' | 'superseded';
-  state: AutoStockDurableState;
-  finalizeFailed?: boolean;
-} {
-  const pending: PendingEnvelopeRef[] = [
-    {
-      kind: 'exact_auto',
-      mutationSeq: existing.mutationSeq ?? 0,
-      medications: existing.medications,
-      logs: existing.logs,
-      toAcknowledge: existing.toAcknowledge,
-      clear: () => null,
-    },
-    ...(otherPending ?? []).map((o) => ({
-      kind: 'manual' as const,
-      mutationSeq: o.mutationSeq,
-      medications: o.medications,
-      logs: o.logs,
-      clear: () => null,
-    })),
-  ];
-  const result = recoverAllPendingStockEnvelopes(
-    fresh,
-    pending,
-    (state, seq) => {
-      const err = commit(state);
-      if (err) return err;
-      return finalizeMutationSeq(seq);
-    }
-  );
-  if (result.blocked) {
-    return { action: 'write_failed', state: fresh, finalizeFailed: true };
-  }
-  if (!result.recovered) {
-    return { action: 'already_applied', state: result.state };
-  }
-  return { action: 'apply', state: result.state };
-}

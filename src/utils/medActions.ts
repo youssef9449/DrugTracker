@@ -129,12 +129,27 @@ export function resolveRestoreDoseAmount(
  * dose/date is already past-due relative to `now`:
  *   - the restore date is a prior calendar day, OR
  *   - the restore date is today and the slot's scheduled time has elapsed.
- * That protects the same doseId+date from a second Auto-Deduct.
+ * That protects the same doseId+date from a second Auto-Deduct — both
+ * the projection path (todayDueUnits) and Exact Auto reconciliation
+ * (isExactAutoOccurrenceApplied) treat a skipped occurrence as applied.
+ * This holds for both the Auto-only path AND the wasActuallyConsumed
+ * path (Auto → Restore or Manual Take → Restore after the scheduled
+ * time has elapsed): without the durable skip, clearing the consume
+ * marker would leave the occurrence with no marker, so it would appear
+ * due again and a second Auto-Deduction could fire for the same
+ * occurrence.
  *
  * When the restore date is today and the slot's scheduled time is still
  * ahead, Restore must NOT record a durable skip: the dose remains
  * eligible for normal time-gated Auto-Deduct when its time arrives
- * (todayDueUnits already requires now >= dose.time).
+ * (todayDueUnits already requires now >= dose.time). In that future-time
+ * case any prior skip for the same occurrence is cleared so Take stays
+ * eligible and Auto-Deduct can still fire at the scheduled time.
+ *
+ * Auto → Restore → Take invariant: Take (consumeDose) clears the skip
+ * marker before recording consumption, so the final durable state
+ * carries exactly one deduction for the occurrence regardless of the
+ * Auto → Restore intermediate.
  *
  * Identity is always medicationId + doseId + date for scheduled meds.
  */
@@ -259,12 +274,18 @@ export function restoreDose(
       slot != null && isDoseTimeElapsedToday(slot.time, now);
     const isPastDueForSkip = restoreDateIsPastDay || timeElapsedToday;
 
-    // Real stock undo (manual Take or Exact Auto — both set doseConsumption):
-    // clear skip for this occurrence so Take is eligible again. Native RECONCILED
-    // prevents the same FIRED event from re-applying. Projection-only path
-    // (no consumption marker) still uses past-due skip without +pills.
+    // Restore after Auto/Manual Take: when the scheduled time has already
+    // passed, leave a durable skip marker for the SAME occurrence
+    // (medicationId + doseId + calendarDate) so projection (todayDueUnits)
+    // and Exact Auto reconciliation (isExactAutoOccurrenceApplied) cannot
+    // re-trigger a second deduction for this occurrence after Restore.
+    // Take clears this skip before recording consumption (consumeDose calls
+    // clearDoseSkippedOnDate), so Auto → Restore → Take still yields exactly
+    // one final deduction. When the scheduled time has NOT passed, clear any
+    // prior skip so the dose stays eligible for time-gated Auto-Deduct at
+    // its scheduled time (todayDueUnits already requires now >= dose.time).
     let doseSkippedHistory = med.doseSkippedHistory;
-    if (wasActuallyConsumed) {
+    if (wasActuallyConsumed && !isPastDueForSkip) {
       const nextSkip = { ...(med.doseSkippedHistory ?? {}) };
       if (Array.isArray(nextSkip[resolvedDoseId])) {
         nextSkip[resolvedDoseId] = nextSkip[resolvedDoseId].filter(
@@ -276,6 +297,9 @@ export function restoreDose(
       }
       doseSkippedHistory = nextSkip;
     } else if (isPastDueForSkip) {
+      // wasActuallyConsumed with elapsed time OR projection-only with elapsed
+      // time: record/leave a durable skip for this occurrence so neither
+      // projection nor Exact Auto reconciliation can re-deduct after Restore.
       const baseForSkip: Medication = {
         ...med,
         doseConsumption: nextConsumption,

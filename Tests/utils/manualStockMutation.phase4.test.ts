@@ -666,7 +666,6 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     expect(result.medications[0].currentPills).toBe(before);
     expect(result.log).toBeNull();
   });
-});
 
 
   it('Manual + Exact Auto envelopes together: older seq never overwrites newer durable', async () => {
@@ -1349,6 +1348,677 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     expect(durable.medications[0].currentPills).toBe(0);
     expect(durable.medications[0].doseConsumption?.d1).toBeUndefined();
   });
+
+  // ─── Section 1: Auto/Manual Take → Restore lifecycle invariants ───
+
+  it('Auto → Restore leaves durable skip so effectiveCurrentPills does not re-project', async () => {
+    // d1@08:00, now 15:00 → d1 elapsed. Simulate Exact Auto having applied
+    // d1 (doseConsumption marker + auto_daily log) without going through
+    // the gated path (the durable state is the post-Auto snapshot).
+    durable = {
+      medications: [
+        med({
+          currentPills: 9,
+          doseConsumption: { d1: TODAY },
+          doseConsumptionHistory: { d1: [TODAY] },
+        }),
+      ],
+      logs: [
+        {
+          id: 'auto-pre-d1',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'auto_daily',
+          amount: -1,
+          date: TODAY,
+          timestamp: '',
+          description: '',
+          doseId: 'd1',
+        },
+      ],
+    };
+
+    const r = await runGatedManualRestore({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      todayStr: TODAY,
+      makeLogId: () => 'restore-after-auto',
+    });
+    expect(r.outcome).toBe('applied');
+    expect(r.restoredAmount).toBe(1);
+    // Stock restored (9 + 1 = 10).
+    expect(durable.medications[0].currentPills).toBe(10);
+    // Consumption cleared for d1.
+    expect(durable.medications[0].doseConsumption?.d1).toBeUndefined();
+    // Durable skip left for the SAME occurrence so projection cannot re-add d1.
+    expect(durable.medications[0].doseSkippedHistory?.d1).toEqual([TODAY]);
+    // Sibling d2 untouched (not skipped, not consumed).
+    expect(durable.medications[0].doseSkippedHistory?.d2).toBeUndefined();
+    expect(durable.medications[0].doseConsumption?.d2).toBeUndefined();
+
+    // No second Auto deduction on a later reconcile for the same FIRED event.
+    const recon = await runAutoDeductionReconciliation({
+      alreadyInGate: true,
+      medications: durable.medications,
+      logs: durable.logs,
+      globalAutoDeductEnabled: true,
+      listFired: async () => [
+        fired({ doseId: 'd1', calendarDate: TODAY, amount: 1 }),
+      ],
+      markReconciled: async () => ({ ok: true, changed: true }),
+      persistMeds: (m) => {
+        durable.medications = m;
+        return null;
+      },
+      persistLogs: (l) => {
+        durable.logs = l;
+        return null;
+      },
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
+    });
+    expect(recon.details[0]?.outcome).toBe('already_applied');
+    expect(durable.medications[0].currentPills).toBe(10);
+    // No second auto_daily log for d1.
+    expect(
+      durable.logs.filter((l) => l.id === 'auto-pre-d1')
+    ).toHaveLength(1);
+  });
+
+  it('Auto → Restore → Take yields exactly one final deduction', async () => {
+    // Start: Exact Auto applied d1 (consume marker + auto_daily log), stock 9.
+    durable = {
+      medications: [
+        med({
+          currentPills: 9,
+          doseConsumption: { d1: TODAY },
+          doseConsumptionHistory: { d1: [TODAY] },
+        }),
+      ],
+      logs: [
+        {
+          id: 'auto-take-d1',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'auto_daily',
+          amount: -1,
+          date: TODAY,
+          timestamp: '',
+          description: '',
+          doseId: 'd1',
+        },
+      ],
+    };
+
+    const restore = await runGatedManualRestore({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      todayStr: TODAY,
+      makeLogId: () => 'restore-then-take',
+    });
+    expect(restore.outcome).toBe('applied');
+    expect(restore.restoredAmount).toBe(1);
+    expect(durable.medications[0].currentPills).toBe(10);
+    // Skip left so Auto cannot re-deduct before Take.
+    expect(durable.medications[0].doseSkippedHistory?.d1).toEqual([TODAY]);
+
+    const take = await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+    });
+    // Take must be allowed (skip does not block Take) and record consumption.
+    expect(take.outcome).toBe('applied');
+    expect(take.doseAmount).toBe(1);
+    // Final stock: 10 - 1 = 9 (exactly one net deduction for the occurrence).
+    expect(durable.medications[0].currentPills).toBe(9);
+    // Skip cleared by Take; consume marker set once.
+    expect(durable.medications[0].doseSkippedHistory?.d1).toBeUndefined();
+    expect(durable.medications[0].doseConsumption?.d1).toBe(TODAY);
+    // Exactly one dose_taken log for d1 (the manual Take) plus the restore log
+    // plus the original auto_daily log — no second auto deduction.
+    const takeLogs = durable.logs.filter(
+      (l) => l.type === 'dose_taken' && l.doseId === 'd1'
+    );
+    expect(takeLogs).toHaveLength(1);
+    const autoLogs = durable.logs.filter(
+      (l) => l.type === 'auto_daily' && l.doseId === 'd1'
+    );
+    expect(autoLogs).toHaveLength(1);
+  });
+
+  it('Manual Take → Restore → later native Exact Auto event does not deduct twice', async () => {
+    // Manual Take d1 first (stock 10 → 9, dose_taken log).
+    const take = await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+    });
+    expect(take.outcome).toBe('applied');
+    expect(durable.medications[0].currentPills).toBe(9);
+    const pillsAfterTake = durable.medications[0].currentPills;
+
+    // Restore d1 (time 08:00 has passed at 15:00) → skip left, consume cleared.
+    const restore = await runGatedManualRestore({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      todayStr: TODAY,
+      makeLogId: () => 'restore-after-manual',
+    });
+    expect(restore.outcome).toBe('applied');
+    expect(restore.restoredAmount).toBe(1);
+    expect(durable.medications[0].currentPills).toBe(10);
+    expect(durable.medications[0].doseConsumption?.d1).toBeUndefined();
+    expect(durable.medications[0].doseSkippedHistory?.d1).toEqual([TODAY]);
+
+    // Later native Exact Auto FIRED event for the same occurrence.
+    const recon = await runAutoDeductionReconciliation({
+      alreadyInGate: true,
+      medications: durable.medications,
+      logs: durable.logs,
+      globalAutoDeductEnabled: true,
+      listFired: async () => [
+        fired({ doseId: 'd1', calendarDate: TODAY, amount: 1 }),
+      ],
+      markReconciled: async () => ({ ok: true, changed: true }),
+      persistMeds: (m) => {
+        durable.medications = m;
+        return null;
+      },
+      persistLogs: (l) => {
+        durable.logs = l;
+        return null;
+      },
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
+    });
+    expect(recon.details[0]?.outcome).toBe('already_applied');
+    // Stock unchanged from post-restore state (no second deduction).
+    expect(durable.medications[0].currentPills).toBe(10);
+    expect(durable.medications[0].currentPills).not.toBe(pillsAfterTake);
+    // No auto_daily log created for d1.
+    expect(
+      durable.logs.filter(
+        (l) => l.type === 'auto_daily' && l.doseId === 'd1'
+      )
+    ).toHaveLength(0);
+  });
+
+  it('Restore before scheduled time does not create skip marker (future dose)', async () => {
+    // d3@22:00, now 15:00 — d3 time has NOT passed. Manual Take d3 then Restore.
+    const take = await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd3',
+      source: 'manual',
+      todayStr: TODAY,
+    });
+    expect(take.outcome).toBe('applied');
+    const pillsAfterTake = durable.medications[0].currentPills;
+
+    const restore = await runGatedManualRestore({
+      medicationId: 'med-1',
+      doseId: 'd3',
+      todayStr: TODAY,
+      makeLogId: () => 'restore-future-d3',
+    });
+    expect(restore.outcome).toBe('applied');
+    expect(durable.medications[0].currentPills).toBe(pillsAfterTake + 2);
+    // Future restore: NO durable skip (d3 stays eligible for time-gated Auto).
+    expect(durable.medications[0].doseSkippedHistory?.d3).toBeUndefined();
+    expect(durable.medications[0].doseConsumption?.d3).toBeUndefined();
+  });
+
+  it('Multi-dose: Restore doseId=A leaves skip for A only; doseId=B untouched', async () => {
+    // Take d1 and d2 manually, then Restore d1 only.
+    await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+    });
+    await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd2',
+      source: 'manual',
+      todayStr: TODAY,
+    });
+    const pillsBeforeRestore = durable.medications[0].currentPills;
+
+    const r = await runGatedManualRestore({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      todayStr: TODAY,
+      makeLogId: () => 'restore-d1-only',
+    });
+    expect(r.outcome).toBe('applied');
+    expect(r.restoredAmount).toBe(1);
+    // d1 restored (skip left, consume cleared); d2 still consumed.
+    expect(durable.medications[0].doseSkippedHistory?.d1).toEqual([TODAY]);
+    expect(durable.medications[0].doseConsumption?.d1).toBeUndefined();
+    expect(durable.medications[0].doseConsumption?.d2).toBe(TODAY);
+    expect(durable.medications[0].doseSkippedHistory?.d2).toBeUndefined();
+    // Only d1's amount credited back.
+    expect(durable.medications[0].currentPills).toBe(pillsBeforeRestore + 1);
+  });
+
+  // ─── Section 3: legacy Exact Auto envelope migration ───
+
+  it('legacy Exact Auto envelope without mutationSeq is migrated, applied, ACKed, cleared once; restart does not re-deduct', async () => {
+    // Plant a legacy envelope (no mutationSeq) simulating a Phase 3 crash
+    // where meds+logs were written but the envelope was never cleared.
+    let exactEnv: {
+      version: 1;
+      status: 'js_ready';
+      medications: ReturnType<typeof med>[];
+      logs: Array<{
+        id: string;
+        medicationId: string;
+        medicationName: string;
+        type: 'auto_daily';
+        amount: number;
+        date: string;
+        timestamp: string;
+        description: string;
+        doseId: string;
+      }>;
+      toAcknowledge: Array<{ medicationId: string; doseId: string; calendarDate: string }>;
+      createdAt: string;
+      mutationSeq?: number;
+    } | null = {
+      version: 1,
+      status: 'js_ready',
+      medications: [med({ currentPills: 8 })],
+      logs: [
+        {
+          id: 'legacy-exact-auto',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'auto_daily',
+          amount: -1,
+          date: TODAY,
+          timestamp: '',
+          description: '',
+          doseId: 'd1',
+        },
+      ],
+      toAcknowledge: [
+        { medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY },
+      ],
+      createdAt: new Date().toISOString(),
+      // mutationSeq intentionally absent — legacy envelope.
+    };
+    const { __setExactAutoEnvelopeStorageTestHooks } = require('../../src/utils/stockEnvelopeRecovery');
+    let savedSnapshot: typeof exactEnv = null;
+    __setExactAutoEnvelopeStorageTestHooks({
+      load: () => exactEnv,
+      save: (env: unknown) => {
+        const e = env as typeof exactEnv;
+        if (e == null) {
+          exactEnv = null;
+        } else {
+          exactEnv = e;
+          savedSnapshot = e;
+        }
+        return null;
+      },
+    });
+
+    let nextSeq = 0;
+    let allocateCalls = 0;
+    __setStockMutationOrderingTestHooks({
+      loadLastApplied: () => 0,
+      persistLastApplied: () => null,
+      allocate: () => {
+        allocateCalls += 1;
+        nextSeq += 1;
+        return { ok: true, seq: nextSeq };
+      },
+    });
+
+    marked = [];
+    const recon = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        marked.push(`${medicationId}|${doseId}|${calendarDate}`);
+        return { ok: true, changed: true };
+      },
+    });
+
+    // Migration allocated a positive mutationSeq and persisted it before
+    // recovery (savedSnapshot captures the migrated envelope state).
+    expect(allocateCalls).toBeGreaterThanOrEqual(1);
+    expect(savedSnapshot).not.toBeNull();
+    expect(typeof savedSnapshot?.mutationSeq).toBe('number');
+    expect((savedSnapshot?.mutationSeq as number) > 0).toBe(true);
+
+    // Applied once: durable reflects the envelope snapshot (currentPills=8)
+    // and the legacy auto_daily log is now durable.
+    expect(durable.medications[0].currentPills).toBe(8);
+    expect(durable.logs.some((l) => l.id === 'legacy-exact-auto')).toBe(true);
+
+    // ACKed exactly once.
+    expect(marked).toEqual([`med-1|d1|${TODAY}`]);
+    expect(recon.markedCount).toBe(1);
+
+    // Envelope cleared after finalization.
+    expect(exactEnv).toBeNull();
+
+    // Second restart/reconcile: envelope is null, durable already reflects
+    // the mutation, no second ACK and no second deduction.
+    marked = [];
+    const recon2 = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        marked.push(`${medicationId}|${doseId}|${calendarDate}`);
+        return { ok: true, changed: true };
+      },
+    });
+    expect(marked).toEqual([]);
+    expect(recon2.markedCount).toBe(0);
+    expect(durable.medications[0].currentPills).toBe(8);
+    expect(
+      durable.logs.filter((l) => l.id === 'legacy-exact-auto')
+    ).toHaveLength(1);
+
+    __setExactAutoEnvelopeStorageTestHooks(null);
+  });
+
+  it('legacy envelope migration does not reallocate mutationSeq on second startup (idempotent)', async () => {
+    let exactEnv: {
+      version: 1;
+      status: 'js_ready';
+      medications: ReturnType<typeof med>[];
+      logs: Array<{
+        id: string;
+        medicationId: string;
+        medicationName: string;
+        type: 'auto_daily';
+        amount: number;
+        date: string;
+        timestamp: string;
+        description: string;
+        doseId: string;
+      }>;
+      toAcknowledge: Array<{ medicationId: string; doseId: string; calendarDate: string }>;
+      createdAt: string;
+      mutationSeq?: number;
+    } | null = {
+      version: 1,
+      status: 'js_ready',
+      medications: [med({ currentPills: 7 })],
+      logs: [
+        {
+          id: 'legacy-exact-2',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'auto_daily',
+          amount: -1,
+          date: TODAY,
+          timestamp: '',
+          description: '',
+          doseId: 'd2',
+        },
+      ],
+      toAcknowledge: [
+        { medicationId: 'med-1', doseId: 'd2', calendarDate: TODAY },
+      ],
+      createdAt: new Date().toISOString(),
+    };
+    const { __setExactAutoEnvelopeStorageTestHooks } = require('../../src/utils/stockEnvelopeRecovery');
+    __setExactAutoEnvelopeStorageTestHooks({
+      load: () => exactEnv,
+      save: (env: unknown) => {
+        const e = env as typeof exactEnv;
+        exactEnv = e;
+        return null;
+      },
+    });
+
+    let nextSeqSpy = 0;
+    let allocateCount = 0;
+    __setStockMutationOrderingTestHooks({
+      loadLastApplied: () => 0,
+      persistLastApplied: () => null,
+      allocate: () => {
+        allocateCount += 1;
+        nextSeqSpy += 1;
+        return { ok: true, seq: nextSeqSpy };
+      },
+    });
+
+    // First startup: migration allocates once (count=1) then recovery clears.
+    await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async () => ({ ok: true, changed: true }),
+    });
+    expect(allocateCount).toBeGreaterThanOrEqual(1);
+    const firstAllocationCount = allocateCount;
+
+    // Simulate a crash BEFORE clear: re-plant the same envelope with the
+    // already-allocated mutationSeq (as persisted by migration). Second
+    // startup must NOT reallocate — the saved seq is authoritative.
+    exactEnv = {
+      version: 1,
+      status: 'js_ready',
+      medications: [med({ currentPills: 7 })],
+      logs: [
+        {
+          id: 'legacy-exact-2',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'auto_daily',
+          amount: -1,
+          date: TODAY,
+          timestamp: '',
+          description: '',
+          doseId: 'd2',
+        },
+      ],
+      toAcknowledge: [
+        { medicationId: 'med-1', doseId: 'd2', calendarDate: TODAY },
+      ],
+      createdAt: new Date().toISOString(),
+      mutationSeq: 1, // already migrated
+    };
+
+    const allocateBeforeSecond = allocateCount;
+    await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async () => ({ ok: true, changed: true }),
+    });
+    // No new allocation on second startup — seq already present.
+    expect(allocateCount).toBe(allocateBeforeSecond);
+    // firstAllocationCount captures the one-time migration allocation.
+    expect(firstAllocationCount).toBeGreaterThanOrEqual(1);
+
+    __setExactAutoEnvelopeStorageTestHooks(null);
+  });
+
+  it('migration failure (allocateMutationSeq fails) does not ACK or clear; retry succeeds', async () => {
+    let exactEnv: {
+      version: 1;
+      status: 'js_ready';
+      medications: ReturnType<typeof med>[];
+      logs: Array<{
+        id: string;
+        medicationId: string;
+        medicationName: string;
+        type: 'auto_daily';
+        amount: number;
+        date: string;
+        timestamp: string;
+        description: string;
+        doseId: string;
+      }>;
+      toAcknowledge: Array<{ medicationId: string; doseId: string; calendarDate: string }>;
+      createdAt: string;
+      mutationSeq?: number;
+    } | null = {
+      version: 1,
+      status: 'js_ready',
+      medications: [med({ currentPills: 6 })],
+      logs: [
+        {
+          id: 'legacy-exact-3',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'auto_daily',
+          amount: -1,
+          date: TODAY,
+          timestamp: '',
+          description: '',
+          doseId: 'd3',
+        },
+      ],
+      toAcknowledge: [
+        { medicationId: 'med-1', doseId: 'd3', calendarDate: TODAY },
+      ],
+      createdAt: new Date().toISOString(),
+    };
+    const { __setExactAutoEnvelopeStorageTestHooks } = require('../../src/utils/stockEnvelopeRecovery');
+    __setExactAutoEnvelopeStorageTestHooks({
+      load: () => exactEnv,
+      save: (env: unknown) => {
+        const e = env as typeof exactEnv;
+        exactEnv = e;
+        return null;
+      },
+    });
+
+    let failAllocate = true;
+    let nextSeq = 100;
+    __setStockMutationOrderingTestHooks({
+      loadLastApplied: () => 0,
+      persistLastApplied: () => null,
+      allocate: () => {
+        if (failAllocate) return { ok: false, error: 'nextSeq persist failed' };
+        nextSeq += 1;
+        return { ok: true, seq: nextSeq };
+      },
+    });
+
+    marked = [];
+    const blocked = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        marked.push(`${medicationId}|${doseId}|${calendarDate}`);
+        return { ok: true, changed: true };
+      },
+    });
+    // Blocked recovery: no ACK, no clear, envelope remains (still no seq).
+    expect(marked).toEqual([]);
+    expect(blocked.markedCount).toBe(0);
+    expect(exactEnv).not.toBeNull();
+    expect((exactEnv as { mutationSeq?: number }).mutationSeq).toBeUndefined();
+    expect(durable.medications[0].currentPills).not.toBe(6);
+    expect(
+      durable.logs.some((l) => l.id === 'legacy-exact-3')
+    ).toBe(false);
+
+    // Retry: allocate succeeds → migration persists seq → recovery applies +
+    // ACKs + clears once.
+    failAllocate = false;
+    marked = [];
+    const recon = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        marked.push(`${medicationId}|${doseId}|${calendarDate}`);
+        return { ok: true, changed: true };
+      },
+    });
+    expect(exactEnv).toBeNull();
+    expect(durable.medications[0].currentPills).toBe(6);
+    expect(durable.logs.some((l) => l.id === 'legacy-exact-3')).toBe(true);
+    expect(marked).toEqual([`med-1|d3|${TODAY}`]);
+    expect(recon.markedCount).toBe(1);
+
+    __setExactAutoEnvelopeStorageTestHooks(null);
+  });
+
+  it('no duplicate ACK after restart: finalized envelope cleanup ACKs at most once', async () => {
+    // Envelope with seq already covered by lastApplied (cleanup-only path).
+    let exactEnv: {
+      version: 1;
+      status: 'js_ready';
+      medications: ReturnType<typeof med>[];
+      logs: [];
+      toAcknowledge: Array<{ medicationId: string; doseId: string; calendarDate: string }>;
+      createdAt: string;
+      mutationSeq: number;
+    } | null = {
+      version: 1,
+      status: 'js_ready',
+      medications: [med({ currentPills: 8 })],
+      logs: [],
+      toAcknowledge: [
+        { medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY },
+      ],
+      createdAt: new Date().toISOString(),
+      mutationSeq: 5,
+    };
+    const { __setExactAutoEnvelopeStorageTestHooks } = require('../../src/utils/stockEnvelopeRecovery');
+    __setExactAutoEnvelopeStorageTestHooks({
+      load: () => exactEnv,
+      save: (env: unknown) => {
+        const e = env as typeof exactEnv;
+        if (e == null) exactEnv = null;
+        else exactEnv = e;
+        return null;
+      },
+    });
+
+    let lastApplied = 5; // already finalized
+    let nextSeq = 5;
+    __setStockMutationOrderingTestHooks({
+      loadLastApplied: () => lastApplied,
+      persistLastApplied: (seq) => {
+        lastApplied = seq;
+        return null;
+      },
+      allocate: () => {
+        nextSeq += 1;
+        return { ok: true, seq: nextSeq };
+      },
+    });
+
+    marked = [];
+    const first = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        marked.push(`${medicationId}|${doseId}|${calendarDate}`);
+        return { ok: true, changed: true };
+      },
+    });
+    // Cleanup ACK happened once.
+    expect(marked).toEqual([`med-1|d1|${TODAY}`]);
+    expect(first.markedCount).toBe(1);
+    expect(exactEnv).toBeNull();
+
+    // Second restart: envelope already cleared, no duplicate ACK.
+    marked = [];
+    const second = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        marked.push(`${medicationId}|${doseId}|${calendarDate}`);
+        return { ok: true, changed: true };
+      },
+    });
+    expect(marked).toEqual([]);
+    expect(second.markedCount).toBe(0);
+
+    __setExactAutoEnvelopeStorageTestHooks(null);
+  });
+});
 
 describe('shouldDismissAlarmAfterManualTake', () => {
   it('dismisses only for applied and already_consumed; never persist_failed', () => {

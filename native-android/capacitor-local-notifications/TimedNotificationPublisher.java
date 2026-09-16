@@ -202,8 +202,10 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
      *   reminderTime: "HH:MM"
      *   medicationId (optional doseId for multi-dose identity)
      *
-     * After successful AlarmManager.set*: writes NotificationStorage schedule.at
-     * and {@link DoseReminderRecurrenceStore} for medicationId+doseId.
+     * Atomicity after AlarmManager.set* succeeds:
+     *   NotificationStorage persist (must succeed)
+     *   then {@link DoseReminderRecurrenceStore#markReArmed} for medicationId+doseId.
+     * Failed persist → no markReArmed (JS can repair). Alarm still kept.
      */
     boolean rescheduleDoseReminderNextDay(
             Context context,
@@ -278,16 +280,26 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
                 Logger.tags("LN"),
                 "dose reminder " + id + " next day at " + sdf.format(new Date(trigger))
             );
-            // Persist next `schedule.at` into Capacitor NotificationStorage so
-            // JS getPending() can see a future occurrence when the store is readable.
-            persistDoseReminderNextAt(context, id, notificationJson, trigger);
-            // Temporary delivery/re-arm evidence for this exact next occurrence
-            // (medicationId+doseId+reminderTime). Not proof the alarm still exists;
-            // cleared on cancel / config change. Valid only while future + config match.
-            if (medicationId != null && !medicationId.isEmpty()) {
+            // Order (required atomicity):
+            //   1) AlarmManager.set* already succeeded above
+            //   2) NotificationStorage persist — observable success/failure
+            //   3) markReArmed only if (2) succeeded
+            // Never write evidence for a storage state that was not persisted.
+            boolean persisted =
+                    persistDoseReminderNextAt(context, id, notificationJson, trigger);
+            if (persisted && medicationId != null && !medicationId.isEmpty()) {
                 DoseReminderRecurrenceStore.markReArmed(
                         context, medicationId, doseId, trigger, reminderTime, id);
+            } else if (!persisted) {
+                Logger.error(
+                    Logger.tags("LN"),
+                    "dose next-day AlarmManager armed but NotificationStorage persist failed; "
+                        + "no re-arm evidence written — JS may repair",
+                    null
+                );
             }
+            // AlarmManager arm succeeded: keep notification id (do not delete storage
+            // in onReceive). Missing markReArmed / past schedule.at lets JS repair.
             return true;
         } catch (Exception e) {
             Logger.error(Logger.tags("LN"), "dose next-day reschedule failed", e);
@@ -300,15 +312,17 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
      * Write updated schedule.at into the plugin notification store (same file
      * NotificationStorage uses). Makes post-delivery getPending() report a
      * future occurrence for this stable dose id.
+     *
+     * @return true only when the SharedPreferences write committed successfully
      */
-    private void persistDoseReminderNextAt(
+    private boolean persistDoseReminderNextAt(
             Context context,
             int id,
             JSObject notificationJson,
             long triggerMs
     ) {
         if (notificationJson == null) {
-            return;
+            return false;
         }
         try {
             JSObject schedule = notificationJson.getJSObject("schedule");
@@ -322,9 +336,15 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
             // Match NotificationStorage.NOTIFICATION_STORE_ID
             SharedPreferences storage =
                     context.getSharedPreferences("NOTIFICATION_STORE", Context.MODE_PRIVATE);
-            storage.edit().putString(Integer.toString(id), notificationJson.toString()).commit();
+            boolean committed =
+                    storage.edit().putString(Integer.toString(id), notificationJson.toString()).commit();
+            if (!committed) {
+                Logger.error(Logger.tags("LN"), "persist dose next at: SharedPreferences commit failed", null);
+            }
+            return committed;
         } catch (Exception e) {
             Logger.error(Logger.tags("LN"), "persist dose next at failed", e);
+            return false;
         }
     }
 }

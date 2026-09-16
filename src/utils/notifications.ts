@@ -1041,15 +1041,17 @@ export function doseReminderAlarmIdForDose(medId: string, doseId: string): numbe
 }
 
 /**
- * True when a valid *future* dose-reminder occurrence is recorded for this
- * stable id in the plugin pending store.
+ * True when Capacitor `LocalNotifications.getPending()` reports a *future*
+ * occurrence for this stable dose-alarm id.
  *
- * After delivery, TimedNotificationPublisher also writes
- * {@link isNativeDoseReminderReArmed} evidence keyed by medicationId+doseId.
- * Prefer checking both during reconciliation: pending alone can lag during
- * the delivery transition while the native next-day AlarmManager arm is
- * already durable in DoseReminderRecurrenceStore.
+ * Layer contract (post-delivery):
+ * - AlarmManager: wall-clock arm (not directly queryable here)
+ * - NotificationStorage / getPending(): plugin-visible future `schedule.at`
+ * - DoseReminderRecurrenceStore: temporary delivery evidence; valid only when
+ *   storage still holds a matching future occurrence for the same notification id
  *
+ * Reconciliation checks getPending first, then native re-arm evidence so a
+ * brief getPending lag during delivery does not force a duplicate schedule.
  * Recurrence owner remains TimedNotificationPublisher (next calendar day).
  * JS must not use Capacitor repeats/every.
  */

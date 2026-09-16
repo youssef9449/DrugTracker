@@ -25,6 +25,16 @@ DoseReminderRecurrenceStore → occurrence evidence (after AlarmManager+Notifica
 JS reconciliation must not treat `getPending() === false` alone as “needs repair”
 during delivery: check `isNativeDoseReminderReArmed` (this store) as well.
 
+### Layer contract
+
+| Layer | What it proves |
+|-------|----------------|
+| `AlarmManager.set*` | Next wall-clock fire was requested |
+| `NOTIFICATION_STORE` / `getPending()` | Plugin-visible future `schedule.at` for the stable id |
+| `DoseReminderRecurrenceStore` | Delivery transition succeeded for one occurrence identity; **valid only while storage still matches** |
+
+Atomic write order in `rescheduleDoseReminderNextDay`: AlarmManager → NotificationStorage persist → `markReArmed` (only if persist committed).
+
 ## Behavior
 
 At alarm delivery, if the notification is a DrugTracker dose reminder

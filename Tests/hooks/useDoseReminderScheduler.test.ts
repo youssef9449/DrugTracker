@@ -7,10 +7,13 @@ import { useDoseReminderScheduler, getDoseReminderSlots } from '@/hooks/useDoseR
 import {
   LEGACY_DOSE_ID,
   doseReminderAlarmIdForDose,
+  doseReminderAlarmId,
 } from '@/utils/notifications';
+import { Capacitor } from '@capacitor/core';
+import { LocalNotifications } from '@capacitor/local-notifications';
 
 vi.mock('@capacitor/core', () => ({
-  Capacitor: { getPlatform: () => 'web' },
+  Capacitor: { getPlatform: vi.fn(() => 'web') },
 }));
 vi.mock('@capacitor/local-notifications', () => ({
   LocalNotifications: {
@@ -18,6 +21,7 @@ vi.mock('@capacitor/local-notifications', () => ({
     cancel: vi.fn(),
     checkPermissions: vi.fn(),
     checkExactNotificationSetting: vi.fn(),
+    getPending: vi.fn(),
   },
 }));
 
@@ -25,6 +29,10 @@ const mocks = vi.hoisted(() => ({
   schedule: vi.fn(),
   cancel: vi.fn(),
   cancelSnoozed: vi.fn(),
+  isPending: vi.fn(),
+  isNativeReArmed: vi.fn(),
+  cancelLegacy: vi.fn(),
+  cancelStale: vi.fn(),
 }));
 
 vi.mock('@/utils/notifications', async () => {
@@ -36,6 +44,11 @@ vi.mock('@/utils/notifications', async () => {
     scheduleDoseReminder: mocks.schedule,
     cancelDoseReminder: mocks.cancel,
     cancelSnoozedDoseReminder: mocks.cancelSnoozed,
+    isDoseReminderPending: mocks.isPending,
+    isNativeDoseReminderReArmed: mocks.isNativeReArmed,
+    cancelLegacyDoseReminderAlarm: mocks.cancelLegacy,
+    // cancelStaleDoseReminderAlarms: NOT mocked — real implementation runs
+    // so the test can verify actual IDs sent to LocalNotifications.cancel.
   };
 });
 
@@ -75,9 +88,17 @@ beforeEach(() => {
   mocks.schedule.mockReset();
   mocks.cancel.mockReset();
   mocks.cancelSnoozed.mockReset();
+  mocks.isPending.mockReset();
+  mocks.isNativeReArmed.mockReset();
+  mocks.cancelLegacy.mockReset();
   mocks.cancel.mockResolvedValue(undefined);
   mocks.cancelSnoozed.mockResolvedValue(undefined);
   mocks.schedule.mockResolvedValue(undefined);
+  mocks.isPending.mockResolvedValue(false);
+  mocks.isNativeReArmed.mockResolvedValue(false);
+  mocks.cancelLegacy.mockResolvedValue(undefined);
+  // Default: no pending notifications (web platform / no stale alarms).
+  LocalNotifications.getPending.mockResolvedValue({ notifications: [] });
   localStorage.clear();
 });
 
@@ -1513,5 +1534,364 @@ describe('useDoseReminderScheduler — restore re-arms future dose notification'
     expect(doseReminderAlarmIdForDose(lastD2![0], lastD2![5].doseId)).toBe(
       logicalNotifId
     );
+  });
+});
+
+
+describe('idempotent lifecycle reconciliation', () => {
+  it('second effect run with same signature does not cancel+reschedule when pending', async () => {
+    const med = makeMed({ reminderTime: '09:00' });
+    const { rerender } = renderHook(
+      (props: { lifecycleTick: number }) =>
+        useDoseReminderScheduler(
+          defaultOpts({
+            medications: [med],
+            lifecycleTick: props.lifecycleTick,
+          })
+        ),
+      { initialProps: { lifecycleTick: 0 } }
+    );
+
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const schedulesAfterFirst = mocks.schedule.mock.calls.length;
+    expect(schedulesAfterFirst).toBeGreaterThanOrEqual(1);
+    const cancelsAfterFirst = mocks.cancel.mock.calls.length;
+
+    // Next lifecycle: pretend native still has the pending id.
+    mocks.isPending.mockResolvedValue(true);
+    mocks.schedule.mockClear();
+    mocks.cancel.mockClear();
+
+    rerender({ lifecycleTick: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mocks.schedule).not.toHaveBeenCalled();
+    expect(mocks.cancel).not.toHaveBeenCalled();
+  });
+
+  it('repairs missing pending without changing signature', async () => {
+    const med = makeMed({ reminderTime: '09:00' });
+    const { rerender } = renderHook(
+      (props: { lifecycleTick: number }) =>
+        useDoseReminderScheduler(
+          defaultOpts({
+            medications: [med],
+            lifecycleTick: props.lifecycleTick,
+          })
+        ),
+      { initialProps: { lifecycleTick: 0 } }
+    );
+
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    mocks.schedule.mockClear();
+    mocks.cancel.mockClear();
+    mocks.isPending.mockResolvedValue(false);
+
+    rerender({ lifecycleTick: 2 });
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Repair schedules without cancel when signature unchanged and pending missing.
+    expect(mocks.schedule).toHaveBeenCalled();
+  });
+
+  it('cancels legacy med-only id when multi-dose slots are active', async () => {
+    const med = makeMed({
+      reminderTime: undefined,
+      doseSchedule: [
+        { id: 'd1', time: '08:00', amount: 1 },
+        { id: 'd2', time: '20:00', amount: 1 },
+      ],
+    });
+    renderHook(() =>
+      useDoseReminderScheduler(defaultOpts({ medications: [med] }))
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.cancelLegacy).toHaveBeenCalledWith('med-1');
+  });
+});
+
+describe('stale native pending cleanup', () => {
+  it('cancels stale dose alarms from native pending on reconcile', async () => {
+    // Use native platform so cancelStaleDoseReminderAlarms exercises the
+    // real getPending + cancel path (not just a spy).
+    vi.mocked(Capacitor.getPlatform).mockReturnValue('android');
+
+    const med = makeMed({
+      reminderTime: '09:00',
+      doseSchedule: [{ id: 'd1', amount: 1, time: '09:00' }],
+      dosesPerDay: 1,
+    });
+
+    const currentId = doseReminderAlarmIdForDose(med.id, 'd1');
+    const staleDoseId = doseReminderAlarmIdForDose('med-stale', 'd-old');
+    const legacyMedId = doseReminderAlarmId(med.id);
+    const nonDoseAlarmId = 999_999_999; // outside doseAlarm band
+
+    // Mock getPending to contain current + stale + legacy + non-doseAlarm IDs.
+    LocalNotifications.getPending.mockResolvedValue({
+      notifications: [
+        { id: currentId },
+        { id: staleDoseId },
+        { id: legacyMedId },
+        { id: nonDoseAlarmId },
+      ],
+    });
+
+    renderHook(() =>
+      useDoseReminderScheduler(defaultOpts({ medications: [med] }))
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Verify actual IDs sent to cancel: stale + legacy cancelled,
+    // current + non-doseAlarm NOT cancelled.
+    expect(LocalNotifications.cancel).toHaveBeenCalled();
+    const cancelledIds = LocalNotifications.cancel.mock.calls.flatMap(
+      (call: unknown[]) =>
+        (call[0] as { notifications: { id: number }[] }).notifications.map(
+          (n) => n.id
+        )
+    );
+    expect(cancelledIds).toContain(staleDoseId);
+    expect(cancelledIds).toContain(legacyMedId);
+    expect(cancelledIds).not.toContain(currentId);
+    expect(cancelledIds).not.toContain(nonDoseAlarmId);
+  });
+});
+
+describe('delivery/reconciliation race', () => {
+  it('repairs when pending=false and no native re-arm evidence (case C)', async () => {
+    // Truly missing alarm: neither getPending nor DoseReminderRecurrenceStore.
+    mocks.isPending.mockResolvedValue(false);
+    mocks.isNativeReArmed.mockResolvedValue(false);
+    const med = makeMed({
+      reminderTime: '23:00',
+      doseSchedule: [{ id: 'd1', amount: 1, time: '23:00' }],
+    });
+
+    const { rerender } = renderHook(
+      (props: { lifecycleTick: number }) =>
+        useDoseReminderScheduler(
+          defaultOpts({
+            medications: [med],
+            lifecycleTick: props.lifecycleTick,
+          })
+        ),
+      { initialProps: { lifecycleTick: 0 } }
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.schedule).toHaveBeenCalled();
+    const firstCalls = mocks.schedule.mock.calls.length;
+    mocks.schedule.mockClear();
+
+    // Still missing — repair again on lifecycle (same signature path).
+    mocks.isPending.mockResolvedValue(false);
+    mocks.isNativeReArmed.mockResolvedValue(false);
+    rerender({ lifecycleTick: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.schedule.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(firstCalls).toBeGreaterThanOrEqual(1);
+  });
+
+  it('no-op when pending=false but native re-arm state is valid (case B — real delivery race)', async () => {
+    // Delivery transition: getPending may still report false while
+    // TimedNotificationPublisher has already written DoseReminderRecurrenceStore
+    // after successful AlarmManager next-day arm. JS must not schedule a second path.
+    mocks.isPending.mockResolvedValue(false);
+    mocks.isNativeReArmed.mockResolvedValue(false);
+    const med = makeMed({
+      reminderTime: '23:00',
+      doseSchedule: [{ id: 'd1', amount: 1, time: '23:00' }],
+    });
+
+    const { rerender } = renderHook(
+      (props: { lifecycleTick: number }) =>
+        useDoseReminderScheduler(
+          defaultOpts({
+            medications: [med],
+            lifecycleTick: props.lifecycleTick,
+          })
+        ),
+      { initialProps: { lifecycleTick: 0 } }
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.schedule).toHaveBeenCalled();
+    mocks.schedule.mockClear();
+
+    // pending still false, but native re-arm evidence present → no-op.
+    mocks.isPending.mockResolvedValue(false);
+    mocks.isNativeReArmed.mockResolvedValue(true);
+    rerender({ lifecycleTick: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.schedule).not.toHaveBeenCalled();
+  });
+
+  it('no-op when pending=true (case A)', async () => {
+    mocks.isPending.mockResolvedValue(false);
+    mocks.isNativeReArmed.mockResolvedValue(false);
+    const med = makeMed({
+      reminderTime: '23:00',
+      doseSchedule: [{ id: 'd1', amount: 1, time: '23:00' }],
+    });
+
+    const { rerender } = renderHook(
+      (props: { lifecycleTick: number }) =>
+        useDoseReminderScheduler(
+          defaultOpts({
+            medications: [med],
+            lifecycleTick: props.lifecycleTick,
+          })
+        ),
+      { initialProps: { lifecycleTick: 0 } }
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    mocks.schedule.mockClear();
+
+    mocks.isPending.mockResolvedValue(true);
+    mocks.isNativeReArmed.mockResolvedValue(false);
+    rerender({ lifecycleTick: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.schedule).not.toHaveBeenCalled();
+  });
+
+  it('repairs when native re-arm state is expired/invalid (case D)', async () => {
+    mocks.isPending.mockResolvedValue(false);
+    mocks.isNativeReArmed.mockResolvedValue(false);
+    const med = makeMed({
+      reminderTime: '23:00',
+      doseSchedule: [{ id: 'd1', amount: 1, time: '23:00' }],
+    });
+
+    const { rerender } = renderHook(
+      (props: { lifecycleTick: number }) =>
+        useDoseReminderScheduler(
+          defaultOpts({
+            medications: [med],
+            lifecycleTick: props.lifecycleTick,
+          })
+        ),
+      { initialProps: { lifecycleTick: 0 } }
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    mocks.schedule.mockClear();
+
+    // isNativeDoseReminderReArmed already encodes validity (expired/config mismatch → false).
+    mocks.isPending.mockResolvedValue(false);
+    mocks.isNativeReArmed.mockResolvedValue(false);
+    rerender({ lifecycleTick: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.schedule.mock.calls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('repairs when evidence is stale for a different schedule identity (config mismatch)', async () => {
+    // Store may still hold a future nextOccurrenceMs from an old reminderTime;
+    // isNativeDoseReminderReArmed(med, dose, currentTime) must return false.
+    mocks.isPending.mockResolvedValue(false);
+    mocks.isNativeReArmed.mockResolvedValue(false);
+    const med = makeMed({
+      reminderTime: '10:00',
+      doseSchedule: [{ id: 'd1', amount: 1, time: '10:00' }],
+    });
+
+    const { rerender } = renderHook(
+      (props: { lifecycleTick: number }) =>
+        useDoseReminderScheduler(
+          defaultOpts({
+            medications: [med],
+            lifecycleTick: props.lifecycleTick,
+          })
+        ),
+      { initialProps: { lifecycleTick: 0 } }
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    mocks.schedule.mockClear();
+    mocks.cancel.mockClear();
+
+    // Signature unchanged but native evidence invalid for current config → repair.
+    mocks.isPending.mockResolvedValue(false);
+    mocks.isNativeReArmed.mockResolvedValue(false);
+    rerender({ lifecycleTick: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.schedule.mock.calls.length).toBeGreaterThanOrEqual(1);
+    // isNativeDoseReminderReArmed must be consulted with current slot time.
+    expect(mocks.isNativeReArmed).toHaveBeenCalledWith('med-1', 'd1', '10:00');
+  });
+
+  it('time/signature change cancels (clears re-arm evidence) then schedules replacement', async () => {
+    mocks.isPending.mockResolvedValue(false);
+    mocks.isNativeReArmed.mockResolvedValue(false);
+    const med1 = makeMed({
+      reminderTime: '09:00',
+      doseSchedule: [{ id: 'd1', amount: 1, time: '09:00' }],
+    });
+
+    const { rerender } = renderHook(
+      (props: { med: ReturnType<typeof makeMed>; lifecycleTick: number }) =>
+        useDoseReminderScheduler(
+          defaultOpts({
+            medications: [props.med],
+            lifecycleTick: props.lifecycleTick,
+          })
+        ),
+      { initialProps: { med: med1, lifecycleTick: 0 } }
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.schedule).toHaveBeenCalled();
+    mocks.schedule.mockClear();
+    mocks.cancel.mockClear();
+
+    const med2 = makeMed({
+      reminderTime: '11:00',
+      doseSchedule: [{ id: 'd1', amount: 1, time: '11:00' }],
+    });
+    // Signature change path: cancel first (clears native evidence) then one schedule.
+    rerender({ med: med2, lifecycleTick: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.cancel).toHaveBeenCalledWith('med-1', 'd1');
+    expect(mocks.schedule).toHaveBeenCalled();
   });
 });

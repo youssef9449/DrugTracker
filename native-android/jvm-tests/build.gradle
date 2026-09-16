@@ -14,7 +14,8 @@ repositories {
 
 /**
  * Compile against the real production Phase 2 sources under
- * native-android/auto-deduction (excluding Capacitor Plugin bridge).
+ * native-android/auto-deduction (excluding Capacitor Plugin bridge)
+ * and DoseReminderRecurrenceStore (dose delivery/re-arm evidence).
  * Sources are synced into the standard package path before compile so
  * tests always exercise the repository's Java implementation, not a copy.
  */
@@ -29,23 +30,47 @@ def productionSources = fileTree("../auto-deduction") {
     )
 }
 
+def doseLocalNotifDir = file("../capacitor-local-notifications")
+def doseRecurrenceSources = fileTree(doseLocalNotifDir) {
+    include(
+            "DoseReminderRecurrenceStore.java",
+            "TimedNotificationPublisher.java",
+            "AppForegroundState.java"
+    )
+}
+
 def syncedMain = layout.buildDirectory.dir("synced-main/app/drugtracker/autodeduction")
+def syncedDoseLocalNotif = layout.buildDirectory.dir(
+        "synced-main/com/capacitorjs/plugins/localnotifications")
 
 tasks.register("syncProductionSources", Copy) {
     from productionSources
     into syncedMain
 }
 
+tasks.register("syncDoseLocalNotifications", Copy) {
+    from doseRecurrenceSources
+    into syncedDoseLocalNotif
+}
+
 sourceSets {
     main {
         java {
-            srcDirs = [layout.buildDirectory.dir("synced-main")]
+            // Production sources (synced) + compile stubs for Capacitor/AndroidX peers
+            srcDirs = [
+                    layout.buildDirectory.dir("synced-main"),
+                    "src/main/java"
+            ]
         }
     }
 }
 
-tasks.named("compileJava").configure { dependsOn("syncProductionSources") }
-tasks.named("processResources").configure { dependsOn("syncProductionSources") }
+tasks.named("compileJava").configure {
+    dependsOn("syncProductionSources", "syncDoseLocalNotifications")
+}
+tasks.named("processResources").configure {
+    dependsOn("syncProductionSources", "syncDoseLocalNotifications")
+}
 
 configurations {
     /**

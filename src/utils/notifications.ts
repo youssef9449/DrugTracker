@@ -35,12 +35,33 @@
  *    settings page where they can re-enable notifications.
  */
 
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import {
   NOTIFICATION_IMMEDIATE_OFFSET_MS,
   SW_READY_TIMEOUT_MS,
 } from './time';
+
+/**
+ * Native bridge for temporary dose-reminder delivery/re-arm evidence
+ * (TimedNotificationPublisher → DoseReminderRecurrenceStore).
+ * Validity requires current desired reminderTime so stale config cannot
+ * block repair. Web / missing plugin: query helpers no-op as invalid.
+ */
+interface DoseReminderNativePlugin {
+  getNextOccurrence(options: {
+    medicationId: string;
+    doseId?: string;
+    /** Current desired HH:MM — required for valid===true. */
+    reminderTime?: string;
+  }): Promise<{ valid: boolean; nextOccurrenceMs: number }>;
+  clearReArm(options: {
+    medicationId: string;
+    doseId?: string;
+  }): Promise<{ ok: boolean }>;
+}
+
+const DoseReminderNative = registerPlugin<DoseReminderNativePlugin>('DoseReminder');
 
 /**
  * The BACKGROUND/KILLED dose-reminder notification channel.
@@ -90,7 +111,7 @@ export const DOSE_REMINDER_FOREGROUND_CHANNEL_ID = 'dose-reminder-foreground-v1'
 //   background → DOSE_REMINDER_CHANNEL_ID (system default sound)
 //
 // The scheduler (useDoseReminderScheduler) re-arms all pending dose
-// reminders on every lifecycle transition (via lifecycleTick), so the
+// reminders via idempotent reconciliation (lifecycleTick), so the
 // channel matches the current app state for the common case.
 //
 // IMPORTANT — schedule-time channel is not a hard guarantee under
@@ -975,39 +996,20 @@ export async function scheduleCriticalAlarm(
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Recurring daily dose-reminder alarm (AlarmManager-backed).
+// Daily dose-reminder alarm (AlarmManager-backed).
 //
-// This is the NATIVE complement to the in-app polling in useDoseReminders.
-// The polling only fires while the app is in the foreground; this native
-// schedule fires the dose reminder at the medication's reminderTime EVERY
-// DAY via Android's AlarmManager (or iOS's UNUserNotificationCenter), even
-// when the app is killed or the device is in Doze. The user sees the
-// reminder in their notification drawer without ever opening the app.
+// Architecture (Capacitor local-notifications 6.1.3 Android):
+// - JS schedules a ONE-SHOT exact alarm at the next due `at` time
+//   (stable id = medicationId + doseId). Does NOT use repeats:true
+//   (that path calls AlarmManager.setRepeating with interval=at-now).
+// - TimedNotificationPublisher is the sole recurrence owner: on delivery
+//   it arms exactly one next-day alarm at extra.reminderTime.
+// - useDoseReminderScheduler performs idempotent reconciliation against
+//   LocalNotifications.getPending() — lifecycle must not cancel+reschedule
+//   when the stable id is already pending.
 //
-// The recurring notification uses a SEPARATE id band (doseAlarm = 6M)
-// from the immediate dose notification (dose = 3M) so the two never
-// collide. The useDoseReminderScheduler hook cancels + reschedules
-// whenever a med's reminder config changes (reminderEnabled, reminderTime,
-// med deleted, notifications disabled), with the same race-protection
-// pattern as useCriticalAlarmScheduler (generation counter + per-med
-// serialization chain).
-//
-// When the notification fires:
-//   - App in background/killed: shown in the system notification tray
-//     with the channel's bundled native sound.
-//   - App in foreground: the localNotificationReceived listener in
-//     native.ts opens the DoseAlarmModal. No JS sound — the native
-//     channel sound is the sole sound.
-//
-// Boot persistence: scheduled notifications are persisted by the
-// @capacitor/local-notifications plugin and re-armed on BOOT_COMPLETED.
-// ─────────────────────────────────────────────────────────────────────
+// Id band doseAlarm (6M) is separate from immediate dose (3M).
 
-/**
- * Sentinel dose id used for legacy medications that only have
- * `reminderTime` (no `doseSchedule`). Maps to the historical
- * med-only notification id so existing single-dose alarms keep working.
- */
 export const LEGACY_DOSE_ID = 'legacy';
 
 /**
@@ -1038,6 +1040,156 @@ export function doseReminderAlarmIdForDose(medId: string, doseId: string): numbe
   return notificationId('doseAlarm', `${medId}::${doseId}`);
 }
 
+/**
+ * True when Capacitor `LocalNotifications.getPending()` reports a *future*
+ * occurrence for this stable dose-alarm id.
+ *
+ * Layer contract (post-delivery):
+ * - AlarmManager: wall-clock arm (not directly queryable here)
+ * - NotificationStorage / getPending(): plugin-visible future `schedule.at`
+ * - DoseReminderRecurrenceStore: temporary delivery evidence; valid only when
+ *   storage still holds a matching future occurrence for the same notification id
+ *
+ * Reconciliation checks getPending first, then native re-arm evidence so a
+ * brief getPending lag during delivery does not force a duplicate schedule.
+ * Recurrence owner remains TimedNotificationPublisher (next calendar day).
+ * JS must not use Capacitor repeats/every.
+ */
+export async function isDoseReminderPending(
+  medId: string,
+  doseId: string = LEGACY_DOSE_ID
+): Promise<boolean> {
+  if (!isNativePlatform()) return false;
+  try {
+    const pending = await LocalNotifications.getPending();
+    const id = doseReminderAlarmIdForDose(medId, doseId);
+    const entry = pending.notifications.find((n) => n.id === id);
+    if (!entry) return false;
+    const at = (entry.schedule as { at?: unknown } | undefined)?.at;
+    if (at == null) {
+      // Present without at: treat as armed (defensive; dose path always sets at).
+      return true;
+    }
+    const atMs =
+      typeof at === 'number'
+        ? at
+        : at instanceof Date
+          ? at.getTime()
+          : Date.parse(String(at));
+    if (Number.isNaN(atMs)) return true;
+    // Future (or within 60s tolerance for clock skew) counts as armed.
+    return atMs > Date.now() - 60_000;
+  } catch (err) {
+    console.warn('[notifications] isDoseReminderPending failed:', err);
+    return false;
+  }
+}
+
+/**
+ * True when native TimedNotificationPublisher has persisted temporary
+ * delivery/re-arm evidence for this medicationId + doseId that still
+ * matches the current desired reminderTime and a future next occurrence.
+ * Independent of getPending() / React memory. Stale config, expired, or
+ * absent → false so JS can repair. Does not prove AlarmManager still holds
+ * the alarm.
+ *
+ * @param reminderTime current desired HH:MM for this dose slot (required)
+ */
+export async function isNativeDoseReminderReArmed(
+  medId: string,
+  doseId: string = LEGACY_DOSE_ID,
+  reminderTime?: string
+): Promise<boolean> {
+  if (!isNativePlatform()) return false;
+  if (!reminderTime || reminderTime.indexOf(':') < 0) return false;
+  try {
+    const opts =
+      doseId && doseId !== LEGACY_DOSE_ID
+        ? { medicationId: medId, doseId, reminderTime }
+        : { medicationId: medId, reminderTime };
+    const result = await DoseReminderNative.getNextOccurrence(opts);
+    return result?.valid === true;
+  } catch (err) {
+    console.warn('[notifications] isNativeDoseReminderReArmed failed:', err);
+    return false;
+  }
+}
+
+/**
+ * Clear native re-arm evidence for a dose slot (cancel / signature change).
+ * Idempotent. Web no-op.
+ */
+export async function clearNativeDoseReminderReArm(
+  medId: string,
+  doseId: string = LEGACY_DOSE_ID
+): Promise<void> {
+  if (!isNativePlatform()) return;
+  try {
+    const opts =
+      doseId && doseId !== LEGACY_DOSE_ID
+        ? { medicationId: medId, doseId }
+        : { medicationId: medId };
+    await DoseReminderNative.clearReArm(opts);
+  } catch (err) {
+    console.warn('[notifications] clearNativeDoseReminderReArm failed:', err);
+  }
+}
+
+/**
+ * Cancel the pre-Phase-2 med-only doseAlarm id for a medication.
+ * Idempotent. Call when reconciling multi-dose slots so a legacy single-id
+ * alarm cannot fire alongside per-dose ids.
+ */
+export async function cancelLegacyDoseReminderAlarm(medId: string): Promise<void> {
+  if (!isNativePlatform()) return;
+  try {
+    await LocalNotifications.cancel({
+      notifications: [{ id: doseReminderAlarmId(medId) }],
+    });
+  } catch (err) {
+    console.warn('[notifications] cancelLegacyDoseReminderAlarm failed:', err);
+  }
+}
+
+function isDoseAlarmBandId(id: number): boolean {
+  const base = NOTIFICATION_ID_BASE.doseAlarm;
+  return id >= base && id < base + ID_RANGE_SIZE;
+}
+
+/**
+ * Pending notification ids in the doseAlarm band (persisted native truth).
+ */
+export async function listPendingDoseReminderAlarmIds(): Promise<number[]> {
+  if (!isNativePlatform()) return [];
+  try {
+    const pending = await LocalNotifications.getPending();
+    return pending.notifications
+      .map((x) => x.id)
+      .filter((id): id is number => typeof id === 'number' && isDoseAlarmBandId(id));
+  } catch (err) {
+    console.warn('[notifications] listPendingDoseReminderAlarmIds failed:', err);
+    return [];
+  }
+}
+
+/**
+ * Cancel pending doseAlarm-band notifications not in keepIds (stale after
+ * process death / dose removal). Does not touch other bands.
+ */
+export async function cancelStaleDoseReminderAlarms(keepIds: ReadonlySet<number>): Promise<void> {
+  if (!isNativePlatform()) return;
+  try {
+    const pendingIds = await listPendingDoseReminderAlarmIds();
+    const toCancel = pendingIds.filter((id) => !keepIds.has(id));
+    if (toCancel.length === 0) return;
+    await LocalNotifications.cancel({
+      notifications: toCancel.map((id) => ({ id })),
+    });
+  } catch (err) {
+    console.warn('[notifications] cancelStaleDoseReminderAlarms failed:', err);
+  }
+}
+
 /** Stable, separate id for a one-shot snoozed dose reminder. */
 export function snoozeDoseReminderId(medId: string, doseId?: string): number {
   if (!doseId || doseId === LEGACY_DOSE_ID) {
@@ -1065,6 +1217,8 @@ export async function cancelDoseReminder(medId: string, doseId?: string): Promis
     await LocalNotifications.cancel({
       notifications: [{ id }],
     });
+    // Drop delivery/re-arm evidence so a later missing-alarm check can repair.
+    await clearNativeDoseReminderReArm(medId, doseId ?? LEGACY_DOSE_ID);
   } catch (err) {
     console.warn('[notifications] cancelDoseReminder failed:', err);
   }
@@ -1215,14 +1369,12 @@ export interface ScheduleDoseReminderOptions {
  * Whether today's occurrence of the given HH:MM reminder time is still
  * in the future. Uses the SAME boundary as {@link scheduleDoseReminder}
  * (HH:MM:00.000 strictly after `now`), so "still ahead" means exactly
- * "the pending recurring alarm would still fire today".
+ * "today's one-shot would still fire today".
  *
- * Used by useDoseReminderScheduler to decide whether a consumed dose
- * needs today's recurring alarm suppressed:
- *   - still ahead  → cancel the pending alarm + re-arm from tomorrow.
- *   - already past → the alarm fired (or was suppressed); a fired
- *     notification is never retracted, and the plugin re-armed the
- *     recurring alarm for tomorrow by itself.
+ * Used by useDoseReminderScheduler when suppressing a consumed dose:
+ *   - still ahead → cancel + schedule next with skipToday.
+ *   - already past → do not retract a delivered notification; native
+ *     TimedNotificationPublisher may already have armed tomorrow.
  */
 export function isDoseReminderTimeStillAhead(
   reminderTime: string,
@@ -1238,24 +1390,18 @@ export function isDoseReminderTimeStillAhead(
 }
 
 /**
- * Schedule a recurring daily dose-reminder notification at the given
- * HH:MM (24-hour) time.
+ * Schedule the next one-shot dose-reminder alarm at the given HH:MM.
  *
- * Computes the next fire time (today at HH:MM if it's still in the
- * future, otherwise tomorrow at HH:MM) and schedules a RECURRING daily
- * notification via LocalNotifications. With `repeats: true` +
- * `every: 'day'`, Android's AlarmManager re-arms it automatically
- * every 24 hours at the same time — the app doesn't need to be open.
+ * Next fire: today at HH:MM if still ahead, else tomorrow (or forced
+ * tomorrow when options.skipToday). Uses a stable id
+ * (medicationId + doseId) so reschedule replaces, not duplicates.
  *
- * `options.skipToday` forces the first occurrence to TOMORROW even when
- * today's HH:MM is still ahead — used when today's dose was already
- * consumed, so the re-armed recurring alarm can never fire for the
- * already-taken dose today.
+ * Recurrence: NOT via Capacitor repeats/every (those use setRepeating
+ * with a wrong interval for daily wall-clock times). Native
+ * TimedNotificationPublisher arms the next day from extra.reminderTime.
  *
- * `allowWhileIdle: true` lets the alarm fire even in Doze mode.
- *
- * The notification uses the `dose-reminder-v3` channel, which plays
- * the default system notification sound. No JS sound playback is involved.
+ * `allowWhileIdle: true` lets the alarm fire in Doze mode.
+ * Channel: dose-reminder-v3 / foreground silent variant at delivery.
  */
 export async function scheduleDoseReminder(
   medId: string,
@@ -1295,6 +1441,12 @@ export async function scheduleDoseReminder(
       if (perm.display !== 'granted') {
         throw new Error('Notification permission is required for dose reminders');
       }
+      // Dose path: initial ONE-SHOT LocalNotifications.schedule (`at`, no
+      // repeats). Capacitor at+repeats:true uses setRepeating with a wrong
+      // interval for daily wall-clock times — not used. Sole recurrence owner:
+      // TimedNotificationPublisher.rescheduleDoseReminderNextDay (next calendar
+      // day) + DoseReminderRecurrenceStore evidence. Same stable id means
+      // concurrent JS schedule replaces rather than duplicates.
       await LocalNotifications.schedule({
         notifications: [
           {
@@ -1303,8 +1455,6 @@ export async function scheduleDoseReminder(
             body,
             schedule: {
               at: fireToday,
-              repeats: true,
-              every: 'day',
               allowWhileIdle: true,
             },
             smallIcon: 'ic_launcher',
@@ -1317,6 +1467,8 @@ export async function scheduleDoseReminder(
               // Phase 3/4: doseId identifies the exact schedule slot for
               // openAlarm / take-dose (legacy omits doseId).
               ...(doseId ? { doseId } : {}),
+              reminderTime,
+              doseRecurring: true,
             },
           },
         ],

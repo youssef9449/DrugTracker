@@ -78,6 +78,11 @@ const copies = [
     marker: 'Process-local foreground flag for DrugTracker',
   },
   {
+    src: path.join(vendorDir, 'DoseReminderRecurrenceStore.java'),
+    dest: path.join(pluginJavaDir, 'DoseReminderRecurrenceStore.java'),
+    marker: 'DoseReminderRecurrenceStore',
+  },
+  {
     src: path.join(appVendorDir, 'MainActivity.java'),
     dest: path.join(
       androidDir,
@@ -155,6 +160,33 @@ for (const file of autoDeductionFiles) {
   const dest = path.join(autoDeductionDestDir, file);
   if (!fs.existsSync(src)) {
     console.error('[prepare-android] FATAL: missing auto-deduction source:', src);
+    process.exit(1);
+  }
+  fs.copyFileSync(src, dest);
+  console.info(`[prepare-android] Installed ${path.relative(root, src)} → ${path.relative(root, dest)}`);
+}
+
+// ── 4b. Dose reminder native query plugin (re-arm evidence bridge) ─────
+const doseReminderSrcDir = path.join(root, 'native-android', 'dose-reminder');
+const doseReminderDestDir = path.join(
+  androidDir,
+  'app',
+  'src',
+  'main',
+  'java',
+  'app',
+  'drugtracker',
+  'dosereminder'
+);
+const doseReminderFiles = ['DoseReminderPlugin.java'];
+if (!fs.existsSync(doseReminderDestDir)) {
+  fs.mkdirSync(doseReminderDestDir, { recursive: true });
+}
+for (const file of doseReminderFiles) {
+  const src = path.join(doseReminderSrcDir, file);
+  const dest = path.join(doseReminderDestDir, file);
+  if (!fs.existsSync(src)) {
+    console.error('[prepare-android] FATAL: missing dose-reminder source:', src);
     process.exit(1);
   }
   fs.copyFileSync(src, dest);

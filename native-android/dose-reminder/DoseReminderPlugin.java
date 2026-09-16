@@ -8,23 +8,26 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.capacitorjs.plugins.localnotifications.DoseReminderRecurrenceStore;
 
 /**
- * JS bridge for durable dose-reminder delivery/re-arm evidence written by
+ * JS bridge for temporary dose-reminder delivery/re-arm evidence written by
  * TimedNotificationPublisher after a successful next-day AlarmManager arm.
  *
- * Does not schedule or cancel alarms — query only.
+ * Does not schedule or cancel alarms — query/clear only. Validity requires
+ * the current desired reminderTime so stale config cannot block repair.
  */
 @CapacitorPlugin(name = "DoseReminder")
 public class DoseReminderPlugin extends Plugin {
 
     /**
-     * Options: medicationId (required), doseId (optional; omit/empty = legacy).
+     * Options: medicationId (required), doseId (optional), reminderTime (required for validity).
      * Resolves: { valid: boolean, nextOccurrenceMs: number } where
-     * nextOccurrenceMs is -1 when absent.
+     * nextOccurrenceMs is -1 when absent. valid is true only when entry matches
+     * current schedule identity and next occurrence is still future.
      */
     @PluginMethod
     public void getNextOccurrence(PluginCall call) {
         String medicationId = call.getString("medicationId");
         String doseId = call.getString("doseId");
+        String reminderTime = call.getString("reminderTime");
         if (medicationId == null || medicationId.isEmpty()) {
             call.reject("invalid_medicationId");
             return;
@@ -32,7 +35,11 @@ public class DoseReminderPlugin extends Plugin {
         long next = DoseReminderRecurrenceStore.getNextOccurrenceMs(
                 getContext(), medicationId, doseId);
         boolean valid = DoseReminderRecurrenceStore.isValidReArm(
-                getContext(), medicationId, doseId, System.currentTimeMillis());
+                getContext(),
+                medicationId,
+                doseId,
+                System.currentTimeMillis(),
+                reminderTime);
         JSObject ret = new JSObject();
         ret.put("valid", valid);
         ret.put("nextOccurrenceMs", next);

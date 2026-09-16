@@ -281,10 +281,12 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
             // Persist next `schedule.at` into Capacitor NotificationStorage so
             // JS getPending() can see a future occurrence when the store is readable.
             persistDoseReminderNextAt(context, id, notificationJson, trigger);
-            // Authoritative delivery/re-arm evidence keyed by medicationId+doseId
-            // (survives process death; independent of getPending race windows).
+            // Temporary delivery/re-arm evidence for this exact next occurrence
+            // (medicationId+doseId+reminderTime). Not proof the alarm still exists;
+            // cleared on cancel / config change. Valid only while future + config match.
             if (medicationId != null && !medicationId.isEmpty()) {
-                DoseReminderRecurrenceStore.markReArmed(context, medicationId, doseId, trigger);
+                DoseReminderRecurrenceStore.markReArmed(
+                        context, medicationId, doseId, trigger, reminderTime);
             }
             return true;
         } catch (Exception e) {

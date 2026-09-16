@@ -342,15 +342,20 @@ export function useDoseReminderScheduler({
           if (doseGenerationRef.current.get(key) !== gen) return;
           // Reconciliation when signature is unchanged:
           //   A) pending=true → no-op
-          //   B) pending=false + valid native re-arm (DoseReminderRecurrenceStore)
+          //   B) pending=false + valid native re-arm for this occurrence identity
+          //      (DoseReminderRecurrenceStore: future + matching reminderTime)
           //      → no-op (delivery transition; TimedNotificationPublisher owns next day)
-          //   C) pending=false + no valid re-arm evidence → one repair schedule
-          //   D) expired/invalid re-arm → treated as absent (repair)
-          // Do not use wall-clock / isDoseReminderTimeStillAhead as delivery proxy.
+          //   C) pending=false + no/stale re-arm evidence → one repair schedule
+          //   D) expired or config-mismatched re-arm → treated as absent (repair)
+          // Store is temporary delivery evidence, not proof AlarmManager still holds the alarm.
           const pending = await isDoseReminderPending(medId, doseId);
           if (doseGenerationRef.current.get(key) !== gen) return;
           if (pending) return;
-          const nativeReArmed = await isNativeDoseReminderReArmed(medId, doseId);
+          const nativeReArmed = await isNativeDoseReminderReArmed(
+            medId,
+            doseId,
+            time
+          );
           if (doseGenerationRef.current.get(key) !== gen) return;
           if (nativeReArmed) return;
           const opts = {

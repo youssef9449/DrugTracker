@@ -43,14 +43,17 @@ import {
 } from './time';
 
 /**
- * Native bridge for durable dose-reminder next-day re-arm evidence
+ * Native bridge for temporary dose-reminder delivery/re-arm evidence
  * (TimedNotificationPublisher → DoseReminderRecurrenceStore).
- * Web / missing plugin: query helpers no-op as invalid.
+ * Validity requires current desired reminderTime so stale config cannot
+ * block repair. Web / missing plugin: query helpers no-op as invalid.
  */
 interface DoseReminderNativePlugin {
   getNextOccurrence(options: {
     medicationId: string;
     doseId?: string;
+    /** Current desired HH:MM — required for valid===true. */
+    reminderTime?: string;
   }): Promise<{ valid: boolean; nextOccurrenceMs: number }>;
   clearReArm(options: {
     medicationId: string;
@@ -1081,21 +1084,27 @@ export async function isDoseReminderPending(
 }
 
 /**
- * True when native TimedNotificationPublisher has persisted a valid
- * next-occurrence re-arm for this medicationId + doseId in
- * DoseReminderRecurrenceStore (SharedPreferences). Independent of
- * getPending() / React memory. Expired or absent → false.
+ * True when native TimedNotificationPublisher has persisted temporary
+ * delivery/re-arm evidence for this medicationId + doseId that still
+ * matches the current desired reminderTime and a future next occurrence.
+ * Independent of getPending() / React memory. Stale config, expired, or
+ * absent → false so JS can repair. Does not prove AlarmManager still holds
+ * the alarm.
+ *
+ * @param reminderTime current desired HH:MM for this dose slot (required)
  */
 export async function isNativeDoseReminderReArmed(
   medId: string,
-  doseId: string = LEGACY_DOSE_ID
+  doseId: string = LEGACY_DOSE_ID,
+  reminderTime?: string
 ): Promise<boolean> {
   if (!isNativePlatform()) return false;
+  if (!reminderTime || reminderTime.indexOf(':') < 0) return false;
   try {
     const opts =
       doseId && doseId !== LEGACY_DOSE_ID
-        ? { medicationId: medId, doseId }
-        : { medicationId: medId };
+        ? { medicationId: medId, doseId, reminderTime }
+        : { medicationId: medId, reminderTime };
     const result = await DoseReminderNative.getNextOccurrence(opts);
     return result?.valid === true;
   } catch (err) {

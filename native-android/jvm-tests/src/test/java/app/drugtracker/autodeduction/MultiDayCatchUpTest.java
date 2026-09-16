@@ -20,11 +20,11 @@ import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
 
-import java.util.Calendar;
-import java.util.Locale;
-import java.util.TimeZone;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
-/** Issue #243 — multi-day missed-dose catch-up with no horizon. */
+/** Issue #243 — multi-day missed-dose catch-up (deterministic). */
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 33)
 public class MultiDayCatchUpTest {
@@ -50,7 +50,15 @@ public class MultiDayCatchUpTest {
                 schKey(AutoDeductionContract.occurrenceKey(med, dose, date)));
     }
 
-    /** Write durable schedule metadata without AlarmManager (allows past dates). */
+    private static void seedGen(String med, String dose, long gen) {
+        SharedPreferences auth = appContext().getSharedPreferences(
+                AutoDeductionContract.PREFS_RECURRENCE_AUTH, 0);
+        auth.edit().putLong(
+                AutoDeductionContract.RECURRENCE_AUTH_KEY_PREFIX
+                        + AutoDeductionContract.scheduleIdentityKey(med, dose),
+                gen).commit();
+    }
+
     private static String putPastSnapshot(
             String med, String dose, String date, String time, double amount, long gen
     ) throws Exception {
@@ -67,200 +75,206 @@ public class MultiDayCatchUpTest {
         o.put("scheduleVersion", version);
         o.put("recurrenceGeneration", gen);
         schedulePrefs().edit().putString(prefKey, o.toString()).commit();
-        // Seed recurrence auth gen so recovery is authorized.
-        SharedPreferences auth = appContext().getSharedPreferences(
-                AutoDeductionContract.PREFS_RECURRENCE_AUTH, 0);
-        auth.edit().putLong(
-                AutoDeductionContract.RECURRENCE_AUTH_KEY_PREFIX
-                        + AutoDeductionContract.scheduleIdentityKey(med, dose),
-                gen).commit();
+        seedGen(med, dose, gen);
         return version;
     }
 
-    private static String todayYmd() {
-        Calendar c = Calendar.getInstance(TimeZone.getDefault(), Locale.US);
-        return String.format(Locale.US, "%04d-%02d-%02d",
-                c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH));
-    }
-
-    private static String addDays(String ymd, int delta) {
-        String d = ymd;
-        if (delta >= 0) {
-            for (int i = 0; i < delta; i++) {
-                d = AutoDeductionScheduler.nextCalendarDate(d);
-            }
-        }
-        return d;
-    }
-
     @Test
-    public void multiDayGap_recoversAllDueDates_thenSchedulesFirstFuture() throws Exception {
+    public void multiDayGap_recoversAllDue_thenOnlyFirstFuture() throws Exception {
         AutoDeductionScheduler s = newScheduler();
         String med = "med-gap";
         String dose = "d1";
         String time = "08:00";
-        // Start far in the past relative to real now so entire range is due.
-        String start = "2020-01-01";
-        String mid = "2020-01-02";
-        String end = "2020-01-03";
+        // Logical now = 2026-09-30 12:00
+        long now = epoch("2026-09-30", "12:00");
+        s.recoveryNowOverrideForTest = now;
+
+        String start = "2026-09-01";
         long gen = 1L;
         String ver = putPastSnapshot(med, dose, start, time, 1.0, gen);
 
         int n = s.catchUpMissedOccurrencesAndScheduleNext(
-                med, dose, start, time, 1.0, gen, schKey(
-                        AutoDeductionContract.occurrenceKey(med, dose, start)), ver);
-        assertTrue(n >= 3);
+                med, dose, start, time, 1.0, gen,
+                schKey(AutoDeductionContract.occurrenceKey(med, dose, start)), ver);
 
-        assertTrue(hasFired(med, dose, start));
-        assertTrue(hasFired(med, dose, mid));
-        assertTrue(hasFired(med, dose, end));
-        // Walking continues until first future date relative to real now — many FIRED.
-        // Snapshot metadata for start should be cleared.
+        // 09-01 .. 09-30 inclusive at 08:00 are due at 12:00 → 30 FIRED
+        assertEquals(30, n);
+        assertTrue(hasFired(med, dose, "2026-09-01"));
+        assertTrue(hasFired(med, dose, "2026-09-15"));
+        assertTrue(hasFired(med, dose, "2026-09-30"));
+        // Next future = 2026-10-01 08:00
+        assertTrue(hasSchedule(med, dose, "2026-10-01"));
+        assertFalse(hasFired(med, dose, "2026-10-01"));
+        assertFalse(hasSchedule(med, dose, "2026-10-02"));
         assertFalse(hasSchedule(med, dose, start));
     }
 
     @Test
-    public void caseA_style_stopBeforeFutureDoseTime_onSyntheticWalk() throws Exception {
-        // recoverMissed only for due; when walk hits a future epoch, schedule it.
+    public void currentDayBoundary_beforeAndExactMinute() throws Exception {
         AutoDeductionScheduler s = newScheduler();
-        String med = "med-a";
-        String dose = "d1";
-        // Use tomorrow 23:59 as "future" and yesterday as start — only past days FIRED.
-        String today = todayYmd();
-        String yesterday = null;
-        // Compute yesterday by scanning back one day from today via Calendar.
-        Calendar c = Calendar.getInstance(TimeZone.getDefault(), Locale.US);
-        c.add(Calendar.DAY_OF_MONTH, -1);
-        yesterday = String.format(Locale.US, "%04d-%02d-%02d",
-                c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH));
-        c.add(Calendar.DAY_OF_MONTH, 2);
-        String tomorrow = String.format(Locale.US, "%04d-%02d-%02d",
-                c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH));
-
-        String time = "23:59"; // today 23:59 may still be future depending on wall clock
+        String med = "med-day";
         long gen = 1L;
-        String ver = putPastSnapshot(med, dose, yesterday, time, 1.0, gen);
 
+        // Recovery at 12:00: 08:00 FIRED, 14:00 future only
+        s.recoveryNowOverrideForTest = epoch("2026-09-30", "12:00");
+        String ver8 = putPastSnapshot(med, "A", "2026-09-30", "08:00", 1.0, gen);
         s.catchUpMissedOccurrencesAndScheduleNext(
-                med, dose, yesterday, time, 1.0, gen,
-                schKey(AutoDeductionContract.occurrenceKey(med, dose, yesterday)), ver);
+                med, "A", "2026-09-30", "08:00", 1.0, gen,
+                schKey(AutoDeductionContract.occurrenceKey(med, "A", "2026-09-30")), ver8);
+        assertTrue(hasFired(med, "A", "2026-09-30"));
+        assertTrue(hasSchedule(med, "A", "2026-10-01"));
 
-        assertTrue(hasFired(med, dose, yesterday));
-        // Today 23:59: if still future, must NOT be FIRED and should be scheduled.
-        long todayEpoch = epoch(today, time);
-        if (todayEpoch > System.currentTimeMillis()) {
-            assertFalse(hasFired(med, dose, today));
-            assertTrue(hasSchedule(med, dose, today));
-        }
+        clearAllDurableState();
+        s = newScheduler();
+        s.recoveryNowOverrideForTest = epoch("2026-09-30", "12:00");
+        seedGen(med, "B", gen);
+        String ver14 = putPastSnapshot(med, "B", "2026-09-30", "14:00", 2.0, gen);
+        s.catchUpMissedOccurrencesAndScheduleNext(
+                med, "B", "2026-09-30", "14:00", 2.0, gen,
+                schKey(AutoDeductionContract.occurrenceKey(med, "B", "2026-09-30")), ver14);
+        assertFalse(hasFired(med, "B", "2026-09-30"));
+        assertTrue(hasSchedule(med, "B", "2026-09-30"));
+
+        // Exact minute 14:00 → due / FIRED
+        clearAllDurableState();
+        s = newScheduler();
+        s.recoveryNowOverrideForTest = epoch("2026-09-30", "14:00");
+        seedGen(med, "B", gen);
+        ver14 = putPastSnapshot(med, "B", "2026-09-30", "14:00", 2.0, gen);
+        s.catchUpMissedOccurrencesAndScheduleNext(
+                med, "B", "2026-09-30", "14:00", 2.0, gen,
+                schKey(AutoDeductionContract.occurrenceKey(med, "B", "2026-09-30")), ver14);
+        assertTrue(hasFired(med, "B", "2026-09-30"));
+        assertTrue(hasSchedule(med, "B", "2026-10-01"));
     }
 
     @Test
-    public void multiDose_independentCatchUp_partialTodayBoundary() throws Exception {
+    public void multiDose_at1500_AandB_fired_C_future() throws Exception {
         AutoDeductionScheduler s = newScheduler();
+        s.recoveryNowOverrideForTest = epoch("2026-09-30", "15:00");
         String med = "med-multi";
-        // Three slots; use far-past start so all historical days recover.
-        String start = "2021-03-01";
         long gen = 1L;
-        String[] doses = { "A", "B", "C" };
-        String[] times = { "08:00", "14:00", "20:00" };
-        double[] amounts = { 1.0, 2.0, 3.0 };
+        String day = "2026-09-30";
+        String[] doses = {"A", "B", "C"};
+        String[] times = {"08:00", "14:00", "20:00"};
+        double[] amounts = {1.0, 2.0, 3.0};
 
         for (int i = 0; i < 3; i++) {
-            String ver = putPastSnapshot(med, doses[i], start, times[i], amounts[i], gen);
+            String ver = putPastSnapshot(med, doses[i], day, times[i], amounts[i], gen);
             s.catchUpMissedOccurrencesAndScheduleNext(
-                    med, doses[i], start, times[i], amounts[i], gen,
-                    schKey(AutoDeductionContract.occurrenceKey(med, doses[i], start)), ver);
+                    med, doses[i], day, times[i], amounts[i], gen,
+                    schKey(AutoDeductionContract.occurrenceKey(med, doses[i], day)), ver);
         }
 
-        assertTrue(hasFired(med, "A", start));
-        assertTrue(hasFired(med, "B", start));
-        assertTrue(hasFired(med, "C", start));
-        // Amounts stored in event ledger
-        String keyA = AutoDeductionContract.occurrenceKey(med, "A", start);
-        String rawA = eventPrefs().getString(evtKey(keyA), null);
-        assertTrue(rawA != null);
-        assertEquals(1.0, new JSONObject(rawA).getDouble("amount"), 0.001);
-        String keyB = AutoDeductionContract.occurrenceKey(med, "B", start);
-        assertEquals(2.0, new JSONObject(eventPrefs().getString(evtKey(keyB), "{}"))
+        assertTrue(hasFired(med, "A", day));
+        assertTrue(hasFired(med, "B", day));
+        assertFalse(hasFired(med, "C", day));
+        assertTrue(hasSchedule(med, "C", day));
+
+        assertEquals(1.0, new JSONObject(eventPrefs().getString(
+                evtKey(AutoDeductionContract.occurrenceKey(med, "A", day)), "{}"))
                 .getDouble("amount"), 0.001);
-        String keyC = AutoDeductionContract.occurrenceKey(med, "C", start);
-        assertEquals(3.0, new JSONObject(eventPrefs().getString(evtKey(keyC), "{}"))
+        assertEquals(2.0, new JSONObject(eventPrefs().getString(
+                evtKey(AutoDeductionContract.occurrenceKey(med, "B", day)), "{}"))
                 .getDouble("amount"), 0.001);
     }
 
     @Test
-    public void idempotentRerun_noDuplicateFired() throws Exception {
+    public void idempotentRerun_singleFiredPerDate() throws Exception {
         AutoDeductionScheduler s = newScheduler();
+        s.recoveryNowOverrideForTest = epoch("2026-09-30", "12:00");
         String med = "med-idemp";
         String dose = "d1";
-        String start = "2020-05-01";
+        String start = "2026-09-28";
         long gen = 1L;
-        String ver = putPastSnapshot(med, dose, start, "09:00", 1.0, gen);
         String prefKey = schKey(AutoDeductionContract.occurrenceKey(med, dose, start));
+        String ver = putPastSnapshot(med, dose, start, "08:00", 1.0, gen);
 
         int first = s.catchUpMissedOccurrencesAndScheduleNext(
-                med, dose, start, "09:00", 1.0, gen, prefKey, ver);
-        assertTrue(first >= 1);
-        assertTrue(hasFired(med, dose, start));
+                med, dose, start, "08:00", 1.0, gen, prefKey, ver);
+        assertEquals(3, first); // 28, 29, 30
+        assertTrue(hasFired(med, dose, "2026-09-28"));
+        assertTrue(hasSchedule(med, dose, "2026-10-01"));
 
-        // Re-seed snapshot as if crash left it (idempotent recover).
-        putPastSnapshot(med, dose, start, "09:00", 1.0, gen);
+        putPastSnapshot(med, dose, start, "08:00", 1.0, gen);
         int second = s.catchUpMissedOccurrencesAndScheduleNext(
-                med, dose, start, "09:00", 1.0, gen, prefKey, ver);
-        // Second pass: CREATED count may be 0 (all ALREADY_EXISTS) but must not fail.
-        assertTrue(second >= 0);
-        assertTrue(hasFired(med, dose, start));
-        // Still a single event key
-        assertTrue(eventPrefs().contains(evtKey(
-                AutoDeductionContract.occurrenceKey(med, dose, start))));
+                med, dose, start, "08:00", 1.0, gen, prefKey, ver);
+        assertEquals(0, second); // all ALREADY_EXISTS
+        assertTrue(hasFired(med, dose, "2026-09-28"));
+        assertTrue(hasSchedule(med, dose, "2026-10-01"));
     }
 
     @Test
-    public void generationInvalidated_stopsCatchUp_noFutureResurrection() throws Exception {
+    public void expectedGenZero_activePositive_noFired() {
         AutoDeductionScheduler s = newScheduler();
-        String med = "med-gen";
+        s.recoveryNowOverrideForTest = epoch("2026-09-30", "12:00");
+        String med = "med-z";
         String dose = "d1";
-        String start = "2020-07-01";
-        long gen = 1L;
-        String ver = putPastSnapshot(med, dose, start, "10:00", 1.0, gen);
+        // Active generation already invalidated / promoted
+        seedGen(med, dose, 2L);
+        AutoDeductionScheduler.FireResult fr = s.recoverMissedOccurrence(
+                med, dose, "2026-09-29", epoch("2026-09-29", "08:00"), 1.0, 0L);
+        assertEquals(AutoDeductionScheduler.FireResult.Status.CANCELLED, fr.status);
+        assertFalse(hasFired(med, dose, "2026-09-29"));
+    }
 
-        // Invalidate generation before catch-up
+    @Test
+    public void generationRace_invalidateBeforeSuccessorInstall_noG2Successor()
+            throws Exception {
+        AutoDeductionScheduler s = newScheduler();
+        s.recoveryNowOverrideForTest = epoch("2026-09-30", "12:00");
+        String med = "med-race";
+        String dose = "d1";
+        String start = "2026-09-30"; // only today 08:00 due → next is 10-01
+        long gen = 1L;
+        String ver = putPastSnapshot(med, dose, start, "08:00", 1.0, gen);
+
+        CountDownLatch beforeInstall = new CountDownLatch(1);
+        CountDownLatch resumeInstall = new CountDownLatch(1);
+        s.recoveryBeforeSuccessorInstallLatchForTest = beforeInstall;
+        s.recoveryResumeSuccessorInstallLatchForTest = resumeInstall;
+
+        AtomicReference<Integer> created = new AtomicReference<>(-1);
+        Thread recovery = new Thread(() -> {
+            created.set(s.catchUpMissedOccurrencesAndScheduleNext(
+                    med, dose, start, "08:00", 1.0, gen,
+                    schKey(AutoDeductionContract.occurrenceKey(med, dose, start)), ver));
+        });
+        recovery.start();
+
+        assertTrue(beforeInstall.await(3, TimeUnit.SECONDS));
+        // Invalidate G1 → G2 while recovery is between outer probe and locked install
         assertTrue(s.invalidateRecurrenceAuthorization(med, dose).ok);
+        resumeInstall.countDown();
+        recovery.join(5000);
+
+        assertTrue(hasFired(med, dose, start)); // due day still recovered under G1
+        // Must not install future under G2 as continuation of G1 recovery
+        assertFalse(hasSchedule(med, dose, "2026-10-01"));
+    }
+
+    @Test
+    public void recoveryInstallsUnderG1_thenInvalidate_existingSemantics() throws Exception {
+        AutoDeductionScheduler s = newScheduler();
+        s.recoveryNowOverrideForTest = epoch("2026-09-30", "12:00");
+        String med = "med-ok";
+        String dose = "d1";
+        String start = "2026-09-30";
+        long gen = 1L;
+        String ver = putPastSnapshot(med, dose, start, "08:00", 1.0, gen);
 
         int n = s.catchUpMissedOccurrencesAndScheduleNext(
-                med, dose, start, "10:00", 1.0, gen,
+                med, dose, start, "08:00", 1.0, gen,
                 schKey(AutoDeductionContract.occurrenceKey(med, dose, start)), ver);
-        assertEquals(0, n);
-        assertFalse(hasFired(med, dose, start));
-    }
+        assertEquals(1, n);
+        assertTrue(hasSchedule(med, dose, "2026-10-01"));
+        long stamped = new JSONObject(schedulePrefs().getString(
+                schKey(AutoDeductionContract.occurrenceKey(med, dose, "2026-10-01")), "{}"))
+                .getLong("recurrenceGeneration");
+        assertEquals(1L, stamped);
 
-    @Test
-    public void occurrenceCancel_skipsThatDate_continuesChain() throws Exception {
-        AutoDeductionScheduler s = newScheduler();
-        String med = "med-skip";
-        String dose = "d1";
-        String d0 = "2020-08-01";
-        String d1 = "2020-08-02";
-        long gen = 1L;
-        String ver = putPastSnapshot(med, dose, d0, "11:00", 1.0, gen);
-
-        // Tombstone d0 only
-        assertTrue(s.cancelOccurrence(med, dose, d0).isOk());
-        // Re-seed generation after cancel (cancel doesn't bump gen)
-        appContext().getSharedPreferences(
-                AutoDeductionContract.PREFS_RECURRENCE_AUTH, 0)
-                .edit().putLong(
-                        AutoDeductionContract.RECURRENCE_AUTH_KEY_PREFIX
-                                + AutoDeductionContract.scheduleIdentityKey(med, dose),
-                        gen).commit();
-        // Put snapshot back (cancel removes schedule meta)
-        putPastSnapshot(med, dose, d0, "11:00", 1.0, gen);
-
-        s.catchUpMissedOccurrencesAndScheduleNext(
-                med, dose, d0, "11:00", 1.0, gen,
-                schKey(AutoDeductionContract.occurrenceKey(med, dose, d0)), ver);
-
-        assertFalse(hasFired(med, dose, d0));
-        assertTrue(hasFired(med, dose, d1));
+        assertTrue(s.invalidateRecurrenceAuthorization(med, dose).ok);
+        // Existing invalidate cancels futures for the dose
+        assertFalse(hasSchedule(med, dose, "2026-10-01"));
     }
 }

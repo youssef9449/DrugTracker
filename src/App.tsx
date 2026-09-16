@@ -868,7 +868,7 @@ export default function App() {
         <AndroidBottomNav activeTab={activeTab} onTabChange={setActiveTab} alertsCount={alertsCount} />
 
         {toast && (
-          <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-40 max-w-[90%] px-4 py-2.5 bg-slate-900 text-white text-xs font-bold rounded-2xl shadow-xl text-center">
+          <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[60] max-w-[90%] px-4 py-2.5 bg-slate-900 text-white text-xs font-bold rounded-2xl shadow-xl text-center">
             {toast.message}
           </div>
         )}
@@ -912,9 +912,12 @@ export default function App() {
         onSendTestNotification={handleSendTestNotification}
         exactAlarmEnabled={exactAlarmEnabled}
         onOpenExactAlarmSettings={handleOpenExactAlarmSettings}
+        showToast={showToast}
         onApplyAppPreferences={async (prefs) => {
-          // Commit drafts only after Save — closing the modal without Save
-          // leaves parent state (and persistence) unchanged.
+          // Final prefs from Settings drafts — apply independently.
+          // Do NOT use handleToggleNotifications / handleToggleCriticalStockAlerts:
+          // those read committed state and can force notifications back ON when
+          // critical is enabled (or invert based on stale closures).
           if (prefs.soundEnabled !== soundEnabled) {
             setSoundEnabled(prefs.soundEnabled);
           }
@@ -922,15 +925,20 @@ export default function App() {
             handleToggleGlobalAutoDeduct();
           }
           if (prefs.notificationsEnabled !== notificationsEnabled) {
-            if (prefs.notificationsEnabled) {
-              await handleToggleNotifications();
-            } else {
-              setNotificationsEnabled(false);
-              showToast(TOAST_MESSAGES.notificationsOff);
-            }
+            setNotificationsEnabled(prefs.notificationsEnabled);
+            showToast(
+              prefs.notificationsEnabled
+                ? TOAST_MESSAGES.notificationsOn
+                : TOAST_MESSAGES.notificationsOff
+            );
           }
           if (prefs.criticalStockAlertsEnabled !== criticalStockAlertsEnabled) {
-            await handleToggleCriticalStockAlerts();
+            setCriticalStockAlertsEnabled(prefs.criticalStockAlertsEnabled);
+            showToast(
+              prefs.criticalStockAlertsEnabled
+                ? TOAST_MESSAGES.criticalAlertsOn
+                : TOAST_MESSAGES.criticalAlertsOff
+            );
           }
           // Confirm feedback only when the committed preference leaves sound on.
           if (prefs.soundEnabled) {

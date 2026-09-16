@@ -392,6 +392,22 @@ Restore works from a **snapshot** (`prefKey`, payload, `observedVersion`). After
 
 If successor scheduling fails for a non-stale reason, past metadata is **kept** so a later restore can retry. Stale snapshots neither overwrite D+1 nor delete a newer D. Cancellation still does not schedule a successor. Both normal past recovery and timezone-recomputed-past recovery use this rule. Repeated restore is idempotent: `ALREADY_EXISTS` + existing D+1 does not create duplicate logical occurrences.
 
+### Multi-day missed-dose catch-up (Issue #243)
+
+**Policy:** every missed exact-dose occurrence is reconstructed as a durable native `FIRED` event. There is **no catch-up horizon**.
+
+Given a persisted schedule snapshot on calendar date `D` for `(medicationId, doseId)` with `timeHhmm` / `amount` / `recurrenceGeneration`, when restore runs at local time `T` on date `R`:
+
+1. Walk calendar dates from `D` forward using `nextCalendarDate` / `computeEpochMs` (device default timezone).
+2. For each date whose scheduled epoch is already due (`epoch <= now`, including the scheduled minute):
+   - Recover via `recoverMissedOccurrence` under `SCHEDULE_LOCK`: cancellation check, active recurrence-generation authorization, then `insertFiredIfAbsent` (idempotent).
+   - Do **not** require live schedule metadata / `scheduleVersion` ownership for that historical date (unlike a real AlarmManager delivery).
+3. Stop historical catch-up at the first date whose dose time is still in the future; install **only** that occurrence as the live AlarmManager schedule.
+4. Multi-dose slots are independent: each `doseId` walks its own chain with its own amount/time.
+5. Native still does **not** mutate `currentPills`, localStorage, or WebView state — recovered rows are FIRED only; JS reconciliation applies stock later.
+6. If recurrence generation was invalidated mid-walk, catch-up stops and does not schedule a future continuation for the stale generation.
+7. Crash mid-walk is retry-safe: already-FIRED dates become `ALREADY_EXISTS`; remaining due dates continue on the next restore.
+
 ### Restore / cancel
 
 - `scheduleOccurrenceLocked` holds `SCHEDULE_LOCK` for ownership check + metadata + AlarmManager install (restore uses `requiredVersion`). The authoritative `scheduleVersion` (`{millis}-{seq}-{uuid}`) is allocated **inside** this lock so its ordering token reflects serialized operation order, not the wall-clock time at which a thread waited for the lock.

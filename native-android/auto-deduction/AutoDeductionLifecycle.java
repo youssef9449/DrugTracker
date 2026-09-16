@@ -15,8 +15,10 @@ public final class AutoDeductionLifecycle {
     private AutoDeductionLifecycle() {}
 
     /**
-     * Promote pending-fire records, then restore future alarms from durable
-     * schedule metadata when exact-alarm permission allows.
+     * Promote pending-fire records, then restore schedules from durable metadata
+     * when exact-alarm permission allows. Past snapshots use multi-day catch-up
+     * (Issue #243): every due occurrence is recovered as FIRED (no horizon), then
+     * the first future occurrence is installed.
      */
     public static void promoteAndRestore(Context context, String reason) {
         try {

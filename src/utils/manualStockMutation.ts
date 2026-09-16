@@ -6,6 +6,14 @@
  * fresh localStorage state, applies pure medActions helpers, commits, and
  * returns the post-commit durable arrays for React to follow.
  *
+ * Crash consistency (reuse Phase 3 exact-auto envelope):
+ *   1. Write js_ready envelope with intended meds+logs
+ *   2. commitDurableAutoStockState (meds then logs)
+ *   3. Clear envelope on full success
+ * If meds succeed and logs fail (or process dies mid-way), the envelope
+ * remains. Next gate entry (manual or exact reconciliation) recovers both
+ * keys so markers + logs stay consistent and exact auto cannot double-deduct.
+ *
  * Idempotency vs exact auto (same occurrence = medId + doseId + calendarDate):
  * - consume: no second stock deduct if consume markers, exact-auto log, or
  *   isExactAutoOccurrenceApplied already reflect the occurrence
@@ -23,6 +31,11 @@ import {
   isExactAutoOccurrenceApplied,
   normalizeExactDoseId,
 } from './autoDeductionReconciliation';
+import {
+  defaultLoadEnvelope,
+  defaultSaveEnvelope,
+  type ExactAutoEnvelope,
+} from './runAutoDeductionReconciliation';
 import { LEGACY_DOSE_ID } from './notifications';
 import { getTodayDateString } from './dateCalculations';
 import {
@@ -66,6 +79,64 @@ function resolveConsumeDoseId(med: Medication, doseId?: string): string | undefi
 }
 
 /**
+ * If a prior mutation left a js_ready envelope (crash between partial
+ * storage writes), finish committing meds+logs and clear the envelope.
+ */
+function recoverEnvelopeInto(
+  fresh: AutoStockDurableState
+): { ok: true; state: AutoStockDurableState } | { ok: false; state: AutoStockDurableState } {
+  const existing = defaultLoadEnvelope();
+  if (!existing) {
+    return { ok: true, state: fresh };
+  }
+  const err = commitDurableAutoStockState({
+    medications: existing.medications,
+    logs: existing.logs,
+  });
+  if (err) {
+    // Keep envelope for a later retry; surface current durable snapshot.
+    return { ok: false, state: fresh };
+  }
+  defaultSaveEnvelope(null);
+  return {
+    ok: true,
+    state: {
+      medications: existing.medications,
+      logs: existing.logs,
+    },
+  };
+}
+
+/**
+ * Durability sequence shared with Phase 3 exact auto:
+ * envelope → meds+logs commit → clear envelope.
+ */
+function commitWithEnvelope(
+  state: AutoStockDurableState,
+  toAcknowledge: ExactAutoEnvelope['toAcknowledge']
+): string | null {
+  const envelope: ExactAutoEnvelope = {
+    version: 1,
+    status: 'js_ready',
+    medications: state.medications,
+    logs: state.logs,
+    toAcknowledge,
+    createdAt: new Date().toISOString(),
+  };
+  const envErr = defaultSaveEnvelope(envelope);
+  if (envErr) return envErr;
+
+  const commitErr = commitDurableAutoStockState(state);
+  if (commitErr) {
+    // Leave envelope so recovery can finish both keys.
+    return commitErr;
+  }
+
+  defaultSaveEnvelope(null);
+  return null;
+}
+
+/**
  * Manual / alarm Take for one occurrence, serialized with exact reconciliation.
  */
 export function runGatedManualConsume(opts: {
@@ -78,7 +149,20 @@ export function runGatedManualConsume(opts: {
   const todayStr = opts.todayStr ?? getTodayDateString();
   const now = opts.now ?? new Date();
 
-  return withAutoStockMutationGate((fresh: AutoStockDurableState) => {
+  return withAutoStockMutationGate((freshIn: AutoStockDurableState) => {
+    const recovered = recoverEnvelopeInto(freshIn);
+    if (!recovered.ok) {
+      return {
+        outcome: 'persist_failed' as const,
+        medications: recovered.state.medications,
+        logs: recovered.state.logs,
+        doseAmount: 0,
+        log: null,
+        reason: 'persist_failed',
+      };
+    }
+    const fresh = recovered.state;
+
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
       return {
@@ -94,7 +178,6 @@ export function runGatedManualConsume(opts: {
     const resolvedId = resolveConsumeDoseId(med, opts.doseId);
     const doseKey = normalizeExactDoseId(resolvedId);
 
-    // Exact-auto durable evidence for this occurrence → no second deduct.
     if (
       findExactAutoLog(fresh.logs, med.id, doseKey, todayStr) ||
       isExactAutoOccurrenceApplied(med, doseKey, todayStr, todayStr)
@@ -136,10 +219,21 @@ export function runGatedManualConsume(opts: {
       m.id === med.id ? result.updatedMed! : m
     );
     const logs = [result.log, ...fresh.logs];
-    const err = commitDurableAutoStockState({ medications, logs });
+    const err = commitWithEnvelope(
+      { medications, logs },
+      [
+        {
+          medicationId: med.id,
+          doseId: doseKey,
+          calendarDate: todayStr,
+        },
+      ]
+    );
     if (err) {
       return {
         outcome: 'persist_failed' as const,
+        // Prefer post-mutation snapshot for callers that still apply UI from
+        // returned arrays only on 'applied'; durable may be partial until recovery.
         medications: fresh.medications,
         logs: fresh.logs,
         doseAmount: 0,
@@ -166,13 +260,25 @@ export function runGatedManualRestore(opts: {
   doseId?: string;
   todayStr?: string;
   now?: Date;
-  /** Optional log id generator (tests / App wire generateId). */
   makeLogId?: () => string;
 }): Promise<GatedManualRestoreResult> {
   const todayStr = opts.todayStr ?? getTodayDateString();
   const now = opts.now ?? new Date();
 
-  return withAutoStockMutationGate((fresh: AutoStockDurableState) => {
+  return withAutoStockMutationGate((freshIn: AutoStockDurableState) => {
+    const recovered = recoverEnvelopeInto(freshIn);
+    if (!recovered.ok) {
+      return {
+        outcome: 'persist_failed' as const,
+        medications: recovered.state.medications,
+        logs: recovered.state.logs,
+        restoredAmount: 0,
+        log: null,
+        reason: 'persist_failed',
+      };
+    }
+    const fresh = recovered.state;
+
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
       return {
@@ -214,7 +320,17 @@ export function runGatedManualRestore(opts: {
     };
     const logs = [log, ...fresh.logs];
 
-    const err = commitDurableAutoStockState({ medications, logs });
+    const doseKey = normalizeExactDoseId(result.doseId);
+    const err = commitWithEnvelope(
+      { medications, logs },
+      [
+        {
+          medicationId: med.id,
+          doseId: doseKey,
+          calendarDate: todayStr,
+        },
+      ]
+    );
     if (err) {
       return {
         outcome: 'persist_failed' as const,

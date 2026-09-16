@@ -70,14 +70,30 @@ export interface RunReconciliationOutput extends ReconcileFiredResult {
   partialNativeAck: boolean;
 }
 
-function defaultLoadEnvelope(): ExactAutoEnvelope | null {
+/** @internal test-only envelope injectors (shared with Phase 4 manual gate). */
+let testLoadEnvelope: (() => ExactAutoEnvelope | null) | null = null;
+let testSaveEnvelope: ((env: ExactAutoEnvelope | null) => string | null) | null =
+  null;
+
+/** @internal test-only */
+export function __setExactAutoEnvelopeTestHooks(hooks: {
+  load?: () => ExactAutoEnvelope | null;
+  save?: (env: ExactAutoEnvelope | null) => string | null;
+} | null): void {
+  testLoadEnvelope = hooks?.load ?? null;
+  testSaveEnvelope = hooks?.save ?? null;
+}
+
+export function defaultLoadEnvelope(): ExactAutoEnvelope | null {
+  if (testLoadEnvelope) return testLoadEnvelope();
   const raw = loadJson<ExactAutoEnvelope | null>(STORAGE_ENVELOPE_KEY, null);
   if (!raw || raw.version !== 1 || raw.status !== 'js_ready') return null;
   if (!Array.isArray(raw.medications) || !Array.isArray(raw.logs)) return null;
   return raw;
 }
 
-function defaultSaveEnvelope(env: ExactAutoEnvelope | null): string | null {
+export function defaultSaveEnvelope(env: ExactAutoEnvelope | null): string | null {
+  if (testSaveEnvelope) return testSaveEnvelope(env);
   if (env == null) {
     if (typeof localStorage !== 'undefined') {
       try {
@@ -89,6 +105,42 @@ function defaultSaveEnvelope(env: ExactAutoEnvelope | null): string | null {
     return null;
   }
   return persist(STORAGE_ENVELOPE_KEY, env, { json: true });
+}
+
+/**
+ * Recover a prior js_ready envelope into durable meds+logs (Phase 3 Option B).
+ * Used by exact reconciliation and Phase 4 manual Take/Restore after a crash
+ * between partial storage writes.
+ */
+export function recoverExactAutoEnvelopeIfPresent(
+  commit: (state: AutoStockDurableState) => string | null = commitDurableAutoStockState,
+  loadEnvelope: () => ExactAutoEnvelope | null = defaultLoadEnvelope,
+  saveEnvelope: (env: ExactAutoEnvelope | null) => string | null = defaultSaveEnvelope
+): {
+  recovered: boolean;
+  state: AutoStockDurableState | null;
+  writeFailed: boolean;
+} {
+  const existing = loadEnvelope();
+  if (!existing) {
+    return { recovered: false, state: null, writeFailed: false };
+  }
+  const err = commit({
+    medications: existing.medications,
+    logs: existing.logs,
+  });
+  if (err) {
+    return { recovered: true, state: null, writeFailed: true };
+  }
+  saveEnvelope(null);
+  return {
+    recovered: true,
+    state: {
+      medications: existing.medications,
+      logs: existing.logs,
+    },
+    writeFailed: false,
+  };
 }
 
 export function runAutoDeductionReconciliation(

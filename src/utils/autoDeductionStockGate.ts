@@ -1,22 +1,24 @@
 /**
- * Serialized fresh-state stock mutation boundary for:
- * - legacy syncAutoDailyDeductions
- * - exact native event reconciliation
+ * Single-process mutex for auto-stock mutations (exact auto-deduction +
+ * Manual Take/Restore). Serializes async work so two reconciliations never
+ * interleave durable reads/writes.
  *
- * Caller React snapshots are NOT authoritative. Each gate entry loads the
- * latest durable medications/logs from localStorage, runs the mutation on
- * that state, and returns the result for the caller to update React after
- * durable commit.
- *
- * Process-local promise chain only — not a distributed lock.
+ * Not a multi-tab distributed lock.
  */
 
 import type { ConsumptionLog, Medication } from '../types';
-import { loadJson, persist } from './storage';
+import { loadJson, loadString, persist } from './storage';
 
 /** Same keys as App.tsx / existing persistence. */
 export const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 export const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
+/**
+ * Monotonic durable generation for meds+logs commits.
+ * Bumped only after both meds and logs persist successfully.
+ * Manual envelope stores baseGeneration so recovery can detect a stale
+ * snapshot when durable advanced past that mutation.
+ */
+export const STORAGE_STOCK_GEN_KEY = 'android_med_tracker_stock_generation_v1';
 
 export interface AutoStockDurableState {
   medications: Medication[];
@@ -31,14 +33,37 @@ let chain: Promise<unknown> = Promise.resolve();
  */
 let testLoad: (() => AutoStockDurableState) | null = null;
 let testCommit: ((state: AutoStockDurableState) => string | null) | null = null;
+let testLoadGeneration: (() => number) | null = null;
+let testBumpGeneration: (() => string | null) | null = null;
 
 /** @internal test-only */
 export function __setAutoStockGateTestHooks(hooks: {
   load?: () => AutoStockDurableState;
   commit?: (state: AutoStockDurableState) => string | null;
+  loadGeneration?: () => number;
+  bumpGeneration?: () => string | null;
 } | null): void {
   testLoad = hooks?.load ?? null;
   testCommit = hooks?.commit ?? null;
+  testLoadGeneration = hooks?.loadGeneration ?? null;
+  testBumpGeneration = hooks?.bumpGeneration ?? null;
+}
+
+export function loadStockGeneration(): number {
+  if (testLoadGeneration) return testLoadGeneration();
+  const raw = loadString(STORAGE_STOCK_GEN_KEY, '0');
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+}
+
+/**
+ * Bump durable generation after a successful meds+logs pair write.
+ * Returns error string if the generation key cannot be persisted.
+ */
+export function bumpStockGeneration(): string | null {
+  if (testBumpGeneration) return testBumpGeneration();
+  const next = loadStockGeneration() + 1;
+  return persist(STORAGE_STOCK_GEN_KEY, String(next), { json: false });
 }
 
 export function loadDurableAutoStockState(): AutoStockDurableState {
@@ -52,16 +77,25 @@ export function loadDurableAutoStockState(): AutoStockDurableState {
 }
 
 /**
- * Persist meds then logs. Returns error string if either write fails.
- * Not a true multi-key transaction — callers that need both should use
- * the exact-auto envelope for recovery of partial failures.
+ * Persist meds then logs, then bump stock generation.
+ * Returns error string if any write fails.
+ * Generation advances only after both meds and logs succeed — so a partial
+ * meds-only write leaves generation unchanged for Manual envelope recovery.
  */
 export function commitDurableAutoStockState(state: AutoStockDurableState): string | null {
-  if (testCommit) return testCommit(state);
+  if (testCommit) {
+    const err = testCommit(state);
+    if (err) return err;
+    // Test commit already applied durable meds+logs; still bump generation so
+    // Manual envelope baseGeneration ordering works in unit tests.
+    return bumpStockGeneration();
+  }
   const medErr = persist(STORAGE_MEDS_KEY, state.medications, { json: true });
   if (medErr) return medErr;
   const logErr = persist(STORAGE_LOGS_KEY, state.logs, { json: true });
   if (logErr) return logErr;
+  const genErr = bumpStockGeneration();
+  if (genErr) return genErr;
   return null;
 }
 

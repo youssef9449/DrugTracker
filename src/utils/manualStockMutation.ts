@@ -36,6 +36,7 @@ import { getTodayDateString } from './dateCalculations';
 import {
   withAutoStockMutationGate,
   commitDurableAutoStockState,
+  loadStockGeneration,
   type AutoStockDurableState,
 } from './autoDeductionStockGate';
 import { loadJson, persist } from './storage';
@@ -54,6 +55,12 @@ export interface ManualStockEnvelope {
   medications: Medication[];
   logs: ConsumptionLog[];
   createdAt: string;
+  /**
+   * Stock generation observed before this mutation's meds+logs commit.
+   * Recovery discards the envelope when durable generation has advanced past
+   * this value (newer durable state must not be overwritten).
+   */
+  baseGeneration: number;
 }
 
 export type GatedManualOutcome =
@@ -172,6 +179,13 @@ export function persistManualRecoveredPair(
 /**
  * Finish a prior Manual partial write: meds+logs only. Never markReconciled.
  * Clears Manual envelope only after both durable writes succeed.
+ *
+ * Stale safety: if durable stock generation advanced past envelope.baseGeneration,
+ * the envelope is discarded without applying (newer durable state wins).
+ *
+ * Clear-failure safety: if meds+logs already committed (generation advanced) but
+ * envelope clear fails, the next recovery sees gen > base and discards without
+ * a second stock/log mutation.
  */
 export function recoverManualEnvelopeInto(
   fresh: AutoStockDurableState,
@@ -184,6 +198,19 @@ export function recoverManualEnvelopeInto(
   if (!existing) {
     return { ok: true, state: fresh };
   }
+
+  const baseGen =
+    typeof existing.baseGeneration === 'number' && existing.baseGeneration >= 0
+      ? existing.baseGeneration
+      : 0;
+  const currentGen = loadStockGeneration();
+
+  // Durable advanced past this mutation — envelope is stale. Drop it; keep fresh.
+  if (currentGen > baseGen) {
+    saveManualStockEnvelope(null);
+    return { ok: true, state: fresh };
+  }
+
   const pair: AutoStockDurableState = {
     medications: existing.medications,
     logs: existing.logs,
@@ -193,6 +220,8 @@ export function recoverManualEnvelopeInto(
     // Leave Manual envelope for retry; do not ACK native.
     return { ok: false, state: fresh };
   }
+  // Best-effort clear. If clear fails, generation was already bumped by the
+  // successful pair write → next recovery discards via currentGen > baseGen.
   saveManualStockEnvelope(null);
   return { ok: true, state: pair };
 }
@@ -200,14 +229,19 @@ export function recoverManualEnvelopeInto(
 /**
  * Manual durability: envelope (JS state only) → meds+logs → clear.
  * No native acknowledgement list.
+ *
+ * Envelope stores baseGeneration so recovery can detect stale snapshots after
+ * durable generation advances (successful commit or a later mutation).
  */
 function commitWithManualEnvelope(state: AutoStockDurableState): string | null {
+  const baseGeneration = loadStockGeneration();
   const envelope: ManualStockEnvelope = {
     version: 1,
     status: 'manual_js_ready',
     medications: state.medications,
     logs: state.logs,
     createdAt: new Date().toISOString(),
+    baseGeneration,
   };
   const envErr = saveManualStockEnvelope(envelope);
   if (envErr) return envErr;
@@ -215,9 +249,13 @@ function commitWithManualEnvelope(state: AutoStockDurableState): string | null {
   const commitErr = commitDurableAutoStockState(state);
   if (commitErr) {
     // Leave Manual envelope so recovery can finish both keys (no native ACK).
+    // Generation is unchanged on partial failure → recovery can still apply.
     return commitErr;
   }
 
+  // Durable pair + generation advanced. Clear is best-effort: clear failure
+  // leaves envelope, but next recovery sees gen > baseGeneration and discards
+  // without re-applying (idempotent, no double mutation).
   saveManualStockEnvelope(null);
   return null;
 }

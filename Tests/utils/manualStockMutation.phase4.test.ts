@@ -330,12 +330,14 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
 
 
 
+
 describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
   let durable: AutoStockDurableState;
   let manualEnvelope: ManualStockEnvelope | null;
   let failLogs: boolean;
+  let failClear: boolean;
+  let generation: number;
   let marked: string[];
-  let markCallsDuringPhase: string;
 
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
@@ -343,12 +345,16 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     durable = { medications: [med()], logs: [] };
     manualEnvelope = null;
     failLogs = false;
+    failClear = false;
+    generation = 0;
     marked = [];
-    markCallsDuringPhase = '';
 
     __setManualEnvelopeTestHooks({
       load: () => manualEnvelope,
       save: (env) => {
+        if (env == null && failClear) {
+          return 'envelope clear failed';
+        }
         manualEnvelope = env;
         return null;
       },
@@ -365,6 +371,11 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
           return 'logs persist failed';
         }
         durable.logs = state.logs.map((l) => ({ ...l }));
+        return null;
+      },
+      loadGeneration: () => generation,
+      bumpGeneration: () => {
+        generation += 1;
         return null;
       },
     });
@@ -387,12 +398,13 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     expect(first.outcome).toBe('persist_failed');
     expect(manualEnvelope).not.toBeNull();
     expect(manualEnvelope?.status).toBe('manual_js_ready');
+    expect(manualEnvelope?.baseGeneration).toBe(0);
     expect((manualEnvelope as { toAcknowledge?: unknown }).toAcknowledge).toBeUndefined();
     expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
     expect(durable.logs.some((l) => l.type === 'dose_taken')).toBe(false);
+    expect(generation).toBe(0);
     expect(marked).toEqual([]);
 
-    // Retry recovery only (no FIRED): durable pair completes, envelope cleared, no ACK.
     failLogs = false;
     marked = [];
     const reconOnly = await runAutoDeductionReconciliation({
@@ -406,12 +418,12 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     expect(manualEnvelope).toBeNull();
     expect(durable.logs.some((l) => l.type === 'dose_taken')).toBe(true);
     expect(durable.medications[0].currentPills).toBe(9);
+    expect(generation).toBe(1);
     expect(marked).toEqual([]);
     expect(reconOnly.markedCount).toBe(0);
   });
 
   it('same recon: Manual envelope recovery + actual FIRED → ACK only from FIRED path', async () => {
-    // Seed Manual envelope after partial Take (meds marker present, logs incomplete).
     failLogs = true;
     await runGatedManualConsume({
       medicationId: 'med-1',
@@ -423,22 +435,18 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
     const pillsAfterPartial = durable.medications[0].currentPills;
 
-    // Single reconciliation: recover Manual pair then process real FIRED.
     failLogs = false;
     marked = [];
     let markPhase = 'before';
     const recon = await runAutoDeductionReconciliation({
       globalAutoDeductEnabled: true,
       listFired: async () => {
-        // listFired runs after Manual recovery in runOnce — envelope must already be cleared.
         expect(manualEnvelope).toBeNull();
-        // Manual recovery must not have called mark yet.
         expect(marked).toEqual([]);
         markPhase = 'listFired';
         return [fired({ doseId: 'd1', calendarDate: TODAY, amount: 1 })];
       },
       markReconciled: async (medicationId, doseId, calendarDate) => {
-        // ACK only after FIRED processing, never during Manual recovery.
         expect(markPhase).toBe('listFired');
         marked.push(`${medicationId}|${doseId}|${calendarDate}`);
         return { ok: true, changed: true };
@@ -447,12 +455,88 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
 
     expect(manualEnvelope).toBeNull();
     expect(durable.logs.some((l) => l.type === 'dose_taken')).toBe(true);
-    // No second stock mutation from Exact Auto.
     expect(durable.medications[0].currentPills).toBe(pillsAfterPartial);
     expect(recon.details[0]?.outcome).toBe('already_applied');
-    // Exactly one ACK for the actual FIRED occurrence.
     expect(marked).toEqual([`med-1|d1|${TODAY}`]);
     expect(recon.markedCount).toBe(1);
+  });
+
+  it('stale Manual envelope must not overwrite newer durable state', async () => {
+    // Successful Take → generation 1, no envelope.
+    const take = await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+    });
+    expect(take.outcome).toBe('applied');
+    expect(generation).toBe(1);
+    expect(durable.medications[0].currentPills).toBe(9);
+    const newerMeds = durable.medications.map((m) => ({ ...m }));
+    const newerLogs = durable.logs.map((l) => ({ ...l }));
+
+    // Plant a stale envelope from an older mutation (baseGeneration 0) with
+    // a contradictory snapshot (full stock, no consume markers).
+    manualEnvelope = {
+      version: 1,
+      status: 'manual_js_ready',
+      medications: [med({ currentPills: 10 })],
+      logs: [],
+      createdAt: new Date().toISOString(),
+      baseGeneration: 0,
+    };
+
+    marked = [];
+    await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        marked.push(`${medicationId}|${doseId}|${calendarDate}`);
+        return { ok: true, changed: true };
+      },
+    });
+
+    // Newer durable B must remain; stale envelope discarded.
+    expect(manualEnvelope).toBeNull();
+    expect(durable.medications[0].currentPills).toBe(9);
+    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
+    expect(durable.logs.length).toBe(newerLogs.length);
+    expect(marked).toEqual([]);
+  });
+
+  it('clear failure after successful meds+logs is idempotent on retry', async () => {
+    failClear = true;
+    const first = await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+    });
+    // Commit succeeded (gen bumped) but clear failed → envelope still present.
+    expect(first.outcome).toBe('applied');
+    expect(generation).toBe(1);
+    expect(durable.medications[0].currentPills).toBe(9);
+    expect(durable.logs.some((l) => l.type === 'dose_taken')).toBe(true);
+    expect(manualEnvelope).not.toBeNull();
+    expect(manualEnvelope?.baseGeneration).toBe(0);
+    const logCount = durable.logs.length;
+    const pills = durable.medications[0].currentPills;
+
+    // Retry recovery: gen > base → discard envelope without second mutation.
+    failClear = false;
+    marked = [];
+    await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        marked.push(`${medicationId}|${doseId}|${calendarDate}`);
+        return { ok: true, changed: true };
+      },
+    });
+    expect(manualEnvelope).toBeNull();
+    expect(durable.medications[0].currentPills).toBe(pills);
+    expect(durable.logs.length).toBe(logCount);
+    expect(marked).toEqual([]);
   });
 
   it('Manual Restore partial write → JS recovery only, never native mark', async () => {

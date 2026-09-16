@@ -29,6 +29,7 @@ import {
 import {
   recoverManualEnvelopeInto,
   recoverExactAutoEnvelopeState,
+  loadManualStockEnvelope,
 } from './stockEnvelopeRecovery';
 import { allocateMutationSeq } from './stockMutationOrdering';
 import { loadJson, persist } from './storage';
@@ -239,12 +240,24 @@ async function runOnce(
         appliedMutationSeq: existing.mutationSeq,
       });
     };
+    const manualEnv = loadManualStockEnvelope();
+    const manualPending = manualEnv
+      ? [
+          {
+            mutationSeq: manualEnv.mutationSeq,
+            logs: manualEnv.logs,
+            medications: manualEnv.medications,
+          },
+        ]
+      : [];
     const recovered = recoverExactAutoEnvelopeState(
       existing,
       { medications: baseMeds, logs: baseLogs },
-      commitExact
+      commitExact,
+      manualPending
     );
     if (recovered.action === 'write_failed') {
+      // Keep Exact Auto envelope — pair and/or lastApplied incomplete.
       return {
         medications: baseMeds,
         logs: baseLogs,
@@ -257,8 +270,8 @@ async function runOnce(
         partialNativeAck: false,
       };
     }
-    // already_applied or apply: clear envelope; ACK only the real toAcknowledge list
-    // (ownership stays Exact Auto — these are FIRED events recorded at mutation time).
+    // already_applied / superseded / apply: lastApplied finalized (or superseded).
+    // Clear is best-effort; lastApplied is the durable applied proof.
     saveEnvelope(null);
     baseMeds = recovered.state.medications;
     baseLogs = recovered.state.logs;
@@ -330,7 +343,21 @@ async function runOnce(
   }
 
   // Mutating path: envelope → meds+logs → mark → clear (Option B)
-  const mutationSeq = allocateMutationSeq();
+  const alloc = allocateMutationSeq();
+  if (!alloc.ok) {
+    return {
+      medications: baseMeds,
+      logs: baseLogs,
+      toAcknowledge: [],
+      details: result.details,
+      mutated: false,
+      newExactLogs: [],
+      markedCount: 0,
+      recoveredEnvelope: false,
+      partialNativeAck: false,
+    };
+  }
+  const mutationSeq = alloc.seq;
   const envelope: ExactAutoEnvelope = {
     version: 1,
     status: 'js_ready',

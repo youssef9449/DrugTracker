@@ -8,18 +8,10 @@
 
 import type { ConsumptionLog, Medication } from '../types';
 import { loadJson, loadString, persist } from './storage';
-import {
-  persistLastAppliedMutationSeq,
-} from './stockMutationOrdering';
+import { persistLastAppliedMutationSeq } from './stockMutationOrdering';
 
-/** Same keys as App.tsx / existing persistence. */
 export const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 export const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
-/**
- * Monotonic durable generation for meds+logs commits (diagnostic / lag signal).
- * Causal ordering for envelope recovery uses mutationSeq + lastAppliedMutationSeq
- * from stockMutationOrdering.ts — not generation alone.
- */
 export const STORAGE_STOCK_GEN_KEY = 'android_med_tracker_stock_generation_v1';
 
 export interface AutoStockDurableState {
@@ -71,16 +63,21 @@ export function loadDurableAutoStockState(): AutoStockDurableState {
 }
 
 export interface CommitDurableOptions {
-  /** When set, advance lastAppliedMutationSeq after meds+logs succeed. */
+  /**
+   * Required finalization marker after meds+logs. If this write fails, the
+   * whole commit fails so callers keep the envelope (recovery evidence).
+   */
   appliedMutationSeq?: number;
 }
 
 /**
- * Persist meds then logs, record applied mutation seq, then best-effort gen bump.
+ * Persist meds then logs then lastAppliedMutationSeq (when provided).
  *
- * Success means meds+logs are durable. lastAppliedMutationSeq is written next
- * (best-effort but attempted before returning success) so recovery can order
- * envelopes. Generation bump remains best-effort only.
+ * Contract:
+ * - meds or logs fail → error (pair not durable)
+ * - appliedMutationSeq provided and lastApplied fails → error (pair may be
+ *   durable but finalization incomplete; keep envelope)
+ * - generation bump is best-effort only after finalization succeeds
  */
 export function commitDurableAutoStockState(
   state: AutoStockDurableState,
@@ -90,7 +87,8 @@ export function commitDurableAutoStockState(
     const err = testCommit(state);
     if (err) return err;
     if (opts?.appliedMutationSeq != null) {
-      persistLastAppliedMutationSeq(opts.appliedMutationSeq);
+      const seqErr = persistLastAppliedMutationSeq(opts.appliedMutationSeq);
+      if (seqErr) return seqErr;
     }
     bumpStockGeneration();
     return null;
@@ -100,8 +98,8 @@ export function commitDurableAutoStockState(
   const logErr = persist(STORAGE_LOGS_KEY, state.logs, { json: true });
   if (logErr) return logErr;
   if (opts?.appliedMutationSeq != null) {
-    // Best-effort causal marker; recovery also uses seq classify + log presence.
-    persistLastAppliedMutationSeq(opts.appliedMutationSeq);
+    const seqErr = persistLastAppliedMutationSeq(opts.appliedMutationSeq);
+    if (seqErr) return seqErr;
   }
   bumpStockGeneration();
   return null;

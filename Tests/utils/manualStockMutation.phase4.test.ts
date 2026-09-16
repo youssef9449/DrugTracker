@@ -352,6 +352,8 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
   let failLogs: boolean;
   let failClear: boolean;
   let failBump: boolean;
+  let failLastApplied: boolean;
+  let failAllocate: boolean;
   let generation: number;
   let marked: string[];
 
@@ -363,6 +365,8 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     failLogs = false;
     failClear = false;
     failBump = false;
+    failLastApplied = false;
+    failAllocate = false;
     generation = 0;
     marked = [];
     let lastApplied = 0;
@@ -371,12 +375,14 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     __setStockMutationOrderingTestHooks({
       loadLastApplied: () => lastApplied,
       persistLastApplied: (seq) => {
+        if (failLastApplied) return 'lastApplied write failed';
         lastApplied = seq;
         return null;
       },
       allocate: () => {
+        if (failAllocate) return { ok: false, error: 'nextSeq persist failed' };
         nextSeq += 1;
-        return nextSeq;
+        return { ok: true, seq: nextSeq };
       },
     });
 
@@ -492,29 +498,23 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     expect(recon.markedCount).toBe(1);
   });
 
-  it('generation finalization fails after meds+logs: recovery is content-safe, no double deduct', async () => {
-    // meds+logs succeed, gen bump fails, clear fails → envelope remains, gen lag.
-    failBump = true;
-    failClear = true;
+  it('lastApplied failure after meds+logs keeps envelope; recovery finalizes without double deduct', async () => {
+    failLastApplied = true;
     const first = await runGatedManualConsume({
       medicationId: 'med-1',
       doseId: 'd1',
       source: 'manual',
       todayStr: TODAY,
     });
-    // Pair is durable → applied (gen is best-effort).
-    expect(first.outcome).toBe('applied');
+    // Pair may be on durable but finalization failed → not success for caller.
+    expect(first.outcome).toBe('persist_failed');
     expect(durable.medications[0].currentPills).toBe(9);
     expect(durable.logs.some((l) => l.type === 'dose_taken')).toBe(true);
-    expect(generation).toBe(0);
     expect(manualEnvelope).not.toBeNull();
-    expect(manualEnvelope?.baseGeneration).toBe(0);
     const logCount = durable.logs.length;
     const logIds = durable.logs.map((l) => l.id);
 
-    // Recovery with gen still equal to base: log ids already present → no overwrite.
-    failBump = false;
-    failClear = false;
+    failLastApplied = false;
     marked = [];
     await runAutoDeductionReconciliation({
       globalAutoDeductEnabled: true,
@@ -529,8 +529,19 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     expect(durable.logs.length).toBe(logCount);
     expect(durable.logs.map((l) => l.id)).toEqual(logIds);
     expect(marked).toEqual([]);
-    // Generation catch-up from content-reflected path.
-    expect(generation).toBe(1);
+  });
+
+  it('generation bump failure after successful finalization is still applied', async () => {
+    failBump = true;
+    const first = await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+    });
+    expect(first.outcome).toBe('applied');
+    expect(durable.medications[0].currentPills).toBe(9);
+    expect(manualEnvelope).toBeNull();
   });
 
   it('stale Manual envelope must not overwrite newer durable state', async () => {
@@ -779,6 +790,80 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     });
     expect(manualEnvelope).toBeNull();
     expect(durable.medications[0].currentPills).toBe(9);
+  });
+
+
+  it('seq11 durable with lastApplied lag: pending seq10 must not overwrite', async () => {
+    // Durable already reflects newer mutation (seq 2) but lastApplied still 0.
+    const seq2Logs = [
+      {
+        id: 'seq2-log',
+        medicationId: 'med-1',
+        medicationName: 'TestMed',
+        type: 'dose_taken' as const,
+        amount: 1,
+        date: TODAY,
+        timestamp: '',
+        description: '',
+      },
+    ];
+    durable.medications = [med({ currentPills: 8 })];
+    durable.logs = seq2Logs;
+
+    // Older pending envelope wants to restore stock=10.
+    manualEnvelope = {
+      version: 1,
+      status: 'manual_js_ready',
+      medications: [med({ currentPills: 10 })],
+      logs: [
+        {
+          id: 'seq1-log',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'dose_taken',
+          amount: 1,
+          date: TODAY,
+          timestamp: '',
+          description: '',
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      baseGeneration: 0,
+      mutationSeq: 1,
+    };
+
+    let exactEnv: {
+      version: 1;
+      status: 'js_ready';
+      medications: typeof durable.medications;
+      logs: typeof durable.logs;
+      toAcknowledge: Array<{ medicationId: string; doseId: string; calendarDate: string }>;
+      createdAt: string;
+      mutationSeq: number;
+    } | null = {
+      version: 1,
+      status: 'js_ready',
+      medications: [med({ currentPills: 8 })],
+      logs: seq2Logs,
+      toAcknowledge: [],
+      createdAt: new Date().toISOString(),
+      mutationSeq: 2,
+    };
+
+    await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async () => ({ ok: true, changed: true }),
+      loadEnvelope: () => exactEnv,
+      saveEnvelope: (env) => {
+        exactEnv = env as typeof exactEnv;
+        return null;
+      },
+    });
+
+    expect(durable.medications[0].currentPills).toBe(8);
+    expect(durable.logs.some((l) => l.id === 'seq2-log')).toBe(true);
+    expect(durable.medications[0].currentPills).not.toBe(10);
   });
 
 describe('shouldDismissAlarmAfterManualTake', () => {

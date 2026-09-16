@@ -1,6 +1,7 @@
 /**
  * Shared recovery for pending Manual / Exact Auto stock envelopes.
- * Orders by mutationSeq so older snapshots never overwrite newer durable state.
+ * Orders by mutationSeq; never lets an older envelope overwrite newer durable
+ * state (including when lastApplied lagged after a successful pair write).
  */
 
 import type { ConsumptionLog, Medication } from '../types';
@@ -26,7 +27,6 @@ export interface ManualStockEnvelope {
   logs: ConsumptionLog[];
   createdAt: string;
   baseGeneration: number;
-  /** Shared causal order with Exact Auto envelopes. */
   mutationSeq: number;
 }
 
@@ -71,59 +71,73 @@ export function saveManualStockEnvelope(
   return persist(STORAGE_MANUAL_ENVELOPE_KEY, env, { json: true });
 }
 
-export interface ExactAutoEnvelopeLike {
-  medications: Medication[];
+export interface PendingEnvelopeRef {
+  mutationSeq: number;
   logs: ConsumptionLog[];
-  mutationSeq?: number;
-  toAcknowledge: Array<{
-    medicationId: string;
-    doseId: string;
-    calendarDate: string;
-  }>;
+  medications: Medication[];
 }
 
 /**
- * Decide whether a pending envelope should be applied to durable state.
- * Primary: mutationSeq vs lastAppliedMutationSeq.
- * Secondary: if seq looks pending but log ids already durable, treat as applied
- * (pair write succeeded, lastApplied/finalization lagged).
+ * True when a higher-seq pending envelope is already reflected in durable logs.
+ * Older envelopes must not overwrite in that case (lastApplied may still lag).
  */
-export function resolveEnvelopeAction(
-  mutationSeq: number | undefined,
-  envelopeLogs: ConsumptionLog[],
-  durable: AutoStockDurableState
-): 'apply' | 'already_applied' {
-  const seq =
-    typeof mutationSeq === 'number' && mutationSeq > 0 ? mutationSeq : 0;
+export function isSupersededByHigherPending(
+  env: PendingEnvelopeRef,
+  durable: AutoStockDurableState,
+  allPending: PendingEnvelopeRef[]
+): boolean {
+  return allPending.some(
+    (other) =>
+      other.mutationSeq > env.mutationSeq &&
+      envelopeLogIdsPresentInDurable(other.logs, durable.logs)
+  );
+}
+
+/**
+ * Finalize lastApplied for seq then allow envelope clear.
+ * Returns error if lastApplied cannot be persisted — caller must keep envelope.
+ */
+export function finalizeMutationSeq(mutationSeq: number): string | null {
+  if (!(mutationSeq > 0)) return null;
   const last = loadLastAppliedMutationSeq();
-  if (seq > 0 && classifyEnvelopeBySeq(seq, last) === 'already_applied') {
+  if (mutationSeq <= last) return null;
+  return persistLastAppliedMutationSeq(mutationSeq);
+}
+
+export type ResolveAction = 'apply' | 'already_applied' | 'superseded';
+
+export function resolveEnvelopeAction(
+  env: PendingEnvelopeRef,
+  durable: AutoStockDurableState,
+  allPending: PendingEnvelopeRef[]
+): ResolveAction {
+  const last = loadLastAppliedMutationSeq();
+  if (
+    env.mutationSeq > 0 &&
+    classifyEnvelopeBySeq(env.mutationSeq, last) === 'already_applied'
+  ) {
     return 'already_applied';
   }
-  if (envelopeLogIdsPresentInDurable(envelopeLogs, durable.logs)) {
+  if (isSupersededByHigherPending(env, durable, allPending)) {
+    return 'superseded';
+  }
+  if (envelopeLogIdsPresentInDurable(env.logs, durable.logs)) {
     return 'already_applied';
   }
-  // seq 0 (legacy envelope without seq): apply only if logs not present
   return 'apply';
 }
 
-export function markEnvelopeApplied(mutationSeq: number | undefined): void {
-  if (typeof mutationSeq === 'number' && mutationSeq > 0) {
-    const last = loadLastAppliedMutationSeq();
-    if (mutationSeq > last) {
-      persistLastAppliedMutationSeq(mutationSeq);
-    }
-  }
-}
-
 /**
- * Recover Manual envelope only (used at Manual gate entry).
- * Never markReconciled / never touches Exact Auto ACK.
+ * Recover Manual envelope only (Manual gate entry).
+ * Never markReconciled.
  */
 export function recoverManualEnvelopeInto(
   fresh: AutoStockDurableState,
   opts?: {
     persistMeds?: (meds: Medication[]) => string | null;
     persistLogs?: (logs: ConsumptionLog[]) => string | null;
+    /** Other pending envelopes (e.g. Exact Auto) for supersession checks. */
+    otherPending?: PendingEnvelopeRef[];
   }
 ): { ok: true; state: AutoStockDurableState } | { ok: false; state: AutoStockDurableState } {
   const existing = loadManualStockEnvelope();
@@ -131,13 +145,28 @@ export function recoverManualEnvelopeInto(
     return { ok: true, state: fresh };
   }
 
-  const action = resolveEnvelopeAction(
-    existing.mutationSeq,
-    existing.logs,
-    fresh
-  );
-  if (action === 'already_applied') {
-    markEnvelopeApplied(existing.mutationSeq);
+  const self: PendingEnvelopeRef = {
+    mutationSeq: existing.mutationSeq,
+    logs: existing.logs,
+    medications: existing.medications,
+  };
+  const allPending = [self, ...(opts?.otherPending ?? [])];
+  const action = resolveEnvelopeAction(self, fresh, allPending);
+
+  if (action === 'already_applied' || action === 'superseded') {
+    const finErr = finalizeMutationSeq(existing.mutationSeq);
+    if (finErr && action === 'already_applied') {
+      // Keep envelope until lastApplied is durable.
+      return { ok: false, state: fresh };
+    }
+    // superseded: clear without forcing lastApplied to older seq
+    if (action === 'superseded') {
+      saveManualStockEnvelope(null);
+      return { ok: true, state: fresh };
+    }
+    if (finErr) {
+      return { ok: false, state: fresh };
+    }
     saveManualStockEnvelope(null);
     return { ok: true, state: fresh };
   }
@@ -154,6 +183,9 @@ export function recoverManualEnvelopeInto(
     else {
       const logErr = opts.persistLogs(pair.logs);
       err = logErr;
+      if (!err) {
+        err = finalizeMutationSeq(existing.mutationSeq);
+      }
     }
   } else {
     err = commitDurableAutoStockState(pair, {
@@ -164,32 +196,50 @@ export function recoverManualEnvelopeInto(
   if (err) {
     return { ok: false, state: fresh };
   }
-  markEnvelopeApplied(existing.mutationSeq);
   saveManualStockEnvelope(null);
   return { ok: true, state: pair };
 }
 
-/**
- * Apply Exact Auto envelope snapshot if pending and not superseded.
- * Returns durable state and whether JS was recovered. Caller owns native ACK.
- */
+export interface ExactAutoEnvelopeLike {
+  medications: Medication[];
+  logs: ConsumptionLog[];
+  mutationSeq?: number;
+  toAcknowledge: Array<{
+    medicationId: string;
+    doseId: string;
+    calendarDate: string;
+  }>;
+}
+
 export function recoverExactAutoEnvelopeState(
   existing: ExactAutoEnvelopeLike,
   fresh: AutoStockDurableState,
-  commit: (state: AutoStockDurableState) => string | null
+  commit: (state: AutoStockDurableState) => string | null,
+  otherPending?: PendingEnvelopeRef[]
 ): {
-  action: 'apply' | 'already_applied' | 'write_failed';
+  action: 'apply' | 'already_applied' | 'write_failed' | 'superseded';
   state: AutoStockDurableState;
+  finalizeFailed?: boolean;
 } {
-  const action = resolveEnvelopeAction(
-    existing.mutationSeq,
-    existing.logs,
-    fresh
-  );
-  if (action === 'already_applied') {
-    markEnvelopeApplied(existing.mutationSeq);
-    return { action: 'already_applied', state: fresh };
+  const seq = existing.mutationSeq ?? 0;
+  const self: PendingEnvelopeRef = {
+    mutationSeq: seq,
+    logs: existing.logs,
+    medications: existing.medications,
+  };
+  const allPending = [self, ...(otherPending ?? [])];
+  const action = resolveEnvelopeAction(self, fresh, allPending);
+
+  if (action === 'already_applied' || action === 'superseded') {
+    if (action === 'already_applied') {
+      const finErr = finalizeMutationSeq(seq);
+      if (finErr) {
+        return { action: 'write_failed', state: fresh, finalizeFailed: true };
+      }
+    }
+    return { action, state: fresh };
   }
+
   const pair = {
     medications: existing.medications,
     logs: existing.logs,
@@ -198,6 +248,5 @@ export function recoverExactAutoEnvelopeState(
   if (err) {
     return { action: 'write_failed', state: fresh };
   }
-  markEnvelopeApplied(existing.mutationSeq);
   return { action: 'apply', state: pair };
 }

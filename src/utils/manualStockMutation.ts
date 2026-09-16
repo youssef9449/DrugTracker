@@ -97,7 +97,9 @@ function resolveConsumeDoseId(med: Medication, doseId?: string): string | undefi
  * Manual durability: envelope (JS state only) → meds+logs → clear.
  */
 function commitWithManualEnvelope(state: AutoStockDurableState): string | null {
-  const mutationSeq = allocateMutationSeq();
+  const alloc = allocateMutationSeq();
+  if (!alloc.ok) return alloc.error;
+  const mutationSeq = alloc.seq;
   const baseGeneration = loadStockGeneration();
   const envelope: ManualStockEnvelope = {
     version: 1,
@@ -111,13 +113,17 @@ function commitWithManualEnvelope(state: AutoStockDurableState): string | null {
   const envErr = saveManualStockEnvelope(envelope);
   if (envErr) return envErr;
 
+  // meds+logs+lastApplied must all succeed before clearing recovery evidence.
   const commitErr = commitDurableAutoStockState(state, {
     appliedMutationSeq: mutationSeq,
   });
   if (commitErr) {
+    // Keep envelope (pair and/or lastApplied incomplete).
     return commitErr;
   }
 
+  // Clear is best-effort after lastApplied is durable; clear failure is safe
+  // because lastApplied already proves the mutation is applied.
   saveManualStockEnvelope(null);
   return null;
 }

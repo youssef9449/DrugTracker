@@ -198,9 +198,12 @@ export function useAutoDeductionScheduler({
       // System boot / permission re-grant restore is handled by
       // AutoDeductionSystemReceiver, not this normal desired-state pass.
       const invalidatedSlots = new Set<string>();
-      try {
-        const nativeSchedules = await listScheduledAutoDeductionOccurrences();
-        for (const s of nativeSchedules) {
+      // Issue #242: native list is authoritative for durable-schedule discovery.
+      // Distinguish success+empty from read failure — never treat failure as [].
+      const listResult = await listScheduledAutoDeductionOccurrences();
+      if (listResult.ok) {
+        // Authoritative native snapshot available — discover + reconcile.
+        for (const s of listResult.schedules) {
           if (gen !== generationRef.current) return;
           const key = autoDeductionScheduleKey(
             s.medicationId,
@@ -236,33 +239,39 @@ export function useAutoDeductionScheduler({
             trackedRef.current.add(key);
           }
         }
-      } catch {
-        // Non-fatal: fall through to trackedRef + schedule paths.
-      }
-      if (gen !== generationRef.current) return;
 
-      for (const key of Array.from(trackedRef.current)) {
-        if (!desired.has(key)) {
-          const [medId, doseId, date] = key.split('::');
-          if (medId && doseId && date) {
-            const slotId = `${medId}::${doseId}`;
-            if (!invalidatedSlots.has(slotId)) {
-              const inv = await invalidateAutoDeductionRecurrence(medId, doseId);
-              if (!inv.ok) {
-                // Fail-closed: do not cancel occurrence; keep tracking for retry.
-                continue;
+        if (gen !== generationRef.current) return;
+
+        // trackedRef destructive path also requires a successful native list:
+        // without an authoritative snapshot, absence from desired alone must
+        // not drive invalidate/cancel (Issue #242 fail-closed).
+        for (const key of Array.from(trackedRef.current)) {
+          if (!desired.has(key)) {
+            const [medId, doseId, date] = key.split('::');
+            if (medId && doseId && date) {
+              const slotId = `${medId}::${doseId}`;
+              if (!invalidatedSlots.has(slotId)) {
+                const inv = await invalidateAutoDeductionRecurrence(medId, doseId);
+                if (!inv.ok) {
+                  // Fail-closed: do not cancel occurrence; keep tracking for retry.
+                  continue;
+                }
+                invalidatedSlots.add(slotId);
               }
-              invalidatedSlots.add(slotId);
-            }
-            const res = await cancelAutoDeduction(medId, doseId, date);
-            // Drop tracking only after successful cancel (invalidate already ok).
-            if (res.ok) {
+              const res = await cancelAutoDeduction(medId, doseId, date);
+              // Drop tracking only after successful cancel (invalidate already ok).
+              if (res.ok) {
+                trackedRef.current.delete(key);
+              }
+            } else {
               trackedRef.current.delete(key);
             }
-          } else {
-            trackedRef.current.delete(key);
           }
         }
+      } else {
+        // Fail closed (Issue #242): list failure ≠ empty native set.
+        // No invalidate/cancel from native absence or trackedRef in this pass.
+        // trackedRef is left unchanged for a later successful reconciliation.
       }
 
       if (gen !== generationRef.current) return;

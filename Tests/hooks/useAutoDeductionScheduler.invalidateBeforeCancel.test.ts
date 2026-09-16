@@ -60,7 +60,7 @@ describe('useAutoDeductionScheduler invalidate-before-cancel (Issue #217)', () =
     invalidateMock.mockReset();
     listScheduledMock.mockReset();
     scheduleMock.mockResolvedValue({ ok: true });
-    listScheduledMock.mockResolvedValue([]);
+    listScheduledMock.mockResolvedValue({ ok: true, schedules: [] });
     cancelMock.mockResolvedValue({ ok: true, status: 'SUCCESS' });
     invalidateMock.mockResolvedValue({ ok: true, generation: 2 });
   });
@@ -73,15 +73,18 @@ describe('useAutoDeductionScheduler invalidate-before-cancel (Issue #217)', () =
     const med = baseMed();
     // Native still holds a schedule that is no longer desired after disable.
     // Retry is via re-listing this schedule — NOT via trackedRef on this path.
-    listScheduledMock.mockResolvedValue([
-      {
-        medicationId: 'med-1',
-        doseId: 'd1',
-        calendarDate: '2099-01-01',
-        timeHhmm: '08:00',
-        amount: 1,
-      },
-    ]);
+    listScheduledMock.mockResolvedValue({
+      ok: true,
+      schedules: [
+        {
+          medicationId: 'med-1',
+          doseId: 'd1',
+          calendarDate: '2099-01-01',
+          timeHhmm: '08:00',
+          amount: 1,
+        },
+      ],
+    });
     invalidateMock.mockResolvedValue({
       ok: false,
       error: 'recurrence_generation_commit_failed',
@@ -104,15 +107,18 @@ describe('useAutoDeductionScheduler invalidate-before-cancel (Issue #217)', () =
     // Disable auto-deduct → desired empty → invalidate then (only if ok) cancel.
     cancelMock.mockClear();
     invalidateMock.mockClear();
-    listScheduledMock.mockResolvedValue([
-      {
-        medicationId: 'med-1',
-        doseId: 'd1',
-        calendarDate: '2099-01-01',
-        timeHhmm: '08:00',
-        amount: 1,
-      },
-    ]);
+    listScheduledMock.mockResolvedValue({
+      ok: true,
+      schedules: [
+        {
+          medicationId: 'med-1',
+          doseId: 'd1',
+          calendarDate: '2099-01-01',
+          timeHhmm: '08:00',
+          amount: 1,
+        },
+      ],
+    });
     invalidateMock.mockResolvedValue({
       ok: false,
       error: 'recurrence_generation_commit_failed',
@@ -129,15 +135,18 @@ describe('useAutoDeductionScheduler invalidate-before-cancel (Issue #217)', () =
     // Retry source = listScheduledAutoDeductionOccurrences, not trackedRef.
     cancelMock.mockClear();
     invalidateMock.mockClear();
-    listScheduledMock.mockResolvedValue([
-      {
-        medicationId: 'med-1',
-        doseId: 'd1',
-        calendarDate: '2099-01-01',
-        timeHhmm: '08:00',
-        amount: 1,
-      },
-    ]);
+    listScheduledMock.mockResolvedValue({
+      ok: true,
+      schedules: [
+        {
+          medicationId: 'med-1',
+          doseId: 'd1',
+          calendarDate: '2099-01-01',
+          timeHhmm: '08:00',
+          amount: 1,
+        },
+      ],
+    });
     invalidateMock.mockResolvedValue({ ok: true, generation: 3 });
 
     // Trigger another reconcile pass (signature change via enable → disable).
@@ -145,15 +154,18 @@ describe('useAutoDeductionScheduler invalidate-before-cancel (Issue #217)', () =
     await wait(20);
     cancelMock.mockClear();
     invalidateMock.mockClear();
-    listScheduledMock.mockResolvedValue([
-      {
-        medicationId: 'med-1',
-        doseId: 'd1',
-        calendarDate: '2099-01-01',
-        timeHhmm: '08:00',
-        amount: 1,
-      },
-    ]);
+    listScheduledMock.mockResolvedValue({
+      ok: true,
+      schedules: [
+        {
+          medicationId: 'med-1',
+          doseId: 'd1',
+          calendarDate: '2099-01-01',
+          timeHhmm: '08:00',
+          amount: 1,
+        },
+      ],
+    });
     invalidateMock.mockResolvedValue({ ok: true, generation: 3 });
     rerender({ meds: [med], enabled: false });
     await wait(40);
@@ -166,7 +178,7 @@ describe('useAutoDeductionScheduler invalidate-before-cancel (Issue #217)', () =
 
   it('calls cancel only after successful invalidate on tracked-only path', async () => {
     // Empty native list so cancellation comes from trackedRef after a schedule pass.
-    listScheduledMock.mockResolvedValue([]);
+    listScheduledMock.mockResolvedValue({ ok: true, schedules: [] });
     const med = baseMed();
 
     const { rerender, unmount } = renderHook(

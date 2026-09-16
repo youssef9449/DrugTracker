@@ -72,5 +72,35 @@ export function timeToMinutes(timeStr: string): number {
   return h * 60 + m;
 }
 
+/**
+ * Format a 24-hour "HH:mm" (or "H:mm") string for user-facing display
+ * as 12-hour Arabic AM/PM style:
+ *   "00:00" → "12:00 ص"
+ *   "09:30" → "09:30 ص"
+ *   "12:00" → "12:00 م"
+ *   "22:00" → "10:00 م"
+ *
+ * Display-only. Does not alter stored schedule times or AlarmManager input.
+ * Invalid input is returned unchanged.
+ */
+export function formatReminderTime12h(timeStr: string): string {
+  if (!timeStr || typeof timeStr !== 'string') return timeStr;
+  // Strict HH:mm / H:mm only — reject partial garbage that parseInt would accept
+  // (e.g. "22abc:00", "09:30abc", "12.5:00", "1foo:30").
+  const match = /^(\d{1,2}):(\d{2})$/.exec(timeStr.trim());
+  if (!match) return timeStr;
+  const h = Number(match[1]);
+  const m = Number(match[2]);
+  if (h > 23 || m > 59) {
+    return timeStr;
+  }
+  const period = h < 12 ? 'ص' : 'م';
+  let hour12 = h % 12;
+  if (hour12 === 0) hour12 = 12;
+  const hh = String(hour12).padStart(2, '0');
+  const mm = String(m).padStart(2, '0');
+  return `${hh}:${mm} ${period}`;
+}
+
 /** Days per month — used for monthly-consumption calculations. */
 export const DAYS_PER_MONTH = 30;

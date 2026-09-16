@@ -40,6 +40,7 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 import {
   NOTIFICATION_IMMEDIATE_OFFSET_MS,
   SW_READY_TIMEOUT_MS,
+  formatReminderTime12h,
 } from './time';
 
 /**
@@ -492,7 +493,9 @@ export async function sendMedicationDoseReminder(
   reminderTime?: string,
   autoDeductEnabled?: boolean,
 ): Promise<void> {
-  const timeHint = reminderTime ? ` الساعة ${reminderTime}` : '';
+  const timeHint = reminderTime
+    ? ` الساعة ${formatReminderTime12h(reminderTime)}`
+    : '';
   const title = `⏰ حان موعد دواء: ${medicineName}`;
   const body = `موعد الجرعة${timeHint}. جرعتك المقررة: ${dailyDose} ${unit}.`;
 
@@ -1285,7 +1288,9 @@ export async function scheduleSnoozedDoseReminder(
   autoDeductEnabled?: boolean,
 ): Promise<void> {
   const fireAt = new Date(Date.now() + minutes * 60_000);
-  const timeHint = reminderTime ? ` (موعد الجرعة الأصلي ${reminderTime})` : '';
+  const timeHint = reminderTime
+    ? ` (موعد الجرعة الأصلي ${formatReminderTime12h(reminderTime)})`
+    : '';
   const title = `⏰ تذكير مجدد: ${medName}`;
   const body = `غفوة ${minutes} دقيقة انتهت${timeHint}. جرعتك المقررة: ${dailyDose} ${unit}.`;
 
@@ -1428,7 +1433,8 @@ export async function scheduleDoseReminder(
   }
 
   const title = `⏰ حان موعد دواء: ${medName}`;
-  const body = `موعد الجرعة الساعة ${reminderTime}. جرعتك المقررة: ${dailyDose} ${unit}.`;
+  // Display 12h for the user; reminderTime stays 24h for schedule + extra.
+  const body = `موعد الجرعة الساعة ${formatReminderTime12h(reminderTime)}. جرعتك المقررة: ${dailyDose} ${unit}.`;
   const doseId = options?.doseId;
   const notifId = doseReminderAlarmIdForDose(medId, doseId ?? LEGACY_DOSE_ID);
 

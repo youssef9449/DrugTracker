@@ -1095,8 +1095,8 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       source: 'manual',
       todayStr: TODAY,
     });
-    // Commit+lastApplied succeed; clear fails → envelope may remain.
-    expect(first.outcome).toBe('applied');
+    // Commit+lastApplied succeed; clear fails → observable persist_failed, envelope remains.
+    expect(first.outcome).toBe('persist_failed');
     expect(durable.medications[0].currentPills).toBe(9);
     expect(manualEnvelope).not.toBeNull();
     const logCount = durable.logs.length;

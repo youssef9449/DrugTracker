@@ -211,8 +211,23 @@ export function restoreDose(
       slot != null && isDoseTimeElapsedToday(slot.time, now);
     const isPastDueForSkip = restoreDateIsPastDay || timeElapsedToday;
 
+    // Real stock undo (manual Take or Exact Auto — both set doseConsumption):
+    // clear skip for this occurrence so Take is eligible again. Native RECONCILED
+    // prevents the same FIRED event from re-applying. Projection-only path
+    // (no consumption marker) still uses past-due skip without +pills.
     let doseSkippedHistory = med.doseSkippedHistory;
-    if (isPastDueForSkip) {
+    if (wasManual) {
+      const nextSkip = { ...(med.doseSkippedHistory ?? {}) };
+      if (Array.isArray(nextSkip[resolvedDoseId])) {
+        nextSkip[resolvedDoseId] = nextSkip[resolvedDoseId].filter(
+          (d) => d !== todayStr
+        );
+        if (nextSkip[resolvedDoseId].length === 0) {
+          delete nextSkip[resolvedDoseId];
+        }
+      }
+      doseSkippedHistory = nextSkip;
+    } else if (isPastDueForSkip) {
       const baseForSkip: Medication = {
         ...med,
         doseConsumption: nextConsumption,
@@ -243,7 +258,7 @@ export function restoreDose(
 
     let updatedMed: Medication;
     if (wasManual) {
-      // Undo the manual settlement: add exact amount back to snapshot.
+      // Undo actual stock deduction (Manual or Exact Auto markers): return pills.
       const { updatedMed: settled } = settleAndAdjust(
         {
           ...med,
@@ -264,9 +279,7 @@ export function restoreDose(
         lastConsumedDate: allStillConsumed ? todayStr : undefined,
       };
     } else {
-      // Auto-only: projection undo via skip when past-due — do not inflate
-      // currentPills. Future auto-only restore leaves skip unset so the
-      // slot can still auto-deduct at its scheduled time.
+      // Merely elapsed/projected — no durable stock deduction to undo.
       updatedMed = {
         ...med,
         doseConsumption: nextConsumption,

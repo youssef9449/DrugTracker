@@ -18,12 +18,12 @@ import {
   type ConsumeDoseResult,
 } from './medActions';
 import {
-  findExactAutoLog,
   isExactAutoOccurrenceApplied,
   normalizeExactDoseId,
 } from './autoDeductionReconciliation';
+import { markAutoDeductionEventReconciled } from './autoDeductionNative';
+import { isDoseConsumedOnDate, getTodayDateString } from './dateCalculations';
 import { LEGACY_DOSE_ID } from './notifications';
-import { getTodayDateString } from './dateCalculations';
 import {
   withAutoStockMutationGate,
   commitDurableAutoStockState,
@@ -93,6 +93,33 @@ function resolveConsumeDoseId(med: Medication, doseId?: string): string | undefi
   return undefined;
 }
 
+
+/**
+ * Hand Exact Auto toAcknowledge to the existing native ACK path.
+ * Manual does not own ACK semantics — only forwards finalized recovery ACKs.
+ * Deduplicates by medicationId+doseId+calendarDate. Never called when recovery blocked.
+ */
+async function acknowledgeExactAutoEvents(
+  acks: Array<{ medicationId: string; doseId: string; calendarDate: string }>
+): Promise<void> {
+  if (!acks.length) return;
+  const seen = new Set<string>();
+  for (const a of acks) {
+    const key = `${a.medicationId}${a.doseId}${a.calendarDate}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    try {
+      await markAutoDeductionEventReconciled(
+        a.medicationId,
+        a.doseId,
+        a.calendarDate
+      );
+    } catch {
+      // Native ACK failures remain retryable via Exact Auto reconciliation.
+    }
+  }
+}
+
 /**
  * Manual durability: envelope (JS state only) → meds+logs → clear.
  */
@@ -122,9 +149,10 @@ function commitWithManualEnvelope(state: AutoStockDurableState): string | null {
     return commitErr;
   }
 
-  // Clear is best-effort after lastApplied is durable; clear failure is safe
-  // because lastApplied already proves the mutation is applied.
-  saveManualStockEnvelope(null);
+  // Clear after lastApplied is durable. Clear failure is observable: mutation
+  // is not reapplied (lastApplied covers seq) but envelope remains for retry.
+  const clearErr = saveManualStockEnvelope(null);
+  if (clearErr) return clearErr;
   return null;
 }
 
@@ -138,9 +166,10 @@ export function runGatedManualConsume(opts: {
   const todayStr = opts.todayStr ?? getTodayDateString();
   const now = opts.now ?? new Date();
 
-  return withAutoStockMutationGate((freshIn: AutoStockDurableState) => {
+  return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
     const recovered = recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
+      // Blocked recovery: do not ACK, do not start Manual mutation.
       return {
         outcome: 'persist_failed' as const,
         medications: recovered.state.medications,
@@ -150,6 +179,8 @@ export function runGatedManualConsume(opts: {
         reason: 'persist_failed',
       };
     }
+    // Exact Auto ACKs via existing native path (not Manual ownership).
+    await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
     const fresh = recovered.state;
 
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
@@ -167,8 +198,11 @@ export function runGatedManualConsume(opts: {
     const resolvedId = resolveConsumeDoseId(med, opts.doseId);
     const doseKey = normalizeExactDoseId(resolvedId);
 
+    // Currently consumed only if durable markers still present (Exact Auto sets
+    // the same markers). Do not use log-id alone — that would block Take after
+    // Auto → Restore once the exact-auto log remains for audit.
     if (
-      findExactAutoLog(fresh.logs, med.id, doseKey, todayStr) ||
+      isDoseConsumedOnDate(med, doseKey, todayStr) ||
       isExactAutoOccurrenceApplied(med, doseKey, todayStr, todayStr)
     ) {
       return {
@@ -240,7 +274,7 @@ export function runGatedManualRestore(opts: {
   const todayStr = opts.todayStr ?? getTodayDateString();
   const now = opts.now ?? new Date();
 
-  return withAutoStockMutationGate((freshIn: AutoStockDurableState) => {
+  return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
     const recovered = recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
@@ -252,6 +286,7 @@ export function runGatedManualRestore(opts: {
         reason: 'persist_failed',
       };
     }
+    await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
     const fresh = recovered.state;
 
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
@@ -278,8 +313,9 @@ export function runGatedManualRestore(opts: {
       };
     }
 
-    // Idempotency: only a wasManual undo credits stock. A second Restore after
-    // consumption was already cleared is a no-op (already_restored).
+    // Idempotency: only undo a real stock deduction (manual or Exact Auto markers).
+    // restoreDose credits pills when wasManual; Exact Auto uses the same markers.
+    // Second Restore after markers cleared is already_restored.
     if (!result.wasManual) {
       return {
         outcome: 'already_restored' as const,

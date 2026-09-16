@@ -58,7 +58,7 @@ describe('useAutoDeductionScheduler CancelResult handling', () => {
     // scheduler may proceed to cancelAutoDeduction. Native schedule list is
     // empty so the desired-state pass only operates on trackedRef.
     invalidateMock.mockResolvedValue({ ok: true });
-    listScheduledMock.mockResolvedValue([]);
+    listScheduledMock.mockResolvedValue({ ok: true, schedules: [] });
     scheduleMock.mockResolvedValue({ ok: true });
   });
 

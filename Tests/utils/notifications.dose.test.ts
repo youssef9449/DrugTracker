@@ -195,3 +195,34 @@ describe('Phase 4 — doseId in notification extra', () => {
     expect(id1).not.toBe(id2);
   });
 });
+
+describe('scheduleDoseReminder — 12h display body, 24h schedule identity', () => {
+  it.each([
+    ['00:00', '12:00 ص'],
+    ['09:30', '09:30 ص'],
+    ['11:59', '11:59 ص'],
+    ['12:00', '12:00 م'],
+    ['13:00', '01:00 م'],
+    ['22:00', '10:00 م'],
+    ['23:59', '11:59 م'],
+  ] as const)(
+    'body shows %s as %s while extra.reminderTime and fire hour stay 24h',
+    async (hhmm, display) => {
+      // Pick a system time so every sample is still "ahead" today (before midnight).
+      vi.setSystemTime(new Date(2024, 8, 10, 0, 0, 0));
+      await scheduleDoseReminder('med-12h', 'Aspirin', hhmm, 1, 'قرص');
+
+      expect(mocks.schedule).toHaveBeenCalled();
+      const notif = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1][0]
+        .notifications[0];
+
+      expect(notif.body).toContain(`الساعة ${display}`);
+      // Scheduling identity unchanged: extra + wall-clock fire use raw HH:mm.
+      expect(notif.extra.reminderTime).toBe(hhmm);
+      expect(notif.extra.reminderTime).not.toMatch(/[صم]/);
+      const [h, m] = hhmm.split(':').map((n) => parseInt(n, 10));
+      expect(notif.schedule.at.getHours()).toBe(h);
+      expect(notif.schedule.at.getMinutes()).toBe(m);
+    },
+  );
+});

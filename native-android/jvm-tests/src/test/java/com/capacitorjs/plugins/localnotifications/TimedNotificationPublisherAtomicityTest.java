@@ -7,6 +7,7 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import android.app.AlarmManager;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.Intent;
@@ -24,6 +25,7 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowAlarmManager;
+import org.robolectric.shadows.ShadowPendingIntent;
 
 /**
  * Regression: TimedNotificationPublisher.rescheduleDoseReminderNextDay atomicity.
@@ -33,7 +35,8 @@ import org.robolectric.shadows.ShadowAlarmManager;
  * </pre>
  *
  * Ordering is observed via test-only Context/SharedPreferences doubles and
- * Robolectric {@link ShadowAlarmManager} — no production instrumentation.
+ * Robolectric {@link ShadowAlarmManager} for the <em>specific</em> {@link #NOTIF_ID}
+ * — no production instrumentation.
  */
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 33)
@@ -51,6 +54,7 @@ public class TimedNotificationPublisherAtomicityTest {
     @Before
     public void setUp() {
         baseContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        clearShadowAlarms(baseContext);
         baseContext
                 .getSharedPreferences(DoseReminderRecurrenceStore.PREFS_NAME, Context.MODE_PRIVATE)
                 .edit()
@@ -63,6 +67,43 @@ public class TimedNotificationPublisherAtomicityTest {
                 .commit();
         publisher = new TimedNotificationPublisher();
         events.clear();
+        assertFalse(
+                "setUp must leave no scheduled alarm for NOTIF_ID",
+                hasScheduledAlarmForNotifId(baseContext, NOTIF_ID));
+    }
+
+    /** Drain all ShadowAlarmManager schedules so tests do not leak across cases. */
+    private static void clearShadowAlarms(Context context) {
+        AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        ShadowAlarmManager shadow = Shadows.shadowOf(am);
+        // Deprecated poll removes and deschedules until empty — isolates each test.
+        while (shadow.getNextScheduledAlarm() != null) {
+            // drain
+        }
+    }
+
+    /**
+     * True when ShadowAlarmManager holds a schedule whose PendingIntent request code
+     * is {@code notifId} (the stable dose-alarm id used by production).
+     */
+    private static boolean hasScheduledAlarmForNotifId(Context context, int notifId) {
+        AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        ShadowAlarmManager shadow = Shadows.shadowOf(am);
+        List<ShadowAlarmManager.ScheduledAlarm> alarms = shadow.getScheduledAlarms();
+        if (alarms == null || alarms.isEmpty()) {
+            return false;
+        }
+        for (ShadowAlarmManager.ScheduledAlarm alarm : alarms) {
+            PendingIntent operation = alarm.operation;
+            if (operation == null) {
+                continue;
+            }
+            ShadowPendingIntent spi = Shadows.shadowOf(operation);
+            if (spi.getRequestCode() == notifId) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private JSObject validDoseNotificationJson() {
@@ -88,8 +129,8 @@ public class TimedNotificationPublisherAtomicityTest {
 
     /**
      * Application-equivalent context: {@link #getApplicationContext()} returns this
-     * instance so production code that calls getApplicationContext().getSharedPreferences
-     * still hits the recording/failing doubles.
+     * instance so production getApplicationContext().getSharedPreferences still hits
+     * the recording/failing doubles.
      */
     private final class ObservingAppContext extends ContextWrapper {
         final CommitTrackingSharedPreferences notificationStore;
@@ -106,14 +147,14 @@ public class TimedNotificationPublisherAtomicityTest {
                             realApp.getSharedPreferences("NOTIFICATION_STORE", Context.MODE_PRIVATE),
                             "notificationStorageCommitted",
                             failNotificationStoreCommit,
-                            /* requireAlarmAlreadyScheduled= */ true);
+                            /* observeSpecificAlarmBeforeCommit= */ true);
             this.recurrenceStore =
                     new CommitTrackingSharedPreferences(
                             realApp.getSharedPreferences(
                                     DoseReminderRecurrenceStore.PREFS_NAME, Context.MODE_PRIVATE),
                             "reArmEvidenceCommitted",
                             /* failCommit= */ false,
-                            /* requireAlarmAlreadyScheduled= */ false);
+                            /* observeSpecificAlarmBeforeCommit= */ false);
         }
 
         @Override
@@ -139,39 +180,37 @@ public class TimedNotificationPublisherAtomicityTest {
     }
 
     /**
-     * Tracks successful (or attempted) commits and appends ordered events.
-     * When {@code requireAlarmAlreadyScheduled} is true, records {@code alarmScheduled}
-     * first if ShadowAlarmManager already has a schedule — proving AlarmManager ran
-     * before this SharedPreferences commit.
+     * Tracks commits and appends ordered events. When observing the notification
+     * store, records {@code alarmScheduled} only if ShadowAlarmManager already
+     * holds a schedule for {@link #NOTIF_ID} — proving the current test's alarm
+     * was armed before this SharedPreferences commit.
      */
     private final class CommitTrackingSharedPreferences implements SharedPreferences {
         private final SharedPreferences delegate;
         private final String successEvent;
         private final boolean failCommit;
-        private final boolean requireAlarmAlreadyScheduled;
+        private final boolean observeSpecificAlarmBeforeCommit;
         volatile boolean commitCalled;
 
         CommitTrackingSharedPreferences(
                 SharedPreferences delegate,
                 String successEvent,
                 boolean failCommit,
-                boolean requireAlarmAlreadyScheduled) {
+                boolean observeSpecificAlarmBeforeCommit) {
             this.delegate = delegate;
             this.successEvent = successEvent;
             this.failCommit = failCommit;
-            this.requireAlarmAlreadyScheduled = requireAlarmAlreadyScheduled;
+            this.observeSpecificAlarmBeforeCommit = observeSpecificAlarmBeforeCommit;
         }
 
-        private void recordAlarmIfNeeded() {
-            if (!requireAlarmAlreadyScheduled) {
+        private void recordSpecificAlarmIfPresent() {
+            if (!observeSpecificAlarmBeforeCommit) {
                 return;
             }
             if (events.contains("alarmScheduled")) {
                 return;
             }
-            AlarmManager am = (AlarmManager) baseContext.getSystemService(Context.ALARM_SERVICE);
-            ShadowAlarmManager shadow = Shadows.shadowOf(am);
-            if (shadow.getScheduledAlarms() != null && !shadow.getScheduledAlarms().isEmpty()) {
+            if (hasScheduledAlarmForNotifId(baseContext, NOTIF_ID)) {
                 events.add("alarmScheduled");
             }
         }
@@ -271,7 +310,8 @@ public class TimedNotificationPublisherAtomicityTest {
                 @Override
                 public boolean commit() {
                     commitCalled = true;
-                    recordAlarmIfNeeded();
+                    // Observe AlarmManager state *before* recording storage success.
+                    recordSpecificAlarmIfPresent();
                     if (failCommit) {
                         return false;
                     }
@@ -285,7 +325,7 @@ public class TimedNotificationPublisherAtomicityTest {
                 @Override
                 public void apply() {
                     commitCalled = true;
-                    recordAlarmIfNeeded();
+                    recordSpecificAlarmIfPresent();
                     if (!failCommit) {
                         real.apply();
                         events.add(successEvent);
@@ -322,10 +362,12 @@ public class TimedNotificationPublisherAtomicityTest {
 
         assertTrue("AlarmManager success must keep the notification", kept);
 
-        // Alarm was scheduled (observed when storage commit was attempted).
         assertTrue(
-                "AlarmManager must have scheduled before storage commit attempt: " + events,
+                "specific NOTIF_ID must be scheduled before storage commit attempt: " + events,
                 events.contains("alarmScheduled"));
+        assertTrue(
+                "ShadowAlarmManager must hold NOTIF_ID after AM success",
+                hasScheduledAlarmForNotifId(baseContext, NOTIF_ID));
         assertFalse(events.contains("notificationStorageCommitted"));
         assertFalse(events.contains("reArmEvidenceCommitted"));
         assertFalse(
@@ -360,6 +402,7 @@ public class TimedNotificationPublisherAtomicityTest {
         assertTrue(kept);
         assertTrue(ctx.notificationStore.commitCalled);
         assertTrue(ctx.recurrenceStore.commitCalled);
+        assertTrue(hasScheduledAlarmForNotifId(baseContext, NOTIF_ID));
 
         long next =
                 DoseReminderRecurrenceStore.getNextOccurrenceMs(ctx, MED_ID, DOSE_ID);
@@ -393,9 +436,11 @@ public class TimedNotificationPublisherAtomicityTest {
             fail("missing ordered events: " + events);
         }
         assertTrue(
-                "AlarmManager before NotificationStorage: " + events, iAlarm < iStore);
+                "specific NOTIF_ID alarm before NotificationStorage: " + events,
+                iAlarm < iStore);
         assertTrue(
                 "NotificationStorage before markReArmed: " + events, iStore < iReArm);
+        assertTrue(hasScheduledAlarmForNotifId(baseContext, NOTIF_ID));
 
         long next =
                 DoseReminderRecurrenceStore.getNextOccurrenceMs(ctx, MED_ID, DOSE_ID);

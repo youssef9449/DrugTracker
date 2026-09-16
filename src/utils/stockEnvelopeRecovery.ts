@@ -151,6 +151,32 @@ export function recoverAllPendingStockEnvelopes(
   let recovered = false;
   let blocked = false;
   const exactToAcknowledge: UnifiedRecoveryResult['exactToAcknowledge'] = [];
+  const ackSeen = new Set<string>();
+
+  const collectExactAcks = (
+    acks: PendingEnvelopeRef['toAcknowledge'] | undefined
+  ): void => {
+    if (!acks?.length) return;
+    for (const a of acks) {
+      const key = `${a.medicationId}${a.doseId}${a.calendarDate}`;
+      if (ackSeen.has(key)) continue;
+      ackSeen.add(key);
+      exactToAcknowledge.push(a);
+    }
+  };
+
+  /**
+   * Attempt envelope clear. On failure: keep evidence, do not re-apply snapshot
+   * when mutation is already finalized; do not treat as fully recovered clear.
+   */
+  const tryClear = (env: PendingEnvelopeRef): boolean => {
+    const err = env.clear();
+    if (err) {
+      blocked = true;
+      return false;
+    }
+    return true;
+  };
 
   if (!pending.length) {
     return { state, exactToAcknowledge, recovered: false, blocked: false };
@@ -158,12 +184,17 @@ export function recoverAllPendingStockEnvelopes(
 
   let lastApplied = loadLastAppliedMutationSeq();
 
-  // Cleanup: envelopes already covered by lastApplied — finalize-only clear.
+  // Cleanup: envelopes already covered by lastApplied — collect Exact Auto ACKs
+  // before clear so native markReconciled is not lost with the envelope.
   for (const env of pending) {
     if (env.mutationSeq > 0 && env.mutationSeq <= lastApplied) {
-      // Already finalized causally — clear recovery evidence only.
-      env.clear();
-      recovered = true;
+      if (env.kind === 'exact_auto') {
+        collectExactAcks(env.toAcknowledge);
+      }
+      if (tryClear(env)) {
+        recovered = true;
+      }
+      // clear failure: leave envelope; lastApplied proves mutation done — no re-apply
     }
   }
 
@@ -173,38 +204,39 @@ export function recoverAllPendingStockEnvelopes(
     .sort((a, b) => b.mutationSeq - a.mutationSeq);
 
   for (const env of above) {
-    // Re-check lastApplied — a prior higher finalize may have advanced it.
     lastApplied = loadLastAppliedMutationSeq();
     if (env.mutationSeq <= lastApplied) {
-      env.clear();
-      recovered = true;
+      if (env.kind === 'exact_auto') {
+        collectExactAcks(env.toAcknowledge);
+      }
+      if (tryClear(env)) {
+        recovered = true;
+      }
       continue;
     }
 
-    // While a strictly higher pending still needs work, do not apply lower.
     const higherStillPending = above.some(
       (h) =>
         h.mutationSeq > env.mutationSeq &&
         h.mutationSeq > loadLastAppliedMutationSeq()
     );
     if (higherStillPending) {
-      // Leave lower envelope intact; higher must complete first.
       continue;
     }
 
-    // This is the highest unresolved pending snapshot.
     if (durableMatchesEnvelopeSnapshot(env, state)) {
       const finErr = finalizeMutationSeq(env.mutationSeq);
       if (finErr) {
         blocked = true;
         break;
       }
-      env.clear();
-      recovered = true;
-      lastApplied = loadLastAppliedMutationSeq();
-      if (env.kind === 'exact_auto' && env.toAcknowledge) {
-        exactToAcknowledge.push(...env.toAcknowledge);
+      if (env.kind === 'exact_auto') {
+        collectExactAcks(env.toAcknowledge);
       }
+      if (tryClear(env)) {
+        recovered = true;
+      }
+      lastApplied = loadLastAppliedMutationSeq();
       continue;
     }
 
@@ -217,19 +249,27 @@ export function recoverAllPendingStockEnvelopes(
       break;
     }
     state = { medications: env.medications, logs: env.logs };
-    env.clear();
-    recovered = true;
-    lastApplied = loadLastAppliedMutationSeq();
-    if (env.kind === 'exact_auto' && env.toAcknowledge) {
-      exactToAcknowledge.push(...env.toAcknowledge);
+    if (env.kind === 'exact_auto') {
+      collectExactAcks(env.toAcknowledge);
     }
+    if (tryClear(env)) {
+      recovered = true;
+    }
+    // clear failure after successful commit+finalize: mutation is durable;
+    // next recovery sees seq <= lastApplied and retries clear only.
+    lastApplied = loadLastAppliedMutationSeq();
   }
 
-  // After highest resolved, clear any lower still present if now covered.
+  // Final cleanup for any remaining covered envelopes.
   lastApplied = loadLastAppliedMutationSeq();
   for (const env of pending) {
     if (env.mutationSeq > 0 && env.mutationSeq <= lastApplied) {
-      env.clear();
+      if (env.kind === 'exact_auto') {
+        collectExactAcks(env.toAcknowledge);
+      }
+      if (tryClear(env)) {
+        recovered = true;
+      }
     }
   }
 

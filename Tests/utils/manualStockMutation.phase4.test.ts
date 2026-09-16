@@ -1029,6 +1029,100 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     expect(durable.medications[0].currentPills).not.toBe(9);
   });
 
+
+  it('Exact Auto envelope seq<=lastApplied still returns toAcknowledge for orchestrator ACK', async () => {
+    // Simulate finalized mutation (lastApplied covers seq) but envelope still present.
+    durable = { medications: [med({ currentPills: 8 })], logs: [] };
+    let lastApplied = 11;
+    let nextSeq = 11;
+    __setStockMutationOrderingTestHooks({
+      loadLastApplied: () => lastApplied,
+      persistLastApplied: (seq) => {
+        lastApplied = seq;
+        return null;
+      },
+      allocate: () => {
+        nextSeq += 1;
+        return { ok: true, seq: nextSeq };
+      },
+    });
+
+    let exactEnv: {
+      version: 1;
+      status: 'js_ready';
+      medications: ReturnType<typeof med>[];
+      logs: [];
+      toAcknowledge: Array<{ medicationId: string; doseId: string; calendarDate: string }>;
+      createdAt: string;
+      mutationSeq: number;
+    } | null = {
+      version: 1,
+      status: 'js_ready',
+      medications: [med({ currentPills: 8 })],
+      logs: [],
+      toAcknowledge: [
+        { medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY },
+        { medicationId: 'med-1', doseId: 'd2', calendarDate: TODAY },
+      ],
+      createdAt: new Date().toISOString(),
+      mutationSeq: 11,
+    };
+
+    marked = [];
+    const recon = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        marked.push(`${medicationId}|${doseId}|${calendarDate}`);
+        return { ok: true, changed: true };
+      },
+      loadEnvelope: () => exactEnv,
+      saveEnvelope: (env) => {
+        exactEnv = env as typeof exactEnv;
+        return null;
+      },
+    });
+
+    expect(marked).toEqual([
+      `med-1|d1|${TODAY}`,
+      `med-1|d2|${TODAY}`,
+    ]);
+    expect(recon.markedCount).toBe(2);
+    expect(exactEnv).toBeNull();
+    // No stock mutation on cleanup-only path.
+    expect(durable.medications[0].currentPills).toBe(8);
+  });
+
+  it('clear failure after finalization does not re-apply; retry clears only', async () => {
+    failClear = true;
+    const first = await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+    });
+    // Commit+lastApplied succeed; clear fails → envelope may remain.
+    expect(first.outcome).toBe('applied');
+    expect(durable.medications[0].currentPills).toBe(9);
+    expect(manualEnvelope).not.toBeNull();
+    const logCount = durable.logs.length;
+
+    failClear = false;
+    marked = [];
+    await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        marked.push(`${medicationId}|${doseId}|${calendarDate}`);
+        return { ok: true, changed: true };
+      },
+    });
+    expect(manualEnvelope).toBeNull();
+    expect(durable.medications[0].currentPills).toBe(9);
+    expect(durable.logs.length).toBe(logCount);
+    expect(marked).toEqual([]);
+  });
+
 describe('shouldDismissAlarmAfterManualTake', () => {
   it('dismisses only for applied and already_consumed; never persist_failed', () => {
     expect(shouldDismissAlarmAfterManualTake('applied')).toBe(true);

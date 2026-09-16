@@ -90,7 +90,7 @@ export const DOSE_REMINDER_FOREGROUND_CHANNEL_ID = 'dose-reminder-foreground-v1'
 //   background → DOSE_REMINDER_CHANNEL_ID (system default sound)
 //
 // The scheduler (useDoseReminderScheduler) re-arms all pending dose
-// reminders on every lifecycle transition (via lifecycleTick), so the
+// reminders via idempotent reconciliation (lifecycleTick), so the
 // channel matches the current app state for the common case.
 //
 // IMPORTANT — schedule-time channel is not a hard guarantee under
@@ -975,39 +975,20 @@ export async function scheduleCriticalAlarm(
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Recurring daily dose-reminder alarm (AlarmManager-backed).
+// Daily dose-reminder alarm (AlarmManager-backed).
 //
-// This is the NATIVE complement to the in-app polling in useDoseReminders.
-// The polling only fires while the app is in the foreground; this native
-// schedule fires the dose reminder at the medication's reminderTime EVERY
-// DAY via Android's AlarmManager (or iOS's UNUserNotificationCenter), even
-// when the app is killed or the device is in Doze. The user sees the
-// reminder in their notification drawer without ever opening the app.
+// Architecture (Capacitor local-notifications 6.1.3 Android):
+// - JS schedules a ONE-SHOT exact alarm at the next due `at` time
+//   (stable id = medicationId + doseId). Does NOT use repeats:true
+//   (that path calls AlarmManager.setRepeating with interval=at-now).
+// - TimedNotificationPublisher is the sole recurrence owner: on delivery
+//   it arms exactly one next-day alarm at extra.reminderTime.
+// - useDoseReminderScheduler performs idempotent reconciliation against
+//   LocalNotifications.getPending() — lifecycle must not cancel+reschedule
+//   when the stable id is already pending.
 //
-// The recurring notification uses a SEPARATE id band (doseAlarm = 6M)
-// from the immediate dose notification (dose = 3M) so the two never
-// collide. The useDoseReminderScheduler hook cancels + reschedules
-// whenever a med's reminder config changes (reminderEnabled, reminderTime,
-// med deleted, notifications disabled), with the same race-protection
-// pattern as useCriticalAlarmScheduler (generation counter + per-med
-// serialization chain).
-//
-// When the notification fires:
-//   - App in background/killed: shown in the system notification tray
-//     with the channel's bundled native sound.
-//   - App in foreground: the localNotificationReceived listener in
-//     native.ts opens the DoseAlarmModal. No JS sound — the native
-//     channel sound is the sole sound.
-//
-// Boot persistence: scheduled notifications are persisted by the
-// @capacitor/local-notifications plugin and re-armed on BOOT_COMPLETED.
-// ─────────────────────────────────────────────────────────────────────
+// Id band doseAlarm (6M) is separate from immediate dose (3M).
 
-/**
- * Sentinel dose id used for legacy medications that only have
- * `reminderTime` (no `doseSchedule`). Maps to the historical
- * med-only notification id so existing single-dose alarms keep working.
- */
 export const LEGACY_DOSE_ID = 'legacy';
 
 /**
@@ -1074,6 +1055,45 @@ export async function cancelLegacyDoseReminderAlarm(medId: string): Promise<void
     });
   } catch (err) {
     console.warn('[notifications] cancelLegacyDoseReminderAlarm failed:', err);
+  }
+}
+
+function isDoseAlarmBandId(id: number): boolean {
+  const base = NOTIFICATION_ID_BASE.doseAlarm;
+  return id >= base && id < base + ID_RANGE_SIZE;
+}
+
+/**
+ * Pending notification ids in the doseAlarm band (persisted native truth).
+ */
+export async function listPendingDoseReminderAlarmIds(): Promise<number[]> {
+  if (!isNativePlatform()) return [];
+  try {
+    const pending = await LocalNotifications.getPending();
+    return pending.notifications
+      .map((x) => x.id)
+      .filter((id): id is number => typeof id === 'number' && isDoseAlarmBandId(id));
+  } catch (err) {
+    console.warn('[notifications] listPendingDoseReminderAlarmIds failed:', err);
+    return [];
+  }
+}
+
+/**
+ * Cancel pending doseAlarm-band notifications not in keepIds (stale after
+ * process death / dose removal). Does not touch other bands.
+ */
+export async function cancelStaleDoseReminderAlarms(keepIds: ReadonlySet<number>): Promise<void> {
+  if (!isNativePlatform()) return;
+  try {
+    const pendingIds = await listPendingDoseReminderAlarmIds();
+    const toCancel = pendingIds.filter((id) => !keepIds.has(id));
+    if (toCancel.length === 0) return;
+    await LocalNotifications.cancel({
+      notifications: toCancel.map((id) => ({ id })),
+    });
+  } catch (err) {
+    console.warn('[notifications] cancelStaleDoseReminderAlarms failed:', err);
   }
 }
 
@@ -1254,14 +1274,12 @@ export interface ScheduleDoseReminderOptions {
  * Whether today's occurrence of the given HH:MM reminder time is still
  * in the future. Uses the SAME boundary as {@link scheduleDoseReminder}
  * (HH:MM:00.000 strictly after `now`), so "still ahead" means exactly
- * "the pending recurring alarm would still fire today".
+ * "today's one-shot would still fire today".
  *
- * Used by useDoseReminderScheduler to decide whether a consumed dose
- * needs today's recurring alarm suppressed:
- *   - still ahead  → cancel the pending alarm + re-arm from tomorrow.
- *   - already past → the alarm fired (or was suppressed); a fired
- *     notification is never retracted, and the plugin re-armed the
- *     recurring alarm for tomorrow by itself.
+ * Used by useDoseReminderScheduler when suppressing a consumed dose:
+ *   - still ahead → cancel + schedule next with skipToday.
+ *   - already past → do not retract a delivered notification; native
+ *     TimedNotificationPublisher may already have armed tomorrow.
  */
 export function isDoseReminderTimeStillAhead(
   reminderTime: string,
@@ -1277,24 +1295,18 @@ export function isDoseReminderTimeStillAhead(
 }
 
 /**
- * Schedule a recurring daily dose-reminder notification at the given
- * HH:MM (24-hour) time.
+ * Schedule the next one-shot dose-reminder alarm at the given HH:MM.
  *
- * Computes the next fire time (today at HH:MM if it's still in the
- * future, otherwise tomorrow at HH:MM) and schedules a RECURRING daily
- * notification via LocalNotifications. With `repeats: true` +
- * `every: 'day'`, Android's AlarmManager re-arms it automatically
- * every 24 hours at the same time — the app doesn't need to be open.
+ * Next fire: today at HH:MM if still ahead, else tomorrow (or forced
+ * tomorrow when options.skipToday). Uses a stable id
+ * (medicationId + doseId) so reschedule replaces, not duplicates.
  *
- * `options.skipToday` forces the first occurrence to TOMORROW even when
- * today's HH:MM is still ahead — used when today's dose was already
- * consumed, so the re-armed recurring alarm can never fire for the
- * already-taken dose today.
+ * Recurrence: NOT via Capacitor repeats/every (those use setRepeating
+ * with a wrong interval for daily wall-clock times). Native
+ * TimedNotificationPublisher arms the next day from extra.reminderTime.
  *
- * `allowWhileIdle: true` lets the alarm fire even in Doze mode.
- *
- * The notification uses the `dose-reminder-v3` channel, which plays
- * the default system notification sound. No JS sound playback is involved.
+ * `allowWhileIdle: true` lets the alarm fire in Doze mode.
+ * Channel: dose-reminder-v3 / foreground silent variant at delivery.
  */
 export async function scheduleDoseReminder(
   medId: string,
@@ -1334,9 +1346,11 @@ export async function scheduleDoseReminder(
       if (perm.display !== 'granted') {
         throw new Error('Notification permission is required for dose reminders');
       }
-      // Recurrence owner is native TimedNotificationPublisher via CRON_KEY
-      // (repeats:true). Do not also reschedule from JS on delivery/lifecycle.
-      // Same stable id replaces any prior pending entry for this dose slot.
+      // Capacitor 6.1.3: at+repeats:true uses AlarmManager.setRepeating with
+      // interval=(at-now) — NOT daily. Dose reminders schedule a ONE-SHOT `at`.
+      // TimedNotificationPublisher.rescheduleDoseReminderNextDay is the sole
+      // recurrence owner (next calendar day at reminderTime). Same stable id
+      // means concurrent JS schedule replaces rather than duplicates.
       await LocalNotifications.schedule({
         notifications: [
           {
@@ -1345,8 +1359,6 @@ export async function scheduleDoseReminder(
             body,
             schedule: {
               at: fireToday,
-              repeats: true,
-              every: 'day',
               allowWhileIdle: true,
             },
             smallIcon: 'ic_launcher',
@@ -1359,6 +1371,8 @@ export async function scheduleDoseReminder(
               // Phase 3/4: doseId identifies the exact schedule slot for
               // openAlarm / take-dose (legacy omits doseId).
               ...(doseId ? { doseId } : {}),
+              reminderTime,
+              doseRecurring: true,
             },
           },
         ],

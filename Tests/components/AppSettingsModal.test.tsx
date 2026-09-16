@@ -330,3 +330,318 @@ describe('AppSettingsModal — permission guard on toggle ON', () => {
     });
   });
 });
+
+describe('AppSettingsModal — draft-only until Save', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    notifMocks.getPermission.mockResolvedValue('granted');
+    notifMocks.requestPermission.mockResolvedValue(true);
+  });
+  afterEach(() => cleanup());
+
+  it('notifications OFF→ON without Save: draft ON, no onApplyAppPreferences', async () => {
+    const onApplyAppPreferences = vi.fn();
+    const onToggleNotifications = vi.fn();
+    render(
+      <AppSettingsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        settings={mockSettings}
+        medications={[]}
+        onSaveSettings={vi.fn()}
+        soundEnabled={true}
+        notificationsEnabled={false}
+        criticalStockAlertsEnabled={false}
+        onToggleNotifications={onToggleNotifications}
+        onApplyAppPreferences={onApplyAppPreferences}
+      />
+    );
+    const notifSwitch = screen.getByRole('switch', {
+      name: 'التنبيهات متوقفة — انقر للتفعيل',
+    });
+    fireEvent.click(notifSwitch);
+    await waitFor(() => {
+      expect(notifSwitch).toHaveAttribute('aria-checked', 'true');
+    });
+    expect(onApplyAppPreferences).not.toHaveBeenCalled();
+    expect(onToggleNotifications).not.toHaveBeenCalled();
+  });
+
+  it('notifications ON→OFF without Save: draft OFF, no onApplyAppPreferences', async () => {
+    const onApplyAppPreferences = vi.fn();
+    const onToggleNotifications = vi.fn();
+    render(
+      <AppSettingsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        settings={mockSettings}
+        medications={[]}
+        onSaveSettings={vi.fn()}
+        soundEnabled={true}
+        notificationsEnabled={true}
+        criticalStockAlertsEnabled={true}
+        onToggleNotifications={onToggleNotifications}
+        onApplyAppPreferences={onApplyAppPreferences}
+      />
+    );
+    const notifSwitch = screen.getByRole('switch', {
+      name: 'التنبيهات مفعلة — انقر للإيقاف',
+    });
+    fireEvent.click(notifSwitch);
+    await waitFor(() => {
+      expect(notifSwitch).toHaveAttribute('aria-checked', 'false');
+    });
+    expect(onApplyAppPreferences).not.toHaveBeenCalled();
+    expect(onToggleNotifications).not.toHaveBeenCalled();
+  });
+
+  it('notifications OFF→ON with Save commits true only on Save', async () => {
+    const onApplyAppPreferences = vi.fn();
+    render(
+      <AppSettingsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        settings={mockSettings}
+        medications={[]}
+        onSaveSettings={vi.fn()}
+        soundEnabled={true}
+        notificationsEnabled={false}
+        criticalStockAlertsEnabled={false}
+        onApplyAppPreferences={onApplyAppPreferences}
+      />
+    );
+    const notifSwitch = screen.getByRole('switch', {
+      name: 'التنبيهات متوقفة — انقر للتفعيل',
+    });
+    fireEvent.click(notifSwitch);
+    await waitFor(() => {
+      expect(notifSwitch).toHaveAttribute('aria-checked', 'true');
+    });
+    expect(onApplyAppPreferences).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'حفظ الإعدادات' }));
+    await waitFor(() => {
+      expect(onApplyAppPreferences).toHaveBeenCalledTimes(1);
+      expect(onApplyAppPreferences).toHaveBeenCalledWith(
+        expect.objectContaining({ notificationsEnabled: true })
+      );
+    });
+  });
+
+  it('notifications ON→OFF with Save commits false only on Save', async () => {
+    const onApplyAppPreferences = vi.fn();
+    render(
+      <AppSettingsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        settings={mockSettings}
+        medications={[]}
+        onSaveSettings={vi.fn()}
+        soundEnabled={true}
+        notificationsEnabled={true}
+        criticalStockAlertsEnabled={true}
+        onApplyAppPreferences={onApplyAppPreferences}
+      />
+    );
+    const notifSwitch = screen.getByRole('switch', {
+      name: 'التنبيهات مفعلة — انقر للإيقاف',
+    });
+    fireEvent.click(notifSwitch);
+    expect(notifSwitch).toHaveAttribute('aria-checked', 'false');
+    expect(onApplyAppPreferences).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'حفظ الإعدادات' }));
+    await waitFor(() => {
+      expect(onApplyAppPreferences).toHaveBeenCalledWith(
+        expect.objectContaining({ notificationsEnabled: false })
+      );
+    });
+  });
+
+  it('critical OFF→ON without Save: draft ON, no onApplyAppPreferences', async () => {
+    const onApplyAppPreferences = vi.fn();
+    const onToggleCriticalStockAlerts = vi.fn();
+    render(
+      <AppSettingsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        settings={mockSettings}
+        medications={[]}
+        onSaveSettings={vi.fn()}
+        soundEnabled={true}
+        notificationsEnabled={false}
+        criticalStockAlertsEnabled={false}
+        onToggleCriticalStockAlerts={onToggleCriticalStockAlerts}
+        onApplyAppPreferences={onApplyAppPreferences}
+      />
+    );
+    const criticalSwitch = screen.getByRole('switch', {
+      name: 'تنبيهات المخزون الحرج متوقفة — انقر للتفعيل',
+    });
+    fireEvent.click(criticalSwitch);
+    await waitFor(() => {
+      expect(criticalSwitch).toHaveAttribute('aria-checked', 'true');
+    });
+    expect(onApplyAppPreferences).not.toHaveBeenCalled();
+    expect(onToggleCriticalStockAlerts).not.toHaveBeenCalled();
+  });
+
+  it('critical ON→OFF without Save: draft OFF, no onApplyAppPreferences', async () => {
+    const onApplyAppPreferences = vi.fn();
+    const onToggleCriticalStockAlerts = vi.fn();
+    render(
+      <AppSettingsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        settings={mockSettings}
+        medications={[]}
+        onSaveSettings={vi.fn()}
+        soundEnabled={true}
+        notificationsEnabled={true}
+        criticalStockAlertsEnabled={true}
+        onToggleCriticalStockAlerts={onToggleCriticalStockAlerts}
+        onApplyAppPreferences={onApplyAppPreferences}
+      />
+    );
+    const criticalSwitch = screen.getByRole('switch', {
+      name: 'تنبيهات المخزون الحرج مفعلة — انقر للإيقاف',
+    });
+    fireEvent.click(criticalSwitch);
+    expect(criticalSwitch).toHaveAttribute('aria-checked', 'false');
+    expect(onApplyAppPreferences).not.toHaveBeenCalled();
+    expect(onToggleCriticalStockAlerts).not.toHaveBeenCalled();
+  });
+
+  it('critical OFF→ON with Save commits true only on Save', async () => {
+    const onApplyAppPreferences = vi.fn();
+    render(
+      <AppSettingsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        settings={mockSettings}
+        medications={[]}
+        onSaveSettings={vi.fn()}
+        soundEnabled={true}
+        notificationsEnabled={false}
+        criticalStockAlertsEnabled={false}
+        onApplyAppPreferences={onApplyAppPreferences}
+      />
+    );
+    const criticalSwitch = screen.getByRole('switch', {
+      name: 'تنبيهات المخزون الحرج متوقفة — انقر للتفعيل',
+    });
+    fireEvent.click(criticalSwitch);
+    await waitFor(() => {
+      expect(criticalSwitch).toHaveAttribute('aria-checked', 'true');
+    });
+    expect(onApplyAppPreferences).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'حفظ الإعدادات' }));
+    await waitFor(() => {
+      expect(onApplyAppPreferences).toHaveBeenCalledWith(
+        expect.objectContaining({ criticalStockAlertsEnabled: true })
+      );
+    });
+  });
+
+  it('critical ON→OFF with Save commits false only on Save', async () => {
+    const onApplyAppPreferences = vi.fn();
+    render(
+      <AppSettingsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        settings={mockSettings}
+        medications={[]}
+        onSaveSettings={vi.fn()}
+        soundEnabled={true}
+        notificationsEnabled={true}
+        criticalStockAlertsEnabled={true}
+        onApplyAppPreferences={onApplyAppPreferences}
+      />
+    );
+    const criticalSwitch = screen.getByRole('switch', {
+      name: 'تنبيهات المخزون الحرج مفعلة — انقر للإيقاف',
+    });
+    fireEvent.click(criticalSwitch);
+    expect(criticalSwitch).toHaveAttribute('aria-checked', 'false');
+    expect(onApplyAppPreferences).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'حفظ الإعدادات' }));
+    await waitFor(() => {
+      expect(onApplyAppPreferences).toHaveBeenCalledWith(
+        expect.objectContaining({ criticalStockAlertsEnabled: false })
+      );
+    });
+  });
+
+  it('toggle then Close without Save discards draft; reopen shows committed values', async () => {
+    const onApplyAppPreferences = vi.fn();
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <AppSettingsModal
+        isOpen={true}
+        onClose={onClose}
+        settings={mockSettings}
+        medications={[]}
+        onSaveSettings={vi.fn()}
+        soundEnabled={true}
+        notificationsEnabled={false}
+        criticalStockAlertsEnabled={false}
+        onApplyAppPreferences={onApplyAppPreferences}
+      />
+    );
+    const notifSwitch = screen.getByRole('switch', {
+      name: 'التنبيهات متوقفة — انقر للتفعيل',
+    });
+    const criticalSwitch = screen.getByRole('switch', {
+      name: 'تنبيهات المخزون الحرج متوقفة — انقر للتفعيل',
+    });
+    fireEvent.click(notifSwitch);
+    fireEvent.click(criticalSwitch);
+    await waitFor(() => {
+      expect(notifSwitch).toHaveAttribute('aria-checked', 'true');
+      expect(criticalSwitch).toHaveAttribute('aria-checked', 'true');
+    });
+    expect(onApplyAppPreferences).not.toHaveBeenCalled();
+
+    // Close without Save (parent still false/false).
+    fireEvent.click(screen.getByRole('button', { name: 'إغلاق' }));
+    expect(onClose).toHaveBeenCalled();
+    expect(onApplyAppPreferences).not.toHaveBeenCalled();
+
+    // Reopen: drafts reset from committed parent props (still false).
+    rerender(
+      <AppSettingsModal
+        isOpen={false}
+        onClose={onClose}
+        settings={mockSettings}
+        medications={[]}
+        onSaveSettings={vi.fn()}
+        soundEnabled={true}
+        notificationsEnabled={false}
+        criticalStockAlertsEnabled={false}
+        onApplyAppPreferences={onApplyAppPreferences}
+      />
+    );
+    rerender(
+      <AppSettingsModal
+        isOpen={true}
+        onClose={onClose}
+        settings={mockSettings}
+        medications={[]}
+        onSaveSettings={vi.fn()}
+        soundEnabled={true}
+        notificationsEnabled={false}
+        criticalStockAlertsEnabled={false}
+        onApplyAppPreferences={onApplyAppPreferences}
+      />
+    );
+    await waitFor(() => {
+      expect(
+        screen.getByRole('switch', { name: 'التنبيهات متوقفة — انقر للتفعيل' })
+      ).toHaveAttribute('aria-checked', 'false');
+      expect(
+        screen.getByRole('switch', {
+          name: 'تنبيهات المخزون الحرج متوقفة — انقر للتفعيل',
+        })
+      ).toHaveAttribute('aria-checked', 'false');
+    });
+    expect(onApplyAppPreferences).not.toHaveBeenCalled();
+  });
+});

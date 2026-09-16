@@ -26,10 +26,7 @@ import {
   commitDurableAutoStockState,
   type AutoStockDurableState,
 } from './autoDeductionStockGate';
-import {
-  loadManualStockEnvelope,
-  saveManualStockEnvelope,
-} from './manualStockMutation';
+import { recoverManualEnvelopeInto } from './manualStockMutation';
 import { loadJson, persist } from './storage';
 
 const STORAGE_ENVELOPE_KEY = 'android_med_tracker_exact_auto_envelope_v1';
@@ -202,33 +199,24 @@ async function runOnce(
   let baseMeds = input.medications ?? fresh.medications;
   let baseLogs = input.logs ?? fresh.logs;
 
-  // ── Manual JS envelope recovery (Phase 4) — meds+logs only, never native ACK ──
-  // Manual Take/Restore may have crashed between meds and logs writes. Finish
-  // that JS durable pair here without markReconciled (Exact Auto owns native ACK).
+  // ── Manual JS envelope recovery (Phase 4) — meds+logs pair only, never native ACK ──
+  // Uses the same durable-pair semantics as withAutoStockMutationGate.
+  // Envelope cleared only after both meds and logs succeed. Exact Auto alone
+  // ACKs real FIRED events after this recovered state is in baseMeds/baseLogs.
   if (!(input.medications || input.logs)) {
-    const manualEnv = loadManualStockEnvelope();
-    if (manualEnv) {
-      let manualWriteFailed = false;
-      if (input.persistMeds || input.persistLogs) {
-        const medErr = input.persistMeds
-          ? input.persistMeds(manualEnv.medications)
-          : null;
-        const logErr = input.persistLogs ? input.persistLogs(manualEnv.logs) : null;
-        manualWriteFailed = !!(medErr || logErr);
-      } else {
-        manualWriteFailed = !!commitDurableAutoStockState({
-          medications: manualEnv.medications,
-          logs: manualEnv.logs,
-        });
+    const manualRecovered = recoverManualEnvelopeInto(
+      { medications: baseMeds, logs: baseLogs },
+      {
+        persistMeds: input.persistMeds,
+        persistLogs: input.persistLogs,
       }
-      if (!manualWriteFailed) {
-        saveManualStockEnvelope(null);
-        baseMeds = manualEnv.medications;
-        baseLogs = manualEnv.logs;
-      }
-      // If manual write still fails, leave Manual envelope; Exact Auto path continues
-      // on whatever durable base is available (markers may already be in meds).
+    );
+    if (manualRecovered.ok) {
+      baseMeds = manualRecovered.state.medications;
+      baseLogs = manualRecovered.state.logs;
     }
+    // On failure: Manual envelope remains; continue with current durable base
+    // (markers may already be in meds from the partial write).
   }
 
   // ── Exact Auto envelope recovery (incomplete prior exact reconciliation) ──

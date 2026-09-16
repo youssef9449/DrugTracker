@@ -146,30 +146,55 @@ function resolveConsumeDoseId(med: Medication, doseId?: string): string | undefi
 }
 
 /**
- * Finish a prior Manual partial write: meds+logs only. Never markReconciled.
+ * Persist Manual recovered meds+logs as one durable pair.
+ * Envelope must only be cleared by the caller after this returns null.
+ * Never calls markReconciled.
  */
-function recoverManualEnvelopeInto(
-  fresh: AutoStockDurableState
+export function persistManualRecoveredPair(
+  state: AutoStockDurableState,
+  opts?: {
+    /** Test injectors: both required; failure of either keeps envelope. */
+    persistMeds?: (meds: Medication[]) => string | null;
+    persistLogs?: (logs: ConsumptionLog[]) => string | null;
+  }
+): string | null {
+  if (opts?.persistMeds && opts?.persistLogs) {
+    const medErr = opts.persistMeds(state.medications);
+    if (medErr) return medErr;
+    const logErr = opts.persistLogs(state.logs);
+    if (logErr) return logErr;
+    return null;
+  }
+  // Production path: same meds-then-logs contract as withAutoStockMutationGate.
+  return commitDurableAutoStockState(state);
+}
+
+/**
+ * Finish a prior Manual partial write: meds+logs only. Never markReconciled.
+ * Clears Manual envelope only after both durable writes succeed.
+ */
+export function recoverManualEnvelopeInto(
+  fresh: AutoStockDurableState,
+  opts?: {
+    persistMeds?: (meds: Medication[]) => string | null;
+    persistLogs?: (logs: ConsumptionLog[]) => string | null;
+  }
 ): { ok: true; state: AutoStockDurableState } | { ok: false; state: AutoStockDurableState } {
   const existing = loadManualStockEnvelope();
   if (!existing) {
     return { ok: true, state: fresh };
   }
-  const err = commitDurableAutoStockState({
+  const pair: AutoStockDurableState = {
     medications: existing.medications,
     logs: existing.logs,
-  });
+  };
+  const err = persistManualRecoveredPair(pair, opts);
   if (err) {
+    // Leave Manual envelope for retry; do not ACK native.
     return { ok: false, state: fresh };
   }
   saveManualStockEnvelope(null);
-  return {
-    ok: true,
-    state: {
-      medications: existing.medications,
-      logs: existing.logs,
-    },
-  };
+  return { ok: true, state: pair };
 }
 
 /**

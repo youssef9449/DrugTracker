@@ -8,7 +8,7 @@
 |------|------|
 | `TimedNotificationPublisher.java` | Capacitor 6.1.3 receiver + delivery-time channel selection + next-day dose re-arm |
 | `AppForegroundState.java` | Process-local `volatile` foreground flag (default `false`) |
-| `DoseReminderRecurrenceStore.java` | Temporary medicationId+doseId+reminderTime delivery evidence after successful AlarmManager re-arm |
+| `DoseReminderRecurrenceStore.java` | Occurrence-scoped delivery evidence; valid only while NOTIFICATION_STORE still holds matching future schedule.at |
 
 App lifecycle wiring lives in `native-android/app/MainActivity.java`
 (`onResume` → true, `onPause` → false). Query bridge: `DoseReminderPlugin`
@@ -19,7 +19,7 @@ App lifecycle wiring lives in `native-android/app/MainActivity.java`
 ```text
 JS → initial ONE-SHOT LocalNotifications.schedule (no repeats)
 TimedNotificationPublisher → next calendar-day AlarmManager arm
-DoseReminderRecurrenceStore → temporary evidence for that exact next occurrence (after AlarmManager success only; invalid when config mismatches)
+DoseReminderRecurrenceStore → occurrence evidence (after AlarmManager+NotificationStorage persist); invalid when storage gone, config mismatches, or occurrence spent
 ```
 
 JS reconciliation must not treat `getPending() === false` alone as “needs repair”

@@ -286,7 +286,7 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
             // cleared on cancel / config change. Valid only while future + config match.
             if (medicationId != null && !medicationId.isEmpty()) {
                 DoseReminderRecurrenceStore.markReArmed(
-                        context, medicationId, doseId, trigger, reminderTime);
+                        context, medicationId, doseId, trigger, reminderTime, id);
             }
             return true;
         } catch (Exception e) {

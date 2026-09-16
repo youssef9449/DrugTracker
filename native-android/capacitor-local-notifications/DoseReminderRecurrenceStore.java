@@ -3,6 +3,9 @@ package com.capacitorjs.plugins.localnotifications;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
+import java.util.Calendar;
+import java.util.Locale;
+import java.util.Map;
 import org.json.JSONObject;
 
 /**
@@ -11,18 +14,26 @@ import org.json.JSONObject;
  * AlarmManager.
  *
  * <p>Not a durable proof that the AlarmManager alarm still exists. Keyed by
- * {@code medicationId + doseId}. Each entry records the armed next occurrence
- * and the source schedule identity ({@code reminderTime} HH:MM) so validation
- * can reject stale evidence after config change.
+ * {@code medicationId + doseId}. Each entry records one occurrence identity:
+ * nextOccurrenceMs, nextCalendarDate, reminderTime (HH:MM), and the native
+ * notification id used for that arm.
  *
- * <p>Written only after AlarmManager.set* succeeds. Cleared on cancel /
- * recurrence change. JS must pass the current desired {@code reminderTime}
- * when querying validity.
+ * <p>{@link #isValidReArm} is true only when the entry matches the current dose
+ * config <em>and</em> Capacitor {@code NOTIFICATION_STORE} still holds a future
+ * {@code schedule.at} for the same notification id (same source of truth
+ * {@code getPending()} uses). If the alarm/storage was wiped without
+ * {@link #clear}, evidence is invalid so JS can repair.
+ *
+ * <p>Written only after AlarmManager.set* and NotificationStorage persist
+ * succeed. Cleared on cancel / recurrence change.
  */
 public final class DoseReminderRecurrenceStore {
 
     /** SharedPreferences file name (app-private). */
     public static final String PREFS_NAME = "dose_reminder_recurrence";
+
+    /** Must match Capacitor NotificationStorage.NOTIFICATION_STORE_ID. */
+    static final String NOTIFICATION_STORE_PREFS = "NOTIFICATION_STORE";
 
     private static final String KEY_PREFIX = "rearm:";
     private static final String LEGACY_DOSE_SENTINEL = "__legacy__";
@@ -46,18 +57,19 @@ public final class DoseReminderRecurrenceStore {
 
     /**
      * Record a successful next-day re-arm for one occurrence. Call only after
-     * AlarmManager.set* returns without throwing.
+     * AlarmManager.set* and NotificationStorage persist succeed.
      *
      * @param nextOccurrenceMs wall-clock trigger of the armed occurrence
      * @param reminderTime     HH:MM schedule identity that produced this arm
-     *                         (must match current dose config for validity)
+     * @param notificationId   stable dose-alarm id (PendingIntent request code)
      */
     public static void markReArmed(
             Context context,
             String medicationId,
             String doseId,
             long nextOccurrenceMs,
-            String reminderTime
+            String reminderTime,
+            int notificationId
     ) {
         if (context == null || nextOccurrenceMs <= 0) {
             return;
@@ -74,6 +86,13 @@ public final class DoseReminderRecurrenceStore {
             if (normalizedTime == null) {
                 return;
             }
+            String nextDate = calendarDateOf(nextOccurrenceMs);
+            // Integrity: nextOccurrenceMs local HH:MM must match reminderTime.
+            if (!occurrenceTimeMatches(nextOccurrenceMs, normalizedTime)) {
+                Log.w("LN", "DoseReminderRecurrenceStore: nextOccurrenceMs HH:MM mismatch; skip mark");
+                return;
+            }
+
             JSONObject obj = new JSONObject();
             obj.put("medicationId", medicationId);
             obj.put(
@@ -81,14 +100,8 @@ public final class DoseReminderRecurrenceStore {
                     (doseId == null || doseId.isEmpty()) ? LEGACY_DOSE_SENTINEL : doseId);
             obj.put("nextOccurrenceMs", nextOccurrenceMs);
             obj.put("reminderTime", normalizedTime);
-            // Calendar day of the armed next occurrence (yyyy-MM-dd local).
-            java.util.Calendar cal = java.util.Calendar.getInstance();
-            cal.setTimeInMillis(nextOccurrenceMs);
-            int y = cal.get(java.util.Calendar.YEAR);
-            int m = cal.get(java.util.Calendar.MONTH) + 1;
-            int day = cal.get(java.util.Calendar.DAY_OF_MONTH);
-            String nextDate = String.format(java.util.Locale.US, "%04d-%02d-%02d", y, m, day);
             obj.put("nextCalendarDate", nextDate);
+            obj.put("notificationId", notificationId);
 
             SharedPreferences prefs =
                     context.getApplicationContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
@@ -100,7 +113,7 @@ public final class DoseReminderRecurrenceStore {
 
     /**
      * Next armed occurrence epoch ms, or {@code -1} if absent / unreadable.
-     * Does not validate schedule match — callers use {@link #isValidReArm}.
+     * Does not validate usability — callers use {@link #isValidReArm}.
      */
     public static long getNextOccurrenceMs(Context context, String medicationId, String doseId) {
         JSONObject obj = readEntry(context, medicationId, doseId);
@@ -110,9 +123,7 @@ public final class DoseReminderRecurrenceStore {
         return obj.optLong("nextOccurrenceMs", -1L);
     }
 
-    /**
-     * Stored reminderTime for this slot, or null if absent.
-     */
+    /** Stored reminderTime for this slot, or null if absent. */
     public static String getStoredReminderTime(Context context, String medicationId, String doseId) {
         JSONObject obj = readEntry(context, medicationId, doseId);
         if (obj == null) {
@@ -123,16 +134,17 @@ public final class DoseReminderRecurrenceStore {
     }
 
     /**
-     * True only when evidence proves a successful re-arm for the *current*
-     * dose recurrence identity:
+     * True only when evidence is usable for the current dose recurrence:
      * <ul>
      *   <li>entry exists for medicationId + doseId</li>
-     *   <li>nextOccurrenceMs still in the future (60s clock skew)</li>
-     *   <li>stored reminderTime matches expectedReminderTime (current config)</li>
-     *   <li>entry medicationId/doseId match the query key</li>
+     *   <li>stored reminderTime matches expectedReminderTime</li>
+     *   <li>nextOccurrenceMs still future (60s skew)</li>
+     *   <li>nextCalendarDate matches the local date of nextOccurrenceMs</li>
+     *   <li>local HH:MM of nextOccurrenceMs matches reminderTime</li>
+     *   <li>NOTIFICATION_STORE still has that notificationId with a future schedule.at
+     *       consistent with nextOccurrenceMs — otherwise evidence is stale and is cleared</li>
      * </ul>
-     * Stale config (time change), expired occurrence, or absent entry → false
-     * so JS can repair. Does not prove AlarmManager still holds the alarm.
+     * SharedPreferences alone never proves the AlarmManager alarm still exists.
      *
      * @param expectedReminderTime current desired HH:MM for this dose slot
      */
@@ -159,14 +171,9 @@ public final class DoseReminderRecurrenceStore {
             if (!storedMed.equals(medicationId)) {
                 return false;
             }
-            String expectedDose =
-                    (doseId == null || doseId.isEmpty() || "__legacy__".equals(doseId))
-                            ? LEGACY_DOSE_SENTINEL
-                            : doseId;
-            String storedDose = obj.optString("doseId", LEGACY_DOSE_SENTINEL);
-            if (!storedDose.equals(expectedDose)
-                    && !(LEGACY_DOSE_SENTINEL.equals(expectedDose)
-                            && (storedDose.isEmpty() || "__legacy__".equals(storedDose)))) {
+            String expectedDose = normalizeDoseId(doseId);
+            String storedDose = normalizeDoseId(obj.optString("doseId", LEGACY_DOSE_SENTINEL));
+            if (!storedDose.equals(expectedDose)) {
                 return false;
             }
             String storedTime = normalizeReminderTime(obj.optString("reminderTime", ""));
@@ -177,8 +184,33 @@ public final class DoseReminderRecurrenceStore {
             if (next <= 0) {
                 return false;
             }
-            // Still the armed future occurrence — past means this evidence is spent.
-            return next > nowMs - 60_000L;
+            if (next <= nowMs - 60_000L) {
+                // Occurrence spent — drop evidence so it cannot linger.
+                clear(context, medicationId, doseId);
+                return false;
+            }
+            String storedDate = obj.optString("nextCalendarDate", "");
+            String dateFromMs = calendarDateOf(next);
+            if (storedDate.isEmpty() || !storedDate.equals(dateFromMs)) {
+                clear(context, medicationId, doseId);
+                return false;
+            }
+            if (!occurrenceTimeMatches(next, storedTime)) {
+                clear(context, medicationId, doseId);
+                return false;
+            }
+            int notificationId = obj.optInt("notificationId", Integer.MIN_VALUE);
+            if (notificationId == Integer.MIN_VALUE) {
+                // Pre-notificationId entries cannot prove storage liveness.
+                clear(context, medicationId, doseId);
+                return false;
+            }
+            if (!notificationStoreHasFutureOccurrence(context, notificationId, next, nowMs)) {
+                // Alarm/storage gone while prefs entry remained — stale; allow repair.
+                clear(context, medicationId, doseId);
+                return false;
+            }
+            return true;
         } catch (Exception e) {
             Log.e("LN", "DoseReminderRecurrenceStore.isValidReArm failed", e);
             return false;
@@ -203,6 +235,75 @@ public final class DoseReminderRecurrenceStore {
         }
     }
 
+    /**
+     * True when Capacitor NOTIFICATION_STORE still has a JSON entry for
+     * {@code notificationId} whose schedule.at is a future time consistent
+     * with {@code expectedNextMs} (within 2 minutes).
+     */
+    static boolean notificationStoreHasFutureOccurrence(
+            Context context,
+            int notificationId,
+            long expectedNextMs,
+            long nowMs
+    ) {
+        if (context == null || notificationId == Integer.MIN_VALUE) {
+            return false;
+        }
+        try {
+            SharedPreferences storage =
+                    context.getApplicationContext()
+                            .getSharedPreferences(NOTIFICATION_STORE_PREFS, Context.MODE_PRIVATE);
+            String raw = storage.getString(Integer.toString(notificationId), null);
+            if (raw == null || raw.isEmpty()) {
+                return false;
+            }
+            JSONObject notif = new JSONObject(raw);
+            JSONObject schedule = notif.optJSONObject("schedule");
+            if (schedule == null) {
+                return false;
+            }
+            String at = schedule.optString("at", "");
+            if (at.isEmpty()) {
+                return false;
+            }
+            long atMs = parseScheduleAtMs(at);
+            if (atMs <= 0) {
+                return false;
+            }
+            if (atMs <= nowMs - 60_000L) {
+                return false;
+            }
+            // Must refer to the same armed occurrence (not an unrelated reschedule).
+            return Math.abs(atMs - expectedNextMs) <= 120_000L;
+        } catch (Exception e) {
+            Log.e("LN", "DoseReminderRecurrenceStore.notificationStore check failed", e);
+            return false;
+        }
+    }
+
+    private static long parseScheduleAtMs(String at) {
+        try {
+            // ISO-8601 written by TimedNotificationPublisher.persistDoseReminderNextAt
+            java.text.SimpleDateFormat iso =
+                    new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", Locale.US);
+            java.util.Date d = iso.parse(at);
+            return d != null ? d.getTime() : -1L;
+        } catch (Exception ignored) {
+            // Fall through
+        }
+        try {
+            return java.time.Instant.parse(at).toEpochMilli();
+        } catch (Exception ignored) {
+            // Fall through
+        }
+        try {
+            long asLong = Long.parseLong(at.trim());
+            return asLong > 0 ? asLong : -1L;
+        } catch (Exception e) {
+            return -1L;
+        }
+    }
+
     private static JSONObject readEntry(Context context, String medicationId, String doseId) {
         if (context == null) {
             return null;
@@ -214,20 +315,86 @@ public final class DoseReminderRecurrenceStore {
         try {
             SharedPreferences prefs =
                     context.getApplicationContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            String raw = prefs.getString(key, null);
-            if (raw == null || raw.isEmpty()) {
-                // Migrate legacy long-only values: treat as absent (cannot validate config).
-                if (prefs.contains(key)) {
-                    // Could be old putLong format — drop so it cannot block repair forever.
-                    prefs.edit().remove(key).commit();
-                }
+            if (!prefs.contains(key)) {
                 return null;
             }
-            return new JSONObject(raw);
+            // Prefer typed inspection so legacy putLong keys are dropped cleanly
+            // (getString on a long value can ClassCastException on some devices).
+            Map<String, ?> all = prefs.getAll();
+            Object rawVal = all.get(key);
+            if (rawVal == null) {
+                prefs.edit().remove(key).commit();
+                return null;
+            }
+            if (rawVal instanceof Number) {
+                // Legacy long-only format — cannot validate config or storage.
+                prefs.edit().remove(key).commit();
+                return null;
+            }
+            if (!(rawVal instanceof String)) {
+                prefs.edit().remove(key).commit();
+                return null;
+            }
+            String raw = ((String) rawVal).trim();
+            if (raw.isEmpty()) {
+                prefs.edit().remove(key).commit();
+                return null;
+            }
+            // Legacy numeric string without JSON structure.
+            if (raw.charAt(0) != '{') {
+                prefs.edit().remove(key).commit();
+                return null;
+            }
+            try {
+                return new JSONObject(raw);
+            } catch (Exception parseErr) {
+                prefs.edit().remove(key).commit();
+                return null;
+            }
         } catch (Exception e) {
             Log.e("LN", "DoseReminderRecurrenceStore.readEntry failed", e);
+            try {
+                String key2 = storeKey(medicationId, doseId);
+                if (key2 != null) {
+                    context.getApplicationContext()
+                            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                            .edit()
+                            .remove(key2)
+                            .commit();
+                }
+            } catch (Exception ignored) {
+                // best-effort purge
+            }
             return null;
         }
+    }
+
+    private static String normalizeDoseId(String doseId) {
+        if (doseId == null || doseId.isEmpty() || "__legacy__".equals(doseId)) {
+            return LEGACY_DOSE_SENTINEL;
+        }
+        return doseId;
+    }
+
+    static String calendarDateOf(long epochMs) {
+        Calendar cal = Calendar.getInstance();
+        cal.setTimeInMillis(epochMs);
+        int y = cal.get(Calendar.YEAR);
+        int m = cal.get(Calendar.MONTH) + 1;
+        int day = cal.get(Calendar.DAY_OF_MONTH);
+        return String.format(Locale.US, "%04d-%02d-%02d", y, m, day);
+    }
+
+    static boolean occurrenceTimeMatches(long occurrenceMs, String normalizedHhmm) {
+        if (normalizedHhmm == null) {
+            return false;
+        }
+        Calendar cal = Calendar.getInstance();
+        cal.setTimeInMillis(occurrenceMs);
+        int hour = cal.get(Calendar.HOUR_OF_DAY);
+        int minute = cal.get(Calendar.MINUTE);
+        String actual = String.format(Locale.US, "%02d:%02d", hour, minute);
+        return actual.equals(normalizedHhmm);
     }
 
     /**
@@ -245,7 +412,6 @@ public final class DoseReminderRecurrenceStore {
         try {
             int hour = Integer.parseInt(t.substring(0, colon));
             String rest = t.substring(colon + 1);
-            // allow optional seconds suffix
             int end = rest.indexOf(':');
             if (end > 0) {
                 rest = rest.substring(0, end);
@@ -254,7 +420,7 @@ public final class DoseReminderRecurrenceStore {
             if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
                 return null;
             }
-            return String.format(java.util.Locale.US, "%02d:%02d", hour, minute);
+            return String.format(Locale.US, "%02d:%02d", hour, minute);
         } catch (NumberFormatException e) {
             return null;
         }

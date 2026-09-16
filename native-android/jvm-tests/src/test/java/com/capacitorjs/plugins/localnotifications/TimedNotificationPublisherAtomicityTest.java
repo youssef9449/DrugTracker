@@ -512,14 +512,88 @@ public class TimedNotificationPublisherAtomicityTest {
         Intent intent = deliveryIntent();
 
         assertTrue(publisher.rescheduleDoseReminderNextDay(ctx, intent, NOTIF_ID, json));
-        long first =
+        long firstNext =
                 DoseReminderRecurrenceStore.getNextOccurrenceMs(ctx, MED_ID, DOSE_ID);
+        String firstAt =
+                ctx.getSharedPreferences("NOTIFICATION_STORE", Context.MODE_PRIVATE)
+                        .getString(Integer.toString(NOTIF_ID), null);
+        assertNotNull(firstAt);
 
         assertTrue(publisher.rescheduleDoseReminderNextDay(ctx, intent, NOTIF_ID, json));
-        long second =
+        long secondNext =
                 DoseReminderRecurrenceStore.getNextOccurrenceMs(ctx, MED_ID, DOSE_ID);
+        String secondAt =
+                ctx.getSharedPreferences("NOTIFICATION_STORE", Context.MODE_PRIVATE)
+                        .getString(Integer.toString(NOTIF_ID), null);
 
-        assertEquals(first, second);
+        assertEquals(firstNext, secondNext);
+        assertNotNull(secondAt);
+        // Same D+1 identity persisted (schedule.at still future successor).
+        assertTrue(secondAt.contains("\"at\""));
+
+        AlarmManager am = (AlarmManager) baseContext.getSystemService(Context.ALARM_SERVICE);
+        int matching = 0;
+        long todayStart = startOfTodayMs();
+        for (ShadowAlarmManager.ScheduledAlarm alarm :
+                Shadows.shadowOf(am).getScheduledAlarms()) {
+            if (alarm.operation != null
+                    && Shadows.shadowOf(alarm.operation).getRequestCode() == NOTIF_ID) {
+                matching++;
+                assertEquals(firstNext, alarm.triggerAtTime);
+                assertTrue(
+                        "must not arm same calendar day as delivery",
+                        alarm.triggerAtTime >= todayStart + 86_400_000L - 60_000L);
+            }
+        }
+        assertEquals(1, matching);
+    }
+
+    /**
+     * Full production entry point: onReceive → dose path → single D+1 successor.
+     * Does not call rescheduleDoseReminderNextDay directly.
+     */
+    @Test
+    public void onReceive_doseDelivery_armsOnlyNextDaySuccessorAndEvidence() throws Exception {
+        // Seed NOTIFICATION_STORE as Capacitor would before the alarm fires.
+        JSObject json = validDoseNotificationJson();
+        baseContext
+                .getSharedPreferences("NOTIFICATION_STORE", Context.MODE_PRIVATE)
+                .edit()
+                .putString(Integer.toString(NOTIF_ID), json.toString())
+                .commit();
+
+        Intent intent = deliveryIntent();
+        // Parcelable Notification required by onReceive before notify().
+        android.app.Notification tray = new android.app.Notification();
+        intent.putExtra(TimedNotificationPublisher.NOTIFICATION_KEY, tray);
+
+        publisher.onReceive(baseContext, intent);
+
+        long next =
+                DoseReminderRecurrenceStore.getNextOccurrenceMs(baseContext, MED_ID, DOSE_ID);
+        assertTrue(next > System.currentTimeMillis());
+
+        Calendar actual = Calendar.getInstance();
+        actual.setTimeInMillis(next);
+        Calendar expected = Calendar.getInstance();
+        expected.add(Calendar.DAY_OF_MONTH, 1);
+        assertEquals(expected.get(Calendar.YEAR), actual.get(Calendar.YEAR));
+        assertEquals(expected.get(Calendar.DAY_OF_YEAR), actual.get(Calendar.DAY_OF_YEAR));
+        assertEquals(9, actual.get(Calendar.HOUR_OF_DAY));
+        assertEquals(15, actual.get(Calendar.MINUTE));
+
+        assertTrue(
+                DoseReminderRecurrenceStore.isValidReArm(
+                        baseContext, MED_ID, DOSE_ID, System.currentTimeMillis(), REMINDER_TIME));
+
+        String stored =
+                baseContext
+                        .getSharedPreferences("NOTIFICATION_STORE", Context.MODE_PRIVATE)
+                        .getString(Integer.toString(NOTIF_ID), null);
+        assertNotNull("NOTIFICATION_STORE must keep future successor schedule.at", stored);
+        assertTrue(stored.contains("\"at\""));
+        // Must not have been deleted (kept=true after dose re-arm).
+        assertTrue(hasScheduledAlarmForNotifId(baseContext, NOTIF_ID));
 
         AlarmManager am = (AlarmManager) baseContext.getSystemService(Context.ALARM_SERVICE);
         int matching = 0;
@@ -528,8 +602,18 @@ public class TimedNotificationPublisherAtomicityTest {
             if (alarm.operation != null
                     && Shadows.shadowOf(alarm.operation).getRequestCode() == NOTIF_ID) {
                 matching++;
+                assertEquals(next, alarm.triggerAtTime);
             }
         }
         assertEquals(1, matching);
+    }
+
+    private static long startOfTodayMs() {
+        Calendar c = Calendar.getInstance();
+        c.set(Calendar.HOUR_OF_DAY, 0);
+        c.set(Calendar.MINUTE, 0);
+        c.set(Calendar.SECOND, 0);
+        c.set(Calendar.MILLISECOND, 0);
+        return c.getTimeInMillis();
     }
 }

@@ -511,6 +511,15 @@ public class TimedNotificationPublisherAtomicityTest {
         JSObject json = validDoseNotificationJson();
         Intent intent = deliveryIntent();
 
+        // Pin D+1 reference before any production scheduling so assertion
+        // does not depend on a later Calendar.getInstance() clock reading.
+        Calendar expectedNextDay = Calendar.getInstance();
+        expectedNextDay.add(Calendar.DAY_OF_MONTH, 1);
+        expectedNextDay.set(Calendar.HOUR_OF_DAY, 9);
+        expectedNextDay.set(Calendar.MINUTE, 15);
+        expectedNextDay.set(Calendar.SECOND, 0);
+        expectedNextDay.set(Calendar.MILLISECOND, 0);
+
         assertTrue(publisher.rescheduleDoseReminderNextDay(ctx, intent, NOTIF_ID, json));
         long firstNext =
                 DoseReminderRecurrenceStore.getNextOccurrenceMs(ctx, MED_ID, DOSE_ID);
@@ -533,12 +542,6 @@ public class TimedNotificationPublisherAtomicityTest {
 
         AlarmManager am = (AlarmManager) baseContext.getSystemService(Context.ALARM_SERVICE);
         int matching = 0;
-        Calendar expectedNextDay = Calendar.getInstance();
-        expectedNextDay.add(Calendar.DAY_OF_MONTH, 1);
-        expectedNextDay.set(Calendar.HOUR_OF_DAY, 9);
-        expectedNextDay.set(Calendar.MINUTE, 15);
-        expectedNextDay.set(Calendar.SECOND, 0);
-        expectedNextDay.set(Calendar.MILLISECOND, 0);
         for (ShadowAlarmManager.ScheduledAlarm alarm :
                 Shadows.shadowOf(am).getScheduledAlarms()) {
             if (alarm.operation != null

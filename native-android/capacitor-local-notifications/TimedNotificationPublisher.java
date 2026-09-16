@@ -7,6 +7,7 @@ import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Build;
 import androidx.core.app.NotificationCompat;
 import com.getcapacitor.JSObject;
@@ -260,10 +261,46 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
                 Logger.tags("LN"),
                 "dose reminder " + id + " next day at " + sdf.format(new Date(trigger))
             );
+            // Persist next `schedule.at` into Capacitor NotificationStorage so
+            // JS getPending() sees a future occurrence (delivery evidence), not
+            // a missing alarm. Same id → single pending entry.
+            persistDoseReminderNextAt(context, id, notificationJson, trigger);
             return true;
         } catch (Exception e) {
             Logger.error(Logger.tags("LN"), "dose next-day reschedule failed", e);
             return false;
+        }
+    }
+
+    /**
+     * Write updated schedule.at into the plugin notification store (same file
+     * NotificationStorage uses). Makes post-delivery getPending() report a
+     * future occurrence for this stable dose id.
+     */
+    private void persistDoseReminderNextAt(
+            Context context,
+            int id,
+            JSObject notificationJson,
+            long triggerMs
+    ) {
+        if (notificationJson == null) {
+            return;
+        }
+        try {
+            JSObject schedule = notificationJson.getJSObject("schedule");
+            if (schedule == null) {
+                schedule = new JSObject();
+                notificationJson.put("schedule", schedule);
+            }
+            // Capacitor accepts ISO-8601 / Date-parsable strings for schedule.at
+            SimpleDateFormat iso = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", Locale.US);
+            schedule.put("at", iso.format(new Date(triggerMs)));
+            // Match NotificationStorage.NOTIFICATION_STORE_ID
+            SharedPreferences storage =
+                    context.getSharedPreferences("NOTIFICATION_STORE", Context.MODE_PRIVATE);
+            storage.edit().putString(Integer.toString(id), notificationJson.toString()).commit();
+        } catch (Exception e) {
+            Logger.error(Logger.tags("LN"), "persist dose next at failed", e);
         }
     }
 }

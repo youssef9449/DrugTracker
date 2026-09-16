@@ -1038,6 +1038,45 @@ export function doseReminderAlarmIdForDose(medId: string, doseId: string): numbe
   return notificationId('doseAlarm', `${medId}::${doseId}`);
 }
 
+/**
+ * Whether a recurring dose reminder is already present in the plugin pending list
+ * for this stable notification id. Used for idempotent reconciliation: if the
+ * correct id is already pending, lifecycle must not cancel+reschedule.
+ *
+ * Recurrence owner: TimedNotificationPublisher (CRON_KEY / nextTrigger) after the
+ * initial schedule with repeats:true. JS must not create a second next occurrence.
+ */
+export async function isDoseReminderPending(
+  medId: string,
+  doseId: string = LEGACY_DOSE_ID
+): Promise<boolean> {
+  if (!isNativePlatform()) return false;
+  try {
+    const pending = await LocalNotifications.getPending();
+    const id = doseReminderAlarmIdForDose(medId, doseId);
+    return pending.notifications.some((n) => n.id === id);
+  } catch (err) {
+    console.warn('[notifications] isDoseReminderPending failed:', err);
+    return false;
+  }
+}
+
+/**
+ * Cancel the pre-Phase-2 med-only doseAlarm id for a medication.
+ * Idempotent. Call when reconciling multi-dose slots so a legacy single-id
+ * alarm cannot fire alongside per-dose ids.
+ */
+export async function cancelLegacyDoseReminderAlarm(medId: string): Promise<void> {
+  if (!isNativePlatform()) return;
+  try {
+    await LocalNotifications.cancel({
+      notifications: [{ id: doseReminderAlarmId(medId) }],
+    });
+  } catch (err) {
+    console.warn('[notifications] cancelLegacyDoseReminderAlarm failed:', err);
+  }
+}
+
 /** Stable, separate id for a one-shot snoozed dose reminder. */
 export function snoozeDoseReminderId(medId: string, doseId?: string): number {
   if (!doseId || doseId === LEGACY_DOSE_ID) {
@@ -1295,6 +1334,9 @@ export async function scheduleDoseReminder(
       if (perm.display !== 'granted') {
         throw new Error('Notification permission is required for dose reminders');
       }
+      // Recurrence owner is native TimedNotificationPublisher via CRON_KEY
+      // (repeats:true). Do not also reschedule from JS on delivery/lifecycle.
+      // Same stable id replaces any prior pending entry for this dose slot.
       await LocalNotifications.schedule({
         notifications: [
           {

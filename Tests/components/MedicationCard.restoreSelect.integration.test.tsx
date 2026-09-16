@@ -136,6 +136,12 @@ async function clickCardManage(medId: string = MED_ID): Promise<void> {
   fireEvent.click(btn);
 }
 
+/** Single-dose / legacy Card restore path — no manage modal, direct restore button. */
+async function clickCardRestoreDirect(medId: string): Promise<void> {
+  const btn = await screen.findByTestId(`restore-dose-${medId}`);
+  fireEvent.click(btn);
+}
+
 async function selectDoseInModal(doseId: string, action: 'take' | 'restore' = 'restore'): Promise<void> {
   await waitFor(() => {
     expect(screen.getByText(/إدارة الجرعات|اختر الإجراء المناسب/)).toBeInTheDocument();
@@ -297,18 +303,27 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
       expect(screen.getByText('اختر الإجراء المناسب لكل جرعة')).toBeInTheDocument();
     });
 
-    // d2 should be disabled / not restorable in the modal.
-    const doseButtons = screen.getAllByRole('button').filter((b) =>
-      b.getAttribute('data-dose-id')
-    );
-    const d2Btn = doseButtons.find((b) => b.getAttribute('data-dose-id') === 'd2');
-    expect(d2Btn).toBeTruthy();
-    expect(d2Btn).toBeDisabled();
+    // d2 was restored/skipped under Auto ON → manage modal renders a span "—",
+    // NOT an action button (action=null). So no restore action for d2 exists.
+    const d2RestoreBtn = screen
+      .getAllByRole('button')
+      .find(
+        (b) =>
+          b.getAttribute('data-dose-id') === 'd2' &&
+          b.getAttribute('data-dose-action') === 'restore'
+      );
+    expect(d2RestoreBtn).toBeUndefined();
 
-    // d1 still selectable.
-    const d1Btn = doseButtons.find((b) => b.getAttribute('data-dose-id') === 'd1');
-    expect(d1Btn).toBeTruthy();
-    expect(d1Btn).not.toBeDisabled();
+    // d1 still selectable (still has a restore action).
+    const d1RestoreBtn = screen
+      .getAllByRole('button')
+      .find(
+        (b) =>
+          b.getAttribute('data-dose-id') === 'd1' &&
+          b.getAttribute('data-dose-action') === 'restore'
+      );
+    expect(d1RestoreBtn).toBeTruthy();
+    expect(d1RestoreBtn).not.toBeDisabled();
 
     // Close modal without selecting.
     fireEvent.click(screen.getByLabelText('إغلاق'));
@@ -330,7 +345,10 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
       expect(screen.getByText('Single Dose Med')).toBeInTheDocument();
     });
 
-    await clickCardManage('med-single');
+    // Single-dose card has no manage-doses button; it shows the per-dose
+    // manual Restore button directly.
+    expect(screen.queryByTestId('manage-doses-med-single')).not.toBeInTheDocument();
+    await clickCardRestoreDirect('med-single');
 
     await waitFor(() => {
       expect(screen.queryByText('اختر الإجراء المناسب لكل جرعة')).not.toBeInTheDocument();
@@ -354,7 +372,10 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
       expect(screen.getByText('Legacy Med')).toBeInTheDocument();
     });
 
-    await clickCardManage('med-legacy');
+    // Legacy card has no manage-doses button; it shows the per-dose manual
+    // Restore button directly.
+    expect(screen.queryByTestId('manage-doses-med-legacy')).not.toBeInTheDocument();
+    await clickCardRestoreDirect('med-legacy');
 
     await waitFor(() => {
       expect(screen.queryByText('اختر الإجراء المناسب لكل جرعة')).not.toBeInTheDocument();

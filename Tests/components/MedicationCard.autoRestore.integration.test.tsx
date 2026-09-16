@@ -307,7 +307,10 @@ describe('MedicationCard Auto ON → no Manual Take', () => {
       expect(screen.getByText('Auto Restore Single')).toBeInTheDocument();
     });
 
-    expect(screen.getByTestId(`manage-doses-${MED_ID}`)).toBeInTheDocument();
+    // Single-dose + auto ON + pure auto-completed → dedicated auto-restore button
+    // (NOT manage-doses; that's only for multi-dose cards).
+    expect(screen.getByTestId(`auto-restore-dose-${MED_ID}`)).toBeInTheDocument();
+    expect(screen.queryByTestId(`manage-doses-${MED_ID}`)).not.toBeInTheDocument();
     expect(screen.queryAllByTitle(/تناول جرعة/)).toHaveLength(0);
   });
 });
@@ -334,7 +337,7 @@ describe('MedicationCard Auto Restore — Multi-dose SelectDoseModal', () => {
     // Click does NOT restore immediately
     await clickAutoRestore();
     await waitFor(() => {
-      expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
+      expect(screen.getByText('اختر الإجراء المناسب لكل جرعة')).toBeInTheDocument();
     });
     expect(readMeds()[0].currentPills).toBe(pillsBefore);
     expect(isDoseSkippedOnDate(readMeds()[0], 'd1', getTodayDateString())).toBe(false);
@@ -365,7 +368,7 @@ describe('MedicationCard Auto Restore — Multi-dose SelectDoseModal', () => {
     // Re-open: d2 disabled/not selectable, d1 still available
     await clickAutoRestore();
     await waitFor(() => {
-      expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
+      expect(screen.getByText('اختر الإجراء المناسب لكل جرعة')).toBeInTheDocument();
     });
     const buttonsAgain = screen.getAllByRole('button').filter((b) =>
       b.getAttribute('data-dose-id')

@@ -197,39 +197,46 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     render(<App />);
     await waitFor(() => expect(screen.getByText('Drug A Multi')).toBeInTheDocument());
 
-    // Multi-dose Card Take opens SelectDoseModal (take mode); select d1 to consume it.
-    fireEvent.click(screen.getByTestId('manage-doses-med-multi'));
-    await waitFor(() => {
-      expect(screen.getByText(/إدارة الجرعات/)).toBeInTheDocument();
-    });
-    const takeD1Btn = screen
-      .getAllByRole('button')
-      .find((b) => b.getAttribute('data-dose-id') === 'd1');
+    const today = getTodayDateString();
+    const openManage = () => {
+      fireEvent.click(screen.getByTestId('manage-doses-med-multi'));
+      return waitFor(() =>
+        expect(screen.getByText('اختر الإجراء المناسب لكل جرعة')).toBeInTheDocument()
+      );
+    };
+    const actionBtn = (doseId: string, action: 'take' | 'restore') =>
+      screen
+        .getAllByRole('button')
+        .find(
+          (b) =>
+            b.getAttribute('data-dose-id') === doseId &&
+            b.getAttribute('data-dose-action') === action
+        );
+
+    // Multi-dose Card opens manage modal; select d1 take action to consume it.
+    await openManage();
+    const takeD1Btn = actionBtn('d1', 'take');
     expect(takeD1Btn).toBeTruthy();
     fireEvent.click(takeD1Btn!);
     await waitFor(() => {
       const med = readMeds().find((m) => m.id === 'med-multi')!;
-      expect(med.doseConsumption?.d1).toBe(getTodayDateString());
+      expect(med.doseConsumption?.d1).toBe(today);
       expect(effectiveCurrentPills(med)).toBe(19);
     });
     const takeLog = readLogs().find((l) => l.type === 'dose_taken');
     expect(takeLog?.doseId).toBe('d1');
     expect(takeLog?.amount).toBe(-1);
 
-    // Second click must be Restore (not Take d2) — multi-dose opens selector
-    await waitFor(() => expect(screen.getByTitle(/استرجاع الجرعة \(\+1\)/)).toBeInTheDocument());
+    // Multi-dose card always shows manage-doses (no per-card Take/Restore title).
     expect(screen.queryByTitle(/تناول جرعة/)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByTitle(/استرجاع الجرعة \(\+1\)/));
-    await waitFor(() => {
-      expect(screen.getByText(/إدارة الجرعات/)).toBeInTheDocument();
-    });
-    const d1Btn = screen
-      .getAllByRole('button')
-      .find((b) => b.getAttribute('data-dose-id') === 'd1');
-    expect(d1Btn).toBeTruthy();
-    expect(d1Btn).not.toBeDisabled();
-    fireEvent.click(d1Btn!);
+    // Second interaction must be Restore (not Take d2) — open manage modal again
+    // and pick the d1 restore action.
+    await openManage();
+    const restoreD1Btn = actionBtn('d1', 'restore');
+    expect(restoreD1Btn).toBeTruthy();
+    expect(restoreD1Btn).not.toBeDisabled();
+    fireEvent.click(restoreD1Btn!);
 
     await waitFor(() => {
       const med = readMeds().find((m) => m.id === 'med-multi')!;
@@ -267,15 +274,19 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     render(<App />);
     await waitFor(() => expect(screen.getByText('Drug A Multi')).toBeInTheDocument());
 
-    await waitFor(() => expect(screen.getByTitle(/استرجاع الجرعة/)).toBeInTheDocument());
-    fireEvent.click(screen.getByTitle(/استرجاع الجرعة/));
+    // Multi-dose card only exposes manage-doses (no per-card Restore title).
+    fireEvent.click(screen.getByTestId('manage-doses-med-multi'));
 
     await waitFor(() => {
-      expect(screen.getByText(/إدارة الجرعات/)).toBeInTheDocument();
+      expect(screen.getByText('اختر الإجراء المناسب لكل جرعة')).toBeInTheDocument();
     });
     const d3Btn = screen
       .getAllByRole('button')
-      .find((b) => b.getAttribute('data-dose-id') === 'd3');
+      .find(
+        (b) =>
+          b.getAttribute('data-dose-id') === 'd3' &&
+          b.getAttribute('data-dose-action') === 'restore'
+      );
     expect(d3Btn).toBeTruthy();
     expect(d3Btn).not.toBeDisabled();
     fireEvent.click(d3Btn!);
@@ -288,8 +299,10 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
   });
 
   it('auto-deduct-only does NOT offer Restore; card is non-interactive when only auto-elapsed', async () => {
-    // PR #196: auto-elapsed-only is not Card Restore. Single slot fully auto-completed
-    // → canTake false, canRestore false → no Take/Restore title on the card.
+    // PR #196: auto-elapsed-only is not the manual Card Restore path. Single
+    // slot fully auto-completed → canTake false, canRestore false → no manual
+    // Take/Restore button on the card. (Pure auto restore lives on a separate
+    // auto-restore-dose-<id> button for single-dose, NOT restore-dose-<id>.)
     localStorage.setItem(
       STORAGE_MEDS_KEY,
       JSON.stringify([
@@ -309,7 +322,8 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     render(<App />);
     await waitFor(() => expect(screen.getByText('Drug A Multi')).toBeInTheDocument());
 
-    expect(screen.queryByTitle(/استرجاع الجرعة/)).not.toBeInTheDocument();
+    // No manual restore-dose-<id> button (canRestore=false) and no manual Take.
+    expect(screen.queryByTestId('restore-dose-med-multi')).not.toBeInTheDocument();
     expect(screen.queryByTitle(/^تناول جرعة/)).not.toBeInTheDocument();
   });
 

@@ -109,8 +109,13 @@ function advanceClockPastMorningDoses(): void {
 
 async function goToStockTab(): Promise<void> {
   fireEvent.click(screen.getByText('المخزون'));
+  // The manage-doses button lives only on the MedicationCard (not on the
+  // SelectDoseModal that stays open in manage mode after a Take). Using
+  // its testid avoids the "multiple elements" clash with the modal's h2
+  // (which also renders the medication name) and uniquely confirms the
+  // card is mounted on the stock tab.
   await waitFor(() => {
-    expect(screen.getByText('Restore Handler Med')).toBeInTheDocument();
+    expect(screen.getByTestId('manage-doses-med-restore')).toBeInTheDocument();
   });
 }
 
@@ -297,15 +302,19 @@ describe('App — independent multi-dose Restore via SelectDoseModal', () => {
     advanceClockPastMorningDoses();
     await goToStockTab();
     await waitFor(() => {
-      expect(screen.getByTestId('restore-dose-med-restore')).toBeInTheDocument();
+      expect(screen.getByTestId('manage-doses-med-restore')).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByTestId('restore-dose-med-restore'));
+    fireEvent.click(screen.getByTestId('manage-doses-med-restore'));
     await waitFor(() => {
-      expect(screen.getByText(/اختر الجرعة المراد استرجاعها/)).toBeInTheDocument();
+      expect(screen.getByText(/إدارة الجرعات|اختر الإجراء المناسب/)).toBeInTheDocument();
     });
     const d2Btn = screen
       .getAllByRole('button')
-      .find((b) => b.getAttribute('data-dose-id') === 'd2');
+      .find(
+        (b) =>
+          b.getAttribute('data-dose-id') === 'd2' &&
+          b.getAttribute('data-dose-action') === 'restore'
+      );
     expect(d2Btn).toBeTruthy();
     expect(d2Btn).not.toBeDisabled();
     fireEvent.click(d2Btn!);

@@ -25,6 +25,8 @@ const mocks = vi.hoisted(() => ({
   schedule: vi.fn(),
   cancel: vi.fn(),
   cancelSnoozed: vi.fn(),
+  isPending: vi.fn(),
+  cancelLegacy: vi.fn(),
 }));
 
 vi.mock('@/utils/notifications', async () => {
@@ -36,6 +38,8 @@ vi.mock('@/utils/notifications', async () => {
     scheduleDoseReminder: mocks.schedule,
     cancelDoseReminder: mocks.cancel,
     cancelSnoozedDoseReminder: mocks.cancelSnoozed,
+    isDoseReminderPending: mocks.isPending,
+    cancelLegacyDoseReminderAlarm: mocks.cancelLegacy,
   };
 });
 
@@ -75,9 +79,13 @@ beforeEach(() => {
   mocks.schedule.mockReset();
   mocks.cancel.mockReset();
   mocks.cancelSnoozed.mockReset();
+  mocks.isPending.mockReset();
+  mocks.cancelLegacy.mockReset();
   mocks.cancel.mockResolvedValue(undefined);
   mocks.cancelSnoozed.mockResolvedValue(undefined);
   mocks.schedule.mockResolvedValue(undefined);
+  mocks.isPending.mockResolvedValue(false);
+  mocks.cancelLegacy.mockResolvedValue(undefined);
   localStorage.clear();
 });
 
@@ -1515,3 +1523,90 @@ describe('useDoseReminderScheduler — restore re-arms future dose notification'
     );
   });
 });
+
+
+describe('idempotent lifecycle reconciliation', () => {
+  it('second effect run with same signature does not cancel+reschedule when pending', async () => {
+    const med = makeMed({ reminderTime: '09:00' });
+    const { rerender } = renderHook(
+      (props: { lifecycleTick: number }) =>
+        useDoseReminderScheduler(
+          defaultOpts({
+            medications: [med],
+            lifecycleTick: props.lifecycleTick,
+          })
+        ),
+      { initialProps: { lifecycleTick: 0 } }
+    );
+
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const schedulesAfterFirst = mocks.schedule.mock.calls.length;
+    expect(schedulesAfterFirst).toBeGreaterThanOrEqual(1);
+    const cancelsAfterFirst = mocks.cancel.mock.calls.length;
+
+    // Next lifecycle: pretend native still has the pending id.
+    mocks.isPending.mockResolvedValue(true);
+    mocks.schedule.mockClear();
+    mocks.cancel.mockClear();
+
+    rerender({ lifecycleTick: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mocks.schedule).not.toHaveBeenCalled();
+    expect(mocks.cancel).not.toHaveBeenCalled();
+  });
+
+  it('repairs missing pending without changing signature', async () => {
+    const med = makeMed({ reminderTime: '09:00' });
+    const { rerender } = renderHook(
+      (props: { lifecycleTick: number }) =>
+        useDoseReminderScheduler(
+          defaultOpts({
+            medications: [med],
+            lifecycleTick: props.lifecycleTick,
+          })
+        ),
+      { initialProps: { lifecycleTick: 0 } }
+    );
+
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    mocks.schedule.mockClear();
+    mocks.cancel.mockClear();
+    mocks.isPending.mockResolvedValue(false);
+
+    rerender({ lifecycleTick: 2 });
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Repair schedules without cancel when signature unchanged and pending missing.
+    expect(mocks.schedule).toHaveBeenCalled();
+  });
+
+  it('cancels legacy med-only id when multi-dose slots are active', async () => {
+    const med = makeMed({
+      reminderTime: undefined,
+      doseSchedule: [
+        { id: 'd1', time: '08:00', amount: 1 },
+        { id: 'd2', time: '20:00', amount: 1 },
+      ],
+    });
+    renderHook(() =>
+      useDoseReminderScheduler(defaultOpts({ medications: [med] }))
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.cancelLegacy).toHaveBeenCalledWith('med-1');
+  });
+});
+

@@ -1670,22 +1670,61 @@ describe('stale native pending cleanup', () => {
 });
 
 describe('delivery/reconciliation race', () => {
-  it('does not re-schedule when time is still ahead and pending is briefly empty (delivery transition)', async () => {
-    // Simulate delivery transition: isDoseReminderPending returns false
-    // (native AlarmManager fired, rescheduleDoseReminderNextDay is re-arming
-    // tomorrow via raw AlarmManager — not reflected in Capacitor getPending).
-    // The reminder time (23:00) is still ahead of now (12:00 UTC).
-    // JS must NOT re-schedule — would create a duplicate TODAY alarm.
+  it('repairs truly missing alarm before dose time (pending=false is not assumed delivery)', async () => {
+    // After first schedule, native pending is gone with no future occurrence
+    // evidence → reconciliation must schedule exactly once (repair).
     mocks.isPending.mockResolvedValue(false);
     const med = makeMed({
       reminderTime: '23:00',
       doseSchedule: [{ id: 'd1', amount: 1, time: '23:00' }],
-      dosesPerDay: 1,
     });
 
-    // First render: signature changes (empty → sig) → schedules.
-    const { rerender } = renderHook(() =>
-      useDoseReminderScheduler(defaultOpts({ medications: [med] }))
+    const { rerender } = renderHook(
+      (props: { lifecycleTick: number }) =>
+        useDoseReminderScheduler(
+          defaultOpts({
+            medications: [med],
+            lifecycleTick: props.lifecycleTick,
+          })
+        ),
+      { initialProps: { lifecycleTick: 0 } }
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.schedule).toHaveBeenCalled();
+    const firstCalls = mocks.schedule.mock.calls.length;
+    mocks.schedule.mockClear();
+
+    // Still missing — repair again on lifecycle (same signature path).
+    mocks.isPending.mockResolvedValue(false);
+    rerender({ lifecycleTick: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.schedule.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(firstCalls).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not schedule when native has a valid future occurrence after delivery', async () => {
+    // Post-delivery: TimedNotificationPublisher persisted next-day schedule.at
+    // → isDoseReminderPending() === true → JS no-op (no duplicate).
+    mocks.isPending.mockResolvedValue(false);
+    const med = makeMed({
+      reminderTime: '23:00',
+      doseSchedule: [{ id: 'd1', amount: 1, time: '23:00' }],
+    });
+
+    const { rerender } = renderHook(
+      (props: { lifecycleTick: number }) =>
+        useDoseReminderScheduler(
+          defaultOpts({
+            medications: [med],
+            lifecycleTick: props.lifecycleTick,
+          })
+        ),
+      { initialProps: { lifecycleTick: 0 } }
     );
     await vi.advanceTimersByTimeAsync(0);
     await Promise.resolve();
@@ -1693,14 +1732,13 @@ describe('delivery/reconciliation race', () => {
     expect(mocks.schedule).toHaveBeenCalled();
     mocks.schedule.mockClear();
 
-    // Second render: same signature (prevSig === sig), pending = false,
-    // time (23:00) is still ahead → should NOT re-schedule.
-    rerender(defaultOpts({ medications: [med], resumeTick: 1 }));
+    // Native re-arm complete: future occurrence visible via getPending/store.
+    mocks.isPending.mockResolvedValue(true);
+    rerender({ lifecycleTick: 1 });
     await vi.advanceTimersByTimeAsync(0);
     await Promise.resolve();
     await Promise.resolve();
-    // scheduleDoseReminder must NOT have been called — delivery guard
-    // (isDoseReminderTimeStillAhead) prevents duplicate today alarm.
+    await Promise.resolve();
     expect(mocks.schedule).not.toHaveBeenCalled();
   });
 });

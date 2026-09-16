@@ -1202,6 +1202,79 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     __setExactAutoEnvelopeStorageTestHooks(null);
   });
 
+
+  it('Restore d1 after Auto d1+d2 only returns d1 amount (no sibling resettle)', async () => {
+    // Simulate Exact Auto applied both slots: stock 8, both consumed markers.
+    durable = {
+      medications: [
+        med({
+          currentPills: 8,
+          doseConsumption: { d1: TODAY, d2: TODAY },
+          doseConsumptionHistory: { d1: [TODAY], d2: [TODAY] },
+        }),
+      ],
+      logs: [
+        {
+          id: 'exact-d1',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'auto_daily',
+          amount: -1,
+          date: TODAY,
+          timestamp: '',
+          description: '',
+          doseId: 'd1',
+        },
+        {
+          id: 'exact-d2',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'auto_daily',
+          amount: -1,
+          date: TODAY,
+          timestamp: '',
+          description: '',
+          doseId: 'd2',
+        },
+      ],
+    };
+
+    const r1 = await runGatedManualRestore({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      todayStr: TODAY,
+      makeLogId: () => 'restore-d1',
+    });
+    expect(r1.outcome).toBe('applied');
+    expect(r1.restoredAmount).toBe(1);
+    // Only d1 restored: 8+1=9; d2 marker remains.
+    expect(durable.medications[0].currentPills).toBe(9);
+    expect(durable.medications[0].doseConsumption?.d2).toBe(TODAY);
+    expect(durable.medications[0].doseConsumption?.d1).toBeUndefined();
+
+    // Second restore of d1 is no-op.
+    const r2 = await runGatedManualRestore({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      todayStr: TODAY,
+      makeLogId: () => 'restore-d1-2',
+    });
+    expect(r2.outcome).toBe('already_restored');
+    expect(durable.medications[0].currentPills).toBe(9);
+
+    // Take d1 after restore: one final deduction → 8.
+    const take = await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+    });
+    expect(take.outcome).toBe('applied');
+    expect(durable.medications[0].currentPills).toBe(8);
+    // d2 still consumed independently.
+    expect(durable.medications[0].doseConsumption?.d2).toBe(TODAY);
+  });
+
 describe('shouldDismissAlarmAfterManualTake', () => {
   it('dismisses only for applied and already_consumed; never persist_failed', () => {
     expect(shouldDismissAlarmAfterManualTake('applied')).toBe(true);

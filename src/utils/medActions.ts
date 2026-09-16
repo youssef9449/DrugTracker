@@ -258,21 +258,11 @@ export function restoreDose(
 
     let updatedMed: Medication;
     if (wasManual) {
-      // Undo actual stock deduction (Manual or Exact Auto markers): return pills.
-      const { updatedMed: settled } = settleAndAdjust(
-        {
-          ...med,
-          doseConsumption: nextConsumption,
-          doseConsumptionHistory: nextHistory,
-          doseSkippedHistory,
-          lastConsumedDate: allStillConsumed ? todayStr : undefined,
-        },
-        restoredAmount,
-        todayStr,
-        now
-      );
+      // Undo ONLY this occurrence's durable deduction. Do not re-run
+      // settleAndAdjust (that would fold sibling pastDueUnits into the snapshot).
       updatedMed = {
-        ...settled,
+        ...med,
+        currentPills: med.currentPills + restoredAmount,
         doseConsumption: nextConsumption,
         doseConsumptionHistory: nextHistory,
         doseSkippedHistory,
@@ -299,23 +289,30 @@ export function restoreDose(
   }
 
   // --- Legacy (no schedule) ---
-  const { updatedMed: settled } = settleAndAdjust(
-    med,
-    restoredAmount,
-    todayStr,
-    now
-  );
-  const updatedMed: Medication =
-    med.lastConsumedDate === todayStr
-      ? { ...settled, lastConsumedDate: undefined }
-      : settled;
+  const wasLegacyConsumed = med.lastConsumedDate === todayStr;
+  if (!wasLegacyConsumed) {
+    // No durable consumption marker — projection-only; do not inflate stock.
+    return {
+      ok: true,
+      updatedMed: med,
+      restoredAmount: 0,
+      doseId: resolvedDoseId,
+      wasManual: false,
+    };
+  }
+  // Undo this day's durable deduction only; do not re-settle other projected units.
+  const updatedMed: Medication = {
+    ...med,
+    currentPills: med.currentPills + restoredAmount,
+    lastConsumedDate: undefined,
+  };
 
   return {
     ok: true,
     updatedMed,
     restoredAmount,
     doseId: resolvedDoseId,
-    wasManual: med.lastConsumedDate === todayStr,
+    wasManual: true,
   };
 }
 

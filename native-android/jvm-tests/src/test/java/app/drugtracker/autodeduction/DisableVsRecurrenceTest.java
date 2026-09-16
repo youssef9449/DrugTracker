@@ -52,6 +52,31 @@ public class DisableVsRecurrenceTest {
         return new JSONObject(raw).optLong("recurrenceGeneration", 0L);
     }
 
+    /** Active ownership tokens (Issue #240) read from schedule metadata. */
+    private static final class DeliveryTokens {
+        final String scheduleVersion;
+        final long recurrenceGeneration;
+
+        DeliveryTokens(String scheduleVersion, long recurrenceGeneration) {
+            this.scheduleVersion = scheduleVersion;
+            this.recurrenceGeneration = recurrenceGeneration;
+        }
+    }
+
+    private static DeliveryTokens tokensFromMeta(String med, String dose, String date)
+            throws Exception {
+        String key = AutoDeductionContract.occurrenceKey(med, dose, date);
+        String raw = Phase2TestSupport.schedulePrefs().getString(
+                Phase2TestSupport.schKey(key), null);
+        assertTrue(raw != null && !raw.isEmpty());
+        JSONObject o = new JSONObject(raw);
+        String v = o.getString("scheduleVersion");
+        long g = o.getLong("recurrenceGeneration");
+        assertTrue(v != null && !v.isEmpty());
+        assertTrue(g > 0L);
+        return new DeliveryTokens(v, g);
+    }
+
     @Test
     public void caseA_fireThenDisableThenRecurrence_doesNotCreateSuccessor() throws Exception {
         String med = "med-a";
@@ -61,20 +86,22 @@ public class DisableVsRecurrenceTest {
         double amount = 1.0;
 
         assertTrue(scheduler.scheduleOccurrence(med, dose, d, time, amount, 0L).ok);
-        long gen = genFromScheduleMeta(med, dose, d);
-        assertTrue(gen > 0L);
+        DeliveryTokens t = tokensFromMeta(med, dose, d);
+        assertTrue(t.recurrenceGeneration > 0L);
 
         AutoDeductionScheduler.FireResult fr =
-                scheduler.fireOccurrenceIfNotCancelled(med, dose, d, System.currentTimeMillis(), amount);
+                scheduler.fireOccurrenceIfNotCancelled(
+                        med, dose, d, System.currentTimeMillis(), amount,
+                        t.scheduleVersion, t.recurrenceGeneration);
         assertTrue(fr.allowsRecurrence());
 
         AutoDeductionScheduler.InvalidateResult inv =
                 scheduler.invalidateRecurrenceAuthorization(med, dose);
         assertTrue(inv.ok);
-        assertTrue(readGen(med, dose) > gen);
+        assertTrue(readGen(med, dose) > t.recurrenceGeneration);
 
         AutoDeductionScheduler.ScheduleResult next =
-                scheduler.scheduleNextOccurrenceIfAbsent(med, dose, d, time, amount, gen);
+                scheduler.scheduleNextOccurrenceIfAbsent(med, dose, d, time, amount, t.recurrenceGeneration);
         assertFalse(next.ok);
         assertEquals("recurrence_authorization_invalid", next.error);
     }
@@ -88,14 +115,16 @@ public class DisableVsRecurrenceTest {
         double amount = 2.0;
 
         assertTrue(scheduler.scheduleOccurrence(med, dose, d, time, amount, 0L).ok);
-        long gen = genFromScheduleMeta(med, dose, d);
+        DeliveryTokens t = tokensFromMeta(med, dose, d);
 
         AutoDeductionScheduler.FireResult fr =
-                scheduler.fireOccurrenceIfNotCancelled(med, dose, d, System.currentTimeMillis(), amount);
+                scheduler.fireOccurrenceIfNotCancelled(
+                        med, dose, d, System.currentTimeMillis(), amount,
+                        t.scheduleVersion, t.recurrenceGeneration);
         assertTrue(fr.allowsRecurrence());
 
         AutoDeductionScheduler.ScheduleResult next =
-                scheduler.scheduleNextOccurrenceIfAbsent(med, dose, d, time, amount, gen);
+                scheduler.scheduleNextOccurrenceIfAbsent(med, dose, d, time, amount, t.recurrenceGeneration);
         assertTrue(next.ok);
 
         String d1Date = null;
@@ -138,16 +167,19 @@ public class DisableVsRecurrenceTest {
     }
 
     @Test
-    public void caseD_occurrenceCancel_stillBlocksFire() {
+    public void caseD_occurrenceCancel_stillBlocksFire() throws Exception {
         String med = "med-d";
         String dose = "d1";
         String d = futureDate(2);
 
         assertTrue(scheduler.scheduleOccurrence(med, dose, d, "08:00", 1.0, 0L).ok);
+        DeliveryTokens t = tokensFromMeta(med, dose, d);
         assertTrue(scheduler.cancelOccurrence(med, dose, d).isOk());
 
         AutoDeductionScheduler.FireResult fr =
-                scheduler.fireOccurrenceIfNotCancelled(med, dose, d, System.currentTimeMillis(), 1.0);
+                scheduler.fireOccurrenceIfNotCancelled(
+                        med, dose, d, System.currentTimeMillis(), 1.0,
+                        t.scheduleVersion, t.recurrenceGeneration);
         assertTrue(fr.isCancelled());
     }
 
@@ -173,15 +205,18 @@ public class DisableVsRecurrenceTest {
     }
 
     @Test
-    public void caseF_cancelWins_noFired() {
+    public void caseF_cancelWins_noFired() throws Exception {
         String med = "med-f";
         String dose = "d1";
         String d = futureDate(2);
 
         assertTrue(scheduler.scheduleOccurrence(med, dose, d, "13:00", 1.0, 0L).ok);
+        DeliveryTokens t = tokensFromMeta(med, dose, d);
         assertTrue(scheduler.cancelOccurrence(med, dose, d).isOk());
         AutoDeductionScheduler.FireResult fr =
-                scheduler.fireOccurrenceIfNotCancelled(med, dose, d, System.currentTimeMillis(), 1.0);
+                scheduler.fireOccurrenceIfNotCancelled(
+                        med, dose, d, System.currentTimeMillis(), 1.0,
+                        t.scheduleVersion, t.recurrenceGeneration);
         assertTrue(fr.isCancelled());
         assertFalse(fr.allowsRecurrence());
     }
@@ -248,6 +283,7 @@ public class DisableVsRecurrenceTest {
         assertTrue(scheduler.scheduleOccurrence(med, dose, d, time, amount, 0L).ok);
         final long genBefore = genFromScheduleMeta(med, dose, d);
         assertTrue(genBefore > 0L);
+        final DeliveryTokens t = tokensFromMeta(med, dose, d);
 
         final java.util.concurrent.CountDownLatch start =
                 new java.util.concurrent.CountDownLatch(1);
@@ -263,7 +299,8 @@ public class DisableVsRecurrenceTest {
                 start.await();
                 AutoDeductionScheduler.FireResult fr =
                         scheduler.fireOccurrenceIfNotCancelled(
-                                med, dose, d, System.currentTimeMillis(), amount);
+                                med, dose, d, System.currentTimeMillis(), amount,
+                                t.scheduleVersion, t.recurrenceGeneration);
                 fireRef.set(fr);
                 if (fr != null && fr.allowsRecurrence()) {
                     // Same path as AutoDeductionReceiver after FIRED.

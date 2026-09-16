@@ -14,9 +14,12 @@ export const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 export const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
 /**
  * Monotonic durable generation for meds+logs commits.
- * Bumped only after both meds and logs persist successfully.
+ * Bumped after both meds and logs persist successfully (best-effort).
  * Manual envelope stores baseGeneration so recovery can detect a stale
  * snapshot when durable advanced past that mutation.
+ *
+ * Generation lag after a successful meds+logs pair is tolerated: recovery
+ * uses content checks (log ids / markers) when generation has not advanced.
  */
 export const STORAGE_STOCK_GEN_KEY = 'android_med_tracker_stock_generation_v1';
 
@@ -77,25 +80,29 @@ export function loadDurableAutoStockState(): AutoStockDurableState {
 }
 
 /**
- * Persist meds then logs, then bump stock generation.
- * Returns error string if any write fails.
- * Generation advances only after both meds and logs succeed — so a partial
- * meds-only write leaves generation unchanged for Manual envelope recovery.
+ * Persist meds then logs, then best-effort bump stock generation.
+ *
+ * Contract:
+ * - Failure of meds or logs → error (pair not durable).
+ * - Both meds+logs succeed → success even if generation bump fails.
+ *   Generation lag is recovered via Manual envelope content checks
+ *   (log ids already present ⇒ treat as applied, do not re-snapshot).
  */
 export function commitDurableAutoStockState(state: AutoStockDurableState): string | null {
   if (testCommit) {
     const err = testCommit(state);
     if (err) return err;
-    // Test commit already applied durable meds+logs; still bump generation so
-    // Manual envelope baseGeneration ordering works in unit tests.
-    return bumpStockGeneration();
+    // Pair is durable; generation bump is best-effort only.
+    bumpStockGeneration();
+    return null;
   }
   const medErr = persist(STORAGE_MEDS_KEY, state.medications, { json: true });
   if (medErr) return medErr;
   const logErr = persist(STORAGE_LOGS_KEY, state.logs, { json: true });
   if (logErr) return logErr;
-  const genErr = bumpStockGeneration();
-  if (genErr) return genErr;
+  // Best-effort: do not fail the commit if generation cannot be written.
+  // Recovery distinguishes applied vs pending via log-id content checks.
+  bumpStockGeneration();
   return null;
 }
 

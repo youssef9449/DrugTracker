@@ -25,7 +25,7 @@ import { generateId } from '../utils/id';
 import { playSuccessChime } from '../utils/sound';
 import { persist } from '../utils/storage';
 import { pruneDoseConsumption } from '../utils/pruneDoseConsumption';
-import { TOAST_MESSAGES } from '../constants/uiStrings';
+import { TOAST_MESSAGES, STORAGE_ERRORS } from '../constants/uiStrings';
 import {
   STORAGE_AUTO_DEDUCT_PROMPTED_KEY,
   STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
@@ -549,7 +549,16 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         showToast(TOAST_MESSAGES.doseAlreadyTaken(med.name));
         return;
       }
-      showToast(TOAST_MESSAGES.doseAlreadyTaken(med.name));
+      // persist_failed: durable write did not complete — not "already taken".
+      if (result.outcome === 'persist_failed') {
+        showToast(STORAGE_ERRORS.generic);
+        return;
+      }
+      // rejected / missing_med / other — do not claim already taken.
+      if (result.outcome === 'missing_med') {
+        return;
+      }
+      // rejected: leave UI unchanged; no false already-taken toast.
     })();
   };
 

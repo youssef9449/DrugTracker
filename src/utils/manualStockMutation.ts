@@ -37,6 +37,7 @@ import {
   withAutoStockMutationGate,
   commitDurableAutoStockState,
   loadStockGeneration,
+  bumpStockGeneration,
   type AutoStockDurableState,
 } from './autoDeductionStockGate';
 import { loadJson, persist } from './storage';
@@ -177,15 +178,43 @@ export function persistManualRecoveredPair(
 }
 
 /**
+ * True when durable already reflects the envelope's intended logs (by id).
+ * Used when generation lag leaves currentGen === baseGeneration after a
+ * successful meds+logs write (generation finalization failed).
+ * Does not compare full med snapshots — log ids are the durable mutation
+ * identity already used for exact-auto / manual logs.
+ */
+export function isManualEnvelopeAlreadyReflected(
+  envelope: ManualStockEnvelope,
+  durable: AutoStockDurableState
+): boolean {
+  if (!Array.isArray(envelope.logs) || envelope.logs.length === 0) {
+    // Empty-log envelope: treat as reflected only if durable med stock already
+    // matches envelope for every med id (no pending log to add).
+    const byId = new Map(durable.medications.map((m) => [m.id, m]));
+    return envelope.medications.every((em) => {
+      const d = byId.get(em.id);
+      return d != null && d.currentPills === em.currentPills;
+    });
+  }
+  const durableIds = new Set(durable.logs.map((l) => l.id));
+  return envelope.logs.every((l) => l.id != null && durableIds.has(l.id));
+}
+
+/**
  * Finish a prior Manual partial write: meds+logs only. Never markReconciled.
- * Clears Manual envelope only after both durable writes succeed.
+ * Clears Manual envelope only after both durable writes succeed (or when
+ * durable already reflects the envelope).
  *
  * Stale safety: if durable stock generation advanced past envelope.baseGeneration,
  * the envelope is discarded without applying (newer durable state wins).
  *
- * Clear-failure safety: if meds+logs already committed (generation advanced) but
- * envelope clear fails, the next recovery sees gen > base and discards without
- * a second stock/log mutation.
+ * Applied-but-finalization-failed safety: when gen has not advanced but every
+ * envelope log id is already present in durable, discard envelope and keep
+ * durable (no overwrite, no second mutation).
+ *
+ * Clear-failure safety: same as generation lag — content or gen check discards
+ * without re-applying.
  */
 export function recoverManualEnvelopeInto(
   fresh: AutoStockDurableState,
@@ -211,6 +240,17 @@ export function recoverManualEnvelopeInto(
     return { ok: true, state: fresh };
   }
 
+  // Pair already durable (e.g. gen bump / clear failed after meds+logs success).
+  // Keep durable; do not re-write envelope snapshot.
+  if (isManualEnvelopeAlreadyReflected(existing, fresh)) {
+    saveManualStockEnvelope(null);
+    // Best-effort catch-up of generation lag so later envelopes order correctly.
+    if (currentGen === baseGen) {
+      bumpStockGeneration();
+    }
+    return { ok: true, state: fresh };
+  }
+
   const pair: AutoStockDurableState = {
     medications: existing.medications,
     logs: existing.logs,
@@ -220,8 +260,8 @@ export function recoverManualEnvelopeInto(
     // Leave Manual envelope for retry; do not ACK native.
     return { ok: false, state: fresh };
   }
-  // Best-effort clear. If clear fails, generation was already bumped by the
-  // successful pair write → next recovery discards via currentGen > baseGen.
+  // Best-effort clear. Clear failure is safe: next recovery sees gen advance
+  // and/or log ids already present.
   saveManualStockEnvelope(null);
   return { ok: true, state: pair };
 }

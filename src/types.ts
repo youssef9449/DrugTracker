@@ -1,5 +1,5 @@
 import { pluralizeArabic } from './lib/arabicPlural';
-import { effectiveCurrentPills, effectiveDaysLeft } from './utils/dateCalculations';
+import { effectiveCurrentPills, effectiveDaysLeft, formatLogTime } from './utils/dateCalculations';
 import { NEVER_DEPLETES_DAYS } from './utils/time';
 
 export interface ConsumptionLog {
@@ -226,6 +226,8 @@ export function formatTimeArabic(timeStr?: string): string {
   const minutePadded = m < 10 ? `0${m}` : `${m}`;
   return `${hour12}:${minutePadded} ${isPM ? 'م' : 'ص'}`;
 }
+
+export { formatLogTime };
 
 /**
  * Returns human-readable strip and pill breakdown of current inventory.

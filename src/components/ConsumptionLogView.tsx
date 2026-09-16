@@ -1,7 +1,7 @@
 import { type FC } from 'react';
 import { Clock, ShieldCheck, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { Medication, ConsumptionLog } from '../types';
-import { getTodayDateString, formatArabicDate } from '../utils/dateCalculations';
+import { getTodayDateString, formatArabicDate, formatLogTime } from '../utils/dateCalculations';
 import { MAX_LOG_ROWS, DAYS_PER_MONTH } from '../utils/time';
 
 interface ConsumptionLogViewProps {
@@ -89,12 +89,13 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
           <div className="space-y-2">
             {logs.slice(0, MAX_LOG_ROWS).map((log) => {
               const isDeduction = log.amount < 0;
+              const logTime = formatLogTime(log.timestamp);
               return (
                 <div
                   key={log.id}
                   className="bg-white rounded-xl border border-slate-200/80 p-3 flex items-center justify-between text-xs shadow-2xs"
                 >
-                  <div className="flex items-center gap-2.5">
+                  <div className="flex items-center gap-2.5 min-w-0">
                     <div
                       className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
                         isDeduction
@@ -108,8 +109,8 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
                         <ArrowUpRight className="w-4 h-4" />
                       )}
                     </div>
-                    <div>
-                      <h4 className="font-bold text-slate-800 text-xs">
+                    <div className="min-w-0">
+                      <h4 className="font-bold text-slate-800 text-xs truncate">
                         {log.medicationName}
                       </h4>
                       <p className="text-[11px] text-slate-500">{log.description}</p>
@@ -127,6 +128,11 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
                     <span className="text-[10px] text-slate-400 block mt-0.5">
                       {formatArabicDate(log.date, false)}
                     </span>
+                    {logTime ? (
+                      <span className="text-[10px] text-slate-500 font-medium block mt-0.5" dir="rtl">
+                        {logTime}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
               );

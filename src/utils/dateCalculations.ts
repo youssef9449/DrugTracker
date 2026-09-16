@@ -369,6 +369,31 @@ export function formatArabicDate(dateStr: string, includeWeekday: boolean = true
   }
 }
 
+/**
+ * Format an ISO timestamp string or epoch into Arabic 12-hour time format (e.g. "10:30 ص" or "2:15 م").
+ * Returns an empty string if timestamp is invalid, missing, or does not contain time.
+ */
+export function formatLogTime(timestamp?: string | number): string {
+  if (!timestamp) return '';
+  const str = String(timestamp).trim();
+  // Ensure it actually contains time information (ISO string with 'T' or time with ':' or epoch milliseconds)
+  if (!str.includes('T') && !str.includes(':') && !/^\d{10,}$/.test(str)) {
+    return '';
+  }
+  try {
+    const d = /^\d{10,}$/.test(str) ? new Date(Number(str)) : new Date(str);
+    if (Number.isNaN(d.getTime())) return '';
+    const h = d.getHours();
+    const m = d.getMinutes();
+    const isPM = h >= 12;
+    const hour12 = h % 12 === 0 ? 12 : h % 12;
+    const minutePadded = m < 10 ? `0${m}` : `${m}`;
+    return `${hour12}:${minutePadded} ${isPM ? 'م' : 'ص'}`;
+  } catch {
+    return '';
+  }
+}
+
 export function getDaysDifference(fromDateStr: string, toDateStr: string): number {
   try {
     const date1 = parseUtcDate(fromDateStr);

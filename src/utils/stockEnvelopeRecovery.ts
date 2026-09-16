@@ -18,7 +18,7 @@ import {
 import {
   loadLastAppliedMutationSeq,
   persistLastAppliedMutationSeq,
-  allocateMutationSeq,
+  envelopeLogIdsPresentInDurable,
 } from './stockMutationOrdering';
 import { loadJson, persist } from './storage';
 
@@ -84,52 +84,138 @@ export function saveExactAutoStockEnvelope(
 }
 
 /**
- * Ensure a legacy Exact Auto envelope (persisted before shared causal
- * ordering with Manual envelopes — Phase 3 js_ready envelopes that carry
- * no mutationSeq) is assigned a durable mutation sequence BEFORE it enters
- * unified recovery. Without a positive mutationSeq the envelope would be
- * invisible to recoverAllPendingStockEnvelopes (mutationSeq ?? 0 never
- * exceeds lastApplied) and stay persisted unrecovered.
+ * Migrate a legacy Exact Auto envelope (Phase 3 js_ready envelope persisted
+ * WITHOUT a mutationSeq) through a recovery barrier that runs BEFORE any new
+ * Phase 4 mutation is allowed to allocate a sequence.
  *
- * Migration rule:
- * 1. existing missing OR non-positive mutationSeq → allocate next sequence
- *    via the same allocateMutationSeq() used by Manual and Phase 4 Exact
- *    Auto envelopes.
- * 2. persist the updated envelope BEFORE attempting snapshot apply or ACK.
- * 3. after success, the saved sequence is authoritative — subsequent loads
- *    see a positive mutationSeq and skip allocation (idempotent; no
- *    repeated allocation on every startup).
- * 4. on allocate OR persist failure: return blocked=true with the original
- *    envelope so the caller does NOT ACK, does NOT clear, and surfaces a
- *    retry state. The envelope is never erased on migration failure.
+ * Why a barrier (not a fresh seq allocation):
+ *   The previous design called allocateMutationSeq() to give the legacy
+ *   envelope a new sequence. That is WRONG — the envelope is chronologically
+ *   OLDER than existing Phase 4 mutations (e.g. a Manual Take that already
+ *   took seq=10). Allocating seq=11 for the legacy envelope makes it look
+ *   NEWER than the Manual mutation, so unified recovery would apply the
+ *   legacy (older) snapshot ON TOP of the newer Manual mutation —
+ *   overwriting newer state with older state and breaking the meaning of
+ *   mutationSeq as a causal order.
  *
- * Timestamps and log IDs are NOT used for ordering — only mutationSeq.
+ * Barrier contract (no new mutationSeq is ever allocated for a legacy
+ * envelope):
+ * 1. load fresh durable state + the pending Exact Auto envelope.
+ * 2. if the envelope is absent OR already carries a positive mutationSeq
+ *    (Phase 4), it is NOT legacy — leave it for unified recovery.
+ * 3. legacy envelope (no mutationSeq):
+ *    a. if durableMatchesEnvelopeSnapshot(legacy, durable) → the legacy
+ *       mutation is already reflected in durable (Phase 3 wrote meds+logs
+ *       before the crash). Collect toAcknowledge, clear the envelope, then
+ *       ACK. Do NOT re-apply (would be a no-op or a regression).
+ *    b. else if the legacy envelope's log IDs are present in durable.logs →
+ *       the legacy mutation WAS applied but a newer Phase 4 mutation later
+ *       superseded it. Collect toAcknowledge, clear the envelope, ACK. Do
+ *       NOT re-apply (would overwrite the newer mutation).
+ *    c. else (legacy mutation was never applied to durable):
+ *       - if lastAppliedMutationSeq === 0 → no Phase 4 mutation exists yet →
+ *         the legacy snapshot is the newest known state → apply it to
+ *         durable (commit meds+logs), then clear + ACK.
+ *       - if lastAppliedMutationSeq > 0 → a newer Phase 4 mutation exists →
+ *         DO NOT apply the legacy snapshot (would overwrite). Clear the
+ *         envelope and let the normal Exact Auto reconciliation
+ *         (reconcileFiredEvents, driven by native FIRED events) re-drive
+ *         the mutation with a proper Phase 4 mutationSeq on top of the
+ *         current durable state. Do NOT ACK here (the mutation is not yet
+ *         durable; the normal path ACKs after re-applying).
+ * 4. on clear failure (or commit failure in 3c): return blocked=true so
+ *    the caller blocks new Phase 4 mutations and keeps the envelope as
+ *    recovery evidence. The envelope is never erased on failure.
+ * 5. idempotent: a restart after a partial migration re-enters the barrier.
+ *    If the envelope was cleared → no-op. If the snapshot was applied but
+ *    clear failed → snapshot now matches → clear + ACK (no re-apply, no
+ *    duplicate deduction, no duplicate ACK — native markReconciled is
+ *    itself idempotent).
+ *
+ * Timestamps (createdAt / Date.now) are NEVER used for ordering. Log IDs
+ * are used only as ONE signal (alongside the full snapshot comparison) that
+ * a legacy mutation was applied — never as sole proof.
  */
-export function ensureExactAutoEnvelopeMutationSeq(
-  existing: ExactAutoEnvelopeStored | null,
-  save: (env: ExactAutoEnvelopeStored | null) => string | null = saveExactAutoStockEnvelope
+export function migrateLegacyExactAutoEnvelope(
+  fresh: AutoStockDurableState,
+  load: () => ExactAutoEnvelopeStored | null,
+  save: (env: ExactAutoEnvelopeStored | null) => string | null,
+  commit: (state: AutoStockDurableState) => string | null
 ): {
-  envelope: ExactAutoEnvelopeStored | null;
-  migrated: boolean;
+  state: AutoStockDurableState;
+  toAcknowledge: Array<{
+    medicationId: string;
+    doseId: string;
+    calendarDate: string;
+  }>;
+  recovered: boolean;
   blocked: boolean;
 } {
-  if (!existing) return { envelope: null, migrated: false, blocked: false };
+  const existing = load();
+  if (!existing) {
+    return { state: fresh, toAcknowledge: [], recovered: false, blocked: false };
+  }
+  // Phase 4 envelope (has mutationSeq) — not legacy. Leave for unified recovery.
   if (typeof existing.mutationSeq === 'number' && existing.mutationSeq > 0) {
-    return { envelope: existing, migrated: false, blocked: false };
+    return { state: fresh, toAcknowledge: [], recovered: false, blocked: false };
   }
-  const alloc = allocateMutationSeq();
-  if (!alloc.ok) {
-    return { envelope: existing, migrated: false, blocked: true };
+
+  const acks = Array.isArray(existing.toAcknowledge) ? existing.toAcknowledge : [];
+
+  // 3a: full snapshot already on durable → already applied & current.
+  if (durableMatchesEnvelopeSnapshot(existing, fresh)) {
+    const clearErr = save(null);
+    if (clearErr) {
+      return { state: fresh, toAcknowledge: [], recovered: false, blocked: true };
+    }
+    return { state: fresh, toAcknowledge: acks, recovered: true, blocked: false };
   }
-  const updated: ExactAutoEnvelopeStored = {
-    ...existing,
-    mutationSeq: alloc.seq,
-  };
-  const err = save(updated);
-  if (err) {
-    return { envelope: existing, migrated: false, blocked: true };
+
+  // 3b: legacy log IDs present in durable → legacy was applied, then a
+  // newer Phase 4 mutation superseded it. ACK + clear. Do NOT re-apply.
+  const legacyLogsPresent = envelopeLogIdsPresentInDurable(existing.logs, fresh.logs);
+  if (legacyLogsPresent) {
+    const clearErr = save(null);
+    if (clearErr) {
+      return { state: fresh, toAcknowledge: [], recovered: false, blocked: true };
+    }
+    return { state: fresh, toAcknowledge: acks, recovered: true, blocked: false };
   }
-  return { envelope: updated, migrated: true, blocked: false };
+
+  // 3c: legacy mutation was never applied to durable.
+  const lastApplied = loadLastAppliedMutationSeq();
+  if (lastApplied === 0) {
+    // No Phase 4 mutation exists yet → legacy snapshot is newest → apply it.
+    const commitErr = commit({
+      medications: existing.medications,
+      logs: existing.logs,
+    });
+    if (commitErr) {
+      return { state: fresh, toAcknowledge: [], recovered: false, blocked: true };
+    }
+    const applied: AutoStockDurableState = {
+      medications: existing.medications,
+      logs: existing.logs,
+    };
+    const clearErr = save(null);
+    if (clearErr) {
+      // Snapshot applied but envelope clear failed → keep envelope; next
+      // restart sees snapshot matches → clear + ACK. Do NOT ACK now (the
+      // clear itself is not durable yet).
+      return { state: applied, toAcknowledge: [], recovered: false, blocked: true };
+    }
+    return { state: applied, toAcknowledge: acks, recovered: true, blocked: false };
+  }
+
+  // lastApplied > 0 → a newer Phase 4 mutation exists. DO NOT apply the
+  // legacy snapshot (would overwrite the newer mutation). Clear the
+  // envelope and let reconcileFiredEvents re-drive via native FIRED events
+  // with a proper Phase 4 mutationSeq. No ACK (mutation not durable here).
+  const clearErr = save(null);
+  if (clearErr) {
+    return { state: fresh, toAcknowledge: [], recovered: false, blocked: true };
+  }
+  return { state: fresh, toAcknowledge: [], recovered: true, blocked: false };
 }
 
 
@@ -208,77 +294,81 @@ export function finalizeMutationSeq(mutationSeq: number): string | null {
 }
 
 /**
- * Full meds+logs equality for "snapshot already on durable" without using
- * log-id presence alone as ordering proof.
- */
-/**
- * Prove the durable medication snapshot is fully equivalent to the envelope.
- * Log IDs are checked separately for presence (idempotent log set) and are
- * NOT a substitute for complete medication snapshot equality.
+ * Prove the durable medication + log snapshot is FULLY equivalent to the
+ * envelope's persisted snapshot. This is the sole "mutation is durable"
+ * proof used to decide finalize + clear vs. re-apply.
+ *
+ * Contract:
+ * - medications: same count, same order, every field deep-equal (id, name,
+ *   currentPills, dailyDose, unit, warningThresholdDays, colorTag,
+ *   category, notes, createdAt, lastSyncDate, lastConsumedDate,
+ *   autoDeductEnabled, packageSize, stripsPerBox, pillsPerStrip,
+ *   targetOrderQuantity, reminderEnabled, reminderTime, dosesPerDay,
+ *   doseSchedule (array order-aware), doseConsumption (record),
+ *   doseConsumptionHistory (record + per-dose array order-aware),
+ *   doseSkippedHistory (record + per-dose array order-aware)).
+ * - logs: same count, same order, every field deep-equal (id, medicationId,
+ *   medicationName, type, amount, date, timestamp, description, reversedAt,
+ *   relatedLogId, doseId).
+ *
+ * Log IDs alone are NEVER sufficient proof — two logs with the same ID but
+ * different amount/date/doseId must NOT count as matched. The comparison is
+ * order-aware for every array because the persisted snapshot is an ordered
+ * array (localStorage stores it verbatim); a reordered-but-equal-content
+ * array is a different persisted snapshot and must trigger re-apply.
  */
 export function durableMatchesEnvelopeSnapshot(
   envelope: { medications: Medication[]; logs: ConsumptionLog[] },
   durable: AutoStockDurableState
 ): boolean {
-  // Complete medication array: same length, every envelope med has exact match.
+  // Medications: same count, order-aware deep equality per index.
   if (envelope.medications.length !== durable.medications.length) return false;
-  const byId = new Map(durable.medications.map((m) => [m.id, m]));
-  if (byId.size !== durable.medications.length) return false; // duplicate ids
-
-  for (const em of envelope.medications) {
-    const d = byId.get(em.id);
-    if (!d) return false;
-    if (d.currentPills !== em.currentPills) return false;
-    if (d.lastConsumedDate !== em.lastConsumedDate) return false;
-    if (d.lastSyncDate !== em.lastSyncDate) return false;
-    if (!doseMapEqual(em.doseConsumption, d.doseConsumption)) return false;
-    if (!doseHistoryEqual(em.doseConsumptionHistory, d.doseConsumptionHistory)) {
-      return false;
-    }
-    if (!doseHistoryEqual(em.doseSkippedHistory, d.doseSkippedHistory)) {
-      return false;
-    }
+  for (let i = 0; i < envelope.medications.length; i++) {
+    if (!deepEqual(envelope.medications[i], durable.medications[i])) return false;
   }
-
-  // Logs: same set of ids (order-independent) for complete log snapshot.
+  // Logs: same count, order-aware deep equality per index.
   if (envelope.logs.length !== durable.logs.length) return false;
-  const envLogIds = new Set(envelope.logs.map((l) => l.id).filter(Boolean));
-  const durLogIds = new Set(durable.logs.map((l) => l.id).filter(Boolean));
-  if (envLogIds.size !== envelope.logs.length) return false;
-  if (durLogIds.size !== durable.logs.length) return false;
-  for (const id of envLogIds) {
-    if (!durLogIds.has(id)) return false;
+  for (let i = 0; i < envelope.logs.length; i++) {
+    if (!deepEqual(envelope.logs[i], durable.logs[i])) return false;
   }
   return true;
 }
 
-function doseMapEqual(
-  a: Record<string, string> | undefined,
-  b: Record<string, string> | undefined
-): boolean {
-  const aa = a ?? {};
-  const bb = b ?? {};
-  const keys = new Set([...Object.keys(aa), ...Object.keys(bb)]);
-  for (const k of keys) {
-    if (aa[k] !== bb[k]) return false;
-  }
-  return true;
-}
-
-function doseHistoryEqual(
-  a: Record<string, string[]> | undefined,
-  b: Record<string, string[]> | undefined
-): boolean {
-  const aa = a ?? {};
-  const bb = b ?? {};
-  const keys = new Set([...Object.keys(aa), ...Object.keys(bb)]);
-  for (const k of keys) {
-    const av = [...(aa[k] ?? [])].sort();
-    const bv = [...(bb[k] ?? [])].sort();
-    if (av.length !== bv.length) return false;
-    for (let i = 0; i < av.length; i++) {
-      if (av[i] !== bv[i]) return false;
+/**
+ * Recursive deep equality for persisted snapshot values.
+ * - primitives: strict ===.
+ * - arrays: same length, order-aware element-wise deep equality.
+ * - objects: same key set (by count) + deep-equal values for every key.
+ * - null/undefined: only equal to null/undefined (NOT to 0 / '' / false).
+ *
+ * Intentionally does NOT treat 0 / '' / false as equal to null/undefined,
+ * because a persisted field with an empty-string value is a real snapshot
+ * difference from a missing field.
+ */
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  // null/undefined: treat null === undefined (both mean "absent" in JSON).
+  if (a == null || b == null) return a == null && b == null;
+  if (typeof a !== typeof b) return false;
+  if (typeof a !== 'object') return a === b;
+  const aArr = Array.isArray(a);
+  const bArr = Array.isArray(b);
+  if (aArr || bArr) {
+    if (!aArr || !bArr) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!deepEqual(a[i], (b as unknown[])[i])) return false;
     }
+    return true;
+  }
+  const ao = a as Record<string, unknown>;
+  const bo = b as Record<string, unknown>;
+  const ak = Object.keys(ao);
+  const bk = Object.keys(bo);
+  if (ak.length !== bk.length) return false;
+  for (const k of ak) {
+    if (!(k in bo)) return false;
+    if (!deepEqual(ao[k], bo[k])) return false;
   }
   return true;
 }
@@ -473,20 +563,49 @@ export function recoverManualEnvelopeInto(
       clear: () => saveManualStockEnvelope(null),
     });
   }
-  // Migrate any legacy Exact Auto envelope (pre-mutationSeq) before it
-  // enters unified recovery: assign + persist a durable sequence using the
-  // shared allocator. On migration failure, surface a blocked recovery so
-  // the caller does NOT ACK or clear the unrecovered envelope.
-  const exactRaw = loadExactAutoStockEnvelope();
-  const exactMigrated = ensureExactAutoEnvelopeMutationSeq(exactRaw);
-  if (exactMigrated.blocked) {
+  // Legacy Exact Auto envelope barrier: run BEFORE unified recovery (and
+  // before any new Phase 4 mutation allocates a mutationSeq). The barrier
+  // never allocates a new seq for a legacy envelope — that would make an
+  // old envelope look newer than existing Phase 4 mutations and break
+  // causal ordering. Instead it confirms the legacy mutation is durable
+  // (full snapshot match OR legacy log IDs present) → clear + ACK; or, if
+  // never applied and no newer mutation exists, applies the snapshot; or,
+  // if a newer mutation exists, clears and lets reconcileFiredEvents re-drive.
+  const legacyCommit = (state: AutoStockDurableState): string | null => {
+    if (opts?.persistMeds && opts?.persistLogs) {
+      const medErr = opts.persistMeds(state.medications);
+      if (medErr) return medErr;
+      const logErr = opts.persistLogs(state.logs);
+      if (logErr) return logErr;
+      return null;
+    }
+    return commitDurableAutoStockState(state);
+  };
+  const legacy = migrateLegacyExactAutoEnvelope(
+    fresh,
+    loadExactAutoStockEnvelope,
+    saveExactAutoStockEnvelope,
+    legacyCommit
+  );
+  if (legacy.blocked) {
     return {
       ok: false,
-      state: fresh,
+      state: legacy.state,
       exactToAcknowledge: [],
     };
   }
-  const exact = exactMigrated.envelope;
+  // After the barrier, reload fresh state so unified recovery sees the
+  // post-migration durable state (the barrier may have applied the legacy
+  // snapshot or cleared the envelope).
+  const barrierState = legacy.state;
+  // Collect ACKs from the barrier (native ACK happens via the caller's
+  // acknowledgeExactAutoEvents path, same as unified recovery acks).
+  const legacyAcks = legacy.toAcknowledge;
+
+  // After the barrier, only Phase 4 envelopes (with mutationSeq) can
+  // remain. The legacy envelope was cleared by the barrier (or left for
+  // blocked retry). Reload to confirm.
+  const exact = loadExactAutoStockEnvelope();
   if (exact) {
     pending.push({
       kind: 'exact_auto',
@@ -499,7 +618,11 @@ export function recoverManualEnvelopeInto(
   }
 
   if (!pending.length) {
-    return { ok: true, state: fresh, exactToAcknowledge: [] };
+    return {
+      ok: true,
+      state: barrierState,
+      exactToAcknowledge: legacyAcks,
+    };
   }
 
   const commit = (
@@ -516,18 +639,38 @@ export function recoverManualEnvelopeInto(
     return commitDurableAutoStockState(state, { appliedMutationSeq });
   };
 
-  const result = recoverAllPendingStockEnvelopes(fresh, pending, commit);
+  const result = recoverAllPendingStockEnvelopes(barrierState, pending, commit);
   if (result.blocked) {
+    // Merge barrier acks + unified acks so the caller still ACKs everything
+    // that became durable even when a later step blocked.
+    const mergedAcks = mergeAcks(legacyAcks, result.exactToAcknowledge);
     return {
       ok: false,
-      state: result.recovered ? result.state : fresh,
-      exactToAcknowledge: result.exactToAcknowledge,
+      state: result.recovered ? result.state : barrierState,
+      exactToAcknowledge: mergedAcks,
     };
   }
+  const mergedAcks = mergeAcks(legacyAcks, result.exactToAcknowledge);
   return {
     ok: true,
     state: result.state,
-    exactToAcknowledge: result.exactToAcknowledge,
+    exactToAcknowledge: mergedAcks,
   };
+}
+
+/** Deduplicate ACKs by medicationId+doseId+calendarDate, preserving order. */
+function mergeAcks(
+  a: UnifiedRecoveryResult['exactToAcknowledge'],
+  b: UnifiedRecoveryResult['exactToAcknowledge']
+): UnifiedRecoveryResult['exactToAcknowledge'] {
+  const out: UnifiedRecoveryResult['exactToAcknowledge'] = [];
+  const seen = new Set<string>();
+  for (const ack of [...a, ...b]) {
+    const key = `${ack.medicationId}|${ack.doseId}|${ack.calendarDate}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(ack);
+  }
+  return out;
 }
 

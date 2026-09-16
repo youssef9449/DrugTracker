@@ -32,7 +32,7 @@ import {
   saveManualStockEnvelope,
   loadExactAutoStockEnvelope,
   saveExactAutoStockEnvelope,
-  ensureExactAutoEnvelopeMutationSeq,
+  migrateLegacyExactAutoEnvelope,
   finalizeMutationSeq,
   type PendingEnvelopeRef,
   type ExactAutoEnvelopeStored,
@@ -180,20 +180,36 @@ async function runOnce(
         clear: () => saveManualStockEnvelope(null),
       });
     }
-    // Migrate any legacy Exact Auto envelope (pre-mutationSeq) before it
-    // enters unified recovery: allocate + persist a durable sequence using
-    // the shared allocator (same path as Manual and Phase 4 Exact Auto).
-    // On migration failure, surface a blocked recovery so the orchestrator
-    // does NOT ACK or clear the unrecovered legacy envelope.
-    const legacyExact = loadEnvelope();
-    const migratedExact = ensureExactAutoEnvelopeMutationSeq(
-      legacyExact as ExactAutoEnvelopeStored | null,
-      saveEnvelope as (env: ExactAutoEnvelopeStored | null) => string | null
+    // Legacy Exact Auto envelope barrier: run BEFORE unified recovery (and
+    // before any new Phase 4 mutation allocates a mutationSeq). The barrier
+    // NEVER allocates a new seq for a legacy envelope — that would make an
+    // old envelope look newer than existing Phase 4 mutations and break
+    // causal ordering. Instead it confirms the legacy mutation is durable
+    // (full snapshot match OR legacy log IDs present) → clear + ACK; or, if
+    // never applied and no newer mutation exists, applies the snapshot; or,
+    // if a newer mutation exists, clears and lets reconcileFiredEvents
+    // (below) re-drive via native FIRED events with a proper Phase 4 seq.
+    const legacyCommit = (state: AutoStockDurableState): string | null => {
+      if (input.persistMeds || input.persistLogs) {
+        const medErr = input.persistMeds
+          ? input.persistMeds(state.medications)
+          : null;
+        const logErr = input.persistLogs ? input.persistLogs(state.logs) : null;
+        if (medErr || logErr) return medErr || logErr || 'persist_failed';
+        return null;
+      }
+      return commitDurableAutoStockState(state);
+    };
+    const legacy = migrateLegacyExactAutoEnvelope(
+      { medications: baseMeds, logs: baseLogs },
+      loadEnvelope as () => ExactAutoEnvelopeStored | null,
+      saveEnvelope as (env: ExactAutoEnvelopeStored | null) => string | null,
+      legacyCommit
     );
-    if (migratedExact.blocked) {
+    if (legacy.blocked) {
       return {
-        medications: baseMeds,
-        logs: baseLogs,
+        medications: legacy.state.medications,
+        logs: legacy.state.logs,
         toAcknowledge: [],
         details: [],
         mutated: false,
@@ -203,7 +219,14 @@ async function runOnce(
         partialNativeAck: false,
       };
     }
-    const existingExact = migratedExact.envelope as ExactAutoEnvelope | null;
+    // After the barrier, reload fresh state (the barrier may have applied
+    // the legacy snapshot or cleared the envelope).
+    baseMeds = legacy.state.medications;
+    baseLogs = legacy.state.logs;
+    const legacyAcks = legacy.toAcknowledge;
+
+    // After the barrier, only Phase 4 envelopes (with mutationSeq) remain.
+    const existingExact = loadEnvelope();
     if (existingExact) {
       pending.push({
         kind: 'exact_auto',
@@ -215,7 +238,7 @@ async function runOnce(
       });
     }
 
-    if (pending.length > 0) {
+    if (pending.length > 0 || legacyAcks.length > 0) {
       const commit = (
         state: AutoStockDurableState,
         appliedMutationSeq: number
@@ -240,16 +263,16 @@ async function runOnce(
       baseMeds = unified.state.medications;
       baseLogs = unified.state.logs;
 
-      if (unified.exactToAcknowledge.length > 0) {
-        const { markedCount, failed } = await markAll(
-          unified.exactToAcknowledge,
-          mark
-        );
+      // Merge barrier acks + unified acks (deduplicated by occurrence key).
+      const allAcks = mergeAckLists(legacyAcks, unified.exactToAcknowledge);
+
+      if (allAcks.length > 0) {
+        const { markedCount, failed } = await markAll(allAcks, mark);
         return {
           medications: baseMeds,
           logs: baseLogs,
-          toAcknowledge: unified.exactToAcknowledge,
-          details: unified.exactToAcknowledge.map((a) => ({
+          toAcknowledge: allAcks,
+          details: allAcks.map((a) => ({
             medicationId: a.medicationId,
             doseId: a.doseId,
             calendarDate: a.calendarDate,
@@ -257,7 +280,7 @@ async function runOnce(
             outcome: 'already_applied' as const,
             occurrenceKey: `${a.medicationId}${a.doseId}${a.calendarDate}`,
           })),
-          mutated: unified.recovered,
+          mutated: unified.recovered || legacy.recovered,
           newExactLogs: [],
           markedCount,
           recoveredEnvelope: true,
@@ -413,4 +436,24 @@ async function runOnce(
     recoveredEnvelope: false,
     partialNativeAck: failed.length > 0,
   };
+}
+
+/** Deduplicate ACKs by medicationId+doseId+calendarDate, preserving order. */
+function mergeAckLists(
+  a: Array<{ medicationId: string; doseId: string; calendarDate: string }>,
+  b: Array<{ medicationId: string; doseId: string; calendarDate: string }>
+): Array<{ medicationId: string; doseId: string; calendarDate: string }> {
+  const out: Array<{
+    medicationId: string;
+    doseId: string;
+    calendarDate: string;
+  }> = [];
+  const seen = new Set<string>();
+  for (const ack of [...a, ...b]) {
+    const key = `${ack.medicationId}|${ack.doseId}|${ack.calendarDate}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(ack);
+  }
+  return out;
 }

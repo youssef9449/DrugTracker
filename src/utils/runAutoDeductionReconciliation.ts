@@ -30,6 +30,8 @@ import {
   recoverAllPendingStockEnvelopes,
   loadManualStockEnvelope,
   saveManualStockEnvelope,
+  loadExactAutoStockEnvelope,
+  saveExactAutoStockEnvelope,
   finalizeMutationSeq,
   type PendingEnvelopeRef,
 } from './stockEnvelopeRecovery';
@@ -96,25 +98,12 @@ export function __setExactAutoEnvelopeTestHooks(hooks: {
 
 export function defaultLoadEnvelope(): ExactAutoEnvelope | null {
   if (testLoadEnvelope) return testLoadEnvelope();
-  const raw = loadJson<ExactAutoEnvelope | null>(STORAGE_ENVELOPE_KEY, null);
-  if (!raw || raw.version !== 1 || raw.status !== 'js_ready') return null;
-  if (!Array.isArray(raw.medications) || !Array.isArray(raw.logs)) return null;
-  return raw;
+  return loadExactAutoStockEnvelope() as ExactAutoEnvelope | null;
 }
 
 export function defaultSaveEnvelope(env: ExactAutoEnvelope | null): string | null {
   if (testSaveEnvelope) return testSaveEnvelope(env);
-  if (env == null) {
-    if (typeof localStorage !== 'undefined') {
-      try {
-        localStorage.removeItem(STORAGE_ENVELOPE_KEY);
-      } catch {
-        /* ignore */
-      }
-    }
-    return null;
-  }
-  return persist(STORAGE_ENVELOPE_KEY, env, { json: true });
+  return saveExactAutoStockEnvelope(env);
 }
 
 /**

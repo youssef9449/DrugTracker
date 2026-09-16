@@ -273,18 +273,12 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
       todayStr: TODAY,
       makeLogId: () => 'restore-2',
     });
-    // Behavioral contract: stock restored exactly once; no second credit.
+    // Behavioral contract: stock restored exactly once; second is already_restored.
+    expect(r2.outcome).toBe('already_restored');
     expect(durable.medications[0].currentPills).toBe(pillsAfterFirst);
     expect(durable.medications[0].currentPills).toBe(afterTake + 1);
     expect(durable.logs.filter((l) => l.id === 'restore-1')).toHaveLength(1);
-    // Second call must not add another restore amount for same med+dose+date.
-    if (r2.outcome === 'applied') {
-      expect(r2.restoredAmount).toBe(0);
-      expect(durable.medications[0].currentPills).toBe(pillsAfterFirst);
-    } else {
-      expect(r2.outcome).toBe('rejected');
-      expect(durable.logs.filter((l) => l.id === 'restore-2')).toHaveLength(0);
-    }
+    expect(durable.logs.filter((l) => l.id === 'restore-2')).toHaveLength(0);
   });
 
   it('crash recovery: markers after Take prevent duplicate exact auto on restart', async () => {
@@ -1121,6 +1115,91 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     expect(durable.medications[0].currentPills).toBe(9);
     expect(durable.logs.length).toBe(logCount);
     expect(marked).toEqual([]);
+  });
+
+
+  it('durableMatchesEnvelopeSnapshot requires complete medication array', () => {
+    const { durableMatchesEnvelopeSnapshot } = require('../../src/utils/stockEnvelopeRecovery');
+    const full = {
+      medications: [med({ currentPills: 9 }), med({ id: 'med-2', currentPills: 5 })],
+      logs: [{ id: 'l1', medicationId: 'med-1', medicationName: 'T', type: 'dose_taken' as const, amount: 1, date: TODAY, timestamp: '', description: '' }],
+    };
+    const durableFull = {
+      medications: full.medications.map((m: ReturnType<typeof med>) => ({ ...m })),
+      logs: full.logs.map((l) => ({ ...l })),
+    };
+    expect(durableMatchesEnvelopeSnapshot(full, durableFull)).toBe(true);
+
+    // Missing medication in durable
+    const durableSubset = {
+      medications: [med({ currentPills: 9 })],
+      logs: durableFull.logs,
+    };
+    expect(durableMatchesEnvelopeSnapshot(full, durableSubset)).toBe(false);
+
+    // Different currentPills
+    const durablePills = {
+      medications: [med({ currentPills: 8 }), med({ id: 'med-2', currentPills: 5 })],
+      logs: durableFull.logs,
+    };
+    expect(durableMatchesEnvelopeSnapshot(full, durablePills)).toBe(false);
+
+    // Matching log ids but different meds must be false
+    const durableWrongMeds = {
+      medications: [med({ currentPills: 10 }), med({ id: 'med-2', currentPills: 5 })],
+      logs: durableFull.logs,
+    };
+    expect(durableMatchesEnvelopeSnapshot(full, durableWrongMeds)).toBe(false);
+  });
+
+  it('pending Exact Auto is recovered before Manual Take allocates a new seq', async () => {
+    durable = { medications: [med({ currentPills: 10 })], logs: [] };
+    // Plant Exact Auto envelope seq=5 with stock=8 (one auto deduction applied in snapshot)
+    const { saveExactAutoStockEnvelope } = require('../../src/utils/stockEnvelopeRecovery');
+    // Use test hook path via __setExactAutoEnvelopeStorageTestHooks if available
+    let exactEnv: any = {
+      version: 1,
+      status: 'js_ready',
+      medications: [med({ currentPills: 8 })],
+      logs: [
+        {
+          id: 'exact-pending',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'dose_taken',
+          amount: 1,
+          date: TODAY,
+          timestamp: '',
+          description: '',
+        },
+      ],
+      toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }],
+      createdAt: new Date().toISOString(),
+      mutationSeq: 5,
+    };
+    const { __setExactAutoEnvelopeStorageTestHooks } = require('../../src/utils/stockEnvelopeRecovery');
+    __setExactAutoEnvelopeStorageTestHooks({
+      load: () => exactEnv,
+      save: (env: any) => {
+        exactEnv = env;
+        return null;
+      },
+    });
+
+    const take = await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd2',
+      source: 'manual',
+      todayStr: TODAY,
+    });
+    // Exact Auto seq 5 must be applied first (stock 8), then Manual d2 may apply
+    // If d2 take applied: stock 7; if already blocked etc.
+    expect(exactEnv).toBeNull();
+    // Durable must reflect at least the Exact Auto snapshot base (not still 10)
+    expect(durable.medications[0].currentPills).toBeLessThan(10);
+    expect(durable.logs.some((l: { id: string }) => l.id === 'exact-pending')).toBe(true);
+
+    __setExactAutoEnvelopeStorageTestHooks(null);
   });
 
 describe('shouldDismissAlarmAfterManualTake', () => {

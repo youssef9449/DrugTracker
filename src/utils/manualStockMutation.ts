@@ -278,6 +278,19 @@ export function runGatedManualRestore(opts: {
       };
     }
 
+    // Idempotency: only a wasManual undo credits stock. A second Restore after
+    // consumption was already cleared is a no-op (already_restored).
+    if (!result.wasManual) {
+      return {
+        outcome: 'already_restored' as const,
+        medications: fresh.medications,
+        logs: fresh.logs,
+        restoredAmount: 0,
+        log: null,
+        reason: 'already_restored',
+      };
+    }
+
     const medications = fresh.medications.map((m) =>
       m.id === opts.medicationId ? result.updatedMed : m
     );

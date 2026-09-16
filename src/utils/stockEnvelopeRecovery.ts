@@ -24,6 +24,65 @@ import { loadJson, persist } from './storage';
 export const STORAGE_MANUAL_ENVELOPE_KEY =
   'android_med_tracker_manual_stock_envelope_v1';
 
+/** Same key as Phase 3 Exact Auto envelope (shared recovery). */
+export const STORAGE_EXACT_AUTO_ENVELOPE_KEY =
+  'android_med_tracker_exact_auto_envelope_v1';
+
+export interface ExactAutoEnvelopeStored {
+  version: 1;
+  status: 'js_ready';
+  medications: Medication[];
+  logs: ConsumptionLog[];
+  toAcknowledge: Array<{
+    medicationId: string;
+    doseId: string;
+    calendarDate: string;
+  }>;
+  createdAt: string;
+  mutationSeq?: number;
+}
+
+let testLoadExact: (() => ExactAutoEnvelopeStored | null) | null = null;
+let testSaveExact: ((env: ExactAutoEnvelopeStored | null) => string | null) | null =
+  null;
+
+/** @internal test-only */
+export function __setExactAutoEnvelopeStorageTestHooks(hooks: {
+  load?: () => ExactAutoEnvelopeStored | null;
+  save?: (env: ExactAutoEnvelopeStored | null) => string | null;
+} | null): void {
+  testLoadExact = hooks?.load ?? null;
+  testSaveExact = hooks?.save ?? null;
+}
+
+export function loadExactAutoStockEnvelope(): ExactAutoEnvelopeStored | null {
+  if (testLoadExact) return testLoadExact();
+  const raw = loadJson<ExactAutoEnvelopeStored | null>(
+    STORAGE_EXACT_AUTO_ENVELOPE_KEY,
+    null
+  );
+  if (!raw || raw.version !== 1 || raw.status !== 'js_ready') return null;
+  if (!Array.isArray(raw.medications) || !Array.isArray(raw.logs)) return null;
+  return raw;
+}
+
+export function saveExactAutoStockEnvelope(
+  env: ExactAutoEnvelopeStored | null
+): string | null {
+  if (testSaveExact) return testSaveExact(env);
+  if (env == null) {
+    if (typeof localStorage === 'undefined') return null;
+    try {
+      localStorage.removeItem(STORAGE_EXACT_AUTO_ENVELOPE_KEY);
+      return null;
+    } catch {
+      return 'envelope_clear_failed';
+    }
+  }
+  return persist(STORAGE_EXACT_AUTO_ENVELOPE_KEY, env, { json: true });
+}
+
+
 export interface ManualStockEnvelope {
   version: 1;
   status: 'manual_js_ready';
@@ -77,14 +136,13 @@ export function saveManualStockEnvelope(
 ): string | null {
   if (testSaveManual) return testSaveManual(env);
   if (env == null) {
-    if (typeof localStorage !== 'undefined') {
-      try {
-        localStorage.removeItem(STORAGE_MANUAL_ENVELOPE_KEY);
-      } catch {
-        /* ignore */
-      }
+    if (typeof localStorage === 'undefined') return null;
+    try {
+      localStorage.removeItem(STORAGE_MANUAL_ENVELOPE_KEY);
+      return null;
+    } catch {
+      return 'envelope_clear_failed';
     }
-    return null;
   }
   return persist(STORAGE_MANUAL_ENVELOPE_KEY, env, { json: true });
 }
@@ -103,22 +161,76 @@ export function finalizeMutationSeq(mutationSeq: number): string | null {
  * Full meds+logs equality for "snapshot already on durable" without using
  * log-id presence alone as ordering proof.
  */
+/**
+ * Prove the durable medication snapshot is fully equivalent to the envelope.
+ * Log IDs are checked separately for presence (idempotent log set) and are
+ * NOT a substitute for complete medication snapshot equality.
+ */
 export function durableMatchesEnvelopeSnapshot(
   envelope: { medications: Medication[]; logs: ConsumptionLog[] },
   durable: AutoStockDurableState
 ): boolean {
-  if (envelope.logs.length !== durable.logs.length) return false;
-  const durLogIds = new Set(durable.logs.map((l) => l.id).filter(Boolean));
-  if (!envelope.logs.every((l) => l.id && durLogIds.has(l.id))) return false;
-
+  // Complete medication array: same length, every envelope med has exact match.
+  if (envelope.medications.length !== durable.medications.length) return false;
   const byId = new Map(durable.medications.map((m) => [m.id, m]));
-  if (envelope.medications.length !== durable.medications.length) {
-    // Allow durable to have same meds by id even if array length differs
-  }
-  return envelope.medications.every((em) => {
+  if (byId.size !== durable.medications.length) return false; // duplicate ids
+
+  for (const em of envelope.medications) {
     const d = byId.get(em.id);
-    return d != null && d.currentPills === em.currentPills;
-  });
+    if (!d) return false;
+    if (d.currentPills !== em.currentPills) return false;
+    if (d.lastConsumedDate !== em.lastConsumedDate) return false;
+    if (d.lastSyncDate !== em.lastSyncDate) return false;
+    if (!doseMapEqual(em.doseConsumption, d.doseConsumption)) return false;
+    if (!doseHistoryEqual(em.doseConsumptionHistory, d.doseConsumptionHistory)) {
+      return false;
+    }
+    if (!doseHistoryEqual(em.doseSkippedHistory, d.doseSkippedHistory)) {
+      return false;
+    }
+  }
+
+  // Logs: same set of ids (order-independent) for complete log snapshot.
+  if (envelope.logs.length !== durable.logs.length) return false;
+  const envLogIds = new Set(envelope.logs.map((l) => l.id).filter(Boolean));
+  const durLogIds = new Set(durable.logs.map((l) => l.id).filter(Boolean));
+  if (envLogIds.size !== envelope.logs.length) return false;
+  if (durLogIds.size !== durable.logs.length) return false;
+  for (const id of envLogIds) {
+    if (!durLogIds.has(id)) return false;
+  }
+  return true;
+}
+
+function doseMapEqual(
+  a: Record<string, string> | undefined,
+  b: Record<string, string> | undefined
+): boolean {
+  const aa = a ?? {};
+  const bb = b ?? {};
+  const keys = new Set([...Object.keys(aa), ...Object.keys(bb)]);
+  for (const k of keys) {
+    if (aa[k] !== bb[k]) return false;
+  }
+  return true;
+}
+
+function doseHistoryEqual(
+  a: Record<string, string[]> | undefined,
+  b: Record<string, string[]> | undefined
+): boolean {
+  const aa = a ?? {};
+  const bb = b ?? {};
+  const keys = new Set([...Object.keys(aa), ...Object.keys(bb)]);
+  for (const k of keys) {
+    const av = [...(aa[k] ?? [])].sort();
+    const bv = [...(bb[k] ?? [])].sort();
+    if (av.length !== bv.length) return false;
+    for (let i = 0; i < av.length; i++) {
+      if (av[i] !== bv[i]) return false;
+    }
+  }
+  return true;
 }
 
 export interface UnifiedRecoveryResult {
@@ -280,40 +392,51 @@ export function recoverAllPendingStockEnvelopes(
  * Manual-only recovery at Manual gate entry (no Exact Auto envelope in scope).
  * Pass otherPending when Exact Auto envelope is known to the caller.
  */
+/**
+ * Unified recovery at Manual gate entry: pending Manual AND Exact Auto
+ * envelopes share mutationSeq ordering. Exact Auto toAcknowledge is collected
+ * but NOT natively ACKed here — callers that own reconciliation may ACK.
+ */
 export function recoverManualEnvelopeInto(
   fresh: AutoStockDurableState,
   opts?: {
     persistMeds?: (meds: Medication[]) => string | null;
     persistLogs?: (logs: ConsumptionLog[]) => string | null;
-    otherPending?: Array<{
-      mutationSeq: number;
-      logs: ConsumptionLog[];
-      medications: Medication[];
-    }>;
   }
-): { ok: true; state: AutoStockDurableState } | { ok: false; state: AutoStockDurableState } {
-  const existing = loadManualStockEnvelope();
-  if (!existing) {
-    return { ok: true, state: fresh };
-  }
-
-  const pending: PendingEnvelopeRef[] = [
-    {
+): {
+  ok: true;
+  state: AutoStockDurableState;
+  exactToAcknowledge: UnifiedRecoveryResult['exactToAcknowledge'];
+} | {
+  ok: false;
+  state: AutoStockDurableState;
+  exactToAcknowledge: UnifiedRecoveryResult['exactToAcknowledge'];
+} {
+  const pending: PendingEnvelopeRef[] = [];
+  const manual = loadManualStockEnvelope();
+  if (manual) {
+    pending.push({
       kind: 'manual',
-      mutationSeq: existing.mutationSeq,
-      medications: existing.medications,
-      logs: existing.logs,
+      mutationSeq: manual.mutationSeq,
+      medications: manual.medications,
+      logs: manual.logs,
       clear: () => saveManualStockEnvelope(null),
-    },
-  ];
-  for (const o of opts?.otherPending ?? []) {
+    });
+  }
+  const exact = loadExactAutoStockEnvelope();
+  if (exact) {
     pending.push({
       kind: 'exact_auto',
-      mutationSeq: o.mutationSeq,
-      medications: o.medications,
-      logs: o.logs,
-      clear: () => null, // caller owns Exact Auto clear
+      mutationSeq: exact.mutationSeq ?? 0,
+      medications: exact.medications,
+      logs: exact.logs,
+      toAcknowledge: exact.toAcknowledge,
+      clear: () => saveExactAutoStockEnvelope(null),
     });
+  }
+
+  if (!pending.length) {
+    return { ok: true, state: fresh, exactToAcknowledge: [] };
   }
 
   const commit = (
@@ -332,9 +455,17 @@ export function recoverManualEnvelopeInto(
 
   const result = recoverAllPendingStockEnvelopes(fresh, pending, commit);
   if (result.blocked) {
-    return { ok: false, state: fresh };
+    return {
+      ok: false,
+      state: result.recovered ? result.state : fresh,
+      exactToAcknowledge: result.exactToAcknowledge,
+    };
   }
-  return { ok: true, state: result.state };
+  return {
+    ok: true,
+    state: result.state,
+    exactToAcknowledge: result.exactToAcknowledge,
+  };
 }
 
 /** @deprecated Prefer recoverAllPendingStockEnvelopes — kept for typed Exact Auto callers. */

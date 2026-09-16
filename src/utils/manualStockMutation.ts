@@ -15,6 +15,7 @@ import type { ConsumptionLog, Medication } from '../types';
 import {
   consumeDose,
   restoreDose,
+  settleAndAdjust,
   type ConsumeDoseResult,
 } from './medActions';
 import { normalizeExactDoseId } from './autoDeductionReconciliation';
@@ -332,6 +333,18 @@ export function runGatedManualRestore(opts: {
       m.id === opts.medicationId ? result.updatedMed : m
     );
 
+    // Mark the ACTIVE deduction log (auto_daily / dose_taken) that this
+    // Restore reverses as `reversedAt`, and link the restore (skipped_day)
+    // log to it via `relatedLogId`. This mirrors the refill/refill_undo
+    // reversal pattern already used by handleUndoRefill. Without this, a
+    // later Restore for the same occurrence would find the already-reversed
+    // historical deduction (e.g. the original Auto after Auto → Restore →
+    // Take) and re-reverse it — inflating stock. With it, findActiveDeduction-
+    // ForOccurrence skips reversed logs and finds the NEXT active deduction
+    // (the Take), so Auto → Restore → Take → Restore reverses exactly the
+    // Take's amount.
+    const reverseTimestamp = new Date(now).toISOString();
+    const reversedLogId = result.reversedLogId;
     const log: ConsumptionLog = {
       id: opts.makeLogId ? opts.makeLogId() : `restore-${Date.now()}`,
       medicationId: med.id,
@@ -339,11 +352,19 @@ export function runGatedManualRestore(opts: {
       type: 'skipped_day',
       amount: result.restoredAmount,
       date: todayStr,
-      timestamp: new Date(now).toISOString(),
+      timestamp: reverseTimestamp,
       description: `استرجاع جرعة (+${result.restoredAmount} ${med.unit || 'وحدة'})`,
       ...(result.doseId ? { doseId: result.doseId } : {}),
+      ...(reversedLogId ? { relatedLogId: reversedLogId } : {}),
     };
-    const logs = [log, ...fresh.logs];
+    const logs = [
+      log,
+      ...fresh.logs.map((l) =>
+        reversedLogId && l.id === reversedLogId
+          ? { ...l, reversedAt: reverseTimestamp }
+          : l
+      ),
+    ];
 
     const err = commitWithManualEnvelope({ medications, logs });
     if (err) {
@@ -363,6 +384,236 @@ export function runGatedManualRestore(opts: {
       logs,
       restoredAmount: result.restoredAmount,
       log,
+    };
+  });
+}
+
+export type GatedRefillOutcome =
+  | 'applied'
+  | 'missing_med'
+  | 'persist_failed'
+  | 'rejected';
+
+export interface GatedRefillResult {
+  outcome: GatedRefillOutcome;
+  medications: Medication[];
+  logs: ConsumptionLog[];
+  addedPills: number;
+  log: ConsumptionLog | null;
+  reason?: string;
+}
+
+/**
+ * Route a stock refill (handleConfirmRefill) through the same durable stock
+ * mutation gate as Manual Take/Restore and Exact Auto reconciliation. This
+ * serializes refills with concurrent deductions so a refill can never write
+ * a stale snapshot over a just-committed deduction (and vice versa).
+ *
+ * Behavior preserved: settleAndAdjust at the effective balance + add the
+ * refill amount, set lastSyncDate=today, prepend a refill log. The only
+ * change is that the settle + commit happen inside the gate against FRESH
+ * durable state (not a potentially-stale React snapshot), and the commit
+ * uses the Manual envelope crash-recovery path (allocate seq → envelope →
+ * commit meds+logs+lastApplied → clear).
+ */
+export function runGatedRefill(opts: {
+  medicationId: string;
+  addedPills: number;
+  todayStr?: string;
+  now?: Date;
+  makeLogId?: () => string;
+}): Promise<GatedRefillResult> {
+  const todayStr = opts.todayStr ?? getTodayDateString();
+  const now = opts.now ?? new Date();
+
+  return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
+    const recovered = recoverManualEnvelopeInto(freshIn);
+    if (!recovered.ok) {
+      return {
+        outcome: 'persist_failed' as const,
+        medications: recovered.state.medications,
+        logs: recovered.state.logs,
+        addedPills: 0,
+        log: null,
+        reason: 'persist_failed',
+      };
+    }
+    await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
+    const fresh = recovered.state;
+
+    const med = fresh.medications.find((m) => m.id === opts.medicationId);
+    if (!med) {
+      return {
+        outcome: 'missing_med' as const,
+        medications: fresh.medications,
+        logs: fresh.logs,
+        addedPills: 0,
+        log: null,
+        reason: 'missing_med',
+      };
+    }
+
+    if (!(opts.addedPills > 0)) {
+      return {
+        outcome: 'rejected' as const,
+        medications: fresh.medications,
+        logs: fresh.logs,
+        addedPills: 0,
+        log: null,
+        reason: 'rejected',
+      };
+    }
+
+    const { updatedMed } = settleAndAdjust(med, opts.addedPills, todayStr, now);
+    const medications = fresh.medications.map((m) =>
+      m.id === opts.medicationId ? updatedMed : m
+    );
+    const log: ConsumptionLog = {
+      id: opts.makeLogId ? opts.makeLogId() : `refill-${Date.now()}`,
+      medicationId: med.id,
+      medicationName: med.name,
+      type: 'refill',
+      amount: opts.addedPills,
+      date: todayStr,
+      timestamp: new Date(now).toISOString(),
+      description:
+        opts.addedPills >= 0
+          ? `شراء وتعبئة مخزون (+${opts.addedPills} ${med.unit})`
+          : `تراجع عن تعبئة مخزون (${Math.abs(opts.addedPills)} ${med.unit})`,
+    };
+    const logs = [log, ...fresh.logs];
+
+    const err = commitWithManualEnvelope({ medications, logs });
+    if (err) {
+      return {
+        outcome: 'persist_failed' as const,
+        medications: fresh.medications,
+        logs: fresh.logs,
+        addedPills: 0,
+        log: null,
+        reason: 'persist_failed',
+      };
+    }
+
+    return {
+      outcome: 'applied' as const,
+      medications,
+      logs,
+      addedPills: opts.addedPills,
+      log,
+    };
+  });
+}
+
+/**
+ * Route a refill undo (handleUndoRefill) through the same durable stock
+ * mutation gate. Reverses the most recent un-reversed refill log for the
+ * medication, marks it `reversedAt`, and prepends a refill_undo log linked
+ * via `relatedLogId` (same pattern as dose-deduction reversal above).
+ */
+export function runGatedUndoRefill(opts: {
+  medicationId: string;
+  todayStr?: string;
+  now?: Date;
+  makeLogId?: () => string;
+}): Promise<GatedRefillResult> {
+  const todayStr = opts.todayStr ?? getTodayDateString();
+  const now = opts.now ?? new Date();
+
+  return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
+    const recovered = recoverManualEnvelopeInto(freshIn);
+    if (!recovered.ok) {
+      return {
+        outcome: 'persist_failed' as const,
+        medications: recovered.state.medications,
+        logs: recovered.state.logs,
+        addedPills: 0,
+        log: null,
+        reason: 'persist_failed',
+      };
+    }
+    await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
+    const fresh = recovered.state;
+
+    const med = fresh.medications.find((m) => m.id === opts.medicationId);
+    if (!med) {
+      return {
+        outcome: 'missing_med' as const,
+        medications: fresh.medications,
+        logs: fresh.logs,
+        addedPills: 0,
+        log: null,
+        reason: 'missing_med',
+      };
+    }
+
+    // Find the most recent un-reversed refill log for this medication.
+    const refill = fresh.logs.find(
+      (l) =>
+        l.medicationId === opts.medicationId &&
+        l.type === 'refill' &&
+        l.amount > 0 &&
+        !l.reversedAt
+    );
+    if (!refill) {
+      return {
+        outcome: 'rejected' as const,
+        medications: fresh.medications,
+        logs: fresh.logs,
+        addedPills: 0,
+        log: null,
+        reason: 'rejected',
+      };
+    }
+
+    const reverseTimestamp = new Date(now).toISOString();
+    const reversedAmount = refill.amount;
+    // Reverse: settle at effective balance, then subtract the refill amount.
+    const { updatedMed } = settleAndAdjust(
+      med,
+      -reversedAmount,
+      todayStr,
+      now
+    );
+    const medications = fresh.medications.map((m) =>
+      m.id === opts.medicationId ? updatedMed : m
+    );
+    const undoLog: ConsumptionLog = {
+      id: opts.makeLogId ? opts.makeLogId() : `refill-undo-${Date.now()}`,
+      medicationId: med.id,
+      medicationName: med.name,
+      type: 'refill_undo',
+      amount: -reversedAmount,
+      date: todayStr,
+      timestamp: reverseTimestamp,
+      relatedLogId: refill.id,
+      description: `تراجع عن تعبئة مخزون (${reversedAmount} ${med.unit})`,
+    };
+    const logs = [
+      undoLog,
+      ...fresh.logs.map((l) =>
+        l.id === refill.id ? { ...l, reversedAt: reverseTimestamp } : l
+      ),
+    ];
+
+    const err = commitWithManualEnvelope({ medications, logs });
+    if (err) {
+      return {
+        outcome: 'persist_failed' as const,
+        medications: fresh.medications,
+        logs: fresh.logs,
+        addedPills: 0,
+        log: null,
+        reason: 'persist_failed',
+      };
+    }
+
+    return {
+      outcome: 'applied' as const,
+      medications,
+      logs,
+      addedPills: -reversedAmount,
+      log: undoLog,
     };
   });
 }

@@ -3,6 +3,8 @@ import type { Medication, ConsumptionLog } from '../../src/types';
 import {
   runGatedManualConsume,
   runGatedManualRestore,
+  runGatedRefill,
+  runGatedUndoRefill,
   shouldDismissAlarmAfterManualTake,
   type ManualStockEnvelope,
 } from '../../src/utils/manualStockMutation';
@@ -1628,6 +1630,220 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     expect(r.restoredAmount).toBe(0);
     expect(durable.medications[0].currentPills).toBe(0);
     expect(durable.medications[0].doseConsumption?.d1).toBeUndefined();
+  });
+
+  // ─── Active-deduction restore accounting (reversal tracking) ───
+  //
+  // restoreDose finds the ACTIVE (un-reversed) deduction log for the exact
+  // occurrence (medicationId + doseId + calendarDate). The gated path marks
+  // the reversed deduction log `reversedAt` and links the restore
+  // (skipped_day) log via `relatedLogId`. A later Restore for the same
+  // occurrence finds the NEXT active deduction (e.g. the Take after Auto →
+  // Restore → Take), NOT a stale historical deduction that was already
+  // reversed. This prevents stock inflation from re-reversing an old log.
+
+  it('Auto 3 → Restore = +3 (active deduction tracked)', async () => {
+    durable = {
+      medications: [med({ currentPills: 7, doseConsumption: { d1: TODAY }, doseConsumptionHistory: { d1: [TODAY] } })],
+      logs: [{ id: 'auto-3', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -3, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
+    };
+    const r = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-auto-3' });
+    expect(r.outcome).toBe('applied');
+    expect(r.restoredAmount).toBe(3);
+    expect(durable.medications[0].currentPills).toBe(10);
+    // The auto-3 deduction log is now marked reversed.
+    const autoLog = durable.logs.find((l) => l.id === 'auto-3');
+    expect(autoLog?.reversedAt).toBeTruthy();
+    // The restore log links to it.
+    const restoreLog = durable.logs.find((l) => l.id === 'restore-auto-3');
+    expect(restoreLog?.relatedLogId).toBe('auto-3');
+  });
+
+  it('Auto 3 → Restore → Take 1 (clamped) → Restore = +1 (reverses the Take, not the old Auto)', async () => {
+    // After Auto (3) + Restore (+3), the user Takes again but stock is low
+    // so the Take clamps to 1. The next Restore must reverse the Take's 1,
+    // NOT the old Auto's 3 (which is already reversed).
+    durable = {
+      medications: [med({ currentPills: 1, doseConsumption: { d1: TODAY }, doseConsumptionHistory: { d1: [TODAY] } })],
+      logs: [{ id: 'auto-3', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -3, date: TODAY, timestamp: '', description: '', doseId: 'd1', reversedAt: 'already-reversed' }],
+    };
+    // Take d1 — clamped to available stock (1). currentPills 1 → 0.
+    const take = await runGatedManualConsume({ medicationId: 'med-1', doseId: 'd1', source: 'manual', todayStr: TODAY });
+    expect(take.outcome).toBe('applied');
+    expect(take.doseAmount).toBe(1);
+    expect(durable.medications[0].currentPills).toBe(0);
+    // The dose_taken log has amount -1 (clamped).
+    const takeLog = durable.logs.find((l) => l.type === 'dose_taken' && l.doseId === 'd1');
+    expect(takeLog?.amount).toBe(-1);
+
+    // Restore must reverse the Take (1), NOT the old Auto (3, already reversed).
+    const r = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-take-1' });
+    expect(r.outcome).toBe('applied');
+    expect(r.restoredAmount).toBe(1);
+    expect(durable.medications[0].currentPills).toBe(1);
+    // The Take log is now reversed; the old Auto log stays reversed.
+    expect(durable.logs.find((l) => l.id === takeLog?.id)?.reversedAt).toBeTruthy();
+  });
+
+  it('Manual Take 3 → Restore = +3 (reverses the Manual Take amount)', async () => {
+    durable = {
+      medications: [med({ currentPills: 7, doseSchedule: [{ id: 'd1', amount: 3, time: '08:00' }], dosesPerDay: 1 })],
+      logs: [],
+    };
+    const take = await runGatedManualConsume({ medicationId: 'med-1', doseId: 'd1', source: 'manual', todayStr: TODAY });
+    expect(take.outcome).toBe('applied');
+    expect(take.doseAmount).toBe(3);
+    expect(durable.medications[0].currentPills).toBe(4);
+    const r = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-manual-3' });
+    expect(r.outcome).toBe('applied');
+    expect(r.restoredAmount).toBe(3);
+    expect(durable.medications[0].currentPills).toBe(7);
+    // The dose_taken log is reversed by the Restore.
+    const takeLog = durable.logs.find((l) => l.type === 'dose_taken' && l.doseId === 'd1');
+    expect(takeLog?.reversedAt).toBeTruthy();
+  });
+
+  it('Auto 3 → Restore → Take 3 → Restore = +3 (reverses the second Take)', async () => {
+    durable = {
+      medications: [med({ currentPills: 7, doseConsumption: { d1: TODAY }, doseConsumptionHistory: { d1: [TODAY] }, doseSchedule: [{ id: 'd1', amount: 3, time: '08:00' }], dosesPerDay: 1 })],
+      logs: [{ id: 'auto-3b', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -3, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
+    };
+    // Restore the Auto (3).
+    const r1 = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-auto-3b' });
+    expect(r1.outcome).toBe('applied');
+    expect(r1.restoredAmount).toBe(3);
+    expect(durable.medications[0].currentPills).toBe(10);
+    // Take again (3). currentPills 10 → 7.
+    const take = await runGatedManualConsume({ medicationId: 'med-1', doseId: 'd1', source: 'manual', todayStr: TODAY });
+    expect(take.outcome).toBe('applied');
+    expect(take.doseAmount).toBe(3);
+    expect(durable.medications[0].currentPills).toBe(7);
+    // Restore must reverse the Take (3), NOT the old Auto (3, already reversed).
+    const r2 = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-take-3b' });
+    expect(r2.outcome).toBe('applied');
+    expect(r2.restoredAmount).toBe(3);
+    expect(durable.medications[0].currentPills).toBe(10);
+  });
+
+  it('Restore twice for the same occurrence does not add stock twice', async () => {
+    durable = {
+      medications: [med({ currentPills: 7, doseConsumption: { d1: TODAY }, doseConsumptionHistory: { d1: [TODAY] } })],
+      logs: [{ id: 'auto-dedup', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -3, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
+    };
+    const r1 = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-1-dedup' });
+    expect(r1.outcome).toBe('applied');
+    expect(r1.restoredAmount).toBe(3);
+    expect(durable.medications[0].currentPills).toBe(10);
+    const pillsAfterFirst = durable.medications[0].currentPills;
+    // Second Restore: occurrence already restored (consume marker cleared).
+    const r2 = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-2-dedup' });
+    expect(r2.outcome).toBe('already_restored');
+    expect(durable.medications[0].currentPills).toBe(pillsAfterFirst);
+    // No second restore log.
+    expect(durable.logs.filter((l) => l.id === 'restore-2-dedup')).toHaveLength(0);
+  });
+
+  it('Dose A and Dose B same day: Restore A cannot reverse B\'s deduction', async () => {
+    durable = {
+      medications: [med({ currentPills: 8, doseConsumption: { d1: TODAY, d2: TODAY }, doseConsumptionHistory: { d1: [TODAY], d2: [TODAY] } })],
+      logs: [
+        { id: 'auto-a', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd1' },
+        { id: 'auto-b', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -2, date: TODAY, timestamp: '', description: '', doseId: 'd2' },
+      ],
+    };
+    // Restore d1 → reverses auto-a (1), NOT auto-b (2).
+    const r = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-a' });
+    expect(r.outcome).toBe('applied');
+    expect(r.restoredAmount).toBe(1);
+    expect(durable.medications[0].currentPills).toBe(9);
+    // d2 still consumed; auto-b NOT reversed.
+    expect(durable.medications[0].doseConsumption?.d2).toBe(TODAY);
+    expect(durable.logs.find((l) => l.id === 'auto-b')?.reversedAt).toBeUndefined();
+    // auto-a IS reversed.
+    expect(durable.logs.find((l) => l.id === 'auto-a')?.reversedAt).toBeTruthy();
+  });
+
+  it('Old reversed deduction is not picked as the active deduction for a later Restore', async () => {
+    // Two deductions for the same occurrence: old (reversed) + new (active).
+    durable = {
+      medications: [med({ currentPills: 6, doseConsumption: { d1: TODAY }, doseConsumptionHistory: { d1: [TODAY] } })],
+      logs: [
+        { id: 'old-deduct', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -4, date: TODAY, timestamp: '', description: '', doseId: 'd1', reversedAt: 'old' },
+        { id: 'new-deduct', medicationId: 'med-1', medicationName: 'TestMed', type: 'dose_taken', amount: -4, date: TODAY, timestamp: '', description: '', doseId: 'd1' },
+      ],
+    };
+    // Restore must find new-deduct (4), NOT old-deduct (4, reversed).
+    const r = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-new' });
+    expect(r.outcome).toBe('applied');
+    expect(r.restoredAmount).toBe(4);
+    expect(durable.medications[0].currentPills).toBe(10);
+    // new-deduct reversed; old-deduct stays reversed.
+    expect(durable.logs.find((l) => l.id === 'new-deduct')?.reversedAt).toBeTruthy();
+    expect(durable.logs.find((l) => l.id === 'old-deduct')?.reversedAt).toBe('old');
+    // restore log links to new-deduct, NOT old-deduct.
+    expect(durable.logs.find((l) => l.id === 'restore-new')?.relatedLogId).toBe('new-deduct');
+  });
+
+  // ─── Refill / undo-refill through the durable stock mutation gate ───
+
+  it('runGatedRefill adds pills through the gate (serialized with Take/Restore)', async () => {
+    durable = { medications: [med({ currentPills: 5 })], logs: [] };
+    const r = await runGatedRefill({ medicationId: 'med-1', addedPills: 10, todayStr: TODAY });
+    expect(r.outcome).toBe('applied');
+    expect(r.addedPills).toBe(10);
+    expect(durable.medications[0].currentPills).toBe(15);
+    expect(durable.logs.some((l) => l.type === 'refill' && l.amount === 10)).toBe(true);
+  });
+
+  it('runGatedRefill: addedPills <= 0 is rejected (no mutation)', async () => {
+    durable = { medications: [med({ currentPills: 5 })], logs: [] };
+    const r = await runGatedRefill({ medicationId: 'med-1', addedPills: 0, todayStr: TODAY });
+    expect(r.outcome).toBe('rejected');
+    expect(durable.medications[0].currentPills).toBe(5);
+    expect(durable.logs).toHaveLength(0);
+  });
+
+  it('runGatedUndoRefill reverses the most recent un-reversed refill through the gate', async () => {
+    durable = {
+      medications: [med({ currentPills: 15 })],
+      logs: [{ id: 'refill-1', medicationId: 'med-1', medicationName: 'TestMed', type: 'refill', amount: 10, date: TODAY, timestamp: '', description: '' }],
+    };
+    const r = await runGatedUndoRefill({ medicationId: 'med-1', todayStr: TODAY, makeLogId: () => 'refill-undo-1' });
+    expect(r.outcome).toBe('applied');
+    expect(durable.medications[0].currentPills).toBeLessThan(15);
+    // The refill log is marked reversedAt.
+    expect(durable.logs.find((l) => l.id === 'refill-1')?.reversedAt).toBeTruthy();
+    // The refill_undo log links to the refill.
+    const undoLog = durable.logs.find((l) => l.id === 'refill-undo-1');
+    expect(undoLog?.relatedLogId).toBe('refill-1');
+    expect(undoLog?.type).toBe('refill_undo');
+  });
+
+  it('runGatedUndoRefill with no un-reversed refill is rejected (no mutation)', async () => {
+    durable = {
+      medications: [med({ currentPills: 5 })],
+      logs: [{ id: 'refill-done', medicationId: 'med-1', medicationName: 'TestMed', type: 'refill', amount: 10, date: TODAY, timestamp: '', description: '', reversedAt: 'already' }],
+    };
+    const r = await runGatedUndoRefill({ medicationId: 'med-1', todayStr: TODAY });
+    expect(r.outcome).toBe('rejected');
+    expect(durable.medications[0].currentPills).toBe(5);
+  });
+
+  it('refill serializes with Manual Take (no stale snapshot race)', async () => {
+    // Both go through the same gate chain — the refill sees the Take's
+    // committed durable state, not a stale snapshot.
+    durable = { medications: [med({ currentPills: 10 })], logs: [] };
+    const [take, refill] = await Promise.all([
+      runGatedManualConsume({ medicationId: 'med-1', doseId: 'd1', source: 'manual', todayStr: TODAY }),
+      runGatedRefill({ medicationId: 'med-1', addedPills: 5, todayStr: TODAY, makeLogId: () => 'refill-after-take' }),
+    ]);
+    expect(take.outcome).toBe('applied');
+    expect(refill.outcome).toBe('applied');
+    // Take deducted 1 (d1 amount); refill added 5. Order is serialized by
+    // the gate chain so the final stock is 10 - 1 + 5 = 14.
+    expect(durable.medications[0].currentPills).toBe(14);
+    expect(durable.logs.some((l) => l.type === 'dose_taken' && l.doseId === 'd1')).toBe(true);
+    expect(durable.logs.some((l) => l.type === 'refill' && l.amount === 5)).toBe(true);
   });
 
   // ─── Section 1: Auto/Manual Take → Restore lifecycle invariants ───

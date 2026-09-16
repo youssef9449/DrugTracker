@@ -8,17 +8,18 @@ import { flushSync } from 'react-dom';
 import type { Medication, ConsumptionLog } from '../types';
 import {
   getTodayDateString,
-  reverseRefill,
   settleDoseChange,
   settleAutoDeductToggle,
   isDoseSkippedOnDate,
   isDoseConsumedOnDate,
 } from '../utils/dateCalculations';
 import { isDoseTimeElapsedToday } from '../utils/doseSchedule';
-import { settleAndAdjust, resolveRestoreDoseAmount } from '../utils/medActions';
+import { resolveRestoreDoseAmount } from '../utils/medActions';
 import {
   runGatedManualConsume,
   runGatedManualRestore,
+  runGatedRefill,
+  runGatedUndoRefill,
   shouldDismissAlarmAfterManualTake,
 } from '../utils/manualStockMutation';
 import { generateId } from '../utils/id';
@@ -185,41 +186,28 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     // A new refill creates a fresh undoable log entry, so clear the
     // dedup guard that blocked rapid double-undo of the previous refill.
     refillUndoInFlightRef.current.delete(medicationId);
-    const today = getTodayDateString();
-    // Shared settle+adjust logic (audit #78): settle at effPills, add the
-    // refill amount, set lastSyncDate=today.
-    const { updatedMed } = settleAndAdjust(med, addedPills, today);
-    setMedications((prev) =>
-      prev.map((m) => (m.id === medicationId ? updatedMed : m))
-    );
-    setLogs((prev) => [
-      {
-        id: generateId('refill'),
-        medicationId: med.id,
-        medicationName: med.name,
-        type: 'refill',
-        amount: addedPills,
-        date: today,
-        timestamp: new Date().toISOString(),
-        description: addedPills >= 0
-          ? `شراء وتعبئة مخزون (+${addedPills} ${med.unit})`
-          : `تراجع عن تعبئة مخزون (${Math.abs(addedPills)} ${med.unit})`,
-      },
-      ...prev,
-    ]);
-    if (soundEnabled) playSuccessChime();
+    // Phase 4: route through the durable stock mutation gate so the refill
+    // serializes with concurrent Take/Restore/Exact Auto reconciliation and
+    // settles against FRESH durable state (not a potentially-stale React
+    // snapshot). Behavior preserved: settleAndAdjust + refill log.
+    void (async () => {
+      const result = await runGatedRefill({
+        medicationId,
+        addedPills,
+      });
+      if (result.outcome === 'applied' && result.log) {
+        setMedications(result.medications);
+        medicationsRef.current = result.medications;
+        setLogs(result.logs);
+        if (soundEnabled) playSuccessChime();
+      }
+    })();
   };
 
   const handleUndoRefill = (medicationId: string) => {
     if (refillUndoInFlightRef.current.has(medicationId)) return;
     const med = medications.find((m) => m.id === medicationId);
-    const refill = logs.find((log) =>
-      log.medicationId === medicationId &&
-      log.type === 'refill' &&
-      log.amount > 0 &&
-      !log.reversedAt
-    );
-    if (!med || !refill) return;
+    if (!med) return;
     refillUndoInFlightRef.current.add(medicationId);
 
     // Clear the guard after the current event-loop tick. This blocks a
@@ -232,29 +220,20 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       refillUndoInFlightRef.current.delete(medicationId);
     }, 0);
 
-    const today = getTodayDateString();
-    const { updatedMed, reversedAmount } = reverseRefill(med, refill.amount, today);
-    const undoTimestamp = new Date().toISOString();
-
-    setMedications((prev) =>
-      prev.map((item) => item.id === medicationId ? updatedMed : item)
-    );
-    setLogs((prev) => [
-      {
-        id: generateId('refill-undo'),
-        medicationId: med.id,
-        medicationName: med.name,
-        type: 'refill_undo',
-        amount: -reversedAmount,
-        date: today,
-        timestamp: undoTimestamp,
-        relatedLogId: refill.id,
-        description: `تراجع عن تعبئة مخزون (${reversedAmount} ${med.unit})`,
-      },
-      ...prev.map((log) => log.id === refill.id ? { ...log, reversedAt: undoTimestamp } : log),
-    ]);
-    showToast(TOAST_MESSAGES.refillUndone(med.name));
-    if (soundEnabled) playSuccessChime();
+    // Phase 4: route through the durable stock mutation gate so the undo
+    // serializes with concurrent Take/Restore/Exact Auto reconciliation.
+    // Behavior preserved: reverseRefill (settleAndAdjust −amount), mark the
+    // refill log reversedAt, prepend refill_undo log with relatedLogId.
+    void (async () => {
+      const result = await runGatedUndoRefill({ medicationId });
+      if (result.outcome === 'applied' && result.log) {
+        setMedications(result.medications);
+        medicationsRef.current = result.medications;
+        setLogs(result.logs);
+        showToast(TOAST_MESSAGES.refillUndone(med.name));
+        if (soundEnabled) playSuccessChime();
+      }
+    })();
   };
 
   const handleToggleAutoDeduct = (medicationId: string) => {

@@ -453,4 +453,83 @@ public class TimedNotificationPublisherAtomicityTest {
         assertEquals(9, cal.get(Calendar.HOUR_OF_DAY));
         assertEquals(15, cal.get(Calendar.MINUTE));
     }
+
+
+    /**
+     * Delivery without open/action: next occurrence is calendar D+1 only.
+     * Dismissing the shade does not re-enter onReceive; this asserts the
+     * observable successor identity produced by rescheduleDoseReminderNextDay.
+     */
+    @Test
+    public void deliveryWithoutOpen_schedulesOnlyNextCalendarDaySuccessor() {
+        ObservingAppContext ctx = new ObservingAppContext(baseContext, /* fail= */ false);
+        JSObject json = validDoseNotificationJson();
+        Intent intent = deliveryIntent();
+
+        long before = System.currentTimeMillis();
+        assertTrue(publisher.rescheduleDoseReminderNextDay(ctx, intent, NOTIF_ID, json));
+
+        long next =
+                DoseReminderRecurrenceStore.getNextOccurrenceMs(ctx, MED_ID, DOSE_ID);
+        assertTrue(next > before);
+
+        Calendar expected = Calendar.getInstance();
+        expected.add(Calendar.DAY_OF_MONTH, 1);
+        expected.set(Calendar.HOUR_OF_DAY, 9);
+        expected.set(Calendar.MINUTE, 15);
+        expected.set(Calendar.SECOND, 0);
+        expected.set(Calendar.MILLISECOND, 0);
+
+        Calendar actual = Calendar.getInstance();
+        actual.setTimeInMillis(next);
+        assertEquals(expected.get(Calendar.YEAR), actual.get(Calendar.YEAR));
+        assertEquals(expected.get(Calendar.DAY_OF_YEAR), actual.get(Calendar.DAY_OF_YEAR));
+        assertEquals(9, actual.get(Calendar.HOUR_OF_DAY));
+        assertEquals(15, actual.get(Calendar.MINUTE));
+
+        assertTrue(hasScheduledAlarmForNotifId(baseContext, NOTIF_ID));
+        AlarmManager am = (AlarmManager) baseContext.getSystemService(Context.ALARM_SERVICE);
+        int matching = 0;
+        for (ShadowAlarmManager.ScheduledAlarm alarm :
+                Shadows.shadowOf(am).getScheduledAlarms()) {
+            if (alarm.operation != null
+                    && Shadows.shadowOf(alarm.operation).getRequestCode() == NOTIF_ID) {
+                matching++;
+                assertEquals(next, alarm.triggerAtTime);
+            }
+        }
+        assertEquals(1, matching);
+    }
+
+    /**
+     * Second delivery-path call for the same stable id keeps a single D+1 arm
+     * (FLAG_CANCEL_CURRENT) — never a same-day duplicate alarm.
+     */
+    @Test
+    public void repeatedDeliveryPath_doesNotCreateSameDayDuplicate() {
+        ObservingAppContext ctx = new ObservingAppContext(baseContext, /* fail= */ false);
+        JSObject json = validDoseNotificationJson();
+        Intent intent = deliveryIntent();
+
+        assertTrue(publisher.rescheduleDoseReminderNextDay(ctx, intent, NOTIF_ID, json));
+        long first =
+                DoseReminderRecurrenceStore.getNextOccurrenceMs(ctx, MED_ID, DOSE_ID);
+
+        assertTrue(publisher.rescheduleDoseReminderNextDay(ctx, intent, NOTIF_ID, json));
+        long second =
+                DoseReminderRecurrenceStore.getNextOccurrenceMs(ctx, MED_ID, DOSE_ID);
+
+        assertEquals(first, second);
+
+        AlarmManager am = (AlarmManager) baseContext.getSystemService(Context.ALARM_SERVICE);
+        int matching = 0;
+        for (ShadowAlarmManager.ScheduledAlarm alarm :
+                Shadows.shadowOf(am).getScheduledAlarms()) {
+            if (alarm.operation != null
+                    && Shadows.shadowOf(alarm.operation).getRequestCode() == NOTIF_ID) {
+                matching++;
+            }
+        }
+        assertEquals(1, matching);
+    }
 }

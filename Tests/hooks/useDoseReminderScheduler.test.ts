@@ -1712,6 +1712,47 @@ describe('delivery/reconciliation race', () => {
     expect(firstCalls).toBeGreaterThanOrEqual(1);
   });
 
+
+  it('after delivery + shade dismiss (no open/action): pending=false + valid re-arm → no same-day reschedule', async () => {
+    // Observable equivalent of: TimedNotificationPublisher delivered occurrence D,
+    // user swiped the notification away without localNotificationActionPerformed /
+    // DoseAlarmModal / Take / Snooze. Shade dismiss does not re-enter onReceive.
+    // getPending() may not list the delivered tray item; successor lives as
+    // future NOTIFICATION_STORE / DoseReminderRecurrenceStore evidence (D+1).
+    mocks.isPending.mockResolvedValue(false);
+    mocks.isNativeReArmed.mockResolvedValue(false);
+    const med = makeMed({
+      reminderTime: '09:00',
+      doseSchedule: [{ id: 'd1', amount: 1, time: '09:00' }],
+    });
+
+    const { rerender } = renderHook(
+      (props: { lifecycleTick: number }) =>
+        useDoseReminderScheduler(
+          defaultOpts({
+            medications: [med],
+            lifecycleTick: props.lifecycleTick,
+          })
+        ),
+      { initialProps: { lifecycleTick: 0 } }
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    mocks.schedule.mockClear();
+
+    // Post-delivery reconciliation: same signature, tray cleared, native D+1 evidence valid.
+    mocks.isPending.mockResolvedValue(false);
+    mocks.isNativeReArmed.mockResolvedValue(true);
+    rerender({ lifecycleTick: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.schedule).not.toHaveBeenCalled();
+    expect(mocks.isNativeReArmed).toHaveBeenCalledWith('med-1', 'd1', '09:00');
+  });
+
   it('no-op when pending=false but native re-arm state is valid (case B — real delivery race)', async () => {
     // Delivery transition: getPending may still report false while
     // TimedNotificationPublisher has already written DoseReminderRecurrenceStore

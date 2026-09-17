@@ -11,7 +11,6 @@ import {
   settleDoseChange,
   settleAutoDeductToggle,
 } from '../utils/dateCalculations';
-import { resolveRestoreDoseAmount } from '../utils/medActions';
 import {
   runGatedManualConsume,
   runGatedManualRestore,
@@ -98,28 +97,16 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     reason: string,
     doseId?: string
   ): Promise<Medication | null> => {
-    // UI-layer only: identity + in-flight guard. All business correctness
-    // (auto_deduct_off, already_restored, consumed vs auto-only, future vs
-    // elapsed, restore amount, active deduction) is decided exclusively
-    // inside runGatedManualRestore() against fresh durable state.
-    // A stale React snapshot must NEVER prevent a Restore that durable
-    // state would accept.
-    const med = medicationsRef.current.find((m) => m.id === medicationId);
-    if (!med) return null;
+    // Outside the gate: only request inputs + double-click guard.
+    // restoreKey is derived from inputs alone (no React medication/logs).
+    // Every business decision (missing med/dose, auto_deduct_off,
+    // already_restored, amount, active deduction) is made inside
+    // runGatedManualRestore against fresh durable state.
     const today = getTodayDateString();
-
-    // Resolve dose identity for UI / in-flight key only (not stock decisions).
-    const preResolved = resolveRestoreDoseAmount(med, doseId);
-    if (!preResolved.ok) {
-      if (preResolved.reason === 'missing_dose_id') {
-        showToast('اختر الجرعة المراد استرجاعها');
-      }
-      return null;
-    }
-    const resolvedDoseId = preResolved.doseId;
-    const restoreKey = resolvedDoseId
-      ? `${medicationId}:${resolvedDoseId}:${today}`
-      : `${medicationId}:${today}`;
+    const restoreKey =
+      doseId != null && doseId !== ''
+        ? `${medicationId}:${doseId}:${today}`
+        : `${medicationId}:${today}`;
 
     if (restoreInFlightRef.current.has(restoreKey)) return null;
     restoreInFlightRef.current.add(restoreKey);
@@ -131,12 +118,14 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         todayStr: today,
         makeLogId: () => generateId('restore'),
       });
+      const displayName = result.medicationName ?? '';
+      const displayUnit = result.unit ?? '';
       if (result.outcome === 'applied' && result.log) {
         const logsWithReason = result.logs.map((l, i) =>
           i === 0
             ? {
                 ...l,
-                description: `استرجاع جرعة (${reason}) (+${result.restoredAmount} ${med.unit})`,
+                description: `استرجاع جرعة (${reason}) (+${result.restoredAmount} ${displayUnit})`,
               }
             : l
         );
@@ -148,9 +137,9 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       }
       // Map durable outcomes to UI messages; never claim success on failure.
       if (result.outcome === 'already_restored' || result.reason === 'already_restored') {
-        showToast(TOAST_MESSAGES.doseAlreadyRestored(med.name));
+        if (displayName) showToast(TOAST_MESSAGES.doseAlreadyRestored(displayName));
       } else if (result.reason === 'auto_deduct_off') {
-        showToast(TOAST_MESSAGES.autoDeductOff(med.name));
+        if (displayName) showToast(TOAST_MESSAGES.autoDeductOff(displayName));
       } else if (result.reason === 'missing_dose_id') {
         showToast('اختر الجرعة المراد استرجاعها');
       }
@@ -162,15 +151,12 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
   };
 
   const handleConfirmRefill = (medicationId: string, addedPills: number) => {
-    const med = medications.find((m) => m.id === medicationId);
-    if (!med || addedPills <= 0) return;
+    // Input validation only — no React medication lookup. Settlement, stock,
+    // and log creation all happen inside runGatedRefill on fresh durable state.
+    if (!(addedPills > 0)) return;
     // A new refill creates a fresh undoable log entry, so clear the
     // dedup guard that blocked rapid double-undo of the previous refill.
     refillUndoInFlightRef.current.delete(medicationId);
-    // Phase 4: route through the durable stock mutation gate so the refill
-    // serializes with concurrent Take/Restore/Exact Auto reconciliation and
-    // settles against FRESH durable state (not a potentially-stale React
-    // snapshot). Behavior preserved: settleAndAdjust + refill log.
     void (async () => {
       const result = await runGatedRefill({
         medicationId,
@@ -186,9 +172,10 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
   };
 
   const handleUndoRefill = (medicationId: string) => {
+    // In-flight guard only. Medication existence, refill selection, and
+    // stock math are decided exclusively inside runGatedUndoRefill against
+    // fresh durable medications + logs (not React snapshot).
     if (refillUndoInFlightRef.current.has(medicationId)) return;
-    const med = medications.find((m) => m.id === medicationId);
-    if (!med) return;
     refillUndoInFlightRef.current.add(medicationId);
 
     // Clear the guard after the current event-loop tick. This blocks a
@@ -201,17 +188,14 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       refillUndoInFlightRef.current.delete(medicationId);
     }, 0);
 
-    // Phase 4: route through the durable stock mutation gate so the undo
-    // serializes with concurrent Take/Restore/Exact Auto reconciliation.
-    // Behavior preserved: reverseRefill (settleAndAdjust −amount), mark the
-    // refill log reversedAt, prepend refill_undo log with relatedLogId.
     void (async () => {
       const result = await runGatedUndoRefill({ medicationId });
       if (result.outcome === 'applied' && result.log) {
         setMedications(result.medications);
         medicationsRef.current = result.medications;
         setLogs(result.logs);
-        showToast(TOAST_MESSAGES.refillUndone(med.name));
+        const name = result.medicationName ?? result.log.medicationName ?? '';
+        if (name) showToast(TOAST_MESSAGES.refillUndone(name));
         if (soundEnabled) playSuccessChime();
       }
     })();

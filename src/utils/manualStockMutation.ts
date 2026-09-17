@@ -70,6 +70,10 @@ export interface GatedManualRestoreResult {
   restoredAmount: number;
   log: ConsumptionLog | null;
   reason?: string;
+  /** Fresh durable medication name for UI toasts (never from React snapshot). */
+  medicationName?: string;
+  /** Fresh durable unit for UI log descriptions. */
+  unit?: string;
 }
 
 /**
@@ -319,6 +323,8 @@ export function runGatedManualRestore(opts: {
         restoredAmount: 0,
         log: null,
         reason: result.reason,
+        medicationName: med.name,
+        unit: med.unit,
       };
     }
 
@@ -339,6 +345,8 @@ export function runGatedManualRestore(opts: {
         restoredAmount: 0,
         log: null,
         reason: 'already_restored',
+        medicationName: med.name,
+        unit: med.unit,
       };
     }
 
@@ -388,6 +396,8 @@ export function runGatedManualRestore(opts: {
         restoredAmount: 0,
         log: null,
         reason: 'persist_failed',
+        medicationName: med.name,
+        unit: med.unit,
       };
     }
 
@@ -397,6 +407,8 @@ export function runGatedManualRestore(opts: {
       logs,
       restoredAmount: result.restoredAmount,
       log,
+      medicationName: med.name,
+      unit: med.unit,
     };
   });
 }
@@ -414,6 +426,9 @@ export interface GatedRefillResult {
   addedPills: number;
   log: ConsumptionLog | null;
   reason?: string;
+  /** Fresh durable medication name for UI toasts (never from React snapshot). */
+  medicationName?: string;
+  unit?: string;
 }
 
 /**
@@ -514,6 +529,8 @@ export function runGatedRefill(opts: {
       logs,
       addedPills: opts.addedPills,
       log,
+      medicationName: med.name,
+      unit: med.unit,
     };
   });
 }
@@ -560,14 +577,25 @@ export function runGatedUndoRefill(opts: {
       };
     }
 
-    // Find the most recent un-reversed refill log for this medication.
-    const refill = fresh.logs.find(
+    // Most recent un-reversed refill by durable contract: highest timestamp,
+    // then highest id (stable, independent of array position / React snapshot).
+    const candidates = fresh.logs.filter(
       (l) =>
         l.medicationId === opts.medicationId &&
         l.type === 'refill' &&
         l.amount > 0 &&
         !l.reversedAt
     );
+    const refill =
+      candidates.length === 0
+        ? undefined
+        : candidates.reduce((best, cur) => {
+            const bt = best.timestamp || '';
+            const ct = cur.timestamp || '';
+            if (ct > bt) return cur;
+            if (ct < bt) return best;
+            return cur.id > best.id ? cur : best;
+          });
     if (!refill) {
       return {
         outcome: 'rejected' as const,
@@ -576,6 +604,8 @@ export function runGatedUndoRefill(opts: {
         addedPills: 0,
         log: null,
         reason: 'rejected',
+        medicationName: med.name,
+        unit: med.unit,
       };
     }
 
@@ -627,6 +657,8 @@ export function runGatedUndoRefill(opts: {
       logs,
       addedPills: -reversedAmount,
       log: undoLog,
+      medicationName: med.name,
+      unit: med.unit,
     };
   });
 }

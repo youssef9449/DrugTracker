@@ -2884,21 +2884,11 @@ describe('Phase 4 — stale React snapshot must not block durable Restore / Undo
   });
 
   it('UndoRefill reverses the durable newest refill, not a stale React logs snapshot', async () => {
-    // Logs are newest-first (prepended on write). Durable has both;
-    // a stale React snapshot might only know about the older one.
+    // Intentionally put OLD first so selection cannot rely on array position.
+    // Selection must use timestamp (then id), independent of React snapshot order.
     durable = {
       medications: [med({ currentPills: 30 })],
       logs: [
-        {
-          id: 'refill-new',
-          medicationId: 'med-1',
-          medicationName: 'TestMed',
-          type: 'refill',
-          amount: 10,
-          date: TODAY,
-          timestamp: `${TODAY}T12:00:00.000Z`,
-          description: 'new',
-        },
         {
           id: 'refill-old',
           medicationId: 'med-1',
@@ -2908,6 +2898,16 @@ describe('Phase 4 — stale React snapshot must not block durable Restore / Undo
           date: TODAY,
           timestamp: `${TODAY}T08:00:00.000Z`,
           description: 'old',
+        },
+        {
+          id: 'refill-new',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'refill',
+          amount: 10,
+          date: TODAY,
+          timestamp: `${TODAY}T12:00:00.000Z`,
+          description: 'new',
         },
       ],
     };

@@ -102,6 +102,31 @@ public class EventStoreRejectedTest {
     }
 
     @Test
+    public void storageKeyPayloadIdentityMismatch_markedRejected_notReturnedAsFired() throws Exception {
+        String storageKey = AutoDeductionContract.occurrenceKey(
+                "med-a", "dose-a", "2026-09-14");
+        JSONObject payload = new JSONObject();
+        payload.put("medicationId", "med-b");
+        payload.put("doseId", "dose-b");
+        payload.put("calendarDate", "2026-09-14");
+        payload.put("amount", 2.0);
+        payload.put("status", AutoDeductionContract.STATUS_FIRED);
+        putRaw(storageKey, payload);
+
+        AutoDeductionEventStore store = newEventStore();
+        assertTrue(store.listFiredEvents().isEmpty());
+        assertTrue(store.listFiredEvents().isEmpty());
+
+        String raw = eventPrefs().getString(evtKey(storageKey), null);
+        assertNotNull(raw);
+        JSONObject rejected = new JSONObject(raw);
+        assertEquals(AutoDeductionContract.STATUS_REJECTED,
+                rejected.optString("status"));
+        assertEquals("identity_mismatch",
+                rejected.optString("rejectionReason"));
+    }
+
+    @Test
     public void validFiredUnaffected() {
         AutoDeductionEventStore store = newEventStore();
         assertEquals(

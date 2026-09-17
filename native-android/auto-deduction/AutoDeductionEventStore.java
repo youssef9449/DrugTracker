@@ -357,15 +357,17 @@ public final class AutoDeductionEventStore {
                     if (!AutoDeductionContract.STATUS_FIRED.equals(status)) {
                         continue;
                     }
-                    if (isMalformedFired(o)) {
+                    if (isMalformedFired(o) || !storageKeyMatchesPayload(e.getKey(), o)) {
                         o.put("status", AutoDeductionContract.STATUS_REJECTED);
                         o.put("rejectedAt", System.currentTimeMillis());
-                        o.put("rejectionReason", "malformed_fields");
+                        o.put(
+                                "rejectionReason",
+                                isMalformedFired(o) ? "malformed_fields" : "identity_mismatch");
                         if (editor == null) {
                             editor = prefs.edit();
                         }
                         editor.putString(e.getKey(), o.toString());
-                        Log.w(TAG, "queued malformed FIRED for REJECTED: " + e.getKey());
+                        Log.w(TAG, "queued invalid FIRED identity for REJECTED: " + e.getKey());
                         // Do not add to fired — never surface as FIRED to JS.
                         continue;
                     }
@@ -435,6 +437,28 @@ public final class AutoDeductionEventStore {
         return false;
     }
     /**
+     * True when the durable evt: storage key encodes exactly the same
+     * medicationId + doseId + calendarDate as the FIRED payload.
+     * The storage key is part of the occurrence identity and must not disagree
+     * with the payload identity, even when all payload fields are individually valid.
+     */
+    private static boolean storageKeyMatchesPayload(String prefKey, JSONObject o) {
+        if (prefKey == null || !prefKey.startsWith(KEY_EVENT_PREFIX) || o == null) {
+            return false;
+        }
+        String medId = o.optString("medicationId", "").trim();
+        String doseId = o.optString("doseId", "").trim();
+        String calendarDate = o.optString("calendarDate", "").trim();
+        if (medId.isEmpty() || doseId.isEmpty()
+                || !AutoDeductionContract.isValidCalendarDate(calendarDate)) {
+            return false;
+        }
+        String expectedPrefKey = KEY_EVENT_PREFIX
+                + AutoDeductionContract.occurrenceKey(medId, doseId, calendarDate);
+        return prefKey.equals(expectedPrefKey);
+    }
+
+    /**
      * Promote pending fires, then return the unreconciled FIRED event for one
      * occurrence identity, or null if absent / already RECONCILED.
      * Nested under EventStore.LOCK after caller holds SCHEDULE_LOCK.
@@ -461,7 +485,7 @@ public final class AutoDeductionEventStore {
                         medicationId.equals(rowMed)
                         && doseId.equals(rowDose)
                         && calendarDate.equals(rowDate);
-                if (!identityOk || isMalformedFired(obj)) {
+                if (!identityOk || !storageKeyMatchesPayload(prefKey, obj) || isMalformedFired(obj)) {
                     // Terminalize mismatched / malformed payload; never return as FIRED.
                     try {
                         obj.put("status", AutoDeductionContract.STATUS_REJECTED);

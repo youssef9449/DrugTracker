@@ -2375,8 +2375,9 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       markReconciled: async (m, d, c) => { marked.push(`${m}|${d}|${c}`); return { ok: true, changed: true }; },
     });
     // First run: barrier applied the snapshot (currentPills=10→6) but clear
-    // failed → blocked, envelope kept, no ACK.
-    expect(first.recoveredEnvelope).toBe(false);
+    // failed → recovery WAS attempted (recoveredEnvelope=true), envelope kept,
+    // no ACK (clear not durable yet).
+    expect(first.recoveredEnvelope).toBe(true);
     expect(first.markedCount).toBe(0);
     expect(marked).toEqual([]);
     expect(env.current).not.toBeNull();
@@ -2496,7 +2497,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       listFired: async () => [],
       markReconciled: async (m, d, c) => { marked.push(`${m}|${d}|${c}`); return { ok: true, changed: true }; },
     });
-    expect(blocked.recoveredEnvelope).toBe(false);
+    expect(blocked.recoveredEnvelope).toBe(true);
     expect(blocked.markedCount).toBe(0);
     expect(marked).toEqual([]);
     expect(env.current).not.toBeNull();

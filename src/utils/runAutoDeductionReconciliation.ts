@@ -38,9 +38,6 @@ import {
   type ExactAutoEnvelopeStored,
 } from './stockEnvelopeRecovery';
 import { allocateMutationSeq } from './stockMutationOrdering';
-import { loadJson, persist } from './storage';
-
-const STORAGE_ENVELOPE_KEY = 'android_med_tracker_exact_auto_envelope_v1';
 
 export interface ExactAutoEnvelope {
   version: 1;
@@ -207,15 +204,41 @@ async function runOnce(
       legacyCommit
     );
     if (legacy.blocked) {
+      // Recovery was attempted (envelope was present). Two sub-cases:
+      // - Persist failure: mutation NOT durable → no acks (toAcknowledge=[]).
+      // - Clear failure after durable commit: mutation IS durable → acks are
+      //   safe to send (toAcknowledge collected by the barrier).
+      const blockedAcks = legacy.toAcknowledge;
+      if (blockedAcks.length > 0) {
+        const { markedCount, failed } = await markAll(blockedAcks, mark);
+        return {
+          medications: legacy.state.medications,
+          logs: legacy.state.logs,
+          toAcknowledge: blockedAcks,
+          details: blockedAcks.map((a) => ({
+            medicationId: a.medicationId,
+            doseId: a.doseId,
+            calendarDate: a.calendarDate,
+            amount: 0,
+            outcome: 'already_applied' as const,
+            occurrenceKey: `${a.medicationId}${a.doseId}${a.calendarDate}`,
+          })),
+          mutated: legacy.recovered,
+          newExactLogs: [],
+          markedCount,
+          recoveredEnvelope: legacy.recovered,
+          partialNativeAck: failed.length > 0,
+        };
+      }
       return {
         medications: legacy.state.medications,
         logs: legacy.state.logs,
         toAcknowledge: [],
         details: [],
-        mutated: false,
+        mutated: legacy.recovered,
         newExactLogs: [],
         markedCount: 0,
-        recoveredEnvelope: false,
+        recoveredEnvelope: legacy.recovered,
         partialNativeAck: false,
       };
     }

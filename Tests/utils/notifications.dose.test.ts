@@ -13,6 +13,10 @@ vi.mock('@capacitor/core', () => ({
   Capacitor: {
     getPlatform: mocks.platform,
   },
+  registerPlugin: () => ({
+    getNextOccurrence: () => Promise.resolve({ valid: false, nextOccurrenceMs: 0 }),
+    clearReArm: () => Promise.resolve({ ok: true }),
+  }),
 }));
 
 vi.mock('@capacitor/local-notifications', () => ({
@@ -38,8 +42,10 @@ import {
 function lastDoseSchedulePayload(): {
   id: number;
   at: Date;
-  repeats: boolean;
-  every: string;
+  repeats: boolean | undefined;
+  every: string | undefined;
+  allowWhileIdle: boolean | undefined;
+  doseRecurring: boolean | undefined;
 } {
   expect(mocks.schedule).toHaveBeenCalled();
   const call = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
@@ -47,8 +53,14 @@ function lastDoseSchedulePayload(): {
   return {
     id: n.id,
     at: n.schedule.at as Date,
-    repeats: n.schedule.repeats as boolean,
-    every: n.schedule.every as string,
+    // Phase 2: dose reminders are ONE-SHOT (no Capacitor repeats/every —
+    // those use setRepeating with a wrong interval for daily wall-clock
+    // times). Recurrence is handled by TimedNotificationPublisher.
+    // rescheduleDoseReminderNextDay + the extra.doseRecurring marker.
+    repeats: n.schedule.repeats as boolean | undefined,
+    every: n.schedule.every as string | undefined,
+    allowWhileIdle: n.schedule.allowWhileIdle as boolean | undefined,
+    doseRecurring: (n.extra as { doseRecurring?: boolean } | undefined)?.doseRecurring,
   };
 }
 
@@ -84,8 +96,12 @@ describe('scheduleDoseReminder — skipToday (consumed-day suppression)', () => 
     expect(payload.at.getDate()).toBe(10);
     expect(payload.at.getHours()).toBe(20);
     expect(payload.at.getMinutes()).toBe(0);
-    expect(payload.repeats).toBe(true);
-    expect(payload.every).toBe('day');
+    // Phase 2 contract: one-shot schedule (no Capacitor repeats/every).
+    // Recurrence is via extra.doseRecurring + native re-arm.
+    expect(payload.repeats).toBeUndefined();
+    expect(payload.every).toBeUndefined();
+    expect(payload.doseRecurring).toBe(true);
+    expect(payload.allowWhileIdle).toBe(true);
   });
 
   it('skipToday: an already-consumed day re-arms the recurring alarm from TOMORROW (same HH:MM, still repeats daily)', async () => {
@@ -98,9 +114,11 @@ describe('scheduleDoseReminder — skipToday (consumed-day suppression)', () => 
     expect(ymd(payload.at)).toBe('2024-09-11'); // tomorrow
     expect(payload.at.getHours()).toBe(20);
     expect(payload.at.getMinutes()).toBe(0);
-    // Tomorrow's (and every later day's) reminder must still recur.
-    expect(payload.repeats).toBe(true);
-    expect(payload.every).toBe('day');
+    // Phase 2 contract: one-shot schedule (no Capacitor repeats/every).
+    // Recurrence is via extra.doseRecurring + native re-arm.
+    expect(payload.repeats).toBeUndefined();
+    expect(payload.every).toBeUndefined();
+    expect(payload.doseRecurring).toBe(true);
     // Same stable medication-specific id band as the normal schedule.
     expect(payload.id).toBe(doseReminderAlarmId('med-1'));
   });

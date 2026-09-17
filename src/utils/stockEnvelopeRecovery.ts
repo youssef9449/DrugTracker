@@ -166,7 +166,12 @@ export function migrateLegacyExactAutoEnvelope(
   if (durableMatchesEnvelopeSnapshot(existing, fresh)) {
     const clearErr = save(null);
     if (clearErr) {
-      return { state: fresh, toAcknowledge: [], recovered: false, blocked: true };
+      // Recovery was attempted (envelope present, snapshot matched). Clear
+      // failed → keep envelope for retry. ACK happens on restart when the
+      // barrier re-confirms snapshot match + clear succeeds (NOT immediately
+      // — lastApplied is not used for legacy, so snapshot match is the only
+      // durability proof, and it requires a successful clear to finalize).
+      return { state: fresh, toAcknowledge: [], recovered: true, blocked: true };
     }
     return { state: fresh, toAcknowledge: acks, recovered: true, blocked: false };
   }
@@ -177,7 +182,7 @@ export function migrateLegacyExactAutoEnvelope(
   if (legacyLogsPresent) {
     const clearErr = save(null);
     if (clearErr) {
-      return { state: fresh, toAcknowledge: [], recovered: false, blocked: true };
+      return { state: fresh, toAcknowledge: [], recovered: true, blocked: true };
     }
     return { state: fresh, toAcknowledge: acks, recovered: true, blocked: false };
   }
@@ -191,7 +196,9 @@ export function migrateLegacyExactAutoEnvelope(
       logs: existing.logs,
     });
     if (commitErr) {
-      return { state: fresh, toAcknowledge: [], recovered: false, blocked: true };
+      // Recovery was attempted (envelope present). Persist failed → mutation
+      // NOT durable → no ACK. recovered=true means recovery was attempted.
+      return { state: fresh, toAcknowledge: [], recovered: true, blocked: true };
     }
     const applied: AutoStockDurableState = {
       medications: existing.medications,
@@ -199,10 +206,10 @@ export function migrateLegacyExactAutoEnvelope(
     };
     const clearErr = save(null);
     if (clearErr) {
-      // Snapshot applied but envelope clear failed → keep envelope; next
-      // restart sees snapshot matches → clear + ACK. Do NOT ACK now (the
-      // clear itself is not durable yet).
-      return { state: applied, toAcknowledge: [], recovered: false, blocked: true };
+      // Snapshot applied (meds+logs durable) but envelope clear failed → keep
+      // envelope; next restart sees snapshot matches → clear + ACK. No ACK now
+      // (clear not durable; ACK deferred to restart confirmation).
+      return { state: applied, toAcknowledge: [], recovered: true, blocked: true };
     }
     return { state: applied, toAcknowledge: acks, recovered: true, blocked: false };
   }
@@ -213,7 +220,7 @@ export function migrateLegacyExactAutoEnvelope(
   // with a proper Phase 4 mutationSeq. No ACK (mutation not durable here).
   const clearErr = save(null);
   if (clearErr) {
-    return { state: fresh, toAcknowledge: [], recovered: false, blocked: true };
+    return { state: fresh, toAcknowledge: [], recovered: true, blocked: true };
   }
   return { state: fresh, toAcknowledge: [], recovered: true, blocked: false };
 }

@@ -20,7 +20,7 @@ import {
 } from './medActions';
 import { normalizeExactDoseId } from './autoDeductionReconciliation';
 import { markAutoDeductionEventReconciled } from './autoDeductionNative';
-import { isDoseConsumedOnDate, getTodayDateString } from './dateCalculations';
+import { isDoseConsumedOnDate, isDoseSkippedOnDate, getTodayDateString } from './dateCalculations';
 import { LEGACY_DOSE_ID } from './notifications';
 import {
   withAutoStockMutationGate,
@@ -322,9 +322,16 @@ export function runGatedManualRestore(opts: {
       };
     }
 
-    // Idempotency: only undo a real durable consumption marker.
-    // Second Restore after markers cleared is already_restored.
-    if (!result.wasActuallyConsumed) {
+    // Idempotency: a projection-only restore (auto-elapsed, no consume
+    // marker) sets a durable skip marker the FIRST time so projection/Exact
+    // Auto don't re-deduct. A SECOND restore for the same occurrence (skip
+    // already set, no consume marker) is a true no-op (already_restored).
+    // But the FIRST auto-only restore must NOT be skipped — it needs to
+    // persist the skip marker that restoreDose computed in updatedMed.
+    const skipAlreadySet = result.doseId
+      ? isDoseSkippedOnDate(med, result.doseId, todayStr)
+      : false;
+    if (!result.wasActuallyConsumed && skipAlreadySet) {
       return {
         outcome: 'already_restored' as const,
         medications: fresh.medications,

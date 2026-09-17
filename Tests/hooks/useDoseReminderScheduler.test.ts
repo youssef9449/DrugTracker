@@ -14,6 +14,10 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: { getPlatform: vi.fn(() => 'web') },
+  registerPlugin: () => ({
+    getNextOccurrence: () => Promise.resolve({ valid: false, nextOccurrenceMs: 0 }),
+    clearReArm: () => Promise.resolve({ ok: true }),
+  }),
 }));
 vi.mock('@capacitor/local-notifications', () => ({
   LocalNotifications: {
@@ -98,7 +102,7 @@ beforeEach(() => {
   mocks.isNativeReArmed.mockResolvedValue(false);
   mocks.cancelLegacy.mockResolvedValue(undefined);
   // Default: no pending notifications (web platform / no stale alarms).
-  LocalNotifications.getPending.mockResolvedValue({ notifications: [] });
+  vi.mocked(LocalNotifications.getPending).mockResolvedValue({ notifications: [] });
   localStorage.clear();
 });
 
@@ -827,6 +831,14 @@ describe('useDoseReminderScheduler — multi-dose (Phase 2)', () => {
     };
     rerender({ medications: [shrunk] });
     await flushUntil(() => mocks.cancel.mock.calls.some((c) => c[0] === 'med-rm' && c[1] === 'b'));
+    // Sibling doses (a, c) are rescheduled after the removed dose (b) is
+    // cancelled — wait for those schedule calls before asserting.
+    await flushUntil(() =>
+      mocks.schedule.mock.calls.some((c) => c[5]?.doseId === 'a')
+    );
+    await flushUntil(() =>
+      mocks.schedule.mock.calls.some((c) => c[5]?.doseId === 'c')
+    );
 
     // Removed dose cancelled exactly once (no duplicate cancelSlot path).
     const cancelB = mocks.cancel.mock.calls.filter(
@@ -1558,7 +1570,6 @@ describe('idempotent lifecycle reconciliation', () => {
 
     const schedulesAfterFirst = mocks.schedule.mock.calls.length;
     expect(schedulesAfterFirst).toBeGreaterThanOrEqual(1);
-    const cancelsAfterFirst = mocks.cancel.mock.calls.length;
 
     // Next lifecycle: pretend native still has the pending id.
     mocks.isPending.mockResolvedValue(true);
@@ -1641,12 +1652,14 @@ describe('stale native pending cleanup', () => {
     const nonDoseAlarmId = 999_999_999; // outside doseAlarm band
 
     // Mock getPending to contain current + stale + legacy + non-doseAlarm IDs.
-    LocalNotifications.getPending.mockResolvedValue({
+    // (title/body are required by PendingLocalNotificationSchema but unused by
+    // the stale-cleanup logic which only inspects `id`.)
+    vi.mocked(LocalNotifications.getPending).mockResolvedValue({
       notifications: [
-        { id: currentId },
-        { id: staleDoseId },
-        { id: legacyMedId },
-        { id: nonDoseAlarmId },
+        { id: currentId, title: '', body: '' },
+        { id: staleDoseId, title: '', body: '' },
+        { id: legacyMedId, title: '', body: '' },
+        { id: nonDoseAlarmId, title: '', body: '' },
       ],
     });
 
@@ -1660,7 +1673,7 @@ describe('stale native pending cleanup', () => {
     // Verify actual IDs sent to cancel: stale + legacy cancelled,
     // current + non-doseAlarm NOT cancelled.
     expect(LocalNotifications.cancel).toHaveBeenCalled();
-    const cancelledIds = LocalNotifications.cancel.mock.calls.flatMap(
+    const cancelledIds = vi.mocked(LocalNotifications.cancel).mock.calls.flatMap(
       (call: unknown[]) =>
         (call[0] as { notifications: { id: number }[] }).notifications.map(
           (n) => n.id

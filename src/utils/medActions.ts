@@ -414,13 +414,32 @@ export function restoreDose(
     let updatedMed: Medication;
     if (wasActuallyConsumed) {
       // Undo ONLY this occurrence's durable deduction (actual log amount).
-      // Do not re-run settleAndAdjust (would fold sibling pastDueUnits).
+      // Do not re-run settleAndAdjust for the stock (would fold sibling
+      // pastDueUnits). BUT recompute lastSyncDate from the CLEARED med so it
+      // rolls back when the restored slot was the last consumed slot —
+      // otherwise the past day stays "settled" (lastSync covers it) and
+      // syncAutoDailyDeductions would never settle the restored dose,
+      // losing it. This mirrors main's settleAndAdjust lastSyncDate recompute
+      // without re-folding sibling pastDueUnits into the stock snapshot.
+      const clearedMed: Medication = {
+        ...med,
+        doseConsumption: nextConsumption,
+        doseConsumptionHistory: nextHistory,
+        doseSkippedHistory,
+      };
+      const postBreakdown = computeDueDoseBreakdown(clearedMed, now, todayStr);
+      const newLastSync = mutationSettlementLastSyncDate(
+        todayStr,
+        postBreakdown.consumedToday,
+        postBreakdown.gated
+      );
       updatedMed = {
         ...med,
         currentPills: med.currentPills + restoredAmount,
         doseConsumption: nextConsumption,
         doseConsumptionHistory: nextHistory,
         doseSkippedHistory,
+        lastSyncDate: newLastSync,
         lastConsumedDate: allStillConsumed ? todayStr : undefined,
       };
     } else {
@@ -445,33 +464,37 @@ export function restoreDose(
   }
 
   // --- Legacy (no schedule) ---
+  // Legacy has no per-dose skip marker. The auto-restore reverses the
+  // projected/auto deduction by crediting dailyDose (or the actual deducted
+  // log amount if the dose was consumed). settleAndAdjust settles the
+  // snapshot at the effective balance then adds the restored amount —
+  // matching main's behavior. For auto-only (not consumed), this credits
+  // dailyDose to reverse the projection. For consumed, it credits the actual
+  // amount and clears lastConsumedDate.
   const wasLegacyConsumed = med.lastConsumedDate === todayStr;
-  if (!wasLegacyConsumed) {
-    // No durable consumption marker — projection-only; do not inflate stock.
+  if (wasLegacyConsumed) {
+    const legacyActive = findActiveDeductionForOccurrence(logs, med.id, resolvedDoseId, todayStr);
+    const legacyActual = legacyActive ? Math.abs(Number(legacyActive.amount) || 0) : restoredAmount;
+    const { updatedMed: settled } = settleAndAdjust(med, legacyActual, todayStr, now);
+    const updatedMed: Medication = { ...settled, lastConsumedDate: undefined };
     return {
       ok: true,
-      updatedMed: med,
-      restoredAmount: 0,
+      updatedMed,
+      restoredAmount: legacyActual,
       doseId: resolvedDoseId,
-      wasActuallyConsumed: false,
+      wasActuallyConsumed: true,
+      reversedLogId: legacyActive?.id,
     };
   }
-  const legacyActive = findActiveDeductionForOccurrence(logs, med.id, resolvedDoseId, todayStr);
-  const legacyActual = legacyActive ? Math.abs(Number(legacyActive.amount) || 0) : restoredAmount;
-  // Undo this day's durable deduction only; do not re-settle other projected units.
-  const updatedMed: Medication = {
-    ...med,
-    currentPills: med.currentPills + legacyActual,
-    lastConsumedDate: undefined,
-  };
-
+  // Auto-only (not consumed): reverse the projected auto-deduction by
+  // crediting dailyDose via settleAndAdjust (same as main).
+  const { updatedMed: legacySettled } = settleAndAdjust(med, restoredAmount, todayStr, now);
   return {
     ok: true,
-    updatedMed,
-    restoredAmount: legacyActual,
+    updatedMed: legacySettled,
+    restoredAmount,
     doseId: resolvedDoseId,
-    wasActuallyConsumed: true,
-    reversedLogId: legacyActive?.id,
+    wasActuallyConsumed: false,
   };
 }
 

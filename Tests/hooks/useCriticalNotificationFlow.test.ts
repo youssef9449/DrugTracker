@@ -26,6 +26,10 @@ const platformMock = vi.hoisted(() => vi.fn(() => 'web'));
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: { getPlatform: platformMock },
+  registerPlugin: () => ({
+    getNextOccurrence: () => Promise.resolve({ valid: false, nextOccurrenceMs: 0 }),
+    clearReArm: () => Promise.resolve({ ok: true }),
+  }),
 }));
 vi.mock('@capacitor/local-notifications', () => ({
   LocalNotifications: {

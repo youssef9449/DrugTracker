@@ -1,6 +1,7 @@
 import { Medication, ConsumptionLog, getCriticalThresholdDays } from '../types';
 import { generateId } from './id';
 import { MS_PER_DAY, NEVER_DEPLETES_DAYS, CRITICAL_ALARM_FIRE_HOUR, timeToMinutes } from './time';
+import { LEGACY_DOSE_ID } from './legacyDoseId';
 
 /**
  * Returns today's date as a deterministic YYYY-MM-DD string, using
@@ -627,9 +628,31 @@ export function computeDueDoseBreakdown(
         fullDueUnits = fullDueDoses * med.dailyDose;
       }
     } else if (totalDays > 0) {
-      fullDueDoses = totalDays;
-      pastDueDoses = totalDays;
-      pastDueUnits = totalDays * med.dailyDose;
+      // Legacy non-gated: a day's dose is due at the start of the calendar
+      // day (pre-change behavior). When TODAY's legacy occurrence is already
+      // consumed (Manual Take, or Exact Auto-deduction applied to the implicit
+      // legacy dose) or skipped (Auto-Deduct → Restore), it must NOT be
+      // charged again: the occurrence was charged exactly once by whoever
+      // consumed it, and identity is medicationId + doseId + calendarDate —
+      // not a day count. Excluding today here makes every downstream legacy
+      // settlement consumer (settleAutoDeductToggle / settleDoseChange /
+      // syncAutoDailyDeductions / effectiveCurrentPills projection) a no-op
+      // for that occurrence, so exact-before-legacy can never double-deduct.
+      // The legacy-dose consume marker is the durable per-occurrence record;
+      // lastConsumedDate (consumedToday) is the legacy single-dose equivalent.
+      // isDoseConsumedOnDate covers both (no-schedule fallback to
+      // lastConsumedDate) plus the marker written by the exact path.
+      const legacyTodayConsumed =
+        consumedToday ||
+        isDoseConsumedOnDate(med, LEGACY_DOSE_ID, todayStr) ||
+        isDoseSkippedOnDate(med, LEGACY_DOSE_ID, todayStr);
+      // When today's occurrence is consumed, only the past days of the
+      // window (lastSync, today) remain due. Otherwise the semantics are
+      // exactly the pre-change legacy behavior (totalDays — today included).
+      const dueDays = legacyTodayConsumed ? Math.max(0, totalDays - 1) : totalDays;
+      fullDueDoses = dueDays;
+      pastDueDoses = dueDays;
+      pastDueUnits = dueDays * med.dailyDose;
       fullDueUnits = pastDueUnits;
     }
   }
@@ -936,7 +959,11 @@ export function settleDoseChange(
   const breakdown = computeDueDoseBreakdown(med, now, todayStr);
   // Settle the elapsed period at the OLD dose. For the reminderTime-gated
   // path, settle past days only (betweenDays) — today's dose is left
-  // dynamic. For legacy, settle totalDays (today included).
+  // dynamic. For legacy, settle totalDays (today included) — EXCEPT when
+  // today's legacy occurrence was already consumed (Manual Take or Exact
+  // Auto): computeDueDoseBreakdown excludes a consumed today from
+  // fullDueUnits/fullDueDoses, so the same occurrence can never be
+  // double-deducted here after exact-before-legacy reconciliation.
   const dueDoses = breakdown.gated ? breakdown.pastDueDoses : breakdown.fullDueDoses;
   // Prefer unit-based settlement (Phase 3). When multi-dose, pastDueUnits
   // already reflects the OLD schedule amounts on the med.
@@ -1033,7 +1060,12 @@ export function settleAutoDeductToggle(
   const breakdown = computeDueDoseBreakdown(med, now, todayStr);
   // For the true→false settlement: settle the elapsed period. For the
   // reminderTime-gated path, settle past days only (betweenDays); for
-  // legacy, settle totalDays (today included). lastSyncDate is bumped to
+  // legacy, settle totalDays (today included) — EXCEPT when today's legacy
+  // occurrence was already consumed (Manual Take or Exact Auto):
+  // computeDueDoseBreakdown excludes a consumed today from
+  // fullDueUnits/fullDueDoses, so toggling can never re-charge an
+  // occurrence the exact path (or a manual Take) already deducted.
+  // lastSyncDate is bumped to
   // today in both cases — turning OFF freezes the balance (autoDeduct
   // projection is off), and turning ON must start fresh from today (no
   // retroactive deduction for the frozen period).

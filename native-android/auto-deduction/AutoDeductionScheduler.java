@@ -2097,7 +2097,9 @@ public final class AutoDeductionScheduler {
      *
      * <ol>
      *   <li>Promote pending-fire records</li>
-     *   <li>Unreconciled FIRED → FIRED + native event amount (invalid amount → FIRED + null)</li>
+     *   <li>Unreconciled FIRED → FIRED + native event amount. Malformed FIRED
+     *       payloads (invalid identity/calendar/amount) are terminalized by
+     *       the EventStore as REJECTED and never surface as FIRED here.</li>
      *   <li>Effective cancellation via ordering tokens ({@link #isOccurrenceCancelledKey})
      *       → CANCELLED. Beats stale schedule metadata when a tombstone exists and
      *       metadata removal failed, unless a strictly newer schedule ordering token
@@ -2138,7 +2140,9 @@ public final class AutoDeductionScheduler {
                 if (AutoDeductionContract.isValidAmount(amt)) {
                     return new OccurrenceSnapshot(OccurrenceSnapshot.Status.FIRED, amt);
                 }
-                // FIRED present but amount invalid — still report FIRED so JS rejects.
+                // Defensive fallback: malformed payloads are terminalized as
+                // REJECTED inside getFiredUnreconciledEvent and never returned,
+                // so this branch should be unreachable for current stores.
                 return new OccurrenceSnapshot(OccurrenceSnapshot.Status.FIRED, null);
             }
             // Effective cancellation (ordering-token aware) must beat stale schedule

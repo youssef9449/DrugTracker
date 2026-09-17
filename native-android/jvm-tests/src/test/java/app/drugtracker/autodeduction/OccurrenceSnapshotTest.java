@@ -10,6 +10,7 @@ import static app.drugtracker.autodeduction.Phase2TestSupport.schKey;
 import static app.drugtracker.autodeduction.Phase2TestSupport.cancelPrefs;
 import static app.drugtracker.autodeduction.Phase2TestSupport.cancelKey;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -116,8 +117,18 @@ public class OccurrenceSnapshotTest {
         assertEquals(2.0, snap.amount, 0.0001);
     }
 
+    /**
+     * Malformed FIRED payload (invalid amount) must NOT surface as FIRED.
+     *
+     * Current AutoDeductionEventStore contract: a FIRED row whose payload is
+     * malformed (identity/calendar/amount invalid) is terminalized as
+     * REJECTED with rejectionReason "malformed_fields" and is never returned
+     * by getFiredUnreconciledEvent — so the snapshot must not report it as
+     * FIRED (with a null or otherwise coerced amount). With no schedule
+     * metadata present for the occurrence, the effective snapshot is ABSENT.
+     */
     @Test
-    public void invalidFiredAmount_returnsFiredNull() {
+    public void malformedFiredAmount_notReportedAsFired_rowBecomesRejected() throws Exception {
         String date = "2026-09-11";
         AutoDeductionEventStore store = newEventStore();
         // Insert with invalid amount via direct prefs if insert rejects — use store path with 0
@@ -146,8 +157,41 @@ public class OccurrenceSnapshotTest {
         AutoDeductionScheduler s = newScheduler();
         AutoDeductionScheduler.OccurrenceSnapshot snap =
                 s.getOccurrenceSnapshot("med", "dose", date);
-        assertEquals(AutoDeductionScheduler.OccurrenceSnapshot.Status.FIRED, snap.status);
+        assertEquals(
+                "malformed FIRED payload must not be reported as FIRED",
+                AutoDeductionScheduler.OccurrenceSnapshot.Status.ABSENT,
+                snap.status);
         assertNull(snap.amount);
+
+        // The EventStore terminalized the malformed FIRED row as REJECTED.
+        String key = AutoDeductionContract.occurrenceKey("med", "dose", date);
+        String raw = Phase2TestSupport.eventPrefs()
+                .getString(Phase2TestSupport.evtKey(key), null);
+        assertNotNull("event row must still exist in storage", raw);
+        JSONObject row = new JSONObject(raw);
+        assertEquals(AutoDeductionContract.STATUS_REJECTED, row.optString("status"));
+        assertEquals("malformed_fields", row.optString("rejectionReason"));
+        assertTrue(row.has("rejectedAt"));
+    }
+
+    /**
+     * Positive control: a VALID FIRED row (correct identity, valid positive
+     * amount) keeps reporting FIRED with the exact event amount — the
+     * REJECTED terminalization path must never swallow valid events.
+     */
+    @Test
+    public void validFired_returnsFiredWithAmount() {
+        String date = "2026-09-12";
+        AutoDeductionEventStore store = newEventStore();
+        assertEquals(
+                AutoDeductionEventStore.InsertFiredResult.Status.CREATED,
+                store.insertFiredIfAbsent("med", "dose", date, 1_000L, 2.5).status);
+
+        AutoDeductionScheduler s = newScheduler();
+        AutoDeductionScheduler.OccurrenceSnapshot snap =
+                s.getOccurrenceSnapshot("med", "dose", date);
+        assertEquals(AutoDeductionScheduler.OccurrenceSnapshot.Status.FIRED, snap.status);
+        assertEquals(2.5, snap.amount, 0.0001);
     }
 
     @Test

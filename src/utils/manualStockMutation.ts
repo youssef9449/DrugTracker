@@ -18,14 +18,12 @@ import {
   settleAndAdjust,
   type ConsumeDoseResult,
 } from './medActions';
-import { normalizeExactDoseId } from './autoDeductionReconciliation';
 import {
   markAutoDeductionEventReconciled,
   getOccurrenceSnapshot,
   type OccurrenceSnapshotResult,
 } from './autoDeductionNative';
 import {
-  isDoseConsumedOnDate,
   isDoseSkippedOnDate,
   getTodayDateString,
   computeDueDoseBreakdown,

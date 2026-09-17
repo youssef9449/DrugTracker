@@ -2859,7 +2859,6 @@ describe('Phase 4 — stale React snapshot must not block durable Restore / Undo
     __setManualEnvelopeTestHooks({
       load: () => null,
       save: () => null,
-      clear: () => null,
     });
     // Match production allocateMutationSeq contract; keep allocation and
     // finalization counters independent.
@@ -3073,7 +3072,6 @@ describe('Phase 4 — Exact Auto event.amount is authoritative for Manual Take',
     __setManualEnvelopeTestHooks({
       load: () => null,
       save: () => null,
-      clear: () => null,
     });
     let nextSeq = 0;
     let lastApplied = 0;
@@ -3293,7 +3291,6 @@ describe('Phase 4 — mutationSeq monotonic invariant', () => {
     __setManualEnvelopeTestHooks({
       load: () => null,
       save: () => null,
-      clear: () => null,
     });
     __setStockMutationOrderingTestHooks({
       allocate: () => ({ ok: false, error: 'nextSeq persist failed' }),
@@ -3338,7 +3335,6 @@ describe('Phase 4 — future Restore is already_restored without durable deducti
     __setManualEnvelopeTestHooks({
       load: () => null,
       save: () => null,
-      clear: () => null,
     });
     let nextSeq = 0;
     let lastApplied = 0;
@@ -3430,7 +3426,6 @@ describe('Phase 4 — todayStr/now captured inside gate after wait', () => {
     __setManualEnvelopeTestHooks({
       load: () => null,
       save: () => null,
-      clear: () => null,
     });
     let nextSeq = 0;
     let lastApplied = 0;
@@ -3510,7 +3505,6 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
     __setManualEnvelopeTestHooks({
       load: () => null,
       save: () => null,
-      clear: () => null,
     });
     let nextSeq = 0;
     let lastApplied = 0;
@@ -3618,7 +3612,7 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
       // no doseId
       source: 'manual',
       todayStr: TODAY,
-      getOccurrenceSnapshot: async (medId, doseId) => {
+      getOccurrenceSnapshot: async (_medId, doseId) => {
         expect(doseId).toBe('d1');
         return { ok: true, status: 'FIRED', amount: 3 };
       },

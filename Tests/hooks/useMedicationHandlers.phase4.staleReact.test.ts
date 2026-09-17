@@ -89,7 +89,6 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     __setManualEnvelopeTestHooks({
       load: () => null,
       save: () => null,
-      clear: () => null,
     });
     // Match production allocateMutationSeq contract:
     // { ok: true, seq } | { ok: false, error }. Keep nextSeq and lastApplied separate.
@@ -176,7 +175,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
 
     let updated: Medication | null = null;
     await act(async () => {
-      updated = await result.current.handleRestoreDose('med-1', 'test', 'd1');
+      updated = (await result.current.handleRestoreDose('med-1', 'test', 'd1')).medication;
     });
 
     expect(updated).not.toBeNull();
@@ -225,7 +224,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
 
     let updated: Medication | null = null;
     await act(async () => {
-      updated = await result.current.handleRestoreDose('med-1', 'test', 'd1');
+      updated = (await result.current.handleRestoreDose('med-1', 'test', 'd1')).medication;
     });
 
     expect(updated).not.toBeNull();
@@ -268,7 +267,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     const { result } = mountHandlers();
     let updated: Medication | null = null;
     await act(async () => {
-      updated = await result.current.handleRestoreDose('med-1', 'test', 'd1');
+      updated = (await result.current.handleRestoreDose('med-1', 'test', 'd1')).medication;
     });
     expect(updated).not.toBeNull();
     expect(durable.medications[0].currentPills).toBe(10);
@@ -304,8 +303,8 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     let first!: Promise<Medication | null>;
     let second!: Promise<Medication | null>;
     await act(async () => {
-      first = result.current.handleRestoreDose('med-1', 'test', 'd1');
-      second = result.current.handleRestoreDose('med-1', 'test', 'd1');
+      first = result.current.handleRestoreDose('med-1', 'test', 'd1').then(r => r.medication);
+      second = result.current.handleRestoreDose('med-1', 'test', 'd1').then(r => r.medication);
       await Promise.all([first, second]);
     });
     const results = [await first, await second];
@@ -577,6 +576,88 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       expect(durable.medications[0].currentPills).toBe(8);
     });
     expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
+  });
+
+  it('Card Restore: React empty + durable multi-dose + omitted doseId → fresh durable medication opens modal', async () => {
+    // React has NO medications (stale/empty). Durable has a multi-dose
+    // medication with a restore eligible for d1. Without doseId, the gate
+    // returns missing_dose_id. handleCardRestoreDose must open the
+    // SelectDoseModal using the FRESH durable medication from
+    // durableResult.medications — NOT medicationsRef.current (which is
+    // empty).
+    durable = {
+      medications: [
+        med({
+          currentPills: 9,
+          doseConsumption: { d1: TODAY },
+          doseConsumptionHistory: { d1: [TODAY] },
+        }),
+      ],
+      logs: [
+        {
+          id: 'take-d1',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'dose_taken',
+          amount: -1,
+          date: TODAY,
+          timestamp: '',
+          description: '',
+          doseId: 'd1',
+        },
+      ],
+    };
+    reactMeds = []; // React snapshot is EMPTY
+    reactLogs = [];
+
+    const setSelectDoseMed = vi.fn();
+    const setSelectDoseMode = vi.fn();
+
+    const { result } = renderHook(
+      ({ medications, logs }: { medications: Medication[]; logs: ConsumptionLog[] }) =>
+        useMedicationHandlers({
+          medications,
+          logs,
+          soundEnabled: false,
+          globalAutoDeductEnabled: true,
+          notificationsEnabled: false,
+          criticalStockAlertsEnabled: false,
+          selectDoseMode: 'restore',
+          setMedications: setMedications as never,
+          setLogs: setLogs as never,
+          setGlobalAutoDeductEnabled: vi.fn(),
+          setIsAutoDeductPromptOpen: vi.fn(),
+          setNotificationsEnabled: vi.fn(),
+          setCriticalStockAlertsEnabled: vi.fn(),
+          setSelectDoseMed,
+          setSelectDoseMode,
+          setEditingMedication: vi.fn(),
+          showToast,
+          dismissAlarm: vi.fn(),
+          snoozeAlarm: vi.fn(),
+        }),
+      { initialProps: { medications: reactMeds, logs: reactLogs } }
+    );
+
+    // Call handleCardRestoreDose without doseId — multi-dose should
+    // trigger missing_dose_id from the gate, and the modal should open
+    // using the FRESH durable medication.
+    await act(async () => {
+      result.current.handleCardRestoreDose('med-1'); // no doseId
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // The modal was opened with the fresh durable medication (from
+    // durableResult.medications), NOT from the empty React snapshot.
+    expect(setSelectDoseMode).toHaveBeenCalledWith('manage');
+    expect(setSelectDoseMed).toHaveBeenCalledTimes(1);
+    const modalMed = setSelectDoseMed.mock.calls[0][0] as Medication;
+    expect(modalMed).not.toBeNull();
+    expect(modalMed.id).toBe('med-1');
+    expect(modalMed.doseSchedule).toBeDefined();
+    expect(modalMed.doseSchedule!.length).toBe(3);
   });
 
 });

@@ -179,7 +179,8 @@ export type RestoreDoseResult =
         | 'missing_dose_id'
         | 'invalid_dose_id'
         | 'no_dose'
-        | 'auto_deduct_off';
+        | 'auto_deduct_off'
+        | 'already_restored';
     };
 
 /**

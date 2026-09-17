@@ -17,6 +17,7 @@ import {
   runGatedRefill,
   runGatedUndoRefill,
   shouldDismissAlarmAfterManualTake,
+  type GatedManualRestoreResult,
 } from '../utils/manualStockMutation';
 import { generateId } from '../utils/id';
 import { playSuccessChime } from '../utils/sound';
@@ -63,7 +64,6 @@ export interface MedicationHandlersDeps {
 export function useMedicationHandlers(deps: MedicationHandlersDeps) {
   const {
     medications,
-    logs,
     soundEnabled,
     globalAutoDeductEnabled,
     notificationsEnabled,
@@ -96,7 +96,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     medicationId: string,
     reason: string,
     doseId?: string
-  ): Promise<Medication | null> => {
+  ): Promise<{ medication: Medication | null; result: GatedManualRestoreResult | null }> => {
     // Outside the gate: only request inputs + double-click guard.
     // restoreKey is derived from inputs alone (no React medication/logs).
     // Every business decision (missing med/dose, auto_deduct_off,
@@ -108,7 +108,9 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         ? `${medicationId}:${doseId}:${today}`
         : `${medicationId}:${today}`;
 
-    if (restoreInFlightRef.current.has(restoreKey)) return null;
+    if (restoreInFlightRef.current.has(restoreKey)) {
+      return { medication: null, result: null };
+    }
     restoreInFlightRef.current.add(restoreKey);
 
     try {
@@ -134,7 +136,10 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         setLogs(logsWithReason);
         if (soundEnabled) playSuccessChime();
         if (displayName) showToast(`تم استرجاع الجرعة — ${displayName}`);
-        return result.medications.find((m) => m.id === medicationId) ?? null;
+        return {
+          medication: result.medications.find((m) => m.id === medicationId) ?? null,
+          result,
+        };
       }
       // Map durable outcomes to UI messages; never claim success on failure.
       if (result.outcome === 'already_restored' || result.reason === 'already_restored') {
@@ -145,7 +150,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         showToast('اختر الجرعة المراد استرجاعها');
       }
       // persist_failed / missing_med / other rejected → no success state
-      return null;
+      return { medication: null, result };
     } finally {
       restoreInFlightRef.current.delete(restoreKey);
     }
@@ -519,7 +524,11 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     // All business decisions happen inside the durable gate via
     // runGatedManualRestore against fresh durable state.
     void (async () => {
-      const updated = await handleRestoreDose(medicationId, 'card', doseId);
+      const { medication: updated, result: durableResult } = await handleRestoreDose(
+        medicationId,
+        'card',
+        doseId
+      );
       if (updated) {
         if (selectDoseModeRef.current === 'manage') {
           setSelectDoseMed(updated);
@@ -527,15 +536,23 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
           setSelectDoseMed(null);
           setSelectDoseMode('take');
         }
-      } else {
-        // If the durable gate returned missing_dose_id, open the
-        // SelectDoseModal using the FRESH durable medication (not a
-        // stale React snapshot).
-        const durableMed = medicationsRef.current.find((m) => m.id === medicationId);
+      } else if (
+        durableResult &&
+        durableResult.reason === 'missing_dose_id' &&
+        !doseId
+      ) {
+        // The durable gate resolved the medication and determined the
+        // doseId is required. Open the SelectDoseModal using the FRESH
+        // durable medication from result.medications — NOT
+        // medicationsRef.current (which may be stale or empty).
+        const durableMed = durableResult.medications.find(
+          (m) => m.id === medicationId
+        );
         if (durableMed) {
           const isMulti =
-            Array.isArray(durableMed.doseSchedule) && durableMed.doseSchedule.length > 1;
-          if (isMulti && !doseId) {
+            Array.isArray(durableMed.doseSchedule) &&
+            durableMed.doseSchedule.length > 1;
+          if (isMulti) {
             flushSync(() => {
               setSelectDoseMode('manage');
             });

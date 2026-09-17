@@ -193,14 +193,30 @@ export type RestoreDoseResult =
  * the NEXT active deduction (e.g. after Auto → Restore → Take, the next
  * Restore finds the Take, not the already-reversed Auto).
  *
- * Logs are prepended (newest first), so the FIRST matching un-reversed
- * deduction is the most recent active one. No timestamp preference and no
- * auto_daily-over-dose_taken preference — the active deduction is whatever
- * the most recent un-reversed deduction for that EXACT occurrence is.
+ * Determinism contract — does NOT depend on array position:
+ *   The most-recent active deduction is selected by comparing the log's
+ *   own persisted data, not by assuming the logs array is newest-first.
+ *   - Primary ordering: `timestamp` (parsed to epoch ms via Date.parse).
+ *     Higher epoch = more recent. Every production log producer sets
+ *     `timestamp` to `new Date(...).toISOString()`, so this field is a
+ *     reliable chronological signal that is preserved through persist /
+ *     recovery / envelope snapshot / reconciliation.
+ *   - Tie-breaker (same timestamp, or both empty/invalid): stable `id`
+ *     lexicographic comparison. This is deterministic from the log's own
+ *     identity and does not depend on array position. When timestamps are
+ *     equal there is no further chronological signal in the schema, so any
+ *     deterministic choice is acceptable — `id` provides it.
+ *   - Logs with empty/invalid timestamps are treated as oldest
+ *     (-Infinity) so a real timestamp always wins over a missing one.
  *
- * This replaces the previous "prefer auto_daily" heuristic, which could
- * return a stale historical deduction (already reversed by a Restore) and
- * inflate stock on a later Restore.
+ * No auto_daily-over-dose_taken preference — the active deduction is
+ * whatever the most-recent un-reversed deduction for that EXACT occurrence
+ * is, regardless of type.
+ *
+ * This replaces the previous "first matching in array" (assumed
+ * newest-first) and "prefer auto_daily" heuristics, both of which could
+ * return a stale historical deduction (or the wrong one if a producer
+ * appended/reordered logs) and inflate stock on a later Restore.
  *
  * Multi-dose identity is strict: doseId must match (or both legacy) so a
  * Restore for dose A can never reverse dose B's deduction.
@@ -211,6 +227,9 @@ export function findActiveDeductionForOccurrence(
   doseId: string | undefined,
   calendarDate: string
 ): ConsumptionLog | null {
+  let best: ConsumptionLog | null = null;
+  let bestEpoch = -Infinity;
+  let bestId = '';
   for (const l of logs) {
     if (l.medicationId !== medicationId) continue;
     if (l.date !== calendarDate) continue;
@@ -225,9 +244,22 @@ export function findActiveDeductionForOccurrence(
       // Legacy / single: accept logs without doseId or with legacy id.
       if (logDose != null && logDose !== 'legacy' && logDose !== doseId) continue;
     }
-    return l; // most recent un-reversed deduction for this occurrence
+    // Deterministic most-recent selection from the log's own data:
+    // timestamp (epoch) primary, id tie-breaker. NOT array position.
+    const parsed = Date.parse(l.timestamp ?? '');
+    const epoch = Number.isFinite(parsed) ? parsed : -Infinity;
+    const id = l.id ?? '';
+    const isMoreRecent =
+      best === null ||
+      epoch > bestEpoch ||
+      (epoch === bestEpoch && id > bestId);
+    if (isMoreRecent) {
+      best = l;
+      bestEpoch = epoch;
+      bestId = id;
+    }
   }
-  return null;
+  return best;
 }
 
 /**

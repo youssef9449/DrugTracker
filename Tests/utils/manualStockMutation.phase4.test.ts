@@ -25,6 +25,7 @@ import {
 import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
 import { isDoseConsumedOnDate } from '../../src/utils/dateCalculations';
 import { exactAutoLogId } from '../../src/utils/autoDeductionReconciliation';
+import { findActiveDeductionForOccurrence } from '../../src/utils/medActions';
 
 const TODAY = '2026-09-16';
 
@@ -2529,5 +2530,214 @@ describe('shouldDismissAlarmAfterManualTake', () => {
     expect(shouldDismissAlarmAfterManualTake('rejected')).toBe(false);
     expect(shouldDismissAlarmAfterManualTake('missing_med')).toBe(false);
     expect(shouldDismissAlarmAfterManualTake('already_restored')).toBe(false);
+  });
+});
+
+describe('findActiveDeductionForOccurrence — deterministic ordering (NOT array position)', () => {
+  // Helper: build a deduction log for the occurrence.
+  function deduction(
+    over: Partial<ConsumptionLog> &
+      Pick<ConsumptionLog, 'id' | 'type' | 'amount' | 'timestamp'>
+  ): ConsumptionLog {
+    return {
+      medicationId: 'med-1',
+      medicationName: 'TestMed',
+      date: TODAY,
+      description: '',
+      ...over,
+    };
+  }
+
+  const TS_OLD = '2026-09-16T08:00:00.000Z';
+  const TS_NEW = '2026-09-16T14:00:00.000Z';
+  const TS_NEWEST = '2026-09-16T20:00:00.000Z';
+
+  it('picks the same active deduction regardless of array order (newest→oldest, oldest→newest, shuffled)', () => {
+    const oldAuto = deduction({
+      id: 'auto-old',
+      type: 'auto_daily',
+      amount: -3,
+      timestamp: TS_OLD,
+      doseId: 'd1',
+    });
+    const newTake = deduction({
+      id: 'take-new',
+      type: 'dose_taken',
+      amount: -1,
+      timestamp: TS_NEW,
+      doseId: 'd1',
+    });
+    const newestAuto = deduction({
+      id: 'auto-newest',
+      type: 'auto_daily',
+      amount: -2,
+      timestamp: TS_NEWEST,
+      doseId: 'd1',
+    });
+    // Three array orderings — the active deduction (newestAuto, highest
+    // timestamp) must be the same in all three.
+    const newestFirst = [newestAuto, newTake, oldAuto];
+    const oldestFirst = [oldAuto, newTake, newestAuto];
+    const shuffled = [newTake, newestAuto, oldAuto];
+    const a = findActiveDeductionForOccurrence(newestFirst, 'med-1', 'd1', TODAY);
+    const b = findActiveDeductionForOccurrence(oldestFirst, 'med-1', 'd1', TODAY);
+    const c = findActiveDeductionForOccurrence(shuffled, 'med-1', 'd1', TODAY);
+    expect(a?.id).toBe('auto-newest');
+    expect(b?.id).toBe('auto-newest');
+    expect(c?.id).toBe('auto-newest');
+    expect(a?.id).toBe(b?.id);
+    expect(b?.id).toBe(c?.id);
+  });
+
+  it('Auto deduction old + Manual Take new → picks the Manual Take (by timestamp, not type)', () => {
+    const oldAuto = deduction({
+      id: 'auto-old',
+      type: 'auto_daily',
+      amount: -3,
+      timestamp: TS_OLD,
+      doseId: 'd1',
+    });
+    const newTake = deduction({
+      id: 'take-new',
+      type: 'dose_taken',
+      amount: -1,
+      timestamp: TS_NEW,
+      doseId: 'd1',
+    });
+    // newestFirst (Take at front) and oldestFirst (Auto at front) — both
+    // must pick the Take because its timestamp is newer, NOT because of
+    // array position or auto_daily preference.
+    const r1 = findActiveDeductionForOccurrence([newTake, oldAuto], 'med-1', 'd1', TODAY);
+    const r2 = findActiveDeductionForOccurrence([oldAuto, newTake], 'med-1', 'd1', TODAY);
+    expect(r1?.id).toBe('take-new');
+    expect(r2?.id).toBe('take-new');
+  });
+
+  it('Manual Take old + Auto deduction new → picks the Auto (by timestamp, not type)', () => {
+    const oldTake = deduction({
+      id: 'take-old',
+      type: 'dose_taken',
+      amount: -1,
+      timestamp: TS_OLD,
+      doseId: 'd1',
+    });
+    const newAuto = deduction({
+      id: 'auto-new',
+      type: 'auto_daily',
+      amount: -2,
+      timestamp: TS_NEW,
+      doseId: 'd1',
+    });
+    const r1 = findActiveDeductionForOccurrence([newAuto, oldTake], 'med-1', 'd1', TODAY);
+    const r2 = findActiveDeductionForOccurrence([oldTake, newAuto], 'med-1', 'd1', TODAY);
+    expect(r1?.id).toBe('auto-new');
+    expect(r2?.id).toBe('auto-new');
+  });
+
+  it('Newer deduction reversed → picks the most-recent UN-reversed deduction', () => {
+    const oldAuto = deduction({
+      id: 'auto-old',
+      type: 'auto_daily',
+      amount: -3,
+      timestamp: TS_OLD,
+      doseId: 'd1',
+    });
+    const newTake = deduction({
+      id: 'take-new',
+      type: 'dose_taken',
+      amount: -1,
+      timestamp: TS_NEW,
+      doseId: 'd1',
+      reversedAt: '2026-09-16T15:00:00.000Z', // reversed by a Restore
+    });
+    const newestAuto = deduction({
+      id: 'auto-newest',
+      type: 'auto_daily',
+      amount: -2,
+      timestamp: TS_NEWEST,
+      doseId: 'd1',
+    });
+    // newTake is reversed → skipped. newestAuto (highest timestamp, active)
+    // wins regardless of array order.
+    const r1 = findActiveDeductionForOccurrence([newestAuto, newTake, oldAuto], 'med-1', 'd1', TODAY);
+    const r2 = findActiveDeductionForOccurrence([oldAuto, newTake, newestAuto], 'med-1', 'd1', TODAY);
+    expect(r1?.id).toBe('auto-newest');
+    expect(r2?.id).toBe('auto-newest');
+  });
+
+  it('Same medication + same date + different doseId → dose A never picks dose B', () => {
+    const a1 = deduction({ id: 'a1', type: 'auto_daily', amount: -1, timestamp: TS_OLD, doseId: 'd1' });
+    const b1 = deduction({ id: 'b1', type: 'auto_daily', amount: -2, timestamp: TS_NEW, doseId: 'd2' });
+    // d1 lookup finds a1 only; d2 lookup finds b1 only — regardless of order.
+    expect(findActiveDeductionForOccurrence([a1, b1], 'med-1', 'd1', TODAY)?.id).toBe('a1');
+    expect(findActiveDeductionForOccurrence([b1, a1], 'med-1', 'd1', TODAY)?.id).toBe('a1');
+    expect(findActiveDeductionForOccurrence([a1, b1], 'med-1', 'd2', TODAY)?.id).toBe('b1');
+    expect(findActiveDeductionForOccurrence([b1, a1], 'med-1', 'd2', TODAY)?.id).toBe('b1');
+  });
+
+  it('Same occurrence with multiple historical deductions/reversals → picks the only active one', () => {
+    // Three deductions for d1+TODAY: two reversed, one active.
+    const d1 = deduction({ id: 'ded-1', type: 'auto_daily', amount: -3, timestamp: TS_OLD, doseId: 'd1', reversedAt: 'r1' });
+    const d2 = deduction({ id: 'ded-2', type: 'dose_taken', amount: -1, timestamp: TS_NEW, doseId: 'd1', reversedAt: 'r2' });
+    const d3 = deduction({ id: 'ded-3', type: 'auto_daily', amount: -2, timestamp: TS_NEWEST, doseId: 'd1' });
+    // d3 is the only un-reversed one. Must be picked in any order.
+    for (const order of [[d1, d2, d3], [d3, d2, d1], [d2, d1, d3], [d2, d3, d1], [d3, d1, d2], [d1, d3, d2]]) {
+      const r = findActiveDeductionForOccurrence(order, 'med-1', 'd1', TODAY);
+      expect(r?.id).toBe('ded-3');
+    }
+  });
+
+  it('Clamped deduction amount is returned as-is (not the requested slot amount)', () => {
+    // Requested 3 but clamped to 1 (stock was 1). The log has amount=-1.
+    const clamped = deduction({ id: 'clamp', type: 'dose_taken', amount: -1, timestamp: TS_NEW, doseId: 'd1' });
+    const r = findActiveDeductionForOccurrence([clamped], 'med-1', 'd1', TODAY);
+    expect(r).not.toBeNull();
+    expect(Math.abs(r!.amount)).toBe(1);
+    expect(Math.abs(r!.amount)).not.toBe(3);
+  });
+
+  it('Logs with empty/invalid timestamps fall back to id tie-breaker (deterministic, not array position)', () => {
+    // Both have empty timestamps — tie-breaker is id. 'zzz' > 'aaa' so
+    // 'zzz' wins regardless of array order.
+    const a = deduction({ id: 'aaa', type: 'auto_daily', amount: -1, timestamp: '', doseId: 'd1' });
+    const b = deduction({ id: 'zzz', type: 'dose_taken', amount: -2, timestamp: '', doseId: 'd1' });
+    const r1 = findActiveDeductionForOccurrence([a, b], 'med-1', 'd1', TODAY);
+    const r2 = findActiveDeductionForOccurrence([b, a], 'med-1', 'd1', TODAY);
+    expect(r1?.id).toBe('zzz');
+    expect(r2?.id).toBe('zzz');
+  });
+
+  it('A real timestamp always wins over an empty/invalid timestamp regardless of array order', () => {
+    const realTs = deduction({ id: 'real', type: 'auto_daily', amount: -2, timestamp: TS_NEW, doseId: 'd1' });
+    const emptyTs = deduction({ id: 'empty', type: 'dose_taken', amount: -5, timestamp: '', doseId: 'd1' });
+    // realTs has a valid timestamp → wins. Even if emptyTs is first AND has
+    // a "higher" id, the valid timestamp wins.
+    const r1 = findActiveDeductionForOccurrence([realTs, emptyTs], 'med-1', 'd1', TODAY);
+    const r2 = findActiveDeductionForOccurrence([emptyTs, realTs], 'med-1', 'd1', TODAY);
+    expect(r1?.id).toBe('real');
+    expect(r2?.id).toBe('real');
+  });
+
+  it('No active deduction (all reversed or none match) → null', () => {
+    const reversed = deduction({ id: 'rev', type: 'auto_daily', amount: -1, timestamp: TS_NEW, doseId: 'd1', reversedAt: 'x' });
+    expect(findActiveDeductionForOccurrence([reversed], 'med-1', 'd1', TODAY)).toBeNull();
+    // Different doseId → no match.
+    const otherDose = deduction({ id: 'other', type: 'auto_daily', amount: -1, timestamp: TS_NEW, doseId: 'd2' });
+    expect(findActiveDeductionForOccurrence([otherDose], 'med-1', 'd1', TODAY)).toBeNull();
+    // Different date → no match.
+    const otherDate = deduction({ id: 'odate', type: 'auto_daily', amount: -1, timestamp: TS_NEW, doseId: 'd1', date: '2026-09-15' });
+    expect(findActiveDeductionForOccurrence([otherDate], 'med-1', 'd1', TODAY)).toBeNull();
+  });
+
+  it('Legacy (no doseId) logs: identity matches when doseId is legacy/undefined', () => {
+    const legacy1 = deduction({ id: 'leg1', type: 'auto_daily', amount: -1, timestamp: TS_OLD });
+    const legacy2 = deduction({ id: 'leg2', type: 'dose_taken', amount: -2, timestamp: TS_NEW });
+    // Lookup with undefined doseId → both legacy logs match; newer (leg2) wins.
+    const r1 = findActiveDeductionForOccurrence([legacy2, legacy1], 'med-1', undefined, TODAY);
+    const r2 = findActiveDeductionForOccurrence([legacy1, legacy2], 'med-1', undefined, TODAY);
+    expect(r1?.id).toBe('leg2');
+    expect(r2?.id).toBe('leg2');
+    // Lookup with 'legacy' doseId → same behavior.
+    expect(findActiveDeductionForOccurrence([legacy1, legacy2], 'med-1', 'legacy', TODAY)?.id).toBe('leg2');
   });
 });

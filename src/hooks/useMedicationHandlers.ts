@@ -10,10 +10,7 @@ import {
   getTodayDateString,
   settleDoseChange,
   settleAutoDeductToggle,
-  isDoseSkippedOnDate,
-  isDoseConsumedOnDate,
 } from '../utils/dateCalculations';
-import { isDoseTimeElapsedToday } from '../utils/doseSchedule';
 import { resolveRestoreDoseAmount } from '../utils/medActions';
 import {
   runGatedManualConsume,
@@ -101,10 +98,17 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     reason: string,
     doseId?: string
   ): Promise<Medication | null> => {
+    // UI-layer only: identity + in-flight guard. All business correctness
+    // (auto_deduct_off, already_restored, consumed vs auto-only, future vs
+    // elapsed, restore amount, active deduction) is decided exclusively
+    // inside runGatedManualRestore() against fresh durable state.
+    // A stale React snapshot must NEVER prevent a Restore that durable
+    // state would accept.
     const med = medicationsRef.current.find((m) => m.id === medicationId);
     if (!med) return null;
     const today = getTodayDateString();
 
+    // Resolve dose identity for UI / in-flight key only (not stock decisions).
     const preResolved = resolveRestoreDoseAmount(med, doseId);
     if (!preResolved.ok) {
       if (preResolved.reason === 'missing_dose_id') {
@@ -117,33 +121,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       ? `${medicationId}:${resolvedDoseId}:${today}`
       : `${medicationId}:${today}`;
 
-    const wasManual = resolvedDoseId
-      ? isDoseConsumedOnDate(med, resolvedDoseId, today)
-      : med.lastConsumedDate === today;
-
-    if (med.autoDeductEnabled === false && !wasManual) {
-      showToast(TOAST_MESSAGES.autoDeductOff(med.name));
-      return null;
-    }
-    const alreadyRestored = resolvedDoseId
-      ? isDoseSkippedOnDate(med, resolvedDoseId, today) ||
-        (() => {
-          if (isDoseConsumedOnDate(med, resolvedDoseId, today)) return null;
-          const slot = med.doseSchedule?.find((d) => d.id === resolvedDoseId);
-          if (!slot) return null;
-          return !isDoseTimeElapsedToday(slot.time);
-        })()
-      : logs.some(
-          (log) =>
-            log.medicationId === medicationId &&
-            log.type === 'skipped_day' &&
-            log.date === today &&
-            !log.doseId
-        );
-    if (alreadyRestored) {
-      showToast(TOAST_MESSAGES.doseAlreadyRestored(med.name));
-      return null;
-    }
     if (restoreInFlightRef.current.has(restoreKey)) return null;
     restoreInFlightRef.current.add(restoreKey);
 
@@ -169,11 +146,15 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         if (soundEnabled) playSuccessChime();
         return result.medications.find((m) => m.id === medicationId) ?? null;
       }
-      if (result.reason === 'auto_deduct_off') {
+      // Map durable outcomes to UI messages; never claim success on failure.
+      if (result.outcome === 'already_restored' || result.reason === 'already_restored') {
+        showToast(TOAST_MESSAGES.doseAlreadyRestored(med.name));
+      } else if (result.reason === 'auto_deduct_off') {
         showToast(TOAST_MESSAGES.autoDeductOff(med.name));
       } else if (result.reason === 'missing_dose_id') {
         showToast('اختر الجرعة المراد استرجاعها');
       }
+      // persist_failed / missing_med / other rejected → no success state
       return null;
     } finally {
       restoreInFlightRef.current.delete(restoreKey);

@@ -2737,3 +2737,207 @@ describe('findActiveDeductionForOccurrence — deterministic ordering (NOT array
     expect(findActiveDeductionForOccurrence([legacy1, legacy2], 'med-1', 'legacy', TODAY)?.id).toBe('leg2');
   });
 });
+
+
+describe('Phase 4 — stale React snapshot must not block durable Restore / Undo', () => {
+  let durable: AutoStockDurableState;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(`${TODAY}T15:00:00`));
+    durable = { medications: [med()], logs: [] };
+    __setAutoStockGateTestHooks({
+      load: () => ({
+        medications: durable.medications.map((m) => ({ ...m })),
+        logs: durable.logs.map((l) => ({ ...l })),
+      }),
+      commit: (next) => {
+        durable = {
+          medications: next.medications.map((m) => ({ ...m })),
+          logs: next.logs.map((l) => ({ ...l })),
+        };
+        return null;
+      },
+    });
+    __setManualEnvelopeTestHooks({
+      load: () => null,
+      save: () => null,
+      clear: () => null,
+    });
+    __setStockMutationOrderingTestHooks({
+      allocate: () => 1,
+      loadLastApplied: () => 0,
+      persistLastApplied: () => null,
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    __setAutoStockGateTestHooks(null);
+    __setManualEnvelopeTestHooks(null);
+    __resetStockMutationOrderingForTests();
+  });
+
+  it('stale React skip=true does not prevent Restore when durable has active manual consumption', async () => {
+    // Durable: Manual Take already applied for d1 today.
+    const take = await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+    });
+    expect(take.outcome).toBe('applied');
+    expect(durable.medications[0].currentPills).toBe(9);
+    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
+
+    // Stale React snapshot would show skip=true / consumed=false (outdated UI).
+    // Handler no longer consults that snapshot for business decisions — only
+    // runGatedManualRestore against durable state decides.
+    const staleReactMed = {
+      ...med(),
+      currentPills: 10,
+      doseSkippedHistory: { d1: [TODAY] },
+      doseConsumption: {},
+      doseConsumptionHistory: {},
+    };
+    // Sanity: stale view looks not consumed
+    expect(isDoseConsumedOnDate(staleReactMed, 'd1', TODAY)).toBe(false);
+
+    const restore = await runGatedManualRestore({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      todayStr: TODAY,
+      makeLogId: () => 'restore-from-stale-ui',
+    });
+    expect(restore.outcome).toBe('applied');
+    expect(restore.restoredAmount).toBe(1);
+    // Stock returned from durable Take amount.
+    expect(durable.medications[0].currentPills).toBe(10);
+    expect(durable.logs.some((l) => l.id === 'restore-from-stale-ui')).toBe(true);
+  });
+
+  it('stale React consumed=false does not prevent Restore when durable has actual consumption', async () => {
+    // Seed durable with a dose_taken log + consume marker.
+    durable = {
+      medications: [
+        med({
+          currentPills: 7,
+          doseConsumption: { d1: TODAY },
+          doseConsumptionHistory: { d1: [TODAY] },
+        }),
+      ],
+      logs: [
+        {
+          id: 'take-log',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'dose_taken',
+          amount: -1,
+          date: TODAY,
+          timestamp: `${TODAY}T10:00:00.000Z`,
+          description: 'manual take',
+          doseId: 'd1',
+        },
+      ],
+    };
+
+    const staleReactMed = med({ currentPills: 10 }); // no consume markers
+    expect(isDoseConsumedOnDate(staleReactMed, 'd1', TODAY)).toBe(false);
+
+    const restore = await runGatedManualRestore({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      todayStr: TODAY,
+      makeLogId: () => 'restore-durable-only',
+    });
+    expect(restore.outcome).toBe('applied');
+    expect(restore.restoredAmount).toBe(1);
+    expect(durable.medications[0].currentPills).toBe(8);
+  });
+
+  it('second Restore uses fresh durable state inside gate (not a captured React snapshot)', async () => {
+    await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+    });
+    const first = await runGatedManualRestore({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      todayStr: TODAY,
+      makeLogId: () => 'restore-1',
+    });
+    expect(first.outcome).toBe('applied');
+    const pillsAfterFirst = durable.medications[0].currentPills;
+
+    // Second call must see durable skip / reversed deduction → already_restored
+    const second = await runGatedManualRestore({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      todayStr: TODAY,
+      makeLogId: () => 'restore-2',
+    });
+    expect(second.outcome).toBe('already_restored');
+    expect(durable.medications[0].currentPills).toBe(pillsAfterFirst);
+    expect(durable.logs.filter((l) => l.id === 'restore-2')).toHaveLength(0);
+  });
+
+  it('UndoRefill reverses the durable newest refill, not a stale React logs snapshot', async () => {
+    // Logs are newest-first (prepended on write). Durable has both;
+    // a stale React snapshot might only know about the older one.
+    durable = {
+      medications: [med({ currentPills: 30 })],
+      logs: [
+        {
+          id: 'refill-new',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'refill',
+          amount: 10,
+          date: TODAY,
+          timestamp: `${TODAY}T12:00:00.000Z`,
+          description: 'new',
+        },
+        {
+          id: 'refill-old',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'refill',
+          amount: 5,
+          date: TODAY,
+          timestamp: `${TODAY}T08:00:00.000Z`,
+          description: 'old',
+        },
+      ],
+    };
+
+    // Stale React logs would only know about the old refill.
+    const staleReactLogs = [
+      {
+        id: 'refill-old',
+        medicationId: 'med-1',
+        medicationName: 'TestMed',
+        type: 'refill' as const,
+        amount: 5,
+        date: TODAY,
+        timestamp: `${TODAY}T08:00:00.000Z`,
+        description: 'old',
+      },
+    ];
+    expect(staleReactLogs[0].id).toBe('refill-old');
+
+    const undo = await runGatedUndoRefill({
+      medicationId: 'med-1',
+      todayStr: TODAY,
+      makeLogId: () => 'undo-newest',
+    });
+    expect(undo.outcome).toBe('applied');
+    // Newest durable refill is reversed.
+    expect(durable.logs.find((l) => l.id === 'refill-new')?.reversedAt).toBeTruthy();
+    expect(durable.logs.find((l) => l.id === 'refill-old')?.reversedAt).toBeFalsy();
+    const undoLog = durable.logs.find((l) => l.id === 'undo-newest');
+    expect(undoLog?.relatedLogId).toBe('refill-new');
+    expect(undoLog?.type).toBe('refill_undo');
+  });
+});

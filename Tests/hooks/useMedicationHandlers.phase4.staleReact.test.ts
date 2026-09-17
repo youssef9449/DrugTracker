@@ -555,4 +555,28 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     expect(durable.logs).toHaveLength(0);
   });
 
+
+  it('single-dose without doseId resolves to schedule dose and Takes', async () => {
+    durable = {
+      medications: [
+        med({
+          currentPills: 10,
+          doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+        }),
+      ],
+      logs: [],
+    };
+    reactMeds = [];
+    const { result } = mountHandlers();
+    await act(async () => {
+      result.current.handleConsumeDose('med-1'); // no doseId
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(durable.medications[0].currentPills).toBe(8);
+    });
+    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
+  });
+
 });

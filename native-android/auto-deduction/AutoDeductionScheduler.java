@@ -2090,4 +2090,75 @@ public final class AutoDeductionScheduler {
             return null;
         }
     }
+    /**
+     * Atomic occurrence state snapshot under {@link #SCHEDULE_LOCK} for Manual Take
+     * amount authority (Phase 4). Linearizes with fireOccurrenceIfNotCancelled and
+     * cancelOccurrence on the same lock.
+     *
+     * <ol>
+     *   <li>Promote pending-fire records</li>
+     *   <li>Unreconciled FIRED → FIRED + event.amount</li>
+     *   <li>Else durable schedule metadata → SCHEDULED + scheduled amount</li>
+     *   <li>Else cancellation tombstone → CANCELLED</li>
+     *   <li>Else ABSENT</li>
+     * </ol>
+     * Does not read JS doseSchedule.
+     */
+    public static final class OccurrenceSnapshot {
+        public enum Status { FIRED, SCHEDULED, CANCELLED, ABSENT }
+
+        public final Status status;
+        /** Present for FIRED and SCHEDULED when amount is valid; null otherwise. */
+        public final Double amount;
+
+        public OccurrenceSnapshot(Status status, Double amount) {
+            this.status = status;
+            this.amount = amount;
+        }
+    }
+
+    public OccurrenceSnapshot getOccurrenceSnapshot(
+            String medicationId, String doseId, String calendarDate) {
+        if (medicationId == null || medicationId.isEmpty()
+                || doseId == null || doseId.isEmpty()
+                || !AutoDeductionContract.isValidCalendarDate(calendarDate)) {
+            return new OccurrenceSnapshot(OccurrenceSnapshot.Status.ABSENT, null);
+        }
+        final String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
+        synchronized (SCHEDULE_LOCK) {
+            AutoDeductionEventStore store = new AutoDeductionEventStore(appContext);
+            // Promote pending under EventStore.LOCK (nested after SCHEDULE_LOCK).
+            JSONObject fired = store.getFiredUnreconciledEvent(medicationId, doseId, calendarDate);
+            if (fired != null) {
+                double amt = fired.optDouble("amount", Double.NaN);
+                if (AutoDeductionContract.isValidAmount(amt)) {
+                    return new OccurrenceSnapshot(OccurrenceSnapshot.Status.FIRED, amt);
+                }
+                // FIRED present but amount invalid — still report FIRED so JS rejects.
+                return new OccurrenceSnapshot(OccurrenceSnapshot.Status.FIRED, null);
+            }
+            final String prefKey = SCHEDULE_KEY_PREFIX + key;
+            String metaRaw = schedulePrefs.getString(prefKey, null);
+            if (metaRaw != null && !metaRaw.isEmpty()) {
+                try {
+                    JSONObject meta = new JSONObject(metaRaw);
+                    double amt = meta.optDouble("amount", Double.NaN);
+                    if (AutoDeductionContract.isValidAmount(amt)) {
+                        return new OccurrenceSnapshot(
+                                OccurrenceSnapshot.Status.SCHEDULED, amt);
+                    }
+                    return new OccurrenceSnapshot(OccurrenceSnapshot.Status.SCHEDULED, null);
+                } catch (JSONException e) {
+                    Log.w(TAG, "getOccurrenceSnapshot schedule parse failed for " + key, e);
+                    return new OccurrenceSnapshot(OccurrenceSnapshot.Status.SCHEDULED, null);
+                }
+            }
+            if (cancelPrefs.contains(CANCEL_KEY_PREFIX + key)) {
+                return new OccurrenceSnapshot(OccurrenceSnapshot.Status.CANCELLED, null);
+            }
+            return new OccurrenceSnapshot(OccurrenceSnapshot.Status.ABSENT, null);
+        }
+    }
+
+
 }

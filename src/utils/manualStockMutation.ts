@@ -18,14 +18,11 @@ import {
   settleAndAdjust,
   type ConsumeDoseResult,
 } from './medActions';
-import {
-  normalizeExactDoseId,
-  findPendingExactAutoOccurrence,
-} from './autoDeductionReconciliation';
+import { normalizeExactDoseId } from './autoDeductionReconciliation';
 import {
   markAutoDeductionEventReconciled,
-  listFiredAutoDeductionEvents,
-  type AutoDeductionEvent,
+  getOccurrenceSnapshot,
+  type OccurrenceSnapshotResult,
 } from './autoDeductionNative';
 import {
   isDoseConsumedOnDate,
@@ -187,8 +184,15 @@ export function runGatedManualConsume(opts: {
   source: 'alarm' | 'manual';
   todayStr?: string;
   now?: Date;
-  /** Test/production inject for native FIRED events (default: listFiredAutoDeductionEvents). */
-  listFired?: () => Promise<AutoDeductionEvent[]>;
+  /**
+   * Test inject for native occurrence snapshot (production uses getOccurrenceSnapshot).
+   * Must not convert infrastructure failure into fake ABSENT.
+   */
+  getOccurrenceSnapshot?: (
+    medicationId: string,
+    doseId: string,
+    calendarDate: string
+  ) => Promise<OccurrenceSnapshotResult>;
 }): Promise<GatedManualConsumeResult> {
   return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
     // Capture date/time inside the critical section so a mutation that waited
@@ -222,44 +226,64 @@ export function runGatedManualConsume(opts: {
       };
     }
 
-    // Authoritative amount for this occurrence: pending Exact Auto FIRED
-    // event.amount (scheduled-time amount), not a later-edited doseSchedule.
-    let amountOverride: number | undefined;
-    try {
-      const listFired = opts.listFired ?? listFiredAutoDeductionEvents;
-      const events = await listFired();
-      const pending = findPendingExactAutoOccurrence(
-        events,
-        opts.medicationId,
-        opts.doseId,
-        todayStr
-      );
-      if (pending) {
-        const n = Number(pending.amount);
-        if (!Number.isFinite(n) || n <= 0) {
-          return {
-            outcome: 'rejected' as const,
-            medications: fresh.medications,
-            logs: fresh.logs,
-            doseAmount: 0,
-            log: null,
-            reason: 'invalid_exact_event',
-            medicationName: med.name,
-            unit: med.unit,
-          };
-        }
-        amountOverride = n;
-      }
-    } catch {
-      // Native list failure: fall back to schedule amount (no silent override).
+    // Resolve dose identity once from durable med (never React). Multi-dose
+    // without doseId cannot proceed; single-dose maps to the sole slot id.
+    const resolvedDoseId = resolveConsumeDoseId(med, opts.doseId);
+    if (resolvedDoseId === undefined) {
+      return {
+        outcome: 'missing_dose_id' as const,
+        medications: fresh.medications,
+        logs: fresh.logs,
+        doseAmount: 0,
+        log: null,
+        reason: 'missing_dose_id',
+        medicationName: med.name,
+        unit: med.unit,
+      };
     }
+
+    // Authoritative amount: native occurrence snapshot under SCHEDULE_LOCK.
+    // FIRED / SCHEDULED → native amount; ABSENT / CANCELLED → JS schedule;
+    // native failure → no mutation (no silent schedule fallback on Android).
+    let amountOverride: number | undefined;
+    const snapshotFn = opts.getOccurrenceSnapshot ?? getOccurrenceSnapshot;
+    const snap = await snapshotFn(opts.medicationId, resolvedDoseId, todayStr);
+    if (!snap.ok) {
+      return {
+        outcome: 'rejected' as const,
+        medications: fresh.medications,
+        logs: fresh.logs,
+        doseAmount: 0,
+        log: null,
+        reason: 'native_snapshot_failed',
+        medicationName: med.name,
+        unit: med.unit,
+      };
+    }
+    if (snap.status === 'FIRED' || snap.status === 'SCHEDULED') {
+      const n = Number(snap.amount);
+      if (!Number.isFinite(n) || n <= 0) {
+        return {
+          outcome: 'rejected' as const,
+          medications: fresh.medications,
+          logs: fresh.logs,
+          doseAmount: 0,
+          log: null,
+          reason: 'invalid_exact_event',
+          medicationName: med.name,
+          unit: med.unit,
+        };
+      }
+      amountOverride = n;
+    }
+    // ABSENT / CANCELLED: leave amountOverride undefined → consumeDose uses schedule.
 
     const result: ConsumeDoseResult = consumeDose(
       med,
       opts.source,
       todayStr,
       now,
-      opts.doseId,
+      resolvedDoseId,
       amountOverride !== undefined ? { amountOverride } : undefined
     );
 

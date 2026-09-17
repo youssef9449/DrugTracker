@@ -339,4 +339,31 @@ public final class AutoDeductionEventStore {
         }
         return fired;
     }
+    /**
+     * Promote pending fires, then return the unreconciled FIRED event for one
+     * occurrence identity, or null if absent / already RECONCILED.
+     * Nested under EventStore.LOCK after caller holds SCHEDULE_LOCK.
+     */
+    public JSONObject getFiredUnreconciledEvent(
+            String medicationId, String doseId, String calendarDate) {
+        promotePendingFires();
+        String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
+        String prefKey = KEY_EVENT_PREFIX + key;
+        synchronized (LOCK) {
+            String raw = prefs.getString(prefKey, null);
+            if (raw == null) return null;
+            try {
+                JSONObject obj = new JSONObject(raw);
+                String status = obj.optString("status", "");
+                if (!AutoDeductionContract.STATUS_FIRED.equals(status)) {
+                    return null;
+                }
+                return obj;
+            } catch (JSONException e) {
+                Log.e(TAG, "getFiredUnreconciledEvent parse failed", e);
+                return null;
+            }
+        }
+    }
+
 }

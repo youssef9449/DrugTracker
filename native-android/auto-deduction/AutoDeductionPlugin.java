@@ -175,6 +175,38 @@ public class AutoDeductionPlugin extends Plugin {
         call.resolve(ret);
     }
 
+
+    /**
+     * Phase 4 — atomic occurrence snapshot for Manual Take amount authority.
+     * Runs under SCHEDULE_LOCK on the native side.
+     */
+    @PluginMethod
+    public void getOccurrenceSnapshot(PluginCall call) {
+        String medicationId = call.getString("medicationId");
+        String doseId = call.getString("doseId");
+        String calendarDate = call.getString("calendarDate");
+        if (medicationId == null || medicationId.isEmpty()
+                || doseId == null || doseId.isEmpty()
+                || calendarDate == null || calendarDate.isEmpty()) {
+            call.reject("missing_params");
+            return;
+        }
+        try {
+            AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
+            AutoDeductionScheduler.OccurrenceSnapshot snap =
+                    scheduler.getOccurrenceSnapshot(medicationId, doseId, calendarDate);
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            ret.put("status", snap.status.name());
+            if (snap.amount != null) {
+                ret.put("amount", snap.amount.doubleValue());
+            }
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject(e.getMessage() != null ? e.getMessage() : "snapshot_failed");
+        }
+    }
+
     private static JSObject toJSObject(JSONObject o) {
         JSObject js = new JSObject();
         js.put("medicationId", o.optString("medicationId", ""));

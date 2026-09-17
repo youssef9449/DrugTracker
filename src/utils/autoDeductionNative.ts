@@ -81,6 +81,16 @@ interface AutoDeductionPlugin {
   }): Promise<{ ok: boolean; error?: string; generation?: number }>;
   listFiredEvents(): Promise<{ events: AutoDeductionEvent[] }>;
   listEvents(): Promise<{ events: AutoDeductionEvent[] }>;
+  getOccurrenceSnapshot(options: {
+    medicationId: string;
+    doseId: string;
+    calendarDate: string;
+  }): Promise<{
+    ok: boolean;
+    status?: string;
+    amount?: number;
+    error?: string;
+  }>;
   markReconciled(options: {
     medicationId: string;
     doseId: string;
@@ -189,6 +199,61 @@ export async function listFiredAutoDeductionEvents(): Promise<AutoDeductionEvent
     return [];
   }
 }
+
+
+export type OccurrenceSnapshotStatus = 'FIRED' | 'SCHEDULED' | 'CANCELLED' | 'ABSENT';
+
+export type OccurrenceSnapshotResult =
+  | { ok: true; status: OccurrenceSnapshotStatus; amount?: number }
+  | { ok: false; error: string };
+
+/**
+ * Atomic native occurrence snapshot under SCHEDULE_LOCK.
+ * On non-Android: returns ok:true ABSENT (caller uses durable JS schedule).
+ * On native failure: ok:false — never faked as ABSENT.
+ */
+export async function getOccurrenceSnapshot(
+  medicationId: string,
+  doseId: string,
+  calendarDate: string
+): Promise<OccurrenceSnapshotResult> {
+  if (!isNativeAndroid()) {
+    return { ok: true, status: 'ABSENT' };
+  }
+  try {
+    const res = await AutoDeduction.getOccurrenceSnapshot({
+      medicationId,
+      doseId: doseId || LEGACY_DOSE_ID,
+      calendarDate,
+    });
+    if (!res || res.ok === false) {
+      return {
+        ok: false,
+        error: (res && res.error) || 'snapshot_failed',
+      };
+    }
+    const statusRaw = String(res.status || '').toUpperCase();
+    const allowed: OccurrenceSnapshotStatus[] = [
+      'FIRED',
+      'SCHEDULED',
+      'CANCELLED',
+      'ABSENT',
+    ];
+    if (!allowed.includes(statusRaw as OccurrenceSnapshotStatus)) {
+      return { ok: false, error: 'invalid_snapshot_status' };
+    }
+    const status = statusRaw as OccurrenceSnapshotStatus;
+    const amount =
+      res.amount != null && Number.isFinite(Number(res.amount))
+        ? Number(res.amount)
+        : undefined;
+    return { ok: true, status, amount };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'snapshot_failed';
+    return { ok: false, error: msg };
+  }
+}
+
 
 export async function listAutoDeductionEvents(): Promise<AutoDeductionEvent[]> {
   if (!isNativeAndroid()) return [];

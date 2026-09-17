@@ -121,6 +121,27 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
     });
     const pillsAfterTake = durable.medications[0].currentPills;
 
+    const recon = await runAutoDeductionReconciliation({
+      alreadyInGate: true,
+      medications: durable.medications,
+      logs: durable.logs,
+      globalAutoDeductEnabled: true,
+      listFired: async () => [
+        fired({ doseId: 'd1', calendarDate: TODAY, amount: 1 }),
+      ],
+      markReconciled: async () => ({ ok: true, changed: true }),
+      persistMeds: (m) => {
+        durable.medications = m;
+        return null;
+      },
+      persistLogs: (l) => {
+        durable.logs = l;
+        return null;
+      },
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
+});
+
     expect(recon.details[0]?.outcome).toBe('already_applied');
     expect(durable.medications[0].currentPills).toBe(pillsAfterTake);
     expect(
@@ -129,6 +150,27 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
   });
 
   it('Manual Take after Auto-Deduction is already_consumed (one deduction)', async () => {
+    const recon = await runAutoDeductionReconciliation({
+      alreadyInGate: true,
+      medications: durable.medications,
+      logs: durable.logs,
+      globalAutoDeductEnabled: true,
+      listFired: async () => [
+        fired({ doseId: 'd1', calendarDate: TODAY, amount: 1 }),
+      ],
+      markReconciled: async () => ({ ok: true, changed: true }),
+      persistMeds: (m) => {
+        durable.medications = m;
+        return null;
+      },
+      persistLogs: (l) => {
+        durable.logs = l;
+        return null;
+      },
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
+    });
+
     expect(recon.details[0]?.outcome).toBe('applied');
     const pillsAfterAuto = durable.medications[0].currentPills;
 
@@ -191,6 +233,28 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
       todayStr: TODAY,
     });
     const afterD1 = durable.medications[0].currentPills;
+
+    const recon = await runAutoDeductionReconciliation({
+      alreadyInGate: true,
+      medications: durable.medications,
+      logs: durable.logs,
+      globalAutoDeductEnabled: true,
+      listFired: async () => [
+        fired({ doseId: 'd2', calendarDate: TODAY, amount: 1 }),
+      ],
+      markReconciled: async () => ({ ok: true, changed: true }),
+      persistMeds: (m) => {
+        durable.medications = m;
+        return null;
+      },
+      persistLogs: (l) => {
+        durable.logs = l;
+        return null;
+      },
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
+    });
+
     expect(recon.details[0]?.outcome).toBe('applied');
     expect(durable.medications[0].currentPills).toBe(afterD1 - 1);
     expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
@@ -239,6 +303,28 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
       todayStr: TODAY,
     });
     // Simulate restart: durable still has markers; FIRED still listed.
+
+    const recon = await runAutoDeductionReconciliation({
+      alreadyInGate: true,
+      medications: durable.medications,
+      logs: durable.logs,
+      globalAutoDeductEnabled: true,
+      listFired: async () => [
+        fired({ doseId: 'd1', calendarDate: TODAY, amount: 1 }),
+      ],
+      markReconciled: async () => ({ ok: true, changed: true }),
+      persistMeds: (m) => {
+        durable.medications = m;
+        return null;
+      },
+      persistLogs: (l) => {
+        durable.logs = l;
+        return null;
+      },
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
+    });
+
     expect(recon.details[0]?.outcome).toBe('already_applied');
     expect(durable.medications[0].currentPills).toBe(9);
   });
@@ -398,6 +484,21 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     failLogs = false;
     marked = [];
     let markPhase = 'before';
+
+    const recon = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => {
+        expect(manualEnvelope).toBeNull();
+        expect(marked).toEqual([]);
+        markPhase = 'listFired';
+        return [fired({ doseId: 'd1', calendarDate: TODAY, amount: 1 })];
+      },
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        expect(markPhase).toBe('listFired');
+        marked.push(`${medicationId}|${doseId}|${calendarDate}`);
+        return { ok: true, changed: true };
+      },
+    });
 
     expect(manualEnvelope).toBeNull();
     expect(durable.logs.some((l) => l.type === 'dose_taken')).toBe(true);
@@ -641,6 +742,19 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     };
 
     marked = [];
+    const recon = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        marked.push(`${medicationId}|${doseId}|${calendarDate}`);
+        return { ok: true, changed: true };
+      },
+      loadEnvelope: () => exactEnv,
+      saveEnvelope: (env) => {
+        exactEnv = env as typeof exactEnv;
+        return null;
+      },
+    });
 
     // Older Manual (seq 1) discarded; Exact Auto seq 2 applied once.
     expect(manualEnvelope).toBeNull();
@@ -965,6 +1079,19 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     };
 
     marked = [];
+    const recon = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        marked.push(`${medicationId}|${doseId}|${calendarDate}`);
+        return { ok: true, changed: true };
+      },
+      loadEnvelope: () => exactEnv,
+      saveEnvelope: (env) => {
+        exactEnv = env as typeof exactEnv;
+        return null;
+      },
+    });
 
     expect(marked).toEqual([
       `med-1|d1|${TODAY}`,
@@ -1153,6 +1280,14 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     });
 
     marked = [];
+    const recon = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async (m, d, c) => { marked.push(`${m}|${d}|${c}`); return { ok: true, changed: true }; },
+      loadEnvelope: () => phase4Exact,
+      saveEnvelope: (e) => { phase4Exact = e; return null; },
+    });
+
     // Snapshot matched → finalize (no-op, seq 3 <= lastApplied 3) + clear + ACK.
     expect(phase4Exact).toBeNull();
     expect(durable.medications[0].currentPills).toBe(8);
@@ -1182,6 +1317,14 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     });
 
     marked = [];
+    const recon = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async (m, d, c) => { marked.push(`${m}|${d}|${c}`); return { ok: true, changed: true }; },
+      loadEnvelope: () => phase4Exact,
+      saveEnvelope: (e) => { phase4Exact = e; return null; },
+    });
+
     // Snapshot re-applied: durable now matches envelope (currentPills=7).
     expect(durable.medications[0].currentPills).toBe(7);
     expect(durable.logs.some((l) => l.id === 'mismatch-apply')).toBe(true);
@@ -1845,6 +1988,27 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     expect(durable.medications[0].doseConsumption?.d2).toBeUndefined();
 
     // No second Auto deduction on a later reconcile for the same FIRED event.
+    const recon = await runAutoDeductionReconciliation({
+      alreadyInGate: true,
+      medications: durable.medications,
+      logs: durable.logs,
+      globalAutoDeductEnabled: true,
+      listFired: async () => [
+        fired({ doseId: 'd1', calendarDate: TODAY, amount: 1 }),
+      ],
+      markReconciled: async () => ({ ok: true, changed: true }),
+      persistMeds: (m) => {
+        durable.medications = m;
+        return null;
+      },
+      persistLogs: (l) => {
+        durable.logs = l;
+        return null;
+      },
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
+    });
+
     expect(recon.details[0]?.outcome).toBe('already_applied');
     expect(durable.medications[0].currentPills).toBe(10);
     // No second auto_daily log for d1.
@@ -1942,6 +2106,27 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     expect(durable.medications[0].doseSkippedHistory?.d1).toEqual([TODAY]);
 
     // Later native Exact Auto FIRED event for the same occurrence.
+    const recon = await runAutoDeductionReconciliation({
+      alreadyInGate: true,
+      medications: durable.medications,
+      logs: durable.logs,
+      globalAutoDeductEnabled: true,
+      listFired: async () => [
+        fired({ doseId: 'd1', calendarDate: TODAY, amount: 1 }),
+      ],
+      markReconciled: async () => ({ ok: true, changed: true }),
+      persistMeds: (m) => {
+        durable.medications = m;
+        return null;
+      },
+      persistLogs: (l) => {
+        durable.logs = l;
+        return null;
+      },
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
+    });
+
     expect(recon.details[0]?.outcome).toBe('already_applied');
     // Stock unchanged from post-restore state (no second deduction).
     expect(durable.medications[0].currentPills).toBe(10);
@@ -2092,6 +2277,11 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     });
 
     marked = [];
+    const recon = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async (m, d, c) => { marked.push(`${m}|${d}|${c}`); return { ok: true, changed: true }; },
+    });
 
     // No seq allocated for the legacy envelope.
     expect(allocateCalls).toBe(0);
@@ -2131,6 +2321,11 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     });
 
     marked = [];
+    const recon = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async (m, d, c) => { marked.push(`${m}|${d}|${c}`); return { ok: true, changed: true }; },
+    });
 
     // Legacy envelope cleared (barrier: lastApplied>0 + legacy not applied →
     // clear without apply).
@@ -2182,6 +2377,11 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     });
 
     marked = [];
+    const recon = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async (m, d, c) => { marked.push(`${m}|${d}|${c}`); return { ok: true, changed: true }; },
+    });
 
     // Manual (seq=10) won — durable reflects Manual's snapshot (currentPills=9),
     // NOT legacy's 8. The barrier applied legacy first (lastApplied=0 → safe
@@ -2402,6 +2602,11 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     // Retry: clear succeeds → envelope cleared + ACK.
     failClear = false;
     marked = [];
+    const recon = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [],
+      markReconciled: async (m, d, c) => { marked.push(`${m}|${d}|${c}`); return { ok: true, changed: true }; },
+    });
     expect(env.current).toBeNull();
     expect(marked).toEqual([`med-1|d1|${TODAY}`]);
     expect(recon.markedCount).toBe(1);
@@ -3421,5 +3626,70 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
     expect(r.outcome).toBe('applied');
     expect(r.doseAmount).toBe(3);
     expect(durable.medications[0].currentPills).toBe(7);
+  });
+
+  it('invalid amountOverride (NaN) returns reason=invalid_exact_event and does not mutate stock', async () => {
+    durable = {
+      medications: [med({ currentPills: 10 })],
+      logs: [],
+    };
+    const r = await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+      getOccurrenceSnapshot: async () => ({
+        ok: true,
+        status: 'FIRED',
+        amount: NaN,
+      }),
+    });
+    expect(r.outcome).toBe('rejected');
+    expect(r.reason).toBe('invalid_exact_event');
+    expect(r.doseAmount).toBe(0);
+    expect(durable.medications[0].currentPills).toBe(10);
+    expect(durable.logs).toHaveLength(0);
+  });
+
+  it('invalid amountOverride (<=0) returns reason=invalid_exact_event', async () => {
+    durable = {
+      medications: [med({ currentPills: 10 })],
+      logs: [],
+    };
+    const r = await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+      getOccurrenceSnapshot: async () => ({
+        ok: true,
+        status: 'FIRED',
+        amount: 0,
+      }),
+    });
+    expect(r.outcome).toBe('rejected');
+    expect(r.reason).toBe('invalid_exact_event');
+    expect(durable.medications[0].currentPills).toBe(10);
+  });
+
+  it('invalid amountOverride (negative) returns reason=invalid_exact_event', async () => {
+    durable = {
+      medications: [med({ currentPills: 10 })],
+      logs: [],
+    };
+    const r = await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+      getOccurrenceSnapshot: async () => ({
+        ok: true,
+        status: 'FIRED',
+        amount: -5,
+      }),
+    });
+    expect(r.outcome).toBe('rejected');
+    expect(r.reason).toBe('invalid_exact_event');
+    expect(durable.medications[0].currentPills).toBe(10);
   });
 });

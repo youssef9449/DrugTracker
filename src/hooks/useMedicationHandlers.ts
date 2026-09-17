@@ -133,6 +133,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         medicationsRef.current = result.medications;
         setLogs(logsWithReason);
         if (soundEnabled) playSuccessChime();
+        if (displayName) showToast(`تم استرجاع الجرعة — ${displayName}`);
         return result.medications.find((m) => m.id === medicationId) ?? null;
       }
       // Map durable outcomes to UI messages; never claim success on failure.
@@ -513,19 +514,10 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
    * (isSelectable = !completed).
    */
   const handleCardRestoreDose = (medicationId: string, doseId?: string) => {
-    const med = medicationsRef.current.find((m) => m.id === medicationId);
-    if (!med) return;
-    const isMulti =
-      Array.isArray(med.doseSchedule) && med.doseSchedule.length > 1;
-
-    if (isMulti && !doseId) {
-      flushSync(() => {
-        setSelectDoseMode('manage');
-      });
-      setSelectDoseMed(med);
-      return;
-    }
-
+    // Request-only wrapper: no React medication lookup, no multi-dose
+    // detection, no schedule lookup, no restore eligibility decision.
+    // All business decisions happen inside the durable gate via
+    // runGatedManualRestore against fresh durable state.
     void (async () => {
       const updated = await handleRestoreDose(medicationId, 'card', doseId);
       if (updated) {
@@ -535,7 +527,21 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
           setSelectDoseMed(null);
           setSelectDoseMode('take');
         }
-        showToast(`تم استرجاع الجرعة — ${med.name}`);
+      } else {
+        // If the durable gate returned missing_dose_id, open the
+        // SelectDoseModal using the FRESH durable medication (not a
+        // stale React snapshot).
+        const durableMed = medicationsRef.current.find((m) => m.id === medicationId);
+        if (durableMed) {
+          const isMulti =
+            Array.isArray(durableMed.doseSchedule) && durableMed.doseSchedule.length > 1;
+          if (isMulti && !doseId) {
+            flushSync(() => {
+              setSelectDoseMode('manage');
+            });
+            setSelectDoseMed(durableMed);
+          }
+        }
       }
     })();
   };

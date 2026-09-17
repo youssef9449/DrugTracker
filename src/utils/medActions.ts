@@ -529,7 +529,7 @@ export interface ConsumeDoseResult {
    * schedule (mirrors {@link resolveRestoreDoseAmount} reasons).
    * Omitted for legacy zero-balance / already-consumed cases.
    */
-  reason?: 'missing_dose_id' | 'invalid_dose_id' | 'no_dose' | 'already_consumed';
+  reason?: 'missing_dose_id' | 'invalid_dose_id' | 'no_dose' | 'already_consumed' | 'invalid_exact_event';
 }
 
 /**

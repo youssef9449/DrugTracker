@@ -349,6 +349,7 @@ public final class AutoDeductionEventStore {
                     if (isMalformedFired(o)) {
                         o.put("status", AutoDeductionContract.STATUS_REJECTED);
                         o.put("rejectedAt", System.currentTimeMillis());
+                        o.put("rejectionReason", "malformed_fields");
                         if (editor == null) {
                             editor = prefs.edit();
                         }
@@ -357,7 +358,23 @@ public final class AutoDeductionEventStore {
                         continue;
                     }
                     fired.add(o);
-                } catch (JSONException ignored) {
+                } catch (JSONException parseEx) {
+                    // Corrupt non-JSON storage value → terminal REJECTED (no fake identity).
+                    try {
+                        JSONObject rejected = new JSONObject();
+                        rejected.put("status", AutoDeductionContract.STATUS_REJECTED);
+                        rejected.put("rejectedAt", System.currentTimeMillis());
+                        rejected.put("rejectionReason", "invalid_json");
+                        rejected.put("storageKey", e.getKey());
+                        if (editor == null) {
+                            editor = prefs.edit();
+                        }
+                        editor.putString(e.getKey(), rejected.toString());
+                        Log.w(TAG, "marked invalid JSON event row as REJECTED: " + e.getKey());
+                    } catch (JSONException writeEx) {
+                        Log.e(TAG, "failed to terminalize invalid JSON event row: "
+                                + e.getKey(), writeEx);
+                    }
                 }
             }
             if (editor != null) {

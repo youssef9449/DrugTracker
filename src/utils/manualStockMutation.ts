@@ -28,7 +28,10 @@ import {
   getTodayDateString,
   computeDueDoseBreakdown,
   effectiveCurrentPills,
+  settleAutoDeductToggle,
+  settleDoseChange,
 } from './dateCalculations';
+import { pruneDoseConsumption } from './pruneDoseConsumption';
 import { LEGACY_DOSE_ID } from './notifications';
 import {
   withAutoStockMutationGate,
@@ -817,6 +820,338 @@ export function runGatedUndoRefill(opts: {
       log: undoLog,
       medicationName: med.name,
       unit: med.unit,
+    };
+  });
+}
+
+
+export type GatedToggleOutcome =
+  | 'applied'
+  | 'missing_med'
+  | 'persist_failed'
+  | 'native_list_failed';
+
+export interface GatedAutoDeductToggleResult {
+  outcome: GatedToggleOutcome;
+  medications: Medication[];
+  logs: ConsumptionLog[];
+  newState: boolean;
+  settleLog: ConsumptionLog | null;
+  medicationName?: string;
+  unit?: string;
+  reason?: string;
+}
+
+/**
+ * Per-med auto-deduct toggle inside the stock gate.
+ * Ordering: recover → exact FIRED reconciliation → settleAutoDeductToggle on durable med.
+ */
+export function runGatedAutoDeductToggle(opts: {
+  medicationId: string;
+  todayStr?: string;
+  now?: Date;
+  globalAutoDeductEnabled?: boolean;
+}): Promise<GatedAutoDeductToggleResult> {
+  return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
+    const todayStr = opts.todayStr ?? getTodayDateString();
+    const now = opts.now ?? new Date();
+
+    const recovered = recoverManualEnvelopeInto(freshIn);
+    if (!recovered.ok) {
+      return {
+        outcome: 'persist_failed' as const,
+        medications: recovered.state.medications,
+        logs: recovered.state.logs,
+        newState: false,
+        settleLog: null,
+        reason: 'persist_failed',
+      };
+    }
+    await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
+
+    const pre = await reconcileExactBeforeLegacySettlement({
+      fresh: recovered.state,
+      globalAutoDeductEnabled: opts.globalAutoDeductEnabled !== false,
+      now,
+    });
+    if (pre.nativeListFailed) {
+      return {
+        outcome: 'native_list_failed' as const,
+        medications: pre.state.medications,
+        logs: pre.state.logs,
+        newState: false,
+        settleLog: null,
+        reason: 'native_list_failed',
+      };
+    }
+    const fresh = pre.state;
+
+    const med = fresh.medications.find((m) => m.id === opts.medicationId);
+    if (!med) {
+      return {
+        outcome: 'missing_med' as const,
+        medications: fresh.medications,
+        logs: fresh.logs,
+        newState: false,
+        settleLog: null,
+        reason: 'missing_med',
+      };
+    }
+
+    // undefined/true → false; false → true
+    const newState = med.autoDeductEnabled === false;
+    const { updatedMed, log: settleLog } = settleAutoDeductToggle(
+      med,
+      newState,
+      todayStr,
+      now
+    );
+
+    const medications = fresh.medications.map((m) =>
+      m.id === opts.medicationId ? updatedMed : m
+    );
+    const logs = settleLog ? [settleLog, ...fresh.logs] : fresh.logs;
+
+    const err = commitWithManualEnvelope({ medications, logs });
+    if (err) {
+      return {
+        outcome: 'persist_failed' as const,
+        medications: fresh.medications,
+        logs: fresh.logs,
+        newState,
+        settleLog: null,
+        reason: 'persist_failed',
+        medicationName: med.name,
+        unit: med.unit,
+      };
+    }
+
+    return {
+      outcome: 'applied' as const,
+      medications,
+      logs,
+      newState,
+      settleLog,
+      medicationName: updatedMed.name,
+      unit: updatedMed.unit,
+    };
+  });
+}
+
+export interface GatedGlobalAutoDeductToggleResult {
+  outcome: 'applied' | 'persist_failed' | 'native_list_failed';
+  medications: Medication[];
+  logs: ConsumptionLog[];
+  enable: boolean;
+  settleLogs: ConsumptionLog[];
+  reason?: string;
+}
+
+/**
+ * Global auto-deduct toggle inside the stock gate.
+ * Exact FIRED reconciliation runs before any per-med legacy settlement.
+ */
+export function runGatedGlobalAutoDeductToggle(opts: {
+  enable: boolean;
+  todayStr?: string;
+  now?: Date;
+}): Promise<GatedGlobalAutoDeductToggleResult> {
+  return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
+    const todayStr = opts.todayStr ?? getTodayDateString();
+    const now = opts.now ?? new Date();
+
+    const recovered = recoverManualEnvelopeInto(freshIn);
+    if (!recovered.ok) {
+      return {
+        outcome: 'persist_failed' as const,
+        medications: recovered.state.medications,
+        logs: recovered.state.logs,
+        enable: opts.enable,
+        settleLogs: [],
+        reason: 'persist_failed',
+      };
+    }
+    await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
+
+    const pre = await reconcileExactBeforeLegacySettlement({
+      fresh: recovered.state,
+      globalAutoDeductEnabled: opts.enable,
+      now,
+    });
+    if (pre.nativeListFailed) {
+      return {
+        outcome: 'native_list_failed' as const,
+        medications: pre.state.medications,
+        logs: pre.state.logs,
+        enable: opts.enable,
+        settleLogs: [],
+        reason: 'native_list_failed',
+      };
+    }
+    const fresh = pre.state;
+
+    const settleLogs: ConsumptionLog[] = [];
+    const medications = fresh.medications.map((med) => {
+      const { updatedMed, log } = settleAutoDeductToggle(
+        med,
+        opts.enable,
+        todayStr,
+        now
+      );
+      if (log) settleLogs.push(log);
+      return updatedMed;
+    });
+    const logs =
+      settleLogs.length > 0 ? [...settleLogs, ...fresh.logs] : fresh.logs;
+
+    const err = commitWithManualEnvelope({ medications, logs });
+    if (err) {
+      return {
+        outcome: 'persist_failed' as const,
+        medications: fresh.medications,
+        logs: fresh.logs,
+        enable: opts.enable,
+        settleLogs: [],
+        reason: 'persist_failed',
+      };
+    }
+
+    return {
+      outcome: 'applied' as const,
+      medications,
+      logs,
+      enable: opts.enable,
+      settleLogs,
+    };
+  });
+}
+
+export type GatedMedicationUpdateOutcome =
+  | 'applied'
+  | 'missing_med'
+  | 'persist_failed'
+  | 'native_list_failed';
+
+export interface GatedMedicationUpdateResult {
+  outcome: GatedMedicationUpdateOutcome;
+  medications: Medication[];
+  logs: ConsumptionLog[];
+  settleLog: ConsumptionLog | null;
+  medicationName?: string;
+  unit?: string;
+  reason?: string;
+}
+
+/**
+ * Medication edit inside the stock gate.
+ * Uses durable medication for settlement; form data cannot overwrite stock-owned fields.
+ */
+export function runGatedMedicationUpdate(opts: {
+  editId: string;
+  medData: Omit<Medication, 'id' | 'createdAt'>;
+  todayStr?: string;
+  now?: Date;
+  globalAutoDeductEnabled?: boolean;
+}): Promise<GatedMedicationUpdateResult> {
+  return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
+    const todayStr = opts.todayStr ?? getTodayDateString();
+    const now = opts.now ?? new Date();
+
+    const recovered = recoverManualEnvelopeInto(freshIn);
+    if (!recovered.ok) {
+      return {
+        outcome: 'persist_failed' as const,
+        medications: recovered.state.medications,
+        logs: recovered.state.logs,
+        settleLog: null,
+        reason: 'persist_failed',
+      };
+    }
+    await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
+
+    const pre = await reconcileExactBeforeLegacySettlement({
+      fresh: recovered.state,
+      globalAutoDeductEnabled: opts.globalAutoDeductEnabled !== false,
+      now,
+    });
+    if (pre.nativeListFailed) {
+      return {
+        outcome: 'native_list_failed' as const,
+        medications: pre.state.medications,
+        logs: pre.state.logs,
+        settleLog: null,
+        reason: 'native_list_failed',
+      };
+    }
+    const fresh = pre.state;
+
+    const freshMed = fresh.medications.find((m) => m.id === opts.editId);
+    if (!freshMed) {
+      return {
+        outcome: 'missing_med' as const,
+        medications: fresh.medications,
+        logs: fresh.logs,
+        settleLog: null,
+        reason: 'missing_med',
+      };
+    }
+
+    const isDoseChanging = opts.medData.dailyDose !== freshMed.dailyDose;
+    let stockBase = freshMed;
+    let settleLog: ConsumptionLog | null = null;
+    if (isDoseChanging) {
+      const settled = settleDoseChange(
+        freshMed,
+        opts.medData.dailyDose,
+        todayStr,
+        now
+      );
+      stockBase = settled.updatedMed;
+      settleLog = settled.log;
+    }
+
+    const pruned = pruneDoseConsumption(opts.medData, freshMed);
+
+    // Build final med: user-editable fields from medData/pruned, stock from stockBase.
+    const finalMed: Medication = {
+      ...freshMed,
+      ...pruned,
+      id: freshMed.id,
+      createdAt: freshMed.createdAt,
+      currentPills: stockBase.currentPills,
+      lastSyncDate: stockBase.lastSyncDate,
+      lastConsumedDate: stockBase.lastConsumedDate,
+      doseConsumption: stockBase.doseConsumption,
+      doseConsumptionHistory: stockBase.doseConsumptionHistory,
+      doseSkippedHistory: stockBase.doseSkippedHistory,
+      autoDeductEnabled: stockBase.autoDeductEnabled,
+    };
+
+    const medications = fresh.medications.map((m) =>
+      m.id === opts.editId ? finalMed : m
+    );
+    const logs = settleLog ? [settleLog, ...fresh.logs] : fresh.logs;
+
+    const err = commitWithManualEnvelope({ medications, logs });
+    if (err) {
+      return {
+        outcome: 'persist_failed' as const,
+        medications: fresh.medications,
+        logs: fresh.logs,
+        settleLog: null,
+        reason: 'persist_failed',
+        medicationName: freshMed.name,
+        unit: freshMed.unit,
+      };
+    }
+
+    return {
+      outcome: 'applied' as const,
+      medications,
+      logs,
+      settleLog,
+      medicationName: finalMed.name,
+      unit: finalMed.unit,
     };
   });
 }

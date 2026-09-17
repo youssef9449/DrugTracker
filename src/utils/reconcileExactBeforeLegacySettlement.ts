@@ -8,20 +8,11 @@
  * the current schedule amount for the same occurrence.
  */
 
-import type { ConsumptionLog, Medication } from '../types';
 import type { AutoStockDurableState } from './autoDeductionStockGate';
 import {
   runAutoDeductionReconciliation,
   type RunReconciliationOutput,
 } from './runAutoDeductionReconciliation';
-import {
-  recoverAllPendingStockEnvelopes,
-  type PendingEnvelopeRef,
-  loadManualStockEnvelope,
-  saveManualStockEnvelope,
-  loadExactAutoStockEnvelope,
-  saveExactAutoStockEnvelope,
-} from './stockEnvelopeRecovery';
 
 export interface PreSettlementResult {
   state: AutoStockDurableState;
@@ -39,9 +30,8 @@ export async function reconcileExactBeforeLegacySettlement(opts: {
   globalAutoDeductEnabled: boolean;
   now?: Date;
 }): Promise<PreSettlementResult> {
-  // 1) Recover pending envelopes first (Manual + Exact Auto, mutationSeq order).
-  // recoverAllPendingStockEnvelopes is used by the Exact Auto orchestrator;
-  // for paths that only recovered Manual, still run full Exact reconciliation.
+  // Recover pending envelopes + reconcile durable FIRED events via the
+  // existing Exact Auto orchestrator (alreadyInGate).
   const recon = await runAutoDeductionReconciliation({
     globalAutoDeductEnabled: opts.globalAutoDeductEnabled,
     medications: opts.fresh.medications,

@@ -8,21 +8,21 @@ import { flushSync } from 'react-dom';
 import type { Medication, ConsumptionLog } from '../types';
 import {
   getTodayDateString,
-  settleDoseChange,
-  settleAutoDeductToggle,
 } from '../utils/dateCalculations';
 import {
   runGatedManualConsume,
   runGatedManualRestore,
   runGatedRefill,
   runGatedUndoRefill,
+  runGatedAutoDeductToggle,
+  runGatedGlobalAutoDeductToggle,
+  runGatedMedicationUpdate,
   shouldDismissAlarmAfterManualTake,
   type GatedManualRestoreResult,
 } from '../utils/manualStockMutation';
 import { generateId } from '../utils/id';
 import { playSuccessChime } from '../utils/sound';
 import { persist } from '../utils/storage';
-import { pruneDoseConsumption } from '../utils/pruneDoseConsumption';
 import { TOAST_MESSAGES, STORAGE_ERRORS } from '../constants/uiStrings';
 import {
   STORAGE_AUTO_DEDUCT_PROMPTED_KEY,
@@ -208,110 +208,55 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
   };
 
   const handleToggleAutoDeduct = (medicationId: string) => {
-    // Settle the snapshot at the live effective balance before the new
-    // auto-deduction state takes effect. This handles BOTH transitions:
-    //   - true → false: deduct the elapsed period at the OLD active
-    //     rate, then flip OFF. Without this, the displayed balance
-    //     would jump back up to the stale snapshot value the moment
-    //     the flag flips (because effectiveCurrentPills returns
-    //     currentPills unchanged when autoDeduct is false), undoing
-    //     all consumption since lastSyncDate.
-    //   - false → true: keep currentPills unchanged (the user wasn't
-    //     consuming during the frozen period), bump lastSyncDate=today
-    //     so the new auto-deduction starts fresh from today. Without
-    //     the lastSyncDate bump, enabling auto-deduction would
-    //     retroactively deduct daysPassed*dailyDose for the frozen
-    //     period.
-    //
-    // IMPORTANT: the settle calculation + all side effects (setLogs,
-    // showToast) must run OUTSIDE the setMedications updater. React
-    // updater functions must be pure — React may invoke them more than
-    // once in Strict Mode (which would create duplicate settlement
-    // logs and duplicate toasts). We compute the settle result once
-    // here, fire the side effects once, and pass the result into the
-    // updater as a closure value (which the updater only READS).
-    const med = medications.find((m) => m.id === medicationId);
-    if (!med) return;
-
-    const today = getTodayDateString();
-    // `autoDeductEnabled` defaults to true when undefined, so the
-    // effective current state is `!== false`. To toggle OFF from the
-    // default-true (undefined) state we must set false explicitly.
-    // #27: the previous `!m.autoDeductEnabled` formulation no-oped
-    // for the undefined case because `!undefined === true` — the
-    // first click on a med with autoDeductEnabled===undefined kept
-    // it ON. `med.autoDeductEnabled === false` correctly maps:
-    //   undefined → false (turn OFF the default-true)
-    //   true      → false (turn OFF)
-    //   false     → true  (turn ON)
-    const newState = med.autoDeductEnabled === false;
-    const { updatedMed, log: settleLog } = settleAutoDeductToggle(
-      med,
-      newState,
-      today
-    );
-
-    // Side effect 1: persist the settlement consumption log (if any
-    // pills were deducted during the true→false transition). Runs
-    // OUTSIDE the medications updater so Strict Mode double-invoke
-    // can't duplicate the log.
-    if (settleLog) {
-      setLogs((prevLogs) => [settleLog, ...prevLogs]);
-    }
-    // Side effect 2: toast the toggle result. Also outside the updater.
-    showToast(
-      newState ? `تم تفعيل الخصم التلقائي لـ "${med.name}"` : `تم إيقاف الخصم التلقائي مؤقتاً لـ "${med.name}"`
-    );
-
-    if (soundEnabled) playSuccessChime();
-
-    // Updater: pure — only reads `updatedMed` from the closure and
-    // returns the new medications array. No side effects inside.
-    setMedications((prev) =>
-      prev.map((m) => (m.id === medicationId ? updatedMed : m))
-    );
+    // Phase 4: durable gate — settlement from React snapshot is forbidden.
+    // Exact FIRED reconciliation runs inside the gate before legacy toggle settle.
+    void (async () => {
+      const result = await runGatedAutoDeductToggle({
+        medicationId,
+        globalAutoDeductEnabled,
+      });
+      if (result.outcome !== 'applied') {
+        return;
+      }
+      setMedications(result.medications);
+      setLogs(result.logs);
+      const name = result.medicationName ?? medicationId;
+      showToast(
+        result.newState
+          ? `تم تفعيل الخصم التلقائي لـ "${name}"`
+          : `تم إيقاف الخصم التلقائي مؤقتاً لـ "${name}"`
+      );
+      if (soundEnabled) playSuccessChime();
+    })();
   };
 
   const handleToggleGlobalAutoDeduct = () => {
+    // Phase 4: durable gate — no React-snapshot settlement.
     const next = !globalAutoDeductEnabled;
-    setGlobalAutoDeductEnabled(next);
-    const today = getTodayDateString();
-
-    if (!next) {
-      // Turning OFF: settle all medications at their current effective balance
-      let totalDeducted = 0;
-      const newLogs: ConsumptionLog[] = [];
-      const settledMeds = medications.map((med) => {
-        const { updatedMed, log } = settleAutoDeductToggle(med, false, today);
-        if (log) {
-          newLogs.push(log);
-          totalDeducted += Math.abs(log.amount);
-        }
-        return updatedMed;
-      });
-
-      setMedications(settledMeds);
-      if (newLogs.length > 0) {
-        setLogs((prev) => [...newLogs, ...prev]);
+    void (async () => {
+      const result = await runGatedGlobalAutoDeductToggle({ enable: next });
+      if (result.outcome !== 'applied') {
+        return;
       }
-
-      showToast(
-        totalDeducted > 0
-          ? `تم إيقاف الخصم التلقائي لجميع الأدوية (تمت تسوية خصم ${totalDeducted} قرص للأيام السابقة).`
-          : 'تم إيقاف الخصم التلقائي لجميع الأدوية ⏸️ (المخزون ثابت الآن)'
+      setGlobalAutoDeductEnabled(result.enable);
+      persist(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, String(result.enable), { json: false });
+      setMedications(result.medications);
+      setLogs(result.logs);
+      const totalDeducted = result.settleLogs.reduce(
+        (sum, log) => sum + Math.abs(log.amount),
+        0
       );
-    } else {
-      // Turning ON: reactivate all medications, resetting lastSyncDate to today
-      const reactivatedMeds = medications.map((med) => {
-        const { updatedMed } = settleAutoDeductToggle(med, true, today);
-        return updatedMed;
-      });
-
-      setMedications(reactivatedMeds);
-      showToast('تم تفعيل الخصم التلقائي اليومي لجميع الأدوية ⚡');
-    }
-
-    if (soundEnabled) playSuccessChime();
+      if (!result.enable) {
+        showToast(
+          totalDeducted > 0
+            ? `تم إيقاف الخصم التلقائي لجميع الأدوية (تمت تسوية خصم ${totalDeducted} قرص للأيام السابقة).`
+            : 'تم إيقاف الخصم التلقائي لجميع الأدوية ⏸️ (المخزون ثابت الآن)'
+        );
+      } else {
+        showToast('تم تفعيل الخصم التلقائي اليومي لجميع الأدوية ⚡');
+      }
+      if (soundEnabled) playSuccessChime();
+    })();
   };
 
   const handleConfirmAutoDeductPrompt = (enable: boolean) => {
@@ -331,74 +276,41 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
 
   const handleSaveMedication = (medData: Omit<Medication, 'id' | 'createdAt'>, editId?: string) => {
     if (editId) {
-      // Settlement: if the user is changing the dailyDose, we MUST NOT
-      // just apply the new dose going forward from lastSyncDate — that
-      // would retroactively apply the new rate to all days that
-      // actually consumed at the OLD rate. Instead, settle the period
-      // [lastSyncDate, today] at the OLD dose first, then apply the
-      // new dose from today forward.
-      const existing = medications.find((m) => m.id === editId);
-      const today = getTodayDateString();
-      const isDoseChanging =
-        existing && medData.dailyDose !== existing.dailyDose;
-      if (existing && isDoseChanging) {
-        const { updatedMed, log } = settleDoseChange(
-          existing,
-          medData.dailyDose,
-          today
-        );
-        // Merge the settled med with the rest of the form data (name,
-        // category, reminder settings, etc.) — but keep the settled
-        // currentPills + lastSyncDate (don't let the form overwrite them).
-        const pruned = pruneDoseConsumption(medData, existing);
-        setMedications((prev) =>
-          prev.map((m) =>
-            m.id === editId
-              ? {
-                  ...m,
-                  ...pruned,
-                  // Override medData.currentPills + lastSyncDate with
-                  // the settled values. medData.currentPills in edit
-                  // mode equals initialData.currentPills (the input is
-                  // disabled), but settleDoseChange may have reduced it
-                  // for the elapsed days at the old dose — we MUST use
-                  // that reduced value, not the form's disabled-input
-                  // echo of the pre-edit snapshot.
-                  currentPills: updatedMed.currentPills,
-                  lastSyncDate: updatedMed.lastSyncDate,
-                }
-              : m
-          )
-        );
-        // Log the settlement consumption if any pills were deducted.
-        if (log) {
-          setLogs((prev) => [log, ...prev]);
+      // Phase 4: durable gate — stock/settlement from fresh durable med, not React.
+      void (async () => {
+        const result = await runGatedMedicationUpdate({
+          editId,
+          medData,
+          globalAutoDeductEnabled,
+        });
+        if (result.outcome !== 'applied') {
+          return;
         }
-      } else {
-        // No dose change (or new med): just save normally.
-        const pruned = pruneDoseConsumption(medData, existing);
-        setMedications((prev) => prev.map((m) => (m.id === editId ? { ...m, ...pruned } : m)));
-      }
-      showToast(
-        medData.reminderEnabled
-          ? `تم حفظ "${medData.name}" مع تذكير يومي الساعة ${medData.reminderTime}`
-          : `تم تعديل بيانات "${medData.name}" بنجاح`
-      );
-    } else {
-      const newMed: Medication = {
-        ...medData,
-        id: 'med-' + Date.now(),
-        createdAt: new Date().toISOString(),
-        lastSyncDate: getTodayDateString(),
-        autoDeductEnabled: globalAutoDeductEnabled,
-      };
-      setMedications((prev) => [newMed, ...prev]);
-      showToast(
-        newMed.reminderEnabled
-          ? `تمت إضافة "${newMed.name}" مع تنبيه الساعة ${newMed.reminderTime}`
-          : `تمت إضافة "${newMed.name}"، وسيحسب استهلاكه تلقائياً`
-      );
+        setMedications(result.medications);
+        setLogs(result.logs);
+        showToast(
+          medData.reminderEnabled
+            ? `تم حفظ "${medData.name}" مع تذكير يومي الساعة ${medData.reminderTime}`
+            : `تم تعديل بيانات "${medData.name}" بنجاح`
+        );
+        if (soundEnabled) playSuccessChime();
+        setEditingMedication(null);
+      })();
+      return;
     }
+    const newMed: Medication = {
+      ...medData,
+      id: 'med-' + Date.now(),
+      createdAt: new Date().toISOString(),
+      lastSyncDate: getTodayDateString(),
+      autoDeductEnabled: globalAutoDeductEnabled,
+    };
+    setMedications((prev) => [newMed, ...prev]);
+    showToast(
+      newMed.reminderEnabled
+        ? `تمت إضافة "${newMed.name}" مع تنبيه الساعة ${newMed.reminderTime}`
+        : `تمت إضافة "${newMed.name}"، وسيحسب استهلاكه تلقائياً`
+    );
     if (soundEnabled) playSuccessChime();
     setEditingMedication(null);
   };

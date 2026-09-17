@@ -1,9 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
 import type { Medication } from '../../src/types';
 import {
   __setAutoStockGateTestHooks,
-  type AutoStockDurableState,
 } from '../../src/utils/autoDeductionStockGate';
 
 function baseMed(over: Partial<Medication> = {}): Medication {

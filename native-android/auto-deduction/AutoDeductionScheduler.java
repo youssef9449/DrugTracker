@@ -2097,11 +2097,15 @@ public final class AutoDeductionScheduler {
      *
      * <ol>
      *   <li>Promote pending-fire records</li>
-     *   <li>Unreconciled FIRED → FIRED + event.amount</li>
-     *   <li>Else durable schedule metadata → SCHEDULED + scheduled amount</li>
-     *   <li>Else cancellation tombstone → CANCELLED</li>
-     *   <li>Else ABSENT</li>
+     *   <li>Unreconciled FIRED → FIRED + native event amount (invalid amount → FIRED + null)</li>
+     *   <li>Effective cancellation via ordering tokens ({@link #isOccurrenceCancelledKey})
+     *       → CANCELLED. Beats stale schedule metadata when a tombstone exists and
+     *       metadata removal failed, unless a strictly newer schedule ordering token
+     *       supersedes the cancellation.</li>
+     *   <li>Durable schedule metadata → SCHEDULED + schedule amount</li>
+     *   <li>Otherwise → ABSENT</li>
      * </ol>
+     * Order: FIRED → effective CANCELLED → SCHEDULED → ABSENT.
      * Does not read JS doseSchedule.
      */
     public static final class OccurrenceSnapshot {

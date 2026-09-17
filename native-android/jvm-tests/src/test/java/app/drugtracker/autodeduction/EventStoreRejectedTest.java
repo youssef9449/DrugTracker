@@ -113,4 +113,24 @@ public class EventStoreRejectedTest {
         assertEquals(2.0, fired.get(0).optDouble("amount"), 0.0001);
         assertEquals(AutoDeductionContract.STATUS_FIRED, fired.get(0).optString("status"));
     }
+    @Test
+    public void invalidJsonRow_markedRejected_notReturnedAsFired() throws Exception {
+        String key = AutoDeductionContract.occurrenceKey("med", "dose", "2026-09-14");
+        eventPrefs().edit().putString(evtKey(key), "not-valid-json{{{").commit();
+
+        AutoDeductionEventStore store = newEventStore();
+        assertTrue(store.listFiredEvents().isEmpty());
+        // Second call still empty (terminal)
+        assertTrue(store.listFiredEvents().isEmpty());
+
+        boolean sawRejected = false;
+        for (org.json.JSONObject e : store.listEvents()) {
+            if (AutoDeductionContract.STATUS_REJECTED.equals(e.optString("status"))) {
+                sawRejected = true;
+                assertTrue(e.has("rejectedAt"));
+                assertEquals("invalid_json", e.optString("rejectionReason"));
+            }
+        }
+        assertTrue(sawRejected);
+    }
 }

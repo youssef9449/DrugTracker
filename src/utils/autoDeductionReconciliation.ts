@@ -29,7 +29,7 @@ export type ReconcileEventOutcome =
   | 'already_applied'
   | 'skipped_invalid'
   | 'skipped_missing_med'
-  | 'skipped_disabled';
+  | 'skipped_disabled'; // retained for type compat; never used for valid FIRED
 
 export interface ReconcileEventDetail {
   medicationId: string;
@@ -302,7 +302,6 @@ export function reconcileFiredEvents(
   } = {}
 ): ReconcileFiredResult {
   const now = options.now ?? new Date();
-  const globalOn = options.globalAutoDeductEnabled !== false;
   const todayStr = getTodayDateString();
 
   const sorted = [...events].sort((a, b) => {
@@ -358,11 +357,10 @@ export function reconcileFiredEvents(
       continue;
     }
 
-    if (!globalOn || med.autoDeductEnabled === false) {
-      details.push({ ...baseDetail, outcome: 'skipped_disabled' });
-      toAcknowledge.push({ medicationId, doseId, calendarDate });
-      continue;
-    }
+    // A durable FIRED event means the exact occurrence already fired.
+    // Current global/per-med enabled flags must NOT turn it into a no-op;
+    // disabled state only prevents future scheduling/recurrence.
+    // (skipped_disabled is never applied to a valid FIRED occurrence.)
 
     // Durable log already present for this occurrence → stock marker path
     if (findExactAutoLog(workingLogs, medicationId, doseId, calendarDate)) {

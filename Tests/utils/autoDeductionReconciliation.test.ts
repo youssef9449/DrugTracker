@@ -828,4 +828,77 @@ describe('exact event day must not be double-settled', () => {
     expect(r.medications[0].currentPills).toBe(8);
     expect(r.newExactLogs).toHaveLength(1);
   });
+
+
+  it('FIRED still reconciles when global auto-deduct is disabled', () => {
+    const med = baseMed({
+      doseSchedule: [{ id: 'd', amount: 1, time: '08:00' }],
+      currentPills: 10,
+      lastSyncDate: '2026-09-14',
+      dailyDose: 1,
+      autoDeductEnabled: true,
+    });
+    const r = reconcileFiredEvents(
+      [med],
+      [],
+      [
+        fired({
+          medicationId: 'med-1',
+          doseId: 'd',
+          calendarDate: '2026-09-14',
+          amount: 2,
+        }),
+      ],
+      { globalAutoDeductEnabled: false }
+    );
+    expect(r.details[0].outcome).toBe('applied');
+    expect(r.medications[0].currentPills).toBe(8);
+    expect(r.toAcknowledge).toHaveLength(1);
+  });
+
+  it('FIRED still reconciles when medication auto-deduct is disabled', () => {
+    const med = baseMed({
+      doseSchedule: [{ id: 'd', amount: 1, time: '08:00' }],
+      currentPills: 10,
+      lastSyncDate: '2026-09-14',
+      dailyDose: 1,
+      autoDeductEnabled: false,
+    });
+    const r = reconcileFiredEvents(
+      [med],
+      [],
+      [
+        fired({
+          medicationId: 'med-1',
+          doseId: 'd',
+          calendarDate: '2026-09-14',
+          amount: 2,
+        }),
+      ],
+      { globalAutoDeductEnabled: true }
+    );
+    expect(r.details[0].outcome).toBe('applied');
+    expect(r.medications[0].currentPills).toBe(8);
+  });
+
+  it('repeated reconciliation remains idempotent after apply', () => {
+    const med = baseMed({
+      doseSchedule: [{ id: 'd', amount: 1, time: '08:00' }],
+      currentPills: 10,
+      lastSyncDate: '2026-09-14',
+      dailyDose: 1,
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd',
+      calendarDate: '2026-09-14',
+      amount: 2,
+    });
+    const r1 = reconcileFiredEvents([med], [], [e]);
+    const r2 = reconcileFiredEvents(r1.medications, r1.logs, [e]);
+    expect(r1.medications[0].currentPills).toBe(8);
+    expect(r2.medications[0].currentPills).toBe(8);
+    expect(r2.details[0].outcome).toBe('already_applied');
+  });
+
 });

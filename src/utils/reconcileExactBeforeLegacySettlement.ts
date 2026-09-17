@@ -1,0 +1,61 @@
+/**
+ * Shared pre-settlement step: before ANY legacy stock settlement runs inside
+ * the withAutoStockMutationGate critical section, recover pending Manual /
+ * Exact-Auto envelopes and reconcile all durable native FIRED exact events.
+ *
+ * Guarantees: exact event.amount is applied before historicalDayDueUnits /
+ * settleAndAdjust / syncAutoDailyDeductions / toggle settlement can charge
+ * the current schedule amount for the same occurrence.
+ */
+
+import type { ConsumptionLog, Medication } from '../types';
+import type { AutoStockDurableState } from './autoDeductionStockGate';
+import {
+  runAutoDeductionReconciliation,
+  type RunReconciliationOutput,
+} from './runAutoDeductionReconciliation';
+import {
+  recoverAllPendingStockEnvelopes,
+  type PendingEnvelopeRef,
+  loadManualStockEnvelope,
+  saveManualStockEnvelope,
+  loadExactAutoStockEnvelope,
+  saveExactAutoStockEnvelope,
+} from './stockEnvelopeRecovery';
+
+export interface PreSettlementResult {
+  state: AutoStockDurableState;
+  reconciliation: RunReconciliationOutput | null;
+  /** True when native FIRED list failed — caller should fail-closed or retry. */
+  nativeListFailed: boolean;
+}
+
+/**
+ * Must be called inside withAutoStockMutationGate (alreadyInGate).
+ * Returns the post-reconciliation durable state for subsequent legacy math.
+ */
+export async function reconcileExactBeforeLegacySettlement(opts: {
+  fresh: AutoStockDurableState;
+  globalAutoDeductEnabled: boolean;
+  now?: Date;
+}): Promise<PreSettlementResult> {
+  // 1) Recover pending envelopes first (Manual + Exact Auto, mutationSeq order).
+  // recoverAllPendingStockEnvelopes is used by the Exact Auto orchestrator;
+  // for paths that only recovered Manual, still run full Exact reconciliation.
+  const recon = await runAutoDeductionReconciliation({
+    globalAutoDeductEnabled: opts.globalAutoDeductEnabled,
+    medications: opts.fresh.medications,
+    logs: opts.fresh.logs,
+    alreadyInGate: true,
+    now: opts.now,
+  });
+
+  return {
+    state: {
+      medications: recon.medications,
+      logs: recon.logs,
+    },
+    reconciliation: recon,
+    nativeListFailed: recon.nativeListFailed === true,
+  };
+}

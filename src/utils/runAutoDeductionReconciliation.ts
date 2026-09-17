@@ -15,6 +15,7 @@ import {
   listFiredAutoDeductionEvents,
   markAutoDeductionEventReconciled,
   type AutoDeductionEvent,
+  type ListFiredEventsResult,
   type MarkReconciledResult,
 } from './autoDeductionNative';
 import {
@@ -59,7 +60,7 @@ export interface RunReconciliationInput {
   /** Prefer omit — gate loads durable state. Kept for tests that inject. */
   medications?: Medication[];
   logs?: ConsumptionLog[];
-  listFired?: () => Promise<AutoDeductionEvent[]>;
+  listFired?: () => Promise<ListFiredEventsResult | AutoDeductionEvent[]>;
   markReconciled?: (
     medicationId: string,
     doseId: string,
@@ -79,6 +80,9 @@ export interface RunReconciliationOutput extends ReconcileFiredResult {
   recoveredEnvelope: boolean;
   /** True when at least one native mark failed after JS commit (retryable). */
   partialNativeAck: boolean;
+  /** True when native FIRED list failed — distinct from empty events; no mutation/ack. */
+  nativeListFailed?: boolean;
+  nativeListError?: string;
 }
 
 /** @internal test-only envelope injectors (shared with Phase 4 manual gate). */
@@ -328,11 +332,48 @@ async function runOnce(
     }
   }
 
+  // Explicit native-read result: failure must NOT look like empty events.
+  // On read failure: do not mutate stock, do not acknowledge, remain retryable.
   let events: AutoDeductionEvent[] = [];
+  let listOk = true;
   try {
-    events = await listFired();
-  } catch {
-    events = [];
+    const listed = await listFired();
+    if (Array.isArray(listed)) {
+      // Legacy test injects that still return AutoDeductionEvent[]
+      events = listed;
+    } else {
+      listOk = listed.ok !== false;
+      events = listed.events ?? [];
+      if (!listOk) {
+        return {
+          medications: baseMeds,
+          logs: baseLogs,
+          toAcknowledge: [],
+          details: [],
+          mutated: false,
+          newExactLogs: [],
+          markedCount: 0,
+          recoveredEnvelope: false,
+          partialNativeAck: false,
+          nativeListFailed: true,
+          nativeListError: listed.error,
+        } as RunReconciliationOutput;
+      }
+    }
+  } catch (e) {
+    return {
+      medications: baseMeds,
+      logs: baseLogs,
+      toAcknowledge: [],
+      details: [],
+      mutated: false,
+      newExactLogs: [],
+      markedCount: 0,
+      recoveredEnvelope: false,
+      partialNativeAck: false,
+      nativeListFailed: true,
+      nativeListError: e instanceof Error ? e.message : 'list_fired_failed',
+    } as RunReconciliationOutput;
   }
 
   if (!events.length) {

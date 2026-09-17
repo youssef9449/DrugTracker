@@ -328,16 +328,59 @@ public final class AutoDeductionEventStore {
         return out;
     }
 
-    /** List only FIRED (unreconciled) events. Promotes pending first. */
+    /** List only FIRED (unreconciled) events. Promotes pending first.
+     * Malformed FIRED rows are atomically marked REJECTED and never returned. */
     public List<JSONObject> listFiredEvents() {
-        List<JSONObject> all = listEvents();
+        promotePendingFires();
         List<JSONObject> fired = new ArrayList<>();
-        for (JSONObject o : all) {
-            if (AutoDeductionContract.STATUS_FIRED.equals(o.optString("status", ""))) {
-                fired.add(o);
+        synchronized (LOCK) {
+            Map<String, ?> all = prefs.getAll();
+            SharedPreferences.Editor editor = null;
+            for (Map.Entry<String, ?> e : all.entrySet()) {
+                if (!e.getKey().startsWith(KEY_EVENT_PREFIX)) continue;
+                Object v = e.getValue();
+                if (!(v instanceof String)) continue;
+                try {
+                    JSONObject o = new JSONObject((String) v);
+                    String status = o.optString("status", "");
+                    if (!AutoDeductionContract.STATUS_FIRED.equals(status)) {
+                        continue;
+                    }
+                    if (isMalformedFired(o)) {
+                        o.put("status", AutoDeductionContract.STATUS_REJECTED);
+                        o.put("rejectedAt", System.currentTimeMillis());
+                        if (editor == null) {
+                            editor = prefs.edit();
+                        }
+                        editor.putString(e.getKey(), o.toString());
+                        Log.w(TAG, "marked malformed FIRED as REJECTED: " + e.getKey());
+                        continue;
+                    }
+                    fired.add(o);
+                } catch (JSONException ignored) {
+                }
+            }
+            if (editor != null) {
+                editor.commit();
             }
         }
         return fired;
+    }
+
+    /**
+     * True when a FIRED row lacks a valid occurrence identity, calendar date, or amount.
+     * Such records cannot be safely reconciled and must become terminal REJECTED.
+     */
+    static boolean isMalformedFired(JSONObject o) {
+        if (o == null) return true;
+        String medId = o.optString("medicationId", "").trim();
+        String doseId = o.optString("doseId", "").trim();
+        String calendarDate = o.optString("calendarDate", "").trim();
+        if (medId.isEmpty() || doseId.isEmpty()) return true;
+        if (!AutoDeductionContract.isValidCalendarDate(calendarDate)) return true;
+        double amt = o.optDouble("amount", Double.NaN);
+        if (!AutoDeductionContract.isValidAmount(amt)) return true;
+        return false;
     }
     /**
      * Promote pending fires, then return the unreconciled FIRED event for one

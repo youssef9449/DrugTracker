@@ -42,6 +42,7 @@ import {
   saveManualStockEnvelope,
   type ManualStockEnvelope,
 } from './stockEnvelopeRecovery';
+import { reconcileExactBeforeLegacySettlement } from './reconcileExactBeforeLegacySettlement';
 
 export type {
   ManualStockEnvelope,
@@ -210,7 +211,24 @@ export function runGatedManualConsume(opts: {
       };
     }
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-    const fresh = recovered.state;
+    // Exact FIRED reconciliation BEFORE any legacy settlement / manual math.
+    const pre = await reconcileExactBeforeLegacySettlement({
+      fresh: recovered.state,
+      globalAutoDeductEnabled: true,
+      now: opts.now,
+    });
+    if (pre.nativeListFailed) {
+      // Fail-closed: do not run legacy or manual mutation when native read failed.
+      return {
+        outcome: 'persist_failed' as const,
+        medications: pre.state.medications,
+        logs: pre.state.logs,
+        doseAmount: 0,
+        log: null,
+        reason: 'native_list_failed',
+      };
+    }
+    const fresh = pre.state;
 
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
@@ -368,7 +386,24 @@ export function runGatedManualRestore(opts: {
       };
     }
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-    const fresh = recovered.state;
+    // Exact FIRED reconciliation BEFORE any legacy settlement / manual math.
+    const pre = await reconcileExactBeforeLegacySettlement({
+      fresh: recovered.state,
+      globalAutoDeductEnabled: true,
+      now: opts.now,
+    });
+    if (pre.nativeListFailed) {
+      // Fail-closed: do not run legacy or manual mutation when native read failed.
+      return {
+        outcome: 'persist_failed' as const,
+        medications: pre.state.medications,
+        logs: pre.state.logs,
+        restoredAmount: 0,
+        log: null,
+        reason: 'native_list_failed',
+      };
+    }
+    const fresh = pre.state;
 
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
@@ -536,7 +571,24 @@ export function runGatedRefill(opts: {
       };
     }
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-    const fresh = recovered.state;
+    // Exact FIRED reconciliation BEFORE any legacy settlement / manual math.
+    const pre = await reconcileExactBeforeLegacySettlement({
+      fresh: recovered.state,
+      globalAutoDeductEnabled: true,
+      now: opts.now,
+    });
+    if (pre.nativeListFailed) {
+      // Fail-closed: do not run legacy or manual mutation when native read failed.
+      return {
+        outcome: 'persist_failed' as const,
+        medications: pre.state.medications,
+        logs: pre.state.logs,
+        addedPills: 0,
+        log: null,
+        reason: 'native_list_failed',
+      };
+    }
+    const fresh = pre.state;
 
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
@@ -633,7 +685,24 @@ export function runGatedUndoRefill(opts: {
       };
     }
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-    const fresh = recovered.state;
+    // Exact FIRED reconciliation BEFORE any legacy settlement / manual math.
+    const pre = await reconcileExactBeforeLegacySettlement({
+      fresh: recovered.state,
+      globalAutoDeductEnabled: true,
+      now: opts.now,
+    });
+    if (pre.nativeListFailed) {
+      // Fail-closed: do not run legacy or manual mutation when native read failed.
+      return {
+        outcome: 'persist_failed' as const,
+        medications: pre.state.medications,
+        logs: pre.state.logs,
+        addedPills: 0,
+        log: null,
+        reason: 'native_list_failed',
+      };
+    }
+    const fresh = pre.state;
 
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {

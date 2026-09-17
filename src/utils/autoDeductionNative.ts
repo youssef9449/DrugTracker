@@ -12,7 +12,7 @@ export interface AutoDeductionEvent {
   calendarDate: string;
   scheduledAtEpochMs: number;
   amount: number;
-  status: 'FIRED' | 'RECONCILED' | string;
+  status: 'FIRED' | 'RECONCILED' | 'REJECTED' | string;
   createdAtEpochMs: number;
   reconciledAtEpochMs: number | null;
 }
@@ -190,13 +190,28 @@ export async function invalidateAutoDeductionRecurrence(
   }
 }
 
-export async function listFiredAutoDeductionEvents(): Promise<AutoDeductionEvent[]> {
-  if (!isNativeAndroid()) return [];
+/**
+ * Explicit result for native FIRED event listing (mirrors scheduled-occurrence listing).
+ * Successful empty list: { ok: true, events: [] }
+ * Native read failure:  { ok: false, events: [], error }
+ * Never conflate the two — callers must check ok before treating events as authoritative.
+ */
+export interface ListFiredEventsResult {
+  ok: boolean;
+  events: AutoDeductionEvent[];
+  error?: string;
+}
+
+export async function listFiredAutoDeductionEvents(): Promise<ListFiredEventsResult> {
+  if (!isNativeAndroid()) {
+    return { ok: true, events: [] };
+  }
   try {
     const res = await AutoDeduction.listFiredEvents();
-    return res.events ?? [];
-  } catch {
-    return [];
+    return { ok: true, events: res.events ?? [] };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'list_fired_failed';
+    return { ok: false, events: [], error: msg };
   }
 }
 

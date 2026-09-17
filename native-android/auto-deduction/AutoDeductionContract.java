@@ -86,6 +86,8 @@ public final class AutoDeductionContract {
 
     public static final String STATUS_FIRED = "FIRED";
     public static final String STATUS_RECONCILED = "RECONCILED";
+    /** Terminal: irreparably malformed FIRED record (invalid identity/date/amount). */
+    public static final String STATUS_REJECTED = "REJECTED";
 
     /**
      * Shared request-code namespace for auto-deduction PendingIntents.

@@ -2137,6 +2137,11 @@ public final class AutoDeductionScheduler {
                 // FIRED present but amount invalid — still report FIRED so JS rejects.
                 return new OccurrenceSnapshot(OccurrenceSnapshot.Status.FIRED, null);
             }
+            // Effective cancellation (ordering-token aware) must beat stale schedule
+            // metadata when a tombstone exists but metadata removal failed.
+            if (isOccurrenceCancelledKey(key)) {
+                return new OccurrenceSnapshot(OccurrenceSnapshot.Status.CANCELLED, null);
+            }
             final String prefKey = SCHEDULE_KEY_PREFIX + key;
             String metaRaw = schedulePrefs.getString(prefKey, null);
             if (metaRaw != null && !metaRaw.isEmpty()) {
@@ -2152,9 +2157,6 @@ public final class AutoDeductionScheduler {
                     Log.w(TAG, "getOccurrenceSnapshot schedule parse failed for " + key, e);
                     return new OccurrenceSnapshot(OccurrenceSnapshot.Status.SCHEDULED, null);
                 }
-            }
-            if (cancelPrefs.contains(CANCEL_KEY_PREFIX + key)) {
-                return new OccurrenceSnapshot(OccurrenceSnapshot.Status.CANCELLED, null);
             }
             return new OccurrenceSnapshot(OccurrenceSnapshot.Status.ABSENT, null);
         }

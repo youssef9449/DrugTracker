@@ -12,6 +12,7 @@ import {
 } from './dateCalculations';
 import { isDoseTimeElapsedToday } from './doseSchedule';
 import { generateId } from './id';
+import { LEGACY_DOSE_ID } from './legacyDoseId';
 
 /**
  * Shared medication-action helpers (audit #77, #78).
@@ -727,7 +728,13 @@ export function consumeDose(
     date: todayStr,
     timestamp: new Date().toISOString(),
     description,
-    ...(targetDoseId ? { doseId: targetDoseId } : {}),
+    // LEGACY_DOSE_ID is an internal identity sentinel for the implicit
+    // legacy dose — persisted logs keep doseId undefined for legacy
+    // occurrences (same contract as the exact-auto log in
+    // autoDeductionReconciliation). findActiveDeductionForOccurrence and
+    // the reminder storage helpers treat undefined/''/'legacy' alike, so
+    // the sentinel never leaks into persisted UI data.
+    ...(targetDoseId && targetDoseId !== LEGACY_DOSE_ID ? { doseId: targetDoseId } : {}),
   };
   return { updatedMed, doseAmount, log };
 }

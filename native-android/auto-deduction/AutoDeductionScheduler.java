@@ -825,7 +825,19 @@ public final class AutoDeductionScheduler {
                 }
             }
             // If future already exists under same identity, do not replace.
-            String existing = schedulePrefs.getString(futurePrefKey, null);
+            // EXCEPTION — same-key recovery: when the first not-yet-due occurrence
+            // IS the past snapshot's own date (fromCalendarDate == calendarDate,
+            // i.e. a today-occurrence whose time is still ahead), the "existing"
+            // metadata is the very snapshot being recovered, not a separate live
+            // schedule. It must be re-armed under a fresh ordering token here;
+            // otherwise the trailing snapshot removal in catchUp (version match)
+            // deletes the only schedule row for the still-pending occurrence and
+            // it silently disappears (no FIRED, no SCHEDULED, no alarm).
+            boolean sameKeyRecovery =
+                    pastPrefKey != null && pastPrefKey.equals(futurePrefKey);
+            String existing = sameKeyRecovery
+                    ? null
+                    : schedulePrefs.getString(futurePrefKey, null);
             if (existing != null && !existing.isEmpty()) {
                 return new ScheduleResult(true, "already_present", futureKey);
             }

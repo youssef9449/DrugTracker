@@ -629,31 +629,39 @@ export function computeDueDoseBreakdown(
       }
     } else if (totalDays > 0) {
       // Legacy non-gated: a day's dose is due at the start of the calendar
-      // day (pre-change behavior). When TODAY's legacy occurrence is already
-      // consumed (Manual Take, or Exact Auto-deduction applied to the implicit
-      // legacy dose) or skipped (Auto-Deduct → Restore), it must NOT be
-      // charged again: the occurrence was charged exactly once by whoever
-      // consumed it, and identity is medicationId + doseId + calendarDate —
-      // not a day count. Excluding today here makes every downstream legacy
-      // settlement consumer (settleAutoDeductToggle / settleDoseChange /
-      // syncAutoDailyDeductions / effectiveCurrentPills projection) a no-op
-      // for that occurrence, so exact-before-legacy can never double-deduct.
-      // The legacy-dose consume marker is the durable per-occurrence record;
-      // lastConsumedDate (consumedToday) is the legacy single-dose equivalent.
-      // isDoseConsumedOnDate covers both (no-schedule fallback to
-      // lastConsumedDate) plus the marker written by the exact path.
-      const legacyTodayConsumed =
-        consumedToday ||
-        isDoseConsumedOnDate(med, LEGACY_DOSE_ID, todayStr) ||
-        isDoseSkippedOnDate(med, LEGACY_DOSE_ID, todayStr);
-      // When today's occurrence is consumed, only the past days of the
-      // window (lastSync, today) remain due. Otherwise the semantics are
-      // exactly the pre-change legacy behavior (totalDays — today included).
-      const dueDays = legacyTodayConsumed ? Math.max(0, totalDays - 1) : totalDays;
+      // day (pre-change behavior). Due units are computed **per calendar
+      // day** across the whole (lastSyncDate, todayStr] window instead of a
+      // single totalDays * dailyDose aggregate, so a day whose implicit
+      // legacy occurrence (LEGACY_DOSE_ID) already has a durable consume or
+      // skip marker is excluded BY ITS SPECIFIC DATE — historical
+      // Exact Auto / Manual Take / Restore days are never re-charged, while
+      // every other day in the window (including today) stays due exactly
+      // as before. isDoseConsumedOnDate checks the durable
+      // doseConsumptionHistory markers first and falls back to the legacy
+      // lastConsumedDate single-date behavior; lastConsumedDate alone is
+      // never the primary source. When NO markers exist inside the window,
+      // the loop sums dailyDose for each of the totalDays days — bit-for-bit
+      // the pre-change legacy semantics. This single computation is shared
+      // by every downstream consumer (settleAutoDeductToggle /
+      // settleDoseChange / syncAutoDailyDeductions / effectiveCurrentPills),
+      // so no consumer can double-deduct an occurrence already charged by
+      // its exact event.amount, and a consumed today never blocks
+      // settlement of the historical unconsumed days (occurrence identity
+      // is medicationId + doseId + calendarDate — not a day count).
+      let dueDays = 0;
+      let dueUnitsAccum = 0;
+      const legacyLastSync = med.lastSyncDate || todayStr;
+      for (let dayIdx = 1; dayIdx <= totalDays; dayIdx++) {
+        const day = addDaysToDateStr(legacyLastSync, dayIdx);
+        if (isDoseConsumedOnDate(med, LEGACY_DOSE_ID, day)) continue;
+        if (isDoseSkippedOnDate(med, LEGACY_DOSE_ID, day)) continue;
+        dueDays += 1;
+        dueUnitsAccum += med.dailyDose;
+      }
       fullDueDoses = dueDays;
       pastDueDoses = dueDays;
-      pastDueUnits = dueDays * med.dailyDose;
-      fullDueUnits = pastDueUnits;
+      pastDueUnits = dueUnitsAccum;
+      fullDueUnits = dueUnitsAccum;
     }
   }
 
@@ -862,11 +870,21 @@ export function syncAutoDailyDeductions(
     const dueUnits = breakdown.gated ? breakdown.pastDueUnits : breakdown.fullDueUnits;
     const dueDoses = breakdown.gated ? breakdown.pastDueDoses : breakdown.fullDueDoses;
 
+    // `consumedToday` must never be a GLOBAL sync blocker for the legacy
+    // non-gated path: fullDueUnits there is computed per calendar day, so a
+    // consumed TODAY only excludes today's own occurrence while the
+    // historical unconsumed days stay due and must still be settled
+    // (e.g. an Exact Auto event on today historically left days
+    // (lastSync, today) un-settled whenever this guard swallowed the whole
+    // sync). For gated meds the pre-existing consumedToday guard is
+    // preserved unchanged.
+    const consumedTodayBlocksSync = breakdown.gated && breakdown.consumedToday;
+
     if (
       med.autoDeductEnabled !== false &&
       dailyScheduleAmount(med) > 0 &&
       dueUnits > 0 &&
-      !breakdown.consumedToday
+      !consumedTodayBlocksSync
     ) {
       const pillsToDeduct = Math.min(med.currentPills, dueUnits);
       const newPills = Math.max(0, med.currentPills - pillsToDeduct);

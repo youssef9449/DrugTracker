@@ -32,18 +32,27 @@ vi.mock('@/utils/sound', () => ({
   stopAllSounds: vi.fn(),
 }));
 
+// Phase 4: the gated stock mutations use the reconciliation result as the
+// fresh durable state inside the critical section (reconcileExact-
+// BeforeLegacySettlement). The mock must therefore honor the REAL identity
+// contract for a reconciliation with no FIRED events: echo the input
+// medications/logs unchanged (no FIRED events → no mutation). Returning
+// empty arrays would wipe the durable state inside the gate and turn every
+// gated mutation into missing_med.
 vi.mock('@/utils/runAutoDeductionReconciliation', () => ({
-  runAutoDeductionReconciliation: vi.fn(async () => ({
-    medications: [],
-    logs: [],
-    toAcknowledge: [],
-    details: [],
-    mutated: false,
-    newExactLogs: [],
-    markedCount: 0,
-    recoveredEnvelope: false,
-    partialNativeAck: false,
-  })),
+  runAutoDeductionReconciliation: vi.fn(
+    async (opts?: { medications?: unknown[]; logs?: unknown[] }) => ({
+      medications: [...(opts?.medications ?? [])],
+      logs: [...(opts?.logs ?? [])],
+      toAcknowledge: [],
+      details: [],
+      mutated: false,
+      newExactLogs: [],
+      markedCount: 0,
+      recoveredEnvelope: false,
+      partialNativeAck: false,
+    })
+  ),
 }));
 
 import App from '@/App';
@@ -292,18 +301,22 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
 
     clickToggleFor();
 
-    // The handler calls settleAutoDeductToggle once (outside the
-    // updater). The setMedications updater only READS the result —
-    // it doesn't call settleAutoDeductToggle itself. So the spy
-    // must be called exactly once.
-    expect(settleSpy).toHaveBeenCalledTimes(1);
+    // Phase 4: the toggle runs inside the async durable stock gate, so the
+    // settle call happens on a later microtask — await it. The handler
+    // calls settleAutoDeductToggle exactly once per click (outside the
+    // updater, so StrictMode cannot double it).
+    await waitFor(() => {
+      expect(settleSpy).toHaveBeenCalledTimes(1);
+    });
 
     // Verify the call args: the med id matches, newState is false
-    // (was true → false), todayStr is today.
+    // (was true → false), todayStr is today, now is a Date (the gated
+    // wrapper always passes all four).
     expect(settleSpy).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'med-toggle', autoDeductEnabled: true }),
       false,
-      expect.any(String)
+      expect.any(String),
+      expect.any(Date)
     );
   });
 
@@ -348,8 +361,12 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
     clickToggleFor();
 
     // Exactly ONE call — StrictMode's double-invoke of the updater
-    // did NOT double the settle call (it's outside the updater).
-    expect(settleSpy).toHaveBeenCalledTimes(1);
+    // did NOT double the settle call (it's outside the updater, and
+    // the Phase 4 gated handler runs once per click). Await the async
+    // durable gate before asserting.
+    await waitFor(() => {
+      expect(settleSpy).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('one toggle (OFF → ON) calls settleAutoDeductToggle EXACTLY ONCE and produces no log', async () => {
@@ -384,12 +401,16 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
 
     clickToggleFor();
 
-    expect(settleSpy).toHaveBeenCalledTimes(1);
-    // newState=true (false→true transition).
+    // Await the async durable stock gate (Phase 4) before asserting.
+    await waitFor(() => {
+      expect(settleSpy).toHaveBeenCalledTimes(1);
+    });
+    // newState=true (false→true transition); 4th arg is the gate's now.
     expect(settleSpy).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'med-toggle', autoDeductEnabled: false }),
       true,
-      expect.any(String)
+      expect.any(String),
+      expect.any(Date)
     );
   });
 
@@ -887,7 +908,8 @@ describe('Success chime on toggle actions', () => {
       name: /إيقاف الخصم التلقائي|تفعيل الخصم التلقائي/,
     });
     fireEvent.click(toggleBtn);
-    expect(playSuccessChime).toHaveBeenCalledTimes(1);
+    // Phase 4: chime fires after the async durable gate resolves.
+    await waitFor(() => expect(playSuccessChime).toHaveBeenCalledTimes(1));
   });
 
   it('Medication Auto-Deduct OFF→ON plays success chime once', async () => {
@@ -899,7 +921,8 @@ describe('Success chime on toggle actions', () => {
       name: /إيقاف الخصم التلقائي|تفعيل الخصم التلقائي/,
     });
     fireEvent.click(toggleBtn);
-    expect(playSuccessChime).toHaveBeenCalledTimes(1);
+    // Phase 4: chime fires after the async durable gate resolves.
+    await waitFor(() => expect(playSuccessChime).toHaveBeenCalledTimes(1));
   });
 
   it('Global Auto-Deduct ON→OFF plays success chime once', async () => {
@@ -911,7 +934,8 @@ describe('Success chime on toggle actions', () => {
     // Global toggle is labeled for all meds
     const globalToggle = screen.getByLabelText(/تبديل الخصم التلقائي لجميع الأدوية/);
     fireEvent.click(globalToggle);
-    expect(playSuccessChime).toHaveBeenCalledTimes(1);
+    // Phase 4: chime fires after the async durable gate resolves.
+    await waitFor(() => expect(playSuccessChime).toHaveBeenCalledTimes(1));
   });
 
   it('Global Auto-Deduct OFF→ON plays success chime once', async () => {
@@ -922,7 +946,8 @@ describe('Success chime on toggle actions', () => {
     await waitFor(() => expect(screen.getByText('Chime Med')).toBeInTheDocument());
     const globalToggle = screen.getByLabelText(/تبديل الخصم التلقائي لجميع الأدوية/);
     fireEvent.click(globalToggle);
-    expect(playSuccessChime).toHaveBeenCalledTimes(1);
+    // Phase 4: chime fires after the async durable gate resolves.
+    await waitFor(() => expect(playSuccessChime).toHaveBeenCalledTimes(1));
   });
 
   it('Display toggle OFF shows "العرض الطبيعي"; ON shows "العرض المختصر" (no شبكة)', async () => {

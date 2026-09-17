@@ -422,6 +422,25 @@ export function runGatedManualRestore(opts: {
 
     const result = restoreDose(med, opts.doseId, todayStr, now, fresh.logs);
     if (!result.ok) {
+      // restoreDose rejects a future unconsumed occurrence (no durable
+      // deduction, scheduled time not elapsed) with reason
+      // 'already_restored' — a settled/no-op outcome, not a hard failure.
+      // Surface it as the documented 'already_restored' outcome (same
+      // pattern as the consume wrapper's 'already_consumed' mapping) so
+      // repeated pre-schedule Restore calls are idempotent zero-mutation
+      // successes instead of generic rejections.
+      if (result.reason === 'already_restored') {
+        return {
+          outcome: 'already_restored' as const,
+          medications: fresh.medications,
+          logs: fresh.logs,
+          restoredAmount: 0,
+          log: null,
+          reason: result.reason,
+          medicationName: med.name,
+          unit: med.unit,
+        };
+      }
       return {
         outcome: 'rejected' as const,
         medications: fresh.medications,

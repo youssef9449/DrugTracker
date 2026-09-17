@@ -51,7 +51,8 @@ describe('useMedicationHandlers — stale React must not block durable mutations
   let setMedications: ReturnType<typeof vi.fn>;
   let setLogs: ReturnType<typeof vi.fn>;
   let showToast: ReturnType<typeof vi.fn>;
-  let seq: number;
+  let nextSeq: number;
+  let lastApplied: number;
 
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
@@ -69,7 +70,8 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       reactLogs = value;
     });
     showToast = vi.fn();
-    seq = 0;
+    nextSeq = 0;
+    lastApplied = 0;
 
     __setAutoStockGateTestHooks({
       load: () => ({
@@ -89,13 +91,18 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       save: () => null,
       clear: () => null,
     });
+    // Match production allocateMutationSeq contract:
+    // { ok: true, seq } | { ok: false, error }. Keep nextSeq and lastApplied separate.
     __setStockMutationOrderingTestHooks({
       allocate: () => {
-        seq += 1;
-        return seq;
+        nextSeq += 1;
+        return { ok: true, seq: nextSeq };
       },
-      loadLastApplied: () => seq,
-      persistLastApplied: () => null,
+      loadLastApplied: () => lastApplied,
+      persistLastApplied: (value) => {
+        lastApplied = value;
+        return null;
+      },
     });
   });
 

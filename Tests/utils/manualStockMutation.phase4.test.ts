@@ -2848,10 +2848,20 @@ describe('Phase 4 — stale React snapshot must not block durable Restore / Undo
       save: () => null,
       clear: () => null,
     });
+    // Match production allocateMutationSeq contract; keep allocation and
+    // finalization counters independent.
+    let nextSeq = 0;
+    let lastApplied = 0;
     __setStockMutationOrderingTestHooks({
-      allocate: () => 1,
-      loadLastApplied: () => 0,
-      persistLastApplied: () => null,
+      allocate: () => {
+        nextSeq += 1;
+        return { ok: true, seq: nextSeq };
+      },
+      loadLastApplied: () => lastApplied,
+      persistLastApplied: (value) => {
+        lastApplied = value;
+        return null;
+      },
     });
   });
 

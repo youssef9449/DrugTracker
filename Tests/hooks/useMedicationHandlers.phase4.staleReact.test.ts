@@ -106,7 +106,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     __resetStockMutationOrderingForTests();
   });
 
-  function mountHandlers(overrides: Partial<Medication[]> = undefined as never) {
+  function mountHandlers() {
     // Always read current reactMeds/reactLogs via closure on each render.
     const { result, rerender } = renderHook(
       ({ medications, logs }: { medications: Medication[]; logs: ConsumptionLog[] }) =>

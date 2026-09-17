@@ -1845,6 +1845,90 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     expect(durable.logs.some((l) => l.type === 'refill' && l.amount === 5)).toBe(true);
   });
 
+  // ─── Refill Undo — partial/clamped reversal (data integrity) ───
+
+  it('runGatedUndoRefill reverses only the ACTUAL reversible amount (clamped), not the full refill.amount', async () => {
+    // Med has currentPills=5 (autoDeduct OFF → effective = currentPills = 5).
+    // A refill log of +10 exists but only 5 is actually reversible (settleBase=5).
+    // Undo must record -5 in the refill_undo log, not -10.
+    durable = {
+      medications: [med({ currentPills: 5, autoDeductEnabled: false, lastSyncDate: TODAY })],
+      logs: [
+        { id: 'refill-10', medicationId: 'med-1', medicationName: 'TestMed', type: 'refill', amount: 10, date: TODAY, timestamp: '2026-09-16T10:00:00.000Z', description: 'refill' },
+      ],
+    };
+    const r = await runGatedUndoRefill({ medicationId: 'med-1', todayStr: TODAY, makeLogId: () => 'undo-clamp' });
+    expect(r.outcome).toBe('applied');
+    // The ACTUAL reversed amount is 5 (clamped to settleBase=5), not 10.
+    expect(r.addedPills).toBe(-5);
+    expect(r.log?.amount).toBe(-5);
+    expect(r.log?.type).toBe('refill_undo');
+    // The refill_undo log links to the original refill.
+    expect(r.log?.relatedLogId).toBe('refill-10');
+    // Stock dropped by 5 (settleBase=5, -5 → 0).
+    expect(durable.medications[0].currentPills).toBe(0);
+    // The original refill is marked reversed.
+    expect(durable.logs.find((l) => l.id === 'refill-10')?.reversedAt).toBeTruthy();
+  });
+
+  it('runGatedUndoRefill with full reversible amount reverses the full refill.amount', async () => {
+    // currentPills=20 → settleBase=20 → full 10 is reversible.
+    durable = {
+      medications: [med({ currentPills: 20, autoDeductEnabled: false, lastSyncDate: TODAY })],
+      logs: [
+        { id: 'refill-full', medicationId: 'med-1', medicationName: 'TestMed', type: 'refill', amount: 10, date: TODAY, timestamp: '2026-09-16T10:00:00.000Z', description: 'refill' },
+      ],
+    };
+    const r = await runGatedUndoRefill({ medicationId: 'med-1', todayStr: TODAY, makeLogId: () => 'undo-full' });
+    expect(r.outcome).toBe('applied');
+    expect(r.addedPills).toBe(-10);
+    expect(r.log?.amount).toBe(-10);
+    // Stock dropped by 10 (settleBase=20, -10 → 10).
+    expect(durable.medications[0].currentPills).toBe(10);
+    expect(durable.logs.find((l) => l.id === 'refill-full')?.reversedAt).toBeTruthy();
+  });
+
+  it('runGatedUndoRefill with zero reversible quantity records actual 0, not -refill.amount', async () => {
+    // currentPills=0 → settleBase=0 → nothing to reverse.
+    durable = {
+      medications: [med({ currentPills: 0, autoDeductEnabled: false, lastSyncDate: TODAY })],
+      logs: [
+        { id: 'refill-zero', medicationId: 'med-1', medicationName: 'TestMed', type: 'refill', amount: 10, date: TODAY, timestamp: '2026-09-16T10:00:00.000Z', description: 'refill' },
+      ],
+    };
+    const r = await runGatedUndoRefill({ medicationId: 'med-1', todayStr: TODAY, makeLogId: () => 'undo-zero' });
+    expect(r.outcome).toBe('applied');
+    // Actual reversed amount is 0, NOT -10.
+    expect(r.addedPills).toBe(0);
+    expect(r.log?.amount).toBe(0);
+    expect(r.log?.type).toBe('refill_undo');
+    // Stock unchanged (0 - 0 = 0).
+    expect(durable.medications[0].currentPills).toBe(0);
+    // The refill is still marked reversed (the undo consumed the refill).
+    expect(durable.logs.find((l) => l.id === 'refill-zero')?.reversedAt).toBeTruthy();
+  });
+
+  it('runGatedUndoRefill: second undo of the same refill is rejected (no double reversal)', async () => {
+    durable = {
+      medications: [med({ currentPills: 20, autoDeductEnabled: false, lastSyncDate: TODAY })],
+      logs: [
+        { id: 'refill-dbl', medicationId: 'med-1', medicationName: 'TestMed', type: 'refill', amount: 10, date: TODAY, timestamp: '2026-09-16T10:00:00.000Z', description: 'refill' },
+      ],
+    };
+    const r1 = await runGatedUndoRefill({ medicationId: 'med-1', todayStr: TODAY, makeLogId: () => 'undo-1' });
+    expect(r1.outcome).toBe('applied');
+    expect(r1.addedPills).toBe(-10);
+    const pillsAfterFirst = durable.medications[0].currentPills;
+
+    // Second undo: the refill is now reversed → rejected.
+    const r2 = await runGatedUndoRefill({ medicationId: 'med-1', todayStr: TODAY, makeLogId: () => 'undo-2' });
+    expect(r2.outcome).toBe('rejected');
+    // No additional stock change.
+    expect(durable.medications[0].currentPills).toBe(pillsAfterFirst);
+    // No second undo log.
+    expect(durable.logs.filter((l) => l.id === 'undo-2')).toHaveLength(0);
+  });
+
   // ─── Section 1: Auto/Manual Take → Restore lifecycle invariants ───
 
   it('Auto → Restore leaves durable skip so effectiveCurrentPills does not re-project', async () => {

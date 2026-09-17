@@ -20,7 +20,13 @@ import {
 } from './medActions';
 import { normalizeExactDoseId } from './autoDeductionReconciliation';
 import { markAutoDeductionEventReconciled } from './autoDeductionNative';
-import { isDoseConsumedOnDate, isDoseSkippedOnDate, getTodayDateString } from './dateCalculations';
+import {
+  isDoseConsumedOnDate,
+  isDoseSkippedOnDate,
+  getTodayDateString,
+  computeDueDoseBreakdown,
+  effectiveCurrentPills,
+} from './dateCalculations';
 import { LEGACY_DOSE_ID } from './notifications';
 import {
   withAutoStockMutationGate,
@@ -610,8 +616,27 @@ export function runGatedUndoRefill(opts: {
     }
 
     const reverseTimestamp = new Date(now).toISOString();
-    const reversedAmount = refill.amount;
-    // Reverse: settle at effective balance, then subtract the refill amount.
+
+    // Compute settleBase with the SAME semantics as settleAndAdjust /
+    // reverseRefill (dateCalculations.ts): for gated meds, settle at the
+    // past-only balance; for legacy, at the full effective balance. Then
+    // clamp the reversal to what is actually reversible — the refill may
+    // have added 10, but if consumption/settlement has since reduced the
+    // settleBase to 5, only 5 can be reversed. Without this clamp, the
+    // refill_undo log and the operation result would record -10 even though
+    // only -5 was actually reversed (the snapshot would be correct due to
+    // settleAndAdjust's own Math.max(0, …) clamp, but the audit log and
+    // caller-facing amount would be wrong — a data-integrity regression).
+    const breakdown = computeDueDoseBreakdown(med, now, todayStr);
+    const settleBase = breakdown.gated
+      ? Math.max(0, med.currentPills - breakdown.pastDueUnits)
+      : Math.max(0, effectiveCurrentPills(med, todayStr, now));
+    const reversedAmount = Math.min(
+      Math.max(0, refill.amount),
+      settleBase
+    );
+    // Reverse: settle at effective balance, then subtract the ACTUAL
+    // (clamped) reversed amount — not the full refill.amount.
     const { updatedMed } = settleAndAdjust(
       med,
       -reversedAmount,
@@ -626,7 +651,7 @@ export function runGatedUndoRefill(opts: {
       medicationId: med.id,
       medicationName: med.name,
       type: 'refill_undo',
-      amount: -reversedAmount,
+      amount: 0 - reversedAmount,
       date: todayStr,
       timestamp: reverseTimestamp,
       relatedLogId: refill.id,
@@ -655,7 +680,7 @@ export function runGatedUndoRefill(opts: {
       outcome: 'applied' as const,
       medications,
       logs,
-      addedPills: -reversedAmount,
+      addedPills: 0 - reversedAmount,
       log: undoLog,
       medicationName: med.name,
       unit: med.unit,

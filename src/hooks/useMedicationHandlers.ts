@@ -408,20 +408,23 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
 
   const handleTakeDoseFromAlarm = useCallback((med: Medication, doseId?: string) => {
     // Phase 4: durable gate — same serialization as exact auto reconciliation.
+    // doseId comes from the alarm payload; display name prefers durable result.
     void (async () => {
       const result = await runGatedManualConsume({
         medicationId: med.id,
         doseId,
         source: 'alarm',
       });
+      const displayName = result.medicationName ?? med.name;
+      const displayUnit = result.unit ?? med.unit;
       if (result.outcome === 'applied' && result.log) {
         setMedications(result.medications);
         medicationsRef.current = result.medications;
         setLogs(result.logs);
-        showToast(TOAST_MESSAGES.doseTaken(med.name, result.doseAmount, med.unit));
+        showToast(TOAST_MESSAGES.doseTaken(displayName, result.doseAmount, displayUnit));
         if (soundEnabled) playSuccessChime();
       } else if (result.outcome === 'already_consumed') {
-        showToast(TOAST_MESSAGES.doseAlreadyTaken(med.name));
+        showToast(TOAST_MESSAGES.doseAlreadyTaken(displayName));
       }
       // Dismiss only when durable Take applied or occurrence already settled.
       // persist_failed must keep the alarm so the user can retry.
@@ -443,34 +446,18 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
   // and updates exactAlarmEnabled → the scheduler reschedules.
 
   const handleConsumeDose = (medicationId: string, doseId?: string) => {
-    const med = medicationsRef.current.find((m) => m.id === medicationId);
-    if (!med) return;
-    const isMulti =
-      Array.isArray(med.doseSchedule) && med.doseSchedule.length > 1;
-
-    // Multi-dose: never guess — open unified management UI when doseId missing.
-    if (isMulti && !doseId) {
-      flushSync(() => {
-        setSelectDoseMode('manage');
-      });
-      setSelectDoseMed(medicationsRef.current.find((m) => m.id === medicationId) ?? med);
-      return;
-    }
-
-    // Single-dose schedule (length === 1): use that dose id if present.
-    const resolvedDoseId =
-      doseId ??
-      (Array.isArray(med.doseSchedule) && med.doseSchedule.length === 1
-        ? med.doseSchedule[0].id
-        : undefined);
-
-    // Phase 4: durable gate serialize with exact auto-deduction.
+    // Outside the gate: only request inputs. All business decisions
+    // (med existence, schedule, single/multi resolution, already_consumed,
+    // amount) are made inside runGatedManualConsume against fresh durable
+    // state. A stale/empty React snapshot must never block or redirect Take.
     void (async () => {
       const result = await runGatedManualConsume({
         medicationId,
-        doseId: resolvedDoseId,
+        doseId,
         source: 'manual',
       });
+      const displayName = result.medicationName ?? '';
+      const displayUnit = result.unit ?? '';
       if (result.outcome === 'applied' && result.log) {
         setMedications(result.medications);
         medicationsRef.current = result.medications;
@@ -482,7 +469,9 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
           setSelectDoseMed(null);
           setSelectDoseMode('take');
         }
-        showToast(TOAST_MESSAGES.doseTaken(med.name, result.doseAmount, med.unit));
+        if (displayName) {
+          showToast(TOAST_MESSAGES.doseTaken(displayName, result.doseAmount, displayUnit));
+        }
         if (soundEnabled) playSuccessChime();
         return;
       }
@@ -490,19 +479,26 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         result.outcome === 'already_consumed' ||
         result.reason === 'already_consumed'
       ) {
-        showToast(TOAST_MESSAGES.doseAlreadyTaken(med.name));
+        if (displayName) showToast(TOAST_MESSAGES.doseAlreadyTaken(displayName));
         return;
       }
-      // persist_failed: durable write did not complete — not "already taken".
+      // Multi-dose without doseId: open SelectDoseModal using fresh durable med.
+      if (result.outcome === 'missing_dose_id') {
+        const freshMed =
+          result.medications.find((m) => m.id === medicationId) ?? null;
+        if (freshMed) {
+          flushSync(() => {
+            setSelectDoseMode('manage');
+          });
+          setSelectDoseMed(freshMed);
+        }
+        return;
+      }
       if (result.outcome === 'persist_failed') {
         showToast(STORAGE_ERRORS.generic);
         return;
       }
-      // rejected / missing_med / other — do not claim already taken.
-      if (result.outcome === 'missing_med') {
-        return;
-      }
-      // rejected: leave UI unchanged; no false already-taken toast.
+      // missing_med / rejected / other — no success or already-taken toast.
     })();
   };
 

@@ -49,6 +49,12 @@ export function loadLastAppliedMutationSeq(): number {
  * evidence.
  */
 export function persistLastAppliedMutationSeq(seq: number): string | null {
+  // Invariant: lastAppliedMutationSeq never decreases.
+  const current = loadLastAppliedMutationSeq();
+  if (!(seq > current)) {
+    // Already at or ahead of requested seq — success without downgrade.
+    return null;
+  }
   if (testHooks?.persistLastApplied) return testHooks.persistLastApplied(seq);
   return persist(STORAGE_LAST_APPLIED_SEQ_KEY, String(seq), { json: false });
 }
@@ -65,8 +71,10 @@ export function allocateMutationSeq(): AllocateMutationSeqResult {
   if (testHooks?.allocate) return testHooks.allocate();
   const raw = loadString(STORAGE_NEXT_SEQ_KEY, '0');
   const cur = Number(raw);
-  const base = Number.isFinite(cur) && cur >= 0 ? Math.floor(cur) : 0;
-  const next = base + 1;
+  const storedNext = Number.isFinite(cur) && cur >= 0 ? Math.floor(cur) : 0;
+  // Invariant: every newly allocated mutationSeq > current lastApplied.
+  const lastApplied = loadLastAppliedMutationSeq();
+  const next = Math.max(storedNext, lastApplied) + 1;
   const err = persist(STORAGE_NEXT_SEQ_KEY, String(next), { json: false });
   if (err) return { ok: false, error: err };
   return { ok: true, seq: next };

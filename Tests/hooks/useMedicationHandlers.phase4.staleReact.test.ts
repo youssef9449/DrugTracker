@@ -387,4 +387,172 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     expect(durable.logs.find((l) => l.id === 'refill-old')?.reversedAt).toBeFalsy();
     expect(showToast).toHaveBeenCalled();
   });
+
+
+  // ─── Manual Take: React snapshot must not decide business outcome ───
+
+  it('Take succeeds when React medications is empty but durable has med + doseId', async () => {
+    durable = {
+      medications: [med({ currentPills: 10 })],
+      logs: [],
+    };
+    reactMeds = [];
+    const { result } = mountHandlers();
+
+    await act(async () => {
+      result.current.handleConsumeDose('med-1', 'd1');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(durable.medications[0].currentPills).toBe(9);
+    });
+    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
+    expect(setMedications).toHaveBeenCalled();
+  });
+
+  it('Take uses durable schedule when React doseSchedule is stale', async () => {
+    durable = {
+      medications: [
+        med({
+          currentPills: 10,
+          doseSchedule: [
+            { id: 'd1', amount: 3, time: '08:00' },
+            { id: 'd2', amount: 1, time: '14:00' },
+          ],
+        }),
+      ],
+      logs: [],
+    };
+    // Stale React: only knows d2 with amount 1
+    reactMeds = [
+      med({
+        currentPills: 10,
+        doseSchedule: [{ id: 'd2', amount: 1, time: '14:00' }],
+      }),
+    ];
+    const { result } = mountHandlers();
+
+    await act(async () => {
+      result.current.handleConsumeDose('med-1', 'd1');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(durable.medications[0].currentPills).toBe(7); // deducted 3 from durable
+    });
+  });
+
+  it('Take uses durable truth when React says already consumed but durable is not', async () => {
+    durable = { medications: [med({ currentPills: 10 })], logs: [] };
+    reactMeds = [
+      med({
+        currentPills: 9,
+        doseConsumption: { d1: TODAY },
+        doseConsumptionHistory: { d1: [TODAY] },
+      }),
+    ];
+    expect(isDoseConsumedOnDate(reactMeds[0], 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(false);
+
+    const { result } = mountHandlers();
+    await act(async () => {
+      result.current.handleConsumeDose('med-1', 'd1');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(durable.medications[0].currentPills).toBe(9);
+    });
+    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
+  });
+
+  it('Take is already_consumed when durable is consumed even if React is not', async () => {
+    durable = {
+      medications: [
+        med({
+          currentPills: 9,
+          doseConsumption: { d1: TODAY },
+          doseConsumptionHistory: { d1: [TODAY] },
+        }),
+      ],
+      logs: [
+        {
+          id: 'take-1',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'dose_taken',
+          amount: -1,
+          date: TODAY,
+          timestamp: `${TODAY}T10:00:00.000Z`,
+          description: 'take',
+          doseId: 'd1',
+        },
+      ],
+    };
+    reactMeds = [med({ currentPills: 10 })]; // not consumed in React
+    const pillsBefore = durable.medications[0].currentPills;
+
+    const { result } = mountHandlers();
+    await act(async () => {
+      result.current.handleConsumeDose('med-1', 'd1');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(showToast).toHaveBeenCalled();
+    });
+    expect(durable.medications[0].currentPills).toBe(pillsBefore);
+  });
+
+  it('Take with durable doseId succeeds even when React schedule lacks that dose', async () => {
+    durable = {
+      medications: [
+        med({
+          currentPills: 10,
+          doseSchedule: [
+            { id: 'd1', amount: 1, time: '08:00' },
+            { id: 'd-new', amount: 2, time: '20:00' },
+          ],
+        }),
+      ],
+      logs: [],
+    };
+    reactMeds = [
+      med({
+        doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+      }),
+    ];
+    const { result } = mountHandlers();
+    await act(async () => {
+      result.current.handleConsumeDose('med-1', 'd-new');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(durable.medications[0].currentPills).toBe(8);
+    });
+  });
+
+  it('multi-dose without doseId yields missing_dose_id and no stock mutation', async () => {
+    durable = {
+      medications: [med({ currentPills: 10 })],
+      logs: [],
+    };
+    reactMeds = [];
+    const { result } = mountHandlers();
+    await act(async () => {
+      result.current.handleConsumeDose('med-1'); // no doseId
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // No stock change
+    expect(durable.medications[0].currentPills).toBe(10);
+    expect(durable.logs).toHaveLength(0);
+  });
+
 });

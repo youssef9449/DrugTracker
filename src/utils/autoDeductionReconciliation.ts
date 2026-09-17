@@ -148,6 +148,40 @@ function calendarDayBefore(calendarDate: string): string | null {
   }
 }
 
+/**
+ * Locate a native Exact Auto occurrence that is FIRED and not yet reconciled
+ * for the given medicationId + doseId + calendarDate.
+ *
+ * When present, event.amount is the authoritative requested amount for this
+ * occurrence (even if Medication.doseSchedule was edited after scheduling).
+ */
+export function findPendingExactAutoOccurrence(
+  events: Array<{
+    medicationId: string;
+    doseId: string;
+    calendarDate: string;
+    amount: number;
+    status: string;
+    reconciledAtEpochMs?: number | null;
+  }>,
+  medicationId: string,
+  doseId: string | undefined,
+  calendarDate: string
+): { medicationId: string; doseId: string; calendarDate: string; amount: number; status: string } | null {
+  const wantDose = normalizeExactDoseId(doseId);
+  for (const ev of events) {
+    if (ev.medicationId !== medicationId) continue;
+    if (ev.calendarDate !== calendarDate) continue;
+    if (normalizeExactDoseId(ev.doseId) !== wantDose) continue;
+    const status = String(ev.status || '').toUpperCase();
+    if (status !== 'FIRED') continue;
+    if (ev.reconciledAtEpochMs != null) continue;
+    return ev;
+  }
+  return null;
+}
+
+
 export function applyExactAutoEventToMedication(
   med: Medication,
   event: AutoDeductionEvent,

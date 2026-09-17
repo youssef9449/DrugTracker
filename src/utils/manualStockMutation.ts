@@ -18,8 +18,15 @@ import {
   settleAndAdjust,
   type ConsumeDoseResult,
 } from './medActions';
-import { normalizeExactDoseId } from './autoDeductionReconciliation';
-import { markAutoDeductionEventReconciled } from './autoDeductionNative';
+import {
+  normalizeExactDoseId,
+  findPendingExactAutoOccurrence,
+} from './autoDeductionReconciliation';
+import {
+  markAutoDeductionEventReconciled,
+  listFiredAutoDeductionEvents,
+  type AutoDeductionEvent,
+} from './autoDeductionNative';
 import {
   isDoseConsumedOnDate,
   isDoseSkippedOnDate,
@@ -57,6 +64,7 @@ export type GatedManualOutcome =
   | 'already_consumed'
   | 'already_restored'
   | 'missing_med'
+  | 'missing_dose_id'
   | 'persist_failed'
   | 'rejected';
 
@@ -67,6 +75,9 @@ export interface GatedManualConsumeResult {
   doseAmount: number;
   log: ConsumptionLog | null;
   reason?: string;
+  /** Fresh durable medication name/unit for UI (never from React snapshot). */
+  medicationName?: string;
+  unit?: string;
 }
 
 export interface GatedManualRestoreResult {
@@ -176,14 +187,17 @@ export function runGatedManualConsume(opts: {
   source: 'alarm' | 'manual';
   todayStr?: string;
   now?: Date;
+  /** Test/production inject for native FIRED events (default: listFiredAutoDeductionEvents). */
+  listFired?: () => Promise<AutoDeductionEvent[]>;
 }): Promise<GatedManualConsumeResult> {
-  const todayStr = opts.todayStr ?? getTodayDateString();
-  const now = opts.now ?? new Date();
-
   return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
+    // Capture date/time inside the critical section so a mutation that waited
+    // on the gate still uses the clock at execution time (not call time).
+    const todayStr = opts.todayStr ?? getTodayDateString();
+    const now = opts.now ?? new Date();
+
     const recovered = recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
-      // Blocked recovery: do not ACK, do not start Manual mutation.
       return {
         outcome: 'persist_failed' as const,
         medications: recovered.state.medications,
@@ -193,7 +207,6 @@ export function runGatedManualConsume(opts: {
         reason: 'persist_failed',
       };
     }
-    // Exact Auto ACKs via existing native path (not Manual ownership).
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
     const fresh = recovered.state;
 
@@ -209,29 +222,36 @@ export function runGatedManualConsume(opts: {
       };
     }
 
-    const resolvedId = resolveConsumeDoseId(med, opts.doseId);
-    const doseKey = normalizeExactDoseId(resolvedId);
-
-    // Block a second Take only when a durable consumption marker is present
-    // (Manual Take or Exact Auto both set doseConsumption). Do NOT block on
-    // the durable skip marker: that marker is left by Restore (after Auto or
-    // Manual Take) precisely so projection/Exact-Auto do not re-deduct the
-    // same occurrence, while Take remains eligible to clear the skip and
-    // record a single manual consumption. isExactAutoOccurrenceApplied is
-    // therefore intentionally NOT used here — it includes skip, which would
-    // break Auto → Restore → Take (the skip would surface as already_consumed
-    // and Take could never replace the restored occurrence). Exact Auto
-    // reconciliation still treats skip as already_applied via its own
-    // isExactAutoOccurrenceApplied call in reconcileFiredEvents.
-    if (isDoseConsumedOnDate(med, doseKey, todayStr)) {
-      return {
-        outcome: 'already_consumed' as const,
-        medications: fresh.medications,
-        logs: fresh.logs,
-        doseAmount: 0,
-        log: null,
-        reason: 'already_consumed',
-      };
+    // Authoritative amount for this occurrence: pending Exact Auto FIRED
+    // event.amount (scheduled-time amount), not a later-edited doseSchedule.
+    let amountOverride: number | undefined;
+    try {
+      const listFired = opts.listFired ?? listFiredAutoDeductionEvents;
+      const events = await listFired();
+      const pending = findPendingExactAutoOccurrence(
+        events,
+        opts.medicationId,
+        opts.doseId,
+        todayStr
+      );
+      if (pending) {
+        const n = Number(pending.amount);
+        if (!Number.isFinite(n) || n <= 0) {
+          return {
+            outcome: 'rejected' as const,
+            medications: fresh.medications,
+            logs: fresh.logs,
+            doseAmount: 0,
+            log: null,
+            reason: 'invalid_exact_event',
+            medicationName: med.name,
+            unit: med.unit,
+          };
+        }
+        amountOverride = n;
+      }
+    } catch {
+      // Native list failure: fall back to schedule amount (no silent override).
     }
 
     const result: ConsumeDoseResult = consumeDose(
@@ -239,11 +259,24 @@ export function runGatedManualConsume(opts: {
       opts.source,
       todayStr,
       now,
-      opts.doseId
+      opts.doseId,
+      amountOverride !== undefined ? { amountOverride } : undefined
     );
 
     if (!result.updatedMed || !result.log || result.doseAmount <= 0) {
       const reason = result.reason ?? 'rejected';
+      if (reason === 'missing_dose_id') {
+        return {
+          outcome: 'missing_dose_id' as const,
+          medications: fresh.medications,
+          logs: fresh.logs,
+          doseAmount: 0,
+          log: null,
+          reason,
+          medicationName: med.name,
+          unit: med.unit,
+        };
+      }
       return {
         outcome:
           reason === 'already_consumed'
@@ -254,6 +287,8 @@ export function runGatedManualConsume(opts: {
         doseAmount: 0,
         log: null,
         reason,
+        medicationName: med.name,
+        unit: med.unit,
       };
     }
 
@@ -270,6 +305,8 @@ export function runGatedManualConsume(opts: {
         doseAmount: 0,
         log: null,
         reason: 'persist_failed',
+        medicationName: med.name,
+        unit: med.unit,
       };
     }
 
@@ -279,6 +316,8 @@ export function runGatedManualConsume(opts: {
       logs,
       doseAmount: result.doseAmount,
       log: result.log,
+      medicationName: med.name,
+      unit: med.unit,
     };
   });
 }
@@ -290,10 +329,11 @@ export function runGatedManualRestore(opts: {
   now?: Date;
   makeLogId?: () => string;
 }): Promise<GatedManualRestoreResult> {
-  const todayStr = opts.todayStr ?? getTodayDateString();
-  const now = opts.now ?? new Date();
-
   return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
+    // Capture date/time inside the critical section (not at call time).
+    const todayStr = opts.todayStr ?? getTodayDateString();
+    const now = opts.now ?? new Date();
+
     const recovered = recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
@@ -457,10 +497,11 @@ export function runGatedRefill(opts: {
   now?: Date;
   makeLogId?: () => string;
 }): Promise<GatedRefillResult> {
-  const todayStr = opts.todayStr ?? getTodayDateString();
-  const now = opts.now ?? new Date();
-
   return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
+    // Capture date/time inside the critical section (not at call time).
+    const todayStr = opts.todayStr ?? getTodayDateString();
+    const now = opts.now ?? new Date();
+
     const recovered = recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
@@ -553,10 +594,11 @@ export function runGatedUndoRefill(opts: {
   now?: Date;
   makeLogId?: () => string;
 }): Promise<GatedRefillResult> {
-  const todayStr = opts.todayStr ?? getTodayDateString();
-  const now = opts.now ?? new Date();
-
   return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
+    // Capture date/time inside the critical section (not at call time).
+    const todayStr = opts.todayStr ?? getTodayDateString();
+    const now = opts.now ?? new Date();
+
     const recovered = recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {

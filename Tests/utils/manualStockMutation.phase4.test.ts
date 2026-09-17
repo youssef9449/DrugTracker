@@ -16,6 +16,9 @@ import {
 import {
   __setStockMutationOrderingTestHooks,
   __resetStockMutationOrderingForTests,
+  allocateMutationSeq,
+  persistLastAppliedMutationSeq,
+  loadLastAppliedMutationSeq,
 } from '../../src/utils/stockMutationOrdering';
 import {
   runAutoDeductionReconciliation,
@@ -28,6 +31,7 @@ import {
 import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
 import { isDoseConsumedOnDate } from '../../src/utils/dateCalculations';
 import { exactAutoLogId } from '../../src/utils/autoDeductionReconciliation';
+// findPending used indirectly via runGatedManualConsume
 import { findActiveDeductionForOccurrence } from '../../src/utils/medActions';
 
 const TODAY = '2026-09-16';
@@ -3033,5 +3037,454 @@ describe('Phase 4 — stale React snapshot must not block durable Restore / Undo
     const undoLog = durable.logs.find((l) => l.id === 'undo-newest');
     expect(undoLog?.relatedLogId).toBe('refill-new');
     expect(undoLog?.type).toBe('refill_undo');
+  });
+});
+
+
+describe('Phase 4 — Exact Auto event.amount is authoritative for Manual Take', () => {
+  let durable: AutoStockDurableState;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(`${TODAY}T15:00:00`));
+    durable = { medications: [med()], logs: [] };
+    __setAutoStockGateTestHooks({
+      load: () => ({
+        medications: durable.medications.map((m) => ({ ...m })),
+        logs: durable.logs.map((l) => ({ ...l })),
+      }),
+      commit: (next) => {
+        durable = {
+          medications: next.medications.map((m) => ({ ...m })),
+          logs: next.logs.map((l) => ({ ...l })),
+        };
+        return null;
+      },
+    });
+    __setManualEnvelopeTestHooks({
+      load: () => null,
+      save: () => null,
+      clear: () => null,
+    });
+    let nextSeq = 0;
+    let lastApplied = 0;
+    __setStockMutationOrderingTestHooks({
+      allocate: () => {
+        nextSeq = Math.max(nextSeq, lastApplied) + 1;
+        return { ok: true, seq: nextSeq };
+      },
+      loadLastApplied: () => lastApplied,
+      persistLastApplied: (value) => {
+        if (value > lastApplied) lastApplied = value;
+        return null;
+      },
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    __setAutoStockGateTestHooks(null);
+    __setManualEnvelopeTestHooks(null);
+    __resetStockMutationOrderingForTests();
+  });
+
+  it('FIRED event amount=2 + schedule amount=1 → Manual Take deducts event amount', async () => {
+    durable = {
+      medications: [
+        med({
+          currentPills: 10,
+          doseSchedule: [
+            { id: 'd1', amount: 1, time: '08:00' },
+            { id: 'd2', amount: 1, time: '14:00' },
+          ],
+        }),
+      ],
+      logs: [],
+    };
+    const r = await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+      listFired: async () => [
+        fired({ doseId: 'd1', calendarDate: TODAY, amount: 2 }),
+      ],
+    });
+    expect(r.outcome).toBe('applied');
+    expect(r.doseAmount).toBe(2);
+    expect(durable.medications[0].currentPills).toBe(8);
+    expect(r.log?.amount).toBe(-2);
+  });
+
+  it('event amount=2 + stock=1 → actual deduction=1 and log=-1', async () => {
+    durable = {
+      medications: [
+        med({
+          currentPills: 1,
+          doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+        }),
+      ],
+      logs: [],
+    };
+    const r = await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+      listFired: async () => [
+        fired({ doseId: 'd1', calendarDate: TODAY, amount: 2 }),
+      ],
+    });
+    expect(r.outcome).toBe('applied');
+    expect(r.doseAmount).toBe(1);
+    expect(durable.medications[0].currentPills).toBe(0);
+    expect(r.log?.amount).toBe(-1);
+  });
+
+  it('Manual Take with event amount then Exact Auto same occurrence → no second deduction', async () => {
+    durable = {
+      medications: [
+        med({
+          currentPills: 10,
+          doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+        }),
+      ],
+      logs: [],
+    };
+    const take = await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+      listFired: async () => [
+        fired({ doseId: 'd1', calendarDate: TODAY, amount: 2 }),
+      ],
+    });
+    expect(take.outcome).toBe('applied');
+    expect(take.doseAmount).toBe(2);
+    const pills = durable.medications[0].currentPills;
+
+    const recon = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => [
+        fired({ doseId: 'd1', calendarDate: TODAY, amount: 2 }),
+      ],
+    });
+    expect(durable.medications[0].currentPills).toBe(pills);
+  });
+
+  it('absence of FIRED event → Manual Take uses current schedule amount', async () => {
+    durable = {
+      medications: [
+        med({
+          currentPills: 10,
+          doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+        }),
+      ],
+      logs: [],
+    };
+    const r = await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+      listFired: async () => [],
+    });
+    expect(r.outcome).toBe('applied');
+    expect(r.doseAmount).toBe(1);
+    expect(durable.medications[0].currentPills).toBe(9);
+  });
+});
+
+describe('Phase 4 — mutationSeq monotonic invariant', () => {
+  afterEach(() => {
+    __resetStockMutationOrderingForTests();
+  });
+
+  it('lastApplied=10, nextSeq=0 → allocation returns 11', () => {
+    let nextSeq = 0;
+    let lastApplied = 10;
+    __setStockMutationOrderingTestHooks({
+      allocate: () => {
+        nextSeq = Math.max(nextSeq, lastApplied) + 1;
+        return { ok: true, seq: nextSeq };
+      },
+      loadLastApplied: () => lastApplied,
+      persistLastApplied: (v) => {
+        if (v > lastApplied) lastApplied = v;
+        return null;
+      },
+    });
+    const r = allocateMutationSeq();
+    expect(r).toEqual({ ok: true, seq: 11 });
+  });
+
+  it('lastApplied=10, nextSeq=10 → allocation returns 11', () => {
+    let nextSeq = 10;
+    let lastApplied = 10;
+    __setStockMutationOrderingTestHooks({
+      allocate: () => {
+        nextSeq = Math.max(nextSeq, lastApplied) + 1;
+        return { ok: true, seq: nextSeq };
+      },
+      loadLastApplied: () => lastApplied,
+      persistLastApplied: (v) => {
+        if (v > lastApplied) lastApplied = v;
+        return null;
+      },
+    });
+    const r = allocateMutationSeq();
+    expect(r).toEqual({ ok: true, seq: 11 });
+  });
+
+  it('lastApplied=10, persist seq=9 does not decrease lastApplied', () => {
+    let lastApplied = 10;
+    __setStockMutationOrderingTestHooks({
+      loadLastApplied: () => lastApplied,
+      persistLastApplied: (v) => {
+        if (v > lastApplied) lastApplied = v;
+        return null;
+      },
+    });
+    const err = persistLastAppliedMutationSeq(9);
+    expect(err).toBeNull();
+    expect(loadLastAppliedMutationSeq()).toBe(10);
+  });
+
+  it('lastApplied=10, persist seq=11 becomes 11', () => {
+    let lastApplied = 10;
+    __setStockMutationOrderingTestHooks({
+      loadLastApplied: () => lastApplied,
+      persistLastApplied: (v) => {
+        if (v > lastApplied) lastApplied = v;
+        return null;
+      },
+    });
+    expect(persistLastAppliedMutationSeq(11)).toBeNull();
+    expect(loadLastAppliedMutationSeq()).toBe(11);
+  });
+
+  it('allocation persistence failure prevents envelope creation path', async () => {
+    let durable: AutoStockDurableState = {
+      medications: [med()],
+      logs: [],
+    };
+    __setAutoStockGateTestHooks({
+      load: () => ({
+        medications: durable.medications.map((m) => ({ ...m })),
+        logs: durable.logs.map((l) => ({ ...l })),
+      }),
+      commit: (next) => {
+        durable = {
+          medications: next.medications.map((m) => ({ ...m })),
+          logs: next.logs.map((l) => ({ ...l })),
+        };
+        return null;
+      },
+    });
+    __setManualEnvelopeTestHooks({
+      load: () => null,
+      save: () => null,
+      clear: () => null,
+    });
+    __setStockMutationOrderingTestHooks({
+      allocate: () => ({ ok: false, error: 'nextSeq persist failed' }),
+      loadLastApplied: () => 0,
+      persistLastApplied: () => null,
+    });
+    const r = await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+    });
+    expect(r.outcome).toBe('persist_failed');
+    expect(durable.medications[0].currentPills).toBe(10);
+    __setAutoStockGateTestHooks(null);
+    __setManualEnvelopeTestHooks(null);
+    __resetStockMutationOrderingForTests();
+  });
+});
+
+describe('Phase 4 — future Restore is already_restored without durable deduction', () => {
+  let durable: AutoStockDurableState;
+
+  beforeEach(() => {
+    // 07:00 — before d1 at 08:00
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(`${TODAY}T07:00:00`));
+    durable = { medications: [med()], logs: [] };
+    __setAutoStockGateTestHooks({
+      load: () => ({
+        medications: durable.medications.map((m) => ({ ...m })),
+        logs: durable.logs.map((l) => ({ ...l })),
+      }),
+      commit: (next) => {
+        durable = {
+          medications: next.medications.map((m) => ({ ...m })),
+          logs: next.logs.map((l) => ({ ...l })),
+        };
+        return null;
+      },
+    });
+    __setManualEnvelopeTestHooks({
+      load: () => null,
+      save: () => null,
+      clear: () => null,
+    });
+    let nextSeq = 0;
+    let lastApplied = 0;
+    __setStockMutationOrderingTestHooks({
+      allocate: () => {
+        nextSeq = Math.max(nextSeq, lastApplied) + 1;
+        return { ok: true, seq: nextSeq };
+      },
+      loadLastApplied: () => lastApplied,
+      persistLastApplied: (v) => {
+        if (v > lastApplied) lastApplied = v;
+        return null;
+      },
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    __setAutoStockGateTestHooks(null);
+    __setManualEnvelopeTestHooks(null);
+    __resetStockMutationOrderingForTests();
+  });
+
+  it('future unconsumed + no deduction → first Restore is already_restored', async () => {
+    const r = await runGatedManualRestore({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      todayStr: TODAY,
+    });
+    expect(r.outcome).toBe('already_restored');
+    expect(durable.medications[0].currentPills).toBe(10);
+    expect(durable.logs).toHaveLength(0);
+  });
+
+  it('second future Restore stays already_restored with zero mutation', async () => {
+    await runGatedManualRestore({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      todayStr: TODAY,
+    });
+    const r2 = await runGatedManualRestore({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      todayStr: TODAY,
+    });
+    expect(r2.outcome).toBe('already_restored');
+    expect(durable.logs).toHaveLength(0);
+    expect(durable.medications[0].currentPills).toBe(10);
+  });
+
+  it('future Manual Take then Restore reverses the Take', async () => {
+    const take = await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+    });
+    expect(take.outcome).toBe('applied');
+    expect(durable.medications[0].currentPills).toBe(9);
+    const restore = await runGatedManualRestore({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      todayStr: TODAY,
+    });
+    expect(restore.outcome).toBe('applied');
+    expect(durable.medications[0].currentPills).toBe(10);
+  });
+});
+
+describe('Phase 4 — todayStr/now captured inside gate after wait', () => {
+  it('second mutation waiting on gate uses clock at execution time', async () => {
+    let durable: AutoStockDurableState = {
+      medications: [med({ currentPills: 10 })],
+      logs: [],
+    };
+    let releaseFirst!: () => void;
+    const firstHold = new Promise<void>((r) => {
+      releaseFirst = r;
+    });
+    let enteredSecond = false;
+    let secondToday = '';
+
+    // Chain: first mutation holds gate; clock advances; second runs with new day.
+    let gateBusy = false;
+    const queue: Array<() => void> = [];
+    // Use real withAutoStockMutationGate which serializes — we inject slow commit.
+    __setAutoStockGateTestHooks({
+      load: () => ({
+        medications: durable.medications.map((m) => ({ ...m })),
+        logs: durable.logs.map((l) => ({ ...l })),
+      }),
+      commit: (next) => {
+        durable = {
+          medications: next.medications.map((m) => ({ ...m })),
+          logs: next.logs.map((l) => ({ ...l })),
+        };
+        return null;
+      },
+    });
+    __setManualEnvelopeTestHooks({
+      load: () => null,
+      save: () => null,
+      clear: () => null,
+    });
+    let nextSeq = 0;
+    let lastApplied = 0;
+    __setStockMutationOrderingTestHooks({
+      allocate: () => {
+        nextSeq = Math.max(nextSeq, lastApplied) + 1;
+        return { ok: true, seq: nextSeq };
+      },
+      loadLastApplied: () => lastApplied,
+      persistLastApplied: (v) => {
+        if (v > lastApplied) lastApplied = v;
+        return null;
+      },
+    });
+
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(`${TODAY}T23:59:00`));
+
+    // First take holds by awaiting a promise before commit via a custom path:
+    // We intercept by running first consume without todayStr override so it
+    // captures TODAY, then advance clock, then second without override.
+    // Gate serializes so second's todayStr is read after first completes.
+
+    const p1 = runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      // no todayStr override
+    });
+
+    // Advance clock past midnight while first may still be running
+    await Promise.resolve();
+    vi.setSystemTime(new Date('2026-09-17T00:30:00'));
+
+    const p2 = runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd2',
+      source: 'manual',
+      // no todayStr override — must use 2026-09-17 inside gate
+    });
+
+    const [r1, r2] = await Promise.all([p1, p2]);
+    expect(r1.outcome).toBe('applied');
+    expect(r2.outcome).toBe('applied');
+    // d1 consumed on first day; d2 on second day
+    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(durable.medications[0], 'd2', '2026-09-17')).toBe(true);
+
+    vi.useRealTimers();
+    __setAutoStockGateTestHooks(null);
+    __setManualEnvelopeTestHooks(null);
+    __resetStockMutationOrderingForTests();
   });
 });

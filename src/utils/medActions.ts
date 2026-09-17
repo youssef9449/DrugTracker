@@ -326,6 +326,25 @@ export function restoreDose(
     : slotAmount;
   const reversedLogId = wasActuallyConsumed ? activeDeduction?.id : undefined;
 
+  // Future unconsumed occurrence with no active durable deduction: nothing to
+  // restore. Reject as already_restored so repeated pre-schedule Restore calls
+  // do not emit multiple restore logs / stock mutations. Do NOT write a future
+  // skip marker — Exact Auto remains eligible at scheduled time.
+  if (hasDoseSchedule(med) && resolvedDoseId && !wasActuallyConsumed && !activeDeduction) {
+    const slot = med.doseSchedule!.find((d) => d.id === resolvedDoseId);
+    if (slot != null && !isDoseTimeElapsedToday(slot.time, now)) {
+      const nowLocalDate = (() => {
+        const y = now.getFullYear();
+        const m = String(now.getMonth() + 1).padStart(2, '0');
+        const d = String(now.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+      })();
+      if (todayStr >= nowLocalDate) {
+        return { ok: false, reason: 'already_restored' };
+      }
+    }
+  }
+
   // --- Multi-dose / scheduled slot ---
   if (hasDoseSchedule(med) && resolvedDoseId) {
     // Clear consumption for this doseId + date (if any).
@@ -537,11 +556,13 @@ export function consumeDose(
   source: 'alarm' | 'manual',
   todayStr: string = getTodayDateString(),
   now: Date = new Date(),
-  doseId?: string
+  doseId?: string,
+  options?: { amountOverride?: number }
 ): ConsumeDoseResult {
   const breakdown = computeDueDoseBreakdown(med, now, todayStr);
   const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
   const multi = schedule.length > 0;
+  const amountOverride = options?.amountOverride;
 
   // Resolve which dose slot is being consumed.
   // Multi-dose identity is strict: medicationId + doseId + date.
@@ -587,7 +608,22 @@ export function consumeDose(
       };
     }
     targetDoseId = target.id;
-    targetAmount = Number(target.amount) || 0;
+    // Authoritative amount: Exact Auto FIRED event amount when provided;
+    // otherwise current schedule slot amount.
+    if (amountOverride !== undefined) {
+      const n = Number(amountOverride);
+      if (!Number.isFinite(n) || n <= 0) {
+        return {
+          updatedMed: null,
+          doseAmount: 0,
+          log: null,
+          reason: 'invalid_exact_event',
+        };
+      }
+      targetAmount = n;
+    } else {
+      targetAmount = Number(target.amount) || 0;
+    }
     if (targetAmount <= 0) {
       return {
         updatedMed: null,
@@ -603,6 +639,17 @@ export function consumeDose(
       log: null,
       reason: 'already_consumed',
     };
+  } else if (amountOverride !== undefined) {
+    const n = Number(amountOverride);
+    if (!Number.isFinite(n) || n <= 0) {
+      return {
+        updatedMed: null,
+        doseAmount: 0,
+        log: null,
+        reason: 'invalid_exact_event',
+      };
+    }
+    targetAmount = n;
   }
 
   // Settle past-only for gated/multi; full effective for legacy non-gated.

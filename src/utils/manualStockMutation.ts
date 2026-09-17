@@ -147,10 +147,16 @@ function commitWithManualEnvelope(state: AutoStockDurableState): string | null {
     return commitErr;
   }
 
-  // Clear after lastApplied is durable. Clear failure is observable: mutation
-  // is not reapplied (lastApplied covers seq) but envelope remains for retry.
+  // Clear after lastApplied is durable. Clear failure is NOT a caller-facing
+  // failure: the mutation is fully durable (meds + logs + lastApplied all
+  // succeeded). lastAppliedMutationSeq is the completion proof. The envelope
+  // stays for retry — recoverManualEnvelopeInto cleans it up on the next
+  // gate entry (mutationSeq <= lastApplied → collect acks + clear). Return
+  // null so the caller sees 'applied' (the mutation is durable; the clear is
+  // best-effort cleanup). This matches the Phase 4 completion contract:
+  // lastAppliedMutationSeq >= envelope.mutationSeq ⇒ mutation finalized.
   const clearErr = saveManualStockEnvelope(null);
-  if (clearErr) return clearErr;
+  if (clearErr) return null;
   return null;
 }
 

@@ -8,11 +8,14 @@ import {
   shouldDismissAlarmAfterManualTake,
   type ManualStockEnvelope,
 } from '../../src/utils/manualStockMutation';
-import { __setManualEnvelopeTestHooks } from '../../src/utils/stockEnvelopeRecovery';
+import {
+  __setManualEnvelopeTestHooks,
+  __setExactAutoEnvelopeStorageTestHooks,
+  durableMatchesEnvelopeSnapshot,
+} from '../../src/utils/stockEnvelopeRecovery';
 import {
   __setStockMutationOrderingTestHooks,
   __resetStockMutationOrderingForTests,
-  loadLastAppliedMutationSeq,
 } from '../../src/utils/stockMutationOrdering';
 import {
   runAutoDeductionReconciliation,
@@ -272,7 +275,6 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
     expect(durable.logs.filter((l) => l.id === 'restore-1')).toHaveLength(1);
 
     const pillsAfterFirst = durable.medications[0].currentPills;
-    const logCountAfterFirst = durable.logs.length;
     const r2 = await runGatedManualRestore({
       medicationId: 'med-1',
       doseId: 'd1',
@@ -1100,8 +1102,10 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       source: 'manual',
       todayStr: TODAY,
     });
-    // Commit+lastApplied succeed; clear fails → observable persist_failed, envelope remains.
-    expect(first.outcome).toBe('persist_failed');
+    // Commit+lastApplied succeed; clear fails → mutation IS durable
+    // (lastApplied is the completion proof). Caller sees 'applied'; the
+    // envelope stays for retry (cleanup on next gate entry).
+    expect(first.outcome).toBe('applied');
     expect(durable.medications[0].currentPills).toBe(9);
     expect(manualEnvelope).not.toBeNull();
     const logCount = durable.logs.length;
@@ -1124,7 +1128,6 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
 
 
   it('durableMatchesEnvelopeSnapshot requires complete medication array', () => {
-    const { durableMatchesEnvelopeSnapshot } = require('../../src/utils/stockEnvelopeRecovery');
     const full = {
       medications: [med({ currentPills: 9 }), med({ id: 'med-2', currentPills: 5 })],
       logs: [{ id: 'l1', medicationId: 'med-1', medicationName: 'T', type: 'dose_taken' as const, amount: 1, date: TODAY, timestamp: '', description: '' }],
@@ -1158,7 +1161,6 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
   });
 
   it('durableMatchesEnvelopeSnapshot: same log IDs but different log contents → not matched', () => {
-    const { durableMatchesEnvelopeSnapshot } = require('../../src/utils/stockEnvelopeRecovery');
     const env = {
       medications: [med({ currentPills: 9 })],
       logs: [{ id: 'l1', medicationId: 'med-1', medicationName: 'T', type: 'dose_taken' as const, amount: -1, date: TODAY, timestamp: 't1', description: 'd', doseId: 'd1' }],
@@ -1184,7 +1186,6 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
   });
 
   it('durableMatchesEnvelopeSnapshot: same stock fields but different medication metadata → not matched', () => {
-    const { durableMatchesEnvelopeSnapshot } = require('../../src/utils/stockEnvelopeRecovery');
     const env = {
       medications: [med({ currentPills: 9, name: 'TestMed' })],
       logs: [],
@@ -1207,7 +1208,6 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
   });
 
   it('durableMatchesEnvelopeSnapshot: medication/log count and order mismatches → not matched', () => {
-    const { durableMatchesEnvelopeSnapshot } = require('../../src/utils/stockEnvelopeRecovery');
     const env = {
       medications: [med({ currentPills: 9 }), med({ id: 'med-2', currentPills: 5 })],
       logs: [
@@ -1404,7 +1404,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     });
 
     marked = [];
-    const first = await runAutoDeductionReconciliation({
+    await runAutoDeductionReconciliation({
       globalAutoDeductEnabled: true,
       listFired: async () => [],
       markReconciled: async (m, d, c) => { marked.push(`${m}|${d}|${c}`); return { ok: true, changed: true }; },
@@ -1438,9 +1438,8 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
   it('pending Exact Auto is recovered before Manual Take allocates a new seq', async () => {
     durable = { medications: [med({ currentPills: 10 })], logs: [] };
     // Plant Exact Auto envelope seq=5 with stock=8 (one auto deduction applied in snapshot)
-    const { saveExactAutoStockEnvelope } = require('../../src/utils/stockEnvelopeRecovery');
     // Use test hook path via __setExactAutoEnvelopeStorageTestHooks if available
-    let exactEnv: any = {
+    let exactEnv: ExactAutoEnvelope | null = {
       version: 1,
       status: 'js_ready',
       medications: [med({ currentPills: 8 })],
@@ -1460,16 +1459,15 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       createdAt: new Date().toISOString(),
       mutationSeq: 5,
     };
-    const { __setExactAutoEnvelopeStorageTestHooks } = require('../../src/utils/stockEnvelopeRecovery');
     __setExactAutoEnvelopeStorageTestHooks({
       load: () => exactEnv,
-      save: (env: any) => {
-        exactEnv = env;
+      save: (env) => {
+        exactEnv = env as ExactAutoEnvelope | null;
         return null;
       },
     });
 
-    const take = await runGatedManualConsume({
+    await runGatedManualConsume({
       medicationId: 'med-1',
       doseId: 'd2',
       source: 'manual',
@@ -1665,7 +1663,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     // so the Take clamps to 1. The next Restore must reverse the Take's 1,
     // NOT the old Auto's 3 (which is already reversed).
     durable = {
-      medications: [med({ currentPills: 1, doseConsumption: { d1: TODAY }, doseConsumptionHistory: { d1: [TODAY] } })],
+      medications: [med({ currentPills: 1 })],
       logs: [{ id: 'auto-3', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -3, date: TODAY, timestamp: '', description: '', doseId: 'd1', reversedAt: 'already-reversed' }],
     };
     // Take d1 — clamped to available stock (1). currentPills 1 → 0.
@@ -2138,7 +2136,6 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
   }
 
   function installLegacyEnvHooks(env: { current: ReturnType<typeof plantLegacyExactEnv> | null }) {
-    const { __setExactAutoEnvelopeStorageTestHooks } = require('../../src/utils/stockEnvelopeRecovery');
     __setExactAutoEnvelopeStorageTestHooks({
       load: () => env.current,
       save: (e: unknown) => {
@@ -2347,11 +2344,10 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
   it('legacy migration: crash after apply before clear → restart sees snapshot match → clear + ACK (no re-apply, no double deduction)', async () => {
     // durable starts at base (currentPills=10); legacy snapshot = currentPills=6.
     durable = { medications: [med({ currentPills: 10 })], logs: [] };
-    const env = { current: plantLegacyExactEnv({ medications: [med({ currentPills: 6 })], logs: [{ id: 'legacy-crash', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd3' }], toAcknowledge: [{ medicationId: 'med-1', doseId: 'd3', calendarDate: TODAY }] }) };
+    const env: { current: ReturnType<typeof plantLegacyExactEnv> | null } = { current: plantLegacyExactEnv({ medications: [med({ currentPills: 6 })], logs: [{ id: 'legacy-crash', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd3' }], toAcknowledge: [{ medicationId: 'med-1', doseId: 'd3', calendarDate: TODAY }] }) };
     // Custom save hook that fails the FIRST clear (simulating crash after apply
     // before clear), then succeeds on retry.
     let failClearOnce = true;
-    const { __setExactAutoEnvelopeStorageTestHooks } = require('../../src/utils/stockEnvelopeRecovery');
     __setExactAutoEnvelopeStorageTestHooks({
       load: () => env.current,
       save: (e: unknown) => {
@@ -2472,8 +2468,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
 
   it('legacy migration: clear failure blocks new mutations and keeps envelope (retry succeeds)', async () => {
     durable = { medications: [med({ currentPills: 8 })], logs: [] };
-    const env = { current: plantLegacyExactEnv({ medications: durable.medications.map((m) => ({ ...m })), toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }] }) };
-    const { __setExactAutoEnvelopeStorageTestHooks } = require('../../src/utils/stockEnvelopeRecovery');
+    const env: { current: ReturnType<typeof plantLegacyExactEnv> | null } = { current: plantLegacyExactEnv({ medications: durable.medications.map((m) => ({ ...m })), toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }] }) };
     let failClear = true;
     __setExactAutoEnvelopeStorageTestHooks({
       load: () => env.current,

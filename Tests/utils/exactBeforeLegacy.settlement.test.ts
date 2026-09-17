@@ -161,15 +161,27 @@ describe('exact FIRED amount precedes legacy settlement', () => {
 
   it('per-med toggle: exact amount 2 applied first; final stock is 8', async () => {
     const callOrder: string[] = [];
+    // lastSync yesterday so legacy settlement WOULD charge schedule amount=1
+    // if it ran before exact — wrong order yields 7 (10-1-2), correct order yields 8.
+    durable.medications = [
+      baseMed({
+        currentPills: 10,
+        lastSyncDate: '2026-09-13',
+        doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+      }),
+    ];
     mockExactFirst(durable, callOrder, 2);
 
     const result = await runGatedAutoDeductToggle({
       medicationId: 'med-1',
       todayStr: '2026-09-14',
+      now: new Date('2026-09-14T09:00:00'),
       globalAutoDeductEnabled: true,
     });
     expect(callOrder[0]).toBe('exact');
     expect(result.outcome).toBe('applied');
+    // exact-first: 10→8; same occurrence already applied so legacy must not charge 1 → 8
+    // legacy-first would be 10→9 then exact →7
     expect(result.medications[0].currentPills).toBe(8);
     const exactLogs = result.logs.filter(
       (l) => l.id === exactAutoLogId('med-1', 'd1', '2026-09-14')
@@ -207,15 +219,24 @@ describe('runGatedGlobalAutoDeductToggle exact-before-legacy', () => {
 
   it('global OFF: exact FIRED amount=2 first; final stock=8; enable false', async () => {
     const callOrder: string[] = [];
+    durable.medications = [
+      baseMed({
+        currentPills: 10,
+        lastSyncDate: '2026-09-13',
+        doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+      }),
+    ];
     mockExactFirst(durable, callOrder, 2);
 
     const result = await runGatedGlobalAutoDeductToggle({
       enable: false,
       todayStr: '2026-09-14',
+      now: new Date('2026-09-14T09:00:00'),
     });
     expect(callOrder[0]).toBe('exact');
     expect(result.outcome).toBe('applied');
     expect(result.enable).toBe(false);
+    // exact-first → 8; legacy-first would yield 7
     expect(result.medications[0].currentPills).toBe(8);
     expect(result.medications[0].autoDeductEnabled).toBe(false);
     const exactLogs = result.logs.filter(
@@ -354,7 +375,7 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
         currentPills: 10,
         dailyDose: 1,
         doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
-        lastSyncDate: '2026-09-14',
+        lastSyncDate: '2026-09-13',
         doseConsumption: { d1: '2026-09-13' },
         doseConsumptionHistory: { d1: ['2026-09-13'] },
       }),
@@ -376,6 +397,7 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
       editId: 'med-1',
       medData,
       todayStr: '2026-09-14',
+      now: new Date('2026-09-14T09:00:00'),
     });
     expect(callOrder[0]).toBe('exact');
     expect(result.outcome).toBe('applied');
@@ -407,12 +429,20 @@ describe('gated paths call exact reconciliation before legacy settlement', () =>
 
   afterEach(() => clearHooks());
 
-  it('runGatedAutoDeductToggle: exact first yields stock 8 not 9', async () => {
+  it('runGatedAutoDeductToggle: exact first yields stock 8 (legacy-first would be 7)', async () => {
     const callOrder: string[] = [];
+    durable.medications = [
+      baseMed({
+        currentPills: 10,
+        lastSyncDate: '2026-09-13',
+        doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+      }),
+    ];
     mockExactFirst(durable, callOrder, 2);
     const result = await runGatedAutoDeductToggle({
       medicationId: 'med-1',
       todayStr: '2026-09-14',
+      now: new Date('2026-09-14T09:00:00'),
       globalAutoDeductEnabled: true,
     });
     expect(callOrder[0]).toBe('exact');
@@ -421,10 +451,18 @@ describe('gated paths call exact reconciliation before legacy settlement', () =>
 
   it('runGatedGlobalAutoDeductToggle: exact first yields stock 8', async () => {
     const callOrder: string[] = [];
+    durable.medications = [
+      baseMed({
+        currentPills: 10,
+        lastSyncDate: '2026-09-13',
+        doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+      }),
+    ];
     mockExactFirst(durable, callOrder, 2);
     const result = await runGatedGlobalAutoDeductToggle({
       enable: false,
       todayStr: '2026-09-14',
+      now: new Date('2026-09-14T09:00:00'),
     });
     expect(callOrder[0]).toBe('exact');
     expect(result.medications[0].currentPills).toBe(8);
@@ -433,6 +471,14 @@ describe('gated paths call exact reconciliation before legacy settlement', () =>
 
   it('runGatedMedicationUpdate: exact first then dailyDose=3 yields stock 8', async () => {
     const callOrder: string[] = [];
+    durable.medications = [
+      baseMed({
+        currentPills: 10,
+        lastSyncDate: '2026-09-13',
+        dailyDose: 1,
+        doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+      }),
+    ];
     mockExactFirst(durable, callOrder, 2);
     const { id: _id, createdAt: _c, ...medData } = {
       ...durable.medications[0],
@@ -443,10 +489,12 @@ describe('gated paths call exact reconciliation before legacy settlement', () =>
       editId: 'med-1',
       medData,
       todayStr: '2026-09-14',
+      now: new Date('2026-09-14T09:00:00'),
     });
     expect(callOrder[0]).toBe('exact');
     expect(result.outcome).toBe('applied');
     expect(result.medications[0].dailyDose).toBe(3);
+    // exact-first 10→8; wrong order would charge schedule then exact → 7
     expect(result.medications[0].currentPills).toBe(8);
   });
 });

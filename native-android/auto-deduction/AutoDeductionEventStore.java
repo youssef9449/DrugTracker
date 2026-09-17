@@ -40,6 +40,17 @@ public final class AutoDeductionEventStore {
      */
     private static final Object LOCK = new Object();
 
+    /**
+     * Test-only seam: when non-null, overrides SharedPreferences.Editor.commit()
+     * results for REJECTED terminalization paths. Production leaves this null.
+     */
+    static volatile Boolean testForceCommitResult = null;
+
+    /** @hide test-only */
+    static void __setTestForceCommitResult(Boolean result) {
+        testForceCommitResult = result;
+    }
+
     private final SharedPreferences prefs;
     private final SharedPreferences pendingPrefs;
 
@@ -354,7 +365,8 @@ public final class AutoDeductionEventStore {
                             editor = prefs.edit();
                         }
                         editor.putString(e.getKey(), o.toString());
-                        Log.w(TAG, "marked malformed FIRED as REJECTED: " + e.getKey());
+                        Log.w(TAG, "queued malformed FIRED for REJECTED: " + e.getKey());
+                        // Do not add to fired — never surface as FIRED to JS.
                         continue;
                     }
                     fired.add(o);
@@ -370,18 +382,41 @@ public final class AutoDeductionEventStore {
                             editor = prefs.edit();
                         }
                         editor.putString(e.getKey(), rejected.toString());
-                        Log.w(TAG, "marked invalid JSON event row as REJECTED: " + e.getKey());
+                        Log.w(TAG, "queued invalid JSON event row for REJECTED: " + e.getKey());
                     } catch (JSONException writeEx) {
-                        Log.e(TAG, "failed to terminalize invalid JSON event row: "
+                        Log.e(TAG, "failed to build REJECTED record for invalid JSON: "
                                 + e.getKey(), writeEx);
                     }
                 }
             }
             if (editor != null) {
-                editor.commit();
+                boolean ok = commitEditor(editor);
+                if (!ok) {
+                    // Fail-closed: do not claim terminalization succeeded.
+                    // Rows remain as stored; next listFiredEvents will retry.
+                    Log.e(TAG, "REJECTED terminalization commit failed — rows remain retryable");
+                }
             }
         }
         return fired;
+    }
+
+    /**
+     * Commit editor, respecting optional test seam {@link #testForceCommitResult}.
+     * @return true only when durable write confirmed.
+     */
+    private static boolean commitEditor(SharedPreferences.Editor editor) {
+        Boolean forced = testForceCommitResult;
+        if (forced != null) {
+            // Still attempt real commit when force=true so storage reflects REJECTED;
+            // when force=false, skip real commit so storage stays pre-terminal.
+            if (forced) {
+                return editor.commit();
+            }
+            // Discard pending edits without writing (simulate commit failure).
+            return false;
+        }
+        return editor.commit();
     }
 
     /**
@@ -418,9 +453,53 @@ public final class AutoDeductionEventStore {
                 if (!AutoDeductionContract.STATUS_FIRED.equals(status)) {
                     return null;
                 }
+                // Payload identity must match the occurrence key used to read the row.
+                String rowMed = obj.optString("medicationId", "").trim();
+                String rowDose = obj.optString("doseId", "").trim();
+                String rowDate = obj.optString("calendarDate", "").trim();
+                boolean identityOk =
+                        medicationId.equals(rowMed)
+                        && doseId.equals(rowDose)
+                        && calendarDate.equals(rowDate);
+                if (!identityOk || isMalformedFired(obj)) {
+                    // Terminalize mismatched / malformed payload; never return as FIRED.
+                    try {
+                        obj.put("status", AutoDeductionContract.STATUS_REJECTED);
+                        obj.put("rejectedAt", System.currentTimeMillis());
+                        obj.put("rejectionReason", "malformed_fields");
+                        SharedPreferences.Editor editor = prefs.edit();
+                        editor.putString(prefKey, obj.toString());
+                        boolean ok = commitEditor(editor);
+                        if (!ok) {
+                            Log.e(TAG, "REJECTED terminalization commit failed for "
+                                    + prefKey + " — row remains retryable");
+                        }
+                    } catch (JSONException writeEx) {
+                        Log.e(TAG, "failed to terminalize mismatched FIRED row: "
+                                + prefKey, writeEx);
+                    }
+                    return null;
+                }
                 return obj;
             } catch (JSONException e) {
-                Log.e(TAG, "getFiredUnreconciledEvent parse failed", e);
+                // Invalid JSON under occurrence key → REJECTED, not FIRED.
+                try {
+                    JSONObject rejected = new JSONObject();
+                    rejected.put("status", AutoDeductionContract.STATUS_REJECTED);
+                    rejected.put("rejectedAt", System.currentTimeMillis());
+                    rejected.put("rejectionReason", "invalid_json");
+                    rejected.put("storageKey", prefKey);
+                    SharedPreferences.Editor editor = prefs.edit();
+                    editor.putString(prefKey, rejected.toString());
+                    boolean ok = commitEditor(editor);
+                    if (!ok) {
+                        Log.e(TAG, "REJECTED terminalization commit failed for "
+                                + prefKey + " — row remains retryable");
+                    }
+                } catch (JSONException writeEx) {
+                    Log.e(TAG, "getFiredUnreconciledEvent invalid JSON terminalize failed",
+                            writeEx);
+                }
                 return null;
             }
         }

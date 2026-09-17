@@ -199,4 +199,76 @@ public class EventStoreRejectedTest {
         assertEquals(2.0, fired.optDouble("amount"), 0.0001);
         assertEquals(AutoDeductionContract.STATUS_FIRED, fired.optString("status"));
     }
+
+    @Test
+    public void getFiredUnreconciledEvent_doseIdMismatch_returnsNullAndRejects()
+            throws Exception {
+        String key = AutoDeductionContract.occurrenceKey("med", "dose", "2026-09-14");
+        JSONObject payload = new JSONObject();
+        payload.put("medicationId", "med");
+        payload.put("doseId", "other-dose");
+        payload.put("calendarDate", "2026-09-14");
+        payload.put("amount", 2.0);
+        payload.put("status", AutoDeductionContract.STATUS_FIRED);
+        payload.put("scheduledAtEpochMs", 1000L);
+        payload.put("createdAtEpochMs", 1000L);
+        eventPrefs().edit().putString(evtKey(key), payload.toString()).commit();
+
+        AutoDeductionEventStore store = newEventStore();
+        assertNull(store.getFiredUnreconciledEvent("med", "dose", "2026-09-14"));
+
+        String after = eventPrefs().getString(evtKey(key), null);
+        assertNotNull(after);
+        JSONObject obj = new JSONObject(after);
+        assertEquals(AutoDeductionContract.STATUS_REJECTED, obj.optString("status"));
+        assertEquals("malformed_fields", obj.optString("rejectionReason"));
+    }
+
+    @Test
+    public void getFiredUnreconciledEvent_calendarDateMismatch_returnsNullAndRejects()
+            throws Exception {
+        String key = AutoDeductionContract.occurrenceKey("med", "dose", "2026-09-14");
+        JSONObject payload = new JSONObject();
+        payload.put("medicationId", "med");
+        payload.put("doseId", "dose");
+        payload.put("calendarDate", "2026-09-15");
+        payload.put("amount", 2.0);
+        payload.put("status", AutoDeductionContract.STATUS_FIRED);
+        payload.put("scheduledAtEpochMs", 1000L);
+        payload.put("createdAtEpochMs", 1000L);
+        eventPrefs().edit().putString(evtKey(key), payload.toString()).commit();
+
+        AutoDeductionEventStore store = newEventStore();
+        assertNull(store.getFiredUnreconciledEvent("med", "dose", "2026-09-14"));
+
+        String after = eventPrefs().getString(evtKey(key), null);
+        assertNotNull(after);
+        JSONObject obj = new JSONObject(after);
+        assertEquals(AutoDeductionContract.STATUS_REJECTED, obj.optString("status"));
+        assertEquals("malformed_fields", obj.optString("rejectionReason"));
+    }
+
+    @Test
+    public void getFiredUnreconciledEvent_invalidAmount_returnsNullAndRejects()
+            throws Exception {
+        String key = AutoDeductionContract.occurrenceKey("med", "dose", "2026-09-14");
+        JSONObject payload = new JSONObject();
+        payload.put("medicationId", "med");
+        payload.put("doseId", "dose");
+        payload.put("calendarDate", "2026-09-14");
+        payload.put("amount", 0.0);
+        payload.put("status", AutoDeductionContract.STATUS_FIRED);
+        payload.put("scheduledAtEpochMs", 1000L);
+        payload.put("createdAtEpochMs", 1000L);
+        eventPrefs().edit().putString(evtKey(key), payload.toString()).commit();
+
+        AutoDeductionEventStore store = newEventStore();
+        assertNull(store.getFiredUnreconciledEvent("med", "dose", "2026-09-14"));
+
+        String after = eventPrefs().getString(evtKey(key), null);
+        assertNotNull(after);
+        JSONObject obj = new JSONObject(after);
+        assertEquals(AutoDeductionContract.STATUS_REJECTED, obj.optString("status"));
+        assertEquals("malformed_fields", obj.optString("rejectionReason"));
+    }
 }

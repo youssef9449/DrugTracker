@@ -1110,9 +1110,19 @@ export function runGatedMedicationUpdate(opts: {
       settleLog = settled.log;
     }
 
-    const pruned = pruneDoseConsumption(opts.medData, freshMed);
+    // Prune from durable/settled history + NEW schedule — never from React form history.
+    // Authority: fresh durable state → settlement result → prune using final schedule.
+    const forPrune: Omit<Medication, 'id' | 'createdAt'> = {
+      ...opts.medData,
+      // Override any form-snapshot history with durable/settled authority.
+      doseConsumption: stockBase.doseConsumption,
+      doseConsumptionHistory: stockBase.doseConsumptionHistory,
+      doseSkippedHistory: stockBase.doseSkippedHistory,
+    };
+    const pruned = pruneDoseConsumption(forPrune, stockBase);
 
-    // Build final med: user-editable fields from medData/pruned, stock from stockBase.
+    // Build final med: user-editable fields from medData/pruned; stock/history from
+    // stockBase then pruned schedule (pruned doseConsumption* wins over stockBase).
     const finalMed: Medication = {
       ...freshMed,
       ...pruned,
@@ -1121,10 +1131,12 @@ export function runGatedMedicationUpdate(opts: {
       currentPills: stockBase.currentPills,
       lastSyncDate: stockBase.lastSyncDate,
       lastConsumedDate: stockBase.lastConsumedDate,
-      doseConsumption: stockBase.doseConsumption,
-      doseConsumptionHistory: stockBase.doseConsumptionHistory,
-      doseSkippedHistory: stockBase.doseSkippedHistory,
       autoDeductEnabled: stockBase.autoDeductEnabled,
+      // Explicitly take pruned history (not stockBase) so removed dose IDs stay gone.
+      doseConsumption: pruned.doseConsumption,
+      doseConsumptionHistory: pruned.doseConsumptionHistory,
+      doseSkippedHistory:
+        pruned.doseSkippedHistory ?? stockBase.doseSkippedHistory,
     };
 
     const medications = fresh.medications.map((m) =>

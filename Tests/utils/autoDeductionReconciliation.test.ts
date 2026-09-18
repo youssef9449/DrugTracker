@@ -1016,7 +1016,14 @@ describe('reconcileFiredEvents — applyExact failure must not ACK (P5-1)', () =
     expect(r.logs).toEqual([]);
   });
 
-  it('failed apply then valid same occurrence: second pass applies once and ACKs', () => {
+  it('invalid_calendarDate no-ACK does not poison later valid occurrence apply + ACK', () => {
+    // applyExact's only non-terminal public failure for a well-formed amount is
+    // invalid_calendarDate. Fixing the date changes occurrence identity
+    // (medicationId + doseId + calendarDate), so this is NOT same-occurrence retry.
+    // Same-occurrence retry for non-terminal failure is covered by the invalid
+    // amount suite (amount can be corrected without changing the occurrence key).
+    // Here we only assert: prior applyExact failure left no ACK / no mutation,
+    // and a subsequent distinct valid occurrence still applies exactly once.
     const med = baseMed({
       currentPills: 10,
       lastSyncDate: '2026-09-13',
@@ -1032,6 +1039,8 @@ describe('reconcileFiredEvents — applyExact failure must not ACK (P5-1)', () =
     expect(r1.details[0].outcome).toBe('skipped_invalid');
     expect(r1.toAcknowledge).toEqual([]);
     expect(r1.medications[0].currentPills).toBe(10);
+    expect(r1.newExactLogs).toEqual([]);
+    expect(r1.logs).toEqual([]);
 
     const valid = fired({
       medicationId: 'med-1',

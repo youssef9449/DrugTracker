@@ -44,6 +44,20 @@ public final class AutoDeductionContract {
      */
     public static final String EXTRA_SCHEDULE_VERSION = "scheduleVersion";
 
+    /**
+     * Bounded fire-persistence retry counter carried on a retry delivery (0 on
+     * the original alarm). See {@link #FIRE_RETRY_DELAY_MS} /
+     * {@link #MAX_FIRE_RETRIES} and
+     * {@code AutoDeductionScheduler#scheduleFireRetry}.
+     */
+    public static final String EXTRA_FIRE_RETRY_COUNT = "fireRetryCount";
+
+    /** Delay before a fire-persistence retry alarm re-delivers the same occurrence. */
+    public static final long FIRE_RETRY_DELAY_MS = 60_000L;
+
+    /** Maximum number of fire-persistence retry alarms per occurrence (bounded). */
+    public static final int MAX_FIRE_RETRIES = 3;
+
     public static final String PREFS_EVENTS = "drugtracker_auto_deduction_events_v1";
     public static final String PREFS_SCHEDULES = "drugtracker_auto_deduction_schedules_v1";
     /** Independent prefs for pending-fire recovery when primary FIRED commit fails. */

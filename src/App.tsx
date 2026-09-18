@@ -44,6 +44,7 @@ import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
 import { useDoseReminderScheduler } from './hooks/useDoseReminderScheduler';
 import { useAutoDeductionScheduler } from './hooks/useAutoDeductionScheduler';
 import { useExactAutoDeductionReconciliation } from './hooks/useExactAutoDeductionReconciliation';
+import { useMidnightTick } from './hooks/useMidnightTick';
 import { usePersistentEffect } from './hooks/usePersistentEffect';
 import { useStockAlerts } from './hooks/useStockAlerts';
 import { useAppHydration } from './hooks/useAppHydration';
@@ -398,6 +399,12 @@ export default function App() {
     lifecycleTick: doseLifecycleTick,
   });
 
+  // Local-midnight rollover while the app stays open: today/tomorrow are
+  // computed from the wall clock at effect-run time, so the desired-state
+  // scheduler and the exact-auto reconciliation must re-run once at the
+  // calendar-day boundary (not only on resume).
+  const autoDeductMidnightTick = useMidnightTick();
+
   // Phase 2: exact-time auto-deduction alarms (independent of notifications).
   // Records durable native FIRED events only — no stock mutation here.
   useAutoDeductionScheduler({
@@ -407,6 +414,7 @@ export default function App() {
     isFirstRun,
     exactAlarmEnabled,
     resumeTick: doseAlarmResumeTick,
+    midnightTick: autoDeductMidnightTick,
   });
 
   // Phase 3/4: reconcile native FIRED exact auto-deduction events into JS stock.
@@ -420,6 +428,7 @@ export default function App() {
     hydrated,
     isFirstRun,
     resumeTick: doseAlarmResumeTick,
+    midnightTick: autoDeductMidnightTick,
   });
 
   const {

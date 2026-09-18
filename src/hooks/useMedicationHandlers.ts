@@ -229,6 +229,17 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
           medicationsRef.current = result.medications;
           setLogs(result.logs);
         }
+        // Audit fix: fail-closed toggle outcomes must not be silent — the
+        // durable state is unchanged, so tell the user nothing happened.
+        if (result.outcome === 'native_invalidation_failed') {
+          showToast('تعذر تأمين إلغاء الجدولة الأصلية للجرعات — لم يتم تغيير الإعداد. حاول مرة أخرى.');
+        } else if (result.outcome === 'native_list_failed') {
+          showToast('تعذر قراءة حالة الخصم الأصلية — لم يتم تغيير الإعداد. حاول مرة أخرى.');
+        } else if (result.outcome === 'missing_med') {
+          showToast('لم يتم العثور على الدواء.');
+        } else if (result.outcome === 'persist_failed') {
+          showToast(STORAGE_ERRORS.generic);
+        }
         return;
       }
       setMedications(result.medications);
@@ -258,6 +269,15 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
           setMedications(result.medications);
           medicationsRef.current = result.medications;
           setLogs(result.logs);
+        }
+        // Audit fix: fail-closed toggle outcomes must not be silent — the
+        // durable state is unchanged, so tell the user nothing happened.
+        if (result.outcome === 'native_invalidation_failed') {
+          showToast('تعذر تأمين إلغاء الجدولة الأصلية للجرعات — لم يتم تغيير الإعداد. حاول مرة أخرى.');
+        } else if (result.outcome === 'native_list_failed') {
+          showToast('تعذر قراءة حالة الخصم الأصلية — لم يتم تغيير الإعداد. حاول مرة أخرى.');
+        } else if (result.outcome === 'persist_failed') {
+          showToast(STORAGE_ERRORS.generic);
         }
         return;
       }
@@ -410,6 +430,13 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       // Covers native snapshot failures and Exact-durability barriers on the
       // notification action path; never leave a failed action silent.
       showToast(STORAGE_ERRORS.generic);
+    } else if (result.outcome === 'rejected') {
+      // Audit fix: fail-closed rejections on the alarm path (e.g.
+      // native_snapshot_failed) must not be silent either. The alarm stays
+      // open so the user can retry once the underlying state is readable.
+      showToast('لم يتم تسجيل الجرعة: تعذر التحقق من حالة الجرعة بشكل آمن — لم يتم أي خصم. حاول مرة أخرى.');
+    } else if (result.outcome === 'missing_med' || result.outcome === 'missing_dose_id') {
+      showToast('لم يتم تسجيل الجرعة: تعذر تحديد الدواء أو الجرعة المطلوبة.');
     }
     if (shouldDismissAlarmAfterManualTake(result.outcome)) {
       dismissAlarm();

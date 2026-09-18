@@ -814,7 +814,11 @@ export function consumeDose(
     type: 'dose_taken',
     amount: -doseAmount,
     date: todayStr,
-    timestamp: new Date().toISOString(),
+    // Audit fix: use the mutation's captured clock (`now`, which the gated
+    // path captures inside the critical section) instead of a fresh Date so
+    // the log timestamp cannot drift behind a mutation that waited on the
+    // stock gate.
+    timestamp: now.toISOString(),
     description,
     // LEGACY_DOSE_ID is an internal identity sentinel for the implicit
     // legacy dose — persisted logs keep doseId undefined for legacy

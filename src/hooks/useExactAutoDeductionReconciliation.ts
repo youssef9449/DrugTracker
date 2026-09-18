@@ -8,7 +8,9 @@
  *
  * There is deliberately NO polling timer here. If an event arrives while a
  * reconciliation is already running, the event is coalesced into one follow-up
- * reconciliation after the current one finishes.
+ * reconciliation after the current one finishes. Hydration, every app resume,
+ * and the local-midnight rollover while the app stays open (midnightTick) each
+ * perform one recovery reconciliation.
  */
 
 import { useEffect, useRef } from 'react';
@@ -26,6 +28,8 @@ export interface UseExactAutoDeductionReconciliationOptions {
   hydrated: boolean;
   isFirstRun: boolean;
   resumeTick?: number;
+  /** Increments at each local-midnight rollover while the app stays open. */
+  midnightTick?: number;
 }
 
 export function useExactAutoDeductionReconciliation({
@@ -36,6 +40,7 @@ export function useExactAutoDeductionReconciliation({
   hydrated,
   isFirstRun,
   resumeTick = 0,
+  midnightTick = 0,
 }: UseExactAutoDeductionReconciliationOptions): void {
   const globalRef = useRef(globalAutoDeductEnabled);
   const reconciliationRunningRef = useRef(false);
@@ -130,6 +135,7 @@ export function useExactAutoDeductionReconciliation({
     hydrated,
     isFirstRun,
     resumeTick,
+    midnightTick,
     setMedications,
     setLogs,
     setGlobalAutoDeductEnabled,

@@ -466,8 +466,11 @@ public final class AutoDeductionEventStore {
      * Result of an acknowledgement attempt.
      * <ul>
      *   <li>{@code ok=true, changed=true} — FIRED → RECONCILED transition succeeded</li>
-     *   <li>{@code ok=true, changed=false} — already RECONCILED (terminal success, no retry)</li>
-     *   <li>{@code ok=false, changed=false} — real failure (missing, parse, or commit); remains retryable</li>
+     *   <li>{@code ok=true, changed=false} — already terminal (RECONCILED or
+     *       REJECTED), or a corrupt FIRED row was terminalized REJECTED instead
+     *       of being acknowledged (terminal success, no retry)</li>
+     *   <li>{@code ok=false, changed=false} — real failure (missing, unexpected
+     *       status, parse/terminalization, or commit); remains retryable</li>
      * </ul>
      */
     public static final class MarkResult {
@@ -500,6 +503,33 @@ public final class AutoDeductionEventStore {
                 if (AutoDeductionContract.STATUS_RECONCILED.equals(status)) {
                     return new MarkResult(true, false);
                 }
+                if (AutoDeductionContract.STATUS_REJECTED.equals(status)) {
+                    // Already terminal via a REJECTED decision. Never resurrect a
+                    // rejected occurrence into RECONCILED through the ack path.
+                    return new MarkResult(true, false);
+                }
+                // Identity/status hardening (mirrors the read paths): only a
+                // well-formed FIRED row whose payload matches its storage key may
+                // be acknowledged as RECONCILED. A corrupt FIRED row is
+                // terminalized REJECTED here instead of being blessed; it will
+                // not be listed as FIRED again, so callers converge without an
+                // ack retry loop.
+                if (!AutoDeductionContract.STATUS_FIRED.equals(status)) {
+                    Log.w(TAG, "markReconciled refused: unexpected status for " + key);
+                    return new MarkResult(false, false);
+                }
+                boolean identityMatches = storageIdentityMatchesPayload(
+                        parseStorageKeyIdentity(prefKey), obj);
+                boolean malformed = isMalformedFired(obj);
+                if (!identityMatches || malformed) {
+                    String reason = malformed ? "malformed_fields" : "identity_mismatch";
+                    EventLookupResult terminalized =
+                            terminalizeFiredRowLocked(prefKey, obj, reason);
+                    if (!terminalized.ok) {
+                        return new MarkResult(false, false);
+                    }
+                    return new MarkResult(true, false);
+                }
                 obj.put("status", AutoDeductionContract.STATUS_RECONCILED);
                 obj.put("reconciledAtEpochMs", System.currentTimeMillis());
                 boolean committed = prefs.edit().putString(prefKey, obj.toString()).commit();
@@ -510,7 +540,14 @@ public final class AutoDeductionEventStore {
                 return new MarkResult(false, false);
             } catch (JSONException e) {
                 Log.e(TAG, "markReconciled parse failed", e);
-                return new MarkResult(false, false);
+                // Invalid JSON can never be acknowledged. Terminalize REJECTED
+                // like the read paths do; if that persistence also fails, the
+                // result stays retryable.
+                EventLookupResult terminalized = terminalizeInvalidJsonLocked(prefKey);
+                if (!terminalized.ok) {
+                    return new MarkResult(false, false);
+                }
+                return new MarkResult(true, false);
             }
         }
     }

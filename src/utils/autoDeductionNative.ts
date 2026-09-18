@@ -306,16 +306,6 @@ export async function getOccurrenceSnapshot(
 }
 
 
-export async function listAutoDeductionEvents(): Promise<AutoDeductionEvent[]> {
-  if (!isNativeAndroid()) return [];
-  try {
-    const res = await AutoDeduction.listEvents();
-    return res.events ?? [];
-  } catch {
-    return [];
-  }
-}
-
 export async function markAutoDeductionEventReconciled(
   medicationId: string,
   doseId: string,

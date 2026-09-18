@@ -23,6 +23,8 @@ export interface UseAutoDeductionSchedulerOptions {
   isFirstRun: boolean;
   exactAlarmEnabled: boolean | null;
   resumeTick?: number;
+  /** Increments at each local-midnight rollover while the app stays open. */
+  midnightTick?: number;
 }
 
 export interface AutoDeductionSlot {
@@ -211,6 +213,7 @@ export function useAutoDeductionScheduler({
   isFirstRun,
   exactAlarmEnabled,
   resumeTick = 0,
+  midnightTick = 0,
 }: UseAutoDeductionSchedulerOptions): void {
   const trackedRef = useRef<Set<string>>(new Set());
   const generationRef = useRef(0);
@@ -391,5 +394,6 @@ export function useAutoDeductionScheduler({
     globalAutoDeductEnabled,
     medications,
     resumeTick,
+    midnightTick,
   ]);
 }

@@ -1023,6 +1023,71 @@ public final class AutoDeductionScheduler {
     }
 
     /**
+     * Bounded one-shot retry for a fire delivery whose durable FIRED/pending
+     * persistence failed without pending evidence. The one-shot alarm is
+     * consumed by the failed delivery, so without a retry the occurrence would
+     * only recover via boot/TZ/JS restore paths.
+     *
+     * <p>The retry re-delivers the SAME occurrence identity with the SAME
+     * ownership tokens ({@code scheduleVersion} + {@code recurrenceGeneration}),
+     * so {@link #fireOccurrenceIfNotCancelled} remains the single linearized
+     * fire path: a retry that races a config change is rejected as stale
+     * (CANCELLED), and insert-if-absent idempotency prevents a duplicate FIRED
+     * row or a second JS wake-up. No schedule metadata is written for a retry,
+     * so no rollback is needed on failure.
+     *
+     * @param nextRetryCount 1-based retry index carried in
+     *        {@link AutoDeductionContract#EXTRA_FIRE_RETRY_COUNT}
+     * @return true only when AlarmManager accepted the retry alarm
+     */
+    boolean scheduleFireRetry(
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            long scheduledAtEpochMs,
+            double amount,
+            String timeHhmm,
+            long recurrenceGeneration,
+            String scheduleVersion,
+            int nextRetryCount
+    ) {
+        Intent intent = buildOccurrenceIntent(
+                medicationId, doseId, calendarDate, scheduledAtEpochMs, amount,
+                timeHhmm, recurrenceGeneration, scheduleVersion);
+        intent.putExtra(AutoDeductionContract.EXTRA_FIRE_RETRY_COUNT, nextRetryCount);
+        PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
+        AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
+        if (am == null) {
+            Log.w(TAG, "fire retry skipped: alarm manager unavailable");
+            return false;
+        }
+        long triggerAt = System.currentTimeMillis()
+                + AutoDeductionContract.FIRE_RETRY_DELAY_MS;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi);
+            } else {
+                am.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pi);
+            }
+            return true;
+        } catch (SecurityException se) {
+            // Exact permission may have been revoked between the original fire
+            // and the retry; an inexact retry is strictly better than no retry.
+            Log.w(TAG, "fire retry setExact denied — falling back to inexact", se);
+            try {
+                am.set(AlarmManager.RTC_WAKEUP, triggerAt, pi);
+                return true;
+            } catch (Exception e) {
+                Log.e(TAG, "fire retry scheduling failed", e);
+                return false;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "fire retry scheduling failed", e);
+            return false;
+        }
+    }
+
+    /**
      * Schedule a single occurrence.
      *
      * Validation runs outside the lock. The scheduling transaction

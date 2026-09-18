@@ -10,6 +10,10 @@ import android.util.Log;
  * Registered android:exported="false" — targeted solely via explicit
  * AlarmManager PendingIntent. Does NOT handle boot or permission broadcasts.
  *
+ * Durable fire work performs synchronous commit() disk I/O, so it runs on a
+ * background thread via {@link #goAsync()}: the main thread is never blocked
+ * (ANR safety) and the broadcast result is held until the work finishes.
+ *
  * Fire vs cancel is linearized under the scheduler SCHEDULE_LOCK via
  * {@link AutoDeductionScheduler#fireOccurrenceIfNotCancelled}: the effective
  * cancellation check and durable FIRED/pending transition are one serialized
@@ -23,7 +27,9 @@ import android.util.Log;
  *       {@link AutoDeductionScheduler#scheduleNextOccurrenceIfAbsent} (never
  *       overwrite an already-present successor with this delivery's payload)</li>
  *   <li>CANCELLED — no recurrence</li>
- *   <li>FAILED without pending — do not advance recurrence</li>
+ *   <li>FAILED without pending — do not advance recurrence; schedule a bounded
+ *       same-occurrence retry alarm (see
+ *       {@link AutoDeductionScheduler#scheduleFireRetry})</li>
  * </ul>
  * The receiver payload for a duplicate D delivery is not authoritative recurrence
  * configuration for an existing D+1.
@@ -43,6 +49,19 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 && (result.status == AutoDeductionScheduler.FireResult.Status.CREATED
                 || (result.status == AutoDeductionScheduler.FireResult.Status.FAILED
                 && result.pendingRecorded));
+    }
+
+    /**
+     * Retry gate for a FAILED fire without durable pending evidence: retry while
+     * the bounded per-occurrence retry budget is not exhausted. Pure decision —
+     * unit tested without Robolectric.
+     */
+    static boolean shouldScheduleFireRetry(
+            AutoDeductionScheduler.FireResult result, int fireRetryCount) {
+        return result != null
+                && result.status == AutoDeductionScheduler.FireResult.Status.FAILED
+                && !result.pendingRecorded
+                && fireRetryCount < AutoDeductionContract.MAX_FIRE_RETRIES;
     }
 
     static void notifyJavascript(
@@ -72,16 +91,22 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
             return;
         }
 
-        String medicationId = intent.getStringExtra(AutoDeductionContract.EXTRA_MEDICATION_ID);
-        String doseId = intent.getStringExtra(AutoDeductionContract.EXTRA_DOSE_ID);
-        String calendarDate = intent.getStringExtra(AutoDeductionContract.EXTRA_CALENDAR_DATE);
-        long scheduledAt = intent.getLongExtra(AutoDeductionContract.EXTRA_SCHEDULED_AT_EPOCH_MS, 0L);
-        double amount = intent.getDoubleExtra(AutoDeductionContract.EXTRA_AMOUNT, Double.NaN);
-        String timeHhmm = intent.getStringExtra(AutoDeductionContract.EXTRA_TIME_HHMM);
-        long recurrenceGeneration = intent.getLongExtra(
+        final String medicationId = intent.getStringExtra(
+                AutoDeductionContract.EXTRA_MEDICATION_ID);
+        final String doseId = intent.getStringExtra(AutoDeductionContract.EXTRA_DOSE_ID);
+        final String calendarDate = intent.getStringExtra(
+                AutoDeductionContract.EXTRA_CALENDAR_DATE);
+        final long scheduledAt = intent.getLongExtra(
+                AutoDeductionContract.EXTRA_SCHEDULED_AT_EPOCH_MS, 0L);
+        final double amount = intent.getDoubleExtra(
+                AutoDeductionContract.EXTRA_AMOUNT, Double.NaN);
+        final String timeHhmm = intent.getStringExtra(AutoDeductionContract.EXTRA_TIME_HHMM);
+        final long recurrenceGeneration = intent.getLongExtra(
                 AutoDeductionContract.EXTRA_RECURRENCE_GENERATION, 0L);
-        String scheduleVersion = intent.getStringExtra(
+        final String scheduleVersion = intent.getStringExtra(
                 AutoDeductionContract.EXTRA_SCHEDULE_VERSION);
+        final int fireRetryCount = intent.getIntExtra(
+                AutoDeductionContract.EXTRA_FIRE_RETRY_COUNT, 0);
 
         if (medicationId == null || medicationId.isEmpty()
                 || doseId == null || doseId.isEmpty()
@@ -91,6 +116,41 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
             return;
         }
 
+        // Durable fire work below performs synchronous commit() disk I/O. Move it
+        // off the main thread and keep the broadcast alive (goAsync) until the
+        // work finishes so the process is not frozen mid-write.
+        final PendingResult pendingResult = goAsync();
+        final Context appContext = context.getApplicationContext();
+        new Thread(() -> {
+            try {
+                handleFireDelivery(
+                        appContext, medicationId, doseId, calendarDate,
+                        scheduledAt, amount, timeHhmm,
+                        recurrenceGeneration, scheduleVersion, fireRetryCount);
+            } catch (Exception e) {
+                Log.e(TAG, "auto-deduction fire delivery failed", e);
+            } finally {
+                pendingResult.finish();
+            }
+        }, "auto-deduction-fire").start();
+    }
+
+    /**
+     * Full durable fire delivery for one occurrence identity. Package-private
+     * static so JVM tests can exercise the exact receiver path synchronously.
+     */
+    static void handleFireDelivery(
+            Context context,
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            long scheduledAt,
+            double amount,
+            String timeHhmm,
+            long recurrenceGeneration,
+            String scheduleVersion,
+            int fireRetryCount
+    ) {
         // Serialized fire transition: cancel-check + FIRED/pending under SCHEDULE_LOCK.
         // Eliminates TOCTOU where cancel could interleave after a non-cancelled check
         // but before durable FIRED persistence.
@@ -136,15 +196,35 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                     scheduleNextIfPossible(
                             context, medicationId, doseId, calendarDate, timeHhmm, amount,
                             recurrenceGeneration);
+                } else if (shouldScheduleFireRetry(result, fireRetryCount)) {
+                    // The one-shot alarm was consumed by this delivery and no
+                    // durable FIRED/pending evidence exists. A bounded
+                    // same-identity retry gives persistence another chance;
+                    // boot/TZ/JS restore remains the last-resort recovery path
+                    // once the retry budget is exhausted.
+                    boolean retryScheduled = scheduler.scheduleFireRetry(
+                            medicationId, doseId, calendarDate, scheduledAt, amount,
+                            timeHhmm, recurrenceGeneration, scheduleVersion,
+                            fireRetryCount + 1);
+                    if (retryScheduled) {
+                        Log.w(TAG, "FIRED persistence FAILED (no pending) — retry #"
+                                + (fireRetryCount + 1) + " scheduled: "
+                                + medicationId + "/" + doseId + "/" + calendarDate);
+                    } else {
+                        Log.e(TAG, "FIRED persistence FAILED (no pending) and retry "
+                                + "could not be scheduled: "
+                                + medicationId + "/" + doseId + "/" + calendarDate);
+                    }
                 } else {
-                    Log.e(TAG, "FIRED persistence FAILED (no pending) — not advancing next occurrence: "
+                    Log.e(TAG, "FIRED persistence FAILED (no pending) after max retries "
+                            + "— occurrence recovery deferred to next restore: "
                             + medicationId + "/" + doseId + "/" + calendarDate);
                 }
                 break;
         }
     }
 
-    private void scheduleNextIfPossible(
+    private static void scheduleNextIfPossible(
             Context context,
             String medicationId,
             String doseId,

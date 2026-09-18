@@ -199,11 +199,11 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     void (async () => {
       try {
         const result = await runGatedUndoRefill({ medicationId });
-      if (result.outcome !== 'persist_failed') {
-        setMedications(result.medications);
-        medicationsRef.current = result.medications;
-        setLogs(result.logs);
-      }
+        if (result.outcome !== 'persist_failed') {
+          setMedications(result.medications);
+          medicationsRef.current = result.medications;
+          setLogs(result.logs);
+        }
         if (result.outcome === 'applied' && result.log) {
           const name = result.medicationName ?? result.log.medicationName ?? '';
           if (name) showToast(TOAST_MESSAGES.refillUndone(name));

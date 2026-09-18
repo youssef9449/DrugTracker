@@ -12,11 +12,14 @@ import { persistLastAppliedMutationSeq } from './stockMutationOrdering';
 
 export const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 export const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
+export const STORAGE_GLOBAL_AUTO_DEDUCT_KEY = 'android_med_tracker_auto_deduct_v1';
 export const STORAGE_STOCK_GEN_KEY = 'android_med_tracker_stock_generation_v1';
 
 export interface AutoStockDurableState {
   medications: Medication[];
   logs: ConsumptionLog[];
+  /** Durable global master switch. Optional for backward-compatible test/recovery inputs. */
+  globalAutoDeductEnabled?: boolean;
 }
 
 let chain: Promise<unknown> = Promise.resolve();
@@ -59,6 +62,8 @@ export function loadDurableAutoStockState(): AutoStockDurableState {
   return {
     medications: Array.isArray(meds) ? meds : [],
     logs: Array.isArray(logs) ? logs : [],
+    globalAutoDeductEnabled:
+      loadString(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'true') !== 'false',
   };
 }
 
@@ -71,10 +76,11 @@ export interface CommitDurableOptions {
 }
 
 /**
- * Persist meds then logs then lastAppliedMutationSeq (when provided).
+ * Persist meds, logs, and the durable global auto-deduct switch, then
+ * lastAppliedMutationSeq (when provided).
  *
  * Contract:
- * - meds or logs fail → error (pair not durable)
+ * - meds/logs/global fail → error (recovery evidence must remain)
  * - appliedMutationSeq provided and lastApplied fails → error (pair may be
  *   durable but finalization incomplete; keep envelope)
  * - generation bump is best-effort only after finalization succeeds
@@ -86,6 +92,14 @@ export function commitDurableAutoStockState(
   if (testCommit) {
     const err = testCommit(state);
     if (err) return err;
+    if (state.globalAutoDeductEnabled != null) {
+      const globalErr = persist(
+        STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
+        String(state.globalAutoDeductEnabled),
+        { json: false }
+      );
+      if (globalErr) return globalErr;
+    }
     if (opts?.appliedMutationSeq != null) {
       const seqErr = persistLastAppliedMutationSeq(opts.appliedMutationSeq);
       if (seqErr) return seqErr;
@@ -97,6 +111,14 @@ export function commitDurableAutoStockState(
   if (medErr) return medErr;
   const logErr = persist(STORAGE_LOGS_KEY, state.logs, { json: true });
   if (logErr) return logErr;
+  if (state.globalAutoDeductEnabled != null) {
+    const globalErr = persist(
+      STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
+      String(state.globalAutoDeductEnabled),
+      { json: false }
+    );
+    if (globalErr) return globalErr;
+  }
   if (opts?.appliedMutationSeq != null) {
     const seqErr = persistLastAppliedMutationSeq(opts.appliedMutationSeq);
     if (seqErr) return seqErr;

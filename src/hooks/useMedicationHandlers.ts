@@ -12,6 +12,7 @@ import {
 import {
   runGatedManualConsume,
   runGatedManualRestore,
+  runGatedAddMedication,
   runGatedRefill,
   runGatedUndoRefill,
   runGatedAutoDeductToggle,
@@ -263,7 +264,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       }
       globalAutoDeductEnabledRef.current = result.enable;
       setGlobalAutoDeductEnabled(result.enable);
-      persist(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, String(result.enable), { json: false });
       setMedications(result.medications);
       setLogs(result.logs);
       const totalDeducted = result.settleLogs.reduce(
@@ -335,14 +335,20 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       lastSyncDate: getTodayDateString(),
       autoDeductEnabled: globalAutoDeductEnabledRef.current,
     };
-    setMedications((prev) => [newMed, ...prev]);
-    showToast(
-      newMed.reminderEnabled
-        ? `تمت إضافة "${newMed.name}" مع تنبيه الساعة ${newMed.reminderTime}`
-        : `تمت إضافة "${newMed.name}"، وسيحسب استهلاكه تلقائياً`
-    );
-    if (soundEnabled) playSuccessChime();
-    setEditingMedication(null);
+    void (async () => {
+      const result = await runGatedAddMedication({ medication: newMed });
+      if (result.outcome !== 'applied') return;
+      setMedications(result.medications);
+      medicationsRef.current = result.medications;
+      setLogs(result.logs);
+      showToast(
+        newMed.reminderEnabled
+          ? `تمت إضافة "${newMed.name}" مع تنبيه الساعة ${newMed.reminderTime}`
+          : `تمت إضافة "${newMed.name}"، وسيحسب استهلاكه تلقائياً`
+      );
+      if (soundEnabled) playSuccessChime();
+      setEditingMedication(null);
+    })();
   };
 
 

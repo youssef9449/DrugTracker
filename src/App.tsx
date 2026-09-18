@@ -454,6 +454,7 @@ export default function App() {
     handleSaveMedication,
     handleDeleteMedication,
     handleTakeDoseFromAlarm,
+    handleTakeDoseFromAlarmById,
     handleSnoozeFromAlarm,
     handleConsumeDose,
     handleCardRestoreDose,

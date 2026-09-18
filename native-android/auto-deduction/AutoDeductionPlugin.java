@@ -157,22 +157,29 @@ public class AutoDeductionPlugin extends Plugin {
      */
     @PluginMethod
     public void listScheduledOccurrences(PluginCall call) {
-        AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
-        java.util.List<JSONObject> rows = scheduler.listScheduledOccurrences();
-        JSArray arr = new JSArray();
-        for (JSONObject o : rows) {
-            JSObject js = new JSObject();
-            js.put("medicationId", o.optString("medicationId", ""));
-            js.put("doseId", o.optString("doseId", ""));
-            js.put("calendarDate", o.optString("calendarDate", ""));
-            js.put("timeHhmm", o.optString("timeHhmm", ""));
-            js.put("amount", o.optDouble("amount", 0));
-            js.put("scheduledAtEpochMs", o.optLong("scheduledAtEpochMs", 0L));
-            arr.put(js);
+        try {
+            AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
+            java.util.List<JSONObject> rows = scheduler.listScheduledOccurrences();
+            JSArray arr = new JSArray();
+            for (JSONObject o : rows) {
+                JSObject js = new JSObject();
+                js.put("medicationId", o.optString("medicationId", ""));
+                js.put("doseId", o.optString("doseId", ""));
+                js.put("calendarDate", o.optString("calendarDate", ""));
+                js.put("timeHhmm", o.optString("timeHhmm", ""));
+                js.put("amount", o.optDouble("amount", 0));
+                js.put("scheduledAtEpochMs", o.optLong("scheduledAtEpochMs", 0L));
+                arr.put(js);
+            }
+            JSObject ret = new JSObject();
+            ret.put("schedules", arr);
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "listScheduledOccurrences failed", e);
+            call.reject(e.getMessage() != null
+                    ? e.getMessage()
+                    : "list_schedules_failed");
         }
-        JSObject ret = new JSObject();
-        ret.put("schedules", arr);
-        call.resolve(ret);
     }
 
 

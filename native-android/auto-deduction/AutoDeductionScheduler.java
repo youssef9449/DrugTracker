@@ -536,9 +536,12 @@ public final class AutoDeductionScheduler {
      * <ol>
      *   <li>Evaluate effective cancellation (tombstone vs schedule ordering)</li>
      *   <li>Require active schedule metadata for this occurrence</li>
-     *   <li>Require delivery {@code scheduleVersion} + {@code recurrenceGeneration}
-     *       to match that metadata exactly (reject stale queued alarms after
-     *       disable → re-enable reschedule)</li>
+     *   <li>Require current/tokenized delivery to match {@code scheduleVersion} +
+     *       {@code recurrenceGeneration} exactly (reject stale queued alarms after
+     *       disable → re-enable reschedule). A legacy delivery with no tokens is
+     *       accepted only when the active durable schedule metadata is also truly
+     *       legacy (both tokens absent), preserving pre-token queued alarms without
+     *       weakening the versioned stale-fire guard.</li>
      *   <li>If ownership holds → persist FIRED via insertFiredIfAbsent</li>
      * </ol>
      *
@@ -588,17 +591,41 @@ public final class AutoDeductionScheduler {
                 JSONObject meta = new JSONObject(metaRaw);
                 String activeVersion = meta.optString(FIELD_SCHEDULE_VERSION, "");
                 long activeGen = meta.optLong(FIELD_RECURRENCE_GENERATION, 0L);
-                if (!deliveryScheduleVersion.equals(activeVersion)) {
-                    Log.i(TAG, "fire linearization: STALE scheduleVersion for " + key
-                            + " delivery=" + deliveryScheduleVersion
-                            + " active=" + activeVersion);
-                    return FireResult.cancelled();
-                }
-                if (deliveryRecurrenceGeneration != activeGen) {
-                    Log.i(TAG, "fire linearization: STALE recurrenceGeneration for " + key
-                            + " delivery=" + deliveryRecurrenceGeneration
-                            + " active=" + activeGen);
-                    return FireResult.cancelled();
+                boolean legacyDelivery = (deliveryScheduleVersion == null
+                        || deliveryScheduleVersion.isEmpty())
+                        && deliveryRecurrenceGeneration <= 0L;
+                boolean legacyActiveMetadata = activeVersion.isEmpty() && activeGen <= 0L;
+
+                if (legacyDelivery) {
+                    // Backward compatibility for alarms queued by the pre-token scheduler:
+                    // accept ONLY while the durable schedule row itself is still genuinely
+                    // legacy. Once this row has been rewritten with scheduleVersion or a
+                    // recurrence generation, a legacy queued alarm is stale and must not FIRE.
+                    if (!legacyActiveMetadata) {
+                        Log.i(TAG, "fire linearization: STALE legacy delivery against versioned metadata for "
+                                + key);
+                        return FireResult.cancelled();
+                    }
+                } else {
+                    // Current/tokenized delivery must own the current schedule row exactly.
+                    if (deliveryScheduleVersion == null || deliveryScheduleVersion.isEmpty()
+                            || deliveryRecurrenceGeneration <= 0L) {
+                        Log.i(TAG, "fire linearization: STALE (delivery partially missing version/generation) for "
+                                + key);
+                        return FireResult.cancelled();
+                    }
+                    if (!deliveryScheduleVersion.equals(activeVersion)) {
+                        Log.i(TAG, "fire linearization: STALE scheduleVersion for " + key
+                                + " delivery=" + deliveryScheduleVersion
+                                + " active=" + activeVersion);
+                        return FireResult.cancelled();
+                    }
+                    if (deliveryRecurrenceGeneration != activeGen) {
+                        Log.i(TAG, "fire linearization: STALE recurrenceGeneration for " + key
+                                + " delivery=" + deliveryRecurrenceGeneration
+                                + " active=" + activeGen);
+                        return FireResult.cancelled();
+                    }
                 }
             } catch (JSONException e) {
                 Log.e(TAG, "fire linearization: malformed schedule metadata for " + key, e);
@@ -1889,12 +1916,25 @@ public final class AutoDeductionScheduler {
                 String time = o.optString("timeHhmm", "");
                 double amount = o.optDouble("amount", Double.NaN);
                 long epoch = o.optLong("scheduledAtEpochMs", 0L);
-                if (medId.isEmpty() || doseId.isEmpty()
-                        || !AutoDeductionContract.isValidCalendarDate(date)
-                        || !AutoDeductionContract.isValidTimeHhmm(time)
-                        || !AutoDeductionContract.isValidAmount(amount)) {
-                    // Only drop the snapshot-owned row (never a newer replacement).
-                    removeScheduleMetadataIfVersion(prefKey, observedVersion);
+                ScheduleStorageIdentity keyIdentity = parseScheduleStorageKey(prefKey);
+                boolean validPayload =
+                        !medId.isEmpty()
+                        && !doseId.isEmpty()
+                        && AutoDeductionContract.isValidCalendarDate(date)
+                        && AutoDeductionContract.isValidTimeHhmm(time)
+                        && AutoDeductionContract.isValidAmount(amount);
+                boolean keyMatchesPayload =
+                        keyIdentity != null
+                        && keyIdentity.medicationId.equals(medId)
+                        && keyIdentity.doseId.equals(doseId)
+                        && keyIdentity.calendarDate.equals(date);
+                if (!validPayload || !keyMatchesPayload) {
+                    String reason = !validPayload
+                            ? "malformed_fields"
+                            : "identity_mismatch";
+                    if (!quarantineMalformedScheduleMetadata(prefKey, raw, reason)) {
+                        Log.e(TAG, "restore: malformed schedule quarantine failed for " + prefKey);
+                    }
                     continue;
                 }
 
@@ -2006,18 +2046,141 @@ public final class AutoDeductionScheduler {
                     }
                 }
             } catch (JSONException ignored) {
-                // Malformed snapshot payload: drop only if still the observed version.
-                removeScheduleMetadataIfVersion(prefKey, observedVersion);
+                // Malformed snapshot payload: quarantine only if the exact snapshot is
+                // still current; otherwise leave a newer replacement untouched.
+                if (!quarantineMalformedScheduleMetadata(prefKey, raw, "invalid_json")) {
+                    Log.e(TAG, "restore: invalid JSON schedule quarantine failed for " + prefKey);
+                }
             }
         }
         return restored;
     }
 
 
+    /** Parsed medicationId + doseId + calendarDate from a sch: storage key. */
+    private static final class ScheduleStorageIdentity {
+        final String medicationId;
+        final String doseId;
+        final String calendarDate;
+
+        ScheduleStorageIdentity(String medicationId, String doseId, String calendarDate) {
+            this.medicationId = medicationId;
+            this.doseId = doseId;
+            this.calendarDate = calendarDate;
+        }
+    }
+
+    /**
+     * Parse the canonical occurrence identity encoded in a durable sch: key.
+     * Returns null when the key cannot identify exactly one occurrence.
+     */
+    private static ScheduleStorageIdentity parseScheduleStorageKey(String prefKey) {
+        if (prefKey == null || !prefKey.startsWith(SCHEDULE_KEY_PREFIX)) {
+            return null;
+        }
+        String encoded = prefKey.substring(SCHEDULE_KEY_PREFIX.length());
+        final char separator = '\u001f';
+        int first = encoded.indexOf(separator);
+        int second = first >= 0
+                ? encoded.indexOf(separator, first + 1)
+                : -1;
+        if (first <= 0 || second <= first + 1 || second >= encoded.length() - 1) {
+            return null;
+        }
+        if (encoded.indexOf(separator, second + 1) >= 0) {
+            return null;
+        }
+        String medicationId = encoded.substring(0, first);
+        String doseId = encoded.substring(first + 1, second);
+        String calendarDate = encoded.substring(second + 1);
+        if (!AutoDeductionContract.isValidCalendarDate(calendarDate)) {
+            return null;
+        }
+        return new ScheduleStorageIdentity(medicationId, doseId, calendarDate);
+    }
+
+    /**
+     * Quarantine malformed schedule metadata without trusting its payload identity.
+     *
+     * <p>The storage key is the only identity source we use for cancellation. When
+     * that key is canonical, cancel the matching PendingIntent first and then remove
+     * the malformed durable row. If the key is not canonical, no alarm identity can
+     * be reconstructed safely, so the row is left untouched and the caller must fail
+     * closed rather than pretending the native listing is authoritative.
+     *
+     * <p>If {@code expectedRaw} no longer matches the current row, the snapshot became
+     * stale; leave the newer row untouched and report success/no-op.
+     */
+    private boolean quarantineMalformedScheduleMetadata(
+            String prefKey,
+            String expectedRaw,
+            String reason
+    ) {
+        synchronized (SCHEDULE_LOCK) {
+            String currentRaw = schedulePrefs.getString(prefKey, null);
+            if (currentRaw == null) {
+                return true;
+            }
+            if (expectedRaw != null && !expectedRaw.equals(currentRaw)) {
+                Log.i(TAG, "quarantine skip (snapshot stale): " + prefKey);
+                return true;
+            }
+
+            ScheduleStorageIdentity identity = parseScheduleStorageKey(prefKey);
+            if (identity == null) {
+                Log.e(TAG, "cannot quarantine malformed schedule with unsafe key: "
+                        + prefKey + " reason=" + reason);
+                return false;
+            }
+
+            AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
+            if (am == null) {
+                Log.e(TAG, "cannot quarantine malformed schedule without AlarmManager: " + prefKey);
+                return false;
+            }
+
+            try {
+                Intent intent = buildOccurrenceIntent(
+                        identity.medicationId,
+                        identity.doseId,
+                        identity.calendarDate,
+                        0L,
+                        0d,
+                        null,
+                        0L,
+                        null);
+                PendingIntent pi = buildPendingIntent(
+                        intent,
+                        PendingIntent.FLAG_UPDATE_CURRENT);
+                if (pi != null) {
+                    am.cancel(pi);
+                    pi.cancel();
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "failed to cancel malformed schedule alarm: " + prefKey, e);
+                return false;
+            }
+
+            boolean removed = schedulePrefs.edit().remove(prefKey).commit();
+            if (!removed) {
+                Log.e(TAG, "failed to remove quarantined schedule metadata: " + prefKey);
+                return false;
+            }
+            Log.w(TAG, "quarantined malformed schedule metadata: " + prefKey
+                    + " reason=" + reason);
+            return true;
+        }
+    }
+
     /**
      * List durable schedule metadata entries (not AlarmManager state).
      * Used by JS to reconcile desired set against native after process restart
      * so stale schedules can be canceled even when trackedRef is empty.
+     *
+     * <p>Malformed rows are not silently skipped. Rows whose storage key still
+     * identifies a real occurrence are quarantined (alarm canceled + metadata
+     * removed). When the key itself is unsafe, this method throws so the JS bridge
+     * reports a listing failure instead of treating the malformed row as absence.
      */
     public java.util.List<JSONObject> listScheduledOccurrences() {
         java.util.List<JSONObject> out = new java.util.ArrayList<>();
@@ -2027,17 +2190,46 @@ public final class AutoDeductionScheduler {
                 if (!e.getKey().startsWith(SCHEDULE_KEY_PREFIX)) continue;
                 Object v = e.getValue();
                 if (!(v instanceof String)) continue;
+                String prefKey = e.getKey();
+                String raw = (String) v;
                 try {
-                    JSONObject o = new JSONObject((String) v);
-                    String medId = o.optString("medicationId", "");
-                    String doseId = o.optString("doseId", "");
-                    String date = o.optString("calendarDate", "");
-                    if (medId.isEmpty() || doseId.isEmpty()
-                            || !AutoDeductionContract.isValidCalendarDate(date)) {
+                    JSONObject o = new JSONObject(raw);
+                    String medId = o.optString("medicationId", "").trim();
+                    String doseId = o.optString("doseId", "").trim();
+                    String date = o.optString("calendarDate", "").trim();
+                    String time = o.optString("timeHhmm", "").trim();
+                    double amount = o.optDouble("amount", Double.NaN);
+
+                    ScheduleStorageIdentity keyIdentity = parseScheduleStorageKey(prefKey);
+                    boolean validPayload =
+                            !medId.isEmpty()
+                            && !doseId.isEmpty()
+                            && AutoDeductionContract.isValidCalendarDate(date)
+                            && AutoDeductionContract.isValidTimeHhmm(time)
+                            && AutoDeductionContract.isValidAmount(amount);
+                    boolean keyMatchesPayload =
+                            keyIdentity != null
+                            && keyIdentity.medicationId.equals(medId)
+                            && keyIdentity.doseId.equals(doseId)
+                            && keyIdentity.calendarDate.equals(date);
+
+                    if (!validPayload || !keyMatchesPayload) {
+                        String reason = !validPayload
+                                ? "malformed_fields"
+                                : "identity_mismatch";
+                        if (!quarantineMalformedScheduleMetadata(prefKey, raw, reason)) {
+                            throw new IllegalStateException(
+                                    "malformed_schedule_metadata_cleanup_failed");
+                        }
                         continue;
                     }
                     out.add(o);
-                } catch (JSONException ignored) {
+                } catch (JSONException ex) {
+                    if (!quarantineMalformedScheduleMetadata(
+                            prefKey, raw, "invalid_json")) {
+                        throw new IllegalStateException(
+                                "malformed_schedule_metadata_cleanup_failed");
+                    }
                 }
             }
         }

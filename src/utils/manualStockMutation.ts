@@ -328,7 +328,7 @@ async function acknowledgeExactAutoEvents(
 /**
  * Manual durability: envelope (JS state only) → meds+logs → clear.
  */
-function commitWithManualEnvelope(
+export function commitWithManualEnvelope(
   state: AutoStockDurableState,
   globalOverride?: boolean
 ): string | null {

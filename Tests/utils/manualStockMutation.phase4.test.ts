@@ -35,8 +35,7 @@ import {
 } from '../../src/utils/autoDeductionStockGate';
 import { __setManualRecurrenceInvalidationTestHook } from '../../src/utils/manualStockMutation';
 import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
-import { isDoseConsumedOnDate } from '../../src/utils/dateCalculations';,
-import { isDoseSkippedOnDate } from '../../src/utils/dateCalculations';
+import { isDoseConsumedOnDate, isDoseSkippedOnDate } from '../../src/utils/dateCalculations';
 import { exactAutoLogId } from '../../src/utils/autoDeductionReconciliation';
 import * as preSettleModule from '../../src/utils/reconcileExactBeforeLegacySettlement';
 // findPending used indirectly via runGatedManualConsume

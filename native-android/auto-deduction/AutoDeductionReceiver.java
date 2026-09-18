@@ -32,7 +32,20 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
 
     private static final String TAG = "AutoDeductionReceiver";
 
-    private static void notifyJavascript(
+    /**
+     * JS is woken only when this delivery produced NEW durable FIRED evidence:
+     * a newly-created main FIRED row or a durable pending-fire fallback.
+     * ALREADY_EXISTS is deliberately not re-emitted because that occurrence
+     * already produced its wake-up when it first became durable.
+     */
+    static boolean shouldNotifyJavascript(AutoDeductionScheduler.FireResult result) {
+        return result != null
+                && (result.status == AutoDeductionScheduler.FireResult.Status.CREATED
+                || (result.status == AutoDeductionScheduler.FireResult.Status.FAILED
+                && result.pendingRecorded));
+    }
+
+    static void notifyJavascript(
             Context context,
             String medicationId,
             String doseId,
@@ -88,6 +101,14 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 medicationId, doseId, calendarDate, scheduledAt, amount,
                 scheduleVersion, recurrenceGeneration);
 
+        if (shouldNotifyJavascript(result)) {
+            // The wake-up is only a notification that durable FIRED evidence now
+            // exists. JS must re-read the native EventStore; it must never trust
+            // this broadcast payload as the stock source of truth.
+            notifyJavascript(
+                    context, medicationId, doseId, calendarDate, scheduledAt, amount);
+        }
+
         switch (result.status) {
             case CANCELLED:
                 Log.i(TAG, "stale fire ignored (cancel linearized first): "
@@ -95,8 +116,6 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 break;
             case CREATED:
                 Log.i(TAG, "FIRED event persisted: " + medicationId + "/" + doseId + "/" + calendarDate);
-                notifyJavascript(
-                        context, medicationId, doseId, calendarDate, scheduledAt, amount);
                 scheduleNextIfPossible(
                         context, medicationId, doseId, calendarDate, timeHhmm, amount,
                         recurrenceGeneration);
@@ -112,11 +131,8 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 if (result.pendingRecorded) {
                     Log.w(TAG, "FIRED primary failed but pending recorded — advancing recurrence: "
                             + medicationId + "/" + doseId + "/" + calendarDate);
-                    // The pending-fire record is itself durable FIRED evidence. Wake
-                    // JS immediately so the event-driven reconciler can promote and
-                    // reconcile it without relying on polling.
-                    notifyJavascript(
-                            context, medicationId, doseId, calendarDate, scheduledAt, amount);
+                    // Pending FIRED evidence already triggered the event-driven
+                    // JS wake-up above; continue only with durable recurrence setup.
                     scheduleNextIfPossible(
                             context, medicationId, doseId, calendarDate, timeHhmm, amount,
                             recurrenceGeneration);

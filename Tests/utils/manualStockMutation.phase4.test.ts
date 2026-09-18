@@ -3979,7 +3979,8 @@ describe('Phase 4 — durable global preference and add-medication ordering', ()
       id: 'new-med',
       name: 'NewMed',
       currentPills: 20,
-      autoDeductEnabled: false,
+      // Deliberately stale/conflicting input — durable global=false must win.
+      autoDeductEnabled: true,
     });
 
     const result = await runGatedAddMedication({ medication: newMedication });
@@ -3987,6 +3988,7 @@ describe('Phase 4 — durable global preference and add-medication ordering', ()
     expect(result.outcome).toBe('applied');
     expect(durable.medications.map((m) => m.id)).toEqual(['new-med', 'existing']);
     expect(durable.medications.find((m) => m.id === 'existing')?.currentPills).toBe(7);
+    expect(durable.medications.find((m) => m.id === 'new-med')?.autoDeductEnabled).toBe(false);
     expect(durable.globalAutoDeductEnabled).toBe(false);
   });
 });

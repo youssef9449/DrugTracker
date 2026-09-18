@@ -54,10 +54,15 @@ public class FireRetryScheduleTest {
     }
 
     private static void drainAlarms() {
-        ShadowAlarmManager shadow = Shadows.shadowOf(alarmManager());
-        while (shadow.getNextScheduledAlarm() != null) {
-            // drain leaked schedules between cases
+        AlarmManager am = alarmManager();
+        List<ShadowAlarmManager.ScheduledAlarm> alarms = new java.util.ArrayList<>(
+                Shadows.shadowOf(am).getScheduledAlarms());
+        for (ShadowAlarmManager.ScheduledAlarm alarm : alarms) {
+            if (alarm.operation != null) {
+                am.cancel(alarm.operation);
+            }
         }
+        assertEquals("test alarm queue must be empty after drain", 0, alarmCount());
     }
 
     private static AlarmManager alarmManager() {
@@ -147,6 +152,87 @@ public class FireRetryScheduleTest {
                 + AutoDeductionContract.FIRE_RETRY_DELAY_MS - 5_000L;
         assertTrue("retry must be delayed, not immediate",
                 alarm.triggerAtTime >= expectedNoEarlierThan);
+    }
+
+    @Test
+    public void scheduleFireRetry_persistsRecoveryMarkerAndFireClearsIt()
+            throws Exception {
+        String date = futureCalendarDate(2);
+        long epoch = futureEpochMs(date, "12:00");
+        AutoDeductionScheduler s = newScheduler();
+        assertTrue(s.scheduleOccurrence(
+                "med", "dose", date, "12:00", 1.0, epoch).ok);
+        String[] vg = activeVersionAndGen("med", "dose", date);
+
+        drainAlarms();
+        assertTrue(s.scheduleFireRetry(
+                "med", "dose", date, epoch, 1.0, "12:00",
+                Long.parseLong(vg[1]), vg[0], 1));
+
+        JSONObject retryMeta = readAnyScheduleMetadata();
+        assertNotNull(retryMeta);
+        assertEquals(1, retryMeta.optInt(
+                AutoDeductionScheduler.FIELD_FIRE_RETRY_COUNT, 0));
+
+        AutoDeductionScheduler.FireResult fire = s.fireOccurrenceIfNotCancelled(
+                "med", "dose", date, epoch, 1.0, vg[0], Long.parseLong(vg[1]));
+        assertEquals(AutoDeductionScheduler.FireResult.Status.CREATED, fire.status);
+
+        JSONObject afterFire = readAnyScheduleMetadata();
+        assertNotNull(afterFire);
+        assertFalse("successful durable fire must clear retry marker",
+                afterFire.has(AutoDeductionScheduler.FIELD_FIRE_RETRY_COUNT));
+    }
+
+    @Test
+    public void scheduleFireRetry_staleOwnershipCannotOverwriteReplacementAlarm()
+            throws Exception {
+        String date = futureCalendarDate(3);
+        long epoch = futureEpochMs(date, "13:00");
+        AutoDeductionScheduler s = newScheduler();
+        assertTrue(s.scheduleOccurrence(
+                "med", "dose", date, "13:00", 1.0, epoch).ok);
+        String[] oldVg = activeVersionAndGen("med", "dose", date);
+        drainAlarms();
+
+        // A new schedule for the same occurrence wins the native PendingIntent identity.
+        assertTrue(s.scheduleOccurrence(
+                "med", "dose", date, "13:00", 2.0, epoch).ok);
+        String[] newVg = activeVersionAndGen("med", "dose", date);
+        assertFalse("reschedule must receive a fresh ownership version",
+                oldVg[0].equals(newVg[0]));
+
+        boolean retry = s.scheduleFireRetry(
+                "med", "dose", date, epoch, 1.0, "13:00",
+                Long.parseLong(oldVg[1]), oldVg[0], 1);
+        assertFalse("stale retry must be rejected before touching AlarmManager", retry);
+        assertEquals(1, alarmCount());
+
+        Intent saved = Shadows.shadowOf(firstAlarm().operation).getSavedIntent();
+        assertNotNull(saved);
+        assertEquals("new scheduleVersion must remain authoritative",
+                newVg[0],
+                saved.getStringExtra(AutoDeductionContract.EXTRA_SCHEDULE_VERSION));
+        assertEquals("new schedule must not be overwritten by retry",
+                0,
+                saved.getIntExtra(AutoDeductionContract.EXTRA_FIRE_RETRY_COUNT, 0));
+    }
+
+    @Test
+    public void scheduleFireRetry_cancelledOccurrenceCannotResurrectAlarm()
+            throws Exception {
+        String date = futureCalendarDate(4);
+        long epoch = futureEpochMs(date, "14:00");
+        AutoDeductionScheduler s = newScheduler();
+        assertTrue(s.scheduleOccurrence(
+                "med", "dose", date, "14:00", 1.0, epoch).ok);
+        String[] vg = activeVersionAndGen("med", "dose", date);
+        assertTrue(s.cancelOccurrence("med", "dose", date).isOk());
+
+        assertFalse(s.scheduleFireRetry(
+                "med", "dose", date, epoch, 1.0, "14:00",
+                Long.parseLong(vg[1]), vg[0], 1));
+        assertEquals("cancel must leave no retry alarm", 0, alarmCount());
     }
 
     @Test

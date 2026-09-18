@@ -3,6 +3,7 @@ import type { Medication, ConsumptionLog } from '../../src/types';
 import {
   runGatedManualConsume,
   runGatedManualRestore,
+  runGatedAddMedication,
   runGatedRefill,
   runGatedUndoRefill,
   runGatedAutoDeductToggle,
@@ -3896,5 +3897,96 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
     expect(r.outcome).toBe('rejected');
     expect(r.reason).toBe('invalid_exact_event');
     expect(durable.medications[0].currentPills).toBe(10);
+  });
+});
+
+
+describe('Phase 4 — durable global preference and add-medication ordering', () => {
+  let durable: AutoStockDurableState;
+  let persistedGlobal: boolean;
+  let failGlobalPersist: boolean;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-16T15:00:00'));
+    durable = {
+      medications: [med()],
+      logs: [],
+      globalAutoDeductEnabled: true,
+    };
+    persistedGlobal = true;
+    failGlobalPersist = false;
+
+    __setManualEnvelopeTestHooks({
+      load: () => null,
+      save: () => null,
+    });
+    __setAutoStockGateTestHooks({
+      load: () => ({
+        medications: durable.medications.map((m) => ({ ...m })),
+        logs: durable.logs.map((l) => ({ ...l })),
+        globalAutoDeductEnabled: durable.globalAutoDeductEnabled,
+      }),
+      commit: (state) => {
+        durable = {
+          medications: state.medications.map((m) => ({ ...m })),
+          logs: state.logs.map((l) => ({ ...l })),
+          globalAutoDeductEnabled: state.globalAutoDeductEnabled,
+        };
+        return null;
+      },
+      persistGlobal: (value) => {
+        if (failGlobalPersist) return 'global_persist_failed';
+        persistedGlobal = value;
+        return null;
+      },
+    });
+  });
+
+  afterEach(() => {
+    __setAutoStockGateTestHooks(null);
+    __setManualEnvelopeTestHooks(null);
+    vi.useRealTimers();
+  });
+
+  it('global toggle persists the master switch inside the same durable commit path', async () => {
+    const result = await runGatedGlobalAutoDeductToggle({ enable: false });
+
+    expect(result.outcome).toBe('applied');
+    expect(durable.globalAutoDeductEnabled).toBe(false);
+    expect(persistedGlobal).toBe(false);
+    expect(durable.medications[0].autoDeductEnabled).toBe(false);
+  });
+
+  it('global persistence failure keeps the mutation envelope for restart recovery', async () => {
+    failGlobalPersist = true;
+
+    const result = await runGatedGlobalAutoDeductToggle({ enable: false });
+
+    expect(result.outcome).toBe('persist_failed');
+    expect(durable.medications[0].autoDeductEnabled).toBe(false);
+    expect(persistedGlobal).toBe(true);
+  });
+
+  it('new medication is committed against fresh durable state instead of React snapshot', async () => {
+    durable = {
+      medications: [med({ id: 'existing', currentPills: 7 })],
+      logs: [],
+      globalAutoDeductEnabled: false,
+    };
+
+    const newMedication = med({
+      id: 'new-med',
+      name: 'NewMed',
+      currentPills: 20,
+      autoDeductEnabled: false,
+    });
+
+    const result = await runGatedAddMedication({ medication: newMedication });
+
+    expect(result.outcome).toBe('applied');
+    expect(durable.medications.map((m) => m.id)).toEqual(['new-med', 'existing']);
+    expect(durable.medications.find((m) => m.id === 'existing')?.currentPills).toBe(7);
+    expect(durable.globalAutoDeductEnabled).toBe(false);
   });
 });

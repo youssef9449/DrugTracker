@@ -330,6 +330,7 @@ export default function App() {
     globalAutoDeductEnabled,
     setMedications,
     setLogs,
+    setGlobalAutoDeductEnabled,
     showToast,
   });
 

@@ -746,6 +746,96 @@ export function runGatedManualRestore(opts: {
   });
 }
 
+export interface GatedAddMedicationResult {
+  outcome: 'applied' | 'duplicate_med_id' | 'persist_failed';
+  medications: Medication[];
+  logs: ConsumptionLog[];
+  medicationName?: string;
+  unit?: string;
+  reason?: string;
+}
+
+/**
+ * Add a medication through the same durable stock gate as every other
+ * post-hydration medication/stock mutation. The caller provides a complete
+ * new Medication object; the gate is authoritative for the final collection
+ * and the durable global auto-deduct value.
+ */
+export function runGatedAddMedication(opts: {
+  medication: Medication;
+}): Promise<GatedAddMedicationResult> {
+  return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
+    const recovered = recoverManualEnvelopeInto(freshIn);
+    if (!recovered.ok) {
+      return {
+        outcome: 'persist_failed' as const,
+        medications: recovered.state.medications,
+        logs: recovered.state.logs,
+        reason: 'persist_failed',
+      };
+    }
+    await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
+
+    const pre = await reconcileExactBeforeLegacySettlement({
+      fresh: recovered.state,
+      globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
+    });
+    if (pre.nativeListFailed) {
+      return {
+        outcome: 'persist_failed' as const,
+        medications: pre.state.medications,
+        logs: pre.state.logs,
+        reason: 'native_list_failed',
+      };
+    }
+
+    if (pre.state.medications.some((m) => m.id === opts.medication.id)) {
+      return {
+        outcome: 'duplicate_med_id' as const,
+        medications: pre.state.medications,
+        logs: pre.state.logs,
+        medicationName: opts.medication.name,
+        unit: opts.medication.unit,
+        reason: 'duplicate_med_id',
+      };
+    }
+
+    const medication: Medication = {
+      ...opts.medication,
+      autoDeductEnabled:
+        opts.medication.autoDeductEnabled ??
+        pre.state.globalAutoDeductEnabled ??
+        loadDurableGlobalAutoDeductEnabled(),
+    };
+    const medications = [medication, ...pre.state.medications];
+    const logs = pre.state.logs;
+
+    const err = commitWithManualEnvelope({
+      medications,
+      logs,
+      globalAutoDeductEnabled: pre.state.globalAutoDeductEnabled,
+    });
+    if (err) {
+      return {
+        outcome: 'persist_failed' as const,
+        medications: pre.state.medications,
+        logs: pre.state.logs,
+        reason: 'persist_failed',
+        medicationName: medication.name,
+        unit: medication.unit,
+      };
+    }
+
+    return {
+      outcome: 'applied' as const,
+      medications,
+      logs,
+      medicationName: medication.name,
+      unit: medication.unit,
+    };
+  });
+}
+
 export type GatedRefillOutcome =
   | 'applied'
   | 'missing_med'

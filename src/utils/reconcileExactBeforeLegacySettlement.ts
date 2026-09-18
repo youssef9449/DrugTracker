@@ -37,6 +37,7 @@ export async function reconcileExactBeforeLegacySettlement(opts: {
     medications: opts.fresh.medications,
     logs: opts.fresh.logs,
     alreadyInGate: true,
+    durableState: opts.fresh,
     now: opts.now,
   });
 

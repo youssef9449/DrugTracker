@@ -342,7 +342,11 @@ export function finalizeMutationSeq(mutationSeq: number): string | null {
  * array is a different persisted snapshot and must trigger re-apply.
  */
 export function durableMatchesEnvelopeSnapshot(
-  envelope: { medications: Medication[]; logs: ConsumptionLog[] },
+  envelope: {
+    medications: Medication[];
+    logs: ConsumptionLog[];
+    globalAutoDeductEnabled?: boolean;
+  },
   durable: AutoStockDurableState
 ): boolean {
   // Global master switch is part of Phase 4 durable snapshots. Legacy envelopes

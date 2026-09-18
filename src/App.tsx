@@ -327,7 +327,6 @@ export default function App() {
   useStartupAutoDeduction({
     hydrated,
     isFirstRun,
-    globalAutoDeductEnabled,
     setMedications,
     setLogs,
     setGlobalAutoDeductEnabled,

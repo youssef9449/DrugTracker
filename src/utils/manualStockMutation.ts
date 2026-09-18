@@ -1348,11 +1348,18 @@ export function runGatedGlobalAutoDeductToggle(opts: {
     }
     const fresh = pre.state;
 
-    // Global is only the default preference for NEW medications.
-    // Do NOT flip autoDeductEnabled, settle stock, or invalidate schedules
-    // for existing medications — those follow medication.autoDeductEnabled.
+    // Global is a bulk state setter for ALL existing medications AND the
+    // default for newly added ones. Flip autoDeductEnabled only — do not
+    // settle stock, invent consumption logs, or mutate currentPills here.
+    // Schedulers/reminders react to the resulting medication-level flags.
+    const medications = fresh.medications.map((med) =>
+      med.autoDeductEnabled === opts.enable
+        ? med
+        : { ...med, autoDeductEnabled: opts.enable }
+    );
+
     const err = commitWithManualEnvelope({
-      medications: fresh.medications,
+      medications,
       logs: fresh.logs,
       globalAutoDeductEnabled: opts.enable,
     });
@@ -1369,7 +1376,7 @@ export function runGatedGlobalAutoDeductToggle(opts: {
 
     return {
       outcome: 'applied' as const,
-      medications: fresh.medications,
+      medications,
       logs: fresh.logs,
       enable: opts.enable,
       settleLogs: [],

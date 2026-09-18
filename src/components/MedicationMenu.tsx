@@ -18,7 +18,7 @@ interface MedicationMenuProps {
   /** Effective Auto-Deduct (global ∧ medication). Used for runtime state only. */
   isAutoActive: boolean;
   /**
-   * @deprecated Global is only a new-med default; not used for per-med Auto UI.
+   * @deprecated Global bulk-sets all meds; this menu edits one medication only.
    * Kept optional so existing callers still type-check.
    */
   globalAutoDeductEnabled?: boolean;
@@ -58,7 +58,7 @@ export function MedicationMenu({
 }: MedicationMenuProps) {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
-  // Medication-level Auto only (Global is new-med default, not a kill switch).
+  // Medication-level Auto only (Global bulk-sets all meds; this menu edits one).
   const isMedicationAutoDeductEnabled = medication.autoDeductEnabled !== false;
   const autoTogglePressed = isMedicationAutoDeductEnabled;
   const autoToggleAriaLabel = isAutoActive

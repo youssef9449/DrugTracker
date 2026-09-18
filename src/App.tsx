@@ -651,8 +651,8 @@ export default function App() {
                         <div className="flex items-center gap-1.5">
                           <span className="font-bold text-slate-900 block text-[11px] leading-tight">
                             {globalAutoDeductEnabled
-                              ? 'افتراضي الأدوية الجديدة: مفعّل'
-                              : 'افتراضي الأدوية الجديدة: متوقف'}
+                              ? 'الخصم التلقائي لجميع الأدوية: مفعّل'
+                              : 'الخصم التلقائي لجميع الأدوية: متوقف'}
                           </span>
                           <span
                             className={`text-[9.5px] px-1.5 py-0.2 rounded-full font-bold ${
@@ -670,8 +670,8 @@ export default function App() {
                           }`}
                         >
                           {globalAutoDeductEnabled
-                            ? 'يُطبَّق على الأدوية الجديدة فقط — لا يغيّر الأدوية الحالية.'
-                            : 'الأدوية الجديدة بدون خصم تلقائي — الحالية كما هي.'}
+                            ? 'يضبط كل الأدوية الحالية والجديدة — يمكن تعديل دواء منفردًا من الكارت.'
+                            : 'يوقف كل الأدوية الحالية — يمكن تفعيل دواء منفردًا من الكارت.'}
                         </p>
                       </div>
                       <label
@@ -682,7 +682,7 @@ export default function App() {
                           id="toggle-global-auto-deduct"
                           checked={globalAutoDeductEnabled}
                           onChange={handleToggleGlobalAutoDeduct}
-                          label="الإعداد الافتراضي للخصم التلقائي عند إضافة دواء جديد"
+                          label="تبديل الخصم التلقائي لجميع الأدوية"
                           size="sm"
                           color="teal"
                         />

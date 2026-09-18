@@ -285,11 +285,11 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       setGlobalAutoDeductEnabled(result.enable);
       setMedications(result.medications);
       setLogs(result.logs);
-      // Global is new-med default only — existing meds unchanged (no settle).
+      // Global bulk-sets every existing medication + remains the new-med default.
       if (!result.enable) {
-        showToast('تم ضبط الإعداد الافتراضي: الأدوية الجديدة بدون خصم تلقائي');
+        showToast('تم إيقاف الخصم التلقائي لجميع الأدوية ⏸️');
       } else {
-        showToast('تم ضبط الإعداد الافتراضي: الأدوية الجديدة مع خصم تلقائي ⚡');
+        showToast('تم تفعيل الخصم التلقائي لجميع الأدوية ⚡');
       }
       if (soundEnabled) playSuccessChime();
     })();

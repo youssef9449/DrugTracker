@@ -116,7 +116,7 @@ export function useDoseReminders({
     const med = medicationsRef.current.find((m) => m.id === medId);
     if (!med) return;
 
-    // Auto-deduction guard: medication-level only (Global is new-med default, not a kill switch).
+    // Auto-deduction guard: medication-level only (Global is bulk setter, not a runtime kill switch).
     const isAutoActive = med.autoDeductEnabled !== false;
     if (isAutoActive) return;
 

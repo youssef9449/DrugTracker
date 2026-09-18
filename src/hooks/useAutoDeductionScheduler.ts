@@ -114,7 +114,7 @@ type GuardedCancelResult = {
  */
 async function scheduleExactOccurrenceFromDurable(slot: AutoDeductionSlot) {
   return withAutoStockMutationGate(async (fresh) => {
-    // Medication-level Auto is authoritative (Global is only a new-med default).
+    // Medication-level Auto is authoritative (Global bulk-sets med flags; not a runtime kill switch).
     const med = fresh.medications.find((m) => m.id === slot.medId);
     if (!med) return { ok: true, skipped: true } as const;
 

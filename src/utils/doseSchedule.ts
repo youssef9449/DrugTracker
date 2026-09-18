@@ -20,8 +20,8 @@ import { LEGACY_DOSE_ID } from './legacyDoseId';
 
 /**
  * Auto-Deduction active for a medication based solely on its own preference.
- * Global Auto-Deduct is NOT a kill switch — it is only a default for new meds.
- * Existing medication Auto is controlled by medication.autoDeductEnabled alone.
+ * Global is a bulk setter (and new-med default); runtime Auto follows
+ * medication.autoDeductEnabled after any Global bulk update or card toggle.
  */
 export function isMedicationAutoDeductActive(
   medication: Medication
@@ -31,7 +31,7 @@ export function isMedicationAutoDeductActive(
 
 /**
  * Stock/status projection input. Identity: projection follows medication
- * Auto only (no Global kill switch). Returns the medication unchanged.
+ * Auto only (Global is not a runtime kill switch). Returns the medication unchanged.
  */
 export function medicationForStockProjection(
   medication: Medication

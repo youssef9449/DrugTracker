@@ -294,12 +294,20 @@ export function isDoseTimeElapsedToday(
 
 /**
  * Returns true if a dose slot is completed today (either manually consumed or auto-deducted because its time elapsed).
+ *
+ * Auto-elapsed completion uses the effective Auto-Deduct state when provided
+ * (`autoDeductActive`), otherwise falls back to medication-level
+ * `autoDeductEnabled !== false` for backward-compatible callers.
+ * Effective state must come from {@link isMedicationAutoDeductActive} so
+ * Global OFF correctly disables auto-completion of elapsed doses.
  */
 export function isDoseCompletedToday(
   med: Medication,
   dose: MedicationDose,
   todayStr: string = getTodayDateString(),
-  now: Date = new Date()
+  now: Date = new Date(),
+  /** Effective auto-deduct (global ∧ medication). When omitted, medication-level only. */
+  autoDeductActive?: boolean
 ): boolean {
   if (isDoseConsumedOnDate(med, dose.id, todayStr)) {
     return true;
@@ -308,7 +316,11 @@ export function isDoseCompletedToday(
   if (isDoseSkippedOnDate(med, dose.id, todayStr)) {
     return false;
   }
-  if (med.autoDeductEnabled !== false && isDoseTimeElapsedToday(dose.time, now)) {
+  const autoActive =
+    autoDeductActive !== undefined
+      ? autoDeductActive
+      : med.autoDeductEnabled !== false;
+  if (autoActive && isDoseTimeElapsedToday(dose.time, now)) {
     return true;
   }
   return false;
@@ -389,18 +401,25 @@ export function getNextDoseAmount(
  *    Skipped/restored slots are incomplete again so Take d1 works after Restore.
  * 3. All completed via auto-deduct only → non-interactive (no fake restore).
  *
+ * Effective Auto-Deduct state (via {@link isMedicationAutoDeductActive} and
+ * `globalAutoDeductEnabled`) controls whether elapsed time alone marks a
+ * slot completed. When Global OFF, elapsed + not consumed + not skipped
+ * remains Take-eligible (`canTake=true`, `canRestore=false`).
+ *
  * Legacy (no schedule): lastConsumedDate / dailyDose.
  */
 export function getCardDoseToggleTarget(
   med: Medication,
   now: Date = new Date(),
-  todayStr: string = getTodayDateString()
+  todayStr: string = getTodayDateString(),
+  globalAutoDeductEnabled: boolean = true
 ): {
   doseId?: string;
   amount: number;
   canTake: boolean;
   canRestore: boolean;
 } {
+  const autoActive = isMedicationAutoDeductActive(med, globalAutoDeductEnabled);
   const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
   if (schedule.length === 0) {
     const taken = med.lastConsumedDate === todayStr;
@@ -429,8 +448,9 @@ export function getCardDoseToggleTarget(
   }
 
   // 2) No restorable manual mark → first incomplete slot for Take.
+  //    Uses effective auto state so Global OFF does not treat elapsed as completed.
   for (const d of sorted) {
-    if (!isDoseCompletedToday(med, d, todayStr, now)) {
+    if (!isDoseCompletedToday(med, d, todayStr, now, autoActive)) {
       const amount = Number(d.amount) || 0;
       return {
         doseId: d.id,

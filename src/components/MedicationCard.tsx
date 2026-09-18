@@ -481,7 +481,12 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const isOut = statusInfo.status === 'out_of_stock';
     const isCrit = statusInfo.status === 'critical';
     const isWarn = statusInfo.status === 'warning';
-    const doseToggle = getCardDoseToggleTarget(medication);
+    const doseToggle = getCardDoseToggleTarget(
+      medication,
+      new Date(),
+      getTodayDateString(),
+      globalAutoDeductEnabled
+    );
     const todayStr = getTodayDateString();
     // Manual Restore display amount: exact active deduction for doseToggle.doseId only.
     // No schedule fallback when evidence is missing (durable layer fail-closes).
@@ -697,7 +702,12 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const isOut = statusInfo.status === 'out_of_stock';
     const isCrit = statusInfo.status === 'critical';
     const isWarn = statusInfo.status === 'warning';
-    const doseToggle = getCardDoseToggleTarget(medication);
+    const doseToggle = getCardDoseToggleTarget(
+      medication,
+      new Date(),
+      getTodayDateString(),
+      globalAutoDeductEnabled
+    );
     const todayStr = getTodayDateString();
     // Manual Restore display amount: exact active deduction for doseToggle.doseId only.
     // No schedule fallback when evidence is missing (durable layer fail-closes).

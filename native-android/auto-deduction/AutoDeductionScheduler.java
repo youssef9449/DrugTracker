@@ -1401,11 +1401,15 @@ public final class AutoDeductionScheduler {
                     // Still FAILED — evidence retained for later retry.
                     int count = evidence.optInt("retryCount", 0);
                     if (count >= AutoDeductionContract.MAX_FIRE_RETRIES) {
-                        // Budget exhausted: keep evidence for diagnostics; no new retry.
-                        // Exhaustion alone does not mark the restore boundary failed —
-                        // evidence remains for a future process with fresh budget policy.
-                        Log.w(TAG, "independent evidence max retries for "
-                                + medId + "/" + doseId + "/" + date);
+                        // Unresolved fire: evidence remains but no durable FIRED/pending
+                        // and no further bounded retry is allowed. Recovery boundary is
+                        // incomplete — must not report ok=true (would success-cache and
+                        // skip later boundaries while the exact deduction never lands).
+                        failed++;
+                        ok = false;
+                        Log.e(TAG, "independent evidence unresolved after MAX_FIRE_RETRIES for "
+                                + medId + "/" + doseId + "/" + date
+                                + " — evidence retained, no further retry");
                     } else {
                         long scheduledAt = evidence.optLong("scheduledAtEpochMs", 0L);
                         double amount = evidence.optDouble("amount", Double.NaN);

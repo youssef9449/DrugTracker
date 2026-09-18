@@ -466,4 +466,59 @@ public class FireRetryScheduleTest {
                 "independent recovery must not schedule successor",
                 before, alarmCount());
     }
+
+    @Test
+    public void maxRetriesUnresolved_restoreOkFalse_evidenceRetained()
+            throws Exception {
+        // Invalid amount so recoverFireFromIndependentEvidence cannot produce FIRED;
+        // retryCount already at MAX → no new retry; boundary must be incomplete.
+        String date = "2026-09-13";
+        AutoDeductionScheduler s = newScheduler();
+        synchronized (getScheduleLock()) {
+            assertTrue(s.recordIndependentFireRetryEvidenceLocked(
+                    "med", "dose", date, 1000L, 0.0, "08:00", 1L, "v1",
+                    AutoDeductionContract.MAX_FIRE_RETRIES));
+        }
+        AutoDeductionScheduler.RestoreResult rr =
+                s.recoverIndependentFireRetryEvidencePass();
+        assertFalse(rr.ok);
+        assertTrue(rr.failed >= 1);
+        // Evidence must remain for a later boundary
+        assertNotNull(s.getIndependentFireRetryEvidence("med", "dose", date));
+        assertEquals(
+                AutoDeductionContract.MAX_FIRE_RETRIES,
+                s.getIndependentFireRetryEvidence("med", "dose", date)
+                        .optInt("retryCount"));
+    }
+
+    @Test
+    public void scheduleFireRetry_noSchAndNoEvidence_doesNotInventEvidence()
+            throws Exception {
+        String date = futureCalendarDate(6);
+        long epoch = futureEpochMs(date, "10:00");
+        AutoDeductionScheduler s = newScheduler();
+        assertFalse(s.scheduleFireRetry(
+                "med", "dose", date, epoch, 1.0, "10:00", 1L, "v1", 1));
+        assertNull(s.getIndependentFireRetryEvidence("med", "dose", date));
+    }
+
+    @Test
+    public void recoverWithoutSch_existingEvidence_producesDurableFired()
+            throws Exception {
+        String date = "2026-09-16";
+        AutoDeductionScheduler s = newScheduler();
+        synchronized (getScheduleLock()) {
+            assertTrue(s.recordIndependentFireRetryEvidenceLocked(
+                    "med", "dose", date, 1000L, 2.0, "08:00", 1L, "v1", 1));
+        }
+        // No sch: row
+        assertFalse(schedulePrefs().contains(
+                "sch:" + AutoDeductionContract.occurrenceKey("med", "dose", date)));
+        AutoDeductionScheduler.FireResult fr =
+                s.recoverFireFromIndependentEvidence("med", "dose", date);
+        assertTrue(fr.status == AutoDeductionScheduler.FireResult.Status.CREATED
+                || fr.status == AutoDeductionScheduler.FireResult.Status.ALREADY_EXISTS
+                || fr.pendingRecorded);
+        assertNull(s.getIndependentFireRetryEvidence("med", "dose", date));
+    }
 }

@@ -695,7 +695,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     });
 
     await waitFor(() => {
-      expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/تم أخذ الجرعة|أخذ الجرعة/));
+      expect(showToast).toHaveBeenCalledWith(expect.stringContaining('تم تناول جرعة'));
     });
     // The operation itself is already consumed, but the gate returned the
     // durable snapshot and the handler must still refresh React with it.

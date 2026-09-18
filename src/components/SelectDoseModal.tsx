@@ -1,6 +1,6 @@
 import type { FC } from 'react';
 import { Check, Pill, RotateCcw, X } from 'lucide-react';
-import type { Medication, MedicationDose } from '../types';
+import type { ConsumptionLog, Medication, MedicationDose } from '../types';
 import { formatTimeArabic } from '../types';
 import {
   getTodayDateString,
@@ -16,6 +16,7 @@ import {
   relativeDoseDayLabel,
   sortDoseSelectItems,
 } from '../utils/doseSelectDisplay';
+import { findActiveDeductionForOccurrence } from '../utils/medActions';
 import { Modal } from './ui/Modal';
 
 export type SelectDoseMode = 'take' | 'restore' | 'manage';
@@ -36,6 +37,8 @@ export interface SelectDoseModalProps {
   /** Global Auto-Deduction toggle (defaults to true). Effective auto state
    *  is isMedicationAutoDeductActive(medication, globalAutoDeductEnabled). */
   globalAutoDeductEnabled?: boolean;
+  /** Durable stock logs used to classify source and show historical amounts. */
+  logs?: ConsumptionLog[];
   onClose: () => void;
 }
 
@@ -57,6 +60,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
   onSelect,
   onRestore,
   globalAutoDeductEnabled = true,
+  logs = [],
   onClose,
 }) => {
   if (!medication) return null;
@@ -135,6 +139,20 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
               const completed = isDoseCompletedToday(medication, dose, today, now);
               const skipped = isDoseSkippedOnDate(medication, dose.id, today);
               const consumed = isDoseConsumedOnDate(medication, dose.id, today);
+              const activeDeduction = findActiveDeductionForOccurrence(
+                logs,
+                medication.id,
+                dose.id,
+                today
+              );
+              const isAutoConsumed =
+                consumed && activeDeduction?.type === 'auto_daily';
+              const historicalAmount =
+                activeDeduction && Number.isFinite(Number(activeDeduction.amount))
+                  ? Math.abs(Number(activeDeduction.amount))
+                  : 0;
+              const displayAmount =
+                historicalAmount > 0 ? historicalAmount : Number(dose.amount) || 0;
               const elapsed = isDoseTimeElapsedToday(dose.time, now);
               // Pure auto: completed via elapsed time, not manual consume, not skipped
               const isPureAuto =
@@ -142,7 +160,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
               const timeLabel = formatTimeArabic(dose.time);
               const dayLabel = relativeDoseDayLabel(eventDate, today);
               const whenLabel = `${dayLabel} • ${timeLabel}`;
-              const amountLabel = `${dose.amount} ${unit}`;
+              const amountLabel = `${displayAmount} ${unit}`;
 
               if (isManage) {
                 // Effective Auto-Deduction state = isAutoActive (single source:
@@ -163,7 +181,13 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                 let action: 'take' | 'restore' | null;
                 let actionLabel: string;
 
-                if (consumed) {
+                if (isAutoConsumed) {
+                  // Exact Auto reuses the consumption marker for idempotency;
+                  // the durable auto_daily log preserves the true source.
+                  statusText = 'تم الخصم تلقائيًا';
+                  action = 'restore';
+                  actionLabel = 'استرجاع الجرعة';
+                } else if (consumed) {
                   // Manually consumed today (either auto state): allow Restore.
                   statusText = 'تم التناول';
                   action = 'restore';
@@ -200,10 +224,10 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                     data-event-date={eventDate}
                     data-select-mode="manage"
                     data-dose-status={
-                      consumed
-                        ? 'consumed'
-                        : isPureAuto
-                          ? 'auto'
+                      isAutoConsumed || isPureAuto
+                        ? 'auto'
+                        : consumed
+                          ? 'consumed'
                           : action === 'take'
                             ? 'pending'
                             : 'inactive'
@@ -276,10 +300,13 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                   statusLabel = 'غير متاحة';
                 }
               } else if (isDone) {
-                ariaLabel = consumed
-                  ? `تم تناول ${whenLabel} — ${amountLabel}`
-                  : `تم خصم ${whenLabel} تلقائياً — ${amountLabel}`;
-                statusLabel = consumed ? 'تم التناول' : 'خصم تلقائي';
+                ariaLabel = isAutoConsumed
+                  ? `تم خصم ${whenLabel} تلقائياً — ${amountLabel}`
+                  : consumed
+                    ? `تم تناول ${whenLabel} — ${amountLabel}`
+                    : `تم خصم ${whenLabel} تلقائياً — ${amountLabel}`;
+                statusLabel =
+                  isAutoConsumed || !consumed ? 'خصم تلقائي' : 'تم التناول';
               } else {
                 ariaLabel = `تناول ${whenLabel} — ${amountLabel}`;
                 statusLabel = 'اختيار';

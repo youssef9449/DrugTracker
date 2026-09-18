@@ -777,6 +777,7 @@ export default function App() {
                       viewFilter={filter}
                       isCompact={isCompactView}
                       globalAutoDeductEnabled={globalAutoDeductEnabled}
+                      logs={logs}
                       onOpenRefill={setRefillMedication}
                       onEdit={(m) => {
                         setEditingMedication(m);
@@ -941,6 +942,7 @@ export default function App() {
         }
         mode={selectDoseMode}
         globalAutoDeductEnabled={globalAutoDeductEnabled}
+        logs={logs}
         onSelect={handleSelectDoseFromModal}
         onRestore={handleCardRestoreDose}
         onClose={() => {

@@ -156,8 +156,10 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         if (displayName) showToast(TOAST_MESSAGES.autoDeductOff(displayName));
       } else if (result.reason === 'missing_dose_id') {
         showToast('اختر الجرعة المراد استرجاعها');
+      } else if (result.outcome === 'persist_failed') {
+        showToast(STORAGE_ERRORS.generic);
       }
-      // persist_failed / missing_med / other rejected → no success state
+      // missing_med / other rejected → no success state
       return { medication: null, result };
     } finally {
       restoreInFlightRef.current.delete(restoreKey);
@@ -404,6 +406,10 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       if (soundEnabled) playSuccessChime();
     } else if (result.outcome === 'already_consumed' && displayName) {
       showToast(TOAST_MESSAGES.doseAlreadyTaken(displayName));
+    } else if (result.outcome === 'persist_failed') {
+      // Covers native snapshot failures and Exact-durability barriers on the
+      // notification action path; never leave a failed action silent.
+      showToast(STORAGE_ERRORS.generic);
     }
     if (shouldDismissAlarmAfterManualTake(result.outcome)) {
       dismissAlarm();

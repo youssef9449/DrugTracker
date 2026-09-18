@@ -11,13 +11,19 @@ import {
   Clock,
   ListChecks,
 } from 'lucide-react';
+import type { ConsumptionLog } from '../types';
 import { Medication, calculateMedicationStatus, describeStockInStrips, isSolidUnit } from '../types';
-import { getDepletionDate, effectiveCurrentPills } from '../utils/dateCalculations';
+import {
+  getDepletionDate,
+  effectiveCurrentPills,
+  getTodayDateString,
+} from '../utils/dateCalculations';
 import {
   getCardDoseToggleTarget,
   getAutoRestorableDose,
   isMedicationAutoDeductActive,
 } from '../utils/doseSchedule';
+import { findActiveDeductionForOccurrence } from '../utils/medActions';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { VISUAL_RANGE_MULTIPLIER, MIN_VISUAL_RANGE_DAYS, DAYS_PER_MONTH } from '../utils/time';
 import { MedicationMenu } from './MedicationMenu';
@@ -110,6 +116,8 @@ interface MedicationCardProps {
   onConsumeDose?: (medicationId: string, doseId?: string) => void;
   /** Restore a manually consumed dose via the same App path as logs. */
   onRestoreDose?: (medicationId: string, doseId?: string) => void;
+  /** Durable stock logs used to display the exact historical Restore amount. */
+  logs?: ConsumptionLog[];
   lastRefillQuantity?: number;
   onUndoRefill?: () => void;
   globalAutoDeductEnabled?: boolean;
@@ -126,6 +134,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   onNavigateToShopping,
   onConsumeDose,
   onRestoreDose,
+  logs = [],
   lastRefillQuantity,
   onUndoRefill,
   globalAutoDeductEnabled = true,
@@ -473,7 +482,18 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const isCrit = statusInfo.status === 'critical';
     const isWarn = statusInfo.status === 'warning';
     const doseToggle = getCardDoseToggleTarget(medication);
-    const nextDoseAmount = doseToggle.amount;
+    const activeDeduction = findActiveDeductionForOccurrence(
+      logs,
+      medication.id,
+      doseToggle.doseId,
+      getTodayDateString()
+    );
+    const historicalAmount =
+      activeDeduction && Number.isFinite(Number(activeDeduction.amount))
+        ? Math.abs(Number(activeDeduction.amount))
+        : 0;
+    const nextDoseAmount =
+      historicalAmount > 0 ? historicalAmount : doseToggle.amount;
     const autoRestorableDose = getAutoRestorableDose(medication);
     const showAutoRestore =
       isAutoActive && Boolean(onRestoreDose) && Boolean(autoRestorableDose);
@@ -650,7 +670,18 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const isCrit = statusInfo.status === 'critical';
     const isWarn = statusInfo.status === 'warning';
     const doseToggle = getCardDoseToggleTarget(medication);
-    const nextDoseAmount = doseToggle.amount;
+    const activeDeduction = findActiveDeductionForOccurrence(
+      logs,
+      medication.id,
+      doseToggle.doseId,
+      getTodayDateString()
+    );
+    const historicalAmount =
+      activeDeduction && Number.isFinite(Number(activeDeduction.amount))
+        ? Math.abs(Number(activeDeduction.amount))
+        : 0;
+    const nextDoseAmount =
+      historicalAmount > 0 ? historicalAmount : doseToggle.amount;
     const autoRestorableDose = getAutoRestorableDose(medication);
     const showAutoRestore =
       isAutoActive && Boolean(onRestoreDose) && Boolean(autoRestorableDose);

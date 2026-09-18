@@ -6,7 +6,7 @@ import {
   relativeDoseDayLabel,
   sortDoseSelectItems,
 } from '@/utils/doseSelectDisplay';
-import type { Medication } from '@/types';
+import type { ConsumptionLog, Medication } from '@/types';
 import { getTodayDateString } from '@/utils/dateCalculations';
 
 function makeMulti(overrides: Partial<Medication> = {}): Medication {
@@ -202,6 +202,49 @@ describe('SelectDoseModal', () => {
     expect(d2Btn).toHaveTextContent('اختيار');
     fireEvent.click(d2Btn!);
     expect(onSelect).toHaveBeenCalledWith('med-multi', 'd2');
+  });
+
+  it('renders an exact auto-deduction as automatic and uses its historical amount', () => {
+    const today = getTodayDateString();
+    const autoLog: ConsumptionLog = {
+      id: 'exact-auto:med-multi:d1:' + today,
+      medicationId: 'med-multi',
+      medicationName: 'Multi Med',
+      type: 'auto_daily',
+      amount: -2,
+      date: today,
+      timestamp: '2026-09-13T08:00:00.000Z',
+      description: 'Exact Auto deduction',
+      doseId: 'd1',
+    };
+
+    render(
+      <SelectDoseModal
+        isOpen
+        mode="manage"
+        medication={makeMulti({
+          doseConsumption: { d1: today },
+          doseSchedule: [
+            { id: 'd1', amount: 1, time: '08:00' },
+            { id: 'd2', amount: 1, time: '14:00' },
+            { id: 'd3', amount: 1, time: '21:00' },
+          ],
+        })}
+        logs={[autoLog]}
+        onSelect={() => {}}
+        onRestore={() => {}}
+        onClose={() => {}}
+      />
+    );
+
+    const d1 = screen
+      .getAllByRole('button')
+      .find((b) => b.getAttribute('data-dose-id') === 'd1');
+
+    expect(d1).toHaveAttribute('data-dose-status', 'auto');
+    expect(d1).toHaveTextContent('2 قرص');
+    expect(d1).toHaveTextContent('الحالة: تم الخصم تلقائيًا');
+    expect(d1).toHaveAttribute('data-dose-action', 'restore');
   });
 
   it('marks consumed doses and blocks re-selection', () => {

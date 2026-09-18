@@ -11,6 +11,7 @@ import {
   autoDeductionScheduleKey,
   localEpochMs,
   tomorrowDateString,
+  isFireRetryRecoveryPending,
 } from '../../src/hooks/useAutoDeductionScheduler';
 import { autoDeductionOccurrenceKey } from '../../src/utils/autoDeductionNative';
 import { LEGACY_DOSE_ID } from '../../src/utils/notifications';
@@ -131,6 +132,118 @@ describe('settings gate', () => {
       doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
     });
     expect(getAutoDeductionSlotsForDate(med, '2026-09-14')).toEqual([]);
+  });
+});
+
+describe('fire-retry recovery preservation', () => {
+  const now = 1_000_000;
+
+  it('protects a due retry-marked occurrence while the durable medication still wants that slot', () => {
+    const med = baseMed({
+      autoDeductEnabled: true,
+      doseSchedule: [{ id: 'dose-a', amount: 1, time: '08:00' }],
+    });
+    expect(
+      isFireRetryRecoveryPending(
+        {
+          medicationId: 'med-1',
+          doseId: 'dose-a',
+          calendarDate: '2026-09-14',
+          timeHhmm: '08:00',
+          amount: 1,
+          scheduledAtEpochMs: now,
+          fireRetryCount: 3,
+        },
+        med,
+        true,
+        now
+      )
+    ).toBe(true);
+  });
+
+  it('does not protect a retry marker when global auto-deduct is disabled', () => {
+    const med = baseMed({
+      autoDeductEnabled: true,
+      doseSchedule: [{ id: 'dose-a', amount: 1, time: '08:00' }],
+    });
+    expect(
+      isFireRetryRecoveryPending(
+        {
+          medicationId: 'med-1',
+          doseId: 'dose-a',
+          calendarDate: '2026-09-14',
+          timeHhmm: '08:00',
+          scheduledAtEpochMs: now,
+          fireRetryCount: 1,
+        },
+        med,
+        false,
+        now
+      )
+    ).toBe(false);
+  });
+
+  it('does not protect a retry marker when the medication no longer wants that dose slot', () => {
+    const med = baseMed({
+      autoDeductEnabled: false,
+      doseSchedule: [{ id: 'dose-a', amount: 1, time: '08:00' }],
+    });
+    expect(
+      isFireRetryRecoveryPending(
+        {
+          medicationId: 'med-1',
+          doseId: 'dose-a',
+          calendarDate: '2026-09-14',
+          scheduledAtEpochMs: now,
+          fireRetryCount: 3,
+        },
+        med,
+        true,
+        now
+      )
+    ).toBe(false);
+  });
+
+  it('does not protect a future retry-marked schedule', () => {
+    const med = baseMed({
+      autoDeductEnabled: true,
+      doseSchedule: [{ id: 'dose-a', amount: 1, time: '08:00' }],
+    });
+    expect(
+      isFireRetryRecoveryPending(
+        {
+          medicationId: 'med-1',
+          doseId: 'dose-a',
+          calendarDate: '2026-09-14',
+          scheduledAtEpochMs: now + 10_000,
+          fireRetryCount: 1,
+        },
+        med,
+        true,
+        now
+      )
+    ).toBe(false);
+  });
+
+  it('does not protect a schedule without a retry marker', () => {
+    const med = baseMed({
+      autoDeductEnabled: true,
+      doseSchedule: [{ id: 'dose-a', amount: 1, time: '08:00' }],
+    });
+    expect(
+      isFireRetryRecoveryPending(
+        {
+          medicationId: 'med-1',
+          doseId: 'dose-a',
+          calendarDate: '2026-09-14',
+          scheduledAtEpochMs: now,
+          fireRetryCount: 0,
+        },
+        med,
+        true,
+        now
+      )
+    ).toBe(false);
   });
 });
 

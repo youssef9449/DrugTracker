@@ -8,7 +8,10 @@
  * the current schedule amount for the same occurrence.
  */
 
-import type { AutoStockDurableState } from './autoDeductionStockGate';
+import {
+  loadDurableGlobalAutoDeductEnabled,
+  type AutoStockDurableState,
+} from './autoDeductionStockGate';
 import {
   runAutoDeductionReconciliation,
   type RunReconciliationOutput,
@@ -41,11 +44,16 @@ export async function reconcileExactBeforeLegacySettlement(opts: {
     now: opts.now,
   });
 
+  // Envelope recovery/reconciliation may have durably changed the global
+  // master switch. Do not return the pre-gate snapshot as the post-recovery
+  // authority; re-read the durable value while the caller still holds the gate.
+  const durableGlobalAutoDeductEnabled = loadDurableGlobalAutoDeductEnabled();
+
   return {
     state: {
       medications: recon.medications,
       logs: recon.logs,
-      globalAutoDeductEnabled: opts.fresh.globalAutoDeductEnabled,
+      globalAutoDeductEnabled: durableGlobalAutoDeductEnabled,
     },
     reconciliation: recon,
     nativeListFailed: recon.nativeListFailed === true,

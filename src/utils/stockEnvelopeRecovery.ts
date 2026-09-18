@@ -209,6 +209,10 @@ export function migrateLegacyExactAutoEnvelope(
     const commitErr = commit({
       medications: existing.medications,
       logs: existing.logs,
+      // Preserve the global master state captured by a Phase 4 envelope.
+      // Pre-Phase-4 envelopes may omit it, so fall back to the current durable value.
+      globalAutoDeductEnabled:
+        existing.globalAutoDeductEnabled ?? fresh.globalAutoDeductEnabled,
     });
     if (commitErr) {
       // Recovery was attempted (envelope present). Persist failed → mutation
@@ -218,6 +222,8 @@ export function migrateLegacyExactAutoEnvelope(
     const applied: AutoStockDurableState = {
       medications: existing.medications,
       logs: existing.logs,
+      globalAutoDeductEnabled:
+        existing.globalAutoDeductEnabled ?? fresh.globalAutoDeductEnabled,
     };
     const clearErr = save(null);
     if (clearErr) {

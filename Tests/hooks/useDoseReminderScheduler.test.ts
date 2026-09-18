@@ -2055,4 +2055,40 @@ describe('useDoseReminderScheduler — medication-level Auto policy', () => {
       )
     ).not.toThrow();
   });
+
+  // Matrix: Global is bulk-only (not an input here). Runtime follows medication only.
+  it('med Auto OFF → schedule without autoDeductEnabled:true (manual reminder)', async () => {
+    const med = makeMed({
+      id: 'med-off',
+      reminderTime: '20:00',
+      autoDeductEnabled: false,
+    });
+    renderHook(() =>
+      useDoseReminderScheduler(defaultOpts({ medications: [med] }))
+    );
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    const autoOn = mocks.schedule.mock.calls.find(
+      (c) => c[5]?.autoDeductEnabled === true
+    );
+    expect(autoOn).toBeUndefined();
+    // Reminder is still scheduled (manual path); only Auto flag differs.
+    expect(mocks.schedule).toHaveBeenCalled();
+  });
+
+  it('med Auto ON after bulk Global OFF scenario → still schedules with autoDeductEnabled:true', async () => {
+    // Simulates: Global was bulk-OFF, user re-enabled only this med on the card.
+    const med = makeMed({
+      id: 'med-individual-on',
+      reminderTime: '20:00',
+      autoDeductEnabled: true,
+    });
+    renderHook(() =>
+      useDoseReminderScheduler(defaultOpts({ medications: [med] }))
+    );
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    const withAuto = mocks.schedule.mock.calls.find(
+      (c) => c[0] === 'med-individual-on' && c[5]?.autoDeductEnabled === true
+    );
+    expect(withAuto).toBeTruthy();
+  });
 });

@@ -91,6 +91,8 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
   medicationsRef.current = medications;
   const selectDoseModeRef = useRef(selectDoseMode);
   selectDoseModeRef.current = selectDoseMode;
+  const globalAutoDeductEnabledRef = useRef(globalAutoDeductEnabled);
+  globalAutoDeductEnabledRef.current = globalAutoDeductEnabled;
 
   const handleRestoreDose = async (
     medicationId: string,
@@ -117,7 +119,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       const result = await runGatedManualRestore({
         medicationId,
         doseId,
-        todayStr: today,
         makeLogId: () => generateId('restore'),
       });
       const displayName = result.medicationName ?? '';
@@ -324,33 +325,44 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
   };
 
 
-  const handleTakeDoseFromAlarm = useCallback((med: Medication, doseId?: string) => {
-    // Phase 4: durable gate — same serialization as exact auto reconciliation.
-    // doseId comes from the alarm payload; display name prefers durable result.
-    void (async () => {
-      const result = await runGatedManualConsume({
-        medicationId: med.id,
-        doseId,
-        source: 'alarm',
-      });
-      const displayName = result.medicationName ?? med.name;
-      const displayUnit = result.unit ?? med.unit;
-      if (result.outcome === 'applied' && result.log) {
-        setMedications(result.medications);
-        medicationsRef.current = result.medications;
-        setLogs(result.logs);
+  const runAlarmTake = useCallback(async (
+    medicationId: string,
+    doseId: string | undefined,
+    fallbackMed?: Medication
+  ) => {
+    const result = await runGatedManualConsume({
+      medicationId,
+      doseId,
+      source: 'alarm',
+    });
+    const displayName = result.medicationName ?? fallbackMed?.name ?? '';
+    const displayUnit = result.unit ?? fallbackMed?.unit ?? '';
+    if (result.outcome !== 'persist_failed') {
+      setMedications(result.medications);
+      medicationsRef.current = result.medications;
+      setLogs(result.logs);
+    }
+    if (result.outcome === 'applied' && result.log) {
+      if (displayName) {
         showToast(TOAST_MESSAGES.doseTaken(displayName, result.doseAmount, displayUnit));
-        if (soundEnabled) playSuccessChime();
-      } else if (result.outcome === 'already_consumed') {
-        showToast(TOAST_MESSAGES.doseAlreadyTaken(displayName));
       }
-      // Dismiss only when durable Take applied or occurrence already settled.
-      // persist_failed must keep the alarm so the user can retry.
-      if (shouldDismissAlarmAfterManualTake(result.outcome)) {
-        dismissAlarm();
-      }
-    })();
+      if (soundEnabled) playSuccessChime();
+    } else if (result.outcome === 'already_consumed' && displayName) {
+      showToast(TOAST_MESSAGES.doseAlreadyTaken(displayName));
+    }
+    if (shouldDismissAlarmAfterManualTake(result.outcome)) {
+      dismissAlarm();
+    }
   }, [dismissAlarm, soundEnabled]);
+
+  const handleTakeDoseFromAlarm = useCallback((med: Medication, doseId?: string) => {
+    void runAlarmTake(med.id, doseId, med);
+  }, [runAlarmTake]);
+
+  /** Notification action entry point: identity only, never a React snapshot. */
+  const handleTakeDoseFromAlarmById = useCallback((medicationId: string, doseId?: string) => {
+    void runAlarmTake(medicationId, doseId);
+  }, [runAlarmTake]);
 
 
   const handleSnoozeFromAlarm = (med: Medication) => {
@@ -376,10 +388,12 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       });
       const displayName = result.medicationName ?? '';
       const displayUnit = result.unit ?? '';
-      if (result.outcome === 'applied' && result.log) {
+      if (result.outcome !== 'persist_failed') {
         setMedications(result.medications);
         medicationsRef.current = result.medications;
         setLogs(result.logs);
+      }
+      if (result.outcome === 'applied' && result.log) {
         const updatedMed = result.medications.find((m) => m.id === medicationId);
         if (selectDoseModeRef.current === 'manage' && updatedMed) {
           setSelectDoseMed(updatedMed);
@@ -547,6 +561,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     handleSaveMedication,
     handleDeleteMedication,
     handleTakeDoseFromAlarm,
+    handleTakeDoseFromAlarmById,
     handleSnoozeFromAlarm,
     handleConsumeDose,
     handleCardRestoreDose,

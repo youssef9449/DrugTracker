@@ -18,6 +18,7 @@ export function useStartupAutoDeduction(opts: {
   globalAutoDeductEnabled: boolean;
   setMedications: Dispatch<SetStateAction<Medication[]>>;
   setLogs: Dispatch<SetStateAction<ConsumptionLog[]>>;
+  setGlobalAutoDeductEnabled: Dispatch<SetStateAction<boolean>>;
   showToast: (message: string) => void;
 }): void {
   const {
@@ -26,6 +27,7 @@ export function useStartupAutoDeduction(opts: {
     globalAutoDeductEnabled,
     setMedications,
     setLogs,
+    setGlobalAutoDeductEnabled,
     showToast,
   } = opts;
 
@@ -45,13 +47,18 @@ export function useStartupAutoDeduction(opts: {
     void withAutoStockMutationGate(async (fresh) => {
       const pre = await reconcileExactBeforeLegacySettlement({
         fresh,
-        globalAutoDeductEnabled,
+        // Valid FIRED events are reconciled regardless of current policy.
+        // The post-reconciliation durable global value is the authority for
+        // whether legacy settlement may proceed.
+        globalAutoDeductEnabled: fresh.globalAutoDeductEnabled !== false,
       });
       // Native list failure: do not run legacy settlement (retry next session).
       if (pre.nativeListFailed) {
         return;
       }
-      if (!globalAutoDeductEnabled) {
+      const durableGlobalAutoDeductEnabled = pre.state.globalAutoDeductEnabled !== false;
+      setGlobalAutoDeductEnabled(durableGlobalAutoDeductEnabled);
+      if (!durableGlobalAutoDeductEnabled) {
         // Exact path may still have mutated stock; surface if so.
         if (pre.reconciliation?.mutated) {
           setMedications(pre.state.medications);
@@ -70,7 +77,7 @@ export function useStartupAutoDeduction(opts: {
         const err = commitDurableAutoStockState({
           medications: nextMeds,
           logs: nextLogs,
-          globalAutoDeductEnabled: fresh.globalAutoDeductEnabled,
+          globalAutoDeductEnabled: pre.state.globalAutoDeductEnabled,
         });
         if (!err) {
           setMedications(nextMeds);

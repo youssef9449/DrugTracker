@@ -295,7 +295,6 @@ export function useAutoDeductionScheduler({
       // hold stale schedules for disabled/deleted meds — cancel those first.
       // System boot / permission re-grant restore is handled by
       // AutoDeductionSystemReceiver, not this normal desired-state pass.
-      const invalidatedSlots = new Set<string>();
       // Issue #242: native list is authoritative for durable-schedule discovery.
       // Distinguish success+empty from read failure — never treat failure as [].
       const listResult = await listScheduledAutoDeductionOccurrences();
@@ -312,30 +311,17 @@ export function useAutoDeductionScheduler({
             // Issue #217: durable generation bump MUST succeed before any
             // occurrence cancel. Cancel-without-invalidate leaves the old
             // generation active so a concurrent receiver can still create D+1.
-            const slotId = `${s.medicationId}::${s.doseId}`;
-            if (!invalidatedSlots.has(slotId)) {
-              const res = await cancelUndesiredExactOccurrence(
-                s.medicationId,
-                s.doseId,
-                s.calendarDate
-              );
-              if (!res.ok) {
-                // Fail-closed: keep tracking, skip cancel, retry next pass.
-                continue;
-              }
-              if (!res.skipped) {
-                invalidatedSlots.add(slotId);
-                trackedRef.current.delete(key);
-              }
-            } else {
-              const res = await cancelAutoDeduction(
-                s.medicationId,
-                s.doseId,
-                s.calendarDate
-              );
-              if (res.ok) {
-                trackedRef.current.delete(key);
-              }
+            const res = await cancelUndesiredExactOccurrence(
+              s.medicationId,
+              s.doseId,
+              s.calendarDate
+            );
+            if (!res.ok) {
+              // Fail-closed: keep tracking, skip cancel, retry next pass.
+              continue;
+            }
+            if (!res.skipped) {
+              trackedRef.current.delete(key);
             }
           } else {
             // Still desired — track so later passes can cancel if removed.
@@ -352,26 +338,17 @@ export function useAutoDeductionScheduler({
           if (!desired.has(key)) {
             const [medId, doseId, date] = key.split('::');
             if (medId && doseId && date) {
-              const slotId = `${medId}::${doseId}`;
-              if (!invalidatedSlots.has(slotId)) {
-                const res = await cancelUndesiredExactOccurrence(
-                  medId,
-                  doseId,
-                  date
-                );
-                if (!res.ok) {
-                  // Fail-closed: do not cancel occurrence; keep tracking for retry.
-                  continue;
-                }
-                if (!res.skipped) {
-                  invalidatedSlots.add(slotId);
-                  trackedRef.current.delete(key);
-                }
-              } else {
-                const res = await cancelAutoDeduction(medId, doseId, date);
-                if (res.ok) {
-                  trackedRef.current.delete(key);
-                }
+              const res = await cancelUndesiredExactOccurrence(
+                medId,
+                doseId,
+                date
+              );
+              if (!res.ok) {
+                // Fail-closed: do not cancel occurrence; keep tracking for retry.
+                continue;
+              }
+              if (!res.skipped) {
+                trackedRef.current.delete(key);
               }
             } else {
               trackedRef.current.delete(key);

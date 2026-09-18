@@ -17,6 +17,7 @@ import {
   runGatedAutoDeductToggle,
   runGatedGlobalAutoDeductToggle,
   runGatedMedicationUpdate,
+  runGatedDeleteMedication,
   shouldDismissAlarmAfterManualTake,
   type GatedManualRestoreResult,
 } from '../utils/manualStockMutation';
@@ -177,10 +178,12 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         medicationId,
         addedPills,
       });
-      if (result.outcome === 'applied' && result.log) {
+      if (result.outcome !== 'persist_failed') {
         setMedications(result.medications);
         medicationsRef.current = result.medications;
         setLogs(result.logs);
+      }
+      if (result.outcome === 'applied' && result.log) {
         if (soundEnabled) playSuccessChime();
       }
     })();
@@ -193,27 +196,21 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     if (refillUndoInFlightRef.current.has(medicationId)) return;
     refillUndoInFlightRef.current.add(medicationId);
 
-    // Clear the guard after the current event-loop tick. This blocks a
-    // rapid double-click (same tick — the timeout hasn't fired yet) while
-    // allowing a legitimate subsequent undo of the NEXT refill (after the
-    // timeout fires and the state has updated). React's act() in tests
-    // flushes state updates but NOT setTimeout (a macrotask), so the guard
-    // stays set between synchronous fireEvent calls.
-    setTimeout(() => {
-      refillUndoInFlightRef.current.delete(medicationId);
-    }, 0);
-
     void (async () => {
-      const result = await runGatedUndoRefill({ medicationId });
+      try {
+        const result = await runGatedUndoRefill({ medicationId });
       if (result.outcome !== 'persist_failed') {
         setMedications(result.medications);
         medicationsRef.current = result.medications;
         setLogs(result.logs);
       }
-      if (result.outcome === 'applied' && result.log) {
-        const name = result.medicationName ?? result.log.medicationName ?? '';
-        if (name) showToast(TOAST_MESSAGES.refillUndone(name));
-        if (soundEnabled) playSuccessChime();
+        if (result.outcome === 'applied' && result.log) {
+          const name = result.medicationName ?? result.log.medicationName ?? '';
+          if (name) showToast(TOAST_MESSAGES.refillUndone(name));
+          if (soundEnabled) playSuccessChime();
+        }
+      } finally {
+        refillUndoInFlightRef.current.delete(medicationId);
       }
     })();
   };
@@ -311,9 +308,15 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
           globalAutoDeductEnabled,
         });
         if (result.outcome !== 'applied') {
+          if (result.outcome !== 'persist_failed') {
+            setMedications(result.medications);
+            medicationsRef.current = result.medications;
+            setLogs(result.logs);
+          }
           return;
         }
         setMedications(result.medications);
+        medicationsRef.current = result.medications;
         setLogs(result.logs);
         showToast(
           medData.reminderEnabled
@@ -344,10 +347,18 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
 
 
   const handleDeleteMedication = (id: string) => {
-    const med = medications.find((m) => m.id === id);
-    if (!med) return;
-    setMedications((prev) => prev.filter((m) => m.id !== id));
-    showToast(`تم حذف "${med.name}" من القائمة`);
+    void (async () => {
+      const result = await runGatedDeleteMedication({ medicationId: id });
+      if (result.outcome !== 'persist_failed') {
+        setMedications(result.medications);
+        medicationsRef.current = result.medications;
+        setLogs(result.logs);
+      }
+      if (result.outcome === 'applied') {
+        const name = result.medicationName ?? id;
+        showToast(`تم حذف "${name}" من القائمة`);
+      }
+    })();
   };
 
 

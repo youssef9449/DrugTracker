@@ -187,7 +187,9 @@ export type RestoreDoseResult =
         | 'invalid_dose_id'
         | 'no_dose'
         | 'auto_deduct_off'
-        | 'already_restored';
+        | 'already_restored'
+        /** Consumed marker exists but no active dose_taken/auto_daily log for this occurrence. */
+        | 'missing_deduction_evidence';
     };
 
 /**
@@ -324,15 +326,28 @@ export function restoreDose(
     resolvedDoseId,
     todayStr
   );
-  // Stock credit uses the active deduction's actual (clamped) amount when
-  // consumed; projection path keeps slotAmount only as metadata (pills
-  // unchanged) and has no deduction log to reverse.
-  const restoredAmount = wasActuallyConsumed
-    ? activeDeduction != null
-      ? Math.abs(Number(activeDeduction.amount) || 0)
-      : slotAmount
-    : slotAmount;
-  const reversedLogId = wasActuallyConsumed ? activeDeduction?.id : undefined;
+  // Amount authority for an actual durable deduction (Manual Take or Exact
+  // Auto auto_daily): the active log for medicationId+doseId+date only.
+  // NEVER fall back to current schedule slotAmount when the occurrence is
+  // marked consumed — schedule edits must not rewrite historical Restore.
+  // Projection-only (not consumed): no durable deduction to reverse; slotAmount
+  // is metadata only and stock is not credited via settleAndAdjust.
+  let restoredAmount: number;
+  let reversedLogId: string | undefined;
+  if (wasActuallyConsumed) {
+    if (activeDeduction == null) {
+      return { ok: false, reason: 'missing_deduction_evidence' };
+    }
+    const fromLog = Math.abs(Number(activeDeduction.amount) || 0);
+    if (!(fromLog > 0)) {
+      return { ok: false, reason: 'missing_deduction_evidence' };
+    }
+    restoredAmount = fromLog;
+    reversedLogId = activeDeduction.id;
+  } else {
+    restoredAmount = slotAmount;
+    reversedLogId = undefined;
+  }
 
   // Future unconsumed occurrence with no active durable deduction: nothing to
   // restore. Reject as already_restored so repeated pre-schedule Restore calls

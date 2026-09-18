@@ -50,6 +50,23 @@ public class LegacyDeliveryCompatibilityTest {
 
         assertEquals(AutoDeductionScheduler.FireResult.Status.CREATED, result.status);
         assertTrue(eventPrefs().contains(evtKey(key)));
+
+        // The legacy delivery must also be able to advance the chain. The
+        // successor is installed through the tokenized path, which creates a
+        // durable recurrence generation before scheduling D+1.
+        AutoDeductionScheduler.ScheduleResult next =
+                Phase2TestSupport.newScheduler().scheduleNextOccurrenceIfAbsent(
+                        "med", "dose", date, "10:00", 1.5, 0L);
+        assertTrue(next.ok);
+
+        String nextKey = AutoDeductionContract.occurrenceKey(
+                "med", "dose", AutoDeductionScheduler.nextCalendarDate(date));
+        JSONObject nextMeta = new JSONObject(
+                schedulePrefs().getString(schKey(nextKey), "{}"));
+        assertTrue(nextMeta.optString(
+                AutoDeductionContract.FIELD_SCHEDULE_VERSION, "").length() > 0);
+        assertTrue(nextMeta.optLong(
+                AutoDeductionContract.FIELD_RECURRENCE_GENERATION, 0L) > 0L);
     }
 
     @Test

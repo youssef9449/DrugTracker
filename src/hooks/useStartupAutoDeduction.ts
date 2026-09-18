@@ -15,7 +15,6 @@ import { TOAST_MESSAGES } from '../constants/uiStrings';
 export function useStartupAutoDeduction(opts: {
   hydrated: boolean;
   isFirstRun: boolean;
-  globalAutoDeductEnabled: boolean;
   setMedications: Dispatch<SetStateAction<Medication[]>>;
   setLogs: Dispatch<SetStateAction<ConsumptionLog[]>>;
   setGlobalAutoDeductEnabled: Dispatch<SetStateAction<boolean>>;
@@ -24,7 +23,6 @@ export function useStartupAutoDeduction(opts: {
   const {
     hydrated,
     isFirstRun,
-    globalAutoDeductEnabled,
     setMedications,
     setLogs,
     setGlobalAutoDeductEnabled,

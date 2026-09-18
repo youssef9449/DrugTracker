@@ -67,6 +67,8 @@ public final class AutoDeductionScheduler {
     public static final String FIELD_SCHEDULE_VERSION = "scheduleVersion";
     /** JSON/Intent field: medication+dose recurrence authorization generation. */
     public static final String FIELD_RECURRENCE_GENERATION = "recurrenceGeneration";
+    /** Durable marker: this occurrence is awaiting fire-persistence retry/recovery. */
+    public static final String FIELD_FIRE_RETRY_COUNT = "fireRetryCount";
 
     /** Process-wide lock: metadata + AlarmManager install/cancel + rollback. */
     private static final Object SCHEDULE_LOCK = new Object();
@@ -634,6 +636,11 @@ public final class AutoDeductionScheduler {
             AutoDeductionEventStore.InsertFiredResult ir = store.insertFiredIfAbsent(
                     medicationId, doseId, calendarDate, scheduledAtEpochMs, amount);
             FireResult result = FireResult.fromInsert(ir);
+            // Any durable fire evidence supersedes the retry marker. Clearing the
+            // marker is best-effort; the FIRED/pending evidence remains authoritative.
+            if (result.allowsRecurrence()) {
+                clearFireRetryMarkerLocked(prefKey);
+            }
             Log.i(TAG, "fire linearization: " + result.status
                     + " pendingRecorded=" + result.pendingRecorded + " for " + key);
             return result;
@@ -1051,38 +1058,138 @@ public final class AutoDeductionScheduler {
             String scheduleVersion,
             int nextRetryCount
     ) {
-        Intent intent = buildOccurrenceIntent(
-                medicationId, doseId, calendarDate, scheduledAtEpochMs, amount,
-                timeHhmm, recurrenceGeneration, scheduleVersion);
-        intent.putExtra(AutoDeductionContract.EXTRA_FIRE_RETRY_COUNT, nextRetryCount);
-        PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
-        AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
-        if (am == null) {
-            Log.w(TAG, "fire retry skipped: alarm manager unavailable");
+        if (medicationId == null || medicationId.isEmpty()
+                || doseId == null || doseId.isEmpty()
+                || !AutoDeductionContract.isValidCalendarDate(calendarDate)
+                || !AutoDeductionContract.isValidAmount(amount)
+                || nextRetryCount <= 0
+                || nextRetryCount > AutoDeductionContract.MAX_FIRE_RETRIES) {
             return false;
         }
-        long triggerAt = System.currentTimeMillis()
-                + AutoDeductionContract.FIRE_RETRY_DELAY_MS;
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi);
-            } else {
-                am.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pi);
-            }
-            return true;
-        } catch (SecurityException se) {
-            // Exact permission may have been revoked between the original fire
-            // and the retry; an inexact retry is strictly better than no retry.
-            Log.w(TAG, "fire retry setExact denied — falling back to inexact", se);
-            try {
-                am.set(AlarmManager.RTC_WAKEUP, triggerAt, pi);
-                return true;
-            } catch (Exception e) {
-                Log.e(TAG, "fire retry scheduling failed", e);
+
+        final String key = AutoDeductionContract.occurrenceKey(
+                medicationId, doseId, calendarDate);
+        final String prefKey = SCHEDULE_KEY_PREFIX + key;
+
+        /*
+         * CRITICAL: retry installation is serialized with fire/cancel/reschedule.
+         * The retry uses the SAME PendingIntent identity as the normal occurrence.
+         * Therefore it must validate ownership and update its durable recovery marker
+         * under SCHEDULE_LOCK before touching AlarmManager; otherwise a stale retry
+         * could overwrite a newer schedule's alarm.
+         */
+        synchronized (SCHEDULE_LOCK) {
+            if (isOccurrenceCancelledKey(key)) {
+                Log.i(TAG, "fire retry skipped: occurrence is cancelled " + key);
                 return false;
             }
-        } catch (Exception e) {
-            Log.e(TAG, "fire retry scheduling failed", e);
+
+            String currentRaw = schedulePrefs.getString(prefKey, null);
+            if (currentRaw == null || currentRaw.isEmpty()) {
+                Log.i(TAG, "fire retry skipped: active schedule metadata missing " + key);
+                return false;
+            }
+
+            try {
+                JSONObject current = new JSONObject(currentRaw);
+                String activeVersion = current.optString(FIELD_SCHEDULE_VERSION, "");
+                long activeGen = current.optLong(FIELD_RECURRENCE_GENERATION, 0L);
+                boolean legacyDelivery = (scheduleVersion == null || scheduleVersion.isEmpty())
+                        && recurrenceGeneration <= 0L;
+                boolean legacyActiveMetadata = activeVersion.isEmpty() && activeGen <= 0L;
+
+                if (legacyDelivery) {
+                    if (!legacyActiveMetadata) {
+                        Log.i(TAG, "fire retry skipped: stale legacy ownership " + key);
+                        return false;
+                    }
+                } else {
+                    if (scheduleVersion == null || scheduleVersion.isEmpty()
+                            || recurrenceGeneration <= 0L
+                            || !scheduleVersion.equals(activeVersion)
+                            || recurrenceGeneration != activeGen) {
+                        Log.i(TAG, "fire retry skipped: ownership changed for " + key);
+                        return false;
+                    }
+                }
+
+                int previousRetryCount = current.optInt(FIELD_FIRE_RETRY_COUNT, 0);
+                int persistedRetryCount = Math.max(previousRetryCount, nextRetryCount);
+                current.put(FIELD_FIRE_RETRY_COUNT, persistedRetryCount);
+
+                if (!schedulePrefs.edit().putString(prefKey, current.toString()).commit()) {
+                    Log.e(TAG, "fire retry marker commit failed for " + key);
+                    return false;
+                }
+
+                Intent intent = buildOccurrenceIntent(
+                        medicationId, doseId, calendarDate, scheduledAtEpochMs, amount,
+                        timeHhmm, recurrenceGeneration, scheduleVersion);
+                intent.putExtra(
+                        AutoDeductionContract.EXTRA_FIRE_RETRY_COUNT, persistedRetryCount);
+                PendingIntent pi = buildPendingIntent(
+                        intent, PendingIntent.FLAG_UPDATE_CURRENT);
+                AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
+                if (am == null) {
+                    Log.w(TAG, "fire retry skipped: alarm manager unavailable " + key);
+                    return false;
+                }
+
+                long triggerAt = System.currentTimeMillis()
+                        + AutoDeductionContract.FIRE_RETRY_DELAY_MS;
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        am.setExactAndAllowWhileIdle(
+                                AlarmManager.RTC_WAKEUP, triggerAt, pi);
+                    } else {
+                        am.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pi);
+                    }
+                    return true;
+                } catch (SecurityException se) {
+                    Log.w(TAG, "fire retry setExact denied — falling back to inexact", se);
+                    try {
+                        am.set(AlarmManager.RTC_WAKEUP, triggerAt, pi);
+                        return true;
+                    } catch (Exception e) {
+                        Log.e(TAG, "fire retry scheduling failed", e);
+                        return false;
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "fire retry scheduling failed", e);
+                    return false;
+                }
+            } catch (JSONException e) {
+                Log.e(TAG, "fire retry ownership metadata malformed for " + key, e);
+                return false;
+            }
+        }
+    }
+
+    /**
+     * Remove the durable fire-retry marker after any primary/pending fire evidence
+     * becomes durable. Caller MUST hold SCHEDULE_LOCK.
+     */
+    private boolean clearFireRetryMarkerLocked(String prefKey) {
+        String raw = schedulePrefs.getString(prefKey, null);
+        if (raw == null || raw.isEmpty()) {
+            return true;
+        }
+        try {
+            JSONObject obj = new JSONObject(raw);
+            if (!obj.has(FIELD_FIRE_RETRY_COUNT)) {
+                return true;
+            }
+            obj.remove(FIELD_FIRE_RETRY_COUNT);
+            boolean committed = schedulePrefs.edit()
+                    .putString(prefKey, obj.toString())
+                    .commit();
+            if (!committed) {
+                Log.w(TAG, "fire retry marker clear failed for " + prefKey
+                        + " — durable FIRED evidence remains authoritative");
+            }
+            return committed;
+        } catch (JSONException e) {
+            Log.w(TAG, "fire retry marker clear parse failed for " + prefKey, e);
             return false;
         }
     }

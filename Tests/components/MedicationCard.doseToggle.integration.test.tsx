@@ -190,6 +190,44 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     });
   });
 
+  it('exact auto Restore button shows the historical event amount after schedule change', async () => {
+    const today = getTodayDateString();
+    localStorage.setItem(
+      STORAGE_MEDS_KEY,
+      JSON.stringify([
+        makeSingle({
+          currentPills: 18,
+          doseSchedule: [{ id: 's1', amount: 1, time: '08:00' }],
+          doseConsumption: { s1: today },
+        }),
+      ])
+    );
+    localStorage.setItem(
+      STORAGE_LOGS_KEY,
+      JSON.stringify([
+        {
+          id: 'exact-auto:med-single:s1:' + today,
+          medicationId: 'med-single',
+          medicationName: 'Single Schedule',
+          type: 'auto_daily',
+          amount: -2,
+          date: today,
+          timestamp: '2024-09-10T08:00:00.000Z',
+          description: 'Exact Auto deduction',
+          doseId: 's1',
+        },
+      ] satisfies ConsumptionLog[])
+    );
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Single Schedule')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTitle('استرجاع الجرعة (+2)')).toBeInTheDocument();
+    expect(screen.queryByTitle('استرجاع الجرعة (+1)')).toBeNull();
+  });
+
   it('multi: first click Take d1; second click Restore d1 (NOT Take d2)', async () => {
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeMulti({ currentPills: 20 })]));
     localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));

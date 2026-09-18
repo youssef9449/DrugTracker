@@ -6,6 +6,10 @@ vi.mock('@capacitor/core', () => ({
   Capacitor: {
     getPlatform: vi.fn(() => 'android'),
   },
+  registerPlugin: () => ({
+    getNextOccurrence: () => Promise.resolve({ valid: false, nextOccurrenceMs: 0 }),
+    clearReArm: () => Promise.resolve({ ok: true }),
+  }),
 }));
 vi.mock('@capacitor/status-bar', () => ({
   StatusBar: {

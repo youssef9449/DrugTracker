@@ -349,3 +349,47 @@ describe('getAutoRestorableDose — pure auto-completed only', () => {
     expect(getAutoRestorableDose(med, now, today)).not.toBeNull();
   });
 });
+
+describe('getCardDoseToggleTarget — medication-level Auto only', () => {
+  const today = getTodayDateString();
+
+  it('Medication ON + elapsed: auto-only → canTake=false, canRestore=false', () => {
+    const late = new Date(`${today}T20:00:00`);
+    const med = makeMed({
+      autoDeductEnabled: true,
+      doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+      dosesPerDay: 1,
+    });
+    const t = getCardDoseToggleTarget(med, late, today);
+    expect(t.canTake).toBe(false);
+    expect(t.canRestore).toBe(false);
+    expect(t.doseId).toBe('d1');
+  });
+
+  it('Medication OFF + elapsed: canTake=true (manual mode)', () => {
+    const late = new Date(`${today}T20:00:00`);
+    const med = makeMed({
+      autoDeductEnabled: false,
+      doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+      dosesPerDay: 1,
+    });
+    const t = getCardDoseToggleTarget(med, late, today);
+    expect(t.canTake).toBe(true);
+    expect(t.canRestore).toBe(false);
+    expect(t.doseId).toBe('d1');
+  });
+
+  it('Medication ON + manual consume: canRestore same doseId', () => {
+    const late = new Date(`${today}T20:00:00`);
+    const med = makeMed({
+      autoDeductEnabled: true,
+      doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+      dosesPerDay: 1,
+      doseConsumption: { d1: today },
+    });
+    const t = getCardDoseToggleTarget(med, late, today);
+    expect(t.canTake).toBe(false);
+    expect(t.canRestore).toBe(true);
+    expect(t.doseId).toBe('d1');
+  });
+});

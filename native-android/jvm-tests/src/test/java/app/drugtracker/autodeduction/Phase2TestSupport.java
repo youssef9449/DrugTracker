@@ -38,6 +38,7 @@ final class Phase2TestSupport {
         clearPrefs(ctx, AutoDeductionContract.PREFS_PENDING);
         clearPrefs(ctx, AutoDeductionContract.PREFS_ORDERING);
         clearPrefs(ctx, AutoDeductionContract.PREFS_RECURRENCE_AUTH);
+        clearPrefs(ctx, AutoDeductionContract.PREFS_FIRE_RETRY);
     }
 
     private static void clearPrefs(Context ctx, String name) {

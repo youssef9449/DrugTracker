@@ -48,6 +48,33 @@ public class FireVsCancelTest {
      * is that public gate — do not call the generic scheduler after CANCELLED as if it
      * were the recurrence decision.
      */
+    /**
+     * A durable pending-fire fallback is still a new FIRED outcome and must wake
+     * event-driven JS reconciliation immediately. A duplicate FIRED row must not
+     * emit a second wake-up because its original durable transition already did.
+     */
+    @Test
+    public void pendingFireFailure_wakesJavascript_butDuplicateDoesNot() {
+        AutoDeductionScheduler.FireResult pendingFailure =
+                new AutoDeductionScheduler.FireResult(
+                        AutoDeductionScheduler.FireResult.Status.FAILED, true);
+        AutoDeductionScheduler.FireResult duplicate =
+                new AutoDeductionScheduler.FireResult(
+                        AutoDeductionScheduler.FireResult.Status.ALREADY_EXISTS, false);
+        AutoDeductionScheduler.FireResult noPendingFailure =
+                new AutoDeductionScheduler.FireResult(
+                        AutoDeductionScheduler.FireResult.Status.FAILED, false);
+        AutoDeductionScheduler.FireResult cancelled =
+                new AutoDeductionScheduler.FireResult(
+                        AutoDeductionScheduler.FireResult.Status.CANCELLED, false);
+
+        assertTrue(AutoDeductionReceiver.shouldNotifyJavascript(pendingFailure));
+        assertFalse(AutoDeductionReceiver.shouldNotifyJavascript(duplicate));
+        assertFalse(AutoDeductionReceiver.shouldNotifyJavascript(noPendingFailure));
+        assertFalse(AutoDeductionReceiver.shouldNotifyJavascript(cancelled));
+        assertFalse(AutoDeductionReceiver.shouldNotifyJavascript(null));
+    }
+
     @Test
     public void cancelFirst_fireReturnsCancelled_noFiredNoPendingNoRecurrence() {
         String date = futureCalendarDate(2);
@@ -159,8 +186,8 @@ public class FireVsCancelTest {
      * Mirrors {@link AutoDeductionReceiver}'s switch on fire status: recurrence
      * scheduling runs only for CREATED / ALREADY_EXISTS / FAILED+pending — i.e.
      * exactly when {@link AutoDeductionScheduler.FireResult#allowsRecurrence()} is true.
-     * This is the public recurrence decision contract; the receiver's private helper
-     * is not invoked from tests.
+     * The receiver's package-visible JS-wakeup helper is tested directly so the
+     * event-driven wake-up contract cannot regress independently of recurrence.
      */
 
     /** Read durable ownership tokens stamped into schedule metadata after schedule. */

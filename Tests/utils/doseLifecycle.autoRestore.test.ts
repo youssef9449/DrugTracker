@@ -93,7 +93,7 @@ describe('production restoreDose + syncAutoDailyDeductions lifecycle', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.wasManual).toBe(false);
+    expect(result.wasActuallyConsumed).toBe(false);
     expect(result.restoredAmount).toBe(1);
     expect(result.doseId).toBe('d1');
     // Auto-only: currentPills unchanged (projection undo via skip)
@@ -189,7 +189,7 @@ describe('production restoreDose + syncAutoDailyDeductions lifecycle', () => {
     const restored = restoreDose(med, 'd2', TODAY, now);
     expect(restored.ok).toBe(true);
     if (!restored.ok) return;
-    expect(restored.wasManual).toBe(true);
+    expect(restored.wasActuallyConsumed).toBe(true);
     expect(restored.restoredAmount).toBe(1);
     // Manual path: snapshot increases by exact amount
     expect(restored.updatedMed.currentPills).toBe(pillsAfterTake + 1);
@@ -378,7 +378,7 @@ describe('production restoreDose + syncAutoDailyDeductions lifecycle', () => {
     if (!restored.ok) return;
     expect(restored.doseId).toBe('d1');
     expect(restored.restoredAmount).toBe(1);
-    expect(restored.wasManual).toBe(false);
+    expect(restored.wasActuallyConsumed).toBe(false);
     // Auto-only path: skip recorded (durable identity)
     expect(isDoseSkippedOnDate(restored.updatedMed, 'd1', pastDay)).toBe(true);
     // d2/d3 unchanged
@@ -413,10 +413,10 @@ describe('production restoreDose + syncAutoDailyDeductions lifecycle', () => {
    *
    * Pure production restoreDose:
    * - First auto-only restore records skip; currentPills unchanged (projection model).
-   * - Second restoreDose on same doseId+date: still wasManual=false, skip idempotent,
+   * - Second restoreDose on same doseId+date: still wasActuallyConsumed=false, skip idempotent,
    *   currentPills still unchanged (no second credit).
    *
-   * Manual path (stock moves): first restore +amount once; second sees wasManual=false
+   * Manual path (stock moves): first restore +amount once; second sees wasActuallyConsumed=false
    * after consumption cleared, so does not settleAndAdjust again.
    *
    * App-layer skipped_day log guard remains the UI duplicate-restore protection;
@@ -449,7 +449,7 @@ describe('production restoreDose + syncAutoDailyDeductions lifecycle', () => {
     const firstAuto = restoreDose(medAuto, 'd1', today, now);
     expect(firstAuto.ok).toBe(true);
     if (!firstAuto.ok) return;
-    expect(firstAuto.wasManual).toBe(false);
+    expect(firstAuto.wasActuallyConsumed).toBe(false);
     expect(firstAuto.restoredAmount).toBe(1);
     expect(firstAuto.updatedMed.currentPills).toBe(30);
     expect(isDoseSkippedOnDate(firstAuto.updatedMed, 'd1', today)).toBe(true);
@@ -479,7 +479,7 @@ describe('production restoreDose + syncAutoDailyDeductions lifecycle', () => {
     const firstManualRestore = restoreDose(medManual, 'd2', today, now);
     expect(firstManualRestore.ok).toBe(true);
     if (!firstManualRestore.ok) return;
-    expect(firstManualRestore.wasManual).toBe(true);
+    expect(firstManualRestore.wasActuallyConsumed).toBe(true);
     expect(firstManualRestore.restoredAmount).toBe(1);
     expect(firstManualRestore.updatedMed.currentPills).toBe(pillsAfterTake + 1);
     const pillsAfterFirstRestore = firstManualRestore.updatedMed.currentPills;
@@ -493,7 +493,7 @@ describe('production restoreDose + syncAutoDailyDeductions lifecycle', () => {
     expect(secondManualRestore.ok).toBe(true);
     if (!secondManualRestore.ok) return;
     // Second restore is no longer "manual" (consume cleared) → no second +amount
-    expect(secondManualRestore.wasManual).toBe(false);
+    expect(secondManualRestore.wasActuallyConsumed).toBe(false);
     expect(secondManualRestore.updatedMed.currentPills).toBe(pillsAfterFirstRestore);
     expect(isDoseSkippedOnDate(secondManualRestore.updatedMed, 'd2', today)).toBe(
       true
@@ -526,7 +526,7 @@ describe('production restoreDose + syncAutoDailyDeductions lifecycle', () => {
     const restored = restoreDose(med, 'd3', TODAY, nowEarly);
     expect(restored.ok).toBe(true);
     if (!restored.ok) return;
-    expect(restored.wasManual).toBe(true);
+    expect(restored.wasActuallyConsumed).toBe(true);
     expect(restored.restoredAmount).toBe(2);
     // Future restore: NO durable skip
     expect(isDoseSkippedOnDate(restored.updatedMed, 'd3', TODAY)).toBe(false);
@@ -764,5 +764,71 @@ describe('production restoreDose + syncAutoDailyDeductions lifecycle', () => {
     const sync = syncAutoDailyDeductions([afterRestore], TODAY, nowLate);
     expect(isDoseSkippedOnDate(sync.updatedMeds[0], 'd3', TODAY)).toBe(false);
     expect(todayDueUnits(sync.updatedMeds[0], nowLate, TODAY)).toBe(1 + 1 + 2);
+  });
+
+  /**
+   * Section 1 — Auto (with durable consume marker + auto_daily log) → Restore
+   * must leave a durable skip for the SAME occurrence so the projection path
+   * (todayDueUnits / effectiveCurrentPills) cannot re-project the dose and a
+   * later legacy syncAutoDailyDeductions cannot re-deduct it. This is the
+   * projection-only sibling of the gated "Auto → Restore → reconcile" test.
+   */
+  it('Section 1 — Auto consume marker → Restore → no re-projection via effectiveCurrentPills', () => {
+    // Simulate Exact Auto having applied d1: consume marker set, auto_daily
+    // log durable, currentPills already deducted by 1 (30 → 29).
+    const autoApplied: Medication = {
+      ...makeMulti({ currentPills: 29, lastSyncDate: TODAY }),
+      doseConsumption: { d1: TODAY },
+      doseConsumptionHistory: { d1: [TODAY] },
+    };
+    const autoLogs = [
+      {
+        id: 'auto-section1-d1',
+        medicationId: 'med-1',
+        medicationName: 'Multi',
+        type: 'auto_daily' as const,
+        amount: -1,
+        date: TODAY,
+        timestamp: '',
+        description: '',
+        doseId: 'd1',
+      },
+    ];
+    const now = at(15); // d1 (08:00) and d2 (14:00) elapsed; d3 (20:00) not yet.
+
+    // Before restore: d1 consumed → todayDueUnits excludes d1 → d2 only = 1.
+    expect(todayDueUnits(autoApplied, now, TODAY)).toBe(1);
+    expect(effectiveCurrentPills(autoApplied, TODAY, now)).toBe(28);
+
+    const restored = restoreDose(autoApplied, 'd1', TODAY, now, autoLogs);
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) return;
+    expect(restored.wasActuallyConsumed).toBe(true);
+    expect(restored.restoredAmount).toBe(1);
+
+    const after = restored.updatedMed;
+    // Stock restored (29 + 1 = 30).
+    expect(after.currentPills).toBe(30);
+    // Consume marker cleared so Take is eligible again.
+    expect(isDoseConsumedOnDate(after, 'd1', TODAY)).toBe(false);
+    // Durable skip left for the SAME occurrence (d1 + TODAY).
+    expect(isDoseSkippedOnDate(after, 'd1', TODAY)).toBe(true);
+    // Sibling d2 untouched.
+    expect(isDoseSkippedOnDate(after, 'd2', TODAY)).toBe(false);
+    expect(isDoseConsumedOnDate(after, 'd2', TODAY)).toBe(false);
+
+    // Projection: d1 skipped (excluded), d2 elapsed (1), d3 not yet → 1.
+    // effectiveCurrentPills = 30 - 1 = 29 (NOT 28 — no re-projection of d1).
+    expect(todayDueUnits(after, now, TODAY)).toBe(1);
+    expect(effectiveCurrentPills(after, TODAY, now)).toBe(29);
+    expect(effectiveCurrentPills(after, TODAY, now)).not.toBe(28);
+
+    // Legacy sync must not re-deduct d1 (skip blocks historicalDayDueUnits).
+    const sync = syncAutoDailyDeductions([after], TODAY, now);
+    const afterSync = sync.updatedMeds[0];
+    expect(isDoseSkippedOnDate(afterSync, 'd1', TODAY)).toBe(true);
+    expect(afterSync.currentPills).toBe(30);
+    expect(todayDueUnits(afterSync, now, TODAY)).toBe(1);
+    expect(effectiveCurrentPills(afterSync, TODAY, now)).toBe(29);
   });
 });

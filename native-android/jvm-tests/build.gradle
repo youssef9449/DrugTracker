@@ -82,6 +82,14 @@ configurations {
     monitorAar
 }
 
+/**
+ * Extract classes.jar from the monitor AAR into a build-generated directory.
+ * Deterministic + reproducible — no hardcoded cache paths.
+ * Declared BEFORE the dependencies block: the dependencies section attaches
+ * this directory to the testCompileOnly classpath.
+ */
+def extractedAarClasses = layout.buildDirectory.dir("extracted-aar-classes")
+
 dependencies {
     def androidAll = "org.robolectric:android-all:13-robolectric-9030017"
     compileOnly androidAll
@@ -98,18 +106,20 @@ dependencies {
     monitorAar("androidx.test:monitor:1.7.0") {
         transitive = false
     }
+    // Compile-time visibility for the extracted monitor classes (test sources
+    // import InstrumentationRegistry directly). fileTree so the classes.jar
+    // INSIDE the directory is picked up (a plain directory entry would not
+    // recurse into jars).
+    testCompileOnly fileTree(extractedAarClasses)
 }
-
-/**
- * Extract classes.jar from the monitor AAR into a build-generated directory.
- * Deterministic + reproducible — no hardcoded cache paths.
- */
-def extractedAarClasses = layout.buildDirectory.dir("extracted-aar-classes")
 
 tasks.register("extractMonitorClasses") {
     outputs.dir(extractedAarClasses)
     doLast {
-        extractedAarClasses.get().asFile.mkdirs()
+        def outDir = extractedAarClasses.get().asFile
+        outDir.mkdirs()
+        // Remove stale extractions so re-runs can overwrite read-only jars.
+        outDir.listFiles()?.each { it.delete() }
         configurations.monitorAar.files.each { aar ->
             copy {
                 from(zipTree(aar)) {
@@ -126,6 +136,16 @@ tasks.named("test").configure {
     dependsOn("extractMonitorClasses")
     // Add extracted AAR classes.jar to the test runtime classpath.
     classpath += fileTree(extractedAarClasses)
+}
+
+/**
+ * InstrumentationRegistry (androidx.test.platform.app) must also be on the
+ * COMPILE classpath for test sources — monitor is an AAR, so its extracted
+ * classes.jar (from extractMonitorClasses) is added as testCompileOnly.
+ * The plain java plugin cannot consume the AAR directly.
+ */
+tasks.matching { it.name == "compileTestJava" }.configureEach {
+    dependsOn("extractMonitorClasses")
 }
 
 tasks.withType(JavaCompile).configureEach {

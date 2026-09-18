@@ -11,13 +11,20 @@ import {
   Clock,
   ListChecks,
 } from 'lucide-react';
+import type { ConsumptionLog } from '../types';
 import { Medication, calculateMedicationStatus, describeStockInStrips, isSolidUnit } from '../types';
-import { getDepletionDate, effectiveCurrentPills } from '../utils/dateCalculations';
+import {
+  getDepletionDate,
+  effectiveCurrentPills,
+  getTodayDateString,
+} from '../utils/dateCalculations';
 import {
   getCardDoseToggleTarget,
   getAutoRestorableDose,
   isMedicationAutoDeductActive,
+  medicationForStockProjection,
 } from '../utils/doseSchedule';
+import { getHistoricalRestoreDisplayAmount } from '../utils/medActions';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { VISUAL_RANGE_MULTIPLIER, MIN_VISUAL_RANGE_DAYS, DAYS_PER_MONTH } from '../utils/time';
 import { MedicationMenu } from './MedicationMenu';
@@ -110,6 +117,8 @@ interface MedicationCardProps {
   onConsumeDose?: (medicationId: string, doseId?: string) => void;
   /** Restore a manually consumed dose via the same App path as logs. */
   onRestoreDose?: (medicationId: string, doseId?: string) => void;
+  /** Durable stock logs used to display the exact historical Restore amount. */
+  logs?: ConsumptionLog[];
   lastRefillQuantity?: number;
   onUndoRefill?: () => void;
   globalAutoDeductEnabled?: boolean;
@@ -126,20 +135,23 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   onNavigateToShopping,
   onConsumeDose,
   onRestoreDose,
+  logs = [],
   lastRefillQuantity,
   onUndoRefill,
   globalAutoDeductEnabled = true,
 }) => {
-  const isAutoActive = isMedicationAutoDeductActive(medication, globalAutoDeductEnabled);
-  const statusInfo = calculateMedicationStatus(medication);
-  const depletion = getDepletionDate(medication);
+  const isAutoActive = isMedicationAutoDeductActive(medication);
+  // Stock/status projection follows medication Auto only (Global is not a kill switch).
+  const stockMed = medicationForStockProjection(medication);
+  const statusInfo = calculateMedicationStatus(stockMed);
+  const depletion = getDepletionDate(stockMed);
   const isSolid = isSolidUnit(medication.unit);
   const hasStrips = isSolid && Boolean(medication.stripsPerBox && medication.pillsPerStrip);
   // Use the DYNAMIC balance (projected from currentPills + lastSyncDate)
   // — never the raw snapshot. This keeps the displayed count correct
   // even if the app was closed for many days and the snapshot hasn't
-  // been re-settled yet.
-  const effPills = effectiveCurrentPills(medication);
+  // been re-settled yet. When Global OFF, projection freezes at snapshot.
+  const effPills = effectiveCurrentPills(stockMed);
   const stripsDesc = isSolid
     ? describeStockInStrips(
         effPills,
@@ -246,6 +258,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           <MedicationMenu
             medication={medication}
             isAutoActive={isAutoActive}
+            globalAutoDeductEnabled={globalAutoDeductEnabled}
             showRefillInMenu={false}
             onOpenRefill={onOpenRefill}
             onEdit={onEdit}
@@ -379,6 +392,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           <MedicationMenu
             medication={medication}
             isAutoActive={isAutoActive}
+            globalAutoDeductEnabled={globalAutoDeductEnabled}
             showRefillInMenu={false}
             onOpenRefill={onOpenRefill}
             onEdit={onEdit}
@@ -472,11 +486,32 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const isOut = statusInfo.status === 'out_of_stock';
     const isCrit = statusInfo.status === 'critical';
     const isWarn = statusInfo.status === 'warning';
-    const doseToggle = getCardDoseToggleTarget(medication);
-    const nextDoseAmount = doseToggle.amount;
+    const doseToggle = getCardDoseToggleTarget(medication, new Date(), getTodayDateString());
+    const todayStr = getTodayDateString();
+    // Manual Restore display amount: exact active deduction for doseToggle.doseId only.
+    // No schedule fallback when evidence is missing (durable layer fail-closes).
+    const manualRestoreAmount = getHistoricalRestoreDisplayAmount(
+      logs,
+      medication.id,
+      doseToggle.doseId,
+      todayStr
+    );
+    // Take uses current schedule slot amount from the manual toggle target.
+    const takeAmount = doseToggle.amount;
+
+    // Auto-restorable occurrence is independent of getCardDoseToggleTarget.
     const autoRestorableDose = getAutoRestorableDose(medication);
     const showAutoRestore =
       isAutoActive && Boolean(onRestoreDose) && Boolean(autoRestorableDose);
+    // Auto Restore display amount: evidence for autoRestorableDose.id only — never schedule.
+    const autoRestoreAmount = autoRestorableDose
+      ? getHistoricalRestoreDisplayAmount(
+          logs,
+          medication.id,
+          autoRestorableDose.id,
+          todayStr
+        )
+      : null;
 
 
     return (
@@ -537,12 +572,22 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 <ListChecks className="w-3 h-3" strokeWidth={2.25} aria-hidden />
               </button>
             ) : (onConsumeDose || onRestoreDose) ? (
-              doseToggle.canRestore && onRestoreDose ? (
+              doseToggle.canRestore &&
+              onRestoreDose &&
+              manualRestoreAmount != null ? (
                 <button
                   type="button"
                   onClick={() => onRestoreDose(medication.id, doseToggle.doseId)}
-                  title={`استرجاع الجرعة (+${nextDoseAmount})`}
-                  aria-label={`استرجاع الجرعة (+${nextDoseAmount})`}
+                  title={
+                    manualRestoreAmount != null
+                      ? `استرجاع الجرعة (+${manualRestoreAmount})`
+                      : 'استرجاع الجرعة'
+                  }
+                  aria-label={
+                    manualRestoreAmount != null
+                      ? `استرجاع الجرعة (+${manualRestoreAmount})`
+                      : 'استرجاع الجرعة'
+                  }
                   className="w-5 h-5 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
                   data-testid={`restore-dose-${medication.id}`}
                 >
@@ -557,8 +602,16 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                       autoRestorableDose?.id || undefined
                     )
                   }
-                  title="استرجاع الجرعة"
-                  aria-label="استرجاع الجرعة"
+                  title={
+                    autoRestoreAmount != null
+                      ? `استرجاع الجرعة (+${autoRestoreAmount})`
+                      : 'استرجاع الجرعة'
+                  }
+                  aria-label={
+                    autoRestoreAmount != null
+                      ? `استرجاع الجرعة (+${autoRestoreAmount})`
+                      : 'استرجاع الجرعة'
+                  }
                   className="w-5 h-5 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
                   data-testid={`auto-restore-dose-${medication.id}`}
                 >
@@ -568,11 +621,11 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 <button
                   type="button"
                   onClick={() => onConsumeDose(medication.id, doseToggle.doseId)}
-                  disabled={effPills <= 0 || nextDoseAmount <= 0}
-                  title={`تناول جرعة (-${nextDoseAmount})`}
-                  aria-label={`تناول جرعة (-${nextDoseAmount})`}
+                  disabled={effPills <= 0 || takeAmount <= 0}
+                  title={`تناول جرعة (-${takeAmount})`}
+                  aria-label={`تناول جرعة (-${takeAmount})`}
                   className={`w-5 h-5 flex items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 active:scale-95 ${
-                    effPills <= 0 || nextDoseAmount <= 0
+                    effPills <= 0 || takeAmount <= 0
                       ? 'bg-slate-100 text-slate-300 cursor-not-allowed'
                       : 'bg-emerald-600 text-white hover:bg-emerald-700'
                   }`}
@@ -599,6 +652,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             <MedicationMenu
               medication={medication}
               isAutoActive={isAutoActive}
+              globalAutoDeductEnabled={globalAutoDeductEnabled}
               showRefillInMenu={false}
               onOpenRefill={onOpenRefill}
               onEdit={onEdit}
@@ -649,11 +703,32 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const isOut = statusInfo.status === 'out_of_stock';
     const isCrit = statusInfo.status === 'critical';
     const isWarn = statusInfo.status === 'warning';
-    const doseToggle = getCardDoseToggleTarget(medication);
-    const nextDoseAmount = doseToggle.amount;
+    const doseToggle = getCardDoseToggleTarget(medication, new Date(), getTodayDateString());
+    const todayStr = getTodayDateString();
+    // Manual Restore display amount: exact active deduction for doseToggle.doseId only.
+    // No schedule fallback when evidence is missing (durable layer fail-closes).
+    const manualRestoreAmount = getHistoricalRestoreDisplayAmount(
+      logs,
+      medication.id,
+      doseToggle.doseId,
+      todayStr
+    );
+    // Take uses current schedule slot amount from the manual toggle target.
+    const takeAmount = doseToggle.amount;
+
+    // Auto-restorable occurrence is independent of getCardDoseToggleTarget.
     const autoRestorableDose = getAutoRestorableDose(medication);
     const showAutoRestore =
       isAutoActive && Boolean(onRestoreDose) && Boolean(autoRestorableDose);
+    // Auto Restore display amount: evidence for autoRestorableDose.id only — never schedule.
+    const autoRestoreAmount = autoRestorableDose
+      ? getHistoricalRestoreDisplayAmount(
+          logs,
+          medication.id,
+          autoRestorableDose.id,
+          todayStr
+        )
+      : null;
 
 
     return (
@@ -720,12 +795,22 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 <ListChecks className="w-3.5 h-3.5" strokeWidth={2.25} aria-hidden />
               </button>
             ) : (onConsumeDose || onRestoreDose) ? (
-              doseToggle.canRestore && onRestoreDose ? (
+              doseToggle.canRestore &&
+              onRestoreDose &&
+              manualRestoreAmount != null ? (
                 <button
                   type="button"
                   onClick={() => onRestoreDose(medication.id, doseToggle.doseId)}
-                  title={`استرجاع الجرعة (+${nextDoseAmount})`}
-                  aria-label={`استرجاع الجرعة (+${nextDoseAmount})`}
+                  title={
+                    manualRestoreAmount != null
+                      ? `استرجاع الجرعة (+${manualRestoreAmount})`
+                      : 'استرجاع الجرعة'
+                  }
+                  aria-label={
+                    manualRestoreAmount != null
+                      ? `استرجاع الجرعة (+${manualRestoreAmount})`
+                      : 'استرجاع الجرعة'
+                  }
                   className="w-6 h-6 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
                   data-testid={`restore-dose-${medication.id}`}
                 >
@@ -740,8 +825,16 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                       autoRestorableDose?.id || undefined
                     )
                   }
-                  title="استرجاع الجرعة"
-                  aria-label="استرجاع الجرعة"
+                  title={
+                    autoRestoreAmount != null
+                      ? `استرجاع الجرعة (+${autoRestoreAmount})`
+                      : 'استرجاع الجرعة'
+                  }
+                  aria-label={
+                    autoRestoreAmount != null
+                      ? `استرجاع الجرعة (+${autoRestoreAmount})`
+                      : 'استرجاع الجرعة'
+                  }
                   className="w-6 h-6 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
                   data-testid={`auto-restore-dose-${medication.id}`}
                 >
@@ -751,11 +844,11 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 <button
                   type="button"
                   onClick={() => onConsumeDose(medication.id, doseToggle.doseId)}
-                  disabled={effPills <= 0 || nextDoseAmount <= 0}
-                  title={`تناول جرعة (-${nextDoseAmount})`}
-                  aria-label={`تناول جرعة (-${nextDoseAmount})`}
+                  disabled={effPills <= 0 || takeAmount <= 0}
+                  title={`تناول جرعة (-${takeAmount})`}
+                  aria-label={`تناول جرعة (-${takeAmount})`}
                   className={`w-6 h-6 flex items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 active:scale-95 ${
-                    effPills <= 0 || nextDoseAmount <= 0
+                    effPills <= 0 || takeAmount <= 0
                       ? 'bg-slate-100 text-slate-300 cursor-not-allowed'
                       : 'bg-emerald-600 text-white hover:bg-emerald-700'
                   }`}
@@ -784,6 +877,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             <MedicationMenu
               medication={medication}
               isAutoActive={isAutoActive}
+              globalAutoDeductEnabled={globalAutoDeductEnabled}
               showRefillInMenu={false}
               onOpenRefill={onOpenRefill}
               onEdit={onEdit}

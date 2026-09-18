@@ -11,12 +11,13 @@ Current-state technical specification for DrugTracker’s exact-time automatic d
 | Native constants, occurrence key, PendingIntent URI | `native-android/auto-deduction/AutoDeductionContract.java` |
 | Durable native event store | `AutoDeductionEventStore.java` |
 | Exact alarm install / cancel / boot restore | `AutoDeductionScheduler.java` |
-| Alarm + boot receiver | `AutoDeductionReceiver.java` |
+| Exact-alarm delivery receiver (background-threaded via `goAsync`, bounded fire-persistence retry) | `AutoDeductionReceiver.java` |
+| Boot / timezone / permission restore receiver | `AutoDeductionSystemReceiver.java` |
 | Capacitor plugin | `AutoDeductionPlugin.java` |
 | Pure reconcile / apply | `src/utils/autoDeductionReconciliation.ts` |
 | Orchestration, envelope, marks | `src/utils/runAutoDeductionReconciliation.ts` |
 | Serialized fresh durable-state gate | `src/utils/autoDeductionStockGate.ts` |
-| Hydration / resume entry | `src/hooks/useExactAutoDeductionReconciliation.ts`, `src/App.tsx` |
+| Hydration / resume + native event entry | `src/hooks/useExactAutoDeductionReconciliation.ts`, `src/App.tsx` |
 | Legacy day settlement & projection | `src/utils/dateCalculations.ts` |
 
 ---
@@ -47,7 +48,8 @@ Current-state technical specification for DrugTracker’s exact-time automatic d
 Schedule (JS)
     → Native exact alarm
     → Receiver persists FIRED (no stock change)
-    → App start / resume after hydration
+    → Native emits exact-auto FIRED event when JS is available
+    → Event listener wakes JS reconciliation immediately
     → Mutation gate loads fresh durable JS state
     → Reconcile FIRED events
     → Apply or no-op (idempotent)
@@ -98,8 +100,8 @@ Used consistently for:
 1. After hydration (and when exact-alarm capability allows), JS requests `scheduleOccurrence` with medication, dose, calendar date, time, and **amount**.
 2. Native persists schedule metadata and installs the one-shot alarm inside a serialized, process-wide scheduling critical section (durable metadata write, then AlarmManager install, with ownership-safe / conditional metadata rollback if installation fails). This is not an ACID transaction spanning SharedPreferences and AlarmManager; it is a process-local serialization of those steps.
 3. PendingIntent identity matches schedule and cancel: action `AUTO_DEDUCTION` + occurrence URI from the identity triple.
-4. On fire, `AutoDeductionReceiver` calls `insertFiredIfAbsent` — durable **FIRED** row; **no** stock update; may schedule the next one-shot occurrence.
-5. On boot / quick boot, system restore promotes past schedules (serialized fire + ownership-safe metadata removal) and reinstalls future alarms from schedule preferences.
+4. On fire, `AutoDeductionReceiver` performs all durable work on a background thread (`goAsync()` keeps the broadcast alive while synchronous `commit()` disk I/O completes, so the main thread is never blocked). The delivery then calls `insertFiredIfAbsent` — durable **FIRED** row; **no** stock update; may schedule the next one-shot occurrence. If persistence fails **without** a durable pending-fire record, the receiver schedules a bounded **same-identity retry alarm** (same occurrence URI + ownership tokens, `FIRE_RETRY_DELAY_MS` delay, max `MAX_FIRE_RETRIES` attempts) instead of silently consuming the one-shot delivery; retries stay idempotent (`ALREADY_EXISTS`) and stale-protected (ownership tokens).
+5. On boot / quick boot, system restore promotes past schedules (serialized fire + ownership-safe metadata removal) and reinstalls future alarms from schedule preferences. Hydration/resume/local-midnight recovery also invokes the same idempotent native restore before the JS FIRED read, so an unresolved past schedule cannot be destructively canceled before recovery.
 
 Exact fire does **not** require WebView or a running JS bridge.
 
@@ -122,11 +124,16 @@ Valid sequence:
 
 Native status remains **FIRED**, while JS already holds the applied markers. A later run must **acknowledge only**, not deduct again.
 
+**Ack guard (identity hardening):** `markReconciled` only transitions a well-formed FIRED row whose payload identity matches its storage key — the same predicate the read paths enforce. A corrupt FIRED row is terminalized REJECTED (same reasons: `malformed_fields` / `identity_mismatch`) instead of being acknowledged; a REJECTED row is terminal and never resurrected through the ack path; an unexpected status is refused as a retryable failure.
+
 ---
 
 ## JavaScript reconciliation
 
-Entry: `useExactAutoDeductionReconciliation` when `hydrated && !isFirstRun` (and on resume tick).
+Entry: `useExactAutoDeductionReconciliation` when `hydrated && !isFirstRun`, on app resume/local midnight, or immediately from the native `exactAutoDeductionFired` event.
+
+At hydration/resume/local midnight, idempotent native schedule recovery runs before the JS FIRED read, so missed past schedule rows can be promoted before desired-state cleanup. The native event remains only a wake-up signal, not a second source of truth: reconciliation always re-reads the durable native FIRED ledger. There is no foreground polling timer.
+
 
 Orchestration (`runAutoDeductionReconciliation`):
 
@@ -272,6 +279,7 @@ Clearing the JS envelope after durable application does **not** imply every nati
 - **Hydration:** `hydrated` is set only after the initialization work required by the app’s hydration flow completes, including permission initialization and `initNativeBridge()`, so hydration-gated effects (persistence, legacy sync, exact reconcile, native schedule hook) do not run against an incomplete native surface. **Exact-alarm capability is separate:** it controls whether exact-alarm scheduling flows may install or restore alarms, and is **not** a general prerequisite for completing hydration itself. The app can finish hydration even when exact-alarm capability is unavailable; scheduling paths handle that capability according to the implementation.
 - **First run** (`isFirstRun`): seed inventory skips auto deduction / reconcile effects.
 - **Resume:** resume tick can re-enter reconciliation for remaining FIRED events.
+- **Midnight while open:** a single self-correcting local-midnight tick (`useMidnightTick`) re-runs the desired-state scheduler and one recovery reconciliation at the calendar-day boundary, so the new day is projected/scheduled without waiting for a resume.
 - **Reboot:** native restores future schedule alarms; FIRED rows remain until JS acknowledges.
 - **Empty medication UI text is not a hydration marker**; it can appear whenever the list is empty while the bridge is still pending.
 
@@ -370,7 +378,7 @@ Lock order is always `SCHEDULE_LOCK` then nested `EventStore.LOCK` (never the re
 | ALREADY_EXISTS | Yes — ensure D+1 if absent; **never overwrite** existing D+1 |
 | FAILED + pending-fire recorded | Yes — same create-if-absent rule |
 | CANCELLED | No |
-| FAILED without pending | No |
+| FAILED without pending | No — a bounded same-identity retry alarm re-delivers the occurrence (60s delay, max 3 attempts); no D+1 until a durable fire outcome exists |
 
 Live fire recurrence uses `scheduleNextOccurrenceIfAbsent`. Under one continuous `SCHEDULE_LOCK` critical section:
 

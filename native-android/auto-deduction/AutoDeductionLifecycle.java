@@ -32,8 +32,14 @@ public final class AutoDeductionLifecycle {
                 Log.w(TAG, reason + ": exact alarm permission not granted — skip restore");
                 return;
             }
-            int n = scheduler.restoreFutureSchedules();
-            Log.i(TAG, reason + ": restored " + n + " future auto-deduction alarms");
+            AutoDeductionScheduler.RestoreResult rr = scheduler.restoreFutureSchedules();
+            if (rr.ok) {
+                Log.i(TAG, reason + ": restored " + rr.restored
+                        + " future auto-deduction alarms (failed=" + rr.failed + ")");
+            } else {
+                Log.e(TAG, reason + ": restoreFutureSchedules incomplete: "
+                        + rr.error + " restored=" + rr.restored + " failed=" + rr.failed);
+            }
         } catch (Exception e) {
             Log.e(TAG, reason + " promoteAndRestore failed", e);
         }

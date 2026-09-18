@@ -1,6 +1,12 @@
 package app.drugtracker.autodeduction;
 
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.util.Log;
+
+import androidx.core.content.ContextCompat;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -21,6 +27,57 @@ import java.util.List;
 public class AutoDeductionPlugin extends Plugin {
 
     private static final String TAG = "AutoDeductionPlugin";
+
+    private BroadcastReceiver exactAutoFiredReceiver;
+
+    @Override
+    public void load() {
+        super.load();
+
+        exactAutoFiredReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (!AutoDeductionContract.ACTION_AUTO_DEDUCTION_FIRED.equals(intent.getAction())) {
+                    return;
+                }
+
+                JSObject event = new JSObject();
+                event.put("medicationId", intent.getStringExtra(
+                        AutoDeductionContract.EXTRA_MEDICATION_ID));
+                event.put("doseId", intent.getStringExtra(
+                        AutoDeductionContract.EXTRA_DOSE_ID));
+                event.put("calendarDate", intent.getStringExtra(
+                        AutoDeductionContract.EXTRA_CALENDAR_DATE));
+                event.put("scheduledAtEpochMs", intent.getLongExtra(
+                        AutoDeductionContract.EXTRA_SCHEDULED_AT_EPOCH_MS, 0L));
+                event.put("amount", intent.getDoubleExtra(
+                        AutoDeductionContract.EXTRA_AMOUNT, Double.NaN));
+
+                notifyListeners("exactAutoDeductionFired", event);
+            }
+        };
+
+        IntentFilter filter = new IntentFilter(
+                AutoDeductionContract.ACTION_AUTO_DEDUCTION_FIRED);
+        ContextCompat.registerReceiver(
+                getContext(),
+                exactAutoFiredReceiver,
+                filter,
+                ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        if (exactAutoFiredReceiver != null) {
+            try {
+                getContext().unregisterReceiver(exactAutoFiredReceiver);
+            } catch (IllegalArgumentException ignored) {
+                // Receiver was already unregistered during teardown.
+            }
+            exactAutoFiredReceiver = null;
+        }
+        super.handleOnDestroy();
+    }
 
     @PluginMethod
     public void scheduleOccurrence(PluginCall call) {
@@ -90,9 +147,9 @@ public class AutoDeductionPlugin extends Plugin {
     @PluginMethod
     public void listFiredEvents(PluginCall call) {
         AutoDeductionEventStore store = new AutoDeductionEventStore(getContext());
-        List<JSONObject> events = store.listFiredEvents();
+        AutoDeductionEventStore.FiredEventsResult result = store.listFiredEventsResult();
         JSArray arr = new JSArray();
-        for (JSONObject o : events) {
+        for (JSONObject o : result.events) {
             try {
                 arr.put(toJSObject(o));
             } catch (Exception e) {
@@ -100,7 +157,9 @@ public class AutoDeductionPlugin extends Plugin {
             }
         }
         JSObject ret = new JSObject();
+        ret.put("ok", result.ok);
         ret.put("events", arr);
+        if (result.error != null) ret.put("error", result.error);
         call.resolve(ret);
     }
 
@@ -144,11 +203,26 @@ public class AutoDeductionPlugin extends Plugin {
 
     @PluginMethod
     public void restoreFutureSchedules(PluginCall call) {
-        AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
-        int n = scheduler.restoreFutureSchedules();
-        JSObject ret = new JSObject();
-        ret.put("restored", n);
-        call.resolve(ret);
+        try {
+            AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
+            AutoDeductionScheduler.RestoreResult result = scheduler.restoreFutureSchedules();
+            JSObject ret = new JSObject();
+            ret.put("ok", result.ok);
+            ret.put("restored", result.restored);
+            ret.put("failed", result.failed);
+            if (result.error != null) {
+                ret.put("error", result.error);
+            }
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "restoreFutureSchedules failed", e);
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("restored", 0);
+            ret.put("failed", 0);
+            ret.put("error", e.getMessage() != null ? e.getMessage() : "restore_failed");
+            call.resolve(ret);
+        }
     }
 
     /**
@@ -157,22 +231,69 @@ public class AutoDeductionPlugin extends Plugin {
      */
     @PluginMethod
     public void listScheduledOccurrences(PluginCall call) {
-        AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
-        java.util.List<JSONObject> rows = scheduler.listScheduledOccurrences();
-        JSArray arr = new JSArray();
-        for (JSONObject o : rows) {
-            JSObject js = new JSObject();
-            js.put("medicationId", o.optString("medicationId", ""));
-            js.put("doseId", o.optString("doseId", ""));
-            js.put("calendarDate", o.optString("calendarDate", ""));
-            js.put("timeHhmm", o.optString("timeHhmm", ""));
-            js.put("amount", o.optDouble("amount", 0));
-            js.put("scheduledAtEpochMs", o.optLong("scheduledAtEpochMs", 0L));
-            arr.put(js);
+        try {
+            AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
+            java.util.List<JSONObject> rows = scheduler.listScheduledOccurrences();
+            JSArray arr = new JSArray();
+            for (JSONObject o : rows) {
+                JSObject js = new JSObject();
+                js.put("medicationId", o.optString("medicationId", ""));
+                js.put("doseId", o.optString("doseId", ""));
+                js.put("calendarDate", o.optString("calendarDate", ""));
+                js.put("timeHhmm", o.optString("timeHhmm", ""));
+                js.put("amount", o.optDouble("amount", 0));
+                js.put("scheduledAtEpochMs", o.optLong("scheduledAtEpochMs", 0L));
+                if (o.has("fireRetryCount")) {
+                    js.put("fireRetryCount", o.optInt("fireRetryCount", 0));
+                }
+                arr.put(js);
+            }
+            JSObject ret = new JSObject();
+            ret.put("schedules", arr);
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "listScheduledOccurrences failed", e);
+            call.reject(e.getMessage() != null
+                    ? e.getMessage()
+                    : "list_schedules_failed");
         }
-        JSObject ret = new JSObject();
-        ret.put("schedules", arr);
-        call.resolve(ret);
+    }
+
+
+    /**
+     * Phase 4 — atomic occurrence snapshot for Manual Take amount authority.
+     * Runs under SCHEDULE_LOCK on the native side.
+     */
+    @PluginMethod
+    public void getOccurrenceSnapshot(PluginCall call) {
+        String medicationId = call.getString("medicationId");
+        String doseId = call.getString("doseId");
+        String calendarDate = call.getString("calendarDate");
+        if (medicationId == null || medicationId.isEmpty()
+                || doseId == null || doseId.isEmpty()
+                || calendarDate == null || calendarDate.isEmpty()) {
+            call.reject("missing_params");
+            return;
+        }
+        try {
+            AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
+            AutoDeductionScheduler.OccurrenceSnapshot snap =
+                    scheduler.getOccurrenceSnapshot(medicationId, doseId, calendarDate);
+            JSObject ret = new JSObject();
+            ret.put("ok", snap.ok);
+            if (!snap.ok) {
+                ret.put("error", snap.error != null ? snap.error : "snapshot_failed");
+                call.resolve(ret);
+                return;
+            }
+            ret.put("status", snap.status.name());
+            if (snap.amount != null) {
+                ret.put("amount", snap.amount.doubleValue());
+            }
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject(e.getMessage() != null ? e.getMessage() : "snapshot_failed");
+        }
     }
 
     private static JSObject toJSObject(JSONObject o) {

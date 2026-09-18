@@ -15,6 +15,7 @@ import {
   listFiredAutoDeductionEvents,
   markAutoDeductionEventReconciled,
   type AutoDeductionEvent,
+  type ListFiredEventsResult,
   type MarkReconciledResult,
 } from './autoDeductionNative';
 import {
@@ -24,23 +25,37 @@ import {
 import {
   withAutoStockMutationGate,
   commitDurableAutoStockState,
+  loadDurableGlobalAutoDeductEnabled,
   type AutoStockDurableState,
 } from './autoDeductionStockGate';
-import { loadJson, persist } from './storage';
-
-const STORAGE_ENVELOPE_KEY = 'android_med_tracker_exact_auto_envelope_v1';
+import {
+  recoverAllPendingStockEnvelopes,
+  loadManualStockEnvelope,
+  saveManualStockEnvelope,
+  loadExactAutoStockEnvelope,
+  saveExactAutoStockEnvelope,
+  migrateLegacyExactAutoEnvelope,
+  finalizeMutationSeq,
+  type PendingEnvelopeRef,
+  type ExactAutoEnvelopeStored,
+} from './stockEnvelopeRecovery';
+import { allocateMutationSeq } from './stockMutationOrdering';
 
 export interface ExactAutoEnvelope {
   version: 1;
   status: 'js_ready';
   medications: Medication[];
   logs: ConsumptionLog[];
+  /** Phase 4 durable global master switch; absent only on pre-fix envelopes. */
+  globalAutoDeductEnabled?: boolean;
   toAcknowledge: Array<{
     medicationId: string;
     doseId: string;
     calendarDate: string;
   }>;
   createdAt: string;
+  /** Shared causal order with Manual envelopes (stockMutationOrdering). */
+  mutationSeq?: number;
 }
 
 export interface RunReconciliationInput {
@@ -48,7 +63,7 @@ export interface RunReconciliationInput {
   /** Prefer omit — gate loads durable state. Kept for tests that inject. */
   medications?: Medication[];
   logs?: ConsumptionLog[];
-  listFired?: () => Promise<AutoDeductionEvent[]>;
+  listFired?: () => Promise<ListFiredEventsResult | AutoDeductionEvent[]>;
   markReconciled?: (
     medicationId: string,
     doseId: string,
@@ -60,6 +75,8 @@ export interface RunReconciliationInput {
   saveEnvelope?: (env: ExactAutoEnvelope | null) => string | null;
   /** When true, skip outer gate (caller already holds it). */
   alreadyInGate?: boolean;
+  /** Fresh durable state from the already-held gate, including the global master switch. */
+  durableState?: AutoStockDurableState;
   now?: Date;
 }
 
@@ -68,37 +85,48 @@ export interface RunReconciliationOutput extends ReconcileFiredResult {
   recoveredEnvelope: boolean;
   /** True when at least one native mark failed after JS commit (retryable). */
   partialNativeAck: boolean;
+  /** True when the exact stock mutation could not be durably finalized; callers must fail closed. */
+  durabilityBlocked?: boolean;
+  /** True when native FIRED list failed — distinct from empty events; no mutation/ack. */
+  nativeListFailed?: boolean;
+  nativeListError?: string;
 }
 
-function defaultLoadEnvelope(): ExactAutoEnvelope | null {
-  const raw = loadJson<ExactAutoEnvelope | null>(STORAGE_ENVELOPE_KEY, null);
-  if (!raw || raw.version !== 1 || raw.status !== 'js_ready') return null;
-  if (!Array.isArray(raw.medications) || !Array.isArray(raw.logs)) return null;
-  return raw;
+/** @internal test-only envelope injectors (shared with Phase 4 manual gate). */
+let testLoadEnvelope: (() => ExactAutoEnvelope | null) | null = null;
+let testSaveEnvelope: ((env: ExactAutoEnvelope | null) => string | null) | null =
+  null;
+
+/** @internal test-only */
+export function __setExactAutoEnvelopeTestHooks(hooks: {
+  load?: () => ExactAutoEnvelope | null;
+  save?: (env: ExactAutoEnvelope | null) => string | null;
+} | null): void {
+  testLoadEnvelope = hooks?.load ?? null;
+  testSaveEnvelope = hooks?.save ?? null;
 }
 
-function defaultSaveEnvelope(env: ExactAutoEnvelope | null): string | null {
-  if (env == null) {
-    if (typeof localStorage !== 'undefined') {
-      try {
-        localStorage.removeItem(STORAGE_ENVELOPE_KEY);
-      } catch {
-        /* ignore */
-      }
-    }
-    return null;
-  }
-  return persist(STORAGE_ENVELOPE_KEY, env, { json: true });
+export function defaultLoadEnvelope(): ExactAutoEnvelope | null {
+  if (testLoadEnvelope) return testLoadEnvelope();
+  return loadExactAutoStockEnvelope() as ExactAutoEnvelope | null;
+}
+
+export function defaultSaveEnvelope(env: ExactAutoEnvelope | null): string | null {
+  if (testSaveEnvelope) return testSaveEnvelope(env);
+  return saveExactAutoStockEnvelope(env);
 }
 
 export function runAutoDeductionReconciliation(
   input: RunReconciliationInput
 ): Promise<RunReconciliationOutput> {
   if (input.alreadyInGate) {
-    return runOnce(input, {
-      medications: input.medications ?? [],
-      logs: input.logs ?? [],
-    });
+    return runOnce(
+      input,
+      input.durableState ?? {
+        medications: input.medications ?? [],
+        logs: input.logs ?? [],
+      }
+    );
   }
   return withAutoStockMutationGate((fresh) => runOnce(input, fresh));
 }
@@ -143,66 +171,228 @@ async function runOnce(
   const saveEnvelope = input.saveEnvelope ?? defaultSaveEnvelope;
 
   // Prefer explicit inject for tests; otherwise durable gate state.
-  const baseMeds = input.medications ?? fresh.medications;
-  const baseLogs = input.logs ?? fresh.logs;
+  let baseMeds = input.medications ?? fresh.medications;
+  let baseLogs = input.logs ?? fresh.logs;
 
-  // ── Envelope recovery (incomplete prior crash before meds/logs settle) ──
-  const existing = loadEnvelope();
-  if (existing) {
-    let writeFailed = false;
-    if (input.persistMeds || input.persistLogs) {
-      const medErr = input.persistMeds ? input.persistMeds(existing.medications) : null;
-      const logErr = input.persistLogs ? input.persistLogs(existing.logs) : null;
-      writeFailed = !!(medErr || logErr);
-    } else {
-      writeFailed = !!commitDurableAutoStockState({
-        medications: existing.medications,
-        logs: existing.logs,
+  // Unified Manual + Exact Auto envelope recovery (mutationSeq causal order).
+  // Highest seq above lastApplied is recovered first (full snapshot). Lower
+  // pending envelopes never overwrite while higher is unresolved. Manual path
+  // never performs native markReconciled — only Exact Auto toAcknowledge lists
+  // returned here are ACKed below.
+  {
+    const pending: PendingEnvelopeRef[] = [];
+    const manualEnv = loadManualStockEnvelope();
+    if (manualEnv) {
+      pending.push({
+        kind: 'manual',
+        mutationSeq: manualEnv.mutationSeq,
+        medications: manualEnv.medications,
+        logs: manualEnv.logs,
+        globalAutoDeductEnabled: manualEnv.globalAutoDeductEnabled,
+        clear: () => saveManualStockEnvelope(null),
       });
     }
-    if (writeFailed) {
-      // JS persistence/recovery failed — no native markReconciled was attempted.
-      // partialNativeAck must only reflect actual native acknowledgement failure.
+    // Legacy Exact Auto envelope barrier: run BEFORE unified recovery (and
+    // before any new Phase 4 mutation allocates a mutationSeq). The barrier
+    // NEVER allocates a new seq for a legacy envelope — that would make an
+    // old envelope look newer than existing Phase 4 mutations and break
+    // causal ordering. Instead it confirms the legacy mutation is durable
+    // (full snapshot match OR legacy log IDs present) → clear + ACK; or, if
+    // never applied and no newer mutation exists, applies the snapshot; or,
+    // if a newer mutation exists, clears and lets reconcileFiredEvents
+    // (below) re-drive via native FIRED events with a proper Phase 4 seq.
+    const legacyCommit = (state: AutoStockDurableState): string | null => {
+      if (input.persistMeds || input.persistLogs) {
+        const medErr = input.persistMeds
+          ? input.persistMeds(state.medications)
+          : null;
+        const logErr = input.persistLogs ? input.persistLogs(state.logs) : null;
+        if (medErr || logErr) return medErr || logErr || 'persist_failed';
+        return null;
+      }
+      return commitDurableAutoStockState(state);
+    };
+    const legacy = migrateLegacyExactAutoEnvelope(
+      { medications: baseMeds, logs: baseLogs },
+      loadEnvelope as () => ExactAutoEnvelopeStored | null,
+      saveEnvelope as (env: ExactAutoEnvelopeStored | null) => string | null,
+      legacyCommit
+    );
+    if (legacy.blocked) {
+      // Recovery was attempted (envelope was present). Two sub-cases:
+      // - Persist failure: mutation NOT durable → no acks (toAcknowledge=[]).
+      // - Clear failure after durable commit: mutation IS durable → acks are
+      //   safe to send (toAcknowledge collected by the barrier).
+      const blockedAcks = legacy.toAcknowledge;
+      if (blockedAcks.length > 0) {
+        const { markedCount, failed } = await markAll(blockedAcks, mark);
+        return {
+          medications: legacy.state.medications,
+          logs: legacy.state.logs,
+          toAcknowledge: blockedAcks,
+          details: blockedAcks.map((a) => ({
+            medicationId: a.medicationId,
+            doseId: a.doseId,
+            calendarDate: a.calendarDate,
+            amount: 0,
+            outcome: 'already_applied' as const,
+            occurrenceKey: `${a.medicationId}${a.doseId}${a.calendarDate}`,
+          })),
+          mutated: legacy.recovered,
+          newExactLogs: [],
+          markedCount,
+          recoveredEnvelope: legacy.recovered,
+          partialNativeAck: failed.length > 0,
+          durabilityBlocked: legacy.durabilityBlocked,
+        };
+      }
       return {
-        medications: baseMeds,
-        logs: baseLogs,
-        toAcknowledge: existing.toAcknowledge,
+        medications: legacy.state.medications,
+        logs: legacy.state.logs,
+        toAcknowledge: [],
         details: [],
-        mutated: false,
+        mutated: legacy.recovered,
         newExactLogs: [],
         markedCount: 0,
-        recoveredEnvelope: true,
+        recoveredEnvelope: legacy.recovered,
         partialNativeAck: false,
       };
     }
-    const { markedCount, failed } = await markAll(existing.toAcknowledge, mark);
-    // Option B: JS state durable → clear envelope; remaining FIRED recoverable
-    saveEnvelope(null);
-    return {
-      medications: existing.medications,
-      logs: existing.logs,
-      toAcknowledge: existing.toAcknowledge,
-      details: existing.toAcknowledge.map((a) => ({
-        medicationId: a.medicationId,
-        doseId: a.doseId,
-        calendarDate: a.calendarDate,
-        amount: 0,
-        outcome: 'already_applied' as const,
-        occurrenceKey: `${a.medicationId}\u001f${a.doseId}\u001f${a.calendarDate}`,
-      })),
-      mutated: true,
-      newExactLogs: [],
-      markedCount,
-      recoveredEnvelope: true,
-      partialNativeAck: failed.length > 0,
-    };
+    // After the barrier, reload fresh state (the barrier may have applied
+    // the legacy snapshot or cleared the envelope).
+    baseMeds = legacy.state.medications;
+    baseLogs = legacy.state.logs;
+    const legacyAcks = legacy.toAcknowledge;
+
+    // After the barrier, only Phase 4 envelopes (with mutationSeq) remain.
+    const existingExact = loadEnvelope();
+    if (existingExact) {
+      pending.push({
+        kind: 'exact_auto',
+        mutationSeq: existingExact.mutationSeq ?? 0,
+        medications: existingExact.medications,
+        logs: existingExact.logs,
+        globalAutoDeductEnabled: existingExact.globalAutoDeductEnabled,
+        toAcknowledge: existingExact.toAcknowledge,
+        clear: () => saveEnvelope(null),
+      });
+    }
+
+    if (pending.length > 0 || legacyAcks.length > 0) {
+      const commit = (
+        state: AutoStockDurableState,
+        appliedMutationSeq: number
+      ): string | null => {
+        if (input.persistMeds || input.persistLogs) {
+          const medErr = input.persistMeds
+            ? input.persistMeds(state.medications)
+            : null;
+          const logErr = input.persistLogs ? input.persistLogs(state.logs) : null;
+          if (medErr || logErr) return medErr || logErr || 'persist_failed';
+          return finalizeMutationSeq(appliedMutationSeq);
+        }
+        return commitDurableAutoStockState(state, { appliedMutationSeq });
+      };
+
+      const unified = recoverAllPendingStockEnvelopes(
+        {
+          medications: baseMeds,
+          logs: baseLogs,
+          globalAutoDeductEnabled: fresh.globalAutoDeductEnabled,
+        },
+        pending,
+        commit
+      );
+
+      baseMeds = unified.state.medications;
+      baseLogs = unified.state.logs;
+
+      // Merge barrier acks + unified acks (deduplicated by occurrence key).
+      const allAcks = mergeAckLists(legacyAcks, unified.exactToAcknowledge);
+
+      if (allAcks.length > 0) {
+        const { markedCount, failed } = await markAll(allAcks, mark);
+        return {
+          medications: baseMeds,
+          logs: baseLogs,
+          toAcknowledge: allAcks,
+          details: allAcks.map((a) => ({
+            medicationId: a.medicationId,
+            doseId: a.doseId,
+            calendarDate: a.calendarDate,
+            amount: 0,
+            outcome: 'already_applied' as const,
+            occurrenceKey: `${a.medicationId}${a.doseId}${a.calendarDate}`,
+          })),
+          mutated: unified.recovered || legacy.recovered,
+          newExactLogs: [],
+          markedCount,
+          recoveredEnvelope: true,
+          partialNativeAck: failed.length > 0,
+          durabilityBlocked: unified.durabilityBlocked,
+        };
+      }
+
+      if (unified.durabilityBlocked) {
+        return {
+          medications: baseMeds,
+          logs: baseLogs,
+          toAcknowledge: [],
+          details: [],
+          mutated: unified.recovered,
+          newExactLogs: [],
+          markedCount: 0,
+          recoveredEnvelope: true,
+          partialNativeAck: false,
+          durabilityBlocked: true,
+        };
+      }
+      // Manual-only recovery may have completed; fall through to listFired.
+    }
   }
 
+  // Explicit native-read result: failure must NOT look like empty events.
+  // On read failure: do not mutate stock, do not acknowledge, remain retryable.
   let events: AutoDeductionEvent[] = [];
+  let listOk = true;
   try {
-    events = await listFired();
-  } catch {
-    events = [];
+    const listed = await listFired();
+    if (Array.isArray(listed)) {
+      // Legacy test injects that still return AutoDeductionEvent[]
+      events = listed;
+    } else {
+      listOk = listed.ok !== false;
+      events = listed.events ?? [];
+      if (!listOk) {
+        return {
+          medications: baseMeds,
+          logs: baseLogs,
+          toAcknowledge: [],
+          details: [],
+          mutated: false,
+          newExactLogs: [],
+          markedCount: 0,
+          recoveredEnvelope: false,
+          partialNativeAck: false,
+          nativeListFailed: true,
+          nativeListError: listed.error,
+        } as RunReconciliationOutput;
+      }
+    }
+  } catch (e) {
+    return {
+      medications: baseMeds,
+      logs: baseLogs,
+      toAcknowledge: [],
+      details: [],
+      mutated: false,
+      newExactLogs: [],
+      markedCount: 0,
+      recoveredEnvelope: false,
+      partialNativeAck: false,
+      nativeListFailed: true,
+      nativeListError: e instanceof Error ? e.message : 'list_fired_failed',
+    } as RunReconciliationOutput;
   }
 
   if (!events.length) {
@@ -219,8 +409,13 @@ async function runOnce(
     };
   }
 
+  // Recovery may have durably changed the global master switch while the
+  // original `fresh` snapshot is now stale. Re-read it after envelope recovery
+  // and before creating/committing any new Exact-Auto mutation envelope.
+  const durableGlobalAutoDeductEnabled = loadDurableGlobalAutoDeductEnabled();
+
   const result = reconcileFiredEvents(baseMeds, baseLogs, events, {
-    globalAutoDeductEnabled: input.globalAutoDeductEnabled,
+    globalAutoDeductEnabled: durableGlobalAutoDeductEnabled,
     now: input.now,
   });
 
@@ -245,13 +440,31 @@ async function runOnce(
   }
 
   // Mutating path: envelope → meds+logs → mark → clear (Option B)
+  const alloc = allocateMutationSeq();
+  if (!alloc.ok) {
+    return {
+      medications: baseMeds,
+      logs: baseLogs,
+      toAcknowledge: [],
+      details: result.details,
+      mutated: false,
+      newExactLogs: [],
+      markedCount: 0,
+      recoveredEnvelope: false,
+      partialNativeAck: false,
+      durabilityBlocked: true,
+    };
+  }
+  const mutationSeq = alloc.seq;
   const envelope: ExactAutoEnvelope = {
     version: 1,
     status: 'js_ready',
     medications: result.medications,
     logs: result.logs,
+    globalAutoDeductEnabled: durableGlobalAutoDeductEnabled,
     toAcknowledge: result.toAcknowledge,
     createdAt: new Date().toISOString(),
+    mutationSeq,
   };
 
   const envErr = saveEnvelope(envelope);
@@ -266,6 +479,7 @@ async function runOnce(
       markedCount: 0,
       recoveredEnvelope: false,
       partialNativeAck: false,
+      durabilityBlocked: true,
     };
   }
 
@@ -277,10 +491,14 @@ async function runOnce(
     const logErr = input.persistLogs ? input.persistLogs(result.logs) : null;
     if (medErr || logErr) writeOk = false;
   } else {
-    const err = commitDurableAutoStockState({
-      medications: result.medications,
-      logs: result.logs,
-    });
+    const err = commitDurableAutoStockState(
+      {
+        medications: result.medications,
+        logs: result.logs,
+        globalAutoDeductEnabled: durableGlobalAutoDeductEnabled,
+      },
+      { appliedMutationSeq: mutationSeq }
+    );
     if (err) writeOk = false;
   }
 
@@ -296,6 +514,7 @@ async function runOnce(
       markedCount: 0,
       recoveredEnvelope: false,
       partialNativeAck: false,
+      durabilityBlocked: true,
     };
   }
 
@@ -310,4 +529,24 @@ async function runOnce(
     recoveredEnvelope: false,
     partialNativeAck: failed.length > 0,
   };
+}
+
+/** Deduplicate ACKs by medicationId+doseId+calendarDate, preserving order. */
+function mergeAckLists(
+  a: Array<{ medicationId: string; doseId: string; calendarDate: string }>,
+  b: Array<{ medicationId: string; doseId: string; calendarDate: string }>
+): Array<{ medicationId: string; doseId: string; calendarDate: string }> {
+  const out: Array<{
+    medicationId: string;
+    doseId: string;
+    calendarDate: string;
+  }> = [];
+  const seen = new Set<string>();
+  for (const ack of [...a, ...b]) {
+    const key = `${ack.medicationId}|${ack.doseId}|${ack.calendarDate}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(ack);
+  }
+  return out;
 }

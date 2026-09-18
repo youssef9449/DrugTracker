@@ -208,3 +208,44 @@ describe('DoseAlarmModal', () => {
     });
   });
 });
+
+describe('DoseAlarmModal — medication-level stock display', () => {
+  it('Medication ON with past lastSync shows projected stock below snapshot', () => {
+    const med = makeMed({
+      currentPills: 30,
+      dailyDose: 2,
+      autoDeductEnabled: true,
+      lastSyncDate: '2024-01-01',
+    });
+    render(
+      <DoseAlarmModal
+        isOpen
+        medication={med}
+        onTakeDose={() => {}}
+        onSnooze={() => {}}
+        onDismiss={() => {}}
+      />
+    );
+    const line = screen.getByText(/المخزون المتوفر لديك حالياً/);
+    expect(line.textContent).not.toMatch(/حالياً: 30 /);
+  });
+
+  it('Medication OFF freezes displayed stock at currentPills', () => {
+    const med = makeMed({
+      currentPills: 30,
+      dailyDose: 2,
+      autoDeductEnabled: false,
+      lastSyncDate: '2024-01-01',
+    });
+    render(
+      <DoseAlarmModal
+        isOpen
+        medication={med}
+        onTakeDose={() => {}}
+        onSnooze={() => {}}
+        onDismiss={() => {}}
+      />
+    );
+    expect(screen.getByText(/المخزون المتوفر لديك حالياً/)).toHaveTextContent('30');
+  });
+});

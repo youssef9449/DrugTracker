@@ -3,7 +3,7 @@
  * Safe on web (no-ops). Does NOT reconcile stock (Phase 3).
  */
 
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 import { LEGACY_DOSE_ID } from './notifications';
 
 export interface AutoDeductionEvent {
@@ -12,7 +12,7 @@ export interface AutoDeductionEvent {
   calendarDate: string;
   scheduledAtEpochMs: number;
   amount: number;
-  status: 'FIRED' | 'RECONCILED' | string;
+  status: 'FIRED' | 'RECONCILED' | 'REJECTED' | string;
   createdAtEpochMs: number;
   reconciledAtEpochMs: number | null;
 }
@@ -22,6 +22,15 @@ export interface MarkReconciledResult {
   changed: boolean;
 }
 
+export interface ExactAutoDeductionFiredEvent {
+  medicationId: string;
+  doseId: string;
+  calendarDate: string;
+  scheduledAtEpochMs: number;
+  amount: number;
+}
+
+
 export interface ScheduleOccurrenceParams {
   medicationId: string;
   doseId: string;
@@ -29,6 +38,8 @@ export interface ScheduleOccurrenceParams {
   timeHhmm: string;
   amount: number;
   scheduledAtEpochMs?: number;
+  /** Durable native marker: fire persistence is pending retry/recovery. */
+  fireRetryCount?: number;
 }
 
 export interface ScheduleOccurrenceResult {
@@ -67,7 +78,23 @@ export interface CancelOccurrenceResult {
   error?: string;
 }
 
+/**
+ * Explicit result for native future-schedule restoration.
+ * ok=false means recovery boundary incomplete — callers must not run
+ * destructive desired-state cleanup based on an incomplete snapshot.
+ */
+export interface RestoreFutureSchedulesResult {
+  ok: boolean;
+  restored: number;
+  failed?: number;
+  error?: string;
+}
+
 interface AutoDeductionPlugin {
+  addListener(
+    eventName: 'exactAutoDeductionFired',
+    listenerFunc: (event: ExactAutoDeductionFiredEvent) => void
+  ): Promise<PluginListenerHandle>;
   scheduleOccurrence(options: ScheduleOccurrenceParams): Promise<ScheduleOccurrenceResult>;
   cancelOccurrence(options: {
     medicationId: string;
@@ -79,15 +106,25 @@ interface AutoDeductionPlugin {
     medicationId: string;
     doseId: string;
   }): Promise<{ ok: boolean; error?: string; generation?: number }>;
-  listFiredEvents(): Promise<{ events: AutoDeductionEvent[] }>;
+  listFiredEvents(): Promise<{ ok: boolean; events: AutoDeductionEvent[]; error?: string }>;
   listEvents(): Promise<{ events: AutoDeductionEvent[] }>;
+  getOccurrenceSnapshot(options: {
+    medicationId: string;
+    doseId: string;
+    calendarDate: string;
+  }): Promise<{
+    ok: boolean;
+    status?: string;
+    amount?: number;
+    error?: string;
+  }>;
   markReconciled(options: {
     medicationId: string;
     doseId: string;
     calendarDate: string;
   }): Promise<MarkReconciledResult>;
   canScheduleExactAlarms(): Promise<{ granted: boolean }>;
-  restoreFutureSchedules(): Promise<{ restored: number }>;
+  restoreFutureSchedules(): Promise<RestoreFutureSchedulesResult>;
   listScheduledOccurrences(): Promise<{ schedules: ScheduledOccurrence[] }>;
 }
 
@@ -180,25 +217,108 @@ export async function invalidateAutoDeductionRecurrence(
   }
 }
 
-export async function listFiredAutoDeductionEvents(): Promise<AutoDeductionEvent[]> {
-  if (!isNativeAndroid()) return [];
+/**
+ * Explicit result for native FIRED event listing (mirrors scheduled-occurrence listing).
+ * Successful empty list: { ok: true, events: [] }
+ * Native read failure:  { ok: false, events: [], error }
+ * Never conflate the two — callers must check ok before treating events as authoritative.
+ */
+export interface ListFiredEventsResult {
+  ok: boolean;
+  events: AutoDeductionEvent[];
+  error?: string;
+}
+
+export function addExactAutoDeductionFiredListener(
+  listener: (event: ExactAutoDeductionFiredEvent) => void
+): Promise<PluginListenerHandle | null> {
+  if (!isNativeAndroid()) {
+    return Promise.resolve(null);
+  }
+  return AutoDeduction.addListener('exactAutoDeductionFired', listener);
+}
+
+export async function listFiredAutoDeductionEvents(): Promise<ListFiredEventsResult> {
+  if (!isNativeAndroid()) {
+    return { ok: true, events: [] };
+  }
   try {
     const res = await AutoDeduction.listFiredEvents();
-    return res.events ?? [];
-  } catch {
-    return [];
+    if (!res || res.ok === false) {
+      return {
+        ok: false,
+        events: [],
+        error: (res && res.error) || 'list_fired_failed',
+      };
+    }
+    return { ok: true, events: res.events ?? [] };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'list_fired_failed';
+    return { ok: false, events: [], error: msg };
   }
 }
 
-export async function listAutoDeductionEvents(): Promise<AutoDeductionEvent[]> {
-  if (!isNativeAndroid()) return [];
+
+export type OccurrenceSnapshotStatus = 'FIRED' | 'SCHEDULED' | 'CANCELLED' | 'ABSENT';
+
+export type OccurrenceSnapshotResult =
+  | { ok: true; status: OccurrenceSnapshotStatus; amount?: number }
+  | { ok: false; error: string };
+
+/**
+ * Atomic native occurrence snapshot under SCHEDULE_LOCK.
+ * On non-Android: returns ok:true ABSENT (caller uses durable JS schedule).
+ * On native failure: ok:false — never faked as ABSENT.
+ *
+ * Native fail-closed contract (Phase 4): when the EventStore cannot durably
+ * read/terminalize a malformed or identity-mismatched FIRED row, the native
+ * snapshot reports an explicit failure (ok=false, error
+ * 'rejected_persist_failed') through this bridge — the gated Manual Take
+ * consumer must fail closed (no stock mutation, no log, no JS schedule
+ * fallback).
+ */
+export async function getOccurrenceSnapshot(
+  medicationId: string,
+  doseId: string,
+  calendarDate: string
+): Promise<OccurrenceSnapshotResult> {
+  if (!isNativeAndroid()) {
+    return { ok: true, status: 'ABSENT' };
+  }
   try {
-    const res = await AutoDeduction.listEvents();
-    return res.events ?? [];
-  } catch {
-    return [];
+    const res = await AutoDeduction.getOccurrenceSnapshot({
+      medicationId,
+      doseId: doseId || LEGACY_DOSE_ID,
+      calendarDate,
+    });
+    if (!res || res.ok === false) {
+      return {
+        ok: false,
+        error: (res && res.error) || 'snapshot_failed',
+      };
+    }
+    const statusRaw = String(res.status || '').toUpperCase();
+    const allowed: OccurrenceSnapshotStatus[] = [
+      'FIRED',
+      'SCHEDULED',
+      'CANCELLED',
+      'ABSENT',
+    ];
+    if (!allowed.includes(statusRaw as OccurrenceSnapshotStatus)) {
+      return { ok: false, error: 'invalid_snapshot_status' };
+    }
+    const status = statusRaw as OccurrenceSnapshotStatus;
+    const amount =
+      res.amount != null && Number.isFinite(Number(res.amount))
+        ? Number(res.amount)
+        : undefined;
+    return { ok: true, status, amount };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'snapshot_failed';
+    return { ok: false, error: msg };
   }
 }
+
 
 export async function markAutoDeductionEventReconciled(
   medicationId: string,
@@ -227,13 +347,22 @@ export async function canScheduleAutoDeductionExactAlarms(): Promise<boolean> {
   }
 }
 
-export async function restoreFutureAutoDeductionSchedules(): Promise<number> {
-  if (!isNativeAndroid()) return 0;
+export async function restoreFutureAutoDeductionSchedules(): Promise<RestoreFutureSchedulesResult> {
+  if (!isNativeAndroid()) {
+    return { ok: true, restored: 0, failed: 0 };
+  }
   try {
     const res = await AutoDeduction.restoreFutureSchedules();
-    return res.restored ?? 0;
-  } catch {
-    return 0;
+    const ok = res != null && res.ok !== false;
+    return {
+      ok,
+      restored: Number(res?.restored) || 0,
+      failed: Number(res?.failed) || 0,
+      error: res?.error,
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'restore_failed';
+    return { ok: false, restored: 0, failed: 0, error: msg };
   }
 }
 

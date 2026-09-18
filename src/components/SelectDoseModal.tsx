@@ -1,6 +1,6 @@
 import type { FC } from 'react';
 import { Check, Pill, RotateCcw, X } from 'lucide-react';
-import type { Medication, MedicationDose } from '../types';
+import type { ConsumptionLog, Medication, MedicationDose } from '../types';
 import { formatTimeArabic } from '../types';
 import {
   getTodayDateString,
@@ -16,6 +16,13 @@ import {
   relativeDoseDayLabel,
   sortDoseSelectItems,
 } from '../utils/doseSelectDisplay';
+import {
+  findActiveDeductionForOccurrence,
+  getHistoricalRestoreDisplayAmount,
+  isUiAutoHistoricalRestoreEligible,
+  isUiConsumedRestoreEligible,
+  isUiPureAutoProjectionRestoreEligible,
+} from '../utils/medActions';
 import { Modal } from './ui/Modal';
 
 export type SelectDoseMode = 'take' | 'restore' | 'manage';
@@ -34,8 +41,10 @@ export interface SelectDoseModalProps {
   /** Restore action in manage mode (falls back to onSelect if omitted). */
   onRestore?: (medicationId: string, doseId: string) => void;
   /** Global Auto-Deduction toggle (defaults to true). Effective auto state
-   *  is isMedicationAutoDeductActive(medication, globalAutoDeductEnabled). */
+   *  is isMedicationAutoDeductActive(medication) — med-level only. */
   globalAutoDeductEnabled?: boolean;
+  /** Durable stock logs used to classify source and show historical amounts. */
+  logs?: ConsumptionLog[];
   onClose: () => void;
 }
 
@@ -57,6 +66,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
   onSelect,
   onRestore,
   globalAutoDeductEnabled = true,
+  logs = [],
   onClose,
 }) => {
   if (!medication) return null;
@@ -72,7 +82,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
   const unit = medication.unit || 'قرص';
   const isManage = mode === 'manage';
   const isRestore = mode === 'restore';
-  const isAutoActive = isMedicationAutoDeductActive(medication, globalAutoDeductEnabled);
+  const isAutoActive = isMedicationAutoDeductActive(medication);
 
   const title =
     isManage
@@ -86,13 +96,36 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
       ? 'اختر الجرعة المراد استرجاعها'
       : 'اختر الجرعة التي تناولتها';
 
-  // Empty state only for pure take/restore modes
+  // Empty state only for pure take/restore modes.
+  // Restore mode: allDone when no dose has a valid Restore action
+  // (consumed+evidence OR pure-auto projection). Not merely "completed".
   const allDone =
     !isManage &&
     schedule.length > 0 &&
     schedule.every((d) => {
-      const completed = isDoseCompletedToday(medication, d, today, now);
-      return isRestore ? !completed : completed;
+      if (!isRestore) {
+        return isDoseCompletedToday(medication, d, today, now, isAutoActive);
+      }
+      const completed = isDoseCompletedToday(medication, d, today, now, isAutoActive);
+      const skipped = isDoseSkippedOnDate(medication, d.id, today);
+      const consumed = isDoseConsumedOnDate(medication, d.id, today);
+      const evidence = getHistoricalRestoreDisplayAmount(
+        logs,
+        medication.id,
+        d.id,
+        today
+      );
+      const elapsed = isDoseTimeElapsedToday(d.time, now);
+      const pureAuto = isUiPureAutoProjectionRestoreEligible(
+        isAutoActive,
+        completed,
+        consumed,
+        skipped,
+        elapsed
+      );
+      const canRestoreThis =
+        isUiConsumedRestoreEligible(consumed, skipped, evidence) || pureAuto;
+      return !canRestoreThis;
     });
 
   const emptyMessage = isRestore
@@ -132,17 +165,43 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
             </div>
           ) : (
             items.map(({ dose, eventDate }) => {
-              const completed = isDoseCompletedToday(medication, dose, today, now);
+              const completed = isDoseCompletedToday(medication, dose, today, now, isAutoActive);
               const skipped = isDoseSkippedOnDate(medication, dose.id, today);
               const consumed = isDoseConsumedOnDate(medication, dose.id, today);
+              const activeDeduction = findActiveDeductionForOccurrence(
+                logs,
+                medication.id,
+                dose.id,
+                today
+              );
+              // Historical restore amount only from exact active deduction evidence.
+              // Never invent from dose.amount / schedule (matches restoreDose fail-closed).
+              const historicalAmount = getHistoricalRestoreDisplayAmount(
+                logs,
+                medication.id,
+                dose.id,
+                today
+              );
+              // Auto historical Restore requires valid amount evidence, not merely type.
+              const isAutoConsumed = isUiAutoHistoricalRestoreEligible(
+                consumed,
+                skipped,
+                activeDeduction?.type,
+                historicalAmount
+              );
+              const scheduleAmount = Number(dose.amount) || 0;
               const elapsed = isDoseTimeElapsedToday(dose.time, now);
-              // Pure auto: completed via elapsed time, not manual consume, not skipped
-              const isPureAuto =
-                completed && !consumed && !skipped && elapsed;
+              // Pure auto projection: no auto_daily log required.
+              const isPureAuto = isUiPureAutoProjectionRestoreEligible(
+                isAutoActive,
+                completed,
+                consumed,
+                skipped,
+                elapsed
+              );
               const timeLabel = formatTimeArabic(dose.time);
               const dayLabel = relativeDoseDayLabel(eventDate, today);
               const whenLabel = `${dayLabel} • ${timeLabel}`;
-              const amountLabel = `${dose.amount} ${unit}`;
 
               if (isManage) {
                 // Effective Auto-Deduction state = isAutoActive (single source:
@@ -163,13 +222,26 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                 let action: 'take' | 'restore' | null;
                 let actionLabel: string;
 
-                if (consumed) {
-                  // Manually consumed today (either auto state): allow Restore.
+                if (isAutoConsumed) {
+                  // Exact Auto with active auto_daily evidence → historical Restore.
+                  statusText = 'تم الخصم تلقائيًا';
+                  action = 'restore';
+                  actionLabel = 'استرجاع الجرعة';
+                } else if (isUiConsumedRestoreEligible(consumed, skipped, historicalAmount)) {
+                  // Consumed + exact active deduction for this doseId → Restore.
                   statusText = 'تم التناول';
                   action = 'restore';
                   actionLabel = 'استرجاع الجرعة';
+                } else if (consumed) {
+                  // Consumed marker but no exact active deduction evidence.
+                  // Durable restoreDose would reject (missing_deduction_evidence).
+                  // Do not offer Restore; do not invent schedule amount.
+                  statusText = 'تم التناول';
+                  action = null;
+                  actionLabel = '';
                 } else if (isAutoActive && isPureAuto) {
-                  // Auto ON, elapsed + auto-deducted (not manual, not skipped).
+                  // Projection-only: elapsed completed without consume mark.
+                  // Restore remains allowed without auto_daily log.
                   statusText = 'تم الخصم تلقائيًا';
                   action = 'restore';
                   actionLabel = 'استرجاع الجرعة';
@@ -192,6 +264,19 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                   actionLabel = 'تناول الجرعة';
                 }
 
+                // Restore display amount only from evidence; Take uses schedule.
+                const amountLabel =
+                  action === 'restore'
+                    ? historicalAmount != null
+                      ? `${historicalAmount} ${unit}`
+                      : unit
+                    : `${scheduleAmount} ${unit}`;
+                if (action === 'restore' && historicalAmount != null) {
+                  actionLabel = `استرجاع الجرعة (+${historicalAmount})`;
+                } else if (action === 'take' && scheduleAmount > 0) {
+                  actionLabel = `تناول الجرعة (-${scheduleAmount})`;
+                }
+
                 return (
                   <div
                     key={dose.id}
@@ -200,10 +285,10 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                     data-event-date={eventDate}
                     data-select-mode="manage"
                     data-dose-status={
-                      consumed
-                        ? 'consumed'
-                        : isPureAuto
-                          ? 'auto'
+                      isAutoConsumed || isPureAuto
+                        ? 'auto'
+                        : consumed
+                          ? 'consumed'
                           : action === 'take'
                             ? 'pending'
                             : 'inactive'
@@ -257,8 +342,18 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
               }
 
               // Legacy take / restore list (single-purpose)
+              // Restore list: evidence-only amount; take list: schedule amount.
+              const amountLabel = isRestore
+                ? historicalAmount != null
+                  ? `${historicalAmount} ${unit}`
+                  : unit
+                : `${scheduleAmount} ${unit}`;
+              // Restore selectable only for:
+              // - consumed + exact active deduction evidence, or
+              // - pure auto projection (no log required).
               const isSelectable = isRestore
-                ? completed && !skipped
+                ? isUiConsumedRestoreEligible(consumed, skipped, historicalAmount) ||
+                  isPureAuto
                 : !completed;
               const isDone = !isSelectable;
 
@@ -276,10 +371,13 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                   statusLabel = 'غير متاحة';
                 }
               } else if (isDone) {
-                ariaLabel = consumed
-                  ? `تم تناول ${whenLabel} — ${amountLabel}`
-                  : `تم خصم ${whenLabel} تلقائياً — ${amountLabel}`;
-                statusLabel = consumed ? 'تم التناول' : 'خصم تلقائي';
+                ariaLabel = isAutoConsumed
+                  ? `تم خصم ${whenLabel} تلقائياً — ${amountLabel}`
+                  : consumed
+                    ? `تم تناول ${whenLabel} — ${amountLabel}`
+                    : `تم خصم ${whenLabel} تلقائياً — ${amountLabel}`;
+                statusLabel =
+                  isAutoConsumed || !consumed ? 'خصم تلقائي' : 'تم التناول';
               } else {
                 ariaLabel = `تناول ${whenLabel} — ${amountLabel}`;
                 statusLabel = 'اختيار';

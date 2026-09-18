@@ -40,6 +40,17 @@ public final class AutoDeductionEventStore {
      */
     private static final Object LOCK = new Object();
 
+    /**
+     * Test-only seam: when non-null, overrides SharedPreferences.Editor.commit()
+     * results for REJECTED terminalization paths. Production leaves this null.
+     */
+    static volatile Boolean testForceCommitResult = null;
+
+    /** @hide test-only */
+    static void __setTestForceCommitResult(Boolean result) {
+        testForceCommitResult = result;
+    }
+
     private final SharedPreferences prefs;
     private final SharedPreferences pendingPrefs;
 
@@ -176,12 +187,47 @@ public final class AutoDeductionEventStore {
     }
 
     /**
+     * Result of promoting pending-fire records into the main FIRED ledger.
+     *
+     * ok=false means at least one valid pending occurrence could not be made
+     * visible in the main FIRED ledger. Callers that use the FIRED ledger as an
+     * authoritative stock input must fail closed rather than treating that
+     * occurrence as ABSENT/SCHEDULED.
+     */
+    public static final class PendingFiresResult {
+        public final boolean ok;
+        public final int promoted;
+        public final String error;
+
+        private PendingFiresResult(boolean ok, int promoted, String error) {
+            this.ok = ok;
+            this.promoted = promoted;
+            this.error = error;
+        }
+
+        static PendingFiresResult success(int promoted) {
+            return new PendingFiresResult(true, promoted, null);
+        }
+
+        static PendingFiresResult failure(int promoted, String error) {
+            return new PendingFiresResult(
+                    false,
+                    promoted,
+                    error != null && !error.isEmpty() ? error : "pending_promotion_failed");
+        }
+    }
+
+    /**
      * Promote any pending-fire records into the main FIRED ledger (idempotent).
      * Safe to call from boot, listEvents, or any recovery path.
-     * Returns number of pending entries successfully promoted or already present.
+     *
+     * A valid pending occurrence that cannot be durably promoted is a real
+     * lookup failure, not an ordinary empty result. The pending record remains
+     * retryable until promotion succeeds.
      */
-    public int promotePendingFires() {
+    public PendingFiresResult promotePendingFiresResult() {
         int promoted = 0;
+        boolean promotionFailed = false;
         synchronized (LOCK) {
             Map<String, ?> all = pendingPrefs.getAll();
             List<String> toRemove = new ArrayList<>();
@@ -198,14 +244,14 @@ public final class AutoDeductionEventStore {
                     String medId = obj.optString("medicationId", "");
                     String doseId = obj.optString("doseId", "");
                     String date = obj.optString("calendarDate", "");
-                    long scheduledAt = obj.optLong("scheduledAtEpochMs", 0L);
-                    double amount = obj.optDouble("amount", Double.NaN);
                     if (medId.isEmpty() || doseId.isEmpty()
                             || !AutoDeductionContract.isValidCalendarDate(date)
-                            || !AutoDeductionContract.isValidAmount(amount)) {
+                            || !AutoDeductionContract.isValidAmount(
+                                    obj.optDouble("amount", Double.NaN))) {
                         toRemove.add(e.getKey());
                         continue;
                     }
+
                     String eventKey = KEY_EVENT_PREFIX
                             + AutoDeductionContract.occurrenceKey(medId, doseId, date);
                     if (prefs.contains(eventKey)) {
@@ -214,6 +260,7 @@ public final class AutoDeductionEventStore {
                         promoted++;
                         continue;
                     }
+
                     // Ensure status FIRED.
                     obj.put("status", AutoDeductionContract.STATUS_FIRED);
                     if (!obj.has("createdAtEpochMs")) {
@@ -222,19 +269,27 @@ public final class AutoDeductionEventStore {
                     if (!obj.has("reconciledAtEpochMs")) {
                         obj.put("reconciledAtEpochMs", JSONObject.NULL);
                     }
-                    boolean written = prefs.edit().putString(eventKey, obj.toString()).commit();
+                    String payload = obj.toString();
+                    boolean written = commitEditor(
+                            prefs.edit().putString(eventKey, payload));
                     if (!written) {
-                        written = prefs.edit().putString(eventKey, obj.toString()).commit();
+                        written = commitEditor(
+                                prefs.edit().putString(eventKey, payload));
                     }
                     if (written) {
                         toRemove.add(e.getKey());
                         promoted++;
                         Log.i(TAG, "promoted pending-fire to FIRED: " + medId + "/" + doseId + "/" + date);
                     } else {
+                        // Keep the pending-fire record for a later retry. Do not
+                        // allow callers to fall through to the JS/SCHEDULED amount.
+                        promotionFailed = true;
                         Log.e(TAG, "promote pending commit failed for " + e.getKey());
                     }
                 } catch (JSONException ex) {
                     Log.e(TAG, "promote pending parse failed", ex);
+                    // Invalid pending records cannot safely represent a FIRED
+                    // occurrence; terminal cleanup is safe.
                     toRemove.add(e.getKey());
                 }
             }
@@ -243,10 +298,21 @@ public final class AutoDeductionEventStore {
                 for (String k : toRemove) {
                     ed.remove(k);
                 }
-                ed.commit();
+                if (!ed.commit()) {
+                    // Cleanup failure does not invalidate already-promoted FIRED
+                    // rows, so keep the result authoritative.
+                    Log.w(TAG, "pending-fire cleanup commit failed");
+                }
             }
         }
-        return promoted;
+        return promotionFailed
+                ? PendingFiresResult.failure(promoted, "pending_promotion_failed")
+                : PendingFiresResult.success(promoted);
+    }
+
+    /** Backward-compatible count API used by non-authoritative callers/tests. */
+    public int promotePendingFires() {
+        return promotePendingFiresResult().promoted;
     }
 
     public boolean hasEvent(String medicationId, String doseId, String calendarDate) {
@@ -257,11 +323,154 @@ public final class AutoDeductionEventStore {
     }
 
     /**
+     * Explicit result for a FIRED occurrence lookup.
+     *
+     * ok=true + event=null means the FIRED occurrence is not available to the
+     * caller (absent, already terminal, or successfully terminalized during
+     * this lookup). ok=false means the lookup could not safely establish that
+     * fact because a required terminal persistence operation failed.
+     */
+    public static final class EventLookupResult {
+        public final boolean ok;
+        public final JSONObject event;
+        public final String error;
+
+        private EventLookupResult(boolean ok, JSONObject event, String error) {
+            this.ok = ok;
+            this.event = event;
+            this.error = error;
+        }
+
+        public static EventLookupResult found(JSONObject event) {
+            return new EventLookupResult(true, event, null);
+        }
+
+        public static EventLookupResult absent() {
+            return new EventLookupResult(true, null, null);
+        }
+
+        public static EventLookupResult failure(String error) {
+            return new EventLookupResult(
+                    false,
+                    null,
+                    error != null && !error.isEmpty() ? error : "event_lookup_failed");
+        }
+    }
+
+    /** Parsed medicationId + doseId + calendarDate from an evt: storage key. */
+    private static final class StorageIdentity {
+        final String medicationId;
+        final String doseId;
+        final String calendarDate;
+
+        StorageIdentity(String medicationId, String doseId, String calendarDate) {
+            this.medicationId = medicationId;
+            this.doseId = doseId;
+            this.calendarDate = calendarDate;
+        }
+    }
+
+    /** Must match the separator used by AutoDeductionContract.occurrenceKey(). */
+    private static final char OCCURRENCE_KEY_SEPARATOR = '\u001f';
+
+    /**
+     * Parse the exact identity encoded in an evt: storage key.
+     * Returns null when the key cannot represent exactly one canonical
+     * medicationId + doseId + calendarDate occurrence.
+     */
+    private static StorageIdentity parseStorageKeyIdentity(String prefKey) {
+        if (prefKey == null || !prefKey.startsWith(KEY_EVENT_PREFIX)) {
+            return null;
+        }
+        String encoded = prefKey.substring(KEY_EVENT_PREFIX.length());
+        int first = encoded.indexOf(OCCURRENCE_KEY_SEPARATOR);
+        int second = first >= 0
+                ? encoded.indexOf(OCCURRENCE_KEY_SEPARATOR, first + 1)
+                : -1;
+        if (first <= 0 || second <= first + 1 || second >= encoded.length() - 1) {
+            return null;
+        }
+        if (encoded.indexOf(OCCURRENCE_KEY_SEPARATOR, second + 1) >= 0) {
+            return null;
+        }
+        return new StorageIdentity(
+                encoded.substring(0, first),
+                encoded.substring(first + 1, second),
+                encoded.substring(second + 1));
+    }
+
+    private static boolean storageIdentityMatchesPayload(
+            StorageIdentity identity,
+            JSONObject o
+    ) {
+        if (identity == null || o == null) return false;
+        String medId = o.optString("medicationId", "");
+        String doseId = o.optString("doseId", "");
+        String calendarDate = o.optString("calendarDate", "");
+        if (medId.trim().isEmpty() || doseId.trim().isEmpty()
+                || !AutoDeductionContract.isValidCalendarDate(calendarDate.trim())) {
+            return false;
+        }
+        return identity.medicationId.equals(medId)
+                && identity.doseId.equals(doseId)
+                && identity.calendarDate.equals(calendarDate);
+    }
+
+    /**
+     * Terminalize one malformed FIRED row while EventStore.LOCK is held.
+     * A failed commit is a lookup FAILURE, never an ordinary ABSENT result.
+     */
+    private EventLookupResult terminalizeFiredRowLocked(
+            String prefKey,
+            JSONObject row,
+            String rejectionReason
+    ) {
+        try {
+            row.put("status", AutoDeductionContract.STATUS_REJECTED);
+            row.put("rejectedAt", System.currentTimeMillis());
+            row.put("rejectionReason", rejectionReason);
+            SharedPreferences.Editor editor = prefs.edit();
+            editor.putString(prefKey, row.toString());
+            if (!commitEditor(editor)) {
+                Log.e(TAG, "REJECTED terminalization commit failed for " + prefKey);
+                return EventLookupResult.failure("rejected_persist_failed");
+            }
+            return EventLookupResult.absent();
+        } catch (JSONException e) {
+            Log.e(TAG, "failed to terminalize FIRED row: " + prefKey, e);
+            return EventLookupResult.failure("rejected_persist_failed");
+        }
+    }
+
+    private EventLookupResult terminalizeInvalidJsonLocked(String prefKey) {
+        try {
+            JSONObject rejected = new JSONObject();
+            rejected.put("status", AutoDeductionContract.STATUS_REJECTED);
+            rejected.put("rejectedAt", System.currentTimeMillis());
+            rejected.put("rejectionReason", "invalid_json");
+            rejected.put("storageKey", prefKey);
+            SharedPreferences.Editor editor = prefs.edit();
+            editor.putString(prefKey, rejected.toString());
+            if (!commitEditor(editor)) {
+                Log.e(TAG, "REJECTED terminalization commit failed for " + prefKey);
+                return EventLookupResult.failure("rejected_persist_failed");
+            }
+            return EventLookupResult.absent();
+        } catch (JSONException e) {
+            Log.e(TAG, "failed to build REJECTED record for invalid JSON: " + prefKey, e);
+            return EventLookupResult.failure("rejected_persist_failed");
+        }
+    }
+
+    /**
      * Result of an acknowledgement attempt.
      * <ul>
      *   <li>{@code ok=true, changed=true} — FIRED → RECONCILED transition succeeded</li>
-     *   <li>{@code ok=true, changed=false} — already RECONCILED (terminal success, no retry)</li>
-     *   <li>{@code ok=false, changed=false} — real failure (missing, parse, or commit); remains retryable</li>
+     *   <li>{@code ok=true, changed=false} — already terminal (RECONCILED or
+     *       REJECTED), or a corrupt FIRED row was terminalized REJECTED instead
+     *       of being acknowledged (terminal success, no retry)</li>
+     *   <li>{@code ok=false, changed=false} — real failure (missing, unexpected
+     *       status, parse/terminalization, or commit); remains retryable</li>
      * </ul>
      */
     public static final class MarkResult {
@@ -294,6 +503,33 @@ public final class AutoDeductionEventStore {
                 if (AutoDeductionContract.STATUS_RECONCILED.equals(status)) {
                     return new MarkResult(true, false);
                 }
+                if (AutoDeductionContract.STATUS_REJECTED.equals(status)) {
+                    // Already terminal via a REJECTED decision. Never resurrect a
+                    // rejected occurrence into RECONCILED through the ack path.
+                    return new MarkResult(true, false);
+                }
+                // Identity/status hardening (mirrors the read paths): only a
+                // well-formed FIRED row whose payload matches its storage key may
+                // be acknowledged as RECONCILED. A corrupt FIRED row is
+                // terminalized REJECTED here instead of being blessed; it will
+                // not be listed as FIRED again, so callers converge without an
+                // ack retry loop.
+                if (!AutoDeductionContract.STATUS_FIRED.equals(status)) {
+                    Log.w(TAG, "markReconciled refused: unexpected status for " + key);
+                    return new MarkResult(false, false);
+                }
+                boolean identityMatches = storageIdentityMatchesPayload(
+                        parseStorageKeyIdentity(prefKey), obj);
+                boolean malformed = isMalformedFired(obj);
+                if (!identityMatches || malformed) {
+                    String reason = malformed ? "malformed_fields" : "identity_mismatch";
+                    EventLookupResult terminalized =
+                            terminalizeFiredRowLocked(prefKey, obj, reason);
+                    if (!terminalized.ok) {
+                        return new MarkResult(false, false);
+                    }
+                    return new MarkResult(true, false);
+                }
                 obj.put("status", AutoDeductionContract.STATUS_RECONCILED);
                 obj.put("reconciledAtEpochMs", System.currentTimeMillis());
                 boolean committed = prefs.edit().putString(prefKey, obj.toString()).commit();
@@ -304,7 +540,14 @@ public final class AutoDeductionEventStore {
                 return new MarkResult(false, false);
             } catch (JSONException e) {
                 Log.e(TAG, "markReconciled parse failed", e);
-                return new MarkResult(false, false);
+                // Invalid JSON can never be acknowledged. Terminalize REJECTED
+                // like the read paths do; if that persistence also fails, the
+                // result stays retryable.
+                EventLookupResult terminalized = terminalizeInvalidJsonLocked(prefKey);
+                if (!terminalized.ok) {
+                    return new MarkResult(false, false);
+                }
+                return new MarkResult(true, false);
             }
         }
     }
@@ -328,15 +571,187 @@ public final class AutoDeductionEventStore {
         return out;
     }
 
-    /** List only FIRED (unreconciled) events. Promotes pending first. */
-    public List<JSONObject> listFiredEvents() {
-        List<JSONObject> all = listEvents();
+    /** Explicit result for bulk FIRED-event listing.
+     * ok=false means native could not safely establish the terminal state.
+     * In that case events is empty and JS must fail closed rather than treating
+     * the result as a successful empty snapshot. */
+    public static final class FiredEventsResult {
+        public final boolean ok;
+        public final List<JSONObject> events;
+        public final String error;
+
+        private FiredEventsResult(boolean ok, List<JSONObject> events, String error) {
+            this.ok = ok;
+            this.events = events;
+            this.error = error;
+        }
+
+        public static FiredEventsResult success(List<JSONObject> events) {
+            return new FiredEventsResult(true, events, null);
+        }
+
+        public static FiredEventsResult failure(String error) {
+            return new FiredEventsResult(false, new ArrayList<>(),
+                    error != null && !error.isEmpty() ? error : "fired_list_failed");
+        }
+    }
+
+    /**
+     * List only FIRED (unreconciled) events. Malformed rows are terminalized
+     * as REJECTED before the snapshot is exposed to JS.
+     */
+    public FiredEventsResult listFiredEventsResult() {
+        PendingFiresResult promotion = promotePendingFiresResult();
+        if (!promotion.ok) {
+            return FiredEventsResult.failure(promotion.error);
+        }
         List<JSONObject> fired = new ArrayList<>();
-        for (JSONObject o : all) {
-            if (AutoDeductionContract.STATUS_FIRED.equals(o.optString("status", ""))) {
-                fired.add(o);
+        synchronized (LOCK) {
+            Map<String, ?> all = prefs.getAll();
+            SharedPreferences.Editor editor = null;
+            boolean needsTerminalization = false;
+            for (Map.Entry<String, ?> e : all.entrySet()) {
+                if (!e.getKey().startsWith(KEY_EVENT_PREFIX)) continue;
+                Object v = e.getValue();
+                if (!(v instanceof String)) continue;
+                try {
+                    JSONObject o = new JSONObject((String) v);
+                    String status = o.optString("status", "");
+                    if (!AutoDeductionContract.STATUS_FIRED.equals(status)) continue;
+
+                    boolean malformed = isMalformedFired(o);
+                    StorageIdentity storageIdentity = parseStorageKeyIdentity(e.getKey());
+                    boolean identityMismatch = !storageIdentityMatchesPayload(storageIdentity, o);
+                    if (malformed || identityMismatch) {
+                        o.put("status", AutoDeductionContract.STATUS_REJECTED);
+                        o.put("rejectedAt", System.currentTimeMillis());
+                        o.put("rejectionReason",
+                                malformed ? "malformed_fields" : "identity_mismatch");
+                        if (editor == null) editor = prefs.edit();
+                        editor.putString(e.getKey(), o.toString());
+                        needsTerminalization = true;
+                        Log.w(TAG, "queued invalid FIRED identity for REJECTED: " + e.getKey());
+                        continue;
+                    }
+                    fired.add(o);
+                } catch (JSONException parseEx) {
+                    try {
+                        JSONObject rejected = new JSONObject();
+                        rejected.put("status", AutoDeductionContract.STATUS_REJECTED);
+                        rejected.put("rejectedAt", System.currentTimeMillis());
+                        rejected.put("rejectionReason", "invalid_json");
+                        rejected.put("storageKey", e.getKey());
+                        if (editor == null) editor = prefs.edit();
+                        editor.putString(e.getKey(), rejected.toString());
+                        needsTerminalization = true;
+                        Log.w(TAG, "queued invalid JSON event row for REJECTED: " + e.getKey());
+                    } catch (JSONException writeEx) {
+                        Log.e(TAG, "failed to build REJECTED record for invalid JSON: "
+                                + e.getKey(), writeEx);
+                        return FiredEventsResult.failure("rejected_build_failed");
+                    }
+                }
+            }
+
+            if (needsTerminalization && !commitEditor(editor)) {
+                // Critical: valid events from the same scan are NOT exposed when
+                // an invalid FIRED row could not be terminalized. Callers must
+                // retry instead of interpreting a partial snapshot as authoritative.
+                Log.e(TAG, "REJECTED terminalization commit failed — bulk FIRED read failed");
+                return FiredEventsResult.failure("rejected_persist_failed");
             }
         }
-        return fired;
+        return FiredEventsResult.success(fired);
+    }
+
+    /** Backward-compatible list API used by focused native tests/callers. */
+    public List<JSONObject> listFiredEvents() {
+        return listFiredEventsResult().events;
+    }
+
+    /**
+     * Commit editor, respecting optional test seam {@link #testForceCommitResult}.
+     * @return true only when durable write confirmed.
+     */
+    private static boolean commitEditor(SharedPreferences.Editor editor) {
+        Boolean forced = testForceCommitResult;
+        if (forced != null) {
+            // Still attempt real commit when force=true so storage reflects REJECTED;
+            // when force=false, skip real commit so storage stays pre-terminal.
+            if (forced) {
+                return editor.commit();
+            }
+            // Discard pending edits without writing (simulate commit failure).
+            return false;
+        }
+        return editor.commit();
+    }
+
+    /**
+     * True when a FIRED row lacks a valid occurrence identity, calendar date, or amount.
+     * Such records cannot be safely reconciled and must become terminal REJECTED.
+     */
+    static boolean isMalformedFired(JSONObject o) {
+        if (o == null) return true;
+        String medId = o.optString("medicationId", "").trim();
+        String doseId = o.optString("doseId", "").trim();
+        String calendarDate = o.optString("calendarDate", "").trim();
+        if (medId.isEmpty() || doseId.isEmpty()) return true;
+        if (!AutoDeductionContract.isValidCalendarDate(calendarDate)) return true;
+        double amt = o.optDouble("amount", Double.NaN);
+        if (!AutoDeductionContract.isValidAmount(amt)) return true;
+        return false;
+    }
+    /**
+     * Promote pending fires, then return an explicit FIRED lookup result for one
+     * occurrence identity. A malformed row that cannot be durably terminalized
+     * is returned as FAILURE so callers cannot fall through to SCHEDULED/ABSENT.
+     * Nested under EventStore.LOCK after caller holds SCHEDULE_LOCK.
+     */
+    public EventLookupResult getFiredUnreconciledEvent(
+            String medicationId, String doseId, String calendarDate) {
+        PendingFiresResult promotion = promotePendingFiresResult();
+        if (!promotion.ok) {
+            return EventLookupResult.failure(promotion.error);
+        }
+        String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
+        String prefKey = KEY_EVENT_PREFIX + key;
+        synchronized (LOCK) {
+            String raw = prefs.getString(prefKey, null);
+            if (raw == null) return EventLookupResult.absent();
+            try {
+                JSONObject obj = new JSONObject(raw);
+                String status = obj.optString("status", "");
+                if (!AutoDeductionContract.STATUS_FIRED.equals(status)) {
+                    return EventLookupResult.absent();
+                }
+
+                StorageIdentity storageIdentity = parseStorageKeyIdentity(prefKey);
+                String rowMed = obj.optString("medicationId", "");
+                String rowDose = obj.optString("doseId", "");
+                String rowDate = obj.optString("calendarDate", "");
+                boolean requestIdentityMatches =
+                        medicationId.equals(rowMed)
+                        && doseId.equals(rowDose)
+                        && calendarDate.equals(rowDate);
+                boolean malformed = isMalformedFired(obj);
+                boolean storageIdentityMatches =
+                        storageIdentityMatchesPayload(storageIdentity, obj);
+
+                if (malformed || !storageIdentityMatches || !requestIdentityMatches) {
+                    String rejectionReason = malformed
+                            ? "malformed_fields"
+                            : "identity_mismatch";
+                    return terminalizeFiredRowLocked(prefKey, obj, rejectionReason);
+                }
+                return EventLookupResult.found(obj);
+            } catch (JSONException e) {
+                EventLookupResult result = terminalizeInvalidJsonLocked(prefKey);
+                if (!result.ok) {
+                    Log.e(TAG, "invalid JSON terminalization failed for " + prefKey);
+                }
+                return result;
+            }
+        }
     }
 }

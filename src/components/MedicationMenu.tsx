@@ -15,7 +15,13 @@ import './MedicationCardMaterial.css';
 
 interface MedicationMenuProps {
   medication: Medication;
+  /** Effective Auto-Deduct (global ∧ medication). Used for runtime state only. */
   isAutoActive: boolean;
+  /**
+   * @deprecated Global bulk-sets all meds; this menu edits one medication only.
+   * Kept optional so existing callers still type-check.
+   */
+  globalAutoDeductEnabled?: boolean;
   showRefillInMenu?: boolean;
   onOpenRefill?: (medication: Medication) => void;
   onEdit: (medication: Medication) => void;
@@ -43,6 +49,7 @@ export function MedicationTypeIcon({ unit, className = "h-3.5 w-3.5" }: { unit: 
 export function MedicationMenu({
   medication,
   isAutoActive,
+  globalAutoDeductEnabled: _globalAutoDeductEnabled,
   onEdit,
   onDelete,
   onToggleAutoDeduct,
@@ -50,6 +57,19 @@ export function MedicationMenu({
   showTypeIcon = false,
 }: MedicationMenuProps) {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+
+  // Medication-level Auto only (Global bulk-sets all meds; this menu edits one).
+  const isMedicationAutoDeductEnabled = medication.autoDeductEnabled !== false;
+  const autoTogglePressed = isMedicationAutoDeductEnabled;
+  const autoToggleAriaLabel = isAutoActive
+    ? 'إيقاف الخصم التلقائي'
+    : 'تفعيل الخصم التلقائي';
+  const autoToggleTitle = isAutoActive
+    ? 'الخصم التلقائي مفعّل — اضغط للإيقاف'
+    : 'الخصم التلقائي متوقف — اضغط للتفعيل';
+  const autoToggleClass = isAutoActive
+    ? 'bg-teal-100 text-teal-800 hover:bg-teal-200'
+    : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-600';
 
   useEffect(() => {
     if (!deleteConfirmOpen) return;
@@ -173,16 +193,17 @@ export function MedicationMenu({
       <button
         type="button"
         onClick={() => onToggleAutoDeduct(medication.id)}
-        className={`${iconButtonClass} ${
-          isAutoActive
-            ? 'bg-teal-100 text-teal-800 hover:bg-teal-200'
-            : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-600'
-        }`}
-        aria-label={isAutoActive ? 'إيقاف الخصم التلقائي' : 'تفعيل الخصم التلقائي'}
-        title={isAutoActive ? 'الخصم التلقائي مفعّل — اضغط للإيقاف' : 'الخصم التلقائي متوقف — اضغط للتفعيل'}
-        aria-pressed={isAutoActive}
+        className={`${iconButtonClass} ${autoToggleClass}`}
+        aria-label={autoToggleAriaLabel}
+        title={autoToggleTitle}
+        aria-pressed={autoTogglePressed}
+        data-auto-pref={isMedicationAutoDeductEnabled ? 'on' : 'off'}
+        data-auto-effective={isAutoActive ? 'on' : 'off'}
       >
-        <Zap className={`${iconDims} ${isAutoActive ? 'fill-teal-600/30' : ''}`} aria-hidden="true" />
+        <Zap
+          className={`${iconDims} ${isAutoActive ? 'fill-teal-600/30' : ''}`}
+          aria-hidden="true"
+        />
       </button>
 
       <button

@@ -515,3 +515,55 @@ describe('useStockAlerts — re-enabling alerts mid-episode', () => {
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
   });
 });
+
+describe('useStockAlerts — medication-level Auto projection', () => {
+  it('Medication ON with past lastSync: can send critical for projected depletion', () => {
+    renderHook(() =>
+      useAlerts({
+        medications: [
+          makeMed({
+            currentPills: 30,
+            dailyDose: 2,
+            autoDeductEnabled: true,
+            lastSyncDate: '2024-01-01',
+            warningThresholdDays: 5,
+          }),
+        ],
+      })
+    );
+    expect(sendMock).toHaveBeenCalled();
+  });
+
+  it('Medication OFF: frozen stock does not send critical from auto projection alone', () => {
+    renderHook(() =>
+      useAlerts({
+        medications: [
+          makeMed({
+            currentPills: 30,
+            dailyDose: 2,
+            autoDeductEnabled: false,
+            lastSyncDate: '2024-01-01',
+            warningThresholdDays: 5,
+          }),
+        ],
+      })
+    );
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it('Medication ON: live armed record matching current projection is preserved', () => {
+    const med = makeMed({
+      currentPills: 30,
+      dailyDose: 1,
+      autoDeductEnabled: true,
+      lastSyncDate: getTodayDateString(),
+      warningThresholdDays: 5,
+    });
+    const projectedT = getCriticalAlarmDate(med, getTodayDateString()) as number;
+    expect(projectedT).toBeGreaterThan(Date.now());
+    writeClaim('med-1', { claimed: true, alarmTime: projectedT });
+    renderHook(() => useAlerts({ medications: [med] }));
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: projectedT });
+    expect(cancelMock).not.toHaveBeenCalled();
+  });
+});

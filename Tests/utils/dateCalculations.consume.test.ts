@@ -32,14 +32,16 @@ describe('syncAutoDailyDeductions — consume-pill feature', () => {
     vi.useRealTimers();
   });
 
-  it('skips auto-deduction when lastConsumedDate === today', () => {
+  it('skips re-deducting today when lastConsumedDate === today (settled snapshot)', () => {
     const today = getTodayDateString();
-    // A med with lastSyncDate in the past (daysPassed > 0) but
-    // lastConsumedDate === today → the auto-deduction should be skipped.
+    // Realistic post-Manual-Take state: the manual consume pre-settled the
+    // snapshot (lastSyncDate = today), so the only day in the window
+    // (lastSyncDate, today] is today itself — already consumed → nothing
+    // due → no deduction.
     const med = makeMed({
       currentPills: 28,
       dailyDose: 2,
-      lastSyncDate: '2024-03-10',
+      lastSyncDate: today,
       lastConsumedDate: today,
     });
     // Use today's date as the "today" param.
@@ -48,6 +50,44 @@ describe('syncAutoDailyDeductions — consume-pill feature', () => {
     expect(result.updatedMeds[0].currentPills).toBe(28);
     expect(result.newLogs).toHaveLength(0);
     expect(result.deductedSummary).toHaveLength(0);
+  });
+
+  it('consumed today excludes only today — never the historical unconsumed days', () => {
+    const today = getTodayDateString();
+    const t = new Date(`${today}T00:00:00Z`);
+    t.setUTCDate(t.getUTCDate() - 1);
+    const yesterday = t.toISOString().slice(0, 10);
+
+    // lastSync = yesterday, today consumed (e.g. same-day Exact Auto on a
+    // stale snapshot): the window is today only → excluded → no deduction.
+    const oneDay = makeMed({
+      currentPills: 28,
+      dailyDose: 2,
+      lastSyncDate: yesterday,
+      lastConsumedDate: today,
+    });
+    const oneDayResult = syncAutoDailyDeductions([oneDay], today);
+    expect(oneDayResult.updatedMeds[0].currentPills).toBe(28);
+    expect(oneDayResult.newLogs).toHaveLength(0);
+
+    // Phase 4 contract: lastSync further back — the historical unconsumed
+    // days (yesterday−1 .. yesterday) must STILL settle even though today
+    // is consumed. consumedToday is not a global sync blocker.
+    const t3 = new Date(`${today}T00:00:00Z`);
+    t3.setUTCDate(t3.getUTCDate() - 3);
+    const threeDaysAgo = t3.toISOString().slice(0, 10);
+    const stale = makeMed({
+      currentPills: 28,
+      dailyDose: 2,
+      lastSyncDate: threeDaysAgo,
+      lastConsumedDate: today,
+    });
+    const staleResult = syncAutoDailyDeductions([stale], today);
+    // Window (D-3, D] = 3 days; today excluded → 2 days × 2 units = 4.
+    expect(staleResult.updatedMeds[0].currentPills).toBe(24);
+    expect(staleResult.newLogs).toHaveLength(1);
+    expect(staleResult.newLogs[0].amount).toBe(-4);
+    expect(staleResult.updatedMeds[0].lastSyncDate).toBe(today);
   });
 
   it('auto-deducts normally when lastConsumedDate is in the past', () => {

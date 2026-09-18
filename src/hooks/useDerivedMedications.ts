@@ -1,10 +1,9 @@
 import { useMemo } from 'react';
 import type { Medication, ConsumptionLog } from '../types';
 import { calculateMedicationStatus } from '../types';
-
 /**
  * Derived medication lists and counts used by the inventory UI.
- * Extracted from App.tsx with identical memoization semantics.
+ * Stock/status projection follows medication Auto only.
  */
 export function useDerivedMedications(
   medications: Medication[],

@@ -14,6 +14,10 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: { getPlatform: vi.fn(() => 'web') },
+  registerPlugin: () => ({
+    getNextOccurrence: () => Promise.resolve({ valid: false, nextOccurrenceMs: 0 }),
+    clearReArm: () => Promise.resolve({ ok: true }),
+  }),
 }));
 vi.mock('@capacitor/local-notifications', () => ({
   LocalNotifications: {
@@ -98,7 +102,7 @@ beforeEach(() => {
   mocks.isNativeReArmed.mockResolvedValue(false);
   mocks.cancelLegacy.mockResolvedValue(undefined);
   // Default: no pending notifications (web platform / no stale alarms).
-  LocalNotifications.getPending.mockResolvedValue({ notifications: [] });
+  vi.mocked(LocalNotifications.getPending).mockResolvedValue({ notifications: [] });
   localStorage.clear();
 });
 
@@ -827,6 +831,14 @@ describe('useDoseReminderScheduler — multi-dose (Phase 2)', () => {
     };
     rerender({ medications: [shrunk] });
     await flushUntil(() => mocks.cancel.mock.calls.some((c) => c[0] === 'med-rm' && c[1] === 'b'));
+    // Sibling doses (a, c) are rescheduled after the removed dose (b) is
+    // cancelled — wait for those schedule calls before asserting.
+    await flushUntil(() =>
+      mocks.schedule.mock.calls.some((c) => c[5]?.doseId === 'a')
+    );
+    await flushUntil(() =>
+      mocks.schedule.mock.calls.some((c) => c[5]?.doseId === 'c')
+    );
 
     // Removed dose cancelled exactly once (no duplicate cancelSlot path).
     const cancelB = mocks.cancel.mock.calls.filter(
@@ -1558,7 +1570,6 @@ describe('idempotent lifecycle reconciliation', () => {
 
     const schedulesAfterFirst = mocks.schedule.mock.calls.length;
     expect(schedulesAfterFirst).toBeGreaterThanOrEqual(1);
-    const cancelsAfterFirst = mocks.cancel.mock.calls.length;
 
     // Next lifecycle: pretend native still has the pending id.
     mocks.isPending.mockResolvedValue(true);
@@ -1641,12 +1652,14 @@ describe('stale native pending cleanup', () => {
     const nonDoseAlarmId = 999_999_999; // outside doseAlarm band
 
     // Mock getPending to contain current + stale + legacy + non-doseAlarm IDs.
-    LocalNotifications.getPending.mockResolvedValue({
+    // (title/body are required by PendingLocalNotificationSchema but unused by
+    // the stale-cleanup logic which only inspects `id`.)
+    vi.mocked(LocalNotifications.getPending).mockResolvedValue({
       notifications: [
-        { id: currentId },
-        { id: staleDoseId },
-        { id: legacyMedId },
-        { id: nonDoseAlarmId },
+        { id: currentId, title: '', body: '' },
+        { id: staleDoseId, title: '', body: '' },
+        { id: legacyMedId, title: '', body: '' },
+        { id: nonDoseAlarmId, title: '', body: '' },
       ],
     });
 
@@ -1660,7 +1673,7 @@ describe('stale native pending cleanup', () => {
     // Verify actual IDs sent to cancel: stale + legacy cancelled,
     // current + non-doseAlarm NOT cancelled.
     expect(LocalNotifications.cancel).toHaveBeenCalled();
-    const cancelledIds = LocalNotifications.cancel.mock.calls.flatMap(
+    const cancelledIds = vi.mocked(LocalNotifications.cancel).mock.calls.flatMap(
       (call: unknown[]) =>
         (call[0] as { notifications: { id: number }[] }).notifications.map(
           (n) => n.id
@@ -1970,5 +1983,112 @@ describe('delivery/reconciliation race', () => {
     await Promise.resolve();
     expect(mocks.cancel).toHaveBeenCalledWith('med-1', 'd1');
     expect(mocks.schedule).toHaveBeenCalled();
+  });
+});
+
+describe('useDoseReminderScheduler — medication-level Auto policy', () => {
+  it('Medication Auto ON: schedules with autoDeductEnabled option', async () => {
+    const med = makeMed({
+      id: 'med-auto-on',
+      reminderTime: '20:00',
+      autoDeductEnabled: true,
+    });
+    renderHook(() =>
+      useDoseReminderScheduler(defaultOpts({ medications: [med] }))
+    );
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    // Last arg is opts when present; Auto ON must pass autoDeductEnabled: true.
+    const withOpts = mocks.schedule.mock.calls.find(
+      (c) => c[5] && typeof c[5] === 'object' && c[5].autoDeductEnabled === true
+    );
+    expect(withOpts).toBeTruthy();
+    expect(withOpts![0]).toBe('med-auto-on');
+  });
+
+  it('flipping medication autoDeductEnabled causes cancel + reschedule with new policy', async () => {
+    const medOn = makeMed({
+      id: 'med-flip',
+      reminderTime: '20:00',
+      autoDeductEnabled: true,
+    });
+    const { rerender } = renderHook(
+      ({ medications }) =>
+        useDoseReminderScheduler(defaultOpts({ medications })),
+      { initialProps: { medications: [medOn] } }
+    );
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    const autoOnCall = mocks.schedule.mock.calls.find(
+      (c) => c[5]?.autoDeductEnabled === true
+    );
+    expect(autoOnCall).toBeTruthy();
+
+    mocks.schedule.mockClear();
+    mocks.cancel.mockClear();
+
+    const medOff = { ...medOn, autoDeductEnabled: false };
+    rerender({ medications: [medOff] });
+    await flushUntil(() => mocks.cancel.mock.calls.length >= 1);
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+
+    expect(mocks.cancel).toHaveBeenCalled();
+    // After Auto OFF, schedule opts must not request autoDeductEnabled: true.
+    const afterFlip = mocks.schedule.mock.calls;
+    expect(afterFlip.length).toBeGreaterThan(0);
+    for (const c of afterFlip) {
+      if (c[5] && typeof c[5] === 'object') {
+        expect(c[5].autoDeductEnabled).not.toBe(true);
+      }
+    }
+  });
+
+  it('hook options do not include globalAutoDeductEnabled (no Global input)', () => {
+    // Production API: Global is not an option. Passing only med-level fields is enough.
+    const med = makeMed({ autoDeductEnabled: true, reminderTime: '20:00' });
+    expect(() =>
+      renderHook(() =>
+        useDoseReminderScheduler(
+          defaultOpts({
+            medications: [med],
+            // Intentionally no globalAutoDeductEnabled — not part of the API.
+          })
+        )
+      )
+    ).not.toThrow();
+  });
+
+  // Matrix: Global is bulk-only (not an input here). Runtime follows medication only.
+  it('med Auto OFF → schedule without autoDeductEnabled:true (manual reminder)', async () => {
+    const med = makeMed({
+      id: 'med-off',
+      reminderTime: '20:00',
+      autoDeductEnabled: false,
+    });
+    renderHook(() =>
+      useDoseReminderScheduler(defaultOpts({ medications: [med] }))
+    );
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    const autoOn = mocks.schedule.mock.calls.find(
+      (c) => c[5]?.autoDeductEnabled === true
+    );
+    expect(autoOn).toBeUndefined();
+    // Reminder is still scheduled (manual path); only Auto flag differs.
+    expect(mocks.schedule).toHaveBeenCalled();
+  });
+
+  it('med Auto ON after bulk Global OFF scenario → still schedules with autoDeductEnabled:true', async () => {
+    // Simulates: Global was bulk-OFF, user re-enabled only this med on the card.
+    const med = makeMed({
+      id: 'med-individual-on',
+      reminderTime: '20:00',
+      autoDeductEnabled: true,
+    });
+    renderHook(() =>
+      useDoseReminderScheduler(defaultOpts({ medications: [med] }))
+    );
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    const withAuto = mocks.schedule.mock.calls.find(
+      (c) => c[0] === 'med-individual-on' && c[5]?.autoDeductEnabled === true
+    );
+    expect(withAuto).toBeTruthy();
   });
 });

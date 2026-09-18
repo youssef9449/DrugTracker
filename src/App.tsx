@@ -44,6 +44,7 @@ import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
 import { useDoseReminderScheduler } from './hooks/useDoseReminderScheduler';
 import { useAutoDeductionScheduler } from './hooks/useAutoDeductionScheduler';
 import { useExactAutoDeductionReconciliation } from './hooks/useExactAutoDeductionReconciliation';
+import { useMidnightTick } from './hooks/useMidnightTick';
 import { usePersistentEffect } from './hooks/usePersistentEffect';
 import { useStockAlerts } from './hooks/useStockAlerts';
 import { useAppHydration } from './hooks/useAppHydration';
@@ -60,10 +61,7 @@ import { getInitialTab } from './lib/initialTab';
 import { persist } from './utils/storage';
 import { TOAST_MESSAGES, PERSIST_FAILURE_MESSAGES } from './constants/uiStrings';
 import {
-  STORAGE_MEDS_KEY,
-  STORAGE_LOGS_KEY,
   STORAGE_PHARMACY_KEY,
-  STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
   STORAGE_AUTO_DEDUCT_PROMPTED_KEY,
   SOUND_KEY,
   NOTIFICATIONS_KEY,
@@ -150,6 +148,7 @@ export default function App() {
   // the correct channel: silent foreground channel when the app is open,
   // system-sound background channel when the app is backgrounded/killed.
   const [doseLifecycleTick, setDoseLifecycleTick] = useState(0);
+
   const [globalAutoDeductEnabled, setGlobalAutoDeductEnabled] = useState<boolean>(true);
 
   const [isPhoneFrame, setIsPhoneFrame] = useState(true);
@@ -162,7 +161,6 @@ export default function App() {
 
   const { alarmingMedication, alarmingDoseId, openAlarm, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
     medications,
-    globalAutoDeductEnabled,
   });
 
   // Phase 3A: multi-dose manual consume / restore requires explicit dose selection.
@@ -248,32 +246,14 @@ export default function App() {
   }, []);
 
   // ─────────────────────────────────────────────────────────────
-  // Persistence effects (M1): each write goes through the
-  // usePersistentEffect hook (utils/storage.ts + hooks/usePersistentEffect.ts),
-  // which surfaces quota failures via a one-shot toast so the user
-  // knows their data wasn't saved (instead of silently dropping it).
-  // A per-key "already warned" ref inside the hook avoids spamming
-  // toasts on every re-render that re-attempts the same failing write.
+  // Medication stock + consumption logs are persisted ONLY by the durable
+  // stock mutation gate. Keeping a React-state persistence effect here would
+  // create a second writer that could replay an older React snapshot after a
+  // gated mutation and overwrite the committed durable state.
   //
-  // All effects are gated on `hydrated` so the first mount does NOT
-  // write the seed defaults (which would briefly overwrite the user's
-  // real data before the hydration effect's setState arrives).
-  // ─────────────────────────────────────────────────────────────
-  usePersistentEffect({
-    storageKey: STORAGE_MEDS_KEY,
-    value: medications,
-    enabled: hydrated,
-    failureMessage: PERSIST_FAILURE_MESSAGES.meds,
-    showToast,
-  });
-
-  usePersistentEffect({
-    storageKey: STORAGE_LOGS_KEY,
-    value: logs,
-    enabled: hydrated,
-    failureMessage: PERSIST_FAILURE_MESSAGES.logs,
-    showToast,
-  });
+  // Hydration remains responsible for the initial read; every post-hydration
+  // mutation path (add/edit/delete/take/restore/refill/undo/exact/legacy)
+  // commits through the same gate.
 
   // M12: pharmacy settings are written via a 400ms debounce so rapid
   // toggles of the 30/60-day duration (which calls onUpdateSettings on
@@ -331,14 +311,9 @@ export default function App() {
     showToast,
   });
 
-  usePersistentEffect({
-    storageKey: STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
-    value: String(globalAutoDeductEnabled),
-    json: false,
-    enabled: hydrated,
-    failureMessage: PERSIST_FAILURE_MESSAGES.autoDeduct,
-    showToast,
-  });
+  // Global auto-deduct is part of the durable stock mutation state. It is
+  // intentionally NOT persisted from React state; toggles commit the master
+  // switch together with medications/logs through the stock gate.
 
   usePersistentEffect({
     storageKey: COMPACT_VIEW_KEY,
@@ -353,9 +328,9 @@ export default function App() {
   useStartupAutoDeduction({
     hydrated,
     isFirstRun,
-    globalAutoDeductEnabled,
     setMedications,
     setLogs,
+    setGlobalAutoDeductEnabled,
     showToast,
   });
 
@@ -407,21 +382,24 @@ export default function App() {
   // reminder fires EVERY DAY at the configured time — even when the app
   // is killed, the device is in Doze, or the user never opens the app.
   //
-  // This complements the in-app polling in useDoseReminders (which only
-  // fires the DoseAlarmModal + chime while the app is in the foreground).
-  // See useDoseReminderScheduler.ts for the race-protection + boot-
-  // persistence details.
+  // Complements event-driven in-app dose reminders while foregrounded.
+  // See useDoseReminderScheduler.ts for race-protection + boot persistence.
   // ─────────────────────────────────────────────────────────────
   useDoseReminderScheduler({
     medications,
     notificationsEnabled,
     hydrated,
     isFirstRun,
-    globalAutoDeductEnabled,
     exactAlarmEnabled,
     resumeTick: doseAlarmResumeTick,
     lifecycleTick: doseLifecycleTick,
   });
+
+  // Local-midnight rollover while the app stays open: today/tomorrow are
+  // computed from the wall clock at effect-run time, so the desired-state
+  // scheduler and the exact-auto reconciliation must re-run once at the
+  // calendar-day boundary (not only on resume).
+  const autoDeductMidnightTick = useMidnightTick();
 
   // Phase 2: exact-time auto-deduction alarms (independent of notifications).
   // Records durable native FIRED events only — no stock mutation here.
@@ -432,17 +410,21 @@ export default function App() {
     isFirstRun,
     exactAlarmEnabled,
     resumeTick: doseAlarmResumeTick,
+    midnightTick: autoDeductMidnightTick,
   });
 
-  // Phase 3: reconcile native FIRED exact auto-deduction events into JS stock.
-  // Runs after hydration and on resume; serialized; crash-safe persist-then-mark.
+  // Phase 3/4: reconcile native FIRED exact auto-deduction events into JS stock.
+  // Runs once after hydration/on resume for recovery, then immediately on the
+  // native exact-auto FIRED event; serialized; crash-safe persist-then-mark.
   useExactAutoDeductionReconciliation({
     setMedications,
     setLogs,
+    setGlobalAutoDeductEnabled,
     globalAutoDeductEnabled,
     hydrated,
     isFirstRun,
     resumeTick: doseAlarmResumeTick,
+    midnightTick: autoDeductMidnightTick,
   });
 
   const {
@@ -454,6 +436,7 @@ export default function App() {
     handleSaveMedication,
     handleDeleteMedication,
     handleTakeDoseFromAlarm,
+    handleTakeDoseFromAlarmById,
     handleSnoozeFromAlarm,
     handleConsumeDose,
     handleCardRestoreDose,
@@ -559,7 +542,7 @@ export default function App() {
 
   useNativeActionHandlers({
     medications,
-    handleTakeDoseFromAlarm,
+    handleTakeDoseFromAlarmById,
     openAlarm,
     soundEnabled,
     setDoseLifecycleTick,
@@ -668,8 +651,8 @@ export default function App() {
                         <div className="flex items-center gap-1.5">
                           <span className="font-bold text-slate-900 block text-[11px] leading-tight">
                             {globalAutoDeductEnabled
-                              ? 'الخصم التلقائي نشط'
-                              : 'الخصم التلقائي متوقف'}
+                              ? 'الخصم التلقائي لجميع الأدوية: مفعّل'
+                              : 'الخصم التلقائي لجميع الأدوية: متوقف'}
                           </span>
                           <span
                             className={`text-[9.5px] px-1.5 py-0.2 rounded-full font-bold ${
@@ -687,8 +670,8 @@ export default function App() {
                           }`}
                         >
                           {globalAutoDeductEnabled
-                            ? 'يُخصم تلقائياً عند ميعاد كل جرعة.'
-                            : 'المخزون ثابت — لا خصم تلقائي.'}
+                            ? 'يضبط كل الأدوية الحالية والجديدة — يمكن تعديل دواء منفردًا من الكارت.'
+                            : 'يوقف كل الأدوية الحالية — يمكن تفعيل دواء منفردًا من الكارت.'}
                         </p>
                       </div>
                       <label
@@ -801,6 +784,7 @@ export default function App() {
                       viewFilter={filter}
                       isCompact={isCompactView}
                       globalAutoDeductEnabled={globalAutoDeductEnabled}
+                      logs={logs}
                       onOpenRefill={setRefillMedication}
                       onEdit={(m) => {
                         setEditingMedication(m);
@@ -965,6 +949,7 @@ export default function App() {
         }
         mode={selectDoseMode}
         globalAutoDeductEnabled={globalAutoDeductEnabled}
+        logs={logs}
         onSelect={handleSelectDoseFromModal}
         onRestore={handleCardRestoreDose}
         onClose={() => {

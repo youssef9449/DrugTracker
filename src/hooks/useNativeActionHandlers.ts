@@ -15,7 +15,7 @@ import { playSuccessChime } from '../utils/sound';
  */
 export function useNativeActionHandlers(opts: {
   medications: Medication[];
-  handleTakeDoseFromAlarm: (med: Medication, doseId?: string) => void;
+  handleTakeDoseFromAlarmById: (medicationId: string, doseId?: string) => void;
   openAlarm: (medId: string, doseId?: string) => void;
   soundEnabled: boolean;
   setDoseLifecycleTick: Dispatch<SetStateAction<number>>;
@@ -25,7 +25,7 @@ export function useNativeActionHandlers(opts: {
 }): void {
   const {
     medications,
-    handleTakeDoseFromAlarm,
+    handleTakeDoseFromAlarmById,
     openAlarm,
     soundEnabled,
     setDoseLifecycleTick,
@@ -37,11 +37,12 @@ export function useNativeActionHandlers(opts: {
   useEffect(() => {
     registerNotificationActionHandler((actionId, medicationId, doseId) => {
       if (actionId !== 'take_dose') return;
-      const medication = medications.find((med) => med.id === medicationId);
-      if (medication) handleTakeDoseFromAlarm(medication, doseId);
+      // Notification actions carry durable identity. Never require the React
+      // medication list to be present/correct before starting the gated Take.
+      handleTakeDoseFromAlarmById(medicationId, doseId);
     });
     return () => registerNotificationActionHandler(null);
-  }, [medications, handleTakeDoseFromAlarm]);
+  }, [handleTakeDoseFromAlarmById]);
 
   // Register the dose-received handler: when a native dose-reminder
   // notification fires while the app is in the foreground, the

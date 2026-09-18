@@ -38,19 +38,20 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     lastSyncDate: getTodayDateString(),
     reminderEnabled: true,
     reminderTime: '23:59',
+    // Suite default: Auto OFF so openAlarm opens the manual modal.
+    // Opt into Auto ON with overrides ({ autoDeductEnabled: true }).
+    autoDeductEnabled: false,
     ...overrides,
   };
 }
 
 /** Default hook options for tests.
- * Manual-alarm suite default: Auto-Deduction OFF so openAlarm() is allowed
- * to open the modal. Individual tests may still opt into auto-active mode
- * via overrides ({ globalAutoDeductEnabled: true }).
+ * Manual-alarm suite default: medications have Auto OFF (or empty list) so
+ * openAlarm() is allowed. Opt into Auto ON via medication.autoDeductEnabled.
  */
 function defaultOpts(overrides: Record<string, unknown> = {}) {
   return {
     medications: [],
-    globalAutoDeductEnabled: false,
     ...overrides,
   };
 }
@@ -372,5 +373,66 @@ describe('useDoseReminders', () => {
     it('is a no-op when no marker exists', () => {
       expect(() => clearSnoozedDoseForMed('med-none')).not.toThrow();
     });
+  });
+});
+
+describe('useDoseReminders — medication-level Auto (openAlarm)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('Medication Auto ON: openAlarm does not open manual modal', () => {
+    const med = makeMed({ id: 'med-auto-on', autoDeductEnabled: true });
+    const { result } = renderHook(() =>
+      useDoseReminders(defaultOpts({ medications: [med] }))
+    );
+    act(() => {
+      result.current.openAlarm('med-auto-on');
+    });
+    expect(result.current.alarmingMedication).toBeNull();
+  });
+
+  it('Medication Auto ON (Global would be OFF): still does not open manual modal', () => {
+    // Global is not passed to the hook; only med preference matters.
+    const med = makeMed({ id: 'med-auto-on-2', autoDeductEnabled: true });
+    const { result } = renderHook(() =>
+      useDoseReminders({ medications: [med] })
+    );
+    act(() => {
+      result.current.openAlarm('med-auto-on-2');
+    });
+    expect(result.current.alarmingMedication).toBeNull();
+  });
+
+  it('Medication Auto OFF: openAlarm opens the modal', () => {
+    const med = makeMed({ id: 'med-auto-off', autoDeductEnabled: false });
+    const { result } = renderHook(() =>
+      useDoseReminders(defaultOpts({ medications: [med] }))
+    );
+    act(() => {
+      result.current.openAlarm('med-auto-off');
+    });
+    expect(result.current.alarmingMedication?.id).toBe('med-auto-off');
+  });
+
+  it('Medication Auto undefined (default ON): openAlarm does not open modal', () => {
+    // makeMed defaults to autoDeductEnabled: false for the manual suite;
+    // this case must exercise the production rule med.autoDeductEnabled !== false
+    // with the property actually absent.
+    const med = makeMed({ id: 'med-default-auto' });
+    delete (med as { autoDeductEnabled?: boolean }).autoDeductEnabled;
+    expect(med.autoDeductEnabled).toBeUndefined();
+    const { result } = renderHook(() =>
+      useDoseReminders({ medications: [med] })
+    );
+    act(() => {
+      result.current.openAlarm('med-default-auto');
+    });
+    expect(result.current.alarmingMedication).toBeNull();
   });
 });

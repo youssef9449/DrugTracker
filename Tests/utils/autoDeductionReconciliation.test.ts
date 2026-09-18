@@ -828,4 +828,152 @@ describe('exact event day must not be double-settled', () => {
     expect(r.medications[0].currentPills).toBe(8);
     expect(r.newExactLogs).toHaveLength(1);
   });
+
+
+  it('FIRED still reconciles when global auto-deduct is disabled', () => {
+    const med = baseMed({
+      doseSchedule: [{ id: 'd', amount: 1, time: '08:00' }],
+      currentPills: 10,
+      lastSyncDate: '2026-09-14',
+      dailyDose: 1,
+      autoDeductEnabled: true,
+    });
+    const r = reconcileFiredEvents(
+      [med],
+      [],
+      [
+        fired({
+          medicationId: 'med-1',
+          doseId: 'd',
+          calendarDate: '2026-09-14',
+          amount: 2,
+        }),
+      ],
+      { globalAutoDeductEnabled: false }
+    );
+    expect(r.details[0].outcome).toBe('applied');
+    expect(r.medications[0].currentPills).toBe(8);
+    expect(r.toAcknowledge).toHaveLength(1);
+  });
+
+  it('FIRED still reconciles when medication auto-deduct is disabled', () => {
+    const med = baseMed({
+      doseSchedule: [{ id: 'd', amount: 1, time: '08:00' }],
+      currentPills: 10,
+      lastSyncDate: '2026-09-14',
+      dailyDose: 1,
+      autoDeductEnabled: false,
+    });
+    const r = reconcileFiredEvents(
+      [med],
+      [],
+      [
+        fired({
+          medicationId: 'med-1',
+          doseId: 'd',
+          calendarDate: '2026-09-14',
+          amount: 2,
+        }),
+      ],
+      { globalAutoDeductEnabled: true }
+    );
+    expect(r.details[0].outcome).toBe('applied');
+    expect(r.medications[0].currentPills).toBe(8);
+  });
+
+  it('repeated reconciliation remains idempotent after apply', () => {
+    const med = baseMed({
+      doseSchedule: [{ id: 'd', amount: 1, time: '08:00' }],
+      currentPills: 10,
+      lastSyncDate: '2026-09-14',
+      dailyDose: 1,
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd',
+      calendarDate: '2026-09-14',
+      amount: 2,
+    });
+    const r1 = reconcileFiredEvents([med], [], [e]);
+    const r2 = reconcileFiredEvents(r1.medications, r1.logs, [e]);
+    expect(r1.medications[0].currentPills).toBe(8);
+    expect(r2.medications[0].currentPills).toBe(8);
+    expect(r2.details[0].outcome).toBe('already_applied');
+  });
+
+});
+
+describe('reconcileFiredEvents — invalid amount must not ACK', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-14T15:00:00'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('amount <= 0 / NaN / Infinity → skipped_invalid, empty toAcknowledge, no stock/log', () => {
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+    });
+    for (const amount of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const e = fired({
+        medicationId: 'med-1',
+        doseId: 'd1',
+        calendarDate: '2026-09-14',
+        amount,
+      });
+      const r = reconcileFiredEvents([med], [], [e]);
+      expect(r.details).toEqual([
+        expect.objectContaining({
+          medicationId: 'med-1',
+          doseId: 'd1',
+          calendarDate: '2026-09-14',
+          outcome: 'skipped_invalid',
+        }),
+      ]);
+      expect(r.toAcknowledge).toEqual([]);
+      expect(r.mutated).toBe(false);
+      expect(r.medications[0].currentPills).toBe(10);
+      expect(r.newExactLogs).toEqual([]);
+      expect(r.logs).toEqual([]);
+    }
+  });
+
+  it('invalid then valid amount on same occurrence: no ACK first, applied + ACK second', () => {
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+    });
+    const invalid = fired({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      calendarDate: '2026-09-14',
+      amount: 0,
+    });
+    const r1 = reconcileFiredEvents([med], [], [invalid]);
+    expect(r1.details[0].outcome).toBe('skipped_invalid');
+    expect(r1.toAcknowledge).toEqual([]);
+    expect(r1.medications[0].currentPills).toBe(10);
+    expect(r1.newExactLogs).toEqual([]);
+
+    const valid = fired({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      calendarDate: '2026-09-14',
+      amount: 2,
+    });
+    const r2 = reconcileFiredEvents(r1.medications, r1.logs, [valid]);
+    expect(r2.details[0].outcome).toBe('applied');
+    expect(r2.mutated).toBe(true);
+    expect(r2.medications[0].currentPills).toBe(8);
+    expect(r2.newExactLogs).toHaveLength(1);
+    expect(r2.newExactLogs[0].amount).toBe(-2);
+    expect(r2.toAcknowledge).toEqual([
+      { medicationId: 'med-1', doseId: 'd1', calendarDate: '2026-09-14' },
+    ]);
+  });
 });

@@ -324,7 +324,9 @@ public class MultiDayCatchUpTest {
         long gen = 1L;
         putPastSnapshot(med, dose, start, "08:00", 1.0, gen);
 
-        int restored = s.restoreFutureSchedules();
+        AutoDeductionScheduler.RestoreResult rr = s.restoreFutureSchedules();
+        int restored = rr.restored;
+        org.junit.Assert.assertTrue(rr.ok);
         // 3 FIRED (28-30) but only 1 future alarm (2026-10-01)
         assertEquals(1, restored);
         assertTrue(hasFired(med, dose, "2026-09-28"));

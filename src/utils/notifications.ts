@@ -1013,7 +1013,11 @@ export async function scheduleCriticalAlarm(
 //
 // Id band doseAlarm (6M) is separate from immediate dose (3M).
 
-export const LEGACY_DOSE_ID = 'legacy';
+// Sentinel lives in a leaf module so pure-logic modules (dateCalculations)
+// can reference it without importing the notification stack.
+// Re-exported here for backward compatibility with existing importers.
+export { LEGACY_DOSE_ID } from './legacyDoseId';
+import { LEGACY_DOSE_ID } from './legacyDoseId';
 
 /**
  * Compute the unique notification id for a medication's recurring dose

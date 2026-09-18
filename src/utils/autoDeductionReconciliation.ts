@@ -29,7 +29,7 @@ export type ReconcileEventOutcome =
   | 'already_applied'
   | 'skipped_invalid'
   | 'skipped_missing_med'
-  | 'skipped_disabled';
+  | 'skipped_disabled'; // retained for type compat; never used for valid FIRED
 
 export interface ReconcileEventDetail {
   medicationId: string;
@@ -148,6 +148,40 @@ function calendarDayBefore(calendarDate: string): string | null {
   }
 }
 
+/**
+ * Locate a native Exact Auto occurrence that is FIRED and not yet reconciled
+ * for the given medicationId + doseId + calendarDate.
+ *
+ * When present, event.amount is the authoritative requested amount for this
+ * occurrence (even if Medication.doseSchedule was edited after scheduling).
+ */
+export function findPendingExactAutoOccurrence(
+  events: Array<{
+    medicationId: string;
+    doseId: string;
+    calendarDate: string;
+    amount: number;
+    status: string;
+    reconciledAtEpochMs?: number | null;
+  }>,
+  medicationId: string,
+  doseId: string | undefined,
+  calendarDate: string
+): { medicationId: string; doseId: string; calendarDate: string; amount: number; status: string } | null {
+  const wantDose = normalizeExactDoseId(doseId);
+  for (const ev of events) {
+    if (ev.medicationId !== medicationId) continue;
+    if (ev.calendarDate !== calendarDate) continue;
+    if (normalizeExactDoseId(ev.doseId) !== wantDose) continue;
+    const status = String(ev.status || '').toUpperCase();
+    if (status !== 'FIRED') continue;
+    if (ev.reconciledAtEpochMs != null) continue;
+    return ev;
+  }
+  return null;
+}
+
+
 export function applyExactAutoEventToMedication(
   med: Medication,
   event: AutoDeductionEvent,
@@ -184,8 +218,10 @@ export function applyExactAutoEventToMedication(
   }
   const settleBase = Math.max(0, med.currentPills - priorHistoricalUnits);
 
-  const amount = event.amount;
-  const newPills = Math.max(0, settleBase - amount);
+  const requested = event.amount;
+  // Actual stock change after clamping at zero (may be < requested).
+  const actualDeducted = Math.min(Math.max(0, requested), settleBase);
+  const newPills = settleBase - actualDeducted;
 
   let nextConsumption = med.doseConsumption;
   let nextHistory = med.doseConsumptionHistory;
@@ -246,10 +282,10 @@ export function applyExactAutoEventToMedication(
     medicationId: med.id,
     medicationName: med.name,
     type: 'auto_daily',
-    amount: -amount,
+    amount: -actualDeducted,
     date: calendarDate,
     timestamp: new Date(now).toISOString(),
-    description: `خصم تلقائي دقيق (−${amount} ${med.unit || 'وحدة'})`,
+    description: `خصم تلقائي دقيق (−${actualDeducted} ${med.unit || 'وحدة'})`,
     doseId: doseId === LEGACY_DOSE_ID ? undefined : doseId,
   };
 
@@ -266,7 +302,6 @@ export function reconcileFiredEvents(
   } = {}
 ): ReconcileFiredResult {
   const now = options.now ?? new Date();
-  const globalOn = options.globalAutoDeductEnabled !== false;
   const todayStr = getTodayDateString();
 
   const sorted = [...events].sort((a, b) => {
@@ -309,9 +344,11 @@ export function reconcileFiredEvents(
       continue;
     }
 
+    // Invalid amount: record skipped_invalid but do NOT ACK. Leaving the
+    // native FIRED row unreconciled preserves evidence for a later pass with
+    // a corrected valid amount (no stock effect was durable this pass).
     if (!isValidEventAmount(amount)) {
       details.push({ ...baseDetail, outcome: 'skipped_invalid' });
-      toAcknowledge.push({ medicationId, doseId, calendarDate });
       continue;
     }
 
@@ -322,11 +359,10 @@ export function reconcileFiredEvents(
       continue;
     }
 
-    if (!globalOn || med.autoDeductEnabled === false) {
-      details.push({ ...baseDetail, outcome: 'skipped_disabled' });
-      toAcknowledge.push({ medicationId, doseId, calendarDate });
-      continue;
-    }
+    // A durable FIRED event means the exact occurrence already fired.
+    // Current global/per-med enabled flags must NOT turn it into a no-op;
+    // disabled state only prevents future scheduling/recurrence.
+    // (skipped_disabled is never applied to a valid FIRED occurrence.)
 
     // Durable log already present for this occurrence → stock marker path
     if (findExactAutoLog(workingLogs, medicationId, doseId, calendarDate)) {

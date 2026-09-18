@@ -282,3 +282,47 @@ describe('PharmacyShoppingView — refill actions', () => {
 
 });
 
+
+describe('PharmacyShoppingView — medication-level stock projection', () => {
+  it('Medication ON with past lastSync appears as urgent under auto projection', () => {
+    const med = makeMed({
+      id: 'urgent-candidate',
+      name: 'Projected Med',
+      currentPills: 30,
+      dailyDose: 2,
+      autoDeductEnabled: true,
+      lastSyncDate: '2024-01-01',
+      warningThresholdDays: 5,
+    });
+    render(
+      <PharmacyShoppingView
+        medications={[med]}
+        settings={defaultSettings}
+        onUpdateSettings={() => {}}
+        showToast={() => {}}
+      />
+    );
+    expect(screen.getByText('Projected Med')).toBeInTheDocument();
+  });
+
+  it('Medication OFF with past lastSync is not urgent (frozen sufficient stock)', () => {
+    const med = makeMed({
+      id: 'frozen',
+      name: 'Frozen Med',
+      currentPills: 30,
+      dailyDose: 2,
+      autoDeductEnabled: false,
+      lastSyncDate: '2024-01-01',
+      warningThresholdDays: 5,
+    });
+    render(
+      <PharmacyShoppingView
+        medications={[med]}
+        settings={defaultSettings}
+        onUpdateSettings={() => {}}
+        showToast={() => {}}
+      />
+    );
+    expect(screen.queryByText('Frozen Med')).not.toBeInTheDocument();
+  });
+});

@@ -7,10 +7,13 @@
 import { useEffect, useRef } from 'react';
 import type { ConsumptionLog, Medication } from '../types';
 import { runAutoDeductionReconciliation } from '../utils/runAutoDeductionReconciliation';
+import { loadDurableGlobalAutoDeductEnabled } from '../utils/autoDeductionStockGate';
 
 export interface UseExactAutoDeductionReconciliationOptions {
   setMedications: (meds: Medication[] | ((prev: Medication[]) => Medication[])) => void;
   setLogs: (logs: ConsumptionLog[] | ((prev: ConsumptionLog[]) => ConsumptionLog[])) => void;
+  /** Optional UI convergence hook for the durable global master switch. */
+  setGlobalAutoDeductEnabled?: (enabled: boolean) => void;
   globalAutoDeductEnabled: boolean;
   hydrated: boolean;
   isFirstRun: boolean;
@@ -20,6 +23,7 @@ export interface UseExactAutoDeductionReconciliationOptions {
 export function useExactAutoDeductionReconciliation({
   setMedications,
   setLogs,
+  setGlobalAutoDeductEnabled,
   globalAutoDeductEnabled,
   hydrated,
   isFirstRun,
@@ -38,10 +42,16 @@ export function useExactAutoDeductionReconciliation({
         globalAutoDeductEnabled: globalRef.current,
       });
       if (cancelled) return;
-      // React follows durable committed state (not the pre-gate snapshot)
+      // React follows durable committed state (not the pre-gate snapshot).
+      // The global master switch is stored in the same durable stock domain,
+      // so sync it after recovery as well; this prevents a recovered global
+      // toggle from remaining stale in React until a full app restart.
       if (result.mutated || result.recoveredEnvelope) {
         setMedications(result.medications);
         setLogs(result.logs);
+      }
+      if (setGlobalAutoDeductEnabled) {
+        setGlobalAutoDeductEnabled(loadDurableGlobalAutoDeductEnabled());
       }
     })();
 

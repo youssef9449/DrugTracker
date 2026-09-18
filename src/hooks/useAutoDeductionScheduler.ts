@@ -13,6 +13,8 @@ import {
   invalidateAutoDeductionRecurrence,
   scheduleAutoDeduction,
   listScheduledAutoDeductionOccurrences,
+  restoreFutureAutoDeductionSchedules,
+  type ScheduledOccurrence,
 } from '../utils/autoDeductionNative';
 import { withAutoStockMutationGate } from '../utils/autoDeductionStockGate';
 
@@ -206,6 +208,41 @@ export function localEpochMs(calendarDate: string, timeHhmm: string): number | n
   return Number.isFinite(ms) ? ms : null;
 }
 
+export function isFireRetryRecoveryPending(
+  schedule: ScheduledOccurrence,
+  med: Medication | undefined,
+  globalAutoDeductEnabled: boolean,
+  now: number = Date.now()
+): boolean {
+  if (
+    !globalAutoDeductEnabled ||
+    !med ||
+    Number(schedule.fireRetryCount) <= 0
+  ) {
+    return false;
+  }
+
+  const configuredSlot = getAutoDeductionSlotsForDate(
+    med,
+    schedule.calendarDate
+  ).find((slot) => slot.doseId === schedule.doseId);
+  if (!configuredSlot) return false;
+
+  const scheduledAt =
+    Number.isFinite(Number(schedule.scheduledAtEpochMs)) &&
+    Number(schedule.scheduledAtEpochMs) > 0
+      ? Number(schedule.scheduledAtEpochMs)
+      : localEpochMs(
+          schedule.calendarDate,
+          schedule.timeHhmm ?? configuredSlot.time
+        );
+
+  // A fire-retry marker is meaningful only after the intended occurrence is
+  // due. The retry alarm itself may be 60s in the future while this occurrence
+  // remains represented by its original scheduledAt timestamp in metadata.
+  return scheduledAt != null && scheduledAt <= now + 2_000;
+}
+
 export function useAutoDeductionScheduler({
   medications,
   globalAutoDeductEnabled,
@@ -218,6 +255,7 @@ export function useAutoDeductionScheduler({
   const trackedRef = useRef<Set<string>>(new Set());
   const generationRef = useRef(0);
   const chainRef = useRef<Promise<void>>(Promise.resolve());
+  const recoveryBoundaryRef = useRef<string | null>(null);
 
   const signature = useMemo(
     () =>
@@ -299,6 +337,16 @@ export function useAutoDeductionScheduler({
     chainRef.current = chainRef.current.then(async () => {
       if (gen !== generationRef.current) return;
 
+      // Recovery boundary: rebuild/promo any past native schedule entries before
+      // the destructive desired-state comparison. This makes missed fires
+      // recoverable after app restart/resume/midnight without foreground polling.
+      const recoveryBoundary = `${resumeTick}:${midnightTick}`;
+      if (recoveryBoundaryRef.current !== recoveryBoundary) {
+        await restoreFutureAutoDeductionSchedules();
+        recoveryBoundaryRef.current = recoveryBoundary;
+        if (gen !== generationRef.current) return;
+      }
+
       // Reconcile against durable native schedule metadata (not process-local
       // trackedRef alone). After restart trackedRef is empty; native may still
       // hold stale schedules for disabled/deleted meds — cancel those first.
@@ -309,6 +357,8 @@ export function useAutoDeductionScheduler({
       const listResult = await listScheduledAutoDeductionOccurrences();
       if (listResult.ok) {
         // Authoritative native snapshot available — discover + reconcile.
+        const listedKeys = new Set<string>();
+        const retryProtectedKeys = new Set<string>();
         for (const s of listResult.schedules) {
           if (gen !== generationRef.current) return;
           const key = autoDeductionScheduleKey(
@@ -316,7 +366,23 @@ export function useAutoDeductionScheduler({
             s.doseId,
             s.calendarDate
           );
+          listedKeys.add(key);
+
           if (!desired.has(key)) {
+            const durableMed = medications.find((m) => m.id === s.medicationId);
+            if (isFireRetryRecoveryPending(
+              s,
+              durableMed,
+              globalAutoDeductEnabled
+            )) {
+              // This past-due schedule is the durable recovery source for a
+              // failed fire-persistence retry. Do not invalidate/cancel it
+              // merely because it falls outside today's/tomorrow's desired set.
+              retryProtectedKeys.add(key);
+              trackedRef.current.delete(key);
+              continue;
+            }
+
             // Issue #217: durable generation bump MUST succeed before any
             // occurrence cancel. Cancel-without-invalidate leaves the old
             // generation active so a concurrent receiver can still create D+1.
@@ -340,28 +406,14 @@ export function useAutoDeductionScheduler({
 
         if (gen !== generationRef.current) return;
 
-        // trackedRef destructive path also requires a successful native list:
-        // without an authoritative snapshot, absence from desired alone must
-        // not drive invalidate/cancel (Issue #242 fail-closed).
+        // The successful native list is authoritative. A tracked key that
+        // disappeared from the native snapshot is already absent natively;
+        // delete only the process-local tracking entry. Do NOT invalidate the
+        // recurrence chain just because an earlier snapshot was resolved by
+        // native recovery between passes (e.g. midnight/resume catch-up).
         for (const key of Array.from(trackedRef.current)) {
-          if (!desired.has(key)) {
-            const [medId, doseId, date] = key.split('::');
-            if (medId && doseId && date) {
-              const res = await cancelUndesiredExactOccurrence(
-                medId,
-                doseId,
-                date
-              );
-              if (!res.ok) {
-                // Fail-closed: do not cancel occurrence; keep tracking for retry.
-                continue;
-              }
-              if (!res.skipped && gen === generationRef.current) {
-                trackedRef.current.delete(key);
-              }
-            } else {
-              trackedRef.current.delete(key);
-            }
+          if (!listedKeys.has(key) && !retryProtectedKeys.has(key)) {
+            trackedRef.current.delete(key);
           }
         }
       } else {

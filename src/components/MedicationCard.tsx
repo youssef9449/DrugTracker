@@ -567,7 +567,9 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 <ListChecks className="w-3 h-3" strokeWidth={2.25} aria-hidden />
               </button>
             ) : (onConsumeDose || onRestoreDose) ? (
-              doseToggle.canRestore && onRestoreDose ? (
+              doseToggle.canRestore &&
+              onRestoreDose &&
+              manualRestoreAmount != null ? (
                 <button
                   type="button"
                   onClick={() => onRestoreDose(medication.id, doseToggle.doseId)}
@@ -787,7 +789,9 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 <ListChecks className="w-3.5 h-3.5" strokeWidth={2.25} aria-hidden />
               </button>
             ) : (onConsumeDose || onRestoreDose) ? (
-              doseToggle.canRestore && onRestoreDose ? (
+              doseToggle.canRestore &&
+              onRestoreDose &&
+              manualRestoreAmount != null ? (
                 <button
                   type="button"
                   onClick={() => onRestoreDose(medication.id, doseToggle.doseId)}

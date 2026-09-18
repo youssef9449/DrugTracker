@@ -93,13 +93,31 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
       ? 'اختر الجرعة المراد استرجاعها'
       : 'اختر الجرعة التي تناولتها';
 
-  // Empty state only for pure take/restore modes
+  // Empty state only for pure take/restore modes.
+  // Restore mode: allDone when no dose has a valid Restore action
+  // (consumed+evidence OR pure-auto projection). Not merely "completed".
   const allDone =
     !isManage &&
     schedule.length > 0 &&
     schedule.every((d) => {
+      if (!isRestore) {
+        return isDoseCompletedToday(medication, d, today, now);
+      }
       const completed = isDoseCompletedToday(medication, d, today, now);
-      return isRestore ? !completed : completed;
+      const skipped = isDoseSkippedOnDate(medication, d.id, today);
+      const consumed = isDoseConsumedOnDate(medication, d.id, today);
+      const evidence = getHistoricalRestoreDisplayAmount(
+        logs,
+        medication.id,
+        d.id,
+        today
+      );
+      const elapsed = isDoseTimeElapsedToday(d.time, now);
+      const pureAuto =
+        isAutoActive && completed && !consumed && !skipped && elapsed;
+      const canRestoreThis =
+        (consumed && !skipped && evidence != null) || pureAuto;
+      return !canRestoreThis;
     });
 
   const emptyMessage = isRestore
@@ -188,18 +206,25 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                 let actionLabel: string;
 
                 if (isAutoConsumed) {
-                  // Exact Auto reuses the consumption marker for idempotency;
-                  // the durable auto_daily log preserves the true source.
+                  // Exact Auto with active auto_daily evidence → historical Restore.
                   statusText = 'تم الخصم تلقائيًا';
                   action = 'restore';
                   actionLabel = 'استرجاع الجرعة';
-                } else if (consumed) {
-                  // Manually consumed today (either auto state): allow Restore.
+                } else if (consumed && historicalAmount != null && !skipped) {
+                  // Consumed + exact active deduction for this doseId → Restore.
                   statusText = 'تم التناول';
                   action = 'restore';
                   actionLabel = 'استرجاع الجرعة';
+                } else if (consumed) {
+                  // Consumed marker but no exact active deduction evidence.
+                  // Durable restoreDose would reject (missing_deduction_evidence).
+                  // Do not offer Restore; do not invent schedule amount.
+                  statusText = 'تم التناول';
+                  action = null;
+                  actionLabel = '';
                 } else if (isAutoActive && isPureAuto) {
-                  // Auto ON, elapsed + auto-deducted (not manual, not skipped).
+                  // Projection-only: elapsed completed without consume mark.
+                  // Restore remains allowed without auto_daily log.
                   statusText = 'تم الخصم تلقائيًا';
                   action = 'restore';
                   actionLabel = 'استرجاع الجرعة';
@@ -306,8 +331,13 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                   ? `${historicalAmount} ${unit}`
                   : unit
                 : `${scheduleAmount} ${unit}`;
+              // Restore selectable only for:
+              // - consumed + exact active deduction evidence, or
+              // - pure auto projection (no log required).
               const isSelectable = isRestore
-                ? completed && !skipped
+                ? !skipped &&
+                  ((consumed && historicalAmount != null) ||
+                    (isAutoActive && isPureAuto))
                 : !completed;
               const isDone = !isSelectable;
 

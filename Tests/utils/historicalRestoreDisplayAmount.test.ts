@@ -75,3 +75,106 @@ describe('getHistoricalRestoreDisplayAmount — UI restore amount contract', () 
     ).toBe(5);
   });
 });
+
+/**
+ * UI Restore eligibility contract (SelectDoseModal / MedicationCard):
+ * - consumed + evidence → restorable
+ * - consumed + no evidence → NOT restorable
+ * - pure auto projection → restorable without log
+ * - sibling dose evidence does not satisfy another doseId
+ */
+describe('UI Restore eligibility contract (derived)', () => {
+  const TODAY = '2026-09-14';
+
+  function canHistoricalRestore(
+    consumed: boolean,
+    skipped: boolean,
+    evidence: number | null
+  ): boolean {
+    return consumed && !skipped && evidence != null;
+  }
+
+  function canPureAutoProjection(
+    isAutoActive: boolean,
+    completed: boolean,
+    consumed: boolean,
+    skipped: boolean,
+    elapsed: boolean
+  ): boolean {
+    return (
+      isAutoActive && completed && !consumed && !skipped && elapsed
+    );
+  }
+
+  it('consumed + exact evidence → restorable', () => {
+    const logs: ConsumptionLog[] = [
+      {
+        id: 'a',
+        medicationId: 'med',
+        doseId: 'd1',
+        amount: -5,
+        type: 'dose_taken',
+        timestamp: '2026-09-14T08:00:00.000Z',
+        date: TODAY,
+      },
+    ];
+    const evidence = getHistoricalRestoreDisplayAmount(logs, 'med', 'd1', TODAY);
+    expect(evidence).toBe(5);
+    expect(canHistoricalRestore(true, false, evidence)).toBe(true);
+  });
+
+  it('consumed + missing evidence → not restorable', () => {
+    const evidence = getHistoricalRestoreDisplayAmount([], 'med', 'd1', TODAY);
+    expect(evidence).toBeNull();
+    expect(canHistoricalRestore(true, false, evidence)).toBe(false);
+  });
+
+  it('pure auto projection + no deduction → still restorable', () => {
+    expect(
+      canPureAutoProjection(true, true, false, false, true)
+    ).toBe(true);
+    expect(
+      getHistoricalRestoreDisplayAmount([], 'med', 'd1', TODAY)
+    ).toBeNull();
+  });
+
+  it('consumed + sibling-only evidence → not restorable for this doseId', () => {
+    const logs: ConsumptionLog[] = [
+      {
+        id: 'b',
+        medicationId: 'med',
+        doseId: 'd2',
+        amount: -10,
+        type: 'dose_taken',
+        timestamp: '2026-09-14T14:00:00.000Z',
+        date: TODAY,
+      },
+    ];
+    const evidence = getHistoricalRestoreDisplayAmount(logs, 'med', 'd1', TODAY);
+    expect(evidence).toBeNull();
+    expect(canHistoricalRestore(true, false, evidence)).toBe(false);
+  });
+
+  it('allDone restore-mode: true when only non-restorable completed doses', () => {
+    // conceptual: every dose fails both historical and pure-auto
+    const doses = [
+      { historical: false, pureAuto: false },
+      { historical: false, pureAuto: false },
+    ];
+    const allDone = doses.every((d) => !(d.historical || d.pureAuto));
+    expect(allDone).toBe(true);
+  });
+
+  it('allDone restore-mode: false when any historical or pure-auto remains', () => {
+    expect(
+      [{ historical: true, pureAuto: false }].every(
+        (d) => !(d.historical || d.pureAuto)
+      )
+    ).toBe(false);
+    expect(
+      [{ historical: false, pureAuto: true }].every(
+        (d) => !(d.historical || d.pureAuto)
+      )
+    ).toBe(false);
+  });
+});

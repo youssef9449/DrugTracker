@@ -254,6 +254,8 @@ export interface PendingEnvelopeRef {
   mutationSeq: number;
   medications: Medication[];
   logs: ConsumptionLog[];
+  /** Durable global master switch captured with Phase 4 snapshots. */
+  globalAutoDeductEnabled?: boolean;
   /** Exact Auto only — native ACK ownership stays with Exact Auto path. */
   toAcknowledge?: Array<{
     medicationId: string;
@@ -341,6 +343,15 @@ export function durableMatchesEnvelopeSnapshot(
   envelope: { medications: Medication[]; logs: ConsumptionLog[] },
   durable: AutoStockDurableState
 ): boolean {
+  // Global master switch is part of Phase 4 durable snapshots. Legacy envelopes
+  // may omit it; in that case only the medication/log snapshot is compared.
+  if (
+    envelope.globalAutoDeductEnabled !== undefined &&
+    durable.globalAutoDeductEnabled !== undefined &&
+    envelope.globalAutoDeductEnabled !== durable.globalAutoDeductEnabled
+  ) {
+    return false;
+  }
   // Medications: same count, order-aware deep equality per index.
   if (envelope.medications.length !== durable.medications.length) return false;
   for (let i = 0; i < envelope.medications.length; i++) {
@@ -513,14 +524,24 @@ export function recoverAllPendingStockEnvelopes(
     }
 
     const err = commit(
-      { medications: env.medications, logs: env.logs },
+      {
+        medications: env.medications,
+        logs: env.logs,
+        globalAutoDeductEnabled:
+          env.globalAutoDeductEnabled ?? state.globalAutoDeductEnabled,
+      },
       env.mutationSeq
     );
     if (err) {
       blocked = true;
       break;
     }
-    state = { medications: env.medications, logs: env.logs };
+    state = {
+      medications: env.medications,
+      logs: env.logs,
+      globalAutoDeductEnabled:
+        env.globalAutoDeductEnabled ?? state.globalAutoDeductEnabled,
+    };
     if (env.kind === 'exact_auto') {
       collectExactAcks(env.toAcknowledge);
     }

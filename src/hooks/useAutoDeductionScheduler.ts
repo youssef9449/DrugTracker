@@ -143,6 +143,7 @@ export function useAutoDeductionScheduler({
             return [
               m.id,
               m.autoDeductEnabled === false ? '0' : '1',
+              m.reminderEnabled === true ? '1' : '0',
               m.reminderTime ?? '',
               m.dailyDose,
               schedulePart,

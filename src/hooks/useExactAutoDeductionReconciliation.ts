@@ -20,7 +20,10 @@ import { loadDurableGlobalAutoDeductEnabled } from '../utils/autoDeductionStockG
 import {
   addExactAutoDeductionFiredListener,
 } from '../utils/autoDeductionNative';
-import { restoreFutureSchedulesOnce } from '../utils/restoreFutureSchedulesBoundary';
+import {
+  recoveryBoundaryKey,
+  restoreFutureSchedulesOnce,
+} from '../utils/restoreFutureSchedulesBoundary';
 
 export interface UseExactAutoDeductionReconciliationOptions {
   setMedications: (meds: Medication[] | ((prev: Medication[]) => Medication[])) => void;
@@ -72,7 +75,9 @@ export function useExactAutoDeductionReconciliation({
           // before reading the FIRED ledger. This handles app restart/resume and
           // local-midnight catch-up without polling; the native operation is
           // idempotent and does not mutate JS stock directly.
-          const restoreResult = await restoreFutureSchedulesOnce(`exact:${resumeTick}:${midnightTick}`);
+          const restoreResult = await restoreFutureSchedulesOnce(
+            recoveryBoundaryKey(resumeTick, midnightTick)
+          );
           if (cancelled) return;
           if (!restoreResult.ok) {
             // Fail-closed: do not treat incomplete recovery as success.

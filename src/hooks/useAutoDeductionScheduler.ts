@@ -15,7 +15,10 @@ import {
   listScheduledAutoDeductionOccurrences,
   type ScheduledOccurrence,
 } from '../utils/autoDeductionNative';
-import { restoreFutureSchedulesOnce } from '../utils/restoreFutureSchedulesBoundary';
+import {
+  recoveryBoundaryKey,
+  restoreFutureSchedulesOnce,
+} from '../utils/restoreFutureSchedulesBoundary';
 import { withAutoStockMutationGate } from '../utils/autoDeductionStockGate';
 
 export interface UseAutoDeductionSchedulerOptions {
@@ -351,7 +354,7 @@ export function useAutoDeductionScheduler({
       // Recovery boundary: rebuild/promo any past native schedule entries before
       // the destructive desired-state comparison. This makes missed fires
       // recoverable after app restart/resume/midnight without foreground polling.
-      const recoveryBoundary = `${resumeTick}:${midnightTick}`;
+      const recoveryBoundary = recoveryBoundaryKey(resumeTick, midnightTick);
       if (recoveryBoundaryRef.current !== recoveryBoundary) {
         const restoreResult = await restoreFutureSchedulesOnce(recoveryBoundary);
         if (!restoreResult.ok) {

@@ -14,7 +14,18 @@ let lastSuccessfulBoundary: string | null = null;
 let lastSuccessfulResult: RestoreFutureSchedulesResult | null = null;
 
 /**
- * @param boundaryKey stable key for the recovery boundary (e.g. `${resumeTick}:${midnightTick}`)
+ * Canonical recovery-boundary key shared by all consumers (scheduler + exact recon).
+ * Same (resumeTick, midnightTick) must produce the same key in every hook.
+ */
+export function recoveryBoundaryKey(
+  resumeTick: number,
+  midnightTick: number
+): string {
+  return `${Number(resumeTick) || 0}:${Number(midnightTick) || 0}`;
+}
+
+/**
+ * @param boundaryKey from {@link recoveryBoundaryKey}
  */
 export function restoreFutureSchedulesOnce(
   boundaryKey: string

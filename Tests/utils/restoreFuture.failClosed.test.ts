@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { RestoreFutureSchedulesResult } from '../../src/utils/autoDeductionNative';
 import {
+  recoveryBoundaryKey,
   restoreFutureSchedulesOnce,
   __resetRestoreFutureSchedulesBoundaryForTests,
 } from '../../src/utils/restoreFutureSchedulesBoundary';
@@ -25,6 +26,11 @@ describe('restoreFuture fail-closed + boundary-aware owner', () => {
     vi.restoreAllMocks();
   });
 
+  it('recoveryBoundaryKey is canonical for both hooks', () => {
+    expect(recoveryBoundaryKey(1, 2)).toBe('1:2');
+    expect(recoveryBoundaryKey(1, 2)).toBe(recoveryBoundaryKey(1, 2));
+  });
+
   it('coalesces concurrent restore for same boundary into one native call', async () => {
     let resolve!: (v: RestoreFutureSchedulesResult) => void;
     const p = new Promise<RestoreFutureSchedulesResult>((r) => {
@@ -32,8 +38,9 @@ describe('restoreFuture fail-closed + boundary-aware owner', () => {
     });
     vi.mocked(restoreFutureAutoDeductionSchedules).mockReturnValue(p);
 
-    const a = restoreFutureSchedulesOnce('b1');
-    const b = restoreFutureSchedulesOnce('b1');
+    const key = recoveryBoundaryKey(3, 4);
+    const a = restoreFutureSchedulesOnce(key);
+    const b = restoreFutureSchedulesOnce(key);
     expect(restoreFutureAutoDeductionSchedules).toHaveBeenCalledTimes(1);
     resolve({ ok: true, restored: 2, failed: 0 });
     await expect(a).resolves.toEqual({ ok: true, restored: 2, failed: 0 });
@@ -46,8 +53,9 @@ describe('restoreFuture fail-closed + boundary-aware owner', () => {
       restored: 1,
       failed: 0,
     });
-    await restoreFutureSchedulesOnce('b-success');
-    await restoreFutureSchedulesOnce('b-success');
+    const key = recoveryBoundaryKey(5, 0);
+    await restoreFutureSchedulesOnce(key);
+    await restoreFutureSchedulesOnce(key);
     expect(restoreFutureAutoDeductionSchedules).toHaveBeenCalledTimes(1);
   });
 
@@ -60,9 +68,10 @@ describe('restoreFuture fail-closed + boundary-aware owner', () => {
         error: 'restore_boundary_incomplete',
       })
       .mockResolvedValueOnce({ ok: true, restored: 1, failed: 0 });
-    const first = await restoreFutureSchedulesOnce('b-fail');
+    const key = recoveryBoundaryKey(7, 1);
+    const first = await restoreFutureSchedulesOnce(key);
     expect(first.ok).toBe(false);
-    const second = await restoreFutureSchedulesOnce('b-fail');
+    const second = await restoreFutureSchedulesOnce(key);
     expect(second.ok).toBe(true);
     expect(restoreFutureAutoDeductionSchedules).toHaveBeenCalledTimes(2);
   });
@@ -73,20 +82,21 @@ describe('restoreFuture fail-closed + boundary-aware owner', () => {
       restored: 0,
       failed: 0,
     });
-    await restoreFutureSchedulesOnce('b-a');
-    await restoreFutureSchedulesOnce('b-b');
+    await restoreFutureSchedulesOnce(recoveryBoundaryKey(1, 0));
+    await restoreFutureSchedulesOnce(recoveryBoundaryKey(2, 0));
     expect(restoreFutureAutoDeductionSchedules).toHaveBeenCalledTimes(2);
   });
 
-  it('propagates ok=false restore failure', async () => {
+  it('scheduler and exact recon share the same key for same ticks', async () => {
     vi.mocked(restoreFutureAutoDeductionSchedules).mockResolvedValue({
-      ok: false,
+      ok: true,
       restored: 0,
       failed: 0,
-      error: 'restore_boundary_incomplete',
     });
-    const result = await restoreFutureSchedulesOnce('b-err');
-    expect(result.ok).toBe(false);
-    expect(result.error).toBe('restore_boundary_incomplete');
+    // Simulates both hooks on the same resume/midnight boundary.
+    const shared = recoveryBoundaryKey(9, 3);
+    await restoreFutureSchedulesOnce(shared);
+    await restoreFutureSchedulesOnce(shared);
+    expect(restoreFutureAutoDeductionSchedules).toHaveBeenCalledTimes(1);
   });
 });

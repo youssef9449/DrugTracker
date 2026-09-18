@@ -331,7 +331,7 @@ After an exact occurrence is applied, markers remove that slot from due helpers 
 
 **Repository:** Architecture and key invariants are covered by repository unit tests and static review of the implementation. **This documentation change does not execute those tests and does not alter production code.**
 
-**Android runtime / emulator / device:** End-to-end validation of AlarmManager fire → FIRED → cold start → single stock apply → RECONCILED under real device conditions remains **unverified in the environment used for this documentation work**. Do not treat the pipeline as field-proven on hardware until that validation is performed and recorded separately.
+**Android runtime / emulator / device:** End-to-end validation of AlarmManager fire → FIRED → cold start → single stock apply → RECONCILED under real device conditions remains **unverified in the environment used for this documentation work**. Do not treat the pipeline as field-proven on hardware until that validation is performed and recorded separately. The dedicated runtime-validation record is `docs/EXACT_AUTO_RUNTIME_VALIDATION.md`; its 2026-09-18 attempt is recorded there as **BLOCKED (no Android runtime available — see the recorded evidence and reproducible procedures)**.
 
 ---
 

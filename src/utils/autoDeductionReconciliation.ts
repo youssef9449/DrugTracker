@@ -380,11 +380,13 @@ export function reconcileFiredEvents(
     const applied = applyExactAutoEventToMedication(med, event, now);
     if (!applied.ok) {
       if (applied.reason === 'already_applied') {
+        // Durable marker/log already reflects stock — safe to ACK.
         details.push({ ...baseDetail, outcome: 'already_applied' });
         toAcknowledge.push({ medicationId, doseId, calendarDate });
       } else {
+        // Non-terminal apply failure (e.g. invalid_calendarDate): no stock
+        // mutation — do NOT ACK so native FIRED remains retryable.
         details.push({ ...baseDetail, outcome: 'skipped_invalid' });
-        toAcknowledge.push({ medicationId, doseId, calendarDate });
       }
       continue;
     }

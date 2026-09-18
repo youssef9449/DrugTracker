@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import type {
   CancelOccurrenceResult,
   CancelOccurrenceStatus,
+  ExactAutoDeductionFiredEvent,
   ListScheduledOccurrencesResult,
   ScheduleOccurrenceResult,
 } from '../../src/utils/autoDeductionNative';
@@ -69,5 +70,23 @@ describe('ListScheduledOccurrencesResult contract (Issue #242)', () => {
     };
     expect(r.ok).toBe(false);
     expect(r.error).toBeTruthy();
+  });
+});
+
+
+describe('ExactAutoDeductionFiredEvent contract', () => {
+  it('carries the occurrence identity and exact native amount', () => {
+    const event: ExactAutoDeductionFiredEvent = {
+      medicationId: 'med-1',
+      doseId: 'dose-2',
+      calendarDate: '2026-09-18',
+      scheduledAtEpochMs: 1778745600000,
+      amount: 2,
+    };
+
+    expect(event.medicationId).toBe('med-1');
+    expect(event.doseId).toBe('dose-2');
+    expect(event.calendarDate).toBe('2026-09-18');
+    expect(event.amount).toBe(2);
   });
 });

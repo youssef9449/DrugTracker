@@ -71,20 +71,21 @@ export function useExactAutoDeductionReconciliation({
 
       try {
         if (recoverNativeSchedules) {
-          // Recovery boundary: promote/repair native missed schedule deliveries
-          // before reading the FIRED ledger. This handles app restart/resume and
-          // local-midnight catch-up without polling; the native operation is
-          // idempotent and does not mutate JS stock directly.
+          // Recovery boundary: one native future-schedule + independent-evidence
+          // restore per boundary key (shared with useAutoDeductionScheduler).
+          // Failure makes this boundary retryable and is NOT success-cached.
+          // That is independent of the FIRED ledger: EventStore rows remain the
+          // stock source of truth and may still be reconciled below even when
+          // native schedule recovery is incomplete. This does not ignore restore
+          // failure — only separates schedule recovery from FIRED reconciliation.
+          // Not polling: hydrate/resume/midnight triggers only.
           const restoreResult = await restoreFutureSchedulesOnce(
             recoveryBoundaryKey(resumeTick, midnightTick)
           );
           if (cancelled) return;
           if (!restoreResult.ok) {
-            // Fail-closed: do not treat incomplete recovery as success.
-            // Stock reconciliation may still run (FIRED ledger is independent),
-            // but we do not claim native schedules were fully restored.
             console.warn(
-              '[App] Exact Auto native schedule restore failed:',
+              '[App] Exact Auto native schedule restore failed (boundary retryable):',
               restoreResult.error || 'restore_failed'
             );
           }

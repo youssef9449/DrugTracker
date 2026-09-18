@@ -660,4 +660,46 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     expect(modalMed.doseSchedule!.length).toBe(3);
   });
 
+  
+  it('manual Take no-op still refreshes React from the durable state', async () => {
+    durable = {
+      medications: [
+        med({
+          currentPills: 9,
+          doseConsumption: { d1: TODAY },
+          doseConsumptionHistory: { d1: [TODAY] },
+        }),
+      ],
+      logs: [
+        {
+          id: 'durable-take',
+          medicationId: 'med-1',
+          medicationName: 'TestMed',
+          type: 'dose_taken',
+          amount: -1,
+          date: TODAY,
+          timestamp: `${TODAY}T10:00:00.000Z`,
+          description: 'take',
+          doseId: 'd1',
+        },
+      ],
+    };
+    // React is stale: it still shows 10 and no consumption marker.
+    reactMeds = [med({ currentPills: 10 })];
+    const { result } = mountHandlers();
+
+    await act(async () => {
+      result.current.handleConsumeDose('med-1', 'd1');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/تم أخذ الجرعة|أخذ الجرعة/));
+    });
+    // The operation itself is already consumed, but the gate returned the
+    // durable snapshot and the handler must still refresh React with it.
+    expect(reactMeds[0].currentPills).toBe(9);
+    expect(isDoseConsumedOnDate(reactMeds[0], 'd1', TODAY)).toBe(true);
+  });
 });

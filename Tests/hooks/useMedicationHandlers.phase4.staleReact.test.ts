@@ -702,4 +702,25 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     expect(reactMeds[0].currentPills).toBe(9);
     expect(isDoseConsumedOnDate(reactMeds[0], 'd1', TODAY)).toBe(true);
   });
+  
+  it('notification-style Take by medicationId works with empty React medications', async () => {
+    durable = {
+      medications: [med({ currentPills: 10 })],
+      logs: [],
+    };
+    reactMeds = [];
+    const { result } = mountHandlers();
+
+    await act(async () => {
+      result.current.handleTakeDoseFromAlarmById('med-1', 'd1');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(durable.medications[0].currentPills).toBe(9);
+    });
+    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
+  });
+
 });

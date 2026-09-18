@@ -16,6 +16,7 @@ import type { Medication, MedicationDose } from '../types';
 import { generateId } from './id';
 import { timeToMinutes } from './time';
 import { isDoseConsumedOnDate, isDoseSkippedOnDate, getTodayDateString } from './dateCalculations';
+import { LEGACY_DOSE_ID } from './legacyDoseId';
 
 /**
  * Effective Auto-Deduction state for a medication: active only when BOTH
@@ -484,6 +485,10 @@ export function getAutoRestorableDose(
   if (schedule.length === 0) {
     // Legacy: auto-completed when time elapsed and no manual lastConsumedDate.
     if (med.lastConsumedDate === todayStr) return null;
+    // Already restored today (durable LEGACY_DOSE_ID skip marker): the
+    // implicit legacy occurrence is settled — same eligibility rule as the
+    // scheduled slots below ("not already skipped/restored today").
+    if (isDoseSkippedOnDate(med, LEGACY_DOSE_ID, todayStr)) return null;
     const time =
       med.reminderTime && isValidDoseTime(med.reminderTime)
         ? med.reminderTime

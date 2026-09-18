@@ -459,8 +459,16 @@ export function runGatedManualRestore(opts: {
     // already set, no consume marker) is a true no-op (already_restored).
     // But the FIRST auto-only restore must NOT be skipped — it needs to
     // persist the skip marker that restoreDose computed in updatedMed.
-    const skipAlreadySet = result.doseId
-      ? isDoseSkippedOnDate(med, result.doseId, todayStr)
+    // Occurrence identity: the restored slot id for scheduled meds; the
+    // LEGACY_DOSE_ID sentinel for legacy meds (no doseSchedule) — the same
+    // identity the per-day legacy due calculation and Exact Auto
+    // reconciliation use for the implicit daily dose.
+    const isLegacyOccurrence =
+      !Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0;
+    const occurrenceDoseId =
+      result.doseId ?? (isLegacyOccurrence ? LEGACY_DOSE_ID : undefined);
+    const skipAlreadySet = occurrenceDoseId
+      ? isDoseSkippedOnDate(med, occurrenceDoseId, todayStr)
       : false;
     if (!result.wasActuallyConsumed && skipAlreadySet) {
       return {

@@ -6,11 +6,12 @@ import {
   mutationSettlementLastSyncDate,
   recordDoseConsumed,
   isDoseConsumedOnDate,
+  isDoseSkippedOnDate,
   clearDoseSkippedOnDate,
   recordDoseSkipped,
   hasDoseSchedule,
 } from './dateCalculations';
-import { isDoseTimeElapsedToday } from './doseSchedule';
+import { isDoseTimeElapsedToday, isValidDoseTime } from './doseSchedule';
 import { generateId } from './id';
 import { LEGACY_DOSE_ID } from './legacyDoseId';
 
@@ -485,19 +486,67 @@ export function restoreDose(
   }
 
   // --- Legacy (no schedule) ---
-  // Legacy has no per-dose skip marker. The auto-restore reverses the
-  // projected/auto deduction by crediting dailyDose (or the actual deducted
-  // log amount if the dose was consumed). settleAndAdjust settles the
-  // snapshot at the effective balance then adds the restored amount —
-  // matching main's behavior. For auto-only (not consumed), this credits
-  // dailyDose to reverse the projection. For consumed, it credits the actual
-  // amount and clears lastConsumedDate.
+  // Occurrence identity for the implicit legacy dose is
+  // medicationId + LEGACY_DOSE_ID + calendarDate — the same identity used by
+  // the per-day legacy due calculation and Exact Auto reconciliation. The
+  // auto-restore reverses the projected/auto deduction by crediting
+  // dailyDose (or the actual deducted log amount if the dose was consumed).
+  // settleAndAdjust settles the snapshot at the effective balance then adds
+  // the restored amount — matching main's behavior. For auto-only (not
+  // consumed), this credits dailyDose to reverse the projection. For
+  // consumed, it credits the actual amount and clears lastConsumedDate.
   const wasLegacyConsumed = med.lastConsumedDate === todayStr;
+
+  // Idempotency (same semantics as exact/multi-dose occurrences): after ONE
+  // auto-only legacy Restore the occurrence carries a durable skip marker
+  // (LEGACY_DOSE_ID + today). Any further Restore of the same occurrence
+  // before a Manual Take is a zero-mutation no-op (already_restored): no
+  // currentPills change, no new log, no lastConsumedDate or any other
+  // stock-owned field change. The skip marker — not lastSyncDate — is the
+  // idempotency source of truth for this occurrence. A consumed restore
+  // (Take reversal) is never blocked: after a Manual Take cleared the skip
+  // marker, the occurrence is restorable again per the existing lifecycle.
+  if (!wasLegacyConsumed && isDoseSkippedOnDate(med, LEGACY_DOSE_ID, todayStr)) {
+    return { ok: false, reason: 'already_restored' };
+  }
+
   if (wasLegacyConsumed) {
     const legacyActive = findActiveDeductionForOccurrence(logs, med.id, resolvedDoseId, todayStr);
     const legacyActual = legacyActive ? Math.abs(Number(legacyActive.amount) || 0) : restoredAmount;
     const { updatedMed: settled } = settleAndAdjust(med, legacyActual, todayStr, now);
-    const updatedMed: Medication = { ...settled, lastConsumedDate: undefined };
+
+    // Mirror the multi-dose skip semantics for the legacy occurrence: a
+    // past-due consumed restore (prior calendar day, or today with the
+    // reminder time elapsed) leaves the occurrence durably skipped so any
+    // further auto-only Restore is a no-op; a not-yet-elapsed restore clears
+    // any prior skip so the dose stays eligible for time-gated
+    // auto-deduction at its scheduled time.
+    const legacyTime =
+      med.reminderTime && isValidDoseTime(med.reminderTime)
+        ? med.reminderTime
+        : '09:00';
+    const nowLocalDate = (() => {
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const d = String(now.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    })();
+    const legacyPastDueForSkip =
+      todayStr < nowLocalDate || isDoseTimeElapsedToday(legacyTime, now);
+
+    let updatedMed: Medication = { ...settled, lastConsumedDate: undefined };
+    if (legacyPastDueForSkip) {
+      updatedMed = {
+        ...updatedMed,
+        ...recordDoseSkipped(updatedMed, LEGACY_DOSE_ID, todayStr),
+      };
+    } else if (isDoseSkippedOnDate(med, LEGACY_DOSE_ID, todayStr)) {
+      updatedMed = {
+        ...updatedMed,
+        ...clearDoseSkippedOnDate(med, LEGACY_DOSE_ID, todayStr),
+      };
+    }
+
     return {
       ok: true,
       updatedMed,
@@ -508,11 +557,17 @@ export function restoreDose(
     };
   }
   // Auto-only (not consumed): reverse the projected auto-deduction by
-  // crediting dailyDose via settleAndAdjust (same as main).
+  // crediting dailyDose via settleAndAdjust (same as main) and record the
+  // durable skip marker for THIS occurrence (LEGACY_DOSE_ID + today) inside
+  // the SAME returned medication object — one atomic durable mutation, not
+  // a separate write that could succeed or fail apart from the restore.
+  // Manual Take clears this marker (consumeDose legacy path), after which
+  // the occurrence becomes restorable again per the existing lifecycle.
   const { updatedMed: legacySettled } = settleAndAdjust(med, restoredAmount, todayStr, now);
+  const legacySkip = recordDoseSkipped(legacySettled, LEGACY_DOSE_ID, todayStr);
   return {
     ok: true,
-    updatedMed: legacySettled,
+    updatedMed: { ...legacySettled, ...legacySkip },
     restoredAmount,
     doseId: resolvedDoseId,
     wasActuallyConsumed: false,
@@ -667,6 +722,7 @@ export function consumeDose(
   let doseConsumption = med.doseConsumption;
   let doseConsumptionHistory = med.doseConsumptionHistory;
   let doseSkippedHistory = med.doseSkippedHistory;
+  let legacySkipCleared = false;
   if (multi && targetDoseId) {
     const recorded = recordDoseConsumed(med, targetDoseId, todayStr);
     doseConsumption = recorded.doseConsumption;
@@ -679,6 +735,18 @@ export function consumeDose(
       todayStr
     );
     doseSkippedHistory = cleared.doseSkippedHistory;
+  } else if (!multi && isDoseSkippedOnDate(med, LEGACY_DOSE_ID, todayStr)) {
+    // Legacy Take after Restore: clear the LEGACY_DOSE_ID skip marker for
+    // today within the SAME mutation so the occurrence is handled as the
+    // same occurrence and becomes restorable again per the existing
+    // lifecycle (mirrors the multi-dose clear above). Only included when a
+    // marker exists so unchanged legacy meds keep their exact shape.
+    doseSkippedHistory = clearDoseSkippedOnDate(
+      med,
+      LEGACY_DOSE_ID,
+      todayStr
+    ).doseSkippedHistory;
+    legacySkipCleared = true;
   }
 
   const allSlotsConsumedToday =
@@ -713,7 +781,9 @@ export function consumeDose(
     lastSyncDate,
     ...(multi
       ? { doseConsumption, doseConsumptionHistory, doseSkippedHistory }
-      : {}),
+      : legacySkipCleared
+        ? { doseSkippedHistory }
+        : {}),
   };
   const description =
     source === 'alarm'

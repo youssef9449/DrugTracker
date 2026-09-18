@@ -178,6 +178,19 @@ export function migrateLegacyExactAutoEnvelope(
 
   // 3b: legacy log IDs present in durable → legacy was applied, then a
   // newer Phase 4 mutation superseded it. ACK + clear. Do NOT re-apply.
+  //
+  // Write-ordering proof (why log-ID presence cannot mean "logs without the
+  // medication snapshot"): every commit path that can have produced these
+  // logs — legacyCommit here, the reconcile-side legacyCommit, and
+  // commitDurableAutoStockState — writes medications FIRST, then logs
+  // (lastApplied last), and each key write is all-or-nothing. Durable log
+  // IDs therefore imply the logs write of that commit landed, which only
+  // happens AFTER the same commit's medications write succeeded — so
+  // durable medications are the envelope's snapshot or something newer
+  // (a later mutation that kept the cumulative logs). Not re-applying is
+  // correct in both cases. The barrier also runs before any new Phase 4
+  // mutation can allocate a sequence, so no interleaving can produce a
+  // logs-present/medications-never-written state.
   const legacyLogsPresent = envelopeLogIdsPresentInDurable(existing.logs, fresh.logs);
   if (legacyLogsPresent) {
     const clearErr = save(null);

@@ -226,6 +226,13 @@ export type OccurrenceSnapshotResult =
  * Atomic native occurrence snapshot under SCHEDULE_LOCK.
  * On non-Android: returns ok:true ABSENT (caller uses durable JS schedule).
  * On native failure: ok:false — never faked as ABSENT.
+ *
+ * Native fail-closed contract (Phase 4): when the EventStore cannot durably
+ * read/terminalize a malformed or identity-mismatched FIRED row, the native
+ * snapshot reports an explicit failure (ok=false, error
+ * 'rejected_persist_failed') through this bridge — the gated Manual Take
+ * consumer must fail closed (no stock mutation, no log, no JS schedule
+ * fallback).
  */
 export async function getOccurrenceSnapshot(
   medicationId: string,

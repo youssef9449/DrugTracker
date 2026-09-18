@@ -3575,6 +3575,42 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
     expect(durable.logs).toHaveLength(0);
   });
 
+  it('native snapshot persist failure (REJECTED terminalization failure) → fail-closed Take', async () => {
+    // Native contract: when the EventStore cannot durably terminalize a
+    // malformed/mismatched FIRED row, getOccurrenceSnapshot reports an
+    // explicit failure (ok=false, error 'rejected_persist_failed') through
+    // the bridge — never a usable ABSENT/SCHEDULED snapshot. Manual Take
+    // must fail closed: no stock mutation, no consume log, and no JS
+    // schedule amount fallback.
+    durable = {
+      medications: [
+        med({
+          currentPills: 10,
+          doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+        }),
+      ],
+      logs: [],
+    };
+    const r = await runGatedManualConsume({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      source: 'manual',
+      todayStr: TODAY,
+      getOccurrenceSnapshot: async () => ({
+        ok: false,
+        error: 'rejected_persist_failed',
+      }),
+    });
+    expect(r.outcome).toBe('rejected');
+    expect(r.reason).toBe('native_snapshot_failed');
+    expect(r.doseAmount).toBe(0);
+    expect(r.log).toBeNull();
+    expect(durable.medications[0].currentPills).toBe(10);
+    // No manual consume log of any type was written.
+    expect(durable.logs.filter((l) => l.type === 'dose_taken')).toHaveLength(0);
+    expect(durable.logs).toHaveLength(0);
+  });
+
   it('CANCELLED snapshot → uses JS schedule amount (no native amount)', async () => {
     durable = {
       medications: [

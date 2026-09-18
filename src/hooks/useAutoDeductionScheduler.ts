@@ -366,9 +366,9 @@ export function useAutoDeductionScheduler({
       for (const [key, slot] of desired) {
         if (gen !== generationRef.current) return;
         const result = await scheduleExactOccurrenceFromDurable(slot);
-        if (result.ok) {
+        if (result.ok && !(result as { skipped?: boolean }).skipped) {
           trackedRef.current.add(key);
-        } else if (result.error === 'exact_alarm_permission_denied') {
+        } else if (!result.ok && result.error === 'exact_alarm_permission_denied') {
           break;
         }
       }

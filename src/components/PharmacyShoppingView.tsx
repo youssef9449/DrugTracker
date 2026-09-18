@@ -13,7 +13,6 @@ import {
 import { Medication, PharmacySettings, calculateMedicationStatus, describeOrderInBoxes } from '../types';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { getDepletionDate, effectiveCurrentPills } from '../utils/dateCalculations';
-import { medicationForStockProjection } from '../utils/doseSchedule';
 import {
   cleanPhoneNumber,
   generatePharmacyOrderMessage,
@@ -30,8 +29,6 @@ interface PharmacyShoppingViewProps {
   onUpdateSettings: (newSettings: PharmacySettings) => void;
   showToast: (message: string) => void;
   onOpenUserContactsSettings?: () => void;
-  /** Required for stock/status projection (effective global ∧ med auto). */
-  globalAutoDeductEnabled: boolean;
 }
 
 export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
@@ -40,7 +37,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   onUpdateSettings,
   showToast,
   onOpenUserContactsSettings = () => {},
-  globalAutoDeductEnabled,
 }) => {
   type PeriodUnit = 'day' | 'month';
   type MedicationPeriod = { value: number; unit: PeriodUnit };
@@ -83,11 +79,10 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
 
   const urgentMeds = useMemo(() => {
     return medications.filter((m) => {
-      const projected = medicationForStockProjection(m, globalAutoDeductEnabled);
-      const { status } = calculateMedicationStatus(projected);
+      const { status } = calculateMedicationStatus(m);
       return status === 'out_of_stock' || status === 'critical' || status === 'warning';
     });
-  }, [medications, globalAutoDeductEnabled]);
+  }, [medications]);
 
   const effectiveShowAll = showAllForPlanning;
   const displayList = (effectiveShowAll ? medications : urgentMeds)
@@ -438,12 +433,10 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
 
       <div className="space-y-3">
         {displayList.map((med) => {
-          // Stock/status projection only — original med remains identity for selection/orders.
-          const projectedMed = medicationForStockProjection(med, globalAutoDeductEnabled);
-          const { status } = calculateMedicationStatus(projectedMed);
+          const { status } = calculateMedicationStatus(med);
           const { quantity: suggestedPills } = getRequestedAmount(med);
           const requestedPills = getRequestedPills(med, suggestedPills);
-          const depletion = getDepletionDate(projectedMed);
+          const depletion = getDepletionDate(med);
           const isSelected = selectedMedIds.has(med.id);
           const availableUnits = getAvailableUnits(med);
           const selectedUnits = getSelectedUnits(med);
@@ -462,7 +455,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                   <div className="min-w-0">
                     <h4 className="font-bold text-slate-900 text-sm">{med.name}</h4>
                     <div className="text-xs text-slate-500 mt-0.5">
-                      المتبقي: <strong className="font-mono text-slate-700">{effectiveCurrentPills(projectedMed)}</strong> • ينفد {depletion.formattedArabic}
+                      المتبقي: <strong className="font-mono text-slate-700">{effectiveCurrentPills(med)}</strong> • ينفد {depletion.formattedArabic}
                     </div>
                     <span
                       className={`inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded-lg border ${

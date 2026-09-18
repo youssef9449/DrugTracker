@@ -23,17 +23,12 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
   };
 }
 
-function renderMenu(
-  med: Medication,
-  globalAutoDeductEnabled: boolean,
-  onToggleAutoDeduct = vi.fn()
-) {
-  const isAutoActive = isMedicationAutoDeductActive(med, globalAutoDeductEnabled);
+function renderMenu(med: Medication, onToggleAutoDeduct = vi.fn()) {
+  const isAutoActive = isMedicationAutoDeductActive(med);
   render(
     <MedicationMenu
       medication={med}
       isAutoActive={isAutoActive}
-      globalAutoDeductEnabled={globalAutoDeductEnabled}
       onEdit={() => {}}
       onDelete={() => {}}
       onToggleAutoDeduct={onToggleAutoDeduct}
@@ -43,98 +38,48 @@ function renderMenu(
 }
 
 function autoToggleButton() {
-  // Matches Global-ON labels and Global-OFF preference labels.
-  return screen.getByRole('button', {
-    name: /الخصم التلقائي/,
-  });
+  return screen.getByRole('button', { name: /الخصم التلقائي/ });
 }
 
 afterEach(() => {
   cleanup();
 });
 
-describe('MedicationMenu — per-med Auto-Deduct vs Global (UI-11)', () => {
-  it('Global ON + preference ON: pressed, effective ON, classic ON label', () => {
+describe('MedicationMenu — medication-level Auto (not Global kill switch)', () => {
+  it('preference ON: pressed, effective ON', () => {
     const med = makeMed({ autoDeductEnabled: true });
-    const { isAutoActive } = renderMenu(med, true);
+    const { isAutoActive } = renderMenu(med);
     expect(isAutoActive).toBe(true);
-
     const btn = autoToggleButton();
     expect(btn).toHaveAttribute('aria-pressed', 'true');
     expect(btn).toHaveAttribute('data-auto-pref', 'on');
     expect(btn).toHaveAttribute('data-auto-effective', 'on');
-    expect(btn).toHaveAttribute('data-global-auto', 'on');
     expect(btn).toHaveAttribute('aria-label', 'إيقاف الخصم التلقائي');
-    expect(btn).toHaveAttribute(
-      'title',
-      'الخصم التلقائي مفعّل — اضغط للإيقاف'
-    );
   });
 
-  it('Global ON + preference OFF: not pressed, effective OFF, classic OFF label', () => {
+  it('preference OFF: not pressed, effective OFF', () => {
     const med = makeMed({ autoDeductEnabled: false });
-    const { isAutoActive } = renderMenu(med, true);
+    const { isAutoActive } = renderMenu(med);
     expect(isAutoActive).toBe(false);
-
     const btn = autoToggleButton();
     expect(btn).toHaveAttribute('aria-pressed', 'false');
     expect(btn).toHaveAttribute('data-auto-pref', 'off');
-    expect(btn).toHaveAttribute('data-auto-effective', 'off');
     expect(btn).toHaveAttribute('aria-label', 'تفعيل الخصم التلقائي');
-    expect(btn).toHaveAttribute(
-      'title',
-      'الخصم التلقائي متوقف — اضغط للتفعيل'
-    );
   });
 
-  it('Global OFF + preference ON: aria-pressed true, effective OFF, global-paused copy', () => {
-    const med = makeMed({ autoDeductEnabled: true });
-    const { isAutoActive } = renderMenu(med, false);
-    expect(isAutoActive).toBe(false);
-
-    const btn = autoToggleButton();
-    expect(btn).toHaveAttribute('aria-pressed', 'true');
-    expect(btn).toHaveAttribute('data-auto-pref', 'on');
-    expect(btn).toHaveAttribute('data-auto-effective', 'off');
-    expect(btn).toHaveAttribute('data-global-auto', 'off');
-    expect(btn.getAttribute('title')).toMatch(/مفعّل/);
-    expect(btn.getAttribute('title')).toMatch(/متوقف عالميًا/);
-    // Must not claim that pressing will turn effective deduction on.
-    expect(btn.getAttribute('title')).not.toMatch(/اضغط للتفعيل/);
-    expect(btn.getAttribute('aria-label')).toMatch(/متوقف عالميًا/);
-    expect(btn.getAttribute('aria-label')).not.toBe('تفعيل الخصم التلقائي');
-  });
-
-  it('Global OFF + preference OFF: aria-pressed false, effective OFF, global-paused copy', () => {
-    const med = makeMed({ autoDeductEnabled: false });
-    const { isAutoActive } = renderMenu(med, false);
-    expect(isAutoActive).toBe(false);
-
-    const btn = autoToggleButton();
-    expect(btn).toHaveAttribute('aria-pressed', 'false');
-    expect(btn).toHaveAttribute('data-auto-pref', 'off');
-    expect(btn).toHaveAttribute('data-auto-effective', 'off');
-    expect(btn.getAttribute('title')).toMatch(/غير مفعّل/);
-    expect(btn.getAttribute('title')).toMatch(/متوقف عالميًا/);
-  });
-
-  it('Global OFF + click: preference ON→OFF via harness; effective stays OFF; global stays false', () => {
-    const globalAutoDeductEnabled = false;
+  it('click toggles preference via harness (med-level only)', () => {
     const onToggle = vi.fn();
-
     function Harness() {
       const [med, setMed] = useState(() => makeMed({ autoDeductEnabled: true }));
-      const isAutoActive = isMedicationAutoDeductActive(med, globalAutoDeductEnabled);
+      const isAutoActive = isMedicationAutoDeductActive(med);
       return (
         <MedicationMenu
           medication={med}
           isAutoActive={isAutoActive}
-          globalAutoDeductEnabled={globalAutoDeductEnabled}
           onEdit={() => {}}
           onDelete={() => {}}
           onToggleAutoDeduct={(id) => {
             onToggle(id);
-            // Simulate production: flip per-med preference only; global unchanged.
             setMed((prev) => ({
               ...prev,
               autoDeductEnabled: prev.autoDeductEnabled === false,
@@ -143,26 +88,10 @@ describe('MedicationMenu — per-med Auto-Deduct vs Global (UI-11)', () => {
         />
       );
     }
-
     render(<Harness />);
-
-    const btnBefore = autoToggleButton();
-    expect(btnBefore).toHaveAttribute('data-auto-pref', 'on');
-    expect(btnBefore).toHaveAttribute('data-auto-effective', 'off');
-    expect(btnBefore).toHaveAttribute('data-global-auto', 'off');
-    expect(btnBefore).toHaveAttribute('aria-pressed', 'true');
-
-    fireEvent.click(btnBefore);
-
-    expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(autoToggleButton()).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(autoToggleButton());
     expect(onToggle).toHaveBeenCalledWith('med-1');
-
-    const btnAfter = autoToggleButton();
-    expect(btnAfter).toHaveAttribute('data-auto-pref', 'off');
-    expect(btnAfter).toHaveAttribute('data-auto-effective', 'off');
-    expect(btnAfter).toHaveAttribute('data-global-auto', 'off');
-    expect(btnAfter).toHaveAttribute('aria-pressed', 'false');
-    // Global remains OFF (harness constant); effective never turns on.
-    expect(globalAutoDeductEnabled).toBe(false);
+    expect(autoToggleButton()).toHaveAttribute('aria-pressed', 'false');
   });
 });

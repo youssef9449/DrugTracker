@@ -114,11 +114,7 @@ type GuardedCancelResult = {
  */
 async function scheduleExactOccurrenceFromDurable(slot: AutoDeductionSlot) {
   return withAutoStockMutationGate(async (fresh) => {
-    // Durable global policy is authoritative. A stale React=true snapshot must
-    // never recreate an exact schedule after a recovered/committed global OFF.
-    if (fresh.globalAutoDeductEnabled === false) {
-      return { ok: true, skipped: true } as const;
-    }
+    // Medication-level Auto is authoritative (Global is only a new-med default).
     const med = fresh.medications.find((m) => m.id === slot.medId);
     if (!med) return { ok: true, skipped: true } as const;
 
@@ -163,7 +159,8 @@ async function cancelUndesiredExactOccurrence(
 ): Promise<GuardedCancelResult> {
   return withAutoStockMutationGate(async (fresh) => {
     const med = fresh.medications.find((m) => m.id === medId);
-    const stillDesired = fresh.globalAutoDeductEnabled !== false && !!med &&
+    // stillDesired depends on medication Auto + dose slot presence only.
+    const stillDesired = !!med &&
       getAutoDeductionSlotsForDate(med, calendarDate).some(
         (slot) => slot.doseId === doseId
       );
@@ -334,16 +331,15 @@ export function useAutoDeductionScheduler({
 
     const desired = new Map<string, AutoDeductionSlot>();
 
-    if (globalAutoDeductEnabled) {
-      for (const med of medications) {
-        for (const date of [today, tomorrow]) {
-          for (const slot of getAutoDeductionSlotsForDate(med, date)) {
-            const epoch = localEpochMs(slot.calendarDate, slot.time);
-            if (epoch == null) continue;
-            if (epoch <= now - 2000) continue;
-            const key = autoDeductionScheduleKey(slot.medId, slot.doseId, slot.calendarDate);
-            desired.set(key, slot);
-          }
+    // Per-medication Auto only (getAutoDeductionSlotsForDate returns [] when OFF).
+    for (const med of medications) {
+      for (const date of [today, tomorrow]) {
+        for (const slot of getAutoDeductionSlotsForDate(med, date)) {
+          const epoch = localEpochMs(slot.calendarDate, slot.time);
+          if (epoch == null) continue;
+          if (epoch <= now - 2000) continue;
+          const key = autoDeductionScheduleKey(slot.medId, slot.doseId, slot.calendarDate);
+          desired.set(key, slot);
         }
       }
     }

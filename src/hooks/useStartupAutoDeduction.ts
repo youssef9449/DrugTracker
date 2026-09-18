@@ -56,16 +56,11 @@ export function useStartupAutoDeduction(opts: {
       if (pre.nativeListFailed || pre.durabilityBlocked) {
         return;
       }
+      // Sync Global preference for UI / new-med default only — not a kill switch.
       const durableGlobalAutoDeductEnabled = pre.state.globalAutoDeductEnabled !== false;
       setGlobalAutoDeductEnabled(durableGlobalAutoDeductEnabled);
-      if (!durableGlobalAutoDeductEnabled) {
-        // Exact path may still have mutated stock; surface if so.
-        if (pre.reconciliation?.mutated) {
-          setMedications(pre.state.medications);
-          setLogs(pre.state.logs);
-        }
-        return;
-      }
+      // Legacy catch-up runs per medication (syncAutoDailyDeductions respects
+      // med.autoDeductEnabled). Global OFF must not skip meds with Auto ON.
       const today = getTodayDateString();
       const result = syncAutoDailyDeductions(pre.state.medications, today);
       if (result.newLogs.length > 0 || pre.reconciliation?.mutated) {

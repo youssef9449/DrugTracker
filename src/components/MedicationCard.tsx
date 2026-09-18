@@ -140,9 +140,9 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   onUndoRefill,
   globalAutoDeductEnabled = true,
 }) => {
-  const isAutoActive = isMedicationAutoDeductActive(medication, globalAutoDeductEnabled);
-  // Stock/status projection follows effective Auto-Deduct (global ∧ med).
-  const stockMed = medicationForStockProjection(medication, globalAutoDeductEnabled);
+  const isAutoActive = isMedicationAutoDeductActive(medication);
+  // Stock/status projection follows medication Auto only (Global is not a kill switch).
+  const stockMed = medicationForStockProjection(medication);
   const statusInfo = calculateMedicationStatus(stockMed);
   const depletion = getDepletionDate(stockMed);
   const isSolid = isSolidUnit(medication.unit);
@@ -486,12 +486,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const isOut = statusInfo.status === 'out_of_stock';
     const isCrit = statusInfo.status === 'critical';
     const isWarn = statusInfo.status === 'warning';
-    const doseToggle = getCardDoseToggleTarget(
-      medication,
-      new Date(),
-      getTodayDateString(),
-      globalAutoDeductEnabled
-    );
+    const doseToggle = getCardDoseToggleTarget(medication, new Date(), getTodayDateString());
     const todayStr = getTodayDateString();
     // Manual Restore display amount: exact active deduction for doseToggle.doseId only.
     // No schedule fallback when evidence is missing (durable layer fail-closes).
@@ -708,12 +703,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const isOut = statusInfo.status === 'out_of_stock';
     const isCrit = statusInfo.status === 'critical';
     const isWarn = statusInfo.status === 'warning';
-    const doseToggle = getCardDoseToggleTarget(
-      medication,
-      new Date(),
-      getTodayDateString(),
-      globalAutoDeductEnabled
-    );
+    const doseToggle = getCardDoseToggleTarget(medication, new Date(), getTodayDateString());
     const todayStr = getTodayDateString();
     // Manual Restore display amount: exact active deduction for doseToggle.doseId only.
     // No schedule fallback when evidence is missing (durable layer fail-closes).

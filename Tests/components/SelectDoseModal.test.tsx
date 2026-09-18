@@ -369,174 +369,44 @@ describe('SelectDoseModal', () => {
     });
   });
 
-  describe('UI-10 — Global Auto-Deduct OFF in take mode', () => {
-    // Case A — Global OFF + med ON + elapsed → Take selectable, not allDone
-    it('Global OFF + med ON + elapsed: Take selectable and allDone=false', () => {
-      vi.setSystemTime(new Date(2026, 8, 13, 12, 0, 0)); // d1 elapsed
-      const onSelect = vi.fn();
-      render(
-        <SelectDoseModal
-          isOpen
-          mode="take"
-          globalAutoDeductEnabled={false}
-          medication={makeMulti({ autoDeductEnabled: true })}
-          onSelect={onSelect}
-          onClose={() => {}}
-        />
-      );
-      expect(
-        screen.queryByText(/تم تناول جميع جرعات اليوم/)
-      ).not.toBeInTheDocument();
-      const d1 = screen
-        .getAllByRole('button')
-        .find((b) => b.getAttribute('data-dose-id') === 'd1');
-      expect(d1).toBeTruthy();
-      expect(d1).not.toBeDisabled();
-      expect(d1).toHaveTextContent('اختيار');
-      fireEvent.click(d1!);
-      expect(onSelect).toHaveBeenCalledWith('med-multi', 'd1');
-    });
+  describe('SelectDoseModal — medication-level Auto in take mode', () => {
+  it('Medication ON + elapsed: dose completed, not selectable for Take', () => {
+    vi.setSystemTime(new Date(2026, 8, 13, 12, 0, 0));
+    const onSelect = vi.fn();
+    render(
+      <SelectDoseModal
+        isOpen
+        mode="take"
+        medication={makeMulti({ autoDeductEnabled: true })}
+        onSelect={onSelect}
+        onClose={() => {}}
+      />
+    );
+    const d1 = screen
+      .getAllByRole('button')
+      .find((b) => b.getAttribute('data-dose-id') === 'd1');
+    expect(d1).toBeDisabled();
+    expect(d1).toHaveTextContent('خصم تلقائي');
+  });
 
-    // Case B — Global ON + med ON + elapsed → completed, not selectable for Take
-    it('Global ON + med ON + elapsed: dose completed, not selectable for Take', () => {
-      vi.setSystemTime(new Date(2026, 8, 13, 12, 0, 0));
-      const onSelect = vi.fn();
-      render(
-        <SelectDoseModal
-          isOpen
-          mode="take"
-          globalAutoDeductEnabled={true}
-          medication={makeMulti({ autoDeductEnabled: true })}
-          onSelect={onSelect}
-          onClose={() => {}}
-        />
-      );
-      const d1 = screen
-        .getAllByRole('button')
-        .find((b) => b.getAttribute('data-dose-id') === 'd1');
-      expect(d1).toBeDisabled();
-      expect(d1).toHaveTextContent('خصم تلقائي');
-      fireEvent.click(d1!);
-      expect(onSelect).not.toHaveBeenCalled();
-    });
-
-    // Case C — Global OFF + future dose still Take selectable
-    it('Global OFF + future dose: Take selectable', () => {
-      vi.setSystemTime(new Date(2026, 8, 13, 7, 0, 0)); // before all times
-      render(
-        <SelectDoseModal
-          isOpen
-          mode="take"
-          globalAutoDeductEnabled={false}
-          medication={makeMulti({ autoDeductEnabled: true })}
-          onSelect={() => {}}
-          onClose={() => {}}
-        />
-      );
-      const d1 = screen
-        .getAllByRole('button')
-        .find((b) => b.getAttribute('data-dose-id') === 'd1');
-      expect(d1).not.toBeDisabled();
-      expect(d1).toHaveTextContent('اختيار');
-    });
-
-    // Case D — Global OFF does not clear manual consumed state
-    it('Global OFF + manually consumed: still not selectable for Take', () => {
-      const today = getTodayDateString();
-      vi.setSystemTime(new Date(2026, 8, 13, 12, 0, 0));
-      const onSelect = vi.fn();
-      render(
-        <SelectDoseModal
-          isOpen
-          mode="take"
-          globalAutoDeductEnabled={false}
-          medication={makeMulti({
-            autoDeductEnabled: true,
-            doseConsumption: { d1: today },
-          })}
-          onSelect={onSelect}
-          onClose={() => {}}
-        />
-      );
-      const d1 = screen
-        .getAllByRole('button')
-        .find((b) => b.getAttribute('data-dose-id') === 'd1');
-      expect(d1).toBeDisabled();
-      fireEvent.click(d1!);
-      expect(onSelect).not.toHaveBeenCalled();
-    });
-
-    // Case E — Restore mode eligibility unchanged (pure auto still restorable when Global ON)
-    it('Restore mode: pure auto projection still restorable when Global ON', () => {
-      vi.setSystemTime(new Date(2026, 8, 13, 12, 0, 0));
-      render(
-        <SelectDoseModal
-          isOpen
-          mode="restore"
-          globalAutoDeductEnabled={true}
-          medication={makeMulti({ autoDeductEnabled: true })}
-          onSelect={() => {}}
-          onClose={() => {}}
-        />
-      );
-      const d1 = screen
-        .getAllByRole('button')
-        .find((b) => b.getAttribute('data-dose-id') === 'd1');
-      expect(d1).not.toBeDisabled();
-    });
-
-    it('Restore mode: Global OFF does not invent Restore for elapsed-only dose', () => {
-      vi.setSystemTime(new Date(2026, 8, 13, 12, 0, 0));
-      render(
-        <SelectDoseModal
-          isOpen
-          mode="restore"
-          globalAutoDeductEnabled={false}
-          medication={makeMulti({ autoDeductEnabled: true })}
-          onSelect={() => {}}
-          onClose={() => {}}
-        />
-      );
-      // With Global OFF, pure-auto projection is not eligible (isAutoActive=false).
-      // No consumed + no evidence → nothing restorable → empty state.
-      expect(
-        screen.getByText(/لا توجد جرعات قابلة للاسترجاع اليوم/)
-      ).toBeInTheDocument();
-    });
-
-    it('Restore mode: consumed + exact evidence still restorable under Global OFF', () => {
-      const today = getTodayDateString();
-      const manualLog: ConsumptionLog = {
-        id: 'manual:med-multi:d1:' + today,
-        medicationId: 'med-multi',
-        medicationName: 'Multi Med',
-        type: 'dose_taken',
-        amount: -2,
-        date: today,
-        timestamp: '2026-09-13T08:05:00.000Z',
-        description: 'Manual take',
-        doseId: 'd1',
-      };
-      vi.setSystemTime(new Date(2026, 8, 13, 12, 0, 0));
-      render(
-        <SelectDoseModal
-          isOpen
-          mode="restore"
-          globalAutoDeductEnabled={false}
-          medication={makeMulti({
-            autoDeductEnabled: true,
-            doseConsumption: { d1: today },
-          })}
-          logs={[manualLog]}
-          onSelect={() => {}}
-          onClose={() => {}}
-        />
-      );
-      const d1 = screen
-        .getAllByRole('button')
-        .find((b) => b.getAttribute('data-dose-id') === 'd1');
-      expect(d1).toBeTruthy();
-      expect(d1).not.toBeDisabled();
-    });
+  it('Medication OFF + elapsed: Take selectable', () => {
+    vi.setSystemTime(new Date(2026, 8, 13, 12, 0, 0));
+    const onSelect = vi.fn();
+    render(
+      <SelectDoseModal
+        isOpen
+        mode="take"
+        medication={makeMulti({ autoDeductEnabled: false })}
+        onSelect={onSelect}
+        onClose={() => {}}
+      />
+    );
+    const d1 = screen
+      .getAllByRole('button')
+      .find((b) => b.getAttribute('data-dose-id') === 'd1');
+    expect(d1).not.toBeDisabled();
+    expect(d1).toHaveTextContent('اختيار');
+    fireEvent.click(d1!);
+    expect(onSelect).toHaveBeenCalledWith('med-multi', 'd1');
   });
 });

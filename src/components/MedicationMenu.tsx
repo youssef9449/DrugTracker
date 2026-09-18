@@ -18,11 +18,10 @@ interface MedicationMenuProps {
   /** Effective Auto-Deduct (global ∧ medication). Used for runtime state only. */
   isAutoActive: boolean;
   /**
-   * Global Auto-Deduct switch. Required so callers cannot silently assume
-   * Global ON. When false, the per-med toggle still edits
-   * medication.autoDeductEnabled but does not enable effective deduction.
+   * @deprecated Global is only a new-med default; not used for per-med Auto UI.
+   * Kept optional so existing callers still type-check.
    */
-  globalAutoDeductEnabled: boolean;
+  globalAutoDeductEnabled?: boolean;
   showRefillInMenu?: boolean;
   onOpenRefill?: (medication: Medication) => void;
   onEdit: (medication: Medication) => void;
@@ -50,7 +49,7 @@ export function MedicationTypeIcon({ unit, className = "h-3.5 w-3.5" }: { unit: 
 export function MedicationMenu({
   medication,
   isAutoActive,
-  globalAutoDeductEnabled,
+  globalAutoDeductEnabled: _globalAutoDeductEnabled,
   onEdit,
   onDelete,
   onToggleAutoDeduct,
@@ -59,46 +58,18 @@ export function MedicationMenu({
 }: MedicationMenuProps) {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
-  // Medication preference (what the per-med toggle edits) vs effective state.
+  // Medication-level Auto only (Global is new-med default, not a kill switch).
   const isMedicationAutoDeductEnabled = medication.autoDeductEnabled !== false;
-  const isGlobalAutoOn = globalAutoDeductEnabled !== false;
-
-  // aria-pressed / visual preference reflect what the button changes, not
-  // effective deduction (which stays OFF whenever Global is OFF).
   const autoTogglePressed = isMedicationAutoDeductEnabled;
-
-  let autoToggleAriaLabel: string;
-  let autoToggleTitle: string;
-  let autoToggleClass: string;
-
-  if (isGlobalAutoOn) {
-    // Global ON: effective state === preference; keep existing labels.
-    autoToggleAriaLabel = isAutoActive
-      ? 'إيقاف الخصم التلقائي'
-      : 'تفعيل الخصم التلقائي';
-    autoToggleTitle = isAutoActive
-      ? 'الخصم التلقائي مفعّل — اضغط للإيقاف'
-      : 'الخصم التلقائي متوقف — اضغط للتفعيل';
-    autoToggleClass = isAutoActive
-      ? 'bg-teal-100 text-teal-800 hover:bg-teal-200'
-      : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-600';
-  } else if (isMedicationAutoDeductEnabled) {
-    // Global OFF + preference ON: preference preserved, effective deduction off.
-    autoToggleAriaLabel =
-      'إيقاف إعداد الخصم التلقائي لهذا الدواء — الخصم متوقف عالميًا';
-    autoToggleTitle =
-      'إعداد الخصم التلقائي لهذا الدواء مفعّل — الخصم متوقف عالميًا';
-    autoToggleClass =
-      'bg-amber-100 text-amber-800 hover:bg-amber-200';
-  } else {
-    // Global OFF + preference OFF.
-    autoToggleAriaLabel =
-      'تفعيل إعداد الخصم التلقائي لهذا الدواء — الخصم متوقف عالميًا';
-    autoToggleTitle =
-      'إعداد الخصم التلقائي لهذا الدواء غير مفعّل — الخصم متوقف عالميًا';
-    autoToggleClass =
-      'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-600';
-  }
+  const autoToggleAriaLabel = isAutoActive
+    ? 'إيقاف الخصم التلقائي'
+    : 'تفعيل الخصم التلقائي';
+  const autoToggleTitle = isAutoActive
+    ? 'الخصم التلقائي مفعّل — اضغط للإيقاف'
+    : 'الخصم التلقائي متوقف — اضغط للتفعيل';
+  const autoToggleClass = isAutoActive
+    ? 'bg-teal-100 text-teal-800 hover:bg-teal-200'
+    : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-600';
 
   useEffect(() => {
     if (!deleteConfirmOpen) return;
@@ -228,16 +199,9 @@ export function MedicationMenu({
         aria-pressed={autoTogglePressed}
         data-auto-pref={isMedicationAutoDeductEnabled ? 'on' : 'off'}
         data-auto-effective={isAutoActive ? 'on' : 'off'}
-        data-global-auto={isGlobalAutoOn ? 'on' : 'off'}
       >
         <Zap
-          className={`${iconDims} ${
-            isGlobalAutoOn && isAutoActive
-              ? 'fill-teal-600/30'
-              : !isGlobalAutoOn && isMedicationAutoDeductEnabled
-                ? 'fill-amber-600/30'
-                : ''
-          }`}
+          className={`${iconDims} ${isAutoActive ? 'fill-teal-600/30' : ''}`}
           aria-hidden="true"
         />
       </button>

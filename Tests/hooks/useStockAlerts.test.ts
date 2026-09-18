@@ -38,14 +38,12 @@ function useAlerts(props: {
   criticalStockAlertsEnabled?: boolean;
   hydrated?: boolean;
   isFirstRun?: boolean;
-  globalAutoDeductEnabled?: boolean;
 }) {
   return useStockAlerts({
     notificationsEnabled: true,
     criticalStockAlertsEnabled: true,
     hydrated: true,
     isFirstRun: false,
-    globalAutoDeductEnabled: true,
     ...props,
   });
 }
@@ -518,10 +516,8 @@ describe('useStockAlerts — re-enabling alerts mid-episode', () => {
   });
 });
 
-describe('useStockAlerts — Global Auto-Deduct stock projection', () => {
-  it('Global OFF + med ON with past lastSync: does not send critical based on auto projection alone', () => {
-    // 30 pills, 2/day, lastSync far past → with auto ON would be out_of_stock projected.
-    // Global OFF freezes at 30 → sufficient → no critical send.
+describe('useStockAlerts — medication-level Auto projection', () => {
+  it('Medication ON with past lastSync: can send critical for projected depletion', () => {
     renderHook(() =>
       useAlerts({
         medications: [
@@ -533,62 +529,29 @@ describe('useStockAlerts — Global Auto-Deduct stock projection', () => {
             warningThresholdDays: 5,
           }),
         ],
-        globalAutoDeductEnabled: false,
-      })
-    );
-    expect(sendMock).not.toHaveBeenCalled();
-  });
-
-  it('Global ON + med ON with past lastSync: can send critical for projected depletion', async () => {
-    renderHook(() =>
-      useAlerts({
-        medications: [
-          makeMed({
-            currentPills: 30,
-            dailyDose: 2,
-            autoDeductEnabled: true,
-            lastSyncDate: '2024-01-01',
-            warningThresholdDays: 5,
-          }),
-        ],
-        globalAutoDeductEnabled: true,
       })
     );
     expect(sendMock).toHaveBeenCalled();
   });
 
-  it('Global OFF + med ON: future auto-projection alarm claim is stale and cancelled', async () => {
-    // Sufficient today with auto ON would still have a future critical crossing.
-    // Global OFF freezes stock → getCriticalAlarmDate(projected) is null → not live.
-    const med = makeMed({
-      currentPills: 30,
-      dailyDose: 1,
-      autoDeductEnabled: true,
-      lastSyncDate: getTodayDateString(),
-      warningThresholdDays: 5,
-    });
-    const autoProjectionT = getCriticalAlarmDate(med, getTodayDateString());
-    expect(autoProjectionT).not.toBeNull();
-    expect(autoProjectionT!).toBeGreaterThan(Date.now());
-
-    writeClaim('med-1', { claimed: true, alarmTime: autoProjectionT! });
-
+  it('Medication OFF: frozen stock does not send critical from auto projection alone', () => {
     renderHook(() =>
       useAlerts({
-        medications: [med],
-        globalAutoDeductEnabled: false,
+        medications: [
+          makeMed({
+            currentPills: 30,
+            dailyDose: 2,
+            autoDeductEnabled: false,
+            lastSyncDate: '2024-01-01',
+            warningThresholdDays: 5,
+          }),
+        ],
       })
     );
-
-    // Not treated as live armed record under Global OFF.
-    expect(readClaims()['med-1']).toBeUndefined();
-    await vi.waitFor(() => {
-      expect(cancelMock).toHaveBeenCalledWith('med-1');
-    });
     expect(sendMock).not.toHaveBeenCalled();
   });
 
-  it('Global ON + med ON: live armed record matching current auto projection is preserved', () => {
+  it('Medication ON: live armed record matching current projection is preserved', () => {
     const med = makeMed({
       currentPills: 30,
       dailyDose: 1,
@@ -599,16 +562,8 @@ describe('useStockAlerts — Global Auto-Deduct stock projection', () => {
     const projectedT = getCriticalAlarmDate(med, getTodayDateString()) as number;
     expect(projectedT).toBeGreaterThan(Date.now());
     writeClaim('med-1', { claimed: true, alarmTime: projectedT });
-
-    renderHook(() =>
-      useAlerts({
-        medications: [med],
-        globalAutoDeductEnabled: true,
-      })
-    );
-
+    renderHook(() => useAlerts({ medications: [med] }));
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: projectedT });
     expect(cancelMock).not.toHaveBeenCalled();
-    expect(sendMock).not.toHaveBeenCalled();
   });
 });

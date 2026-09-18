@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { useDerivedMedications } from '@/hooks/useDerivedMedications';
 import type { Medication } from '@/types';
-import { getTodayDateString } from '@/utils/dateCalculations';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
   return {
@@ -20,30 +19,23 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
   };
 }
 
-describe('useDerivedMedications — Global Auto-Deduct (UI-13)', () => {
-  it('recomputes medicationsWithStatus when globalAutoDeductEnabled flips', () => {
-    const meds = [makeMed()];
-    const { result, rerender } = renderHook(
-      ({ global }: { global: boolean }) =>
-        useDerivedMedications(meds, [], 'all', '', global),
-      { initialProps: { global: true } }
+describe('useDerivedMedications — medication-level Auto projection', () => {
+  it('Medication ON projects stock (daysLeft reflects auto depletion)', () => {
+    const meds = [makeMed({ autoDeductEnabled: true })];
+    const { result } = renderHook(() =>
+      useDerivedMedications(meds, [], 'all', '')
     );
+    const days = result.current.medicationsWithStatus[0].statusInfo.daysLeft;
+    // Past lastSync with auto ON → projected depletion (not frozen 15 days)
+    expect(days).toBeLessThan(15);
+  });
 
-    const daysOn = result.current.medicationsWithStatus[0].statusInfo.daysLeft;
-    const pillsProjectedLow =
-      result.current.medicationsWithStatus[0].statusInfo.status === 'out_of_stock' ||
-      daysOn < 15;
-
-    rerender({ global: false });
-    const daysOff = result.current.medicationsWithStatus[0].statusInfo.daysLeft;
-
-    // With Global OFF, projection freezes → more days left (or at least not more depleted).
-    expect(daysOff).toBeGreaterThanOrEqual(daysOn);
-    // And status should reflect frozen 30 pills / 2 daily = 15 days when threshold is 5 → sufficient
+  it('Medication OFF freezes stock at currentPills', () => {
+    const meds = [makeMed({ autoDeductEnabled: false, currentPills: 30 })];
+    const { result } = renderHook(() =>
+      useDerivedMedications(meds, [], 'all', '')
+    );
     expect(result.current.medicationsWithStatus[0].statusInfo.daysLeft).toBe(15);
     expect(result.current.medicationsWithStatus[0].statusInfo.status).toBe('sufficient');
-
-    // Sanity: Global ON had been projecting (either depleted or fewer days)
-    expect(pillsProjectedLow || daysOn < 15).toBe(true);
   });
 });

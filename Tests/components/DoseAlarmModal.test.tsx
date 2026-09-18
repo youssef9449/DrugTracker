@@ -40,7 +40,6 @@ describe('DoseAlarmModal', () => {
     const med = makeMed();
     render(
       <DoseAlarmModal
-        globalAutoDeductEnabled={true}
         isOpen={true}
         medication={med}
         onTakeDose={() => {}}
@@ -56,7 +55,6 @@ describe('DoseAlarmModal', () => {
     const med = makeMed();
     render(
       <DoseAlarmModal
-        globalAutoDeductEnabled={true}
         isOpen={true}
         medication={med}
         onTakeDose={() => {}}
@@ -76,7 +74,6 @@ describe('DoseAlarmModal', () => {
     const med = makeMed();
     render(
       <DoseAlarmModal
-        globalAutoDeductEnabled={true}
         isOpen={true}
         medication={med}
         onTakeDose={() => {}}
@@ -93,7 +90,6 @@ describe('DoseAlarmModal', () => {
     const med = makeMed();
     render(
       <DoseAlarmModal
-        globalAutoDeductEnabled={true}
         isOpen={false}
         medication={med}
         onTakeDose={() => {}}
@@ -116,7 +112,6 @@ describe('DoseAlarmModal', () => {
     });
     render(
       <DoseAlarmModal
-        globalAutoDeductEnabled={true}
         isOpen={true}
         medication={med}
         doseId="slot-b"
@@ -136,7 +131,6 @@ describe('DoseAlarmModal', () => {
     const med = makeMed();
     render(
       <DoseAlarmModal
-        globalAutoDeductEnabled={true}
         isOpen={true}
         medication={med}
         onTakeDose={onTakeDose}
@@ -162,7 +156,6 @@ describe('DoseAlarmModal', () => {
     it('displays the exact slot amount for doseId d2 (not dailyDose)', () => {
       render(
         <DoseAlarmModal
-        globalAutoDeductEnabled={true}
           isOpen={true}
           medication={multi}
           doseId="d2"
@@ -185,7 +178,6 @@ describe('DoseAlarmModal', () => {
       const onTakeDose = vi.fn();
       render(
         <DoseAlarmModal
-        globalAutoDeductEnabled={true}
           isOpen={true}
           medication={multi}
           doseId="d2"
@@ -202,7 +194,6 @@ describe('DoseAlarmModal', () => {
       const onTakeDose = vi.fn();
       render(
         <DoseAlarmModal
-        globalAutoDeductEnabled={true}
           isOpen={true}
           medication={multi}
           doseId="d1"
@@ -218,8 +209,8 @@ describe('DoseAlarmModal', () => {
   });
 });
 
-describe('DoseAlarmModal — Global Auto-Deduct stock display', () => {
-  it('Global OFF + med ON: shows currentPills without auto projection', () => {
+describe('DoseAlarmModal — medication-level stock display', () => {
+  it('Medication ON with past lastSync shows projected stock below snapshot', () => {
     const med = makeMed({
       currentPills: 30,
       dailyDose: 2,
@@ -228,27 +219,6 @@ describe('DoseAlarmModal — Global Auto-Deduct stock display', () => {
     });
     render(
       <DoseAlarmModal
-        globalAutoDeductEnabled={false}
-        isOpen
-        medication={med}
-        onTakeDose={() => {}}
-        onSnooze={() => {}}
-        onDismiss={() => {}}
-      />
-    );
-    expect(screen.getByText(/المخزون المتوفر لديك حالياً/)).toHaveTextContent('30');
-  });
-
-  it('Global ON + med ON: may show projected stock below currentPills', () => {
-    const med = makeMed({
-      currentPills: 30,
-      dailyDose: 2,
-      autoDeductEnabled: true,
-      lastSyncDate: '2024-01-01',
-    });
-    render(
-      <DoseAlarmModal
-        globalAutoDeductEnabled={true}
         isOpen
         medication={med}
         onTakeDose={() => {}}
@@ -257,7 +227,25 @@ describe('DoseAlarmModal — Global Auto-Deduct stock display', () => {
       />
     );
     const line = screen.getByText(/المخزون المتوفر لديك حالياً/);
-    // Projected value should not equal the raw 30 snapshot after long elapsed period
     expect(line.textContent).not.toMatch(/حالياً: 30 /);
+  });
+
+  it('Medication OFF freezes displayed stock at currentPills', () => {
+    const med = makeMed({
+      currentPills: 30,
+      dailyDose: 2,
+      autoDeductEnabled: false,
+      lastSyncDate: '2024-01-01',
+    });
+    render(
+      <DoseAlarmModal
+        isOpen
+        medication={med}
+        onTakeDose={() => {}}
+        onSnooze={() => {}}
+        onDismiss={() => {}}
+      />
+    );
+    expect(screen.getByText(/المخزون المتوفر لديك حالياً/)).toHaveTextContent('30');
   });
 });

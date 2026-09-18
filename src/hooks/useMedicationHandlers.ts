@@ -285,18 +285,11 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       setGlobalAutoDeductEnabled(result.enable);
       setMedications(result.medications);
       setLogs(result.logs);
-      const totalDeducted = result.settleLogs.reduce(
-        (sum, log) => sum + Math.abs(log.amount),
-        0
-      );
+      // Global is new-med default only — existing meds unchanged (no settle).
       if (!result.enable) {
-        showToast(
-          totalDeducted > 0
-            ? `تم إيقاف الخصم التلقائي لجميع الأدوية (تمت تسوية خصم ${totalDeducted} قرص للأيام السابقة).`
-            : 'تم إيقاف الخصم التلقائي لجميع الأدوية ⏸️ (المخزون ثابت الآن)'
-        );
+        showToast('تم ضبط الإعداد الافتراضي: الأدوية الجديدة بدون خصم تلقائي');
       } else {
-        showToast('تم تفعيل الخصم التلقائي اليومي لجميع الأدوية ⚡');
+        showToast('تم ضبط الإعداد الافتراضي: الأدوية الجديدة مع خصم تلقائي ⚡');
       }
       if (soundEnabled) playSuccessChime();
     })();

@@ -350,40 +350,36 @@ describe('getAutoRestorableDose — pure auto-completed only', () => {
   });
 });
 
-describe('getCardDoseToggleTarget — Global OFF effective Auto-Deduct (UI-9)', () => {
+describe('getCardDoseToggleTarget — medication-level Auto only', () => {
   const today = getTodayDateString();
 
-  // Case A — Global OFF + elapsed dose → canTake, not Restore
-  it('Global OFF + med ON + elapsed: canTake=true, canRestore=false', () => {
+  it('Medication ON + elapsed: auto-only → canTake=false, canRestore=false', () => {
     const late = new Date(`${today}T20:00:00`);
     const med = makeMed({
       autoDeductEnabled: true,
       doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
       dosesPerDay: 1,
     });
-    const t = getCardDoseToggleTarget(med, late, today, false);
-    expect(t.canTake).toBe(true);
-    expect(t.canRestore).toBe(false);
-    expect(t.doseId).toBe('d1');
-    expect(t.amount).toBe(1);
-  });
-
-  // Case B — Global ON + Medication ON + elapsed → auto behavior (no Card Take/Restore)
-  it('Global ON + med ON + elapsed: auto-only → canTake=false, canRestore=false', () => {
-    const late = new Date(`${today}T20:00:00`);
-    const med = makeMed({
-      autoDeductEnabled: true,
-      doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
-      dosesPerDay: 1,
-    });
-    const t = getCardDoseToggleTarget(med, late, today, true);
+    const t = getCardDoseToggleTarget(med, late, today);
     expect(t.canTake).toBe(false);
     expect(t.canRestore).toBe(false);
     expect(t.doseId).toBe('d1');
   });
 
-  // Case C — Global OFF + manually consumed → canRestore same doseId
-  it('Global OFF + manual consume: canRestore=true, same doseId', () => {
+  it('Medication OFF + elapsed: canTake=true (manual mode)', () => {
+    const late = new Date(`${today}T20:00:00`);
+    const med = makeMed({
+      autoDeductEnabled: false,
+      doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+      dosesPerDay: 1,
+    });
+    const t = getCardDoseToggleTarget(med, late, today);
+    expect(t.canTake).toBe(true);
+    expect(t.canRestore).toBe(false);
+    expect(t.doseId).toBe('d1');
+  });
+
+  it('Medication ON + manual consume: canRestore same doseId', () => {
     const late = new Date(`${today}T20:00:00`);
     const med = makeMed({
       autoDeductEnabled: true,
@@ -391,71 +387,9 @@ describe('getCardDoseToggleTarget — Global OFF effective Auto-Deduct (UI-9)', 
       dosesPerDay: 1,
       doseConsumption: { d1: today },
     });
-    const t = getCardDoseToggleTarget(med, late, today, false);
+    const t = getCardDoseToggleTarget(med, late, today);
     expect(t.canTake).toBe(false);
     expect(t.canRestore).toBe(true);
     expect(t.doseId).toBe('d1');
-    expect(t.amount).toBe(2);
-  });
-
-  // Case D — Global OFF + skipped → Take again
-  it('Global OFF + skipped/restored dose: canTake=true again', () => {
-    const late = new Date(`${today}T20:00:00`);
-    const med = makeMed({
-      autoDeductEnabled: true,
-      doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
-      dosesPerDay: 1,
-      doseSkippedHistory: { d1: [today] },
-    });
-    const t = getCardDoseToggleTarget(med, late, today, false);
-    expect(t.canTake).toBe(true);
-    expect(t.canRestore).toBe(false);
-    expect(t.doseId).toBe('d1');
-  });
-
-  // Case E — Global OFF does not mix sibling doseIds
-  it('Global OFF multi-dose: elapsed d1 still Take d1; sibling d2 not Restore', () => {
-    const noon = new Date(`${today}T12:00:00`);
-    const med = makeMed({
-      autoDeductEnabled: true,
-      doseSchedule: multiSchedule,
-      dosesPerDay: 3,
-    });
-    const t = getCardDoseToggleTarget(med, noon, today, false);
-    // With Global OFF, elapsed d1 is incomplete → Take d1 (not advance to d2)
-    expect(t.canTake).toBe(true);
-    expect(t.canRestore).toBe(false);
-    expect(t.doseId).toBe('d1');
-    expect(t.amount).toBe(1);
-  });
-
-  it('Global OFF multi-dose: manual d1 remains Restore d1 (not sibling)', () => {
-    const noon = new Date(`${today}T12:00:00`);
-    const med = makeMed({
-      autoDeductEnabled: true,
-      doseSchedule: multiSchedule,
-      dosesPerDay: 3,
-      doseConsumption: { d1: today },
-    });
-    const t = getCardDoseToggleTarget(med, noon, today, false);
-    expect(t.canRestore).toBe(true);
-    expect(t.canTake).toBe(false);
-    expect(t.doseId).toBe('d1');
-  });
-
-  // getAutoRestorableDose stays med-level; Card gates with isAutoActive
-  it('getAutoRestorableDose still finds pure-auto when med ON (Card hides via isAutoActive)', () => {
-    const late = new Date(`${today}T20:00:00`);
-    const med = makeMed({
-      autoDeductEnabled: true,
-      doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
-      dosesPerDay: 1,
-    });
-    // Helper itself is med-level only; Global OFF is applied by MedicationCard via isAutoActive
-    expect(getAutoRestorableDose(med, late, today)).not.toBeNull();
-    // But Card toggle is Take, not Restore
-    const t = getCardDoseToggleTarget(med, late, today, false);
-    expect(t.canTake).toBe(true);
-    expect(t.canRestore).toBe(false);
   });
 });

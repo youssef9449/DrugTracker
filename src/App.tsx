@@ -349,7 +349,6 @@ export default function App() {
     criticalStockAlertsEnabled,
     hydrated,
     isFirstRun,
-    globalAutoDeductEnabled,
   });
 
   // ─────────────────────────────────────────────────────────────
@@ -573,7 +572,7 @@ export default function App() {
     filteredMedications,
     alertsCount,
     sufficientCount,
-  } = useDerivedMedications(medications, logs, filter, searchQuery, globalAutoDeductEnabled);
+  } = useDerivedMedications(medications, logs, filter, searchQuery);
 
   const openAdd = () => {
     setEditingMedication(null);
@@ -654,8 +653,8 @@ export default function App() {
                         <div className="flex items-center gap-1.5">
                           <span className="font-bold text-slate-900 block text-[11px] leading-tight">
                             {globalAutoDeductEnabled
-                              ? 'الخصم التلقائي نشط'
-                              : 'الخصم التلقائي متوقف'}
+                              ? 'افتراضي الأدوية الجديدة: مفعّل'
+                              : 'افتراضي الأدوية الجديدة: متوقف'}
                           </span>
                           <span
                             className={`text-[9.5px] px-1.5 py-0.2 rounded-full font-bold ${
@@ -673,8 +672,8 @@ export default function App() {
                           }`}
                         >
                           {globalAutoDeductEnabled
-                            ? 'يُخصم تلقائياً عند ميعاد كل جرعة.'
-                            : 'المخزون ثابت — لا خصم تلقائي.'}
+                            ? 'يُطبَّق على الأدوية الجديدة فقط — لا يغيّر الأدوية الحالية.'
+                            : 'الأدوية الجديدة بدون خصم تلقائي — الحالية كما هي.'}
                         </p>
                       </div>
                       <label
@@ -685,7 +684,7 @@ export default function App() {
                           id="toggle-global-auto-deduct"
                           checked={globalAutoDeductEnabled}
                           onChange={handleToggleGlobalAutoDeduct}
-                          label="تبديل الخصم التلقائي لجميع الأدوية"
+                          label="الإعداد الافتراضي للخصم التلقائي عند إضافة دواء جديد"
                           size="sm"
                           color="teal"
                         />
@@ -818,7 +817,6 @@ export default function App() {
               onUpdateSettings={setPharmacySettings}
               showToast={showToast}
               onOpenUserContactsSettings={() => setActiveTab('user-data')}
-              globalAutoDeductEnabled={globalAutoDeductEnabled}
             />
           )}
 
@@ -941,7 +939,6 @@ export default function App() {
         onTakeDose={handleTakeDoseFromAlarm}
         onSnooze={handleSnoozeFromAlarm}
         onDismiss={dismissAlarm}
-        globalAutoDeductEnabled={globalAutoDeductEnabled}
       />
       <SelectDoseModal
         isOpen={Boolean(selectDoseMed)}

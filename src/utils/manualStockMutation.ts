@@ -1347,59 +1347,16 @@ export function runGatedGlobalAutoDeductToggle(opts: {
       };
     }
     const fresh = pre.state;
-    const invalidatedMeds: Array<{ med: Medication; doseIds: string[] }> = [];
 
-    // Invalidate all existing native recurrence chains before committing the
-    // global policy change, so no old alarm can become FIRED after disable.
-    for (const med of fresh.medications) {
-      const invalidation = await invalidateMedicationRecurrences(med);
-      if (!invalidation.ok) {
-        for (const completed of invalidatedMeds) {
-          if (completed.doseIds.length > 0) {
-            await restoreInvalidatedRecurrences(completed.med, completed.doseIds, now);
-          }
-        }
-        return {
-          outcome: 'native_invalidation_failed' as const,
-          medications: fresh.medications,
-          logs: fresh.logs,
-          enable: opts.enable,
-          settleLogs: [],
-          reason: invalidation.error,
-        };
-      }
-      invalidatedMeds.push({ med, doseIds: invalidation.invalidatedDoseIds });
-    }
-
-    const settleLogs: ConsumptionLog[] = [];
-    const medications = fresh.medications.map((med) => {
-      const { updatedMed, log } = settleAutoDeductToggle(
-        med,
-        opts.enable,
-        todayStr,
-        now
-      );
-      if (log) settleLogs.push(log);
-      return updatedMed;
-    });
-    const logs =
-      settleLogs.length > 0 ? [...settleLogs, ...fresh.logs] : fresh.logs;
-
+    // Global is only the default preference for NEW medications.
+    // Do NOT flip autoDeductEnabled, settle stock, or invalidate schedules
+    // for existing medications — those follow medication.autoDeductEnabled.
     const err = commitWithManualEnvelope({
-      medications,
-      logs,
+      medications: fresh.medications,
+      logs: fresh.logs,
       globalAutoDeductEnabled: opts.enable,
     });
     if (err) {
-      for (const invalidated of invalidatedMeds) {
-        if (invalidated.doseIds.length > 0) {
-          await restoreInvalidatedRecurrences(
-            invalidated.med,
-            invalidated.doseIds,
-            now
-          );
-        }
-      }
       return {
         outcome: 'persist_failed' as const,
         medications: fresh.medications,
@@ -1412,10 +1369,10 @@ export function runGatedGlobalAutoDeductToggle(opts: {
 
     return {
       outcome: 'applied' as const,
-      medications,
-      logs,
+      medications: fresh.medications,
+      logs: fresh.logs,
       enable: opts.enable,
-      settleLogs,
+      settleLogs: [],
     };
   });
 }

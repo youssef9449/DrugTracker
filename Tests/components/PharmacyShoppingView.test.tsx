@@ -42,7 +42,7 @@ function renderView(overrides: Record<string, unknown> = {}) {
     onOpenUserContactsSettings: vi.fn(),
     ...overrides,
   };
-  return render(<PharmacyShoppingView globalAutoDeductEnabled={true} {...props} />);
+  return render(<PharmacyShoppingView {...props} />);
 }
 
 // Wave 13 #123: pin system time so getTodayDateString() (used by
@@ -91,7 +91,6 @@ describe('PharmacyShoppingView — deselection preservation (#20)', () => {
     const medC = makeMed({ id: 'med-c', name: 'Med C', currentPills: 50, dailyDose: 1 });
     rerender(
       <PharmacyShoppingView
-        globalAutoDeductEnabled={true}
         medications={[medA, medB, medC]}
         settings={defaultSettings}
         onUpdateSettings={vi.fn()}
@@ -117,7 +116,6 @@ describe('PharmacyShoppingView — deselection preservation (#20)', () => {
     const medB = makeMed({ id: 'med-b', name: 'Med B', currentPills: 1, dailyDose: 1 });
     rerender(
       <PharmacyShoppingView
-        globalAutoDeductEnabled={true}
         medications={[medA, medB]}
         settings={defaultSettings}
         onUpdateSettings={vi.fn()}
@@ -147,7 +145,6 @@ describe('PharmacyShoppingView — deselection preservation (#20)', () => {
     const medB = makeMed({ id: 'med-b', name: 'Med B', currentPills: 1, dailyDose: 1 });
     rerender(
       <PharmacyShoppingView
-        globalAutoDeductEnabled={true}
         medications={[medA, medB]}
         settings={defaultSettings}
         onUpdateSettings={vi.fn()}
@@ -286,9 +283,8 @@ describe('PharmacyShoppingView — refill actions', () => {
 });
 
 
-describe('PharmacyShoppingView — Global Auto-Deduct stock projection (UI-13 follow-up)', () => {
-  it('Global OFF + med ON: does not treat auto-projected low stock as urgent', () => {
-    // Past lastSync + auto ON would project near-empty; Global OFF freezes at currentPills.
+describe('PharmacyShoppingView — medication-level stock projection', () => {
+  it('Medication ON with past lastSync appears as urgent under auto projection', () => {
     const med = makeMed({
       id: 'urgent-candidate',
       name: 'Projected Med',
@@ -298,61 +294,35 @@ describe('PharmacyShoppingView — Global Auto-Deduct stock projection (UI-13 fo
       lastSyncDate: '2024-01-01',
       warningThresholdDays: 5,
     });
-    const { rerender } = render(
+    render(
       <PharmacyShoppingView
-        globalAutoDeductEnabled={true}
         medications={[med]}
         settings={defaultSettings}
         onUpdateSettings={() => {}}
         showToast={() => {}}
       />
     );
-    // With Global ON, long-past sync projects to out_of_stock / critical — shows in urgent list
-    // (display defaults to urgent only). With Global OFF, frozen 30 pills → sufficient → hidden
-    // unless "show all".
-    rerender(
-      <PharmacyShoppingView
-        globalAutoDeductEnabled={false}
-        medications={[med]}
-        settings={defaultSettings}
-        onUpdateSettings={() => {}}
-        showToast={() => {}}
-      />
-    );
-    // Urgent-only mode: sufficient med should not appear as a shortage row.
-    expect(screen.queryByText('Projected Med')).not.toBeInTheDocument();
+    expect(screen.getByText('Projected Med')).toBeInTheDocument();
   });
 
-  it('Global OFF + med ON: remaining stock shows currentPills not projected', () => {
+  it('Medication OFF with past lastSync is not urgent (frozen sufficient stock)', () => {
     const med = makeMed({
-      id: 'stock-row',
-      name: 'Stock Row Med',
+      id: 'frozen',
+      name: 'Frozen Med',
       currentPills: 30,
       dailyDose: 2,
-      autoDeductEnabled: true,
+      autoDeductEnabled: false,
       lastSyncDate: '2024-01-01',
       warningThresholdDays: 5,
     });
-    // Force show-all so the row is visible even when not urgent
     render(
       <PharmacyShoppingView
-        globalAutoDeductEnabled={false}
         medications={[med]}
         settings={defaultSettings}
         onUpdateSettings={() => {}}
         showToast={() => {}}
       />
     );
-    // Toggle show all if needed — look for control; if med not visible, status is sufficient.
-    const showAll = screen.queryByText(/عرض الكل|كل الأدوية|تخطيط/);
-    if (showAll) fireEvent.click(showAll);
-    // When visible, stock text should include 30 (snapshot), not a projected near-zero.
-    // If still not in urgent list, that's also correct for Global OFF.
-    const row = screen.queryByText('Stock Row Med');
-    if (row) {
-      expect(screen.getByText(/30/)).toBeInTheDocument();
-    } else {
-      expect(row).toBeNull();
-    }
+    expect(screen.queryByText('Frozen Med')).not.toBeInTheDocument();
   });
 });

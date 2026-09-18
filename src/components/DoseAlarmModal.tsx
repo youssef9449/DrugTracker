@@ -2,7 +2,6 @@ import type { FC } from 'react';
 import { Bell, Check, Clock, X } from 'lucide-react';
 import { Medication, formatTimeArabic } from '../types';
 import { effectiveCurrentPills } from '../utils/dateCalculations';
-import { medicationForStockProjection } from '../utils/doseSchedule';
 import { Modal } from './ui/Modal';
 
 interface DoseAlarmModalProps {
@@ -13,8 +12,6 @@ interface DoseAlarmModalProps {
   onTakeDose: (med: Medication, doseId?: string) => void;
   onSnooze: (med: Medication) => void;
   onDismiss: () => void;
-  /** Required for stock display projection (effective global ∧ med auto). */
-  globalAutoDeductEnabled: boolean;
 }
 
 export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
@@ -24,7 +21,6 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
   onTakeDose,
   onSnooze,
   onDismiss,
-  globalAutoDeductEnabled,
 }) => {
   const dose =
     medication && doseId && Array.isArray(medication.doseSchedule)
@@ -95,11 +91,7 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
             </div>
 
             <div className="text-[11px] text-slate-500 pt-1">
-              المخزون المتوفر لديك حالياً:{' '}
-              {effectiveCurrentPills(
-                medicationForStockProjection(medication, globalAutoDeductEnabled)
-              )}{' '}
-              {unit}
+              المخزون المتوفر لديك حالياً: {effectiveCurrentPills(medication)} {unit}
             </div>
           </div>
 

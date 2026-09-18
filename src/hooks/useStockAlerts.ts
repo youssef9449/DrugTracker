@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import { Medication, calculateMedicationStatus } from '../types';
 import { effectiveCurrentPills, getCriticalAlarmDate, getTodayDateString } from '../utils/dateCalculations';
-import { medicationForStockProjection } from '../utils/doseSchedule';
 import { sendCriticalStockAlert, cancelCriticalAlarm } from '../utils/notifications';
 import {
   loadCriticalNotificationClaims,
@@ -19,8 +18,6 @@ interface UseStockAlertsOptions {
   criticalStockAlertsEnabled: boolean;
   hydrated: boolean;
   isFirstRun: boolean;
-  /** Required: stock/status projection uses effective global ∧ med auto. */
-  globalAutoDeductEnabled: boolean;
 }
 
 /** The claim value an in-flight foreground send has written. */
@@ -118,7 +115,6 @@ export function useStockAlerts({
   criticalStockAlertsEnabled,
   hydrated,
   isFirstRun,
-  globalAutoDeductEnabled,
 }: UseStockAlertsOptions): void {
   useEffect(() => {
     if (!hydrated) return;
@@ -140,9 +136,7 @@ export function useStockAlerts({
     const canNotify = notificationsEnabled && criticalStockAlertsEnabled;
 
     for (const med of medications) {
-      // Stock/status only — original med remains identity for claims/alarms.
-      const projectedMed = medicationForStockProjection(med, globalAutoDeductEnabled);
-      const { status, daysLeft } = calculateMedicationStatus(projectedMed);
+      const { status, daysLeft } = calculateMedicationStatus(med);
       const isCriticalish = status === 'critical' || status === 'out_of_stock';
 
       if (!isCriticalish) {
@@ -152,9 +146,8 @@ export function useStockAlerts({
         // clear.
         const claim = getCriticalNotificationClaim(claims, med.id);
         if (claim) {
-          // Same effective projection as status/balance (Global ∧ med).
           const projection = canNotify
-            ? getCriticalAlarmDate(projectedMed, getTodayDateString())
+            ? getCriticalAlarmDate(med, getTodayDateString())
             : null;
           // The scheduler's live armed record: an alarm successfully
           // scheduled for EXACTLY the current projected crossing. It is
@@ -213,7 +206,7 @@ export function useStockAlerts({
       setCriticalNotificationClaim(claims, med.id, { ...IN_FLIGHT_CLAIM });
       changed = true;
 
-      const effPills = effectiveCurrentPills(projectedMed);
+      const effPills = effectiveCurrentPills(med);
       const unit = med.unit || 'قرص';
       Promise.resolve(sendCriticalStockAlert(med.id, med.name, daysLeft, effPills, unit))
         .then((sent) => sent === true)
@@ -242,5 +235,5 @@ export function useStockAlerts({
     if (changed) {
       saveCriticalNotificationClaims(claims);
     }
-  }, [medications, notificationsEnabled, criticalStockAlertsEnabled, hydrated, isFirstRun, globalAutoDeductEnabled]);
+  }, [medications, notificationsEnabled, criticalStockAlertsEnabled, hydrated, isFirstRun]);
 }

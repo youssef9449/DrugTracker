@@ -15,7 +15,14 @@ import './MedicationCardMaterial.css';
 
 interface MedicationMenuProps {
   medication: Medication;
+  /** Effective Auto-Deduct (global ∧ medication). Used for runtime state only. */
   isAutoActive: boolean;
+  /**
+   * Global Auto-Deduct switch. When false, the per-med toggle still edits
+   * medication.autoDeductEnabled but does not enable effective deduction.
+   * Defaults to true so existing callers keep prior Global-ON behavior.
+   */
+  globalAutoDeductEnabled?: boolean;
   showRefillInMenu?: boolean;
   onOpenRefill?: (medication: Medication) => void;
   onEdit: (medication: Medication) => void;
@@ -43,6 +50,7 @@ export function MedicationTypeIcon({ unit, className = "h-3.5 w-3.5" }: { unit: 
 export function MedicationMenu({
   medication,
   isAutoActive,
+  globalAutoDeductEnabled = true,
   onEdit,
   onDelete,
   onToggleAutoDeduct,
@@ -50,6 +58,47 @@ export function MedicationMenu({
   showTypeIcon = false,
 }: MedicationMenuProps) {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+
+  // Medication preference (what the per-med toggle edits) vs effective state.
+  const isMedicationAutoDeductEnabled = medication.autoDeductEnabled !== false;
+  const isGlobalAutoOn = globalAutoDeductEnabled !== false;
+
+  // aria-pressed / visual preference reflect what the button changes, not
+  // effective deduction (which stays OFF whenever Global is OFF).
+  const autoTogglePressed = isMedicationAutoDeductEnabled;
+
+  let autoToggleAriaLabel: string;
+  let autoToggleTitle: string;
+  let autoToggleClass: string;
+
+  if (isGlobalAutoOn) {
+    // Global ON: effective state === preference; keep existing labels.
+    autoToggleAriaLabel = isAutoActive
+      ? 'إيقاف الخصم التلقائي'
+      : 'تفعيل الخصم التلقائي';
+    autoToggleTitle = isAutoActive
+      ? 'الخصم التلقائي مفعّل — اضغط للإيقاف'
+      : 'الخصم التلقائي متوقف — اضغط للتفعيل';
+    autoToggleClass = isAutoActive
+      ? 'bg-teal-100 text-teal-800 hover:bg-teal-200'
+      : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-600';
+  } else if (isMedicationAutoDeductEnabled) {
+    // Global OFF + preference ON: preference preserved, effective deduction off.
+    autoToggleAriaLabel =
+      'إيقاف إعداد الخصم التلقائي لهذا الدواء — الخصم متوقف عالميًا';
+    autoToggleTitle =
+      'إعداد الخصم التلقائي لهذا الدواء مفعّل — الخصم متوقف عالميًا';
+    autoToggleClass =
+      'bg-amber-100 text-amber-800 hover:bg-amber-200';
+  } else {
+    // Global OFF + preference OFF.
+    autoToggleAriaLabel =
+      'تفعيل إعداد الخصم التلقائي لهذا الدواء — الخصم متوقف عالميًا';
+    autoToggleTitle =
+      'إعداد الخصم التلقائي لهذا الدواء غير مفعّل — الخصم متوقف عالميًا';
+    autoToggleClass =
+      'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-600';
+  }
 
   useEffect(() => {
     if (!deleteConfirmOpen) return;
@@ -173,16 +222,24 @@ export function MedicationMenu({
       <button
         type="button"
         onClick={() => onToggleAutoDeduct(medication.id)}
-        className={`${iconButtonClass} ${
-          isAutoActive
-            ? 'bg-teal-100 text-teal-800 hover:bg-teal-200'
-            : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-600'
-        }`}
-        aria-label={isAutoActive ? 'إيقاف الخصم التلقائي' : 'تفعيل الخصم التلقائي'}
-        title={isAutoActive ? 'الخصم التلقائي مفعّل — اضغط للإيقاف' : 'الخصم التلقائي متوقف — اضغط للتفعيل'}
-        aria-pressed={isAutoActive}
+        className={`${iconButtonClass} ${autoToggleClass}`}
+        aria-label={autoToggleAriaLabel}
+        title={autoToggleTitle}
+        aria-pressed={autoTogglePressed}
+        data-auto-pref={isMedicationAutoDeductEnabled ? 'on' : 'off'}
+        data-auto-effective={isAutoActive ? 'on' : 'off'}
+        data-global-auto={isGlobalAutoOn ? 'on' : 'off'}
       >
-        <Zap className={`${iconDims} ${isAutoActive ? 'fill-teal-600/30' : ''}`} aria-hidden="true" />
+        <Zap
+          className={`${iconDims} ${
+            isGlobalAutoOn && isAutoActive
+              ? 'fill-teal-600/30'
+              : !isGlobalAutoOn && isMedicationAutoDeductEnabled
+                ? 'fill-amber-600/30'
+                : ''
+          }`}
+          aria-hidden="true"
+        />
       </button>
 
       <button

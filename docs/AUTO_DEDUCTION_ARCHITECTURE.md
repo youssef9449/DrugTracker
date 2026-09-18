@@ -130,9 +130,9 @@ Native status remains **FIRED**, while JS already holds the applied markers. A l
 
 ## JavaScript reconciliation
 
-Entry: `useExactAutoDeductionReconciliation` when `hydrated && !isFirstRun`, on app resume, or immediately from the native `exactAutoDeductionFired` event.
+Entry: `useExactAutoDeductionReconciliation` when `hydrated && !isFirstRun`, on app resume/local midnight, or immediately from the native `exactAutoDeductionFired` event.
 
-The native event is a wake-up signal, not a second source of truth: reconciliation always re-reads the durable native FIRED ledger. There is no foreground polling timer. If JavaScript is unavailable when the alarm fires, the durable FIRED record is recovered by the next hydration/resume reconciliation.
+At hydration/resume/local midnight, idempotent native schedule recovery runs before the JS FIRED read, so missed past schedule rows can be promoted before desired-state cleanup. The native event remains only a wake-up signal, not a second source of truth: reconciliation always re-reads the durable native FIRED ledger. There is no foreground polling timer.
 
 
 Orchestration (`runAutoDeductionReconciliation`):

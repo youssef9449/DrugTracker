@@ -252,17 +252,24 @@ export function clearDoseSkippedOnDate(
  * Units still auto-due on a single historical calendar day (all slots
  * that day are fully elapsed).
  *
- * Known history: slots with a recorded consume on `dateStr` are skipped
- * (already settled by consumeDose — never double-deducted).
+ * Known history: slots with a recorded consume/skip on `dateStr` are
+ * skipped (already settled by Manual Take, Exact Auto apply, or skip —
+ * never double-deducted).
  *
- * Unknown history: when no recorded consumption exists for a slot on
- * that date, the implementation cannot distinguish "user did not
- * consume" from "consumption was never recorded". It therefore uses the
- * **current** schedule amount for that unrecorded slot (deterministic
- * full-schedule fallback). This is not historical reconstruction of
- * past amounts/times — schedule amount/time edits do not rewrite
- * recorded consume *dates*, but unrecorded historical slots are valued
- * with today's schedule definition.
+ * Unknown history (Phase 7 / D7-3): when no recorded consumption exists
+ * for a slot on that date, the implementation cannot reconstruct the
+ * historical amount if the user later edited the schedule. It therefore
+ * uses the **current** schedule amount for that unrecorded slot
+ * (deterministic full-schedule fallback). This is **not** historical
+ * reconstruction of past amounts/times.
+ *
+ * Exact Auto does **not** rely on this fallback for fired occurrences:
+ * `applyExactAutoEventToMedication` charges `event.amount` from the
+ * durable FIRED payload. This helper only feeds legacy catch-up /
+ * projection due math for slots without consume/skip markers.
+ *
+ * Phase 7 does not add historical schedule snapshots or schema changes.
+ * This limitation is not Exact-vs-legacy double deduction.
  */
 export function historicalDayDueUnits(med: Medication, dateStr: string): number {
   if (!hasDoseSchedule(med) || !med.doseSchedule) {
@@ -410,16 +417,28 @@ export function getDaysDifference(fromDateStr: string, toDateStr: string): numbe
 }
 
 /**
- * The dynamic balance that the UI actually displays.
+ * The dynamic balance that the UI actually displays (Phase 7 dual-balance).
  *
- * `med.currentPills` is the last "settled" snapshot — the value at
- * `med.lastSyncDate`. From that snapshot, we project forward by
- * {@link computeDueDoseBreakdown}'s `fullDueUnits` (units, not days).
- * The result is clamped at 0 so the displayed balance never goes negative.
+ * **Dual model (D7-1):**
+ * - `med.currentPills` is the **durable committed stock snapshot** (and
+ *   horizon companion `lastSyncDate`). It is **not** necessarily the
+ *   number that must be shown to the user at every moment.
+ * - `effectiveCurrentPills` is the **read-only projection** of live UI
+ *   balance: from that snapshot, subtract
+ *   {@link computeDueDoseBreakdown}'s `fullDueUnits` (respecting
+ *   consume/skip markers). Clamped at 0.
  *
  * This is the SINGLE source of truth for "how many pills does the user
- * actually have right now" in the entire UI. Callers should NEVER read
- * `med.currentPills` directly for display.
+ * actually have right now" in the UI. Callers must NOT read
+ * `med.currentPills` directly for display. Durable mutations (Exact
+ * apply, legacy catch-up, Take/Restore, refill, envelopes) continue to
+ * read/write `currentPills`.
+ *
+ * **Projection-only contract (must not change):**
+ * - Does not write storage
+ * - Does not mutate `currentPills` or `lastSyncDate`
+ * - Does not create logs or Exact events
+ * - Uses `computeDueDoseBreakdown().fullDueUnits` only
  *
  * Timing model:
  *   - `reminderTime`-gated med (`reminderEnabled` + valid
@@ -427,21 +446,19 @@ export function getDaysDifference(fromDateStr: string, toDateStr: string): numbe
  *     So at 15:00 with reminderTime 20:00, the projection does NOT
  *     include today's dose. Once `now >= reminderTime` (and the user
  *     hasn't manually consumed today), today's dose is projected.
+ *   - Multi-dose: per-slot wall-clock via {@link todayDueUnits}.
  *   - Legacy med (no reminder): a day's dose is due at the start of
  *     the calendar day — the pre-change behavior.
  *
- * The manual-consume interaction (`lastConsumedDate === today`) yields
- * 0 due doses: a manual consume pre-settles the snapshot (currentPills
- * already reflects the projection + the manual dose, lastSyncDate =
- * today), so this function returns currentPills as-is — no spurious
- * re-deduction of the already-consumed dose.
+ * The manual-consume interaction (`lastConsumedDate === today` / slot
+ * markers) yields 0 due for that occurrence: projection returns
+ * snapshot without re-charging an already-handled dose.
  *
  * Behavior:
  *   - `autoDeductEnabled === false` → returns `currentPills` unchanged
  *     (the user has paused auto-deduction; the stored snapshot IS the
  *     effective balance).
- *   - `dailyDose <= 0` → returns `currentPills` (no consumption rate to
- *     project forward; effectively "unknown rate" — show the snapshot).
+ *   - `dailyDose`/schedule amount ≤ 0 → returns `currentPills`.
  *   - Otherwise: `max(0, currentPills - fullDueUnits)`.
  *
  * @param med The medication.
@@ -847,6 +864,41 @@ export interface AutoSyncResult {
   }[];
 }
 
+/**
+ * Legacy day/window stock catch-up (Phase 7 / D7-2).
+ *
+ * **Authority split:**
+ * - Exact Auto (native FIRED → `reconcileFiredEvents`) is the
+ *   authoritative **timed occurrence** path when FIRED evidence exists.
+ * - This function is a **secondary defensive catch-up** for due history
+ *   that is still unrepresented in durable state **after** Exact
+ *   reconciliation.
+ *
+ * **Ordering (must not reverse):**
+ * `withAutoStockMutationGate` → envelope recovery →
+ * `reconcileExactBeforeLegacySettlement` → only then this function.
+ * If native list/durability fails, callers must not run this mutation.
+ *
+ * **What this function does NOT do:**
+ * - Re-apply Exact FIRED occurrences (consume/skip markers + due math
+ *   already exclude them after Exact apply)
+ * - Create Exact occurrence IDs or `exact-auto:*` logs
+ * - ACK / RECONCILE native EventStore rows
+ * - Act as an occurrence ledger (`medicationId + doseId + calendarDate`)
+ *
+ * **What it does:**
+ * - Uses {@link computeDueDoseBreakdown} due units only
+ * - Multi-dose / reminder-gated: settles **past** fully-elapsed days;
+ *   today's slots stay dynamic for Exact/manual (existing contract)
+ * - Legacy non-gated: existing per-day due loop (unchanged unless a
+ *   proven double-deduction path appears)
+ * - When post-Exact `dueUnits === 0`: no durable stock mutation and no
+ *   `auto_daily` log for that med
+ *
+ * **`auto_daily` logs** are audit records of day/window catch-up only.
+ * They are **not** evidence that a specific Exact occurrence fired or
+ * was applied, and must not gate Exact FIRED reconciliation.
+ */
 export function syncAutoDailyDeductions(
   medications: Medication[],
   todayStr: string = getTodayDateString(),

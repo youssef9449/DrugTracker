@@ -32,6 +32,10 @@ export function isMedicationAutoDeductActive(
 /**
  * Stock/status projection input. Identity: projection follows medication
  * Auto only (Global is not a runtime kill switch). Returns the medication unchanged.
+ *
+ * Phase 7 (D7-1): callers that need a live displayed balance must still use
+ * `effectiveCurrentPills(medicationForStockProjection(med))` — not raw
+ * `med.currentPills`. This helper does not itself project stock.
  */
 export function medicationForStockProjection(
   medication: Medication

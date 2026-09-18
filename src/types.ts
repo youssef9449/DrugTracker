@@ -25,6 +25,12 @@ export interface ConsumptionLog {
 export interface Medication {
   id: string;
   name: string;
+  /**
+   * Durable committed stock snapshot (Phase 7).
+   * Not necessarily the live UI balance — display must use
+   * `effectiveCurrentPills(med)` when auto-deduction projection applies.
+   * Mutations (Exact apply, legacy catch-up, Take/Restore, refill) write this field.
+   */
   currentPills: number;
   dailyDose: number; // Consumption rate per day
   unit: string; // e.g., 'قرص', 'كبسولة', 'مل'
@@ -33,7 +39,8 @@ export interface Medication {
   category?: string;
   notes?: string;
   createdAt: string;
-  lastSyncDate: string; // YYYY-MM-DD: date when currentPills was synced/counted
+  /** YYYY-MM-DD settlement horizon companion to `currentPills`. */
+  lastSyncDate: string
   autoDeductEnabled?: boolean; // Default true
   packageSize?: number; // Size of standard package when bought (e.g. 30)
   stripsPerBox?: number; // عدد الأشرطة في العلبة (مثال: 3 أشرطة)

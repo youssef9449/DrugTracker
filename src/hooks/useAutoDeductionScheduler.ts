@@ -107,6 +107,11 @@ type GuardedCancelResult = {
  */
 async function scheduleExactOccurrenceFromDurable(slot: AutoDeductionSlot) {
   return withAutoStockMutationGate(async (fresh) => {
+    // Durable global policy is authoritative. A stale React=true snapshot must
+    // never recreate an exact schedule after a recovered/committed global OFF.
+    if (fresh.globalAutoDeductEnabled === false) {
+      return { ok: true, skipped: true } as const;
+    }
     const med = fresh.medications.find((m) => m.id === slot.medId);
     if (!med) return { ok: true, skipped: true } as const;
 
@@ -151,7 +156,7 @@ async function cancelUndesiredExactOccurrence(
 ): Promise<GuardedCancelResult> {
   return withAutoStockMutationGate(async (fresh) => {
     const med = fresh.medications.find((m) => m.id === medId);
-    const stillDesired = !!med &&
+    const stillDesired = fresh.globalAutoDeductEnabled !== false && !!med &&
       getAutoDeductionSlotsForDate(med, calendarDate).some(
         (slot) => slot.doseId === doseId
       );

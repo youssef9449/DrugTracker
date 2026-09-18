@@ -228,6 +228,9 @@ public class AutoDeductionPlugin extends Plugin {
                 js.put("timeHhmm", o.optString("timeHhmm", ""));
                 js.put("amount", o.optDouble("amount", 0));
                 js.put("scheduledAtEpochMs", o.optLong("scheduledAtEpochMs", 0L));
+                if (o.has("fireRetryCount")) {
+                    js.put("fireRetryCount", o.optInt("fireRetryCount", 0));
+                }
                 arr.put(js);
             }
             JSObject ret = new JSObject();

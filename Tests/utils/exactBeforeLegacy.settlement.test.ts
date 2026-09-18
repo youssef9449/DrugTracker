@@ -145,6 +145,35 @@ describe('exact FIRED amount precedes legacy settlement', () => {
     expect(r.newExactLogs[0].amount).toBe(-2);
   });
 
+  it('exact persistence failure surfaces durabilityBlocked and leaves stock untouched', async () => {
+    __setExactAutoEnvelopeTestHooks({
+      load: () => null,
+      save: () => 'exact_envelope_save_failed',
+    });
+    const mark = vi.fn(async () => ({ ok: true as const, changed: true }));
+
+    const recon = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      medications: durable.medications,
+      logs: durable.logs,
+      alreadyInGate: true,
+      durableState: {
+        medications: durable.medications,
+        logs: durable.logs,
+        globalAutoDeductEnabled: true,
+      },
+      listFired: async () => ({ ok: true, events: [firedEvent(2)] }),
+      markReconciled: mark,
+    });
+
+    expect(recon.durabilityBlocked).toBe(true);
+    expect(recon.mutated).toBe(false);
+    expect(recon.markedCount).toBe(0);
+    expect(mark).not.toHaveBeenCalled();
+    expect(durable.medications[0].currentPills).toBe(10);
+    expect(durable.logs).toHaveLength(0);
+  });
+
   it('runAutoDeductionReconciliation then legacy sync does not double-charge', async () => {
     const events = [firedEvent(2)];
     const recon = await runAutoDeductionReconciliation({
@@ -161,6 +190,38 @@ describe('exact FIRED amount precedes legacy settlement', () => {
 
     const legacy = syncAutoDailyDeductions(recon.medications, '2026-09-14');
     expect(legacy.updatedMeds[0].currentPills).toBe(8);
+  });
+
+  it('per-med toggle blocks when exact reconciliation is not durably finalized', async () => {
+    vi.spyOn(
+      preSettleModule,
+      'reconcileExactBeforeLegacySettlement'
+    ).mockImplementation(async (opts) => ({
+      state: opts.fresh,
+      reconciliation: null,
+      nativeListFailed: false,
+      durabilityBlocked: true,
+    }));
+
+    durable.medications = [
+      baseMed({
+        currentPills: 10,
+        lastSyncDate: '2026-09-13',
+        autoDeductEnabled: true,
+      }),
+    ];
+
+    const result = await runGatedAutoDeductToggle({
+      medicationId: 'med-1',
+      todayStr: '2026-09-14',
+      now: new Date('2026-09-14T09:00:00'),
+      globalAutoDeductEnabled: true,
+    });
+
+    expect(result.reason).toBe('exact_reconciliation_blocked');
+    expect(result.medications[0].currentPills).toBe(10);
+    expect(result.medications[0].autoDeductEnabled).toBe(true);
+    expect(durable.logs).toHaveLength(0);
   });
 
   it('per-med toggle: exact amount 2 applied first; final stock is 8', async () => {

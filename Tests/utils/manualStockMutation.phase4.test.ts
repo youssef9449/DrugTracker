@@ -35,8 +35,10 @@ import {
 } from '../../src/utils/autoDeductionStockGate';
 import { __setManualRecurrenceInvalidationTestHook } from '../../src/utils/manualStockMutation';
 import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
-import { isDoseConsumedOnDate } from '../../src/utils/dateCalculations';
+import { isDoseConsumedOnDate } from '../../src/utils/dateCalculations';,
+import { isDoseSkippedOnDate } from '../../src/utils/dateCalculations';
 import { exactAutoLogId } from '../../src/utils/autoDeductionReconciliation';
+import * as preSettleModule from '../../src/utils/reconcileExactBeforeLegacySettlement';
 // findPending used indirectly via runGatedManualConsume
 import {
   findActiveDeductionForOccurrence,
@@ -3708,7 +3710,7 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
     __resetStockMutationOrderingForTests();
   });
 
-  it('native SCHEDULED amount=2 + JS schedule amount=1 → Take deducts 2', async () => {
+  it('native SCHEDULED amount=2 + JS schedule amount=1 → Take deducts current JS amount 1', async () => {
     durable = {
       medications: [
         med({
@@ -3730,8 +3732,34 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
       }),
     });
     expect(r.outcome).toBe('applied');
-    expect(r.doseAmount).toBe(2);
-    expect(durable.medications[0].currentPills).toBe(8);
+    expect(r.doseAmount).toBe(1);
+    expect(durable.medications[0].currentPills).toBe(9);
+  });
+
+  it('exact durability block → Restore cannot write a projection skip marker', async () => {
+    const before = JSON.parse(JSON.stringify(durable.medications[0]));
+
+    vi.spyOn(
+      preSettleModule,
+      'reconcileExactBeforeLegacySettlement'
+    ).mockImplementation(async (opts) => ({
+      state: opts.fresh,
+      reconciliation: null,
+      nativeListFailed: false,
+      durabilityBlocked: true,
+    }));
+
+    const r = await runGatedManualRestore({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      todayStr: TODAY,
+    });
+
+    expect(r.outcome).toBe('persist_failed');
+    expect(r.reason).toBe('exact_reconciliation_blocked');
+    expect(durable.medications[0]).toEqual(before);
+    expect(isDoseSkippedOnDate(durable.medications[0], 'd1', TODAY)).toBe(false);
+    expect(durable.logs).toHaveLength(0);
   });
 
   it('native snapshot failure → no stock mutation', async () => {

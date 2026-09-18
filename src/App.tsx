@@ -413,6 +413,7 @@ export default function App() {
   useExactAutoDeductionReconciliation({
     setMedications,
     setLogs,
+    setGlobalAutoDeductEnabled,
     globalAutoDeductEnabled,
     hydrated,
     isFirstRun,

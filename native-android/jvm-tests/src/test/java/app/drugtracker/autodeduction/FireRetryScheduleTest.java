@@ -353,4 +353,65 @@ public class FireRetryScheduleTest {
         f.setAccessible(true);
         return f.get(null);
     }
+
+    @Test
+    public void recoverFireFromIndependentEvidence_withoutScheduleMetadata_succeeds()
+            throws Exception {
+        String date = "2026-09-10";
+        AutoDeductionScheduler s = newScheduler();
+        // No sch: row — only independent evidence
+        synchronized (getScheduleLock()) {
+            assertTrue(s.recordIndependentFireRetryEvidenceLocked(
+                    "med", "dose", date, 1000L, 2.0, "08:00", 1L, "v1", 1));
+        }
+        AutoDeductionScheduler.FireResult fr =
+                s.recoverFireFromIndependentEvidence("med", "dose", date);
+        assertTrue(fr.status == AutoDeductionScheduler.FireResult.Status.CREATED
+                || fr.status == AutoDeductionScheduler.FireResult.Status.ALREADY_EXISTS
+                || fr.pendingRecorded);
+        // Evidence cleared after durable fire proof
+        assertNull(s.getIndependentFireRetryEvidence("med", "dose", date));
+    }
+
+    @Test
+    public void scheduleFireRetry_staleOwnership_doesNotWriteIndependentEvidence()
+            throws Exception {
+        String date = futureCalendarDate(4);
+        long epoch = futureEpochMs(date, "11:00");
+        AutoDeductionScheduler s = newScheduler();
+        AutoDeductionScheduler.ScheduleResult first =
+                s.scheduleOccurrence("med", "dose", date, "11:00", 1.0, epoch);
+        assertTrue(first.ok);
+        // Capture ownership of first schedule
+        String key = AutoDeductionContract.occurrenceKey("med", "dose", date);
+        String prefKey = "sch:" + key;
+        String raw1 = schedulePrefs().getString(prefKey, null);
+        assertNotNull(raw1);
+        JSONObject meta1 = new JSONObject(raw1);
+        String ver1 = meta1.optString(AutoDeductionScheduler.FIELD_SCHEDULE_VERSION, "");
+        long gen1 = meta1.optLong(AutoDeductionScheduler.FIELD_RECURRENCE_GENERATION, 0L);
+
+        // Replace with newer schedule
+        assertTrue(s.scheduleOccurrence("med", "dose", date, "11:00", 3.0, epoch).ok);
+        String raw2 = schedulePrefs().getString(prefKey, null);
+        JSONObject meta2 = new JSONObject(raw2);
+        String ver2 = meta2.optString(AutoDeductionScheduler.FIELD_SCHEDULE_VERSION, "");
+        assertFalse(ver1.equals(ver2));
+
+        // Stale retry with old ownership tokens must not write evidence
+        assertFalse(s.scheduleFireRetry(
+                "med", "dose", date, epoch, 1.0, "11:00", gen1, ver1, 1));
+        assertNull(s.getIndependentFireRetryEvidence("med", "dose", date));
+    }
+
+    @Test
+    public void restoreFutureSchedules_allValid_okTrue() {
+        AutoDeductionScheduler s = newScheduler();
+        String date = futureCalendarDate(5);
+        assertTrue(s.scheduleOccurrence(
+                "med", "dose", date, "09:00", 1.0, futureEpochMs(date, "09:00")).ok);
+        AutoDeductionScheduler.RestoreResult rr = s.restoreFutureSchedules();
+        assertTrue(rr.ok);
+        assertEquals(0, rr.failed);
+    }
 }

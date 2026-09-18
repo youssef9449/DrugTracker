@@ -1117,16 +1117,12 @@ public final class AutoDeductionScheduler {
                 return false;
             }
 
-            // Always refresh independent failure evidence first (survives config mutation).
-            recordIndependentFireRetryEvidenceLocked(
-                    medicationId, doseId, calendarDate, scheduledAtEpochMs, amount,
-                    timeHhmm, recurrenceGeneration, scheduleVersion, nextRetryCount);
-
             String currentRaw = schedulePrefs.getString(prefKey, null);
             int persistedRetryCount = nextRetryCount;
-            // If schedule metadata is gone, independent evidence still authorizes the
-            // one-shot retry alarm for the SAME occurrence identity.
+
             if (currentRaw != null && !currentRaw.isEmpty()) {
+                // Ownership MUST be validated BEFORE writing independent evidence so a
+                // stale retry cannot stamp old recovery data onto a newer schedule.
                 try {
                     JSONObject current = new JSONObject(currentRaw);
                     String activeVersion = current.optString(FIELD_SCHEDULE_VERSION, "");
@@ -1155,16 +1151,30 @@ public final class AutoDeductionScheduler {
                     current.put(FIELD_FIRE_RETRY_COUNT, persistedRetryCount);
 
                     if (!schedulePrefs.edit().putString(prefKey, current.toString()).commit()) {
-                        Log.e(TAG, "fire retry schedule-metadata marker commit failed for " + key
-                                + " — independent evidence remains durable");
-                        // Continue: independent evidence is already recorded.
+                        Log.e(TAG, "fire retry schedule-metadata marker commit failed for " + key);
                     }
                 } catch (JSONException e) {
                     Log.e(TAG, "fire retry ownership metadata malformed for " + key, e);
-                    // Independent evidence already recorded; still attempt alarm.
+                    return false;
                 }
+                // Ownership OK — now refresh independent evidence.
+                recordIndependentFireRetryEvidenceLocked(
+                        medicationId, doseId, calendarDate, scheduledAtEpochMs, amount,
+                        timeHhmm, recurrenceGeneration, scheduleVersion, persistedRetryCount);
             } else {
+                // No sch: — must not invent evidence; only continue from prior failure evidence.
+                JSONObject existing = getIndependentFireRetryEvidence(
+                        medicationId, doseId, calendarDate);
+                if (existing == null) {
+                    Log.i(TAG, "fire retry skipped: no sch: and no independent evidence for " + key);
+                    return false;
+                }
                 Log.i(TAG, "fire retry: schedule metadata missing — using independent evidence for " + key);
+                int prior = existing.optInt("retryCount", 0);
+                persistedRetryCount = Math.max(prior, nextRetryCount);
+                recordIndependentFireRetryEvidenceLocked(
+                        medicationId, doseId, calendarDate, scheduledAtEpochMs, amount,
+                        timeHhmm, recurrenceGeneration, scheduleVersion, persistedRetryCount);
             }
 
             try {
@@ -1277,6 +1287,136 @@ public final class AutoDeductionScheduler {
             Log.w(TAG, "independent fire-retry evidence clear failed for " + occurrenceKey);
         }
         return ok;
+    }
+
+    /**
+     * Recover a previously authorized fire from independent failure evidence.
+     * Does NOT require sch: metadata and does NOT schedule recurrence successors.
+     * Lock order: SCHEDULE_LOCK → EventStore.LOCK (via insertFiredIfAbsent).
+     */
+    public FireResult recoverFireFromIndependentEvidence(
+            String medicationId,
+            String doseId,
+            String calendarDate
+    ) {
+        if (medicationId == null || medicationId.isEmpty()
+                || doseId == null || doseId.isEmpty()
+                || !AutoDeductionContract.isValidCalendarDate(calendarDate)) {
+            return new FireResult(FireResult.Status.FAILED, false);
+        }
+        final String key = AutoDeductionContract.occurrenceKey(
+                medicationId, doseId, calendarDate);
+        synchronized (SCHEDULE_LOCK) {
+            // Cancellation of the occurrence still wins.
+            if (isOccurrenceCancelledKey(key)) {
+                Log.i(TAG, "recover independent evidence: CANCELLED " + key);
+                clearIndependentFireRetryEvidenceLocked(key);
+                return FireResult.cancelled();
+            }
+            JSONObject evidence = getIndependentFireRetryEvidence(
+                    medicationId, doseId, calendarDate);
+            if (evidence == null) {
+                return new FireResult(FireResult.Status.FAILED, false);
+            }
+            double amount = evidence.optDouble("amount", Double.NaN);
+            long scheduledAt = evidence.optLong("scheduledAtEpochMs", 0L);
+            if (!AutoDeductionContract.isValidAmount(amount)) {
+                Log.e(TAG, "recover independent evidence: invalid amount for " + key);
+                return new FireResult(FireResult.Status.FAILED, false);
+            }
+            AutoDeductionEventStore store = new AutoDeductionEventStore(appContext);
+            AutoDeductionEventStore.InsertFiredResult ir = store.insertFiredIfAbsent(
+                    medicationId, doseId, calendarDate, scheduledAt, amount);
+            FireResult result = FireResult.fromInsert(ir);
+            if (result.allowsRecurrence()) {
+                // Clear only after durable FIRED or pending proof.
+                clearIndependentFireRetryEvidenceLocked(key);
+                clearFireRetryMarkerLocked(SCHEDULE_KEY_PREFIX + key);
+            } else if (result.status == FireResult.Status.FAILED
+                    && !result.pendingRecorded) {
+                int prior = evidence.optInt("retryCount", 0);
+                int next = Math.min(prior + 1, AutoDeductionContract.MAX_FIRE_RETRIES);
+                recordIndependentFireRetryEvidenceLocked(
+                        medicationId, doseId, calendarDate, scheduledAt, amount,
+                        evidence.optString("timeHhmm", ""),
+                        evidence.optLong("recurrenceGeneration", 0L),
+                        evidence.optString("scheduleVersion", ""),
+                        next);
+            }
+            Log.i(TAG, "recover independent evidence: " + result.status
+                    + " pending=" + result.pendingRecorded + " for " + key);
+            return result;
+        }
+    }
+
+    /**
+     * Restore-boundary pass: attempt recovery for every independent fire-retry
+     * evidence row, even when sch: metadata is missing.
+     */
+    RestoreResult recoverIndependentFireRetryEvidencePass() {
+        int recovered = 0;
+        int failed = 0;
+        boolean ok = true;
+        java.util.List<String[]> rows = new java.util.ArrayList<>();
+        synchronized (SCHEDULE_LOCK) {
+            Map<String, ?> all = fireRetryPrefs.getAll();
+            for (Map.Entry<String, ?> e : all.entrySet()) {
+                if (!e.getKey().startsWith(FIRE_RETRY_KEY_PREFIX)) continue;
+                if (!(e.getValue() instanceof String)) continue;
+                rows.add(new String[]{ e.getKey(), (String) e.getValue() });
+            }
+        }
+        for (String[] row : rows) {
+            try {
+                JSONObject evidence = new JSONObject(row[1]);
+                String medId = evidence.optString("medicationId", "");
+                String doseId = evidence.optString("doseId", "");
+                String date = evidence.optString("calendarDate", "");
+                if (medId.isEmpty() || doseId.isEmpty()
+                        || !AutoDeductionContract.isValidCalendarDate(date)) {
+                    failed++;
+                    ok = false;
+                    Log.e(TAG, "independent evidence row malformed: " + row[0]);
+                    continue;
+                }
+                FireResult fr = recoverFireFromIndependentEvidence(medId, doseId, date);
+                if (fr.allowsRecurrence()) {
+                    recovered++;
+                } else if (fr.status == FireResult.Status.CANCELLED) {
+                    // cancelled: evidence cleared; not a boundary failure
+                } else {
+                    // Still FAILED — evidence retained for later retry; boundary incomplete
+                    // until max retries exhausted or later success.
+                    int count = evidence.optInt("retryCount", 0);
+                    if (count >= AutoDeductionContract.MAX_FIRE_RETRIES) {
+                        // Budget exhausted: leave evidence for diagnostics; do not fail
+                        // the entire schedule restore boundary solely for exhausted budget.
+                        Log.w(TAG, "independent evidence max retries for "
+                                + medId + "/" + doseId + "/" + date);
+                    } else {
+                        // schedule a one-shot retry if possible
+                        long scheduledAt = evidence.optLong("scheduledAtEpochMs", 0L);
+                        double amount = evidence.optDouble("amount", Double.NaN);
+                        String time = evidence.optString("timeHhmm", "");
+                        long gen = evidence.optLong("recurrenceGeneration", 0L);
+                        String ver = evidence.optString("scheduleVersion", "");
+                        if (AutoDeductionContract.isValidAmount(amount)) {
+                            scheduleFireRetry(medId, doseId, date, scheduledAt, amount,
+                                    time, gen, ver, Math.min(count + 1,
+                                            AutoDeductionContract.MAX_FIRE_RETRIES));
+                        }
+                    }
+                }
+            } catch (JSONException e) {
+                failed++;
+                ok = false;
+                Log.e(TAG, "independent evidence parse failed: " + row[0], e);
+            }
+        }
+        if (!ok || failed > 0) {
+            return RestoreResult.failure(recovered, failed, "independent_evidence_pass_failed");
+        }
+        return RestoreResult.success(recovered, failed);
     }
 
     /**
@@ -2268,7 +2408,10 @@ public final class AutoDeductionScheduler {
                             : "identity_mismatch";
                     if (!quarantineMalformedScheduleMetadata(prefKey, raw, reason)) {
                         Log.e(TAG, "restore: malformed schedule quarantine failed for " + prefKey);
+                        failed++;
+                        boundaryOk = false;
                     }
+                    // quarantine success OR fail-closed: do not treat unproven cleanup as ok
                     continue;
                 }
 
@@ -2354,6 +2497,8 @@ public final class AutoDeductionScheduler {
                     payload.put("scheduledAtEpochMs", epoch);
                 } catch (JSONException e) {
                     Log.e(TAG, "restore payload build failed", e);
+                    failed++;
+                    boundaryOk = false;
                     continue;
                 }
                 Intent intent = buildOccurrenceIntent(medId, doseId, date, epoch, amount, time, 0L, null);
@@ -2373,10 +2518,12 @@ public final class AutoDeductionScheduler {
                     if (r.ok) {
                         restored++;
                     } else if ("ownership_lost".equals(r.error)) {
-                        // Canceled or replaced after snapshot — correct skip.
+                        // Canceled or replaced after snapshot — expected concurrent outcome.
                         Log.i(TAG, "restore skip (ownership lost): " + prefKey);
                     } else {
                         Log.w(TAG, "restore schedule failed for " + prefKey + ": " + r.error);
+                        failed++;
+                        boundaryOk = false;
                     }
                 }
             } catch (JSONException ignored) {
@@ -2384,11 +2531,23 @@ public final class AutoDeductionScheduler {
                 // still current; otherwise leave a newer replacement untouched.
                 if (!quarantineMalformedScheduleMetadata(prefKey, raw, "invalid_json")) {
                     Log.e(TAG, "restore: invalid JSON schedule quarantine failed for " + prefKey);
+                    failed++;
+                    boundaryOk = false;
                 }
             }
         }
-        if (!boundaryOk) {
-            return RestoreResult.failure(restored, failed, "restore_boundary_incomplete");
+
+        // Also recover independent fire-retry evidence (may exist without sch: rows).
+        RestoreResult retryPass = recoverIndependentFireRetryEvidencePass();
+        restored += retryPass.restored;
+        failed += retryPass.failed;
+        if (!retryPass.ok) {
+            boundaryOk = false;
+        }
+
+        if (!boundaryOk || failed > 0) {
+            return RestoreResult.failure(restored, failed,
+                    failed > 0 ? "restore_boundary_incomplete" : "restore_boundary_incomplete");
         }
         return RestoreResult.success(restored, failed);
     }

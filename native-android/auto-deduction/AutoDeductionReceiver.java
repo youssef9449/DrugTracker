@@ -155,11 +155,29 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
         // Eliminates TOCTOU where cancel could interleave after a non-cancelled check
         // but before durable FIRED persistence.
         AutoDeductionScheduler scheduler = new AutoDeductionScheduler(context);
-        // Issue #240: pass delivery ownership tokens so a queued alarm from a
-        // prior scheduleVersion/generation cannot FIRE after disable→reschedule.
-        AutoDeductionScheduler.FireResult result = scheduler.fireOccurrenceIfNotCancelled(
-                medicationId, doseId, calendarDate, scheduledAt, amount,
-                scheduleVersion, recurrenceGeneration);
+        AutoDeductionScheduler.FireResult result;
+
+        boolean hasIndependentEvidence = scheduler.getIndependentFireRetryEvidence(
+                medicationId, doseId, calendarDate) != null;
+        if (hasIndependentEvidence || fireRetryCount > 0) {
+            // Already-authorized fire recovery: does not require sch: ownership.
+            result = scheduler.recoverFireFromIndependentEvidence(
+                    medicationId, doseId, calendarDate);
+            // If no evidence existed, recover returns FAILED — try normal path.
+            if (result.status == AutoDeductionScheduler.FireResult.Status.FAILED
+                    && !result.pendingRecorded
+                    && !hasIndependentEvidence) {
+                result = scheduler.fireOccurrenceIfNotCancelled(
+                        medicationId, doseId, calendarDate, scheduledAt, amount,
+                        scheduleVersion, recurrenceGeneration);
+            }
+        } else {
+            // Issue #240: ownership tokens so a queued alarm from a prior
+            // scheduleVersion/generation cannot FIRE after disable→reschedule.
+            result = scheduler.fireOccurrenceIfNotCancelled(
+                    medicationId, doseId, calendarDate, scheduledAt, amount,
+                    scheduleVersion, recurrenceGeneration);
+        }
 
         if (shouldNotifyJavascript(result)) {
             // The wake-up is only a notification that durable FIRED evidence now

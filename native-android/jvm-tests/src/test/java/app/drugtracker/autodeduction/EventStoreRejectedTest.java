@@ -127,6 +127,25 @@ public class EventStoreRejectedTest {
     }
 
     @Test
+    public void bulkList_terminalizationCommitFailure_returnsFailure() throws Exception {
+        String key = AutoDeductionContract.occurrenceKey("med", "dose", "2026-09-14");
+        eventPrefs().edit().putString(evtKey(key), "not-valid-json{{{").commit();
+
+        AutoDeductionEventStore.__setTestForceCommitResult(false);
+        try {
+            AutoDeductionEventStore.FiredEventsResult result =
+                    newEventStore().listFiredEventsResult();
+            assertFalse(result.ok);
+            assertTrue(result.events.isEmpty());
+            assertEquals("rejected_persist_failed", result.error);
+            assertEquals("not-valid-json{{{"
+                    , eventPrefs().getString(evtKey(key), null));
+        } finally {
+            AutoDeductionEventStore.__setTestForceCommitResult(null);
+        }
+    }
+
+    @Test
     public void validFiredUnaffected() {
         AutoDeductionEventStore store = newEventStore();
         assertEquals(
@@ -251,7 +270,10 @@ public class EventStoreRejectedTest {
                 AutoDeductionEventStore.InsertFiredResult.Status.CREATED,
                 store.insertFiredIfAbsent("med", "dose", "2026-09-14", 1000L, 2.0).status);
 
-        JSONObject fired = store.getFiredUnreconciledEvent("med", "dose", "2026-09-14");
+        AutoDeductionEventStore.EventLookupResult lookup =
+                store.getFiredUnreconciledEvent("med", "dose", "2026-09-14");
+        assertTrue(lookup.ok);
+        JSONObject fired = lookup.event;
         assertNotNull(fired);
         assertEquals("med", fired.optString("medicationId"));
         assertEquals("dose", fired.optString("doseId"));

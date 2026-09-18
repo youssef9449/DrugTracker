@@ -60,8 +60,6 @@ import { getInitialTab } from './lib/initialTab';
 import { persist } from './utils/storage';
 import { TOAST_MESSAGES, PERSIST_FAILURE_MESSAGES } from './constants/uiStrings';
 import {
-  STORAGE_MEDS_KEY,
-  STORAGE_LOGS_KEY,
   STORAGE_PHARMACY_KEY,
   STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
   STORAGE_AUTO_DEDUCT_PROMPTED_KEY,
@@ -248,32 +246,14 @@ export default function App() {
   }, []);
 
   // ─────────────────────────────────────────────────────────────
-  // Persistence effects (M1): each write goes through the
-  // usePersistentEffect hook (utils/storage.ts + hooks/usePersistentEffect.ts),
-  // which surfaces quota failures via a one-shot toast so the user
-  // knows their data wasn't saved (instead of silently dropping it).
-  // A per-key "already warned" ref inside the hook avoids spamming
-  // toasts on every re-render that re-attempts the same failing write.
+  // Medication stock + consumption logs are persisted ONLY by the durable
+  // stock mutation gate. Keeping a React-state persistence effect here would
+  // create a second writer that could replay an older React snapshot after a
+  // gated mutation and overwrite the committed durable state.
   //
-  // All effects are gated on `hydrated` so the first mount does NOT
-  // write the seed defaults (which would briefly overwrite the user's
-  // real data before the hydration effect's setState arrives).
-  // ─────────────────────────────────────────────────────────────
-  usePersistentEffect({
-    storageKey: STORAGE_MEDS_KEY,
-    value: medications,
-    enabled: hydrated,
-    failureMessage: PERSIST_FAILURE_MESSAGES.meds,
-    showToast,
-  });
-
-  usePersistentEffect({
-    storageKey: STORAGE_LOGS_KEY,
-    value: logs,
-    enabled: hydrated,
-    failureMessage: PERSIST_FAILURE_MESSAGES.logs,
-    showToast,
-  });
+  // Hydration remains responsible for the initial read; every post-hydration
+  // mutation path (add/edit/delete/take/restore/refill/undo/exact/legacy)
+  // commits through the same gate.
 
   // M12: pharmacy settings are written via a 400ms debounce so rapid
   // toggles of the 30/60-day duration (which calls onUpdateSettings on
@@ -331,14 +311,9 @@ export default function App() {
     showToast,
   });
 
-  usePersistentEffect({
-    storageKey: STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
-    value: String(globalAutoDeductEnabled),
-    json: false,
-    enabled: hydrated,
-    failureMessage: PERSIST_FAILURE_MESSAGES.autoDeduct,
-    showToast,
-  });
+  // Global auto-deduct is part of the durable stock mutation state. It is
+  // intentionally NOT persisted from React state; toggles commit the master
+  // switch together with medications/logs through the stock gate.
 
   usePersistentEffect({
     storageKey: COMPACT_VIEW_KEY,

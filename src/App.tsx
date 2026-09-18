@@ -61,7 +61,6 @@ import { persist } from './utils/storage';
 import { TOAST_MESSAGES, PERSIST_FAILURE_MESSAGES } from './constants/uiStrings';
 import {
   STORAGE_PHARMACY_KEY,
-  STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
   STORAGE_AUTO_DEDUCT_PROMPTED_KEY,
   SOUND_KEY,
   NOTIFICATIONS_KEY,

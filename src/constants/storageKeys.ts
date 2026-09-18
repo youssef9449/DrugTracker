@@ -8,9 +8,9 @@
 export {
   STORAGE_MEDS_KEY,
   STORAGE_LOGS_KEY,
+  STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
 } from '../utils/autoDeductionStockGate';
 
-export const STORAGE_GLOBAL_AUTO_DEDUCT_KEY = 'android_med_tracker_auto_deduct_v1';
 export const STORAGE_AUTO_DEDUCT_PROMPTED_KEY = 'android_med_tracker_auto_deduct_prompted_v1';
 export const STORAGE_PHARMACY_KEY = 'android_med_tracker_pharmacy_v2';
 export const SOUND_KEY = 'android_med_tracker_sound_v1';

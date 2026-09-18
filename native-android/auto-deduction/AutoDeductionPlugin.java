@@ -90,9 +90,9 @@ public class AutoDeductionPlugin extends Plugin {
     @PluginMethod
     public void listFiredEvents(PluginCall call) {
         AutoDeductionEventStore store = new AutoDeductionEventStore(getContext());
-        List<JSONObject> events = store.listFiredEvents();
+        AutoDeductionEventStore.FiredEventsResult result = store.listFiredEventsResult();
         JSArray arr = new JSArray();
-        for (JSONObject o : events) {
+        for (JSONObject o : result.events) {
             try {
                 arr.put(toJSObject(o));
             } catch (Exception e) {
@@ -100,7 +100,9 @@ public class AutoDeductionPlugin extends Plugin {
             }
         }
         JSObject ret = new JSObject();
+        ret.put("ok", result.ok);
         ret.put("events", arr);
+        if (result.error != null) ret.put("error", result.error);
         call.resolve(ret);
     }
 

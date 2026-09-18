@@ -58,5 +58,5 @@ export function useExactAutoDeductionReconciliation({
     return () => {
       cancelled = true;
     };
-  }, [hydrated, isFirstRun, resumeTick, setMedications, setLogs]);
+  }, [hydrated, isFirstRun, resumeTick, setMedications, setLogs, setGlobalAutoDeductEnabled]);
 }

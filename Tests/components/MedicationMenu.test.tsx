@@ -1,5 +1,6 @@
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { useState } from 'react';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { MedicationMenu } from '@/components/MedicationMenu';
 import { isMedicationAutoDeductActive } from '@/utils/doseSchedule';
@@ -117,17 +118,51 @@ describe('MedicationMenu — per-med Auto-Deduct vs Global (UI-11)', () => {
     expect(btn.getAttribute('title')).toMatch(/متوقف عالميًا/);
   });
 
-  it('Global OFF + click toggles preference only; does not enable Global or effective', () => {
-    const med = makeMed({ autoDeductEnabled: true });
+  it('Global OFF + click: preference ON→OFF via harness; effective stays OFF; global stays false', () => {
+    const globalAutoDeductEnabled = false;
     const onToggle = vi.fn();
-    const { isAutoActive } = renderMenu(med, false, onToggle);
-    expect(isAutoActive).toBe(false);
 
-    fireEvent.click(autoToggleButton());
+    function Harness() {
+      const [med, setMed] = useState(() => makeMed({ autoDeductEnabled: true }));
+      const isAutoActive = isMedicationAutoDeductActive(med, globalAutoDeductEnabled);
+      return (
+        <MedicationMenu
+          medication={med}
+          isAutoActive={isAutoActive}
+          globalAutoDeductEnabled={globalAutoDeductEnabled}
+          onEdit={() => {}}
+          onDelete={() => {}}
+          onToggleAutoDeduct={(id) => {
+            onToggle(id);
+            // Simulate production: flip per-med preference only; global unchanged.
+            setMed((prev) => ({
+              ...prev,
+              autoDeductEnabled: prev.autoDeductEnabled === false,
+            }));
+          }}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    const btnBefore = autoToggleButton();
+    expect(btnBefore).toHaveAttribute('data-auto-pref', 'on');
+    expect(btnBefore).toHaveAttribute('data-auto-effective', 'off');
+    expect(btnBefore).toHaveAttribute('data-global-auto', 'off');
+    expect(btnBefore).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(btnBefore);
+
     expect(onToggle).toHaveBeenCalledTimes(1);
     expect(onToggle).toHaveBeenCalledWith('med-1');
-    // Handler is the only side effect — no global toggle prop/callback invoked.
-    // Effective state for the same inputs remains OFF (production helper).
-    expect(isMedicationAutoDeductActive(med, false)).toBe(false);
+
+    const btnAfter = autoToggleButton();
+    expect(btnAfter).toHaveAttribute('data-auto-pref', 'off');
+    expect(btnAfter).toHaveAttribute('data-auto-effective', 'off');
+    expect(btnAfter).toHaveAttribute('data-global-auto', 'off');
+    expect(btnAfter).toHaveAttribute('aria-pressed', 'false');
+    // Global remains OFF (harness constant); effective never turns on.
+    expect(globalAutoDeductEnabled).toBe(false);
   });
 });

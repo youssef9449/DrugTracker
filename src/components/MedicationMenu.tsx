@@ -18,11 +18,11 @@ interface MedicationMenuProps {
   /** Effective Auto-Deduct (global ∧ medication). Used for runtime state only. */
   isAutoActive: boolean;
   /**
-   * Global Auto-Deduct switch. When false, the per-med toggle still edits
+   * Global Auto-Deduct switch. Required so callers cannot silently assume
+   * Global ON. When false, the per-med toggle still edits
    * medication.autoDeductEnabled but does not enable effective deduction.
-   * Defaults to true so existing callers keep prior Global-ON behavior.
    */
-  globalAutoDeductEnabled?: boolean;
+  globalAutoDeductEnabled: boolean;
   showRefillInMenu?: boolean;
   onOpenRefill?: (medication: Medication) => void;
   onEdit: (medication: Medication) => void;
@@ -50,7 +50,7 @@ export function MedicationTypeIcon({ unit, className = "h-3.5 w-3.5" }: { unit: 
 export function MedicationMenu({
   medication,
   isAutoActive,
-  globalAutoDeductEnabled = true,
+  globalAutoDeductEnabled,
   onEdit,
   onDelete,
   onToggleAutoDeduct,

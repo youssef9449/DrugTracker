@@ -1147,6 +1147,12 @@ export function runGatedAutoDeductToggle(opts: {
 
     const err = commitWithManualEnvelope({ medications, logs });
     if (err) {
+      // Native invalidation already linearized the old schedule chain. Restore
+      // it when the JS commit fails so a failed mutation does not leave the
+      // medication without its previously authorized exact schedule.
+      if (invalidation.invalidatedDoseIds.length > 0) {
+        await restoreInvalidatedRecurrences(med, invalidation.invalidatedDoseIds, now);
+      }
       return {
         outcome: 'persist_failed' as const,
         medications: fresh.medications,
@@ -1226,12 +1232,18 @@ export function runGatedGlobalAutoDeductToggle(opts: {
       };
     }
     const fresh = pre.state;
+    const invalidatedMeds: Array<{ med: Medication; doseIds: string[] }> = [];
 
     // Invalidate all existing native recurrence chains before committing the
     // global policy change, so no old alarm can become FIRED after disable.
     for (const med of fresh.medications) {
       const invalidation = await invalidateMedicationRecurrences(med);
       if (!invalidation.ok) {
+        for (const completed of invalidatedMeds) {
+          if (completed.doseIds.length > 0) {
+            await restoreInvalidatedRecurrences(completed.med, completed.doseIds, now);
+          }
+        }
         return {
           outcome: 'native_invalidation_failed' as const,
           medications: fresh.medications,
@@ -1241,6 +1253,7 @@ export function runGatedGlobalAutoDeductToggle(opts: {
           reason: invalidation.error,
         };
       }
+      invalidatedMeds.push({ med, doseIds: invalidation.invalidatedDoseIds });
     }
 
     const settleLogs: ConsumptionLog[] = [];
@@ -1259,6 +1272,15 @@ export function runGatedGlobalAutoDeductToggle(opts: {
 
     const err = commitWithManualEnvelope({ medications, logs });
     if (err) {
+      for (const invalidated of invalidatedMeds) {
+        if (invalidated.doseIds.length > 0) {
+          await restoreInvalidatedRecurrences(
+            invalidated.med,
+            invalidated.doseIds,
+            now
+          );
+        }
+      }
       return {
         outcome: 'persist_failed' as const,
         medications: fresh.medications,
@@ -1363,6 +1385,9 @@ export function runGatedDeleteMedication(opts: {
       logs: pre.state.logs,
     });
     if (err) {
+      if (invalidation.invalidatedDoseIds.length > 0) {
+        await restoreInvalidatedRecurrences(med, invalidation.invalidatedDoseIds, new Date());
+      }
       return {
         outcome: 'persist_failed' as const,
         medications: pre.state.medications,
@@ -1456,10 +1481,14 @@ export function runGatedMedicationUpdate(opts: {
 
     const isDoseChanging = opts.medData.dailyDose !== freshMed.dailyDose;
 
+    let invalidation: RecurrenceInvalidationResult = {
+      ok: true,
+      invalidatedDoseIds: [],
+    };
     if (autoDeductionDefinitionChanged(freshMed, opts.medData)) {
       // Invalidate the old native chain before committing new amount/time,
       // reminder, schedule-id, or per-med auto-deduction configuration.
-      const invalidation = await invalidateMedicationRecurrences(freshMed);
+      invalidation = await invalidateMedicationRecurrences(freshMed);
       if (!invalidation.ok) {
         return {
           outcome: 'native_invalidation_failed' as const,
@@ -1522,6 +1551,18 @@ export function runGatedMedicationUpdate(opts: {
 
     const err = commitWithManualEnvelope({ medications, logs });
     if (err) {
+      // Only configuration-changing edits invalidate native recurrences.
+      // Restore the old chain when the new JS state could not be committed.
+      if (
+        autoDeductionDefinitionChanged(freshMed, opts.medData) &&
+        invalidation.invalidatedDoseIds.length > 0
+      ) {
+        await restoreInvalidatedRecurrences(
+          freshMed,
+          invalidation.invalidatedDoseIds,
+          now
+        );
+      }
       return {
         outcome: 'persist_failed' as const,
         medications: fresh.medications,

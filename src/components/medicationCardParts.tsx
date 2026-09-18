@@ -39,15 +39,14 @@ export const PackageSizeBadge: FC<PackageSizeBadgeProps> = ({ medication, classN
 );
 
 /**
- * "الخصم التلقائي معلق" note — shown on every view when auto-deduction
- * is disabled. Uses the AUTO_DEDUCT_PAUSED_NOTE class constant (#86).
- * Previously the third site (all view, L575) had the same class string
- * inline — a Wave 4 regression fixed here.
+ * Note shown when effective auto-deduction is inactive (!isAutoActive).
+ * Describes only that auto-deduct is stopped — never that manual Take is
+ * disabled (manual Take remains available whenever doseToggle.canTake).
  */
 export const AutoDeductPausedNote: FC = () => (
   <div className={AUTO_DEDUCT_PAUSED_NOTE}>
     <PauseCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-    <span>الخصم التلقائي معلق — الجرعة اليدوية والخصم التلقائي معطلان لهذا اليوم.</span>
+    <span>الخصم التلقائي متوقف حاليًا — يمكنك تسجيل الجرعة يدويًا.</span>
   </div>
 );
 

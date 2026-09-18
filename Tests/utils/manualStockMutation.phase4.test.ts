@@ -7,6 +7,7 @@ import {
   runGatedUndoRefill,
   runGatedAutoDeductToggle,
   runGatedMedicationUpdate,
+  runGatedDeleteMedication,
   shouldDismissAlarmAfterManualTake,
   type ManualStockEnvelope,
 } from '../../src/utils/manualStockMutation';
@@ -3235,6 +3236,53 @@ describe('Phase 4 — stale scheduled dose identity must not downgrade to legacy
   });
 });
 
+
+describe('Phase 4 — durable deletion', () => {
+  let durable: AutoStockDurableState;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-16T15:00:00'));
+    durable = { medications: [med()], logs: [] };
+    __setAutoStockGateTestHooks({
+      load: () => ({
+        medications: durable.medications.map((m) => ({ ...m })),
+        logs: durable.logs.map((l) => ({ ...l })),
+      }),
+      commit: (next) => {
+        durable = {
+          medications: next.medications.map((m) => ({ ...m })),
+          logs: next.logs.map((l) => ({ ...l })),
+        };
+        return null;
+      },
+    });
+    __setManualEnvelopeTestHooks({ load: () => null, save: () => null });
+    __setManualRecurrenceInvalidationTestHook(async () => ({ ok: true }));
+    __setStockMutationOrderingTestHooks({
+      allocate: (() => {
+        let seq = 0;
+        return () => ({ ok: true, seq: ++seq });
+      })(),
+      loadLastApplied: () => 0,
+      persistLastApplied: () => null,
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    __setAutoStockGateTestHooks(null);
+    __setManualEnvelopeTestHooks(null);
+    __setManualRecurrenceInvalidationTestHook(null);
+    __resetStockMutationOrderingForTests();
+  });
+
+  it('deletes from fresh durable state and invalidates the old native chain before commit', async () => {
+    const result = await runGatedDeleteMedication({ medicationId: 'med-1' });
+    expect(result.outcome).toBe('applied');
+    expect(durable.medications).toHaveLength(0);
+  });
+});
 
 describe('Phase 4 — native recurrence invalidation is the config-change ordering barrier', () => {
   let durable: AutoStockDurableState;

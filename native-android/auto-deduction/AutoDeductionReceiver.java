@@ -95,6 +95,8 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 break;
             case CREATED:
                 Log.i(TAG, "FIRED event persisted: " + medicationId + "/" + doseId + "/" + calendarDate);
+                notifyJavascript(
+                        context, medicationId, doseId, calendarDate, scheduledAt, amount);
                 scheduleNextIfPossible(
                         context, medicationId, doseId, calendarDate, timeHhmm, amount,
                         recurrenceGeneration);
@@ -110,6 +112,11 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 if (result.pendingRecorded) {
                     Log.w(TAG, "FIRED primary failed but pending recorded — advancing recurrence: "
                             + medicationId + "/" + doseId + "/" + calendarDate);
+                    // The pending-fire record is itself durable FIRED evidence. Wake
+                    // JS immediately so the event-driven reconciler can promote and
+                    // reconcile it without relying on polling.
+                    notifyJavascript(
+                            context, medicationId, doseId, calendarDate, scheduledAt, amount);
                     scheduleNextIfPossible(
                             context, medicationId, doseId, calendarDate, timeHhmm, amount,
                             recurrenceGeneration);

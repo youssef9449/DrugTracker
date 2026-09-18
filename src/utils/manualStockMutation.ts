@@ -21,6 +21,7 @@ import {
 import {
   markAutoDeductionEventReconciled,
   getOccurrenceSnapshot,
+  invalidateAutoDeductionRecurrence,
   type OccurrenceSnapshotResult,
 } from './autoDeductionNative';
 import {
@@ -109,6 +110,70 @@ function resolveConsumeDoseId(med: Medication, doseId?: string): string | undefi
   if (schedule.length === 1) return schedule[0].id;
   if (schedule.length === 0) return LEGACY_DOSE_ID;
   return undefined;
+}
+
+/** Native recurrence chains affected by an auto-deduction configuration change. */
+function recurrenceDoseIds(med: Medication): string[] {
+  const ids = new Set<string>();
+  if (Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) {
+    for (const d of med.doseSchedule) {
+      const id = typeof d?.id === 'string' ? d.id.trim() : '';
+      if (id) ids.add(id);
+    }
+  } else {
+    ids.add(LEGACY_DOSE_ID);
+  }
+  return [...ids];
+}
+
+function autoDeductionDefinitionSignature(med: {
+  autoDeductEnabled?: boolean;
+  reminderEnabled?: boolean;
+  reminderTime?: string;
+  dailyDose: number;
+  doseSchedule?: Medication['doseSchedule'];
+}): string {
+  const schedulePart =
+    Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0
+      ? med.doseSchedule
+          .map((d) => String(d.id) + '@' + String(d.time) + '@' + String(d.amount))
+          .join(',')
+      : '';
+  return [
+    med.autoDeductEnabled === false ? '0' : '1',
+    med.reminderEnabled === true ? '1' : '0',
+    med.reminderTime ?? '',
+    med.dailyDose,
+    schedulePart,
+  ].join('|');
+}
+
+function autoDeductionDefinitionChanged(
+  oldMed: Medication,
+  nextMed: Omit<Medication, 'id' | 'createdAt'>
+): boolean {
+  return autoDeductionDefinitionSignature(oldMed) !==
+    autoDeductionDefinitionSignature(nextMed);
+}
+
+/**
+ * Invalidate every native recurrence chain belonging to one medication.
+ * On web `not_android` is a successful no-op. Real native failure blocks
+ * the JS configuration commit so an old authorized alarm cannot survive it.
+ */
+async function invalidateMedicationRecurrences(
+  med: Medication
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  for (const doseId of recurrenceDoseIds(med)) {
+    const result = await invalidateAutoDeductionRecurrence(med.id, doseId);
+    if (!result.ok && result.error !== 'not_android') {
+      return {
+        ok: false,
+        error: result.error ?? 'native_invalidation_failed',
+      };
+    }
+  }
+  return { ok: true };
 }
 
 
@@ -279,7 +344,11 @@ export function runGatedManualConsume(opts: {
         unit: med.unit,
       };
     }
-    if (snap.status === 'FIRED' || snap.status === 'SCHEDULED') {
+    if (snap.status === 'FIRED') {
+      // Only an already-fired occurrence carries immutable amount authority.
+      // SCHEDULED is a native copy of configuration and may be stale while a
+      // JS medication edit is propagating; fresh durable JS schedule remains
+      // authoritative until the occurrence actually fires.
       const n = Number(snap.amount);
       if (!Number.isFinite(n) || n <= 0) {
         return {
@@ -295,7 +364,7 @@ export function runGatedManualConsume(opts: {
       }
       amountOverride = n;
     }
-    // ABSENT / CANCELLED: leave amountOverride undefined → consumeDose uses schedule.
+    // SCHEDULED / ABSENT / CANCELLED: consumeDose uses fresh durable JS schedule.
 
     const result: ConsumeDoseResult = consumeDose(
       med,
@@ -856,7 +925,8 @@ export type GatedToggleOutcome =
   | 'applied'
   | 'missing_med'
   | 'persist_failed'
-  | 'native_list_failed';
+  | 'native_list_failed'
+  | 'native_invalidation_failed';
 
 export interface GatedAutoDeductToggleResult {
   outcome: GatedToggleOutcome;
@@ -939,6 +1009,21 @@ export function runGatedAutoDeductToggle(opts: {
     );
     const logs = settleLog ? [settleLog, ...fresh.logs] : fresh.logs;
 
+    // Native recurrence invalidation is the cross-domain ordering barrier.
+    const invalidation = await invalidateMedicationRecurrences(med);
+    if (!invalidation.ok) {
+      return {
+        outcome: 'native_invalidation_failed' as const,
+        medications: fresh.medications,
+        logs: fresh.logs,
+        newState,
+        settleLog: null,
+        reason: invalidation.error,
+        medicationName: med.name,
+        unit: med.unit,
+      };
+    }
+
     const err = commitWithManualEnvelope({ medications, logs });
     if (err) {
       return {
@@ -966,7 +1051,11 @@ export function runGatedAutoDeductToggle(opts: {
 }
 
 export interface GatedGlobalAutoDeductToggleResult {
-  outcome: 'applied' | 'persist_failed' | 'native_list_failed';
+  outcome:
+    | 'applied'
+    | 'persist_failed'
+    | 'native_list_failed'
+    | 'native_invalidation_failed';
   medications: Medication[];
   logs: ConsumptionLog[];
   enable: boolean;
@@ -1017,6 +1106,22 @@ export function runGatedGlobalAutoDeductToggle(opts: {
     }
     const fresh = pre.state;
 
+    // Invalidate all existing native recurrence chains before committing the
+    // global policy change, so no old alarm can become FIRED after disable.
+    for (const med of fresh.medications) {
+      const invalidation = await invalidateMedicationRecurrences(med);
+      if (!invalidation.ok) {
+        return {
+          outcome: 'native_invalidation_failed' as const,
+          medications: fresh.medications,
+          logs: fresh.logs,
+          enable: opts.enable,
+          settleLogs: [],
+          reason: invalidation.error,
+        };
+      }
+    }
+
     const settleLogs: ConsumptionLog[] = [];
     const medications = fresh.medications.map((med) => {
       const { updatedMed, log } = settleAutoDeductToggle(
@@ -1057,7 +1162,8 @@ export type GatedMedicationUpdateOutcome =
   | 'applied'
   | 'missing_med'
   | 'persist_failed'
-  | 'native_list_failed';
+  | 'native_list_failed'
+  | 'native_invalidation_failed';
 
 export interface GatedMedicationUpdateResult {
   outcome: GatedMedicationUpdateOutcome;
@@ -1124,6 +1230,24 @@ export function runGatedMedicationUpdate(opts: {
     }
 
     const isDoseChanging = opts.medData.dailyDose !== freshMed.dailyDose;
+
+    if (autoDeductionDefinitionChanged(freshMed, opts.medData)) {
+      // Invalidate the old native chain before committing new amount/time,
+      // reminder, schedule-id, or per-med auto-deduction configuration.
+      const invalidation = await invalidateMedicationRecurrences(freshMed);
+      if (!invalidation.ok) {
+        return {
+          outcome: 'native_invalidation_failed' as const,
+          medications: fresh.medications,
+          logs: fresh.logs,
+          settleLog: null,
+          reason: invalidation.error,
+          medicationName: freshMed.name,
+          unit: freshMed.unit,
+        };
+      }
+    }
+
     let stockBase = freshMed;
     let settleLog: ConsumptionLog | null = null;
     if (isDoseChanging) {

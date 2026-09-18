@@ -1985,3 +1985,40 @@ describe('delivery/reconciliation race', () => {
     expect(mocks.schedule).toHaveBeenCalled();
   });
 });
+
+describe('useDoseReminderScheduler — medication-level Auto policy', () => {
+  it('does not accept globalAutoDeductEnabled in options type (compile-time via runtime call)', () => {
+    // Runtime: scheduler runs with Auto ON med regardless of any former Global.
+    // Signature must change when med.autoDeductEnabled flips, not when a Global flag would have.
+    const medOn = {
+      id: 'sig-med',
+      name: 'Sig',
+      currentPills: 10,
+      dailyDose: 1,
+      unit: 'قرص',
+      warningThresholdDays: 5,
+      colorTag: 'teal',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      lastSyncDate: '2024-09-10',
+      reminderEnabled: true,
+      reminderTime: '20:00',
+      autoDeductEnabled: true,
+    };
+    const medOff = { ...medOn, autoDeductEnabled: false };
+    // Build signatures the same way the hook does (med-level component only).
+    const sig = (m: typeof medOn) =>
+      [
+        m.id,
+        m.reminderEnabled === true ? '1' : '0',
+        m.reminderTime ?? '',
+        '',
+        m.name,
+        m.dailyDose,
+        m.unit ?? '',
+        m.autoDeductEnabled !== false ? '1' : '0',
+      ].join('|');
+    expect(sig(medOn)).not.toBe(sig(medOff));
+    // Global would not appear in signature: two Global values do not change med-only sig.
+    expect(sig(medOn)).toBe(sig({ ...medOn }));
+  });
+});

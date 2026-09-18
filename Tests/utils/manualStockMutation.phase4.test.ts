@@ -2867,8 +2867,11 @@ describe('Phase 4 — stale React snapshot must not block durable Restore / Undo
       },
     });
     __setManualEnvelopeTestHooks({
-      load: () => null,
-      save: () => null,
+      load: () => manualEnvelope,
+      save: (env) => {
+        manualEnvelope = env;
+        return null;
+      },
     });
     // Match production allocateMutationSeq contract; keep allocation and
     // finalization counters independent.
@@ -3903,6 +3906,7 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
 
 describe('Phase 4 — durable global preference and add-medication ordering', () => {
   let durable: AutoStockDurableState;
+  let manualEnvelope: ManualStockEnvelope | null;
   let persistedGlobal: boolean;
   let failGlobalPersist: boolean;
 
@@ -3914,6 +3918,7 @@ describe('Phase 4 — durable global preference and add-medication ordering', ()
       logs: [],
       globalAutoDeductEnabled: true,
     };
+    manualEnvelope = null;
     persistedGlobal = true;
     failGlobalPersist = false;
 
@@ -3966,6 +3971,7 @@ describe('Phase 4 — durable global preference and add-medication ordering', ()
     expect(result.outcome).toBe('persist_failed');
     expect(durable.medications[0].autoDeductEnabled).toBe(false);
     expect(persistedGlobal).toBe(true);
+    expect(manualEnvelope?.globalAutoDeductEnabled).toBe(false);
   });
 
   it('new medication is committed against fresh durable state instead of React snapshot', async () => {

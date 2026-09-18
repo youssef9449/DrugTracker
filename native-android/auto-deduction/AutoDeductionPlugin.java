@@ -1,6 +1,6 @@
 package app.drugtracker.autodeduction;
 
-import android.util.Log;
+import android.content.BroadcastReceiver;\nimport android.content.Context;\nimport android.content.Intent;\nimport android.content.IntentFilter;\nimport androidx.core.content.ContextCompat;\nimport android.util.Log;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -21,6 +21,57 @@ import java.util.List;
 public class AutoDeductionPlugin extends Plugin {
 
     private static final String TAG = "AutoDeductionPlugin";
+
+    private BroadcastReceiver exactAutoFiredReceiver;
+
+    @Override
+    public void load() {
+        super.load();
+
+        exactAutoFiredReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (!AutoDeductionContract.ACTION_AUTO_DEDUCTION_FIRED.equals(intent.getAction())) {
+                    return;
+                }
+
+                JSObject event = new JSObject();
+                event.put("medicationId", intent.getStringExtra(
+                        AutoDeductionContract.EXTRA_MEDICATION_ID));
+                event.put("doseId", intent.getStringExtra(
+                        AutoDeductionContract.EXTRA_DOSE_ID));
+                event.put("calendarDate", intent.getStringExtra(
+                        AutoDeductionContract.EXTRA_CALENDAR_DATE));
+                event.put("scheduledAtEpochMs", intent.getLongExtra(
+                        AutoDeductionContract.EXTRA_SCHEDULED_AT_EPOCH_MS, 0L));
+                event.put("amount", intent.getDoubleExtra(
+                        AutoDeductionContract.EXTRA_AMOUNT, Double.NaN));
+
+                notifyListeners("exactAutoDeductionFired", event);
+            }
+        };
+
+        IntentFilter filter = new IntentFilter(
+                AutoDeductionContract.ACTION_AUTO_DEDUCTION_FIRED);
+        ContextCompat.registerReceiver(
+                getContext(),
+                exactAutoFiredReceiver,
+                filter,
+                ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        if (exactAutoFiredReceiver != null) {
+            try {
+                getContext().unregisterReceiver(exactAutoFiredReceiver);
+            } catch (IllegalArgumentException ignored) {
+                // Receiver was already unregistered during teardown.
+            }
+            exactAutoFiredReceiver = null;
+        }
+        super.handleOnDestroy();
+    }
 
     @PluginMethod
     public void scheduleOccurrence(PluginCall call) {

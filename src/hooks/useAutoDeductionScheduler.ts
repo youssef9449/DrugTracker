@@ -13,7 +13,7 @@ import {
   invalidateAutoDeductionRecurrence,
   scheduleAutoDeduction,
   listScheduledAutoDeductionOccurrences,
-} from '../utils/autoDeductionNative';
+} from '../utils/autoDeductionNative';import { withAutoStockMutationGate } from '../utils/autoDeductionStockGate';
 
 export interface UseAutoDeductionSchedulerOptions {
   medications: Medication[];
@@ -88,6 +88,89 @@ export function getAutoDeductionSlotsForDate(
   }
 
   return [];
+}
+
+type GuardedCancelResult = {
+  ok: boolean;
+  skipped?: boolean;
+  error?: string;
+};
+
+/**
+ * Native exact-schedule writes must serialize with stock/config mutations.
+ * The request may have been built from an older React render, so the durable
+ * medication is re-read while holding the same JS gate immediately before the
+ * native write. A stale request therefore either linearizes before the config
+ * mutation (and is then invalidated by that mutation) or runs after it and
+ * uses the current durable configuration.
+ */
+async function scheduleExactOccurrenceFromDurable(slot: AutoDeductionSlot) {
+  return withAutoStockMutationGate(async (fresh) => {
+    const med = fresh.medications.find((m) => m.id === slot.medId);
+    if (!med) return { ok: true, skipped: true } as const;
+
+    const current = getAutoDeductionSlotsForDate(med, slot.calendarDate).find(
+      (candidate) => candidate.doseId === slot.doseId
+    );
+    if (!current) return { ok: true, skipped: true } as const;
+
+    const epoch = localEpochMs(current.calendarDate, current.time);
+    if (epoch == null || epoch <= Date.now() - 2000) {
+      return { ok: true, skipped: true } as const;
+    }
+
+    // IMPORTANT: use the durable slot, not the stale React snapshot.
+    return scheduleAutoDeduction({
+      medicationId: current.medId,
+      doseId: current.doseId,
+      calendarDate: current.calendarDate,
+      timeHhmm: current.time,
+      amount: current.amount,
+      scheduledAtEpochMs: epoch,
+    });
+  });
+}
+
+/**
+ * Cancel a stale native exact occurrence under the same durable gate used by
+ * stock/config mutations. For normal reconciliation cleanup, cancellation
+ * is allowed only when the durable medication no longer desires this exact
+ * occurrence. Otherwise a stale React scheduler pass must not invalidate or
+ * cancel a newly committed schedule with the same identity.
+ *
+ * force=true is used only when exact-alarm permission is unavailable. In that
+ * case native cancellation is policy-required even though the durable config
+ * still desires the occurrence.
+ */
+async function cancelUndesiredExactOccurrence(
+  medId: string,
+  doseId: string,
+  calendarDate: string,
+  force = false
+): Promise<GuardedCancelResult> {
+  return withAutoStockMutationGate(async (fresh) => {
+    const med = fresh.medications.find((m) => m.id === medId);
+    const stillDesired = !!med &&
+      getAutoDeductionSlotsForDate(med, calendarDate).some(
+        (slot) => slot.doseId === doseId
+      );
+    if (!force && stillDesired) {
+      return { ok: true, skipped: true } as const;
+    }
+
+    if (!force) {
+      const invalidation = await invalidateAutoDeductionRecurrence(medId, doseId);
+      if (!invalidation.ok && invalidation.error !== 'not_android') {
+        return { ok: false, error: invalidation.error ?? 'invalidate_failed' };
+      }
+    }
+
+    const result = await cancelAutoDeduction(medId, doseId, calendarDate);
+    return {
+      ok: result.ok,
+      error: result.ok ? undefined : (result.error ?? 'cancel_failed'),
+    };
+  });
 }
 
 export function tomorrowDateString(today: string = getTodayDateString()): string {
@@ -166,7 +249,12 @@ export function useAutoDeductionScheduler({
           for (const key of toCancel) {
             const [medId, doseId, date] = key.split('::');
             if (medId && doseId && date) {
-              const res = await cancelAutoDeduction(medId, doseId, date);
+              const res = await cancelUndesiredExactOccurrence(
+                medId,
+                doseId,
+                date,
+                /* force */ true
+              );
               // Only drop tracking when native reports terminal success.
               if (res.ok && gen === generationRef.current) {
                 trackedRef.current.delete(key);
@@ -226,23 +314,28 @@ export function useAutoDeductionScheduler({
             // generation active so a concurrent receiver can still create D+1.
             const slotId = `${s.medicationId}::${s.doseId}`;
             if (!invalidatedSlots.has(slotId)) {
-              const inv = await invalidateAutoDeductionRecurrence(
+              const res = await cancelUndesiredExactOccurrence(
                 s.medicationId,
-                s.doseId
+                s.doseId,
+                s.calendarDate
               );
-              if (!inv.ok) {
+              if (!res.ok) {
                 // Fail-closed: keep tracking, skip cancel, retry next pass.
                 continue;
               }
-              invalidatedSlots.add(slotId);
-            }
-            const res = await cancelAutoDeduction(
-              s.medicationId,
-              s.doseId,
-              s.calendarDate
-            );
-            if (res.ok) {
-              trackedRef.current.delete(key);
+              if (!res.skipped) {
+                invalidatedSlots.add(slotId);
+                trackedRef.current.delete(key);
+              }
+            } else {
+              const res = await cancelAutoDeduction(
+                s.medicationId,
+                s.doseId,
+                s.calendarDate
+              );
+              if (res.ok) {
+                trackedRef.current.delete(key);
+              }
             }
           } else {
             // Still desired — track so later passes can cancel if removed.
@@ -261,17 +354,24 @@ export function useAutoDeductionScheduler({
             if (medId && doseId && date) {
               const slotId = `${medId}::${doseId}`;
               if (!invalidatedSlots.has(slotId)) {
-                const inv = await invalidateAutoDeductionRecurrence(medId, doseId);
-                if (!inv.ok) {
+                const res = await cancelUndesiredExactOccurrence(
+                  medId,
+                  doseId,
+                  date
+                );
+                if (!res.ok) {
                   // Fail-closed: do not cancel occurrence; keep tracking for retry.
                   continue;
                 }
-                invalidatedSlots.add(slotId);
-              }
-              const res = await cancelAutoDeduction(medId, doseId, date);
-              // Drop tracking only after successful cancel (invalidate already ok).
-              if (res.ok) {
-                trackedRef.current.delete(key);
+                if (!res.skipped) {
+                  invalidatedSlots.add(slotId);
+                  trackedRef.current.delete(key);
+                }
+              } else {
+                const res = await cancelAutoDeduction(medId, doseId, date);
+                if (res.ok) {
+                  trackedRef.current.delete(key);
+                }
               }
             } else {
               trackedRef.current.delete(key);
@@ -288,15 +388,7 @@ export function useAutoDeductionScheduler({
 
       for (const [key, slot] of desired) {
         if (gen !== generationRef.current) return;
-        const epoch = localEpochMs(slot.calendarDate, slot.time);
-        const result = await scheduleAutoDeduction({
-          medicationId: slot.medId,
-          doseId: slot.doseId,
-          calendarDate: slot.calendarDate,
-          timeHhmm: slot.time,
-          amount: slot.amount,
-          scheduledAtEpochMs: epoch ?? undefined,
-        });
+        const result = await scheduleExactOccurrenceFromDurable(slot);
         if (result.ok) {
           trackedRef.current.add(key);
         } else if (result.error === 'exact_alarm_permission_denied') {

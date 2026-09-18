@@ -1352,6 +1352,41 @@ export function runGatedGlobalAutoDeductToggle(opts: {
     // default for newly added ones. Flip autoDeductEnabled only — do not
     // settle stock, invent consumption logs, or mutate currentPills here.
     // Schedulers/reminders react to the resulting medication-level flags.
+    //
+    // Global OFF: invalidate ALL native recurrences BEFORE the durable bulk
+    // commit (same ordering barrier as per-med toggle) so a near-fire
+    // occurrence cannot FIRE after OFF is durable but before the scheduler
+    // cleans up. Global ON does not invalidate.
+    const invalidatedMeds: Array<{ med: Medication; doseIds: string[] }> = [];
+    if (opts.enable === false) {
+      for (const med of fresh.medications) {
+        const invalidation = await invalidateMedicationRecurrences(med);
+        if (!invalidation.ok) {
+          for (const completed of invalidatedMeds) {
+            if (completed.doseIds.length > 0) {
+              await restoreInvalidatedRecurrences(
+                completed.med,
+                completed.doseIds,
+                now
+              );
+            }
+          }
+          return {
+            outcome: 'native_invalidation_failed' as const,
+            medications: fresh.medications,
+            logs: fresh.logs,
+            enable: opts.enable,
+            settleLogs: [],
+            reason: invalidation.error,
+          };
+        }
+        invalidatedMeds.push({
+          med,
+          doseIds: invalidation.invalidatedDoseIds,
+        });
+      }
+    }
+
     const medications = fresh.medications.map((med) =>
       med.autoDeductEnabled === opts.enable
         ? med
@@ -1364,6 +1399,15 @@ export function runGatedGlobalAutoDeductToggle(opts: {
       globalAutoDeductEnabled: opts.enable,
     });
     if (err) {
+      for (const completed of invalidatedMeds) {
+        if (completed.doseIds.length > 0) {
+          await restoreInvalidatedRecurrences(
+            completed.med,
+            completed.doseIds,
+            now
+          );
+        }
+      }
       return {
         outcome: 'persist_failed' as const,
         medications: fresh.medications,

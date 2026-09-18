@@ -413,7 +413,7 @@ export function runGatedManualConsume(opts: {
     // Exact FIRED reconciliation BEFORE any legacy settlement / manual math.
     const pre = await reconcileExactBeforeLegacySettlement({
       fresh: recovered.state,
-      globalAutoDeductEnabled: true,
+      globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
       now,
     });
     if (pre.nativeListFailed) {
@@ -458,8 +458,8 @@ export function runGatedManualConsume(opts: {
     }
 
     // Authoritative amount: native occurrence snapshot under SCHEDULE_LOCK.
-    // FIRED / SCHEDULED → native amount; ABSENT / CANCELLED → JS schedule;
-    // native failure → no mutation (no silent schedule fallback on Android).
+    // FIRED → immutable native event amount; SCHEDULED / ABSENT / CANCELLED
+    // → fresh durable JS schedule amount; native failure → no mutation.
     let amountOverride: number | undefined;
     const snapshotFn = opts.getOccurrenceSnapshot ?? getOccurrenceSnapshot;
     const snap = await snapshotFn(opts.medicationId, resolvedDoseId, todayStr);
@@ -592,7 +592,7 @@ export function runGatedManualRestore(opts: {
     // Exact FIRED reconciliation BEFORE any legacy settlement / manual math.
     const pre = await reconcileExactBeforeLegacySettlement({
       fresh: recovered.state,
-      globalAutoDeductEnabled: true,
+      globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
       now,
     });
     if (pre.nativeListFailed) {
@@ -896,7 +896,7 @@ export function runGatedRefill(opts: {
     // Exact FIRED reconciliation BEFORE any legacy settlement / manual math.
     const pre = await reconcileExactBeforeLegacySettlement({
       fresh: recovered.state,
-      globalAutoDeductEnabled: true,
+      globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
       now,
     });
     if (pre.nativeListFailed) {
@@ -1010,7 +1010,7 @@ export function runGatedUndoRefill(opts: {
     // Exact FIRED reconciliation BEFORE any legacy settlement / manual math.
     const pre = await reconcileExactBeforeLegacySettlement({
       fresh: recovered.state,
-      globalAutoDeductEnabled: true,
+      globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
       now,
     });
     if (pre.nativeListFailed) {
@@ -1191,7 +1191,9 @@ export function runGatedAutoDeductToggle(opts: {
 
     const pre = await reconcileExactBeforeLegacySettlement({
       fresh: recovered.state,
-      globalAutoDeductEnabled: opts.globalAutoDeductEnabled !== false,
+      // The durable recovered global policy is the authority; React's copy is
+      // only an input hint and may lag after crash/recovery.
+      globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
       now,
     });
     if (pre.nativeListFailed) {
@@ -1448,7 +1450,7 @@ export function runGatedDeleteMedication(opts: {
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
     const pre = await reconcileExactBeforeLegacySettlement({
       fresh: recovered.state,
-      globalAutoDeductEnabled: true,
+      globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
     });
     if (pre.nativeListFailed) {
       return {

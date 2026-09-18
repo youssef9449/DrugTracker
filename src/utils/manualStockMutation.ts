@@ -330,7 +330,7 @@ async function acknowledgeExactAutoEvents(
  * Safe to call from an already-held withAutoStockMutationGate, including
  * startup legacy settlement; callers must NOT wrap it in another gate.
  */
-export export function commitWithManualEnvelope(
+export function commitWithManualEnvelope(
   state: AutoStockDurableState,
   globalOverride?: boolean
 ): string | null {

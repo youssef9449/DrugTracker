@@ -17,7 +17,10 @@ import { useEffect, useRef } from 'react';
 import type { ConsumptionLog, Medication } from '../types';
 import { runAutoDeductionReconciliation } from '../utils/runAutoDeductionReconciliation';
 import { loadDurableGlobalAutoDeductEnabled } from '../utils/autoDeductionStockGate';
-import { addExactAutoDeductionFiredListener } from '../utils/autoDeductionNative';
+import {
+  addExactAutoDeductionFiredListener,
+  restoreFutureAutoDeductionSchedules,
+} from '../utils/autoDeductionNative';
 
 export interface UseExactAutoDeductionReconciliationOptions {
   setMedications: (meds: Medication[] | ((prev: Medication[]) => Medication[])) => void;
@@ -53,7 +56,7 @@ export function useExactAutoDeductionReconciliation({
 
     let cancelled = false;
 
-    const reconcile = async (): Promise<void> => {
+    const reconcile = async (recoverNativeSchedules = false): Promise<void> => {
       if (cancelled) return;
 
       if (reconciliationRunningRef.current) {
@@ -64,6 +67,15 @@ export function useExactAutoDeductionReconciliation({
       reconciliationRunningRef.current = true;
 
       try {
+        if (recoverNativeSchedules) {
+          // Recovery boundary: promote/repair native missed schedule deliveries
+          // before reading the FIRED ledger. This handles app restart/resume and
+          // local-midnight catch-up without polling; the native operation is
+          // idempotent and does not mutate JS stock directly.
+          await restoreFutureAutoDeductionSchedules();
+          if (cancelled) return;
+        }
+
         const result = await runAutoDeductionReconciliation({
           globalAutoDeductEnabled: globalRef.current,
         });
@@ -104,7 +116,7 @@ export function useExactAutoDeductionReconciliation({
     void addExactAutoDeductionFiredListener(() => {
       if (listenerCancelled || cancelled) return;
       // Native already persisted FIRED before emitting this wake-up signal.
-      void reconcile();
+      void reconcile(false);
     }).then((handle) => {
       if (listenerCancelled || cancelled) {
         void handle?.remove();
@@ -115,11 +127,11 @@ export function useExactAutoDeductionReconciliation({
       // Recovery boundary: hydrate and every app resume perform one
       // reconciliation after the event listener is armed. This is NOT polling;
       // it covers events that occurred while JS was unavailable or during setup.
-      void reconcile();
+      void reconcile(true);
     }).catch((err) => {
       console.warn('[App] Exact Auto event listener registration failed:', err);
       // Even if the listener cannot be attached, perform the recovery read once.
-      void reconcile();
+      void reconcile(true);
     });
 
     return () => {

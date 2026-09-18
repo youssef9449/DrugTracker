@@ -581,12 +581,10 @@ public final class AutoDeductionScheduler {
                 Log.i(TAG, "fire linearization: STALE (no active schedule metadata) for " + key);
                 return FireResult.cancelled();
             }
-            if (deliveryScheduleVersion == null || deliveryScheduleVersion.isEmpty()
-                    || deliveryRecurrenceGeneration <= 0L) {
-                Log.i(TAG, "fire linearization: STALE (delivery missing version/generation) for "
-                        + key);
-                return FireResult.cancelled();
-            }
+            // Legacy pre-token alarms can legitimately still be queued across an
+            // app upgrade. They are accepted only when the active durable
+            // schedule row is itself still legacy (no version/generation).
+            // Tokenized deliveries must carry BOTH ownership tokens.
             try {
                 JSONObject meta = new JSONObject(metaRaw);
                 String activeVersion = meta.optString(FIELD_SCHEDULE_VERSION, "");

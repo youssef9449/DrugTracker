@@ -40,6 +40,7 @@ import {
 import { OrderItem } from './utils/whatsapp';
 import { playSuccessChime } from './utils/sound';
 import { useDoseReminders } from './hooks/useDoseReminders';
+import { useForegroundUiRefresh } from './hooks/useForegroundUiRefresh';
 import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
 import { useDoseReminderScheduler } from './hooks/useDoseReminderScheduler';
 import { useAutoDeductionScheduler } from './hooks/useAutoDeductionScheduler';
@@ -147,6 +148,12 @@ export default function App() {
   // the correct channel: silent foreground channel when the app is open,
   // system-sound background channel when the app is backgrounded/killed.
   const [doseLifecycleTick, setDoseLifecycleTick] = useState(0);
+
+  // Time-driven dose labels (due/future/completed) need a small foreground
+  // refresh so crossing a configured HH:mm boundary is reflected without
+  // requiring a user interaction. This does not drive Exact Auto stock timing.
+  useForegroundUiRefresh(doseLifecycleTick);
+
   const [globalAutoDeductEnabled, setGlobalAutoDeductEnabled] = useState<boolean>(true);
 
   const [isPhoneFrame, setIsPhoneFrame] = useState(true);

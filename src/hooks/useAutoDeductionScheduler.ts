@@ -13,9 +13,9 @@ import {
   invalidateAutoDeductionRecurrence,
   scheduleAutoDeduction,
   listScheduledAutoDeductionOccurrences,
-  restoreFutureAutoDeductionSchedules,
   type ScheduledOccurrence,
 } from '../utils/autoDeductionNative';
+import { restoreFutureSchedulesOnce } from '../utils/restoreFutureSchedulesBoundary';
 import { withAutoStockMutationGate } from '../utils/autoDeductionStockGate';
 
 export interface UseAutoDeductionSchedulerOptions {
@@ -208,39 +208,50 @@ export function localEpochMs(calendarDate: string, timeHhmm: string): number | n
   return Number.isFinite(ms) ? ms : null;
 }
 
+/**
+ * Protect past-due schedules that carry durable fire-retry evidence.
+ * Native fireRetryCount (schedule secondary marker or listed metadata) is the
+ * authority — stale React global/med disabled state must not drop recovery
+ * evidence for an already-failed FIRED persistence.
+ */
 export function isFireRetryRecoveryPending(
   schedule: ScheduledOccurrence,
   med: Medication | undefined,
   globalAutoDeductEnabled: boolean,
   now: number = Date.now()
 ): boolean {
-  if (
-    !globalAutoDeductEnabled ||
-    !med ||
-    Number(schedule.fireRetryCount) <= 0
-  ) {
+  // Durable native retry marker is required. React enable flags are NOT used
+  // to erase recovery — only to decide future desired-state scheduling.
+  if (Number(schedule.fireRetryCount) <= 0) {
     return false;
   }
+  void globalAutoDeductEnabled;
 
-  const configuredSlot = getAutoDeductionSlotsForDate(
-    med,
-    schedule.calendarDate
-  ).find((slot) => slot.doseId === schedule.doseId);
-  if (!configuredSlot) return false;
-
-  const scheduledAt =
+  // Prefer native scheduledAtEpochMs; fall back to timeHhmm or med schedule.
+  let scheduledAt: number | null = null;
+  if (
     Number.isFinite(Number(schedule.scheduledAtEpochMs)) &&
     Number(schedule.scheduledAtEpochMs) > 0
-      ? Number(schedule.scheduledAtEpochMs)
-      : localEpochMs(
-          schedule.calendarDate,
-          schedule.timeHhmm ?? configuredSlot.time
-        );
+  ) {
+    scheduledAt = Number(schedule.scheduledAtEpochMs);
+  } else if (schedule.timeHhmm) {
+    scheduledAt = localEpochMs(schedule.calendarDate, schedule.timeHhmm);
+  } else if (med) {
+    const configuredSlot = getAutoDeductionSlotsForDate(
+      med,
+      schedule.calendarDate
+    ).find((slot) => slot.doseId === schedule.doseId);
+    if (configuredSlot) {
+      scheduledAt = localEpochMs(schedule.calendarDate, configuredSlot.time);
+    }
+  }
 
-  // A fire-retry marker is meaningful only after the intended occurrence is
-  // due. The retry alarm itself may be 60s in the future while this occurrence
-  // remains represented by its original scheduledAt timestamp in metadata.
-  return scheduledAt != null && scheduledAt <= now + 2_000;
+  // Without a due timestamp we still protect the row when fireRetryCount > 0:
+  // stale React med/global state must not cancel durable failed-fire evidence.
+  if (scheduledAt == null) {
+    return true;
+  }
+  return scheduledAt <= now + 2_000;
 }
 
 export function useAutoDeductionScheduler({
@@ -342,7 +353,16 @@ export function useAutoDeductionScheduler({
       // recoverable after app restart/resume/midnight without foreground polling.
       const recoveryBoundary = `${resumeTick}:${midnightTick}`;
       if (recoveryBoundaryRef.current !== recoveryBoundary) {
-        await restoreFutureAutoDeductionSchedules();
+        const restoreResult = await restoreFutureSchedulesOnce();
+        if (!restoreResult.ok) {
+          // Fail-closed: incomplete recovery must not drive destructive cleanup.
+          // Leave recoveryBoundaryRef unchanged so a later pass retries restore.
+          console.warn(
+            '[App] AutoDeduction restoreFutureSchedules failed — skipping desired-state cleanup:',
+            restoreResult.error || 'restore_failed'
+          );
+          return;
+        }
         recoveryBoundaryRef.current = recoveryBoundary;
         if (gen !== generationRef.current) return;
       }

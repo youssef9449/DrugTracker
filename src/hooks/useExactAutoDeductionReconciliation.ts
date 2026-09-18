@@ -19,8 +19,8 @@ import { runAutoDeductionReconciliation } from '../utils/runAutoDeductionReconci
 import { loadDurableGlobalAutoDeductEnabled } from '../utils/autoDeductionStockGate';
 import {
   addExactAutoDeductionFiredListener,
-  restoreFutureAutoDeductionSchedules,
 } from '../utils/autoDeductionNative';
+import { restoreFutureSchedulesOnce } from '../utils/restoreFutureSchedulesBoundary';
 
 export interface UseExactAutoDeductionReconciliationOptions {
   setMedications: (meds: Medication[] | ((prev: Medication[]) => Medication[])) => void;
@@ -72,8 +72,17 @@ export function useExactAutoDeductionReconciliation({
           // before reading the FIRED ledger. This handles app restart/resume and
           // local-midnight catch-up without polling; the native operation is
           // idempotent and does not mutate JS stock directly.
-          await restoreFutureAutoDeductionSchedules();
+          const restoreResult = await restoreFutureSchedulesOnce();
           if (cancelled) return;
+          if (!restoreResult.ok) {
+            // Fail-closed: do not treat incomplete recovery as success.
+            // Stock reconciliation may still run (FIRED ledger is independent),
+            // but we do not claim native schedules were fully restored.
+            console.warn(
+              '[App] Exact Auto native schedule restore failed:',
+              restoreResult.error || 'restore_failed'
+            );
+          }
         }
 
         const result = await runAutoDeductionReconciliation({

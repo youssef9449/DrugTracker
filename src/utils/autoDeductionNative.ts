@@ -78,6 +78,18 @@ export interface CancelOccurrenceResult {
   error?: string;
 }
 
+/**
+ * Explicit result for native future-schedule restoration.
+ * ok=false means recovery boundary incomplete — callers must not run
+ * destructive desired-state cleanup based on an incomplete snapshot.
+ */
+export interface RestoreFutureSchedulesResult {
+  ok: boolean;
+  restored: number;
+  failed?: number;
+  error?: string;
+}
+
 interface AutoDeductionPlugin {
   addListener(
     eventName: 'exactAutoDeductionFired',
@@ -112,7 +124,7 @@ interface AutoDeductionPlugin {
     calendarDate: string;
   }): Promise<MarkReconciledResult>;
   canScheduleExactAlarms(): Promise<{ granted: boolean }>;
-  restoreFutureSchedules(): Promise<{ restored: number }>;
+  restoreFutureSchedules(): Promise<RestoreFutureSchedulesResult>;
   listScheduledOccurrences(): Promise<{ schedules: ScheduledOccurrence[] }>;
 }
 
@@ -335,13 +347,22 @@ export async function canScheduleAutoDeductionExactAlarms(): Promise<boolean> {
   }
 }
 
-export async function restoreFutureAutoDeductionSchedules(): Promise<number> {
-  if (!isNativeAndroid()) return 0;
+export async function restoreFutureAutoDeductionSchedules(): Promise<RestoreFutureSchedulesResult> {
+  if (!isNativeAndroid()) {
+    return { ok: true, restored: 0, failed: 0 };
+  }
   try {
     const res = await AutoDeduction.restoreFutureSchedules();
-    return res.restored ?? 0;
-  } catch {
-    return 0;
+    const ok = res != null && res.ok !== false;
+    return {
+      ok,
+      restored: Number(res?.restored) || 0,
+      failed: Number(res?.failed) || 0,
+      error: res?.error,
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'restore_failed';
+    return { ok: false, restored: 0, failed: 0, error: msg };
   }
 }
 

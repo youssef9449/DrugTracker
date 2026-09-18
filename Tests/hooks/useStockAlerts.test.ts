@@ -38,12 +38,14 @@ function useAlerts(props: {
   criticalStockAlertsEnabled?: boolean;
   hydrated?: boolean;
   isFirstRun?: boolean;
+  globalAutoDeductEnabled?: boolean;
 }) {
   return useStockAlerts({
     notificationsEnabled: true,
     criticalStockAlertsEnabled: true,
     hydrated: true,
     isFirstRun: false,
+    globalAutoDeductEnabled: true,
     ...props,
   });
 }
@@ -513,5 +515,45 @@ describe('useStockAlerts — re-enabling alerts mid-episode', () => {
     });
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
+  });
+});
+
+describe('useStockAlerts — Global Auto-Deduct stock projection', () => {
+  it('Global OFF + med ON with past lastSync: does not send critical based on auto projection alone', () => {
+    // 30 pills, 2/day, lastSync far past → with auto ON would be out_of_stock projected.
+    // Global OFF freezes at 30 → sufficient → no critical send.
+    renderHook(() =>
+      useAlerts({
+        medications: [
+          makeMed({
+            currentPills: 30,
+            dailyDose: 2,
+            autoDeductEnabled: true,
+            lastSyncDate: '2024-01-01',
+            warningThresholdDays: 5,
+          }),
+        ],
+        globalAutoDeductEnabled: false,
+      })
+    );
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it('Global ON + med ON with past lastSync: can send critical for projected depletion', async () => {
+    renderHook(() =>
+      useAlerts({
+        medications: [
+          makeMed({
+            currentPills: 30,
+            dailyDose: 2,
+            autoDeductEnabled: true,
+            lastSyncDate: '2024-01-01',
+            warningThresholdDays: 5,
+          }),
+        ],
+        globalAutoDeductEnabled: true,
+      })
+    );
+    expect(sendMock).toHaveBeenCalled();
   });
 });

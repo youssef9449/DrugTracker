@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Medication, calculateMedicationStatus } from '../types';
 import { effectiveCurrentPills, getCriticalAlarmDate, getTodayDateString } from '../utils/dateCalculations';
+import { medicationForStockProjection } from '../utils/doseSchedule';
 import { sendCriticalStockAlert, cancelCriticalAlarm } from '../utils/notifications';
 import {
   loadCriticalNotificationClaims,
@@ -18,6 +19,8 @@ interface UseStockAlertsOptions {
   criticalStockAlertsEnabled: boolean;
   hydrated: boolean;
   isFirstRun: boolean;
+  /** Required: stock/status projection uses effective global ∧ med auto. */
+  globalAutoDeductEnabled: boolean;
 }
 
 /** The claim value an in-flight foreground send has written. */
@@ -115,6 +118,7 @@ export function useStockAlerts({
   criticalStockAlertsEnabled,
   hydrated,
   isFirstRun,
+  globalAutoDeductEnabled,
 }: UseStockAlertsOptions): void {
   useEffect(() => {
     if (!hydrated) return;
@@ -136,7 +140,9 @@ export function useStockAlerts({
     const canNotify = notificationsEnabled && criticalStockAlertsEnabled;
 
     for (const med of medications) {
-      const { status, daysLeft } = calculateMedicationStatus(med);
+      // Stock/status only — original med remains identity for claims/alarms.
+      const projectedMed = medicationForStockProjection(med, globalAutoDeductEnabled);
+      const { status, daysLeft } = calculateMedicationStatus(projectedMed);
       const isCriticalish = status === 'critical' || status === 'out_of_stock';
 
       if (!isCriticalish) {
@@ -206,7 +212,7 @@ export function useStockAlerts({
       setCriticalNotificationClaim(claims, med.id, { ...IN_FLIGHT_CLAIM });
       changed = true;
 
-      const effPills = effectiveCurrentPills(med);
+      const effPills = effectiveCurrentPills(projectedMed);
       const unit = med.unit || 'قرص';
       Promise.resolve(sendCriticalStockAlert(med.id, med.name, daysLeft, effPills, unit))
         .then((sent) => sent === true)
@@ -235,5 +241,5 @@ export function useStockAlerts({
     if (changed) {
       saveCriticalNotificationClaims(claims);
     }
-  }, [medications, notificationsEnabled, criticalStockAlertsEnabled, hydrated, isFirstRun]);
+  }, [medications, notificationsEnabled, criticalStockAlertsEnabled, hydrated, isFirstRun, globalAutoDeductEnabled]);
 }

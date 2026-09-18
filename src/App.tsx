@@ -349,6 +349,7 @@ export default function App() {
     criticalStockAlertsEnabled,
     hydrated,
     isFirstRun,
+    globalAutoDeductEnabled,
   });
 
   // ─────────────────────────────────────────────────────────────
@@ -817,6 +818,7 @@ export default function App() {
               onUpdateSettings={setPharmacySettings}
               showToast={showToast}
               onOpenUserContactsSettings={() => setActiveTab('user-data')}
+              globalAutoDeductEnabled={globalAutoDeductEnabled}
             />
           )}
 
@@ -939,6 +941,7 @@ export default function App() {
         onTakeDose={handleTakeDoseFromAlarm}
         onSnooze={handleSnoozeFromAlarm}
         onDismiss={dismissAlarm}
+        globalAutoDeductEnabled={globalAutoDeductEnabled}
       />
       <SelectDoseModal
         isOpen={Boolean(selectDoseMed)}

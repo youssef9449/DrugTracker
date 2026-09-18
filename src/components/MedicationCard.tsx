@@ -482,21 +482,46 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const isCrit = statusInfo.status === 'critical';
     const isWarn = statusInfo.status === 'warning';
     const doseToggle = getCardDoseToggleTarget(medication);
-    const activeDeduction = findActiveDeductionForOccurrence(
+    const todayStr = getTodayDateString();
+    // Manual toggle occurrence: medicationId + doseToggle.doseId + today.
+    // Amount authority = active deduction log for THAT occurrence (not auto).
+    const manualActiveDeduction = findActiveDeductionForOccurrence(
       logs,
       medication.id,
       doseToggle.doseId,
-      getTodayDateString()
+      todayStr
     );
-    const historicalAmount =
-      activeDeduction && Number.isFinite(Number(activeDeduction.amount))
-        ? Math.abs(Number(activeDeduction.amount))
+    const manualHistoricalAmount =
+      manualActiveDeduction && Number.isFinite(Number(manualActiveDeduction.amount))
+        ? Math.abs(Number(manualActiveDeduction.amount))
         : 0;
-    const nextDoseAmount =
-      historicalAmount > 0 ? historicalAmount : doseToggle.amount;
+    const manualRestoreAmount =
+      manualHistoricalAmount > 0 ? manualHistoricalAmount : doseToggle.amount;
+    // Take uses current schedule slot amount from the manual toggle target.
+    const takeAmount = doseToggle.amount;
+
+    // Auto-restorable occurrence is independent of getCardDoseToggleTarget.
     const autoRestorableDose = getAutoRestorableDose(medication);
     const showAutoRestore =
       isAutoActive && Boolean(onRestoreDose) && Boolean(autoRestorableDose);
+    // Auto Restore amount = persisted exact deduction for autoRestorableDose.id
+    // (FIRED / auto_daily log). Never doseToggle.doseId, doseSchedule[0], or dailyDose.
+    const autoActiveDeduction = autoRestorableDose
+      ? findActiveDeductionForOccurrence(
+          logs,
+          medication.id,
+          autoRestorableDose.id,
+          todayStr
+        )
+      : null;
+    const autoHistoricalAmount =
+      autoActiveDeduction && Number.isFinite(Number(autoActiveDeduction.amount))
+        ? Math.abs(Number(autoActiveDeduction.amount))
+        : 0;
+    const autoRestoreAmount =
+      autoHistoricalAmount > 0
+        ? autoHistoricalAmount
+        : Number(autoRestorableDose?.amount) || 0;
 
 
     return (
@@ -561,8 +586,8 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 <button
                   type="button"
                   onClick={() => onRestoreDose(medication.id, doseToggle.doseId)}
-                  title={`استرجاع الجرعة (+${nextDoseAmount})`}
-                  aria-label={`استرجاع الجرعة (+${nextDoseAmount})`}
+                  title={`استرجاع الجرعة (+${manualRestoreAmount})`}
+                  aria-label={`استرجاع الجرعة (+${manualRestoreAmount})`}
                   className="w-5 h-5 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
                   data-testid={`restore-dose-${medication.id}`}
                 >
@@ -577,8 +602,16 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                       autoRestorableDose?.id || undefined
                     )
                   }
-                  title="استرجاع الجرعة"
-                  aria-label="استرجاع الجرعة"
+                  title={
+                    autoRestoreAmount > 0
+                      ? `استرجاع الجرعة (+${autoRestoreAmount})`
+                      : 'استرجاع الجرعة'
+                  }
+                  aria-label={
+                    autoRestoreAmount > 0
+                      ? `استرجاع الجرعة (+${autoRestoreAmount})`
+                      : 'استرجاع الجرعة'
+                  }
                   className="w-5 h-5 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
                   data-testid={`auto-restore-dose-${medication.id}`}
                 >
@@ -588,11 +621,11 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 <button
                   type="button"
                   onClick={() => onConsumeDose(medication.id, doseToggle.doseId)}
-                  disabled={effPills <= 0 || nextDoseAmount <= 0}
-                  title={`تناول جرعة (-${nextDoseAmount})`}
-                  aria-label={`تناول جرعة (-${nextDoseAmount})`}
+                  disabled={effPills <= 0 || takeAmount <= 0}
+                  title={`تناول جرعة (-${takeAmount})`}
+                  aria-label={`تناول جرعة (-${takeAmount})`}
                   className={`w-5 h-5 flex items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 active:scale-95 ${
-                    effPills <= 0 || nextDoseAmount <= 0
+                    effPills <= 0 || takeAmount <= 0
                       ? 'bg-slate-100 text-slate-300 cursor-not-allowed'
                       : 'bg-emerald-600 text-white hover:bg-emerald-700'
                   }`}
@@ -670,21 +703,46 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const isCrit = statusInfo.status === 'critical';
     const isWarn = statusInfo.status === 'warning';
     const doseToggle = getCardDoseToggleTarget(medication);
-    const activeDeduction = findActiveDeductionForOccurrence(
+    const todayStr = getTodayDateString();
+    // Manual toggle occurrence: medicationId + doseToggle.doseId + today.
+    // Amount authority = active deduction log for THAT occurrence (not auto).
+    const manualActiveDeduction = findActiveDeductionForOccurrence(
       logs,
       medication.id,
       doseToggle.doseId,
-      getTodayDateString()
+      todayStr
     );
-    const historicalAmount =
-      activeDeduction && Number.isFinite(Number(activeDeduction.amount))
-        ? Math.abs(Number(activeDeduction.amount))
+    const manualHistoricalAmount =
+      manualActiveDeduction && Number.isFinite(Number(manualActiveDeduction.amount))
+        ? Math.abs(Number(manualActiveDeduction.amount))
         : 0;
-    const nextDoseAmount =
-      historicalAmount > 0 ? historicalAmount : doseToggle.amount;
+    const manualRestoreAmount =
+      manualHistoricalAmount > 0 ? manualHistoricalAmount : doseToggle.amount;
+    // Take uses current schedule slot amount from the manual toggle target.
+    const takeAmount = doseToggle.amount;
+
+    // Auto-restorable occurrence is independent of getCardDoseToggleTarget.
     const autoRestorableDose = getAutoRestorableDose(medication);
     const showAutoRestore =
       isAutoActive && Boolean(onRestoreDose) && Boolean(autoRestorableDose);
+    // Auto Restore amount = persisted exact deduction for autoRestorableDose.id
+    // (FIRED / auto_daily log). Never doseToggle.doseId, doseSchedule[0], or dailyDose.
+    const autoActiveDeduction = autoRestorableDose
+      ? findActiveDeductionForOccurrence(
+          logs,
+          medication.id,
+          autoRestorableDose.id,
+          todayStr
+        )
+      : null;
+    const autoHistoricalAmount =
+      autoActiveDeduction && Number.isFinite(Number(autoActiveDeduction.amount))
+        ? Math.abs(Number(autoActiveDeduction.amount))
+        : 0;
+    const autoRestoreAmount =
+      autoHistoricalAmount > 0
+        ? autoHistoricalAmount
+        : Number(autoRestorableDose?.amount) || 0;
 
 
     return (
@@ -755,8 +813,8 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 <button
                   type="button"
                   onClick={() => onRestoreDose(medication.id, doseToggle.doseId)}
-                  title={`استرجاع الجرعة (+${nextDoseAmount})`}
-                  aria-label={`استرجاع الجرعة (+${nextDoseAmount})`}
+                  title={`استرجاع الجرعة (+${manualRestoreAmount})`}
+                  aria-label={`استرجاع الجرعة (+${manualRestoreAmount})`}
                   className="w-6 h-6 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
                   data-testid={`restore-dose-${medication.id}`}
                 >
@@ -771,8 +829,16 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                       autoRestorableDose?.id || undefined
                     )
                   }
-                  title="استرجاع الجرعة"
-                  aria-label="استرجاع الجرعة"
+                  title={
+                    autoRestoreAmount > 0
+                      ? `استرجاع الجرعة (+${autoRestoreAmount})`
+                      : 'استرجاع الجرعة'
+                  }
+                  aria-label={
+                    autoRestoreAmount > 0
+                      ? `استرجاع الجرعة (+${autoRestoreAmount})`
+                      : 'استرجاع الجرعة'
+                  }
                   className="w-6 h-6 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
                   data-testid={`auto-restore-dose-${medication.id}`}
                 >
@@ -782,11 +848,11 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 <button
                   type="button"
                   onClick={() => onConsumeDose(medication.id, doseToggle.doseId)}
-                  disabled={effPills <= 0 || nextDoseAmount <= 0}
-                  title={`تناول جرعة (-${nextDoseAmount})`}
-                  aria-label={`تناول جرعة (-${nextDoseAmount})`}
+                  disabled={effPills <= 0 || takeAmount <= 0}
+                  title={`تناول جرعة (-${takeAmount})`}
+                  aria-label={`تناول جرعة (-${takeAmount})`}
                   className={`w-6 h-6 flex items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 active:scale-95 ${
-                    effPills <= 0 || nextDoseAmount <= 0
+                    effPills <= 0 || takeAmount <= 0
                       ? 'bg-slate-100 text-slate-300 cursor-not-allowed'
                       : 'bg-emerald-600 text-white hover:bg-emerald-700'
                   }`}

@@ -187,12 +187,47 @@ public final class AutoDeductionEventStore {
     }
 
     /**
+     * Result of promoting pending-fire records into the main FIRED ledger.
+     *
+     * ok=false means at least one valid pending occurrence could not be made
+     * visible in the main FIRED ledger. Callers that use the FIRED ledger as an
+     * authoritative stock input must fail closed rather than treating that
+     * occurrence as ABSENT/SCHEDULED.
+     */
+    public static final class PendingFiresResult {
+        public final boolean ok;
+        public final int promoted;
+        public final String error;
+
+        private PendingFiresResult(boolean ok, int promoted, String error) {
+            this.ok = ok;
+            this.promoted = promoted;
+            this.error = error;
+        }
+
+        static PendingFiresResult success(int promoted) {
+            return new PendingFiresResult(true, promoted, null);
+        }
+
+        static PendingFiresResult failure(int promoted, String error) {
+            return new PendingFiresResult(
+                    false,
+                    promoted,
+                    error != null && !error.isEmpty() ? error : "pending_promotion_failed");
+        }
+    }
+
+    /**
      * Promote any pending-fire records into the main FIRED ledger (idempotent).
      * Safe to call from boot, listEvents, or any recovery path.
-     * Returns number of pending entries successfully promoted or already present.
+     *
+     * A valid pending occurrence that cannot be durably promoted is a real
+     * lookup failure, not an ordinary empty result. The pending record remains
+     * retryable until promotion succeeds.
      */
-    public int promotePendingFires() {
+    public PendingFiresResult promotePendingFiresResult() {
         int promoted = 0;
+        boolean promotionFailed = false;
         synchronized (LOCK) {
             Map<String, ?> all = pendingPrefs.getAll();
             List<String> toRemove = new ArrayList<>();
@@ -209,14 +244,14 @@ public final class AutoDeductionEventStore {
                     String medId = obj.optString("medicationId", "");
                     String doseId = obj.optString("doseId", "");
                     String date = obj.optString("calendarDate", "");
-                    long scheduledAt = obj.optLong("scheduledAtEpochMs", 0L);
-                    double amount = obj.optDouble("amount", Double.NaN);
                     if (medId.isEmpty() || doseId.isEmpty()
                             || !AutoDeductionContract.isValidCalendarDate(date)
-                            || !AutoDeductionContract.isValidAmount(amount)) {
+                            || !AutoDeductionContract.isValidAmount(
+                                    obj.optDouble("amount", Double.NaN))) {
                         toRemove.add(e.getKey());
                         continue;
                     }
+
                     String eventKey = KEY_EVENT_PREFIX
                             + AutoDeductionContract.occurrenceKey(medId, doseId, date);
                     if (prefs.contains(eventKey)) {
@@ -225,6 +260,7 @@ public final class AutoDeductionEventStore {
                         promoted++;
                         continue;
                     }
+
                     // Ensure status FIRED.
                     obj.put("status", AutoDeductionContract.STATUS_FIRED);
                     if (!obj.has("createdAtEpochMs")) {
@@ -233,19 +269,27 @@ public final class AutoDeductionEventStore {
                     if (!obj.has("reconciledAtEpochMs")) {
                         obj.put("reconciledAtEpochMs", JSONObject.NULL);
                     }
-                    boolean written = prefs.edit().putString(eventKey, obj.toString()).commit();
+                    String payload = obj.toString();
+                    boolean written = commitEditor(
+                            prefs.edit().putString(eventKey, payload));
                     if (!written) {
-                        written = prefs.edit().putString(eventKey, obj.toString()).commit();
+                        written = commitEditor(
+                                prefs.edit().putString(eventKey, payload));
                     }
                     if (written) {
                         toRemove.add(e.getKey());
                         promoted++;
                         Log.i(TAG, "promoted pending-fire to FIRED: " + medId + "/" + doseId + "/" + date);
                     } else {
+                        // Keep the pending-fire record for a later retry. Do not
+                        // allow callers to fall through to the JS/SCHEDULED amount.
+                        promotionFailed = true;
                         Log.e(TAG, "promote pending commit failed for " + e.getKey());
                     }
                 } catch (JSONException ex) {
                     Log.e(TAG, "promote pending parse failed", ex);
+                    // Invalid pending records cannot safely represent a FIRED
+                    // occurrence; terminal cleanup is safe.
                     toRemove.add(e.getKey());
                 }
             }
@@ -254,10 +298,21 @@ public final class AutoDeductionEventStore {
                 for (String k : toRemove) {
                     ed.remove(k);
                 }
-                ed.commit();
+                if (!ed.commit()) {
+                    // Cleanup failure does not invalidate already-promoted FIRED
+                    // rows, so keep the result authoritative.
+                    Log.w(TAG, "pending-fire cleanup commit failed");
+                }
             }
         }
-        return promoted;
+        return promotionFailed
+                ? PendingFiresResult.failure(promoted, "pending_promotion_failed")
+                : PendingFiresResult.success(promoted);
+    }
+
+    /** Backward-compatible count API used by non-authoritative callers/tests. */
+    public int promotePendingFires() {
+        return promotePendingFiresResult().promoted;
     }
 
     public boolean hasEvent(String medicationId, String doseId, String calendarDate) {
@@ -509,7 +564,10 @@ public final class AutoDeductionEventStore {
      * as REJECTED before the snapshot is exposed to JS.
      */
     public FiredEventsResult listFiredEventsResult() {
-        promotePendingFires();
+        PendingFiresResult promotion = promotePendingFiresResult();
+        if (!promotion.ok) {
+            return FiredEventsResult.failure(promotion.error);
+        }
         List<JSONObject> fired = new ArrayList<>();
         synchronized (LOCK) {
             Map<String, ?> all = prefs.getAll();
@@ -615,7 +673,10 @@ public final class AutoDeductionEventStore {
      */
     public EventLookupResult getFiredUnreconciledEvent(
             String medicationId, String doseId, String calendarDate) {
-        promotePendingFires();
+        PendingFiresResult promotion = promotePendingFiresResult();
+        if (!promotion.ok) {
+            return EventLookupResult.failure(promotion.error);
+        }
         String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
         String prefKey = KEY_EVENT_PREFIX + key;
         synchronized (LOCK) {

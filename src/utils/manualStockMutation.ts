@@ -326,9 +326,11 @@ async function acknowledgeExactAutoEvents(
 }
 
 /**
- * Manual durability: envelope (JS state only) → meds+logs → clear.
+ * Shared JS-stock durability: recovery envelope → meds+logs+global → completion marker → clear.
+ * Safe to call from an already-held withAutoStockMutationGate, including
+ * startup legacy settlement; callers must NOT wrap it in another gate.
  */
-export function commitWithManualEnvelope(
+export export function commitWithManualEnvelope(
   state: AutoStockDurableState,
   globalOverride?: boolean
 ): string | null {

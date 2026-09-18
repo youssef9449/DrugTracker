@@ -3,6 +3,7 @@ package app.drugtracker.autodeduction;
 import static app.drugtracker.autodeduction.Phase2TestSupport.clearAllDurableState;
 import static app.drugtracker.autodeduction.Phase2TestSupport.evtKey;
 import static app.drugtracker.autodeduction.Phase2TestSupport.eventPrefs;
+import static app.drugtracker.autodeduction.Phase2TestSupport.pendingPrefs;
 import static app.drugtracker.autodeduction.Phase2TestSupport.newEventStore;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -258,6 +259,63 @@ public class EventStoreRejectedTest {
             JSONObject stillFired = new JSONObject(raw);
             assertEquals(AutoDeductionContract.STATUS_FIRED,
                     stillFired.optString("status"));
+        } finally {
+            AutoDeductionEventStore.__setTestForceCommitResult(null);
+        }
+    }
+
+    @Test
+    public void getFiredUnreconciledEvent_pendingPromotionCommitFailure_failsClosed() throws Exception {
+        String date = "2026-09-16";
+        String key = AutoDeductionContract.occurrenceKey("med", "dose", date);
+        JSONObject payload = new JSONObject();
+        payload.put("medicationId", "med");
+        payload.put("doseId", "dose");
+        payload.put("calendarDate", date);
+        payload.put("scheduledAtEpochMs", 1_000L);
+        payload.put("amount", 2.0);
+        payload.put("status", AutoDeductionContract.STATUS_FIRED);
+
+        pendingPrefs().edit().putString("pend:" + key, payload.toString()).commit();
+
+        AutoDeductionEventStore.__setTestForceCommitResult(false);
+        try {
+            AutoDeductionEventStore.EventLookupResult result =
+                    newEventStore().getFiredUnreconciledEvent(
+                            "med", "dose", date);
+            assertFalse(result.ok);
+            assertNull(result.event);
+            assertEquals("pending_promotion_failed", result.error);
+            assertFalse(eventPrefs().contains(evtKey(key)));
+            assertNotNull(pendingPrefs().getString("pend:" + key, null));
+        } finally {
+            AutoDeductionEventStore.__setTestForceCommitResult(null);
+        }
+    }
+
+    @Test
+    public void listFiredEventsResult_pendingPromotionCommitFailure_failsClosed() throws Exception {
+        String date = "2026-09-17";
+        String key = AutoDeductionContract.occurrenceKey("med", "dose", date);
+        JSONObject payload = new JSONObject();
+        payload.put("medicationId", "med");
+        payload.put("doseId", "dose");
+        payload.put("calendarDate", date);
+        payload.put("scheduledAtEpochMs", 1_000L);
+        payload.put("amount", 2.0);
+        payload.put("status", AutoDeductionContract.STATUS_FIRED);
+
+        pendingPrefs().edit().putString("pend:" + key, payload.toString()).commit();
+
+        AutoDeductionEventStore.__setTestForceCommitResult(false);
+        try {
+            AutoDeductionEventStore.FiredEventsResult result =
+                    newEventStore().listFiredEventsResult();
+            assertFalse(result.ok);
+            assertTrue(result.events.isEmpty());
+            assertEquals("pending_promotion_failed", result.error);
+            assertFalse(eventPrefs().contains(evtKey(key)));
+            assertNotNull(pendingPrefs().getString("pend:" + key, null));
         } finally {
             AutoDeductionEventStore.__setTestForceCommitResult(null);
         }

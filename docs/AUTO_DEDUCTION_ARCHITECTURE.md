@@ -16,7 +16,7 @@ Current-state technical specification for DrugTracker’s exact-time automatic d
 | Pure reconcile / apply | `src/utils/autoDeductionReconciliation.ts` |
 | Orchestration, envelope, marks | `src/utils/runAutoDeductionReconciliation.ts` |
 | Serialized fresh durable-state gate | `src/utils/autoDeductionStockGate.ts` |
-| Hydration / resume entry | `src/hooks/useExactAutoDeductionReconciliation.ts`, `src/App.tsx` |
+| Hydration / resume + native event entry | `src/hooks/useExactAutoDeductionReconciliation.ts`, `src/App.tsx` |
 | Legacy day settlement & projection | `src/utils/dateCalculations.ts` |
 
 ---
@@ -47,7 +47,8 @@ Current-state technical specification for DrugTracker’s exact-time automatic d
 Schedule (JS)
     → Native exact alarm
     → Receiver persists FIRED (no stock change)
-    → App start / resume after hydration
+    → Native emits exact-auto FIRED event when JS is available
+    → Event listener wakes JS reconciliation immediately
     → Mutation gate loads fresh durable JS state
     → Reconcile FIRED events
     → Apply or no-op (idempotent)
@@ -126,7 +127,10 @@ Native status remains **FIRED**, while JS already holds the applied markers. A l
 
 ## JavaScript reconciliation
 
-Entry: `useExactAutoDeductionReconciliation` when `hydrated && !isFirstRun` (and on resume tick).
+Entry: `useExactAutoDeductionReconciliation` when `hydrated && !isFirstRun`, on app resume, or immediately from the native `exactAutoDeductionFired` event.
+
+The native event is a wake-up signal, not a second source of truth: reconciliation always re-reads the durable native FIRED ledger. There is no foreground polling timer. If JavaScript is unavailable when the alarm fires, the durable FIRED record is recovered by the next hydration/resume reconciliation.
+
 
 Orchestration (`runAutoDeductionReconciliation`):
 

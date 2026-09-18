@@ -25,6 +25,7 @@ import {
 import {
   withAutoStockMutationGate,
   commitDurableAutoStockState,
+  loadDurableGlobalAutoDeductEnabled,
   type AutoStockDurableState,
 } from './autoDeductionStockGate';
 import {
@@ -403,8 +404,13 @@ async function runOnce(
     };
   }
 
+  // Recovery may have durably changed the global master switch while the
+  // original `fresh` snapshot is now stale. Re-read it after envelope recovery
+  // and before creating/committing any new Exact-Auto mutation envelope.
+  const durableGlobalAutoDeductEnabled = loadDurableGlobalAutoDeductEnabled();
+
   const result = reconcileFiredEvents(baseMeds, baseLogs, events, {
-    globalAutoDeductEnabled: input.globalAutoDeductEnabled,
+    globalAutoDeductEnabled: durableGlobalAutoDeductEnabled,
     now: input.now,
   });
 
@@ -449,7 +455,7 @@ async function runOnce(
     status: 'js_ready',
     medications: result.medications,
     logs: result.logs,
-    globalAutoDeductEnabled: fresh.globalAutoDeductEnabled,
+    globalAutoDeductEnabled: durableGlobalAutoDeductEnabled,
     toAcknowledge: result.toAcknowledge,
     createdAt: new Date().toISOString(),
     mutationSeq,
@@ -482,7 +488,7 @@ async function runOnce(
       {
         medications: result.medications,
         logs: result.logs,
-        globalAutoDeductEnabled: fresh.globalAutoDeductEnabled,
+        globalAutoDeductEnabled: durableGlobalAutoDeductEnabled,
       },
       { appliedMutationSeq: mutationSeq }
     );

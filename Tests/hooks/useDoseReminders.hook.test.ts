@@ -421,8 +421,12 @@ describe('useDoseReminders — medication-level Auto (openAlarm)', () => {
   });
 
   it('Medication Auto undefined (default ON): openAlarm does not open modal', () => {
+    // makeMed defaults to autoDeductEnabled: false for the manual suite;
+    // this case must exercise the production rule med.autoDeductEnabled !== false
+    // with the property actually absent.
     const med = makeMed({ id: 'med-default-auto' });
-    // makeMed does not set autoDeductEnabled → treated as ON
+    delete (med as { autoDeductEnabled?: boolean }).autoDeductEnabled;
+    expect(med.autoDeductEnabled).toBeUndefined();
     const { result } = renderHook(() =>
       useDoseReminders({ medications: [med] })
     );

@@ -22,6 +22,7 @@ import {
   markAutoDeductionEventReconciled,
   getOccurrenceSnapshot,
   invalidateAutoDeductionRecurrence,
+  scheduleAutoDeduction,
   type OccurrenceSnapshotResult,
 } from './autoDeductionNative';
 import {
@@ -33,6 +34,7 @@ import {
   settleDoseChange,
 } from './dateCalculations';
 import { pruneDoseConsumption } from './pruneDoseConsumption';
+import { isValidDoseTime, normalizeTimeString } from './doseSchedule';
 import { LEGACY_DOSE_ID } from './notifications';
 import {
   withAutoStockMutationGate,
@@ -171,21 +173,128 @@ export function __setManualRecurrenceInvalidationTestHook(
   manualRecurrenceInvalidationTestHook = hook;
 }
 
+function nextCalendarDateString(calendarDate: string): string | null {
+  const [y, m, d] = calendarDate.split('-').map((n) => Number(n));
+  if (![y, m, d].every(Number.isFinite)) return null;
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + 1);
+  return [
+    String(dt.getFullYear()).padStart(4, '0'),
+    String(dt.getMonth() + 1).padStart(2, '0'),
+    String(dt.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function localEpochMs(calendarDate: string, timeHhmm: string): number | null {
+  const [y, m, d] = calendarDate.split('-').map((n) => Number(n));
+  if (![y, m, d].every(Number.isFinite)) return null;
+  const colon = timeHhmm.indexOf(':');
+  if (colon < 1) return null;
+  const hour = Number(timeHhmm.slice(0, colon));
+  const minute = Number(timeHhmm.slice(colon + 1));
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  const dt = new Date(y, m - 1, d, hour, minute, 0, 0);
+  const epoch = dt.getTime();
+  return Number.isFinite(epoch) ? epoch : null;
+}
+
+function recurrenceDefinition(
+  med: Medication,
+  doseId: string
+): { doseId: string; time: string; amount: number } | null {
+  if (med.autoDeductEnabled === false) return null;
+  const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
+  if (schedule.length > 0) {
+    const dose = schedule.find((d) => d?.id === doseId);
+    if (!dose || !isValidDoseTime(dose.time) || !(Number(dose.amount) > 0)) {
+      return null;
+    }
+    return {
+      doseId: String(dose.id),
+      time: normalizeTimeString(dose.time),
+      amount: Number(dose.amount),
+    };
+  }
+  if (doseId !== LEGACY_DOSE_ID || med.reminderEnabled !== true) return null;
+  if (!med.reminderTime || !isValidDoseTime(med.reminderTime) || !(Number(med.dailyDose) > 0)) {
+    return null;
+  }
+  return {
+    doseId: LEGACY_DOSE_ID,
+    time: normalizeTimeString(med.reminderTime),
+    amount: Number(med.dailyDose),
+  };
+}
+
+async function restoreInvalidatedRecurrences(
+  med: Medication,
+  doseIds: string[],
+  now: Date
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const today = getTodayDateString();
+  const tomorrow = nextCalendarDateString(today);
+  if (!tomorrow) return { ok: false, error: 'invalid_next_date' };
+
+  for (const doseId of doseIds) {
+    const def = recurrenceDefinition(med, doseId);
+    if (!def) continue;
+    for (const calendarDate of [today, tomorrow]) {
+      const epoch = localEpochMs(calendarDate, def.time);
+      if (epoch == null || epoch <= now.getTime() - 2000) continue;
+      const result = await scheduleAutoDeduction({
+        medicationId: med.id,
+        doseId: def.doseId,
+        calendarDate,
+        timeHhmm: def.time,
+        amount: def.amount,
+        scheduledAtEpochMs: epoch,
+      });
+      if (!result.ok && result.error !== 'not_android') {
+        return { ok: false, error: result.error ?? 'schedule_failed' };
+      }
+    }
+  }
+  return { ok: true };
+}
+
+interface RecurrenceInvalidationResult {
+  ok: boolean;
+  error?: string;
+  invalidatedDoseIds: string[];
+}
+
 async function invalidateMedicationRecurrences(
   med: Medication
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<RecurrenceInvalidationResult> {
+  const invalidatedDoseIds: string[] = [];
   for (const doseId of recurrenceDoseIds(med)) {
     const result = manualRecurrenceInvalidationTestHook
       ? await manualRecurrenceInvalidationTestHook(med.id, doseId)
       : await invalidateAutoDeductionRecurrence(med.id, doseId);
     if (!result.ok && result.error !== 'not_android') {
+      if (invalidatedDoseIds.length > 0) {
+        const compensation = await restoreInvalidatedRecurrences(
+          med,
+          invalidatedDoseIds,
+          new Date()
+        );
+        if (!compensation.ok) {
+          return {
+            ok: false,
+            error: `${result.error ?? 'native_invalidation_failed'};compensation:${compensation.error}`,
+            invalidatedDoseIds,
+          };
+        }
+      }
       return {
         ok: false,
         error: result.error ?? 'native_invalidation_failed',
+        invalidatedDoseIds,
       };
     }
+    if (result.ok) invalidatedDoseIds.push(doseId);
   }
-  return { ok: true };
+  return { ok: true, invalidatedDoseIds };
 }
 
 

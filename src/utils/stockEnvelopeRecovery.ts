@@ -34,6 +34,8 @@ export interface ExactAutoEnvelopeStored {
   status: 'js_ready';
   medications: Medication[];
   logs: ConsumptionLog[];
+  /** Phase 4 durable global master switch; absent only on pre-fix envelopes. */
+  globalAutoDeductEnabled?: boolean;
   toAcknowledge: Array<{
     medicationId: string;
     doseId: string;

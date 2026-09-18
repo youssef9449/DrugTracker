@@ -185,6 +185,7 @@ async function runOnce(
         mutationSeq: manualEnv.mutationSeq,
         medications: manualEnv.medications,
         logs: manualEnv.logs,
+        globalAutoDeductEnabled: manualEnv.globalAutoDeductEnabled,
         clear: () => saveManualStockEnvelope(null),
       });
     }
@@ -267,6 +268,7 @@ async function runOnce(
         mutationSeq: existingExact.mutationSeq ?? 0,
         medications: existingExact.medications,
         logs: existingExact.logs,
+        globalAutoDeductEnabled: existingExact.globalAutoDeductEnabled,
         toAcknowledge: existingExact.toAcknowledge,
         clear: () => saveEnvelope(null),
       });
@@ -289,7 +291,11 @@ async function runOnce(
       };
 
       const unified = recoverAllPendingStockEnvelopes(
-        { medications: baseMeds, logs: baseLogs },
+        {
+          medications: baseMeds,
+          logs: baseLogs,
+          globalAutoDeductEnabled: fresh.globalAutoDeductEnabled,
+        },
         pending,
         commit
       );

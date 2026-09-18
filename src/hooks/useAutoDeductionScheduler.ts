@@ -13,7 +13,8 @@ import {
   invalidateAutoDeductionRecurrence,
   scheduleAutoDeduction,
   listScheduledAutoDeductionOccurrences,
-} from '../utils/autoDeductionNative';import { withAutoStockMutationGate } from '../utils/autoDeductionStockGate';
+} from '../utils/autoDeductionNative';
+import { withAutoStockMutationGate } from '../utils/autoDeductionStockGate';
 
 export interface UseAutoDeductionSchedulerOptions {
   medications: Medication[];

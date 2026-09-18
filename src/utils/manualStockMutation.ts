@@ -40,6 +40,7 @@ import {
   withAutoStockMutationGate,
   commitDurableAutoStockState,
   loadStockGeneration,
+  loadDurableGlobalAutoDeductEnabled,
   type AutoStockDurableState,
 } from './autoDeductionStockGate';
 import { allocateMutationSeq } from './stockMutationOrdering';
@@ -327,7 +328,15 @@ async function acknowledgeExactAutoEvents(
 /**
  * Manual durability: envelope (JS state only) → meds+logs → clear.
  */
-function commitWithManualEnvelope(state: AutoStockDurableState): string | null {
+function commitWithManualEnvelope(
+  state: AutoStockDurableState,
+  globalOverride?: boolean
+): string | null {
+  const durableState: AutoStockDurableState = {
+    ...state,
+    globalAutoDeductEnabled:
+      globalOverride ?? state.globalAutoDeductEnabled ?? loadDurableGlobalAutoDeductEnabled(),
+  };
   const alloc = allocateMutationSeq();
   if (!alloc.ok) return alloc.error;
   const mutationSeq = alloc.seq;
@@ -335,8 +344,9 @@ function commitWithManualEnvelope(state: AutoStockDurableState): string | null {
   const envelope: ManualStockEnvelope = {
     version: 1,
     status: 'manual_js_ready',
-    medications: state.medications,
-    logs: state.logs,
+    medications: durableState.medications,
+    logs: durableState.logs,
+    globalAutoDeductEnabled: durableState.globalAutoDeductEnabled,
     createdAt: new Date().toISOString(),
     baseGeneration,
     mutationSeq,
@@ -345,7 +355,7 @@ function commitWithManualEnvelope(state: AutoStockDurableState): string | null {
   if (envErr) return envErr;
 
   // meds+logs+lastApplied must all succeed before clearing recovery evidence.
-  const commitErr = commitDurableAutoStockState(state, {
+  const commitErr = commitDurableAutoStockState(durableState, {
     appliedMutationSeq: mutationSeq,
   });
   if (commitErr) {

@@ -1245,7 +1245,10 @@ export function runGatedAutoDeductToggle(opts: {
       };
     }
 
-    const err = commitWithManualEnvelope({ medications, logs });
+    const err = commitWithManualEnvelope(
+      { medications, logs },
+      opts.enable
+    );
     if (err) {
       // Native invalidation already linearized the old schedule chain. Restore
       // it when the JS commit fails so a failed mutation does not leave the

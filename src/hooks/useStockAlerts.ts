@@ -152,8 +152,9 @@ export function useStockAlerts({
         // clear.
         const claim = getCriticalNotificationClaim(claims, med.id);
         if (claim) {
+          // Same effective projection as status/balance (Global ∧ med).
           const projection = canNotify
-            ? getCriticalAlarmDate(med, getTodayDateString())
+            ? getCriticalAlarmDate(projectedMed, getTodayDateString())
             : null;
           // The scheduler's live armed record: an alarm successfully
           // scheduled for EXACTLY the current projected crossing. It is

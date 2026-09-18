@@ -556,4 +556,59 @@ describe('useStockAlerts — Global Auto-Deduct stock projection', () => {
     );
     expect(sendMock).toHaveBeenCalled();
   });
+
+  it('Global OFF + med ON: future auto-projection alarm claim is stale and cancelled', async () => {
+    // Sufficient today with auto ON would still have a future critical crossing.
+    // Global OFF freezes stock → getCriticalAlarmDate(projected) is null → not live.
+    const med = makeMed({
+      currentPills: 30,
+      dailyDose: 1,
+      autoDeductEnabled: true,
+      lastSyncDate: getTodayDateString(),
+      warningThresholdDays: 5,
+    });
+    const autoProjectionT = getCriticalAlarmDate(med, getTodayDateString());
+    expect(autoProjectionT).not.toBeNull();
+    expect(autoProjectionT!).toBeGreaterThan(Date.now());
+
+    writeClaim('med-1', { claimed: true, alarmTime: autoProjectionT! });
+
+    renderHook(() =>
+      useAlerts({
+        medications: [med],
+        globalAutoDeductEnabled: false,
+      })
+    );
+
+    // Not treated as live armed record under Global OFF.
+    expect(readClaims()['med-1']).toBeUndefined();
+    await vi.waitFor(() => {
+      expect(cancelMock).toHaveBeenCalledWith('med-1');
+    });
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it('Global ON + med ON: live armed record matching current auto projection is preserved', () => {
+    const med = makeMed({
+      currentPills: 30,
+      dailyDose: 1,
+      autoDeductEnabled: true,
+      lastSyncDate: getTodayDateString(),
+      warningThresholdDays: 5,
+    });
+    const projectedT = getCriticalAlarmDate(med, getTodayDateString()) as number;
+    expect(projectedT).toBeGreaterThan(Date.now());
+    writeClaim('med-1', { claimed: true, alarmTime: projectedT });
+
+    renderHook(() =>
+      useAlerts({
+        medications: [med],
+        globalAutoDeductEnabled: true,
+      })
+    );
+
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: projectedT });
+    expect(cancelMock).not.toHaveBeenCalled();
+    expect(sendMock).not.toHaveBeenCalled();
+  });
 });

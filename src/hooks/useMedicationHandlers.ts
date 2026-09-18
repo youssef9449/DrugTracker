@@ -221,7 +221,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     void (async () => {
       const result = await runGatedAutoDeductToggle({
         medicationId,
-        globalAutoDeductEnabled,
+        globalAutoDeductEnabled: globalAutoDeductEnabledRef.current,
       });
       if (result.outcome !== 'applied') {
         if (result.outcome !== 'persist_failed') {
@@ -305,7 +305,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         const result = await runGatedMedicationUpdate({
           editId,
           medData,
-          globalAutoDeductEnabled,
+          globalAutoDeductEnabled: globalAutoDeductEnabledRef.current,
         });
         if (result.outcome !== 'applied') {
           if (result.outcome !== 'persist_failed') {
@@ -333,7 +333,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       id: 'med-' + Date.now(),
       createdAt: new Date().toISOString(),
       lastSyncDate: getTodayDateString(),
-      autoDeductEnabled: globalAutoDeductEnabled,
+      autoDeductEnabled: globalAutoDeductEnabledRef.current,
     };
     setMedications((prev) => [newMed, ...prev]);
     showToast(

@@ -161,11 +161,23 @@ function autoDeductionDefinitionChanged(
  * On web `not_android` is a successful no-op. Real native failure blocks
  * the JS configuration commit so an old authorized alarm cannot survive it.
  */
+let manualRecurrenceInvalidationTestHook:
+  ((medicationId: string, doseId: string) => Promise<{ ok: boolean; error?: string }>) | null = null;
+
+/** @internal test-only */
+export function __setManualRecurrenceInvalidationTestHook(
+  hook: typeof manualRecurrenceInvalidationTestHook
+): void {
+  manualRecurrenceInvalidationTestHook = hook;
+}
+
 async function invalidateMedicationRecurrences(
   med: Medication
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   for (const doseId of recurrenceDoseIds(med)) {
-    const result = await invalidateAutoDeductionRecurrence(med.id, doseId);
+    const result = manualRecurrenceInvalidationTestHook
+      ? await manualRecurrenceInvalidationTestHook(med.id, doseId)
+      : await invalidateAutoDeductionRecurrence(med.id, doseId);
     if (!result.ok && result.error !== 'not_android') {
       return {
         ok: false,

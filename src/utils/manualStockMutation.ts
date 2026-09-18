@@ -1170,6 +1170,93 @@ export function runGatedGlobalAutoDeductToggle(opts: {
   });
 }
 
+export type GatedDeleteMedicationOutcome =
+  | 'applied'
+  | 'missing_med'
+  | 'persist_failed'
+  | 'native_list_failed';
+
+export interface GatedDeleteMedicationResult {
+  outcome: GatedDeleteMedicationOutcome;
+  medications: Medication[];
+  logs: ConsumptionLog[];
+  medicationName?: string;
+  unit?: string;
+  reason?: string;
+}
+
+/**
+ * Delete a medication from the durable stock state.
+ *
+ * Native FIRED events for a deleted medication remain harmless: the existing
+ * Exact Auto reconciler ACKs missing-med occurrences without mutating stock.
+ * Native schedule cleanup is handled by the normal desired-state scheduler
+ * after React reflects the committed deletion.
+ */
+export function runGatedDeleteMedication(opts: {
+  medicationId: string;
+}): Promise<GatedDeleteMedicationResult> {
+  return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
+    const recovered = recoverManualEnvelopeInto(freshIn);
+    if (!recovered.ok) {
+      return {
+        outcome: 'persist_failed' as const,
+        medications: recovered.state.medications,
+        logs: recovered.state.logs,
+        reason: 'persist_failed',
+      };
+    }
+
+    await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
+    const pre = await reconcileExactBeforeLegacySettlement({
+      fresh: recovered.state,
+      globalAutoDeductEnabled: true,
+    });
+    if (pre.nativeListFailed) {
+      return {
+        outcome: 'native_list_failed' as const,
+        medications: pre.state.medications,
+        logs: pre.state.logs,
+        reason: 'native_list_failed',
+      };
+    }
+
+    const med = pre.state.medications.find((m) => m.id === opts.medicationId);
+    if (!med) {
+      return {
+        outcome: 'missing_med' as const,
+        medications: pre.state.medications,
+        logs: pre.state.logs,
+        reason: 'missing_med',
+      };
+    }
+
+    const medications = pre.state.medications.filter((m) => m.id !== opts.medicationId);
+    const err = commitWithManualEnvelope({
+      medications,
+      logs: pre.state.logs,
+    });
+    if (err) {
+      return {
+        outcome: 'persist_failed' as const,
+        medications: pre.state.medications,
+        logs: pre.state.logs,
+        reason: 'persist_failed',
+        medicationName: med.name,
+        unit: med.unit,
+      };
+    }
+
+    return {
+      outcome: 'applied' as const,
+      medications,
+      logs: pre.state.logs,
+      medicationName: med.name,
+      unit: med.unit,
+    };
+  });
+}
+
 export type GatedMedicationUpdateOutcome =
   | 'applied'
   | 'missing_med'

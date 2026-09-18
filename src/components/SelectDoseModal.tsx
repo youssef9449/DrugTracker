@@ -104,9 +104,9 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
     schedule.length > 0 &&
     schedule.every((d) => {
       if (!isRestore) {
-        return isDoseCompletedToday(medication, d, today, now);
+        return isDoseCompletedToday(medication, d, today, now, isAutoActive);
       }
-      const completed = isDoseCompletedToday(medication, d, today, now);
+      const completed = isDoseCompletedToday(medication, d, today, now, isAutoActive);
       const skipped = isDoseSkippedOnDate(medication, d.id, today);
       const consumed = isDoseConsumedOnDate(medication, d.id, today);
       const evidence = getHistoricalRestoreDisplayAmount(
@@ -165,7 +165,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
             </div>
           ) : (
             items.map(({ dose, eventDate }) => {
-              const completed = isDoseCompletedToday(medication, dose, today, now);
+              const completed = isDoseCompletedToday(medication, dose, today, now, isAutoActive);
               const skipped = isDoseSkippedOnDate(medication, dose.id, today);
               const consumed = isDoseConsumedOnDate(medication, dose.id, today);
               const activeDeduction = findActiveDeductionForOccurrence(

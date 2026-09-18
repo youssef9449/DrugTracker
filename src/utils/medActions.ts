@@ -111,6 +111,11 @@ export function resolveRestoreDoseAmount(
     if (amount <= 0) return { ok: false, amount: 0, reason: 'no_dose' };
     return { ok: true, amount, doseId: slot.id };
   }
+  // A stale explicit scheduled doseId must never silently downgrade to the
+  // implicit legacy daily occurrence after the schedule was removed.
+  if (doseId != null && doseId !== '' && doseId !== LEGACY_DOSE_ID) {
+    return { ok: false, amount: 0, reason: 'invalid_dose_id' };
+  }
   const amount = Number(med.dailyDose) || 0;
   if (amount <= 0) return { ok: false, amount: 0, reason: 'no_dose' };
   return { ok: true, amount };
@@ -689,14 +694,27 @@ export function consumeDose(
         reason: 'no_dose',
       };
     }
-  } else if (med.lastConsumedDate === todayStr) {
-    return {
-      updatedMed: null,
-      doseAmount: 0,
-      log: null,
-      reason: 'already_consumed',
-    };
-  } else if (amountOverride !== undefined) {
+  } else {
+    // A stale explicit scheduled doseId must never silently downgrade to the
+    // implicit legacy daily occurrence after the schedule was removed.
+    if (targetDoseId != null && targetDoseId !== '' && targetDoseId !== LEGACY_DOSE_ID) {
+      return {
+        updatedMed: null,
+        doseAmount: 0,
+        log: null,
+        reason: 'invalid_dose_id',
+      };
+    }
+    if (med.lastConsumedDate === todayStr) {
+      return {
+        updatedMed: null,
+        doseAmount: 0,
+        log: null,
+        reason: 'already_consumed',
+      };
+    }
+  }
+  if (amountOverride !== undefined) {
     const n = Number(amountOverride);
     if (!Number.isFinite(n) || n <= 0) {
       return {

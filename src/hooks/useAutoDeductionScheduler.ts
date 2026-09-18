@@ -321,7 +321,7 @@ export function useAutoDeductionScheduler({
               // Fail-closed: keep tracking, skip cancel, retry next pass.
               continue;
             }
-            if (!res.skipped) {
+            if (!res.skipped && gen === generationRef.current) {
               trackedRef.current.delete(key);
             }
           } else {
@@ -348,7 +348,7 @@ export function useAutoDeductionScheduler({
                 // Fail-closed: do not cancel occurrence; keep tracking for retry.
                 continue;
               }
-              if (!res.skipped) {
+              if (!res.skipped && gen === generationRef.current) {
                 trackedRef.current.delete(key);
               }
             } else {
@@ -367,7 +367,11 @@ export function useAutoDeductionScheduler({
       for (const [key, slot] of desired) {
         if (gen !== generationRef.current) return;
         const result = await scheduleExactOccurrenceFromDurable(slot);
-        if (result.ok && !(result as { skipped?: boolean }).skipped) {
+        if (
+          result.ok &&
+          !(result as { skipped?: boolean }).skipped &&
+          gen === generationRef.current
+        ) {
           trackedRef.current.add(key);
         } else if (!result.ok && result.error === 'exact_alarm_permission_denied') {
           break;

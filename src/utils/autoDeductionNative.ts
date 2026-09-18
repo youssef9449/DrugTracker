@@ -3,7 +3,7 @@
  * Safe on web (no-ops). Does NOT reconcile stock (Phase 3).
  */
 
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 import { LEGACY_DOSE_ID } from './notifications';
 
 export interface AutoDeductionEvent {
@@ -21,6 +21,15 @@ export interface MarkReconciledResult {
   ok: boolean;
   changed: boolean;
 }
+
+export interface ExactAutoDeductionFiredEvent {
+  medicationId: string;
+  doseId: string;
+  calendarDate: string;
+  scheduledAtEpochMs: number;
+  amount: number;
+}
+
 
 export interface ScheduleOccurrenceParams {
   medicationId: string;
@@ -68,6 +77,10 @@ export interface CancelOccurrenceResult {
 }
 
 interface AutoDeductionPlugin {
+  addListener(
+    eventName: 'exactAutoDeductionFired',
+    listenerFunc: (event: ExactAutoDeductionFiredEvent) => void
+  ): Promise<PluginListenerHandle>;
   scheduleOccurrence(options: ScheduleOccurrenceParams): Promise<ScheduleOccurrenceResult>;
   cancelOccurrence(options: {
     medicationId: string;
@@ -200,6 +213,15 @@ export interface ListFiredEventsResult {
   ok: boolean;
   events: AutoDeductionEvent[];
   error?: string;
+}
+
+export function addExactAutoDeductionFiredListener(
+  listener: (event: ExactAutoDeductionFiredEvent) => void
+): Promise<PluginListenerHandle | null> {
+  if (!isNativeAndroid()) {
+    return Promise.resolve(null);
+  }
+  return AutoDeduction.addListener('exactAutoDeductionFired', listener);
 }
 
 export async function listFiredAutoDeductionEvents(): Promise<ListFiredEventsResult> {

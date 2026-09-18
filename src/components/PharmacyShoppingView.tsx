@@ -10,7 +10,7 @@ import {
   X,
   MessageSquare,
 } from 'lucide-react';
-import { Medication, PharmacySettings, calculateMedicationStatus, describeOrderInBoxes } from '../types';
+import { Medication, PharmacySettings, calculateMedicationStatus, describeOrderInBoxes, isSolidUnit } from '../types';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { getDepletionDate, effectiveCurrentPills } from '../utils/dateCalculations';
 import {
@@ -749,11 +749,14 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
               <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-2.5 max-h-40 overflow-y-auto space-y-1.5 text-xs">
                 {activeOrderItems.map((item, idx) => {
                   const pkg = describeOrderInBoxes(item.quantity, item.stripsPerBox, item.pillsPerStrip, item.packageSize, item.unit);
+                  const displayQty = pkg || (isSolidUnit(item.unit)
+                    ? pluralizeArabic(Math.max(1, Math.ceil(item.quantity / (item.packageSize || 30))), 'علبة')
+                    : `${item.quantity} ${item.unit}`);
                   return (
                     <div key={idx} className="flex items-center justify-between py-1 border-b border-slate-200/60 last:border-b-0">
                       <span className="font-bold text-slate-800">{item.name}</span>
                       <span className="text-[11px] text-teal-800 bg-teal-50 px-2 py-0.5 rounded-lg border border-teal-200/60 font-semibold">
-                        {pkg || `${item.quantity} ${item.unit}`}
+                        {displayQty}
                       </span>
                     </div>
                   );

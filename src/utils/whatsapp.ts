@@ -1,4 +1,5 @@
-import { Medication, describeOrderInBoxes } from '../types';
+import { Medication, describeOrderInBoxes, isSolidUnit } from '../types';
+import { pluralizeArabic } from '../lib/arabicPlural';
 
 export function normalizeArabicDigits(input: string): string {
   if (!input) return '';
@@ -109,11 +110,13 @@ export function generatePharmacyOrderMessage(
       item.unit
     );
 
-    // If packaging description is more specific than just "X قرص", include it
-    if (packagingDesc && packagingDesc !== `${item.quantity} ${item.unit}`) {
+    if (packagingDesc && (!isSolidUnit(item.unit) || (!packagingDesc.includes('قرص') && !packagingDesc.includes('أقراص') && !packagingDesc.includes('كبسول')))) {
       text += `${idx + 1}. ${item.name} - المطلوب: ${packagingDesc}\n`;
+    } else if (isSolidUnit(item.unit)) {
+      const boxCount = Math.max(1, Math.ceil(item.quantity / (item.packageSize || 30)));
+      text += `${idx + 1}. ${item.name} - المطلوب: ${pluralizeArabic(boxCount, 'علبة')}\n`;
     } else {
-      text += `${idx + 1}. ${item.name} - الكمية: ${item.quantity} ${item.unit}\n`;
+      text += `${idx + 1}. ${item.name} - المطلوب: ${packagingDesc || `${item.quantity} ${item.unit}`}\n`;
     }
   });
 

@@ -317,8 +317,7 @@ export function describeOrderInBoxes(
 
   // Exact match — full boxes only.
   if (boxes > 0 && remainderAfterBoxes === 0) {
-    const boxWord = pluralizeArabic(boxes, boxWordLabel);
-    return `${boxWord} (${pillTotalWord})`;
+    return pluralizeArabic(boxes, boxWordLabel);
   }
 
   // Boxes + strips (and possibly loose pills) for solid medications.
@@ -328,26 +327,31 @@ export function describeOrderInBoxes(
     const boxWord = pluralizeArabic(boxes, boxWordLabel);
     const parts: string[] = [boxWord];
     if (strips > 0) parts.push(pluralizeArabic(strips, 'شريط'));
-    if (loosePills > 0) parts.push(pluralizeArabic(loosePills, unit));
-    return `${parts.join(' و ')} (${pillTotalWord})`;
+    if (loosePills > 0) parts.push(pluralizeArabic(Math.ceil(loosePills / stripSize), 'شريط'));
+    return parts.join(' و ');
   }
 
   // Boxes + remainder with no strips (e.g. liquid bottles or loose units)
   if (boxes > 0 && !stripSize && remainderAfterBoxes > 0) {
+    if (isSolid) {
+      return pluralizeArabic(boxes + 1, boxWordLabel);
+    }
     const boxWord = pluralizeArabic(boxes, boxWordLabel);
     const looseWord = pluralizeArabic(remainderAfterBoxes, unit);
-    return `${boxWord} و ${looseWord} (${pillTotalWord})`;
+    return `${boxWord} و ${looseWord}`;
   }
 
   // Strips only (no boxes), possibly + loose pills.
   if (boxes === 0 && stripSize && remainderAfterBoxes > 0) {
-    const strips = Math.floor(remainderAfterBoxes / stripSize);
-    const loosePills = remainderAfterBoxes % stripSize;
+    const strips = Math.ceil(remainderAfterBoxes / stripSize);
     if (strips > 0) {
-      const parts: string[] = [pluralizeArabic(strips, 'شريط')];
-      if (loosePills > 0) parts.push(pluralizeArabic(loosePills, unit));
-      return `${parts.join(' و ')} (${pillTotalWord})`;
+      return pluralizeArabic(strips, 'شريط');
     }
+  }
+
+  // Solid with no strips but targetPills > 0
+  if (boxes === 0 && !stripSize && isSolid && targetPills > 0) {
+    return pluralizeArabic(1, boxWordLabel);
   }
 
   // No boxes, no strips — just the total count in unit.

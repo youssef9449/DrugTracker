@@ -15,7 +15,6 @@ import { playSuccessChime } from '../utils/sound';
  */
 export function useNativeActionHandlers(opts: {
   medications: Medication[];
-  handleTakeDoseFromAlarm: (med: Medication, doseId?: string) => void;
   handleTakeDoseFromAlarmById: (medicationId: string, doseId?: string) => void;
   openAlarm: (medId: string, doseId?: string) => void;
   soundEnabled: boolean;
@@ -26,7 +25,6 @@ export function useNativeActionHandlers(opts: {
 }): void {
   const {
     medications,
-    handleTakeDoseFromAlarm,
     handleTakeDoseFromAlarmById,
     openAlarm,
     soundEnabled,

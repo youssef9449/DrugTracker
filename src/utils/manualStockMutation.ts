@@ -414,7 +414,7 @@ export function runGatedManualConsume(opts: {
     const pre = await reconcileExactBeforeLegacySettlement({
       fresh: recovered.state,
       globalAutoDeductEnabled: true,
-      now: opts.now,
+      now,
     });
     if (pre.nativeListFailed) {
       // Fail-closed: do not run legacy or manual mutation when native read failed.
@@ -593,7 +593,7 @@ export function runGatedManualRestore(opts: {
     const pre = await reconcileExactBeforeLegacySettlement({
       fresh: recovered.state,
       globalAutoDeductEnabled: true,
-      now: opts.now,
+      now,
     });
     if (pre.nativeListFailed) {
       // Fail-closed: do not run legacy or manual mutation when native read failed.
@@ -897,7 +897,7 @@ export function runGatedRefill(opts: {
     const pre = await reconcileExactBeforeLegacySettlement({
       fresh: recovered.state,
       globalAutoDeductEnabled: true,
-      now: opts.now,
+      now,
     });
     if (pre.nativeListFailed) {
       // Fail-closed: do not run legacy or manual mutation when native read failed.
@@ -1011,7 +1011,7 @@ export function runGatedUndoRefill(opts: {
     const pre = await reconcileExactBeforeLegacySettlement({
       fresh: recovered.state,
       globalAutoDeductEnabled: true,
-      now: opts.now,
+      now,
     });
     if (pre.nativeListFailed) {
       // Fail-closed: do not run legacy or manual mutation when native read failed.
@@ -1247,10 +1247,7 @@ export function runGatedAutoDeductToggle(opts: {
       };
     }
 
-    const err = commitWithManualEnvelope(
-      { medications, logs },
-      opts.enable
-    );
+    const err = commitWithManualEnvelope({ medications, logs });
     if (err) {
       // Native invalidation already linearized the old schedule chain. Restore
       // it when the JS commit fails so a failed mutation does not leave the
@@ -1375,7 +1372,11 @@ export function runGatedGlobalAutoDeductToggle(opts: {
     const logs =
       settleLogs.length > 0 ? [...settleLogs, ...fresh.logs] : fresh.logs;
 
-    const err = commitWithManualEnvelope({ medications, logs });
+    const err = commitWithManualEnvelope({
+      medications,
+      logs,
+      globalAutoDeductEnabled: opts.enable,
+    });
     if (err) {
       for (const invalidated of invalidatedMeds) {
         if (invalidated.doseIds.length > 0) {

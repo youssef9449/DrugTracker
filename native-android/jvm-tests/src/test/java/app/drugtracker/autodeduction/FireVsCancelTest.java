@@ -48,6 +48,33 @@ public class FireVsCancelTest {
      * is that public gate — do not call the generic scheduler after CANCELLED as if it
      * were the recurrence decision.
      */
+    /**
+     * A durable pending-fire fallback is still a new FIRED outcome and must wake
+     * event-driven JS reconciliation immediately. A duplicate FIRED row must not
+     * emit a second wake-up because its original durable transition already did.
+     */
+    @Test
+    public void pendingFireFailure_wakesJavascript_butDuplicateDoesNot() {
+        AutoDeductionScheduler.FireResult pendingFailure =
+                new AutoDeductionScheduler.FireResult(
+                        AutoDeductionScheduler.FireResult.Status.FAILED, true);
+        AutoDeductionScheduler.FireResult duplicate =
+                new AutoDeductionScheduler.FireResult(
+                        AutoDeductionScheduler.FireResult.Status.ALREADY_EXISTS, false);
+        AutoDeductionScheduler.FireResult noPendingFailure =
+                new AutoDeductionScheduler.FireResult(
+                        AutoDeductionScheduler.FireResult.Status.FAILED, false);
+        AutoDeductionScheduler.FireResult cancelled =
+                new AutoDeductionScheduler.FireResult(
+                        AutoDeductionScheduler.FireResult.Status.CANCELLED, false);
+
+        assertTrue(AutoDeductionReceiver.shouldNotifyJavascript(pendingFailure));
+        assertFalse(AutoDeductionReceiver.shouldNotifyJavascript(duplicate));
+        assertFalse(AutoDeductionReceiver.shouldNotifyJavascript(noPendingFailure));
+        assertFalse(AutoDeductionReceiver.shouldNotifyJavascript(cancelled));
+        assertFalse(AutoDeductionReceiver.shouldNotifyJavascript(null));
+    }
+
     @Test
     public void cancelFirst_fireReturnsCancelled_noFiredNoPendingNoRecurrence() {
         String date = futureCalendarDate(2);

@@ -104,6 +104,15 @@ public final class AutoDeductionScheduler {
     /** Test-only: force restoreFutureSchedules to report ok=false. */
     volatile boolean forceRestoreFutureFailureForTest = false;
     /**
+     * Test-only: force failure of sch: fireRetryCount marker commit inside
+     * {@link #scheduleFireRetry}.
+     */
+    volatile boolean forceFireRetryScheduleMarkerCommitFailureForTest = false;
+    /**
+     * Test-only: force failure of independent fire-retry evidence commit.
+     */
+    volatile boolean forceFireRetryEvidenceCommitFailureForTest = false;
+    /**
      * Test-only: when true, {@link #allocateOrderingTokenLocked()} returns null
      * (simulating a durable ordering-token allocation failure) to exercise the
      * Issue #241 fail-closed path. Production never sets this; the durable
@@ -1089,7 +1098,9 @@ public final class AutoDeductionScheduler {
      *
      * @param nextRetryCount 1-based retry index carried in
      *        {@link AutoDeductionContract#EXTRA_FIRE_RETRY_COUNT}
-     * @return true only when AlarmManager accepted the retry alarm
+     * @return true only when required durable writes succeeded AND AlarmManager
+     *         accepted the retry alarm. Fail-closed: marker or independent-evidence
+     *         commit failure returns false without scheduling.
      */
     boolean scheduleFireRetry(
             String medicationId,
@@ -1161,17 +1172,29 @@ public final class AutoDeductionScheduler {
                     persistedRetryCount = Math.max(previousRetryCount, nextRetryCount);
                     current.put(FIELD_FIRE_RETRY_COUNT, persistedRetryCount);
 
-                    if (!schedulePrefs.edit().putString(prefKey, current.toString()).commit()) {
-                        Log.e(TAG, "fire retry schedule-metadata marker commit failed for " + key);
+                    boolean markerCommitted =
+                            !forceFireRetryScheduleMarkerCommitFailureForTest
+                            && schedulePrefs.edit()
+                                    .putString(prefKey, current.toString())
+                                    .commit();
+                    if (!markerCommitted) {
+                        Log.e(TAG, "fire retry schedule-metadata marker commit failed for "
+                                + key + " — fail-closed, no alarm");
+                        return false;
                     }
                 } catch (JSONException e) {
                     Log.e(TAG, "fire retry ownership metadata malformed for " + key, e);
                     return false;
                 }
-                // Ownership OK — now refresh independent evidence.
-                recordIndependentFireRetryEvidenceLocked(
+                // Ownership OK + marker durable — now refresh independent evidence.
+                boolean evidenceOk = recordIndependentFireRetryEvidenceLocked(
                         medicationId, doseId, calendarDate, scheduledAtEpochMs, amount,
                         timeHhmm, recurrenceGeneration, scheduleVersion, persistedRetryCount);
+                if (!evidenceOk) {
+                    Log.e(TAG, "fire retry independent evidence commit failed for "
+                            + key + " — fail-closed, no alarm");
+                    return false;
+                }
             } else {
                 // No sch: — must not invent evidence; only continue from prior failure evidence.
                 JSONObject existing = getIndependentFireRetryEvidence(
@@ -1183,9 +1206,14 @@ public final class AutoDeductionScheduler {
                 Log.i(TAG, "fire retry: schedule metadata missing — using independent evidence for " + key);
                 int prior = existing.optInt("retryCount", 0);
                 persistedRetryCount = Math.max(prior, nextRetryCount);
-                recordIndependentFireRetryEvidenceLocked(
+                boolean evidenceOk = recordIndependentFireRetryEvidenceLocked(
                         medicationId, doseId, calendarDate, scheduledAtEpochMs, amount,
                         timeHhmm, recurrenceGeneration, scheduleVersion, persistedRetryCount);
+                if (!evidenceOk) {
+                    Log.e(TAG, "fire retry independent evidence commit failed (no sch:) for "
+                            + key + " — fail-closed, no alarm");
+                    return false;
+                }
             }
 
             try {
@@ -1274,7 +1302,8 @@ public final class AutoDeductionScheduler {
             obj.put("scheduleVersion", scheduleVersion != null ? scheduleVersion : "");
             obj.put("retryCount", count);
             obj.put("updatedAtEpochMs", System.currentTimeMillis());
-            boolean ok = fireRetryPrefs.edit().putString(prefKey, obj.toString()).commit();
+            boolean ok = !forceFireRetryEvidenceCommitFailureForTest
+                    && fireRetryPrefs.edit().putString(prefKey, obj.toString()).commit();
             if (!ok) {
                 Log.e(TAG, "independent fire-retry evidence commit failed for " + key);
             } else {

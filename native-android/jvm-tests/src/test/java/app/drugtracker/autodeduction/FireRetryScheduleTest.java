@@ -521,4 +521,62 @@ public class FireRetryScheduleTest {
                 || fr.pendingRecorded);
         assertNull(s.getIndependentFireRetryEvidence("med", "dose", date));
     }
+
+    @Test
+    public void scheduleFireRetry_scheduleMarkerCommitFailure_failClosed()
+            throws Exception {
+        String date = futureCalendarDate(7);
+        long epoch = futureEpochMs(date, "10:00");
+        AutoDeductionScheduler s = newScheduler();
+        AutoDeductionScheduler.ScheduleResult sr =
+                s.scheduleOccurrence("med", "dose", date, "10:00", 1.0, epoch);
+        assertTrue(sr.ok);
+        String key = AutoDeductionContract.occurrenceKey("med", "dose", date);
+        String prefKey = "sch:" + key;
+        String raw = schedulePrefs().getString(prefKey, null);
+        assertNotNull(raw);
+        JSONObject meta = new JSONObject(raw);
+        String ver = meta.optString(AutoDeductionScheduler.FIELD_SCHEDULE_VERSION, "");
+        long gen = meta.optLong(AutoDeductionScheduler.FIELD_RECURRENCE_GENERATION, 0L);
+
+        int alarmsBefore = alarmCount();
+        s.forceFireRetryScheduleMarkerCommitFailureForTest = true;
+        try {
+            assertFalse(s.scheduleFireRetry(
+                    "med", "dose", date, epoch, 1.0, "10:00", gen, ver, 1));
+        } finally {
+            s.forceFireRetryScheduleMarkerCommitFailureForTest = false;
+        }
+        assertEquals("no retry alarm on marker commit failure", alarmsBefore, alarmCount());
+        assertNull(
+                "independent evidence must not be written after marker failure",
+                s.getIndependentFireRetryEvidence("med", "dose", date));
+    }
+
+    @Test
+    public void scheduleFireRetry_evidenceCommitFailure_failClosed()
+            throws Exception {
+        String date = futureCalendarDate(8);
+        long epoch = futureEpochMs(date, "11:00");
+        AutoDeductionScheduler s = newScheduler();
+        AutoDeductionScheduler.ScheduleResult sr =
+                s.scheduleOccurrence("med", "dose", date, "11:00", 1.0, epoch);
+        assertTrue(sr.ok);
+        String key = AutoDeductionContract.occurrenceKey("med", "dose", date);
+        String raw = schedulePrefs().getString("sch:" + key, null);
+        assertNotNull(raw);
+        JSONObject meta = new JSONObject(raw);
+        String ver = meta.optString(AutoDeductionScheduler.FIELD_SCHEDULE_VERSION, "");
+        long gen = meta.optLong(AutoDeductionScheduler.FIELD_RECURRENCE_GENERATION, 0L);
+
+        int alarmsBefore = alarmCount();
+        s.forceFireRetryEvidenceCommitFailureForTest = true;
+        try {
+            assertFalse(s.scheduleFireRetry(
+                    "med", "dose", date, epoch, 1.0, "11:00", gen, ver, 1));
+        } finally {
+            s.forceFireRetryEvidenceCommitFailureForTest = false;
+        }
+        assertEquals("no retry alarm on evidence commit failure", alarmsBefore, alarmCount());
+    }
 }

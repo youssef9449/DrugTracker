@@ -572,7 +572,7 @@ export default function App() {
     filteredMedications,
     alertsCount,
     sufficientCount,
-  } = useDerivedMedications(medications, logs, filter, searchQuery);
+  } = useDerivedMedications(medications, logs, filter, searchQuery, globalAutoDeductEnabled);
 
   const openAdd = () => {
     setEditingMedication(null);

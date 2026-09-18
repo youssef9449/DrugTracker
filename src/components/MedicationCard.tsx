@@ -22,6 +22,7 @@ import {
   getCardDoseToggleTarget,
   getAutoRestorableDose,
   isMedicationAutoDeductActive,
+  medicationForStockProjection,
 } from '../utils/doseSchedule';
 import { getHistoricalRestoreDisplayAmount } from '../utils/medActions';
 import { pluralizeArabic } from '../lib/arabicPlural';
@@ -140,15 +141,17 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   globalAutoDeductEnabled = true,
 }) => {
   const isAutoActive = isMedicationAutoDeductActive(medication, globalAutoDeductEnabled);
-  const statusInfo = calculateMedicationStatus(medication);
-  const depletion = getDepletionDate(medication);
+  // Stock/status projection follows effective Auto-Deduct (global ∧ med).
+  const stockMed = medicationForStockProjection(medication, globalAutoDeductEnabled);
+  const statusInfo = calculateMedicationStatus(stockMed);
+  const depletion = getDepletionDate(stockMed);
   const isSolid = isSolidUnit(medication.unit);
   const hasStrips = isSolid && Boolean(medication.stripsPerBox && medication.pillsPerStrip);
   // Use the DYNAMIC balance (projected from currentPills + lastSyncDate)
   // — never the raw snapshot. This keeps the displayed count correct
   // even if the app was closed for many days and the snapshot hasn't
-  // been re-settled yet.
-  const effPills = effectiveCurrentPills(medication);
+  // been re-settled yet. When Global OFF, projection freezes at snapshot.
+  const effPills = effectiveCurrentPills(stockMed);
   const stripsDesc = isSolid
     ? describeStockInStrips(
         effPills,

@@ -32,6 +32,27 @@ export function isMedicationAutoDeductActive(
   return globalAutoDeductEnabled !== false && medication.autoDeductEnabled !== false;
 }
 
+/**
+ * UI-only view of a medication for stock/status projection.
+ * When effective Auto-Deduct is inactive (Global OFF or med preference OFF),
+ * returns a shallow copy with autoDeductEnabled=false so
+ * effectiveCurrentPills / calculateMedicationStatus / getDepletionDate
+ * freeze at the stored snapshot — matching isMedicationAutoDeductActive.
+ * Does not mutate durable state.
+ */
+export function medicationForStockProjection(
+  medication: Medication,
+  globalAutoDeductEnabled: boolean
+): Medication {
+  if (isMedicationAutoDeductActive(medication, globalAutoDeductEnabled)) {
+    return medication;
+  }
+  if (medication.autoDeductEnabled === false) {
+    return medication;
+  }
+  return { ...medication, autoDeductEnabled: false };
+}
+
 /** Sensible UI maximum for doses per day (compact mobile form). */
 export const MAX_DOSES_PER_DAY = 6;
 

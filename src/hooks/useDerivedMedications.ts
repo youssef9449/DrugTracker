@@ -1,24 +1,29 @@
 import { useMemo } from 'react';
 import type { Medication, ConsumptionLog } from '../types';
 import { calculateMedicationStatus } from '../types';
+import { medicationForStockProjection } from '../utils/doseSchedule';
 
 /**
  * Derived medication lists and counts used by the inventory UI.
- * Extracted from App.tsx with identical memoization semantics.
+ * Stock/status projection uses effective Auto-Deduct
+ * (global ∧ medication) via medicationForStockProjection.
  */
 export function useDerivedMedications(
   medications: Medication[],
   logs: ConsumptionLog[],
   filter: 'all' | 'alerts' | 'sufficient',
-  searchQuery: string
+  searchQuery: string,
+  globalAutoDeductEnabled: boolean = true
 ) {
   const medicationsWithStatus = useMemo(
     () =>
       medications.map((med) => ({
         med,
-        statusInfo: calculateMedicationStatus(med),
+        statusInfo: calculateMedicationStatus(
+          medicationForStockProjection(med, globalAutoDeductEnabled)
+        ),
       })),
-    [medications]
+    [medications, globalAutoDeductEnabled]
   );
 
   // #89: Precompute a Map<medId, lastRefillLog> so the per-card render

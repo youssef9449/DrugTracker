@@ -196,7 +196,12 @@ public class AutoDeductionPlugin extends Plugin {
             AutoDeductionScheduler.OccurrenceSnapshot snap =
                     scheduler.getOccurrenceSnapshot(medicationId, doseId, calendarDate);
             JSObject ret = new JSObject();
-            ret.put("ok", true);
+            ret.put("ok", snap.ok);
+            if (!snap.ok) {
+                ret.put("error", snap.error != null ? snap.error : "snapshot_failed");
+                call.resolve(ret);
+                return;
+            }
             ret.put("status", snap.status.name());
             if (snap.amount != null) {
                 ret.put("amount", snap.amount.doubleValue());

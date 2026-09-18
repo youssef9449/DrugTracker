@@ -175,6 +175,41 @@ public class OccurrenceSnapshotTest {
     }
 
     /**
+     * Persistence failure while terminalizing a malformed FIRED row must
+     * propagate as an explicit native lookup failure, never as ABSENT.
+     */
+    @Test
+    public void malformedFiredTerminalizationCommitFailure_returnsFailure_notAbsent() throws Exception {
+        String date = "2026-09-13";
+        String key = AutoDeductionContract.occurrenceKey("med", "dose", date);
+        JSONObject obj = new JSONObject();
+        obj.put("medicationId", "med");
+        obj.put("doseId", "dose");
+        obj.put("calendarDate", date);
+        obj.put("amount", 0.0);
+        obj.put("status", AutoDeductionContract.STATUS_FIRED);
+        Phase2TestSupport.eventPrefs().edit()
+                .putString(Phase2TestSupport.evtKey(key), obj.toString())
+                .commit();
+
+        AutoDeductionEventStore.__setTestForceCommitResult(false);
+        try {
+            AutoDeductionScheduler.OccurrenceSnapshot snap =
+                    newScheduler().getOccurrenceSnapshot("med", "dose", date);
+            assertFalse(snap.ok);
+            assertEquals("rejected_persist_failed", snap.error);
+            assertNull(snap.amount);
+            // With no schedule metadata, ABSENT would prove the failure was
+            // incorrectly collapsed into ordinary absence.
+            assertEquals(
+                    AutoDeductionScheduler.OccurrenceSnapshot.Status.ABSENT,
+                    snap.status);
+        } finally {
+            AutoDeductionEventStore.__setTestForceCommitResult(null);
+        }
+    }
+
+    /**
      * Positive control: a VALID FIRED row (correct identity, valid positive
      * amount) keeps reporting FIRED with the exact event amount — the
      * REJECTED terminalization path must never swallow valid events.

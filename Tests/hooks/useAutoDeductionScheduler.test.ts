@@ -100,8 +100,19 @@ describe('multi-dose amount isolation', () => {
 });
 
 describe('legacy single-dose', () => {
+  it('does not schedule a legacy exact occurrence when reminder timing is disabled', () => {
+    const med = baseMed({
+      reminderEnabled: false,
+      reminderTime: '08:30',
+      dailyDose: 2,
+      doseSchedule: undefined,
+    });
+    expect(getAutoDeductionSlotsForDate(med, '2026-09-14')).toEqual([]);
+  });
+
   it('uses LEGACY_DOSE_ID and dailyDose', () => {
     const med = baseMed({
+      reminderEnabled: true,
       reminderTime: '08:30',
       dailyDose: 2,
       doseSchedule: undefined,

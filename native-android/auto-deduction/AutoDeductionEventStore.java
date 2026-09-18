@@ -268,6 +268,146 @@ public final class AutoDeductionEventStore {
     }
 
     /**
+     * Explicit result for a FIRED occurrence lookup.
+     *
+     * ok=true + event=null means the FIRED occurrence is not available to the
+     * caller (absent, already terminal, or successfully terminalized during
+     * this lookup). ok=false means the lookup could not safely establish that
+     * fact because a required terminal persistence operation failed.
+     */
+    public static final class EventLookupResult {
+        public final boolean ok;
+        public final JSONObject event;
+        public final String error;
+
+        private EventLookupResult(boolean ok, JSONObject event, String error) {
+            this.ok = ok;
+            this.event = event;
+            this.error = error;
+        }
+
+        public static EventLookupResult found(JSONObject event) {
+            return new EventLookupResult(true, event, null);
+        }
+
+        public static EventLookupResult absent() {
+            return new EventLookupResult(true, null, null);
+        }
+
+        public static EventLookupResult failure(String error) {
+            return new EventLookupResult(
+                    false,
+                    null,
+                    error != null && !error.isEmpty() ? error : "event_lookup_failed");
+        }
+    }
+
+    /** Parsed medicationId + doseId + calendarDate from an evt: storage key. */
+    private static final class StorageIdentity {
+        final String medicationId;
+        final String doseId;
+        final String calendarDate;
+
+        StorageIdentity(String medicationId, String doseId, String calendarDate) {
+            this.medicationId = medicationId;
+            this.doseId = doseId;
+            this.calendarDate = calendarDate;
+        }
+    }
+
+    /** Must match the separator used by AutoDeductionContract.occurrenceKey(). */
+    private static final char OCCURRENCE_KEY_SEPARATOR = '\u001f';
+
+    /**
+     * Parse the exact identity encoded in an evt: storage key.
+     * Returns null when the key cannot represent exactly one canonical
+     * medicationId + doseId + calendarDate occurrence.
+     */
+    private static StorageIdentity parseStorageKeyIdentity(String prefKey) {
+        if (prefKey == null || !prefKey.startsWith(KEY_EVENT_PREFIX)) {
+            return null;
+        }
+        String encoded = prefKey.substring(KEY_EVENT_PREFIX.length());
+        int first = encoded.indexOf(OCCURRENCE_KEY_SEPARATOR);
+        int second = first >= 0
+                ? encoded.indexOf(OCCURRENCE_KEY_SEPARATOR, first + 1)
+                : -1;
+        if (first <= 0 || second <= first + 1 || second >= encoded.length() - 1) {
+            return null;
+        }
+        if (encoded.indexOf(OCCURRENCE_KEY_SEPARATOR, second + 1) >= 0) {
+            return null;
+        }
+        return new StorageIdentity(
+                encoded.substring(0, first),
+                encoded.substring(first + 1, second),
+                encoded.substring(second + 1));
+    }
+
+    private static boolean storageIdentityMatchesPayload(
+            StorageIdentity identity,
+            JSONObject o
+    ) {
+        if (identity == null || o == null) return false;
+        String medId = o.optString("medicationId", "");
+        String doseId = o.optString("doseId", "");
+        String calendarDate = o.optString("calendarDate", "");
+        if (medId.trim().isEmpty() || doseId.trim().isEmpty()
+                || !AutoDeductionContract.isValidCalendarDate(calendarDate.trim())) {
+            return false;
+        }
+        return identity.medicationId.equals(medId)
+                && identity.doseId.equals(doseId)
+                && identity.calendarDate.equals(calendarDate);
+    }
+
+    /**
+     * Terminalize one malformed FIRED row while EventStore.LOCK is held.
+     * A failed commit is a lookup FAILURE, never an ordinary ABSENT result.
+     */
+    private EventLookupResult terminalizeFiredRowLocked(
+            String prefKey,
+            JSONObject row,
+            String rejectionReason
+    ) {
+        try {
+            row.put("status", AutoDeductionContract.STATUS_REJECTED);
+            row.put("rejectedAt", System.currentTimeMillis());
+            row.put("rejectionReason", rejectionReason);
+            SharedPreferences.Editor editor = prefs.edit();
+            editor.putString(prefKey, row.toString());
+            if (!commitEditor(editor)) {
+                Log.e(TAG, "REJECTED terminalization commit failed for " + prefKey);
+                return EventLookupResult.failure("rejected_persist_failed");
+            }
+            return EventLookupResult.absent();
+        } catch (JSONException e) {
+            Log.e(TAG, "failed to terminalize FIRED row: " + prefKey, e);
+            return EventLookupResult.failure("rejected_persist_failed");
+        }
+    }
+
+    private EventLookupResult terminalizeInvalidJsonLocked(String prefKey) {
+        try {
+            JSONObject rejected = new JSONObject();
+            rejected.put("status", AutoDeductionContract.STATUS_REJECTED);
+            rejected.put("rejectedAt", System.currentTimeMillis());
+            rejected.put("rejectionReason", "invalid_json");
+            rejected.put("storageKey", prefKey);
+            SharedPreferences.Editor editor = prefs.edit();
+            editor.putString(prefKey, rejected.toString());
+            if (!commitEditor(editor)) {
+                Log.e(TAG, "REJECTED terminalization commit failed for " + prefKey);
+                return EventLookupResult.failure("rejected_persist_failed");
+            }
+            return EventLookupResult.absent();
+        } catch (JSONException e) {
+            Log.e(TAG, "failed to build REJECTED record for invalid JSON: " + prefKey, e);
+            return EventLookupResult.failure("rejected_persist_failed");
+        }
+    }
+
+    /**
      * Result of an acknowledgement attempt.
      * <ul>
      *   <li>{@code ok=true, changed=true} — FIRED → RECONCILED transition succeeded</li>
@@ -357,12 +497,15 @@ public final class AutoDeductionEventStore {
                     if (!AutoDeductionContract.STATUS_FIRED.equals(status)) {
                         continue;
                     }
-                    if (isMalformedFired(o) || !storageKeyMatchesPayload(e.getKey(), o)) {
+                    boolean malformed = isMalformedFired(o);
+                    StorageIdentity storageIdentity = parseStorageKeyIdentity(e.getKey());
+                    boolean identityMismatch = !storageIdentityMatchesPayload(storageIdentity, o);
+                    if (malformed || identityMismatch) {
                         o.put("status", AutoDeductionContract.STATUS_REJECTED);
                         o.put("rejectedAt", System.currentTimeMillis());
                         o.put(
                                 "rejectionReason",
-                                isMalformedFired(o) ? "malformed_fields" : "identity_mismatch");
+                                malformed ? "malformed_fields" : "identity_mismatch");
                         if (editor == null) {
                             editor = prefs.edit();
                         }
@@ -437,96 +580,52 @@ public final class AutoDeductionEventStore {
         return false;
     }
     /**
-     * True when the durable evt: storage key encodes exactly the same
-     * medicationId + doseId + calendarDate as the FIRED payload.
-     * The storage key is part of the occurrence identity and must not disagree
-     * with the payload identity, even when all payload fields are individually valid.
-     */
-    private static boolean storageKeyMatchesPayload(String prefKey, JSONObject o) {
-        if (prefKey == null || !prefKey.startsWith(KEY_EVENT_PREFIX) || o == null) {
-            return false;
-        }
-        String medId = o.optString("medicationId", "").trim();
-        String doseId = o.optString("doseId", "").trim();
-        String calendarDate = o.optString("calendarDate", "").trim();
-        if (medId.isEmpty() || doseId.isEmpty()
-                || !AutoDeductionContract.isValidCalendarDate(calendarDate)) {
-            return false;
-        }
-        String expectedPrefKey = KEY_EVENT_PREFIX
-                + AutoDeductionContract.occurrenceKey(medId, doseId, calendarDate);
-        return prefKey.equals(expectedPrefKey);
-    }
-
-    /**
-     * Promote pending fires, then return the unreconciled FIRED event for one
-     * occurrence identity, or null if absent / already RECONCILED.
+     * Promote pending fires, then return an explicit FIRED lookup result for one
+     * occurrence identity. A malformed row that cannot be durably terminalized
+     * is returned as FAILURE so callers cannot fall through to SCHEDULED/ABSENT.
      * Nested under EventStore.LOCK after caller holds SCHEDULE_LOCK.
      */
-    public JSONObject getFiredUnreconciledEvent(
+    public EventLookupResult getFiredUnreconciledEvent(
             String medicationId, String doseId, String calendarDate) {
         promotePendingFires();
         String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
         String prefKey = KEY_EVENT_PREFIX + key;
         synchronized (LOCK) {
             String raw = prefs.getString(prefKey, null);
-            if (raw == null) return null;
+            if (raw == null) return EventLookupResult.absent();
             try {
                 JSONObject obj = new JSONObject(raw);
                 String status = obj.optString("status", "");
                 if (!AutoDeductionContract.STATUS_FIRED.equals(status)) {
-                    return null;
+                    return EventLookupResult.absent();
                 }
-                // Payload identity must match the occurrence key used to read the row.
-                String rowMed = obj.optString("medicationId", "").trim();
-                String rowDose = obj.optString("doseId", "").trim();
-                String rowDate = obj.optString("calendarDate", "").trim();
-                boolean identityOk =
+
+                StorageIdentity storageIdentity = parseStorageKeyIdentity(prefKey);
+                String rowMed = obj.optString("medicationId", "");
+                String rowDose = obj.optString("doseId", "");
+                String rowDate = obj.optString("calendarDate", "");
+                boolean requestIdentityMatches =
                         medicationId.equals(rowMed)
                         && doseId.equals(rowDose)
                         && calendarDate.equals(rowDate);
-                if (!identityOk || !storageKeyMatchesPayload(prefKey, obj) || isMalformedFired(obj)) {
-                    // Terminalize mismatched / malformed payload; never return as FIRED.
-                    try {
-                        obj.put("status", AutoDeductionContract.STATUS_REJECTED);
-                        obj.put("rejectedAt", System.currentTimeMillis());
-                        obj.put("rejectionReason", "malformed_fields");
-                        SharedPreferences.Editor editor = prefs.edit();
-                        editor.putString(prefKey, obj.toString());
-                        boolean ok = commitEditor(editor);
-                        if (!ok) {
-                            Log.e(TAG, "REJECTED terminalization commit failed for "
-                                    + prefKey + " — row remains retryable");
-                        }
-                    } catch (JSONException writeEx) {
-                        Log.e(TAG, "failed to terminalize mismatched FIRED row: "
-                                + prefKey, writeEx);
-                    }
-                    return null;
+                boolean malformed = isMalformedFired(obj);
+                boolean storageIdentityMatches =
+                        storageIdentityMatchesPayload(storageIdentity, obj);
+
+                if (malformed || !storageIdentityMatches || !requestIdentityMatches) {
+                    String rejectionReason = malformed
+                            ? "malformed_fields"
+                            : "identity_mismatch";
+                    return terminalizeFiredRowLocked(prefKey, obj, rejectionReason);
                 }
-                return obj;
+                return EventLookupResult.found(obj);
             } catch (JSONException e) {
-                // Invalid JSON under occurrence key → REJECTED, not FIRED.
-                try {
-                    JSONObject rejected = new JSONObject();
-                    rejected.put("status", AutoDeductionContract.STATUS_REJECTED);
-                    rejected.put("rejectedAt", System.currentTimeMillis());
-                    rejected.put("rejectionReason", "invalid_json");
-                    rejected.put("storageKey", prefKey);
-                    SharedPreferences.Editor editor = prefs.edit();
-                    editor.putString(prefKey, rejected.toString());
-                    boolean ok = commitEditor(editor);
-                    if (!ok) {
-                        Log.e(TAG, "REJECTED terminalization commit failed for "
-                                + prefKey + " — row remains retryable");
-                    }
-                } catch (JSONException writeEx) {
-                    Log.e(TAG, "getFiredUnreconciledEvent invalid JSON terminalize failed",
-                            writeEx);
+                EventLookupResult result = terminalizeInvalidJsonLocked(prefKey);
+                if (!result.ok) {
+                    Log.e(TAG, "invalid JSON terminalization failed for " + prefKey);
                 }
-                return null;
+                return result;
             }
         }
     }
-
 }

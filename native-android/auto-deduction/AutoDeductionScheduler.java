@@ -2125,13 +2125,30 @@ public final class AutoDeductionScheduler {
     public static final class OccurrenceSnapshot {
         public enum Status { FIRED, SCHEDULED, CANCELLED, ABSENT }
 
+        public final boolean ok;
         public final Status status;
         /** Present for FIRED and SCHEDULED when amount is valid; null otherwise. */
         public final Double amount;
+        /** Non-null only when the native lookup failed before a safe snapshot was established. */
+        public final String error;
 
         public OccurrenceSnapshot(Status status, Double amount) {
+            this(true, status, amount, null);
+        }
+
+        private OccurrenceSnapshot(boolean ok, Status status, Double amount, String error) {
+            this.ok = ok;
             this.status = status;
             this.amount = amount;
+            this.error = error;
+        }
+
+        public static OccurrenceSnapshot failure(String error) {
+            return new OccurrenceSnapshot(
+                    false,
+                    Status.ABSENT,
+                    null,
+                    error != null && !error.isEmpty() ? error : "snapshot_failed");
         }
     }
 
@@ -2146,16 +2163,23 @@ public final class AutoDeductionScheduler {
         synchronized (SCHEDULE_LOCK) {
             AutoDeductionEventStore store = new AutoDeductionEventStore(appContext);
             // Promote pending under EventStore.LOCK (nested after SCHEDULE_LOCK).
-            JSONObject fired = store.getFiredUnreconciledEvent(medicationId, doseId, calendarDate);
+            AutoDeductionEventStore.EventLookupResult firedLookup =
+                    store.getFiredUnreconciledEvent(medicationId, doseId, calendarDate);
+            if (!firedLookup.ok) {
+                // Fail-closed: a FIRED row that could not be durably terminalized
+                // is NOT equivalent to ABSENT/SCHEDULED. Manual Take must not
+                // fall back to the JS schedule amount in this situation.
+                return OccurrenceSnapshot.failure(firedLookup.error);
+            }
+            JSONObject fired = firedLookup.event;
             if (fired != null) {
                 double amt = fired.optDouble("amount", Double.NaN);
                 if (AutoDeductionContract.isValidAmount(amt)) {
                     return new OccurrenceSnapshot(OccurrenceSnapshot.Status.FIRED, amt);
                 }
-                // Defensive fallback: malformed payloads are terminalized as
-                // REJECTED inside getFiredUnreconciledEvent and never returned,
-                // so this branch should be unreachable for current stores.
-                return new OccurrenceSnapshot(OccurrenceSnapshot.Status.FIRED, null);
+                // Defensive invariant guard. EventStore currently rejects malformed
+                // FIRED rows before returning them, so this should be unreachable.
+                return OccurrenceSnapshot.failure("invalid_fired_amount");
             }
             // Effective cancellation (ordering-token aware) must beat stale schedule
             // metadata when a tombstone exists but metadata removal failed.

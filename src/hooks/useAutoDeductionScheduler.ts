@@ -66,7 +66,16 @@ export function getAutoDeductionSlotsForDate(
     return slots;
   }
 
-  if (med.reminderTime && isValidDoseTime(med.reminderTime) && Number(med.dailyDose) > 0) {
+  // Legacy single-dose exact timing is valid only when the legacy reminder
+  // timing is actually enabled. This must match isReminderTimeGated() in
+  // dateCalculations.ts; otherwise legacy sync can settle the calendar day
+  // while this scheduler also creates an exact occurrence for the same day.
+  if (
+    med.reminderEnabled === true &&
+    med.reminderTime &&
+    isValidDoseTime(med.reminderTime) &&
+    Number(med.dailyDose) > 0
+  ) {
     return [
       {
         medId: med.id,

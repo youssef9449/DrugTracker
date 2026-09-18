@@ -186,7 +186,7 @@ public class EventStoreRejectedTest {
     }
 
     @Test
-    public void getFiredUnreconciledEvent_mismatchedIdentity_returnsNullAndRejects()
+    public void getFiredUnreconciledEvent_mismatchedIdentity_returnsAbsentAndRejects()
             throws Exception {
         String key = AutoDeductionContract.occurrenceKey("med", "dose", "2026-09-14");
         JSONObject payload = new JSONObject();
@@ -200,13 +200,48 @@ public class EventStoreRejectedTest {
         eventPrefs().edit().putString(evtKey(key), payload.toString()).commit();
 
         AutoDeductionEventStore store = newEventStore();
-        assertNull(store.getFiredUnreconciledEvent("med", "dose", "2026-09-14"));
+        AutoDeductionEventStore.EventLookupResult lookup =
+                store.getFiredUnreconciledEvent("med", "dose", "2026-09-14");
+        assertTrue(lookup.ok);
+        assertNull(lookup.event);
 
         String after = eventPrefs().getString(evtKey(key), null);
         assertNotNull(after);
         JSONObject obj = new JSONObject(after);
         assertEquals(AutoDeductionContract.STATUS_REJECTED, obj.optString("status"));
-        assertEquals("malformed_fields", obj.optString("rejectionReason"));
+        assertEquals("identity_mismatch", obj.optString("rejectionReason"));
+    }
+
+    @Test
+    public void getFiredUnreconciledEvent_terminalizationCommitFailure_returnsFailure() throws Exception {
+        String key = AutoDeductionContract.occurrenceKey("med", "dose", "2026-09-14");
+        JSONObject payload = new JSONObject();
+        payload.put("medicationId", "other-med");
+        payload.put("doseId", "dose");
+        payload.put("calendarDate", "2026-09-14");
+        payload.put("amount", 2.0);
+        payload.put("status", AutoDeductionContract.STATUS_FIRED);
+        eventPrefs().edit().putString(evtKey(key), payload.toString()).commit();
+
+        AutoDeductionEventStore.__setTestForceCommitResult(false);
+        try {
+            AutoDeductionEventStore.EventLookupResult result =
+                    newEventStore().getFiredUnreconciledEvent(
+                            "med", "dose", "2026-09-14");
+            assertFalse(result.ok);
+            assertNull(result.event);
+            assertEquals("rejected_persist_failed", result.error);
+
+            // Commit failed: the original FIRED row remains in storage and must
+            // not be silently reinterpreted as ABSENT by the caller.
+            String raw = eventPrefs().getString(evtKey(key), null);
+            assertNotNull(raw);
+            JSONObject stillFired = new JSONObject(raw);
+            assertEquals(AutoDeductionContract.STATUS_FIRED,
+                    stillFired.optString("status"));
+        } finally {
+            AutoDeductionEventStore.__setTestForceCommitResult(null);
+        }
     }
 
     @Test
@@ -226,7 +261,7 @@ public class EventStoreRejectedTest {
     }
 
     @Test
-    public void getFiredUnreconciledEvent_doseIdMismatch_returnsNullAndRejects()
+    public void getFiredUnreconciledEvent_doseIdMismatch_returnsAbsentAndRejects()
             throws Exception {
         String key = AutoDeductionContract.occurrenceKey("med", "dose", "2026-09-14");
         JSONObject payload = new JSONObject();
@@ -240,7 +275,10 @@ public class EventStoreRejectedTest {
         eventPrefs().edit().putString(evtKey(key), payload.toString()).commit();
 
         AutoDeductionEventStore store = newEventStore();
-        assertNull(store.getFiredUnreconciledEvent("med", "dose", "2026-09-14"));
+        AutoDeductionEventStore.EventLookupResult lookup =
+                store.getFiredUnreconciledEvent("med", "dose", "2026-09-14");
+        assertTrue(lookup.ok);
+        assertNull(lookup.event);
 
         String after = eventPrefs().getString(evtKey(key), null);
         assertNotNull(after);
@@ -250,7 +288,7 @@ public class EventStoreRejectedTest {
     }
 
     @Test
-    public void getFiredUnreconciledEvent_calendarDateMismatch_returnsNullAndRejects()
+    public void getFiredUnreconciledEvent_calendarDateMismatch_returnsAbsentAndRejects()
             throws Exception {
         String key = AutoDeductionContract.occurrenceKey("med", "dose", "2026-09-14");
         JSONObject payload = new JSONObject();
@@ -264,7 +302,10 @@ public class EventStoreRejectedTest {
         eventPrefs().edit().putString(evtKey(key), payload.toString()).commit();
 
         AutoDeductionEventStore store = newEventStore();
-        assertNull(store.getFiredUnreconciledEvent("med", "dose", "2026-09-14"));
+        AutoDeductionEventStore.EventLookupResult lookup =
+                store.getFiredUnreconciledEvent("med", "dose", "2026-09-14");
+        assertTrue(lookup.ok);
+        assertNull(lookup.event);
 
         String after = eventPrefs().getString(evtKey(key), null);
         assertNotNull(after);
@@ -274,7 +315,7 @@ public class EventStoreRejectedTest {
     }
 
     @Test
-    public void getFiredUnreconciledEvent_invalidAmount_returnsNullAndRejects()
+    public void getFiredUnreconciledEvent_invalidAmount_returnsAbsentAndRejects()
             throws Exception {
         String key = AutoDeductionContract.occurrenceKey("med", "dose", "2026-09-14");
         JSONObject payload = new JSONObject();
@@ -288,7 +329,10 @@ public class EventStoreRejectedTest {
         eventPrefs().edit().putString(evtKey(key), payload.toString()).commit();
 
         AutoDeductionEventStore store = newEventStore();
-        assertNull(store.getFiredUnreconciledEvent("med", "dose", "2026-09-14"));
+        AutoDeductionEventStore.EventLookupResult lookup =
+                store.getFiredUnreconciledEvent("med", "dose", "2026-09-14");
+        assertTrue(lookup.ok);
+        assertNull(lookup.event);
 
         String after = eventPrefs().getString(evtKey(key), null);
         assertNotNull(after);

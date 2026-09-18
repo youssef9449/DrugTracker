@@ -1,9 +1,10 @@
 import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import type { Medication, ConsumptionLog } from '../types';
 import { getTodayDateString, syncAutoDailyDeductions } from '../utils/dateCalculations';
-import { withAutoStockMutationGate, commitDurableAutoStockState } from '../utils/autoDeductionStockGate';
+import { withAutoStockMutationGate } from '../utils/autoDeductionStockGate';
 import { reconcileExactBeforeLegacySettlement } from '../utils/reconcileExactBeforeLegacySettlement';
 import { TOAST_MESSAGES } from '../constants/uiStrings';
+import { commitWithManualEnvelope } from '../utils/manualStockMutation';
 
 /**
  * One-shot per session auto-deduction after hydration.
@@ -72,7 +73,10 @@ export function useStartupAutoDeduction(opts: {
             ? [...result.newLogs, ...pre.state.logs]
             : pre.state.logs;
         const nextMeds = result.newLogs.length > 0 ? result.updatedMeds : pre.state.medications;
-        const err = commitDurableAutoStockState({
+        // Legacy date-based startup settlement is still a stock mutation.
+        // It must use the same durable recovery envelope as Manual Take/Restore
+        // rather than writing meds/logs directly and risking a partial snapshot.
+        const err = commitWithManualEnvelope({
           medications: nextMeds,
           logs: nextLogs,
           globalAutoDeductEnabled: pre.state.globalAutoDeductEnabled,

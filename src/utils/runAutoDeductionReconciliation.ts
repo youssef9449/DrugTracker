@@ -74,6 +74,8 @@ export interface RunReconciliationInput {
   saveEnvelope?: (env: ExactAutoEnvelope | null) => string | null;
   /** When true, skip outer gate (caller already holds it). */
   alreadyInGate?: boolean;
+  /** Fresh durable state from the already-held gate, including the global master switch. */
+  durableState?: AutoStockDurableState;
   now?: Date;
 }
 
@@ -115,10 +117,13 @@ export function runAutoDeductionReconciliation(
   input: RunReconciliationInput
 ): Promise<RunReconciliationOutput> {
   if (input.alreadyInGate) {
-    return runOnce(input, {
-      medications: input.medications ?? [],
-      logs: input.logs ?? [],
-    });
+    return runOnce(
+      input,
+      input.durableState ?? {
+        medications: input.medications ?? [],
+        logs: input.logs ?? [],
+      }
+    );
   }
   return withAutoStockMutationGate((fresh) => runOnce(input, fresh));
 }

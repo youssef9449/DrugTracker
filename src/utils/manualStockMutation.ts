@@ -1562,7 +1562,9 @@ export function runGatedMedicationUpdate(opts: {
 
     const pre = await reconcileExactBeforeLegacySettlement({
       fresh: recovered.state,
-      globalAutoDeductEnabled: opts.globalAutoDeductEnabled !== false,
+      // The durable recovered global policy is authoritative; the React value
+      // may lag after crash/recovery and must not control stock reconciliation.
+      globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
       now,
     });
     if (pre.nativeListFailed) {

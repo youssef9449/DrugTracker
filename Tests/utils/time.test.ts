@@ -3,7 +3,6 @@ import {
   MS_PER_MINUTE,
   MS_PER_DAY,
   NEVER_DEPLETES_DAYS,
-  REMINDER_POLL_INTERVAL_MS,
   DEFAULT_SNOOZE_MINUTES,
   NOTIFICATION_IMMEDIATE_OFFSET_MS,
   CRITICAL_ALARM_FIRE_HOUR,
@@ -29,10 +28,6 @@ describe('time/numeric constants (#99)', () => {
 
   it('NEVER_DEPLETES_DAYS is 999', () => {
     expect(NEVER_DEPLETES_DAYS).toBe(999);
-  });
-
-  it('REMINDER_POLL_INTERVAL_MS is 5000', () => {
-    expect(REMINDER_POLL_INTERVAL_MS).toBe(5000);
   });
 
   it('DEFAULT_SNOOZE_MINUTES is 10', () => {

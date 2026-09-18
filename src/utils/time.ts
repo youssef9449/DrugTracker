@@ -20,8 +20,6 @@ export const MS_PER_DAY = 1000 * 60 * 60 * 24;
 export const NEVER_DEPLETES_DAYS = 999;
 
 /** Polling interval for the dose-reminder check (useDoseReminders). */
-export const REMINDER_POLL_INTERVAL_MS = 5000;
-
 /** Default snooze duration in minutes (useDoseReminders). */
 export const DEFAULT_SNOOZE_MINUTES = 10;
 

@@ -383,10 +383,8 @@ export default function App() {
   // reminder fires EVERY DAY at the configured time — even when the app
   // is killed, the device is in Doze, or the user never opens the app.
   //
-  // This complements the in-app polling in useDoseReminders (which only
-  // fires the DoseAlarmModal + chime while the app is in the foreground).
-  // See useDoseReminderScheduler.ts for the race-protection + boot-
-  // persistence details.
+  // Complements event-driven in-app dose reminders while foregrounded.
+  // See useDoseReminderScheduler.ts for race-protection + boot persistence.
   // ─────────────────────────────────────────────────────────────
   useDoseReminderScheduler({
     medications,

@@ -366,10 +366,21 @@ public final class AutoDeductionScheduler {
         final int firedCreated;
         /** True only when a new future AlarmManager schedule was installed. */
         final boolean futureInstalled;
+        /**
+         * True when recovery could not finish (FIRED persistence failure, epoch
+         * compute failure, or future install failure that preserves the snapshot).
+         * Callers must treat incomplete=true as restore boundary failure.
+         */
+        final boolean incomplete;
 
         CatchUpResult(int firedCreated, boolean futureInstalled) {
+            this(firedCreated, futureInstalled, false);
+        }
+
+        CatchUpResult(int firedCreated, boolean futureInstalled, boolean incomplete) {
             this.firedCreated = firedCreated;
             this.futureInstalled = futureInstalled;
+            this.incomplete = incomplete;
         }
     }
 
@@ -849,7 +860,7 @@ public final class AutoDeductionScheduler {
                 Log.i(TAG, "catchUp: past metadata already gone/replaced: " + pastPrefKey);
             }
         }
-        return new CatchUpResult(created, futureInstalled);
+        return new CatchUpResult(created, futureInstalled, preserveSnapshotForRetry);
     }
 
     /**
@@ -1307,15 +1318,17 @@ public final class AutoDeductionScheduler {
         final String key = AutoDeductionContract.occurrenceKey(
                 medicationId, doseId, calendarDate);
         synchronized (SCHEDULE_LOCK) {
-            // Cancellation of the occurrence still wins.
-            if (isOccurrenceCancelledKey(key)) {
-                Log.i(TAG, "recover independent evidence: CANCELLED " + key);
-                clearIndependentFireRetryEvidenceLocked(key);
-                return FireResult.cancelled();
-            }
+            // Independent fire evidence proves an already-authorized fire began
+            // persistence before any later config mutation/cancellation. Later
+            // tombstones must NOT erase recovery of that prior fire.
             JSONObject evidence = getIndependentFireRetryEvidence(
                     medicationId, doseId, calendarDate);
             if (evidence == null) {
+                // No prior failed-fire evidence — cancellation applies to live path.
+                if (isOccurrenceCancelledKey(key)) {
+                    Log.i(TAG, "recover independent evidence: no evidence + CANCELLED " + key);
+                    return FireResult.cancelled();
+                }
                 return new FireResult(FireResult.Status.FAILED, false);
             }
             double amount = evidence.optDouble("amount", Double.NaN);
@@ -1385,25 +1398,35 @@ public final class AutoDeductionScheduler {
                 } else if (fr.status == FireResult.Status.CANCELLED) {
                     // cancelled: evidence cleared; not a boundary failure
                 } else {
-                    // Still FAILED — evidence retained for later retry; boundary incomplete
-                    // until max retries exhausted or later success.
+                    // Still FAILED — evidence retained for later retry.
                     int count = evidence.optInt("retryCount", 0);
                     if (count >= AutoDeductionContract.MAX_FIRE_RETRIES) {
-                        // Budget exhausted: leave evidence for diagnostics; do not fail
-                        // the entire schedule restore boundary solely for exhausted budget.
+                        // Budget exhausted: keep evidence for diagnostics; no new retry.
+                        // Exhaustion alone does not mark the restore boundary failed —
+                        // evidence remains for a future process with fresh budget policy.
                         Log.w(TAG, "independent evidence max retries for "
                                 + medId + "/" + doseId + "/" + date);
                     } else {
-                        // schedule a one-shot retry if possible
                         long scheduledAt = evidence.optLong("scheduledAtEpochMs", 0L);
                         double amount = evidence.optDouble("amount", Double.NaN);
                         String time = evidence.optString("timeHhmm", "");
                         long gen = evidence.optLong("recurrenceGeneration", 0L);
                         String ver = evidence.optString("scheduleVersion", "");
-                        if (AutoDeductionContract.isValidAmount(amount)) {
-                            scheduleFireRetry(medId, doseId, date, scheduledAt, amount,
+                        if (!AutoDeductionContract.isValidAmount(amount)) {
+                            failed++;
+                            ok = false;
+                            Log.e(TAG, "independent evidence invalid amount: " + row[0]);
+                        } else {
+                            boolean retryOk = scheduleFireRetry(
+                                    medId, doseId, date, scheduledAt, amount,
                                     time, gen, ver, Math.min(count + 1,
                                             AutoDeductionContract.MAX_FIRE_RETRIES));
+                            if (!retryOk) {
+                                failed++;
+                                ok = false;
+                                Log.e(TAG, "independent evidence retry schedule failed for "
+                                        + medId + "/" + doseId + "/" + date);
+                            }
                         }
                     }
                 }
@@ -2420,7 +2443,11 @@ public final class AutoDeductionScheduler {
                 if (epoch <= 0) {
                     Long computed = computeEpochMs(date, time);
                     if (computed == null) {
-                        removeScheduleMetadataIfVersion(prefKey, observedVersion);
+                        // Unrecoverable epoch — cleanup; ownership_lost is not failure.
+                        if (!removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
+                            Log.i(TAG, "restore: epoch-null cleanup ownership_lost/gone: " + prefKey);
+                        }
+                        // Cannot prove recovery of a valid schedule — leave as resolved via drop.
                         continue;
                     }
                     epoch = computed;
@@ -2438,6 +2465,11 @@ public final class AutoDeductionScheduler {
                     if (catchUp.futureInstalled) {
                         restored++;
                     }
+                    if (catchUp.incomplete) {
+                        Log.e(TAG, "restore: catch-up incomplete for " + prefKey);
+                        failed++;
+                        boundaryOk = false;
+                    }
                     continue;
                 }
 
@@ -2446,6 +2478,7 @@ public final class AutoDeductionScheduler {
                 // reschedule is not suppressed.
                 if (isOccurrenceCancelledKey(occurrenceKey)) {
                     Log.i(TAG, "restore skip (cancelled): " + medId + "/" + doseId + "/" + date);
+                    // Prior cancellation is expected; ownership_lost on cleanup is not failure.
                     if (!removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
                         Log.i(TAG, "restore future cancel cleanup skipped (ownership lost): "
                                 + prefKey);
@@ -2460,6 +2493,10 @@ public final class AutoDeductionScheduler {
                 }
 
                 if (!canScheduleExactAlarms()) {
+                    // Future schedule requires AlarmManager — cannot complete recovery.
+                    Log.w(TAG, "restore: exact alarm permission denied for future " + prefKey);
+                    failed++;
+                    boundaryOk = false;
                     continue;
                 }
 
@@ -2467,7 +2504,9 @@ public final class AutoDeductionScheduler {
                 // timezone so a TIMEZONE_CHANGED restore does not reinstall a stale epoch.
                 Long recomputed = computeEpochMs(date, time);
                 if (recomputed == null) {
-                    removeScheduleMetadataIfVersion(prefKey, observedVersion);
+                    if (!removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
+                        Log.i(TAG, "restore: recompute-null cleanup ownership_lost: " + prefKey);
+                    }
                     continue;
                 }
                 if (recomputed <= recoveryNowMs()) {
@@ -2478,6 +2517,11 @@ public final class AutoDeductionScheduler {
                             prefKey, observedVersion);
                     if (catchUp.futureInstalled) {
                         restored++;
+                    }
+                    if (catchUp.incomplete) {
+                        Log.e(TAG, "restore: TZ catch-up incomplete for " + prefKey);
+                        failed++;
+                        boundaryOk = false;
                     }
                     continue;
                 }
@@ -2510,6 +2554,7 @@ public final class AutoDeductionScheduler {
                     if (metaGen > 0L
                             && !isRecurrenceGenerationAuthorizedLocked(medId, doseId, metaGen)) {
                         Log.i(TAG, "restore skip (recurrence generation invalid): " + prefKey);
+                        // Dropping invalidated generation is expected; ownership_lost ok.
                         removeScheduleMetadataIfVersionLocked(prefKey, observedVersion);
                         continue;
                     }

@@ -81,6 +81,11 @@ public final class AutoDeductionScheduler {
     /** Active recurrence generation per (medicationId, doseId) — Issue #217. */
     private final SharedPreferences recurrenceAuthPrefs;
     /**
+     * Independent fire-failure / retry evidence (not schedule metadata).
+     * Survives config mutation that removes sch: rows.
+     */
+    private final SharedPreferences fireRetryPrefs;
+    /**
      * Test-only: when true, {@link #invalidateRecurrenceAuthorization} treats the
      * generation commit as failed (fail-closed). Production code never sets this.
      */
@@ -96,6 +101,8 @@ public final class AutoDeductionScheduler {
      * durable stale-fire guard until retry completes cleanup).
      */
     volatile boolean forceScheduleMetadataRemovalFailureForTest = false;
+    /** Test-only: force restoreFutureSchedules to report ok=false. */
+    volatile boolean forceRestoreFutureFailureForTest = false;
     /**
      * Test-only: when true, {@link #allocateOrderingTokenLocked()} returns null
      * (simulating a durable ordering-token allocation failure) to exercise the
@@ -133,6 +140,8 @@ public final class AutoDeductionScheduler {
                 AutoDeductionContract.PREFS_ORDERING, Context.MODE_PRIVATE);
         this.recurrenceAuthPrefs = appContext.getSharedPreferences(
                 AutoDeductionContract.PREFS_RECURRENCE_AUTH, Context.MODE_PRIVATE);
+        this.fireRetryPrefs = appContext.getSharedPreferences(
+                AutoDeductionContract.PREFS_FIRE_RETRY, Context.MODE_PRIVATE);
     }
 
 
@@ -640,6 +649,28 @@ public final class AutoDeductionScheduler {
             // marker is best-effort; the FIRED/pending evidence remains authoritative.
             if (result.allowsRecurrence()) {
                 clearFireRetryMarkerLocked(prefKey);
+                clearIndependentFireRetryEvidenceLocked(key);
+            } else if (result.status == FireResult.Status.FAILED && !result.pendingRecorded) {
+                // Independent durable failure evidence under SCHEDULE_LOCK — must not
+                // depend on schedule metadata that config mutation may remove next.
+                String timeHhmm = "";
+                String scheduleVersion = deliveryScheduleVersion != null
+                        ? deliveryScheduleVersion : "";
+                long gen = deliveryRecurrenceGeneration;
+                try {
+                    JSONObject meta = new JSONObject(metaRaw);
+                    timeHhmm = meta.optString("timeHhmm", "");
+                    if (scheduleVersion.isEmpty()) {
+                        scheduleVersion = meta.optString(FIELD_SCHEDULE_VERSION, "");
+                    }
+                    if (gen <= 0L) {
+                        gen = meta.optLong(FIELD_RECURRENCE_GENERATION, 0L);
+                    }
+                } catch (JSONException ignored) {
+                }
+                recordIndependentFireRetryEvidenceLocked(
+                        medicationId, doseId, calendarDate, scheduledAtEpochMs,
+                        amount, timeHhmm, gen, scheduleVersion, /*nextRetryCount=*/1);
             }
             Log.i(TAG, "fire linearization: " + result.status
                     + " pendingRecorded=" + result.pendingRecorded + " for " + key);
@@ -1038,10 +1069,12 @@ public final class AutoDeductionScheduler {
      * <p>The retry re-delivers the SAME occurrence identity with the SAME
      * ownership tokens ({@code scheduleVersion} + {@code recurrenceGeneration}),
      * so {@link #fireOccurrenceIfNotCancelled} remains the single linearized
-     * fire path: a retry that races a config change is rejected as stale
-     * (CANCELLED), and insert-if-absent idempotency prevents a duplicate FIRED
-     * row or a second JS wake-up. No schedule metadata is written for a retry,
-     * so no rollback is needed on failure.
+     * fire path: a retry that races a cancel is rejected as CANCELLED, and
+     * insert-if-absent idempotency prevents a duplicate FIRED row or a second
+     * JS wake-up. Independent fire-retry evidence in {@link AutoDeductionContract#PREFS_FIRE_RETRY}
+     * is the durable authority for failed-fire recovery; schedule metadata may
+     * also carry a secondary {@code fireRetryCount} marker when the schedule row
+     * still exists, but config mutation must not erase the independent evidence.
      *
      * @param nextRetryCount 1-based retry index carried in
      *        {@link AutoDeductionContract#EXTRA_FIRE_RETRY_COUNT}
@@ -1084,44 +1117,57 @@ public final class AutoDeductionScheduler {
                 return false;
             }
 
+            // Always refresh independent failure evidence first (survives config mutation).
+            recordIndependentFireRetryEvidenceLocked(
+                    medicationId, doseId, calendarDate, scheduledAtEpochMs, amount,
+                    timeHhmm, recurrenceGeneration, scheduleVersion, nextRetryCount);
+
             String currentRaw = schedulePrefs.getString(prefKey, null);
-            if (currentRaw == null || currentRaw.isEmpty()) {
-                Log.i(TAG, "fire retry skipped: active schedule metadata missing " + key);
-                return false;
+            int persistedRetryCount = nextRetryCount;
+            // If schedule metadata is gone, independent evidence still authorizes the
+            // one-shot retry alarm for the SAME occurrence identity.
+            if (currentRaw != null && !currentRaw.isEmpty()) {
+                try {
+                    JSONObject current = new JSONObject(currentRaw);
+                    String activeVersion = current.optString(FIELD_SCHEDULE_VERSION, "");
+                    long activeGen = current.optLong(FIELD_RECURRENCE_GENERATION, 0L);
+                    boolean legacyDelivery = (scheduleVersion == null || scheduleVersion.isEmpty())
+                            && recurrenceGeneration <= 0L;
+                    boolean legacyActiveMetadata = activeVersion.isEmpty() && activeGen <= 0L;
+
+                    if (legacyDelivery) {
+                        if (!legacyActiveMetadata) {
+                            Log.i(TAG, "fire retry skipped: stale legacy ownership " + key);
+                            return false;
+                        }
+                    } else {
+                        if (scheduleVersion == null || scheduleVersion.isEmpty()
+                                || recurrenceGeneration <= 0L
+                                || !scheduleVersion.equals(activeVersion)
+                                || recurrenceGeneration != activeGen) {
+                            Log.i(TAG, "fire retry skipped: ownership changed for " + key);
+                            return false;
+                        }
+                    }
+
+                    int previousRetryCount = current.optInt(FIELD_FIRE_RETRY_COUNT, 0);
+                    persistedRetryCount = Math.max(previousRetryCount, nextRetryCount);
+                    current.put(FIELD_FIRE_RETRY_COUNT, persistedRetryCount);
+
+                    if (!schedulePrefs.edit().putString(prefKey, current.toString()).commit()) {
+                        Log.e(TAG, "fire retry schedule-metadata marker commit failed for " + key
+                                + " — independent evidence remains durable");
+                        // Continue: independent evidence is already recorded.
+                    }
+                } catch (JSONException e) {
+                    Log.e(TAG, "fire retry ownership metadata malformed for " + key, e);
+                    // Independent evidence already recorded; still attempt alarm.
+                }
+            } else {
+                Log.i(TAG, "fire retry: schedule metadata missing — using independent evidence for " + key);
             }
 
             try {
-                JSONObject current = new JSONObject(currentRaw);
-                String activeVersion = current.optString(FIELD_SCHEDULE_VERSION, "");
-                long activeGen = current.optLong(FIELD_RECURRENCE_GENERATION, 0L);
-                boolean legacyDelivery = (scheduleVersion == null || scheduleVersion.isEmpty())
-                        && recurrenceGeneration <= 0L;
-                boolean legacyActiveMetadata = activeVersion.isEmpty() && activeGen <= 0L;
-
-                if (legacyDelivery) {
-                    if (!legacyActiveMetadata) {
-                        Log.i(TAG, "fire retry skipped: stale legacy ownership " + key);
-                        return false;
-                    }
-                } else {
-                    if (scheduleVersion == null || scheduleVersion.isEmpty()
-                            || recurrenceGeneration <= 0L
-                            || !scheduleVersion.equals(activeVersion)
-                            || recurrenceGeneration != activeGen) {
-                        Log.i(TAG, "fire retry skipped: ownership changed for " + key);
-                        return false;
-                    }
-                }
-
-                int previousRetryCount = current.optInt(FIELD_FIRE_RETRY_COUNT, 0);
-                int persistedRetryCount = Math.max(previousRetryCount, nextRetryCount);
-                current.put(FIELD_FIRE_RETRY_COUNT, persistedRetryCount);
-
-                if (!schedulePrefs.edit().putString(prefKey, current.toString()).commit()) {
-                    Log.e(TAG, "fire retry marker commit failed for " + key);
-                    return false;
-                }
-
                 Intent intent = buildOccurrenceIntent(
                         medicationId, doseId, calendarDate, scheduledAtEpochMs, amount,
                         timeHhmm, recurrenceGeneration, scheduleVersion);
@@ -1158,16 +1204,102 @@ public final class AutoDeductionScheduler {
                     Log.e(TAG, "fire retry scheduling failed", e);
                     return false;
                 }
-            } catch (JSONException e) {
-                Log.e(TAG, "fire retry ownership metadata malformed for " + key, e);
-                return false;
             }
+        }
+    }
+
+    private static final String FIRE_RETRY_KEY_PREFIX = "fretry:";
+
+    /**
+     * Persist independent fire-failure evidence for an occurrence.
+     * Caller MUST hold SCHEDULE_LOCK. Idempotent: same occurrence increments
+     * retryCount to max(existing, nextRetryCount) without duplicating rows.
+     */
+    boolean recordIndependentFireRetryEvidenceLocked(
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            long scheduledAtEpochMs,
+            double amount,
+            String timeHhmm,
+            long recurrenceGeneration,
+            String scheduleVersion,
+            int nextRetryCount
+    ) {
+        final String key = AutoDeductionContract.occurrenceKey(
+                medicationId, doseId, calendarDate);
+        final String prefKey = FIRE_RETRY_KEY_PREFIX + key;
+        try {
+            int prior = 0;
+            String existing = fireRetryPrefs.getString(prefKey, null);
+            if (existing != null && !existing.isEmpty()) {
+                try {
+                    prior = new JSONObject(existing).optInt("retryCount", 0);
+                } catch (JSONException ignored) {
+                }
+            }
+            int count = Math.max(prior, Math.max(1, nextRetryCount));
+            if (count > AutoDeductionContract.MAX_FIRE_RETRIES) {
+                count = AutoDeductionContract.MAX_FIRE_RETRIES;
+            }
+            JSONObject obj = new JSONObject();
+            obj.put("medicationId", medicationId);
+            obj.put("doseId", doseId);
+            obj.put("calendarDate", calendarDate);
+            obj.put("scheduledAtEpochMs", scheduledAtEpochMs);
+            obj.put("amount", amount);
+            obj.put("timeHhmm", timeHhmm != null ? timeHhmm : "");
+            obj.put("recurrenceGeneration", recurrenceGeneration);
+            obj.put("scheduleVersion", scheduleVersion != null ? scheduleVersion : "");
+            obj.put("retryCount", count);
+            obj.put("updatedAtEpochMs", System.currentTimeMillis());
+            boolean ok = fireRetryPrefs.edit().putString(prefKey, obj.toString()).commit();
+            if (!ok) {
+                Log.e(TAG, "independent fire-retry evidence commit failed for " + key);
+            } else {
+                Log.i(TAG, "independent fire-retry evidence recorded for " + key
+                        + " retryCount=" + count);
+            }
+            return ok;
+        } catch (JSONException e) {
+            Log.e(TAG, "independent fire-retry evidence build failed for " + key, e);
+            return false;
+        }
+    }
+
+    /** Clear independent fire-retry evidence. Caller MUST hold SCHEDULE_LOCK. */
+    boolean clearIndependentFireRetryEvidenceLocked(String occurrenceKey) {
+        if (occurrenceKey == null || occurrenceKey.isEmpty()) return true;
+        final String prefKey = FIRE_RETRY_KEY_PREFIX + occurrenceKey;
+        if (!fireRetryPrefs.contains(prefKey)) return true;
+        boolean ok = fireRetryPrefs.edit().remove(prefKey).commit();
+        if (!ok) {
+            Log.w(TAG, "independent fire-retry evidence clear failed for " + occurrenceKey);
+        }
+        return ok;
+    }
+
+    /**
+     * Read independent fire-retry evidence for an occurrence, or null.
+     * Safe without SCHEDULE_LOCK for diagnostics; mutations must use lock.
+     */
+    public JSONObject getIndependentFireRetryEvidence(
+            String medicationId, String doseId, String calendarDate) {
+        final String key = AutoDeductionContract.occurrenceKey(
+                medicationId, doseId, calendarDate);
+        String raw = fireRetryPrefs.getString(FIRE_RETRY_KEY_PREFIX + key, null);
+        if (raw == null || raw.isEmpty()) return null;
+        try {
+            return new JSONObject(raw);
+        } catch (JSONException e) {
+            return null;
         }
     }
 
     /**
      * Remove the durable fire-retry marker after any primary/pending fire evidence
      * becomes durable. Caller MUST hold SCHEDULE_LOCK.
+     * Schedule-metadata marker is secondary; independent evidence is the authority.
      */
     private boolean clearFireRetryMarkerLocked(String prefKey) {
         String raw = schedulePrefs.getString(prefKey, null);
@@ -2049,12 +2181,44 @@ public final class AutoDeductionScheduler {
      * and successor scheduling succeeded (or the occurrence was CANCELLED), so a
      * newer legitimate reschedule is never deleted and recurrence is not lost.
      */
-    public int restoreFutureSchedules() {
+    /**
+     * Explicit result of native future-schedule restoration.
+     * {@code ok=false} means the recovery boundary is incomplete — JS must not
+     * run destructive desired-state cleanup based on a partial snapshot.
+     */
+    public static final class RestoreResult {
+        public final boolean ok;
+        public final int restored;
+        public final int failed;
+        public final String error;
+
+        public RestoreResult(boolean ok, int restored, int failed, String error) {
+            this.ok = ok;
+            this.restored = restored;
+            this.failed = failed;
+            this.error = error;
+        }
+
+        public static RestoreResult success(int restored, int failed) {
+            return new RestoreResult(true, restored, failed, null);
+        }
+
+        public static RestoreResult failure(int restored, int failed, String error) {
+            return new RestoreResult(false, restored, failed, error);
+        }
+    }
+
+    public RestoreResult restoreFutureSchedules() {
         if (!canScheduleExactAlarms()) {
             Log.w(TAG, "restoreFutureSchedules: exact alarm permission denied");
             // Still attempt past-schedule promotion to FIRED.
         }
         int restored = 0;
+        int failed = 0;
+        boolean boundaryOk = true;
+        if (forceRestoreFutureFailureForTest) {
+            return RestoreResult.failure(0, 0, "forced_restore_failure");
+        }
 
         java.util.List<String[]> snapshot = new java.util.ArrayList<>();
         synchronized (SCHEDULE_LOCK) {
@@ -2223,7 +2387,10 @@ public final class AutoDeductionScheduler {
                 }
             }
         }
-        return restored;
+        if (!boundaryOk) {
+            return RestoreResult.failure(restored, failed, "restore_boundary_incomplete");
+        }
+        return RestoreResult.success(restored, failed);
     }
 
 

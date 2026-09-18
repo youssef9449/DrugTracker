@@ -295,4 +295,62 @@ public class FireRetryScheduleTest {
                 failedNoPending, AutoDeductionContract.MAX_FIRE_RETRIES));
         assertEquals(0, alarmCount());
     }
+
+    @Test
+    public void independentFireRetryEvidence_survivesScheduleMetadataRemoval()
+            throws Exception {
+        String date = futureCalendarDate(3);
+        long epoch = futureEpochMs(date, "10:00");
+        AutoDeductionScheduler s = newScheduler();
+        assertTrue(s.scheduleOccurrence(
+                "med", "dose", date, "10:00", 2.0, epoch).ok);
+
+        // Simulate FAILED/no-pending by recording independent evidence under lock
+        // (production path does this inside fireOccurrenceIfNotCancelled).
+        String key = AutoDeductionContract.occurrenceKey("med", "dose", date);
+        synchronized (getScheduleLock()) {
+            assertTrue(s.recordIndependentFireRetryEvidenceLocked(
+                    "med", "dose", date, epoch, 2.0, "10:00", 1L, "v1", 1));
+        }
+
+        // Config mutation: remove schedule metadata
+        String prefKey = "sch:" + key;
+        schedulePrefs().edit().remove(prefKey).commit();
+        assertFalse(schedulePrefs().contains(prefKey));
+
+        // Independent evidence must still be present
+        JSONObject evidence = s.getIndependentFireRetryEvidence("med", "dose", date);
+        assertNotNull(evidence);
+        assertEquals(1, evidence.optInt("retryCount"));
+        assertEquals(2.0, evidence.optDouble("amount"), 0.0001);
+
+        // Retry can still be scheduled from independent evidence
+        assertTrue(s.scheduleFireRetry(
+                "med", "dose", date, epoch, 2.0, "10:00", 1L, "v1", 2));
+        evidence = s.getIndependentFireRetryEvidence("med", "dose", date);
+        assertNotNull(evidence);
+        assertEquals(2, evidence.optInt("retryCount"));
+    }
+
+    @Test
+    public void restoreFutureSchedules_explicitFailure_okFalse() {
+        AutoDeductionScheduler s = newScheduler();
+        s.forceRestoreFutureFailureForTest = true;
+        try {
+            AutoDeductionScheduler.RestoreResult rr = s.restoreFutureSchedules();
+            assertFalse(rr.ok);
+            assertEquals("forced_restore_failure", rr.error);
+            assertEquals(0, rr.restored);
+        } finally {
+            s.forceRestoreFutureFailureForTest = false;
+        }
+    }
+
+    /** Access package-private SCHEDULE_LOCK via same package. */
+    private static Object getScheduleLock() throws Exception {
+        java.lang.reflect.Field f =
+                AutoDeductionScheduler.class.getDeclaredField("SCHEDULE_LOCK");
+        f.setAccessible(true);
+        return f.get(null);
+    }
 }

@@ -63,6 +63,12 @@ public final class AutoDeductionContract {
     /** Independent prefs for pending-fire recovery when primary FIRED commit fails. */
     public static final String PREFS_PENDING = "drugtracker_auto_deduction_pending_v1";
     /**
+     * Independent durable fire-failure / retry evidence, keyed by occurrence identity.
+     * Survives schedule metadata removal (config mutation, disable, delete) so a
+     * failed FIRED persistence can still be retried without depending on schedulePrefs.
+     */
+    public static final String PREFS_FIRE_RETRY = "drugtracker_auto_deduction_fire_retry_v1";
+    /**
      * Durable cancellation tombstones keyed by occurrence identity.
      * Survives process death so restore and AutoDeductionReceiver cannot promote a
      * cancelled occurrence to FIRED (stale schedule metadata or stale alarm delivery).

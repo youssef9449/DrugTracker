@@ -203,11 +203,26 @@ public class AutoDeductionPlugin extends Plugin {
 
     @PluginMethod
     public void restoreFutureSchedules(PluginCall call) {
-        AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
-        int n = scheduler.restoreFutureSchedules();
-        JSObject ret = new JSObject();
-        ret.put("restored", n);
-        call.resolve(ret);
+        try {
+            AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
+            AutoDeductionScheduler.RestoreResult result = scheduler.restoreFutureSchedules();
+            JSObject ret = new JSObject();
+            ret.put("ok", result.ok);
+            ret.put("restored", result.restored);
+            ret.put("failed", result.failed);
+            if (result.error != null) {
+                ret.put("error", result.error);
+            }
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "restoreFutureSchedules failed", e);
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("restored", 0);
+            ret.put("failed", 0);
+            ret.put("error", e.getMessage() != null ? e.getMessage() : "restore_failed");
+            call.resolve(ret);
+        }
     }
 
     /**

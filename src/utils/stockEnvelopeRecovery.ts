@@ -244,6 +244,8 @@ export interface ManualStockEnvelope {
   status: 'manual_js_ready';
   medications: Medication[];
   logs: ConsumptionLog[];
+  /** Phase 4 durable global master switch; absent only on pre-fix envelopes. */
+  globalAutoDeductEnabled?: boolean;
   createdAt: string;
   baseGeneration: number;
   mutationSeq: number;
@@ -601,6 +603,7 @@ export function recoverManualEnvelopeInto(
       mutationSeq: manual.mutationSeq,
       medications: manual.medications,
       logs: manual.logs,
+      globalAutoDeductEnabled: manual.globalAutoDeductEnabled,
       clear: () => saveManualStockEnvelope(null),
     });
   }
@@ -653,6 +656,7 @@ export function recoverManualEnvelopeInto(
       mutationSeq: exact.mutationSeq ?? 0,
       medications: exact.medications,
       logs: exact.logs,
+      globalAutoDeductEnabled: exact.globalAutoDeductEnabled,
       toAcknowledge: exact.toAcknowledge,
       clear: () => saveExactAutoStockEnvelope(null),
     });

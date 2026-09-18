@@ -32,6 +32,24 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
 
     private static final String TAG = "AutoDeductionReceiver";
 
+    private static void notifyJavascript(
+            Context context,
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            long scheduledAt,
+            double amount
+    ) {
+        Intent event = new Intent(AutoDeductionContract.ACTION_AUTO_DEDUCTION_FIRED);
+        event.setPackage(context.getPackageName());
+        event.putExtra(AutoDeductionContract.EXTRA_MEDICATION_ID, medicationId);
+        event.putExtra(AutoDeductionContract.EXTRA_DOSE_ID, doseId);
+        event.putExtra(AutoDeductionContract.EXTRA_CALENDAR_DATE, calendarDate);
+        event.putExtra(AutoDeductionContract.EXTRA_SCHEDULED_AT_EPOCH_MS, scheduledAt);
+        event.putExtra(AutoDeductionContract.EXTRA_AMOUNT, amount);
+        context.sendBroadcast(event);
+    }
+
     @Override
     public void onReceive(Context context, Intent intent) {
         if (intent == null) return;

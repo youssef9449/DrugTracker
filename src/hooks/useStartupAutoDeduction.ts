@@ -70,6 +70,7 @@ export function useStartupAutoDeduction(opts: {
         const err = commitDurableAutoStockState({
           medications: nextMeds,
           logs: nextLogs,
+          globalAutoDeductEnabled: fresh.globalAutoDeductEnabled,
         });
         if (!err) {
           setMedications(nextMeds);

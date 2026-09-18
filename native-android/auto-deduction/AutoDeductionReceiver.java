@@ -151,49 +151,133 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
             String scheduleVersion,
             int fireRetryCount
     ) {
-        // Serialized fire transition: cancel-check + FIRED/pending under SCHEDULE_LOCK.
-        // Eliminates TOCTOU where cancel could interleave after a non-cancelled check
-        // but before durable FIRED persistence.
         AutoDeductionScheduler scheduler = new AutoDeductionScheduler(context);
-        AutoDeductionScheduler.FireResult result;
 
         boolean hasIndependentEvidence = scheduler.getIndependentFireRetryEvidence(
                 medicationId, doseId, calendarDate) != null;
-        if (hasIndependentEvidence || fireRetryCount > 0) {
-            // Already-authorized fire recovery: does not require sch: ownership.
+        // Explicit path: independent recovery vs live authorized fire.
+        final boolean independentRecoveryPath =
+                hasIndependentEvidence || fireRetryCount > 0;
+
+        AutoDeductionScheduler.FireResult result;
+        if (independentRecoveryPath) {
+            // Complete an already-authorized fire from durable independent evidence.
+            // Does NOT require sch: and must NOT schedule recurrence successors.
             result = scheduler.recoverFireFromIndependentEvidence(
                     medicationId, doseId, calendarDate);
-            // If no evidence existed, recover returns FAILED — try normal path.
             if (result.status == AutoDeductionScheduler.FireResult.Status.FAILED
                     && !result.pendingRecorded
                     && !hasIndependentEvidence) {
+                // Retry delivery without evidence — fall back to live path once.
                 result = scheduler.fireOccurrenceIfNotCancelled(
                         medicationId, doseId, calendarDate, scheduledAt, amount,
                         scheduleVersion, recurrenceGeneration);
+                // Fall-through became a live fire path.
+                handleLiveFireResult(
+                        context, scheduler, result,
+                        medicationId, doseId, calendarDate, scheduledAt, amount,
+                        timeHhmm, recurrenceGeneration, scheduleVersion, fireRetryCount);
+                return;
             }
-        } else {
-            // Issue #240: ownership tokens so a queued alarm from a prior
-            // scheduleVersion/generation cannot FIRE after disable→reschedule.
-            result = scheduler.fireOccurrenceIfNotCancelled(
+            handleIndependentRecoveryResult(
+                    context, scheduler, result,
                     medicationId, doseId, calendarDate, scheduledAt, amount,
-                    scheduleVersion, recurrenceGeneration);
+                    timeHhmm, recurrenceGeneration, scheduleVersion, fireRetryCount);
+            return;
         }
 
+        // Live authorized alarm delivery — ownership tokens apply.
+        result = scheduler.fireOccurrenceIfNotCancelled(
+                medicationId, doseId, calendarDate, scheduledAt, amount,
+                scheduleVersion, recurrenceGeneration);
+        handleLiveFireResult(
+                context, scheduler, result,
+                medicationId, doseId, calendarDate, scheduledAt, amount,
+                timeHhmm, recurrenceGeneration, scheduleVersion, fireRetryCount);
+    }
+
+    /** Independent evidence recovery: FIRED/pending only — never scheduleNext. */
+    private static void handleIndependentRecoveryResult(
+            Context context,
+            AutoDeductionScheduler scheduler,
+            AutoDeductionScheduler.FireResult result,
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            long scheduledAt,
+            double amount,
+            String timeHhmm,
+            long recurrenceGeneration,
+            String scheduleVersion,
+            int fireRetryCount
+    ) {
         if (shouldNotifyJavascript(result)) {
-            // The wake-up is only a notification that durable FIRED evidence now
-            // exists. JS must re-read the native EventStore; it must never trust
-            // this broadcast payload as the stock source of truth.
             notifyJavascript(
                     context, medicationId, doseId, calendarDate, scheduledAt, amount);
         }
+        switch (result.status) {
+            case CANCELLED:
+                Log.i(TAG, "independent recovery cancelled (no prior evidence): "
+                        + medicationId + "/" + doseId + "/" + calendarDate);
+                break;
+            case CREATED:
+            case ALREADY_EXISTS:
+                Log.i(TAG, "independent recovery durable FIRED (no successor): "
+                        + medicationId + "/" + doseId + "/" + calendarDate);
+                // Intentionally no scheduleNextIfPossible — past fire recovery only.
+                break;
+            case FAILED:
+                if (result.pendingRecorded) {
+                    Log.w(TAG, "independent recovery pending recorded (no successor): "
+                            + medicationId + "/" + doseId + "/" + calendarDate);
+                } else if (shouldScheduleFireRetry(result, fireRetryCount)) {
+                    boolean retryScheduled = scheduler.scheduleFireRetry(
+                            medicationId, doseId, calendarDate, scheduledAt, amount,
+                            timeHhmm, recurrenceGeneration, scheduleVersion,
+                            fireRetryCount + 1);
+                    if (retryScheduled) {
+                        Log.w(TAG, "independent recovery FAILED — retry #"
+                                + (fireRetryCount + 1) + " scheduled: "
+                                + medicationId + "/" + doseId + "/" + calendarDate);
+                    } else {
+                        Log.e(TAG, "independent recovery FAILED and retry not scheduled: "
+                                + medicationId + "/" + doseId + "/" + calendarDate);
+                    }
+                } else {
+                    Log.e(TAG, "independent recovery FAILED after max retries: "
+                            + medicationId + "/" + doseId + "/" + calendarDate);
+                }
+                break;
+        }
+    }
 
+    /** Live authorized fire — may advance recurrence when fire is durable. */
+    private static void handleLiveFireResult(
+            Context context,
+            AutoDeductionScheduler scheduler,
+            AutoDeductionScheduler.FireResult result,
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            long scheduledAt,
+            double amount,
+            String timeHhmm,
+            long recurrenceGeneration,
+            String scheduleVersion,
+            int fireRetryCount
+    ) {
+        if (shouldNotifyJavascript(result)) {
+            notifyJavascript(
+                    context, medicationId, doseId, calendarDate, scheduledAt, amount);
+        }
         switch (result.status) {
             case CANCELLED:
                 Log.i(TAG, "stale fire ignored (cancel linearized first): "
                         + medicationId + "/" + doseId + "/" + calendarDate);
                 break;
             case CREATED:
-                Log.i(TAG, "FIRED event persisted: " + medicationId + "/" + doseId + "/" + calendarDate);
+                Log.i(TAG, "FIRED event persisted: "
+                        + medicationId + "/" + doseId + "/" + calendarDate);
                 scheduleNextIfPossible(
                         context, medicationId, doseId, calendarDate, timeHhmm, amount,
                         recurrenceGeneration);
@@ -209,17 +293,10 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 if (result.pendingRecorded) {
                     Log.w(TAG, "FIRED primary failed but pending recorded — advancing recurrence: "
                             + medicationId + "/" + doseId + "/" + calendarDate);
-                    // Pending FIRED evidence already triggered the event-driven
-                    // JS wake-up above; continue only with durable recurrence setup.
                     scheduleNextIfPossible(
                             context, medicationId, doseId, calendarDate, timeHhmm, amount,
                             recurrenceGeneration);
                 } else if (shouldScheduleFireRetry(result, fireRetryCount)) {
-                    // The one-shot alarm was consumed by this delivery and no
-                    // durable FIRED/pending evidence exists. A bounded
-                    // same-identity retry gives persistence another chance;
-                    // boot/TZ/JS restore remains the last-resort recovery path
-                    // once the retry budget is exhausted.
                     boolean retryScheduled = scheduler.scheduleFireRetry(
                             medicationId, doseId, calendarDate, scheduledAt, amount,
                             timeHhmm, recurrenceGeneration, scheduleVersion,

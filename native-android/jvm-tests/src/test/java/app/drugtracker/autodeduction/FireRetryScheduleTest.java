@@ -414,4 +414,56 @@ public class FireRetryScheduleTest {
         assertTrue(rr.ok);
         assertEquals(0, rr.failed);
     }
+
+    @Test
+    public void recoverFireFromIndependentEvidence_survivesLaterCancellation()
+            throws Exception {
+        String date = "2026-09-11";
+        AutoDeductionScheduler s = newScheduler();
+        synchronized (getScheduleLock()) {
+            assertTrue(s.recordIndependentFireRetryEvidenceLocked(
+                    "med", "dose", date, 1000L, 2.0, "08:00", 1L, "v1", 1));
+        }
+        // Later cancellation tombstone (config mutation after failed fire)
+        s.cancelOccurrence("med", "dose", date);
+        AutoDeductionScheduler.FireResult fr =
+                s.recoverFireFromIndependentEvidence("med", "dose", date);
+        assertTrue(
+                "later cancel must not erase prior fire evidence recovery",
+                fr.status == AutoDeductionScheduler.FireResult.Status.CREATED
+                        || fr.status == AutoDeductionScheduler.FireResult.Status.ALREADY_EXISTS
+                        || fr.pendingRecorded);
+        // Evidence cleared only after durable proof
+        assertNull(s.getIndependentFireRetryEvidence("med", "dose", date));
+    }
+
+    @Test
+    public void handleIndependentRecovery_created_doesNotScheduleSuccessor() {
+        // Independent recovery CREATED path must not install a next-day alarm.
+        // Use handleFireDelivery with pre-seeded evidence and no sch: metadata.
+        String date = "2026-09-12";
+        AutoDeductionScheduler s = newScheduler();
+        try {
+            java.lang.reflect.Method m = AutoDeductionScheduler.class
+                    .getDeclaredMethod(
+                            "recordIndependentFireRetryEvidenceLocked",
+                            String.class, String.class, String.class, long.class,
+                            double.class, String.class, long.class, String.class, int.class);
+            m.setAccessible(true);
+        } catch (Exception ignored) {
+            // package-private; same package can call directly
+        }
+        synchronized (getScheduleLock()) {
+            assertTrue(s.recordIndependentFireRetryEvidenceLocked(
+                    "med", "dose", date, 1000L, 1.0, "08:00", 1L, "v1", 1));
+        }
+        int before = alarmCount();
+        AutoDeductionReceiver.handleFireDelivery(
+                appContext(), "med", "dose", date, 1000L, 1.0, "08:00",
+                1L, "v1", 1);
+        // No successor alarm from independent recovery
+        assertEquals(
+                "independent recovery must not schedule successor",
+                before, alarmCount());
+    }
 }

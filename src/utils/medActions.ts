@@ -305,6 +305,50 @@ export function getHistoricalRestoreDisplayAmount(
   return n > 0 ? n : null;
 }
 
+/**
+ * UI-only: Auto historical Restore (consumed + auto_daily + valid amount evidence).
+ * Must not treat auto_daily with null/zero historical amount as restorable.
+ */
+export function isUiAutoHistoricalRestoreEligible(
+  consumed: boolean,
+  skipped: boolean,
+  activeDeductionType: string | null | undefined,
+  historicalAmount: number | null
+): boolean {
+  return (
+    consumed &&
+    !skipped &&
+    activeDeductionType === 'auto_daily' &&
+    historicalAmount != null
+  );
+}
+
+/**
+ * UI-only: Manual (or any) consumed Restore with exact active deduction evidence.
+ */
+export function isUiConsumedRestoreEligible(
+  consumed: boolean,
+  skipped: boolean,
+  historicalAmount: number | null
+): boolean {
+  return consumed && !skipped && historicalAmount != null;
+}
+
+/**
+ * UI-only: pure auto projection Restore (no auto_daily log required).
+ */
+export function isUiPureAutoProjectionRestoreEligible(
+  isAutoActive: boolean,
+  completed: boolean,
+  consumed: boolean,
+  skipped: boolean,
+  elapsed: boolean
+): boolean {
+  return (
+    isAutoActive && completed && !consumed && !skipped && elapsed
+  );
+}
+
 export function findActualDeductedAmountForOccurrence(
   logs: ConsumptionLog[],
   medicationId: string,

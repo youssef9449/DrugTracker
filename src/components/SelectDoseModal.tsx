@@ -19,6 +19,9 @@ import {
 import {
   findActiveDeductionForOccurrence,
   getHistoricalRestoreDisplayAmount,
+  isUiAutoHistoricalRestoreEligible,
+  isUiConsumedRestoreEligible,
+  isUiPureAutoProjectionRestoreEligible,
 } from '../utils/medActions';
 import { Modal } from './ui/Modal';
 
@@ -113,10 +116,15 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
         today
       );
       const elapsed = isDoseTimeElapsedToday(d.time, now);
-      const pureAuto =
-        isAutoActive && completed && !consumed && !skipped && elapsed;
+      const pureAuto = isUiPureAutoProjectionRestoreEligible(
+        isAutoActive,
+        completed,
+        consumed,
+        skipped,
+        elapsed
+      );
       const canRestoreThis =
-        (consumed && !skipped && evidence != null) || pureAuto;
+        isUiConsumedRestoreEligible(consumed, skipped, evidence) || pureAuto;
       return !canRestoreThis;
     });
 
@@ -166,8 +174,6 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                 dose.id,
                 today
               );
-              const isAutoConsumed =
-                consumed && activeDeduction?.type === 'auto_daily';
               // Historical restore amount only from exact active deduction evidence.
               // Never invent from dose.amount / schedule (matches restoreDose fail-closed).
               const historicalAmount = getHistoricalRestoreDisplayAmount(
@@ -176,12 +182,23 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                 dose.id,
                 today
               );
+              // Auto historical Restore requires valid amount evidence, not merely type.
+              const isAutoConsumed = isUiAutoHistoricalRestoreEligible(
+                consumed,
+                skipped,
+                activeDeduction?.type,
+                historicalAmount
+              );
               const scheduleAmount = Number(dose.amount) || 0;
               const elapsed = isDoseTimeElapsedToday(dose.time, now);
-              // Pure auto: completed via elapsed projection, not manual consume, not skipped.
-              // Projection-only restore remains valid; do not treat as confirmed log amount.
-              const isPureAuto =
-                completed && !consumed && !skipped && elapsed;
+              // Pure auto projection: no auto_daily log required.
+              const isPureAuto = isUiPureAutoProjectionRestoreEligible(
+                isAutoActive,
+                completed,
+                consumed,
+                skipped,
+                elapsed
+              );
               const timeLabel = formatTimeArabic(dose.time);
               const dayLabel = relativeDoseDayLabel(eventDate, today);
               const whenLabel = `${dayLabel} • ${timeLabel}`;
@@ -210,7 +227,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                   statusText = 'تم الخصم تلقائيًا';
                   action = 'restore';
                   actionLabel = 'استرجاع الجرعة';
-                } else if (consumed && historicalAmount != null && !skipped) {
+                } else if (isUiConsumedRestoreEligible(consumed, skipped, historicalAmount)) {
                   // Consumed + exact active deduction for this doseId → Restore.
                   statusText = 'تم التناول';
                   action = 'restore';
@@ -335,9 +352,8 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
               // - consumed + exact active deduction evidence, or
               // - pure auto projection (no log required).
               const isSelectable = isRestore
-                ? !skipped &&
-                  ((consumed && historicalAmount != null) ||
-                    (isAutoActive && isPureAuto))
+                ? isUiConsumedRestoreEligible(consumed, skipped, historicalAmount) ||
+                  isPureAuto
                 : !completed;
               const isDone = !isSelectable;
 

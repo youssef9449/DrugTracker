@@ -344,9 +344,11 @@ export function reconcileFiredEvents(
       continue;
     }
 
+    // Invalid amount: record skipped_invalid but do NOT ACK. Leaving the
+    // native FIRED row unreconciled preserves evidence for a later pass with
+    // a corrected valid amount (no stock effect was durable this pass).
     if (!isValidEventAmount(amount)) {
       details.push({ ...baseDetail, outcome: 'skipped_invalid' });
-      toAcknowledge.push({ medicationId, doseId, calendarDate });
       continue;
     }
 

@@ -151,55 +151,83 @@ export function migrateLegacyExactAutoEnvelope(
     calendarDate: string;
   }>;
   recovered: boolean;
+  /** True only when the legacy mutation itself is not durably established. */
+  durabilityBlocked: boolean;
+  /** True when recovery is incomplete, including best-effort envelope cleanup failure. */
   blocked: boolean;
 } {
   const existing = load();
   if (!existing) {
-    return { state: fresh, toAcknowledge: [], recovered: false, blocked: false };
+    return {
+      state: fresh,
+      toAcknowledge: [],
+      recovered: false,
+      durabilityBlocked: false,
+      blocked: false,
+    };
   }
-  // Phase 4 envelope (has mutationSeq) — not legacy. Leave for unified recovery.
+
+  // Phase 4 envelope (has mutationSeq) — not legacy. Leave it for unified recovery.
   if (typeof existing.mutationSeq === 'number' && existing.mutationSeq > 0) {
-    return { state: fresh, toAcknowledge: [], recovered: false, blocked: false };
+    return {
+      state: fresh,
+      toAcknowledge: [],
+      recovered: false,
+      durabilityBlocked: false,
+      blocked: false,
+    };
   }
 
   const acks = Array.isArray(existing.toAcknowledge) ? existing.toAcknowledge : [];
 
-  // 3a: full snapshot already on durable → already applied & current.
+  // 3a: full snapshot already on durable → the stock mutation is already applied.
   if (durableMatchesEnvelopeSnapshot(existing, fresh)) {
     const clearErr = save(null);
     if (clearErr) {
-      // Recovery was attempted (envelope present, snapshot matched). Clear
-      // failed → keep envelope for retry. ACK happens on restart when the
-      // barrier re-confirms snapshot match + clear succeeds (NOT immediately
-      // — lastApplied is not used for legacy, so snapshot match is the only
-      // durability proof, and it requires a successful clear to finalize).
-      return { state: fresh, toAcknowledge: [], recovered: true, blocked: true };
+      // Only cleanup failed. The stock snapshot is already durable.
+      return {
+        state: fresh,
+        toAcknowledge: [],
+        recovered: true,
+        durabilityBlocked: false,
+        blocked: true,
+      };
     }
-    return { state: fresh, toAcknowledge: acks, recovered: true, blocked: false };
+    return {
+      state: fresh,
+      toAcknowledge: acks,
+      recovered: true,
+      durabilityBlocked: false,
+      blocked: false,
+    };
   }
 
-  // 3b: legacy log IDs present in durable → legacy was applied, then a
-  // newer Phase 4 mutation superseded it. ACK + clear. Do NOT re-apply.
+  // 3b: legacy log IDs present in durable → the legacy mutation was applied,
+  // then a newer Phase 4 mutation superseded it. ACK + clear. Do NOT re-apply.
   //
-  // Write-ordering proof (why log-ID presence cannot mean "logs without the
-  // medication snapshot"): every commit path that can have produced these
-  // logs — legacyCommit here, the reconcile-side legacyCommit, and
-  // commitDurableAutoStockState — writes medications FIRST, then logs
-  // (lastApplied last), and each key write is all-or-nothing. Durable log
-  // IDs therefore imply the logs write of that commit landed, which only
-  // happens AFTER the same commit's medications write succeeded — so
-  // durable medications are the envelope's snapshot or something newer
-  // (a later mutation that kept the cumulative logs). Not re-applying is
-  // correct in both cases. The barrier also runs before any new Phase 4
-  // mutation can allocate a sequence, so no interleaving can produce a
-  // logs-present/medications-never-written state.
+  // This is valid because every known producer of these legacy logs writes
+  // medications BEFORE logs. Therefore the presence of the envelope's log IDs
+  // proves the corresponding medications write already landed, even if a
+  // later Phase 4 mutation changed the medication snapshot afterwards.
   const legacyLogsPresent = envelopeLogIdsPresentInDurable(existing.logs, fresh.logs);
   if (legacyLogsPresent) {
     const clearErr = save(null);
     if (clearErr) {
-      return { state: fresh, toAcknowledge: [], recovered: true, blocked: true };
+      return {
+        state: fresh,
+        toAcknowledge: [],
+        recovered: true,
+        durabilityBlocked: false,
+        blocked: true,
+      };
     }
-    return { state: fresh, toAcknowledge: acks, recovered: true, blocked: false };
+    return {
+      state: fresh,
+      toAcknowledge: acks,
+      recovered: true,
+      durabilityBlocked: false,
+      blocked: false,
+    };
   }
 
   // 3c: legacy mutation was never applied to durable.
@@ -209,16 +237,22 @@ export function migrateLegacyExactAutoEnvelope(
     const commitErr = commit({
       medications: existing.medications,
       logs: existing.logs,
-      // Preserve the global master state captured by a Phase 4 envelope.
-      // Pre-Phase-4 envelopes may omit it, so fall back to the current durable value.
       globalAutoDeductEnabled:
         existing.globalAutoDeductEnabled ?? fresh.globalAutoDeductEnabled,
     });
     if (commitErr) {
-      // Recovery was attempted (envelope present). Persist failed → mutation
-      // NOT durable → no ACK. recovered=true means recovery was attempted.
-      return { state: fresh, toAcknowledge: [], recovered: true, blocked: true };
+      // The legacy snapshot is NOT durably established. This is the real
+      // durability barrier: callers must not perform another stock mutation
+      // until this envelope can be recovered.
+      return {
+        state: fresh,
+        toAcknowledge: [],
+        recovered: true,
+        durabilityBlocked: true,
+        blocked: true,
+      };
     }
+
     const applied: AutoStockDurableState = {
       medications: existing.medications,
       logs: existing.logs,
@@ -227,25 +261,45 @@ export function migrateLegacyExactAutoEnvelope(
     };
     const clearErr = save(null);
     if (clearErr) {
-      // Snapshot applied (meds+logs durable) but envelope clear failed → keep
-      // envelope; next restart sees snapshot matches → clear + ACK. No ACK now
-      // (clear not durable; ACK deferred to restart confirmation).
-      return { state: applied, toAcknowledge: [], recovered: true, blocked: true };
+      // Snapshot is durable; only envelope cleanup failed.
+      return {
+        state: applied,
+        toAcknowledge: [],
+        recovered: true,
+        durabilityBlocked: false,
+        blocked: true,
+      };
     }
-    return { state: applied, toAcknowledge: acks, recovered: true, blocked: false };
+    return {
+      state: applied,
+      toAcknowledge: acks,
+      recovered: true,
+      durabilityBlocked: false,
+      blocked: false,
+    };
   }
 
   // lastApplied > 0 → a newer Phase 4 mutation exists. DO NOT apply the
-  // legacy snapshot (would overwrite the newer mutation). Clear the
-  // envelope and let reconcileFiredEvents re-drive via native FIRED events
-  // with a proper Phase 4 mutationSeq. No ACK (mutation not durable here).
+  // legacy snapshot (would overwrite the newer mutation). Clear the envelope
+  // and let native FIRED evidence drive a proper Phase 4 reconciliation.
   const clearErr = save(null);
   if (clearErr) {
-    return { state: fresh, toAcknowledge: [], recovered: true, blocked: true };
+    return {
+      state: fresh,
+      toAcknowledge: [],
+      recovered: true,
+      durabilityBlocked: false,
+      blocked: true,
+    };
   }
-  return { state: fresh, toAcknowledge: [], recovered: true, blocked: false };
+  return {
+    state: fresh,
+    toAcknowledge: [],
+    recovered: true,
+    durabilityBlocked: false,
+    blocked: false,
+  };
 }
-
 
 export interface ManualStockEnvelope {
   version: 1;
@@ -427,7 +481,9 @@ export interface UnifiedRecoveryResult {
     calendarDate: string;
   }>;
   recovered: boolean;
-  /** True when a write/finalization failed and evidence was kept. */
+  /** True when the pending stock snapshot is not durably finalized; new mutations must stop. */
+  durabilityBlocked: boolean;
+  /** True when recovery is incomplete, including best-effort envelope cleanup failure. */
   blocked: boolean;
 }
 
@@ -446,6 +502,7 @@ export function recoverAllPendingStockEnvelopes(
 ): UnifiedRecoveryResult {
   let state = fresh;
   let recovered = false;
+  let durabilityBlocked = false;
   let blocked = false;
   const exactToAcknowledge: UnifiedRecoveryResult['exactToAcknowledge'] = [];
   const ackSeen = new Set<string>();
@@ -476,7 +533,13 @@ export function recoverAllPendingStockEnvelopes(
   };
 
   if (!pending.length) {
-    return { state, exactToAcknowledge, recovered: false, blocked: false };
+    return {
+      state,
+      exactToAcknowledge,
+      recovered: false,
+      durabilityBlocked: false,
+      blocked: false,
+    };
   }
 
   let lastApplied = loadLastAppliedMutationSeq();
@@ -524,6 +587,7 @@ export function recoverAllPendingStockEnvelopes(
     if (durableMatchesEnvelopeSnapshot(env, state)) {
       const finErr = finalizeMutationSeq(env.mutationSeq);
       if (finErr) {
+        durabilityBlocked = true;
         blocked = true;
         break;
       }
@@ -547,6 +611,7 @@ export function recoverAllPendingStockEnvelopes(
       env.mutationSeq
     );
     if (err) {
+      durabilityBlocked = true;
       blocked = true;
       break;
     }
@@ -580,7 +645,13 @@ export function recoverAllPendingStockEnvelopes(
     }
   }
 
-  return { state, exactToAcknowledge, recovered, blocked };
+  return {
+    state,
+    exactToAcknowledge,
+    recovered,
+    durabilityBlocked,
+    blocked,
+  };
 }
 
 /**

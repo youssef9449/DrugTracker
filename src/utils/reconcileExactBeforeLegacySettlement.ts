@@ -22,6 +22,8 @@ export interface PreSettlementResult {
   reconciliation: RunReconciliationOutput | null;
   /** True when native FIRED list failed — caller should fail-closed or retry. */
   nativeListFailed: boolean;
+  /** True when Exact stock is not durably finalized; callers must not mutate stock afterward. */
+  durabilityBlocked: boolean;
 }
 
 /**
@@ -57,5 +59,6 @@ export async function reconcileExactBeforeLegacySettlement(opts: {
     },
     reconciliation: recon,
     nativeListFailed: recon.nativeListFailed === true,
+    durabilityBlocked: recon.durabilityBlocked === true,
   };
 }

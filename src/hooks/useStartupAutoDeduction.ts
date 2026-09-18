@@ -51,8 +51,9 @@ export function useStartupAutoDeduction(opts: {
         // whether legacy settlement may proceed.
         globalAutoDeductEnabled: fresh.globalAutoDeductEnabled !== false,
       });
-      // Native list failure: do not run legacy settlement (retry next session).
-      if (pre.nativeListFailed) {
+      // Native read failure OR unresolved Exact durability: do not run
+      // legacy settlement on top of an unresolved exact occurrence.
+      if (pre.nativeListFailed || pre.durabilityBlocked) {
         return;
       }
       const durableGlobalAutoDeductEnabled = pre.state.globalAutoDeductEnabled !== false;

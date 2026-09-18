@@ -85,6 +85,8 @@ export interface RunReconciliationOutput extends ReconcileFiredResult {
   recoveredEnvelope: boolean;
   /** True when at least one native mark failed after JS commit (retryable). */
   partialNativeAck: boolean;
+  /** True when the exact stock mutation could not be durably finalized; callers must fail closed. */
+  durabilityBlocked?: boolean;
   /** True when native FIRED list failed — distinct from empty events; no mutation/ack. */
   nativeListFailed?: boolean;
   nativeListError?: string;
@@ -241,6 +243,7 @@ async function runOnce(
           markedCount,
           recoveredEnvelope: legacy.recovered,
           partialNativeAck: failed.length > 0,
+          durabilityBlocked: legacy.durabilityBlocked,
         };
       }
       return {
@@ -326,10 +329,11 @@ async function runOnce(
           markedCount,
           recoveredEnvelope: true,
           partialNativeAck: failed.length > 0,
+          durabilityBlocked: unified.durabilityBlocked,
         };
       }
 
-      if (unified.blocked) {
+      if (unified.durabilityBlocked) {
         return {
           medications: baseMeds,
           logs: baseLogs,
@@ -340,6 +344,7 @@ async function runOnce(
           markedCount: 0,
           recoveredEnvelope: true,
           partialNativeAck: false,
+          durabilityBlocked: true,
         };
       }
       // Manual-only recovery may have completed; fall through to listFired.
@@ -447,6 +452,7 @@ async function runOnce(
       markedCount: 0,
       recoveredEnvelope: false,
       partialNativeAck: false,
+      durabilityBlocked: true,
     };
   }
   const mutationSeq = alloc.seq;
@@ -473,6 +479,7 @@ async function runOnce(
       markedCount: 0,
       recoveredEnvelope: false,
       partialNativeAck: false,
+      durabilityBlocked: true,
     };
   }
 
@@ -507,6 +514,7 @@ async function runOnce(
       markedCount: 0,
       recoveredEnvelope: false,
       partialNativeAck: false,
+      durabilityBlocked: true,
     };
   }
 

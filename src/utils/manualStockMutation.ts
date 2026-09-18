@@ -115,6 +115,15 @@ function resolveConsumeDoseId(med: Medication, doseId?: string): string | undefi
   return undefined;
 }
 
+function preSettlementBlockReason(pre: {
+  nativeListFailed: boolean;
+  durabilityBlocked?: boolean;
+}): string | null {
+  if (pre.durabilityBlocked === true) return 'exact_reconciliation_blocked';
+  if (pre.nativeListFailed) return 'native_list_failed';
+  return null;
+}
+
 /** Native recurrence chains affected by an auto-deduction configuration change. */
 function recurrenceDoseIds(med: Medication): string[] {
   const ids = new Set<string>();
@@ -418,7 +427,7 @@ export function runGatedManualConsume(opts: {
       globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
       now,
     });
-    if (pre.nativeListFailed) {
+    if (pre.nativeListFailed || pre.durabilityBlocked === true) {
       // Fail-closed: do not run legacy or manual mutation when native read failed.
       return {
         outcome: 'persist_failed' as const,
@@ -426,7 +435,7 @@ export function runGatedManualConsume(opts: {
         logs: pre.state.logs,
         doseAmount: 0,
         log: null,
-        reason: 'native_list_failed',
+        reason: preSettlementBlockReason(pre) ?? 'native_list_failed',
       };
     }
     const fresh = pre.state;
@@ -597,7 +606,7 @@ export function runGatedManualRestore(opts: {
       globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
       now,
     });
-    if (pre.nativeListFailed) {
+    if (pre.nativeListFailed || pre.durabilityBlocked === true) {
       // Fail-closed: do not run legacy or manual mutation when native read failed.
       return {
         outcome: 'persist_failed' as const,
@@ -605,7 +614,7 @@ export function runGatedManualRestore(opts: {
         logs: pre.state.logs,
         restoredAmount: 0,
         log: null,
-        reason: 'native_list_failed',
+        reason: preSettlementBlockReason(pre) ?? 'native_list_failed',
       };
     }
     const fresh = pre.state;
@@ -782,12 +791,12 @@ export function runGatedAddMedication(opts: {
       fresh: recovered.state,
       globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
     });
-    if (pre.nativeListFailed) {
+    if (pre.nativeListFailed || pre.durabilityBlocked === true) {
       return {
         outcome: 'persist_failed' as const,
         medications: pre.state.medications,
         logs: pre.state.logs,
-        reason: 'native_list_failed',
+        reason: preSettlementBlockReason(pre) ?? 'native_list_failed',
       };
     }
 
@@ -901,7 +910,7 @@ export function runGatedRefill(opts: {
       globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
       now,
     });
-    if (pre.nativeListFailed) {
+    if (pre.nativeListFailed || pre.durabilityBlocked === true) {
       // Fail-closed: do not run legacy or manual mutation when native read failed.
       return {
         outcome: 'persist_failed' as const,
@@ -909,7 +918,7 @@ export function runGatedRefill(opts: {
         logs: pre.state.logs,
         addedPills: 0,
         log: null,
-        reason: 'native_list_failed',
+        reason: preSettlementBlockReason(pre) ?? 'native_list_failed',
       };
     }
     const fresh = pre.state;
@@ -1015,7 +1024,7 @@ export function runGatedUndoRefill(opts: {
       globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
       now,
     });
-    if (pre.nativeListFailed) {
+    if (pre.nativeListFailed || pre.durabilityBlocked === true) {
       // Fail-closed: do not run legacy or manual mutation when native read failed.
       return {
         outcome: 'persist_failed' as const,
@@ -1023,7 +1032,7 @@ export function runGatedUndoRefill(opts: {
         logs: pre.state.logs,
         addedPills: 0,
         log: null,
-        reason: 'native_list_failed',
+        reason: preSettlementBlockReason(pre) ?? 'native_list_failed',
       };
     }
     const fresh = pre.state;
@@ -1198,14 +1207,14 @@ export function runGatedAutoDeductToggle(opts: {
       globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
       now,
     });
-    if (pre.nativeListFailed) {
+    if (pre.nativeListFailed || pre.durabilityBlocked === true) {
       return {
         outcome: 'native_list_failed' as const,
         medications: pre.state.medications,
         logs: pre.state.logs,
         newState: false,
         settleLog: null,
-        reason: 'native_list_failed',
+        reason: preSettlementBlockReason(pre) ?? 'native_list_failed',
       };
     }
     const fresh = pre.state;
@@ -1327,14 +1336,14 @@ export function runGatedGlobalAutoDeductToggle(opts: {
       globalAutoDeductEnabled: opts.enable,
       now,
     });
-    if (pre.nativeListFailed) {
+    if (pre.nativeListFailed || pre.durabilityBlocked === true) {
       return {
         outcome: 'native_list_failed' as const,
         medications: pre.state.medications,
         logs: pre.state.logs,
         enable: opts.enable,
         settleLogs: [],
-        reason: 'native_list_failed',
+        reason: preSettlementBlockReason(pre) ?? 'native_list_failed',
       };
     }
     const fresh = pre.state;
@@ -1454,12 +1463,12 @@ export function runGatedDeleteMedication(opts: {
       fresh: recovered.state,
       globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
     });
-    if (pre.nativeListFailed) {
+    if (pre.nativeListFailed || pre.durabilityBlocked === true) {
       return {
         outcome: 'native_list_failed' as const,
         medications: pre.state.medications,
         logs: pre.state.logs,
-        reason: 'native_list_failed',
+        reason: preSettlementBlockReason(pre) ?? 'native_list_failed',
       };
     }
 
@@ -1569,13 +1578,13 @@ export function runGatedMedicationUpdate(opts: {
       globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
       now,
     });
-    if (pre.nativeListFailed) {
+    if (pre.nativeListFailed || pre.durabilityBlocked === true) {
       return {
         outcome: 'native_list_failed' as const,
         medications: pre.state.medications,
         logs: pre.state.logs,
         settleLog: null,
-        reason: 'native_list_failed',
+        reason: preSettlementBlockReason(pre) ?? 'native_list_failed',
       };
     }
     const fresh = pre.state;

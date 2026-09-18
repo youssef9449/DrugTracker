@@ -5,6 +5,8 @@ import {
   runGatedManualRestore,
   runGatedRefill,
   runGatedUndoRefill,
+  runGatedAutoDeductToggle,
+  runGatedMedicationUpdate,
   shouldDismissAlarmAfterManualTake,
   type ManualStockEnvelope,
 } from '../../src/utils/manualStockMutation';
@@ -28,6 +30,7 @@ import {
   __setAutoStockGateTestHooks,
   type AutoStockDurableState,
 } from '../../src/utils/autoDeductionStockGate';
+import { __setManualRecurrenceInvalidationTestHook } from '../../src/utils/manualStockMutation';
 import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
 import { isDoseConsumedOnDate } from '../../src/utils/dateCalculations';
 import { exactAutoLogId } from '../../src/utils/autoDeductionReconciliation';
@@ -3199,6 +3202,100 @@ describe('Phase 4 — Exact Auto event.amount is authoritative for Manual Take',
     expect(r.outcome).toBe('applied');
     expect(r.doseAmount).toBe(1);
     expect(durable.medications[0].currentPills).toBe(9);
+  });
+});
+
+
+describe('Phase 4 — native recurrence invalidation is the config-change ordering barrier', () => {
+  let durable: AutoStockDurableState;
+  const invalidated: string[] = [];
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-16T15:00:00'));
+    durable = { medications: [med()], logs: [] };
+    __setAutoStockGateTestHooks({
+      load: () => ({
+        medications: durable.medications.map((m) => ({ ...m })),
+        logs: durable.logs.map((l) => ({ ...l })),
+      }),
+      commit: (next) => {
+        durable = {
+          medications: next.medications.map((m) => ({ ...m })),
+          logs: next.logs.map((l) => ({ ...l })),
+        };
+        return null;
+      },
+    });
+    __setManualEnvelopeTestHooks({ load: () => null, save: () => null });
+    invalidated.length = 0;
+    __setManualRecurrenceInvalidationTestHook(async (medicationId, doseId) => {
+      invalidated.push(`${medicationId}|${doseId}`);
+      return { ok: true };
+    });
+    __setStockMutationOrderingTestHooks({
+      allocate: (() => {
+        let seq = 0;
+        return () => ({ ok: true, seq: ++seq });
+      })(),
+      loadLastApplied: () => 0,
+      persistLastApplied: () => null,
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    __setAutoStockGateTestHooks(null);
+    __setManualEnvelopeTestHooks(null);
+    __setManualRecurrenceInvalidationTestHook(null);
+    __resetStockMutationOrderingForTests();
+  });
+
+  it('per-med toggle invalidates every existing dose chain before commit', async () => {
+    const r = await runGatedAutoDeductToggle({
+      medicationId: 'med-1',
+      globalAutoDeductEnabled: true,
+      todayStr: '2026-09-16',
+    });
+    expect(r.outcome).toBe('applied');
+    expect(invalidated).toEqual(['med-1|d1', 'med-1|d2', 'med-1|d3']);
+    expect(durable.medications[0].autoDeductEnabled).toBe(false);
+  });
+
+  it('schedule edit invalidates the old chain before the new configuration commits', async () => {
+    const next: Medication = {
+      ...med(),
+      dailyDose: 6,
+      doseSchedule: [
+        { id: 'd1', amount: 3, time: '09:00' },
+        { id: 'd2', amount: 1, time: '14:00' },
+        { id: 'd3', amount: 2, time: '22:00' },
+      ],
+    };
+    const r = await runGatedMedicationUpdate({
+      editId: 'med-1',
+      medData: next,
+      globalAutoDeductEnabled: true,
+      todayStr: '2026-09-16',
+    });
+    expect(r.outcome).toBe('applied');
+    expect(invalidated).toEqual(['med-1|d1', 'med-1|d2', 'med-1|d3']);
+    expect(durable.medications[0].doseSchedule?.find((d) => d.id === 'd1')?.amount).toBe(3);
+  });
+
+  it('native invalidation failure blocks the JS configuration mutation', async () => {
+    __setManualRecurrenceInvalidationTestHook(async () => ({
+      ok: false,
+      error: 'native_invalidation_failed',
+    }));
+    const before = durable.medications[0];
+    const r = await runGatedAutoDeductToggle({
+      medicationId: 'med-1',
+      globalAutoDeductEnabled: true,
+      todayStr: '2026-09-16',
+    });
+    expect(r.outcome).toBe('native_invalidation_failed');
+    expect(durable.medications[0]).toEqual(before);
   });
 });
 

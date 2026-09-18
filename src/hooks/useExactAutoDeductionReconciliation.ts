@@ -90,13 +90,12 @@ export function useExactAutoDeductionReconciliation({
       }
     };
 
-    // Recovery boundary: hydrate and every app resume perform one reconciliation.
-    // This is NOT polling; it covers events that occurred while JS was unavailable.
-    void reconcile();
-
     let listenerHandle: { remove: () => Promise<void> } | null = null;
     let listenerCancelled = false;
 
+    // Register the native wake-up before the recovery reconciliation. If an
+    // alarm fires during listener setup, the durable FIRED row is still picked
+    // up by this one-shot recovery once registration completes.
     void addExactAutoDeductionFiredListener(() => {
       if (listenerCancelled || cancelled) return;
       // Native already persisted FIRED before emitting this wake-up signal.
@@ -107,8 +106,15 @@ export function useExactAutoDeductionReconciliation({
         return;
       }
       listenerHandle = handle;
+
+      // Recovery boundary: hydrate and every app resume perform one
+      // reconciliation after the event listener is armed. This is NOT polling;
+      // it covers events that occurred while JS was unavailable or during setup.
+      void reconcile();
     }).catch((err) => {
       console.warn('[App] Exact Auto event listener registration failed:', err);
+      // Even if the listener cannot be attached, perform the recovery read once.
+      void reconcile();
     });
 
     return () => {

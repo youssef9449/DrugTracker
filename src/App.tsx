@@ -559,7 +559,6 @@ export default function App() {
 
   useNativeActionHandlers({
     medications,
-    handleTakeDoseFromAlarm,
     handleTakeDoseFromAlarmById,
     openAlarm,
     soundEnabled,

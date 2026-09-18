@@ -479,14 +479,42 @@ public final class AutoDeductionEventStore {
         return out;
     }
 
-    /** List only FIRED (unreconciled) events. Promotes pending first.
-     * Malformed FIRED rows are atomically marked REJECTED and never returned. */
-    public List<JSONObject> listFiredEvents() {
+    /** Explicit result for bulk FIRED-event listing.
+     * ok=false means native could not safely establish the terminal state.
+     * In that case events is empty and JS must fail closed rather than treating
+     * the result as a successful empty snapshot. */
+    public static final class FiredEventsResult {
+        public final boolean ok;
+        public final List<JSONObject> events;
+        public final String error;
+
+        private FiredEventsResult(boolean ok, List<JSONObject> events, String error) {
+            this.ok = ok;
+            this.events = events;
+            this.error = error;
+        }
+
+        public static FiredEventsResult success(List<JSONObject> events) {
+            return new FiredEventsResult(true, events, null);
+        }
+
+        public static FiredEventsResult failure(String error) {
+            return new FiredEventsResult(false, new ArrayList<>(),
+                    error != null && !error.isEmpty() ? error : "fired_list_failed");
+        }
+    }
+
+    /**
+     * List only FIRED (unreconciled) events. Malformed rows are terminalized
+     * as REJECTED before the snapshot is exposed to JS.
+     */
+    public FiredEventsResult listFiredEventsResult() {
         promotePendingFires();
         List<JSONObject> fired = new ArrayList<>();
         synchronized (LOCK) {
             Map<String, ?> all = prefs.getAll();
             SharedPreferences.Editor editor = null;
+            boolean needsTerminalization = false;
             for (Map.Entry<String, ?> e : all.entrySet()) {
                 if (!e.getKey().startsWith(KEY_EVENT_PREFIX)) continue;
                 Object v = e.getValue();
@@ -494,56 +522,56 @@ public final class AutoDeductionEventStore {
                 try {
                     JSONObject o = new JSONObject((String) v);
                     String status = o.optString("status", "");
-                    if (!AutoDeductionContract.STATUS_FIRED.equals(status)) {
-                        continue;
-                    }
+                    if (!AutoDeductionContract.STATUS_FIRED.equals(status)) continue;
+
                     boolean malformed = isMalformedFired(o);
                     StorageIdentity storageIdentity = parseStorageKeyIdentity(e.getKey());
                     boolean identityMismatch = !storageIdentityMatchesPayload(storageIdentity, o);
                     if (malformed || identityMismatch) {
                         o.put("status", AutoDeductionContract.STATUS_REJECTED);
                         o.put("rejectedAt", System.currentTimeMillis());
-                        o.put(
-                                "rejectionReason",
+                        o.put("rejectionReason",
                                 malformed ? "malformed_fields" : "identity_mismatch");
-                        if (editor == null) {
-                            editor = prefs.edit();
-                        }
+                        if (editor == null) editor = prefs.edit();
                         editor.putString(e.getKey(), o.toString());
+                        needsTerminalization = true;
                         Log.w(TAG, "queued invalid FIRED identity for REJECTED: " + e.getKey());
-                        // Do not add to fired — never surface as FIRED to JS.
                         continue;
                     }
                     fired.add(o);
                 } catch (JSONException parseEx) {
-                    // Corrupt non-JSON storage value → terminal REJECTED (no fake identity).
                     try {
                         JSONObject rejected = new JSONObject();
                         rejected.put("status", AutoDeductionContract.STATUS_REJECTED);
                         rejected.put("rejectedAt", System.currentTimeMillis());
                         rejected.put("rejectionReason", "invalid_json");
                         rejected.put("storageKey", e.getKey());
-                        if (editor == null) {
-                            editor = prefs.edit();
-                        }
+                        if (editor == null) editor = prefs.edit();
                         editor.putString(e.getKey(), rejected.toString());
+                        needsTerminalization = true;
                         Log.w(TAG, "queued invalid JSON event row for REJECTED: " + e.getKey());
                     } catch (JSONException writeEx) {
                         Log.e(TAG, "failed to build REJECTED record for invalid JSON: "
                                 + e.getKey(), writeEx);
+                        return FiredEventsResult.failure("rejected_build_failed");
                     }
                 }
             }
-            if (editor != null) {
-                boolean ok = commitEditor(editor);
-                if (!ok) {
-                    // Fail-closed: do not claim terminalization succeeded.
-                    // Rows remain as stored; next listFiredEvents will retry.
-                    Log.e(TAG, "REJECTED terminalization commit failed — rows remain retryable");
-                }
+
+            if (needsTerminalization && !commitEditor(editor)) {
+                // Critical: valid events from the same scan are NOT exposed when
+                // an invalid FIRED row could not be terminalized. Callers must
+                // retry instead of interpreting a partial snapshot as authoritative.
+                Log.e(TAG, "REJECTED terminalization commit failed — bulk FIRED read failed");
+                return FiredEventsResult.failure("rejected_persist_failed");
             }
         }
-        return fired;
+        return FiredEventsResult.success(fired);
+    }
+
+    /** Backward-compatible list API used by focused native tests/callers. */
+    public List<JSONObject> listFiredEvents() {
+        return listFiredEventsResult().events;
     }
 
     /**

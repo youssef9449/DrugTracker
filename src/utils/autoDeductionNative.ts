@@ -38,6 +38,8 @@ export interface ScheduleOccurrenceParams {
   timeHhmm: string;
   amount: number;
   scheduledAtEpochMs?: number;
+  /** Durable native marker: fire persistence is pending retry/recovery. */
+  fireRetryCount?: number;
 }
 
 export interface ScheduleOccurrenceResult {

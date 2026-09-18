@@ -353,7 +353,7 @@ export function useAutoDeductionScheduler({
       // recoverable after app restart/resume/midnight without foreground polling.
       const recoveryBoundary = `${resumeTick}:${midnightTick}`;
       if (recoveryBoundaryRef.current !== recoveryBoundary) {
-        const restoreResult = await restoreFutureSchedulesOnce();
+        const restoreResult = await restoreFutureSchedulesOnce(recoveryBoundary);
         if (!restoreResult.ok) {
           // Fail-closed: incomplete recovery must not drive destructive cleanup.
           // Leave recoveryBoundaryRef unchanged so a later pass retries restore.

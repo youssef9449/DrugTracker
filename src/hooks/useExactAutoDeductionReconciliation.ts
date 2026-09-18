@@ -72,7 +72,7 @@ export function useExactAutoDeductionReconciliation({
           // before reading the FIRED ledger. This handles app restart/resume and
           // local-midnight catch-up without polling; the native operation is
           // idempotent and does not mutate JS stock directly.
-          const restoreResult = await restoreFutureSchedulesOnce();
+          const restoreResult = await restoreFutureSchedulesOnce(`exact:${resumeTick}:${midnightTick}`);
           if (cancelled) return;
           if (!restoreResult.ok) {
             // Fail-closed: do not treat incomplete recovery as success.

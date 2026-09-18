@@ -26,10 +26,7 @@ import { generateId } from '../utils/id';
 import { playSuccessChime } from '../utils/sound';
 import { persist } from '../utils/storage';
 import { TOAST_MESSAGES, STORAGE_ERRORS } from '../constants/uiStrings';
-import {
-  STORAGE_AUTO_DEDUCT_PROMPTED_KEY,
-  STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
-} from '../constants/storageKeys';
+import { STORAGE_AUTO_DEDUCT_PROMPTED_KEY } from '../constants/storageKeys';
 import {
   requestNotificationPermission,
   getNotificationPermission,
@@ -284,16 +281,31 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
   };
 
   const handleConfirmAutoDeductPrompt = (enable: boolean) => {
-    setIsAutoDeductPromptOpen(false);
-    persist(STORAGE_AUTO_DEDUCT_PROMPTED_KEY, 'true', { json: false });
-    setGlobalAutoDeductEnabled(enable);
-    persist(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, String(enable), { json: false });
-    if (soundEnabled) playSuccessChime();
-    showToast(
-      enable
-        ? 'تم تفعيل الخصم التلقائي لمخزون الأدوية ⚡'
-        : 'تم إيقاف الخصم التلقائي ⏸️ (المخزون ثابت حتى تسجل الجرعة يدوياً)'
-    );
+    // First-run preference uses the same durable global mutation gate as every
+    // later global toggle. Do not create a second durable writer for the
+    // global master switch.
+    void (async () => {
+      const result = await runGatedGlobalAutoDeductToggle({ enable });
+      if (result.outcome !== 'applied') {
+        // Keep the prompt retryable. In particular, native/read/persistence
+        // failures must not record the prompt as completed before the durable
+        // policy change actually lands.
+        setIsAutoDeductPromptOpen(true);
+        return;
+      }
+
+      persist(STORAGE_AUTO_DEDUCT_PROMPTED_KEY, 'true', { json: false });
+      setGlobalAutoDeductEnabled(result.enable);
+      setMedications(result.medications);
+      medicationsRef.current = result.medications;
+      setLogs(result.logs);
+      if (soundEnabled) playSuccessChime();
+      showToast(
+        enable
+          ? 'تم تفعيل الخصم التلقائي لمخزون الأدوية ⚡'
+          : 'تم إيقاف الخصم التلقائي ⏸️ (المخزون ثابت حتى تسجل الجرعة يدوياً)'
+      );
+    })();
   };
 
 

@@ -45,6 +45,8 @@ export interface ExactAutoEnvelope {
   status: 'js_ready';
   medications: Medication[];
   logs: ConsumptionLog[];
+  /** Phase 4 durable global master switch; absent only on pre-fix envelopes. */
+  globalAutoDeductEnabled?: boolean;
   toAcknowledge: Array<{
     medicationId: string;
     doseId: string;
@@ -436,6 +438,7 @@ async function runOnce(
     status: 'js_ready',
     medications: result.medications,
     logs: result.logs,
+    globalAutoDeductEnabled: fresh.globalAutoDeductEnabled,
     toAcknowledge: result.toAcknowledge,
     createdAt: new Date().toISOString(),
     mutationSeq,
@@ -468,6 +471,7 @@ async function runOnce(
       {
         medications: result.medications,
         logs: result.logs,
+        globalAutoDeductEnabled: fresh.globalAutoDeductEnabled,
       },
       { appliedMutationSeq: mutationSeq }
     );

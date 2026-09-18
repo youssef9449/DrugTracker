@@ -79,7 +79,7 @@ interface AutoDeductionPlugin {
     medicationId: string;
     doseId: string;
   }): Promise<{ ok: boolean; error?: string; generation?: number }>;
-  listFiredEvents(): Promise<{ events: AutoDeductionEvent[] }>;
+  listFiredEvents(): Promise<{ ok: boolean; events: AutoDeductionEvent[]; error?: string }>;
   listEvents(): Promise<{ events: AutoDeductionEvent[] }>;
   getOccurrenceSnapshot(options: {
     medicationId: string;
@@ -208,6 +208,13 @@ export async function listFiredAutoDeductionEvents(): Promise<ListFiredEventsRes
   }
   try {
     const res = await AutoDeduction.listFiredEvents();
+    if (!res || res.ok === false) {
+      return {
+        ok: false,
+        events: [],
+        error: (res && res.error) || 'list_fired_failed',
+      };
+    }
     return { ok: true, events: res.events ?? [] };
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'list_fired_failed';

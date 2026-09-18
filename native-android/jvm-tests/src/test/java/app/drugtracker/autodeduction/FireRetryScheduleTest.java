@@ -122,13 +122,19 @@ public class FireRetryScheduleTest {
     }
 
     @Test
-    public void scheduleFireRetry_schedulesSameIdentityAlarmWithRetryExtra() {
+    public void scheduleFireRetry_schedulesSameIdentityAlarmWithRetryExtra()
+            throws Exception {
         String date = futureCalendarDate(2);
         long epoch = futureEpochMs(date, "12:00");
         AutoDeductionScheduler s = newScheduler();
+        assertTrue(s.scheduleOccurrence(
+                "med", "dose", date, "12:00", 1.0, epoch).ok);
+        String[] vg = activeVersionAndGen("med", "dose", date);
+        drainAlarms();
 
         assertTrue(s.scheduleFireRetry(
-                "med", "dose", date, epoch, 1.0, "12:00", 7L, "ver-1", 1));
+                "med", "dose", date, epoch, 1.0, "12:00",
+                Long.parseLong(vg[1]), vg[0], 1));
 
         ShadowAlarmManager.ScheduledAlarm alarm = firstAlarm();
         assertNotNull("retry alarm must be scheduled", alarm);

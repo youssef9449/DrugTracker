@@ -1174,7 +1174,8 @@ export type GatedDeleteMedicationOutcome =
   | 'applied'
   | 'missing_med'
   | 'persist_failed'
-  | 'native_list_failed';
+  | 'native_list_failed'
+  | 'native_invalidation_failed';
 
 export interface GatedDeleteMedicationResult {
   outcome: GatedDeleteMedicationOutcome;
@@ -1228,6 +1229,22 @@ export function runGatedDeleteMedication(opts: {
         medications: pre.state.medications,
         logs: pre.state.logs,
         reason: 'missing_med',
+      };
+    }
+
+    // Invalidate the deleted medication's old native recurrence before the
+    // deletion is committed. This closes the same cross-domain race as edit/
+    // toggle: a queued old alarm cannot create a new FIRED occurrence after
+    // the deletion has linearized.
+    const invalidation = await invalidateMedicationRecurrences(med);
+    if (!invalidation.ok) {
+      return {
+        outcome: 'native_invalidation_failed' as const,
+        medications: pre.state.medications,
+        logs: pre.state.logs,
+        reason: invalidation.error,
+        medicationName: med.name,
+        unit: med.unit,
       };
     }
 

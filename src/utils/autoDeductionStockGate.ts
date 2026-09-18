@@ -28,6 +28,7 @@ let testLoad: (() => AutoStockDurableState) | null = null;
 let testCommit: ((state: AutoStockDurableState) => string | null) | null = null;
 let testLoadGeneration: (() => number) | null = null;
 let testBumpGeneration: (() => string | null) | null = null;
+let testPersistGlobal: ((value: boolean) => string | null) | null = null;
 
 /** @internal test-only */
 export function __setAutoStockGateTestHooks(hooks: {
@@ -35,11 +36,13 @@ export function __setAutoStockGateTestHooks(hooks: {
   commit?: (state: AutoStockDurableState) => string | null;
   loadGeneration?: () => number;
   bumpGeneration?: () => string | null;
+  persistGlobal?: (value: boolean) => string | null;
 } | null): void {
   testLoad = hooks?.load ?? null;
   testCommit = hooks?.commit ?? null;
   testLoadGeneration = hooks?.loadGeneration ?? null;
   testBumpGeneration = hooks?.bumpGeneration ?? null;
+  testPersistGlobal = hooks?.persistGlobal ?? null;
 }
 
 export function loadStockGeneration(): number {
@@ -55,6 +58,10 @@ export function bumpStockGeneration(): string | null {
   return persist(STORAGE_STOCK_GEN_KEY, String(next), { json: false });
 }
 
+export function loadDurableGlobalAutoDeductEnabled(): boolean {
+  return loadString(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'true') !== 'false';
+}
+
 export function loadDurableAutoStockState(): AutoStockDurableState {
   if (testLoad) return testLoad();
   const meds = loadJson<Medication[] | null>(STORAGE_MEDS_KEY, null);
@@ -62,8 +69,7 @@ export function loadDurableAutoStockState(): AutoStockDurableState {
   return {
     medications: Array.isArray(meds) ? meds : [],
     logs: Array.isArray(logs) ? logs : [],
-    globalAutoDeductEnabled:
-      loadString(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'true') !== 'false',
+    globalAutoDeductEnabled: loadDurableGlobalAutoDeductEnabled(),
   };
 }
 
@@ -93,11 +99,13 @@ export function commitDurableAutoStockState(
     const err = testCommit(state);
     if (err) return err;
     if (state.globalAutoDeductEnabled != null) {
-      const globalErr = persist(
-        STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
-        String(state.globalAutoDeductEnabled),
-        { json: false }
-      );
+      const globalErr = testPersistGlobal
+        ? testPersistGlobal(state.globalAutoDeductEnabled)
+        : persist(
+            STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
+            String(state.globalAutoDeductEnabled),
+            { json: false }
+          );
       if (globalErr) return globalErr;
     }
     if (opts?.appliedMutationSeq != null) {

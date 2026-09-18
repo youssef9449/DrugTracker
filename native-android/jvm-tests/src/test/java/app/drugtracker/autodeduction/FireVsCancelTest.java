@@ -186,8 +186,8 @@ public class FireVsCancelTest {
      * Mirrors {@link AutoDeductionReceiver}'s switch on fire status: recurrence
      * scheduling runs only for CREATED / ALREADY_EXISTS / FAILED+pending — i.e.
      * exactly when {@link AutoDeductionScheduler.FireResult#allowsRecurrence()} is true.
-     * This is the public recurrence decision contract; the receiver's private helper
-     * is not invoked from tests.
+     * The receiver's package-visible JS-wakeup helper is tested directly so the
+     * event-driven wake-up contract cannot regress independently of recurrence.
      */
 
     /** Read durable ownership tokens stamped into schedule metadata after schedule. */

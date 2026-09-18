@@ -19,6 +19,11 @@ public final class AutoDeductionContract {
     public static final String ACTION_AUTO_DEDUCTION =
             "app.drugtracker.action.AUTO_DEDUCTION";
 
+    /** In-process event bridge from the exact-alarm receiver to the Capacitor plugin. */
+    public static final String ACTION_AUTO_DEDUCTION_FIRED =
+            "app.drugtracker.action.AUTO_DEDUCTION_FIRED";
+
+
     public static final String EXTRA_MEDICATION_ID = "medicationId";
     public static final String EXTRA_DOSE_ID = "doseId";
     public static final String EXTRA_CALENDAR_DATE = "calendarDate";

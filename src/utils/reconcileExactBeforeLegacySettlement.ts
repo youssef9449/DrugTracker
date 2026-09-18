@@ -45,6 +45,7 @@ export async function reconcileExactBeforeLegacySettlement(opts: {
     state: {
       medications: recon.medications,
       logs: recon.logs,
+      globalAutoDeductEnabled: opts.fresh.globalAutoDeductEnabled,
     },
     reconciliation: recon,
     nativeListFailed: recon.nativeListFailed === true,

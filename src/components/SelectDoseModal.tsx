@@ -16,7 +16,10 @@ import {
   relativeDoseDayLabel,
   sortDoseSelectItems,
 } from '../utils/doseSelectDisplay';
-import { findActiveDeductionForOccurrence } from '../utils/medActions';
+import {
+  findActiveDeductionForOccurrence,
+  getHistoricalRestoreDisplayAmount,
+} from '../utils/medActions';
 import { Modal } from './ui/Modal';
 
 export type SelectDoseMode = 'take' | 'restore' | 'manage';
@@ -147,20 +150,23 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
               );
               const isAutoConsumed =
                 consumed && activeDeduction?.type === 'auto_daily';
-              const historicalAmount =
-                activeDeduction && Number.isFinite(Number(activeDeduction.amount))
-                  ? Math.abs(Number(activeDeduction.amount))
-                  : 0;
-              const displayAmount =
-                historicalAmount > 0 ? historicalAmount : Number(dose.amount) || 0;
+              // Historical restore amount only from exact active deduction evidence.
+              // Never invent from dose.amount / schedule (matches restoreDose fail-closed).
+              const historicalAmount = getHistoricalRestoreDisplayAmount(
+                logs,
+                medication.id,
+                dose.id,
+                today
+              );
+              const scheduleAmount = Number(dose.amount) || 0;
               const elapsed = isDoseTimeElapsedToday(dose.time, now);
-              // Pure auto: completed via elapsed time, not manual consume, not skipped
+              // Pure auto: completed via elapsed projection, not manual consume, not skipped.
+              // Projection-only restore remains valid; do not treat as confirmed log amount.
               const isPureAuto =
                 completed && !consumed && !skipped && elapsed;
               const timeLabel = formatTimeArabic(dose.time);
               const dayLabel = relativeDoseDayLabel(eventDate, today);
               const whenLabel = `${dayLabel} • ${timeLabel}`;
-              const amountLabel = `${displayAmount} ${unit}`;
 
               if (isManage) {
                 // Effective Auto-Deduction state = isAutoActive (single source:
@@ -214,6 +220,19 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                   statusText = 'لم يتم التناول';
                   action = 'take';
                   actionLabel = 'تناول الجرعة';
+                }
+
+                // Restore display amount only from evidence; Take uses schedule.
+                const amountLabel =
+                  action === 'restore'
+                    ? historicalAmount != null
+                      ? `${historicalAmount} ${unit}`
+                      : unit
+                    : `${scheduleAmount} ${unit}`;
+                if (action === 'restore' && historicalAmount != null) {
+                  actionLabel = `استرجاع الجرعة (+${historicalAmount})`;
+                } else if (action === 'take' && scheduleAmount > 0) {
+                  actionLabel = `تناول الجرعة (-${scheduleAmount})`;
                 }
 
                 return (
@@ -281,6 +300,12 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
               }
 
               // Legacy take / restore list (single-purpose)
+              // Restore list: evidence-only amount; take list: schedule amount.
+              const amountLabel = isRestore
+                ? historicalAmount != null
+                  ? `${historicalAmount} ${unit}`
+                  : unit
+                : `${scheduleAmount} ${unit}`;
               const isSelectable = isRestore
                 ? completed && !skipped
                 : !completed;

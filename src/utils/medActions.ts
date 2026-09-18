@@ -282,6 +282,29 @@ export function findActiveDeductionForOccurrence(
  * deduction. Kept only for callers that need the bare amount without the
  * log reference.
  */
+/**
+ * UI-only: historical Restore amount for display from exact active deduction
+ * evidence (medicationId + doseId + calendarDate). Returns null when no active
+ * dose_taken / auto_daily log exists — callers must NOT invent schedule amount.
+ * Does not decide whether Restore is executable (durable restoreDose does).
+ */
+export function getHistoricalRestoreDisplayAmount(
+  logs: ConsumptionLog[],
+  medicationId: string,
+  doseId: string | undefined,
+  calendarDate: string
+): number | null {
+  const active = findActiveDeductionForOccurrence(
+    logs,
+    medicationId,
+    doseId,
+    calendarDate
+  );
+  if (!active) return null;
+  const n = Math.abs(Number(active.amount) || 0);
+  return n > 0 ? n : null;
+}
+
 export function findActualDeductedAmountForOccurrence(
   logs: ConsumptionLog[],
   medicationId: string,

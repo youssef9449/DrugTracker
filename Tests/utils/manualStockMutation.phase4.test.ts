@@ -7,6 +7,7 @@ import {
   runGatedRefill,
   runGatedUndoRefill,
   runGatedAutoDeductToggle,
+  runGatedGlobalAutoDeductToggle,
   runGatedMedicationUpdate,
   runGatedDeleteMedication,
   shouldDismissAlarmAfterManualTake,
@@ -3923,8 +3924,11 @@ describe('Phase 4 — durable global preference and add-medication ordering', ()
     failGlobalPersist = false;
 
     __setManualEnvelopeTestHooks({
-      load: () => null,
-      save: () => null,
+      load: () => manualEnvelope,
+      save: (env) => {
+        manualEnvelope = env;
+        return null;
+      },
     });
     __setAutoStockGateTestHooks({
       load: () => ({
@@ -3952,6 +3956,23 @@ describe('Phase 4 — durable global preference and add-medication ordering', ()
     __setAutoStockGateTestHooks(null);
     __setManualEnvelopeTestHooks(null);
     vi.useRealTimers();
+  });
+
+  it('per-med toggle preserves the durable global master switch', async () => {
+    durable = {
+      medications: [med({ autoDeductEnabled: true })],
+      logs: [],
+      globalAutoDeductEnabled: false,
+    };
+
+    const result = await runGatedAutoDeductToggle({
+      medicationId: 'med-1',
+      globalAutoDeductEnabled: false,
+    });
+
+    expect(result.outcome).toBe('applied');
+    expect(durable.medications[0].autoDeductEnabled).toBe(false);
+    expect(durable.globalAutoDeductEnabled).toBe(false);
   });
 
   it('global toggle persists the master switch inside the same durable commit path', async () => {

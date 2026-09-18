@@ -142,6 +142,14 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
           result,
         };
       }
+      // Every non-persist-failure result carries a durable snapshot. Keep React
+      // aligned even when Restore itself becomes a no-op after exact recovery.
+      if (result.outcome !== 'persist_failed') {
+        setMedications(result.medications);
+        medicationsRef.current = result.medications;
+        setLogs(result.logs);
+      }
+
       // Map durable outcomes to UI messages; never claim success on failure.
       if (result.outcome === 'already_restored' || result.reason === 'already_restored') {
         if (displayName) showToast(TOAST_MESSAGES.doseAlreadyRestored(displayName));
@@ -197,10 +205,12 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
 
     void (async () => {
       const result = await runGatedUndoRefill({ medicationId });
-      if (result.outcome === 'applied' && result.log) {
+      if (result.outcome !== 'persist_failed') {
         setMedications(result.medications);
         medicationsRef.current = result.medications;
         setLogs(result.logs);
+      }
+      if (result.outcome === 'applied' && result.log) {
         const name = result.medicationName ?? result.log.medicationName ?? '';
         if (name) showToast(TOAST_MESSAGES.refillUndone(name));
         if (soundEnabled) playSuccessChime();
@@ -217,9 +227,15 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         globalAutoDeductEnabled,
       });
       if (result.outcome !== 'applied') {
+        if (result.outcome !== 'persist_failed') {
+          setMedications(result.medications);
+          medicationsRef.current = result.medications;
+          setLogs(result.logs);
+        }
         return;
       }
       setMedications(result.medications);
+      medicationsRef.current = result.medications;
       setLogs(result.logs);
       const name = result.medicationName ?? medicationId;
       showToast(
@@ -232,13 +248,23 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
   };
 
   const handleToggleGlobalAutoDeduct = () => {
-    // Phase 4: durable gate — no React-snapshot settlement.
-    const next = !globalAutoDeductEnabled;
+    // Eagerly update the request ref so consecutive clicks before React
+    // renders alternate OFF/ON instead of reading the same stale closure.
+    const previous = globalAutoDeductEnabledRef.current;
+    const next = !previous;
+    globalAutoDeductEnabledRef.current = next;
     void (async () => {
       const result = await runGatedGlobalAutoDeductToggle({ enable: next });
       if (result.outcome !== 'applied') {
+        globalAutoDeductEnabledRef.current = previous;
+        if (result.outcome !== 'persist_failed') {
+          setMedications(result.medications);
+          medicationsRef.current = result.medications;
+          setLogs(result.logs);
+        }
         return;
       }
+      globalAutoDeductEnabledRef.current = result.enable;
       setGlobalAutoDeductEnabled(result.enable);
       persist(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, String(result.enable), { json: false });
       setMedications(result.medications);

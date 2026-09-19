@@ -1268,25 +1268,16 @@ export interface ScheduleDoseReminderOptions {
    * Start the recurring schedule from TOMORROW even when today's HH:MM
    * is still in the future.
    *
-   * Used when today's dose has already been consumed (manual card action
-   * or the notification's take-dose action — both set
-   * `lastConsumedDate = today`): the pending recurring alarm is
-   * cancelled and re-armed from tomorrow, so the already-taken dose can
-   * never produce today's reminder. Tomorrow — and every later day —
-   * the reminder fires normally at reminderTime.
+   * Used when today's occurrence for this dose slot has already been
+   * consumed (per-dose markers: doseConsumption / doseConsumptionHistory).
+   * The pending alarm is cancelled and re-armed from tomorrow so the
+   * already-taken occurrence cannot produce today's reminder. Tomorrow
+   * and later days fire normally at the schedule-row time.
    *
-   * Phase 2 note: consumption is still medication-level (`lastConsumedDate`),
-   * not per-dose. skipToday therefore suppresses TODAY for this scheduled
-   * dose slot when the med was marked consumed. Per-dose consumption is
-   * Phase 3.
+   * Medication-level lastConsumedDate is not the source of truth for
+   * this suppression.
    */
   skipToday?: boolean;
-  /**
-   * Specific dose-row id from `Medication.doseSchedule`. When omitted or
-   * set to {@link empty doseId}, the historical med-only notification
-   * id is used (single-dose / legacy path).
-   */
-  doseId?: string;
   /**
    * When true, auto-deduction is active for this dose. The push notification
    * will NOT show the "تم أخذ الجرعة" action button.

@@ -776,9 +776,8 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
   });
 
   it('restores a dose once per day via MedicationCard (logs restore UI removed)', async () => {
-    // Legacy (no doseSchedule): MedicationCard canRestore when lastConsumedDate === today
-    // (local calendar, same as getTodayDateString). Real restore-dose-* then appears.
-    // Logs-tab restore UI stays intentionally removed.
+    // Explicit single-slot schedule + per-dose consume marker + durable deduction log.
+    // Logs-tab restore UI stays intentionally removed; restore is via MedicationCard.
     const today = getTodayDateString();
     localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([{
       id: 'med-restore',
@@ -790,11 +789,24 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
       colorTag: 'teal',
       createdAt: '2024-01-01T00:00:00.000Z',
       lastSyncDate: today,
-      lastConsumedDate: today,
       autoDeductEnabled: true,
       reminderEnabled: false,
+      doseSchedule: [{ id: 'd1', amount: 2, time: '09:00' }],
+      dosesPerDay: 1,
+      doseConsumption: { d1: today },
+      doseConsumptionHistory: { d1: [today] },
     }]));
-    localStorage.setItem('android_med_tracker_logs_v2', '[]');
+    localStorage.setItem('android_med_tracker_logs_v2', JSON.stringify([{
+      id: 'take-d1',
+      medicationId: 'med-restore',
+      medicationName: 'Restore Med',
+      type: 'dose_taken',
+      amount: -2,
+      date: today,
+      timestamp: today + 'T09:00:00.000Z',
+      description: 'manual take',
+      doseId: 'd1',
+    }]));
 
     render(<App />);
     await waitFor(() => expect(screen.getByText('Restore Med')).toBeInTheDocument());
@@ -814,7 +826,7 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
       ).toHaveLength(1);
     });
 
-    // After successful restore, lastConsumedDate is cleared → canRestore false →
+    // After successful restore, per-dose consume is cleared → canRestore false →
     // real restore control is no longer rendered. A second restore must not add logs.
     expect(screen.queryByTestId('restore-dose-med-restore')).not.toBeInTheDocument();
     const savedLogs = JSON.parse(localStorage.getItem('android_med_tracker_logs_v2') || '[]');

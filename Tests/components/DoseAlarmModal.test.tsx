@@ -42,6 +42,7 @@ describe('DoseAlarmModal', () => {
       <DoseAlarmModal
         isOpen={true}
         medication={med}
+        doseId="d1"
         onTakeDose={() => {}}
         onSnooze={() => {}}
         onDismiss={() => {}}
@@ -57,6 +58,7 @@ describe('DoseAlarmModal', () => {
       <DoseAlarmModal
         isOpen={true}
         medication={med}
+        doseId="d1"
         onTakeDose={() => {}}
         onSnooze={() => {}}
         onDismiss={onDismiss}
@@ -76,6 +78,7 @@ describe('DoseAlarmModal', () => {
       <DoseAlarmModal
         isOpen={true}
         medication={med}
+        doseId="d1"
         onTakeDose={() => {}}
         onSnooze={onSnooze}
         onDismiss={() => {}}
@@ -92,6 +95,7 @@ describe('DoseAlarmModal', () => {
       <DoseAlarmModal
         isOpen={false}
         medication={med}
+        doseId="d1"
         onTakeDose={() => {}}
         onSnooze={() => {}}
         onDismiss={() => {}}
@@ -126,21 +130,6 @@ describe('DoseAlarmModal', () => {
     expect(onTakeDose.mock.calls[0][1]).toBe('slot-b');
   });
 
-  it('legacy alarm without doseId still calls onTakeDose with undefined doseId', () => {
-    const onTakeDose = vi.fn();
-    const med = makeMed();
-    render(
-      <DoseAlarmModal
-        isOpen={true}
-        medication={med}
-        onTakeDose={onTakeDose}
-        onSnooze={() => {}}
-        onDismiss={() => {}}
-      />
-    );
-    fireEvent.click(screen.getByTestId('alarm-take-dose'));
-    expect(onTakeDose).toHaveBeenCalledWith(med, undefined);
-  });
 
   describe('Phase 4 multi-dose alarm identity', () => {
     const multi = makeMed({
@@ -221,6 +210,7 @@ describe('DoseAlarmModal — medication-level stock display', () => {
       <DoseAlarmModal
         isOpen
         medication={med}
+        doseId="d1"
         onTakeDose={() => {}}
         onSnooze={() => {}}
         onDismiss={() => {}}
@@ -242,6 +232,7 @@ describe('DoseAlarmModal — medication-level stock display', () => {
       <DoseAlarmModal
         isOpen
         medication={med}
+        doseId="d1"
         onTakeDose={() => {}}
         onSnooze={() => {}}
         onDismiss={() => {}}

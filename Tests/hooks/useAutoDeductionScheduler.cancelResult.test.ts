@@ -137,3 +137,116 @@ describe('useAutoDeductionScheduler CancelResult handling', () => {
     unmount();
   });
 });
+
+describe('Exact Auto scheduler signature ignores dailyDose/reminder fields', () => {
+  beforeEach(() => {
+    cancelMock.mockReset();
+    scheduleMock.mockReset();
+    invalidateMock.mockReset();
+    listScheduledMock.mockReset();
+    invalidateMock.mockResolvedValue({ ok: true });
+    listScheduledMock.mockResolvedValue({ ok: true, schedules: [] });
+    scheduleMock.mockResolvedValue({ ok: true });
+    cancelMock.mockResolvedValue({ ok: true, status: 'SUCCESS' });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function scheduledMed(over: Partial<Medication> = {}): Medication {
+    return baseMed({
+      autoDeductEnabled: true,
+      dailyDose: 1,
+      reminderEnabled: true,
+      reminderTime: '20:00',
+      doseSchedule: [{ id: 'd1', amount: 1, time: '20:00' }],
+      dosesPerDay: 1,
+      ...over,
+    });
+  }
+
+  async function settle() {
+    await new Promise((r) => setTimeout(r, 40));
+  }
+
+  it('dailyDose change does not trigger Exact schedule/cancel when doseSchedule is unchanged', async () => {
+    const med = scheduledMed();
+    const { rerender, unmount } = renderHook(
+      (props: { meds: Medication[] }) =>
+        useAutoDeductionScheduler({
+          medications: props.meds,
+          globalAutoDeductEnabled: true,
+          hydrated: true,
+          isFirstRun: false,
+          exactAlarmEnabled: true,
+        }),
+      { initialProps: { meds: [med] } }
+    );
+    await settle();
+    const scheduleAfter = scheduleMock.mock.calls.length;
+    const cancelAfter = cancelMock.mock.calls.length;
+
+    rerender({ meds: [{ ...med, dailyDose: med.dailyDose + 99 }] });
+    await settle();
+    expect(scheduleMock.mock.calls.length).toBe(scheduleAfter);
+    expect(cancelMock.mock.calls.length).toBe(cancelAfter);
+    unmount();
+  });
+
+  it('reminderTime change does not trigger Exact schedule/cancel when doseSchedule is unchanged', async () => {
+    const med = scheduledMed();
+    const { rerender, unmount } = renderHook(
+      (props: { meds: Medication[] }) =>
+        useAutoDeductionScheduler({
+          medications: props.meds,
+          globalAutoDeductEnabled: true,
+          hydrated: true,
+          isFirstRun: false,
+          exactAlarmEnabled: true,
+        }),
+      { initialProps: { meds: [med] } }
+    );
+    await settle();
+    const scheduleAfter = scheduleMock.mock.calls.length;
+    const cancelAfter = cancelMock.mock.calls.length;
+
+    rerender({
+      meds: [
+        {
+          ...med,
+          reminderTime: '21:00',
+          doseSchedule: [{ id: 'd1', amount: 1, time: '20:00' }],
+        },
+      ],
+    });
+    await settle();
+    expect(scheduleMock.mock.calls.length).toBe(scheduleAfter);
+    expect(cancelMock.mock.calls.length).toBe(cancelAfter);
+    unmount();
+  });
+
+  it('reminderEnabled change does not trigger Exact schedule/cancel when doseSchedule is unchanged', async () => {
+    const med = scheduledMed({ reminderEnabled: true });
+    const { rerender, unmount } = renderHook(
+      (props: { meds: Medication[] }) =>
+        useAutoDeductionScheduler({
+          medications: props.meds,
+          globalAutoDeductEnabled: true,
+          hydrated: true,
+          isFirstRun: false,
+          exactAlarmEnabled: true,
+        }),
+      { initialProps: { meds: [med] } }
+    );
+    await settle();
+    const scheduleAfter = scheduleMock.mock.calls.length;
+    const cancelAfter = cancelMock.mock.calls.length;
+
+    rerender({ meds: [{ ...med, reminderEnabled: false }] });
+    await settle();
+    expect(scheduleMock.mock.calls.length).toBe(scheduleAfter);
+    expect(cancelMock.mock.calls.length).toBe(cancelAfter);
+    unmount();
+  });
+});

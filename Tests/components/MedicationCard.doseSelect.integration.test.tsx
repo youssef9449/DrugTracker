@@ -104,24 +104,6 @@ function makeMulti(overrides: Partial<Medication> = {}): Medication {
   };
 }
 
-function makeLegacy(overrides: Partial<Medication> = {}): Medication {
-  return {
-    id: 'med-legacy',
-    name: 'Legacy One Dose',
-    currentPills: 10,
-    dailyDose: 1,
-    unit: 'قرص',
-    warningThresholdDays: 5,
-    colorTag: 'teal',
-    createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: '2024-09-10',
-    autoDeductEnabled: false,
-    reminderEnabled: false,
-    reminderTime: '20:00',
-    ...overrides,
-  };
-}
-
 function readMeds(): Medication[] {
   const raw = localStorage.getItem(STORAGE_MEDS_KEY);
   if (!raw) return [];
@@ -504,31 +486,6 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
   });
 
 
-  it('legacy medication Take Dose consumes without opening the selector', async () => {
-    localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeLegacy()]));
-    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
-
-    render(<App />);
-    await waitFor(() => {
-      expect(screen.getByText('Legacy One Dose')).toBeInTheDocument();
-    });
-
-    // Legacy uses the Card Take button directly (no multi-dose management UI).
-    fireEvent.click(screen.getByTitle(/تناول جرعة/));
-
-    // No multi-dose selector
-    expect(screen.queryByText('اختر الإجراء المناسب لكل جرعة')).toBeNull();
-
-    const today = getTodayDateString();
-    await waitFor(() => {
-      const med = readMeds().find((m) => m.id === 'med-legacy');
-      expect(med?.lastConsumedDate).toBe(today);
-    });
-
-    const logs = readLogs().filter((l) => l.type === 'dose_taken');
-    expect(logs.length).toBeGreaterThan(0);
-    expect(logs[0].doseId).toBeUndefined();
-  });
 
   it('single-slot schedule resolves that doseId without showing the selector', async () => {
     localStorage.setItem(

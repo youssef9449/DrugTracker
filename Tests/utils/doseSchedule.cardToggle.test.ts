@@ -26,20 +26,15 @@ const multiSchedule = [
 ];
 
 describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
-  it('legacy: canTake when not consumed today', () => {
-    const t = getCardDoseToggleTarget(makeMed({ dailyDose: 2 }));
-    expect(t.canTake).toBe(true);
-    expect(t.canRestore).toBe(false);
-    expect(t.amount).toBe(2);
-    expect(t.doseId).toBeUndefined();
-  });
-
-  it('legacy: canRestore when lastConsumedDate is today', () => {
+  it('no doseSchedule: no Take/Restore target even with dailyDose and lastConsumedDate', () => {
     const today = getTodayDateString();
-    const t = getCardDoseToggleTarget(makeMed({ dailyDose: 2, lastConsumedDate: today }));
+    const t = getCardDoseToggleTarget(
+      makeMed({ dailyDose: 2, lastConsumedDate: today, doseSchedule: undefined })
+    );
+    expect(t.doseId).toBeUndefined();
     expect(t.canTake).toBe(false);
-    expect(t.canRestore).toBe(true);
-    expect(t.amount).toBe(2);
+    expect(t.canRestore).toBe(false);
+    expect(t.amount).toBe(0);
   });
 
   it('single-slot: amount is slot amount not dailyDose', () => {

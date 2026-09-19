@@ -259,12 +259,11 @@ export function useAutoDeductionScheduler({
                     .map((d) => `${d.id}@${d.time}@${d.amount}`)
                     .join(',')
                 : '';
+            // Exact Auto desired slots come only from explicit doseSchedule.
+            // reminderEnabled/reminderTime/dailyDose do not define Exact occurrences.
             return [
               m.id,
               m.autoDeductEnabled === false ? '0' : '1',
-              m.reminderEnabled === true ? '1' : '0',
-              m.reminderTime ?? '',
-              m.dailyDose,
               schedulePart,
             ].join('|');
           })

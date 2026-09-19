@@ -139,9 +139,11 @@ export default function App() {
   const [criticalAlarmResumeTick, setCriticalAlarmResumeTick] = useState(0);
   // Bumped on every app resume (appStateChange) so the dose-reminder
   // scheduler re-runs its CONSUMPTION SUPPRESSION: an already-consumed
-  // dose (lastConsumedDate === today) can never produce today's
-  // reminder, even if a previous suppression attempt failed while the
-  // process was backgrounded/killed. Mirrors criticalAlarmResumeTick.
+  // dose occurrence (per-dose markers for medId + doseId on today) can
+  // never produce today's reminder, even if a previous suppression
+  // attempt failed while the process was backgrounded/killed.
+  // Medication-level lastConsumedDate is not the source of truth here.
+  // Mirrors criticalAlarmResumeTick.
   const [doseAlarmResumeTick, setDoseAlarmResumeTick] = useState(0);
   // Bumped on EVERY app state transition (foreground ↔ background) so the
   // dose-reminder scheduler re-runs and re-arms all pending reminders on
@@ -377,10 +379,12 @@ export default function App() {
   // ─────────────────────────────────────────────────────────────
   // NATIVE recurring daily dose-reminder scheduling.
   //
-  // Schedules a recurring native notification (AlarmManager-backed) for
-  // each medication with reminderEnabled + reminderTime, so the dose
-  // reminder fires EVERY DAY at the configured time — even when the app
-  // is killed, the device is in Doze, or the user never opens the app.
+  // Schedules one recurring native notification per explicit doseSchedule
+  // row (AlarmManager-backed), gated by reminderEnabled. Each occurrence
+  // is identified by medId + doseId; reminderTime/dailyDose are not
+  // occurrence identity sources. Fires daily at the schedule-row time even
+  // when the app is killed, the device is in Doze, or the user never opens
+  // the app.
   //
   // Complements event-driven in-app dose reminders while foregrounded.
   // See useDoseReminderScheduler.ts for race-protection + boot persistence.
@@ -561,8 +565,8 @@ export default function App() {
       .catch(() => void 0);
   };
 
-  // Consume-pill feature: manually consume a dose from the card.
-  // Subtracts dailyDose from currentPills, marks the med as consumed
+  // Consume-pill feature: manually consume a selected explicit dose from the card.
+  // Subtracts that dose's schedule amount from currentPills; marks the dose occurrence as consumed
 
   const {
     medicationsWithStatus,
@@ -931,9 +935,9 @@ export default function App() {
         }}
       />
       <DoseAlarmModal
-        isOpen={Boolean(alarmingMedication)}
+        isOpen={Boolean(alarmingMedication) && Boolean(alarmingDoseId)}
         medication={alarmingMedication}
-        doseId={alarmingDoseId}
+        doseId={alarmingDoseId ?? ''}
         onTakeDose={handleTakeDoseFromAlarm}
         onSnooze={handleSnoozeFromAlarm}
         onDismiss={dismissAlarm}

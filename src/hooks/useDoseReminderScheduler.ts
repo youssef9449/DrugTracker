@@ -36,11 +36,12 @@ export interface UseDoseReminderSchedulerOptions {
   /**
    * Bumped by App.tsx on every app resume (appStateChange) and on mount
    * it simply runs — drives the consumption-suppression reconciliation:
-   * after a cold start or a resume, an already-consumed dose
-   * (lastConsumedDate === today) can never produce TODAY's reminder,
-   * even if a previous suppression attempt failed (bridge error, the
-   * process being killed mid-operation). Mirrors the critical-alarm
-   * scheduler's resumeTick pattern.
+   * after a cold start or a resume, an already-consumed dose occurrence
+   * (per-dose doseConsumption / history for medId + doseId on today) can
+   * never produce TODAY's reminder, even if a previous suppression attempt
+   * failed (bridge error, the process being killed mid-operation).
+   * Medication-level lastConsumedDate is not the source of truth here.
+   * Mirrors the critical-alarm scheduler's resumeTick pattern.
    */
   resumeTick?: number;
   /**
@@ -164,13 +165,13 @@ export function useDoseReminderScheduler({
                   .map((d) => `${d.id}@${d.time}@${d.amount}`)
                   .join(',')
               : '';
+          // Reminder slots from explicit doseSchedule only.
+          // reminderTime/dailyDose are not separate sources of dose identity.
           return [
             m.id,
             m.reminderEnabled === true ? '1' : '0',
-            m.reminderTime ?? '',
             schedulePart,
             m.name,
-            m.dailyDose,
             m.unit ?? '',
             m.autoDeductEnabled !== false ? '1' : '0',
           ].join('|');
@@ -393,7 +394,9 @@ export function useDoseReminderScheduler({
                 .sort()
                 .join(',')
             : '';
-          return `${m.id}|${m.lastConsumedDate ?? ''}|${perDose}`;
+          // Per-dose consumption only; medication-level lastConsumedDate
+          // is not a reminder reconciliation dependency.
+          return `${m.id}|${perDose}`;
         })
         .sort()
         .join('\n'),

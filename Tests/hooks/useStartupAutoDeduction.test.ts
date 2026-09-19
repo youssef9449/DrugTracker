@@ -3,16 +3,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, cleanup, waitFor } from '@testing-library/react';
 import type { Medication, ConsumptionLog } from '@/types';
 
-const gateMock = vi.fn();
-const reconcileMock = vi.fn();
+const mocks = vi.hoisted(() => ({
+  gate: vi.fn(),
+  reconcile: vi.fn(),
+}));
 
 vi.mock('@/utils/autoDeductionStockGate', () => ({
-  withAutoStockMutationGate: (...args: unknown[]) => gateMock(...args),
+  withAutoStockMutationGate: (...args: unknown[]) => mocks.gate(...args),
 }));
 
 vi.mock('@/utils/reconcileExactBeforeManualMutation', () => ({
   reconcileExactBeforeManualMutation: (...args: unknown[]) =>
-    reconcileMock(...args),
+    mocks.reconcile(...args),
 }));
 
 import { useStartupAutoDeduction } from '@/hooks/useStartupAutoDeduction';
@@ -27,7 +29,7 @@ function flushMicrotasks() {
 describe('useStartupAutoDeduction — first-run lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    gateMock.mockImplementation(async (fn: (fresh: unknown) => Promise<unknown>) => {
+    mocks.gate.mockImplementation(async (fn: (fresh: unknown) => Promise<unknown>) => {
       const fresh = {
         medications: sampleMeds,
         logs: sampleLogs,
@@ -35,7 +37,7 @@ describe('useStartupAutoDeduction — first-run lifecycle', () => {
       };
       return fn(fresh);
     });
-    reconcileMock.mockResolvedValue({
+    mocks.reconcile.mockResolvedValue({
       state: {
         medications: sampleMeds,
         logs: sampleLogs,
@@ -71,21 +73,21 @@ describe('useStartupAutoDeduction — first-run lifecycle', () => {
     );
 
     await flushMicrotasks();
-    expect(gateMock).not.toHaveBeenCalled();
-    expect(reconcileMock).not.toHaveBeenCalled();
+    expect(mocks.gate).not.toHaveBeenCalled();
+    expect(mocks.reconcile).not.toHaveBeenCalled();
 
     // Onboarding completed: isFirstRun clears; startup Exact reconcile may run once.
     rerender({ hydrated: true, isFirstRun: false });
     await waitFor(() => {
-      expect(gateMock).toHaveBeenCalledTimes(1);
+      expect(mocks.gate).toHaveBeenCalledTimes(1);
     });
-    expect(reconcileMock).toHaveBeenCalledTimes(1);
+    expect(mocks.reconcile).toHaveBeenCalledTimes(1);
 
     // Later renders with the same flags must not re-run the one-shot effect.
     rerender({ hydrated: true, isFirstRun: false });
     await flushMicrotasks();
-    expect(gateMock).toHaveBeenCalledTimes(1);
-    expect(reconcileMock).toHaveBeenCalledTimes(1);
+    expect(mocks.gate).toHaveBeenCalledTimes(1);
+    expect(mocks.reconcile).toHaveBeenCalledTimes(1);
   });
 
   it('does not run startup reconcile on hydration alone while first-run is still active', async () => {
@@ -108,19 +110,19 @@ describe('useStartupAutoDeduction — first-run lifecycle', () => {
     );
 
     await flushMicrotasks();
-    expect(gateMock).not.toHaveBeenCalled();
+    expect(mocks.gate).not.toHaveBeenCalled();
 
     // Hydration completes but onboarding is still open.
     rerender({ hydrated: true, isFirstRun: true });
     await flushMicrotasks();
-    expect(gateMock).not.toHaveBeenCalled();
-    expect(reconcileMock).not.toHaveBeenCalled();
+    expect(mocks.gate).not.toHaveBeenCalled();
+    expect(mocks.reconcile).not.toHaveBeenCalled();
 
     // Only after isFirstRun ends does the one-shot startup reconcile run.
     rerender({ hydrated: true, isFirstRun: false });
     await waitFor(() => {
-      expect(gateMock).toHaveBeenCalledTimes(1);
+      expect(mocks.gate).toHaveBeenCalledTimes(1);
     });
-    expect(reconcileMock).toHaveBeenCalledTimes(1);
+    expect(mocks.reconcile).toHaveBeenCalledTimes(1);
   });
 });

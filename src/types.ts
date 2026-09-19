@@ -6,86 +6,11 @@ export interface ConsumptionLog {
   id: string;
   medicationId: string;
   medicationName: string;
-  type: 'exact_auto' | 'auto_daily' | 'refill' | 'refill_undo' | 'manual_adjust' | 'skipped_day' | 'dose_taken';
+  type: 'exact_auto' | 'refill' | 'refill_undo' | 'manual_adjust' | 'skipped_day' | 'dose_taken';
   amount: number; // positive or negative
   date: string; // YYYY-MM-DD
   timestamp: string;
   description: string;
-  /** Set when this refill has already been reversed. Legacy logs omit it. */
-  reversedAt?: string;
-  /** Links a refill_undo log to the original refill log. */
-  relatedLogId?: string;
-  /**
-   * Stable MedicationDose.id when this log is for a specific dose slot
-   * (Phase 3). Legacy dose_taken logs omit it.
-   */
-  doseId?: string;
-}
-
-export interface Medication {
-  id: string;
-  name: string;
-  /**
-   * Authoritative durable live stock (Issue #266).
-   * UI and status must use this value directly — there is no second
-   * projected/effective balance. Exact Auto, Manual Take/Restore, and
-   * Refill mutate this field.
-   */
-  currentPills: number;
-  dailyDose: number; // Consumption rate per day
-  unit: string; // e.g., 'قرص', 'كبسولة', 'مل'
-  warningThresholdDays: number; // Alert when days left <= this number (default 5)
-  colorTag: string;
-  category?: string;
-  notes?: string;
-  createdAt: string;
-  /** YYYY-MM-DD settlement horizon companion to `currentPills`. */
-  lastSyncDate: string
-  autoDeductEnabled?: boolean; // Default true
-  packageSize?: number; // Size of standard package when bought (e.g. 30)
-  stripsPerBox?: number; // عدد الأشرطة في العلبة (مثال: 3 أشرطة)
-  pillsPerStrip?: number; // عدد الأقراص في الشريط الواحد (مثال: 10 أقراص)
-  targetOrderQuantity?: number; // Custom target order quantity specified for pharmacy order
-  reminderEnabled?: boolean; // هل تم تفعيل تذكير يومي بموعد محدد
-  reminderTime?: string; // وقت التذكير بصيغة 24 ساعة (مثال: "09:00" أو "21:30")
-  /**
-   * Number of individual dose events per day.
-   * Optional for legacy medications that only stored dailyDose + reminderTime.
-   * When present, should equal doseSchedule.length.
-   */
-  dosesPerDay?: number;
-  /**
-   * Explicit per-dose schedule (amount + time for each dose event).
-   * Optional for legacy medications. New/edited meds always persist this.
-   * Total daily consumption for the existing engine remains `dailyDose`
-   * (sum of schedule amounts when a schedule exists).
-   */
-  doseSchedule?: MedicationDose[];
-  /**
-   * YYYY-MM-DD of the last day the user manually consumed a dose.
-   * Legacy single-dose: when this equals today, auto-deduction and
-   * reminders for the med are suppressed for today.
-   * Multi-dose: compatibility / UI badge when ALL of today's schedule
-   * slots are consumed. Per-slot authority is
-   * {@link doseConsumptionHistory} (with {@link doseConsumption} as
-   * last-date compat).
-   */
-  lastConsumedDate?: string;
-  /**
-   * Per-dose **last** consumption date (Phase 3 / 3B compat):
-   * doseId → YYYY-MM-DD of the most recent manual consume for that slot.
-   *
-   * This is NOT a complete historical ledger. It is kept so:
-   * - "consumed today?" checks and reminder suppression stay cheap
-   * - pre-Phase-3B persisted data remains readable
-   *
-   * Detailed multi-dose catch-up uses {@link doseConsumptionHistory}.
-   * When history is absent, readers may treat this last-date value as
-   * a single known consumed date for that doseId. Dates that the old
-   * last-date-only model overwrote are unrecoverable and must not be
-   * invented.
-   */
-  doseConsumption?: Record<string, string>;
   /**
    * Per-dose consumption history (Phase 3B): doseId → YYYY-MM-DD dates
    * on which that slot was manually consumed (unique, chronological).
@@ -99,8 +24,7 @@ export interface Medication {
    * - Orphan doseIds are removed when that id leaves the schedule
    * - App scale does not currently justify a retention subsystem
    *
-   * Missing/undefined is fine for legacy meds and pre-3B data; readers
-   * fall back to {@link doseConsumption} as a one-date history.
+   * fall back to only a one-date history.
    */
   doseConsumptionHistory?: Record<string, string[]>;
   /**

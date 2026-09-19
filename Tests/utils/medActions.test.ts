@@ -186,9 +186,9 @@ describe('consumeDose strict doseId identity', () => {
     const result = consumeDose(med, 'manual', '2024-09-13', new Date('2024-09-13T15:00:00'), 'd2');
     expect(result.doseAmount).toBe(2);
     expect(result.log?.doseId).toBe('d2');
-    expect(result.updatedMed?.doseConsumption?.d2).toBe('2024-09-13');
-    expect(result.updatedMed?.doseConsumption?.d1).toBeUndefined();
-    expect(result.updatedMed?.doseConsumption?.d3).toBeUndefined();
+    expect(result.updatedMed?.doseConsumptionHistory?.d2).toBe('2024-09-13');
+    expect(result.updatedMed?.doseConsumptionHistory?.d1).toBeUndefined();
+    expect(result.updatedMed?.doseConsumptionHistory?.d3).toBeUndefined();
   });
 
   it('multi + missing doseId fails with missing_dose_id and mutates nothing', () => {
@@ -225,7 +225,7 @@ describe('consumeDose strict doseId identity', () => {
     const result = consumeDose(med, 'manual', '2024-09-13', new Date('2024-09-13T10:00:00'));
     expect(result.doseAmount).toBe(2);
     expect(result.log?.doseId).toBe('only');
-    expect(result.updatedMed?.doseConsumption?.only).toBe('2024-09-13');
+    expect(result.updatedMed?.doseConsumptionHistory?.only).toBe('2024-09-13');
   });
 
   it('reordering schedule does not change which doseId is consumed', () => {
@@ -371,7 +371,7 @@ describe('restoreDose (#267 — durable deduction evidence)', () => {
     const med = makeMed({
       currentPills: 28, // 30 - 2 (after manual Take of d1=2)
       lastSyncDate: '2024-01-10',
-      doseConsumption: { d1: today },
+      doseConsumptionHistory: { d1: [today] },
       doseConsumptionHistory: { d1: [today] },
     });
     const logs: ConsumptionLog[] = [
@@ -391,7 +391,7 @@ describe('restoreDose (#267 — durable deduction evidence)', () => {
     const med = makeMed({
       currentPills: 28,
       lastSyncDate: '2024-01-10',
-      doseConsumption: { d1: today },
+      doseConsumptionHistory: { d1: [today] },
       doseConsumptionHistory: { d1: [today] },
     });
     const logs: ConsumptionLog[] = [
@@ -421,7 +421,7 @@ describe('restoreDose (#267 — durable deduction evidence)', () => {
     const med = makeMed({
       currentPills: 30,
       lastSyncDate: '2024-01-10',
-      doseConsumption: { d1: today },
+      doseConsumptionHistory: { d1: [today] },
       doseConsumptionHistory: { d1: [today] },
     });
     // The deduction log exists but is already reversed.
@@ -459,7 +459,7 @@ describe('restoreDose (#267 — durable deduction evidence)', () => {
     const med = makeMed({
       currentPills: 28,
       lastSyncDate: '2024-01-01', // 9 days passed
-      doseConsumption: { d1: today },
+      doseConsumptionHistory: { d1: [today] },
       doseConsumptionHistory: { d1: [today] },
     });
     const logs: ConsumptionLog[] = [
@@ -477,7 +477,7 @@ describe('restoreDose (#267 — durable deduction evidence)', () => {
     const med = makeMed({
       currentPills: 28,
       lastSyncDate: '2024-01-10',
-      doseConsumption: { d1: today },
+      doseConsumptionHistory: { d1: [today] },
       doseConsumptionHistory: { d1: [today] },
       doseSchedule: [{ id: 'd1', amount: 5, time: '08:00' }], // edited from 2
     });
@@ -628,12 +628,12 @@ describe('findActiveDeductionForOccurrence', () => {
     expect(result?.id).toBe(`exact-auto:med-1:d1:${today}`);
   });
 
-  it('accepts legacy auto_daily only when id is deterministic Exact occurrence id', () => {
+  it('accepts legacy exact_auto only when id is deterministic Exact occurrence id', () => {
     const exactId = `exact-auto:med-1:d1:${today}`;
     const logs: ConsumptionLog[] = [
       makeLog({
         id: exactId,
-        type: 'auto_daily',
+        type: 'exact_auto',
         amount: -2,
         doseId: 'd1',
         date: today,
@@ -643,11 +643,11 @@ describe('findActiveDeductionForOccurrence', () => {
     expect(result?.id).toBe(exactId);
   });
 
-  it('rejects ordinary legacy auto_daily without deterministic Exact id', () => {
+  it('rejects ordinary legacy exact_auto without deterministic Exact id', () => {
     const logs: ConsumptionLog[] = [
       makeLog({
         id: 'log-init-1',
-        type: 'auto_daily',
+        type: 'exact_auto',
         amount: -2,
         doseId: 'd1',
         date: today,
@@ -703,11 +703,11 @@ describe('findActiveDeductionForOccurrence', () => {
     ).toBe(exactId);
   });
 
-  it('Case D: valid legacy auto_daily with deterministic Exact id remains readable', () => {
+  it('Case D: valid legacy exact_auto with deterministic Exact id remains readable', () => {
     const exactId = `exact-auto:med-1:d1:${today}`;
     const legacy = makeLog({
       id: exactId,
-      type: 'auto_daily',
+      type: 'exact_auto',
       amount: -2,
       doseId: 'd1',
       date: today,
@@ -718,10 +718,10 @@ describe('findActiveDeductionForOccurrence', () => {
     ).toBe(exactId);
   });
 
-  it('Case E: ordinary auto_daily is rejected as Exact Auto evidence', () => {
+  it('Case E: ordinary exact_auto is rejected as Exact Auto evidence', () => {
     const ordinary = makeLog({
       id: 'log-init-1',
-      type: 'auto_daily',
+      type: 'exact_auto',
       amount: -2,
       doseId: 'd1',
       date: today,
@@ -781,14 +781,14 @@ describe('getHistoricalRestoreDisplayAmount / eligibility helpers', () => {
     });
     const ordinaryAuto = makeLog({
       id: 'log-init-1',
-      type: 'auto_daily',
+      type: 'exact_auto',
       amount: -2,
       doseId: 'd1',
       date: today,
     });
     const legacyExact = makeLog({
       id: `exact-auto:med-1:d1:${today}`,
-      type: 'auto_daily',
+      type: 'exact_auto',
       amount: -2,
       doseId: 'd1',
       date: today,
@@ -814,11 +814,11 @@ describe('getHistoricalRestoreDisplayAmount / eligibility helpers', () => {
     expect(
       isUiAutoHistoricalRestoreEligible(true, true, exactLog, 2, 'med-1', 'd1', today)
     ).toBe(false);
-    // ordinary auto_daily → NOT eligible
+    // ordinary exact_auto → NOT eligible
     expect(
       isUiAutoHistoricalRestoreEligible(true, false, ordinaryAuto, 2, 'med-1', 'd1', today)
     ).toBe(false);
-    // valid legacy deterministic auto_daily → eligible
+    // valid legacy deterministic exact_auto → eligible
     expect(
       isUiAutoHistoricalRestoreEligible(true, false, legacyExact, 2, 'med-1', 'd1', today)
     ).toBe(true);

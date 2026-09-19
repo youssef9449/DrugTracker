@@ -329,7 +329,7 @@ describe('runGatedGlobalAutoDeductToggle exact-before-legacy', () => {
         currentPills: 8,
         lastSyncDate: '2026-09-14',
         autoDeductEnabled: false,
-        doseConsumption: { d1: '2026-09-14' },
+        doseConsumptionHistory: { d1: ['2026-09-14'] },
         doseConsumptionHistory: { d1: ['2026-09-14'] },
       }),
     ];
@@ -385,9 +385,9 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
             { id: 'd1', amount: 1, time: '08:00' },
             { id: 'd2', amount: 1, time: '20:00' },
           ],
-          doseConsumption: {
-            d1: '2026-09-14',
-            d2: '2026-09-13',
+          doseConsumptionHistory: {
+            d1: ['2026-09-14'],
+            d2: ['2026-09-13'],
           },
           doseConsumptionHistory: {
             d1: ['2026-09-14'],
@@ -418,9 +418,9 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
       ...formMed,
       doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
       // Stale React form still has d2 history
-      doseConsumption: {
-        d1: '2026-09-14',
-        d2: '2026-09-13',
+      doseConsumptionHistory: {
+        d1: ['2026-09-14'],
+        d2: ['2026-09-13'],
       },
       doseConsumptionHistory: {
         d1: ['2026-09-14'],
@@ -436,9 +436,9 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
     expect(result.outcome).toBe('applied');
     const med = result.medications[0];
     expect(med.doseSchedule?.map((d) => d.id)).toEqual(['d1']);
-    expect(med.doseConsumption).toEqual({ d1: '2026-09-14' });
+    expect(med.doseConsumptionHistory).toEqual({ d1: '2026-09-14' });
     expect(med.doseConsumptionHistory).toEqual({ d1: ['2026-09-14'] });
-    expect(med.doseConsumption).not.toHaveProperty('d2');
+    expect(med.doseConsumptionHistory).not.toHaveProperty('d2');
     expect(med.doseConsumptionHistory).not.toHaveProperty('d2');
   });
 
@@ -451,7 +451,7 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
         dailyDose: 1,
         doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
         lastSyncDate: '2026-09-13',
-        doseConsumption: { d1: '2026-09-13' },
+        doseConsumptionHistory: { d1: ['2026-09-13'] },
         doseConsumptionHistory: { d1: ['2026-09-13'] },
       }),
     ];
@@ -461,7 +461,7 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
       ...durable.medications[0],
       dailyDose: 3,
       doseSchedule: [{ id: 'd1', amount: 3, time: '08:00' }],
-      doseConsumption: { d1: '2026-09-13', orphan: '2026-01-01' },
+      doseConsumptionHistory: { d1: ['2026-09-13'], orphan: ['2026-01-01'] },
       doseConsumptionHistory: {
         d1: ['2026-09-13'],
         orphan: ['2026-01-01'],
@@ -482,7 +482,7 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
       (l) => l.id === exactAutoLogId('med-1', 'd1', '2026-09-14')
     );
     expect(exactLogs).toHaveLength(1);
-    expect(result.medications[0].doseConsumption).not.toHaveProperty('orphan');
+    expect(result.medications[0].doseConsumptionHistory).not.toHaveProperty('orphan');
     expect(result.medications[0].doseConsumptionHistory).not.toHaveProperty(
       'orphan'
     );

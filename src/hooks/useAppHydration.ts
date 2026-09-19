@@ -11,7 +11,6 @@ import {
   getExactAlarmPermission,
 } from '../utils/notifications';
 import { initNativeBridge } from '../native';
-import { migrateSchema } from '../lib/migration';
 import { loadJson, loadString } from '../utils/storage';
 import {
   STORAGE_MEDS_KEY,
@@ -47,7 +46,7 @@ export interface AppHydrationSetters {
  * init native bridge, then flip hydrated=true.
  *
  * Ordering is intentional and must be preserved:
- * migrateSchema → read storage → Promise.all(permissions + initNativeBridge)
+ * read storage → Promise.all(permissions + initNativeBridge)
  * → setHydrated(true) in finally.
  */
 export function useAppHydration(setters: AppHydrationSetters): void {
@@ -68,10 +67,6 @@ export function useAppHydration(setters: AppHydrationSetters): void {
   } = setters;
 
   useEffect(() => {
-    // M11: run schema migration first so any future key-shape changes
-    // are applied before we read the (possibly migrated) keys.
-    migrateSchema();
-
     // Medications — use loadJson (silent fallback). The "first run"
     // detection distinguishes "no key set" (null) from "empty array
     // explicitly saved" (loadJson returns []).
@@ -99,33 +94,16 @@ export function useAppHydration(setters: AppHydrationSetters): void {
     const savedLogs = loadJson<ConsumptionLog[] | null>(STORAGE_LOGS_KEY, null);
     if (Array.isArray(savedLogs)) setLogs(savedLogs);
 
-    // Pharmacy settings — custom parsing for the legacy customerCode/
-    // pharmacyName shim, so we read the raw object via loadJson then
-    // post-process.
-    const parsed = loadJson<Partial<PharmacySettings> & { pharmacies?: unknown } | null>(
+    // Pharmacy settings — current schema only (pharmacies array).
+    const parsed = loadJson<Partial<PharmacySettings> | null>(
       STORAGE_PHARMACY_KEY,
       null
     );
     if (parsed && typeof parsed === 'object') {
-      // Clear legacy default customerCode ('14739') and legacy default pharmacyName ('الصيدلية')
-      const loadedCustomerCode =
-        parsed.customerCode === '14739' ? '' : (parsed.customerCode || '');
-      const loadedPharmacyName =
-        parsed.pharmacyName === 'الصيدلية' ? '' : (parsed.pharmacyName || '');
-      const legacyPharmacy = loadedPharmacyName || loadedCustomerCode || parsed.pharmacyPhone
-        ? [{
-            id: 'pharmacy-legacy',
-            name: loadedPharmacyName || 'صيدلية محفوظة',
-            phone: parsed.pharmacyPhone || '',
-            customerCode: loadedCustomerCode,
-          }]
-        : [];
-      const pharmacies = Array.isArray(parsed.pharmacies) ? parsed.pharmacies : legacyPharmacy;
+      const pharmacies = Array.isArray(parsed.pharmacies) ? parsed.pharmacies : [];
       setPharmacySettings({
         ...DEFAULT_PHARMACY_SETTINGS,
         ...parsed,
-        customerCode: loadedCustomerCode,
-        pharmacyName: loadedPharmacyName,
         pharmacies,
         selectedPharmacyId: parsed.selectedPharmacyId || pharmacies[0]?.id || '',
       });

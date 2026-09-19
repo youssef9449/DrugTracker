@@ -192,7 +192,6 @@ export function finalizeMutationSeq(mutationSeq: number): string | null {
  *   category, notes, createdAt, lastSyncDate, lastConsumedDate,
  *   autoDeductEnabled, packageSize, stripsPerBox, pillsPerStrip,
  *   targetOrderQuantity, reminderEnabled, reminderTime, dosesPerDay,
- *   doseSchedule (array order-aware), doseConsumption (record),
  *   doseConsumptionHistory (record + per-dose array order-aware),
  *   doseSkippedHistory (record + per-dose array order-aware)).
  * - logs: same count, same order, every field deep-equal (id, medicationId,

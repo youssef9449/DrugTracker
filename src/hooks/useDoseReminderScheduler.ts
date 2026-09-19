@@ -37,7 +37,7 @@ export interface UseDoseReminderSchedulerOptions {
    * Bumped by App.tsx on every app resume (appStateChange) and on mount
    * it simply runs — drives the consumption-suppression reconciliation:
    * after a cold start or a resume, an already-consumed dose occurrence
-   * (per-dose doseConsumption / history for medId + doseId on today) can
+   * (per-dose doseConsumptionHistory for medId + doseId on today) can
    * never produce TODAY's reminder, even if a previous suppression attempt
    * failed (bridge error, the process being killed mid-operation).
    * Medication-level lastConsumedDate is not the source of truth here.
@@ -117,7 +117,7 @@ export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
  * notification id derived from medicationId + doseId.
  *
  * The recurring alarm is config-driven. Consumption suppression still
- * uses per-dose consumption (`doseConsumption`).
+ * uses per-dose consumption (`doseConsumptionHistory`).
  * skipToday applies only to slots consumed today.
  *
  * Generation counter + per-key serialization chain prevent races when
@@ -388,9 +388,9 @@ export function useDoseReminderScheduler({
     () =>
       medications
         .map((m) => {
-          const perDose = m.doseConsumption
-            ? Object.entries(m.doseConsumption)
-                .map(([id, d]) => `${id}=${d}`)
+          const perDose = m.doseConsumptionHistory
+            ? Object.entries(m.doseConsumptionHistory)
+                .map(([id, d]) => `${id}=${Array.isArray(d) ? d.join('|') : d}`)
                 .sort()
                 .join(',')
             : '';

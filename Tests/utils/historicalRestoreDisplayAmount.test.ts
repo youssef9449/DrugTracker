@@ -141,68 +141,7 @@ describe('production UI Restore eligibility helpers', () => {
     expect(isUiConsumedRestoreEligible(true, false, evidence)).toBe(false);
   });
 
-  it('legacy auto_daily with deterministic Exact id remains readable/restorable', () => {
-    const id = exactAutoLogId('med', 'd1', TODAY);
-    const legacyExact: ConsumptionLog = {
-      id,
-      medicationId: 'med',
-      medicationName: 'Med',
-      type: 'auto_daily',
-      amount: -3,
-      date: TODAY,
-      timestamp: '2026-09-14T08:00:00.000Z',
-      description: 'legacy exact',
-      doseId: 'd1',
-    };
-    expect(
-      isExactAutoDeductionEvidence(legacyExact, 'med', 'd1', TODAY)
-    ).toBe(true);
-    expect(
-      getHistoricalRestoreDisplayAmount([legacyExact], 'med', 'd1', TODAY)
-    ).toBe(3);
-    expect(
-      isUiAutoHistoricalRestoreEligible(
-        true,
-        false,
-        legacyExact,
-        3,
-        'med',
-        'd1',
-        TODAY
-      )
-    ).toBe(true);
-  });
 
-  it('ordinary legacy auto_daily is NOT treated as Exact Auto occurrence', () => {
-    const ordinary: ConsumptionLog = {
-      id: 'log-init-1',
-      medicationId: 'med',
-      medicationName: 'Med',
-      type: 'auto_daily',
-      amount: -1,
-      date: TODAY,
-      timestamp: '2026-09-14T08:00:00.000Z',
-      description: 'legacy day bulk',
-      doseId: 'd1',
-    };
-    expect(
-      isExactAutoDeductionEvidence(ordinary, 'med', 'd1', TODAY)
-    ).toBe(false);
-    expect(
-      getHistoricalRestoreDisplayAmount([ordinary], 'med', 'd1', TODAY)
-    ).toBeNull();
-    expect(
-      isUiAutoHistoricalRestoreEligible(
-        true,
-        false,
-        ordinary,
-        1,
-        'med',
-        'd1',
-        TODAY
-      )
-    ).toBe(false);
-  });
 
   it('malformed exact_auto with arbitrary id is NOT Exact evidence', () => {
     const malformed: ConsumptionLog = {

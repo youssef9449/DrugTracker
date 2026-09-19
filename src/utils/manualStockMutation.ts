@@ -693,7 +693,7 @@ export function runGatedManualRestore(opts: {
       m.id === opts.medicationId ? result.updatedMed : m
     );
 
-    // Mark the ACTIVE deduction log (exact_auto / dose_taken / legacy-compatible auto_daily) that this
+    // Mark the ACTIVE deduction log (exact_auto / dose_taken) that this
     // Restore reverses as `reversedAt`, and link the restore (skipped_day)
     // log to it via `relatedLogId`. This mirrors the refill/refill_undo
     // reversal pattern already used by handleUndoRefill. Without this, a
@@ -1210,7 +1210,6 @@ export function runGatedAutoDeductToggle(opts: {
     }
 
     // Issue #267: per-med Auto ON/OFF changes configuration only.
-    // No stock settlement, no auto_daily log, no lastSyncDate change.
     const newState = med.autoDeductEnabled === false;
     const updatedMed: Medication = { ...med, autoDeductEnabled: newState };
     const settleLog: ConsumptionLog | null = null;
@@ -1603,7 +1602,6 @@ export function runGatedMedicationUpdate(opts: {
     }
 
     // Issue #267: dose edit changes configuration only. No stock settlement,
-    // no auto_daily log, no lastSyncDate change. currentPills is NOT changed
     // by a dose edit.
     const stockBase = freshMed;
     const settleLog: ConsumptionLog | null = null;
@@ -1613,14 +1611,13 @@ export function runGatedMedicationUpdate(opts: {
     const forPrune: Omit<Medication, 'id' | 'createdAt'> = {
       ...opts.medData,
       // Override any form-snapshot history with durable/settled authority.
-      doseConsumption: stockBase.doseConsumption,
       doseConsumptionHistory: stockBase.doseConsumptionHistory,
       doseSkippedHistory: stockBase.doseSkippedHistory,
     };
     const pruned = pruneDoseConsumption(forPrune, stockBase);
 
     // Build final med: user-editable fields from medData/pruned; stock/history from
-    // stockBase then pruned schedule (pruned doseConsumption* wins over stockBase).
+    // stockBase then pruned schedule (pruned doseConsumptionHistory wins over stockBase).
     const finalMed: Medication = {
       ...freshMed,
       ...pruned,
@@ -1631,7 +1628,6 @@ export function runGatedMedicationUpdate(opts: {
       lastConsumedDate: stockBase.lastConsumedDate,
       autoDeductEnabled: stockBase.autoDeductEnabled,
       // Explicitly take pruned history (not stockBase) so removed dose IDs stay gone.
-      doseConsumption: pruned.doseConsumption,
       doseConsumptionHistory: pruned.doseConsumptionHistory,
       doseSkippedHistory:
         pruned.doseSkippedHistory ?? stockBase.doseSkippedHistory,

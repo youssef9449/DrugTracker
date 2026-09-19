@@ -612,49 +612,29 @@ public final class AutoDeductionScheduler {
                 Log.i(TAG, "fire linearization: STALE (no active schedule metadata) for " + key);
                 return FireResult.cancelled();
             }
-            // Legacy pre-token alarms can legitimately still be queued across an
-            // app upgrade. They are accepted only when the active durable
-            // schedule row is itself still legacy (no version/generation).
-            // Tokenized deliveries must carry BOTH ownership tokens.
+            // Tokenized delivery must own the current schedule row exactly.
+            // Missing or mismatched scheduleVersion / recurrenceGeneration → STALE.
             try {
                 JSONObject meta = new JSONObject(metaRaw);
                 String activeVersion = meta.optString(FIELD_SCHEDULE_VERSION, "");
                 long activeGen = meta.optLong(FIELD_RECURRENCE_GENERATION, 0L);
-                boolean legacyDelivery = (deliveryScheduleVersion == null
-                        || deliveryScheduleVersion.isEmpty())
-                        && deliveryRecurrenceGeneration <= 0L;
-                boolean legacyActiveMetadata = activeVersion.isEmpty() && activeGen <= 0L;
-
-                if (legacyDelivery) {
-                    // Backward compatibility for alarms queued by the pre-token scheduler:
-                    // accept ONLY while the durable schedule row itself is still genuinely
-                    // legacy. Once this row has been rewritten with scheduleVersion or a
-                    // recurrence generation, a legacy queued alarm is stale and must not FIRE.
-                    if (!legacyActiveMetadata) {
-                        Log.i(TAG, "fire linearization: STALE legacy delivery against versioned metadata for "
-                                + key);
-                        return FireResult.cancelled();
-                    }
-                } else {
-                    // Current/tokenized delivery must own the current schedule row exactly.
-                    if (deliveryScheduleVersion == null || deliveryScheduleVersion.isEmpty()
-                            || deliveryRecurrenceGeneration <= 0L) {
-                        Log.i(TAG, "fire linearization: STALE (delivery partially missing version/generation) for "
-                                + key);
-                        return FireResult.cancelled();
-                    }
-                    if (!deliveryScheduleVersion.equals(activeVersion)) {
-                        Log.i(TAG, "fire linearization: STALE scheduleVersion for " + key
-                                + " delivery=" + deliveryScheduleVersion
-                                + " active=" + activeVersion);
-                        return FireResult.cancelled();
-                    }
-                    if (deliveryRecurrenceGeneration != activeGen) {
-                        Log.i(TAG, "fire linearization: STALE recurrenceGeneration for " + key
-                                + " delivery=" + deliveryRecurrenceGeneration
-                                + " active=" + activeGen);
-                        return FireResult.cancelled();
-                    }
+                if (deliveryScheduleVersion == null || deliveryScheduleVersion.isEmpty()
+                        || deliveryRecurrenceGeneration <= 0L) {
+                    Log.i(TAG, "fire linearization: STALE (delivery partially missing version/generation) for "
+                            + key);
+                    return FireResult.cancelled();
+                }
+                if (!deliveryScheduleVersion.equals(activeVersion)) {
+                    Log.i(TAG, "fire linearization: STALE scheduleVersion for " + key
+                            + " delivery=" + deliveryScheduleVersion
+                            + " active=" + activeVersion);
+                    return FireResult.cancelled();
+                }
+                if (deliveryRecurrenceGeneration != activeGen) {
+                    Log.i(TAG, "fire linearization: STALE recurrenceGeneration for " + key
+                            + " delivery=" + deliveryRecurrenceGeneration
+                            + " active=" + activeGen);
+                    return FireResult.cancelled();
                 }
             } catch (JSONException e) {
                 Log.e(TAG, "fire linearization: malformed schedule metadata for " + key, e);
@@ -1149,23 +1129,12 @@ public final class AutoDeductionScheduler {
                     JSONObject current = new JSONObject(currentRaw);
                     String activeVersion = current.optString(FIELD_SCHEDULE_VERSION, "");
                     long activeGen = current.optLong(FIELD_RECURRENCE_GENERATION, 0L);
-                    boolean legacyDelivery = (scheduleVersion == null || scheduleVersion.isEmpty())
-                            && recurrenceGeneration <= 0L;
-                    boolean legacyActiveMetadata = activeVersion.isEmpty() && activeGen <= 0L;
-
-                    if (legacyDelivery) {
-                        if (!legacyActiveMetadata) {
-                            Log.i(TAG, "fire retry skipped: stale legacy ownership " + key);
-                            return false;
-                        }
-                    } else {
-                        if (scheduleVersion == null || scheduleVersion.isEmpty()
-                                || recurrenceGeneration <= 0L
-                                || !scheduleVersion.equals(activeVersion)
-                                || recurrenceGeneration != activeGen) {
-                            Log.i(TAG, "fire retry skipped: ownership changed for " + key);
-                            return false;
-                        }
+                    if (scheduleVersion == null || scheduleVersion.isEmpty()
+                            || recurrenceGeneration <= 0L
+                            || !scheduleVersion.equals(activeVersion)
+                            || recurrenceGeneration != activeGen) {
+                        Log.i(TAG, "fire retry skipped: ownership changed for " + key);
+                        return false;
                     }
 
                     int previousRetryCount = current.optInt(FIELD_FIRE_RETRY_COUNT, 0);

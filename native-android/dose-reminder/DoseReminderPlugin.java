@@ -18,7 +18,7 @@ import com.capacitorjs.plugins.localnotifications.DoseReminderRecurrenceStore;
 public class DoseReminderPlugin extends Plugin {
 
     /**
-     * Options: medicationId (required), doseId (optional), reminderTime (required for validity).
+     * Options: medicationId (required), doseId (required), reminderTime (required for validity).
      * Resolves: { valid: boolean, nextOccurrenceMs: number } where
      * nextOccurrenceMs is -1 when absent. valid is true only when entry matches
      * current schedule identity and next occurrence is still future.
@@ -30,6 +30,10 @@ public class DoseReminderPlugin extends Plugin {
         String reminderTime = call.getString("reminderTime");
         if (medicationId == null || medicationId.isEmpty()) {
             call.reject("invalid_medicationId");
+            return;
+        }
+        if (doseId == null || doseId.isEmpty()) {
+            call.reject("invalid_doseId");
             return;
         }
         long next = DoseReminderRecurrenceStore.getNextOccurrenceMs(
@@ -48,7 +52,7 @@ public class DoseReminderPlugin extends Plugin {
 
     /**
      * Clear persisted re-arm evidence for a dose slot (cancel / config change).
-     * Options: medicationId (required), doseId (optional).
+     * Options: medicationId (required), doseId (required).
      */
     @PluginMethod
     public void clearReArm(PluginCall call) {
@@ -56,6 +60,10 @@ public class DoseReminderPlugin extends Plugin {
         String doseId = call.getString("doseId");
         if (medicationId == null || medicationId.isEmpty()) {
             call.reject("invalid_medicationId");
+            return;
+        }
+        if (doseId == null || doseId.isEmpty()) {
+            call.reject("invalid_doseId");
             return;
         }
         DoseReminderRecurrenceStore.clear(getContext(), medicationId, doseId);

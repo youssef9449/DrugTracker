@@ -189,7 +189,7 @@ describe('legacy single-dose (no doseSchedule): FIRED is durable; no Legacy Sing
     const r = reconcileFiredEvents([med], [], [noScheduleFiredEvent(2)], {
       now: NOW,
     });
-    expect(r.medications[0].doseConsumption?.['d1']).toBe(TODAY);
+    expect(r.medications[0].doseConsumptionHistory?.['d1']).toBe(TODAY);
     expect(r.medications[0].doseConsumptionHistory?.['d1']).toContain(TODAY);
   });
 

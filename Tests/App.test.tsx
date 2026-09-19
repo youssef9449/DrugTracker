@@ -200,7 +200,7 @@ describe('handleToggleAutoDeduct logic (#27)', () => {
  *
  * The Auto-Deduction toggle changes ONLY the `autoDeductEnabled` configuration.
  * It does NOT settle historical elapsed doses, modify `currentPills`, advance
- * `lastSyncDate`, or create an `auto_daily` deduction log. The tests below
+ * `lastSyncDate`, or create an `exact_auto` deduction log. The tests below
  * verify observable/durable behavior (not internal helper call counts).
  */
 
@@ -269,7 +269,7 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
     return JSON.parse(raw) as Record<string, unknown>[];
   }
 
-  it('Test A — ON → OFF: changes autoDeductEnabled only; currentPills/lastSyncDate unchanged; no auto_daily log', async () => {
+  it('Test A — ON → OFF: changes autoDeductEnabled only; currentPills/lastSyncDate unchanged; no exact_auto log', async () => {
     const todayStr = new Date().toISOString().slice(0, 10);
     seedMed({ autoDeductEnabled: true });
 
@@ -293,9 +293,9 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
     expect(med?.currentPills).toBe(60);
     expect(med?.lastSyncDate).toBe(todayStr);
 
-    // No auto_daily settlement log created by the toggle.
+    // No exact_auto settlement log created by the toggle.
     const logs = getDurableLogs();
-    expect(logs.filter((l) => l.type === 'auto_daily')).toHaveLength(0);
+    expect(logs.filter((l) => l.type === 'exact_auto')).toHaveLength(0);
   });
 
   it('Test B — StrictMode ON → OFF: durable mutation executes exactly once', async () => {
@@ -388,9 +388,9 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
     // lastSyncDate unchanged from the pre-toggle durable medication.
     expect(med?.lastSyncDate).toBe(preToggleLastSync);
 
-    // No auto_daily settlement log created by the toggle.
+    // No exact_auto settlement log created by the toggle.
     const logs = getDurableLogs();
-    expect(logs.filter((l) => l.type === 'auto_daily')).toHaveLength(0);
+    expect(logs.filter((l) => l.type === 'exact_auto')).toHaveLength(0);
 
     // Cleanup test hooks.
     __setAutoStockGateTestHooks(null);
@@ -399,7 +399,7 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
     __setStockMutationOrderingTestHooks(null);
   });
 
-  it('Test C — OFF → ON: changes autoDeductEnabled to true; currentPills unchanged; no auto_daily log', async () => {
+  it('Test C — OFF → ON: changes autoDeductEnabled to true; currentPills unchanged; no exact_auto log', async () => {
     const todayStr = new Date().toISOString().slice(0, 10);
     seedMed({ autoDeductEnabled: false });
 
@@ -418,14 +418,14 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
     });
 
     // Issue #267: the toggle changes ONLY autoDeductEnabled.
-    // No retroactive deduction, no auto_daily log.
+    // No retroactive deduction, no exact_auto log.
     const med = getDurableMed();
     expect(med?.autoDeductEnabled).toBe(true);
     expect(med?.currentPills).toBe(60);
     expect(med?.lastSyncDate).toBe(todayStr);
 
     const logs = getDurableLogs();
-    expect(logs.filter((l) => l.type === 'auto_daily')).toHaveLength(0);
+    expect(logs.filter((l) => l.type === 'exact_auto')).toHaveLength(0);
   });
 
   it('one toggle click shows the toast EXACTLY ONCE (no duplicate toasts under StrictMode)', async () => {
@@ -793,7 +793,7 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
       reminderEnabled: false,
       doseSchedule: [{ id: 'd1', amount: 2, time: '09:00' }],
       dosesPerDay: 1,
-      doseConsumption: { d1: today },
+      doseConsumptionHistory: { d1: [today] },
       doseConsumptionHistory: { d1: [today] },
     }]));
     localStorage.setItem('android_med_tracker_logs_v2', JSON.stringify([{

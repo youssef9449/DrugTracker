@@ -45,7 +45,6 @@ export interface AppSettingsModalProps {
   onSaveSettings: (newSettings: PharmacySettings) => void;
   soundEnabled: boolean;
   /** @deprecated Toggles are draft-only until Save; kept optional for compatibility. */
-  onToggleSound?: () => void;
   notificationsEnabled?: boolean;
   onToggleNotifications?: () => void;
   criticalStockAlertsEnabled?: boolean;

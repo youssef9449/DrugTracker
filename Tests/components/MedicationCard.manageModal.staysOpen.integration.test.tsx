@@ -143,7 +143,7 @@ describe('Management modal stays open after actions', () => {
       STORAGE_MEDS_KEY,
       JSON.stringify([
         makeMulti({
-          doseConsumption: { d1: TEST_DATE },
+          doseConsumptionHistory: { d1: [TEST_DATE] },
           currentPills: 29,
         }),
       ])

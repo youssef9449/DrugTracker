@@ -21,7 +21,6 @@ interface MedicationMenuProps {
    * @deprecated Global bulk-sets all meds; this menu edits one medication only.
    * Kept optional so existing callers still type-check.
    */
-  globalAutoDeductEnabled?: boolean;
   showRefillInMenu?: boolean;
   onOpenRefill?: (medication: Medication) => void;
   onEdit: (medication: Medication) => void;
@@ -49,7 +48,6 @@ export function MedicationTypeIcon({ unit, className = "h-3.5 w-3.5" }: { unit: 
 export function MedicationMenu({
   medication,
   isAutoActive,
-  globalAutoDeductEnabled: _globalAutoDeductEnabled,
   onEdit,
   onDelete,
   onToggleAutoDeduct,

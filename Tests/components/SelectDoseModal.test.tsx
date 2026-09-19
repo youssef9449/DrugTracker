@@ -222,7 +222,7 @@ describe('SelectDoseModal', () => {
         isOpen
         mode="manage"
         medication={makeMulti({
-          doseConsumption: { d1: today },
+          doseConsumptionHistory: { d1: [today] },
           doseSchedule: [
             { id: 'd1', amount: 1, time: '08:00' },
             { id: 'd2', amount: 1, time: '14:00' },
@@ -252,7 +252,7 @@ describe('SelectDoseModal', () => {
     render(
       <SelectDoseModal
         isOpen
-        medication={makeMulti({ doseConsumption: { d1: today } })}
+        medication={makeMulti({ doseConsumptionHistory: { d1: [today] } })}
         onSelect={onSelect}
         onClose={() => {}}
       />
@@ -276,7 +276,7 @@ describe('SelectDoseModal', () => {
       <SelectDoseModal
         isOpen
         medication={makeMulti({
-          doseConsumption: { d1: today, d2: today, d3: today },
+          doseConsumptionHistory: { d1: [today], d2: [today], d3: [today] },
         })}
         onSelect={() => {}}
         onClose={() => {}}
@@ -295,7 +295,7 @@ describe('SelectDoseModal', () => {
         <SelectDoseModal
           isOpen
           mode="restore"
-          medication={makeMulti({ doseConsumption: { d2: today } })}
+          medication={makeMulti({ doseConsumptionHistory: { d2: [today] } })}
           onSelect={onSelect}
           onClose={() => {}}
         />
@@ -333,7 +333,7 @@ describe('SelectDoseModal', () => {
           mode="restore"
           medication={makeMulti({
             doseSkippedHistory: { d1: [today] },
-            doseConsumption: { d2: today },
+            doseConsumptionHistory: { d2: [today] },
           })}
           onSelect={() => {}}
           onClose={() => {}}

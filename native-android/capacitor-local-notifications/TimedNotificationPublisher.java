@@ -243,7 +243,12 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
                     doseId = extra.getString("doseId");
                 }
             } catch (Exception ignored) {
-                // optional doseId for multi-dose identity
+                doseId = null;
+            }
+            // Occurrence identity requires non-empty doseId — no sentinel fallback.
+            if (doseId == null || doseId.isEmpty()) {
+                Log.w("LN", "TimedNotificationPublisher: missing doseId; skip re-arm evidence");
+                doseId = null;
             }
 
             Calendar cal = Calendar.getInstance();
@@ -288,7 +293,9 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
             // Never write evidence for a storage state that was not persisted.
             boolean persisted =
                     persistDoseReminderNextAt(context, id, notificationJson, trigger);
-            if (persisted && medicationId != null && !medicationId.isEmpty()) {
+            if (persisted
+                    && medicationId != null && !medicationId.isEmpty()
+                    && doseId != null && !doseId.isEmpty()) {
                 DoseReminderRecurrenceStore.markReArmed(
                         context, medicationId, doseId, trigger, reminderTime, id);
             } else if (!persisted) {

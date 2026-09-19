@@ -173,7 +173,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                 today
               );
               // Auto historical Restore requires Exact Auto evidence + valid amount.
-              // Issue #269: exact_auto (current) or legacy auto_daily with deterministic Exact id.
+              // Issue #269: exact_auto (current).
               const isAutoConsumed = isUiAutoHistoricalRestoreEligible(
                 consumed,
                 skipped,
@@ -210,7 +210,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                 let actionLabel: string;
 
                 if (isAutoConsumed) {
-                  // Exact Auto with active exact_auto (or legacy deterministic auto_daily) evidence → historical Restore.
+                  // Exact Auto with active exact_auto evidence → historical Restore.
                   statusText = 'تم الخصم تلقائيًا';
                   action = 'restore';
                   actionLabel = 'استرجاع الجرعة';

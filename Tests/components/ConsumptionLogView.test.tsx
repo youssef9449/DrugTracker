@@ -29,7 +29,7 @@ function makeLog(overrides: Partial<ConsumptionLog> = {}): ConsumptionLog {
     id: 'log-1',
     medicationId: 'med-a',
     medicationName: 'Med A',
-    type: 'auto_daily',
+    type: 'exact_auto',
     amount: -1,
     date: '2024-01-02',
     timestamp: '2024-01-02T08:00:00.000Z',

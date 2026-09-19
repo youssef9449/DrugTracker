@@ -1,7 +1,7 @@
 import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import type { Medication, ConsumptionLog } from '../types';
 import { withAutoStockMutationGate } from '../utils/autoDeductionStockGate';
-import { reconcileExactBeforeLegacySettlement } from '../utils/reconcileExactBeforeLegacySettlement';
+import { reconcileExactBeforeManualMutation } from '../utils/reconcileExactBeforeManualMutation';
 import { TOAST_MESSAGES } from '../constants/uiStrings';
 
 /**
@@ -49,7 +49,7 @@ export function useStartupAutoDeduction(opts: {
     // Even when global is off, we still reconcile already-FIRED exact events
     // (disable must not erase durable FIRED stock events).
     void withAutoStockMutationGate(async (fresh) => {
-      const pre = await reconcileExactBeforeLegacySettlement({
+      const pre = await reconcileExactBeforeManualMutation({
         fresh,
         // Valid FIRED events are reconciled regardless of current policy.
         globalAutoDeductEnabled: fresh.globalAutoDeductEnabled !== false,

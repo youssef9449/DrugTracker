@@ -9,7 +9,7 @@ import {
   __setAutoStockGateTestHooks,
   type AutoStockDurableState,
 } from '@/utils/autoDeductionStockGate';
-import * as preSettleModule from '@/utils/reconcileExactBeforeLegacySettlement';
+import * as preSettleModule from '@/utils/reconcileExactBeforeManualMutation';
 import * as autoNative from '@/utils/autoDeductionNative';
 
 function med(over: Partial<Medication> = {}): Medication {
@@ -84,7 +84,7 @@ describe('runGatedGlobalAutoDeductToggle — bulk + Global OFF invalidation orde
 
     vi.spyOn(
       preSettleModule,
-      'reconcileExactBeforeLegacySettlement'
+      'reconcileExactBeforeManualMutation'
     ).mockImplementation(async (opts) => ({
       state: opts.fresh,
       reconciliation: null,

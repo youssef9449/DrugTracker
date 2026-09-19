@@ -9,7 +9,7 @@
  * `lastSyncDate` / `LEGACY_DOSE_ID` workaround.
  *
  * The production startup path is `useStartupAutoDeduction` →
- * `reconcileExactBeforeLegacySettlement` (→ `runAutoDeductionReconciliation`).
+ * `reconcileExactBeforeManualMutation` (→ `runAutoDeductionReconciliation`).
  * These tests prove that core does not double-deduct: a FIRED Exact
  * occurrence is applied once via `event.amount`, and a second startup/app-open
  * pass (re-listing the same FIRED) sees `already_applied` — no second charge.
@@ -111,7 +111,7 @@ function clearHooks() {
 /**
  * Run the production startup reconciliation core (runAutoDeductionReconciliation,
  * the exact orchestrator that useStartupAutoDeduction →
- * reconcileExactBeforeLegacySettlement drives inside the gate). The hook
+ * reconcileExactBeforeManualMutation drives inside the gate). The hook
  * mirrors the post-state into React; this helper returns that post-state.
  */
 async function runStartupReconciliation(opts: {

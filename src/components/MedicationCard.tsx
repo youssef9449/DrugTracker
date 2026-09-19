@@ -20,7 +20,6 @@ import {
 } from '../utils/dateCalculations';
 import {
   getCardDoseToggleTarget,
-  getAutoRestorableDose,
   isMedicationAutoDeductActive,
   medicationForStockProjection,
 } from '../utils/doseSchedule';
@@ -500,18 +499,11 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const takeAmount = doseToggle.amount;
 
     // Auto-restorable occurrence is independent of getCardDoseToggleTarget.
-    const autoRestorableDose = getAutoRestorableDose(medication);
-    const showAutoRestore =
-      isAutoActive && Boolean(onRestoreDose) && Boolean(autoRestorableDose);
-    // Auto Restore display amount: evidence for autoRestorableDose.id only — never schedule.
-    const autoRestoreAmount = autoRestorableDose
-      ? getHistoricalRestoreDisplayAmount(
-          logs,
-          medication.id,
-          autoRestorableDose.id,
-          todayStr
-        )
-      : null;
+    // Issue #267: pure-projection auto-restore (auto enabled + time elapsed +
+    // not consumed) is removed. Restore requires durable deduction evidence.
+    const autoRestorableDose: { id: string } | null = null;
+    const showAutoRestore = false;
+    const autoRestoreAmount = null;
 
 
     return (
@@ -717,18 +709,11 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     const takeAmount = doseToggle.amount;
 
     // Auto-restorable occurrence is independent of getCardDoseToggleTarget.
-    const autoRestorableDose = getAutoRestorableDose(medication);
-    const showAutoRestore =
-      isAutoActive && Boolean(onRestoreDose) && Boolean(autoRestorableDose);
-    // Auto Restore display amount: evidence for autoRestorableDose.id only — never schedule.
-    const autoRestoreAmount = autoRestorableDose
-      ? getHistoricalRestoreDisplayAmount(
-          logs,
-          medication.id,
-          autoRestorableDose.id,
-          todayStr
-        )
-      : null;
+    // Issue #267: pure-projection auto-restore (auto enabled + time elapsed +
+    // not consumed) is removed. Restore requires durable deduction evidence.
+    const autoRestorableDose: { id: string } | null = null;
+    const showAutoRestore = false;
+    const autoRestoreAmount = null;
 
 
     return (

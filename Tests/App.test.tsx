@@ -202,7 +202,7 @@ describe('handleToggleAutoDeduct logic (#27)', () => {
  * must run OUTSIDE the setMedications updater. React updater
  * functions must be pure; React may invoke them more than once in
  * Strict Mode (which ships in src/main.tsx). If the updater itself
- * calls setLogs/showToast/settleAutoDeductToggle, Strict Mode's
+ * calls setLogs/showToast/Strict Mode's
  * double-invoke would create DUPLICATE settlement calls, logs, and
  * toasts.
  *
@@ -212,7 +212,7 @@ describe('handleToggleAutoDeduct logic (#27)', () => {
  * into the updater as a closure value (which the updater only READS).
  *
  * These tests verify the structural property: ONE toggle click calls
- * the pure `settleAutoDeductToggle` helper EXACTLY ONCE — even under
+ * the pure `` helper EXACTLY ONCE — even under
  * <StrictMode> (which double-invokes the setMedications updater). If
  * the settle call were inside the updater, StrictMode would call it
  * twice; the fix ensures it's called once regardless.
@@ -268,7 +268,7 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
     );
   }
 
-  it('one toggle click calls settleAutoDeductToggle EXACTLY ONCE (not twice, not zero)', async () => {
+  it('one toggle click calls  EXACTLY ONCE (not twice, not zero)', async () => {
     seedMed();
 
     // Spy on the pure settle helper. The spy returns a no-op result
@@ -276,7 +276,7 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
     // sync effect's state — we ONLY care about the call count.
     const dateCalcModule = await import('@/utils/dateCalculations');
     const settleSpy = vi
-      .spyOn(dateCalcModule, 'settleAutoDeductToggle')
+      .spyOn(dateCalcModule, '')
       .mockReturnValue({
         updatedMed: {
           id: 'med-toggle',
@@ -303,7 +303,7 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
 
     // Phase 4: the toggle runs inside the async durable stock gate, so the
     // settle call happens on a later microtask — await it. The handler
-    // calls settleAutoDeductToggle exactly once per click (outside the
+    // calls  exactly once per click (outside the
     // updater, so StrictMode cannot double it).
     await waitFor(() => {
       expect(settleSpy).toHaveBeenCalledTimes(1);
@@ -320,9 +320,9 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
     );
   });
 
-  it('one toggle click under <StrictMode> still calls settleAutoDeductToggle EXACTLY ONCE', async () => {
+  it('one toggle click under <StrictMode> still calls  EXACTLY ONCE', async () => {
     // StrictMode double-invokes updater functions in development.
-    // If settleAutoDeductToggle were called INSIDE the setMedications
+    // If  were called INSIDE the setMedications
     // updater, StrictMode would call it TWICE. The fix ensures the
     // settle call is OUTSIDE the updater, so it's called once even
     // under StrictMode.
@@ -330,7 +330,7 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
 
     const dateCalcModule = await import('@/utils/dateCalculations');
     const settleSpy = vi
-      .spyOn(dateCalcModule, 'settleAutoDeductToggle')
+      .spyOn(dateCalcModule, '')
       .mockReturnValue({
         updatedMed: {
           id: 'med-toggle',
@@ -369,14 +369,14 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
     });
   });
 
-  it('one toggle (OFF → ON) calls settleAutoDeductToggle EXACTLY ONCE and produces no log', async () => {
+  it('one toggle (OFF → ON) calls  EXACTLY ONCE and produces no log', async () => {
     // Frozen med → toggle to ON. The settle helper is called once
     // (with newState=true) and returns no log (no retroactive deduction).
     seedMed({ autoDeductEnabled: false });
 
     const dateCalcModule = await import('@/utils/dateCalculations');
     const settleSpy = vi
-      .spyOn(dateCalcModule, 'settleAutoDeductToggle')
+      .spyOn(dateCalcModule, '')
       .mockReturnValue({
         updatedMed: {
           id: 'med-toggle',

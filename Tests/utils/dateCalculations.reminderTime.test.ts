@@ -3,10 +3,8 @@ import {
   effectiveCurrentPills,
   countDueAutoDoses,
   computeDueDoseBreakdown,
-  settleDoseChange,
-  settleAutoDeductToggle,
 } from '@/utils/dateCalculations';
-import { consumeDose, settleAndAdjust } from '@/utils/medActions';
+import { consumeDose } from '@/utils/medActions';
 import type { Medication } from '@/types';
 
 /**
@@ -84,14 +82,23 @@ describe('reminderTime-gated auto-deduction timing', () => {
   // ─── 4. manual consume before reminderTime → no double at the time ─
   it('manual consume before reminderTime: deduct once, no double at reminderTime', () => {
     const now = at('2026-09-11T18:00:00Z'); // 18:00 < 20:00
-    const med = makeRemindedMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2026-09-10' });
-    const { updatedMed } = consumeDose(med, 'manual', '2026-09-11', now);
+    // Issue #267: consumeDose requires a doseSchedule (no Legacy fallback).
+    // Use a single-slot schedule at the reminderTime so behavior matches the
+    // pre-#267 reminderTime-gated semantics.
+    const med = makeRemindedMed({
+      currentPills: 30,
+      dailyDose: 2,
+      lastSyncDate: '2026-09-10',
+      doseSchedule: [{ id: 'd1', amount: 2, time: '20:00' }],
+      dosesPerDay: 1,
+    });
+    const { updatedMed } = consumeDose(med, 'manual', '2026-09-11', now, 'd1');
     expect(updatedMed).not.toBeNull();
     expect(updatedMed!.currentPills).toBe(28); // 30 - 2 (the manual dose only)
     expect(updatedMed!.lastConsumedDate).toBe('2026-09-11');
 
     // At 20:00 (reminderTime), NO additional deduction: the manual
-    // consume marked today's dose complete (lastConsumedDate = today).
+    // consume marked today's dose complete (doseConsumption.d1 = today).
     const nowAtTime = at('2026-09-11T20:00:00Z');
     expect(effectiveCurrentPills(updatedMed!, '2026-09-11', nowAtTime)).toBe(28);
   });
@@ -99,11 +106,17 @@ describe('reminderTime-gated auto-deduction timing', () => {
   // ─── 5. manual consume after reminderTime → no double deduction ────
   it('manual consume after reminderTime: no double deduction', () => {
     const now = at('2026-09-11T20:01:00Z'); // 20:01 > 20:00 (today dose due)
-    const med = makeRemindedMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2026-09-10' });
+    const med = makeRemindedMed({
+      currentPills: 30,
+      dailyDose: 2,
+      lastSyncDate: '2026-09-10',
+      doseSchedule: [{ id: 'd1', amount: 2, time: '20:00' }],
+      dosesPerDay: 1,
+    });
     // The projection would deduct today's dose (→ 28). The manual consume
-    // REPLACES today's auto-dose (does not add to it), so the result is
-    // 28, not 26.
-    const { updatedMed } = consumeDose(med, 'manual', '2026-09-11', now);
+    // deducts from durable currentPills only (NOT from effPills), so the
+    // result is 30 - 2 = 28, NOT 26.
+    const { updatedMed } = consumeDose(med, 'manual', '2026-09-11', now, 'd1');
     expect(updatedMed).not.toBeNull();
     expect(updatedMed!.currentPills).toBe(28);
     expect(updatedMed!.lastConsumedDate).toBe('2026-09-11');
@@ -220,50 +233,65 @@ describe('reminderTime-gated auto-deduction timing', () => {
     expect(effectiveCurrentPills(medNew, '2026-09-15', now)).toBe(22); // 30 - 4*2
   });
 
-  // ─── 11. change dailyDose → old dose for past, new dose for future ─
-  it('settleDoseChange: settles elapsed PAST days at OLD dose, then applies NEW dose going forward', () => {
+  // Issue #267: dose-change settlement was removed. `settleDoseChange` was
+  // deleted; the durable `currentPills` is NOT changed by a dose edit. The
+  // projection uses the current `dailyDose` for both past and today (there
+  // is no historical settlement that bakes in the OLD dose anymore).
+
+  // ─── 11. change dailyDose → snapshot unchanged; projection uses NEW dose ─
+  it('change dailyDose: snapshot unchanged; projection uses NEW dose (no settlement, no OLD-dose past)', () => {
     const now = at('2026-09-13T15:00:00Z'); // 09-13 15:00 < 20:00
-    const med = makeRemindedMed({
+    const medBefore = makeRemindedMed({
       currentPills: 30,
       dailyDose: 2,
       lastSyncDate: '2026-09-10',
     });
-    // Elapsed past days (09-11, 09-12) = 2, settled at OLD dose 2 → 4.
-    // Today (09-13, before 20:00) NOT settled (left dynamic).
-    const { updatedMed, log } = settleDoseChange(med, 3, '2026-09-13', now);
-    expect(updatedMed.currentPills).toBe(26); // 30 - 2*2 (old dose)
-    expect(updatedMed.dailyDose).toBe(3); // new dose from today forward
-    expect(updatedMed.lastSyncDate).toBe('2026-09-12'); // yesterday (today dynamic)
-    expect(log).not.toBeNull();
-    expect(log!.amount).toBe(-4);
+    // Pre-change projection: betweenDays=2 (Sep 11, Sep 12) at dose 2
+    // → pastDueUnits=4. todayDue=0 (15:00 < 20:00). effPills=30-4=26.
+    expect(effectiveCurrentPills(medBefore, '2026-09-13', now)).toBe(26);
 
-    // Before today's reminderTime: today NOT due → effPills = settled 26.
-    expect(effectiveCurrentPills(updatedMed, '2026-09-13', now)).toBe(26);
-    // At 20:00, today's dose due at the NEW dose (3) → effPills = 26 - 3 = 23.
+    // Issue #267: dose edit changes configuration only. No settle, no
+    // lastSyncDate change, no auto_daily log. The durable snapshot stays
+    // at currentPills=30 and lastSyncDate='2026-09-10' (unchanged).
+    const medAfter: Medication = { ...medBefore, dailyDose: 3 };
+    expect(medAfter.currentPills).toBe(30);
+    expect(medAfter.lastSyncDate).toBe('2026-09-10');
+    expect(medAfter.dailyDose).toBe(3);
+
+    // After the dose change, the projection uses the NEW dose 3 for both
+    // past days and today (no OLD-dose past anymore — historicalDayDueUnits
+    // reads the current med.dailyDose).
+    // past days (Sep 11, Sep 12) at NEW dose 3 → 6. todayDue=0. effPills=30-6=24.
+    expect(effectiveCurrentPills(medAfter, '2026-09-13', now)).toBe(24);
+    // At 20:00, today's dose due at NEW dose (3) → effPills = 24 - 3 = 21.
     const nowAtTime = at('2026-09-13T20:00:00Z');
-    expect(effectiveCurrentPills(updatedMed, '2026-09-13', nowAtTime)).toBe(23);
+    expect(effectiveCurrentPills(medAfter, '2026-09-13', nowAtTime)).toBe(21);
   });
 
-  // ─── settleAutoDeductToggle (gated) ────────────────────────────────
-  it('toggle true→false (gated): settles past days only, freezes the balance', () => {
+  // Issue #267: auto-deduct toggle settlement was removed. The toggle now
+  // flips `autoDeductEnabled` only — no stock change, no log, no lastSyncDate
+  // bump. The durable snapshot stays unchanged; projection starts/stops
+  // applying on the next render.
+
+  // ─── auto-deduct toggle (gated) ────────────────────────────────
+  it('toggle true→false (gated): snapshot unchanged, projection frozen', () => {
     const now = at('2026-09-11T15:00:00Z'); // 09-11 15:00 < 20:00
     const med = makeRemindedMed({
       currentPills: 30,
       dailyDose: 2,
       lastSyncDate: '2026-09-09', // 2 days elapsed (09-09 → 09-11): betweenDays = 1 (09-10)
     });
-    const { updatedMed, log } = settleAutoDeductToggle(med, false, '2026-09-11', now);
-    // Past day 09-10 settled at 2 → 28. Today (09-11, before 20:00) not.
-    expect(updatedMed.currentPills).toBe(28);
-    expect(updatedMed.lastSyncDate).toBe('2026-09-10'); // yesterday (today stays dynamic if re-enabled)
+    // Issue #267: toggle flips the flag only. No stock settlement, no log,
+    // no lastSyncDate change. The durable snapshot stays at 30 / '2026-09-09'.
+    const updatedMed: Medication = { ...med, autoDeductEnabled: false };
+    expect(updatedMed.currentPills).toBe(30); // unchanged
+    expect(updatedMed.lastSyncDate).toBe('2026-09-09'); // unchanged
     expect(updatedMed.autoDeductEnabled).toBe(false);
-    expect(log).not.toBeNull();
-    expect(log!.amount).toBe(-2);
     // Frozen med → effectiveCurrentPills returns the snapshot unchanged.
-    expect(effectiveCurrentPills(updatedMed, '2026-09-11', now)).toBe(28);
+    expect(effectiveCurrentPills(updatedMed, '2026-09-11', now)).toBe(30);
   });
 
-  it('toggle false→true (gated): no retroactive deduction for the frozen period; today stays dynamic', () => {
+  it('toggle false→true (gated): snapshot unchanged; projection starts from today forward', () => {
     const now = at('2026-09-11T15:00:00Z'); // 15:00 < 20:00
     const med = makeRemindedMed({
       currentPills: 30,
@@ -271,51 +299,57 @@ describe('reminderTime-gated auto-deduction timing', () => {
       lastSyncDate: '2026-09-09',
       autoDeductEnabled: false,
     });
-    const { updatedMed, log } = settleAutoDeductToggle(med, true, '2026-09-11', now);
+    // Issue #267: toggle flips the flag only. No retroactive deduction for
+    // the frozen period. The durable snapshot stays at 30 / '2026-09-09'.
+    const updatedMed: Medication = { ...med, autoDeductEnabled: true };
     expect(updatedMed.currentPills).toBe(30); // unchanged — no retroactive deduction
-    expect(updatedMed.lastSyncDate).toBe('2026-09-10'); // yesterday (today dynamic, no retro)
+    expect(updatedMed.lastSyncDate).toBe('2026-09-09'); // unchanged
     expect(updatedMed.autoDeductEnabled).toBe(true);
-    expect(log).toBeNull();
-    // Today (before 20:00) NOT due → effPills = 30.
-    expect(effectiveCurrentPills(updatedMed, '2026-09-11', now)).toBe(30);
-    // At 20:00, today's dose due (NEW schedule from today) → effPills = 28.
+    // Today (before 20:00) NOT due → pastDueUnits only (betweenDays=1 for
+    // Sep 10 at dose 2) → effPills = 30 - 2 = 28. The past day's projection
+    // is NOT zero — it stays a live projection (no settlement was baked in).
+    expect(effectiveCurrentPills(updatedMed, '2026-09-11', now)).toBe(28);
+    // At 20:00, today's dose also due → effPills = 30 - 2 (Sep 10) - 2 (today) = 26.
     const nowAtTime = at('2026-09-11T20:00:00Z');
-    expect(effectiveCurrentPills(updatedMed, '2026-09-11', nowAtTime)).toBe(28);
+    expect(effectiveCurrentPills(updatedMed, '2026-09-11', nowAtTime)).toBe(26);
   });
 
-  // ─── refill (settleAndAdjust, gated) ────────────────────────────────
-  it('refill after reminderTime (gated): settles past-only, today stays dynamic (no double)', () => {
+  // Issue #267: refill adds to durable currentPills only (no settlement).
+  // The refill test below verifies the new contract directly.
+  // ─── refill (gated) ────────────────────────────────
+  it('refill after reminderTime (gated): adds to durable currentPills; projection still reflects today due (no double)', () => {
     const now = at('2026-09-11T21:00:00Z'); // 21:00 > 20:00 (today due)
     const med = makeRemindedMed({
       currentPills: 30,
       dailyDose: 2,
       lastSyncDate: '2026-09-10',
     });
-    const result = settleAndAdjust(med, 10, '2026-09-11', now); // refill +10
-    // Past-only settle (betweenDays=0) → 30, +10 → 40. today's dose NOT
-    // baked in (left dynamic). lastSyncDate kept (yesterday).
-    expect(result.updatedMed.currentPills).toBe(40);
-    expect(result.updatedMed.lastSyncDate).toBe('2026-09-10');
+    // Issue #267: refill = currentPills + addedPills only. No settlement,
+    // no lastSyncDate change. The durable snapshot becomes 40.
+    const updatedMed: Medication = { ...med, currentPills: 40 };
+    expect(updatedMed.currentPills).toBe(40);
+    expect(updatedMed.lastSyncDate).toBe('2026-09-10'); // unchanged
     // Live balance projects today's due dose → 40 - 2 = 38 (no double).
-    expect(effectiveCurrentPills(result.updatedMed, '2026-09-11', now)).toBe(38);
+    expect(effectiveCurrentPills(updatedMed, '2026-09-11', now)).toBe(38);
   });
 
-  it('refill with elapsed past days (gated): settles past days, today stays dynamic', () => {
+  it('refill with elapsed past days (gated): adds to durable currentPills; projection still reflects past + today', () => {
     const now = at('2026-09-12T15:00:00Z'); // 09-12 15:00 < 20:00
     const med = makeRemindedMed({
       currentPills: 30,
       dailyDose: 2,
       lastSyncDate: '2026-09-09', // betweenDays = 2 (09-10, 09-11)
     });
-    const result = settleAndAdjust(med, 10, '2026-09-12', now); // refill +10
-    // Past 2 days (09-10, 09-11) settled at 2 → 30 - 4 = 26. +10 → 36.
-    expect(result.updatedMed.currentPills).toBe(36);
-    expect(result.updatedMed.lastSyncDate).toBe('2026-09-11'); // yesterday (today dynamic)
-    // Today (09-12, before 20:00) NOT due → effPills = 36.
-    expect(effectiveCurrentPills(result.updatedMed, '2026-09-12', now)).toBe(36);
-    // At 20:00, today due → 36 - 2 = 34.
+    // Issue #267: refill = currentPills + addedPills only. No settlement.
+    const updatedMed: Medication = { ...med, currentPills: 40 };
+    expect(updatedMed.currentPills).toBe(40);
+    expect(updatedMed.lastSyncDate).toBe('2026-09-09'); // unchanged
+    // Today (09-12, before 20:00) NOT due → projection = past 2 days at 2 = 4
+    // → effPills = 40 - 4 = 36.
+    expect(effectiveCurrentPills(updatedMed, '2026-09-12', now)).toBe(36);
+    // At 20:00, today due → 40 - 4 - 2 = 34.
     const nowAtTime = at('2026-09-12T20:00:00Z');
-    expect(effectiveCurrentPills(result.updatedMed, '2026-09-12', nowAtTime)).toBe(34);
+    expect(effectiveCurrentPills(updatedMed, '2026-09-12', nowAtTime)).toBe(34);
   });
 
   // ─── already-consumed-today guard (gated) ──────────────────────────
@@ -412,17 +446,20 @@ describe('same-day lastSyncDate === today (reminderTime-gated)', () => {
   // ─── 4. same-day manual consume before reminderTime → no double at time
   it('same-day manual consume before reminderTime: deduct once, no double at reminderTime', () => {
     const now = at('2026-09-11T18:00:00Z'); // 18:00 < 20:00
+    // Issue #267: consumeDose requires a doseSchedule (no Legacy fallback).
     const med = makeRemindedMed({
       currentPills: 30,
       dailyDose: 2,
       lastSyncDate: '2026-09-11', // same day
+      doseSchedule: [{ id: 'd1', amount: 2, time: '20:00' }],
+      dosesPerDay: 1,
     });
-    const { updatedMed } = consumeDose(med, 'manual', '2026-09-11', now);
+    const { updatedMed } = consumeDose(med, 'manual', '2026-09-11', now, 'd1');
     expect(updatedMed).not.toBeNull();
     expect(updatedMed!.currentPills).toBe(28); // 30 - 2 (the manual dose only)
     expect(updatedMed!.lastConsumedDate).toBe('2026-09-11');
 
-    // At 20:00 (reminderTime), NO additional deduction — lastConsumedDate
+    // At 20:00 (reminderTime), NO additional deduction — doseConsumption.d1
     // = today blocks today's auto-dose.
     const nowAtTime = at('2026-09-11T20:00:00Z');
     expect(countDueAutoDoses(updatedMed!, nowAtTime, '2026-09-11')).toBe(0);
@@ -436,12 +473,14 @@ describe('same-day lastSyncDate === today (reminderTime-gated)', () => {
       currentPills: 30,
       dailyDose: 2,
       lastSyncDate: '2026-09-11', // same day
+      doseSchedule: [{ id: 'd1', amount: 2, time: '20:00' }],
+      dosesPerDay: 1,
     });
     // The auto projection before consume = 28 (todayDue=1, betweenDays=0).
     expect(effectiveCurrentPills(med, '2026-09-11', now)).toBe(28);
-    // The manual consume REPLACES today's auto-dose (settle past-only = 30,
-    // then deduct the manual dose) → 28, NOT 26.
-    const { updatedMed } = consumeDose(med, 'manual', '2026-09-11', now);
+    // Issue #267: consumeDose deducts from durable currentPills only
+    // (NOT from effPills). Result = 30 - 2 = 28, NOT 26.
+    const { updatedMed } = consumeDose(med, 'manual', '2026-09-11', now, 'd1');
     expect(updatedMed).not.toBeNull();
     expect(updatedMed!.currentPills).toBe(28); // not 26
     expect(updatedMed!.lastConsumedDate).toBe('2026-09-11');

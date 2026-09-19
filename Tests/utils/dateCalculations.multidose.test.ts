@@ -6,12 +6,11 @@ import {
   isDoseConsumedOnDate,
   todayDueUnits,
   dailyScheduleAmount,
-  settleDoseChange,
   countDueAutoDoses,
   effectiveDaysLeft,
   historicalDayDueUnits,
 } from '@/utils/dateCalculations';
-import { consumeDose, settleAndAdjust } from '@/utils/medActions';
+import { consumeDose } from '@/utils/medActions';
 import type { Medication } from '@/types';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
@@ -228,9 +227,12 @@ describe('Phase 3B Example G — schedule edit keeps stable dose IDs', () => {
     expect(isDoseConsumedOnDate(edited, 'd1', '2024-09-12')).toBe(true);
     expect(isDoseConsumedOnDate(edited, 'd2', '2024-09-11')).toBe(true);
     expect(isDoseConsumedOnDate(edited, 'd2', '2024-09-12')).toBe(false);
-    const { updatedMed } = settleDoseChange(med, 5, '2024-09-12', at('2024-09-12T10:00:00'));
-    expect(updatedMed.currentPills).toBe(30);
-    expect(updatedMed.dailyDose).toBe(5);
+    // Issue #267: dose edits no longer settle past consumption into the
+    // snapshot — `settleDoseChange` was deleted. The durable `currentPills`
+    // is unchanged by a dose edit; `dailyDose` is updated to the new value.
+    const editedMed: Medication = { ...med, dailyDose: 5 };
+    expect(editedMed.currentPills).toBe(30);
+    expect(editedMed.dailyDose).toBe(5);
   });
 
   it('removed dose id is ignored by projection (orphan key harmless)', () => {
@@ -317,7 +319,7 @@ describe('Phase 3 consumeDose multi-dose', () => {
     ).toBe(result.updatedMed!.currentPills);
   });
 
-  it('legacy med still consumes via lastConsumedDate', () => {
+  it('legacy med without doseSchedule is rejected (Issue #267/#268 — no Legacy fallback)', () => {
     const med = makeMed({
       doseSchedule: undefined,
       dosesPerDay: undefined,
@@ -328,8 +330,10 @@ describe('Phase 3 consumeDose multi-dose', () => {
     });
     const now = at('2024-09-12T10:00:00');
     const result = consumeDose(med, 'manual', '2024-09-12', now);
-    expect(result.doseAmount).toBe(1);
-    expect(result.updatedMed?.lastConsumedDate).toBe('2024-09-12');
+    // No doseSchedule → reject with missing_dose_id (no dailyDose fallback).
+    expect(result.doseAmount).toBe(0);
+    expect(result.updatedMed).toBeNull();
+    expect(result.reason).toBe('missing_dose_id');
   });
 
   it('multi-dose without doseId fails (no silent first-unconsumed fallback)', () => {
@@ -364,17 +368,6 @@ describe('Phase 3B countDueAutoDoses / days left', () => {
       autoDeductEnabled: false,
     });
     expect(effectiveDaysLeft(med, '2024-09-12')).toBe(10);
-  });
-});
-
-describe('Phase 3B settleAndAdjust multi-dose', () => {
-  it('refill settles past-only leaving today dynamic', () => {
-    const med = makeMed({ lastSyncDate: '2024-09-10', currentPills: 30 });
-    const now = at('2024-09-12T15:00:00');
-    const { updatedMed } = settleAndAdjust(med, 10, '2024-09-12', now);
-    expect(updatedMed.currentPills).toBe(36);
-    expect(updatedMed.lastSyncDate).toBe('2024-09-11');
-    expect(effectiveCurrentPills(updatedMed, '2024-09-12', now)).toBe(33);
   });
 });
 
@@ -473,7 +466,7 @@ describe('Phase 3B BLOCKER — historical partial consumption (no double deducti
     expect(b.todayDueUnits).toBe(0);
   });
 
-  it('consumeDose writes history so later catch-up is correct', () => {
+  it('consumeDose writes history so later projection is correct', () => {
     let med = makeMed({ lastSyncDate: '2024-09-12', currentPills: 40 });
     const day1 = at('2024-09-12T10:00:00');
     let r = consumeDose(med, 'manual', '2024-09-12', day1, 'd1');
@@ -483,13 +476,21 @@ describe('Phase 3B BLOCKER — historical partial consumption (no double deducti
     expect(med.currentPills).toBe(37);
     expect(med.doseConsumptionHistory!.d1).toContain('2024-09-12');
     expect(med.doseConsumptionHistory!.d2).toContain('2024-09-12');
+    // Issue #267: lastSyncDate is NOT changed by consume — no settlement
+    // bump. The durable snapshot stays at the original lastSyncDate.
+    expect(med.lastSyncDate).toBe('2024-09-12');
 
-    // Next day
+    // Next day projection: with lastSyncDate still '2024-09-12', totalDays
+    // from '2024-09-12' → '2024-09-13' = 1, betweenDays = 0 (gated multi).
+    // So pastDueUnits = 0 (no fully-elapsed past days). Sep 12's d3 stays
+    // part of the live projection via today's schedule on Sep 13 (not
+    // historical). todayDueUnits at 10:00 = d1 only (2 units).
     const day2 = at('2024-09-13T10:00:00');
     const b = computeDueDoseBreakdown(med, day2, '2024-09-13');
-    expect(b.pastDueUnits).toBe(1); // only d3 from Sep 12
+    expect(b.pastDueUnits).toBe(0); // no past fully-elapsed days (gated)
+    expect(b.todayDueUnits).toBe(2); // d1 (08:00 elapsed) on Sep 13
     expect(effectiveCurrentPills(med, '2024-09-13', day2)).toBe(
-      med.currentPills - 1 - 2 // past d3 + today d1
+      med.currentPills - 2 // today d1 only
     );
   });
 

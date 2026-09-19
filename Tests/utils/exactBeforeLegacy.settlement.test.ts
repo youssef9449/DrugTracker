@@ -20,7 +20,7 @@ import {
 import { __setAutoStockGateTestHooks } from '../../src/utils/autoDeductionStockGate';
 import { __setExactAutoEnvelopeTestHooks } from '../../src/utils/runAutoDeductionReconciliation';
 import { __setStockMutationOrderingTestHooks } from '../../src/utils/stockMutationOrdering';
-import * as preSettleModule from '../../src/utils/reconcileExactBeforeLegacySettlement';
+import * as preSettleModule from '../../src/utils/reconcileExactBeforeManualMutation';
 
 function baseMed(over: Partial<Medication> = {}): Medication {
   return {
@@ -99,7 +99,7 @@ function mockExactFirst(
   amount = 2
 ) {
   return vi
-    .spyOn(preSettleModule, 'reconcileExactBeforeLegacySettlement')
+    .spyOn(preSettleModule, 'reconcileExactBeforeManualMutation')
     .mockImplementation(async (opts) => {
       callOrder.push('exact');
       const from = opts.fresh.medications;
@@ -207,7 +207,7 @@ describe('exact FIRED amount precedes legacy settlement', () => {
   it('per-med toggle blocks when exact reconciliation is not durably finalized', async () => {
     vi.spyOn(
       preSettleModule,
-      'reconcileExactBeforeLegacySettlement'
+      'reconcileExactBeforeManualMutation'
     ).mockImplementation(async (opts) => ({
       state: opts.fresh,
       reconciliation: null,
@@ -350,7 +350,7 @@ describe('runGatedGlobalAutoDeductToggle exact-before-legacy', () => {
 
     vi.spyOn(
       preSettleModule,
-      'reconcileExactBeforeLegacySettlement'
+      'reconcileExactBeforeManualMutation'
     ).mockImplementation(async (opts) => {
       callOrder.push('exact');
       return {
@@ -408,7 +408,7 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
   it('prunes orphan dose history when schedule drops d2', async () => {
     vi.spyOn(
       preSettleModule,
-      'reconcileExactBeforeLegacySettlement'
+      'reconcileExactBeforeManualMutation'
     ).mockImplementation(async (opts) => ({
       state: opts.fresh,
       reconciliation: null,
@@ -621,7 +621,7 @@ describe('FIRED durable after schedule edit/remove (#268 / PR #271)', () => {
    */
   function mockExactAppliesDurable(callOrder: string[], amount = 2) {
     return vi
-      .spyOn(preSettleModule, 'reconcileExactBeforeLegacySettlement')
+      .spyOn(preSettleModule, 'reconcileExactBeforeManualMutation')
       .mockImplementation(async (opts) => {
         callOrder.push('exact');
         const r = reconcileFiredEvents(

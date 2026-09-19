@@ -1,10 +1,10 @@
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
-import type { Medication } from '@/types';
+import type { Medication, ConsumptionLog } from '@/types';
 import { useStockAlerts } from '@/hooks/useStockAlerts';
-import { resolveRestoreDoseAmount, settleAndAdjust } from '@/utils/medActions';
 import { CRITICAL_CLAIMS_STORAGE_KEY } from '@/utils/criticalNotificationClaims';
+import { restoreDose, resolveRestoreDoseId } from '@/utils/medActions';
 
 vi.mock('@/utils/notifications', () => ({
   sendCriticalStockAlert: vi.fn(() => Promise.resolve(true)),
@@ -38,6 +38,50 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
   };
 }
 
+/** Build a `dose_taken` log for a single occurrence (med + doseId + date). */
+function makeDoseTakenLog(
+  med: Medication,
+  doseId: string,
+  date: string,
+  amount: number,
+  logId: string
+): ConsumptionLog {
+  return {
+    id: logId,
+    medicationId: med.id,
+    medicationName: med.name,
+    type: 'dose_taken',
+    amount: -amount,
+    date,
+    timestamp: `${date}T08:00:00.000Z`,
+    description: 'test dose_taken',
+    doseId,
+  };
+}
+
+/** Build a med that has had `doseId` consumed on `date` (with the durable log). */
+function makeConsumedMed(
+  baseMed: Medication,
+  doseId: string,
+  date: string,
+  deductedAmount: number
+): { med: Medication; logs: ConsumptionLog[] } {
+  const slot = baseMed.doseSchedule!.find((d) => d.id === doseId)!;
+  const med: Medication = {
+    ...baseMed,
+    currentPills: Math.max(0, baseMed.currentPills - deductedAmount),
+    doseConsumption: { ...(baseMed.doseConsumption ?? {}), [doseId]: date },
+    doseConsumptionHistory: {
+      ...(baseMed.doseConsumptionHistory ?? {}),
+      [doseId]: [date],
+    },
+  };
+  const logs: ConsumptionLog[] = [
+    makeDoseTakenLog(baseMed, doseId, date, deductedAmount, `take-${doseId}-${date}`),
+  ];
+  return { med, logs };
+}
+
 function useAlerts(medications: Medication[]) {
   return useStockAlerts({
     medications,
@@ -67,8 +111,14 @@ afterEach(() => {
 
 describe('restore dose → critical stock reconciliation', () => {
   it('Critical → Restore → Sufficient: exact dose restore clears the old critical claim', () => {
-    // floor(4/3)=1 day left at threshold 1 → critical; after +2 → floor(6/3)=2 → sufficient
-    const med = makeMed({ currentPills: 4, warningThresholdDays: 1 });
+    // Start at 4 pills (after taking evening dose=2 from 6). threshold=1.
+    // floor(4/3)=1 day left at threshold 1 → critical.
+    // After Restore (reverses evening dose +2) → 6 → floor(6/3)=2 → sufficient.
+    const baseMed = makeMed({ currentPills: 6, warningThresholdDays: 1 });
+    const { med, logs } = makeConsumedMed(baseMed, 'evening', TEST_DATE, 2);
+    // med.currentPills = 4 (6 - 2); the active deduction log records -2.
+    expect(med.currentPills).toBe(4);
+
     const { rerender } = renderHook(({ medications }) => useAlerts(medications), {
       initialProps: { medications: [med] },
     });
@@ -76,34 +126,37 @@ describe('restore dose → critical stock reconciliation', () => {
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(readClaims()['med-restore']).toEqual({ claimed: true, alarmTime: null });
 
-    const resolved = resolveRestoreDoseAmount(med, 'evening');
-    expect(resolved).toEqual({ ok: true, amount: 2, doseId: 'evening' });
-    if (!resolved.ok) throw new Error('Expected evening dose to resolve');
-
-    const { updatedMed } = settleAndAdjust(med, resolved.amount, TEST_DATE, TEST_NOW);
-    expect(updatedMed.currentPills).toBe(6);
-    expect(updatedMed.currentPills - med.currentPills).toBe(2);
-    expect(updatedMed.currentPills - med.currentPills).not.toBe(med.dailyDose);
+    // Issue #267: restoreDose reverses the active deduction log's amount
+    // (abs(log.amount) = 2 for evening). Restored = currentPills + 2 = 6.
+    const result = restoreDose(med, 'evening', TEST_DATE, TEST_NOW, logs);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('Expected evening restore to succeed');
+    expect(result.restoredAmount).toBe(2);
+    expect(result.updatedMed.currentPills).toBe(6);
+    // Restore amount equals the slot amount (2), NOT dailyDose (3).
+    expect(result.restoredAmount).not.toBe(med.dailyDose);
     // Integer days-left (floor) must exceed threshold to leave critical
-    expect(Math.floor(updatedMed.currentPills / updatedMed.dailyDose)).toBeGreaterThan(
-      updatedMed.warningThresholdDays
+    expect(Math.floor(result.updatedMed.currentPills / result.updatedMed.dailyDose)).toBeGreaterThan(
+      result.updatedMed.warningThresholdDays
     );
 
-    rerender({ medications: [updatedMed] });
+    rerender({ medications: [result.updatedMed] });
     expect(readClaims()['med-restore']).toBeUndefined();
     expect(sendMock).toHaveBeenCalledTimes(1);
   });
 
   it('Critical → Restore → Sufficient → Critical: a new episode gets exactly one new notification', () => {
-    const med = makeMed({ currentPills: 4, warningThresholdDays: 1 });
+    const baseMed = makeMed({ currentPills: 6, warningThresholdDays: 1 });
+    const { med, logs } = makeConsumedMed(baseMed, 'evening', TEST_DATE, 2);
+
     const { rerender } = renderHook(({ medications }) => useAlerts(medications), {
       initialProps: { medications: [med] },
     });
     expect(sendMock).toHaveBeenCalledTimes(1);
 
-    const resolved = resolveRestoreDoseAmount(med, 'evening');
-    if (!resolved.ok) throw new Error('Expected evening dose to resolve');
-    const sufficientMed = settleAndAdjust(med, resolved.amount, TEST_DATE, TEST_NOW).updatedMed;
+    const result = restoreDose(med, 'evening', TEST_DATE, TEST_NOW, logs);
+    if (!result.ok) throw new Error('Expected evening restore to succeed');
+    const sufficientMed = result.updatedMed;
     expect(sufficientMed.currentPills).toBe(6);
 
     rerender({ medications: [sufficientMed] });
@@ -116,7 +169,11 @@ describe('restore dose → critical stock reconciliation', () => {
   });
 
   it('Critical → Restore → Still Critical: exact restore keeps the same episode claim and sends no duplicate', () => {
-    const med = makeMed({ currentPills: 0 });
+    // Start at 0 pills (after taking morning dose=1 from 1). Still critical (0 pills).
+    const baseMed = makeMed({ currentPills: 1 });
+    const { med, logs } = makeConsumedMed(baseMed, 'morning', TEST_DATE, 1);
+    expect(med.currentPills).toBe(0);
+
     const { rerender } = renderHook(({ medications }) => useAlerts(medications), {
       initialProps: { medications: [med] },
     });
@@ -125,13 +182,12 @@ describe('restore dose → critical stock reconciliation', () => {
     const originalClaim = readClaims()['med-restore'];
     expect(originalClaim?.claimed).toBe(true);
 
-    const resolved = resolveRestoreDoseAmount(med, 'morning');
-    if (!resolved.ok) throw new Error('Expected morning dose to resolve');
-    const updatedMed = settleAndAdjust(med, resolved.amount, TEST_DATE, TEST_NOW).updatedMed;
-
-    expect(updatedMed.currentPills).toBe(1);
-    expect(updatedMed.currentPills).not.toBe(med.dailyDose);
-    rerender({ medications: [updatedMed] });
+    // Restore reverses morning dose (+1). 0 + 1 = 1. Still critical (floor(1/3)=0 ≤ 3).
+    const result = restoreDose(med, 'morning', TEST_DATE, TEST_NOW, logs);
+    if (!result.ok) throw new Error('Expected morning restore to succeed');
+    expect(result.updatedMed.currentPills).toBe(1);
+    expect(result.restoredAmount).not.toBe(med.dailyDose);
+    rerender({ medications: [result.updatedMed] });
 
     expect(readClaims()['med-restore']).toEqual(originalClaim);
     expect(sendMock).toHaveBeenCalledTimes(1);
@@ -139,65 +195,119 @@ describe('restore dose → critical stock reconciliation', () => {
   });
 
   it('restores the selected multi-dose slot amount, not dailyDose', () => {
-    const med = makeMed({ currentPills: 10 });
-    const morning = resolveRestoreDoseAmount(med, 'morning');
-    const evening = resolveRestoreDoseAmount(med, 'evening');
+    // Take morning (1) then take evening (2). Restoring each reverses only that slot's amount.
+    const baseMed = makeMed({ currentPills: 10 });
+    const morningTake = makeDoseTakenLog(baseMed, 'morning', TEST_DATE, 1, 'take-morning');
+    const eveningTake = makeDoseTakenLog(baseMed, 'evening', TEST_DATE, 2, 'take-evening');
+    const logs: ConsumptionLog[] = [morningTake, eveningTake];
 
-    expect(morning).toEqual({ ok: true, amount: 1, doseId: 'morning' });
-    expect(evening).toEqual({ ok: true, amount: 2, doseId: 'evening' });
-    if (!morning.ok || !evening.ok) throw new Error('Expected both doses to resolve');
+    // Med has already taken morning (1) and evening (2): currentPills = 10 - 1 - 2 = 7.
+    const med: Medication = {
+      ...baseMed,
+      currentPills: 7,
+      doseConsumption: { morning: TEST_DATE, evening: TEST_DATE },
+      doseConsumptionHistory: {
+        morning: [TEST_DATE],
+        evening: [TEST_DATE],
+      },
+    };
 
-    const afterMorning = settleAndAdjust(med, morning.amount, TEST_DATE, TEST_NOW).updatedMed;
-    const afterEvening = settleAndAdjust(
-      afterMorning,
-      evening.amount,
+    // Restore morning first (+1) → 8.
+    const morningResult = restoreDose(med, 'morning', TEST_DATE, TEST_NOW, logs);
+    expect(morningResult.ok).toBe(true);
+    if (!morningResult.ok) throw new Error('Expected morning restore');
+    expect(morningResult.restoredAmount).toBe(1);
+    expect(morningResult.updatedMed.currentPills).toBe(8);
+
+    // After morning restore, the morning log is reversed. Restore evening (+2) → 10.
+    // findActiveDeductionForOccurrence skips reversed logs, so evening restore still
+    // finds the active evening log.
+    const updatedLogs: ConsumptionLog[] = logs.map((l) =>
+      l.id === morningResult.reversedLogId
+        ? { ...l, reversedAt: new Date(TEST_NOW).toISOString() }
+        : l
+    );
+    const eveningResult = restoreDose(
+      morningResult.updatedMed,
+      'evening',
       TEST_DATE,
-      TEST_NOW
-    ).updatedMed;
-
-    expect(afterMorning.currentPills).toBe(11);
-    expect(afterEvening.currentPills).toBe(13);
-    expect(afterEvening.currentPills - afterMorning.currentPills).toBe(2);
-    expect(afterEvening.currentPills - med.currentPills).toBe(3);
-    expect(afterEvening.currentPills - med.currentPills).not.toBe(6);
+      TEST_NOW,
+      updatedLogs
+    );
+    expect(eveningResult.ok).toBe(true);
+    if (!eveningResult.ok) throw new Error('Expected evening restore');
+    expect(eveningResult.restoredAmount).toBe(2);
+    expect(eveningResult.updatedMed.currentPills).toBe(10);
+    // Total restore = 1 + 2 = 3 (slot amounts), NOT dailyDose*2 = 6.
+    expect(morningResult.restoredAmount + eveningResult.restoredAmount).toBe(3);
   });
 
   it('multiple same-day restores remain in the same critical episode and do not duplicate notifications', () => {
-    const med = makeMed({ currentPills: 0 });
+    // Start at 0 pills (after taking both morning=1 and evening=2 from 3).
+    const baseMed = makeMed({ currentPills: 3 });
+    const morningTake = makeDoseTakenLog(baseMed, 'morning', TEST_DATE, 1, 'take-morning');
+    const eveningTake = makeDoseTakenLog(baseMed, 'evening', TEST_DATE, 2, 'take-evening');
+    const logs: ConsumptionLog[] = [morningTake, eveningTake];
+    const med: Medication = {
+      ...baseMed,
+      currentPills: 0,
+      doseConsumption: { morning: TEST_DATE, evening: TEST_DATE },
+      doseConsumptionHistory: {
+        morning: [TEST_DATE],
+        evening: [TEST_DATE],
+      },
+    };
+
     const { rerender } = renderHook(({ medications }) => useAlerts(medications), {
       initialProps: { medications: [med] },
     });
     expect(sendMock).toHaveBeenCalledTimes(1);
 
-    const morning = resolveRestoreDoseAmount(med, 'morning');
-    if (!morning.ok) throw new Error('Expected morning dose to resolve');
-    const afterMorning = settleAndAdjust(med, morning.amount, TEST_DATE, TEST_NOW).updatedMed;
-    expect(afterMorning.currentPills).toBe(1);
-    rerender({ medications: [afterMorning] });
+    // Restore morning (+1) → 1. Still critical (floor(1/3)=0 ≤ 3).
+    const morningResult = restoreDose(med, 'morning', TEST_DATE, TEST_NOW, logs);
+    if (!morningResult.ok) throw new Error('Expected morning restore');
+    expect(morningResult.updatedMed.currentPills).toBe(1);
+    rerender({ medications: [morningResult.updatedMed] });
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(readClaims()['med-restore']?.claimed).toBe(true);
 
-    const evening = resolveRestoreDoseAmount(afterMorning, 'evening');
-    if (!evening.ok) throw new Error('Expected evening dose to resolve');
-    const afterEvening = settleAndAdjust(
-      afterMorning,
-      evening.amount,
+    // Restore evening (+2) → 3. Still critical (floor(3/3)=1 ≤ 3).
+    const updatedLogs: ConsumptionLog[] = logs.map((l) =>
+      l.id === morningResult.reversedLogId
+        ? { ...l, reversedAt: new Date(TEST_NOW).toISOString() }
+        : l
+    );
+    const eveningResult = restoreDose(
+      morningResult.updatedMed,
+      'evening',
       TEST_DATE,
-      TEST_NOW
-    ).updatedMed;
-    expect(afterEvening.currentPills).toBe(3);
-    expect(afterEvening.currentPills - afterMorning.currentPills).toBe(2);
+      TEST_NOW,
+      updatedLogs
+    );
+    if (!eveningResult.ok) throw new Error('Expected evening restore');
+    expect(eveningResult.updatedMed.currentPills).toBe(3);
+    expect(eveningResult.restoredAmount).toBe(2);
 
-    rerender({ medications: [afterEvening] });
+    rerender({ medications: [eveningResult.updatedMed] });
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(readClaims()['med-restore']?.claimed).toBe(true);
   });
 
   it('requires a doseId for multi-dose restore', () => {
-    expect(resolveRestoreDoseAmount(makeMed())).toEqual({
-      ok: false,
-      amount: 0,
-      reason: 'missing_dose_id',
-    });
+    // Issue #267: resolveRestoreDoseId replaces the deleted resolveRestoreDoseAmount
+    // and returns the dose identity (no amount — amount comes from the log).
+    const med = makeMed();
+    const resolved = resolveRestoreDoseId(med);
+    expect(resolved).toEqual({ ok: false, reason: 'missing_dose_id' });
+  });
+
+  it('restoreDose rejects when no active deduction log exists (no pure-projection restore)', () => {
+    // Issue #267: restoreDose requires durable deduction evidence.
+    // A projection-only restore (no consume marker, no deduction log) is rejected.
+    const med = makeMed({ currentPills: 30 });
+    const result = restoreDose(med, 'morning', TEST_DATE, TEST_NOW, []);
+    expect(result.ok).toBe(false);
+    if (!result.ok) return;
+    expect(result.reason).toBe('missing_deduction_evidence');
   });
 });

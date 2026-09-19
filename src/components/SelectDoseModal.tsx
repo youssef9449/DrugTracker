@@ -325,12 +325,11 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                   ? `${historicalAmount} ${unit}`
                   : unit
                 : `${scheduleAmount} ${unit}`;
-              // Restore selectable only for:
-              // - consumed + exact active deduction evidence, or
-              // - pure auto projection (no log required).
+              // Issue #267: Restore is selectable only when there is a
+              // consumed/manual state AND exact active durable deduction
+              // evidence for this doseId. No pure-projection restore.
               const isSelectable = isRestore
-                ? isUiConsumedRestoreEligible(consumed, skipped, historicalAmount) ||
-                  isPureAuto
+                ? isUiConsumedRestoreEligible(consumed, skipped, historicalAmount)
                 : !completed;
               const isDone = !isSelectable;
 

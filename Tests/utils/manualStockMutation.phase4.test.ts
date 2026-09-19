@@ -2464,16 +2464,38 @@ describe('findActiveDeductionForOccurrence — deterministic ordering (NOT array
     expect(findActiveDeductionForOccurrence([otherDate], 'med-1', 'd1', TODAY)).toBeNull();
   });
 
-  it('Legacy (no doseId) logs: identity matches when doseId is legacy/undefined', () => {
-    const legacy1 = deduction({ id: 'leg1', type: 'auto_daily', amount: -1, timestamp: TS_OLD });
-    const legacy2 = deduction({ id: 'leg2', type: 'dose_taken', amount: -2, timestamp: TS_NEW });
-    // Lookup with undefined doseId → both legacy logs match; newer (leg2) wins.
-    const r1 = findActiveDeductionForOccurrence([legacy2, legacy1], 'med-1', undefined, TODAY);
-    const r2 = findActiveDeductionForOccurrence([legacy1, legacy2], 'med-1', undefined, TODAY);
-    expect(r1?.id).toBe('leg2');
-    expect(r2?.id).toBe('leg2');
-    // Lookup with 'legacy' doseId → same behavior.
-    expect(findActiveDeductionForOccurrence([legacy1, legacy2], 'med-1', 'legacy', TODAY)?.id).toBe('leg2');
+  it('logs without doseId never match (no legacy/undefined/sentinel identity)', () => {
+    // Logs missing doseId must not match any lookup — including undefined
+    // and the removed 'legacy' sentinel. A concurrent valid log still matches.
+    const noId1 = deduction({
+      id: 'leg1',
+      type: 'auto_daily',
+      amount: -1,
+      timestamp: TS_OLD,
+    });
+    const noId2 = deduction({
+      id: 'leg2',
+      type: 'dose_taken',
+      amount: -2,
+      timestamp: TS_NEW,
+    });
+    const valid = deduction({
+      id: 'valid-d1',
+      type: 'auto_daily',
+      amount: -3,
+      timestamp: TS_NEWEST,
+      doseId: 'd1',
+    });
+    const legacyLogs = [noId1, noId2, valid];
+    expect(
+      findActiveDeductionForOccurrence(legacyLogs, 'med-1', undefined as never, TODAY)
+    ).toBeNull();
+    expect(
+      findActiveDeductionForOccurrence(legacyLogs, 'med-1', 'legacy', TODAY)
+    ).toBeNull();
+    expect(
+      findActiveDeductionForOccurrence(legacyLogs, 'med-1', 'd1', TODAY)?.id
+    ).toBe('valid-d1');
   });
 });
 

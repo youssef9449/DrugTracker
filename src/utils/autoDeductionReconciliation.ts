@@ -260,6 +260,9 @@ export function applyExactAutoEventToMedication(
   const recorded = recordDoseConsumed(med, doseId, calendarDate);
   nextConsumption = recorded.doseConsumption;
   nextHistory = recorded.doseConsumptionHistory;
+  // Exact Auto only updates lastConsumedDate when the medication has an
+  // explicit doseSchedule and every slot for the calendar day is consumed.
+  // No Legacy Single-Dose fallback (doseId-only lastConsumedDate) — #268 / PR #271.
   if (Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) {
     const allConsumed = med.doseSchedule.every((d) =>
       d.id === doseId
@@ -277,8 +280,6 @@ export function applyExactAutoEventToMedication(
     if (allConsumed) {
       lastConsumedDate = calendarDate;
     }
-  } else if (doseId) {
-    lastConsumedDate = calendarDate;
   }
 
   // If prior days (after lastSync, before event day) were folded into the

@@ -6,6 +6,7 @@ import {
   reconcileFiredEvents,
   isExactAutoOccurrenceApplied,
   exactAutoLogId,
+  applyExactAutoEventToMedication,
 } from '../../src/utils/autoDeductionReconciliation';
 import { autoDeductionOccurrenceKey } from '../../src/utils/autoDeductionNative';
 import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
@@ -1344,5 +1345,234 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
     expect(markCalls).toEqual([]);
     // Still unreconciled FIRED in native mock
     expect(nativeFired).toHaveLength(1);
+  });
+
+  it('empty doseId FIRED: runner path terminal ACK via markAll; no stock/log/marker (#268)', async () => {
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      lastConsumedDate: '2026-09-12',
+      doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+    });
+    const emptyDose: AutoDeductionEvent = fired({
+      medicationId: 'med-1',
+      doseId: '',
+      calendarDate: '2026-09-14',
+      amount: 2,
+    });
+    let nativeFired: AutoDeductionEvent[] = [emptyDose];
+    const markCalls: Array<{
+      medicationId: string;
+      doseId: string;
+      calendarDate: string;
+    }> = [];
+
+    const first = await runAutoDeductionReconciliation({
+      alreadyInGate: true,
+      medications: [med],
+      logs: [],
+      globalAutoDeductEnabled: true,
+      listFired: async () => nativeFired,
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        markCalls.push({ medicationId, doseId, calendarDate });
+        nativeFired = nativeFired.filter(
+          (e) =>
+            !(
+              e.medicationId === medicationId &&
+              String(e.doseId ?? '') === doseId &&
+              e.calendarDate === calendarDate
+            )
+        );
+        return { ok: true, changed: true };
+      },
+      persistMeds: () => null,
+      persistLogs: () => null,
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
+    });
+
+    expect(first.details[0]?.outcome).toBe('skipped_invalid');
+    expect(first.mutated).toBe(false);
+    expect(first.medications[0].currentPills).toBe(10);
+    expect(first.medications[0].lastConsumedDate).toBe('2026-09-12');
+    expect(first.newExactLogs).toEqual([]);
+    expect(first.logs).toEqual([]);
+    expect(first.toAcknowledge).toEqual([
+      { medicationId: 'med-1', doseId: '', calendarDate: '2026-09-14' },
+    ]);
+    // Production ACK path: markAll → markReconciled once
+    expect(markCalls).toEqual([
+      { medicationId: 'med-1', doseId: '', calendarDate: '2026-09-14' },
+    ]);
+    expect(first.markedCount).toBe(1);
+    expect(nativeFired).toEqual([]);
+
+    const second = await runAutoDeductionReconciliation({
+      alreadyInGate: true,
+      medications: first.medications,
+      logs: first.logs,
+      globalAutoDeductEnabled: true,
+      listFired: async () => nativeFired,
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        markCalls.push({ medicationId, doseId, calendarDate });
+        return { ok: true, changed: false };
+      },
+      persistMeds: () => null,
+      persistLogs: () => null,
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
+    });
+    expect(second.mutated).toBe(false);
+    expect(second.medications[0].currentPills).toBe(10);
+    expect(second.newExactLogs).toEqual([]);
+    expect(second.toAcknowledge).toEqual([]);
+    expect(second.markedCount).toBe(0);
+    expect(markCalls).toHaveLength(1);
+  });
+
+  it('missing doseId FIRED: runner path terminal ACK via markAll; no stock/log/marker (#268)', async () => {
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      lastConsumedDate: '2026-09-12',
+      doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+    });
+    const missingDose: AutoDeductionEvent = fired({
+      medicationId: 'med-1',
+      doseId: undefined as unknown as string,
+      calendarDate: '2026-09-14',
+      amount: 2,
+    });
+    let nativeFired: AutoDeductionEvent[] = [missingDose];
+    const markCalls: Array<{
+      medicationId: string;
+      doseId: string;
+      calendarDate: string;
+    }> = [];
+
+    const first = await runAutoDeductionReconciliation({
+      alreadyInGate: true,
+      medications: [med],
+      logs: [],
+      globalAutoDeductEnabled: true,
+      listFired: async () => nativeFired,
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        markCalls.push({ medicationId, doseId, calendarDate });
+        nativeFired = nativeFired.filter(
+          (e) =>
+            !(
+              e.medicationId === medicationId &&
+              String(e.doseId ?? '') === doseId &&
+              e.calendarDate === calendarDate
+            )
+        );
+        return { ok: true, changed: true };
+      },
+      persistMeds: () => null,
+      persistLogs: () => null,
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
+    });
+
+    expect(first.details[0]?.outcome).toBe('skipped_invalid');
+    expect(first.mutated).toBe(false);
+    expect(first.medications[0].currentPills).toBe(10);
+    expect(first.medications[0].lastConsumedDate).toBe('2026-09-12');
+    expect(first.newExactLogs).toEqual([]);
+    expect(first.logs).toEqual([]);
+    expect(first.toAcknowledge).toEqual([
+      { medicationId: 'med-1', doseId: '', calendarDate: '2026-09-14' },
+    ]);
+    expect(markCalls).toEqual([
+      { medicationId: 'med-1', doseId: '', calendarDate: '2026-09-14' },
+    ]);
+    expect(first.markedCount).toBe(1);
+    expect(nativeFired).toEqual([]);
+  });
+});
+
+describe('applyExactAutoEventToMedication — no Legacy Single-Dose lastConsumedDate (#268)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-14T15:00:00'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('with explicit doseSchedule: lastConsumedDate updates only when all slots consumed', () => {
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      lastConsumedDate: '2026-09-12',
+      doseSchedule: [
+        { id: 'd1', amount: 1, time: '08:00' },
+        { id: 'd2', amount: 1, time: '20:00' },
+      ],
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      calendarDate: '2026-09-14',
+      amount: 1,
+    });
+    const applied = applyExactAutoEventToMedication(med, e, new Date());
+    expect(applied.ok).toBe(true);
+    if (applied.ok) {
+      // Only one of two slots consumed → lastConsumedDate unchanged
+      expect(applied.updatedMed.lastConsumedDate).toBe('2026-09-12');
+      expect(applied.updatedMed.currentPills).toBe(9);
+      expect(applied.log.id).toBe(exactAutoLogId('med-1', 'd1', '2026-09-14'));
+      expect(applied.log.doseId).toBe('d1');
+    }
+  });
+
+  it('without doseSchedule: applying Exact does not set lastConsumedDate (no Legacy fallback)', () => {
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      lastConsumedDate: '2026-09-12',
+      // no doseSchedule — legacy single-dose shape
+      doseSchedule: undefined,
+      dailyDose: 2,
+      reminderTime: '08:00',
+      reminderEnabled: true,
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'some-id',
+      calendarDate: '2026-09-14',
+      amount: 2,
+    });
+    const applied = applyExactAutoEventToMedication(med, e, new Date());
+    expect(applied.ok).toBe(true);
+    if (applied.ok) {
+      // No legacy doseId-only lastConsumedDate write
+      expect(applied.updatedMed.lastConsumedDate).toBe('2026-09-12');
+      expect(applied.updatedMed.currentPills).toBe(8);
+      // Log still carries the event doseId (identity was non-empty)
+      expect(applied.log.doseId).toBe('some-id');
+      expect(applied.log.id).toBe(exactAutoLogId('med-1', 'some-id', '2026-09-14'));
+    }
+  });
+
+  it('empty doseSchedule array: no lastConsumedDate legacy write', () => {
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      lastConsumedDate: '2026-09-12',
+      doseSchedule: [],
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'orphan',
+      calendarDate: '2026-09-14',
+      amount: 1,
+    });
+    const applied = applyExactAutoEventToMedication(med, e, new Date());
+    expect(applied.ok).toBe(true);
+    if (applied.ok) {
+      expect(applied.updatedMed.lastConsumedDate).toBe('2026-09-12');
+    }
   });
 });

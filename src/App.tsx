@@ -379,10 +379,12 @@ export default function App() {
   // ─────────────────────────────────────────────────────────────
   // NATIVE recurring daily dose-reminder scheduling.
   //
-  // Schedules a recurring native notification (AlarmManager-backed) for
-  // each medication with reminderEnabled + reminderTime, so the dose
-  // reminder fires EVERY DAY at the configured time — even when the app
-  // is killed, the device is in Doze, or the user never opens the app.
+  // Schedules one recurring native notification per explicit doseSchedule
+  // row (AlarmManager-backed), gated by reminderEnabled. Each occurrence
+  // is identified by medId + doseId; reminderTime/dailyDose are not
+  // occurrence identity sources. Fires daily at the schedule-row time even
+  // when the app is killed, the device is in Doze, or the user never opens
+  // the app.
   //
   // Complements event-driven in-app dose reminders while foregrounded.
   // See useDoseReminderScheduler.ts for race-protection + boot persistence.
@@ -933,9 +935,9 @@ export default function App() {
         }}
       />
       <DoseAlarmModal
-        isOpen={Boolean(alarmingMedication)}
+        isOpen={Boolean(alarmingMedication) && Boolean(alarmingDoseId)}
         medication={alarmingMedication}
-        doseId={alarmingDoseId}
+        doseId={alarmingDoseId ?? ''}
         onTakeDose={handleTakeDoseFromAlarm}
         onSnooze={handleSnoozeFromAlarm}
         onDismiss={dismissAlarm}

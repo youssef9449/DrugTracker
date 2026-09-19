@@ -42,6 +42,7 @@ describe('DoseAlarmModal', () => {
       <DoseAlarmModal
         isOpen={true}
         medication={med}
+        doseId="d1"
         onTakeDose={() => {}}
         onSnooze={() => {}}
         onDismiss={() => {}}
@@ -57,6 +58,7 @@ describe('DoseAlarmModal', () => {
       <DoseAlarmModal
         isOpen={true}
         medication={med}
+        doseId="d1"
         onTakeDose={() => {}}
         onSnooze={() => {}}
         onDismiss={onDismiss}
@@ -76,6 +78,7 @@ describe('DoseAlarmModal', () => {
       <DoseAlarmModal
         isOpen={true}
         medication={med}
+        doseId="d1"
         onTakeDose={() => {}}
         onSnooze={onSnooze}
         onDismiss={() => {}}
@@ -92,6 +95,7 @@ describe('DoseAlarmModal', () => {
       <DoseAlarmModal
         isOpen={false}
         medication={med}
+        doseId="d1"
         onTakeDose={() => {}}
         onSnooze={() => {}}
         onDismiss={() => {}}
@@ -206,6 +210,7 @@ describe('DoseAlarmModal — medication-level stock display', () => {
       <DoseAlarmModal
         isOpen
         medication={med}
+        doseId="d1"
         onTakeDose={() => {}}
         onSnooze={() => {}}
         onDismiss={() => {}}
@@ -227,6 +232,7 @@ describe('DoseAlarmModal — medication-level stock display', () => {
       <DoseAlarmModal
         isOpen
         medication={med}
+        doseId="d1"
         onTakeDose={() => {}}
         onSnooze={() => {}}
         onDismiss={() => {}}

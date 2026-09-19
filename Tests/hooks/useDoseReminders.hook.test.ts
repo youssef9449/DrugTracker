@@ -38,8 +38,9 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     lastSyncDate: getTodayDateString(),
     reminderEnabled: true,
     reminderTime: '23:59',
+    doseSchedule: [{ id: 'd1', amount: 1, time: '23:59' }],
+    dosesPerDay: 1,
     // Suite default: Auto OFF so openAlarm opens the manual modal.
-    // Opt into Auto ON with overrides ({ autoDeductEnabled: true }).
     autoDeductEnabled: false,
     ...overrides,
   };
@@ -85,7 +86,7 @@ describe('useDoseReminders', () => {
       );
 
       act(() => {
-        result.current.openAlarm('med-open');
+        result.current.openAlarm('med-open', 'd1');
       });
 
       expect(result.current.alarmingMedication).toEqual(
@@ -100,7 +101,7 @@ describe('useDoseReminders', () => {
       );
 
       act(() => {
-        result.current.openAlarm('med-dup');
+        result.current.openAlarm('med-dup', 'd1');
       });
       expect(result.current.alarmingMedication).toEqual(
         expect.objectContaining({ id: 'med-dup' })
@@ -108,7 +109,7 @@ describe('useDoseReminders', () => {
 
       // Second call while already alarming → no-op.
       act(() => {
-        result.current.openAlarm('med-dup');
+        result.current.openAlarm('med-dup', 'd1');
       });
       expect(result.current.alarmingMedication).toEqual(
         expect.objectContaining({ id: 'med-dup' })
@@ -120,14 +121,14 @@ describe('useDoseReminders', () => {
       const today = new Date().toISOString().slice(0, 10);
       localStorage.setItem(
         FIRED_KEY,
-        JSON.stringify({ [`med-fired:${today}`]: true })
+        JSON.stringify({ [`med-fired:d1:${today}`]: true })
       );
       const { result } = renderHook(() =>
         useDoseReminders(defaultOpts({ medications: [med] }))
       );
 
       act(() => {
-        result.current.openAlarm('med-fired');
+        result.current.openAlarm('med-fired', 'd1');
       });
 
       expect(result.current.alarmingMedication).toBeNull();
@@ -139,7 +140,7 @@ describe('useDoseReminders', () => {
       );
 
       act(() => {
-        result.current.openAlarm('med-gone');
+        result.current.openAlarm('med-gone', 'd1');
       });
 
       expect(result.current.alarmingMedication).toBeNull();
@@ -148,14 +149,15 @@ describe('useDoseReminders', () => {
     it('does NOT open when today’s dose was already consumed (manual or alarm-action consumption)', () => {
       const med = makeMed({
         id: 'med-consumed-today',
-        lastConsumedDate: getTodayDateString(),
+        doseConsumption: { d1: getTodayDateString() },
+        doseConsumptionHistory: { d1: [getTodayDateString()] },
       });
       const { result } = renderHook(() =>
         useDoseReminders(defaultOpts({ medications: [med] }))
       );
 
       act(() => {
-        result.current.openAlarm('med-consumed-today');
+        result.current.openAlarm('med-consumed-today', 'd1');
       });
 
       expect(result.current.alarmingMedication).toBeNull();
@@ -164,14 +166,15 @@ describe('useDoseReminders', () => {
     it('still opens when the dose was consumed YESTERDAY (guard is current-calendar-day based)', () => {
       const med = makeMed({
         id: 'med-consumed-yesterday',
-        lastConsumedDate: '2024-09-09',
+        doseConsumption: { d1: '2024-09-09' },
+        doseConsumptionHistory: { d1: ['2024-09-09'] },
       });
       const { result } = renderHook(() =>
         useDoseReminders(defaultOpts({ medications: [med] }))
       );
 
       act(() => {
-        result.current.openAlarm('med-consumed-yesterday');
+        result.current.openAlarm('med-consumed-yesterday', 'd1');
       });
 
       expect(result.current.alarmingMedication).toEqual(
@@ -186,7 +189,7 @@ describe('useDoseReminders', () => {
       );
 
       act(() => {
-        result.current.openAlarm('med-dismiss');
+        result.current.openAlarm('med-dismiss', 'd1');
       });
       act(() => {
         result.current.dismissAlarm();
@@ -234,6 +237,7 @@ describe('useDoseReminders', () => {
       expect(result.current.alarmingMedication).toEqual(
         expect.objectContaining({ id: 'med-test' })
       );
+      expect(result.current.alarmingDoseId).toBe('d1');
 
       act(() => {
         result.current.dismissAlarm();
@@ -253,7 +257,7 @@ describe('useDoseReminders', () => {
         useDoseReminders(defaultOpts({ medications: [med] }))
       );
       act(() => {
-        result.current.openAlarm('med-snooze');
+        result.current.openAlarm('med-snooze', 'd1');
       });
       expect(result.current.alarmingMedication).toEqual(
         expect.objectContaining({ id: 'med-snooze' })
@@ -276,7 +280,7 @@ describe('useDoseReminders', () => {
         useDoseReminders(defaultOpts({ medications: [med] }))
       );
       act(() => {
-        result.current.openAlarm('med-snooze-sched');
+        result.current.openAlarm('med-snooze-sched', 'd1');
       });
       act(() => {
         result.current.snoozeAlarm(med, 15);
@@ -289,7 +293,8 @@ describe('useDoseReminders', () => {
         'قرص',
         '09:00',
         15,
-        undefined
+        'd1',
+        false
       );
     });
 
@@ -300,7 +305,7 @@ describe('useDoseReminders', () => {
       );
 
       act(() => {
-        result.current.openAlarm('med-snooze-legit');
+        result.current.openAlarm('med-snooze-legit', 'd1');
       });
       expect(result.current.alarmingMedication).toEqual(
         expect.objectContaining({ id: 'med-snooze-legit' })
@@ -313,7 +318,7 @@ describe('useDoseReminders', () => {
 
       act(() => {
         vi.setSystemTime(new Date('2024-09-10T12:10:00Z'));
-        result.current.openAlarm('med-snooze-legit');
+        result.current.openAlarm('med-snooze-legit', 'd1');
       });
       expect(result.current.alarmingMedication).toEqual(
         expect.objectContaining({ id: 'med-snooze-legit' })
@@ -324,7 +329,8 @@ describe('useDoseReminders', () => {
       const med = makeMed({
         id: 'med-snooze-taken',
         reminderTime: '09:00',
-        lastConsumedDate: getTodayDateString(),
+        doseConsumption: { d1: getTodayDateString() },
+        doseConsumptionHistory: { d1: [getTodayDateString()] },
       });
       const { result } = renderHook(() =>
         useDoseReminders(defaultOpts({ medications: [med] }))
@@ -332,7 +338,7 @@ describe('useDoseReminders', () => {
 
       act(() => {
         vi.setSystemTime(new Date('2024-09-10T12:10:00Z'));
-        result.current.openAlarm('med-snooze-taken');
+        result.current.openAlarm('med-snooze-taken', 'd1');
       });
 
       expect(result.current.alarmingMedication).toBeNull();
@@ -381,7 +387,7 @@ describe('useDoseReminders — medication-level Auto (openAlarm)', () => {
       useDoseReminders(defaultOpts({ medications: [med] }))
     );
     act(() => {
-      result.current.openAlarm('med-auto-on');
+      result.current.openAlarm('med-auto-on', 'd1');
     });
     expect(result.current.alarmingMedication).toBeNull();
   });
@@ -393,7 +399,7 @@ describe('useDoseReminders — medication-level Auto (openAlarm)', () => {
       useDoseReminders({ medications: [med] })
     );
     act(() => {
-      result.current.openAlarm('med-auto-on-2');
+      result.current.openAlarm('med-auto-on-2', 'd1');
     });
     expect(result.current.alarmingMedication).toBeNull();
   });
@@ -404,7 +410,7 @@ describe('useDoseReminders — medication-level Auto (openAlarm)', () => {
       useDoseReminders(defaultOpts({ medications: [med] }))
     );
     act(() => {
-      result.current.openAlarm('med-auto-off');
+      result.current.openAlarm('med-auto-off', 'd1');
     });
     expect(result.current.alarmingMedication?.id).toBe('med-auto-off');
   });
@@ -420,7 +426,7 @@ describe('useDoseReminders — medication-level Auto (openAlarm)', () => {
       useDoseReminders({ medications: [med] })
     );
     act(() => {
-      result.current.openAlarm('med-default-auto');
+      result.current.openAlarm('med-default-auto', 'd1');
     });
     expect(result.current.alarmingMedication).toBeNull();
   });

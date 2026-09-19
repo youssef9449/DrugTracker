@@ -6,9 +6,9 @@ import { Modal } from './ui/Modal';
 interface DoseAlarmModalProps {
   isOpen: boolean;
   medication: Medication | null;
-  /** Dose slot that triggered this alarm (Phase 2/3 notification extra). */
-  doseId?: string | null;
-  onTakeDose: (med: Medication, doseId?: string) => void;
+  /** Explicit dose slot that triggered this alarm (required occurrence identity). */
+  doseId: string;
+  onTakeDose: (med: Medication, doseId: string) => void;
   onSnooze: (med: Medication) => void;
   onDismiss: () => void;
 }
@@ -21,23 +21,27 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
   onSnooze,
   onDismiss,
 }) => {
+  const normalizedDoseId = typeof doseId === 'string' ? doseId.trim() : '';
   const dose =
-    medication && doseId && Array.isArray(medication.doseSchedule)
-      ? medication.doseSchedule.find((d) => d.id === doseId)
+    medication &&
+    normalizedDoseId &&
+    Array.isArray(medication.doseSchedule)
+      ? medication.doseSchedule.find((d) => d && d.id === normalizedDoseId)
       : undefined;
-  const displayTime =
-    dose?.time ?? medication?.reminderTime;
-  const displayAmount = dose?.amount ?? medication?.dailyDose;
+  // Explicit schedule row only — no reminderTime/dailyDose synthetic fallback.
+  const displayTime = dose?.time;
+  const displayAmount = dose != null ? Number(dose.amount) : undefined;
   const unit = medication?.unit ?? 'قرص';
+  const canInteract = Boolean(medication && dose && normalizedDoseId);
 
   return (
     <Modal
-      isOpen={isOpen && Boolean(medication)}
+      isOpen={isOpen && Boolean(medication) && Boolean(normalizedDoseId)}
       onClose={onDismiss}
       label="تنبيه موعد الجرعة"
       variant="center"
     >
-      {medication && (
+      {medication && canInteract && (
       <div
         className="w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden border border-teal-200"
         dir="rtl"
@@ -72,7 +76,7 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
         <div className="p-5 space-y-4">
           <div
             className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center space-y-1.5"
-            data-dose-id={doseId ?? undefined}
+            data-dose-id={normalizedDoseId}
           >
             <div className="text-xs font-bold text-slate-500">اسم الدواء</div>
             <div className="text-lg font-black text-slate-900 leading-tight">{medication.name}</div>
@@ -97,7 +101,7 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
           <div className="space-y-2 pt-1">
             <button
               type="button"
-              onClick={() => onTakeDose(medication, doseId ?? undefined)}
+              onClick={() => onTakeDose(medication, normalizedDoseId)}
               className="w-full py-3 px-4 bg-teal-700 hover:bg-teal-800 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-sm transition active:scale-98"
               data-testid="alarm-take-dose"
             >

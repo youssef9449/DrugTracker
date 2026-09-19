@@ -250,7 +250,7 @@ Clearing the JS envelope after durable application does **not** imply every nati
 
 ## Hydration, resume, reboot
 
-- **Hydration:** `hydrated` is set only after the initialization work required by the app’s hydration flow completes, including permission initialization and `initNativeBridge()`, so hydration-gated effects (persistence, legacy sync, exact reconcile, native schedule hook) do not run against an incomplete native surface. **Exact-alarm capability is separate:** it controls whether exact-alarm scheduling flows may install or restore alarms, and is **not** a general prerequisite for completing hydration itself. The app can finish hydration even when exact-alarm capability is unavailable; scheduling paths handle that capability according to the implementation.
+- **Hydration:** `hydrated` is set only after the initialization work required by the app’s hydration flow completes, including permission initialization and `initNativeBridge()`, so hydration-gated effects (persistence, Exact Auto reconciliation, native schedule hook) do not run against an incomplete native surface. **Exact-alarm capability is separate:** it controls whether exact-alarm scheduling flows may install or restore alarms, and is **not** a general prerequisite for completing hydration itself. The app can finish hydration even when exact-alarm capability is unavailable; scheduling paths handle that capability according to the implementation.
 - **First run** (`isFirstRun`): seed inventory skips auto deduction / reconcile effects.
 - **Resume:** resume tick can re-enter reconciliation for remaining FIRED events.
 - **Midnight while open:** a single self-correcting local-midnight tick (`useMidnightTick`) re-runs the desired-state scheduler and one recovery reconciliation at the calendar-day boundary, so the new day is projected/scheduled without waiting for a resume.
@@ -280,7 +280,7 @@ After an exact occurrence is applied, markers remove that slot from due helpers 
 | Same med, different doseId | Independent occurrences |
 | Same doseId, different calendarDate | Independent occurrences |
 | Legacy settlement already covered the day | Exact event does not deduct again |
-| Native-first occurrence | Exact event applies once; later legacy skips it |
+| Native-first occurrence | Exact event applies once; later reconciliation sees occurrence markers / deterministic log |
 | Medication deleted | Acknowledge without stock mutation |
 | Auto-deduct disabled | Acknowledge without stock mutation |
 

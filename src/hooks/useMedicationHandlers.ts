@@ -45,6 +45,7 @@ export interface MedicationHandlersDeps {
   setLogs: Dispatch<SetStateAction<ConsumptionLog[]>>;
   setGlobalAutoDeductEnabled: Dispatch<SetStateAction<boolean>>;
   setIsAutoDeductPromptOpen: Dispatch<SetStateAction<boolean>>;
+  setIsFirstRun: Dispatch<SetStateAction<boolean>>;
   setNotificationsEnabled: Dispatch<SetStateAction<boolean>>;
   setCriticalStockAlertsEnabled: Dispatch<SetStateAction<boolean>>;
   setSelectDoseMed: Dispatch<SetStateAction<Medication | null>>;
@@ -72,6 +73,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     setLogs,
     setGlobalAutoDeductEnabled,
     setIsAutoDeductPromptOpen,
+    setIsFirstRun,
     setNotificationsEnabled,
     setCriticalStockAlertsEnabled,
     setSelectDoseMed,
@@ -314,6 +316,9 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       setMedications(result.medications);
       medicationsRef.current = result.medications;
       setLogs(result.logs);
+      setIsAutoDeductPromptOpen(false);
+      // Only after durable policy commits: unlock scheduler hooks for this session.
+      setIsFirstRun(false);
       if (soundEnabled) playSuccessChime();
       showToast(
         enable

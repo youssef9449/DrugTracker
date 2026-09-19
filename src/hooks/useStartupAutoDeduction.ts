@@ -38,9 +38,10 @@ export function useStartupAutoDeduction(opts: {
   const deductedRef = useRef(false);
   useEffect(() => {
     if (!hydrated || deductedRef.current) return;
-    // First-run: don't auto-deduct or fire notifications for seed data.
+    // First-run onboarding: skip startup Exact reconcile until the user
+    // completes the Auto-Deduct decision. Do NOT set deductedRef here —
+    // that would permanently block the single post-onboarding pass.
     if (isFirstRun) {
-      deductedRef.current = true;
       return;
     }
     deductedRef.current = true;
@@ -84,6 +85,8 @@ export function useStartupAutoDeduction(opts: {
         }
       }
     });
+    // Re-run when isFirstRun transitions true→false after onboarding.
+    // deductedRef ensures the reconcile body still runs at most once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated]);
+  }, [hydrated, isFirstRun]);
 }

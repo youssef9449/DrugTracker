@@ -16,6 +16,7 @@ import {
 import {
   __setManualEnvelopeTestHooks,
   __setExactAutoEnvelopeStorageTestHooks,
+  loadExactAutoStockEnvelope,
   durableMatchesEnvelopeSnapshot,
 } from '../../src/utils/stockEnvelopeRecovery';
 import {
@@ -728,6 +729,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       toAcknowledge: Array<{ medicationId: string; doseId: string; calendarDate: string }>;
       createdAt: string;
       mutationSeq: number;
+      globalAutoDeductEnabled: true,
     } | null = {
       version: 1,
       status: 'js_ready',
@@ -860,6 +862,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       toAcknowledge: Array<{ medicationId: string; doseId: string; calendarDate: string }>;
       createdAt: string;
       mutationSeq: number;
+      globalAutoDeductEnabled: true,
     } | null = {
       version: 1,
       status: 'js_ready',
@@ -937,6 +940,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       toAcknowledge: Array<{ medicationId: string; doseId: string; calendarDate: string }>;
       createdAt: string;
       mutationSeq: number;
+      globalAutoDeductEnabled: true,
     } | null = {
       version: 1,
       status: 'js_ready',
@@ -1013,6 +1017,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       toAcknowledge: Array<{ medicationId: string; doseId: string; calendarDate: string }>;
       createdAt: string;
       mutationSeq: number;
+      globalAutoDeductEnabled: true,
     } | null = {
       version: 1,
       status: 'js_ready',
@@ -1076,6 +1081,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       toAcknowledge: Array<{ medicationId: string; doseId: string; calendarDate: string }>;
       createdAt: string;
       mutationSeq: number;
+      globalAutoDeductEnabled: true,
     } | null = {
       version: 1,
       status: 'js_ready',
@@ -1282,6 +1288,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }],
       createdAt: new Date().toISOString(),
       mutationSeq: 3,
+      globalAutoDeductEnabled: true,
     };
     let lastApplied = 3;
     __setStockMutationOrderingTestHooks({
@@ -1319,6 +1326,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }],
       createdAt: new Date().toISOString(),
       mutationSeq: 4,
+      globalAutoDeductEnabled: true,
     };
     let lastApplied = 0;
     __setStockMutationOrderingTestHooks({
@@ -1361,6 +1369,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }],
       createdAt: new Date().toISOString(),
       mutationSeq: 5,
+      globalAutoDeductEnabled: true,
     };
     let lastApplied = 0; // finalize crashed — lastApplied NOT advanced.
     let failFinalize = true;
@@ -1416,6 +1425,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }],
       createdAt: new Date().toISOString(),
       mutationSeq: 6,
+      globalAutoDeductEnabled: true,
     };
     let lastApplied = 6;
     let failClear = true;
@@ -1455,6 +1465,45 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     expect(durable.medications[0].currentPills).toBe(pillsAfterFirst);
     expect(durable.logs.length).toBe(logCountAfterFirst);
     expect(second.markedCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it('Exact envelope missing mutationSeq is rejected (no Phase 4 recovery)', () => {
+    // Legacy/pre-fix payload without mutationSeq must not be accepted.
+    const legacyLike = {
+      version: 1 as const,
+      status: 'js_ready' as const,
+      medications: [med({ currentPills: 5 })],
+      logs: [],
+      toAcknowledge: [],
+      createdAt: new Date().toISOString(),
+      globalAutoDeductEnabled: true,
+      // mutationSeq intentionally absent
+    };
+    __setExactAutoEnvelopeStorageTestHooks({
+      load: () => legacyLike as never,
+      save: () => null,
+    });
+    expect(loadExactAutoStockEnvelope()).toBeNull();
+    __setExactAutoEnvelopeStorageTestHooks(null);
+  });
+
+  it('Exact envelope with non-positive mutationSeq is rejected', () => {
+    __setExactAutoEnvelopeStorageTestHooks({
+      load: () =>
+        ({
+          version: 1,
+          status: 'js_ready',
+          medications: [med({ currentPills: 5 })],
+          logs: [],
+          toAcknowledge: [],
+          createdAt: new Date().toISOString(),
+          globalAutoDeductEnabled: true,
+          mutationSeq: 0,
+        }) as never,
+      save: () => null,
+    });
+    expect(loadExactAutoStockEnvelope()).toBeNull();
+    __setExactAutoEnvelopeStorageTestHooks(null);
   });
 
   it('pending Exact Auto is recovered before Manual Take allocates a new seq', async () => {

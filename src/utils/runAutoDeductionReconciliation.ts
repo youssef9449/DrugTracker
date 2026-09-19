@@ -44,16 +44,16 @@ export interface ExactAutoEnvelope {
   status: 'js_ready';
   medications: Medication[];
   logs: ConsumptionLog[];
-  /** Phase 4 durable global master switch; absent only on pre-fix envelopes. */
-  globalAutoDeductEnabled?: boolean;
+  /** Phase 4 durable global master switch (required). */
+  globalAutoDeductEnabled: boolean;
   toAcknowledge: Array<{
     medicationId: string;
     doseId: string;
     calendarDate: string;
   }>;
   createdAt: string;
-  /** Shared causal order with Manual envelopes (stockMutationOrdering). */
-  mutationSeq?: number;
+  /** Shared causal order with Manual envelopes — required (no legacy seq). */
+  mutationSeq: number;
 }
 
 export interface RunReconciliationInput {
@@ -197,7 +197,7 @@ async function runOnce(
     if (existingExact) {
       pending.push({
         kind: 'exact_auto',
-        mutationSeq: existingExact.mutationSeq ?? 0,
+        mutationSeq: existingExact.mutationSeq,
         medications: existingExact.medications,
         logs: existingExact.logs,
         globalAutoDeductEnabled: existingExact.globalAutoDeductEnabled,

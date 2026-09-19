@@ -176,7 +176,7 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
     expect(result.reason).toBe('missing_deduction_evidence');
   });
 
-  it('projection-only (not consumed) still restores without requiring a deduction log', () => {
+  it('no durable deduction evidence → missing_deduction_evidence, stock unchanged', () => {
     const med = makeMed({
       doseConsumption: {},
       currentPills: 20,
@@ -188,25 +188,23 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
       new Date('2026-09-14T15:00:00'),
       []
     );
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.wasActuallyConsumed).toBe(false);
-    expect(result.reversedLogId).toBeUndefined();
-    // projection undo: stock unchanged
-    expect(result.updatedMed.currentPills).toBe(20);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('missing_deduction_evidence');
+    expect(med.currentPills).toBe(20);
   });
 
-  it('legacy with active auto_daily uses log amount not dailyDose after edit', () => {
+  it('missing dose identity is not valid Restore evidence', () => {
     const med = makeMed({
-      doseSchedule: undefined,
-      dailyDose: 9, // later changed
-      lastConsumedDate: TODAY,
+      doseSchedule: [{ id: 'd1', time: '08:00', amount: 2 }],
+      doseConsumption: { d1: TODAY },
       currentPills: 18,
     });
     const logs: ConsumptionLog[] = [
       {
-        id: 'legacy-auto',
+        id: 'orphan-auto',
         medicationId: 'med-1',
+        // no doseId — not valid occurrence evidence under #267
         amount: -2,
         type: 'auto_daily',
         timestamp: '2026-09-14T08:00:00.000Z',
@@ -215,16 +213,14 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
     ];
     const result = restoreDose(
       med,
-      undefined,
+      'd1',
       TODAY,
       new Date('2026-09-14T15:00:00'),
       logs
     );
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.wasActuallyConsumed).toBe(true);
-    expect(result.restoredAmount).toBe(2);
-    expect(result.reversedLogId).toBe('legacy-auto');
-    expect(result.updatedMed.currentPills).toBe(20);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('missing_deduction_evidence');
+    expect(med.currentPills).toBe(18);
   });
 });

@@ -34,15 +34,16 @@ export interface ExactAutoEnvelopeStored {
   status: 'js_ready';
   medications: Medication[];
   logs: ConsumptionLog[];
-  /** Phase 4 durable global master switch; absent only on pre-fix envelopes. */
-  globalAutoDeductEnabled?: boolean;
+  /** Phase 4 durable global master switch (required on current envelopes). */
+  globalAutoDeductEnabled: boolean;
   toAcknowledge: Array<{
     medicationId: string;
     doseId: string;
     calendarDate: string;
   }>;
   createdAt: string;
-  mutationSeq?: number;
+  /** Required causal order with Manual envelopes — no legacy/missing seq. */
+  mutationSeq: number;
 }
 
 let testLoadExact: (() => ExactAutoEnvelopeStored | null) | null = null;
@@ -58,14 +59,31 @@ export function __setExactAutoEnvelopeStorageTestHooks(hooks: {
   testSaveExact = hooks?.save ?? null;
 }
 
+function isValidPhase4ExactEnvelope(
+  raw: ExactAutoEnvelopeStored | null | undefined
+): raw is ExactAutoEnvelopeStored {
+  if (!raw || raw.version !== 1 || raw.status !== 'js_ready') return false;
+  if (!Array.isArray(raw.medications) || !Array.isArray(raw.logs)) return false;
+  if (!Array.isArray(raw.toAcknowledge)) return false;
+  if (typeof raw.createdAt !== 'string' || raw.createdAt.length === 0) return false;
+  // Phase 4 only: mutationSeq is mandatory. Missing/legacy seq → reject (no
+  // coercion to 0, no pre-fix acceptance).
+  if (
+    typeof raw.mutationSeq !== 'number' ||
+    !Number.isFinite(raw.mutationSeq) ||
+    raw.mutationSeq <= 0
+  ) {
+    return false;
+  }
+  if (typeof raw.globalAutoDeductEnabled !== 'boolean') return false;
+  return true;
+}
+
 export function loadExactAutoStockEnvelope(): ExactAutoEnvelopeStored | null {
-  if (testLoadExact) return testLoadExact();
-  const raw = loadJson<ExactAutoEnvelopeStored | null>(
-    STORAGE_EXACT_AUTO_ENVELOPE_KEY,
-    null
-  );
-  if (!raw || raw.version !== 1 || raw.status !== 'js_ready') return null;
-  if (!Array.isArray(raw.medications) || !Array.isArray(raw.logs)) return null;
+  const raw = testLoadExact
+    ? testLoadExact()
+    : loadJson<ExactAutoEnvelopeStored | null>(STORAGE_EXACT_AUTO_ENVELOPE_KEY, null);
+  if (!isValidPhase4ExactEnvelope(raw)) return null;
   return raw;
 }
 
@@ -90,7 +108,7 @@ export interface ManualStockEnvelope {
   status: 'manual_js_ready';
   medications: Medication[];
   logs: ConsumptionLog[];
-  /** Phase 4 durable global master switch; absent only on pre-fix envelopes. */
+  /** Phase 4 durable global master switch. */
   globalAutoDeductEnabled?: boolean;
   createdAt: string;
   baseGeneration: number;
@@ -480,7 +498,7 @@ export function recoverManualEnvelopeInto(
   if (exact) {
     pending.push({
       kind: 'exact_auto',
-      mutationSeq: exact.mutationSeq ?? 0,
+      mutationSeq: exact.mutationSeq,
       medications: exact.medications,
       logs: exact.logs,
       globalAutoDeductEnabled: exact.globalAutoDeductEnabled,

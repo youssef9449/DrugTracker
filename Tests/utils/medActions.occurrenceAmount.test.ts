@@ -144,4 +144,37 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
     );
     expect(active).toBeNull();
   });
+
+  it('whitespace-only doseId returns null (no occurrence match — #267)', () => {
+    const logs: ConsumptionLog[] = [
+      {
+        id: 'd1-log',
+        medicationId: 'med',
+        doseId: 'd1',
+        amount: -2,
+        type: 'dose_taken',
+        timestamp: '2026-09-14T08:00:00.000Z',
+        date: today,
+      },
+    ];
+    expect(findActiveDeductionForOccurrence(logs, 'med', '   ', today)).toBeNull();
+    expect(findActiveDeductionForOccurrence(logs, 'med', '', today)).toBeNull();
+  });
+
+  it('padded doseId normalizes and matches log doseId', () => {
+    const logs: ConsumptionLog[] = [
+      {
+        id: 'd1-log',
+        medicationId: 'med',
+        doseId: 'd1',
+        amount: -2,
+        type: 'auto_daily',
+        timestamp: '2026-09-14T08:00:00.000Z',
+        date: today,
+      },
+    ];
+    const active = findActiveDeductionForOccurrence(logs, 'med', ' d1 ', today);
+    expect(active?.id).toBe('d1-log');
+    expect(active?.amount).toBe(-2);
+  });
 });

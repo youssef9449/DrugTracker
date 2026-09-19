@@ -127,9 +127,11 @@ export function findActiveDeductionForOccurrence(
   doseId: string,
   calendarDate: string
 ): ConsumptionLog | null {
-  // Issue #267: doseId is required (no legacy/missing/empty/sentinel).
-  // Only explicit non-empty doseId is valid for occurrence matching.
-  if (!doseId) return null;
+  // Issue #267: doseId is required (no legacy/missing/empty/whitespace/sentinel).
+  // Trim before matching so '   ' rejects and ' d1 ' normalizes to 'd1'.
+  const normalizedDoseId =
+    doseId == null ? '' : String(doseId).trim();
+  if (!normalizedDoseId) return null;
   let best: ConsumptionLog | null = null;
   let bestEpoch = -Infinity;
   let bestId = '';
@@ -138,10 +140,13 @@ export function findActiveDeductionForOccurrence(
     if (l.date !== calendarDate) continue;
     if (l.type !== 'dose_taken' && l.type !== 'auto_daily') continue;
     if (l.reversedAt) continue; // already reversed by a prior Restore
-    const logDose = l.doseId != null && String(l.doseId) !== '' ? String(l.doseId) : null;
+    const logDoseRaw =
+      l.doseId != null && String(l.doseId).trim() !== ''
+        ? String(l.doseId).trim()
+        : null;
     // Issue #267: require explicit non-empty doseId on the log — no
-    // legacy/missing/empty/sentinel matching.
-    if (logDose !== doseId) continue;
+    // legacy/missing/empty/whitespace/sentinel matching.
+    if (logDoseRaw !== normalizedDoseId) continue;
     const parsed = Date.parse(l.timestamp ?? '');
     const epoch = Number.isFinite(parsed) ? parsed : -Infinity;
     const id = l.id ?? '';
@@ -169,11 +174,13 @@ export function getHistoricalRestoreDisplayAmount(
   doseId: string | undefined,
   calendarDate: string
 ): number | null {
-  if (!doseId) return null;
+  const normalized =
+    doseId == null ? '' : String(doseId).trim();
+  if (!normalized) return null;
   const active = findActiveDeductionForOccurrence(
     logs,
     medicationId,
-    doseId,
+    normalized,
     calendarDate
   );
   if (!active) return null;

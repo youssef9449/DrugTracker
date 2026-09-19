@@ -459,7 +459,7 @@ describe('MedicationCard Auto Restore — Legacy', () => {
 
     await waitFor(() => {
       const med = readMeds().find((m) => m.id === 'med-legacy-auto')!;
-      // Legacy restoreDose always settleAndAdjust by dailyDose.
+      // Legacy restoreDose always  by dailyDose.
       expect(med.currentPills).toBe(pillsBefore + 3);
       // After restore, lastConsumedDate stays cleared / not today.
       expect(med.lastConsumedDate).not.toBe(getTodayDateString());

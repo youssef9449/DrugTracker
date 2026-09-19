@@ -53,6 +53,7 @@ vi.mock('@/utils/runAutoDeductionReconciliation', () => ({
       partialNativeAck: false,
     })
   ),
+  __setExactAutoEnvelopeTestHooks: vi.fn(),
 }));
 
 import App from '@/App';
@@ -196,29 +197,14 @@ describe('handleToggleAutoDeduct logic (#27)', () => {
 });
 
 /**
- * handleToggleAutoDeduct — purity of the setMedications updater.
+ * handleToggleAutoDeduct — Phase 4 / Issue #267 contract.
  *
- * The settlement calculation + all side effects (setLogs, showToast)
- * must run OUTSIDE the setMedications updater. React updater
- * functions must be pure; React may invoke them more than once in
- * Strict Mode (which ships in src/main.tsx). If the updater itself
- * calls setLogs/showToast/settleAutoDeductToggle, Strict Mode's
- * double-invoke would create DUPLICATE settlement calls, logs, and
- * toasts.
- *
- * The fix: handleToggleAutoDeduct computes the settle result OUTSIDE
- * the updater (using `medications.find`), fires setLogs + showToast
- * once from the handler body, and passes the pre-computed `updatedMed`
- * into the updater as a closure value (which the updater only READS).
- *
- * These tests verify the structural property: ONE toggle click calls
- * the pure `settleAutoDeductToggle` helper EXACTLY ONCE — even under
- * <StrictMode> (which double-invokes the setMedications updater). If
- * the settle call were inside the updater, StrictMode would call it
- * twice; the fix ensures it's called once regardless.
- *
- * We also verify the toast side effect fires exactly once per click.
+ * The Auto-Deduction toggle changes ONLY the `autoDeductEnabled` configuration.
+ * It does NOT settle historical elapsed doses, modify `currentPills`, advance
+ * `lastSyncDate`, or create an `auto_daily` deduction log. The tests below
+ * verify observable/durable behavior (not internal helper call counts).
  */
+
 describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -244,6 +230,7 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
 
   /** Seed a single med in localStorage so App renders one MedicationCard. */
   function seedMed(overrides: Record<string, unknown> = {}): void {
+    const todayStr = new Date().toISOString().slice(0, 10);
     localStorage.setItem(
       'android_med_tracker_items_v2',
       JSON.stringify([
@@ -256,42 +243,36 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
           warningThresholdDays: 5,
           colorTag: 'teal',
           createdAt: '2024-01-01T00:00:00.000Z',
-          // lastSyncDate = today so the app-open sync effect is a no-op
-          // (daysPassed = 0). This isolates the test to the toggle's
-          // own settle behavior.
-          lastSyncDate: new Date().toISOString().slice(0, 10),
+          // lastSyncDate = today so there are no elapsed days to settle.
+          lastSyncDate: todayStr,
           autoDeductEnabled: true,
           reminderEnabled: false,
           ...overrides,
         },
       ])
     );
+    // Ensure no pre-existing logs.
+    localStorage.setItem('android_med_tracker_logs_v2', JSON.stringify([]));
   }
 
-  it('one toggle click calls settleAutoDeductToggle EXACTLY ONCE (not twice, not zero)', async () => {
-    seedMed();
+  /** Read the durable med from localStorage after a mutation. */
+  function getDurableMed(): Record<string, unknown> | undefined {
+    const raw = localStorage.getItem('android_med_tracker_items_v2');
+    if (!raw) return undefined;
+    const meds = JSON.parse(raw) as Record<string, unknown>[];
+    return meds.find((m) => m.id === 'med-toggle');
+  }
 
-    // Spy on the pure settle helper. The spy returns a no-op result
-    // (no deduction, no log) so the test doesn't depend on the
-    // sync effect's state — we ONLY care about the call count.
-    const dateCalcModule = await import('@/utils/dateCalculations');
-    const settleSpy = vi
-      .spyOn(dateCalcModule, 'settleAutoDeductToggle')
-      .mockReturnValue({
-        updatedMed: {
-          id: 'med-toggle',
-          name: 'Toggle Med',
-          currentPills: 60,
-          dailyDose: 2,
-          unit: 'قرص',
-          warningThresholdDays: 5,
-          colorTag: 'teal',
-          createdAt: '2024-01-01T00:00:00.000Z',
-          lastSyncDate: new Date().toISOString().slice(0, 10),
-          autoDeductEnabled: false,
-        },
-        log: null,
-      });
+  /** Read the durable logs from localStorage after a mutation. */
+  function getDurableLogs(): Record<string, unknown>[] {
+    const raw = localStorage.getItem('android_med_tracker_logs_v2');
+    if (!raw) return [];
+    return JSON.parse(raw) as Record<string, unknown>[];
+  }
+
+  it('Test A — ON → OFF: changes autoDeductEnabled only; currentPills/lastSyncDate unchanged; no auto_daily log', async () => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    seedMed({ autoDeductEnabled: true });
 
     render(<App />);
 
@@ -301,51 +282,81 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
 
     clickToggleFor();
 
-    // Phase 4: the toggle runs inside the async durable stock gate, so the
-    // settle call happens on a later microtask — await it. The handler
-    // calls settleAutoDeductToggle exactly once per click (outside the
-    // updater, so StrictMode cannot double it).
+    // Await the async durable stock gate (Phase 4).
     await waitFor(() => {
-      expect(settleSpy).toHaveBeenCalledTimes(1);
+      const med = getDurableMed();
+      expect(med?.autoDeductEnabled).toBe(false);
     });
 
-    // Verify the call args: the med id matches, newState is false
-    // (was true → false), todayStr is today, now is a Date (the gated
-    // wrapper always passes all four).
-    expect(settleSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'med-toggle', autoDeductEnabled: true }),
-      false,
-      expect.any(String),
-      expect.any(Date)
-    );
+    // Issue #267: the toggle changes ONLY autoDeductEnabled.
+    const med = getDurableMed();
+    expect(med?.autoDeductEnabled).toBe(false);
+    expect(med?.currentPills).toBe(60);
+    expect(med?.lastSyncDate).toBe(todayStr);
+
+    // No auto_daily settlement log created by the toggle.
+    const logs = getDurableLogs();
+    expect(logs.filter((l) => l.type === 'auto_daily')).toHaveLength(0);
   });
 
-  it('one toggle click under <StrictMode> still calls settleAutoDeductToggle EXACTLY ONCE', async () => {
+  it('Test B — StrictMode ON → OFF: durable mutation executes exactly once', async () => {
     // StrictMode double-invokes updater functions in development.
-    // If settleAutoDeductToggle were called INSIDE the setMedications
-    // updater, StrictMode would call it TWICE. The fix ensures the
-    // settle call is OUTSIDE the updater, so it's called once even
-    // under StrictMode.
-    seedMed();
+    // The Phase 4 gated handler runs the mutation outside the updater,
+    // so the durable mutation executes exactly once even under StrictMode.
+    //
+    // This test instruments the durable commit path (commitDurableAutoStockState
+    // via __setAutoStockGateTestHooks) to count how many times the toggle's
+    // medication-state mutation is physically committed to durable storage.
+    // This counts the actual durable mutation/commit operation — NOT a UI
+    // callback, React render, or click handler invocation. If StrictMode
+    // caused the gated mutation to execute twice, the counter would be 2.
+    seedMed({ autoDeductEnabled: true });
 
-    const dateCalcModule = await import('@/utils/dateCalculations');
-    const settleSpy = vi
-      .spyOn(dateCalcModule, 'settleAutoDeductToggle')
-      .mockReturnValue({
-        updatedMed: {
-          id: 'med-toggle',
-          name: 'Toggle Med',
-          currentPills: 60,
-          dailyDose: 2,
-          unit: 'قرص',
-          warningThresholdDays: 5,
-          colorTag: 'teal',
-          createdAt: '2024-01-01T00:00:00.000Z',
-          lastSyncDate: new Date().toISOString().slice(0, 10),
-          autoDeductEnabled: false,
-        },
-        log: null,
-      });
+    // Capture the pre-toggle durable medication state.
+    const preToggleMed = getDurableMed();
+    expect(preToggleMed?.autoDeductEnabled).toBe(true);
+    const preToggleLastSync = preToggleMed?.lastSyncDate as string;
+    const preToggleCurrentPills = preToggleMed?.currentPills as number;
+
+    // Instrument the durable stock gate to count commits where the
+    // autoDeductEnabled flag for med-toggle changed. This is the actual
+    // durable mutation commit — the physical write of medications to
+    // durable storage, called by commitWithManualEnvelope inside the
+    // gated handler. It is NOT a UI callback or React render.
+    let toggleCommitCount = 0;
+    const { __setAutoStockGateTestHooks } = await import('@/utils/autoDeductionStockGate');
+    const { __setManualEnvelopeTestHooks } = await import('@/utils/manualStockMutation');
+    const { __setExactAutoEnvelopeTestHooks } = await import('@/utils/runAutoDeductionReconciliation');
+    const { __setStockMutationOrderingTestHooks } = await import('@/utils/stockMutationOrdering');
+
+    // Install gate hooks: load from real localStorage, commit to real
+    // localStorage (so the app reads the updated state), but also count
+    // commits where autoDeductEnabled changed for med-toggle.
+    __setAutoStockGateTestHooks({
+      load: () => ({
+        medications: JSON.parse(localStorage.getItem('android_med_tracker_items_v2') ?? '[]'),
+        logs: JSON.parse(localStorage.getItem('android_med_tracker_logs_v2') ?? '[]'),
+        globalAutoDeductEnabled: true,
+      }),
+      commit: (state) => {
+        // Write to real localStorage (production behavior).
+        localStorage.setItem('android_med_tracker_items_v2', JSON.stringify(state.medications));
+        localStorage.setItem('android_med_tracker_logs_v2', JSON.stringify(state.logs));
+        // Count commits where med-toggle's autoDeductEnabled changed.
+        const committedMed = state.medications.find((m) => m.id === 'med-toggle');
+        if (committedMed && committedMed.autoDeductEnabled !== preToggleMed?.autoDeductEnabled) {
+          toggleCommitCount++;
+        }
+        return null;
+      },
+    });
+    __setManualEnvelopeTestHooks({ load: () => null, save: () => null });
+    __setExactAutoEnvelopeTestHooks({ load: () => null, save: () => null });
+    __setStockMutationOrderingTestHooks({
+      loadLastApplied: () => 0,
+      persistLastApplied: () => null,
+      allocate: () => ({ ok: true as const, seq: 1 }),
+    });
 
     const { StrictMode } = await import('react');
     render(
@@ -360,38 +371,38 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
 
     clickToggleFor();
 
-    // Exactly ONE call — StrictMode's double-invoke of the updater
-    // did NOT double the settle call (it's outside the updater, and
-    // the Phase 4 gated handler runs once per click). Await the async
-    // durable gate before asserting.
+    // Exactly ONE durable mutation commit — autoDeductEnabled changed
+    // from true to false. This assertion would FAIL if the same ON→OFF
+    // user action caused two durable mutation commits (toggleCommitCount
+    // would be 2).
     await waitFor(() => {
-      expect(settleSpy).toHaveBeenCalledTimes(1);
+      expect(toggleCommitCount).toBe(1);
     });
+
+    // Verify the durable state: autoDeductEnabled = false.
+    const med = getDurableMed();
+    expect(med?.autoDeductEnabled).toBe(false);
+
+    // Issue #267: currentPills unchanged from pre-toggle value.
+    expect(med?.currentPills).toBe(preToggleCurrentPills);
+
+    // lastSyncDate unchanged from the pre-toggle durable medication.
+    expect(med?.lastSyncDate).toBe(preToggleLastSync);
+
+    // No auto_daily settlement log created by the toggle.
+    const logs = getDurableLogs();
+    expect(logs.filter((l) => l.type === 'auto_daily')).toHaveLength(0);
+
+    // Cleanup test hooks.
+    __setAutoStockGateTestHooks(null);
+    __setManualEnvelopeTestHooks(null);
+    __setExactAutoEnvelopeTestHooks(null);
+    __setStockMutationOrderingTestHooks(null);
   });
 
-  it('one toggle (OFF → ON) calls settleAutoDeductToggle EXACTLY ONCE and produces no log', async () => {
-    // Frozen med → toggle to ON. The settle helper is called once
-    // (with newState=true) and returns no log (no retroactive deduction).
+  it('Test C — OFF → ON: changes autoDeductEnabled to true; currentPills unchanged; no auto_daily log', async () => {
+    const todayStr = new Date().toISOString().slice(0, 10);
     seedMed({ autoDeductEnabled: false });
-
-    const dateCalcModule = await import('@/utils/dateCalculations');
-    const settleSpy = vi
-      .spyOn(dateCalcModule, 'settleAutoDeductToggle')
-      .mockReturnValue({
-        updatedMed: {
-          id: 'med-toggle',
-          name: 'Toggle Med',
-          currentPills: 60,
-          dailyDose: 2,
-          unit: 'قرص',
-          warningThresholdDays: 5,
-          colorTag: 'teal',
-          createdAt: '2024-01-01T00:00:00.000Z',
-          lastSyncDate: new Date().toISOString().slice(0, 10),
-          autoDeductEnabled: true,
-        },
-        log: null,
-      });
 
     render(<App />);
 
@@ -401,17 +412,21 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
 
     clickToggleFor();
 
-    // Await the async durable stock gate (Phase 4) before asserting.
+    // Await the async durable stock gate (Phase 4).
     await waitFor(() => {
-      expect(settleSpy).toHaveBeenCalledTimes(1);
+      const med = getDurableMed();
+      expect(med?.autoDeductEnabled).toBe(true);
     });
-    // newState=true (false→true transition); 4th arg is the gate's now.
-    expect(settleSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'med-toggle', autoDeductEnabled: false }),
-      true,
-      expect.any(String),
-      expect.any(Date)
-    );
+
+    // Issue #267: the toggle changes ONLY autoDeductEnabled.
+    // No retroactive deduction, no auto_daily log.
+    const med = getDurableMed();
+    expect(med?.autoDeductEnabled).toBe(true);
+    expect(med?.currentPills).toBe(60);
+    expect(med?.lastSyncDate).toBe(todayStr);
+
+    const logs = getDurableLogs();
+    expect(logs.filter((l) => l.type === 'auto_daily')).toHaveLength(0);
   });
 
   it('one toggle click shows the toast EXACTLY ONCE (no duplicate toasts under StrictMode)', async () => {

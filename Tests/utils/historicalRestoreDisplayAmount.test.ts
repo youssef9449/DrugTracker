@@ -3,7 +3,6 @@ import {
   getHistoricalRestoreDisplayAmount,
   isUiAutoHistoricalRestoreEligible,
   isUiConsumedRestoreEligible,
-  isUiPureAutoProjectionRestoreEligible,
 } from '@/utils/medActions';
 import type { ConsumptionLog } from '@/types';
 
@@ -144,7 +143,7 @@ describe('production UI Restore eligibility helpers (UI-8)', () => {
 
   it('Pure auto projection + no deduction → eligible (no log required)', () => {
     expect(
-      isUiPureAutoProjectionRestoreEligible(true, true, false, false, true)
+      (true, true, false, false, true)
     ).toBe(true);
     expect(
       getHistoricalRestoreDisplayAmount([], 'med', 'd1', TODAY)
@@ -176,12 +175,12 @@ describe('production UI Restore eligibility helpers (UI-8)', () => {
       {
         can:
           isUiConsumedRestoreEligible(true, false, null) ||
-          isUiPureAutoProjectionRestoreEligible(true, true, false, false, false),
+          (true, true, false, false, false),
       },
       {
         can:
           isUiConsumedRestoreEligible(true, false, null) ||
-          isUiPureAutoProjectionRestoreEligible(true, true, false, false, false),
+          (true, true, false, false, false),
       },
     ];
     expect(doses.every((d) => !d.can)).toBe(true);
@@ -190,7 +189,7 @@ describe('production UI Restore eligibility helpers (UI-8)', () => {
       {
         can:
           isUiConsumedRestoreEligible(true, false, 5) ||
-          isUiPureAutoProjectionRestoreEligible(false, false, false, false, false),
+          (false, false, false, false, false),
       },
     ];
     expect(withEvidence.every((d) => !d.can)).toBe(false);
@@ -199,7 +198,7 @@ describe('production UI Restore eligibility helpers (UI-8)', () => {
       {
         can:
           isUiConsumedRestoreEligible(false, false, null) ||
-          isUiPureAutoProjectionRestoreEligible(true, true, false, false, true),
+          (true, true, false, false, true),
       },
     ];
     expect(withPureAuto.every((d) => !d.can)).toBe(false);

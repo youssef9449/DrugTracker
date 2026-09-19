@@ -37,7 +37,7 @@ import { __setManualRecurrenceInvalidationTestHook } from '../../src/utils/manua
 import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
 import { isDoseConsumedOnDate, isDoseSkippedOnDate } from '../../src/utils/dateCalculations';
 import { exactAutoLogId } from '../../src/utils/autoDeductionReconciliation';
-import * as preSettleModule from '../../src/utils/reconcileExactBeforeLegacySettlement';
+import * as preSettleModule from '../../src/utils/reconcileExactBeforeManualMutation';
 // findPending used indirectly via runGatedManualConsume
 import {
   findActiveDeductionForOccurrence,
@@ -3732,7 +3732,7 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
 
     vi.spyOn(
       preSettleModule,
-      'reconcileExactBeforeLegacySettlement'
+      'reconcileExactBeforeManualMutation'
     ).mockImplementation(async (opts) => ({
       state: opts.fresh,
       reconciliation: null,

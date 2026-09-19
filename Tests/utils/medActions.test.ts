@@ -1,6 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { settleAndAdjust, consumeDose, resolveRestoreDoseAmount } from '@/utils/medActions';
-import type { Medication } from '@/types';
+import {
+  consumeDose,
+  restoreDose,
+  resolveRestoreDoseId,
+  applyDurableStockDelta,
+  findActiveDeductionForOccurrence,
+  getHistoricalRestoreDisplayAmount,
+  isUiAutoHistoricalRestoreEligible,
+  isUiConsumedRestoreEligible,
+  findActualDeductedAmountForOccurrence,
+} from '@/utils/medActions';
+import type { Medication, ConsumptionLog } from '@/types';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
   return {
@@ -12,228 +22,150 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: '2024-01-01',
+    lastSyncDate: '2024-01-10',
     autoDeductEnabled: true,
+    doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+    dosesPerDay: 1,
     ...overrides,
   };
 }
 
-describe('settleAndAdjust (#78)', () => {
-  it('settles at the effective balance + applies a positive delta (restore)', () => {
-    const med = makeMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2024-01-01' });
-    const today = '2024-01-10';
-    // 9 days passed at 2/day → effPills = 30 - 18 = 12. Restore +2 → 14.
-    const result = settleAndAdjust(med, 2, today);
-    expect(result.updatedMed.currentPills).toBe(14);
-    expect(result.updatedMed.lastSyncDate).toBe(today);
-    expect(result.appliedDelta).toBe(2);
-  });
+function makeLog(overrides: Partial<ConsumptionLog> = {}): ConsumptionLog {
+  return {
+    id: 'log-1',
+    medicationId: 'med-1',
+    medicationName: 'Test',
+    type: 'dose_taken',
+    amount: -2,
+    date: '2024-01-10',
+    timestamp: '2024-01-10T08:00:00.000Z',
+    description: 'test',
+    ...overrides,
+  };
+}
 
-  it('applies a positive delta when no days passed (refill)', () => {
-    const med = makeMed({ currentPills: 20, dailyDose: 1, lastSyncDate: '2024-01-10' });
-    const result = settleAndAdjust(med, 15, '2024-01-10');
-    // effPills = 20 (0 days passed). 20 + 15 = 35.
-    expect(result.updatedMed.currentPills).toBe(35);
-    expect(result.updatedMed.lastSyncDate).toBe('2024-01-10');
-  });
-
-  it('clamps at 0 when the delta would make the balance negative', () => {
-    const med = makeMed({ currentPills: 5, dailyDose: 10, lastSyncDate: '2024-01-01' });
-    // effPills = max(0, 5 - 10*9) → 0. -5 → 0.
-    const result = settleAndAdjust(med, -5, '2024-01-10');
-    expect(result.updatedMed.currentPills).toBe(0);
-  });
-
-  it('does not mutate the input medication', () => {
+// ─── applyDurableStockDelta ────────────────────────────────────────────
+describe('applyDurableStockDelta (#267 — durable stock mutation)', () => {
+  it('applies a positive delta (restore/refill) to currentPills', () => {
     const med = makeMed({ currentPills: 30 });
-    const result = settleAndAdjust(med, 10, '2024-01-10');
-    expect(med.currentPills).toBe(30); // unchanged
-    expect(result.updatedMed).not.toBe(med);
+    const result = applyDurableStockDelta(med, 2);
+    expect(result.currentPills).toBe(32);
   });
 
-  it('respects autoDeductEnabled=false (effPills = currentPills)', () => {
-    const med = makeMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2024-01-01', autoDeductEnabled: false });
-    // auto-deduct off → effPills = 30 (no projection). +5 → 35.
-    const result = settleAndAdjust(med, 5, '2024-01-10');
-    expect(result.updatedMed.currentPills).toBe(35);
+  it('applies a negative delta (consume) to currentPills', () => {
+    const med = makeMed({ currentPills: 30 });
+    const result = applyDurableStockDelta(med, -2);
+    expect(result.currentPills).toBe(28);
+  });
+
+  it('clamps the result at 0 when the delta would make the balance negative', () => {
+    const med = makeMed({ currentPills: 5 });
+    const result = applyDurableStockDelta(med, -10);
+    expect(result.currentPills).toBe(0);
+  });
+
+  it('does NOT change lastSyncDate (no settlement horizon)', () => {
+    const med = makeMed({ currentPills: 30, lastSyncDate: '2024-01-01' });
+    const result = applyDurableStockDelta(med, 5);
+    expect(result.lastSyncDate).toBe('2024-01-01');
+  });
+
+  it('does NOT mutate the input medication', () => {
+    const med = makeMed({ currentPills: 30 });
+    const result = applyDurableStockDelta(med, 10);
+    expect(med.currentPills).toBe(30); // unchanged
+    expect(result).not.toBe(med);
+  });
+
+  it('treats a negative currentPills as 0 base (defensive clamp)', () => {
+    const med = makeMed({ currentPills: -5 } as unknown as Medication);
+    const result = applyDurableStockDelta(med, 10);
+    // base = max(0, -5) = 0; +10 = 10
+    expect(result.currentPills).toBe(10);
   });
 });
 
-describe('consumeDose (#77)', () => {
+// ─── consumeDose (#267 contract) ──────────────────────────────────────
+describe('consumeDose (#267 — durable deduction, no settlement)', () => {
   it('consumes a dose from the alarm path (source: alarm)', () => {
-    const med = makeMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2024-01-10' });
-    const result = consumeDose(med, 'alarm', '2024-01-10');
-    // effPills = 30 (0 days passed). dose = min(2, 30) = 2. newSnapshot = 28.
+    const med = makeMed({ currentPills: 30, lastSyncDate: '2024-01-10' });
+    const result = consumeDose(med, 'alarm', '2024-01-10', new Date('2024-01-10T08:00:00'), 'd1');
     expect(result.doseAmount).toBe(2);
     expect(result.updatedMed).not.toBeNull();
     expect(result.updatedMed!.currentPills).toBe(28);
     expect(result.updatedMed!.lastConsumedDate).toBe('2024-01-10');
+    // Issue #267: lastSyncDate is NOT changed by consume.
     expect(result.updatedMed!.lastSyncDate).toBe('2024-01-10');
     expect(result.log).not.toBeNull();
     expect(result.log!.type).toBe('dose_taken');
     expect(result.log!.amount).toBe(-2);
     expect(result.log!.description).toContain('من التنبيه');
-    // Uses generateId('consume') — not 'consume-' + Date.now() (#64).
-    expect(result.log!.id).toMatch(/^consume-/);
+    expect(result.log!.doseId).toBe('d1');
   });
 
   it('consumes a dose from the manual path (source: manual)', () => {
-    const med = makeMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2024-01-10' });
-    const result = consumeDose(med, 'manual', '2024-01-10');
+    const med = makeMed({ currentPills: 30, lastSyncDate: '2024-01-10' });
+    const result = consumeDose(med, 'manual', '2024-01-10', new Date('2024-01-10T08:00:00'), 'd1');
     expect(result.doseAmount).toBe(2);
     expect(result.updatedMed!.currentPills).toBe(28);
     expect(result.log!.description).toContain('يدوياً');
   });
 
-  it('returns null (no consumption) when the effective balance is 0', () => {
-    const med = makeMed({ currentPills: 0, dailyDose: 2, lastSyncDate: '2024-01-10' });
-    const result = consumeDose(med, 'manual', '2024-01-10');
+  it('returns null when the durable balance is 0', () => {
+    const med = makeMed({ currentPills: 0, lastSyncDate: '2024-01-10' });
+    const result = consumeDose(med, 'manual', '2024-01-10', new Date('2024-01-10T08:00:00'), 'd1');
     expect(result.doseAmount).toBe(0);
     expect(result.updatedMed).toBeNull();
     expect(result.log).toBeNull();
   });
 
-  it('returns null when the dailyDose is 0 (no consumption rate)', () => {
-    const med = makeMed({ currentPills: 30, dailyDose: 0, lastSyncDate: '2024-01-10' });
-    const result = consumeDose(med, 'manual', '2024-01-10');
-    expect(result.doseAmount).toBe(0);
-    expect(result.updatedMed).toBeNull();
-    expect(result.log).toBeNull();
-  });
-
-  it('clamps the dose to the effective balance (partial consumption)', () => {
-    const med = makeMed({ currentPills: 1, dailyDose: 5, lastSyncDate: '2024-01-10' });
-    // effPills = 1. dose = min(5, 1) = 1. newSnapshot = 0.
-    const result = consumeDose(med, 'alarm', '2024-01-10');
+  it('clamps the dose to the durable balance (partial consumption)', () => {
+    const med = makeMed({
+      currentPills: 1,
+      lastSyncDate: '2024-01-10',
+      doseSchedule: [{ id: 'd1', amount: 5, time: '08:00' }],
+    });
+    // settleBase = max(0, 1) = 1. dose = min(5, 1) = 1. newSnapshot = 0.
+    const result = consumeDose(med, 'alarm', '2024-01-10', new Date('2024-01-10T08:00:00'), 'd1');
     expect(result.doseAmount).toBe(1);
     expect(result.updatedMed!.currentPills).toBe(0);
   });
 
-  it('projects the effective balance forward before consuming (app was closed for days)', () => {
-    const med = makeMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2024-01-01' });
-    // 9 days passed → effPills = 30 - 18 = 12. dose = min(2, 12) = 2. newSnapshot = 10.
-    const result = consumeDose(med, 'manual', '2024-01-10');
+  it('does NOT project forward from lastSyncDate before consuming (no historical catch-up)', () => {
+    // Issue #267: app closed for days. The OLD behavior deducted
+    // daysPassed*dailyDose from the effective balance before the consume.
+    // The NEW behavior deducts from durable currentPills only — no
+    // historical catch-up, no effective balance, no lastSyncDate change.
+    const med = makeMed({
+      currentPills: 30,
+      dailyDose: 2,
+      lastSyncDate: '2024-01-01', // 9 days passed
+      doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+    });
+    const result = consumeDose(med, 'manual', '2024-01-10', new Date('2024-01-10T08:00:00'), 'd1');
     expect(result.doseAmount).toBe(2);
-    expect(result.updatedMed!.currentPills).toBe(10);
+    // 30 - 2 = 28 (NOT 30 - 9*2 - 2 = 10).
+    expect(result.updatedMed!.currentPills).toBe(28);
+    // lastSyncDate is NOT bumped.
+    expect(result.updatedMed!.lastSyncDate).toBe('2024-01-01');
   });
 
   it('does not mutate the input medication', () => {
-    const med = makeMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2024-01-10' });
-    consumeDose(med, 'alarm', '2024-01-10');
+    const med = makeMed({ currentPills: 30, lastSyncDate: '2024-01-10' });
+    consumeDose(med, 'alarm', '2024-01-10', new Date('2024-01-10T08:00:00'), 'd1');
     expect(med.currentPills).toBe(30);
     expect(med.lastConsumedDate).toBeUndefined();
   });
 
   it('uses generateId("consume") for the log id (not Date.now() — #64)', () => {
-    const med = makeMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2024-01-10' });
-    const result = consumeDose(med, 'manual', '2024-01-10');
+    const med = makeMed({ currentPills: 30, lastSyncDate: '2024-01-10' });
+    const result = consumeDose(med, 'manual', '2024-01-10', new Date('2024-01-10T08:00:00'), 'd1');
     // generateId('consume') → 'consume-<uuid>' (40 chars). Not 'consume-<timestamp>'.
     expect(result.log!.id).toMatch(/^consume-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   });
 });
 
-
-describe('resolveRestoreDoseAmount (multi-dose restore)', () => {
-  const multi = makeMed({
-    dailyDose: 4,
-    doseSchedule: [
-      { id: 'd1', amount: 1, time: '08:00' },
-      { id: 'd2', amount: 1, time: '14:00' },
-      { id: 'd3', amount: 2, time: '20:00' },
-    ],
-    dosesPerDay: 3,
-  });
-
-  it('returns dose.amount for explicit multi-dose id (not dailyDose)', () => {
-    expect(resolveRestoreDoseAmount(multi, 'd1')).toEqual({
-      ok: true,
-      amount: 1,
-      doseId: 'd1',
-    });
-    expect(resolveRestoreDoseAmount(multi, 'd3')).toEqual({
-      ok: true,
-      amount: 2,
-      doseId: 'd3',
-    });
-  });
-
-  it('rejects multi-dose restore without doseId', () => {
-    expect(resolveRestoreDoseAmount(multi)).toEqual({
-      ok: false,
-      amount: 0,
-      reason: 'missing_dose_id',
-    });
-  });
-
-  it('rejects invalid doseId', () => {
-    expect(resolveRestoreDoseAmount(multi, 'missing')).toEqual({
-      ok: false,
-      amount: 0,
-      reason: 'invalid_dose_id',
-    });
-  });
-
-  it('single-slot schedule uses that slot amount when doseId omitted', () => {
-    const one = makeMed({
-      dailyDose: 5,
-      doseSchedule: [{ id: 'only', amount: 3, time: '09:00' }],
-      dosesPerDay: 1,
-    });
-    expect(resolveRestoreDoseAmount(one)).toEqual({
-      ok: true,
-      amount: 3,
-      doseId: 'only',
-    });
-  });
-
-  it('legacy med uses dailyDose', () => {
-    const legacy = makeMed({ dailyDose: 2, doseSchedule: undefined });
-    expect(resolveRestoreDoseAmount(legacy)).toEqual({ ok: true, amount: 2 });
-  });
-
-  it('settleAndAdjust with resolved multi amount adds only that amount', () => {
-    // lastSync = today so no past projection; +1 restore → currentPills + 1
-    const med = makeMed({
-      currentPills: 10,
-      dailyDose: 4,
-      lastSyncDate: '2024-09-13',
-      doseSchedule: [
-        { id: 'd1', amount: 1, time: '08:00' },
-        { id: 'd2', amount: 1, time: '14:00' },
-        { id: 'd3', amount: 2, time: '20:00' },
-      ],
-    });
-    const resolved = resolveRestoreDoseAmount(med, 'd1');
-    expect(resolved.ok).toBe(true);
-    if (!resolved.ok) return;
-    const { updatedMed, appliedDelta } = settleAndAdjust(
-      med,
-      resolved.amount,
-      '2024-09-13'
-    );
-    expect(appliedDelta).toBe(1);
-    expect(updatedMed.currentPills).toBe(11);
-  });
-
-  it('restore of 20:00 slot adds 2 not dailyDose 4', () => {
-    const med = makeMed({
-      currentPills: 10,
-      dailyDose: 4,
-      lastSyncDate: '2024-09-13',
-      doseSchedule: [
-        { id: 'd1', amount: 1, time: '08:00' },
-        { id: 'd2', amount: 1, time: '14:00' },
-        { id: 'd3', amount: 2, time: '20:00' },
-      ],
-    });
-    const resolved = resolveRestoreDoseAmount(med, 'd3');
-    expect(resolved.ok && resolved.amount).toBe(2);
-    if (!resolved.ok) return;
-    const { updatedMed } = settleAndAdjust(med, resolved.amount, '2024-09-13');
-    expect(updatedMed.currentPills).toBe(12);
-  });
-});
-
+// ─── consumeDose strict doseId identity (#267 — no Legacy fallback) ──
 describe('consumeDose strict doseId identity', () => {
   const multi = (overrides: Partial<Medication> = {}): Medication =>
     makeMed({
@@ -296,20 +228,6 @@ describe('consumeDose strict doseId identity', () => {
     expect(result.updatedMed?.doseConsumption?.only).toBe('2024-09-13');
   });
 
-  it('legacy + omitted doseId uses dailyDose (unchanged)', () => {
-    const med = makeMed({
-      currentPills: 10,
-      dailyDose: 1,
-      lastSyncDate: '2024-09-13',
-      doseSchedule: undefined,
-      dosesPerDay: undefined,
-    });
-    const result = consumeDose(med, 'manual', '2024-09-13', new Date('2024-09-13T10:00:00'));
-    expect(result.doseAmount).toBe(1);
-    expect(result.log?.doseId).toBeUndefined();
-    expect(result.updatedMed?.lastConsumedDate).toBe('2024-09-13');
-  });
-
   it('reordering schedule does not change which doseId is consumed', () => {
     const med = multi({
       doseSchedule: [
@@ -337,7 +255,53 @@ describe('consumeDose strict doseId identity', () => {
   });
 });
 
-describe('resolveRestoreDoseAmount strict doseId identity', () => {
+// ─── consumeDose no-schedule rejection (#267/#268 — no Legacy fallback) ─
+describe('consumeDose rejects no-schedule meds (#267/#268)', () => {
+  it('rejects a no-schedule med with missing_dose_id when doseId is omitted', () => {
+    const med = makeMed({
+      doseSchedule: undefined,
+      dosesPerDay: undefined,
+      dailyDose: 2,
+    });
+    const result = consumeDose(med, 'manual', '2024-01-10', new Date('2024-01-10T08:00:00'));
+    expect(result.reason).toBe('missing_dose_id');
+    expect(result.doseAmount).toBe(0);
+    expect(result.updatedMed).toBeNull();
+    expect(result.log).toBeNull();
+  });
+
+  it('rejects a no-schedule med with invalid_dose_id when an explicit doseId is given', () => {
+    const med = makeMed({
+      doseSchedule: undefined,
+      dosesPerDay: undefined,
+      dailyDose: 2,
+    });
+    const result = consumeDose(
+      med,
+      'manual',
+      '2024-01-10',
+      new Date('2024-01-10T08:00:00'),
+      'legacy'
+    );
+    expect(result.reason).toBe('invalid_dose_id');
+    expect(result.doseAmount).toBe(0);
+    expect(result.updatedMed).toBeNull();
+  });
+
+  it('rejects a no-schedule med even when dailyDose > 0 (no dailyDose fallback)', () => {
+    const med = makeMed({
+      doseSchedule: [],
+      dosesPerDay: 0,
+      dailyDose: 5,
+    });
+    const result = consumeDose(med, 'manual', '2024-01-10', new Date('2024-01-10T08:00:00'));
+    expect(result.reason).toBe('missing_dose_id');
+    expect(result.doseAmount).toBe(0);
+  });
+});
+
+// ─── resolveRestoreDoseId (identity only — amount comes from log) ─────
+describe('resolveRestoreDoseId (identity only — #267)', () => {
   const multi = (overrides: Partial<Medication> = {}): Medication =>
     makeMed({
       currentPills: 20,
@@ -352,19 +316,23 @@ describe('resolveRestoreDoseAmount strict doseId identity', () => {
       ...overrides,
     });
 
-  it('multi + explicit d2 restores amount 2 only', () => {
-    const resolved = resolveRestoreDoseAmount(multi(), 'd2');
-    expect(resolved.ok).toBe(true);
-    if (!resolved.ok) return;
-    expect(resolved.amount).toBe(2);
-    expect(resolved.doseId).toBe('d2');
+  it('multi + explicit d2 resolves to d2', () => {
+    const resolved = resolveRestoreDoseId(multi(), 'd2');
+    expect(resolved).toEqual({ ok: true, doseId: 'd2' });
   });
 
   it('multi + missing doseId fails with missing_dose_id', () => {
-    const resolved = resolveRestoreDoseAmount(multi());
+    const resolved = resolveRestoreDoseId(multi());
     expect(resolved.ok).toBe(false);
     if (resolved.ok) return;
     expect(resolved.reason).toBe('missing_dose_id');
+  });
+
+  it('multi + invalid doseId fails with invalid_dose_id', () => {
+    const resolved = resolveRestoreDoseId(multi(), 'not-a-slot');
+    expect(resolved.ok).toBe(false);
+    if (resolved.ok) return;
+    expect(resolved.reason).toBe('invalid_dose_id');
   });
 
   it('single-slot + omitted doseId resolves to the only slot', () => {
@@ -373,19 +341,328 @@ describe('resolveRestoreDoseAmount strict doseId identity', () => {
       dosesPerDay: 1,
       dailyDose: 3,
     });
-    const resolved = resolveRestoreDoseAmount(med);
-    expect(resolved.ok).toBe(true);
-    if (!resolved.ok) return;
-    expect(resolved.doseId).toBe('only');
-    expect(resolved.amount).toBe(3);
+    const resolved = resolveRestoreDoseId(med);
+    expect(resolved).toEqual({ ok: true, doseId: 'only' });
   });
 
-  it('legacy restore uses dailyDose without doseId', () => {
-    const med = makeMed({ doseSchedule: undefined, dailyDose: 2 });
-    const resolved = resolveRestoreDoseAmount(med);
-    expect(resolved.ok).toBe(true);
-    if (!resolved.ok) return;
-    expect(resolved.amount).toBe(2);
-    expect(resolved.doseId).toBeUndefined();
+  it('no-schedule med rejects with no_dose when doseId is omitted', () => {
+    const med = makeMed({ doseSchedule: undefined, dosesPerDay: undefined });
+    const resolved = resolveRestoreDoseId(med);
+    expect(resolved.ok).toBe(false);
+    if (resolved.ok) return;
+    expect(resolved.reason).toBe('no_dose');
+  });
+
+  it('no-schedule med rejects with invalid_dose_id when an explicit doseId is given', () => {
+    const med = makeMed({ doseSchedule: undefined, dosesPerDay: undefined });
+    const resolved = resolveRestoreDoseId(med, 'legacy');
+    expect(resolved.ok).toBe(false);
+    if (resolved.ok) return;
+    expect(resolved.reason).toBe('invalid_dose_id');
+  });
+});
+
+// ─── restoreDose (#267 — requires durable deduction evidence) ─────────
+describe('restoreDose (#267 — durable deduction evidence)', () => {
+  const today = '2024-01-10';
+  const now = new Date('2024-01-10T20:00:00');
+
+  it('restores the active deduction log amount (Manual Take)', () => {
+    const med = makeMed({
+      currentPills: 28, // 30 - 2 (after manual Take of d1=2)
+      lastSyncDate: '2024-01-10',
+      doseConsumption: { d1: today },
+      doseConsumptionHistory: { d1: [today] },
+    });
+    const logs: ConsumptionLog[] = [
+      makeLog({ id: 'take-1', type: 'dose_taken', amount: -2, doseId: 'd1', date: today }),
+    ];
+    const result = restoreDose(med, 'd1', today, now, logs);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.restoredAmount).toBe(2);
+    expect(result.updatedMed.currentPills).toBe(30); // 28 + 2
+    expect(result.doseId).toBe('d1');
+    expect(result.wasActuallyConsumed).toBe(true);
+    expect(result.reversedLogId).toBe('take-1');
+  });
+
+  it('restores the active deduction log amount (Auto Daily)', () => {
+    const med = makeMed({
+      currentPills: 28,
+      lastSyncDate: '2024-01-10',
+      doseConsumption: { d1: today },
+      doseConsumptionHistory: { d1: [today] },
+    });
+    const logs: ConsumptionLog[] = [
+      makeLog({ id: 'auto-1', type: 'auto_daily', amount: -2, doseId: 'd1', date: today }),
+    ];
+    const result = restoreDose(med, 'd1', today, now, logs);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.restoredAmount).toBe(2);
+    expect(result.updatedMed.currentPills).toBe(30);
+  });
+
+  it('rejects with missing_deduction_evidence when no active deduction log exists', () => {
+    // Pure-projection Restore is GONE (#267): elapsed time without a durable
+    // deduction log does NOT add stock.
+    const med = makeMed({
+      currentPills: 30,
+      lastSyncDate: '2024-01-01', // 9 days passed
+    });
+    const result = restoreDose(med, 'd1', '2024-01-10', now, []);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('missing_deduction_evidence');
+  });
+
+  it('rejects with already_restored when the consume marker exists but the deduction is reversed', () => {
+    const med = makeMed({
+      currentPills: 30,
+      lastSyncDate: '2024-01-10',
+      doseConsumption: { d1: today },
+      doseConsumptionHistory: { d1: [today] },
+    });
+    // The deduction log exists but is already reversed.
+    const logs: ConsumptionLog[] = [
+      makeLog({
+        id: 'take-1',
+        type: 'dose_taken',
+        amount: -2,
+        doseId: 'd1',
+        date: today,
+        reversedAt: '2024-01-10T19:00:00.000Z',
+      }),
+    ];
+    const result = restoreDose(med, 'd1', today, now, logs);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('already_restored');
+  });
+
+  it('rejects with missing_dose_id when multi-dose and no doseId is given', () => {
+    const med = makeMed({
+      doseSchedule: [
+        { id: 'd1', amount: 1, time: '08:00' },
+        { id: 'd2', amount: 2, time: '14:00' },
+      ],
+      dosesPerDay: 2,
+    });
+    const result = restoreDose(med, undefined, today, now, []);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('missing_dose_id');
+  });
+
+  it('does NOT change lastSyncDate (no settlement horizon)', () => {
+    const med = makeMed({
+      currentPills: 28,
+      lastSyncDate: '2024-01-01', // 9 days passed
+      doseConsumption: { d1: today },
+      doseConsumptionHistory: { d1: [today] },
+    });
+    const logs: ConsumptionLog[] = [
+      makeLog({ id: 'take-1', type: 'dose_taken', amount: -2, doseId: 'd1', date: today }),
+    ];
+    const result = restoreDose(med, 'd1', today, now, logs);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.updatedMed.lastSyncDate).toBe('2024-01-01'); // unchanged
+  });
+
+  it('restores from the historical deduction log amount, not the current schedule amount', () => {
+    // The schedule was 2 when the Take happened; later the user edits the
+    // schedule to 5. Restore must use the historical 2, not the current 5.
+    const med = makeMed({
+      currentPills: 28,
+      lastSyncDate: '2024-01-10',
+      doseConsumption: { d1: today },
+      doseConsumptionHistory: { d1: [today] },
+      doseSchedule: [{ id: 'd1', amount: 5, time: '08:00' }], // edited from 2
+    });
+    const logs: ConsumptionLog[] = [
+      makeLog({
+        id: 'take-1',
+        type: 'dose_taken',
+        amount: -2, // historical amount at the time of Take
+        doseId: 'd1',
+        date: today,
+      }),
+    ];
+    const result = restoreDose(med, 'd1', today, now, logs);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Restored amount = abs(log.amount) = 2, NOT the current schedule amount 5.
+    expect(result.restoredAmount).toBe(2);
+    expect(result.updatedMed.currentPills).toBe(30); // 28 + 2
+  });
+});
+
+// ─── findActiveDeductionForOccurrence ─────────────────────────────────
+describe('findActiveDeductionForOccurrence', () => {
+  const today = '2024-01-10';
+
+  it('finds the active (un-reversed) dose_taken deduction for the occurrence', () => {
+    const logs: ConsumptionLog[] = [
+      makeLog({
+        id: 'take-1',
+        type: 'dose_taken',
+        amount: -2,
+        doseId: 'd1',
+        date: today,
+        timestamp: '2024-01-10T08:00:00.000Z',
+      }),
+    ];
+    const result = findActiveDeductionForOccurrence(logs, 'med-1', 'd1', today);
+    expect(result?.id).toBe('take-1');
+  });
+
+  it('skips reversed deductions (finds the next active one)', () => {
+    const logs: ConsumptionLog[] = [
+      makeLog({
+        id: 'take-1',
+        type: 'dose_taken',
+        amount: -2,
+        doseId: 'd1',
+        date: today,
+        timestamp: '2024-01-10T08:00:00.000Z',
+        reversedAt: '2024-01-10T19:00:00.000Z',
+      }),
+      makeLog({
+        id: 'take-2',
+        type: 'dose_taken',
+        amount: -2,
+        doseId: 'd1',
+        date: today,
+        timestamp: '2024-01-10T20:00:00.000Z',
+      }),
+    ];
+    const result = findActiveDeductionForOccurrence(logs, 'med-1', 'd1', today);
+    expect(result?.id).toBe('take-2');
+  });
+
+  it('returns null when no active deduction exists', () => {
+    const logs: ConsumptionLog[] = [];
+    const result = findActiveDeductionForOccurrence(logs, 'med-1', 'd1', today);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for a different medicationId', () => {
+    const logs: ConsumptionLog[] = [
+      makeLog({
+        id: 'take-1',
+        medicationId: 'other-med',
+        type: 'dose_taken',
+        amount: -2,
+        doseId: 'd1',
+        date: today,
+      }),
+    ];
+    const result = findActiveDeductionForOccurrence(logs, 'med-1', 'd1', today);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for a different date', () => {
+    const logs: ConsumptionLog[] = [
+      makeLog({
+        id: 'take-1',
+        type: 'dose_taken',
+        amount: -2,
+        doseId: 'd1',
+        date: '2024-01-09',
+      }),
+    ];
+    const result = findActiveDeductionForOccurrence(logs, 'med-1', 'd1', today);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for a different doseId', () => {
+    const logs: ConsumptionLog[] = [
+      makeLog({
+        id: 'take-1',
+        type: 'dose_taken',
+        amount: -2,
+        doseId: 'd2',
+        date: today,
+      }),
+    ];
+    const result = findActiveDeductionForOccurrence(logs, 'med-1', 'd1', today);
+    expect(result).toBeNull();
+  });
+
+  it('selects the most-recent active deduction by timestamp (deterministic)', () => {
+    const logs: ConsumptionLog[] = [
+      makeLog({
+        id: 'older',
+        type: 'dose_taken',
+        amount: -2,
+        doseId: 'd1',
+        date: today,
+        timestamp: '2024-01-10T08:00:00.000Z',
+      }),
+      makeLog({
+        id: 'newer',
+        type: 'dose_taken',
+        amount: -2,
+        doseId: 'd1',
+        date: today,
+        timestamp: '2024-01-10T20:00:00.000Z',
+      }),
+    ];
+    const result = findActiveDeductionForOccurrence(logs, 'med-1', 'd1', today);
+    expect(result?.id).toBe('newer');
+  });
+
+  it('accepts auto_daily logs as well as dose_taken', () => {
+    const logs: ConsumptionLog[] = [
+      makeLog({
+        id: 'auto-1',
+        type: 'auto_daily',
+        amount: -2,
+        doseId: 'd1',
+        date: today,
+      }),
+    ];
+    const result = findActiveDeductionForOccurrence(logs, 'med-1', 'd1', today);
+    expect(result?.id).toBe('auto-1');
+  });
+});
+
+// ─── UI helpers (historical restore eligibility / display amount) ────
+describe('getHistoricalRestoreDisplayAmount / eligibility helpers', () => {
+  const today = '2024-01-10';
+
+  it('getHistoricalRestoreDisplayAmount returns abs(log.amount) for an active deduction', () => {
+    const logs: ConsumptionLog[] = [
+      makeLog({ id: 'take-1', type: 'dose_taken', amount: -3, doseId: 'd1', date: today }),
+    ];
+    expect(getHistoricalRestoreDisplayAmount(logs, 'med-1', 'd1', today)).toBe(3);
+  });
+
+  it('getHistoricalRestoreDisplayAmount returns null when no active deduction exists', () => {
+    expect(getHistoricalRestoreDisplayAmount([], 'med-1', 'd1', today)).toBeNull();
+  });
+
+  it('findActualDeductedAmountForOccurrence returns the active deduction amount', () => {
+    const logs: ConsumptionLog[] = [
+      makeLog({ id: 'take-1', type: 'dose_taken', amount: -4, doseId: 'd1', date: today }),
+    ];
+    expect(findActualDeductedAmountForOccurrence(logs, 'med-1', 'd1', today)).toBe(4);
+  });
+
+  it('isUiAutoHistoricalRestoreEligible requires auto_daily type and historical amount', () => {
+    expect(isUiAutoHistoricalRestoreEligible(true, false, 'auto_daily', 2)).toBe(true);
+    expect(isUiAutoHistoricalRestoreEligible(true, false, 'dose_taken', 2)).toBe(false);
+    expect(isUiAutoHistoricalRestoreEligible(true, false, 'auto_daily', null)).toBe(false);
+    expect(isUiAutoHistoricalRestoreEligible(false, false, 'auto_daily', 2)).toBe(false);
+    expect(isUiAutoHistoricalRestoreEligible(true, true, 'auto_daily', 2)).toBe(false);
+  });
+
+  it('isUiConsumedRestoreEligible requires consumed + historical amount', () => {
+    expect(isUiConsumedRestoreEligible(true, false, 2)).toBe(true);
+    expect(isUiConsumedRestoreEligible(true, false, null)).toBe(false);
+    expect(isUiConsumedRestoreEligible(false, false, 2)).toBe(false);
+    expect(isUiConsumedRestoreEligible(true, true, 2)).toBe(false);
   });
 });

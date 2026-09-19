@@ -18,17 +18,16 @@
  */
 
 import { loadJson, saveJson } from './storage';
-import { LEGACY_DOSE_ID } from './notifications';
 
 export const SNOOZE_KEY = 'android_med_tracker_snooze_v1';
 
 /**
  * Stable storage key for a snooze marker.
- * Legacy / omitted / LEGACY_DOSE_ID → med-only key (backward compatible).
+ * Legacy / omitted / empty doseId → med-only key (backward compatible).
  * Multi-dose → medId::doseId so slots are independent.
  */
 export function snoozeStorageKey(medId: string, doseId?: string | null): string {
-  if (!doseId || doseId === LEGACY_DOSE_ID) return medId;
+  if (!doseId) return medId;
   return `${medId}::${doseId}`;
 }
 
@@ -53,7 +52,7 @@ export function clearSnoozedDose(medId: string, doseId?: string | null): void {
   }
   // When clearing a multi-dose slot, also drop any obsolete med-level key
   // left over from pre-Phase-3B installs.
-  if (doseId && doseId !== LEGACY_DOSE_ID && snooze[medId] !== undefined) {
+  if (doseId && !!doseId && snooze[medId] !== undefined) {
     delete snooze[medId];
     changed = true;
   }
@@ -74,7 +73,7 @@ export function clearSnoozedDoseForMed(medId: string): void {
  * checked. An obsolete pre-Phase-3B med-only key must NOT suppress sibling
  * slots — it is cleared on first multi-dose check so it cannot linger.
  *
- * Legacy (no doseId / LEGACY_DOSE_ID): med-only key as before.
+ * Legacy (no doseId / empty doseId): med-only key as before.
  */
 export function isSnoozeActive(
   medId: string,
@@ -88,7 +87,7 @@ export function isSnoozeActive(
 
   // Multi-dose path: never inherit med-only snooze for a specific slot.
   // Clear obsolete med-level key so it cannot suppress unrelated doses.
-  if (doseId && doseId !== LEGACY_DOSE_ID && key !== medId) {
+  if (doseId && !!doseId && key !== medId) {
     if (snooze[medId] !== undefined) {
       delete snooze[medId];
       saveJson(SNOOZE_KEY, snooze);

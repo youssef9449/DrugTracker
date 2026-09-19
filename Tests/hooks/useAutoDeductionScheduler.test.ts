@@ -99,7 +99,7 @@ describe('multi-dose amount isolation', () => {
   });
 });
 
-describe('legacy single-dose (post #268 migration)', () => {
+describe('no doseSchedule (doseSchedule-only scheduler)', () => {
   it('does not invent slots from reminder fields without explicit doseSchedule', () => {
     const med = baseMed({
       reminderEnabled: true,

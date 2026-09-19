@@ -1,7 +1,6 @@
 import { Medication, ConsumptionLog, getCriticalThresholdDays } from '../types';
 import { generateId } from './id';
 import { MS_PER_DAY, NEVER_DEPLETES_DAYS, CRITICAL_ALARM_FIRE_HOUR, timeToMinutes } from './time';
-import { LEGACY_DOSE_ID } from './legacyDoseId';
 
 /**
  * Returns today's date as a deterministic YYYY-MM-DD string, using
@@ -645,40 +644,13 @@ export function computeDueDoseBreakdown(
         fullDueUnits = fullDueDoses * med.dailyDose;
       }
     } else if (totalDays > 0) {
-      // Legacy non-gated: a day's dose is due at the start of the calendar
-      // day (pre-change behavior). Due units are computed **per calendar
-      // day** across the whole (lastSyncDate, todayStr] window instead of a
-      // single totalDays * dailyDose aggregate, so a day whose implicit
-      // legacy occurrence (LEGACY_DOSE_ID) already has a durable consume or
-      // skip marker is excluded BY ITS SPECIFIC DATE — historical
-      // Exact Auto / Manual Take / Restore days are never re-charged, while
-      // every other day in the window (including today) stays due exactly
-      // as before. isDoseConsumedOnDate checks the durable
-      // doseConsumptionHistory markers first and falls back to the legacy
-      // lastConsumedDate single-date behavior; lastConsumedDate alone is
-      // never the primary source. When NO markers exist inside the window,
-      // the loop sums dailyDose for each of the totalDays days — bit-for-bit
-      // the pre-change legacy semantics. This single computation is shared
-      // by every downstream consumer (settleAutoDeductToggle /
-      // settleDoseChange / syncAutoDailyDeductions / effectiveCurrentPills),
-      // so no consumer can double-deduct an occurrence already charged by
-      // its exact event.amount, and a consumed today never blocks
-      // settlement of the historical unconsumed days (occurrence identity
-      // is medicationId + doseId + calendarDate — not a day count).
-      let dueDays = 0;
-      let dueUnitsAccum = 0;
-      const legacyLastSync = med.lastSyncDate || todayStr;
-      for (let dayIdx = 1; dayIdx <= totalDays; dayIdx++) {
-        const day = addDaysToDateStr(legacyLastSync, dayIdx);
-        if (isDoseConsumedOnDate(med, LEGACY_DOSE_ID, day)) continue;
-        if (isDoseSkippedOnDate(med, LEGACY_DOSE_ID, day)) continue;
-        dueDays += 1;
-        dueUnitsAccum += med.dailyDose;
-      }
-      fullDueDoses = dueDays;
-      pastDueDoses = dueDays;
-      pastDueUnits = dueUnitsAccum;
-      fullDueUnits = dueUnitsAccum;
+      // No explicit doseSchedule: day-level due uses dailyDose for each day
+      // in (lastSyncDate, today]. Consume/skip exclusion requires explicit
+      // doseSchedule markers (no LEGACY_DOSE_ID identity).
+      fullDueDoses = totalDays;
+      pastDueDoses = totalDays;
+      pastDueUnits = totalDays * med.dailyDose;
+      fullDueUnits = totalDays * med.dailyDose;
     }
   }
 

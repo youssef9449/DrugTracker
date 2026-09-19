@@ -12,8 +12,7 @@ import {
 } from '../utils/notifications';
 import { initNativeBridge } from '../native';
 import { migrateSchema } from '../lib/migration';
-import { loadJson, loadString, persist } from '../utils/storage';
-import { migrateMedicationsLegacySingleDose } from '../utils/legacySingleDoseMigration';
+import { loadJson, loadString } from '../utils/storage';
 import {
   STORAGE_MEDS_KEY,
   STORAGE_LOGS_KEY,
@@ -48,8 +47,8 @@ export interface AppHydrationSetters {
  * init native bridge, then flip hydrated=true.
  *
  * Ordering is intentional and must be preserved:
- * migrateSchema → read storage → legacy single-dose→doseSchedule migration
- * → Promise.all(permissions + initNativeBridge) → setHydrated(true) in finally.
+ * migrateSchema → read storage → Promise.all(permissions + initNativeBridge)
+ * → setHydrated(true) in finally.
  */
 export function useAppHydration(setters: AppHydrationSetters): void {
   const {
@@ -93,16 +92,7 @@ export function useAppHydration(setters: AppHydrationSetters): void {
       // stays in state, and the hydration-gated persistence effect
       // overwrites the user's "[]" with the seed meds.
       const parsed = loadJson<Medication[] | null>(STORAGE_MEDS_KEY, null);
-      if (Array.isArray(parsed)) {
-        // Issue #268: materialize explicit doseSchedule for legacy single-dose
-        // meds before hydrated gates Exact scheduling.
-        const { medications: migrated, changed } =
-          migrateMedicationsLegacySingleDose(parsed);
-        setMedications(migrated);
-        if (changed) {
-          persist(STORAGE_MEDS_KEY, migrated, { json: true });
-        }
-      }
+      if (Array.isArray(parsed)) setMedications(parsed);
     }
 
     // Logs

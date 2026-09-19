@@ -22,7 +22,6 @@ import {
   isDoseSkippedOnDate,
   recordDoseConsumed,
 } from './dateCalculations';
-import { LEGACY_DOSE_ID } from './notifications';
 
 export type ReconcileEventOutcome =
   | 'applied'
@@ -94,8 +93,8 @@ export function isValidExactOccurrenceIdentity(
 }
 
 export function normalizeExactDoseId(doseId: string | undefined | null): string {
-  if (doseId == null || doseId === '') return LEGACY_DOSE_ID;
-  return doseId;
+  if (doseId == null) return '';
+  return String(doseId);
 }
 
 /**
@@ -138,25 +137,15 @@ export function isExactAutoOccurrenceApplied(
   todayStr: string = getTodayDateString()
 ): boolean {
   const id = normalizeExactDoseId(doseId);
-  const multi = Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0;
+  if (!id) return false;
 
-  if (!multi || id === LEGACY_DOSE_ID) {
-    if (med.lastConsumedDate === calendarDate) return true;
-    if (isDoseConsumedOnDate(med, LEGACY_DOSE_ID, calendarDate)) return true;
-    if (isDoseSkippedOnDate(med, LEGACY_DOSE_ID, calendarDate)) return true;
-  } else {
-    if (isDoseConsumedOnDate(med, id, calendarDate)) return true;
-    if (isDoseSkippedOnDate(med, id, calendarDate)) return true;
-  }
+  if (isDoseConsumedOnDate(med, id, calendarDate)) return true;
+  if (isDoseSkippedOnDate(med, id, calendarDate)) return true;
 
   const lastSync = med.lastSyncDate;
   if (lastSync && calendarDate.length === 10) {
     // Past calendar day already included in day settlement into currentPills
     if (calendarDate < todayStr && calendarDate <= lastSync) {
-      return true;
-    }
-    // Legacy non-schedule: sync settles today when lastSync advances to today
-    if (!multi && calendarDate === todayStr && lastSync === todayStr) {
       return true;
     }
   }
@@ -262,33 +251,28 @@ export function applyExactAutoEventToMedication(
   let nextHistory = med.doseConsumptionHistory;
   let lastConsumedDate = med.lastConsumedDate;
 
-  if (doseId === LEGACY_DOSE_ID || !Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0) {
-    lastConsumedDate = calendarDate;
-    const recorded = recordDoseConsumed(med, LEGACY_DOSE_ID, calendarDate);
-    nextConsumption = recorded.doseConsumption;
-    nextHistory = recorded.doseConsumptionHistory;
-  } else {
-    const recorded = recordDoseConsumed(med, doseId, calendarDate);
-    nextConsumption = recorded.doseConsumption;
-    nextHistory = recorded.doseConsumptionHistory;
-    const allConsumed =
-      Array.isArray(med.doseSchedule) &&
-      med.doseSchedule.every((d) =>
-        d.id === doseId
-          ? true
-          : isDoseConsumedOnDate(
-              {
-                ...med,
-                doseConsumption: nextConsumption,
-                doseConsumptionHistory: nextHistory,
-              },
-              d.id,
-              calendarDate
-            )
-      );
+  const recorded = recordDoseConsumed(med, doseId, calendarDate);
+  nextConsumption = recorded.doseConsumption;
+  nextHistory = recorded.doseConsumptionHistory;
+  if (Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) {
+    const allConsumed = med.doseSchedule.every((d) =>
+      d.id === doseId
+        ? true
+        : isDoseConsumedOnDate(
+            {
+              ...med,
+              doseConsumption: nextConsumption,
+              doseConsumptionHistory: nextHistory,
+            },
+            d.id,
+            calendarDate
+          )
+    );
     if (allConsumed) {
       lastConsumedDate = calendarDate;
     }
+  } else if (doseId) {
+    lastConsumedDate = calendarDate;
   }
 
   // If prior days (after lastSync, before event day) were folded into the
@@ -321,7 +305,7 @@ export function applyExactAutoEventToMedication(
     date: calendarDate,
     timestamp: new Date(now).toISOString(),
     description: `خصم تلقائي دقيق (−${actualDeducted} ${med.unit || 'وحدة'})`,
-    doseId: doseId === LEGACY_DOSE_ID ? undefined : doseId,
+    doseId: doseId || undefined,
   };
 
   return { ok: true, updatedMed, log };

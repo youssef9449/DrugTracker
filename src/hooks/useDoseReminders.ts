@@ -6,10 +6,9 @@ import { loadJson, saveJson } from '../utils/storage';
 import { DEFAULT_SNOOZE_MINUTES, MS_PER_MINUTE } from '../utils/time';
 import { scheduleSnoozedDoseReminder } from '../utils/notifications';
 import {
-  SNOOZE_KEY,
   isSnoozeActive,
   setSnoozeUntil,
-  snoozeStorageKey,
+  clearSnoozedDose,
 } from '../utils/doseReminderStorage';
 
 const FIRED_KEY = 'android_med_tracker_fired_reminders_v1';
@@ -32,8 +31,7 @@ interface UseDoseRemindersOptions {
  * Phase 3A: openAlarm accepts an optional doseId from the native
  * notification extra so Take Dose consumes that exact slot.
  *
- * Phase 3B: snooze markers are dose-scoped for multi-dose meds
- * (`medId::doseId`). Legacy meds continue to use the med-only key.
+ * Snooze markers are always dose-scoped (`medId::doseId`) — Issue #268.
  */
 export function useDoseReminders({
   medications,
@@ -61,12 +59,9 @@ export function useDoseReminders({
       }
       saveJson(FIRED_KEY, fired);
 
-      // Clear only this slot's snooze (or med-level for legacy).
-      const snooze = loadJson<Record<string, number>>(SNOOZE_KEY, {});
-      const key = snoozeStorageKey(current, doseId);
-      if (snooze[key] !== undefined) {
-        delete snooze[key];
-        saveJson(SNOOZE_KEY, snooze);
+      // Clear this slot's snooze when doseId is known (Issue #268).
+      if (doseId) {
+        clearSnoozedDose(current, doseId);
       }
     }
     stopAllSounds();
@@ -79,6 +74,15 @@ export function useDoseReminders({
 
   const snoozeAlarm = useCallback((medication: Medication, minutes: number = DEFAULT_SNOOZE_MINUTES) => {
     const doseId = alarmingDoseIdRef.current ?? undefined;
+    if (!doseId) {
+      // Cannot snooze without explicit doseSchedule doseId (Issue #268).
+      alarmingIdRef.current = null;
+      alarmingDoseIdRef.current = null;
+      isTestAlarmRef.current = false;
+      setAlarmingMedication(null);
+      setAlarmingDoseId(null);
+      return;
+    }
     setSnoozeUntil(medication.id, Date.now() + minutes * MS_PER_MINUTE, doseId);
 
     // Prefer the specific slot's amount/time when snoozing a multi-dose alarm.
@@ -142,8 +146,8 @@ export function useDoseReminders({
     const fired = loadJson<Record<string, boolean>>(FIRED_KEY, {});
     if (fired[firedKey(med.id, today, doseId)]) return;
 
-    // Dose-scoped snooze: only suppress this slot (legacy = med-only key).
-    if (isSnoozeActive(med.id, doseId)) return;
+    // Dose-scoped snooze only when doseId is known.
+    if (doseId && isSnoozeActive(med.id, doseId)) return;
 
     isTestAlarmRef.current = false;
     alarmingIdRef.current = med.id;

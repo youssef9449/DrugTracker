@@ -449,7 +449,7 @@ export function getCardDoseToggleTarget(
   const nominal = sorted[0];
   return {
     doseId: nominal?.id,
-    amount: Number(nominal?.amount) || Number(med.dailyDose) || 0,
+    amount: Number(nominal?.amount) || 0,
     canTake: false,
     canRestore: false,
   };

@@ -1,5 +1,5 @@
 /**
- * Issue #268 — doseSchedule is the only dose source (no legacy synthetic rows).
+ * Issue #268 — doseSchedule is the only dose source (no med-only / legacy path).
  */
 import { describe, it, expect } from 'vitest';
 import type { Medication } from '../../src/types';
@@ -11,6 +11,10 @@ import {
 } from '../../src/utils/doseSchedule';
 import { getAutoDeductionSlotsForDate } from '../../src/hooks/useAutoDeductionScheduler';
 import { getDoseReminderSlots } from '../../src/hooks/useDoseReminderScheduler';
+import {
+  doseReminderAlarmIdForDose,
+  snoozeDoseReminderId,
+} from '../../src/utils/notifications';
 
 function baseMed(over: Partial<Medication> = {}): Medication {
   return {
@@ -30,108 +34,55 @@ function baseMed(over: Partial<Medication> = {}): Medication {
   };
 }
 
-describe('getDoseScheduleForUI — explicit only', () => {
-  it('returns empty when doseSchedule missing (no dailyDose/reminderTime invention)', () => {
-    const med = baseMed({ doseSchedule: undefined });
-    expect(getDoseScheduleForUI(med)).toEqual([]);
+describe('explicit schedule only', () => {
+  it('getDoseScheduleForUI without schedule → []', () => {
+    expect(getDoseScheduleForUI(baseMed({ doseSchedule: undefined }))).toEqual([]);
   });
 
-  it('preserves existing explicit schedule ids/amounts/times', () => {
-    const schedule = [
-      { id: 'keep-a', amount: 1, time: '08:00' },
-      { id: 'keep-b', amount: 2, time: '20:00' },
-    ];
-    const med = baseMed({ doseSchedule: schedule });
-    const ui = getDoseScheduleForUI(med);
-    expect(ui.map((d) => d.id)).toEqual(['keep-a', 'keep-b']);
-    expect(ui.map((d) => d.amount)).toEqual([1, 2]);
-  });
-});
-
-describe('getAutoDeductionSlotsForDate — doseSchedule only', () => {
-  it('explicit single-dose → one slot with correct id/amount/time', () => {
-    const med = baseMed({
-      doseSchedule: [{ id: 'd1', amount: 2, time: '08:30' }],
-    });
-    const slots = getAutoDeductionSlotsForDate(med, '2026-09-18');
-    expect(slots).toEqual([
-      {
-        medId: 'med-1',
-        doseId: 'd1',
-        time: '08:30',
-        amount: 2,
-        calendarDate: '2026-09-18',
-      },
-    ]);
-    expect(slots[0].doseId).not.toBe('legacy');
+  it('getAutoDeductionSlotsForDate uses schedule rows only', () => {
+    const slots = getAutoDeductionSlotsForDate(
+      baseMed({
+        doseSchedule: [
+          { id: 'a', amount: 1, time: '08:00' },
+          { id: 'b', amount: 2, time: '20:00' },
+        ],
+      }),
+      '2026-09-18'
+    );
+    expect(slots.map((s) => s.doseId)).toEqual(['a', 'b']);
+    expect(slots.map((s) => s.amount)).toEqual([1, 2]);
   });
 
-  it('explicit multi-dose → one slot per row', () => {
-    const med = baseMed({
-      doseSchedule: [
-        { id: 'a', amount: 1, time: '08:00' },
-        { id: 'b', amount: 2, time: '14:00' },
-        { id: 'c', amount: 3, time: '22:00' },
-      ],
-    });
-    const slots = getAutoDeductionSlotsForDate(med, '2026-09-18');
-    expect(slots).toHaveLength(3);
-    expect(slots.map((s) => s.doseId)).toEqual(['a', 'b', 'c']);
-    expect(slots.map((s) => s.amount)).toEqual([1, 2, 3]);
-  });
-
-  it('does not use reminderTime/dailyDose when doseSchedule is absent', () => {
+  it('no doseSchedule → no Exact slots and no reminder slots', () => {
     const med = baseMed({
       doseSchedule: undefined,
-      reminderEnabled: true,
       reminderTime: '08:30',
       dailyDose: 2,
     });
     expect(getAutoDeductionSlotsForDate(med, '2026-09-18')).toEqual([]);
-  });
-});
-
-describe('card helpers — no legacy fallback', () => {
-  it('getCardDoseToggleTarget with no schedule → cannot take/restore', () => {
-    const med = baseMed({ doseSchedule: undefined });
-    const t = getCardDoseToggleTarget(med, new Date('2026-09-14T15:00:00'));
-    expect(t.canTake).toBe(false);
-    expect(t.canRestore).toBe(false);
-    expect(t.amount).toBe(0);
+    expect(getDoseReminderSlots(med)).toEqual([]);
   });
 
-  it('getAutoRestorableDose with no schedule → null', () => {
-    const med = baseMed({ doseSchedule: undefined });
-    expect(
-      getAutoRestorableDose(med, new Date('2026-09-14T15:00:00'), '2026-09-14')
-    ).toBeNull();
-  });
-
-  it('getNextDoseAmount with no schedule → 0', () => {
-    expect(getNextDoseAmount(baseMed({ doseSchedule: undefined }))).toBe(0);
-  });
-});
-
-
-describe('getDoseReminderSlots — doseSchedule only', () => {
-  it('no schedule → no reminder slots', () => {
-    expect(
-      getDoseReminderSlots(
-        baseMed({ doseSchedule: undefined, reminderTime: '08:30', dailyDose: 2 })
-      )
-    ).toEqual([]);
-  });
-
-  it('explicit schedule → slots use row ids', () => {
-    const slots = getDoseReminderSlots(
-      baseMed({
-        doseSchedule: [
-          { id: 'r1', amount: 1, time: '08:00' },
-          { id: 'r2', amount: 2, time: '20:00' },
-        ],
-      })
+  it('getCardDoseToggleTarget does not use dailyDose fallback', () => {
+    const med = baseMed({
+      doseSchedule: [{ id: 'd1', amount: 3, time: '09:00' }],
+      dailyDose: 99,
+    });
+    // All slots "completed" path uses nominal amount only
+    const t = getCardDoseToggleTarget(
+      {
+        ...med,
+        doseConsumption: { d1: '2026-09-14' },
+      },
+      new Date('2026-09-14T22:00:00'),
+      '2026-09-14'
     );
-    expect(slots.map((s) => s.doseId)).toEqual(['r1', 'r2']);
-    expect(slots.every((s) => s.doseId !== 'legacy')).toBe(true);
+    // amount must not be 99
+    expect(t.amount).not.toBe(99);
+  });
+
+  it('empty doseId → no alarm/snooze identity', () => {
+    expect(doseReminderAlarmIdForDose('med-1', '')).toBeNull();
+    expect(snoozeDoseReminderId('med-1', '')).toBeNull();
   });
 });

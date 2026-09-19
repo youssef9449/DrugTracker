@@ -5,7 +5,6 @@ import {
   scheduleDoseReminder,
   cancelDoseReminder,
   cancelSnoozedDoseReminder,
-  cancelLegacyDoseReminderAlarm,
   isDoseReminderPending,
   isNativeDoseReminderReArmed,
   isDoseReminderTimeStillAhead,
@@ -113,11 +112,11 @@ export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
  *
  * Phase 2: for each medication with `reminderEnabled`, schedules one
  * RECURRING daily notification per dose slot (multi-dose `doseSchedule`,
- * or a single legacy `reminderTime` slot). Each slot uses a stable
+ * Each slot uses a stable
  * notification id derived from medicationId + doseId.
  *
  * The recurring alarm is config-driven. Consumption suppression still
- * uses per-dose consumption (`doseConsumption` / legacy lastConsumedDate).
+ * uses per-dose consumption (`doseConsumption`).
  * skipToday applies only to slots consumed today.
  *
  * Generation counter + per-key serialization chain prevent races when
@@ -248,12 +247,6 @@ export function useDoseReminderScheduler({
       const slots = getDoseReminderSlots(med);
       if (slots.length === 0) continue;
 
-      if (slots.some((sl) => !!sl.doseId)) {
-        enqueue(doseScheduleKey(med.id, '__legacy_cleanup__'), () =>
-          cancelLegacyDoseReminderAlarm(med.id)
-        );
-      }
-
       for (const slot of slots) {
         const key = doseScheduleKey(slot.medId, slot.doseId);
         const slotConsumedToday = isDoseConsumedOnDate(med, slot.doseId, today);
@@ -267,7 +260,8 @@ export function useDoseReminderScheduler({
           isAutoActive ? '1' : '0',
         ].join('|');
         stillScheduled.add(key);
-        keepNativeIds.add(doseReminderAlarmIdForDose(slot.medId, slot.doseId));
+        const nid = doseReminderAlarmIdForDose(slot.medId, slot.doseId);
+        if (nid != null) keepNativeIds.add(nid);
         desired.push({
           key,
           medId: slot.medId,

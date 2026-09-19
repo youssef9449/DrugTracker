@@ -16,7 +16,7 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
         medicationId: 'med',
         doseId: 'd1',
         amount: -2,
-        type: 'auto_daily',
+        type: 'exact_auto',
         timestamp: '2026-09-14T08:00:00.000Z',
         date: today,
       },
@@ -39,14 +39,14 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
   });
 
   it('Auto historical amount survives schedule amount change', () => {
-    // FIRED / auto_daily stored amount=2 even if current schedule slot is 1
+    // FIRED / exact_auto stored amount=2 even if current schedule slot is 1
     const logs: ConsumptionLog[] = [
       {
         id: 'log-fired',
         medicationId: 'med',
         doseId: 'd1',
         amount: -2,
-        type: 'auto_daily',
+        type: 'exact_auto',
         timestamp: '2026-09-14T08:00:00.000Z',
         date: today,
       },
@@ -68,7 +68,7 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
         medicationId: 'med',
         doseId: 'd2',
         amount: -5,
-        type: 'auto_daily',
+        type: 'exact_auto',
         timestamp: '2026-09-14T10:00:00.000Z',
         date: today,
       },
@@ -86,7 +86,7 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
         medicationId: 'med',
         doseId: 'd1',
         amount: -3,
-        type: 'auto_daily',
+        type: 'exact_auto',
         timestamp: '2026-09-14T08:00:00.000Z',
         date: today,
       },
@@ -110,7 +110,7 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
         id: 'legacy-log',
         medicationId: 'med',
         amount: -2,
-        type: 'auto_daily',
+        type: 'exact_auto',
         timestamp: '2026-09-14T08:00:00.000Z',
         date: today,
       },
@@ -168,7 +168,7 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
         medicationId: 'med',
         doseId: 'd1',
         amount: -2,
-        type: 'auto_daily',
+        type: 'exact_auto',
         timestamp: '2026-09-14T08:00:00.000Z',
         date: today,
       },

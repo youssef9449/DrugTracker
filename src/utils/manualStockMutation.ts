@@ -693,7 +693,7 @@ export function runGatedManualRestore(opts: {
       m.id === opts.medicationId ? result.updatedMed : m
     );
 
-    // Mark the ACTIVE deduction log (auto_daily / dose_taken) that this
+    // Mark the ACTIVE deduction log (exact_auto / dose_taken / legacy-compatible auto_daily) that this
     // Restore reverses as `reversedAt`, and link the restore (skipped_day)
     // log to it via `relatedLogId`. This mirrors the refill/refill_undo
     // reversal pattern already used by handleUndoRefill. Without this, a

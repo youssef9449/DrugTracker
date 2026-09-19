@@ -172,12 +172,16 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                 dose.id,
                 today
               );
-              // Auto historical Restore requires valid amount evidence, not merely type.
+              // Auto historical Restore requires Exact Auto evidence + valid amount.
+              // Issue #269: exact_auto (current) or legacy auto_daily with deterministic Exact id.
               const isAutoConsumed = isUiAutoHistoricalRestoreEligible(
                 consumed,
                 skipped,
-                activeDeduction?.type,
-                historicalAmount
+                activeDeduction,
+                historicalAmount,
+                medication.id,
+                dose.id,
+                today
               );
               const scheduleAmount = Number(dose.amount) || 0;
               const elapsed = isDoseTimeElapsedToday(dose.time, now);
@@ -206,7 +210,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                 let actionLabel: string;
 
                 if (isAutoConsumed) {
-                  // Exact Auto with active auto_daily evidence → historical Restore.
+                  // Exact Auto with active exact_auto (or legacy deterministic auto_daily) evidence → historical Restore.
                   statusText = 'تم الخصم تلقائيًا';
                   action = 'restore';
                   actionLabel = 'استرجاع الجرعة';

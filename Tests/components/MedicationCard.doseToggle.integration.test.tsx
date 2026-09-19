@@ -208,7 +208,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
           id: 'exact-auto:med-single:s1:' + today,
           medicationId: 'med-single',
           medicationName: 'Single Schedule',
-          type: 'auto_daily',
+          type: 'exact_auto',
           amount: -2,
           date: today,
           timestamp: '2024-09-10T08:00:00.000Z',

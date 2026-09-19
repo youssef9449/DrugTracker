@@ -113,7 +113,7 @@ function makeDoseTakenLog(
   };
 }
 
-function makeAutoDailyLog(
+function makeExactAutoLog(
   medId: string,
   medName: string,
   doseId: string,
@@ -126,11 +126,11 @@ function makeAutoDailyLog(
     id: logId,
     medicationId: medId,
     medicationName: medName,
-    type: 'auto_daily',
+    type: 'exact_auto',
     amount: -amount,
     date,
     timestamp,
-    description: 'test auto_daily',
+    description: 'test exact_auto',
     doseId,
   };
 }
@@ -277,7 +277,7 @@ describe('#267 regression 3 — Refill Undo after Exact deductions', () => {
       logs: [
         makeRefillLog('med-1', 'TestMed', TODAY, 20, 'refill-1'),
         // Some exact deductions already baked into the durable snapshot:
-        makeAutoDailyLog('med-1', 'TestMed', 'd1', TODAY, 1, 'auto-1'),
+        makeExactAutoLog('med-1', 'TestMed', 'd1', TODAY, 1, 'auto-1'),
       ],
     });
     const r = await runGatedUndoRefill({
@@ -515,7 +515,7 @@ describe('#267 regression 8 — Exact Auto → Restore: amount = exact active lo
           doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
         }),
       ],
-      logs: [makeAutoDailyLog('med-1', 'TestMed', 'd1', TODAY, 2, 'auto-1')],
+      logs: [makeExactAutoLog('med-1', 'TestMed', 'd1', TODAY, 2, 'auto-1')],
     });
 
     const r = await runGatedManualRestore({
@@ -603,7 +603,7 @@ describe('#267 regression 10 — Schedule changed after Exact deduction: Restore
       doseConsumptionHistory: { d1: [TODAY] },
       doseSchedule: [{ id: 'd1', amount: 5, time: '08:00' }], // edited from 2
     });
-    const logs: ConsumptionLog[] = [makeAutoDailyLog('med-1', 'TestMed', 'd1', TODAY, 2, 'auto-1')];
+    const logs: ConsumptionLog[] = [makeExactAutoLog('med-1', 'TestMed', 'd1', TODAY, 2, 'auto-1')];
     const result = restoreDose(m, 'd1', TODAY, new Date(`${TODAY}T15:00:00`), logs);
     expect(result.ok).toBe(true);
     if (!result.ok) return;

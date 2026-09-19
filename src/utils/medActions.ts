@@ -9,6 +9,7 @@ import {
 } from './dateCalculations';
 import { isDoseTimeElapsedToday } from './doseSchedule';
 import { generateId } from './id';
+import { exactAutoLogId } from './autoDeductionReconciliation';
 
 /**
  * Shared medication-action helpers (Issue #267).
@@ -89,7 +90,7 @@ export type RestoreDoseResult =
        */
       wasActuallyConsumed: boolean;
       /**
-       * The id of the ACTIVE deduction log (auto_daily / dose_taken) that this
+       * The id of the ACTIVE deduction log (exact_auto / dose_taken / legacy compatible auto_daily) that this
        * Restore reverses. The caller MUST mark that log's `reversedAt` and
        * create the restore (skipped_day) log with `relatedLogId` pointing to
        * this id.
@@ -112,10 +113,16 @@ export type RestoreDoseResult =
  * (medicationId + doseId + calendarDate). "Active" = the deduction whose
  * stock effect is still in place and can be reversed by a Restore.
  *
- * A deduction log (auto_daily / dose_taken) is active when it has NO
- * `reversedAt` marker. Once a Restore reverses a deduction, that deduction
- * log is marked `reversedAt` and is skipped here so a later Restore finds
- * the NEXT active deduction.
+ * A deduction log (exact_auto / dose_taken, or legacy auto_daily with the
+ * deterministic Exact occurrence id) is active when it has NO `reversedAt`
+ * marker. Once a Restore reverses a deduction, that deduction log is marked
+ * `reversedAt` and is skipped here so a later Restore finds the NEXT active
+ * deduction.
+ *
+ * Issue #269: new Exact Auto logs use type `exact_auto`. Legacy `auto_daily`
+ * is accepted only when the persisted id matches the deterministic Exact
+ * occurrence identity (`exact-auto:<medicationId>:<doseId>:<calendarDate>`).
+ * Ordinary legacy auto_daily records are NOT treated as Exact evidence.
  *
  * Determinism contract — does NOT depend on array position:
  *   The most-recent active deduction is selected by comparing the log's
@@ -138,7 +145,15 @@ export function findActiveDeductionForOccurrence(
   for (const l of logs) {
     if (l.medicationId !== medicationId) continue;
     if (l.date !== calendarDate) continue;
-    if (l.type !== 'dose_taken' && l.type !== 'auto_daily') continue;
+    // Issue #269: dose_taken (manual) and exact_auto (current Exact Auto)
+    // are valid current deduction evidence. Legacy auto_daily is accepted
+    // only when the log id is the deterministic Exact occurrence id.
+    const isCurrentDeduction =
+      l.type === 'dose_taken' || l.type === 'exact_auto';
+    const isLegacyExactCompatible =
+      l.type === 'auto_daily' &&
+      l.id === exactAutoLogId(medicationId, normalizedDoseId, calendarDate);
+    if (!isCurrentDeduction && !isLegacyExactCompatible) continue;
     if (l.reversedAt) continue; // already reversed by a prior Restore
     const logDoseRaw =
       l.doseId != null && String(l.doseId).trim() !== ''
@@ -166,7 +181,7 @@ export function findActiveDeductionForOccurrence(
 /**
  * UI-only: historical Restore amount for display from exact active deduction
  * evidence (medicationId + doseId + calendarDate). Returns null when no active
- * dose_taken / auto_daily log exists.
+ * dose_taken / exact_auto / legacy-compatible auto_daily log exists.
  */
 export function getHistoricalRestoreDisplayAmount(
   logs: ConsumptionLog[],
@@ -189,19 +204,52 @@ export function getHistoricalRestoreDisplayAmount(
 }
 
 /**
- * UI-only: Auto historical Restore (consumed + auto_daily + valid amount evidence).
+ * Whether a log is Exact Auto deduction evidence for UI/restore purposes.
+ * Current path: type === 'exact_auto'.
+ * Legacy read-only compatibility: type === 'auto_daily' AND id is the
+ * deterministic Exact occurrence id for the given identity.
+ * Ordinary legacy auto_daily records are NOT Exact evidence (Issue #269).
+ */
+export function isExactAutoDeductionEvidence(
+  log: ConsumptionLog,
+  medicationId: string,
+  doseId: string,
+  calendarDate: string
+): boolean {
+  if (log.type === 'exact_auto') return true;
+  if (log.type === 'auto_daily') {
+    const normalized =
+      doseId == null ? '' : String(doseId).trim();
+    if (!normalized) return false;
+    return log.id === exactAutoLogId(medicationId, normalized, calendarDate);
+  }
+  return false;
+}
+
+/**
+ * UI-only: Auto historical Restore (consumed + Exact Auto evidence + valid amount).
+ * Accepts current `exact_auto` and legacy deterministic `auto_daily` Exact logs.
  */
 export function isUiAutoHistoricalRestoreEligible(
   consumed: boolean,
   skipped: boolean,
-  activeDeductionType: string | null | undefined,
-  historicalAmount: number | null
+  activeDeduction: ConsumptionLog | null | undefined,
+  historicalAmount: number | null,
+  medicationId: string,
+  doseId: string,
+  calendarDate: string
 ): boolean {
   return (
     consumed &&
     !skipped &&
-    activeDeductionType === 'auto_daily' &&
-    historicalAmount != null
+    historicalAmount != null &&
+    activeDeduction != null &&
+    isExactAutoDeductionEvidence(
+      activeDeduction,
+      medicationId,
+      doseId,
+      calendarDate
+    )
   );
 }
 
@@ -232,7 +280,7 @@ export function findActualDeductedAmountForOccurrence(
  *
  * Issue #267: Restore reverses a durable deduction log for the occurrence
  * (medicationId + doseId + calendarDate). The restore amount is
- * `abs(log.amount)` from the active deduction log (dose_taken or auto_daily).
+ * `abs(log.amount)` from the active deduction log (dose_taken, exact_auto, or legacy-compatible auto_daily).
  * If no active deduction log exists → reject `missing_deduction_evidence`.
  *
  * There is NO pure-projection Restore (elapsed time without a durable

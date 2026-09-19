@@ -4,9 +4,11 @@
  * This module is imported by `src/App.tsx`:
  *     import { getInitialMedications, getInitialLogs } from './data/initialData';
  *
- * It provides the default 3 medications + 2 consumption logs that
- * appear on a fresh install (before the user has saved anything to
- * localStorage). Once the user adds / edits medications, the state
+ * It provides the default 3 medications that appear on a fresh install
+ * (before the user has saved anything to localStorage). Seed logs are
+ * intentionally empty — legacy auto_daily automatic-deduction seed logs
+ * were removed in Issue #269 (Exact Auto uses occurrence-based exact_auto
+ * logs produced at runtime, not day-based seed data). Once the user adds / edits medications, the state
  * is persisted in localStorage (`android_med_tracker_items_v2`)
  * and this file is no longer used as the source of truth.
  *
@@ -16,11 +18,8 @@
  * "today" values; now each call gets the current date.
  *
  * Both functions accept an optional `todayStr` parameter so the caller
- * can share a single date snapshot across medications + logs — if the
- * first render straddles local midnight, two independent
- * `getTodayDateString()` calls could produce a lastSyncDate for day D
- * on the meds and a date for day D+1 on the seed auto-deduction logs,
- * creating inconsistent seed state that's persisted on first run.
+ * can share a single date snapshot. Medications use it for lastSyncDate;
+ * getInitialLogs returns an empty collection (Issue #269).
  *
  * NOTE: if AI Studio's preview shows an error like
  *     Failed to resolve import "./data/initialData" from "src/App.tsx"
@@ -96,29 +95,11 @@ export function getInitialMedications(todayStr: string = getTodayDateString()): 
   ];
 }
 
-export function getInitialLogs(todayStr: string = getTodayDateString()): ConsumptionLog[] {
-  const today = todayStr;
-  const nowIso = new Date().toISOString();
-  return [
-    {
-      id: 'log-init-1',
-      medicationId: 'med-1',
-      medicationName: 'كونكور 5 مجم (Concor)',
-      type: 'auto_daily',
-      amount: -1,
-      date: today,
-      timestamp: nowIso,
-      description: 'خصم استهلاك اليوم تلقائياً (-1 قرص)',
-    },
-    {
-      id: 'log-init-2',
-      medicationId: 'med-2',
-      medicationName: 'جلوكوفاج 500 مجم (Glucophage)',
-      type: 'auto_daily',
-      amount: -2,
-      date: today,
-      timestamp: nowIso,
-      description: 'خصم استهلاك اليوم تلقائياً (-2 قرص)',
-    },
-  ];
+/**
+ * Fresh installs start with no consumption logs.
+ * Issue #269: do not seed legacy auto_daily automatic-deduction logs.
+ * Exact Auto produces exact_auto occurrence logs at runtime only.
+ */
+export function getInitialLogs(_todayStr: string = getTodayDateString()): ConsumptionLog[] {
+  return [];
 }

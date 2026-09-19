@@ -305,7 +305,7 @@ export function applyExactAutoEventToMedication(
     id: exactAutoLogId(med.id, doseId, calendarDate),
     medicationId: med.id,
     medicationName: med.name,
-    type: 'auto_daily',
+    type: 'exact_auto',
     amount: -actualDeducted,
     date: calendarDate,
     timestamp: new Date(now).toISOString(),

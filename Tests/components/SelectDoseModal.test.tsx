@@ -209,7 +209,7 @@ describe('SelectDoseModal', () => {
       id: 'exact-auto:med-multi:d1:' + today,
       medicationId: 'med-multi',
       medicationName: 'Multi Med',
-      type: 'auto_daily',
+      type: 'exact_auto',
       amount: -2,
       date: today,
       timestamp: '2026-09-13T08:00:00.000Z',

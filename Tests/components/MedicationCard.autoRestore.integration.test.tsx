@@ -50,8 +50,7 @@ import type { ConsumptionLog, Medication } from '@/types';
 import {
   getTodayDateString,
   isDoseSkippedOnDate,
-  isDoseConsumedOnDate,
-} from '@/utils/dateCalculations';
+  isDoseConsumedOnDate } from '@/utils/dateCalculations';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';

@@ -32,8 +32,7 @@ import {
   scheduleDoseReminder,
   doseReminderAlarmId,
   doseReminderAlarmIdForDose,
-  isDoseReminderTimeStillAhead,
-} from '@/utils/notifications';
+  isDoseReminderTimeStillAhead } from '@/utils/notifications';
 
 /**
  * Extract the scheduled payload (id + schedule) of the LAST

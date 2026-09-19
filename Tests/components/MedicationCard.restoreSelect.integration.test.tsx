@@ -50,7 +50,7 @@ vi.mock('@/utils/sound', () => ({
 
 import App from '@/App';
 import type { Medication, ConsumptionLog } from '@/types';
-import { getTodayDateString, effectiveCurrentPills } from '@/utils/dateCalculations';
+import { getTodayDateString } from '@/utils/dateCalculations';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
@@ -410,7 +410,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
     });
 
     const before = readMeds()[0].currentPills;
-    const beforeEff = effectiveCurrentPills(readMeds()[0]);
+    const beforeEff =(readMeds()[0]);
 
     await clickCardManage();
     await selectDoseInModal('d2');

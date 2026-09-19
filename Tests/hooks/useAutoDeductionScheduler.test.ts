@@ -11,8 +11,7 @@ import {
   autoDeductionScheduleKey,
   localEpochMs,
   tomorrowDateString,
-  isFireRetryRecoveryPending,
-} from '../../src/hooks/useAutoDeductionScheduler';
+  isFireRetryRecoveryPending } from '../../src/hooks/useAutoDeductionScheduler';
 import { autoDeductionOccurrenceKey } from '../../src/utils/autoDeductionNative';
 
 function baseMed(over: Partial<Medication> = {}): Medication {
@@ -279,8 +278,7 @@ describe('amount validation boundary (JS)', () => {
 import {
   isMetadataOwnedByVersion,
   conditionalRollback,
-  buildSchedulePayload,
-} from '../../src/utils/autoDeductionScheduleOwnership';
+  buildSchedulePayload } from '../../src/utils/autoDeductionScheduleOwnership';
 
 describe('schedule metadata ownership / conditional rollback', () => {
   const key = 'sch:med\u001fdose\u001f2026-09-14';
@@ -401,8 +399,7 @@ describe('schedule metadata ownership / conditional rollback', () => {
 import {
   runSerializedScheduleTxn,
   runSerializedCancelTxn,
-  type SchedulerTxnState,
-} from '../../src/utils/autoDeductionScheduleOwnership';
+  type SchedulerTxnState } from '../../src/utils/autoDeductionScheduleOwnership';
 
 describe('scheduler transaction serialization (model)', () => {
   const key = 'sch:med\u001fdose\u001f2026-09-14';

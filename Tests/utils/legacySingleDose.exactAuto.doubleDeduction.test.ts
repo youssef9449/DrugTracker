@@ -31,13 +31,11 @@ import { describe, it, expect } from 'vitest';
 import type { Medication } from '../../src/types';
 import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
 import {
-  computeDueDoseBreakdown,
 } from '../../src/utils/dateCalculations';
 import {
   reconcileFiredEvents,
   exactAutoLogId,
-  applyExactAutoEventToMedication,
-} from '../../src/utils/autoDeductionReconciliation';
+  applyExactAutoEventToMedication } from '../../src/utils/autoDeductionReconciliation';
 
 const TODAY = '2026-09-14';
 const NOW = new Date('2026-09-14T09:00:00');
@@ -220,7 +218,7 @@ describe('explicit doseSchedule: Exact Auto unchanged after legacy removal', () 
       doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
       lastSyncDate: '2026-09-12',
     };
-    const breakdown = computeDueDoseBreakdown(multiMed, NOW, TODAY);
+    const breakdown =(multiMed, NOW, TODAY);
     expect(breakdown.gated).toBe(true);
     expect(breakdown.pastDueUnits).toBe(1);
     expect(breakdown.todayDueUnits).toBe(1);

@@ -4,8 +4,7 @@ import {
   cleanPhoneNumber,
   generatePharmacyOrderMessage,
   buildWhatsAppUrl,
-  calculateMedicationOrderQuantity,
-} from '@/utils/whatsapp';
+  calculateMedicationOrderQuantity } from '@/utils/whatsapp';
 import type { Medication } from '@/types';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {

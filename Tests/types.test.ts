@@ -2,8 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   calculateMedicationStatus,
   getCriticalThresholdDays,
-  type Medication,
-} from '@/types';
+  type Medication } from '@/types';
 import { getTodayDateString } from '@/utils/dateCalculations';
 import { NEVER_DEPLETES_DAYS } from '@/utils/time';
 

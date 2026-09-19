@@ -7,8 +7,7 @@ import {
   validateAndNormalizeDoseSchedule,
   isValidDoseTime,
   MAX_DOSES_PER_DAY,
-  DEFAULT_DOSE_TIMES,
-} from '@/utils/doseSchedule';
+  DEFAULT_DOSE_TIMES } from '@/utils/doseSchedule';
 import type { MedicationDose } from '@/types';
 
 function dose(partial: Partial<MedicationDose> & { amount: number; time: string }): MedicationDose {

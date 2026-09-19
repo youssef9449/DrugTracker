@@ -2,13 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   getTodayDateString,
   getDaysDifference,
-  getDepletionDate,
-} from '@/utils/dateCalculations';
+  getDepletionDate } from '@/utils/dateCalculations';
 import { NEVER_DEPLETES_DAYS } from '@/utils/time';
 import type { Medication } from '@/types';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
-  // lastSyncDate defaults to today so effectiveCurrentPills() ===
+  // lastSyncDate defaults to today so currentPills ===
   // currentPills (no days have passed). Tests that exercise the
   // dynamic-balance projection override lastSyncDate explicitly.
   return {

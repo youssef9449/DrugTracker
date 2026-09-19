@@ -6,8 +6,7 @@ import {
   reconcileFiredEvents,
   isExactAutoOccurrenceApplied,
   exactAutoLogId,
-  applyExactAutoEventToMedication,
-} from '../../src/utils/autoDeductionReconciliation';
+  applyExactAutoEventToMedication } from '../../src/utils/autoDeductionReconciliation';
 import { autoDeductionOccurrenceKey } from '../../src/utils/autoDeductionNative';
 import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
 import { runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
@@ -15,10 +14,8 @@ import {
   withAutoStockMutationGate,
   commitDurableAutoStockState,
   __setAutoStockGateTestHooks,
-  type AutoStockDurableState,
-} from '../../src/utils/autoDeductionStockGate';
+  type AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
 import {
-  effectiveCurrentPills,
 } from '../../src/utils/dateCalculations';
 
 function baseMed(over: Partial<Medication> = {}): Medication {
@@ -661,7 +658,7 @@ describe('projection', () => {
     vi.useRealTimers();
   });
 
-  it('effectiveCurrentPillsMatchesCommittedSnapshot', () => {
+  it('MatchesCommittedSnapshot', () => {
     const med = baseMed({
       doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
       currentPills: 10,
@@ -673,7 +670,7 @@ describe('projection', () => {
       [fired({ medicationId: 'med-1', doseId: 'd', calendarDate: '2026-09-14', amount: 2 })]
     );
     expect(r.medications[0].currentPills).toBe(8);
-    const eff = effectiveCurrentPills(
+    const eff =(
       r.medications[0],
       '2026-09-14',
       new Date('2026-09-14T20:00:00')

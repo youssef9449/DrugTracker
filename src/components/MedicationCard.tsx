@@ -15,13 +15,11 @@ import type { ConsumptionLog } from '../types';
 import { Medication, calculateMedicationStatus, describeStockInStrips, isSolidUnit } from '../types';
 import {
   getDepletionDate,
-  effectiveCurrentPills,
   getTodayDateString,
 } from '../utils/dateCalculations';
 import {
   getCardDoseToggleTarget,
   isMedicationAutoDeductActive,
-  medicationForStockProjection,
 } from '../utils/doseSchedule';
 import { getHistoricalRestoreDisplayAmount } from '../utils/medActions';
 import { pluralizeArabic } from '../lib/arabicPlural';
@@ -140,20 +138,15 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   globalAutoDeductEnabled = true,
 }) => {
   const isAutoActive = isMedicationAutoDeductActive(medication);
-  // Stock/status projection follows medication Auto only (Global is not a kill switch).
-  const stockMed = medicationForStockProjection(medication);
-  const statusInfo = calculateMedicationStatus(stockMed);
-  const depletion = getDepletionDate(stockMed);
+  // Issue #266: durable currentPills is the sole live stock balance.
+  const statusInfo = calculateMedicationStatus(medication);
+  const depletion = getDepletionDate(medication);
   const isSolid = isSolidUnit(medication.unit);
   const hasStrips = isSolid && Boolean(medication.stripsPerBox && medication.pillsPerStrip);
-  // Use the DYNAMIC balance (projected from currentPills + lastSyncDate)
-  // — never the raw snapshot. This keeps the displayed count correct
-  // even if the app was closed for many days and the snapshot hasn't
-  // been re-settled yet. When Global OFF, projection freezes at snapshot.
-  const effPills = effectiveCurrentPills(stockMed);
+  const currentPills = Number(medication.currentPills) || 0;
   const stripsDesc = isSolid
     ? describeStockInStrips(
-        effPills,
+        currentPills,
         medication.pillsPerStrip,
         medication.stripsPerBox,
         medication.unit
@@ -276,7 +269,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   isOut ? 'text-red-600' : 'text-rose-600'
                 }`}
               >
-                {effPills}
+                {currentPills}
               </span>
               <span className="text-xs text-slate-600 font-medium">
                 {medication.unit}
@@ -406,7 +399,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             <span className="text-[10px] text-slate-500 block">المخزون المتوفر</span>
             <div className="flex items-baseline gap-1 mt-0.5">
               <span className="text-xl font-extrabold font-mono text-emerald-900">
-                {effPills}
+                {currentPills}
               </span>
               <span className="text-[11px] text-slate-600">
                 {medication.unit}
@@ -613,11 +606,11 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 <button
                   type="button"
                   onClick={() => onConsumeDose(medication.id, doseToggle.doseId)}
-                  disabled={effPills <= 0 || takeAmount <= 0}
+                  disabled={currentPills <= 0 || takeAmount <= 0}
                   title={`تناول جرعة (-${takeAmount})`}
                   aria-label={`تناول جرعة (-${takeAmount})`}
                   className={`w-5 h-5 flex items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 active:scale-95 ${
-                    effPills <= 0 || takeAmount <= 0
+                    currentPills <= 0 || takeAmount <= 0
                       ? 'bg-slate-100 text-slate-300 cursor-not-allowed'
                       : 'bg-emerald-600 text-white hover:bg-emerald-700'
                   }`}
@@ -658,8 +651,8 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         <div className="mt-1.5 p-1 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between gap-1 text-[9px] min-w-0">
           <div className="flex items-baseline gap-0.5 min-w-0">
             <span className="text-[8px] text-slate-500">المتبقي:</span>
-            <span className={`font-mono font-extrabold text-[11px] leading-none ${effPills === 0 ? 'text-red-600' : 'text-slate-900'}`}>
-              {effPills}
+            <span className={`font-mono font-extrabold text-[11px] leading-none ${currentPills === 0 ? 'text-red-600' : 'text-slate-900'}`}>
+              {currentPills}
             </span>
             <span className="text-[8px] text-slate-500 truncate">{medication.unit || 'قرص'}</span>
           </div>
@@ -829,11 +822,11 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 <button
                   type="button"
                   onClick={() => onConsumeDose(medication.id, doseToggle.doseId)}
-                  disabled={effPills <= 0 || takeAmount <= 0}
+                  disabled={currentPills <= 0 || takeAmount <= 0}
                   title={`تناول جرعة (-${takeAmount})`}
                   aria-label={`تناول جرعة (-${takeAmount})`}
                   className={`w-6 h-6 flex items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 active:scale-95 ${
-                    effPills <= 0 || takeAmount <= 0
+                    currentPills <= 0 || takeAmount <= 0
                       ? 'bg-slate-100 text-slate-300 cursor-not-allowed'
                       : 'bg-emerald-600 text-white hover:bg-emerald-700'
                   }`}
@@ -878,14 +871,14 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             <span className="text-[10px] text-slate-500 font-medium">المتبقي:</span>
             <span
               className={`font-extrabold font-mono text-xs ${
-                effPills === 0
+                currentPills === 0
                   ? 'text-red-600'
-                  : effPills <= medication.dailyDose * 2
+                  : currentPills <= medication.dailyDose * 2
                   ? 'text-rose-600'
                   : 'text-slate-800'
               }`}
             >
-              {effPills}
+              {currentPills}
             </span>
             <span className="text-[10px] text-slate-600 font-medium">
               {medication.unit || 'قرص'}

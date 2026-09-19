@@ -63,8 +63,7 @@ import { runAutoDeductionReconciliation } from '@/utils/runAutoDeductionReconcil
 import { getInitialMedications } from '@/data/initialData';
 import {
   scheduleCriticalAlarm,
-  cancelCriticalAlarm,
-} from '@/utils/notifications';
+  cancelCriticalAlarm } from '@/utils/notifications';
 import { initNativeBridge } from '@/native';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';

@@ -14,8 +14,7 @@ import {
   MAX_LOG_ROWS,
   DEFAULT_SOLID_PACK_SIZE,
   DEFAULT_LIQUID_PACK_SIZE,
-  DAYS_PER_MONTH,
-} from '@/utils/time';
+  DAYS_PER_MONTH } from '@/utils/time';
 
 describe('time/numeric constants (#99)', () => {
   it('MS_PER_MINUTE is 60000', () => {

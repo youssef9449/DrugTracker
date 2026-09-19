@@ -9,14 +9,12 @@ import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
 import { runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
 import {
   reconcileFiredEvents,
-  exactAutoLogId,
-} from '../../src/utils/autoDeductionReconciliation';
+  exactAutoLogId } from '../../src/utils/autoDeductionReconciliation';
 import {
   runGatedAutoDeductToggle,
   runGatedGlobalAutoDeductToggle,
   runGatedMedicationUpdate,
-  __setManualEnvelopeTestHooks,
-} from '../../src/utils/manualStockMutation';
+  __setManualEnvelopeTestHooks } from '../../src/utils/manualStockMutation';
 import { __setAutoStockGateTestHooks } from '../../src/utils/autoDeductionStockGate';
 import { __setExactAutoEnvelopeTestHooks } from '../../src/utils/runAutoDeductionReconciliation';
 import { __setStockMutationOrderingTestHooks } from '../../src/utils/stockMutationOrdering';

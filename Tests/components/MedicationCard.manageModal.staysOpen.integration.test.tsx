@@ -46,8 +46,7 @@ import App from '@/App';
 import type { Medication } from '@/types';
 import {
   getTodayDateString,
-  isDoseConsumedOnDate,
-} from '@/utils/dateCalculations';
+  isDoseConsumedOnDate } from '@/utils/dateCalculations';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';

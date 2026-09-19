@@ -7,8 +7,7 @@ import {
   setCriticalNotificationClaim,
   clearCriticalNotificationClaim,
   claimsEqual,
-  migrateLegacyClaims,
-} from '@/utils/criticalNotificationClaims';
+  migrateLegacyClaims } from '@/utils/criticalNotificationClaims';
 
 describe('criticalNotificationClaims — storage', () => {
   beforeEach(() => {

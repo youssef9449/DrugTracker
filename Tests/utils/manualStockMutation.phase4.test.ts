@@ -11,29 +11,24 @@ import {
   runGatedMedicationUpdate,
   runGatedDeleteMedication,
   shouldDismissAlarmAfterManualTake,
-  type ManualStockEnvelope,
-} from '../../src/utils/manualStockMutation';
+  type ManualStockEnvelope } from '../../src/utils/manualStockMutation';
 import {
   __setManualEnvelopeTestHooks,
   __setExactAutoEnvelopeStorageTestHooks,
   loadExactAutoStockEnvelope,
-  durableMatchesEnvelopeSnapshot,
-} from '../../src/utils/stockEnvelopeRecovery';
+  durableMatchesEnvelopeSnapshot } from '../../src/utils/stockEnvelopeRecovery';
 import {
   __setStockMutationOrderingTestHooks,
   __resetStockMutationOrderingForTests,
   allocateMutationSeq,
   persistLastAppliedMutationSeq,
-  loadLastAppliedMutationSeq,
-} from '../../src/utils/stockMutationOrdering';
+  loadLastAppliedMutationSeq } from '../../src/utils/stockMutationOrdering';
 import {
   runAutoDeductionReconciliation,
-  type ExactAutoEnvelope,
-} from '../../src/utils/runAutoDeductionReconciliation';
+  type ExactAutoEnvelope } from '../../src/utils/runAutoDeductionReconciliation';
 import {
   __setAutoStockGateTestHooks,
-  type AutoStockDurableState,
-} from '../../src/utils/autoDeductionStockGate';
+  type AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
 import { __setManualRecurrenceInvalidationTestHook } from '../../src/utils/manualStockMutation';
 import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
 import { isDoseConsumedOnDate, isDoseSkippedOnDate } from '../../src/utils/dateCalculations';
@@ -43,8 +38,7 @@ import * as preSettleModule from '../../src/utils/reconcileExactBeforeManualMuta
 import {
   findActiveDeductionForOccurrence,
   consumeDose,
-  restoreDose,
-} from '../../src/utils/medActions';
+  restoreDose } from '../../src/utils/medActions';
 
 const TODAY = '2026-09-16';
 
@@ -2002,7 +1996,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
 
   // ─── Section 1: Auto/Manual Take → Restore lifecycle invariants ───
 
-  it('Auto → Restore leaves durable skip so effectiveCurrentPills does not re-project', async () => {
+  it('Auto → Restore leaves durable skip so does not re-project', async () => {
     // d1@08:00, now 15:00 → d1 elapsed. Simulate Exact Auto having applied
     // d1 (doseConsumption marker + auto_daily log) without going through
     // the gated path (the durable state is the post-Auto snapshot).

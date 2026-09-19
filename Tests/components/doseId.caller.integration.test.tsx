@@ -93,7 +93,7 @@ vi.mock('@/components/MedicationCard', async (importOriginal) => {
 
 import App from '@/App';
 import type { Medication, ConsumptionLog } from '@/types';
-import { getTodayDateString, effectiveCurrentPills } from '@/utils/dateCalculations';
+import { getTodayDateString } from '@/utils/dateCalculations';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
@@ -190,7 +190,7 @@ describe('doseId propagation — production callers (integration)', () => {
     expect(med.doseConsumption?.d3).toBeUndefined();
     // Auto OFF → no projection; snapshot reduced by d2.amount (2) only → 28.
     expect(med.currentPills).toBe(28);
-    expect(effectiveCurrentPills(med)).toBe(28);
+    expect(med.currentPills).toBe(28);
 
     const doseLog = readLogs().find(
       (l) => l.type === 'dose_taken' && l.medicationId === 'med-multi'
@@ -249,7 +249,7 @@ describe('doseId propagation — production callers (integration)', () => {
     expect(med.doseConsumption?.d3).toBeUndefined();
     expect(med.currentPills).toBe(28);
     // Auto OFF → no projection; effective == snapshot.
-    expect(effectiveCurrentPills(med)).toBe(28);
+    expect(med.currentPills).toBe(28);
 
     const doseLog = readLogs().find((l) => l.type === 'dose_taken');
     expect(doseLog?.doseId).toBe('d2');
@@ -276,7 +276,7 @@ describe('doseId propagation — production callers (integration)', () => {
     expect(med.doseConsumptionHistory).toBeUndefined();
     // No consume mutation; snapshot unchanged. d1 auto-due still projects.
     expect(med.currentPills).toBe(30);
-    expect(effectiveCurrentPills(med)).toBe(29);
+    expect(med.currentPills).toBe(29);
     expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(0);
   });
 
@@ -310,7 +310,7 @@ describe('doseId propagation — production callers (integration)', () => {
     expect(med.doseConsumption?.d3).toBeUndefined();
     expect(med.currentPills).toBe(28);
     // Auto OFF → effective == snapshot, no projection.
-    expect(effectiveCurrentPills(med)).toBe(28);
+    expect(med.currentPills).toBe(28);
 
     const doseLog = readLogs().find((l) => l.type === 'dose_taken');
     expect(doseLog?.doseId).toBe('d2');
@@ -378,7 +378,7 @@ describe('doseId propagation — production callers (integration)', () => {
     const med = readMeds()[0]!;
     expect(med.doseConsumption?.d2).toBeUndefined();
     expect(med.doseConsumption?.d3).toBeUndefined();
-    expect(effectiveCurrentPills(med)).toBe(30);
+    expect(med.currentPills).toBe(30);
 
     const restoreLog = readLogs().find((l) => l.type === 'skipped_day');
     expect(restoreLog?.doseId).toBe('d1');
@@ -406,9 +406,8 @@ describe('doseId propagation — production callers (integration)', () => {
     });
 
     expect(notificationActionHandler).toBeTypeOf('function');
-    // Pre: projection only — effective 29, snapshot 30 until Take settles.
-    expect(effectiveCurrentPills(readMeds()[0]!)).toBe(29);
-    expect(readMeds()[0]!.currentPills).toBe(30);
+    // Pre: durable snapshot until Take.
+        expect(readMeds()[0]!.currentPills).toBe(30);
     expect(readLogs().filter((l) => l.type === 'auto_daily')).toHaveLength(0);
 
     // Production path: localNotificationActionPerformed → take_dose → handleTakeDoseFromAlarm
@@ -424,7 +423,7 @@ describe('doseId propagation — production callers (integration)', () => {
     expect(med.currentPills).toBe(29);
     expect(med.doseConsumption?.d1).toBe(today);
     expect(med.doseConsumption?.d2).toBeUndefined();
-    expect(effectiveCurrentPills(med)).toBe(29);
+    expect(med.currentPills).toBe(29);
 
     const doseLogs = readLogs().filter((l) => l.type === 'dose_taken');
     expect(doseLogs).toHaveLength(1);
@@ -456,7 +455,7 @@ describe('doseId propagation — production callers (integration)', () => {
       afterFirst.doseConsumptionHistory
     );
     expect(med.doseConsumption?.d2).toBeUndefined();
-    expect(effectiveCurrentPills(med)).toBe(29);
+    expect(med.currentPills).toBe(29);
   });
 
   it('auto-due d1 + In-App DoseAlarm Take: one deduction; duplicate notification does not reopen modal; d2 untouched', async () => {
@@ -486,8 +485,7 @@ describe('doseId propagation — production callers (integration)', () => {
     expect(doseReceivedHandler).toBeTypeOf('function');
     // Pre: Auto OFF → no projection (snapshot 30, effective 30).
     expect(readMeds()[0]!.currentPills).toBe(30);
-    expect(effectiveCurrentPills(readMeds()[0]!)).toBe(30);
-
+    
     doseReceivedHandler!('med-multi', 'd1');
 
     await waitFor(() => {
@@ -503,7 +501,7 @@ describe('doseId propagation — production callers (integration)', () => {
     let med = readMeds()[0]!;
     expect(med.currentPills).toBe(29);
     expect(med.doseConsumption?.d2).toBeUndefined();
-    expect(effectiveCurrentPills(med)).toBe(29);
+    expect(med.currentPills).toBe(29);
     expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(1);
     expect(readLogs().find((l) => l.type === 'dose_taken')?.doseId).toBe('d1');
     expect(readLogs().find((l) => l.type === 'dose_taken')?.amount).toBe(-1);
@@ -544,6 +542,6 @@ describe('doseId propagation — production callers (integration)', () => {
     );
     expect(med.doseConsumption?.d1).toBe(today);
     expect(med.doseConsumption?.d2).toBeUndefined();
-    expect(effectiveCurrentPills(med)).toBe(29);
+    expect(med.currentPills).toBe(29);
   });
 });

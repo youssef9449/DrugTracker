@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Medication, calculateMedicationStatus } from '../types';
-import { effectiveCurrentPills, getCriticalAlarmDate, getTodayDateString } from '../utils/dateCalculations';
+import { getCriticalAlarmDate, getTodayDateString } from '../utils/dateCalculations';
 import { sendCriticalStockAlert, cancelCriticalAlarm } from '../utils/notifications';
 import {
   loadCriticalNotificationClaims,
@@ -206,9 +206,9 @@ export function useStockAlerts({
       setCriticalNotificationClaim(claims, med.id, { ...IN_FLIGHT_CLAIM });
       changed = true;
 
-      const effPills = effectiveCurrentPills(med);
+      const currentPills = Number(med.currentPills) || 0;
       const unit = med.unit || 'قرص';
-      Promise.resolve(sendCriticalStockAlert(med.id, med.name, daysLeft, effPills, unit))
+      Promise.resolve(sendCriticalStockAlert(med.id, med.name, daysLeft, currentPills, unit))
         .then((sent) => sent === true)
         .catch(() => false)
         .then((sent) => {

@@ -125,7 +125,7 @@ export interface UseCriticalAlarmSchedulerOptions {
  *
  * Re-schedule triggers: the effect re-runs whenever any field that
  * affects the projected critical date changes (id, currentPills,
- * dailyDose, lastSyncDate, warningThresholdDays, autoDeductEnabled,
+ * dailyDose, warningThresholdDays, autoDeductEnabled,
  * name, unit) — see `criticalSignature`.
  *
  * Async race safety (all in-memory, nothing persisted for it):
@@ -178,7 +178,6 @@ export function useCriticalAlarmScheduler({
             m.id,
             m.currentPills,
             m.dailyDose,
-            m.lastSyncDate ?? '',
             m.warningThresholdDays,
             m.autoDeductEnabled === false ? 0 : 1,
             m.name,

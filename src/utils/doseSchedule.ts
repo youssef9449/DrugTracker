@@ -18,6 +18,17 @@ import { timeToMinutes } from './time';
 import { isDoseConsumedOnDate, isDoseSkippedOnDate, getTodayDateString } from './dateCalculations';
 
 
+
+/**
+ * Auto-Deduction active for a medication based solely on its own preference.
+ * Runtime Auto follows medication.autoDeductEnabled (undefined defaults ON).
+ */
+export function isMedicationAutoDeductActive(
+  medication: Medication
+): boolean {
+  return medication.autoDeductEnabled !== false;
+}
+
 /** Sensible UI maximum for doses per day (compact mobile form). */
 export const MAX_DOSES_PER_DAY = 6;
 

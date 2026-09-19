@@ -389,7 +389,7 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
 
     const before = readMeds()[0]!;
     const beforeLogs = readLogs();
-    const beforePills =(before);
+    const beforePills = before.currentPills;
 
     fireEvent.click(screen.getByTestId('manage-doses-med-multi'));
     await waitFor(() => {

@@ -210,7 +210,7 @@ describe('DoseAlarmModal', () => {
 });
 
 describe('DoseAlarmModal — medication-level stock display', () => {
-  it('Medication ON with past lastSync shows projected stock below snapshot', () => {
+  it('Medication ON with past lastSync still shows durable currentPills (no projection)', () => {
     const med = makeMed({
       currentPills: 30,
       dailyDose: 2,
@@ -227,7 +227,8 @@ describe('DoseAlarmModal — medication-level stock display', () => {
       />
     );
     const line = screen.getByText(/المخزون المتوفر لديك حالياً/);
-    expect(line.textContent).not.toMatch(/حالياً: 30 /);
+    // Issue #266: lastSyncDate must not reduce displayed stock.
+    expect(line.textContent).toMatch(/حالياً: 30 /);
   });
 
   it('Medication OFF freezes displayed stock at currentPills', () => {

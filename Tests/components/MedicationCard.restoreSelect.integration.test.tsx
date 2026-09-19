@@ -410,7 +410,6 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
     });
 
     const before = readMeds()[0].currentPills;
-    const beforeEff =(readMeds()[0]);
 
     await clickCardManage();
     await selectDoseInModal('d2');
@@ -427,8 +426,6 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
       expect(readMeds()[0].doseConsumption?.d1).toBe(TEST_DATE);
     });
 
-    // Sanity: effective balance moved by +2 relative to pre-restore snapshot path
-    void beforeEff;
   });
 
   it('closing SelectDoseModal without selecting does not restore', async () => {

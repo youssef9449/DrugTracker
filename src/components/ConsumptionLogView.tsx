@@ -12,8 +12,8 @@ interface ConsumptionLogViewProps {
 
 /**
  * Count daily dose *slots* for a medication under the current model.
- * Prefer doseSchedule length when present; otherwise legacy single-dose
- * (one slot when auto-deduct is on and dailyDose > 0).
+ * Explicit doseSchedule only: length of the schedule when Auto is on.
+ * Missing/empty doseSchedule → 0 (no dailyDose synthetic slot).
  * Medications with autoDeductEnabled === false contribute zero slots.
  */
 function dailyScheduledSlots(med: Medication): number {
@@ -21,7 +21,7 @@ function dailyScheduledSlots(med: Medication): number {
   if (med.doseSchedule && med.doseSchedule.length > 0) {
     return med.doseSchedule.length;
   }
-  return med.dailyDose > 0 ? 1 : 0;
+  return 0;
 }
 
 /**
@@ -35,7 +35,7 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
   logs,
 }) => {
   // Sum of daily dose slots across auto-deduct medications, then × DAYS_PER_MONTH.
-  // Multi-dose meds use doseSchedule.length; legacy single-dose counts as 1 slot.
+  // Explicit doseSchedule length only; no-schedule meds contribute 0.
   const totalDailyScheduled = medications.reduce(
     (acc, m) => acc + dailyScheduledSlots(m),
     0

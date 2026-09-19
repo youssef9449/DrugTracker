@@ -106,8 +106,8 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       setName(initialData.name);
       setCurrentPills(initialData.currentPills);
       setCurrentPillsStr(String(initialData.currentPills));
-      // Multi-dose schedule: use stored schedule when present, otherwise
-      // map legacy dailyDose + reminderTime to a single-dose row.
+      // Editing uses persisted doseSchedule only (explicit-schedule model).
+      // Missing/empty schedule → no synthetic dose from dailyDose/reminderTime.
       const schedule = getDoseScheduleForUI(initialData);
       setDoseSchedule(schedule);
       setDosesPerDay(schedule.length);

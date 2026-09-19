@@ -72,7 +72,7 @@ describe('ConsumptionLogView', () => {
     expect(screen.queryByLabelText('اختر الجرعة')).not.toBeInTheDocument();
   });
 
-  it('counts legacy single-dose medication as one daily slot (×30 monthly)', () => {
+  it('no-schedule medication contributes 0 daily slots (no dailyDose synthetic)', () => {
     render(
       <ConsumptionLogView
         medications={[makeMed('med-a', 'Med A', { dailyDose: 2, autoDeductEnabled: true })]}
@@ -80,7 +80,25 @@ describe('ConsumptionLogView', () => {
         showToast={() => {}}
       />
     );
-    // 1 slot/day × 30 = 30 (dailyDose is pills, not slots)
+    // Missing doseSchedule → 0 slots/day → 0 monthly
+    expect(screen.getByText('0')).toBeInTheDocument();
+  });
+
+  it('explicit single-slot schedule counts as one daily slot (×30 monthly)', () => {
+    render(
+      <ConsumptionLogView
+        medications={[
+          makeMed('med-a', 'Med A', {
+            dailyDose: 2,
+            autoDeductEnabled: true,
+            doseSchedule: [makeDose('d1', 2, '09:00')],
+            dosesPerDay: 1,
+          }),
+        ]}
+        logs={[]}
+        showToast={() => {}}
+      />
+    );
     expect(screen.getByText('30')).toBeInTheDocument();
     expect(screen.getByText('1')).toBeInTheDocument();
   });
@@ -110,7 +128,7 @@ describe('ConsumptionLogView', () => {
     expect(screen.getByText('3')).toBeInTheDocument();
   });
 
-  it('sums single-dose + multi-dose slots and excludes autoDeductEnabled === false', () => {
+  it('sums explicit single-slot + multi-dose slots and excludes autoDeductEnabled === false', () => {
     const multi = [
       makeDose('d1', 1, '08:00'),
       makeDose('d2', 1, '14:00'),
@@ -119,7 +137,12 @@ describe('ConsumptionLogView', () => {
     render(
       <ConsumptionLogView
         medications={[
-          makeMed('med-a', 'Med A', { dailyDose: 1, autoDeductEnabled: true }),
+          makeMed('med-a', 'Med A', {
+            dailyDose: 1,
+            autoDeductEnabled: true,
+            doseSchedule: [makeDose('s1', 1, '08:00')],
+            dosesPerDay: 1,
+          }),
           makeMed('med-b', 'Med B', {
             dailyDose: 3,
             doseSchedule: multi,

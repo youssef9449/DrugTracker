@@ -517,8 +517,9 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
 
   /**
    * Card toggle restore.
-   * Multi-dose without doseId → same SelectDoseModal UX as Take (restore mode).
-   * Single-dose / legacy / explicit doseId → direct restoreDose path.
+   * Multi-dose without doseId → SelectDoseModal (restore mode), same UX as Take.
+   * Explicit doseId (including single-slot schedule) → direct restoreDose path.
+   * No-schedule medications are not a supported current single-dose runtime mode.
    *
    * Mode is committed with flushSync before selectDoseMed so the first
    * SelectDoseModal render after open always sees mode='restore'. Otherwise

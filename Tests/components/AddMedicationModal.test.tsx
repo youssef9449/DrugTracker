@@ -270,7 +270,7 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     expect(amountTwos.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('legacy med without schedule maps to one dose in the UI', () => {
+  it('missing doseSchedule produces no synthetic dose row from dailyDose/reminderTime', () => {
     const med = makeMed({
       dailyDose: 2,
       reminderTime: '20:00',
@@ -278,10 +278,9 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
       doseSchedule: undefined,
     });
     render(<AddMedicationModal {...baseProps({ initialData: med })} />);
-    expect(screen.getByText('الجرعة 1')).toBeInTheDocument();
-    expect(screen.queryByText('الجرعة 2')).not.toBeInTheDocument();
-    const amountTwos = screen.getAllByDisplayValue('2');
-    expect(amountTwos.length).toBeGreaterThanOrEqual(1);
+    // Explicit-schedule only: no invented dose from dailyDose/reminderTime
+    expect(screen.queryByText('الجرعة 1')).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue('2')).not.toBeInTheDocument();
   });
 
   it('saving persists doseSchedule and derived dailyDose without changing stock fields', () => {
@@ -292,6 +291,8 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
       lastConsumedDate: '2024-06-01',
       dailyDose: 1,
       reminderTime: '09:00',
+      doseSchedule: [{ id: 'd1', amount: 1, time: '09:00' }],
+      dosesPerDay: 1,
     });
     const onSave = vi.fn();
     render(

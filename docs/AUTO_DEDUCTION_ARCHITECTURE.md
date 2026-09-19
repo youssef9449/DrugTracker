@@ -18,7 +18,7 @@ Current-state technical specification for DrugTracker’s exact-time automatic d
 | Orchestration, envelope, marks | `src/utils/runAutoDeductionReconciliation.ts` |
 | Serialized fresh durable-state gate | `src/utils/autoDeductionStockGate.ts` |
 | Hydration / resume + native event entry | `src/hooks/useExactAutoDeductionReconciliation.ts`, `src/App.tsx` |
-| Legacy day settlement & projection | `src/utils/dateCalculations.ts` |
+| Durable stock / daysLeft (no day projection) | `src/utils/dateCalculations.ts` |
 
 ---
 
@@ -30,8 +30,8 @@ Current-state technical specification for DrugTracker’s exact-time automatic d
 
 - One-shot native exact alarms and durable native occurrence events
 - JS reconciliation into medications, consumption markers, and logs
-- Coordination with existing day-level settlement (`syncAutoDailyDeductions`)
-- Multi-dose and legacy single-dose occurrence identity
+- Explicit `doseSchedule` as the source of future Exact occurrences (no day-level settlement engine)
+- Multi-dose and explicit single-slot `doseSchedule` occurrence identity
 - Crash-oriented durability for JS commits and native acknowledgement retries
 
 **Non-goals of this document / this subsystem boundary:**
@@ -69,10 +69,10 @@ JavaScript owns **business stock, markers, logs, and acknowledgement**.
 | Did this occurrence fire at wall time while the app might be dead? | Native event store (SharedPreferences), status until successfully marked reconciled |
 | What is the app’s committed inventory? | `Medication.currentPills` (+ related history fields) in localStorage (`android_med_tracker_items_v2`) |
 | What does the UI show as “effective” remaining? | `effectiveCurrentPills(...)` — a **projection** from committed state + remaining due slots, **not** a second durable ledger |
-| What prevents applying the same dose twice? | Occurrence markers, legacy day horizon, deterministic exact-auto log ids, native insert-if-absent, serialized gate |
+| What prevents applying the same dose twice? | Occurrence markers, deterministic exact-auto log ids, native insert-if-absent, serialized gate |
 
 **Native does not** write `currentPills`, does not write JS localStorage, and does not run settlement math.  
-**A FIRED native row is not a stock mutation.** Stock changes only in JS reconciliation (or other JS paths such as legacy sync / manual take).
+**A FIRED native row is not a stock mutation.** Stock changes only in JS reconciliation (Exact Auto apply, Manual Take/Restore, Refill).
 
 ---
 
@@ -89,9 +89,9 @@ Used consistently for:
 - Native storage key and PendingIntent **data URI** (plus fixed action; request code is only a namespace, not the uniqueness mechanism)
 - JS occurrence keys and deterministic log ids
 
-**Not** used as identity: array index, time string alone, `dailyDose`, “first dose”, “next dose”, or schedule position.
+**Not** used as identity: array index, time string alone, `dailyDose`, “first dose”, “next dose”, schedule position, or a medication-level `lastConsumedDate` fallback.
 
-**Legacy / single-dose:** empty or missing `doseId` is normalized to `LEGACY_DOSE_ID` (`__legacy_daily__`) in JS reconciliation.
+**`doseSchedule` is the sole source for future Exact occurrences.** FIRED events remain durable and are reconciled using their persisted identity (`medicationId + doseId + calendarDate`) and `event.amount`. There is no current no-schedule synthetic Exact occurrence and no `LEGACY_DOSE_ID` in the JS Exact Auto model.
 
 ---
 
@@ -186,17 +186,18 @@ After folding prior units, `lastSyncDate` may advance only to the end of that pr
 
 ---
 
-## Legacy day settlement compatibility
+## Day-based settlement (removed)
 
-`syncAutoDailyDeductions` remains the bulk / day-horizon path. Exact reconciliation shares stock and markers with it.
+There is **no** current Legacy day-based catch-up engine (`syncAutoDailyDeductions` was removed). Exact Auto is occurrence-based only.
 
-**Native-first:** exact apply records consumption (or equivalent terminal markers) → later legacy `historicalDayDueUnits` skips consumed/skipped slots → no second charge of that occurrence.
+- `lastSyncDate` is retained as a companion field to durable `currentPills` where other paths still use it; it is **not** occurrence-level Exact Auto evidence and must not prevent applying a FIRED event.
+- Per-dose truth for consumption/skip remains `doseConsumption` / `doseConsumptionHistory` / `doseSkippedHistory`.
+- Medication-level `lastConsumedDate` does **not** mark an arbitrary dose occurrence as consumed when `doseSchedule` is missing.
 
-**Legacy-first:** day settlement advances `lastSyncDate` and reduces `currentPills` → later exact event with `calendarDate < today` and `calendarDate <= lastSync` is treated as already reflected → acknowledge only.
+### Log types
 
-`lastSyncDate` is a **day-settlement horizon**, not a per-dose event ledger. Per-dose truth remains consumption / skip history (and legacy `lastConsumedDate` where applicable).
-
-Hydration-time legacy sync and exact reconciliation both use the **same** stock mutation gate with fresh durable loads.
+- **Current Exact Auto production logs** use `type: 'exact_auto'` with deterministic id `exact-auto:<medicationId>:<doseId>:<calendarDate>`.
+- **`auto_daily`** remains in the type union only for **read-only compatibility** with old persisted logs. Ordinary legacy `auto_daily` records are not treated as Exact occurrences; only those whose id matches the deterministic Exact identity are interpreted as historical Exact evidence.
 
 ---
 
@@ -206,7 +207,7 @@ Hydration-time legacy sync and exact reconciliation both use the **same** stock 
 
 Exact reconciliation uses the same occurrence-level consumption and skip history helpers used elsewhere in the app. A dose already taken or skipped for that `doseId` + date is `already_applied` for exact auto. Applying exact auto records consumption markers so a later manual take path that checks the same history can see the occurrence as already consumed. Restore and skip history remain part of the shared occurrence model.
 
-**Not claimed here:** a complete, product-level matrix of every race between Take, Restore, exact native fire, and legacy sync as a dedicated redesigned workflow. Further product tightening of that matrix is future work; it is **not** accurate to say Take/Restore “do not integrate” with exact auto today.
+**Not claimed here:** a complete, product-level matrix of every race between Take, Restore, exact native fire, and Exact Auto as a dedicated redesigned workflow. Further product tightening of that matrix is future work; it is **not** accurate to say Take/Restore “do not integrate” with exact auto today.
 
 ---
 
@@ -214,9 +215,8 @@ Exact reconciliation uses the same occurrence-level consumption and skip history
 
 | Layer | Role |
 |-------|------|
-| **Occurrence markers** | `doseConsumption` / history, `doseSkippedHistory`, legacy `lastConsumedDate` — terminal for that dose+date |
-| **Legacy horizon** | `lastSyncDate` — past calendar days already folded by day settlement |
-| **Deterministic exact-auto log** | `exact-auto:{medicationId}:{doseId}:{calendarDate}` — retries do not create a second logical exact-auto log row |
+| **Occurrence markers** | `doseConsumption` / history, `doseSkippedHistory` — terminal for that dose+date |
+| **Deterministic exact-auto log** | `exact-auto:{medicationId}:{doseId}:{calendarDate}` with `type: 'exact_auto'` — retries do not create a second logical exact-auto log row |
 | **Native insert-if-absent** | One durable native row per occurrence key |
 | **Serialized gate** | One mutation job at a time, each on fresh durable state |
 

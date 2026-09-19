@@ -164,13 +164,13 @@ export function useDoseReminderScheduler({
                   .map((d) => `${d.id}@${d.time}@${d.amount}`)
                   .join(',')
               : '';
+          // Reminder slots from explicit doseSchedule only.
+          // reminderTime/dailyDose are not separate sources of dose identity.
           return [
             m.id,
             m.reminderEnabled === true ? '1' : '0',
-            m.reminderTime ?? '',
             schedulePart,
             m.name,
-            m.dailyDose,
             m.unit ?? '',
             m.autoDeductEnabled !== false ? '1' : '0',
           ].join('|');
@@ -393,7 +393,9 @@ export function useDoseReminderScheduler({
                 .sort()
                 .join(',')
             : '';
-          return `${m.id}|${m.lastConsumedDate ?? ''}|${perDose}`;
+          // Per-dose consumption only; medication-level lastConsumedDate
+          // is not a reminder reconciliation dependency.
+          return `${m.id}|${perDose}`;
         })
         .sort()
         .join('\n'),

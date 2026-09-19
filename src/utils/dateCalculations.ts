@@ -83,22 +83,19 @@ export function getDoseConsumedDates(med: Medication, doseId: string): string[] 
 }
 
 /**
- * Whether a specific dose slot was manually consumed on `dateStr`.
- * Multi-dose: true when history (or pre-3B last-date fallback) includes
- * that exact date. Legacy (no schedule): lastConsumedDate === dateStr.
+ * Whether a specific dose slot was consumed on `dateStr`.
+ * True only when the requested doseId has that date in per-dose data:
+ * `doseConsumptionHistory[doseId]` or the `doseConsumption[doseId]`
+ * pre-3B compatibility fallback.
+ * Medication-level `lastConsumedDate` is NOT used (no no-schedule
+ * single-dose runtime fallback).
  */
 export function isDoseConsumedOnDate(
   med: Medication,
   doseId: string,
   dateStr: string
 ): boolean {
-  if (getDoseConsumedDates(med, doseId).includes(dateStr)) {
-    return true;
-  }
-  if (!hasDoseSchedule(med) && med.lastConsumedDate === dateStr) {
-    return true;
-  }
-  return false;
+  return getDoseConsumedDates(med, doseId).includes(dateStr);
 }
 
 /**

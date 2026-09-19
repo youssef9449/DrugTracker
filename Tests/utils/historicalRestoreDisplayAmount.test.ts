@@ -203,4 +203,35 @@ describe('production UI Restore eligibility helpers', () => {
       )
     ).toBe(false);
   });
+
+  it('malformed exact_auto with arbitrary id is NOT Exact evidence', () => {
+    const malformed: ConsumptionLog = {
+      id: 'random-id',
+      medicationId: 'med',
+      medicationName: 'Med',
+      type: 'exact_auto',
+      amount: -2,
+      date: TODAY,
+      timestamp: '2026-09-14T08:00:00.000Z',
+      description: 'bad',
+      doseId: 'd1',
+    };
+    expect(
+      isExactAutoDeductionEvidence(malformed, 'med', 'd1', TODAY)
+    ).toBe(false);
+    expect(
+      getHistoricalRestoreDisplayAmount([malformed], 'med', 'd1', TODAY)
+    ).toBeNull();
+    expect(
+      isUiAutoHistoricalRestoreEligible(
+        true,
+        false,
+        malformed,
+        2,
+        'med',
+        'd1',
+        TODAY
+      )
+    ).toBe(false);
+  });
 });

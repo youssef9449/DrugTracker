@@ -27,6 +27,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Medication, ConsumptionLog } from '../../src/types';
+import { exactAutoLogId } from '../../src/utils/autoDeductionReconciliation';
 import {
   consumeDose,
   restoreDose,
@@ -119,11 +120,11 @@ function makeExactAutoLog(
   doseId: string,
   date: string,
   amount: number,
-  logId: string,
+  _logId: string = '',
   timestamp: string = `${date}T08:00:00.000Z`
 ): ConsumptionLog {
   return {
-    id: logId,
+    id: exactAutoLogId(medId, doseId, date),
     medicationId: medId,
     medicationName: medName,
     type: 'exact_auto',
@@ -532,9 +533,9 @@ describe('#267 regression 8 — Exact Auto → Restore: amount = exact active lo
     const restoreLog = durable.logs.find((l) => l.id === 'restore-1');
     expect(restoreLog?.type).toBe('skipped_day');
     expect(restoreLog?.amount).toBe(2);
-    expect(restoreLog?.relatedLogId).toBe('auto-1');
+    expect(restoreLog?.relatedLogId).toBe(exactAutoLogId('med-1', 'd1', TODAY));
     // The auto_daily log is marked reversed.
-    expect(durable.logs.find((l) => l.id === 'auto-1')?.reversedAt).toBeTruthy();
+    expect(durable.logs.find((l) => l.id === exactAutoLogId('med-1', 'd1', TODAY))?.reversedAt).toBeTruthy();
   });
 });
 

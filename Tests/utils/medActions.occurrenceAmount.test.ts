@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { findActiveDeductionForOccurrence } from '@/utils/medActions';
 import type { ConsumptionLog } from '@/types';
+import { exactAutoLogId } from '@/utils/autoDeductionReconciliation';
 
 /**
  * Phase 4 UI / restore amount authority:
@@ -12,7 +13,7 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
   it('Manual d2 restore must not pick Auto d1 amount (sibling isolation)', () => {
     const logs: ConsumptionLog[] = [
       {
-        id: 'log-d1-auto',
+        id: exactAutoLogId('med', 'd1', today),
         medicationId: 'med',
         doseId: 'd1',
         amount: -2,
@@ -42,7 +43,7 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
     // FIRED / exact_auto stored amount=2 even if current schedule slot is 1
     const logs: ConsumptionLog[] = [
       {
-        id: 'log-fired',
+        id: exactAutoLogId('med', 'd1', today),
         medicationId: 'med',
         doseId: 'd1',
         amount: -2,
@@ -64,7 +65,7 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
   it('exact occurrence identity does not cross-pick sibling dose events', () => {
     const logs: ConsumptionLog[] = [
       {
-        id: 'a',
+        id: exactAutoLogId('med', 'd2', today),
         medicationId: 'med',
         doseId: 'd2',
         amount: -5,
@@ -82,7 +83,7 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
   it('when persisted exact deduction exists, do not fall back to schedule defaults', () => {
     const logs: ConsumptionLog[] = [
       {
-        id: 'exact',
+        id: exactAutoLogId('med', 'd1', today),
         medicationId: 'med',
         doseId: 'd1',
         amount: -3,
@@ -164,7 +165,7 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
   it('padded doseId normalizes and matches log doseId', () => {
     const logs: ConsumptionLog[] = [
       {
-        id: 'd1-log',
+        id: exactAutoLogId('med', 'd1', today),
         medicationId: 'med',
         doseId: 'd1',
         amount: -2,
@@ -174,7 +175,7 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
       },
     ];
     const active = findActiveDeductionForOccurrence(logs, 'med', ' d1 ', today);
-    expect(active?.id).toBe('d1-log');
+    expect(active?.id).toBe(exactAutoLogId('med', 'd1', today));
     expect(active?.amount).toBe(-2);
   });
 });

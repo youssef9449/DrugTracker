@@ -113,16 +113,17 @@ export type RestoreDoseResult =
  * (medicationId + doseId + calendarDate). "Active" = the deduction whose
  * stock effect is still in place and can be reversed by a Restore.
  *
- * A deduction log (exact_auto / dose_taken, or legacy auto_daily with the
- * deterministic Exact occurrence id) is active when it has NO `reversedAt`
- * marker. Once a Restore reverses a deduction, that deduction log is marked
- * `reversedAt` and is skipped here so a later Restore finds the NEXT active
- * deduction.
+ * A deduction log is active when it has NO `reversedAt` marker. Once a
+ * Restore reverses a deduction, that deduction log is marked `reversedAt`
+ * and is skipped here so a later Restore finds the NEXT active deduction.
  *
- * Issue #269: new Exact Auto logs use type `exact_auto`. Legacy `auto_daily`
- * is accepted only when the persisted id matches the deterministic Exact
- * occurrence identity (`exact-auto:<medicationId>:<doseId>:<calendarDate>`).
- * Ordinary legacy auto_daily records are NOT treated as Exact evidence.
+ * Issue #269 / #276: accepted deduction types for an occurrence:
+ *   - dose_taken: manual deduction (existing doseId checks)
+ *   - exact_auto: current Exact Auto, ONLY when log.id is the deterministic
+ *     Exact occurrence id (`exact-auto:<medicationId>:<doseId>:<calendarDate>`)
+ *   - auto_daily: legacy read-only compatibility, ONLY when log.id matches
+ *     the same deterministic Exact occurrence id
+ * Ordinary legacy auto_daily and malformed exact_auto records are ignored.
  *
  * Determinism contract — does NOT depend on array position:
  *   The most-recent active deduction is selected by comparing the log's
@@ -139,21 +140,24 @@ export function findActiveDeductionForOccurrence(
   const normalizedDoseId =
     doseId == null ? '' : String(doseId).trim();
   if (!normalizedDoseId) return null;
+  const expectedExactId = exactAutoLogId(
+    medicationId,
+    normalizedDoseId,
+    calendarDate
+  );
   let best: ConsumptionLog | null = null;
   let bestEpoch = -Infinity;
   let bestId = '';
   for (const l of logs) {
     if (l.medicationId !== medicationId) continue;
     if (l.date !== calendarDate) continue;
-    // Issue #269: dose_taken (manual) and exact_auto (current Exact Auto)
-    // are valid current deduction evidence. Legacy auto_daily is accepted
-    // only when the log id is the deterministic Exact occurrence id.
-    const isCurrentDeduction =
-      l.type === 'dose_taken' || l.type === 'exact_auto';
-    const isLegacyExactCompatible =
-      l.type === 'auto_daily' &&
-      l.id === exactAutoLogId(medicationId, normalizedDoseId, calendarDate);
-    if (!isCurrentDeduction && !isLegacyExactCompatible) continue;
+    // Issue #269/#276: dose_taken is manual evidence. exact_auto and
+    // legacy auto_daily are Exact evidence only with deterministic ID.
+    const isManualDeduction = l.type === 'dose_taken';
+    const isExactOccurrenceEvidence =
+      (l.type === 'exact_auto' || l.type === 'auto_daily') &&
+      l.id === expectedExactId;
+    if (!isManualDeduction && !isExactOccurrenceEvidence) continue;
     if (l.reversedAt) continue; // already reversed by a prior Restore
     const logDoseRaw =
       l.doseId != null && String(l.doseId).trim() !== ''
@@ -204,11 +208,16 @@ export function getHistoricalRestoreDisplayAmount(
 }
 
 /**
- * Whether a log is Exact Auto deduction evidence for UI/restore purposes.
- * Current path: type === 'exact_auto'.
- * Legacy read-only compatibility: type === 'auto_daily' AND id is the
- * deterministic Exact occurrence id for the given identity.
- * Ordinary legacy auto_daily records are NOT Exact evidence (Issue #269).
+ * Whether a log represents Exact Auto deduction evidence for the requested
+ * occurrence (Issue #269 / #276).
+ *
+ * Decision table:
+ *   exact_auto  → valid only when log.id === exactAutoLogId(...)
+ *   auto_daily  → valid only when log.id === exactAutoLogId(...)  (legacy)
+ *   other types → invalid
+ *
+ * Both current and legacy formats require the deterministic occurrence id.
+ * Malformed exact_auto records with arbitrary ids are NOT evidence.
  */
 export function isExactAutoDeductionEvidence(
   log: ConsumptionLog,
@@ -216,14 +225,14 @@ export function isExactAutoDeductionEvidence(
   doseId: string,
   calendarDate: string
 ): boolean {
-  if (log.type === 'exact_auto') return true;
-  if (log.type === 'auto_daily') {
-    const normalized =
-      doseId == null ? '' : String(doseId).trim();
-    if (!normalized) return false;
-    return log.id === exactAutoLogId(medicationId, normalized, calendarDate);
-  }
-  return false;
+  if (log.type !== 'exact_auto' && log.type !== 'auto_daily') return false;
+  const normalizedDoseId =
+    doseId == null ? '' : String(doseId).trim();
+  if (!normalizedDoseId) return false;
+  return (
+    log.id ===
+    exactAutoLogId(medicationId, normalizedDoseId, calendarDate)
+  );
 }
 
 /**

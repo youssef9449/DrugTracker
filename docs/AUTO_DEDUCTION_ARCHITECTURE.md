@@ -279,7 +279,7 @@ After an exact occurrence is applied, markers remove that slot from due helpers 
 | Duplicate FIRED delivery | No second stock deduction; one exact-auto log id |
 | Same med, different doseId | Independent occurrences |
 | Same doseId, different calendarDate | Independent occurrences |
-| Legacy settlement already covered the day | Exact event does not deduct again |
+| Duplicate / already-reconciled occurrence | No second stock mutation; occurrence markers / deterministic exact-auto log make reconciliation idempotent |
 | Native-first occurrence | Exact event applies once; later reconciliation sees occurrence markers / deterministic log |
 | Medication deleted | Acknowledge without stock mutation |
 | Auto-deduct disabled | Acknowledge without stock mutation |
@@ -290,14 +290,13 @@ After an exact occurrence is applied, markers remove that slot from due helpers 
 
 1. Native exact fire does not mutate application stock and does not require WebView.
 2. Occurrence identity is always `medicationId + doseId + calendarDate`.
-3. Multi-dose exact apply uses `event.amount`.
-4. Historical settlement for an exact event on day D only includes eligible days **strictly before D**, then applies D’s `event.amount`.
-5. Sibling doses on the same date remain isolated.
-6. Stock mutations for auto paths load **fresh durable state** inside the mutation gate.
-7. Mutating reconcile persists JS state before relying on successful native acknowledgement; failed marks remain safely retryable.
-8. Duplicate reconciliation is idempotent for stock and exact-auto logs.
-9. `effectiveCurrentPills` is a projection over committed state, not a second ledger.
-10. Android device/emulator field verification of the full path is tracked explicitly (see below)—not implied by unit coverage alone.
+3. Multi-dose exact apply uses `event.amount` (authoritative charge for that FIRED occurrence).
+4. Sibling doses on the same date remain isolated.
+5. Stock mutations for auto paths load **fresh durable state** inside the mutation gate.
+6. Mutating reconcile persists JS state before relying on successful native acknowledgement; failed marks remain safely retryable.
+7. Duplicate reconciliation is idempotent for stock and exact-auto logs.
+8. `effectiveCurrentPills` is a projection over committed state, not a second ledger.
+9. Android device/emulator field verification of the full path is tracked explicitly (see below)—not implied by unit coverage alone.
 
 ---
 

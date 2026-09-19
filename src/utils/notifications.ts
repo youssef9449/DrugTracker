@@ -1437,8 +1437,10 @@ export async function scheduleDoseReminder(
   const title = `⏰ حان موعد دواء: ${medName}`;
   // Display 12h for the user; reminderTime stays 24h for schedule + extra.
   const body = `موعد الجرعة الساعة ${formatReminderTime12h(reminderTime)}. جرعتك المقررة: ${dailyDose} ${unit}.`;
-  const doseId = options?.doseId;
-  const notifId = doseReminderAlarmIdForDose(medId, doseId ?? '');
+  const doseId = typeof options?.doseId === 'string' ? options.doseId.trim() : '';
+  // Issue #268: explicit doseSchedule slot id required — no med-only / legacy id.
+  if (!doseId) return;
+  const notifId = doseReminderAlarmIdForDose(medId, doseId);
 
   if (isNativePlatform()) {
     try {

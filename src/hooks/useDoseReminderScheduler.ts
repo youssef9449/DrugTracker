@@ -11,7 +11,6 @@ import {
   isDoseReminderTimeStillAhead,
   doseReminderAlarmIdForDose,
   cancelStaleDoseReminderAlarms,
-  LEGACY_DOSE_ID,
 } from '../utils/notifications';
 import { clearSnoozedDose } from '../utils/doseReminderStorage';
 import { isValidDoseTime } from '../utils/doseSchedule';
@@ -57,9 +56,7 @@ export interface UseDoseReminderSchedulerOptions {
 }
 
 /**
- * One schedulable dose slot derived from a medication.
- * - Multi-dose meds: one entry per `doseSchedule` row (stable dose id).
- * - Legacy meds (no schedule): single entry with {@link LEGACY_DOSE_ID}.
+ * One schedulable dose slot derived from explicit `doseSchedule` row.
  */
 export interface DoseReminderSlot {
   medId: string;
@@ -77,62 +74,38 @@ export function doseScheduleKey(medId: string, doseId: string): string {
 
 export function parseDoseScheduleKey(key: string): { medId: string; doseId: string } {
   const idx = key.indexOf('::');
-  if (idx < 0) return { medId: key, doseId: LEGACY_DOSE_ID };
+  if (idx < 0) return { medId: key, doseId: '' };
   return { medId: key.slice(0, idx), doseId: key.slice(idx + 2) };
 }
 
 /**
- * Build the list of dose reminder slots for a medication.
- *
- * Source of truth for multi-dose: non-empty `doseSchedule` (by dose id).
- * Legacy: single slot at `reminderTime` with amount = `dailyDose`.
- * Invalid/missing times are skipped.
- *
- * Does not mutate the medication. Does not implement stock logic.
+ * Build dose reminder slots from explicit `doseSchedule` only.
+ * Missing/empty schedule → []. No dailyDose/reminderTime synthetic slot.
  */
 export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
   const name = med.name;
   const unit = med.unit || 'قرص';
-
-  if (Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) {
-    // Multi-dose path: every scheduled row must carry a non-empty stable
-    // doseId. Missing/empty/whitespace ids are skipped — never mapped to
-    // LEGACY_DOSE_ID (that identity is only for meds without a usable
-    // doseSchedule). Keep first occurrence of each valid doseId.
-    const seen = new Set<string>();
-    const slots: DoseReminderSlot[] = [];
-    for (const d of med.doseSchedule) {
-      if (!d || !isValidDoseTime(d.time) || !(Number(d.amount) > 0)) continue;
-      const doseId = typeof d.id === 'string' ? d.id.trim() : '';
-      if (!doseId) continue;
-      if (seen.has(doseId)) continue;
-      seen.add(doseId);
-      slots.push({
-        medId: med.id,
-        doseId,
-        time: d.time,
-        amount: Number(d.amount),
-        name,
-        unit,
-      });
-    }
-    return slots;
+  if (!Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0) {
+    return [];
   }
-
-  if (med.reminderTime && isValidDoseTime(med.reminderTime)) {
-    return [
-      {
-        medId: med.id,
-        doseId: LEGACY_DOSE_ID,
-        time: med.reminderTime,
-        amount: Number(med.dailyDose) > 0 ? Number(med.dailyDose) : 1,
-        name,
-        unit,
-      },
-    ];
+  const seen = new Set<string>();
+  const slots: DoseReminderSlot[] = [];
+  for (const d of med.doseSchedule) {
+    if (!d || !isValidDoseTime(d.time) || !(Number(d.amount) > 0)) continue;
+    const doseId = typeof d.id === 'string' ? d.id.trim() : '';
+    if (!doseId) continue;
+    if (seen.has(doseId)) continue;
+    seen.add(doseId);
+    slots.push({
+      medId: med.id,
+      doseId,
+      time: d.time,
+      amount: Number(d.amount),
+      name,
+      unit,
+    });
   }
-
-  return [];
+  return slots;
 }
 
 /**
@@ -275,7 +248,7 @@ export function useDoseReminderScheduler({
       const slots = getDoseReminderSlots(med);
       if (slots.length === 0) continue;
 
-      if (slots.some((sl) => sl.doseId !== LEGACY_DOSE_ID)) {
+      if (slots.some((sl) => !!sl.doseId)) {
         enqueue(doseScheduleKey(med.id, '__legacy_cleanup__'), () =>
           cancelLegacyDoseReminderAlarm(med.id)
         );
@@ -355,7 +328,7 @@ export function useDoseReminderScheduler({
           if (doseGenerationRef.current.get(key) !== gen) return;
           if (nativeReArmed) return;
           const opts = {
-            ...(doseId !== LEGACY_DOSE_ID ? { doseId } : {}),
+            ...(doseId ? { doseId } : {}),
             ...(slotConsumedToday ? { skipToday: true as const } : {}),
             ...(isAutoActive ? { autoDeductEnabled: true } : {}),
           };
@@ -377,7 +350,7 @@ export function useDoseReminderScheduler({
         cancelDoseReminder(medId, doseId).then(async () => {
           if (doseGenerationRef.current.get(key) !== gen) return;
           const opts = {
-            ...(doseId !== LEGACY_DOSE_ID ? { doseId } : {}),
+            ...(doseId ? { doseId } : {}),
             ...(slotConsumedToday ? { skipToday: true as const } : {}),
             ...(isAutoActive ? { autoDeductEnabled: true } : {}),
           };
@@ -496,7 +469,7 @@ export function useDoseReminderScheduler({
                 if (doseGenerationRef.current.get(key) !== gen) return;
                 const isAutoActive = med.autoDeductEnabled !== false;
                 const opts = {
-                  ...(doseId !== LEGACY_DOSE_ID ? { doseId } : {}),
+                  ...(doseId ? { doseId } : {}),
                   skipToday: true as const,
                   ...(isAutoActive ? { autoDeductEnabled: true } : {}),
                 };
@@ -523,7 +496,7 @@ export function useDoseReminderScheduler({
               if (doseGenerationRef.current.get(key) !== gen) return;
               const isAutoActive = med.autoDeductEnabled !== false;
               const opts = {
-                ...(doseId !== LEGACY_DOSE_ID ? { doseId } : {}),
+                ...(doseId ? { doseId } : {}),
                 ...(isAutoActive ? { autoDeductEnabled: true } : {}),
               };
               const hasOpts = Object.keys(opts).length > 0;

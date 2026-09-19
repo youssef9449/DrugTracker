@@ -104,11 +104,13 @@ export function getDoseScheduleForUI(
     return [];
   }
   return sortDoseSchedule(
-    med.doseSchedule.map((d) => ({
-      id: d.id || generateId('dose'),
-      amount: Number(d.amount) > 0 ? Number(d.amount) : 1,
-      time: normalizeTimeString(d.time || '09:00'),
-    }))
+    med.doseSchedule
+      .filter((d) => d && isValidDoseTime(d.time) && Number(d.amount) > 0)
+      .map((d) => ({
+        id: d.id || generateId('dose'),
+        amount: Number(d.amount),
+        time: normalizeTimeString(d.time),
+      }))
   );
 }
 
@@ -356,7 +358,7 @@ export function getNextScheduledDose(
 
 /**
  * Returns the dose amount for the next upcoming dose.
- * For single-dose medications without a schedule, returns `med.dailyDose`.
+ * Without an explicit doseSchedule, returns 0.
  * For multi-dose medications, returns the amount of the next scheduled dose.
  */
 export function getNextDoseAmount(
@@ -395,7 +397,7 @@ export function getNextDoseAmount(
  * Auto-Deduct state (via {@link isMedicationAutoDeductActive}) controls
  * whether elapsed time alone marks a slot completed. Medication-level only.
  *
- * Legacy (no schedule): lastConsumedDate / dailyDose.
+ * Without doseSchedule: no toggle target.
  */
 export function getCardDoseToggleTarget(
   med: Medication,

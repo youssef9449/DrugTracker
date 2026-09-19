@@ -4,7 +4,6 @@
  */
 
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
-import { LEGACY_DOSE_ID } from './notifications';
 
 export interface AutoDeductionEvent {
   medicationId: string;
@@ -155,11 +154,15 @@ export async function scheduleAutoDeduction(
   if (!(Number(params.amount) > 0) || !Number.isFinite(Number(params.amount))) {
     return { ok: false, error: 'invalid_amount' };
   }
+  const doseId = typeof params.doseId === 'string' ? params.doseId.trim() : '';
+  if (!doseId) {
+    return { ok: false, error: 'missing_dose_id' };
+  }
   try {
     return await AutoDeduction.scheduleOccurrence({
       ...params,
       amount: Number(params.amount),
-      doseId: params.doseId || LEGACY_DOSE_ID,
+      doseId,
     });
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'schedule_failed' };
@@ -174,10 +177,14 @@ export async function cancelAutoDeduction(
   if (!isNativeAndroid()) {
     return { ok: false, status: "FAILED", error: "not_android" };
   }
+  const id = typeof doseId === 'string' ? doseId.trim() : '';
+  if (!id) {
+    return { ok: false, status: "FAILED", error: "missing_dose_id" };
+  }
   try {
     return await AutoDeduction.cancelOccurrence({
       medicationId,
-      doseId: doseId || LEGACY_DOSE_ID,
+      doseId: id,
       calendarDate,
     });
   } catch (e) {
@@ -205,9 +212,13 @@ export async function invalidateAutoDeductionRecurrence(
   try {
     // Pass through native ok/error — never coerce a failed generation commit
     // into success (fail-closed for Issue #217 recurrence authorization).
+    const id = typeof doseId === 'string' ? doseId.trim() : '';
+    if (!id) {
+      return { ok: false, error: "missing_dose_id" };
+    }
     return await AutoDeduction.invalidateRecurrenceAuthorization({
       medicationId,
-      doseId: doseId || LEGACY_DOSE_ID,
+      doseId: id,
     });
   } catch (e) {
     return {
@@ -285,10 +296,14 @@ export async function getOccurrenceSnapshot(
   if (!isNativeAndroid()) {
     return { ok: true, status: 'ABSENT' };
   }
+  const id = typeof doseId === 'string' ? doseId.trim() : '';
+  if (!id) {
+    return { ok: false, error: 'missing_dose_id' };
+  }
   try {
     const res = await AutoDeduction.getOccurrenceSnapshot({
       medicationId,
-      doseId: doseId || LEGACY_DOSE_ID,
+      doseId: id,
       calendarDate,
     });
     if (!res || res.ok === false) {
@@ -326,10 +341,14 @@ export async function markAutoDeductionEventReconciled(
   calendarDate: string
 ): Promise<MarkReconciledResult> {
   if (!isNativeAndroid()) return { ok: false, changed: false };
+  const id = typeof doseId === 'string' ? doseId.trim() : '';
+  if (!id) {
+    return { ok: false, changed: false };
+  }
   try {
     return await AutoDeduction.markReconciled({
       medicationId,
-      doseId: doseId || LEGACY_DOSE_ID,
+      doseId: id,
       calendarDate,
     });
   } catch {

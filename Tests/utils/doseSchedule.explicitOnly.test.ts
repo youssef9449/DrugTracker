@@ -10,6 +10,7 @@ import {
   getNextDoseAmount,
 } from '../../src/utils/doseSchedule';
 import { getAutoDeductionSlotsForDate } from '../../src/hooks/useAutoDeductionScheduler';
+import { getDoseReminderSlots } from '../../src/hooks/useDoseReminderScheduler';
 
 function baseMed(over: Partial<Medication> = {}): Medication {
   return {
@@ -108,5 +109,29 @@ describe('card helpers — no legacy fallback', () => {
 
   it('getNextDoseAmount with no schedule → 0', () => {
     expect(getNextDoseAmount(baseMed({ doseSchedule: undefined }))).toBe(0);
+  });
+});
+
+
+describe('getDoseReminderSlots — doseSchedule only', () => {
+  it('no schedule → no reminder slots', () => {
+    expect(
+      getDoseReminderSlots(
+        baseMed({ doseSchedule: undefined, reminderTime: '08:30', dailyDose: 2 })
+      )
+    ).toEqual([]);
+  });
+
+  it('explicit schedule → slots use row ids', () => {
+    const slots = getDoseReminderSlots(
+      baseMed({
+        doseSchedule: [
+          { id: 'r1', amount: 1, time: '08:00' },
+          { id: 'r2', amount: 2, time: '20:00' },
+        ],
+      })
+    );
+    expect(slots.map((s) => s.doseId)).toEqual(['r1', 'r2']);
+    expect(slots.every((s) => s.doseId !== 'legacy')).toBe(true);
   });
 });

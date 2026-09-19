@@ -54,9 +54,6 @@ export function getAutoDeductionSlotsForDate(
   if (med.autoDeductEnabled === false) return [];
 
   // Issue #268: Exact slots come only from explicit doseSchedule rows.
-  // Implicit legacy single-dose meds are migrated to doseSchedule at hydration
-  // (migrateMedicationsLegacySingleDose) before this scheduler runs.
-  // Do not create new occurrences under LEGACY_DOSE_ID.
   if (!Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0) {
     return [];
   }

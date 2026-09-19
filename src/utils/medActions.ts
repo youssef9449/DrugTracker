@@ -525,8 +525,8 @@ export function restoreDose(
       // Do not re-run settleAndAdjust for the stock (would fold sibling
       // pastDueUnits). BUT recompute lastSyncDate from the CLEARED med so it
       // rolls back when the restored slot was the last consumed slot —
-      // otherwise the past day stays "settled" (lastSync covers it) and
-      // syncAutoDailyDeductions would never settle the restored dose,
+      // otherwise the past day stays "settled" (lastSync covers it) and a
+      // later mutation settlement would never settle the restored dose,
       // losing it. This mirrors main's settleAndAdjust lastSyncDate recompute
       // without re-folding sibling pastDueUnits into the stock snapshot.
       const clearedMed: Medication = {

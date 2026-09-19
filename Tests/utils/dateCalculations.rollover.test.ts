@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   effectiveCurrentPills,
   countDueAutoDoses,
-  syncAutoDailyDeductions,
   settleDoseChange,
   settleAutoDeductToggle,
   reverseRefill,
@@ -17,25 +16,28 @@ import type { Medication } from '@/types';
  * Per the architecture: `currentPills` is the last SETTLED snapshot,
  * `lastSyncDate` is its date, and `effectiveCurrentPills()` is the live
  * projection computed on the fly from the doses that have become due.
- * The projection is pure/read-only — it never mutates state. Settlement
- * (syncAutoDailyDeductions / mutations) is the only thing that updates
- * currentPills + lastSyncDate + logs.
+ * The projection is pure/read-only — it never mutates state. Mutations
+ * (refill / consume / dose-change / auto-deduct toggle) are the only thing
+ * that updates currentPills + lastSyncDate + logs.
  *
  * IMPORTANT — what the app does NOT do: there is NO automatic settlement
- * at the calendar-day boundary while the app stays open. syncAutoDailyDeductions
- * runs only on app-open (App.tsx mount effect, once after hydration) and via
- * mutations (refill / consume / dose-change / auto-deduct toggle). So while
- * the app remains open across midnight, the snapshot is NOT physically
+ * at the calendar-day boundary while the app stays open, and NO automatic
+ * day-based catch-up on app-open either. The legacy day-based catch-up
+ * (`syncAutoDailyDeductions`) was removed in Issue #268 / PR #271; Exact
+ * FIRED occurrences are the sole timed automatic deduction. So while the
+ * app remains open across midnight, the snapshot is NOT physically
  * settled at 00:00 — the previous day's dose becomes part of the past-day
- * settlement basis (it shifts from `todayDue` to `betweenDays`) and is
- * settled at the next existing execution point.
+ * projection basis (it shifts from `todayDue` to `betweenDays`) and is
+ * settled at the next existing execution point (a mutation or an Exact
+ * FIRED occurrence).
  *
  * These tests explicitly DISTINGUISH the two concerns:
  *   (A) Dynamic projection across midnight — effectiveCurrentPills() is
- *       correct without any settlement (no sync call in the test).
- *   (B) Actual settlement execution — syncAutoDailyDeductions() (or a
- *       mutation) is explicitly called, and currentPills/lastSyncDate/logs
- *       are verified. No test implies sync fires automatically at midnight.
+ *       correct without any settlement (no mutation in the test).
+ *   (B) Actual settlement execution — a mutation (refill / consume /
+ *       dose-change / toggle) is explicitly called, and
+ *       currentPills/lastSyncDate/logs are verified. No test implies any
+ *       automatic settlement fires at midnight or on app-open.
  *
  * Key projection invariant at the Sep 11 → Sep 12 rollover (reminderTime
  * 20:00): a dose becomes due only at its reminderTime, so crossing midnight
@@ -81,10 +83,10 @@ function at(utcIso: string): Date {
 // ─── A. Day rollover while the app remains open ──────────────────────
 describe('day rollover while app remains open (dynamic projection, no settlement)', () => {
   // These tests call effectiveCurrentPills/countDueAutoDoses ONLY. They do NOT
-  // call syncAutoDailyDeductions or any mutation — they verify the live
-  // projection is correct across midnight WITHOUT any settlement, proving the
-  // displayed balance is right even though the snapshot is not physically
-  // settled at the calendar-day boundary.
+  // call any mutation — they verify the live projection is correct across
+  // midnight WITHOUT any settlement, proving the displayed balance is right
+  // even though the snapshot is not physically settled at the calendar-day
+  // boundary.
   // A.1 Sep 11 21:00 → Sep 12 10:00 → Sep 12 20:00
   it('projection is stable across midnight: 28 → 28 → 26 (no premature next-day dose)', () => {
     const med = makeRemindedMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2026-09-10' });
@@ -124,34 +126,8 @@ describe('day rollover while app remains open (dynamic projection, no settlement
   });
 });
 
-// ─── B. Rollover settlement (when sync/mutation runs after rollover) ──
-describe('rollover settlement: settles past-due only, not the new day', () => {
-  // B.1 sync at Sep 12 10:00 (app open since Sep 11, sync runs e.g. on a re-mount)
-  it('sync after rollover (before new reminderTime) settles Sep 11 only → currentPills=28, lastSyncDate=Sep 11', () => {
-    const med = makeRemindedMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2026-09-10' });
-    const now = at('2026-09-12T10:00:00Z');
-    const result = syncAutoDailyDeductions([med], '2026-09-12', now);
-    // Sep 11 (betweenDays=1) settled; Sep 12 NOT settled (todayDue=0, before 20:00).
-    expect(result.updatedMeds[0].currentPills).toBe(28); // 30 - 1*2 (NOT 26)
-    expect(result.updatedMeds[0].lastSyncDate).toBe('2026-09-11'); // yesterday (NOT Sep 12)
-    expect(result.newLogs).toHaveLength(1);
-    expect(result.newLogs[0].amount).toBe(-2);
-    // Projection after sync: Sep 12 still not due → 28.
-    expect(effectiveCurrentPills(result.updatedMeds[0], '2026-09-12', now)).toBe(28);
-  });
-
-  // B.2 sync at Sep 12 21:00 (after new reminderTime) — settles Sep 11 AND Sep 12 is dynamic
-  it('sync after rollover (after new reminderTime) settles Sep 11; Sep 12 stays dynamic (projection=26)', () => {
-    const med = makeRemindedMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2026-09-10' });
-    const now = at('2026-09-12T21:00:00Z');
-    const result = syncAutoDailyDeductions([med], '2026-09-12', now);
-    // sync settles past only (betweenDays=1, Sep 11); Sep 12 is dynamic (todayDue, not settled).
-    expect(result.updatedMeds[0].currentPills).toBe(28); // 30 - 1*2 (Sep 11 only)
-    expect(result.updatedMeds[0].lastSyncDate).toBe('2026-09-11'); // yesterday
-    // Projection: Sep 11 (settled) + Sep 12 (dynamic due) → 28 - 2 = 26.
-    expect(effectiveCurrentPills(result.updatedMeds[0], '2026-09-12', now)).toBe(26);
-  });
-
+// ─── B. Rollover settlement (when a mutation runs after rollover) ──
+describe('rollover settlement: a mutation settles past-due only, not the new day', () => {
   // B.3 manual consume after rollover: past day settled first, then today's manual applied
   it('manual consume after rollover (before today reminderTime): settles Sep 11 first, then Sep 12 manual (no double)', () => {
     const med = makeRemindedMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2026-09-10' });
@@ -261,15 +237,6 @@ describe('rollover + app resume (reconciliation via projection)', () => {
     expect(countDueAutoDoses(med, now, '2026-09-12')).toBe(1);
     // Sep 12's dose is NOT prematurely counted.
     expect(effectiveCurrentPills(med, '2026-09-12', at('2026-09-12T20:00:00Z'))).toBe(26);
-  });
-
-  it('the snapshot catches up correctly on the next sync (settle Sep 11, not Sep 12)', () => {
-    // After resume, the next sync (e.g. re-mount) settles the past-due correctly.
-    const med = makeRemindedMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2026-09-10' });
-    const now = at('2026-09-12T10:00:00Z');
-    const result = syncAutoDailyDeductions([med], '2026-09-12', now);
-    expect(result.updatedMeds[0].currentPills).toBe(28); // Sep 11 only
-    expect(result.updatedMeds[0].lastSyncDate).toBe('2026-09-11'); // yesterday
   });
 });
 

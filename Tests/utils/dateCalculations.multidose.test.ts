@@ -6,7 +6,6 @@ import {
   isDoseConsumedOnDate,
   todayDueUnits,
   dailyScheduleAmount,
-  syncAutoDailyDeductions,
   settleDoseChange,
   countDueAutoDoses,
   effectiveDaysLeft,
@@ -187,12 +186,6 @@ describe('Phase 3B Example E — historical catch-up', () => {
     expect(b.todayDueUnits).toBe(3);
     expect(b.fullDueUnits).toBe(11);
     expect(effectiveCurrentPills(med, '2024-09-10', now)).toBe(29);
-    const sync = syncAutoDailyDeductions([med], '2024-09-10', now);
-    expect(sync.updatedMeds[0].currentPills).toBe(32);
-    expect(sync.updatedMeds[0].lastSyncDate).toBe('2024-09-09');
-    expect(
-      effectiveCurrentPills(sync.updatedMeds[0], '2024-09-10', now)
-    ).toBe(29);
   });
 });
 

@@ -1,11 +1,15 @@
 /**
  * Phase 3 — JS reconciliation of native exact-time auto-deduction FIRED events.
  *
- * Idempotency vs legacy syncAutoDailyDeductions:
+ * Idempotency:
  * - Per-dose consume/skip markers (same as Take)
  * - lastSyncDate day-settlement horizon: past calendar days already folded
- *   into currentPills by gated/legacy sync are treated as applied without
- *   inventing fake consume markers for slots that were only day-settled
+ *   into currentPills by a prior mutation settlement are treated as applied
+ *   without inventing fake consume markers for slots that were only
+ *   day-settled. (The legacy day-based catch-up `syncAutoDailyDeductions` was
+ *   removed in Issue #268 / PR #271; Exact FIRED is the sole timed automatic
+ *   deduction. The day-settlement horizon still applies to past mutation
+ *   settlements.)
  *
  * Log identity for exact events is deterministic so retries do not create
  * duplicate ConsumptionLog rows.
@@ -106,7 +110,9 @@ export function normalizeExactDoseId(doseId: string | undefined | null): string 
 
 /**
  * Deterministic log id for one exact auto occurrence (retry-safe).
- * Not used for legacy bulk auto_daily logs from syncAutoDailyDeductions.
+ * Not used for legacy bulk auto_daily logs (the legacy day-based catch-up
+ * `syncAutoDailyDeductions` that produced them was removed in Issue #268 /
+ * PR #271).
  *
  * Issue #268 / PR #271: this id MUST never be built with an empty doseId.
  * `applyExactAutoEventToMedication` rejects any event whose `doseId` is empty
@@ -144,7 +150,8 @@ export function findExactAutoLog(
  * Sources (any one is enough):
  * 1. dose consume / skip history (Take, prior exact apply, Restore skip)
  * 2. lastSyncDate day-settlement horizon — past days already settled into
- *    currentPills by syncAutoDailyDeductions (no fake consume markers invented)
+ *    currentPills by a prior mutation settlement (no fake consume markers
+ *    invented)
  */
 export function isExactAutoOccurrenceApplied(
   med: Medication,

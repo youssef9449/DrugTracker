@@ -18,7 +18,6 @@ import {
   type AutoStockDurableState,
 } from '../../src/utils/autoDeductionStockGate';
 import {
-  syncAutoDailyDeductions,
   effectiveCurrentPills,
 } from '../../src/utils/dateCalculations';
 
@@ -178,14 +177,18 @@ describe('stock gate — fresh durable state', () => {
     expect(durable.medications[0].currentPills).toBe(8);
     expect(isExactAutoOccurrenceApplied(durable.medications[0], 'd', '2026-09-13')).toBe(true);
 
-    await withAutoStockMutationGate((fresh) => {
-      const sync = syncAutoDailyDeductions(fresh.medications, '2026-09-14');
-      commitDurableAutoStockState({
-        medications: sync.updatedMeds,
-        logs: [...sync.newLogs, ...fresh.logs],
-      });
+    // The legacy day-based catch-up (syncAutoDailyDeductions) was removed in
+    // Issue #268 / PR #271 — there is no second automatic deduction at all
+    // (no app-open / calendar-day settlement). A second gate entry simply
+    // observes the durable committed state; it must NOT re-apply the same
+    // occurrence (the durable consume marker + exact log make it
+    // already_applied). 8, not 6.
+    await withAutoStockMutationGate(async (fresh) => {
+      const r = reconcileFiredEvents(fresh.medications, fresh.logs, [e]);
+      expect(r.details[0]?.outcome).toBe('already_applied');
+      expect(r.mutated).toBe(false);
+      expect(r.medications[0].currentPills).toBe(8);
     });
-    // Same occurrence must not be charged again (8, not 6)
     expect(durable.medications[0].currentPills).toBe(8);
   });
 

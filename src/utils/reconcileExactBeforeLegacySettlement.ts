@@ -1,11 +1,13 @@
 /**
- * Shared pre-settlement step: before ANY legacy stock settlement runs inside
+ * Shared pre-settlement step: before any MUTATION stock settlement runs inside
  * the withAutoStockMutationGate critical section, recover pending Manual /
  * Exact-Auto envelopes and reconcile all durable native FIRED exact events.
  *
  * Guarantees: exact event.amount is applied before historicalDayDueUnits /
- * settleAndAdjust / syncAutoDailyDeductions / toggle settlement can charge
- * the current schedule amount for the same occurrence.
+ * settleAndAdjust / toggle settlement can charge the current schedule amount
+ * for the same occurrence. (The legacy day-based catch-up
+ * `syncAutoDailyDeductions` was removed in Issue #268 / PR #271; Exact FIRED
+ * is the sole timed automatic deduction.)
  */
 
 import {

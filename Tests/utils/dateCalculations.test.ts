@@ -3,7 +3,6 @@ import {
   getTodayDateString,
   getDaysDifference,
   getDepletionDate,
-  syncAutoDailyDeductions,
 } from '@/utils/dateCalculations';
 import { NEVER_DEPLETES_DAYS } from '@/utils/time';
 import type { Medication } from '@/types';
@@ -109,47 +108,3 @@ describe('getDepletionDate', () => {
   });
 });
 
-describe('syncAutoDailyDeductions', () => {
-  it('deducts pills for each day passed since lastSyncDate', () => {
-    const med = makeMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2024-03-10' });
-    const result = syncAutoDailyDeductions([med], '2024-03-15');
-    expect(result.updatedMeds[0].currentPills).toBe(20); // 30 - 2*5
-    expect(result.updatedMeds[0].lastSyncDate).toBe('2024-03-15');
-    expect(result.newLogs).toHaveLength(1);
-    expect(result.newLogs[0].amount).toBe(-10);
-    expect(result.deductedSummary[0].daysPassed).toBe(5);
-  });
-
-  it('clamps the deduction so currentPills never goes negative', () => {
-    const med = makeMed({ currentPills: 3, dailyDose: 2, lastSyncDate: '2024-03-10' });
-    const result = syncAutoDailyDeductions([med], '2024-03-15');
-    expect(result.updatedMeds[0].currentPills).toBe(0);
-    expect(result.newLogs[0].amount).toBe(-3); // only 3 pills existed
-  });
-
-  it('skips meds with autoDeductEnabled === false', () => {
-    const med = makeMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2024-03-10', autoDeductEnabled: false });
-    const result = syncAutoDailyDeductions([med], '2024-03-15');
-    expect(result.updatedMeds[0].currentPills).toBe(30); // unchanged
-    expect(result.newLogs).toHaveLength(0);
-  });
-
-  it('skips meds with dailyDose <= 0', () => {
-    const med = makeMed({ currentPills: 30, dailyDose: 0, lastSyncDate: '2024-03-10' });
-    const result = syncAutoDailyDeductions([med], '2024-03-15');
-    expect(result.updatedMeds[0].currentPills).toBe(30);
-    expect(result.newLogs).toHaveLength(0);
-  });
-
-  it('produces no logs when 0 days have passed', () => {
-    const med = makeMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2024-03-15' });
-    const result = syncAutoDailyDeductions([med], '2024-03-15');
-    expect(result.newLogs).toHaveLength(0);
-  });
-
-  it('ensures lastSyncDate is set on meds that had none', () => {
-    const med = makeMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '' });
-    const result = syncAutoDailyDeductions([med], '2024-03-15');
-    expect(result.updatedMeds[0].lastSyncDate).toBe('2024-03-15');
-  });
-});

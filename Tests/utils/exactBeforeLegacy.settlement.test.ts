@@ -20,7 +20,6 @@ import {
 import { __setAutoStockGateTestHooks } from '../../src/utils/autoDeductionStockGate';
 import { __setExactAutoEnvelopeTestHooks } from '../../src/utils/runAutoDeductionReconciliation';
 import { __setStockMutationOrderingTestHooks } from '../../src/utils/stockMutationOrdering';
-import { syncAutoDailyDeductions } from '../../src/utils/dateCalculations';
 import * as preSettleModule from '../../src/utils/reconcileExactBeforeLegacySettlement';
 
 function baseMed(over: Partial<Medication> = {}): Medication {
@@ -174,7 +173,7 @@ describe('exact FIRED amount precedes legacy settlement', () => {
     expect(durable.logs).toHaveLength(0);
   });
 
-  it('runAutoDeductionReconciliation then legacy sync does not double-charge', async () => {
+  it('runAutoDeductionReconciliation then a second reconciliation does not double-charge', async () => {
     const events = [firedEvent(2)];
     const recon = await runAutoDeductionReconciliation({
       globalAutoDeductEnabled: true,
@@ -188,8 +187,21 @@ describe('exact FIRED amount precedes legacy settlement', () => {
     const exactId = exactAutoLogId('med-1', 'd1', '2026-09-14');
     expect(recon.logs.some((l) => l.id === exactId)).toBe(true);
 
-    const legacy = syncAutoDailyDeductions(recon.medications, '2026-09-14');
-    expect(legacy.updatedMeds[0].currentPills).toBe(8);
+    // The legacy day-based catch-up (syncAutoDailyDeductions) was removed
+    // (Issue #268 / PR #271); there is no second automatic deduction at all.
+    // A second reconciliation re-listing the same FIRED finds the durable
+    // exact log + consume marker → already_applied → no double-charge (8).
+    const recon2 = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      medications: recon.medications,
+      logs: recon.logs,
+      alreadyInGate: true,
+      listFired: async () => ({ ok: true, events }),
+      markReconciled: async () => ({ ok: true, changed: false }),
+    });
+    expect(recon2.mutated).toBe(false);
+    expect(recon2.medications[0].currentPills).toBe(8);
+    expect(recon2.newExactLogs).toEqual([]);
   });
 
   it('per-med toggle blocks when exact reconciliation is not durably finalized', async () => {

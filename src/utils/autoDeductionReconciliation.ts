@@ -19,9 +19,7 @@ import type { ConsumptionLog, Medication } from '../types';
 import type { AutoDeductionEvent } from './autoDeductionNative';
 import { autoDeductionOccurrenceKey } from './autoDeductionNative';
 import {
-  computeDueDoseBreakdown,
   getTodayDateString,
-  historicalRangeDueUnits,
   isDoseConsumedOnDate,
   isDoseSkippedOnDate,
   recordDoseConsumed,
@@ -177,24 +175,6 @@ export function isExactAutoOccurrenceApplied(
 }
 
 
-/** Local calendar day before YYYY-MM-DD, or null if invalid. */
-function calendarDayBefore(calendarDate: string): string | null {
-  if (!calendarDate || calendarDate.length !== 10) return null;
-  try {
-    const y = parseInt(calendarDate.slice(0, 4), 10);
-    const m = parseInt(calendarDate.slice(5, 7), 10);
-    const d = parseInt(calendarDate.slice(8, 10), 10);
-    const dt = new Date(y, m - 1, d);
-    dt.setDate(dt.getDate() - 1);
-    const yy = dt.getFullYear();
-    const mm = String(dt.getMonth() + 1).padStart(2, '0');
-    const dd = String(dt.getDate()).padStart(2, '0');
-    return `${yy}-${mm}-${dd}`;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Locate a native Exact Auto occurrence that is FIRED and not yet reconciled
  * for the given medicationId + doseId + calendarDate.
@@ -233,19 +213,26 @@ export function applyExactAutoEventToMedication(
   event: AutoDeductionEvent,
   now: Date = new Date()
 ): { ok: true; updatedMed: Medication; log: ConsumptionLog } | { ok: false; reason: string } {
-  // Issue #268 / PR #271 — a FIRED Exact occurrence is durable: the native
+  // Issue #265 / #268 — a FIRED Exact occurrence is durable: the native
   // AlarmManager created and persisted it at schedule time with identity
-  // (medicationId + doseId + calendarDate) and amount. Editing or removing
-  // the dose from the Medication's CURRENT `doseSchedule` AFTER the alarm
-  // fired does NOT invalidate the already-occurred event; `event.amount`
-  // remains authoritative. `doseSchedule` is the sole source for scheduling
-  // FUTURE occurrences, NOT a precondition for reconciling a FIRED one.
+  // (medicationId + doseId + calendarDate) and `event.amount`. Editing or
+  // removing the dose from the Medication's CURRENT `doseSchedule` AFTER the
+  // alarm fired does NOT invalidate the already-occurred event; `event.amount`
+  // is the authoritative charge. `doseSchedule` is the sole source for
+  // scheduling FUTURE occurrences, NOT a precondition for reconciling a FIRED
+  // one.
+  //
+  // Exact FIRED is the SOLE source of timed automatic stock deduction. There
+  // is NO historical / day-based settlement folded into this apply: the stock
+  // change is exactly `currentPills → currentPills - event.amount` (clamped
+  // at zero). No `computeDueDoseBreakdown`, no `historicalRangeDueUnits`, no
+  // `lastSyncDate` advance, no `dailyDose` / current-schedule-amount fallback.
+  // A single FIRED event charges its own amount only; past calendar days are
+  // not auto-settled by this path.
   //
   // Apply validation (no Legacy Single-Dose fallback): positive finite
   // amount, non-empty doseId, valid YYYY-MM-DD calendarDate, occurrence not
-  // already applied. No dailyDose / reminderTime / reminderEnabled /
-  // lastConsumedDate / first-or-next dose / array-index / empty-sentinel
-  // doseId fallback for amount or identity.
+  // already applied.
   if (!isValidEventAmount(event.amount)) {
     return { ok: false, reason: 'invalid_amount' };
   }
@@ -267,22 +254,11 @@ export function applyExactAutoEventToMedication(
     return { ok: false, reason: 'already_applied' };
   }
 
-  // Historical settlement while applying exact event on day D must cover only
-  // days strictly after lastSync and strictly before D — never the event day
-  // itself (that occurrence is charged solely via event.amount). Same-day
-  // sibling doses on D are left for their own exact events / later legacy path.
-  const breakdown = computeDueDoseBreakdown(med, now, todayStr);
-  const lastSync = med.lastSyncDate || todayStr;
-  let priorHistoricalUnits = 0;
-  if (
-    breakdown.gated &&
-    med.autoDeductEnabled !== false &&
-    calendarDate > lastSync
-  ) {
-    priorHistoricalUnits = historicalRangeDueUnits(med, lastSync, calendarDate);
-  }
-  const settleBase = Math.max(0, med.currentPills - priorHistoricalUnits);
-
+  // Stock deduction is exactly event.amount (clamped at zero). No historical
+  // / day-based settlement is folded into this apply — Exact FIRED is the
+  // sole timed automatic deduction, and `lastSyncDate` does not influence the
+  // amount charged for this FIRED occurrence.
+  const settleBase = Math.max(0, med.currentPills);
   const requested = event.amount;
   // Actual stock change after clamping at zero (may be < requested).
   const actualDeducted = Math.min(Math.max(0, requested), settleBase);
@@ -321,22 +297,12 @@ export function applyExactAutoEventToMedication(
     }
   }
 
-  // If prior days (after lastSync, before event day) were folded into the
-  // snapshot, advance lastSync to the day before the event (end of that
-  // exclusive-end window). Do NOT jump to today — that would imply the
-  // rest of the event day and later days were settled.
-  let lastSyncDate = med.lastSyncDate || todayStr;
-  if (priorHistoricalUnits > 0) {
-    const prev = calendarDayBefore(calendarDate);
-    if (prev && prev > lastSyncDate) {
-      lastSyncDate = prev;
-    }
-  }
-
+  // The Exact apply does NOT advance lastSyncDate: no prior days are folded
+  // into the snapshot by this path. lastSyncDate is preserved as-is (only a
+  // mutation settlement would advance it).
   const updatedMed: Medication = {
     ...med,
     currentPills: newPills,
-    lastSyncDate,
     lastConsumedDate,
     doseConsumption: nextConsumption,
     doseConsumptionHistory: nextHistory,

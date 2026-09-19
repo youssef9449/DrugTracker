@@ -16,6 +16,7 @@ import {
 import {
   __setManualEnvelopeTestHooks,
   __setExactAutoEnvelopeStorageTestHooks,
+  loadExactAutoStockEnvelope,
   durableMatchesEnvelopeSnapshot,
 } from '../../src/utils/stockEnvelopeRecovery';
 import {
@@ -37,7 +38,7 @@ import { __setManualRecurrenceInvalidationTestHook } from '../../src/utils/manua
 import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
 import { isDoseConsumedOnDate, isDoseSkippedOnDate } from '../../src/utils/dateCalculations';
 import { exactAutoLogId } from '../../src/utils/autoDeductionReconciliation';
-import * as preSettleModule from '../../src/utils/reconcileExactBeforeLegacySettlement';
+import * as preSettleModule from '../../src/utils/reconcileExactBeforeManualMutation';
 // findPending used indirectly via runGatedManualConsume
 import {
   findActiveDeductionForOccurrence,
@@ -728,6 +729,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       toAcknowledge: Array<{ medicationId: string; doseId: string; calendarDate: string }>;
       createdAt: string;
       mutationSeq: number;
+      globalAutoDeductEnabled: true,
     } | null = {
       version: 1,
       status: 'js_ready',
@@ -860,6 +862,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       toAcknowledge: Array<{ medicationId: string; doseId: string; calendarDate: string }>;
       createdAt: string;
       mutationSeq: number;
+      globalAutoDeductEnabled: true,
     } | null = {
       version: 1,
       status: 'js_ready',
@@ -937,6 +940,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       toAcknowledge: Array<{ medicationId: string; doseId: string; calendarDate: string }>;
       createdAt: string;
       mutationSeq: number;
+      globalAutoDeductEnabled: true,
     } | null = {
       version: 1,
       status: 'js_ready',
@@ -1013,6 +1017,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       toAcknowledge: Array<{ medicationId: string; doseId: string; calendarDate: string }>;
       createdAt: string;
       mutationSeq: number;
+      globalAutoDeductEnabled: true,
     } | null = {
       version: 1,
       status: 'js_ready',
@@ -1076,6 +1081,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       toAcknowledge: Array<{ medicationId: string; doseId: string; calendarDate: string }>;
       createdAt: string;
       mutationSeq: number;
+      globalAutoDeductEnabled: true,
     } | null = {
       version: 1,
       status: 'js_ready',
@@ -1282,6 +1288,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }],
       createdAt: new Date().toISOString(),
       mutationSeq: 3,
+      globalAutoDeductEnabled: true,
     };
     let lastApplied = 3;
     __setStockMutationOrderingTestHooks({
@@ -1319,6 +1326,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }],
       createdAt: new Date().toISOString(),
       mutationSeq: 4,
+      globalAutoDeductEnabled: true,
     };
     let lastApplied = 0;
     __setStockMutationOrderingTestHooks({
@@ -1361,6 +1369,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }],
       createdAt: new Date().toISOString(),
       mutationSeq: 5,
+      globalAutoDeductEnabled: true,
     };
     let lastApplied = 0; // finalize crashed — lastApplied NOT advanced.
     let failFinalize = true;
@@ -1416,6 +1425,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }],
       createdAt: new Date().toISOString(),
       mutationSeq: 6,
+      globalAutoDeductEnabled: true,
     };
     let lastApplied = 6;
     let failClear = true;
@@ -1455,6 +1465,45 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     expect(durable.medications[0].currentPills).toBe(pillsAfterFirst);
     expect(durable.logs.length).toBe(logCountAfterFirst);
     expect(second.markedCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it('Exact envelope missing mutationSeq is rejected (no Phase 4 recovery)', () => {
+    // Legacy/pre-fix payload without mutationSeq must not be accepted.
+    const legacyLike = {
+      version: 1 as const,
+      status: 'js_ready' as const,
+      medications: [med({ currentPills: 5 })],
+      logs: [],
+      toAcknowledge: [],
+      createdAt: new Date().toISOString(),
+      globalAutoDeductEnabled: true,
+      // mutationSeq intentionally absent
+    };
+    __setExactAutoEnvelopeStorageTestHooks({
+      load: () => legacyLike as never,
+      save: () => null,
+    });
+    expect(loadExactAutoStockEnvelope()).toBeNull();
+    __setExactAutoEnvelopeStorageTestHooks(null);
+  });
+
+  it('Exact envelope with non-positive mutationSeq is rejected', () => {
+    __setExactAutoEnvelopeStorageTestHooks({
+      load: () =>
+        ({
+          version: 1,
+          status: 'js_ready',
+          medications: [med({ currentPills: 5 })],
+          logs: [],
+          toAcknowledge: [],
+          createdAt: new Date().toISOString(),
+          globalAutoDeductEnabled: true,
+          mutationSeq: 0,
+        }) as never,
+      save: () => null,
+    });
+    expect(loadExactAutoStockEnvelope()).toBeNull();
+    __setExactAutoEnvelopeStorageTestHooks(null);
   });
 
   it('pending Exact Auto is recovered before Manual Take allocates a new seq', async () => {
@@ -2206,424 +2255,6 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     // Only d1's amount credited back.
     expect(durable.medications[0].currentPills).toBe(pillsBeforeRestore + 1);
   });
-
-  // ─── Section 3 (revised): legacy Exact Auto envelope migration barrier ───
-  //
-  // The barrier NEVER allocates a new mutationSeq for a legacy envelope.
-  // A legacy envelope is chronologically OLDER than existing Phase 4
-  // mutations; allocating a fresh high seq would make it look NEWER and
-  // let it overwrite real newer mutations (causal-ordering break). The
-  // barrier instead confirms the legacy mutation is durable (full snapshot
-  // match OR legacy log IDs present) → clear + ACK; or, if never applied
-  // and no newer mutation exists, applies the snapshot; or, if a newer
-  // mutation exists, clears and lets reconcileFiredEvents re-drive via
-  // native FIRED events with a proper Phase 4 mutationSeq.
-
-  function plantLegacyExactEnv(
-    over: Partial<{
-      medications: Medication[];
-      logs: ConsumptionLog[];
-      toAcknowledge: Array<{ medicationId: string; doseId: string; calendarDate: string }>;
-    }> = {}
-  ): {
-    version: 1;
-    status: 'js_ready';
-    medications: Medication[];
-    logs: ConsumptionLog[];
-    toAcknowledge: Array<{ medicationId: string; doseId: string; calendarDate: string }>;
-    createdAt: string;
-  } {
-    return {
-      version: 1,
-      status: 'js_ready',
-      medications: over.medications ?? [med({ currentPills: 8 })],
-      logs: over.logs ?? [],
-      toAcknowledge: over.toAcknowledge ?? [],
-      createdAt: new Date().toISOString(),
-    };
-  }
-
-  function installLegacyEnvHooks(env: { current: ReturnType<typeof plantLegacyExactEnv> | null }) {
-    __setExactAutoEnvelopeStorageTestHooks({
-      load: () => env.current,
-      save: (e: unknown) => {
-        const val = e as ReturnType<typeof plantLegacyExactEnv> | null;
-        if (val == null) env.current = null;
-        else env.current = val;
-        return null;
-      },
-    });
-    return () => __setExactAutoEnvelopeStorageTestHooks(null);
-  }
-
-  it('legacy envelope snapshot matching durable → clear + ACK, no re-apply, no seq allocation', async () => {
-    // Durable already reflects the legacy mutation (Phase 3 wrote meds+logs
-    // before the crash; the envelope is leftover evidence).
-    durable = {
-      medications: [
-        med({ currentPills: 8, doseConsumption: { d1: TODAY }, doseConsumptionHistory: { d1: [TODAY] } }),
-      ],
-      logs: [
-        {
-          id: 'legacy-exact-auto',
-          medicationId: 'med-1',
-          medicationName: 'TestMed',
-          type: 'auto_daily',
-          amount: -1,
-          date: TODAY,
-          timestamp: '',
-          description: '',
-          doseId: 'd1',
-        },
-      ],
-    };
-    const env = { current: plantLegacyExactEnv({ medications: durable.medications.map((m) => ({ ...m })), logs: durable.logs.map((l) => ({ ...l })), toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }] }) };
-    const cleanup = installLegacyEnvHooks(env);
-
-    let allocateCalls = 0;
-    __setStockMutationOrderingTestHooks({
-      loadLastApplied: () => 0,
-      persistLastApplied: () => null,
-      allocate: () => { allocateCalls += 1; return { ok: true, seq: allocateCalls }; },
-    });
-
-    marked = [];
-    const recon = await runAutoDeductionReconciliation({
-      globalAutoDeductEnabled: true,
-      listFired: async () => [],
-      markReconciled: async (m, d, c) => { marked.push(`${m}|${d}|${c}`); return { ok: true, changed: true }; },
-    });
-
-    // No seq allocated for the legacy envelope.
-    expect(allocateCalls).toBe(0);
-    // Envelope cleared.
-    expect(env.current).toBeNull();
-    // Durable unchanged (no re-apply).
-    expect(durable.medications[0].currentPills).toBe(8);
-    expect(durable.logs.filter((l) => l.id === 'legacy-exact-auto')).toHaveLength(1);
-    // ACKed once.
-    expect(marked).toEqual([`med-1|d1|${TODAY}`]);
-    expect(recon.markedCount).toBe(1);
-
-    cleanup();
-  });
-
-  it('legacy envelope + newer Manual mutation (lastApplied>0) → legacy does NOT overwrite Manual', async () => {
-    // Manual seq=10 already applied: durable = Manual state (currentPills=9,
-    // dose_taken d1 log). Legacy envelope has an OLDER snapshot (currentPills=8,
-    // auto_daily d1 log) that must NOT overwrite the newer Manual state.
-    durable = {
-      medications: [med({ currentPills: 9, doseConsumption: { d1: TODAY }, doseConsumptionHistory: { d1: [TODAY] } })],
-      logs: [{ id: 'manual-take-d1', medicationId: 'med-1', medicationName: 'TestMed', type: 'dose_taken', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
-    };
-    const env = {
-      current: plantLegacyExactEnv({
-        medications: [med({ currentPills: 8, doseConsumption: { d1: TODAY }, doseConsumptionHistory: { d1: [TODAY] } })],
-        logs: [{ id: 'legacy-auto-d1', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
-        toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }],
-      }),
-    };
-    const cleanup = installLegacyEnvHooks(env);
-
-    __setStockMutationOrderingTestHooks({
-      loadLastApplied: () => 10,
-      persistLastApplied: () => null,
-      allocate: () => { return { ok: true, seq: 11 }; },
-    });
-
-    marked = [];
-    const recon = await runAutoDeductionReconciliation({
-      globalAutoDeductEnabled: true,
-      listFired: async () => [],
-      markReconciled: async (m, d, c) => { marked.push(`${m}|${d}|${c}`); return { ok: true, changed: true }; },
-    });
-
-    // Legacy envelope cleared (barrier: lastApplied>0 + legacy not applied →
-    // clear without apply).
-    expect(env.current).toBeNull();
-    // Durable still = Manual state (currentPills=9). Legacy (8) did NOT overwrite.
-    expect(durable.medications[0].currentPills).toBe(9);
-    expect(durable.medications[0].currentPills).not.toBe(8);
-    // Legacy auto_daily log NOT in durable (not re-applied).
-    expect(durable.logs.some((l) => l.id === 'legacy-auto-d1')).toBe(false);
-    // No ACK here (legacy not durable; listFired empty so normal path no-ops).
-    expect(marked).toEqual([]);
-    expect(recon.markedCount).toBe(0);
-
-    cleanup();
-  });
-
-  it('legacy envelope + newer pending Manual envelope (seq=10) → Manual wins, legacy does not overwrite', async () => {
-    // durable = base (currentPills=10). A legacy Exact Auto envelope (no seq,
-    // currentPills=8, auto_daily d1) AND a pending Phase 4 Manual envelope
-    // (seq=10, currentPills=9, dose_taken d1) coexist (different storage keys).
-    // The Manual envelope is NEWER (has seq=10). The legacy must NOT overwrite
-    // the newer Manual mutation.
-    durable = { medications: [med({ currentPills: 10 })], logs: [] };
-    const env = {
-      current: plantLegacyExactEnv({
-        medications: [med({ currentPills: 8, doseConsumption: { d1: TODAY }, doseConsumptionHistory: { d1: [TODAY] } })],
-        logs: [{ id: 'legacy-auto-d1', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
-        toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }],
-      }),
-    };
-    const cleanup = installLegacyEnvHooks(env);
-
-    // Pending Manual envelope (seq=10) — NEWER than the legacy envelope.
-    manualEnvelope = {
-      version: 1,
-      status: 'manual_js_ready',
-      medications: [med({ currentPills: 9, doseConsumption: { d1: TODAY }, doseConsumptionHistory: { d1: [TODAY] } })],
-      logs: [{ id: 'manual-take-d1', medicationId: 'med-1', medicationName: 'TestMed', type: 'dose_taken', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
-      createdAt: new Date().toISOString(),
-      baseGeneration: 0,
-      mutationSeq: 10,
-    };
-
-    let allocateCalls = 0;
-    __setStockMutationOrderingTestHooks({
-      loadLastApplied: () => 0,
-      persistLastApplied: () => null,
-      allocate: () => { allocateCalls += 1; return { ok: true, seq: allocateCalls }; },
-    });
-
-    marked = [];
-    const recon = await runAutoDeductionReconciliation({
-      globalAutoDeductEnabled: true,
-      listFired: async () => [],
-      markReconciled: async (m, d, c) => { marked.push(`${m}|${d}|${c}`); return { ok: true, changed: true }; },
-    });
-
-    // Manual (seq=10) won — durable reflects Manual's snapshot (currentPills=9),
-    // NOT legacy's 8. The barrier applied legacy first (lastApplied=0 → safe
-    // apply), then unified recovery applied Manual (seq=10, newer) on top.
-    expect(durable.medications[0].currentPills).toBe(9);
-    expect(durable.medications[0].currentPills).not.toBe(8);
-    // Manual's dose_taken log present; legacy's auto_daily log NOT in durable
-    // (Manual's snapshot replaced the legacy apply).
-    expect(durable.logs.some((l) => l.id === 'manual-take-d1')).toBe(true);
-    expect(durable.logs.some((l) => l.id === 'legacy-auto-d1')).toBe(false);
-    // Both envelopes cleared.
-    expect(env.current).toBeNull();
-    expect(manualEnvelope).toBeNull();
-    // No seq allocated for the legacy envelope (barrier doesn't allocate).
-    expect(allocateCalls).toBe(0);
-    // ACK from legacy toAcknowledge (d1) — the barrier collected it.
-    expect(marked).toEqual([`med-1|d1|${TODAY}`]);
-    expect(recon.markedCount).toBe(1);
-
-    cleanup();
-  });
-
-  it('legacy envelope: no double deduction on restart (snapshot matches → no re-apply)', async () => {
-    durable = {
-      medications: [med({ currentPills: 8 })],
-      logs: [{ id: 'legacy-dedup', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
-    };
-    const env = { current: plantLegacyExactEnv({ medications: durable.medications.map((m) => ({ ...m })), logs: durable.logs.map((l) => ({ ...l })), toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }] }) };
-    const cleanup = installLegacyEnvHooks(env);
-
-    marked = [];
-    await runAutoDeductionReconciliation({
-      globalAutoDeductEnabled: true,
-      listFired: async () => [],
-      markReconciled: async (m, d, c) => { marked.push(`${m}|${d}|${c}`); return { ok: true, changed: true }; },
-    });
-    expect(env.current).toBeNull();
-    expect(durable.medications[0].currentPills).toBe(8);
-    expect(durable.logs.filter((l) => l.id === 'legacy-dedup')).toHaveLength(1);
-    expect(marked).toEqual([`med-1|d1|${TODAY}`]);
-
-    // Restart: envelope cleared, no second deduction, no second ACK.
-    marked = [];
-    const recon2 = await runAutoDeductionReconciliation({
-      globalAutoDeductEnabled: true,
-      listFired: async () => [],
-      markReconciled: async (m, d, c) => { marked.push(`${m}|${d}|${c}`); return { ok: true, changed: true }; },
-    });
-    expect(marked).toEqual([]);
-    expect(recon2.markedCount).toBe(0);
-    expect(durable.medications[0].currentPills).toBe(8);
-    expect(durable.logs.filter((l) => l.id === 'legacy-dedup')).toHaveLength(1);
-
-    cleanup();
-  });
-
-  it('legacy migration: crash after apply before clear → restart sees snapshot match → clear + ACK (no re-apply, no double deduction)', async () => {
-    // durable starts at base (currentPills=10); legacy snapshot = currentPills=6.
-    durable = { medications: [med({ currentPills: 10 })], logs: [] };
-    const env: { current: ReturnType<typeof plantLegacyExactEnv> | null } = { current: plantLegacyExactEnv({ medications: [med({ currentPills: 6 })], logs: [{ id: 'legacy-crash', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd3' }], toAcknowledge: [{ medicationId: 'med-1', doseId: 'd3', calendarDate: TODAY }] }) };
-    // Custom save hook that fails the FIRST clear (simulating crash after apply
-    // before clear), then succeeds on retry.
-    let failClearOnce = true;
-    __setExactAutoEnvelopeStorageTestHooks({
-      load: () => env.current,
-      save: (e: unknown) => {
-        const val = e as ReturnType<typeof plantLegacyExactEnv> | null;
-        if (val == null) {
-          if (failClearOnce) { return 'envelope_clear_failed'; }
-          env.current = null;
-        } else {
-          env.current = val;
-        }
-        return null;
-      },
-    });
-
-    __setStockMutationOrderingTestHooks({
-      loadLastApplied: () => 0,
-      persistLastApplied: () => null,
-      allocate: () => { return { ok: true, seq: 1 }; },
-    });
-
-    marked = [];
-    const first = await runAutoDeductionReconciliation({
-      globalAutoDeductEnabled: true,
-      listFired: async () => [],
-      markReconciled: async (m, d, c) => { marked.push(`${m}|${d}|${c}`); return { ok: true, changed: true }; },
-    });
-    // First run: barrier applied the snapshot (currentPills=10→6) but clear
-    // failed → recovery WAS attempted (recoveredEnvelope=true), envelope kept,
-    // no ACK (clear not durable yet).
-    expect(first.recoveredEnvelope).toBe(true);
-    expect(first.markedCount).toBe(0);
-    expect(marked).toEqual([]);
-    expect(env.current).not.toBeNull();
-    expect(durable.medications[0].currentPills).toBe(6);
-    expect(durable.logs.some((l) => l.id === 'legacy-crash')).toBe(true);
-
-    // Restart: snapshot now matches durable → clear + ACK (no re-apply).
-    failClearOnce = false;
-    marked = [];
-    const second = await runAutoDeductionReconciliation({
-      globalAutoDeductEnabled: true,
-      listFired: async () => [],
-      markReconciled: async (m, d, c) => { marked.push(`${m}|${d}|${c}`); return { ok: true, changed: true }; },
-    });
-    expect(env.current).toBeNull();
-    expect(durable.medications[0].currentPills).toBe(6);
-    // No double deduction: only one legacy-crash log.
-    expect(durable.logs.filter((l) => l.id === 'legacy-crash')).toHaveLength(1);
-    expect(marked).toEqual([`med-1|d3|${TODAY}`]);
-    expect(second.markedCount).toBe(1);
-
-    __setExactAutoEnvelopeStorageTestHooks(null);
-  });
-
-  it('legacy migration: no new mutationSeq allocated on any restart (idempotent)', async () => {
-    durable = { medications: [med({ currentPills: 8 })], logs: [] };
-    const env = { current: plantLegacyExactEnv({ medications: durable.medications.map((m) => ({ ...m })), toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }] }) };
-    const cleanup = installLegacyEnvHooks(env);
-
-    let allocateCalls = 0;
-    __setStockMutationOrderingTestHooks({
-      loadLastApplied: () => 0,
-      persistLastApplied: () => null,
-      allocate: () => { allocateCalls += 1; return { ok: true, seq: allocateCalls }; },
-    });
-
-    await runAutoDeductionReconciliation({
-      globalAutoDeductEnabled: true,
-      listFired: async () => [],
-      markReconciled: async () => ({ ok: true, changed: true }),
-    });
-    const firstAllocateCount = allocateCalls;
-    expect(firstAllocateCount).toBe(0);
-
-    // Restart (envelope already cleared).
-    await runAutoDeductionReconciliation({
-      globalAutoDeductEnabled: true,
-      listFired: async () => [],
-      markReconciled: async () => ({ ok: true, changed: true }),
-    });
-    expect(allocateCalls).toBe(0);
-
-    cleanup();
-  });
-
-  it('after successful legacy migration, new Phase 4 mutations allocate mutationSeq normally', async () => {
-    durable = { medications: [med({ currentPills: 8 })], logs: [] };
-    const env = { current: plantLegacyExactEnv({ medications: durable.medications.map((m) => ({ ...m })), toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }] }) };
-    const cleanup = installLegacyEnvHooks(env);
-
-    let nextSeq = 0;
-    __setStockMutationOrderingTestHooks({
-      loadLastApplied: () => 0,
-      persistLastApplied: () => null,
-      allocate: () => { nextSeq += 1; return { ok: true, seq: nextSeq }; },
-    });
-
-    // Run recon to clear the legacy envelope via the barrier.
-    await runAutoDeductionReconciliation({
-      globalAutoDeductEnabled: true,
-      listFired: async () => [],
-      markReconciled: async () => ({ ok: true, changed: true }),
-    });
-    expect(env.current).toBeNull();
-
-    // Now a Manual Take must allocate a fresh Phase 4 mutationSeq (seq=1).
-    const take = await runGatedManualConsume({
-      medicationId: 'med-1',
-      doseId: 'd1',
-      source: 'manual',
-      todayStr: TODAY,
-    });
-    expect(take.outcome).toBe('applied');
-    expect(durable.medications[0].currentPills).toBe(7);
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
-
-    cleanup();
-  });
-
-  it('legacy migration: clear failure blocks new mutations and keeps envelope (retry succeeds)', async () => {
-    durable = { medications: [med({ currentPills: 8 })], logs: [] };
-    const env: { current: ReturnType<typeof plantLegacyExactEnv> | null } = { current: plantLegacyExactEnv({ medications: durable.medications.map((m) => ({ ...m })), toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }] }) };
-    let failClear = true;
-    __setExactAutoEnvelopeStorageTestHooks({
-      load: () => env.current,
-      save: (e: unknown) => {
-        const val = e as ReturnType<typeof plantLegacyExactEnv> | null;
-        if (val == null) {
-          if (failClear) return 'envelope_clear_failed';
-          env.current = null;
-        } else {
-          env.current = val;
-        }
-        return null;
-      },
-    });
-
-    __setStockMutationOrderingTestHooks({
-      loadLastApplied: () => 0,
-      persistLastApplied: () => null,
-      allocate: () => { return { ok: true, seq: 1 }; },
-    });
-
-    marked = [];
-    const blocked = await runAutoDeductionReconciliation({
-      globalAutoDeductEnabled: true,
-      listFired: async () => [],
-      markReconciled: async (m, d, c) => { marked.push(`${m}|${d}|${c}`); return { ok: true, changed: true }; },
-    });
-    expect(blocked.recoveredEnvelope).toBe(true);
-    expect(blocked.markedCount).toBe(0);
-    expect(marked).toEqual([]);
-    expect(env.current).not.toBeNull();
-
-    // Retry: clear succeeds → envelope cleared + ACK.
-    failClear = false;
-    marked = [];
-    const recon = await runAutoDeductionReconciliation({
-      globalAutoDeductEnabled: true,
-      listFired: async () => [],
-      markReconciled: async (m, d, c) => { marked.push(`${m}|${d}|${c}`); return { ok: true, changed: true }; },
-    });
-    expect(env.current).toBeNull();
-    expect(marked).toEqual([`med-1|d1|${TODAY}`]);
-    expect(recon.markedCount).toBe(1);
-
-    __setExactAutoEnvelopeStorageTestHooks(null);
-  });
 });
 
 describe('shouldDismissAlarmAfterManualTake', () => {
@@ -2833,27 +2464,51 @@ describe('findActiveDeductionForOccurrence — deterministic ordering (NOT array
     expect(findActiveDeductionForOccurrence([otherDate], 'med-1', 'd1', TODAY)).toBeNull();
   });
 
-  it('Legacy (no doseId) logs: identity matches when doseId is legacy/undefined', () => {
-    const legacy1 = deduction({ id: 'leg1', type: 'auto_daily', amount: -1, timestamp: TS_OLD });
-    const legacy2 = deduction({ id: 'leg2', type: 'dose_taken', amount: -2, timestamp: TS_NEW });
-    // Lookup with undefined doseId → both legacy logs match; newer (leg2) wins.
-    const r1 = findActiveDeductionForOccurrence([legacy2, legacy1], 'med-1', undefined, TODAY);
-    const r2 = findActiveDeductionForOccurrence([legacy1, legacy2], 'med-1', undefined, TODAY);
-    expect(r1?.id).toBe('leg2');
-    expect(r2?.id).toBe('leg2');
-    // Lookup with 'legacy' doseId → same behavior.
-    expect(findActiveDeductionForOccurrence([legacy1, legacy2], 'med-1', 'legacy', TODAY)?.id).toBe('leg2');
+  it('logs without doseId never match (no legacy/undefined/sentinel identity)', () => {
+    // Logs missing doseId must not match any lookup — including undefined
+    // and the removed 'legacy' sentinel. A concurrent valid log still matches.
+    const noId1 = deduction({
+      id: 'leg1',
+      type: 'auto_daily',
+      amount: -1,
+      timestamp: TS_OLD,
+    });
+    const noId2 = deduction({
+      id: 'leg2',
+      type: 'dose_taken',
+      amount: -2,
+      timestamp: TS_NEW,
+    });
+    const valid = deduction({
+      id: 'valid-d1',
+      type: 'auto_daily',
+      amount: -3,
+      timestamp: TS_NEWEST,
+      doseId: 'd1',
+    });
+    const legacyLogs = [noId1, noId2, valid];
+    expect(
+      findActiveDeductionForOccurrence(legacyLogs, 'med-1', undefined as never, TODAY)
+    ).toBeNull();
+    expect(
+      findActiveDeductionForOccurrence(legacyLogs, 'med-1', 'legacy', TODAY)
+    ).toBeNull();
+    expect(
+      findActiveDeductionForOccurrence(legacyLogs, 'med-1', 'd1', TODAY)?.id
+    ).toBe('valid-d1');
   });
 });
 
 
 describe('Phase 4 — stale React snapshot must not block durable Restore / Undo', () => {
   let durable: AutoStockDurableState;
+  let manualEnvelope: ManualStockEnvelope | null;
 
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(`${TODAY}T15:00:00`));
     durable = { medications: [med()], logs: [] };
+    manualEnvelope = null;
     __setAutoStockGateTestHooks({
       load: () => ({
         medications: durable.medications.map((m) => ({ ...m })),
@@ -3732,7 +3387,7 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
 
     vi.spyOn(
       preSettleModule,
-      'reconcileExactBeforeLegacySettlement'
+      'reconcileExactBeforeManualMutation'
     ).mockImplementation(async (opts) => ({
       state: opts.fresh,
       reconciliation: null,
@@ -4038,3 +3693,4 @@ describe('Phase 4 — durable global preference and add-medication ordering', ()
     expect(durable.globalAutoDeductEnabled).toBe(false);
   });
 });
+

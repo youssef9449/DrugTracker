@@ -104,7 +104,7 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
     expect(amount).toBe(3);
   });
 
-  it('legacy (no doseId on log) still resolves for undefined/legacy doseId', () => {
+  it('missing doseId returns null (no legacy matching — #267)', () => {
     const logs: ConsumptionLog[] = [
       {
         id: 'legacy-log',
@@ -121,7 +121,60 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
       undefined,
       today
     );
-    expect(active?.id).toBe('legacy-log');
-    expect(Math.abs(Number(active?.amount))).toBe(2);
+    expect(active).toBeNull();
+  });
+
+  it('d1 log cannot restore d2 (doseId isolation — #267)', () => {
+    const logs: ConsumptionLog[] = [
+      {
+        id: 'd1-log',
+        medicationId: 'med',
+        doseId: 'd1',
+        amount: -2,
+        type: 'dose_taken',
+        timestamp: '2026-09-14T08:00:00.000Z',
+        date: today,
+      },
+    ];
+    const active = findActiveDeductionForOccurrence(
+      logs,
+      'med',
+      'd2',
+      today
+    );
+    expect(active).toBeNull();
+  });
+
+  it('whitespace-only doseId returns null (no occurrence match — #267)', () => {
+    const logs: ConsumptionLog[] = [
+      {
+        id: 'd1-log',
+        medicationId: 'med',
+        doseId: 'd1',
+        amount: -2,
+        type: 'dose_taken',
+        timestamp: '2026-09-14T08:00:00.000Z',
+        date: today,
+      },
+    ];
+    expect(findActiveDeductionForOccurrence(logs, 'med', '   ', today)).toBeNull();
+    expect(findActiveDeductionForOccurrence(logs, 'med', '', today)).toBeNull();
+  });
+
+  it('padded doseId normalizes and matches log doseId', () => {
+    const logs: ConsumptionLog[] = [
+      {
+        id: 'd1-log',
+        medicationId: 'med',
+        doseId: 'd1',
+        amount: -2,
+        type: 'auto_daily',
+        timestamp: '2026-09-14T08:00:00.000Z',
+        date: today,
+      },
+    ];
+    const active = findActiveDeductionForOccurrence(logs, 'med', ' d1 ', today);
+    expect(active?.id).toBe('d1-log');
+    expect(active?.amount).toBe(-2);
   });
 });

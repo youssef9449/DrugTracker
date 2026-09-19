@@ -6,7 +6,6 @@ import type { Medication } from '../../src/types';
 import {
   getDoseScheduleForUI,
   getCardDoseToggleTarget,
-  getAutoRestorableDose,
   getNextDoseAmount,
 } from '../../src/utils/doseSchedule';
 import { getAutoDeductionSlotsForDate } from '../../src/hooks/useAutoDeductionScheduler';

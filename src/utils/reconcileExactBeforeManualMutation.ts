@@ -1,13 +1,13 @@
 /**
- * Shared pre-settlement step: before any MUTATION stock settlement runs inside
- * the withAutoStockMutationGate critical section, recover pending Manual /
+ * Shared pre-mutation step: before any manual mutation runs inside the
+ * withAutoStockMutationGate critical section, recover pending Manual /
  * Exact-Auto envelopes and reconcile all durable native FIRED exact events.
  *
- * Guarantees: exact event.amount is applied before historicalDayDueUnits /
- * settleAndAdjust / toggle settlement can charge the current schedule amount
- * for the same occurrence. (The legacy day-based catch-up
- * `syncAutoDailyDeductions` was removed in Issue #268 / PR #271; Exact FIRED
- * is the sole timed automatic deduction.)
+ * Guarantees: exact event.amount is applied before the manual mutation
+ * (Take / Restore / Refill / dose-edit / auto-toggle) runs, so the manual
+ * mutation operates on the post-Exact durable state. (Issue #267: there is
+ * no legacy day-based settlement after reconciliation — manual mutations
+ * use durable `currentPills` directly.)
  */
 
 import {
@@ -19,7 +19,7 @@ import {
   type RunReconciliationOutput,
 } from './runAutoDeductionReconciliation';
 
-export interface PreSettlementResult {
+export interface PreMutationResult {
   state: AutoStockDurableState;
   reconciliation: RunReconciliationOutput | null;
   /** True when native FIRED list failed — caller should fail-closed or retry. */
@@ -30,13 +30,13 @@ export interface PreSettlementResult {
 
 /**
  * Must be called inside withAutoStockMutationGate (alreadyInGate).
- * Returns the post-reconciliation durable state for subsequent legacy math.
+ * Returns the post-reconciliation durable state for the subsequent manual mutation.
  */
-export async function reconcileExactBeforeLegacySettlement(opts: {
+export async function reconcileExactBeforeManualMutation(opts: {
   fresh: AutoStockDurableState;
   globalAutoDeductEnabled: boolean;
   now?: Date;
-}): Promise<PreSettlementResult> {
+}): Promise<PreMutationResult> {
   // Recover pending envelopes + reconcile durable FIRED events via the
   // existing Exact Auto orchestrator (alreadyInGate).
   const recon = await runAutoDeductionReconciliation({

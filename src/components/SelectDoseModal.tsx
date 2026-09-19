@@ -21,7 +21,6 @@ import {
   getHistoricalRestoreDisplayAmount,
   isUiAutoHistoricalRestoreEligible,
   isUiConsumedRestoreEligible,
-  isUiPureAutoProjectionRestoreEligible,
 } from '../utils/medActions';
 import { Modal } from './ui/Modal';
 
@@ -106,7 +105,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
       if (!isRestore) {
         return isDoseCompletedToday(medication, d, today, now, isAutoActive);
       }
-      const completed = isDoseCompletedToday(medication, d, today, now, isAutoActive);
+      // Issue #267: pure-projection restore removed; restore requires durable evidence.
       const skipped = isDoseSkippedOnDate(medication, d.id, today);
       const consumed = isDoseConsumedOnDate(medication, d.id, today);
       const evidence = getHistoricalRestoreDisplayAmount(
@@ -115,16 +114,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
         d.id,
         today
       );
-      const elapsed = isDoseTimeElapsedToday(d.time, now);
-      const pureAuto = isUiPureAutoProjectionRestoreEligible(
-        isAutoActive,
-        completed,
-        consumed,
-        skipped,
-        elapsed
-      );
-      const canRestoreThis =
-        isUiConsumedRestoreEligible(consumed, skipped, evidence) || pureAuto;
+      const canRestoreThis = isUiConsumedRestoreEligible(consumed, skipped, evidence);
       return !canRestoreThis;
     });
 
@@ -191,14 +181,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
               );
               const scheduleAmount = Number(dose.amount) || 0;
               const elapsed = isDoseTimeElapsedToday(dose.time, now);
-              // Pure auto projection: no auto_daily log required.
-              const isPureAuto = isUiPureAutoProjectionRestoreEligible(
-                isAutoActive,
-                completed,
-                consumed,
-                skipped,
-                elapsed
-              );
+              // Issue #267: pure-projection restore removed.
               const timeLabel = formatTimeArabic(dose.time);
               const dayLabel = relativeDoseDayLabel(eventDate, today);
               const whenLabel = `${dayLabel} • ${timeLabel}`;
@@ -239,12 +222,6 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                   statusText = 'تم التناول';
                   action = null;
                   actionLabel = '';
-                } else if (isAutoActive && isPureAuto) {
-                  // Projection-only: elapsed completed without consume mark.
-                  // Restore remains allowed without auto_daily log.
-                  statusText = 'تم الخصم تلقائيًا';
-                  action = 'restore';
-                  actionLabel = 'استرجاع الجرعة';
                 } else if (isAutoActive && !elapsed) {
                   // Auto ON + future slot: not yet due, no action available.
                   statusText = 'لم يحن وقتها';
@@ -285,7 +262,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                     data-event-date={eventDate}
                     data-select-mode="manage"
                     data-dose-status={
-                      isAutoConsumed || isPureAuto
+                      isAutoConsumed
                         ? 'auto'
                         : consumed
                           ? 'consumed'
@@ -348,12 +325,11 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                   ? `${historicalAmount} ${unit}`
                   : unit
                 : `${scheduleAmount} ${unit}`;
-              // Restore selectable only for:
-              // - consumed + exact active deduction evidence, or
-              // - pure auto projection (no log required).
+              // Issue #267: Restore is selectable only when there is a
+              // consumed/manual state AND exact active durable deduction
+              // evidence for this doseId. No pure-projection restore.
               const isSelectable = isRestore
-                ? isUiConsumedRestoreEligible(consumed, skipped, historicalAmount) ||
-                  isPureAuto
+                ? isUiConsumedRestoreEligible(consumed, skipped, historicalAmount)
                 : !completed;
               const isDone = !isSelectable;
 

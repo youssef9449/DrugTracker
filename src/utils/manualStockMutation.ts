@@ -15,8 +15,7 @@ import type { ConsumptionLog, Medication } from '../types';
 import {
   consumeDose,
   restoreDose,
-  settleAndAdjust,
-  type ConsumeDoseResult,
+  applyDurableStockDelta,
 } from './medActions';
 import {
   markAutoDeductionEventReconciled,
@@ -28,10 +27,6 @@ import {
 import {
   isDoseSkippedOnDate,
   getTodayDateString,
-  computeDueDoseBreakdown,
-  effectiveCurrentPills,
-  settleAutoDeductToggle,
-  settleDoseChange,
 } from './dateCalculations';
 import { pruneDoseConsumption } from './pruneDoseConsumption';
 import { isValidDoseTime, normalizeTimeString } from './doseSchedule';
@@ -48,7 +43,7 @@ import {
   saveManualStockEnvelope,
   type ManualStockEnvelope,
 } from './stockEnvelopeRecovery';
-import { reconcileExactBeforeLegacySettlement } from './reconcileExactBeforeLegacySettlement';
+import { reconcileExactBeforeManualMutation } from './reconcileExactBeforeManualMutation';
 
 export type {
   ManualStockEnvelope,
@@ -323,7 +318,7 @@ async function acknowledgeExactAutoEvents(
 /**
  * Shared JS-stock durability: recovery envelope → meds+logs+global → completion marker → clear.
  * Safe to call from an already-held withAutoStockMutationGate, including
- * startup legacy settlement; callers must NOT wrap it in another gate.
+ * startup manual mutation; callers must NOT wrap it in another gate.
  */
 export function commitWithManualEnvelope(
   state: AutoStockDurableState,
@@ -407,8 +402,8 @@ export function runGatedManualConsume(opts: {
       };
     }
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-    // Exact FIRED reconciliation BEFORE any legacy settlement / manual math.
-    const pre = await reconcileExactBeforeLegacySettlement({
+    // Exact FIRED reconciliation BEFORE any manual mutation.
+    const pre = await reconcileExactBeforeManualMutation({
       fresh: recovered.state,
       globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
       now,
@@ -494,7 +489,7 @@ export function runGatedManualConsume(opts: {
     }
     // SCHEDULED / ABSENT / CANCELLED: consumeDose uses fresh durable JS schedule.
 
-    const result: ConsumeDoseResult = consumeDose(
+    const result = consumeDose(
       med,
       opts.source,
       todayStr,
@@ -586,8 +581,8 @@ export function runGatedManualRestore(opts: {
       };
     }
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-    // Exact FIRED reconciliation BEFORE any legacy settlement / manual math.
-    const pre = await reconcileExactBeforeLegacySettlement({
+    // Exact FIRED reconciliation BEFORE any manual mutation.
+    const pre = await reconcileExactBeforeManualMutation({
       fresh: recovered.state,
       globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
       now,
@@ -637,6 +632,26 @@ export function runGatedManualRestore(opts: {
           medicationName: med.name,
           unit: med.unit,
         };
+      }
+      // Issue #267: missing_deduction_evidence after a prior Restore set a
+      // skip marker is already_restored (idempotent — the occurrence was
+      // already handled). This happens when the first Restore cleared the
+      // consume marker and set a skip; the second Restore finds no active
+      // deduction and no consume marker.
+      if (result.reason === 'missing_deduction_evidence') {
+        const occurrenceDoseId = opts.doseId;
+        if (occurrenceDoseId && isDoseSkippedOnDate(med, occurrenceDoseId, todayStr)) {
+          return {
+            outcome: 'already_restored' as const,
+            medications: fresh.medications,
+            logs: fresh.logs,
+            restoredAmount: 0,
+            log: null,
+            reason: 'already_restored',
+            medicationName: med.name,
+            unit: med.unit,
+          };
+        }
       }
       return {
         outcome: 'rejected' as const,
@@ -767,7 +782,7 @@ export function runGatedAddMedication(opts: {
     }
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
 
-    const pre = await reconcileExactBeforeLegacySettlement({
+    const pre = await reconcileExactBeforeManualMutation({
       fresh: recovered.state,
       globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
     });
@@ -853,7 +868,7 @@ export interface GatedRefillResult {
  * serializes refills with concurrent deductions so a refill can never write
  * a stale snapshot over a just-committed deduction (and vice versa).
  *
- * Behavior preserved: settleAndAdjust at the effective balance + add the
+ * Behavior preserved:  at the effective balance + add the
  * refill amount, set lastSyncDate=today, prepend a refill log. The only
  * change is that the settle + commit happen inside the gate against FRESH
  * durable state (not a potentially-stale React snapshot), and the commit
@@ -884,8 +899,8 @@ export function runGatedRefill(opts: {
       };
     }
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-    // Exact FIRED reconciliation BEFORE any legacy settlement / manual math.
-    const pre = await reconcileExactBeforeLegacySettlement({
+    // Exact FIRED reconciliation BEFORE any manual mutation.
+    const pre = await reconcileExactBeforeManualMutation({
       fresh: recovered.state,
       globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
       now,
@@ -926,7 +941,9 @@ export function runGatedRefill(opts: {
       };
     }
 
-    const { updatedMed } = settleAndAdjust(med, opts.addedPills, todayStr, now);
+    // Issue #267: refill adds user-entered amount to durable currentPills only.
+    // No settlement, no lastSyncDate change.
+    const updatedMed = applyDurableStockDelta(med, opts.addedPills);
     const medications = fresh.medications.map((m) =>
       m.id === opts.medicationId ? updatedMed : m
     );
@@ -998,8 +1015,8 @@ export function runGatedUndoRefill(opts: {
       };
     }
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-    // Exact FIRED reconciliation BEFORE any legacy settlement / manual math.
-    const pre = await reconcileExactBeforeLegacySettlement({
+    // Exact FIRED reconciliation BEFORE any manual mutation.
+    const pre = await reconcileExactBeforeManualMutation({
       fresh: recovered.state,
       globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
       now,
@@ -1063,32 +1080,14 @@ export function runGatedUndoRefill(opts: {
 
     const reverseTimestamp = new Date(now).toISOString();
 
-    // Compute settleBase with the SAME semantics as settleAndAdjust /
-    // reverseRefill (dateCalculations.ts): for gated meds, settle at the
-    // past-only balance; for legacy, at the full effective balance. Then
-    // clamp the reversal to what is actually reversible — the refill may
-    // have added 10, but if consumption/settlement has since reduced the
-    // settleBase to 5, only 5 can be reversed. Without this clamp, the
-    // refill_undo log and the operation result would record -10 even though
-    // only -5 was actually reversed (the snapshot would be correct due to
-    // settleAndAdjust's own Math.max(0, …) clamp, but the audit log and
-    // caller-facing amount would be wrong — a data-integrity regression).
-    const breakdown = computeDueDoseBreakdown(med, now, todayStr);
-    const settleBase = breakdown.gated
-      ? Math.max(0, med.currentPills - breakdown.pastDueUnits)
-      : Math.max(0, effectiveCurrentPills(med, todayStr, now));
+    // Issue #267: refill undo reverses from durable currentPills only.
+    // reversedAmount = min(refill.amount, max(0, currentPills)).
+    // No computeDueDoseBreakdown, no effectiveCurrentPills, no settlement.
     const reversedAmount = Math.min(
       Math.max(0, refill.amount),
-      settleBase
+      Math.max(0, med.currentPills)
     );
-    // Reverse: settle at effective balance, then subtract the ACTUAL
-    // (clamped) reversed amount — not the full refill.amount.
-    const { updatedMed } = settleAndAdjust(
-      med,
-      -reversedAmount,
-      todayStr,
-      now
-    );
+    const updatedMed = applyDurableStockDelta(med, -reversedAmount);
     const medications = fresh.medications.map((m) =>
       m.id === opts.medicationId ? updatedMed : m
     );
@@ -1155,7 +1154,7 @@ export interface GatedAutoDeductToggleResult {
 
 /**
  * Per-med auto-deduct toggle inside the stock gate.
- * Ordering: recover → exact FIRED reconciliation → settleAutoDeductToggle on durable med.
+ * Ordering: recover → exact FIRED reconciliation →  on durable med.
  */
 export function runGatedAutoDeductToggle(opts: {
   medicationId: string;
@@ -1164,7 +1163,6 @@ export function runGatedAutoDeductToggle(opts: {
   globalAutoDeductEnabled?: boolean;
 }): Promise<GatedAutoDeductToggleResult> {
   return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
-    const todayStr = opts.todayStr ?? getTodayDateString();
     const now = opts.now ?? new Date();
 
     const recovered = recoverManualEnvelopeInto(freshIn);
@@ -1180,7 +1178,7 @@ export function runGatedAutoDeductToggle(opts: {
     }
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
 
-    const pre = await reconcileExactBeforeLegacySettlement({
+    const pre = await reconcileExactBeforeManualMutation({
       fresh: recovered.state,
       // The durable recovered global policy is the authority; React's copy is
       // only an input hint and may lag after crash/recovery.
@@ -1211,19 +1209,16 @@ export function runGatedAutoDeductToggle(opts: {
       };
     }
 
-    // undefined/true → false; false → true
+    // Issue #267: per-med Auto ON/OFF changes configuration only.
+    // No stock settlement, no auto_daily log, no lastSyncDate change.
     const newState = med.autoDeductEnabled === false;
-    const { updatedMed, log: settleLog } = settleAutoDeductToggle(
-      med,
-      newState,
-      todayStr,
-      now
-    );
+    const updatedMed: Medication = { ...med, autoDeductEnabled: newState };
+    const settleLog: ConsumptionLog | null = null;
 
     const medications = fresh.medications.map((m) =>
       m.id === opts.medicationId ? updatedMed : m
     );
-    const logs = settleLog ? [settleLog, ...fresh.logs] : fresh.logs;
+    const logs = fresh.logs;
 
     // Native recurrence invalidation is the cross-domain ordering barrier.
     const invalidation = await invalidateMedicationRecurrences(med);
@@ -1287,7 +1282,7 @@ export interface GatedGlobalAutoDeductToggleResult {
 
 /**
  * Global auto-deduct toggle inside the stock gate.
- * Exact FIRED reconciliation runs before any per-med legacy settlement.
+ * Exact FIRED reconciliation runs before any per-med manual mutation.
  */
 export function runGatedGlobalAutoDeductToggle(opts: {
   enable: boolean;
@@ -1295,7 +1290,6 @@ export function runGatedGlobalAutoDeductToggle(opts: {
   now?: Date;
 }): Promise<GatedGlobalAutoDeductToggleResult> {
   return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
-    const todayStr = opts.todayStr ?? getTodayDateString();
     const now = opts.now ?? new Date();
 
     const recovered = recoverManualEnvelopeInto(freshIn);
@@ -1311,7 +1305,7 @@ export function runGatedGlobalAutoDeductToggle(opts: {
     }
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
 
-    const pre = await reconcileExactBeforeLegacySettlement({
+    const pre = await reconcileExactBeforeManualMutation({
       fresh: recovered.state,
       globalAutoDeductEnabled: opts.enable,
       now,
@@ -1447,7 +1441,7 @@ export function runGatedDeleteMedication(opts: {
     }
 
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-    const pre = await reconcileExactBeforeLegacySettlement({
+    const pre = await reconcileExactBeforeManualMutation({
       fresh: recovered.state,
       globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
     });
@@ -1544,7 +1538,6 @@ export function runGatedMedicationUpdate(opts: {
   globalAutoDeductEnabled?: boolean;
 }): Promise<GatedMedicationUpdateResult> {
   return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
-    const todayStr = opts.todayStr ?? getTodayDateString();
     const now = opts.now ?? new Date();
 
     const recovered = recoverManualEnvelopeInto(freshIn);
@@ -1559,7 +1552,7 @@ export function runGatedMedicationUpdate(opts: {
     }
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
 
-    const pre = await reconcileExactBeforeLegacySettlement({
+    const pre = await reconcileExactBeforeManualMutation({
       fresh: recovered.state,
       // The durable recovered global policy is authoritative; the React value
       // may lag after crash/recovery and must not control stock reconciliation.
@@ -1588,8 +1581,6 @@ export function runGatedMedicationUpdate(opts: {
       };
     }
 
-    const isDoseChanging = opts.medData.dailyDose !== freshMed.dailyDose;
-
     let invalidation: RecurrenceInvalidationResult = {
       ok: true,
       invalidatedDoseIds: [],
@@ -1611,18 +1602,11 @@ export function runGatedMedicationUpdate(opts: {
       }
     }
 
-    let stockBase = freshMed;
-    let settleLog: ConsumptionLog | null = null;
-    if (isDoseChanging) {
-      const settled = settleDoseChange(
-        freshMed,
-        opts.medData.dailyDose,
-        todayStr,
-        now
-      );
-      stockBase = settled.updatedMed;
-      settleLog = settled.log;
-    }
+    // Issue #267: dose edit changes configuration only. No stock settlement,
+    // no auto_daily log, no lastSyncDate change. currentPills is NOT changed
+    // by a dose edit.
+    const stockBase = freshMed;
+    const settleLog: ConsumptionLog | null = null;
 
     // Prune from durable/settled history + NEW schedule — never from React form history.
     // Authority: fresh durable state → settlement result → prune using final schedule.

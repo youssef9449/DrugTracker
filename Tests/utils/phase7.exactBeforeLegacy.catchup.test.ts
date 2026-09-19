@@ -89,17 +89,40 @@ function startupExactThenLegacy(
 describe('Phase 7 Exact-before-legacy catch-up (T7-1)', () => {
   describe('Case A — multi-day history: Exact FIRED + unrecorded catch-up', () => {
     it('applies each Exact event.amount once; legacy does not re-charge those slots; unrecorded past may catch up', () => {
-      // lastSync = 2026-09-15. Today = 2026-09-18.
-      // Exact covered: 09-16 dA (1), 09-17 dB (2) — event.amount authoritative.
-      // 09-16 dB+dC and 09-17 dA+dC remain unrecorded → legacy past catch-up.
+      // Fixture:
+      //   start currentPills = 30, lastSyncDate = 2026-09-15, today = 2026-09-18
+      //   schedule: dA@08:00=1, dB@14:00=2, dC@22:00=3 (daily total 6)
+      // Exact FIRED (in scheduled order):
+      //   1) dA @ 2026-09-16 amount=1
+      //   2) dB @ 2026-09-17 amount=2
+      //
+      // Exact apply math (gated multi + priorHistoricalUnits):
+      //   Event1 dA@09-16: prior hist (lastSync, 09-16) empty → 30 − 1 = 29
+      //   Event2 dB@09-17: prior hist day 09-16 unrecorded slots dB+dC = 2+3 = 5
+      //                    settleBase = 29 − 5 = 24; deduct event 2 → 22
+      //                    lastSync advances to day-before event = 09-16
+      //   EXPECTED_EXACT_RESULT = 22
+      //
+      // Legacy sync after Exact (multi past-only; today not settled):
+      //   past window (lastSync 09-16, today 09-18) → day 09-17 only
+      //   09-17: dB consumed by Exact → remaining dA+dC = 1+3 = 4
+      //   22 − 4 = 18
+      //   EXPECTED_FINAL_RESULT = 18
+      //
+      // Exact occurrences must not be charged again by legacy (markers exclude them).
       const med = multiMed({ currentPills: 30, lastSyncDate: THREE_DAYS_AGO });
       const events = [
         fired('dA', DAY_BEFORE, 1, 100),
         fired('dB', YESTERDAY, 2, 200),
       ];
-      // Afternoon today so today's elapsed slots exist for projection only;
-      // multi sync must not settle today.
+      // Afternoon today: elapsed today slots affect projection only; multi sync
+      // does not settle today.
       const now = new Date(2026, 8, 18, 15, 0, 0);
+
+      const EXPECTED_EXACT_RESULT = 22;
+      const EXPECTED_FINAL_RESULT = 18;
+      const EXPECTED_EXACT_LOG_COUNT = 2;
+      const EXPECTED_LEGACY_CATCHUP_UNITS = 4;
 
       const { recon, sync, finalMeds, finalLogs } = startupExactThenLegacy(
         [med],
@@ -113,12 +136,9 @@ describe('Phase 7 Exact-before-legacy catch-up (T7-1)', () => {
       expect(recon.details.every((d) => d.outcome === 'applied')).toBe(true);
 
       const afterExact = recon.medications[0];
-      // 30 - 1 - 2 = 27 from Exact alone (prior hist fold may also settle
-      // unrecorded slots on event days before the event — design allows
-      // priorHistoricalUnits for gated meds). Stock must be strictly lower.
-      expect(afterExact.currentPills).toBeLessThan(30);
+      expect(afterExact.currentPills).toBe(EXPECTED_EXACT_RESULT);
 
-      // Markers for Exact occurrences
+      // Markers for Exact occurrences only
       expect(isDoseConsumedOnDate(afterExact, 'dA', DAY_BEFORE)).toBe(true);
       expect(isDoseConsumedOnDate(afterExact, 'dB', YESTERDAY)).toBe(true);
       expect(isExactAutoOccurrenceApplied(afterExact, 'dA', DAY_BEFORE, TODAY)).toBe(
@@ -128,16 +148,18 @@ describe('Phase 7 Exact-before-legacy catch-up (T7-1)', () => {
         true
       );
 
-      // Exact logs only for Exact path
+      // Exact logs: one per successful Exact occurrence; never auto_daily
+      expect(recon.newExactLogs).toHaveLength(EXPECTED_EXACT_LOG_COUNT);
       const exactIds = [
         exactAutoLogId('med-multi', 'dA', DAY_BEFORE),
         exactAutoLogId('med-multi', 'dB', YESTERDAY),
       ];
-      for (const id of exactIds) {
-        expect(recon.newExactLogs.some((l) => l.id === id)).toBe(true);
-      }
+      expect(recon.newExactLogs.map((l) => l.id).sort()).toEqual([...exactIds].sort());
+      expect(
+        recon.newExactLogs.every((l) => String(l.id).startsWith('exact-auto:'))
+      ).toBe(true);
 
-      // Re-running Exact on same events must be already_applied (once)
+      // Re-running Exact on same events: already_applied, stock stays 22
       const second = reconcileFiredEvents(
         recon.medications,
         recon.logs,
@@ -148,24 +170,30 @@ describe('Phase 7 Exact-before-legacy catch-up (T7-1)', () => {
         true
       );
       expect(second.mutated).toBe(false);
-      expect(second.medications[0].currentPills).toBe(afterExact.currentPills);
+      expect(second.medications[0].currentPills).toBe(EXPECTED_EXACT_RESULT);
+      expect(second.newExactLogs).toHaveLength(0);
 
-      // Legacy sync after Exact: may catch up remaining past units, but must
-      // not produce exact-auto:* logs and must not re-apply Exact slots.
-      expect(sync.newLogs.every((l) => !String(l.id).startsWith('exact-auto:'))).toBe(
-        true
+      // Legacy catch-up: only unrecorded past units (4), not Exact slots
+      expect(sync.newLogs).toHaveLength(1);
+      expect(sync.newLogs[0].type).toBe('auto_daily');
+      expect(String(sync.newLogs[0].id).startsWith('exact-auto:')).toBe(false);
+      expect(sync.newLogs[0].amount).toBe(-EXPECTED_LEGACY_CATCHUP_UNITS);
+      expect(sync.deductedSummary).toHaveLength(1);
+      expect(sync.deductedSummary[0].pillsDeducted).toBe(EXPECTED_LEGACY_CATCHUP_UNITS);
+
+      const afterLegacy = finalMeds[0];
+      expect(afterLegacy.currentPills).toBe(EXPECTED_FINAL_RESULT);
+      // Exact markers still present — legacy did not clear or re-charge them
+      expect(isDoseConsumedOnDate(afterLegacy, 'dA', DAY_BEFORE)).toBe(true);
+      expect(isDoseConsumedOnDate(afterLegacy, 'dB', YESTERDAY)).toBe(true);
+
+      // Total durable reduction = Exact path effect to 22 + legacy 4 → 18
+      // Equivalent check: never double-count Exact amounts 1+2 into legacy total
+      expect(30 - EXPECTED_FINAL_RESULT).toBe(
+        30 - EXPECTED_EXACT_RESULT + EXPECTED_LEGACY_CATCHUP_UNITS
       );
-      const final = finalMeds[0];
-      expect(isDoseConsumedOnDate(final, 'dA', DAY_BEFORE)).toBe(true);
-      expect(isDoseConsumedOnDate(final, 'dB', YESTERDAY)).toBe(true);
 
-      // auto_daily is catch-up audit only — presence does not prove Exact identity
-      for (const log of sync.newLogs) {
-        expect(log.type).toBe('auto_daily');
-        expect(log.id.startsWith('exact-auto:')).toBe(false);
-      }
-
-      // Idempotent startup second pass: no further Exact mutation
+      // Idempotent second startup: no further Exact or legacy mutation
       const pass2 = startupExactThenLegacy(
         finalMeds,
         finalLogs,
@@ -174,7 +202,8 @@ describe('Phase 7 Exact-before-legacy catch-up (T7-1)', () => {
         now
       );
       expect(pass2.recon.mutated).toBe(false);
-      expect(pass2.finalMeds[0].currentPills).toBe(final.currentPills);
+      expect(pass2.sync.newLogs).toHaveLength(0);
+      expect(pass2.finalMeds[0].currentPills).toBe(EXPECTED_FINAL_RESULT);
     });
   });
 

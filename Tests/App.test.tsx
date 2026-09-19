@@ -53,6 +53,7 @@ vi.mock('@/utils/runAutoDeductionReconciliation', () => ({
       partialNativeAck: false,
     })
   ),
+  __setExactAutoEnvelopeTestHooks: vi.fn(),
 }));
 
 import App from '@/App';
@@ -302,8 +303,60 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
     // StrictMode double-invokes updater functions in development.
     // The Phase 4 gated handler runs the mutation outside the updater,
     // so the durable mutation executes exactly once even under StrictMode.
-    const todayStr = new Date().toISOString().slice(0, 10);
+    //
+    // This test instruments the durable commit path (commitDurableAutoStockState
+    // via __setAutoStockGateTestHooks) to count how many times the toggle's
+    // medication-state mutation is physically committed to durable storage.
+    // This counts the actual durable mutation/commit operation — NOT a UI
+    // callback, React render, or click handler invocation. If StrictMode
+    // caused the gated mutation to execute twice, the counter would be 2.
     seedMed({ autoDeductEnabled: true });
+
+    // Capture the pre-toggle durable medication state.
+    const preToggleMed = getDurableMed();
+    expect(preToggleMed?.autoDeductEnabled).toBe(true);
+    const preToggleLastSync = preToggleMed?.lastSyncDate as string;
+    const preToggleCurrentPills = preToggleMed?.currentPills as number;
+
+    // Instrument the durable stock gate to count commits where the
+    // autoDeductEnabled flag for med-toggle changed. This is the actual
+    // durable mutation commit — the physical write of medications to
+    // durable storage, called by commitWithManualEnvelope inside the
+    // gated handler. It is NOT a UI callback or React render.
+    let toggleCommitCount = 0;
+    const { __setAutoStockGateTestHooks } = await import('@/utils/autoDeductionStockGate');
+    const { __setManualEnvelopeTestHooks } = await import('@/utils/manualStockMutation');
+    const { __setExactAutoEnvelopeTestHooks } = await import('@/utils/runAutoDeductionReconciliation');
+    const { __setStockMutationOrderingTestHooks } = await import('@/utils/stockMutationOrdering');
+
+    // Install gate hooks: load from real localStorage, commit to real
+    // localStorage (so the app reads the updated state), but also count
+    // commits where autoDeductEnabled changed for med-toggle.
+    __setAutoStockGateTestHooks({
+      load: () => ({
+        medications: JSON.parse(localStorage.getItem('android_med_tracker_items_v2') ?? '[]'),
+        logs: JSON.parse(localStorage.getItem('android_med_tracker_logs_v2') ?? '[]'),
+        globalAutoDeductEnabled: true,
+      }),
+      commit: (state) => {
+        // Write to real localStorage (production behavior).
+        localStorage.setItem('android_med_tracker_items_v2', JSON.stringify(state.medications));
+        localStorage.setItem('android_med_tracker_logs_v2', JSON.stringify(state.logs));
+        // Count commits where med-toggle's autoDeductEnabled changed.
+        const committedMed = state.medications.find((m) => m.id === 'med-toggle');
+        if (committedMed && committedMed.autoDeductEnabled !== preToggleMed?.autoDeductEnabled) {
+          toggleCommitCount++;
+        }
+        return null;
+      },
+    });
+    __setManualEnvelopeTestHooks({ load: () => null, save: () => null });
+    __setExactAutoEnvelopeTestHooks({ load: () => null, save: () => null });
+    __setStockMutationOrderingTestHooks({
+      loadLastApplied: () => 0,
+      persistLastApplied: () => null,
+      allocate: () => ({ ok: true as const, seq: 1 }),
+    });
 
     const { StrictMode } = await import('react');
     render(
@@ -318,20 +371,33 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
 
     clickToggleFor();
 
-    // Exactly ONE durable mutation — autoDeductEnabled = false.
+    // Exactly ONE durable mutation commit — autoDeductEnabled changed
+    // from true to false. This assertion would FAIL if the same ON→OFF
+    // user action caused two durable mutation commits (toggleCommitCount
+    // would be 2).
     await waitFor(() => {
-      const med = getDurableMed();
-      expect(med?.autoDeductEnabled).toBe(false);
+      expect(toggleCommitCount).toBe(1);
     });
 
-    // Verify currentPills unchanged and no auto_daily log.
+    // Verify the durable state: autoDeductEnabled = false.
     const med = getDurableMed();
     expect(med?.autoDeductEnabled).toBe(false);
-    expect(med?.currentPills).toBe(60);
-    expect(med?.lastSyncDate).toBe(todayStr);
 
+    // Issue #267: currentPills unchanged from pre-toggle value.
+    expect(med?.currentPills).toBe(preToggleCurrentPills);
+
+    // lastSyncDate unchanged from the pre-toggle durable medication.
+    expect(med?.lastSyncDate).toBe(preToggleLastSync);
+
+    // No auto_daily settlement log created by the toggle.
     const logs = getDurableLogs();
     expect(logs.filter((l) => l.type === 'auto_daily')).toHaveLength(0);
+
+    // Cleanup test hooks.
+    __setAutoStockGateTestHooks(null);
+    __setManualEnvelopeTestHooks(null);
+    __setExactAutoEnvelopeTestHooks(null);
+    __setStockMutationOrderingTestHooks(null);
   });
 
   it('Test C — OFF → ON: changes autoDeductEnabled to true; currentPills unchanged; no auto_daily log', async () => {

@@ -124,9 +124,12 @@ export type RestoreDoseResult =
 export function findActiveDeductionForOccurrence(
   logs: ConsumptionLog[],
   medicationId: string,
-  doseId: string | undefined,
+  doseId: string,
   calendarDate: string
 ): ConsumptionLog | null {
+  // Issue #267: doseId is required (no legacy/missing/empty/sentinel).
+  // Only explicit non-empty doseId is valid for occurrence matching.
+  if (!doseId) return null;
   let best: ConsumptionLog | null = null;
   let bestEpoch = -Infinity;
   let bestId = '';
@@ -135,15 +138,10 @@ export function findActiveDeductionForOccurrence(
     if (l.date !== calendarDate) continue;
     if (l.type !== 'dose_taken' && l.type !== 'auto_daily') continue;
     if (l.reversedAt) continue; // already reversed by a prior Restore
-    const logDose =
-      l.doseId != null && String(l.doseId) !== '' ? String(l.doseId) : null;
-    if (doseId != null && doseId !== '' && doseId !== 'legacy') {
-      // Multi-dose: require matching doseId on the log.
-      if (logDose !== doseId) continue;
-    } else {
-      // Legacy / single: accept logs without doseId or with legacy id.
-      if (logDose != null && logDose !== 'legacy' && logDose !== doseId) continue;
-    }
+    const logDose = l.doseId != null && String(l.doseId) !== '' ? String(l.doseId) : null;
+    // Issue #267: require explicit non-empty doseId on the log — no
+    // legacy/missing/empty/sentinel matching.
+    if (logDose !== doseId) continue;
     const parsed = Date.parse(l.timestamp ?? '');
     const epoch = Number.isFinite(parsed) ? parsed : -Infinity;
     const id = l.id ?? '';
@@ -171,6 +169,7 @@ export function getHistoricalRestoreDisplayAmount(
   doseId: string | undefined,
   calendarDate: string
 ): number | null {
+  if (!doseId) return null;
   const active = findActiveDeductionForOccurrence(
     logs,
     medicationId,
@@ -216,6 +215,7 @@ export function findActualDeductedAmountForOccurrence(
   doseId: string | undefined,
   calendarDate: string
 ): number | null {
+  if (!doseId) return null;
   const active = findActiveDeductionForOccurrence(logs, medicationId, doseId, calendarDate);
   return active ? Math.abs(Number(active.amount) || 0) : null;
 }

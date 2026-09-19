@@ -192,13 +192,15 @@ describe('stock gate — fresh durable state', () => {
     expect(durable.medications[0].currentPills).toBe(8);
   });
 
-  it('legacyThenNativeDoesNotDoubleDeduct', async () => {
-    // Scenario A: legacy day settlement already advanced lastSync over the event day.
-    // today=2026-09-14, lastSync=2026-09-13, event=2026-09-13 → already reflected.
+  it('lastSyncDateDoesNotBlockFIRED (#265/#267)', async () => {
+    // Issue #265/#267: lastSyncDate is NOT occurrence-level evidence.
+    // A FIRED event for a past date (calendarDate == lastSyncDate) with no
+    // durable consume/skip marker must be APPLIED — lastSyncDate does not
+    // prevent the FIRED deduction.
     durable.medications = [
       baseMed({
         doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
-        currentPills: 8,
+        currentPills: 10,
         lastSyncDate: '2026-09-13',
         dailyDose: 2,
       }),
@@ -211,8 +213,22 @@ describe('stock gate — fresh durable state', () => {
     });
     await withAutoStockMutationGate(async (fresh) => {
       const r = reconcileFiredEvents(fresh.medications, fresh.logs, [e]);
-      expect(r.details[0]?.outcome).toBe('already_applied');
+      // NOT already_applied — the FIRED event is applied.
+      expect(r.details[0]?.outcome).toBe('applied');
+      expect(r.mutated).toBe(true);
       commitDurableAutoStockState({ medications: r.medications, logs: r.logs });
+    });
+    // event.amount (2) deducted exactly once.
+    expect(durable.medications[0].currentPills).toBe(8);
+    // lastSyncDate is NOT changed by the Exact apply (Issue #265).
+    expect(durable.medications[0].lastSyncDate).toBe('2026-09-13');
+
+    // Second reconciliation of the same FIRED: now there IS durable evidence
+    // (consume marker) → already_applied → no second deduction.
+    await withAutoStockMutationGate(async (fresh) => {
+      const r = reconcileFiredEvents(fresh.medications, fresh.logs, [e]);
+      expect(r.details[0]?.outcome).toBe('already_applied');
+      expect(r.mutated).toBe(false);
     });
     expect(durable.medications[0].currentPills).toBe(8);
   });
@@ -562,6 +578,8 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
         { medicationId: 'med-1', doseId: 'd', calendarDate: '2026-09-14' },
       ],
       createdAt: '2026-09-14T12:00:00.000Z',
+      mutationSeq: 1,
+      globalAutoDeductEnabled: true,
     };
     let markCalls = 0;
 

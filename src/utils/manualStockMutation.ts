@@ -633,6 +633,26 @@ export function runGatedManualRestore(opts: {
           unit: med.unit,
         };
       }
+      // Issue #267: missing_deduction_evidence after a prior Restore set a
+      // skip marker is already_restored (idempotent — the occurrence was
+      // already handled). This happens when the first Restore cleared the
+      // consume marker and set a skip; the second Restore finds no active
+      // deduction and no consume marker.
+      if (result.reason === 'missing_deduction_evidence') {
+        const occurrenceDoseId = opts.doseId;
+        if (occurrenceDoseId && isDoseSkippedOnDate(med, occurrenceDoseId, todayStr)) {
+          return {
+            outcome: 'already_restored' as const,
+            medications: fresh.medications,
+            logs: fresh.logs,
+            restoredAmount: 0,
+            log: null,
+            reason: 'already_restored',
+            medicationName: med.name,
+            unit: med.unit,
+          };
+        }
+      }
       return {
         outcome: 'rejected' as const,
         medications: fresh.medications,

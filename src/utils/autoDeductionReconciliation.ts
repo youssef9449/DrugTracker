@@ -3,13 +3,10 @@
  *
  * Idempotency:
  * - Per-dose consume/skip markers (same as Take)
- * - lastSyncDate day-settlement horizon: past calendar days already folded
- *   into currentPills by a prior mutation settlement are treated as applied
- *   without inventing fake consume markers for slots that were only
- *   day-settled. (The legacy day-based catch-up `syncAutoDailyDeductions` was
- *   removed in Issue #268 / PR #271; Exact FIRED is the sole timed automatic
- *   deduction. The day-settlement horizon still applies to past mutation
- *   settlements.)
+ * - Existing exact auto log (deterministic id) for the occurrence
+ * - Issue #265/#267: `lastSyncDate` is NOT occurrence-level evidence and is
+ *   NOT used to mark an occurrence as applied. Idempotency relies solely on
+ *   durable occurrence-specific evidence.
  *
  * Log identity for exact events is deterministic so retries do not create
  * duplicate ConsumptionLog rows.
@@ -147,9 +144,13 @@ export function findExactAutoLog(
  *
  * Sources (any one is enough):
  * 1. dose consume / skip history (Take, prior exact apply, Restore skip)
- * 2. lastSyncDate day-settlement horizon — past days already settled into
- *    currentPills by a prior mutation settlement (no fake consume markers
- *    invented)
+ * 2. existing exact auto log for this occurrence (deterministic id)
+ *
+ * Issue #265/#267: `lastSyncDate` is NOT occurrence-level evidence and must
+ * NOT prevent a FIRED event from being applied. Idempotency relies solely
+ * on durable occurrence-specific evidence (consume/skip markers + the
+ * deterministic exact log id), not on a global date-based settlement
+ * horizon.
  */
 export function isExactAutoOccurrenceApplied(
   med: Medication,
@@ -162,14 +163,6 @@ export function isExactAutoOccurrenceApplied(
 
   if (isDoseConsumedOnDate(med, id, calendarDate)) return true;
   if (isDoseSkippedOnDate(med, id, calendarDate)) return true;
-
-  const lastSync = med.lastSyncDate;
-  if (lastSync && calendarDate.length === 10) {
-    // Past calendar day already included in day settlement into currentPills
-    if (calendarDate < todayStr && calendarDate <= lastSync) {
-      return true;
-    }
-  }
 
   return false;
 }

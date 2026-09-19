@@ -789,8 +789,14 @@ describe('exact event day must not be double-settled', () => {
     expect(r.newExactLogs).toHaveLength(2);
   });
 
-  it('priorHistoricalDaysBeforeEventDayStillSettle', () => {
-    // lastSync=09-10, event=09-13 amount 2; days 11+12 still due (2 each) → 10-4-2=4
+  it('oldLastSyncDoesNotFoldHistoricalDaysIntoExactApply (#265)', () => {
+    // Issue #265: a single FIRED event deducts ONLY event.amount. No
+    // historical / day-based settlement is folded into the Exact apply —
+    // `lastSyncDate` does not influence the amount charged for this FIRED
+    // occurrence. lastSync=09-10, event=09-13 amount 2 → 10 - 2 = 8 (NOT
+    // 10 - 4 [days 11+12] - 2 = 4). The days 11+12 are NOT auto-settled by
+    // this path; they stay as a live projection until a mutation or their
+    // own FIRED occurrences settle them.
     const med = baseMed({
       doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
       currentPills: 10,
@@ -809,7 +815,13 @@ describe('exact event day must not be double-settled', () => {
         }),
       ]
     );
-    expect(r.medications[0].currentPills).toBe(4);
+    expect(r.details[0].outcome).toBe('applied');
+    expect(r.medications[0].currentPills).toBe(8);
+    // lastSyncDate is preserved (no prior-day folding).
+    expect(r.medications[0].lastSyncDate).toBe('2026-09-10');
+    // Exactly one exact log (the FIRED occurrence); no legacy day-settlement log.
+    expect(r.newExactLogs).toHaveLength(1);
+    expect(r.newExactLogs[0].amount).toBe(-2);
   });
 
   it('sameDayExactEventDoesNotUsePastDueWindow', () => {
@@ -1949,6 +1961,104 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
     if (applied.ok) {
       expect(applied.updatedMed.lastConsumedDate).toBe('2026-09-14');
       expect(applied.updatedMed.currentPills).toBe(9);
+    }
+  });
+
+  it('current schedule amount differs from event.amount → deduction is event.amount, NOT the schedule amount (#265)', () => {
+    // The current doseSchedule says d1 amount=3, but the FIRED event carries
+    // amount=1. The deduction is event.amount (1), NOT the current schedule
+    // amount (3). event.amount is the authoritative charge for a FIRED
+    // occurrence; the current schedule is only for scheduling FUTURE ones.
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      lastConsumedDate: '2026-09-12',
+      doseSchedule: [{ id: 'd1', amount: 3, time: '08:00' }],
+      dailyDose: 3,
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      calendarDate: '2026-09-14',
+      amount: 1,
+    });
+    const applied = applyExactAutoEventToMedication(med, e, new Date());
+    expect(applied.ok).toBe(true);
+    if (applied.ok) {
+      // 10 − event.amount(1) = 9, NOT 10 − schedule amount(3) = 7.
+      expect(applied.updatedMed.currentPills).toBe(9);
+      expect(applied.log.amount).toBe(-1);
+    }
+  });
+
+  it('past FIRED occurrence adds no historical sibling/day deductions (#265)', () => {
+    // A single FIRED event on a past calendar day deducts ONLY its own
+    // event.amount. No historical / sibling-day settlement is folded into
+    // the apply — other elapsed days (e.g. between lastSync and the event
+    // day) are NOT auto-charged by this path. lastSyncDate is preserved.
+    // lastSync=09-10, event=09-13 amount 2 → 10 − 2 = 8. Days 09-11/09-12
+    // are NOT charged here (they stay a live projection until a mutation or
+    // their own FIRED occurrences settle them).
+    const med = baseMed({
+      doseSchedule: [
+        { id: 'd1', amount: 2, time: '08:00' },
+        { id: 'd2', amount: 2, time: '20:00' },
+      ],
+      currentPills: 10,
+      lastSyncDate: '2026-09-10',
+      lastConsumedDate: '2026-09-09',
+      dailyDose: 4,
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      calendarDate: '2026-09-13',
+      amount: 2,
+    });
+    const applied = applyExactAutoEventToMedication(med, e, new Date());
+    expect(applied.ok).toBe(true);
+    if (applied.ok) {
+      // Only the FIRED occurrence's amount (2). No sibling d2, no days
+      // 09-11/09-12, no dailyDose(4)-based catch-up.
+      expect(applied.updatedMed.currentPills).toBe(8);
+      // lastSyncDate preserved (no prior-day folding).
+      expect(applied.updatedMed.lastSyncDate).toBe('2026-09-10');
+      // Only one exact log (this occurrence).
+      expect(applied.log.amount).toBe(-2);
+      expect(applied.log.doseId).toBe('d1');
+    }
+  });
+
+  it('old lastSyncDate does not increase the Exact deduction (#265)', () => {
+    // The same FIRED event (amount 2) deducts exactly 2 whether lastSyncDate
+    // is recent or many days old. lastSyncDate has no influence on the Exact
+    // deduction amount.
+    const recent = baseMed({
+      doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      dailyDose: 2,
+    });
+    const old = baseMed({
+      doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+      currentPills: 10,
+      lastSyncDate: '2026-09-01',
+      dailyDose: 2,
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      calendarDate: '2026-09-14',
+      amount: 2,
+    });
+    const r1 = applyExactAutoEventToMedication(recent, e, new Date());
+    const r2 = applyExactAutoEventToMedication(old, e, new Date());
+    expect(r1.ok).toBe(true);
+    expect(r2.ok).toBe(true);
+    if (r1.ok && r2.ok) {
+      // Both deduct exactly event.amount (2) — lastSyncDate is irrelevant.
+      expect(r1.updatedMed.currentPills).toBe(8);
+      expect(r2.updatedMed.currentPills).toBe(8);
     }
   });
 });

@@ -1,41 +1,39 @@
 /**
- * Phase 4 regression — legacy single-dose (no doseSchedule) after Exact Auto.
+ * Issue #268 / PR #271 — Legacy Single-Dose Exact path removed.
  *
- * Scenario (exact numbers from the Phase 4 audit):
- *   medication: legacy single-dose, no doseSchedule
- *   currentPills = 10, dailyDose = 1
- *   lastSyncDate = '2026-09-13', todayStr = '2026-09-14'
- *   now = new Date('2026-09-14T09:00:00')
- *   Exact FIRED event amount = 2 for calendarDate '2026-09-14'
+ * Pre-PR this file guarded the legacy single-dose Exact double-deduction
+ * regression (a no-`doseSchedule` med charged once by Exact Auto then again
+ * by legacy day-settlement). That whole path is gone: a Medication without an
+ * explicit, non-empty `doseSchedule` whose array contains the event `doseId`
+ * can no longer produce an Exact stock mutation, an Exact log, a consume
+ * marker, or a `lastConsumedDate` write — `applyExactAutoEventToMedication`
+ * returns `{ ok: false, reason: 'invalid_dose_schedule' }`.
  *
- * applyExactAutoEventToMedication() deducts the authoritative event.amount (2)
- * and leaves lastSyncDate behind (legacy non-gated has no prior-historical
- * window). A Phase 4 mutation that then runs legacy settlement
- * (settleAutoDeductToggle / settleDoseChange) used to charge today's dose
- * AGAIN because computeDueDoseBreakdown()'s legacy path folded today into
- * fullDueUnits even though today's occurrence was already consumed:
- *   10 → 8 (exact) → 7 (legacy settlement double-charge)  ← the bug
- * The corrected contract:
- *   10 → 8 (exact) → 8 (legacy settlement must be a no-op for that occurrence)
+ * `doseSchedule` is now the SOLE source of dose identity / amount / time for
+ * Exact Auto. There is no migration and no backward compatibility:
+ *   - no `LEGACY_DOSE_ID` sentinel,
+ *   - no `dailyDose` / `reminderTime` / `reminderEnabled` / `lastConsumedDate`
+ *     fallback,
+ *   - no first-dose / next-dose / array-index fallback,
+ *   - no empty/sentinel doseId.
  *
- * Invariants preserved:
- *   - Legacy semantics unchanged when today's dose is NOT consumed.
- *   - Multi-dose semantics unchanged (slot-level timing + todayDueUnits).
- *   - occurrence identity = medicationId + doseId + calendarDate.
+ * What remains valid and unchanged: explicit multi-dose / single-slot
+ * schedules (a Medication with `doseSchedule: [{ id, amount, time }]`) drive
+ * Exact Auto normally, and `event.amount` is the authoritative charge.
  */
 import { describe, it, expect } from 'vitest';
 import type { Medication } from '../../src/types';
 import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
 import {
   computeDueDoseBreakdown,
-  settleAutoDeductToggle,
-  settleDoseChange,
   syncAutoDailyDeductions,
   effectiveCurrentPills,
 } from '../../src/utils/dateCalculations';
 import {
   reconcileFiredEvents,
   exactAutoLogId,
+  applyExactAutoEventToMedication,
+  isExactDoseScheduleMember,
 } from '../../src/utils/autoDeductionReconciliation';
 
 const TODAY = '2026-09-14';
@@ -57,10 +55,13 @@ function legacyMed(over: Partial<Medication> = {}): Medication {
   };
 }
 
+/** Exact FIRED event for a no-schedule med — the pre-PR legacy shape. */
 function legacyFiredEvent(amount: number): AutoDeductionEvent {
   return {
     medicationId: 'med-1',
-    // Empty doseId normalizes to the LEGACY_DOSE_ID sentinel.
+    // Empty doseId: the pre-PR LEGACY_DOSE_ID shape. Under the new contract
+    // this is a malformed identity → terminal ACK at the runner level (no
+    // stock, no log) before ever reaching applyExactAutoEventToMedication.
     doseId: '',
     calendarDate: TODAY,
     amount,
@@ -71,108 +72,136 @@ function legacyFiredEvent(amount: number): AutoDeductionEvent {
   };
 }
 
-describe('legacy single-dose: exact reconciliation then legacy settlement', () => {
-  it('applyExactAutoEventToMedication path: amount 2 applied, lastSyncDate left behind', () => {
+describe('legacy single-dose (no doseSchedule): Exact path is removed (#268 / PR #271)', () => {
+  it('applyExactAutoEventToMedication: no doseSchedule → ok:false invalid_dose_schedule, no deduction', () => {
+    const med = legacyMed();
+    const e = legacyFiredEvent(2);
+    const applied = applyExactAutoEventToMedication(med, e, NOW);
+    expect(applied.ok).toBe(false);
+    if (!applied.ok) {
+      expect(applied.reason).toBe('invalid_dose_schedule');
+    }
+  });
+
+  it('applyExactAutoEventToMedication: empty doseSchedule array → ok:false invalid_dose_schedule', () => {
+    const med = legacyMed({ doseSchedule: [] });
+    const e = { ...legacyFiredEvent(2), doseId: 'any-id' };
+    const applied = applyExactAutoEventToMedication(med, e, NOW);
+    expect(applied.ok).toBe(false);
+    if (!applied.ok) {
+      expect(applied.reason).toBe('invalid_dose_schedule');
+    }
+  });
+
+  it('applyExactAutoEventToMedication: schedule present but doseId not a member → ok:false invalid_dose_schedule', () => {
+    const med = legacyMed({
+      doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+    });
+    const e = { ...legacyFiredEvent(2), doseId: 'd2' };
+    const applied = applyExactAutoEventToMedication(med, e, NOW);
+    expect(applied.ok).toBe(false);
+    if (!applied.ok) {
+      expect(applied.reason).toBe('invalid_dose_schedule');
+    }
+  });
+
+  it('isExactDoseScheduleMember: false for no/empty schedule, false for non-member, true for member', () => {
+    const noSchedule = legacyMed();
+    expect(isExactDoseScheduleMember(noSchedule, 'd1')).toBe(false);
+    expect(isExactDoseScheduleMember(noSchedule, '')).toBe(false);
+
+    const empty = legacyMed({ doseSchedule: [] });
+    expect(isExactDoseScheduleMember(empty, 'd1')).toBe(false);
+
+    const scheduled = legacyMed({
+      doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+    });
+    expect(isExactDoseScheduleMember(scheduled, 'd1')).toBe(true);
+    expect(isExactDoseScheduleMember(scheduled, 'd2')).toBe(false);
+    expect(isExactDoseScheduleMember(scheduled, '')).toBe(false);
+  });
+
+  it('reconcileFiredEvents: no doseSchedule + empty doseId → skipped_invalid, no stock, no log (terminal ACK)', () => {
     const med = legacyMed();
     const r = reconcileFiredEvents([med], [], [legacyFiredEvent(2)], {
       now: NOW,
     });
-    expect(r.medications[0].currentPills).toBe(8);
-    // Exact leaves lastSyncDate before the event day for legacy non-gated.
-    expect(r.medications[0].lastSyncDate).toBe('2026-09-13');
-    // The occurrence is durably marked consumed (identity: med + legacy dose + date).
-    expect(r.medications[0].lastConsumedDate).toBe(TODAY);
-    expect(r.newExactLogs).toHaveLength(1);
-    expect(r.newExactLogs[0].id).toBe(exactAutoLogId('med-1', 'legacy', TODAY));
-    expect(r.newExactLogs[0].amount).toBe(-2);
+    expect(r.details[0].outcome).toBe('skipped_invalid');
+    expect(r.toAcknowledge).toEqual([
+      { medicationId: 'med-1', doseId: '', calendarDate: TODAY },
+    ]);
+    expect(r.mutated).toBe(false);
+    expect(r.medications[0].currentPills).toBe(10);
+    expect(r.newExactLogs).toEqual([]);
+    expect(r.logs).toEqual([]);
+    // lastConsumedDate untouched (no legacy doseId-only write)
+    expect(r.medications[0].lastConsumedDate).toBeUndefined();
   });
 
-  it('computeDueDoseBreakdown: today already consumed by exact → fullDueUnits excludes today', () => {
-    const applied = reconcileFiredEvents([legacyMed()], [], [legacyFiredEvent(2)], {
-      now: NOW,
-    });
-    const med = applied.medications[0];
-    const breakdown = computeDueDoseBreakdown(med, NOW, TODAY);
-    expect(breakdown.consumedToday).toBe(true);
-    // The exact event already charged the occurrence (amount 2). Legacy
-    // settlement must not count today's dose again → due window is empty.
-    expect(breakdown.fullDueUnits).toBe(0);
-    expect(breakdown.fullDueDoses).toBe(0);
+  it('reconcileFiredEvents: no doseSchedule + non-empty doseId → skipped_invalid (no ACK), stock/log unchanged, retryable', () => {
+    // Identity is well-formed (med + non-empty doseId + valid date + positive
+    // amount), but the med has no schedule so the occurrence cannot apply.
+    // This is NOT terminal — the event may become applicable after the med
+    // is edited to add a matching schedule, so it stays unreconciled.
+    const med = legacyMed({ currentPills: 10 });
+    const e: AutoDeductionEvent = {
+      ...legacyFiredEvent(2),
+      doseId: 'some-id',
+    };
+    const r = reconcileFiredEvents([med], [], [e], { now: NOW });
+    expect(r.details[0].outcome).toBe('skipped_invalid');
+    expect(r.toAcknowledge).toEqual([]);
+    expect(r.mutated).toBe(false);
+    expect(r.medications[0].currentPills).toBe(10);
+    expect(r.newExactLogs).toEqual([]);
+    expect(r.logs).toEqual([]);
   });
 
-  it('computeDueDoseBreakdown: today NOT consumed → legacy semantics preserved', () => {
-    // Same lastSyncDate/today as the bug scenario but no consumption marker:
-    // the legacy path must keep charging the full (lastSync, today] window.
+  it('reconcileFiredEvents: legacy sync after a no-op Exact still settles the window (no double-charge because Exact charged 0)', () => {
+    // The pre-PR double-deduction bug (Exact −2 then legacy −1 for the same
+    // day → 7) is structurally impossible now: Exact charges nothing for a
+    // no-schedule med, so legacy sync is the only deduction. 10 − 1 = 9.
     const med = legacyMed();
-    const breakdown = computeDueDoseBreakdown(med, NOW, TODAY);
-    expect(breakdown.consumedToday).toBe(false);
-    expect(breakdown.fullDueDoses).toBe(1);
-    expect(breakdown.fullDueUnits).toBe(1);
-  });
-
-  it('settleAutoDeductToggle (ON→OFF) after exact reconciliation: stock stays 8, no settlement log', () => {
-    const applied = reconcileFiredEvents([legacyMed()], [], [legacyFiredEvent(2)], {
+    const r = reconcileFiredEvents([med], [], [legacyFiredEvent(2)], {
       now: NOW,
     });
-    const med = applied.medications[0];
-    const { updatedMed, log } = settleAutoDeductToggle(med, false, TODAY, NOW);
-    // Double-deduction regression: legacy settlement after exact reconciliation
-    // must NOT deduct the same occurrence a second time (8, not 7).
-    expect(updatedMed.currentPills).toBe(8);
-    expect(log).toBeNull();
-    expect(updatedMed.autoDeductEnabled).toBe(false);
+    const afterExact = r.medications[0];
+    expect(afterExact.currentPills).toBe(10);
+
+    const synced = syncAutoDailyDeductions([afterExact], TODAY, NOW);
+    // One day settled at dailyDose 1 → 9 (the only deduction; no Exact
+    // charge preceded it).
+    expect(synced.updatedMeds[0].currentPills).toBe(9);
+    expect(synced.newLogs).toHaveLength(1);
+    expect(synced.newLogs[0].amount).toBe(-1);
   });
 
-  it('settleDoseChange (dailyDose 1→3) after exact reconciliation: stock stays 8, no settlement log', () => {
-    const applied = reconcileFiredEvents([legacyMed()], [], [legacyFiredEvent(2)], {
+  it('effectiveCurrentPills: no-schedule med after a no-op Exact reflects only the legacy projection (10 − 1 = 9)', () => {
+    const med = legacyMed();
+    const r = reconcileFiredEvents([med], [], [legacyFiredEvent(2)], {
       now: NOW,
     });
-    const med = applied.medications[0];
-    const { updatedMed, log } = settleDoseChange(med, 3, TODAY, NOW);
-    expect(updatedMed.currentPills).toBe(8);
-    expect(updatedMed.dailyDose).toBe(3);
-    expect(log).toBeNull();
+    expect(effectiveCurrentPills(r.medications[0], TODAY, NOW)).toBe(9);
   });
 
-  it('full chain: exact → toggle settle → dose-change settle → sync never re-deducts the occurrence', () => {
-    const applied = reconcileFiredEvents([legacyMed()], [], [legacyFiredEvent(2)], {
+  it('no Exact log id is ever built with an empty doseId for a no-schedule med', () => {
+    // exactAutoLogId with an empty doseId is the historical legacy shape.
+    // The runner never calls it for a no-schedule med because the apply
+    // gate rejects before any log construction.
+    const med = legacyMed();
+    const r = reconcileFiredEvents([med], [], [legacyFiredEvent(2)], {
       now: NOW,
     });
-    const afterExact = applied.medications[0];
-
-    const toggled = settleAutoDeductToggle(
-      { ...afterExact, autoDeductEnabled: true },
-      false,
-      TODAY,
-      NOW
-    ).updatedMed;
-    expect(toggled.currentPills).toBe(8);
-
-    const reEnabled = { ...toggled, autoDeductEnabled: true };
-    const doseChanged = settleDoseChange(reEnabled, 2, TODAY, NOW).updatedMed;
-    expect(doseChanged.currentPills).toBe(8);
-
-    const synced = syncAutoDailyDeductions(
-      [{ ...doseChanged, autoDeductEnabled: true }],
-      TODAY,
-      NOW
-    );
-    expect(synced.updatedMeds[0].currentPills).toBe(8);
-    expect(synced.newLogs).toHaveLength(0);
+    const legacyLogId = exactAutoLogId('med-1', '', TODAY);
+    expect(r.logs.find((l) => l.id === legacyLogId)).toBeUndefined();
   });
+});
 
-  it('effectiveCurrentPills displays 8 (not the double-charged 7 projection)', () => {
-    const applied = reconcileFiredEvents([legacyMed()], [], [legacyFiredEvent(2)], {
-      now: NOW,
-    });
-    const med = applied.medications[0];
-    expect(effectiveCurrentPills(med, TODAY, NOW)).toBe(8);
-  });
-
+/**
+ * Explicit-schedule semantics are unchanged and remain authoritative.
+ */
+describe('explicit doseSchedule: Exact Auto unchanged after legacy removal', () => {
   it('multi-dose semantics unchanged: slot-level timing still drives fullDueUnits', () => {
-    // Multi-dose guard: no recorded consumption; today's slot elapsed and
-    // unconsumed at 09:00 → past(1) + today(1) = 2 units. The legacy fix
-    // must not touch the multi branch.
     const multiMed: Medication = {
       ...legacyMed(),
       doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
@@ -185,12 +214,10 @@ describe('legacy single-dose: exact reconciliation then legacy settlement', () =
     expect(breakdown.fullDueUnits).toBe(2);
   });
 
-  it('multi-dose with schedule amount 1 and exact amount 2 → final stock 8 (authoritative event.amount)', () => {
+  it('schedule amount 1 and exact amount 2 → final stock 8 (authoritative event.amount)', () => {
     const multiMed: Medication = {
       ...legacyMed(),
       doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
-      // lastSync strictly before the event day so the exact occurrence is
-      // reconcilable (past-day horizon guard does not swallow it).
       lastSyncDate: '2026-09-13',
     };
     const event: AutoDeductionEvent = {
@@ -200,218 +227,6 @@ describe('legacy single-dose: exact reconciliation then legacy settlement', () =
     const r = reconcileFiredEvents([multiMed], [], [event], { now: NOW });
     expect(r.medications[0].currentPills).toBe(8);
     expect(r.newExactLogs[0].amount).toBe(-2);
-  });
-});
-
-/**
- * Phase 4 — HISTORICAL legacy Exact Auto double-deduction regression.
- *
- * The same-day scenario above is not the only hole. The Exact Auto event for
- * a legacy single-dose med can be HISTORICAL (calendarDate strictly between
- * lastSyncDate and today). applyExactAutoEventToMedication() deducts the
- * authoritative event.amount, records the durable LEGACY_DOSE_ID consume
- * marker for that calendar date, and (legacy non-gated → not gated) leaves
- * lastSyncDate behind. The legacy settlement window (lastSyncDate, todayStr]
- * then still contains the already-charged historical day, and an aggregate
- * `totalDays * dailyDose` re-charges it — the historical double-deduction:
- *
- *   currentPills = 50, dailyDose = 1
- *   lastSyncDate = 2026-09-09, todayStr = 2026-09-14
- *   Exact FIRED 2026-09-12 amount = 2 → 50 → 48
- *   legacy settlement used to charge 5 days (48 → 43), re-charging 09-12.
- *   Correct: 4 unconsumed days (09-10, 09-11, 09-13, 09-14) → 48 → 44.
- *
- * The contract under test:
- *   legacy due units =
- *     sum over every day in (lastSyncDate, todayStr] of dailyDose
- *     minus days with a durable legacy consume/skip marker.
- * A consumed TODAY excludes ONLY today — it must never block settlement of
- * the historical unconsumed days.
- */
-describe('legacy single-dose: historical exact events must not be charged twice', () => {
-  const HIST_LAST_SYNC = '2026-09-09';
-
-  /** Fixture from the audit: 50 pills, lastSync 09-09, today 09-14. */
-  function historicalMed(over: Partial<Medication> = {}): Medication {
-    return legacyMed({
-      currentPills: 50,
-      lastSyncDate: HIST_LAST_SYNC,
-      ...over,
-    });
-  }
-
-  /** Exact FIRED event for the implicit legacy dose on an arbitrary date. */
-  function legacyFiredEventOn(calendarDate: string, amount: number): AutoDeductionEvent {
-    return { ...legacyFiredEvent(amount), calendarDate };
-  }
-
-  /** Run the legacy app-open sync against the reconciled state. */
-  function legacySync(meds: Medication[]) {
-    return syncAutoDailyDeductions(meds, TODAY, NOW);
-  }
-
-  it('Test A — historical Exact event (09-12) must not be charged twice: 50 → 48 → 44 (not 43)', () => {
-    const r = reconcileFiredEvents(
-      [historicalMed()],
-      [],
-      [legacyFiredEventOn('2026-09-12', 2)],
-      { now: NOW }
-    );
-    const afterExact = r.medications[0];
-    // Authoritative event.amount applied exactly once.
-    expect(afterExact.currentPills).toBe(48);
-    // Durable per-occurrence marker for the historical day (primary source).
-    expect(afterExact.doseConsumptionHistory?.legacy).toContain('2026-09-12');
-    // Legacy non-gated exact apply leaves lastSyncDate behind.
-    expect(afterExact.lastSyncDate).toBe(HIST_LAST_SYNC);
-
-    const synced = legacySync(r.medications);
-    // 09-10 + 09-11 + 09-13 + 09-14 = 4 units; 09-12 already consumed → skip.
-    expect(synced.updatedMeds[0].currentPills).toBe(44);
-    // Settled days reflected in the sync log (4 days, 4 units).
-    expect(synced.newLogs).toHaveLength(1);
-    expect(synced.newLogs[0].amount).toBe(-4);
-    // Snapshot advanced so the settled window cannot be re-charged.
-    expect(synced.updatedMeds[0].lastSyncDate).toBe(TODAY);
-    // Idempotent: a second sync is a no-op.
-    const resynced = legacySync(synced.updatedMeds);
-    expect(resynced.updatedMeds[0].currentPills).toBe(44);
-    expect(resynced.newLogs).toHaveLength(0);
-  });
-
-  it('Test B — exact today (09-14) + historical legacy settlement: 50 → 48 → 44 (consumedToday is not a global blocker)', () => {
-    const r = reconcileFiredEvents(
-      [historicalMed()],
-      [],
-      [legacyFiredEventOn(TODAY, 2)],
-      { now: NOW }
-    );
-    const afterExact = r.medications[0];
-    expect(afterExact.currentPills).toBe(48);
-    expect(afterExact.lastConsumedDate).toBe(TODAY);
-
-    // 09-10..09-13 due (4), 09-14 consumed by Exact → excluded.
-    // The old `!consumedToday` guard swallowed the whole sync (stayed 48).
-    const synced = legacySync(r.medications);
-    expect(synced.updatedMeds[0].currentPills).toBe(44);
-    expect(synced.newLogs).toHaveLength(1);
-    expect(synced.newLogs[0].amount).toBe(-4);
-    expect(synced.updatedMeds[0].lastSyncDate).toBe(TODAY);
-  });
-
-  it('Test C — multiple historical Exact events: 50 → 44 (exact −6) → 42 (legacy settles 09-11 + 09-13)', () => {
-    const r = reconcileFiredEvents(
-      [historicalMed()],
-      [],
-      [
-        legacyFiredEventOn('2026-09-10', 2),
-        legacyFiredEventOn('2026-09-12', 2),
-        legacyFiredEventOn(TODAY, 2),
-      ],
-      { now: NOW }
-    );
-    // Exact total = 6.
-    expect(r.medications[0].currentPills).toBe(44);
-    // All three occurrences durably marked by date (primary source — the
-    // mid-window days are excluded via history, not lastConsumedDate alone,
-    // which only records the latest date 09-14).
-    expect(r.medications[0].doseConsumptionHistory?.legacy).toEqual([
-      '2026-09-10',
-      '2026-09-12',
-      TODAY,
-    ]);
-    expect(r.medications[0].lastConsumedDate).toBe(TODAY);
-
-    const synced = legacySync(r.medications);
-    // Remaining unconsumed days: 09-11 + 09-13 = 2 units.
-    expect(synced.updatedMeds[0].currentPills).toBe(42);
-    expect(synced.newLogs[0].amount).toBe(-2);
-  });
-
-  it('Test D — no markers preserves legacy behavior: 5 units settled, 50 → 45', () => {
-    // computeDueDoseBreakdown keeps the pre-change aggregate semantics when
-    // no consume/skip markers exist inside the window.
-    const breakdown = computeDueDoseBreakdown(historicalMed(), NOW, TODAY);
-    expect(breakdown.consumedToday).toBe(false);
-    expect(breakdown.fullDueDoses).toBe(5);
-    expect(breakdown.fullDueUnits).toBe(5);
-
-    const synced = legacySync([historicalMed()]);
-    expect(synced.updatedMeds[0].currentPills).toBe(45);
-    expect(synced.newLogs[0].amount).toBe(-5);
-    expect(synced.deductedSummary[0].daysPassed).toBe(5);
-  });
-
-  it('Test E — historical exact then settleDoseChange: exact-consumed 09-12 not re-deducted (48 → 44)', () => {
-    const applied = reconcileFiredEvents(
-      [historicalMed()],
-      [],
-      [legacyFiredEventOn('2026-09-12', 2)],
-      { now: NOW }
-    );
-    const med = applied.medications[0];
-    expect(med.currentPills).toBe(48);
-
-    const { updatedMed, log } = settleDoseChange(med, 2, TODAY, NOW);
-    // Settles the 4 unconsumed days at the OLD dose (1), never 09-12 again.
-    expect(updatedMed.currentPills).toBe(44);
-    expect(updatedMed.dailyDose).toBe(2);
-    expect(log).not.toBeNull();
-    expect(log!.amount).toBe(-4);
-    // The historical exact marker survives the mutation.
-    expect(updatedMed.doseConsumptionHistory?.legacy).toContain('2026-09-12');
-  });
-
-  it('Test F — historical exact then settleAutoDeductToggle: exact-consumed day skipped, unconsumed days settled (48 → 44)', () => {
-    const applied = reconcileFiredEvents(
-      [historicalMed()],
-      [],
-      [legacyFiredEventOn('2026-09-12', 2)],
-      { now: NOW }
-    );
-    const med = applied.medications[0];
-    expect(med.currentPills).toBe(48);
-
-    const { updatedMed, log } = settleAutoDeductToggle(med, false, TODAY, NOW);
-    // Historical unconsumed days (4 units) settled; 09-12 not re-charged.
-    expect(updatedMed.currentPills).toBe(44);
-    expect(updatedMed.autoDeductEnabled).toBe(false);
-    expect(log).not.toBeNull();
-    expect(log!.amount).toBe(-4);
-  });
-
-  it('Test G — effectiveCurrentPills projection reflects only unconsumed days/occurrences', () => {
-    const applied = reconcileFiredEvents(
-      [historicalMed()],
-      [],
-      [legacyFiredEventOn('2026-09-12', 2)],
-      { now: NOW }
-    );
-    // Projection after the historical exact marker: 48 − 4 unconsumed days.
-    expect(effectiveCurrentPills(applied.medications[0], TODAY, NOW)).toBe(44);
-
-    const multi = reconcileFiredEvents(
-      [historicalMed()],
-      [],
-      [
-        legacyFiredEventOn('2026-09-10', 2),
-        legacyFiredEventOn('2026-09-12', 2),
-        legacyFiredEventOn(TODAY, 2),
-      ],
-      { now: NOW }
-    );
-    // Projection after three historical markers: 44 − 2 (09-11 + 09-13).
-    expect(effectiveCurrentPills(multi.medications[0], TODAY, NOW)).toBe(42);
-  });
-
-  it('skip marker (Restore) on a historical day is also excluded by date, not period', () => {
-    // Restore writes a durable skip marker for the legacy occurrence.
-    const med = historicalMed({
-      doseSkippedHistory: { legacy: ['2026-09-12'] },
-    });
-    const breakdown = computeDueDoseBreakdown(med, NOW, TODAY);
-    // 5 days minus skipped 09-12 = 4 units.
-    expect(breakdown.fullDueUnits).toBe(4);
-    expect(breakdown.fullDueDoses).toBe(4);
+    expect(r.newExactLogs[0].id).toBe(exactAutoLogId('med-1', 'd1', TODAY));
   });
 });

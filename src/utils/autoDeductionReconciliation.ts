@@ -107,6 +107,13 @@ export function normalizeExactDoseId(doseId: string | undefined | null): string 
 /**
  * Deterministic log id for one exact auto occurrence (retry-safe).
  * Not used for legacy bulk auto_daily logs from syncAutoDailyDeductions.
+ *
+ * Issue #268 / PR #271: this id MUST never be built with an empty doseId.
+ * The only valid path to here is through {@link applyExactAutoEventToMedication},
+ * which rejects any Medication without a non-empty `doseSchedule` whose array
+ * contains `doseId`. Callers that bypass that gate (none in production) would
+ * produce an id shaped `exact-auto:<med>::<date>` — that is rejected upstream by
+ * `isValidExactOccurrenceIdentity` and never persisted as an Exact log.
  */
 export function exactAutoLogId(
   medicationId: string,
@@ -211,6 +218,29 @@ export function findPendingExactAutoOccurrence(
   return null;
 }
 
+/**
+ * Issue #268 / PR #271 — Exact occurrence identity is authoritative ONLY when
+ * the Medication carries an explicit, non-empty `doseSchedule` AND the event's
+ * `doseId` is a member of that schedule. No synthetic/legacy identity, no
+ * `dailyDose`/`reminderTime`/`reminderEnabled`/`lastConsumedDate` fallback, no
+ * "first/next dose", no array-index, no empty/sentinel doseId.
+ *
+ * This is the single source of truth for whether an Exact stock mutation may
+ * run. Returning false here means: no deduction, no Exact log, no applied
+ * marker — the caller MUST treat the event as not-applicable (not as a
+ * malformed identity that requires terminal ACK).
+ */
+export function isExactDoseScheduleMember(
+  med: Medication,
+  doseId: string
+): boolean {
+  if (!Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0) {
+    return false;
+  }
+  const id = normalizeExactDoseId(doseId);
+  if (!id) return false;
+  return med.doseSchedule.some((d) => normalizeExactDoseId(d.id) === id);
+}
 
 export function applyExactAutoEventToMedication(
   med: Medication,
@@ -225,6 +255,17 @@ export function applyExactAutoEventToMedication(
   const calendarDate = event.calendarDate;
   if (!calendarDate || calendarDate.length !== 10) {
     return { ok: false, reason: 'invalid_calendarDate' };
+  }
+
+  // Issue #268 / PR #271 — Exact stock mutation requires an explicit,
+  // non-empty `doseSchedule` whose array contains the event doseId. A
+  // Medication without/with-empty `doseSchedule`, or an event whose doseId
+  // is not a schedule member, CANNOT produce an Exact occurrence. No
+  // legacy single-dose fallback, no dailyDose/reminderTime/lastConsumedDate
+  // fallback, no first/next/index fallback. Do not deduct, do not log,
+  // do not touch lastConsumedDate.
+  if (!isExactDoseScheduleMember(med, doseId)) {
+    return { ok: false, reason: 'invalid_dose_schedule' };
   }
 
   const todayStr = getTodayDateString();
@@ -260,26 +301,26 @@ export function applyExactAutoEventToMedication(
   const recorded = recordDoseConsumed(med, doseId, calendarDate);
   nextConsumption = recorded.doseConsumption;
   nextHistory = recorded.doseConsumptionHistory;
-  // Exact Auto only updates lastConsumedDate when the medication has an
-  // explicit doseSchedule and every slot for the calendar day is consumed.
-  // No Legacy Single-Dose fallback (doseId-only lastConsumedDate) — #268 / PR #271.
-  if (Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) {
-    const allConsumed = med.doseSchedule.every((d) =>
-      d.id === doseId
-        ? true
-        : isDoseConsumedOnDate(
-            {
-              ...med,
-              doseConsumption: nextConsumption,
-              doseConsumptionHistory: nextHistory,
-            },
-            d.id,
-            calendarDate
-          )
-    );
-    if (allConsumed) {
-      lastConsumedDate = calendarDate;
-    }
+  // Exact Auto only updates lastConsumedDate when every slot for the calendar
+  // day is consumed. The apply gate above already guarantees a non-empty
+  // explicit doseSchedule and that `doseId` is a member, so there is no
+  // Legacy Single-Dose path here — lastConsumedDate is set ONLY when all
+  // schedule slots for the calendar day are consumed. #268 / PR #271.
+  const allConsumed = med.doseSchedule!.every((d) =>
+    normalizeExactDoseId(d.id) === doseId
+      ? true
+      : isDoseConsumedOnDate(
+          {
+            ...med,
+            doseConsumption: nextConsumption,
+            doseConsumptionHistory: nextHistory,
+          },
+          d.id,
+          calendarDate
+        )
+  );
+  if (allConsumed) {
+    lastConsumedDate = calendarDate;
   }
 
   // If prior days (after lastSync, before event day) were folded into the
@@ -423,6 +464,16 @@ export function reconcileFiredEvents(
         toAcknowledge.push({ medicationId, doseId, calendarDate });
       } else if (applied.reason === 'invalid_amount') {
         // Amount still retryable — defensive if amount gate is bypassed.
+        details.push({ ...baseDetail, outcome: 'skipped_invalid' });
+      } else if (applied.reason === 'invalid_dose_schedule') {
+        // Issue #268 / PR #271: Medication has no/empty doseSchedule, or the
+        // event doseId is not a member of it. The occurrence identity itself
+        // is well-formed (medicationId + doseId + calendarDate all valid) and
+        // the amount is positive — this is NOT a malformed identity that must
+        // be terminalized. The event may become applicable later if the
+        // Medication is edited to add a matching doseSchedule, so leave the
+        // native FIRED row unreconciled (no ACK) — identical to the invalid
+        // amount contract: no stock mutation, no Exact log, retryable.
         details.push({ ...baseDetail, outcome: 'skipped_invalid' });
       } else {
         // Unknown apply failure: no stock mutation; do not invent policy.

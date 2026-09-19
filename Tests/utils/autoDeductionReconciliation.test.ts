@@ -1313,7 +1313,7 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
       calendarDate: '2026-09-14',
       amount: 0,
     });
-    let nativeFired: AutoDeductionEvent[] = [invalidAmount];
+    const nativeFired: AutoDeductionEvent[] = [invalidAmount];
     const markCalls: Array<{
       medicationId: string;
       doseId: string;
@@ -1367,6 +1367,12 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
       calendarDate: string;
     }> = [];
 
+    // Production native ACK contract for malformed identity (mirrors
+    // AutoDeductionEventStore.markReconciled in EventStoreMarkReconciledGuardTest):
+    // the corrupt FIRED row is terminalized to REJECTED (NOT acknowledged as
+    // RECONCILED). The native returns ok:true (handled, no retry needed) and
+    // changed:false (nothing was RECONCILED). The JS runner's markAll treats
+    // ok:true as a successful terminal ack regardless of `changed`.
     const first = await runAutoDeductionReconciliation({
       alreadyInGate: true,
       medications: [med],
@@ -1375,6 +1381,7 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
       listFired: async () => nativeFired,
       markReconciled: async (medicationId, doseId, calendarDate) => {
         markCalls.push({ medicationId, doseId, calendarDate });
+        // Terminal native ACK: drop the corrupt row from the FIRED set.
         nativeFired = nativeFired.filter(
           (e) =>
             !(
@@ -1383,7 +1390,8 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
               e.calendarDate === calendarDate
             )
         );
-        return { ok: true, changed: true };
+        // Native terminalization to REJECTED → ok:true, changed:false.
+        return { ok: true, changed: false };
       },
       persistMeds: () => null,
       persistLogs: () => null,
@@ -1400,13 +1408,16 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
     expect(first.toAcknowledge).toEqual([
       { medicationId: 'med-1', doseId: '', calendarDate: '2026-09-14' },
     ]);
-    // Production ACK path: markAll → markReconciled once
+    // Production ACK path: markAll → markReconciled invoked exactly once.
     expect(markCalls).toEqual([
       { medicationId: 'med-1', doseId: '', calendarDate: '2026-09-14' },
     ]);
     expect(first.markedCount).toBe(1);
+    // The corrupt row is gone from the FIRED set → no infinite retry.
     expect(nativeFired).toEqual([]);
 
+    // Second pass: the corrupt row is no longer listed → no re-processing,
+    // no re-ACK, no mutation. Terminal: never re-applied in a later pass.
     const second = await runAutoDeductionReconciliation({
       alreadyInGate: true,
       medications: first.medications,
@@ -1427,6 +1438,7 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
     expect(second.newExactLogs).toEqual([]);
     expect(second.toAcknowledge).toEqual([]);
     expect(second.markedCount).toBe(0);
+    // markReconciled was called at most once (only the first pass).
     expect(markCalls).toHaveLength(1);
   });
 
@@ -1466,7 +1478,8 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
               e.calendarDate === calendarDate
             )
         );
-        return { ok: true, changed: true };
+        // Native terminalization to REJECTED → ok:true, changed:false.
+        return { ok: true, changed: false };
       },
       persistMeds: () => null,
       persistLogs: () => null,
@@ -1487,11 +1500,28 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
       { medicationId: 'med-1', doseId: '', calendarDate: '2026-09-14' },
     ]);
     expect(first.markedCount).toBe(1);
+    // Terminal: the corrupt row is gone → no infinite retry.
     expect(nativeFired).toEqual([]);
+  });
+
+  it('native markReconciled web contract: empty doseId returns ok:false (not a valid occurrence)', async () => {
+    // Direct contract assertion for the JS-level guard in
+    // markAutoDeductionEventReconciled (autoDeductionNative.ts): on a non-Android
+    // platform it refuses to bless an empty doseId as a valid occurrence. The
+    // native Android path terminalizes the corrupt row to REJECTED instead
+    // (covered by EventStoreMarkReconciledGuardTest). This guard is what
+    // prevents JS from passing an empty doseId to native markReconciled as a
+    // valid occurrence on web.
+    const { markAutoDeductionEventReconciled } = await import(
+      '../../src/utils/autoDeductionNative'
+    );
+    const r = await markAutoDeductionEventReconciled('med-1', '', '2026-09-14');
+    expect(r.ok).toBe(false);
+    expect(r.changed).toBe(false);
   });
 });
 
-describe('applyExactAutoEventToMedication — no Legacy Single-Dose lastConsumedDate (#268)', () => {
+describe('runAutoDeductionReconciliation — no/empty doseSchedule: valid identity, not applicable (retryable, no ACK) (#268 / PR #271)', () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-09-14T15:00:00'));
@@ -1500,7 +1530,117 @@ describe('applyExactAutoEventToMedication — no Legacy Single-Dose lastConsumed
     vi.useRealTimers();
   });
 
-  it('with explicit doseSchedule: lastConsumedDate updates only when all slots consumed', () => {
+  it('no doseSchedule + valid non-empty doseId: skipped_invalid, no ACK, no stock/log (retryable)', async () => {
+    // Well-formed identity (med + non-empty doseId + valid date + positive
+    // amount) but the Medication has no doseSchedule. The occurrence cannot
+    // apply now but may after the med is edited to add a matching schedule.
+    // This is NOT terminal — no ACK, stays in the native FIRED set for a
+    // later pass (mirrors the invalid-amount contract).
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      lastConsumedDate: '2026-09-12',
+      doseSchedule: undefined,
+    });
+    const e: AutoDeductionEvent = fired({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      calendarDate: '2026-09-14',
+      amount: 2,
+    });
+    const nativeFired: AutoDeductionEvent[] = [e];
+    const markCalls: Array<{
+      medicationId: string;
+      doseId: string;
+      calendarDate: string;
+    }> = [];
+
+    const r = await runAutoDeductionReconciliation({
+      alreadyInGate: true,
+      medications: [med],
+      logs: [],
+      globalAutoDeductEnabled: true,
+      listFired: async () => nativeFired,
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        markCalls.push({ medicationId, doseId, calendarDate });
+        return { ok: true, changed: true };
+      },
+      persistMeds: () => null,
+      persistLogs: () => null,
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
+    });
+
+    expect(r.details[0]?.outcome).toBe('skipped_invalid');
+    expect(r.mutated).toBe(false);
+    expect(r.medications[0].currentPills).toBe(10);
+    expect(r.medications[0].lastConsumedDate).toBe('2026-09-12');
+    expect(r.newExactLogs).toEqual([]);
+    expect(r.logs).toEqual([]);
+    expect(r.toAcknowledge).toEqual([]);
+    expect(r.markedCount).toBe(0);
+    expect(markCalls).toEqual([]);
+    // Retryable: still listed in the native FIRED set.
+    expect(nativeFired).toHaveLength(1);
+  });
+
+  it('doseSchedule present but doseId not a member: skipped_invalid, no ACK, retryable', async () => {
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      lastConsumedDate: '2026-09-12',
+      doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+    });
+    const e: AutoDeductionEvent = fired({
+      medicationId: 'med-1',
+      doseId: 'd2',
+      calendarDate: '2026-09-14',
+      amount: 2,
+    });
+    const nativeFired: AutoDeductionEvent[] = [e];
+    const markCalls: Array<{
+      medicationId: string;
+      doseId: string;
+      calendarDate: string;
+    }> = [];
+
+    const r = await runAutoDeductionReconciliation({
+      alreadyInGate: true,
+      medications: [med],
+      logs: [],
+      globalAutoDeductEnabled: true,
+      listFired: async () => nativeFired,
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        markCalls.push({ medicationId, doseId, calendarDate });
+        return { ok: true, changed: true };
+      },
+      persistMeds: () => null,
+      persistLogs: () => null,
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
+    });
+
+    expect(r.details[0]?.outcome).toBe('skipped_invalid');
+    expect(r.mutated).toBe(false);
+    expect(r.medications[0].currentPills).toBe(10);
+    expect(r.newExactLogs).toEqual([]);
+    expect(r.toAcknowledge).toEqual([]);
+    expect(r.markedCount).toBe(0);
+    expect(markCalls).toEqual([]);
+    expect(nativeFired).toHaveLength(1);
+  });
+});
+
+describe('applyExactAutoEventToMedication — doseSchedule is the sole Exact identity source (#268 / PR #271)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-14T15:00:00'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('with explicit doseSchedule: Exact applies; lastConsumedDate updates only when all slots consumed', () => {
     const med = baseMed({
       currentPills: 10,
       lastSyncDate: '2026-09-13',
@@ -1527,7 +1667,11 @@ describe('applyExactAutoEventToMedication — no Legacy Single-Dose lastConsumed
     }
   });
 
-  it('without doseSchedule: applying Exact does not set lastConsumedDate (no Legacy fallback)', () => {
+  it('without doseSchedule: NO Exact application (no stock mutation, no lastConsumedDate change, no Exact log)', () => {
+    // Issue #268 / PR #271: a Medication without an explicit doseSchedule can
+    // no longer drive an Exact occurrence. The legacy single-dose shape
+    // (dailyDose + reminderTime + reminderEnabled + lastConsumedDate) is NOT
+    // a fallback identity source — the apply gate returns { ok: false }.
     const med = baseMed({
       currentPills: 10,
       lastSyncDate: '2026-09-13',
@@ -1545,18 +1689,18 @@ describe('applyExactAutoEventToMedication — no Legacy Single-Dose lastConsumed
       amount: 2,
     });
     const applied = applyExactAutoEventToMedication(med, e, new Date());
-    expect(applied.ok).toBe(true);
-    if (applied.ok) {
-      // No legacy doseId-only lastConsumedDate write
-      expect(applied.updatedMed.lastConsumedDate).toBe('2026-09-12');
-      expect(applied.updatedMed.currentPills).toBe(8);
-      // Log still carries the event doseId (identity was non-empty)
-      expect(applied.log.doseId).toBe('some-id');
-      expect(applied.log.id).toBe(exactAutoLogId('med-1', 'some-id', '2026-09-14'));
+    expect(applied.ok).toBe(false);
+    if (!applied.ok) {
+      expect(applied.reason).toBe('invalid_dose_schedule');
     }
+    // No stock mutation, no lastConsumedDate write, no log at all.
+    // (currentPills / lastConsumedDate on `med` are unchanged by the call;
+    //  no updatedMed / log is returned when ok is false.)
+    expect(med.currentPills).toBe(10);
+    expect(med.lastConsumedDate).toBe('2026-09-12');
   });
 
-  it('empty doseSchedule array: no lastConsumedDate legacy write', () => {
+  it('empty doseSchedule array: NO Exact application (no stock mutation, no log)', () => {
     const med = baseMed({
       currentPills: 10,
       lastSyncDate: '2026-09-13',
@@ -1570,9 +1714,64 @@ describe('applyExactAutoEventToMedication — no Legacy Single-Dose lastConsumed
       amount: 1,
     });
     const applied = applyExactAutoEventToMedication(med, e, new Date());
+    expect(applied.ok).toBe(false);
+    if (!applied.ok) {
+      expect(applied.reason).toBe('invalid_dose_schedule');
+    }
+    expect(med.currentPills).toBe(10);
+    expect(med.lastConsumedDate).toBe('2026-09-12');
+  });
+
+  it('doseId not a member of doseSchedule: NO Exact application (identity membership is required)', () => {
+    // Explicit schedule exists and is non-empty, but the event doseId does
+    // not match any slot id. This is not a malformed identity and not a
+    // legacy fallback — the occurrence simply cannot be applied.
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      lastConsumedDate: '2026-09-12',
+      doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd2',
+      calendarDate: '2026-09-14',
+      amount: 1,
+    });
+    const applied = applyExactAutoEventToMedication(med, e, new Date());
+    expect(applied.ok).toBe(false);
+    if (!applied.ok) {
+      expect(applied.reason).toBe('invalid_dose_schedule');
+    }
+    expect(med.currentPills).toBe(10);
+    expect(med.lastConsumedDate).toBe('2026-09-12');
+  });
+
+  it('valid doseId member with multi-slot schedule + all consumed → lastConsumedDate set', () => {
+    // Same explicit schedule as the first test, but pre-mark the other slot
+    // consumed so this Exact apply completes the day → lastConsumedDate moves.
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      lastConsumedDate: '2026-09-12',
+      doseSchedule: [
+        { id: 'd1', amount: 1, time: '08:00' },
+        { id: 'd2', amount: 1, time: '20:00' },
+      ],
+      doseConsumption: { d2: '2026-09-14' },
+      doseConsumptionHistory: { d2: ['2026-09-14'] },
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      calendarDate: '2026-09-14',
+      amount: 1,
+    });
+    const applied = applyExactAutoEventToMedication(med, e, new Date());
     expect(applied.ok).toBe(true);
     if (applied.ok) {
-      expect(applied.updatedMed.lastConsumedDate).toBe('2026-09-12');
+      expect(applied.updatedMed.lastConsumedDate).toBe('2026-09-14');
+      expect(applied.updatedMed.currentPills).toBe(9);
     }
   });
 });

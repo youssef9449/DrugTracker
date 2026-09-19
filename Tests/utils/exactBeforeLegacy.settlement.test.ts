@@ -565,25 +565,31 @@ describe('gated paths call exact reconciliation before legacy settlement', () =>
 });
 
 /**
- * Legacy single-dose (no doseSchedule) ordering-proof regression — Phase 4.
+ * Issue #268 / PR #271 — Legacy single-dose (no doseSchedule) Exact path removed.
  *
- * The multi-dose fixtures above cannot reveal a legacy settlement ordering
- * error: with lastSync = yesterday the gated past-due window is empty, so
- * legacy settlement charges nothing for today's slot and the final stock is
- * insensitive to ordering. A LEGACY single-dose med is the sensitive case:
- *   lastSyncDate = '2026-09-13', todayStr = '2026-09-14', dailyDose = 1,
- *   currentPills = 10, Exact FIRED amount = 2
- *   - exact first  → 10 − 2 = 8  (legacy settlement must then be a no-op
- *     for the already-consumed occurrence)
- *   - legacy first (deliberately emulated) → 10 − 1 − 2 = 7
- * The behavioral assertion (currentPills === 8) is primary; callOrder is
- * kept as a secondary structural assertion.
+ * The pre-PR block here used a no-`doseSchedule` fixture to prove the
+ * exact-before-legacy ordering: Exact applied amount 2 (10→8) and legacy
+ * settlement then had to be a no-op for the same occurrence. That whole
+ * path is gone. A Medication without an explicit, non-empty `doseSchedule`
+ * whose array contains the event `doseId` can no longer drive an Exact
+ * occurrence — `applyExactAutoEventToMedication` returns
+ * `{ ok: false, reason: 'invalid_dose_schedule' }`.
+ *
+ * Consequence for ordering: with no Exact application, legacy settlement is
+ * the ONLY deduction for a no-schedule med, so the "exact-before-legacy
+ * ordering" is structurally trivial (Exact charges nothing). These tests
+ * assert the new contract: no Exact log, no stock mutation from Exact, and
+ * the gated-toggle / dose-change / global-toggle paths settle the legacy
+ * window exactly once (10 → 9 at dailyDose 1).
+ *
+ * `doseSchedule` is the sole source of dose identity/amount/time for Exact.
+ * No migration, no backward compatibility, no LEGACY_DOSE_ID fallback.
  */
-describe('legacy single-dose (no doseSchedule): exact-before-legacy ordering proof', () => {
+describe('legacy single-dose (no doseSchedule): Exact path removed (#268 / PR #271)', () => {
   let durable: { medications: Medication[]; logs: ConsumptionLog[] };
   let seqCounter: { n: number };
 
-  /** Legacy med: the double-deduction-sensitive fixture. */
+  /** No-schedule med — the pre-PR legacy single-dose shape. */
   function legacyMed(over: Partial<Medication> = {}): Medication {
     return baseMed({
       doseSchedule: undefined,
@@ -592,16 +598,18 @@ describe('legacy single-dose (no doseSchedule): exact-before-legacy ordering pro
     });
   }
 
-  /** Exact FIRED event for the implicit legacy dose (amount 2). */
+  /** Exact FIRED event for the pre-PR legacy shape (empty doseId). */
   function legacyFired(amount = 2): AutoDeductionEvent {
     return firedEvent(amount, { doseId: '' });
   }
 
-  /** Same as mockExactFirst but for the implicit legacy dose id. */
-  function mockLegacyExactFirst(
-    callOrder: string[],
-    amount = 2
-  ) {
+  /**
+   * Mock pre-settlement to run the REAL reconcileFiredEvents for a no-schedule
+   * med. Under the new contract Exact is a no-op (identity malformed → terminal
+   * ACK; or invalid_dose_schedule if doseId were non-empty → retryable). The
+   * gated settlement that follows is the only deduction.
+   */
+  function mockLegacyExactNoOp(callOrder: string[], amount = 2) {
     return vi
       .spyOn(preSettleModule, 'reconcileExactBeforeLegacySettlement')
       .mockImplementation(async (opts) => {
@@ -611,50 +619,6 @@ describe('legacy single-dose (no doseSchedule): exact-before-legacy ordering pro
           opts.fresh.logs,
           [legacyFired(amount)]
         );
-        durable.medications = r.medications;
-        durable.logs = r.logs;
-        return {
-          state: { medications: r.medications, logs: r.logs },
-          reconciliation: {
-            ...r,
-            markedCount: 0,
-            recoveredEnvelope: false,
-            partialNativeAck: false,
-          },
-          nativeListFailed: false,
-        };
-      });
-  }
-
-  /**
-   * Deliberately WRONG order (negative control): legacy settlement charges
-   * today's occurrence (dailyDose) BEFORE exact reconciliation.
-   *
-   * The emulated legacy charge deducts today's occurrence from stock while
-   * deliberately leaving lastSyncDate behind and writing no consumption
-   * marker — the same-day production semantics in which the exact event
-   * stays reconcilable afterwards (the past-day horizon guard only blocks
-   * events on days already folded into lastSyncDate, and a same-day event
-   * is never strictly-before today). This is exactly the arithmetic of the
-   * ordering bug: 10 → 9 (legacy charges schedule amount 1) → 7 (exact
-   * charges its authoritative amount 2 for the SAME occurrence).
-   */
-  function mockLegacyFirstThenExact(
-    callOrder: string[],
-    amount = 2
-  ) {
-    return vi
-      .spyOn(preSettleModule, 'reconcileExactBeforeLegacySettlement')
-      .mockImplementation(async (opts) => {
-        callOrder.push('legacy');
-        const charged = opts.fresh.medications.map((m) => ({
-          ...m,
-          currentPills: Math.max(0, m.currentPills - (m.dailyDose || 0)),
-        }));
-        callOrder.push('exact');
-        const r = reconcileFiredEvents(charged, opts.fresh.logs, [
-          legacyFired(amount),
-        ]);
         durable.medications = r.medications;
         durable.logs = r.logs;
         return {
@@ -681,9 +645,9 @@ describe('legacy single-dose (no doseSchedule): exact-before-legacy ordering pro
 
   afterEach(() => clearHooks());
 
-  it('runGatedAutoDeductToggle: exact first → stock 8 (primary), exact before legacy (structural)', async () => {
+  it('runGatedAutoDeductToggle: Exact is a no-op for a no-schedule med; legacy settle is the only deduction (10 → 9)', async () => {
     const callOrder: string[] = [];
-    mockLegacyExactFirst(callOrder, 2);
+    mockLegacyExactNoOp(callOrder, 2);
 
     const result = await runGatedAutoDeductToggle({
       medicationId: 'med-1',
@@ -691,38 +655,21 @@ describe('legacy single-dose (no doseSchedule): exact-before-legacy ordering pro
       now: new Date('2026-09-14T09:00:00'),
       globalAutoDeductEnabled: true,
     });
-    // Primary behavioral assertion: exact amount 2 applied exactly once;
-    // the subsequent legacy settlement must NOT charge the same occurrence.
     expect(result.outcome).toBe('applied');
-    expect(result.medications[0].currentPills).toBe(8);
-    // Secondary structural assertion.
+    // Exact charged nothing; legacy settlement at dailyDose 1 → 9.
+    expect(result.medications[0].currentPills).toBe(9);
     expect(callOrder[0]).toBe('exact');
-    const exactLogs = result.logs.filter(
-      (l) => l.id === exactAutoLogId('med-1', 'legacy', '2026-09-14')
-    );
-    expect(exactLogs).toHaveLength(1);
-    expect(exactLogs[0].amount).toBe(-2);
+    // No Exact log with an empty-doseId id is ever produced.
+    const exactLogId = exactAutoLogId('med-1', '', '2026-09-14');
+    expect(result.logs.filter((l) => l.id === exactLogId)).toHaveLength(0);
   });
 
-  it('runGatedAutoDeductToggle: legacy-first control → stock 7 (ordering error is detectable)', async () => {
+  it('runGatedGlobalAutoDeductToggle: no-schedule med → Exact no-op, global disable leaves stock untouched (10)', async () => {
+    // Global disable only stops future recurrence for the med; it does not
+    // run a per-med legacy day-settlement. With Exact a no-op, nothing is
+    // deducted and currentPills stays at 10.
     const callOrder: string[] = [];
-    mockLegacyFirstThenExact(callOrder, 2);
-
-    const result = await runGatedAutoDeductToggle({
-      medicationId: 'med-1',
-      todayStr: '2026-09-14',
-      now: new Date('2026-09-14T09:00:00'),
-      globalAutoDeductEnabled: true,
-    });
-    // The same occurrence charged twice (1 + 2) — proves this fixture would
-    // catch a reversed pipeline. Positive assertion on the wrong-order value.
-    expect(result.medications[0].currentPills).toBe(7);
-    expect(callOrder).toEqual(['legacy', 'exact']);
-  });
-
-  it('runGatedGlobalAutoDeductToggle: exact first → stock 8 (primary)', async () => {
-    const callOrder: string[] = [];
-    mockLegacyExactFirst(callOrder, 2);
+    mockLegacyExactNoOp(callOrder, 2);
 
     const result = await runGatedGlobalAutoDeductToggle({
       enable: false,
@@ -730,27 +677,17 @@ describe('legacy single-dose (no doseSchedule): exact-before-legacy ordering pro
       now: new Date('2026-09-14T09:00:00'),
     });
     expect(result.outcome).toBe('applied');
-    expect(result.medications[0].currentPills).toBe(8);
+    expect(result.medications[0].currentPills).toBe(10);
     expect(callOrder[0]).toBe('exact');
     expect(result.medications[0].autoDeductEnabled).toBe(false);
+    // No Exact log with an empty-doseId id is ever produced.
+    const exactLogId = exactAutoLogId('med-1', '', '2026-09-14');
+    expect(result.logs.filter((l) => l.id === exactLogId)).toHaveLength(0);
   });
 
-  it('runGatedGlobalAutoDeductToggle: legacy-first control → stock 7', async () => {
+  it('runGatedMedicationUpdate (dailyDose 1→3): no-schedule med → legacy settle at old dose then dailyDose update; Exact no-op', async () => {
     const callOrder: string[] = [];
-    mockLegacyFirstThenExact(callOrder, 2);
-
-    const result = await runGatedGlobalAutoDeductToggle({
-      enable: false,
-      todayStr: '2026-09-14',
-      now: new Date('2026-09-14T09:00:00'),
-    });
-    expect(result.medications[0].currentPills).toBe(7);
-    expect(callOrder).toEqual(['legacy', 'exact']);
-  });
-
-  it('runGatedMedicationUpdate (dailyDose 1→3): exact first → stock 8 (primary)', async () => {
-    const callOrder: string[] = [];
-    mockLegacyExactFirst(callOrder, 2);
+    mockLegacyExactNoOp(callOrder, 2);
 
     const { id: _id, createdAt: _c, ...medData } = {
       ...durable.medications[0],
@@ -765,26 +702,22 @@ describe('legacy single-dose (no doseSchedule): exact-before-legacy ordering pro
     });
     expect(result.outcome).toBe('applied');
     expect(result.medications[0].dailyDose).toBe(3);
-    expect(result.medications[0].currentPills).toBe(8);
+    // Exact no-op; legacy settle at old dailyDose 1 → 9.
+    expect(result.medications[0].currentPills).toBe(9);
     expect(callOrder[0]).toBe('exact');
   });
 
-  it('runGatedMedicationUpdate: legacy-first control → stock 7', async () => {
-    const callOrder: string[] = [];
-    mockLegacyFirstThenExact(callOrder, 2);
-
-    const { id: _id, createdAt: _c, ...medData } = {
-      ...durable.medications[0],
-      dailyDose: 3,
-    };
-
-    const result = await runGatedMedicationUpdate({
-      editId: 'med-1',
-      medData,
-      todayStr: '2026-09-14',
-      now: new Date('2026-09-14T09:00:00'),
-    });
-    expect(result.medications[0].currentPills).toBe(7);
-    expect(callOrder).toEqual(['legacy', 'exact']);
+  it('reconcileFiredEvents directly: no-schedule + non-empty doseId → skipped_invalid, no ACK, no stock/log', () => {
+    // Well-formed identity (med + non-empty doseId + valid date + positive
+    // amount) but no schedule → cannot apply. NOT terminal; stays retryable.
+    const med = legacyMed({ currentPills: 10 });
+    const e: AutoDeductionEvent = firedEvent(2, { doseId: 'orphan' });
+    const r = reconcileFiredEvents([med], [], [e]);
+    expect(r.details[0].outcome).toBe('skipped_invalid');
+    expect(r.toAcknowledge).toEqual([]);
+    expect(r.mutated).toBe(false);
+    expect(r.medications[0].currentPills).toBe(10);
+    expect(r.newExactLogs).toEqual([]);
+    expect(r.logs).toEqual([]);
   });
 });

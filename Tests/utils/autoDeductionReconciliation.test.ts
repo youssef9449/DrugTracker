@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Medication, ConsumptionLog } from '../../src/types';
 import {
+  isValidExactOccurrenceIdentity,
+  normalizeExactDoseId,
   reconcileFiredEvents,
   isExactAutoOccurrenceApplied,
   exactAutoLogId,
@@ -47,6 +49,23 @@ function fired(
     ...over,
   };
 }
+
+describe('isValidExactOccurrenceIdentity — triple identity (#268)', () => {
+  it('requires non-empty medicationId, doseId, and YYYY-MM-DD calendarDate', () => {
+    expect(isValidExactOccurrenceIdentity('med-1', 'd1', '2026-09-14')).toBe(true);
+    expect(isValidExactOccurrenceIdentity('', 'd1', '2026-09-14')).toBe(false);
+    expect(isValidExactOccurrenceIdentity('med-1', '', '2026-09-14')).toBe(false);
+    expect(isValidExactOccurrenceIdentity('med-1', '  ', '2026-09-14')).toBe(false);
+    expect(isValidExactOccurrenceIdentity('med-1', 'd1', '')).toBe(false);
+    expect(isValidExactOccurrenceIdentity('med-1', 'd1', 'bad')).toBe(false);
+  });
+
+  it('normalizeExactDoseId does not invent identity', () => {
+    expect(normalizeExactDoseId(null)).toBe('');
+    expect(normalizeExactDoseId(undefined)).toBe('');
+    expect(normalizeExactDoseId('  d1  ')).toBe('d1');
+  });
+});
 
 describe('identity', () => {
   it('same med+dose+date key; dose and date isolation', () => {
@@ -976,6 +995,72 @@ describe('reconcileFiredEvents — invalid amount must not ACK', () => {
       { medicationId: 'med-1', doseId: 'd1', calendarDate: '2026-09-14' },
     ]);
   });
+
+  it('empty doseId: no stock/log, skipped_invalid, ACK terminal (#268)', () => {
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: '',
+      calendarDate: '2026-09-14',
+      amount: 2,
+    });
+    const r = reconcileFiredEvents([med], [], [e]);
+    expect(r.details[0].outcome).toBe('skipped_invalid');
+    expect(r.toAcknowledge).toEqual([
+      { medicationId: 'med-1', doseId: '', calendarDate: '2026-09-14' },
+    ]);
+    expect(r.mutated).toBe(false);
+    expect(r.medications[0].currentPills).toBe(10);
+    expect(r.newExactLogs).toEqual([]);
+    expect(r.logs).toEqual([]);
+  });
+
+  it('missing doseId (undefined normalized): terminal ACK, no stock/log (#268)', () => {
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: undefined as unknown as string,
+      calendarDate: '2026-09-14',
+      amount: 2,
+    });
+    const r = reconcileFiredEvents([med], [], [e]);
+    expect(r.details[0].outcome).toBe('skipped_invalid');
+    expect(r.toAcknowledge).toEqual([
+      { medicationId: 'med-1', doseId: '', calendarDate: '2026-09-14' },
+    ]);
+    expect(r.mutated).toBe(false);
+    expect(r.medications[0].currentPills).toBe(10);
+    expect(r.newExactLogs).toEqual([]);
+  });
+
+  it('valid identity + invalid amount remains retryable (no ACK)', () => {
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      calendarDate: '2026-09-14',
+      amount: 0,
+    });
+    const r = reconcileFiredEvents([med], [], [e]);
+    expect(r.details[0].outcome).toBe('skipped_invalid');
+    expect(r.toAcknowledge).toEqual([]);
+    expect(r.mutated).toBe(false);
+    expect(r.medications[0].currentPills).toBe(10);
+    expect(r.newExactLogs).toEqual([]);
+  });
+
 });
 
 describe('reconcileFiredEvents — malformed identity is terminal ACK (#262 Finding 3)', () => {

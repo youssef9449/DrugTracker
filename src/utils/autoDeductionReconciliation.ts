@@ -77,24 +77,31 @@ export function isValidExactCalendarDate(calendarDate: string): boolean {
 
 /**
  * Occurrence identity for Exact Auto is medicationId + doseId + calendarDate.
- * doseId may be normalized to the legacy sentinel when empty; medicationId and
- * calendarDate must be present and well-formed. Malformed identity cannot be
- * repaired by a later amount fix and must not remain FIRED forever (#262 F3).
+ * All three components are required and non-empty. Empty/missing doseId is
+ * invalid (not a legacy sentinel) — Issue #268. Malformed identity cannot
+ * be repaired by a later amount fix and must not remain FIRED forever (#262 F3).
  */
 export function isValidExactOccurrenceIdentity(
   medicationId: string,
+  doseId: string,
   calendarDate: string
 ): boolean {
   return (
     typeof medicationId === 'string' &&
     medicationId.trim().length > 0 &&
+    typeof doseId === 'string' &&
+    doseId.trim().length > 0 &&
     isValidExactCalendarDate(calendarDate)
   );
 }
 
+/**
+ * Normalize doseId for keying. Does not invent an identity for missing values —
+ * null/undefined become '' which fails {@link isValidExactOccurrenceIdentity}.
+ */
 export function normalizeExactDoseId(doseId: string | undefined | null): string {
   if (doseId == null) return '';
-  return String(doseId);
+  return String(doseId).trim();
 }
 
 /**
@@ -126,8 +133,7 @@ export function findExactAutoLog(
  *
  * Sources (any one is enough):
  * 1. dose consume / skip history (Take, prior exact apply, Restore skip)
- * 2. legacy lastConsumedDate for single-dose
- * 3. lastSyncDate day-settlement horizon — past days already settled into
+ * 2. lastSyncDate day-settlement horizon — past days already settled into
  *    currentPills by syncAutoDailyDeductions (no fake consume markers invented)
  */
 export function isExactAutoOccurrenceApplied(
@@ -305,7 +311,7 @@ export function applyExactAutoEventToMedication(
     date: calendarDate,
     timestamp: new Date(now).toISOString(),
     description: `خصم تلقائي دقيق (−${actualDeducted} ${med.unit || 'وحدة'})`,
-    doseId: doseId || undefined,
+    doseId,
   };
 
   return { ok: true, updatedMed, log };
@@ -358,12 +364,11 @@ export function reconcileFiredEvents(
       occurrenceKey,
     };
 
-    // Validation order (#262 Finding 3):
-    //   1) occurrence identity — terminal ACK if irreparable
-    //   2) amount — no ACK (retryable if identity is valid)
-    // doseId is normalized above; empty doseId maps to the legacy sentinel
-    // and remains a valid identity component.
-    if (!isValidExactOccurrenceIdentity(medicationId, calendarDate)) {
+    // Validation order (#262 Finding 3 / Issue #268):
+    //   1) occurrence identity (medicationId + doseId + calendarDate) —
+    //      terminal ACK if any component is missing/invalid
+    //   2) amount — no ACK (retryable when identity is valid)
+    if (!isValidExactOccurrenceIdentity(medicationId, doseId, calendarDate)) {
       details.push({ ...baseDetail, outcome: 'skipped_invalid' });
       // Terminal: malformed identity cannot become a valid Exact occurrence
       // without changing the key. ACK via existing markReconciled path so the

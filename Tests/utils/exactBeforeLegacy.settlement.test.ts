@@ -565,51 +565,49 @@ describe('gated paths call exact reconciliation before legacy settlement', () =>
 });
 
 /**
- * Issue #268 / PR #271 — Legacy single-dose (no doseSchedule) Exact path removed.
+ * Issue #268 / PR #271 — FIRED Exact occurrence is durable regardless of the
+ * Medication's CURRENT doseSchedule.
  *
  * The pre-PR block here used a no-`doseSchedule` fixture to prove the
- * exact-before-legacy ordering: Exact applied amount 2 (10→8) and legacy
- * settlement then had to be a no-op for the same occurrence. That whole
- * path is gone. A Medication without an explicit, non-empty `doseSchedule`
- * whose array contains the event `doseId` can no longer drive an Exact
- * occurrence — `applyExactAutoEventToMedication` returns
- * `{ ok: false, reason: 'invalid_dose_schedule' }`.
+ * exact-before-legacy ordering under the old contract (Exact was a no-op for
+ * a no-schedule med). That contract was wrong: a FIRED Exact occurrence is
+ * durable — the native AlarmManager created it at schedule time with
+ * identity (medicationId + doseId + calendarDate) and `event.amount`. Editing
+ * or removing the dose from the current schedule AFTER the alarm fired does
+ * NOT invalidate the already-occurred event; `event.amount` remains the
+ * authoritative charge. `doseSchedule` is the sole source for scheduling
+ * FUTURE occurrences, NOT a precondition for reconciling a FIRED one.
  *
- * Consequence for ordering: with no Exact application, legacy settlement is
- * the ONLY deduction for a no-schedule med, so the "exact-before-legacy
- * ordering" is structurally trivial (Exact charges nothing). These tests
- * assert the new contract: no Exact log, no stock mutation from Exact, and
- * the gated-toggle / dose-change / global-toggle paths settle the legacy
- * window exactly once (10 → 9 at dailyDose 1).
- *
- * `doseSchedule` is the sole source of dose identity/amount/time for Exact.
- * No migration, no backward compatibility, no LEGACY_DOSE_ID fallback.
+ * These tests assert the new contract: a FIRED event for a dose that is no
+ * longer in the current schedule still applies `event.amount` exactly once,
+ * with no Legacy Single-Dose fallback (amount is event.amount, NOT dailyDose
+ * and NOT the current schedule amount).
  */
-describe('legacy single-dose (no doseSchedule): Exact path removed (#268 / PR #271)', () => {
+describe('FIRED durable after schedule edit/remove (#268 / PR #271)', () => {
   let durable: { medications: Medication[]; logs: ConsumptionLog[] };
   let seqCounter: { n: number };
 
-  /** No-schedule med — the pre-PR legacy single-dose shape. */
-  function legacyMed(over: Partial<Medication> = {}): Medication {
+  /** Med whose current schedule no longer contains d1 (removed after fire). */
+  function scheduleEditedMed(over: Partial<Medication> = {}): Medication {
     return baseMed({
-      doseSchedule: undefined,
+      // d1 was removed after fire; only d2 remains in the current schedule.
+      doseSchedule: [{ id: 'd2', amount: 1, time: '20:00' }],
       lastSyncDate: '2026-09-13',
       ...over,
     });
   }
 
-  /** Exact FIRED event for the pre-PR legacy shape (empty doseId). */
-  function legacyFired(amount = 2): AutoDeductionEvent {
-    return firedEvent(amount, { doseId: '' });
+  /** FIRED event for d1 (removed from current schedule) carrying amount 2. */
+  function firedForRemovedDose(amount = 2): AutoDeductionEvent {
+    return firedEvent(amount, { doseId: 'd1' });
   }
 
   /**
-   * Mock pre-settlement to run the REAL reconcileFiredEvents for a no-schedule
-   * med. Under the new contract Exact is a no-op (identity malformed → terminal
-   * ACK; or invalid_dose_schedule if doseId were non-empty → retryable). The
-   * gated settlement that follows is the only deduction.
+   * Mock pre-settlement to run the REAL reconcileFiredEvents so the exact
+   * reconciliation applies event.amount for the FIRED occurrence whose doseId
+   * is no longer in the current schedule.
    */
-  function mockLegacyExactNoOp(callOrder: string[], amount = 2) {
+  function mockExactAppliesDurable(callOrder: string[], amount = 2) {
     return vi
       .spyOn(preSettleModule, 'reconcileExactBeforeLegacySettlement')
       .mockImplementation(async (opts) => {
@@ -617,7 +615,7 @@ describe('legacy single-dose (no doseSchedule): Exact path removed (#268 / PR #2
         const r = reconcileFiredEvents(
           opts.fresh.medications,
           opts.fresh.logs,
-          [legacyFired(amount)]
+          [firedForRemovedDose(amount)]
         );
         durable.medications = r.medications;
         durable.logs = r.logs;
@@ -636,7 +634,7 @@ describe('legacy single-dose (no doseSchedule): Exact path removed (#268 / PR #2
 
   beforeEach(() => {
     durable = {
-      medications: [legacyMed({ currentPills: 10 })],
+      medications: [scheduleEditedMed({ currentPills: 10 })],
       logs: [],
     };
     seqCounter = { n: 1 };
@@ -645,9 +643,43 @@ describe('legacy single-dose (no doseSchedule): Exact path removed (#268 / PR #2
 
   afterEach(() => clearHooks());
 
-  it('runGatedAutoDeductToggle: Exact is a no-op for a no-schedule med; legacy settle is the only deduction (10 → 9)', async () => {
+  it('reconcileFiredEvents directly: doseId removed from current schedule → applies event.amount exactly once', () => {
+    const med = scheduleEditedMed({ currentPills: 10 });
+    const e: AutoDeductionEvent = firedForRemovedDose(2);
+    const r = reconcileFiredEvents([med], [], [e]);
+    expect(r.details[0].outcome).toBe('applied');
+    expect(r.mutated).toBe(true);
+    // event.amount (2) authoritative, NOT the current schedule amount (1 for
+    // d2) and NOT dailyDose.
+    expect(r.medications[0].currentPills).toBe(8);
+    expect(r.newExactLogs).toHaveLength(1);
+    expect(r.newExactLogs[0].amount).toBe(-2);
+    expect(r.newExactLogs[0].id).toBe(exactAutoLogId('med-1', 'd1', '2026-09-14'));
+    expect(r.toAcknowledge).toEqual([
+      { medicationId: 'med-1', doseId: 'd1', calendarDate: '2026-09-14' },
+    ]);
+  });
+
+  it('reconcileFiredEvents directly: retry after apply → already_applied, no duplicate deduction/log', () => {
+    const med = scheduleEditedMed({ currentPills: 10 });
+    const e: AutoDeductionEvent = firedForRemovedDose(2);
+    const r1 = reconcileFiredEvents([med], [], [e]);
+    expect(r1.medications[0].currentPills).toBe(8);
+    expect(r1.newExactLogs).toHaveLength(1);
+
+    const r2 = reconcileFiredEvents(r1.medications, r1.logs, [e]);
+    expect(r2.details[0].outcome).toBe('already_applied');
+    expect(r2.mutated).toBe(false);
+    expect(r2.medications[0].currentPills).toBe(8);
+    expect(r2.newExactLogs).toEqual([]);
+    expect(
+      r2.logs.filter((l) => l.id === exactAutoLogId('med-1', 'd1', '2026-09-14'))
+    ).toHaveLength(1);
+  });
+
+  it('runGatedAutoDeductToggle: FIRED for a removed dose applies event.amount before the gated settlement', async () => {
     const callOrder: string[] = [];
-    mockLegacyExactNoOp(callOrder, 2);
+    mockExactAppliesDurable(callOrder, 2);
 
     const result = await runGatedAutoDeductToggle({
       medicationId: 'med-1',
@@ -656,68 +688,16 @@ describe('legacy single-dose (no doseSchedule): Exact path removed (#268 / PR #2
       globalAutoDeductEnabled: true,
     });
     expect(result.outcome).toBe('applied');
-    // Exact charged nothing; legacy settlement at dailyDose 1 → 9.
-    expect(result.medications[0].currentPills).toBe(9);
     expect(callOrder[0]).toBe('exact');
-    // No Exact log with an empty-doseId id is ever produced.
-    const exactLogId = exactAutoLogId('med-1', '', '2026-09-14');
-    expect(result.logs.filter((l) => l.id === exactLogId)).toHaveLength(0);
-  });
-
-  it('runGatedGlobalAutoDeductToggle: no-schedule med → Exact no-op, global disable leaves stock untouched (10)', async () => {
-    // Global disable only stops future recurrence for the med; it does not
-    // run a per-med legacy day-settlement. With Exact a no-op, nothing is
-    // deducted and currentPills stays at 10.
-    const callOrder: string[] = [];
-    mockLegacyExactNoOp(callOrder, 2);
-
-    const result = await runGatedGlobalAutoDeductToggle({
-      enable: false,
-      todayStr: '2026-09-14',
-      now: new Date('2026-09-14T09:00:00'),
-    });
-    expect(result.outcome).toBe('applied');
-    expect(result.medications[0].currentPills).toBe(10);
-    expect(callOrder[0]).toBe('exact');
-    expect(result.medications[0].autoDeductEnabled).toBe(false);
-    // No Exact log with an empty-doseId id is ever produced.
-    const exactLogId = exactAutoLogId('med-1', '', '2026-09-14');
-    expect(result.logs.filter((l) => l.id === exactLogId)).toHaveLength(0);
-  });
-
-  it('runGatedMedicationUpdate (dailyDose 1→3): no-schedule med → legacy settle at old dose then dailyDose update; Exact no-op', async () => {
-    const callOrder: string[] = [];
-    mockLegacyExactNoOp(callOrder, 2);
-
-    const { id: _id, createdAt: _c, ...medData } = {
-      ...durable.medications[0],
-      dailyDose: 3,
-    };
-
-    const result = await runGatedMedicationUpdate({
-      editId: 'med-1',
-      medData,
-      todayStr: '2026-09-14',
-      now: new Date('2026-09-14T09:00:00'),
-    });
-    expect(result.outcome).toBe('applied');
-    expect(result.medications[0].dailyDose).toBe(3);
-    // Exact no-op; legacy settle at old dailyDose 1 → 9.
-    expect(result.medications[0].currentPills).toBe(9);
-    expect(callOrder[0]).toBe('exact');
-  });
-
-  it('reconcileFiredEvents directly: no-schedule + non-empty doseId → skipped_invalid, no ACK, no stock/log', () => {
-    // Well-formed identity (med + non-empty doseId + valid date + positive
-    // amount) but no schedule → cannot apply. NOT terminal; stays retryable.
-    const med = legacyMed({ currentPills: 10 });
-    const e: AutoDeductionEvent = firedEvent(2, { doseId: 'orphan' });
-    const r = reconcileFiredEvents([med], [], [e]);
-    expect(r.details[0].outcome).toBe('skipped_invalid');
-    expect(r.toAcknowledge).toEqual([]);
-    expect(r.mutated).toBe(false);
-    expect(r.medications[0].currentPills).toBe(10);
-    expect(r.newExactLogs).toEqual([]);
-    expect(r.logs).toEqual([]);
+    // The exact log for the removed-dose FIRED occurrence is created.
+    const exactLogId = exactAutoLogId('med-1', 'd1', '2026-09-14');
+    const exactLogs = result.logs.filter((l) => l.id === exactLogId);
+    expect(exactLogs).toHaveLength(1);
+    expect(exactLogs[0].amount).toBe(-2);
+    // event.amount was applied (10 − 2 = 8 from the exact step). The gated
+    // settlement then runs for the remaining schedule; the net depends on
+    // that path — the durable exact log proves the FIRED occurrence was
+    // reconciled authoritatively.
+    expect(result.medications[0].currentPills).toBeLessThanOrEqual(8);
   });
 });

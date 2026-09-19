@@ -1,39 +1,42 @@
 /**
- * Issue #268 / PR #271 — Legacy Single-Dose Exact path removed.
+ * Issue #268 / PR #271 — Legacy Single-Dose Exact fallback removed.
  *
- * Pre-PR this file guarded the legacy single-dose Exact double-deduction
- * regression (a no-`doseSchedule` med charged once by Exact Auto then again
- * by legacy day-settlement). That whole path is gone: a Medication without an
- * explicit, non-empty `doseSchedule` whose array contains the event `doseId`
- * can no longer produce an Exact stock mutation, an Exact log, a consume
- * marker, or a `lastConsumedDate` write — `applyExactAutoEventToMedication`
- * returns `{ ok: false, reason: 'invalid_dose_schedule' }`.
+ * A FIRED Exact occurrence is durable: the native AlarmManager created and
+ * persisted it at schedule time with identity (medicationId + doseId +
+ * calendarDate) and `event.amount`. The Medication's CURRENT `doseSchedule`
+ * is the sole source for scheduling FUTURE occurrences, NOT a precondition
+ * for reconciling a FIRED one. Editing or removing the dose from the current
+ * schedule AFTER the alarm fired does NOT invalidate the already-occurred
+ * event; `event.amount` remains the authoritative charge.
  *
- * `doseSchedule` is now the SOLE source of dose identity / amount / time for
- * Exact Auto. There is no migration and no backward compatibility:
+ * No Legacy Single-Dose fallback:
  *   - no `LEGACY_DOSE_ID` sentinel,
  *   - no `dailyDose` / `reminderTime` / `reminderEnabled` / `lastConsumedDate`
- *     fallback,
+ *     fallback for amount or identity,
  *   - no first-dose / next-dose / array-index fallback,
- *   - no empty/sentinel doseId.
+ *   - no empty / sentinel doseId.
  *
- * What remains valid and unchanged: explicit multi-dose / single-slot
- * schedules (a Medication with `doseSchedule: [{ id, amount, time }]`) drive
- * Exact Auto normally, and `event.amount` is the authoritative charge.
+ * The ONLY identity failure that blocks a FIRED occurrence from applying is
+ * a malformed identity (empty/missing doseId, bad calendarDate) — which is
+ * terminal at the runner level (no infinite retry). Invalid amount stays
+ * retryable with no ACK.
+ *
+ * `lastConsumedDate` is written ONLY when the Medication still has an
+ * explicit non-empty `doseSchedule` AND every slot for the calendar day is
+ * consumed. A med whose schedule was removed/edited still gets its FIRED
+ * occurrence applied via event.amount, but with no schedule to test
+ * all-consumed it does NOT write lastConsumedDate (no doseId-only write).
  */
 import { describe, it, expect } from 'vitest';
 import type { Medication } from '../../src/types';
 import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
 import {
   computeDueDoseBreakdown,
-  syncAutoDailyDeductions,
-  effectiveCurrentPills,
 } from '../../src/utils/dateCalculations';
 import {
   reconcileFiredEvents,
   exactAutoLogId,
   applyExactAutoEventToMedication,
-  isExactDoseScheduleMember,
 } from '../../src/utils/autoDeductionReconciliation';
 
 const TODAY = '2026-09-14';
@@ -55,14 +58,11 @@ function legacyMed(over: Partial<Medication> = {}): Medication {
   };
 }
 
-/** Exact FIRED event for a no-schedule med — the pre-PR legacy shape. */
-function legacyFiredEvent(amount: number): AutoDeductionEvent {
+/** Exact FIRED event with a non-empty doseId for a med with no schedule. */
+function noScheduleFiredEvent(amount: number): AutoDeductionEvent {
   return {
     medicationId: 'med-1',
-    // Empty doseId: the pre-PR LEGACY_DOSE_ID shape. Under the new contract
-    // this is a malformed identity → terminal ACK at the runner level (no
-    // stock, no log) before ever reaching applyExactAutoEventToMedication.
-    doseId: '',
+    doseId: 'd1',
     calendarDate: TODAY,
     amount,
     status: 'FIRED',
@@ -72,60 +72,90 @@ function legacyFiredEvent(amount: number): AutoDeductionEvent {
   };
 }
 
-describe('legacy single-dose (no doseSchedule): Exact path is removed (#268 / PR #271)', () => {
-  it('applyExactAutoEventToMedication: no doseSchedule → ok:false invalid_dose_schedule, no deduction', () => {
-    const med = legacyMed();
-    const e = legacyFiredEvent(2);
+describe('legacy single-dose (no doseSchedule): FIRED is durable; no Legacy Single-Dose fallback (#268 / PR #271)', () => {
+  it('applyExactAutoEventToMedication: no doseSchedule + non-empty doseId → applies event.amount (NOT dailyDose)', () => {
+    const med = legacyMed({ dailyDose: 5 });
+    const e = noScheduleFiredEvent(2);
     const applied = applyExactAutoEventToMedication(med, e, NOW);
-    expect(applied.ok).toBe(false);
-    if (!applied.ok) {
-      expect(applied.reason).toBe('invalid_dose_schedule');
+    expect(applied.ok).toBe(true);
+    if (applied.ok) {
+      // 10 − event.amount(2) = 8, NOT 10 − dailyDose(5) = 5.
+      expect(applied.updatedMed.currentPills).toBe(8);
+      expect(applied.log.amount).toBe(-2);
+      expect(applied.log.doseId).toBe('d1');
+      expect(applied.log.id).toBe(exactAutoLogId('med-1', 'd1', TODAY));
+      // No schedule → no lastConsumedDate write.
+      expect(applied.updatedMed.lastConsumedDate).toBeUndefined();
     }
   });
 
-  it('applyExactAutoEventToMedication: empty doseSchedule array → ok:false invalid_dose_schedule', () => {
+  it('applyExactAutoEventToMedication: empty doseSchedule array → applies event.amount', () => {
     const med = legacyMed({ doseSchedule: [] });
-    const e = { ...legacyFiredEvent(2), doseId: 'any-id' };
+    const e = noScheduleFiredEvent(2);
     const applied = applyExactAutoEventToMedication(med, e, NOW);
-    expect(applied.ok).toBe(false);
-    if (!applied.ok) {
-      expect(applied.reason).toBe('invalid_dose_schedule');
+    expect(applied.ok).toBe(true);
+    if (applied.ok) {
+      expect(applied.updatedMed.currentPills).toBe(8);
+      expect(applied.log.amount).toBe(-2);
     }
   });
 
-  it('applyExactAutoEventToMedication: schedule present but doseId not a member → ok:false invalid_dose_schedule', () => {
+  it('applyExactAutoEventToMedication: doseId removed from current schedule after fire → applies event.amount', () => {
+    // The med was scheduled with d1; the native created FIRED med-1+d1+TODAY.
+    // The user then removed d1 from the current doseSchedule. The FIRED
+    // occurrence already happened → reconciliation applies event.amount.
     const med = legacyMed({
-      doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+      doseSchedule: [{ id: 'd2', amount: 1, time: '20:00' }],
     });
-    const e = { ...legacyFiredEvent(2), doseId: 'd2' };
+    const e = noScheduleFiredEvent(2);
     const applied = applyExactAutoEventToMedication(med, e, NOW);
-    expect(applied.ok).toBe(false);
-    if (!applied.ok) {
-      expect(applied.reason).toBe('invalid_dose_schedule');
+    expect(applied.ok).toBe(true);
+    if (applied.ok) {
+      expect(applied.updatedMed.currentPills).toBe(8);
+      expect(applied.log.amount).toBe(-2);
+      expect(applied.log.doseId).toBe('d1');
+      expect(applied.updatedMed.lastConsumedDate).toBeUndefined();
     }
   });
 
-  it('isExactDoseScheduleMember: false for no/empty schedule, false for non-member, true for member', () => {
-    const noSchedule = legacyMed();
-    expect(isExactDoseScheduleMember(noSchedule, 'd1')).toBe(false);
-    expect(isExactDoseScheduleMember(noSchedule, '')).toBe(false);
-
-    const empty = legacyMed({ doseSchedule: [] });
-    expect(isExactDoseScheduleMember(empty, 'd1')).toBe(false);
-
-    const scheduled = legacyMed({
-      doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
-    });
-    expect(isExactDoseScheduleMember(scheduled, 'd1')).toBe(true);
-    expect(isExactDoseScheduleMember(scheduled, 'd2')).toBe(false);
-    expect(isExactDoseScheduleMember(scheduled, '')).toBe(false);
+  it('applyExactAutoEventToMedication: empty doseId → ok:false (malformed identity, not applied)', () => {
+    // Empty doseId is the ONLY identity failure that blocks application.
+    const med = legacyMed();
+    const e: AutoDeductionEvent = {
+      ...noScheduleFiredEvent(2),
+      doseId: '',
+    };
+    const applied = applyExactAutoEventToMedication(med, e, NOW);
+    expect(applied.ok).toBe(false);
+    if (!applied.ok) {
+      expect(applied.reason).toBe('invalid_dose_id');
+    }
   });
 
-  it('reconcileFiredEvents: no doseSchedule + empty doseId → skipped_invalid, no stock, no log (terminal ACK)', () => {
-    const med = legacyMed();
-    const r = reconcileFiredEvents([med], [], [legacyFiredEvent(2)], {
+  it('reconcileFiredEvents: no doseSchedule + non-empty doseId → applied once with event.amount; terminal ACK', () => {
+    const med = legacyMed({ currentPills: 10, dailyDose: 5 });
+    const r = reconcileFiredEvents([med], [], [noScheduleFiredEvent(2)], {
       now: NOW,
     });
+    expect(r.details[0].outcome).toBe('applied');
+    expect(r.mutated).toBe(true);
+    // event.amount (2), NOT dailyDose (5).
+    expect(r.medications[0].currentPills).toBe(8);
+    expect(r.newExactLogs).toHaveLength(1);
+    expect(r.newExactLogs[0].amount).toBe(-2);
+    expect(r.newExactLogs[0].id).toBe(exactAutoLogId('med-1', 'd1', TODAY));
+    expect(r.toAcknowledge).toEqual([
+      { medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY },
+    ]);
+    // No lastConsumedDate write (no schedule).
+    expect(r.medications[0].lastConsumedDate).toBeUndefined();
+  });
+
+  it('reconcileFiredEvents: no doseSchedule + empty doseId → skipped_invalid, terminal ACK (malformed identity)', () => {
+    // Empty doseId is a malformed identity → terminal ACK, no stock, no log.
+    const med = legacyMed();
+    const e: AutoDeductionEvent = { ...noScheduleFiredEvent(2), doseId: '' };
+    const r = reconcileFiredEvents([med], [], [e], { now: NOW });
     expect(r.details[0].outcome).toBe('skipped_invalid');
     expect(r.toAcknowledge).toEqual([
       { medicationId: 'med-1', doseId: '', calendarDate: TODAY },
@@ -134,71 +164,54 @@ describe('legacy single-dose (no doseSchedule): Exact path is removed (#268 / PR
     expect(r.medications[0].currentPills).toBe(10);
     expect(r.newExactLogs).toEqual([]);
     expect(r.logs).toEqual([]);
-    // lastConsumedDate untouched (no legacy doseId-only write)
-    expect(r.medications[0].lastConsumedDate).toBeUndefined();
   });
 
-  it('reconcileFiredEvents: no doseSchedule + non-empty doseId → skipped_invalid (no ACK), stock/log unchanged, retryable', () => {
-    // Identity is well-formed (med + non-empty doseId + valid date + positive
-    // amount), but the med has no schedule so the occurrence cannot apply.
-    // This is NOT terminal — the event may become applicable after the med
-    // is edited to add a matching schedule, so it stays unreconciled.
+  it('reconcileFiredEvents: retry of the same FIRED after apply → already_applied, no duplicate deduction/log', () => {
     const med = legacyMed({ currentPills: 10 });
-    const e: AutoDeductionEvent = {
-      ...legacyFiredEvent(2),
-      doseId: 'some-id',
-    };
-    const r = reconcileFiredEvents([med], [], [e], { now: NOW });
-    expect(r.details[0].outcome).toBe('skipped_invalid');
-    expect(r.toAcknowledge).toEqual([]);
-    expect(r.mutated).toBe(false);
-    expect(r.medications[0].currentPills).toBe(10);
-    expect(r.newExactLogs).toEqual([]);
-    expect(r.logs).toEqual([]);
+    const e = noScheduleFiredEvent(2);
+    const r1 = reconcileFiredEvents([med], [], [e], { now: NOW });
+    expect(r1.mutated).toBe(true);
+    expect(r1.medications[0].currentPills).toBe(8);
+
+    // Second pass re-lists the same FIRED; the durable exact log + consume
+    // marker make it already_applied (no duplicate deduction or log).
+    const r2 = reconcileFiredEvents(r1.medications, r1.logs, [e], { now: NOW });
+    expect(r2.details[0].outcome).toBe('already_applied');
+    expect(r2.mutated).toBe(false);
+    expect(r2.medications[0].currentPills).toBe(8);
+    expect(r2.newExactLogs).toEqual([]);
+    expect(
+      r2.logs.filter((l) => l.id === exactAutoLogId('med-1', 'd1', TODAY))
+    ).toHaveLength(1);
   });
 
-  it('reconcileFiredEvents: legacy sync after a no-op Exact still settles the window (no double-charge because Exact charged 0)', () => {
-    // The pre-PR double-deduction bug (Exact −2 then legacy −1 for the same
-    // day → 7) is structurally impossible now: Exact charges nothing for a
-    // no-schedule med, so legacy sync is the only deduction. 10 − 1 = 9.
-    const med = legacyMed();
-    const r = reconcileFiredEvents([med], [], [legacyFiredEvent(2)], {
+  it('reconcileFiredEvents: no doseSchedule + valid identity → durable consume marker written for the occurrence', () => {
+    // The exact apply writes a per-occurrence consume marker (doseConsumption +
+    // doseConsumptionHistory) keyed by doseId+calendarDate, independent of the
+    // current schedule membership. This is the recovery source on retry.
+    const med = legacyMed({ currentPills: 10 });
+    const r = reconcileFiredEvents([med], [], [noScheduleFiredEvent(2)], {
       now: NOW,
     });
-    const afterExact = r.medications[0];
-    expect(afterExact.currentPills).toBe(10);
-
-    const synced = syncAutoDailyDeductions([afterExact], TODAY, NOW);
-    // One day settled at dailyDose 1 → 9 (the only deduction; no Exact
-    // charge preceded it).
-    expect(synced.updatedMeds[0].currentPills).toBe(9);
-    expect(synced.newLogs).toHaveLength(1);
-    expect(synced.newLogs[0].amount).toBe(-1);
+    expect(r.medications[0].doseConsumption?.['d1']).toBe(TODAY);
+    expect(r.medications[0].doseConsumptionHistory?.['d1']).toContain(TODAY);
   });
 
-  it('effectiveCurrentPills: no-schedule med after a no-op Exact reflects only the legacy projection (10 − 1 = 9)', () => {
-    const med = legacyMed();
-    const r = reconcileFiredEvents([med], [], [legacyFiredEvent(2)], {
-      now: NOW,
-    });
-    expect(effectiveCurrentPills(r.medications[0], TODAY, NOW)).toBe(9);
-  });
-
-  it('no Exact log id is ever built with an empty doseId for a no-schedule med', () => {
+  it('no Exact log id is ever built with an empty doseId', () => {
     // exactAutoLogId with an empty doseId is the historical legacy shape.
-    // The runner never calls it for a no-schedule med because the apply
-    // gate rejects before any log construction.
+    // The malformed-identity path never reaches log construction.
     const med = legacyMed();
-    const r = reconcileFiredEvents([med], [], [legacyFiredEvent(2)], {
-      now: NOW,
-    });
+    const e: AutoDeductionEvent = { ...noScheduleFiredEvent(2), doseId: '' };
+    const r = reconcileFiredEvents([med], [], [e], { now: NOW });
     const legacyLogId = exactAutoLogId('med-1', '', TODAY);
     expect(r.logs.find((l) => l.id === legacyLogId)).toBeUndefined();
   });
 });
 
 /**
- * Explicit-schedule semantics are unchanged and remain authoritative.
+ * Explicit-schedule semantics are unchanged and remain authoritative for
+ * scheduling FUTURE occurrences. `event.amount` is the authoritative charge
+ * for a FIRED occurrence even when it differs from the current schedule amount.
  */
 describe('explicit doseSchedule: Exact Auto unchanged after legacy removal', () => {
   it('multi-dose semantics unchanged: slot-level timing still drives fullDueUnits', () => {
@@ -221,7 +234,7 @@ describe('explicit doseSchedule: Exact Auto unchanged after legacy removal', () 
       lastSyncDate: '2026-09-13',
     };
     const event: AutoDeductionEvent = {
-      ...legacyFiredEvent(2),
+      ...noScheduleFiredEvent(2),
       doseId: 'd1',
     };
     const r = reconcileFiredEvents([multiMed], [], [event], { now: NOW });

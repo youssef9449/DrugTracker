@@ -35,8 +35,7 @@ import {
   criticalAlarmId,
   cancelCriticalAlarm,
   scheduleCriticalAlarm,
-  verifyCriticalAlarmPending,
-} from '@/utils/notifications';
+  verifyCriticalAlarmPending } from '@/utils/notifications';
 
 beforeEach(() => {
   vi.clearAllMocks();

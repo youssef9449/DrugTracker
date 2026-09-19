@@ -6,7 +6,7 @@ import type { Medication, PharmacySettings } from '@/types';
 import { getTodayDateString } from '@/utils/dateCalculations';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
-  // lastSyncDate defaults to today so effectiveCurrentPills() ===
+  // lastSyncDate defaults to today so currentPills ===
   // currentPills (no projection); tests set their own lastSyncDate to
   // exercise the dynamic balance.
   return {

@@ -8,8 +8,7 @@ import {
   getHistoricalRestoreDisplayAmount,
   isUiAutoHistoricalRestoreEligible,
   isUiConsumedRestoreEligible,
-  findActualDeductedAmountForOccurrence,
-} from '@/utils/medActions';
+  findActualDeductedAmountForOccurrence } from '@/utils/medActions';
 import type { Medication, ConsumptionLog } from '@/types';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {

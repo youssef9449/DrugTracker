@@ -42,7 +42,7 @@ vi.mock('@/utils/sound', () => ({
 
 import App from '@/App';
 import type { Medication, ConsumptionLog } from '@/types';
-import { getTodayDateString, effectiveCurrentPills } from '@/utils/dateCalculations';
+import { getTodayDateString } from '@/utils/dateCalculations';
 import { getNextScheduledDose } from '@/utils/doseSchedule';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
@@ -146,7 +146,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     await waitFor(() => {
       const med = readMeds().find((m) => m.id === 'med-legacy')!;
       expect(med.lastConsumedDate).toBe(getTodayDateString());
-      expect(effectiveCurrentPills(med)).toBe(9);
+      expect(med.currentPills).toBe(9);
     });
 
     await waitFor(() => expect(screen.getByTitle(/استرجاع الجرعة/)).toBeInTheDocument());
@@ -154,7 +154,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
 
     await waitFor(() => {
       const med = readMeds().find((m) => m.id === 'med-legacy')!;
-      expect(effectiveCurrentPills(med)).toBe(10);
+      expect(med.currentPills).toBe(10);
       const restoreLog = readLogs().find((l) => l.type === 'skipped_day');
       expect(restoreLog?.amount).toBe(1);
     });
@@ -170,7 +170,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     fireEvent.click(screen.getByTitle(/تناول جرعة \(-2\)/));
     await waitFor(() => {
       const med = readMeds().find((m) => m.id === 'med-single')!;
-      expect(effectiveCurrentPills(med)).toBe(18);
+      expect(med.currentPills).toBe(18);
       expect(med.doseConsumption?.s1).toBe(getTodayDateString());
     });
     const doseLog = readLogs().find((l) => l.type === 'dose_taken');
@@ -182,7 +182,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
 
     await waitFor(() => {
       const med = readMeds().find((m) => m.id === 'med-single')!;
-      expect(effectiveCurrentPills(med)).toBe(20);
+      expect(med.currentPills).toBe(20);
       const restoreLog = readLogs().find((l) => l.type === 'skipped_day');
       expect(restoreLog?.amount).toBe(2);
       expect(restoreLog?.doseId).toBe('s1');
@@ -258,7 +258,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     await waitFor(() => {
       const med = readMeds().find((m) => m.id === 'med-multi')!;
       expect(med.doseConsumption?.d1).toBe(today);
-      expect(effectiveCurrentPills(med)).toBe(19);
+      expect(med.currentPills).toBe(19);
     });
     const takeLog = readLogs().find((l) => l.type === 'dose_taken');
     expect(takeLog?.doseId).toBe('d1');
@@ -277,7 +277,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
 
     await waitFor(() => {
       const med = readMeds().find((m) => m.id === 'med-multi')!;
-      expect(effectiveCurrentPills(med)).toBe(20);
+      expect(med.currentPills).toBe(20);
       const restoreLog = readLogs().find((l) => l.type === 'skipped_day');
       expect(restoreLog?.doseId).toBe('d1');
       expect(restoreLog?.amount).toBe(1);

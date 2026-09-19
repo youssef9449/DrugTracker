@@ -4,8 +4,7 @@ import {
   snoozeStorageKey,
   clearSnoozedDose,
   isSnoozeActive,
-  setSnoozeUntil,
-} from '@/utils/doseReminderStorage';
+  setSnoozeUntil } from '@/utils/doseReminderStorage';
 
 describe('doseReminderStorage Phase 3B dose-scoped snooze', () => {
   beforeEach(() => {

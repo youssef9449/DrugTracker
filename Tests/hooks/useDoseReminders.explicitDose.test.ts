@@ -5,8 +5,7 @@ import { describe, it, expect } from 'vitest';
 import type { Medication } from '../../src/types';
 import {
   doseReminderAlarmIdForDose,
-  snoozeDoseReminderId,
-} from '../../src/utils/notifications';
+  snoozeDoseReminderId } from '../../src/utils/notifications';
 
 function baseMed(over: Partial<Medication> = {}): Medication {
   return {

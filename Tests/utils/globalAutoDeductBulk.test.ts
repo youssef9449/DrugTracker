@@ -2,13 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Medication } from '@/types';
 import {
   runGatedGlobalAutoDeductToggle,
-  __setManualRecurrenceInvalidationTestHook,
-} from '@/utils/manualStockMutation';
+  __setManualRecurrenceInvalidationTestHook } from '@/utils/manualStockMutation';
 import { __setManualEnvelopeTestHooks } from '@/utils/stockEnvelopeRecovery';
 import {
   __setAutoStockGateTestHooks,
-  type AutoStockDurableState,
-} from '@/utils/autoDeductionStockGate';
+  type AutoStockDurableState } from '@/utils/autoDeductionStockGate';
 import * as preSettleModule from '@/utils/reconcileExactBeforeManualMutation';
 import * as autoNative from '@/utils/autoDeductionNative';
 

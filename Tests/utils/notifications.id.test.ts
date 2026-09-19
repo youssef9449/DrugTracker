@@ -44,8 +44,7 @@ import {
   snoozeDoseReminderId,
   cancelDoseReminder,
   getExactAlarmPermission,
-  openExactAlarmSettings,
-} from '@/utils/notifications';
+  openExactAlarmSettings } from '@/utils/notifications';
 
 beforeEach(() => {
   vi.clearAllMocks();

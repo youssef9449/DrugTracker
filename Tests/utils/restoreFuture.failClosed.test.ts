@@ -3,8 +3,7 @@ import type { RestoreFutureSchedulesResult } from '../../src/utils/autoDeduction
 import {
   recoveryBoundaryKey,
   restoreFutureSchedulesOnce,
-  __resetRestoreFutureSchedulesBoundaryForTests,
-} from '../../src/utils/restoreFutureSchedulesBoundary';
+  __resetRestoreFutureSchedulesBoundaryForTests } from '../../src/utils/restoreFutureSchedulesBoundary';
 
 vi.mock('../../src/utils/autoDeductionNative', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/utils/autoDeductionNative')>();

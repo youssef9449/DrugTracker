@@ -11,13 +11,11 @@ import type { Medication, ConsumptionLog } from '../../src/types';
 import { useMedicationHandlers } from '../../src/hooks/useMedicationHandlers';
 import {
   __setAutoStockGateTestHooks,
-  type AutoStockDurableState,
-} from '../../src/utils/autoDeductionStockGate';
+  type AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
 import { __setManualEnvelopeTestHooks } from '../../src/utils/stockEnvelopeRecovery';
 import {
   __setStockMutationOrderingTestHooks,
-  __resetStockMutationOrderingForTests,
-} from '../../src/utils/stockMutationOrdering';
+  __resetStockMutationOrderingForTests } from '../../src/utils/stockMutationOrdering';
 import { isDoseConsumedOnDate } from '../../src/utils/dateCalculations';
 
 const TODAY = '2026-09-16';

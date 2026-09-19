@@ -40,8 +40,7 @@ import {
   scheduleDoseReminder,
   scheduleSnoozedDoseReminder,
   cancelDoseReminder,
-  doseReminderAlarmIdForDose,
-} from '@/utils/notifications';
+  doseReminderAlarmIdForDose } from '@/utils/notifications';
 
 beforeEach(() => {
   vi.clearAllMocks();

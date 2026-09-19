@@ -6,8 +6,7 @@ import { getTodayDateString, getCriticalAlarmDate } from '@/utils/dateCalculatio
 import { CRITICAL_CLAIMS_STORAGE_KEY } from '@/utils/criticalNotificationClaims';
 import {
   useCriticalAlarmScheduler,
-  type UseCriticalAlarmSchedulerOptions,
-} from '@/hooks/useCriticalAlarmScheduler';
+  type UseCriticalAlarmSchedulerOptions } from '@/hooks/useCriticalAlarmScheduler';
 
 // Mutable platform mock so tests can switch between the web and the
 // native (android) code paths.

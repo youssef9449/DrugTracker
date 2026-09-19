@@ -2,8 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   getHistoricalRestoreDisplayAmount,
   isUiAutoHistoricalRestoreEligible,
-  isUiConsumedRestoreEligible,
-} from '@/utils/medActions';
+  isUiConsumedRestoreEligible } from '@/utils/medActions';
 import type { ConsumptionLog } from '@/types';
 
 const TODAY = '2026-09-14';

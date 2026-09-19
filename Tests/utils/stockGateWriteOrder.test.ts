@@ -47,8 +47,7 @@ import {
   STORAGE_MEDS_KEY,
   STORAGE_LOGS_KEY,
   STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
-  STORAGE_STOCK_GEN_KEY,
-} from '../../src/utils/autoDeductionStockGate';
+  STORAGE_STOCK_GEN_KEY } from '../../src/utils/autoDeductionStockGate';
 import type { ConsumptionLog, Medication } from '../../src/types';
 
 const LAST_APPLIED_MARKER = 'lastAppliedMutationSeq';

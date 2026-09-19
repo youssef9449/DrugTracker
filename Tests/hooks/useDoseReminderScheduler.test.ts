@@ -6,8 +6,7 @@ import { getTodayDateString } from '@/utils/dateCalculations';
 import { useDoseReminderScheduler, getDoseReminderSlots } from '@/hooks/useDoseReminderScheduler';
 import {
   doseReminderAlarmIdForDose,
-  doseReminderAlarmId,
-} from '@/utils/notifications';
+  doseReminderAlarmId } from '@/utils/notifications';
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 

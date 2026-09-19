@@ -6,8 +6,7 @@ import {
   reconcileFiredEvents,
   isExactAutoOccurrenceApplied,
   exactAutoLogId,
-  applyExactAutoEventToMedication,
-} from '../../src/utils/autoDeductionReconciliation';
+  applyExactAutoEventToMedication } from '../../src/utils/autoDeductionReconciliation';
 import { autoDeductionOccurrenceKey } from '../../src/utils/autoDeductionNative';
 import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
 import { runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
@@ -15,11 +14,7 @@ import {
   withAutoStockMutationGate,
   commitDurableAutoStockState,
   __setAutoStockGateTestHooks,
-  type AutoStockDurableState,
-} from '../../src/utils/autoDeductionStockGate';
-import {
-  effectiveCurrentPills,
-} from '../../src/utils/dateCalculations';
+  type AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
 
 function baseMed(over: Partial<Medication> = {}): Medication {
   return {
@@ -651,8 +646,7 @@ describe('multi-dose', () => {
   });
 });
 
-describe('projection', () => {
-
+describe('durable currentPills after Exact apply (Issue #266)', () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-09-14T15:00:00'));
@@ -661,7 +655,7 @@ describe('projection', () => {
     vi.useRealTimers();
   });
 
-  it('effectiveCurrentPillsMatchesCommittedSnapshot', () => {
+  it('reconcileFiredEvents commits event.amount into currentPills once', () => {
     const med = baseMed({
       doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
       currentPills: 10,
@@ -673,12 +667,6 @@ describe('projection', () => {
       [fired({ medicationId: 'med-1', doseId: 'd', calendarDate: '2026-09-14', amount: 2 })]
     );
     expect(r.medications[0].currentPills).toBe(8);
-    const eff = effectiveCurrentPills(
-      r.medications[0],
-      '2026-09-14',
-      new Date('2026-09-14T20:00:00')
-    );
-    expect(eff).toBe(8);
   });
 });
 

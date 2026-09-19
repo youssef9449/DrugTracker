@@ -50,7 +50,7 @@ vi.mock('@/utils/sound', () => ({
 
 import App from '@/App';
 import type { Medication, ConsumptionLog } from '@/types';
-import { getTodayDateString, effectiveCurrentPills } from '@/utils/dateCalculations';
+import { getTodayDateString } from '@/utils/dateCalculations';
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
@@ -410,7 +410,6 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
     });
 
     const before = readMeds()[0].currentPills;
-    const beforeEff = effectiveCurrentPills(readMeds()[0]);
 
     await clickCardManage();
     await selectDoseInModal('d2');
@@ -427,8 +426,6 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
       expect(readMeds()[0].doseConsumption?.d1).toBe(TEST_DATE);
     });
 
-    // Sanity: effective balance moved by +2 relative to pre-restore snapshot path
-    void beforeEff;
   });
 
   it('closing SelectDoseModal without selecting does not restore', async () => {

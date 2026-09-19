@@ -6,14 +6,12 @@ import type { Medication } from '../../src/types';
 import {
   getDoseScheduleForUI,
   getCardDoseToggleTarget,
-  getNextDoseAmount,
-} from '../../src/utils/doseSchedule';
+  getNextDoseAmount } from '../../src/utils/doseSchedule';
 import { getAutoDeductionSlotsForDate } from '../../src/hooks/useAutoDeductionScheduler';
 import { getDoseReminderSlots } from '../../src/hooks/useDoseReminderScheduler';
 import {
   doseReminderAlarmIdForDose,
-  snoozeDoseReminderId,
-} from '../../src/utils/notifications';
+  snoozeDoseReminderId } from '../../src/utils/notifications';
 
 function baseMed(over: Partial<Medication> = {}): Medication {
   return {

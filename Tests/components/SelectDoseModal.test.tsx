@@ -4,8 +4,7 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { SelectDoseModal } from '@/components/SelectDoseModal';
 import {
   relativeDoseDayLabel,
-  sortDoseSelectItems,
-} from '@/utils/doseSelectDisplay';
+  sortDoseSelectItems } from '@/utils/doseSelectDisplay';
 import type { ConsumptionLog, Medication } from '@/types';
 import { getTodayDateString } from '@/utils/dateCalculations';
 

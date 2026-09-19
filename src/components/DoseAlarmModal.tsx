@@ -1,7 +1,6 @@
 import type { FC } from 'react';
 import { Bell, Check, Clock, X } from 'lucide-react';
 import { Medication, formatTimeArabic } from '../types';
-import { effectiveCurrentPills } from '../utils/dateCalculations';
 import { Modal } from './ui/Modal';
 
 interface DoseAlarmModalProps {
@@ -91,7 +90,7 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
             </div>
 
             <div className="text-[11px] text-slate-500 pt-1">
-              المخزون المتوفر لديك حالياً: {effectiveCurrentPills(medication)} {unit}
+              المخزون المتوفر لديك حالياً: {medication.currentPills} {unit}
             </div>
           </div>
 

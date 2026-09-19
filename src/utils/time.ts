@@ -13,7 +13,7 @@ export const MS_PER_MINUTE = 60 * 1000;
 export const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
 /**
- * Sentinel returned by `effectiveDaysLeft` when `dailyDose <= 0`,
+ * Sentinel for days-left when daily consumption rate is <= 0,
  * meaning "never depletes". Referenced in tests as the expected value
  * for meds with no consumption rate.
  */

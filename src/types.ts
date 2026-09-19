@@ -1,5 +1,5 @@
 import { pluralizeArabic } from './lib/arabicPlural';
-import { effectiveCurrentPills, effectiveDaysLeft, formatLogTime } from './utils/dateCalculations';
+import { dailyScheduleAmount, daysLeftFromCurrentStock, formatLogTime } from './utils/dateCalculations';
 import { NEVER_DEPLETES_DAYS } from './utils/time';
 
 export interface ConsumptionLog {
@@ -26,10 +26,10 @@ export interface Medication {
   id: string;
   name: string;
   /**
-   * Durable committed stock snapshot (Phase 7).
-   * Not necessarily the live UI balance — display must use
-   * `effectiveCurrentPills(med)` when auto-deduction projection applies.
-   * Mutations (Exact apply, legacy catch-up, Take/Restore, refill) write this field.
+   * Authoritative durable live stock (Issue #266).
+   * UI and status must use this value directly — there is no second
+   * projected/effective balance. Exact Auto, Manual Take/Restore, and
+   * Refill mutate this field.
    */
   currentPills: number;
   dailyDose: number; // Consumption rate per day
@@ -444,15 +444,11 @@ export interface MedicationWithStatus {
 }
 
 export function calculateMedicationStatus(med: Medication): MedicationStatusInfo {
-  // The dynamic balance: projects currentPills forward from lastSyncDate
-  // by dailyDose. This keeps status correct even if the app was closed for
-  // many days and no settlement has run (the legacy day-based catch-up
-  // `syncAutoDailyDeductions` was removed in Issue #268 / PR #271; the
-  // projection is the live authority between settlements).
-  const effPills = effectiveCurrentPills(med);
-  const daysLeft = effectiveDaysLeft(med);
+  // Issue #266: durable currentPills is the sole live stock balance.
+  const currentPills = Number(med.currentPills) || 0;
+  const daysLeft = daysLeftFromCurrentStock(med);
 
-  if (effPills <= 0) {
+  if (currentPills <= 0) {
     return {
       daysLeft: 0,
       status: 'out_of_stock',
@@ -463,7 +459,7 @@ export function calculateMedicationStatus(med: Medication): MedicationStatusInfo
     };
   }
 
-  if (med.dailyDose <= 0) {
+  if (dailyScheduleAmount(med) <= 0) {
     return {
       daysLeft: NEVER_DEPLETES_DAYS,
       status: 'sufficient',

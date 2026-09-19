@@ -58,6 +58,41 @@ function isValidEventAmount(amount: unknown): amount is number {
   return typeof amount === 'number' && Number.isFinite(amount) && amount > 0;
 }
 
+/**
+ * Exact occurrence calendarDate must be YYYY-MM-DD (same shape as native
+ * AutoDeductionContract.isValidCalendarDate). Invalid dates are unrecoverable
+ * identity failures — correcting the date changes the occurrence key.
+ */
+export function isValidExactCalendarDate(calendarDate: string): boolean {
+  if (!calendarDate || calendarDate.length !== 10) return false;
+  if (calendarDate.charAt(4) !== '-' || calendarDate.charAt(7) !== '-') {
+    return false;
+  }
+  for (let i = 0; i < 10; i++) {
+    if (i === 4 || i === 7) continue;
+    const c = calendarDate.charAt(i);
+    if (c < '0' || c > '9') return false;
+  }
+  return true;
+}
+
+/**
+ * Occurrence identity for Exact Auto is medicationId + doseId + calendarDate.
+ * doseId may be normalized to the legacy sentinel when empty; medicationId and
+ * calendarDate must be present and well-formed. Malformed identity cannot be
+ * repaired by a later amount fix and must not remain FIRED forever (#262 F3).
+ */
+export function isValidExactOccurrenceIdentity(
+  medicationId: string,
+  calendarDate: string
+): boolean {
+  return (
+    typeof medicationId === 'string' &&
+    medicationId.trim().length > 0 &&
+    isValidExactCalendarDate(calendarDate)
+  );
+}
+
 export function normalizeExactDoseId(doseId: string | undefined | null): string {
   if (doseId == null || doseId === '') return LEGACY_DOSE_ID;
   return doseId;
@@ -339,8 +374,17 @@ export function reconcileFiredEvents(
       occurrenceKey,
     };
 
-    if (!medicationId || !calendarDate) {
+    // Validation order (#262 Finding 3):
+    //   1) occurrence identity — terminal ACK if irreparable
+    //   2) amount — no ACK (retryable if identity is valid)
+    // doseId is normalized above; empty doseId maps to the legacy sentinel
+    // and remains a valid identity component.
+    if (!isValidExactOccurrenceIdentity(medicationId, calendarDate)) {
       details.push({ ...baseDetail, outcome: 'skipped_invalid' });
+      // Terminal: malformed identity cannot become a valid Exact occurrence
+      // without changing the key. ACK via existing markReconciled path so the
+      // native FIRED row does not retry forever.
+      toAcknowledge.push({ medicationId, doseId, calendarDate });
       continue;
     }
 
@@ -383,9 +427,15 @@ export function reconcileFiredEvents(
         // Durable marker/log already reflects stock — safe to ACK.
         details.push({ ...baseDetail, outcome: 'already_applied' });
         toAcknowledge.push({ medicationId, doseId, calendarDate });
+      } else if (applied.reason === 'invalid_calendarDate') {
+        // Identity malformed (should normally be filtered above). Terminal ACK.
+        details.push({ ...baseDetail, outcome: 'skipped_invalid' });
+        toAcknowledge.push({ medicationId, doseId, calendarDate });
+      } else if (applied.reason === 'invalid_amount') {
+        // Amount still retryable — defensive if amount gate is bypassed.
+        details.push({ ...baseDetail, outcome: 'skipped_invalid' });
       } else {
-        // Non-terminal apply failure (e.g. invalid_calendarDate): no stock
-        // mutation — do NOT ACK so native FIRED remains retryable.
+        // Unknown apply failure: no stock mutation; do not invent policy.
         details.push({ ...baseDetail, outcome: 'skipped_invalid' });
       }
       continue;

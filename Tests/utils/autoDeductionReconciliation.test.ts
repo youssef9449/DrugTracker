@@ -978,7 +978,7 @@ describe('reconcileFiredEvents — invalid amount must not ACK', () => {
   });
 });
 
-describe('reconcileFiredEvents — applyExact failure must not ACK (P5-1)', () => {
+describe('reconcileFiredEvents — malformed identity is terminal ACK (#262 Finding 3)', () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-09-14T15:00:00'));
@@ -987,14 +987,57 @@ describe('reconcileFiredEvents — applyExact failure must not ACK (P5-1)', () =
     vi.useRealTimers();
   });
 
-  it('invalid_calendarDate apply failure: skipped_invalid, no ACK, no stock/log mutation', () => {
+  it('missing medicationId: no stock/log, skipped_invalid, ACK terminal', () => {
     const med = baseMed({
       currentPills: 10,
       lastSyncDate: '2026-09-13',
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     });
-    // Non-empty calendarDate passes reconcileFiredEvents gate, but length !== 10
-    // fails inside applyExactAutoEventToMedication (invalid_calendarDate).
+    const e = fired({
+      medicationId: '',
+      doseId: 'd1',
+      calendarDate: '2026-09-14',
+      amount: 2,
+    });
+    const r = reconcileFiredEvents([med], [], [e]);
+    expect(r.details[0].outcome).toBe('skipped_invalid');
+    expect(r.toAcknowledge).toEqual([
+      { medicationId: '', doseId: 'd1', calendarDate: '2026-09-14' },
+    ]);
+    expect(r.mutated).toBe(false);
+    expect(r.medications[0].currentPills).toBe(10);
+    expect(r.newExactLogs).toEqual([]);
+    expect(r.logs).toEqual([]);
+  });
+
+  it('missing calendarDate: no stock/log, skipped_invalid, ACK terminal', () => {
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      calendarDate: '',
+      amount: 2,
+    });
+    const r = reconcileFiredEvents([med], [], [e]);
+    expect(r.details[0].outcome).toBe('skipped_invalid');
+    expect(r.toAcknowledge).toEqual([
+      { medicationId: 'med-1', doseId: 'd1', calendarDate: '' },
+    ]);
+    expect(r.mutated).toBe(false);
+    expect(r.medications[0].currentPills).toBe(10);
+    expect(r.newExactLogs).toEqual([]);
+  });
+
+  it('malformed calendarDate (not YYYY-MM-DD): terminal ACK, no stock/log', () => {
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+    });
     const e = fired({
       medicationId: 'med-1',
       doseId: 'd1',
@@ -1002,28 +1045,46 @@ describe('reconcileFiredEvents — applyExact failure must not ACK (P5-1)', () =
       amount: 2,
     });
     const r = reconcileFiredEvents([med], [], [e]);
-    expect(r.details).toEqual([
-      expect.objectContaining({
-        medicationId: 'med-1',
-        doseId: 'd1',
-        outcome: 'skipped_invalid',
-      }),
+    expect(r.details[0].outcome).toBe('skipped_invalid');
+    expect(r.toAcknowledge).toEqual([
+      { medicationId: 'med-1', doseId: 'd1', calendarDate: 'bad-date' },
     ]);
-    expect(r.toAcknowledge).toEqual([]);
     expect(r.mutated).toBe(false);
     expect(r.medications[0].currentPills).toBe(10);
     expect(r.newExactLogs).toEqual([]);
     expect(r.logs).toEqual([]);
   });
 
-  it('invalid_calendarDate no-ACK does not poison later valid occurrence apply + ACK', () => {
-    // applyExact's only non-terminal public failure for a well-formed amount is
-    // invalid_calendarDate. Fixing the date changes occurrence identity
-    // (medicationId + doseId + calendarDate), so this is NOT same-occurrence retry.
-    // Same-occurrence retry for non-terminal failure is covered by the invalid
-    // amount suite (amount can be corrected without changing the occurrence key).
-    // Here we only assert: prior applyExact failure left no ACK / no mutation,
-    // and a subsequent distinct valid occurrence still applies exactly once.
+  it('second reconciliation of same malformed event does not mutate stock or add logs', () => {
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      calendarDate: 'bad-date',
+      amount: 2,
+    });
+    const r1 = reconcileFiredEvents([med], [], [e]);
+    expect(r1.toAcknowledge).toHaveLength(1);
+    expect(r1.medications[0].currentPills).toBe(10);
+
+    // Simulate native still listing the same malformed payload before ACK lands
+    const r2 = reconcileFiredEvents(r1.medications, r1.logs, [e]);
+    expect(r2.details[0].outcome).toBe('skipped_invalid');
+    expect(r2.toAcknowledge).toEqual([
+      { medicationId: 'med-1', doseId: 'd1', calendarDate: 'bad-date' },
+    ]);
+    expect(r2.mutated).toBe(false);
+    expect(r2.medications[0].currentPills).toBe(10);
+    expect(r2.newExactLogs).toEqual([]);
+    expect(r2.logs).toEqual([]);
+  });
+
+  it('malformed identity terminal ACK does not block a distinct valid occurrence', () => {
+    // Fixing calendarDate changes occurrence identity — not same-occurrence retry.
     const med = baseMed({
       currentPills: 10,
       lastSyncDate: '2026-09-13',
@@ -1036,11 +1097,10 @@ describe('reconcileFiredEvents — applyExact failure must not ACK (P5-1)', () =
       amount: 2,
     });
     const r1 = reconcileFiredEvents([med], [], [invalid]);
-    expect(r1.details[0].outcome).toBe('skipped_invalid');
-    expect(r1.toAcknowledge).toEqual([]);
+    expect(r1.toAcknowledge).toEqual([
+      { medicationId: 'med-1', doseId: 'd1', calendarDate: 'bad-date' },
+    ]);
     expect(r1.medications[0].currentPills).toBe(10);
-    expect(r1.newExactLogs).toEqual([]);
-    expect(r1.logs).toEqual([]);
 
     const valid = fired({
       medicationId: 'med-1',
@@ -1057,5 +1117,147 @@ describe('reconcileFiredEvents — applyExact failure must not ACK (P5-1)', () =
     expect(r2.toAcknowledge).toEqual([
       { medicationId: 'med-1', doseId: 'd1', calendarDate: '2026-09-14' },
     ]);
+  });
+});
+
+describe('runAutoDeductionReconciliation — malformed identity terminal native ACK (#262 F3)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-14T15:00:00'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('malformed FIRED reaches markReconciled once; stock/log unchanged; no second ACK after terminal', async () => {
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+    });
+    // Malformed identity (invalid calendarDate) with positive amount
+    const malformed: AutoDeductionEvent = fired({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      calendarDate: 'bad-date',
+      amount: 2,
+    });
+
+    // Simulated native FIRED store: present until markReconciled succeeds
+    let nativeFired: AutoDeductionEvent[] = [malformed];
+    const markCalls: Array<{
+      medicationId: string;
+      doseId: string;
+      calendarDate: string;
+    }> = [];
+
+    const first = await runAutoDeductionReconciliation({
+      alreadyInGate: true,
+      medications: [med],
+      logs: [],
+      globalAutoDeductEnabled: true,
+      listFired: async () => nativeFired,
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        markCalls.push({ medicationId, doseId, calendarDate });
+        // Terminal native ACK: drop from unreconciled FIRED set
+        nativeFired = nativeFired.filter(
+          (e) =>
+            !(
+              e.medicationId === medicationId &&
+              e.doseId === doseId &&
+              e.calendarDate === calendarDate
+            )
+        );
+        return { ok: true, changed: true };
+      },
+      persistMeds: () => null,
+      persistLogs: () => null,
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
+    });
+
+    expect(first.details[0]?.outcome).toBe('skipped_invalid');
+    expect(first.mutated).toBe(false);
+    expect(first.medications[0].currentPills).toBe(10);
+    expect(first.newExactLogs).toEqual([]);
+    expect(first.logs).toEqual([]);
+    expect(first.toAcknowledge).toEqual([
+      { medicationId: 'med-1', doseId: 'd1', calendarDate: 'bad-date' },
+    ]);
+    // Existing ACK path (markAll → markReconciled) invoked once
+    expect(markCalls).toEqual([
+      { medicationId: 'med-1', doseId: 'd1', calendarDate: 'bad-date' },
+    ]);
+    expect(first.markedCount).toBe(1);
+    expect(nativeFired).toEqual([]);
+
+    // Second run: event no longer listed → no re-ACK, no mutation
+    const second = await runAutoDeductionReconciliation({
+      alreadyInGate: true,
+      medications: first.medications,
+      logs: first.logs,
+      globalAutoDeductEnabled: true,
+      listFired: async () => nativeFired,
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        markCalls.push({ medicationId, doseId, calendarDate });
+        return { ok: true, changed: false };
+      },
+      persistMeds: () => null,
+      persistLogs: () => null,
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
+    });
+    expect(second.mutated).toBe(false);
+    expect(second.medications[0].currentPills).toBe(10);
+    expect(second.newExactLogs).toEqual([]);
+    expect(second.toAcknowledge).toEqual([]);
+    expect(second.markedCount).toBe(0);
+    expect(markCalls).toHaveLength(1);
+  });
+
+  it('valid identity + invalid amount does not call markReconciled (remains retryable)', async () => {
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+    });
+    const invalidAmount = fired({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      calendarDate: '2026-09-14',
+      amount: 0,
+    });
+    let nativeFired: AutoDeductionEvent[] = [invalidAmount];
+    const markCalls: Array<{
+      medicationId: string;
+      doseId: string;
+      calendarDate: string;
+    }> = [];
+
+    const r = await runAutoDeductionReconciliation({
+      alreadyInGate: true,
+      medications: [med],
+      logs: [],
+      globalAutoDeductEnabled: true,
+      listFired: async () => nativeFired,
+      markReconciled: async (medicationId, doseId, calendarDate) => {
+        markCalls.push({ medicationId, doseId, calendarDate });
+        return { ok: true, changed: true };
+      },
+      persistMeds: () => null,
+      persistLogs: () => null,
+      loadEnvelope: () => null,
+      saveEnvelope: () => null,
+    });
+
+    expect(r.details[0]?.outcome).toBe('skipped_invalid');
+    expect(r.mutated).toBe(false);
+    expect(r.medications[0].currentPills).toBe(10);
+    expect(r.newExactLogs).toEqual([]);
+    expect(r.toAcknowledge).toEqual([]);
+    expect(r.markedCount).toBe(0);
+    expect(markCalls).toEqual([]);
+    // Still unreconciled FIRED in native mock
+    expect(nativeFired).toHaveLength(1);
   });
 });

@@ -512,7 +512,6 @@ describe('#267 regression 8 — Exact Auto → Restore: amount = exact active lo
           currentPills: 28, // 30 - 2 (the exact auto deduction)
           lastSyncDate: TODAY,
           doseConsumptionHistory: { d1: [TODAY] },
-          doseConsumptionHistory: { d1: [TODAY] },
           doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
         }),
       ],
@@ -552,7 +551,6 @@ describe('#267 regression 9 — Manual Take → Restore: amount = dose_taken amo
           currentPills: 27, // 30 - 3 (the manual Take)
           lastSyncDate: TODAY,
           doseConsumptionHistory: { d1: [TODAY] },
-          doseConsumptionHistory: { d1: [TODAY] },
           doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }], // current schedule is 1
         }),
       ],
@@ -575,7 +573,6 @@ describe('#267 regression 9 — Manual Take → Restore: amount = dose_taken amo
     const m = med({
       currentPills: 27,
       lastSyncDate: TODAY,
-      doseConsumptionHistory: { d1: [TODAY] },
       doseConsumptionHistory: { d1: [TODAY] },
       doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
     });
@@ -601,7 +598,6 @@ describe('#267 regression 10 — Schedule changed after Exact deduction: Restore
       currentPills: 28, // 30 - 2 (the exact deduction)
       lastSyncDate: TODAY,
       doseConsumptionHistory: { d1: [TODAY] },
-      doseConsumptionHistory: { d1: [TODAY] },
       doseSchedule: [{ id: 'd1', amount: 5, time: '08:00' }], // edited from 2
     });
     const logs: ConsumptionLog[] = [makeExactAutoLog('med-1', 'TestMed', 'd1', TODAY, 2, 'auto-1')];
@@ -620,7 +616,6 @@ describe('#267 regression 10 — Schedule changed after Exact deduction: Restore
     const m = med({
       currentPills: 28,
       lastSyncDate: TODAY,
-      doseConsumptionHistory: { d1: [TODAY] },
       doseConsumptionHistory: { d1: [TODAY] },
       doseSchedule: [{ id: 'd1', amount: 5, time: '08:00' }],
     });
@@ -686,7 +681,6 @@ describe('#267 regression 11 — Schedule removed after Exact FIRED: FIRED still
       dailyDose: 5,
       doseSchedule: [],
       dosesPerDay: 0,
-      doseConsumptionHistory: {},
       doseConsumptionHistory: {},
     };
     const edit = await runGatedMedicationUpdate({
@@ -789,7 +783,6 @@ describe('#267 regression 12 — Multiple dose isolation', () => {
       currentPills: 29, // 30 - 1 (after Take d1)
       lastSyncDate: TODAY,
       doseConsumptionHistory: { d1: [TODAY] },
-      doseConsumptionHistory: { d1: [TODAY] },
     });
     const logs: ConsumptionLog[] = [makeDoseTakenLog('med-1', 'TestMed', 'd1', TODAY, 1, 'take-1')];
     const r = restoreDose(m, 'd1', TODAY, new Date(`${TODAY}T15:00:00`), logs);
@@ -817,7 +810,6 @@ describe('#267 regression 13 — lastSyncDate never changed by manual mutations'
     const m = med({
       currentPills: 29,
       lastSyncDate: '2026-09-10',
-      doseConsumptionHistory: { d1: [TODAY] },
       doseConsumptionHistory: { d1: [TODAY] },
     });
     const logs: ConsumptionLog[] = [makeDoseTakenLog('med-1', 'TestMed', 'd1', TODAY, 1, 'take-1')];

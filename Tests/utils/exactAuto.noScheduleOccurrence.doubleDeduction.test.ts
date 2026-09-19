@@ -1,5 +1,5 @@
 /**
- * Issue #268 / PR #271 — Legacy Single-Dose Exact fallback removed.
+ * Issue #268 / PR #271 — no-schedule occurrence Exact fallback removed.
  *
  * A FIRED Exact occurrence is durable: the native AlarmManager created and
  * persisted it at schedule time with identity (medicationId + doseId +
@@ -9,7 +9,7 @@
  * schedule AFTER the alarm fired does NOT invalidate the already-occurred
  * event; `event.amount` remains the authoritative charge.
  *
- * No Legacy Single-Dose fallback:
+ * No no-schedule occurrence fallback:
  *   - no `LEGACY_DOSE_ID` sentinel,
  *   - no `dailyDose` / `reminderTime` / `reminderEnabled` / `lastConsumedDate`
  *     fallback for amount or identity,
@@ -68,7 +68,7 @@ function noScheduleFiredEvent(amount: number): AutoDeductionEvent {
   };
 }
 
-describe('legacy single-dose (no doseSchedule): FIRED is durable; no Legacy Single-Dose fallback (#268 / PR #271)', () => {
+describe('no-schedule FIRED occurrence (no doseSchedule): FIRED is durable; no no-schedule occurrence fallback (#268 / PR #271)', () => {
   it('applyExactAutoEventToMedication: no doseSchedule + non-empty doseId → applies event.amount (NOT dailyDose)', () => {
     const med = legacyMed({ dailyDose: 5 });
     const e = noScheduleFiredEvent(2);

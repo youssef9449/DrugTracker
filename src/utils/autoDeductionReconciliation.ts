@@ -255,12 +255,11 @@ export function applyExactAutoEventToMedication(
   // Actual stock change after clamping at zero (may be < requested).
   const actualDeducted = Math.min(Math.max(0, requested), settleBase);
   const newPills = settleBase - actualDeducted;
-
-    let nextHistory = med.doseConsumptionHistory;
+  let nextHistory = med.doseConsumptionHistory;
   let lastConsumedDate = med.lastConsumedDate;
 
   const recorded = recordDoseConsumed(med, doseId, calendarDate);
-  nextHistory = recorded.doseConsumptionHistory /* removed map */History;
+  nextHistory = recorded.doseConsumptionHistory;
   // Exact Auto updates lastConsumedDate ONLY when the Medication still has an
   // explicit, non-empty `doseSchedule` AND every slot for the calendar day is
   // consumed. A med whose schedule was removed (or edited so this slot is no
@@ -275,7 +274,7 @@ export function applyExactAutoEventToMedication(
         : isDoseConsumedOnDate(
             {
               ...med,
-                            doseConsumptionHistory: nextHistory,
+              doseConsumptionHistory: nextHistory,
             },
             d.id,
             calendarDate
@@ -293,7 +292,7 @@ export function applyExactAutoEventToMedication(
     ...med,
     currentPills: newPills,
     lastConsumedDate,
-        doseConsumptionHistory: nextHistory,
+    doseConsumptionHistory: nextHistory,
   };
 
   const log: ConsumptionLog = {

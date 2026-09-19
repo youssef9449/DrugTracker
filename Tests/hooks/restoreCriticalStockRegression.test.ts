@@ -206,10 +206,6 @@ describe('restore dose → critical stock reconciliation', () => {
       ...baseMed,
       currentPills: 7,
       doseConsumptionHistory: { morning: [TEST_DATE], evening: [TEST_DATE] },
-      doseConsumptionHistory: {
-        morning: [TEST_DATE],
-        evening: [TEST_DATE],
-      },
     };
 
     // Restore morning first (+1) → 8.
@@ -252,10 +248,6 @@ describe('restore dose → critical stock reconciliation', () => {
       ...baseMed,
       currentPills: 0,
       doseConsumptionHistory: { morning: [TEST_DATE], evening: [TEST_DATE] },
-      doseConsumptionHistory: {
-        morning: [TEST_DATE],
-        evening: [TEST_DATE],
-      },
     };
 
     const { rerender } = renderHook(({ medications }) => useAlerts(medications), {

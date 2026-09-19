@@ -1271,7 +1271,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     // Envelope snapshot exactly equals durable → recovery finalizes + clears
     // without re-applying the snapshot (no extra mutation).
     durable = {
-      medications: [med({ currentPills: 8, doseConsumptionHistory: { d1: [TODAY] }, doseConsumptionHistory: { d1: [TODAY] } })],
+      medications: [med({ currentPills: 8, doseConsumptionHistory: { d1: [TODAY] } })],
       logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
     };
     let phase4Exact: ExactAutoEnvelope | null = {
@@ -1556,7 +1556,6 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
         med({
           currentPills: 8,
           doseConsumptionHistory: { d1: [TODAY], d2: [TODAY] },
-          doseConsumptionHistory: { d1: [TODAY], d2: [TODAY] },
         }),
       ],
       logs: [
@@ -1633,7 +1632,6 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
             { id: 'd2', amount: 1, time: '14:00' },
           ],
           doseConsumptionHistory: { d1: [TODAY] },
-          doseConsumptionHistory: { d1: [TODAY] },
         }),
       ],
       logs: [
@@ -1666,7 +1664,6 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       medications: [
         med({
           currentPills: 0,
-          doseConsumptionHistory: { d1: [TODAY] },
           doseConsumptionHistory: { d1: [TODAY] },
         }),
       ],
@@ -1708,7 +1705,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
 
   it('Auto 3 → Restore = +3 (active deduction tracked)', async () => {
     durable = {
-      medications: [med({ currentPills: 7, doseConsumptionHistory: { d1: [TODAY] }, doseConsumptionHistory: { d1: [TODAY] } })],
+      medications: [med({ currentPills: 7, doseConsumptionHistory: { d1: [TODAY] } })],
       logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -3, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
     };
     const r = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-auto-3' });
@@ -1769,7 +1766,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
 
   it('Auto 3 → Restore → Take 3 → Restore = +3 (reverses the second Take)', async () => {
     durable = {
-      medications: [med({ currentPills: 7, doseConsumptionHistory: { d1: [TODAY] }, doseConsumptionHistory: { d1: [TODAY] }, doseSchedule: [{ id: 'd1', amount: 3, time: '08:00' }], dosesPerDay: 1 })],
+      medications: [med({ currentPills: 7, doseConsumptionHistory: { d1: [TODAY] }, doseSchedule: [{ id: 'd1', amount: 3, time: '08:00' }], dosesPerDay: 1 })],
       logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -3, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
     };
     // Restore the Auto (3).
@@ -1791,7 +1788,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
 
   it('Restore twice for the same occurrence does not add stock twice', async () => {
     durable = {
-      medications: [med({ currentPills: 7, doseConsumptionHistory: { d1: [TODAY] }, doseConsumptionHistory: { d1: [TODAY] } })],
+      medications: [med({ currentPills: 7, doseConsumptionHistory: { d1: [TODAY] } })],
       logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -3, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
     };
     const r1 = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-1-dedup' });
@@ -1809,7 +1806,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
 
   it('Dose A and Dose B same day: Restore A cannot reverse B\'s deduction', async () => {
     durable = {
-      medications: [med({ currentPills: 8, doseConsumptionHistory: { d1: [TODAY], d2: [TODAY] }, doseConsumptionHistory: { d1: [TODAY], d2: [TODAY] } })],
+      medications: [med({ currentPills: 8, doseConsumptionHistory: { d1: [TODAY], d2: [TODAY] } })],
       logs: [
         { id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd1' },
         { id: exactAutoLogId('med-1', 'd2', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -2, date: TODAY, timestamp: '', description: '', doseId: 'd2' },
@@ -1830,7 +1827,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
   it('Old reversed deduction is not picked as the active deduction for a later Restore', async () => {
     // Two deductions for the same occurrence: old (reversed) + new (active).
     durable = {
-      medications: [med({ currentPills: 6, doseConsumptionHistory: { d1: [TODAY] }, doseConsumptionHistory: { d1: [TODAY] } })],
+      medications: [med({ currentPills: 6, doseConsumptionHistory: { d1: [TODAY] } })],
       logs: [
         { id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -4, date: TODAY, timestamp: '', description: '', doseId: 'd1', reversedAt: 'old' },
         { id: 'new-deduct', medicationId: 'med-1', medicationName: 'TestMed', type: 'dose_taken', amount: -4, date: TODAY, timestamp: '', description: '', doseId: 'd1' },
@@ -2005,7 +2002,6 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
         med({
           currentPills: 9,
           doseConsumptionHistory: { d1: [TODAY] },
-          doseConsumptionHistory: { d1: [TODAY] },
         }),
       ],
       logs: [
@@ -2077,7 +2073,6 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       medications: [
         med({
           currentPills: 9,
-          doseConsumptionHistory: { d1: [TODAY] },
           doseConsumptionHistory: { d1: [TODAY] },
         }),
       ],
@@ -2567,7 +2562,6 @@ describe('Phase 4 — stale React snapshot must not block durable Restore / Undo
       currentPills: 10,
       doseSkippedHistory: { d1: [TODAY] },
       doseConsumptionHistory: {},
-      doseConsumptionHistory: {},
     };
     // Sanity: stale view looks not consumed
     expect(isDoseConsumedOnDate(staleReactMed, 'd1', TODAY)).toBe(false);
@@ -2591,7 +2585,6 @@ describe('Phase 4 — stale React snapshot must not block durable Restore / Undo
       medications: [
         med({
           currentPills: 7,
-          doseConsumptionHistory: { d1: [TODAY] },
           doseConsumptionHistory: { d1: [TODAY] },
         }),
       ],

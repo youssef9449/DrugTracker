@@ -201,7 +201,7 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
      * Requires notification JSON extra:
      *   doseRecurring: true
      *   reminderTime: "HH:MM"
-     *   medicationId (optional doseId for multi-dose identity)
+     *   medicationId (required), doseId (required)
      *
      * Atomicity after AlarmManager.set* succeeds:
      *   NotificationStorage persist (must succeed)
@@ -237,6 +237,10 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
             }
 
             String medicationId = extra.getString("medicationId");
+            if (medicationId == null || medicationId.isEmpty()) {
+                Log.w("LN", "TimedNotificationPublisher: missing medicationId; skip next-day recurrence");
+                return false;
+            }
             String doseId = null;
             try {
                 if (extra.has("doseId")) {
@@ -245,10 +249,10 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
             } catch (Exception ignored) {
                 doseId = null;
             }
-            // Occurrence identity requires non-empty doseId — no sentinel fallback.
+            // Full occurrence identity required — no next-day arm without doseId.
             if (doseId == null || doseId.isEmpty()) {
-                Log.w("LN", "TimedNotificationPublisher: missing doseId; skip re-arm evidence");
-                doseId = null;
+                Log.w("LN", "TimedNotificationPublisher: missing doseId; skip next-day recurrence");
+                return false;
             }
 
             Calendar cal = Calendar.getInstance();

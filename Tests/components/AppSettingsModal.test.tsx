@@ -57,9 +57,7 @@ describe('AppSettingsModal — Notification Controls', () => {
         onSaveSettings={onSaveSettings}
         soundEnabled={true}
         notificationsEnabled={true}
-        onToggleNotifications={vi.fn()}
         criticalStockAlertsEnabled={true}
-        onToggleCriticalStockAlerts={vi.fn()}
         onApplyAppPreferences={onApplyAppPreferences}
       />
     );
@@ -106,9 +104,7 @@ describe('AppSettingsModal — Notification Controls', () => {
         onSaveSettings={vi.fn()}
         soundEnabled={true}
         notificationsEnabled={false}
-        onToggleNotifications={vi.fn()}
         criticalStockAlertsEnabled={false}
-        onToggleCriticalStockAlerts={vi.fn()}
       />
     );
 
@@ -350,7 +346,6 @@ describe('AppSettingsModal — draft-only until Save', () => {
         soundEnabled={true}
         notificationsEnabled={false}
         criticalStockAlertsEnabled={false}
-        onToggleNotifications={onToggleNotifications}
         onApplyAppPreferences={onApplyAppPreferences}
       />
     );
@@ -378,7 +373,6 @@ describe('AppSettingsModal — draft-only until Save', () => {
         soundEnabled={true}
         notificationsEnabled={true}
         criticalStockAlertsEnabled={true}
-        onToggleNotifications={onToggleNotifications}
         onApplyAppPreferences={onApplyAppPreferences}
       />
     );
@@ -467,7 +461,6 @@ describe('AppSettingsModal — draft-only until Save', () => {
         soundEnabled={true}
         notificationsEnabled={false}
         criticalStockAlertsEnabled={false}
-        onToggleCriticalStockAlerts={onToggleCriticalStockAlerts}
         onApplyAppPreferences={onApplyAppPreferences}
       />
     );
@@ -495,7 +488,6 @@ describe('AppSettingsModal — draft-only until Save', () => {
         soundEnabled={true}
         notificationsEnabled={true}
         criticalStockAlertsEnabled={true}
-        onToggleCriticalStockAlerts={onToggleCriticalStockAlerts}
         onApplyAppPreferences={onApplyAppPreferences}
       />
     );

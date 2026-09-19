@@ -11,20 +11,65 @@ export interface ConsumptionLog {
   date: string; // YYYY-MM-DD
   timestamp: string;
   description: string;
+  /** Set when this refill has already been reversed. Legacy logs omit it. */
+  reversedAt?: string;
+  /** Links a refill_undo log to the original refill log. */
+  relatedLogId?: string;
   /**
-   * Per-dose consumption history (Phase 3B): doseId → YYYY-MM-DD dates
-   * on which that slot was manually consumed (unique, chronological).
-   *
-   * Authoritative source for multi-dose historical catch-up: a slot
-   * recorded as consumed on date D is never auto-deducted again for D.
-   *
-   * Retention (intentional current design):
-   * - Local, lightweight date strings only
-   * - Grows with consume events; no date-based pruning
-   * - Orphan doseIds are removed when that id leaves the schedule
-   * - App scale does not currently justify a retention subsystem
-   *
-   * fall back to only a one-date history.
+   * Stable MedicationDose.id when this log is for a specific dose slot
+   * (Phase 3). Legacy dose_taken logs omit it.
+   */
+  doseId?: string;
+}
+
+export interface Medication {
+  id: string;
+  name: string;
+  /**
+   * Authoritative durable live stock (Issue #266).
+   * UI and status must use this value directly — there is no second
+   * projected/effective balance. Exact Auto, Manual Take/Restore, and
+   * Refill mutate this field.
+   */
+  currentPills: number;
+  dailyDose: number; // Consumption rate per day
+  unit: string; // e.g., 'قرص', 'كبسولة', 'مل'
+  warningThresholdDays: number; // Alert when days left <= this number (default 5)
+  colorTag: string;
+  category?: string;
+  notes?: string;
+  createdAt: string;
+  /** YYYY-MM-DD settlement horizon companion to `currentPills`. */
+  lastSyncDate: string
+  autoDeductEnabled?: boolean; // Default true
+  packageSize?: number; // Size of standard package when bought (e.g. 30)
+  stripsPerBox?: number; // عدد الأشرطة في العلبة (مثال: 3 أشرطة)
+  pillsPerStrip?: number; // عدد الأقراص في الشريط الواحد (مثال: 10 أقراص)
+  targetOrderQuantity?: number; // Custom target order quantity specified for pharmacy order
+  reminderEnabled?: boolean; // هل تم تفعيل تذكير يومي بموعد محدد
+  reminderTime?: string; // وقت التذكير بصيغة 24 ساعة (مثال: "09:00" أو "21:30")
+  /**
+   * Number of individual dose events per day.
+   * When present, should equal doseSchedule.length.
+   */
+  dosesPerDay?: number;
+  /**
+   * Explicit per-dose schedule rows — sole source of future dose occurrence
+   * identity, amount, and time.
+   */
+  doseSchedule?: MedicationDose[];
+  /**
+   * YYYY-MM-DD of the last day the user manually consumed a dose.
+   * Legacy single-dose: when this equals today, auto-deduction and
+   * reminders for the med are suppressed for today.
+   * Multi-dose: compatibility / UI badge when ALL of today's schedule
+   * slots are consumed. Per-slot authority is
+   * {@link doseConsumptionHistory}.
+   */
+  lastConsumedDate?: string;
+  /**
+   * Per-dose consumption history: doseId → YYYY-MM-DD dates (append-only).
+   * Source of truth for whether a dose occurrence was consumed on a date.
    */
   doseConsumptionHistory?: Record<string, string[]>;
   /**

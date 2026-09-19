@@ -330,7 +330,6 @@ describe('runGatedGlobalAutoDeductToggle exact-before-legacy', () => {
         lastSyncDate: '2026-09-14',
         autoDeductEnabled: false,
         doseConsumptionHistory: { d1: ['2026-09-14'] },
-        doseConsumptionHistory: { d1: ['2026-09-14'] },
       }),
     ];
     durable.logs = [
@@ -389,10 +388,6 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
             d1: ['2026-09-14'],
             d2: ['2026-09-13'],
           },
-          doseConsumptionHistory: {
-            d1: ['2026-09-14'],
-            d2: ['2026-09-13'],
-          },
         }),
       ],
       logs: [],
@@ -418,10 +413,6 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
       ...formMed,
       doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
       // Stale React form still has d2 history
-      doseConsumptionHistory: {
-        d1: ['2026-09-14'],
-        d2: ['2026-09-13'],
-      },
       doseConsumptionHistory: {
         d1: ['2026-09-14'],
         d2: ['2026-09-13'],
@@ -452,7 +443,6 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
         doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
         lastSyncDate: '2026-09-13',
         doseConsumptionHistory: { d1: ['2026-09-13'] },
-        doseConsumptionHistory: { d1: ['2026-09-13'] },
       }),
     ];
     mockExactFirst(durable, callOrder, 2);
@@ -462,10 +452,6 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
       dailyDose: 3,
       doseSchedule: [{ id: 'd1', amount: 3, time: '08:00' }],
       doseConsumptionHistory: { d1: ['2026-09-13'], orphan: ['2026-01-01'] },
-      doseConsumptionHistory: {
-        d1: ['2026-09-13'],
-        orphan: ['2026-01-01'],
-      },
     };
 
     const result = await runGatedMedicationUpdate({

@@ -151,7 +151,6 @@ describe('useMedicationHandlers — stale React must not block durable mutations
         med({
           currentPills: 9,
           doseConsumptionHistory: { d1: [TODAY] },
-          doseConsumptionHistory: { d1: [TODAY] },
         }),
       ],
       logs: [
@@ -188,7 +187,6 @@ describe('useMedicationHandlers — stale React must not block durable mutations
         med({
           currentPills: 9,
           doseConsumptionHistory: { d1: [TODAY] },
-          doseConsumptionHistory: { d1: [TODAY] },
           doseSchedule: [
             { id: 'd1', amount: 1, time: '08:00' },
             { id: 'd2', amount: 1, time: '14:00' },
@@ -215,7 +213,6 @@ describe('useMedicationHandlers — stale React must not block durable mutations
         currentPills: 10,
         doseSchedule: [{ id: 'd2', amount: 1, time: '14:00' }],
         doseConsumptionHistory: {},
-        doseConsumptionHistory: {},
       }),
     ];
     const { result } = mountHandlers();
@@ -234,7 +231,6 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       medications: [
         med({
           currentPills: 9,
-          doseConsumptionHistory: { d1: [TODAY] },
           doseConsumptionHistory: { d1: [TODAY] },
         }),
       ],
@@ -257,7 +253,6 @@ describe('useMedicationHandlers — stale React must not block durable mutations
         currentPills: 10,
         doseSkippedHistory: { d1: [TODAY] },
         doseConsumptionHistory: {},
-        doseConsumptionHistory: {},
       }),
     ];
     expect(isDoseConsumedOnDate(reactMeds[0], 'd1', TODAY)).toBe(false);
@@ -276,7 +271,6 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       medications: [
         med({
           currentPills: 9,
-          doseConsumptionHistory: { d1: [TODAY] },
           doseConsumptionHistory: { d1: [TODAY] },
         }),
       ],
@@ -448,7 +442,6 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       med({
         currentPills: 9,
         doseConsumptionHistory: { d1: [TODAY] },
-        doseConsumptionHistory: { d1: [TODAY] },
       }),
     ];
     expect(isDoseConsumedOnDate(reactMeds[0], 'd1', TODAY)).toBe(true);
@@ -472,7 +465,6 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       medications: [
         med({
           currentPills: 9,
-          doseConsumptionHistory: { d1: [TODAY] },
           doseConsumptionHistory: { d1: [TODAY] },
         }),
       ],
@@ -588,7 +580,6 @@ describe('useMedicationHandlers — stale React must not block durable mutations
         med({
           currentPills: 9,
           doseConsumptionHistory: { d1: [TODAY] },
-          doseConsumptionHistory: { d1: [TODAY] },
         }),
       ],
       logs: [
@@ -664,7 +655,6 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       medications: [
         med({
           currentPills: 9,
-          doseConsumptionHistory: { d1: [TODAY] },
           doseConsumptionHistory: { d1: [TODAY] },
         }),
       ],

@@ -639,7 +639,6 @@ describe('multi-dose', () => {
       currentPills: 10,
       lastSyncDate: '2026-09-14',
       doseConsumptionHistory: { d: ['2026-09-13'] },
-      doseConsumptionHistory: { d: ['2026-09-13'] },
     });
     expect(isExactAutoOccurrenceApplied(med, 'd', '2026-09-13')).toBe(true);
     expect(isExactAutoOccurrenceApplied(med, 'd', '2026-09-14')).toBe(false);
@@ -1957,7 +1956,6 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
         { id: 'd1', amount: 1, time: '08:00' },
         { id: 'd2', amount: 1, time: '20:00' },
       ],
-      doseConsumptionHistory: { d2: ['2026-09-14'] },
       doseConsumptionHistory: { d2: ['2026-09-14'] },
     });
     const e = fired({

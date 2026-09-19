@@ -5,7 +5,6 @@ import android.content.SharedPreferences;
 import android.util.Log;
 import java.util.Calendar;
 import java.util.Locale;
-import java.util.Map;
 import org.json.JSONObject;
 
 /**
@@ -167,9 +166,11 @@ public final class DoseReminderRecurrenceStore {
             if (!storedMed.equals(medicationId)) {
                 return false;
             }
-            String expectedDose = normalizeDoseId(doseId);
-            String storedDose = normalizeDoseId(obj.optString("doseId", ""));
-            if (expectedDose.isEmpty() || storedDose.isEmpty() || !storedDose.equals(expectedDose)) {
+            if (doseId == null || doseId.isEmpty()) {
+                return false;
+            }
+            String storedDose = obj.optString("doseId", "");
+            if (storedDose.isEmpty() || !storedDose.equals(doseId)) {
                 return false;
             }
             String storedTime = normalizeReminderTime(obj.optString("reminderTime", ""));
@@ -314,62 +315,28 @@ public final class DoseReminderRecurrenceStore {
             if (!prefs.contains(key)) {
                 return null;
             }
-            // Prefer typed inspection so legacy putLong keys are dropped cleanly
-            // (getString on a long value can ClassCastException on some devices).
-            Map<String, ?> all = prefs.getAll();
-            Object rawVal = all.get(key);
-            if (rawVal == null) {
+            String raw;
+            try {
+                raw = prefs.getString(key, null);
+            } catch (ClassCastException cce) {
+                // Non-string value is invalid for current store format.
                 prefs.edit().remove(key).commit();
                 return null;
             }
-            if (rawVal instanceof Number) {
-                // Legacy long-only format — cannot validate config or storage.
-                prefs.edit().remove(key).commit();
-                return null;
-            }
-            if (!(rawVal instanceof String)) {
-                prefs.edit().remove(key).commit();
-                return null;
-            }
-            String raw = ((String) rawVal).trim();
-            if (raw.isEmpty()) {
-                prefs.edit().remove(key).commit();
-                return null;
-            }
-            // Legacy numeric string without JSON structure.
-            if (raw.charAt(0) != '{') {
+            if (raw == null || raw.trim().isEmpty()) {
                 prefs.edit().remove(key).commit();
                 return null;
             }
             try {
-                return new JSONObject(raw);
+                return new JSONObject(raw.trim());
             } catch (Exception parseErr) {
                 prefs.edit().remove(key).commit();
                 return null;
             }
         } catch (Exception e) {
             Log.e("LN", "DoseReminderRecurrenceStore.readEntry failed", e);
-            try {
-                String key2 = storeKey(medicationId, doseId);
-                if (key2 != null) {
-                    context.getApplicationContext()
-                            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                            .edit()
-                            .remove(key2)
-                            .commit();
-                }
-            } catch (Exception ignored) {
-                // best-effort purge
-            }
             return null;
         }
-    }
-
-    private static String normalizeDoseId(String doseId) {
-        if (doseId == null || doseId.isEmpty()) {
-            return "";
-        }
-        return doseId;
     }
 
     static String calendarDateOf(long epochMs) {

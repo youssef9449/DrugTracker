@@ -372,7 +372,6 @@ describe('restoreDose (#267 — durable deduction evidence)', () => {
       currentPills: 28, // 30 - 2 (after manual Take of d1=2)
       lastSyncDate: '2024-01-10',
       doseConsumptionHistory: { d1: [today] },
-      doseConsumptionHistory: { d1: [today] },
     });
     const logs: ConsumptionLog[] = [
       makeLog({ id: 'take-1', type: 'dose_taken', amount: -2, doseId: 'd1', date: today }),
@@ -391,7 +390,6 @@ describe('restoreDose (#267 — durable deduction evidence)', () => {
     const med = makeMed({
       currentPills: 28,
       lastSyncDate: '2024-01-10',
-      doseConsumptionHistory: { d1: [today] },
       doseConsumptionHistory: { d1: [today] },
     });
     const logs: ConsumptionLog[] = [
@@ -421,7 +419,6 @@ describe('restoreDose (#267 — durable deduction evidence)', () => {
     const med = makeMed({
       currentPills: 30,
       lastSyncDate: '2024-01-10',
-      doseConsumptionHistory: { d1: [today] },
       doseConsumptionHistory: { d1: [today] },
     });
     // The deduction log exists but is already reversed.
@@ -460,7 +457,6 @@ describe('restoreDose (#267 — durable deduction evidence)', () => {
       currentPills: 28,
       lastSyncDate: '2024-01-01', // 9 days passed
       doseConsumptionHistory: { d1: [today] },
-      doseConsumptionHistory: { d1: [today] },
     });
     const logs: ConsumptionLog[] = [
       makeLog({ id: 'take-1', type: 'dose_taken', amount: -2, doseId: 'd1', date: today }),
@@ -477,7 +473,6 @@ describe('restoreDose (#267 — durable deduction evidence)', () => {
     const med = makeMed({
       currentPills: 28,
       lastSyncDate: '2024-01-10',
-      doseConsumptionHistory: { d1: [today] },
       doseConsumptionHistory: { d1: [today] },
       doseSchedule: [{ id: 'd1', amount: 5, time: '08:00' }], // edited from 2
     });

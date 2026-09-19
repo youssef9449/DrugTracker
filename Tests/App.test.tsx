@@ -794,7 +794,6 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
       doseSchedule: [{ id: 'd1', amount: 2, time: '09:00' }],
       dosesPerDay: 1,
       doseConsumptionHistory: { d1: [today] },
-      doseConsumptionHistory: { d1: [today] },
     }]));
     localStorage.setItem('android_med_tracker_logs_v2', JSON.stringify([{
       id: 'take-d1',

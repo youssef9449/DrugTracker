@@ -436,7 +436,7 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
       id: 'med-consumed',
       reminderTime: '20:00',
       doseSchedule: [{ id: 'd1', amount: 1, time: '20:00' }],
-      doseConsumptionHistory: { d1: [getTodayDateString]() },
+      doseConsumptionHistory: { d1: [getTodayDateString()] },
     });
     renderHook(() => useDoseReminderScheduler(defaultOpts({ medications: [med] })));
 
@@ -481,7 +481,7 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
     // Per-dose consume marker → consumedSignature change.
     const medConsumed = {
       ...med,
-      doseConsumptionHistory: { d1: [getTodayDateString]() },
+      doseConsumptionHistory: { d1: [getTodayDateString()] },
     };
     rerender({ medications: [medConsumed] });
 
@@ -519,7 +519,7 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
       id: 'med-tomorrow',
       reminderTime: '20:00',
       doseSchedule: [{ id: 'd1', amount: 1, time: '20:00' }],
-      doseConsumptionHistory: { d1: [getTodayDateString]() },
+      doseConsumptionHistory: { d1: [getTodayDateString()] },
     });
     renderHook(() => useDoseReminderScheduler(defaultOpts({ medications: [med] })));
 
@@ -539,7 +539,7 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
     const med = makeMed({
       id: 'med-after',
       reminderTime: '20:00',
-      doseConsumptionHistory: { d1: [getTodayDateString]() },
+      doseConsumptionHistory: { d1: [getTodayDateString()] },
     });
     renderHook(() => useDoseReminderScheduler(defaultOpts({ medications: [med] })));
 
@@ -565,7 +565,7 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
     const med = makeMed({
       id: 'med-resume',
       reminderTime: '20:00',
-      doseConsumptionHistory: { d1: [getTodayDateString]() },
+      doseConsumptionHistory: { d1: [getTodayDateString()] },
     });
     const { rerender } = renderHook(
       ({ resumeTick }) =>
@@ -610,7 +610,7 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
 
     // User takes the dose manually → suppression must cancel/suppress
     // the pending snoozed reminder for today.
-    rerender({ medications: [{ ...med, doseConsumptionHistory: { d1: [getTodayDateString]() } }] });
+    rerender({ medications: [{ ...med, doseConsumptionHistory: { d1: [getTodayDateString()] } }] });
     await flushUntil(() => mocks.cancelSnoozed.mock.calls.length >= 1);
 
     expect(mocks.cancelSnoozed).toHaveBeenCalledWith('med-snooze-consumed', 'd1');
@@ -682,7 +682,7 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
     // Config change (main effect re-runs → cancel+schedule enqueued)…
     rerender({ medications: [{ ...med, name: 'Renamed Med' }] });
     // …immediately followed by the consumption (suppression effect).
-    rerender({ medications: [{ ...med, name: 'Renamed Med', doseConsumptionHistory: { d1: [getTodayDateString]() } }] });
+    rerender({ medications: [{ ...med, name: 'Renamed Med', doseConsumptionHistory: { d1: [getTodayDateString()] } }] });
 
     // Release the gate; let everything settle.
     gateHolder.release();
@@ -711,7 +711,7 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
     const med = makeMed({
       id: 'med-rename',
       reminderTime: '20:00',
-      doseConsumptionHistory: { d1: [getTodayDateString]() },
+      doseConsumptionHistory: { d1: [getTodayDateString()] },
     });
     const { rerender } = renderHook(
       ({ medications }) => useDoseReminderScheduler(defaultOpts({ medications })),
@@ -740,7 +740,7 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
     const med = makeMed({
       id: 'med-gated',
       reminderTime: '20:00',
-      doseConsumptionHistory: { d1: [getTodayDateString]() },
+      doseConsumptionHistory: { d1: [getTodayDateString()] },
     });
     renderHook(() =>
       useDoseReminderScheduler(defaultOpts({ medications: [med], notificationsEnabled: false }))

@@ -44,11 +44,8 @@ export interface AppSettingsModalProps {
   activeOrderItems?: OrderItem[];
   onSaveSettings: (newSettings: PharmacySettings) => void;
   soundEnabled: boolean;
-  /** @deprecated Toggles are draft-only until Save; kept optional for compatibility. */
   notificationsEnabled?: boolean;
-  onToggleNotifications?: () => void;
   criticalStockAlertsEnabled?: boolean;
-  onToggleCriticalStockAlerts?: () => void;
   onSendTestNotification?: () => void;
   autoDeductEnabled?: boolean;
   onToggleAutoDeduct?: () => void;

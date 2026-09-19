@@ -90,7 +90,7 @@ export type RestoreDoseResult =
        */
       wasActuallyConsumed: boolean;
       /**
-       * The id of the ACTIVE deduction log (exact_auto / dose_taken / exact_auto) that this
+       * The id of the ACTIVE deduction log (exact_auto / dose_taken) that this
        * Restore reverses. The caller MUST mark that log's `reversedAt` and
        * create the restore (skipped_day) log with `relatedLogId` pointing to
        * this id.
@@ -122,8 +122,6 @@ export type RestoreDoseResult =
  *   - exact_auto: current Exact Auto, ONLY when log.id is the deterministic
  *     Exact occurrence id (`exact-auto:<medicationId>:<doseId>:<calendarDate>`)
  *     the same deterministic Exact occurrence id
- * Ordinary exact_auto.
- *
  * Determinism contract — does NOT depend on array position:
  *   The most-recent active deduction is selected by comparing the log's
  *   own persisted data (timestamp primary, id tie-breaker).
@@ -151,7 +149,6 @@ export function findActiveDeductionForOccurrence(
     if (l.medicationId !== medicationId) continue;
     if (l.date !== calendarDate) continue;
     // Issue #269/#276: dose_taken is manual evidence. exact_auto and
-    // exact_auto.
     const isManualDeduction = l.type === 'dose_taken';
     const isExactOccurrenceEvidence =
       (l.type === 'exact_auto') &&
@@ -184,7 +181,7 @@ export function findActiveDeductionForOccurrence(
 /**
  * UI-only: historical Restore amount for display from exact active deduction
  * evidence (medicationId + doseId + calendarDate). Returns null when no active
- * dose_taken / exact_auto / exact_auto log exists.
+ * dose_taken / exact_auto log exists.
  */
 export function getHistoricalRestoreDisplayAmount(
   logs: ConsumptionLog[],
@@ -214,7 +211,6 @@ export function getHistoricalRestoreDisplayAmount(
  *   exact_auto  → valid only when log.id === exactAutoLogId(...)
  *   other types → invalid
  *
- * Both current and legacy formats require the deterministic occurrence id.
  * Malformed exact_auto records with arbitrary ids are NOT evidence.
  */
 export function isExactAutoDeductionEvidence(
@@ -287,7 +283,7 @@ export function findActualDeductedAmountForOccurrence(
  *
  * Issue #267: Restore reverses a durable deduction log for the occurrence
  * (medicationId + doseId + calendarDate). The restore amount is
- * `abs(log.amount)` from the active deduction log (dose_taken, exact_auto, or exact_auto).
+ * `abs(log.amount)` from the active deduction log (dose_taken or exact_auto).
  * If no active deduction log exists → reject `missing_deduction_evidence`.
  *
  * There is NO pure-projection Restore (elapsed time without a durable
@@ -350,9 +346,6 @@ export function restoreDose(
   // --- Multi-dose / scheduled slot ---
   if (hasDoseSchedule(med) && resolvedDoseId) {
     // Clear consumption for this doseId + date (if any).
-    if (nextConsumption[resolvedDoseId] === todayStr) {
-      delete nextConsumption[resolvedDoseId];
-    }
     const nextHistory = { ...(med.doseConsumptionHistory ?? {}) };
     if (Array.isArray(nextHistory[resolvedDoseId])) {
       nextHistory[resolvedDoseId] = nextHistory[resolvedDoseId].filter(
@@ -412,7 +405,7 @@ export function restoreDose(
           : isDoseConsumedOnDate(
               {
                 ...med,
-                        doseConsumptionHistory: nextHistory,
+                doseConsumptionHistory: nextHistory,
               },
               d.id,
               todayStr
@@ -459,7 +452,7 @@ export function restoreDose(
  * - Multi-dose → explicit doseId required (or single-slot auto-resolve).
  * - No doseSchedule → reject `missing_dose_id` (no Legacy single-dose path).
  *
- * Metadata preserved: doseConsumption, doseConsumptionHistory,
+ * Metadata preserved: doseConsumptionHistory,
  * doseSkippedHistory, lastConsumedDate, dose_taken log.
  *
  * `lastSyncDate` is NOT changed.
@@ -571,12 +564,11 @@ export function consumeDose(
     return { updatedMed: null, doseAmount: 0, log: null };
   }
   const newSnapshot = Math.max(0, settleBase - doseAmount);
-
   let doseConsumptionHistory = med.doseConsumptionHistory;
   let doseSkippedHistory = med.doseSkippedHistory;
   if (targetDoseId) {
     const recorded = recordDoseConsumed(med, targetDoseId, todayStr);
-        doseConsumptionHistory = recorded.doseConsumptionHistory /* removed map */History;
+    doseConsumptionHistory = recorded.doseConsumptionHistory;
     // Clear any prior restore/skip for this dose+date so Take after
     // Restore is a single clean manual consumption.
     const cleared = clearDoseSkippedOnDate(
@@ -593,7 +585,7 @@ export function consumeDose(
       isDoseConsumedOnDate(
         {
           ...med,
-                doseConsumptionHistory,
+          doseConsumptionHistory,
         },
         d.id,
         todayStr

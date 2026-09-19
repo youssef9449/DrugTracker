@@ -6,7 +6,7 @@ export interface ConsumptionLog {
   id: string;
   medicationId: string;
   medicationName: string;
-  type: 'auto_daily' | 'refill' | 'refill_undo' | 'manual_adjust' | 'skipped_day' | 'dose_taken';
+  type: 'exact_auto' | 'auto_daily' | 'refill' | 'refill_undo' | 'manual_adjust' | 'skipped_day' | 'dose_taken';
   amount: number; // positive or negative
   date: string; // YYYY-MM-DD
   timestamp: string;

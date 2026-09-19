@@ -1272,7 +1272,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     // without re-applying the snapshot (no extra mutation).
     durable = {
       medications: [med({ currentPills: 8, doseConsumption: { d1: TODAY }, doseConsumptionHistory: { d1: [TODAY] } })],
-      logs: [{ id: 'match-clear', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
+      logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
     };
     let phase4Exact: ExactAutoEnvelope | null = {
       version: 1,
@@ -1316,7 +1316,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       version: 1,
       status: 'js_ready',
       medications: [med({ currentPills: 7, doseConsumption: { d1: TODAY } })],
-      logs: [{ id: 'mismatch-apply', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
+      logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
       toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }],
       createdAt: new Date().toISOString(),
       mutationSeq: 4,
@@ -1353,7 +1353,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     // must finalize + clear WITHOUT re-applying the snapshot.
     durable = {
       medications: [med({ currentPills: 6, doseConsumption: { d1: TODAY } })],
-      logs: [{ id: 'crash-fin', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
+      logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
     };
     let phase4Exact: ExactAutoEnvelope | null = {
       version: 1,
@@ -1409,7 +1409,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
   it('clear failure after finalization → restart does not re-mutate; retries clear only', async () => {
     durable = {
       medications: [med({ currentPills: 6, doseConsumption: { d1: TODAY } })],
-      logs: [{ id: 'clear-fail', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
+      logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
     };
     let phase4Exact: ExactAutoEnvelope | null = {
       version: 1,
@@ -1561,10 +1561,10 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       ],
       logs: [
         {
-          id: 'exact-d1',
+          id: exactAutoLogId('med-1', 'd1', TODAY),
           medicationId: 'med-1',
           medicationName: 'TestMed',
-          type: 'auto_daily',
+          type: 'exact_auto',
           amount: -1,
           date: TODAY,
           timestamp: '',
@@ -1572,10 +1572,10 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
           doseId: 'd1',
         },
         {
-          id: 'exact-d2',
+          id: exactAutoLogId('med-1', 'd2', TODAY),
           medicationId: 'med-1',
           medicationName: 'TestMed',
-          type: 'auto_daily',
+          type: 'exact_auto',
           amount: -1,
           date: TODAY,
           timestamp: '',
@@ -1638,10 +1638,10 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       ],
       logs: [
         {
-          id: 'exact-clamped',
+          id: exactAutoLogId('med-1', 'd1', TODAY),
           medicationId: 'med-1',
           medicationName: 'TestMed',
-          type: 'auto_daily',
+          type: 'exact_auto',
           amount: -1,
           date: TODAY,
           timestamp: '',
@@ -1672,10 +1672,10 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       ],
       logs: [
         {
-          id: 'exact-zero',
+          id: exactAutoLogId('med-1', 'd1', TODAY),
           medicationId: 'med-1',
           medicationName: 'TestMed',
-          type: 'auto_daily',
+          type: 'exact_auto',
           amount: 0,
           date: TODAY,
           timestamp: '',
@@ -1709,18 +1709,18 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
   it('Auto 3 → Restore = +3 (active deduction tracked)', async () => {
     durable = {
       medications: [med({ currentPills: 7, doseConsumption: { d1: TODAY }, doseConsumptionHistory: { d1: [TODAY] } })],
-      logs: [{ id: 'auto-3', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -3, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
+      logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -3, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
     };
     const r = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-auto-3' });
     expect(r.outcome).toBe('applied');
     expect(r.restoredAmount).toBe(3);
     expect(durable.medications[0].currentPills).toBe(10);
     // The auto-3 deduction log is now marked reversed.
-    const autoLog = durable.logs.find((l) => l.id === 'auto-3');
+    const autoLog = durable.logs.find((l) => l.id === exactAutoLogId('med-1', 'd1', TODAY));
     expect(autoLog?.reversedAt).toBeTruthy();
     // The restore log links to it.
     const restoreLog = durable.logs.find((l) => l.id === 'restore-auto-3');
-    expect(restoreLog?.relatedLogId).toBe('auto-3');
+    expect(restoreLog?.relatedLogId).toBe(exactAutoLogId('med-1', 'd1', TODAY));
   });
 
   it('Auto 3 → Restore → Take 1 (clamped) → Restore = +1 (reverses the Take, not the old Auto)', async () => {
@@ -1729,7 +1729,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     // NOT the old Auto's 3 (which is already reversed).
     durable = {
       medications: [med({ currentPills: 1 })],
-      logs: [{ id: 'auto-3', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -3, date: TODAY, timestamp: '', description: '', doseId: 'd1', reversedAt: 'already-reversed' }],
+      logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -3, date: TODAY, timestamp: '', description: '', doseId: 'd1', reversedAt: 'already-reversed' }],
     };
     // Take d1 — clamped to available stock (1). currentPills 1 → 0.
     const take = await runGatedManualConsume({ medicationId: 'med-1', doseId: 'd1', source: 'manual', todayStr: TODAY });
@@ -1770,7 +1770,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
   it('Auto 3 → Restore → Take 3 → Restore = +3 (reverses the second Take)', async () => {
     durable = {
       medications: [med({ currentPills: 7, doseConsumption: { d1: TODAY }, doseConsumptionHistory: { d1: [TODAY] }, doseSchedule: [{ id: 'd1', amount: 3, time: '08:00' }], dosesPerDay: 1 })],
-      logs: [{ id: 'auto-3b', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -3, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
+      logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -3, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
     };
     // Restore the Auto (3).
     const r1 = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-auto-3b' });
@@ -1792,7 +1792,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
   it('Restore twice for the same occurrence does not add stock twice', async () => {
     durable = {
       medications: [med({ currentPills: 7, doseConsumption: { d1: TODAY }, doseConsumptionHistory: { d1: [TODAY] } })],
-      logs: [{ id: 'auto-dedup', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -3, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
+      logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -3, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
     };
     const r1 = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-1-dedup' });
     expect(r1.outcome).toBe('applied');
@@ -1811,8 +1811,8 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     durable = {
       medications: [med({ currentPills: 8, doseConsumption: { d1: TODAY, d2: TODAY }, doseConsumptionHistory: { d1: [TODAY], d2: [TODAY] } })],
       logs: [
-        { id: 'auto-a', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd1' },
-        { id: 'auto-b', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -2, date: TODAY, timestamp: '', description: '', doseId: 'd2' },
+        { id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd1' },
+        { id: exactAutoLogId('med-1', 'd2', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -2, date: TODAY, timestamp: '', description: '', doseId: 'd2' },
       ],
     };
     // Restore d1 → reverses auto-a (1), NOT auto-b (2).
@@ -1832,7 +1832,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     durable = {
       medications: [med({ currentPills: 6, doseConsumption: { d1: TODAY }, doseConsumptionHistory: { d1: [TODAY] } })],
       logs: [
-        { id: 'old-deduct', medicationId: 'med-1', medicationName: 'TestMed', type: 'auto_daily', amount: -4, date: TODAY, timestamp: '', description: '', doseId: 'd1', reversedAt: 'old' },
+        { id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -4, date: TODAY, timestamp: '', description: '', doseId: 'd1', reversedAt: 'old' },
         { id: 'new-deduct', medicationId: 'med-1', medicationName: 'TestMed', type: 'dose_taken', amount: -4, date: TODAY, timestamp: '', description: '', doseId: 'd1' },
       ],
     };
@@ -1998,7 +1998,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
 
   it('Auto → Restore leaves durable skip so does not re-project', async () => {
     // d1@08:00, now 15:00 → d1 elapsed. Simulate Exact Auto having applied
-    // d1 (doseConsumption marker + auto_daily log) without going through
+    // d1 (doseConsumption marker + exact_auto log) without going through
     // the gated path (the durable state is the post-Auto snapshot).
     durable = {
       medications: [
@@ -2010,10 +2010,10 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       ],
       logs: [
         {
-          id: 'auto-pre-d1',
+          id: exactAutoLogId('med-1', 'd1', TODAY),
           medicationId: 'med-1',
           medicationName: 'TestMed',
-          type: 'auto_daily',
+          type: 'exact_auto',
           amount: -1,
           date: TODAY,
           timestamp: '',
@@ -2065,14 +2065,14 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
 
     expect(recon.details[0]?.outcome).toBe('already_applied');
     expect(durable.medications[0].currentPills).toBe(10);
-    // No second auto_daily log for d1.
+    // No second exact_auto log for d1.
     expect(
-      durable.logs.filter((l) => l.id === 'auto-pre-d1')
+      durable.logs.filter((l) => l.id === exactAutoLogId('med-1', 'd1', TODAY))
     ).toHaveLength(1);
   });
 
   it('Auto → Restore → Take yields exactly one final deduction', async () => {
-    // Start: Exact Auto applied d1 (consume marker + auto_daily log), stock 9.
+    // Start: Exact Auto applied d1 (consume marker + exact_auto log), stock 9.
     durable = {
       medications: [
         med({
@@ -2083,10 +2083,10 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       ],
       logs: [
         {
-          id: 'auto-take-d1',
+          id: exactAutoLogId('med-1', 'd1', TODAY),
           medicationId: 'med-1',
           medicationName: 'TestMed',
-          type: 'auto_daily',
+          type: 'exact_auto',
           amount: -1,
           date: TODAY,
           timestamp: '',
@@ -2123,13 +2123,13 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     expect(durable.medications[0].doseSkippedHistory?.d1).toBeUndefined();
     expect(durable.medications[0].doseConsumption?.d1).toBe(TODAY);
     // Exactly one dose_taken log for d1 (the manual Take) plus the restore log
-    // plus the original auto_daily log — no second auto deduction.
+    // plus the original exact_auto log — no second auto deduction.
     const takeLogs = durable.logs.filter(
       (l) => l.type === 'dose_taken' && l.doseId === 'd1'
     );
     expect(takeLogs).toHaveLength(1);
     const autoLogs = durable.logs.filter(
-      (l) => l.type === 'auto_daily' && l.doseId === 'd1'
+      (l) => l.type === 'exact_auto' && l.doseId === 'd1'
     );
     expect(autoLogs).toHaveLength(1);
   });
@@ -2185,10 +2185,10 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     // Stock unchanged from post-restore state (no second deduction).
     expect(durable.medications[0].currentPills).toBe(10);
     expect(durable.medications[0].currentPills).not.toBe(pillsAfterTake);
-    // No auto_daily log created for d1.
+    // No exact_auto log created for d1.
     expect(
       durable.logs.filter(
-        (l) => l.type === 'auto_daily' && l.doseId === 'd1'
+        (l) => l.type === 'exact_auto' && l.doseId === 'd1'
       )
     ).toHaveLength(0);
   });
@@ -2283,8 +2283,8 @@ describe('findActiveDeductionForOccurrence — deterministic ordering (NOT array
 
   it('picks the same active deduction regardless of array order (newest→oldest, oldest→newest, shuffled)', () => {
     const oldAuto = deduction({
-      id: 'auto-old',
-      type: 'auto_daily',
+      id: exactAutoLogId('med-1', 'd1', TODAY),
+      type: 'exact_auto',
       amount: -3,
       timestamp: TS_OLD,
       doseId: 'd1',
@@ -2297,8 +2297,8 @@ describe('findActiveDeductionForOccurrence — deterministic ordering (NOT array
       doseId: 'd1',
     });
     const newestAuto = deduction({
-      id: 'auto-newest',
-      type: 'auto_daily',
+      id: exactAutoLogId('med-1', 'd1', TODAY),
+      type: 'exact_auto',
       amount: -2,
       timestamp: TS_NEWEST,
       doseId: 'd1',
@@ -2311,17 +2311,17 @@ describe('findActiveDeductionForOccurrence — deterministic ordering (NOT array
     const a = findActiveDeductionForOccurrence(newestFirst, 'med-1', 'd1', TODAY);
     const b = findActiveDeductionForOccurrence(oldestFirst, 'med-1', 'd1', TODAY);
     const c = findActiveDeductionForOccurrence(shuffled, 'med-1', 'd1', TODAY);
-    expect(a?.id).toBe('auto-newest');
-    expect(b?.id).toBe('auto-newest');
-    expect(c?.id).toBe('auto-newest');
+    expect(a?.id).toBe(exactAutoLogId('med-1', 'd1', TODAY));
+    expect(b?.id).toBe(exactAutoLogId('med-1', 'd1', TODAY));
+    expect(c?.id).toBe(exactAutoLogId('med-1', 'd1', TODAY));
     expect(a?.id).toBe(b?.id);
     expect(b?.id).toBe(c?.id);
   });
 
   it('Auto deduction old + Manual Take new → picks the Manual Take (by timestamp, not type)', () => {
     const oldAuto = deduction({
-      id: 'auto-old',
-      type: 'auto_daily',
+      id: exactAutoLogId('med-1', 'd1', TODAY),
+      type: 'exact_auto',
       amount: -3,
       timestamp: TS_OLD,
       doseId: 'd1',
@@ -2335,7 +2335,7 @@ describe('findActiveDeductionForOccurrence — deterministic ordering (NOT array
     });
     // newestFirst (Take at front) and oldestFirst (Auto at front) — both
     // must pick the Take because its timestamp is newer, NOT because of
-    // array position or auto_daily preference.
+    // array position or type preference.
     const r1 = findActiveDeductionForOccurrence([newTake, oldAuto], 'med-1', 'd1', TODAY);
     const r2 = findActiveDeductionForOccurrence([oldAuto, newTake], 'med-1', 'd1', TODAY);
     expect(r1?.id).toBe('take-new');
@@ -2351,22 +2351,22 @@ describe('findActiveDeductionForOccurrence — deterministic ordering (NOT array
       doseId: 'd1',
     });
     const newAuto = deduction({
-      id: 'auto-new',
-      type: 'auto_daily',
+      id: exactAutoLogId('med-1', 'd1', TODAY),
+      type: 'exact_auto',
       amount: -2,
       timestamp: TS_NEW,
       doseId: 'd1',
     });
     const r1 = findActiveDeductionForOccurrence([newAuto, oldTake], 'med-1', 'd1', TODAY);
     const r2 = findActiveDeductionForOccurrence([oldTake, newAuto], 'med-1', 'd1', TODAY);
-    expect(r1?.id).toBe('auto-new');
-    expect(r2?.id).toBe('auto-new');
+    expect(r1?.id).toBe(exactAutoLogId('med-1', 'd1', TODAY));
+    expect(r2?.id).toBe(exactAutoLogId('med-1', 'd1', TODAY));
   });
 
   it('Newer deduction reversed → picks the most-recent UN-reversed deduction', () => {
     const oldAuto = deduction({
-      id: 'auto-old',
-      type: 'auto_daily',
+      id: exactAutoLogId('med-1', 'd1', TODAY),
+      type: 'exact_auto',
       amount: -3,
       timestamp: TS_OLD,
       doseId: 'd1',
@@ -2380,8 +2380,8 @@ describe('findActiveDeductionForOccurrence — deterministic ordering (NOT array
       reversedAt: '2026-09-16T15:00:00.000Z', // reversed by a Restore
     });
     const newestAuto = deduction({
-      id: 'auto-newest',
-      type: 'auto_daily',
+      id: exactAutoLogId('med-1', 'd1', TODAY),
+      type: 'exact_auto',
       amount: -2,
       timestamp: TS_NEWEST,
       doseId: 'd1',
@@ -2390,29 +2390,29 @@ describe('findActiveDeductionForOccurrence — deterministic ordering (NOT array
     // wins regardless of array order.
     const r1 = findActiveDeductionForOccurrence([newestAuto, newTake, oldAuto], 'med-1', 'd1', TODAY);
     const r2 = findActiveDeductionForOccurrence([oldAuto, newTake, newestAuto], 'med-1', 'd1', TODAY);
-    expect(r1?.id).toBe('auto-newest');
-    expect(r2?.id).toBe('auto-newest');
+    expect(r1?.id).toBe(exactAutoLogId('med-1', 'd1', TODAY));
+    expect(r2?.id).toBe(exactAutoLogId('med-1', 'd1', TODAY));
   });
 
   it('Same medication + same date + different doseId → dose A never picks dose B', () => {
-    const a1 = deduction({ id: 'a1', type: 'auto_daily', amount: -1, timestamp: TS_OLD, doseId: 'd1' });
-    const b1 = deduction({ id: 'b1', type: 'auto_daily', amount: -2, timestamp: TS_NEW, doseId: 'd2' });
+    const a1 = deduction({ id: exactAutoLogId('med-1', 'd1', TODAY), type: 'exact_auto', amount: -1, timestamp: TS_OLD, doseId: 'd1' });
+    const b1 = deduction({ id: exactAutoLogId('med-1', 'd2', TODAY), type: 'exact_auto', amount: -2, timestamp: TS_NEW, doseId: 'd2' });
     // d1 lookup finds a1 only; d2 lookup finds b1 only — regardless of order.
-    expect(findActiveDeductionForOccurrence([a1, b1], 'med-1', 'd1', TODAY)?.id).toBe('a1');
-    expect(findActiveDeductionForOccurrence([b1, a1], 'med-1', 'd1', TODAY)?.id).toBe('a1');
-    expect(findActiveDeductionForOccurrence([a1, b1], 'med-1', 'd2', TODAY)?.id).toBe('b1');
-    expect(findActiveDeductionForOccurrence([b1, a1], 'med-1', 'd2', TODAY)?.id).toBe('b1');
+    expect(findActiveDeductionForOccurrence([a1, b1], 'med-1', 'd1', TODAY)?.id).toBe(exactAutoLogId('med-1', 'd1', TODAY));
+    expect(findActiveDeductionForOccurrence([b1, a1], 'med-1', 'd1', TODAY)?.id).toBe(exactAutoLogId('med-1', 'd1', TODAY));
+    expect(findActiveDeductionForOccurrence([a1, b1], 'med-1', 'd2', TODAY)?.id).toBe(exactAutoLogId('med-1', 'd2', TODAY));
+    expect(findActiveDeductionForOccurrence([b1, a1], 'med-1', 'd2', TODAY)?.id).toBe(exactAutoLogId('med-1', 'd2', TODAY));
   });
 
   it('Same occurrence with multiple historical deductions/reversals → picks the only active one', () => {
     // Three deductions for d1+TODAY: two reversed, one active.
-    const d1 = deduction({ id: 'ded-1', type: 'auto_daily', amount: -3, timestamp: TS_OLD, doseId: 'd1', reversedAt: 'r1' });
+    const d1 = deduction({ id: exactAutoLogId('med-1', 'd1', TODAY), type: 'exact_auto', amount: -3, timestamp: TS_OLD, doseId: 'd1', reversedAt: 'r1' });
     const d2 = deduction({ id: 'ded-2', type: 'dose_taken', amount: -1, timestamp: TS_NEW, doseId: 'd1', reversedAt: 'r2' });
-    const d3 = deduction({ id: 'ded-3', type: 'auto_daily', amount: -2, timestamp: TS_NEWEST, doseId: 'd1' });
+    const d3 = deduction({ id: exactAutoLogId('med-1', 'd1', TODAY), type: 'exact_auto', amount: -2, timestamp: TS_NEWEST, doseId: 'd1' });
     // d3 is the only un-reversed one. Must be picked in any order.
     for (const order of [[d1, d2, d3], [d3, d2, d1], [d2, d1, d3], [d2, d3, d1], [d3, d1, d2], [d1, d3, d2]]) {
       const r = findActiveDeductionForOccurrence(order, 'med-1', 'd1', TODAY);
-      expect(r?.id).toBe('ded-3');
+      expect(r?.id).toBe(exactAutoLogId('med-1', 'd1', TODAY));
     }
   });
 
@@ -2428,7 +2428,7 @@ describe('findActiveDeductionForOccurrence — deterministic ordering (NOT array
   it('Logs with empty/invalid timestamps fall back to id tie-breaker (deterministic, not array position)', () => {
     // Both have empty timestamps — tie-breaker is id. 'zzz' > 'aaa' so
     // 'zzz' wins regardless of array order.
-    const a = deduction({ id: 'aaa', type: 'auto_daily', amount: -1, timestamp: '', doseId: 'd1' });
+    const a = deduction({ id: exactAutoLogId('med-1', 'd1', TODAY), type: 'exact_auto', amount: -1, timestamp: '', doseId: 'd1' });
     const b = deduction({ id: 'zzz', type: 'dose_taken', amount: -2, timestamp: '', doseId: 'd1' });
     const r1 = findActiveDeductionForOccurrence([a, b], 'med-1', 'd1', TODAY);
     const r2 = findActiveDeductionForOccurrence([b, a], 'med-1', 'd1', TODAY);
@@ -2437,24 +2437,24 @@ describe('findActiveDeductionForOccurrence — deterministic ordering (NOT array
   });
 
   it('A real timestamp always wins over an empty/invalid timestamp regardless of array order', () => {
-    const realTs = deduction({ id: 'real', type: 'auto_daily', amount: -2, timestamp: TS_NEW, doseId: 'd1' });
+    const realTs = deduction({ id: exactAutoLogId('med-1', 'd1', TODAY), type: 'exact_auto', amount: -2, timestamp: TS_NEW, doseId: 'd1' });
     const emptyTs = deduction({ id: 'empty', type: 'dose_taken', amount: -5, timestamp: '', doseId: 'd1' });
     // realTs has a valid timestamp → wins. Even if emptyTs is first AND has
     // a "higher" id, the valid timestamp wins.
     const r1 = findActiveDeductionForOccurrence([realTs, emptyTs], 'med-1', 'd1', TODAY);
     const r2 = findActiveDeductionForOccurrence([emptyTs, realTs], 'med-1', 'd1', TODAY);
-    expect(r1?.id).toBe('real');
-    expect(r2?.id).toBe('real');
+    expect(r1?.id).toBe(exactAutoLogId('med-1', 'd1', TODAY));
+    expect(r2?.id).toBe(exactAutoLogId('med-1', 'd1', TODAY));
   });
 
   it('No active deduction (all reversed or none match) → null', () => {
-    const reversed = deduction({ id: 'rev', type: 'auto_daily', amount: -1, timestamp: TS_NEW, doseId: 'd1', reversedAt: 'x' });
+    const reversed = deduction({ id: exactAutoLogId('med-1', 'd1', TODAY), type: 'exact_auto', amount: -1, timestamp: TS_NEW, doseId: 'd1', reversedAt: 'x' });
     expect(findActiveDeductionForOccurrence([reversed], 'med-1', 'd1', TODAY)).toBeNull();
     // Different doseId → no match.
-    const otherDose = deduction({ id: 'other', type: 'auto_daily', amount: -1, timestamp: TS_NEW, doseId: 'd2' });
+    const otherDose = deduction({ id: exactAutoLogId('med-1', 'd2', TODAY), type: 'exact_auto', amount: -1, timestamp: TS_NEW, doseId: 'd2' });
     expect(findActiveDeductionForOccurrence([otherDose], 'med-1', 'd1', TODAY)).toBeNull();
     // Different date → no match.
-    const otherDate = deduction({ id: 'odate', type: 'auto_daily', amount: -1, timestamp: TS_NEW, doseId: 'd1', date: '2026-09-15' });
+    const otherDate = deduction({ id: exactAutoLogId('med-1', 'd1', '2026-09-15'), type: 'exact_auto', amount: -1, timestamp: TS_NEW, doseId: 'd1', date: '2026-09-15' });
     expect(findActiveDeductionForOccurrence([otherDate], 'med-1', 'd1', TODAY)).toBeNull();
   });
 
@@ -2462,8 +2462,8 @@ describe('findActiveDeductionForOccurrence — deterministic ordering (NOT array
     // Logs missing doseId must not match any lookup — including undefined
     // and the removed 'legacy' sentinel. A concurrent valid log still matches.
     const noId1 = deduction({
-      id: 'leg1',
-      type: 'auto_daily',
+      id: exactAutoLogId('med-1', 'd1', TODAY),
+      type: 'exact_auto',
       amount: -1,
       timestamp: TS_OLD,
     });
@@ -2474,8 +2474,8 @@ describe('findActiveDeductionForOccurrence — deterministic ordering (NOT array
       timestamp: TS_NEW,
     });
     const valid = deduction({
-      id: 'valid-d1',
-      type: 'auto_daily',
+      id: exactAutoLogId('med-1', 'd1', TODAY),
+      type: 'exact_auto',
       amount: -3,
       timestamp: TS_NEWEST,
       doseId: 'd1',
@@ -2489,7 +2489,7 @@ describe('findActiveDeductionForOccurrence — deterministic ordering (NOT array
     ).toBeNull();
     expect(
       findActiveDeductionForOccurrence(legacyLogs, 'med-1', 'd1', TODAY)?.id
-    ).toBe('valid-d1');
+    ).toBe(exactAutoLogId('med-1', 'd1', TODAY));
   });
 });
 

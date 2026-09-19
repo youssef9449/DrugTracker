@@ -338,7 +338,7 @@ describe('runGatedGlobalAutoDeductToggle exact-before-legacy', () => {
         id: exactAutoLogId('med-1', 'd1', '2026-09-14'),
         medicationId: 'med-1',
         medicationName: 'TestMed',
-        type: 'auto_daily',
+        type: 'exact_auto',
         amount: -2,
         date: '2026-09-14',
         timestamp: new Date().toISOString(),

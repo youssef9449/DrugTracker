@@ -113,13 +113,15 @@ function makeMultiAuto(overrides: Partial<Medication> = {}): Medication {
 /** Durable Exact Auto deduction for s1 (amount may differ from current schedule). */
 function durableS1AutoLog(amount = -2): ConsumptionLog {
   return {
-    id: 'exact-s1',
+    id: `exact-auto:${MED_ID}:s1:${TEST_DATE}`,
     medicationId: MED_ID,
+    medicationName: 'Test',
     doseId: 's1',
     amount,
-    type: 'auto_daily',
+    type: 'exact_auto',
     timestamp: `${TEST_DATE}T08:00:00.000Z`,
     date: TEST_DATE,
+    description: 'Exact Auto',
   };
 }
 

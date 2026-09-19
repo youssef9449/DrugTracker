@@ -1676,6 +1676,8 @@ describe('runAutoDeductionReconciliation — FIRED durable regardless of current
     expect(first.newExactLogs).toHaveLength(1);
     expect(first.newExactLogs[0].amount).toBe(-2);
     expect(first.newExactLogs[0].id).toBe(exactAutoLogId('med-1', 'd1', '2026-09-14'));
+    expect(first.newExactLogs[0].type).toBe('exact_auto');
+    expect(first.logs.filter((l) => l.type === 'auto_daily')).toHaveLength(0);
     expect(first.toAcknowledge).toEqual([
       { medicationId: 'med-1', doseId: 'd1', calendarDate: '2026-09-14' },
     ]);
@@ -1794,6 +1796,7 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
       expect(applied.updatedMed.lastConsumedDate).toBe('2026-09-12');
       expect(applied.updatedMed.currentPills).toBe(9);
       expect(applied.log.id).toBe(exactAutoLogId('med-1', 'd1', '2026-09-14'));
+      expect(applied.log.type).toBe('exact_auto');
       expect(applied.log.doseId).toBe('d1');
     }
   });
@@ -1829,6 +1832,7 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
       expect(applied.updatedMed.lastConsumedDate).toBe('2026-09-12');
       // Exact log is created once with the full identity.
       expect(applied.log.id).toBe(exactAutoLogId('med-1', 'd1', '2026-09-14'));
+      expect(applied.log.type).toBe('exact_auto');
       expect(applied.log.doseId).toBe('d1');
       expect(applied.log.amount).toBe(-2);
     }

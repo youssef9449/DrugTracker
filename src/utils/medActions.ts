@@ -9,6 +9,7 @@ import {
 } from './dateCalculations';
 import { isDoseTimeElapsedToday } from './doseSchedule';
 import { generateId } from './id';
+import { exactAutoLogId } from './autoDeductionReconciliation';
 
 /**
  * Shared medication-action helpers (Issue #267).
@@ -89,7 +90,7 @@ export type RestoreDoseResult =
        */
       wasActuallyConsumed: boolean;
       /**
-       * The id of the ACTIVE deduction log (auto_daily / dose_taken) that this
+       * The id of the ACTIVE deduction log (exact_auto / dose_taken / legacy compatible auto_daily) that this
        * Restore reverses. The caller MUST mark that log's `reversedAt` and
        * create the restore (skipped_day) log with `relatedLogId` pointing to
        * this id.
@@ -112,10 +113,17 @@ export type RestoreDoseResult =
  * (medicationId + doseId + calendarDate). "Active" = the deduction whose
  * stock effect is still in place and can be reversed by a Restore.
  *
- * A deduction log (auto_daily / dose_taken) is active when it has NO
- * `reversedAt` marker. Once a Restore reverses a deduction, that deduction
- * log is marked `reversedAt` and is skipped here so a later Restore finds
- * the NEXT active deduction.
+ * A deduction log is active when it has NO `reversedAt` marker. Once a
+ * Restore reverses a deduction, that deduction log is marked `reversedAt`
+ * and is skipped here so a later Restore finds the NEXT active deduction.
+ *
+ * Issue #269 / #276: accepted deduction types for an occurrence:
+ *   - dose_taken: manual deduction (existing doseId checks)
+ *   - exact_auto: current Exact Auto, ONLY when log.id is the deterministic
+ *     Exact occurrence id (`exact-auto:<medicationId>:<doseId>:<calendarDate>`)
+ *   - auto_daily: legacy read-only compatibility, ONLY when log.id matches
+ *     the same deterministic Exact occurrence id
+ * Ordinary legacy auto_daily and malformed exact_auto records are ignored.
  *
  * Determinism contract — does NOT depend on array position:
  *   The most-recent active deduction is selected by comparing the log's
@@ -132,13 +140,24 @@ export function findActiveDeductionForOccurrence(
   const normalizedDoseId =
     doseId == null ? '' : String(doseId).trim();
   if (!normalizedDoseId) return null;
+  const expectedExactId = exactAutoLogId(
+    medicationId,
+    normalizedDoseId,
+    calendarDate
+  );
   let best: ConsumptionLog | null = null;
   let bestEpoch = -Infinity;
   let bestId = '';
   for (const l of logs) {
     if (l.medicationId !== medicationId) continue;
     if (l.date !== calendarDate) continue;
-    if (l.type !== 'dose_taken' && l.type !== 'auto_daily') continue;
+    // Issue #269/#276: dose_taken is manual evidence. exact_auto and
+    // legacy auto_daily are Exact evidence only with deterministic ID.
+    const isManualDeduction = l.type === 'dose_taken';
+    const isExactOccurrenceEvidence =
+      (l.type === 'exact_auto' || l.type === 'auto_daily') &&
+      l.id === expectedExactId;
+    if (!isManualDeduction && !isExactOccurrenceEvidence) continue;
     if (l.reversedAt) continue; // already reversed by a prior Restore
     const logDoseRaw =
       l.doseId != null && String(l.doseId).trim() !== ''
@@ -166,7 +185,7 @@ export function findActiveDeductionForOccurrence(
 /**
  * UI-only: historical Restore amount for display from exact active deduction
  * evidence (medicationId + doseId + calendarDate). Returns null when no active
- * dose_taken / auto_daily log exists.
+ * dose_taken / exact_auto / legacy-compatible auto_daily log exists.
  */
 export function getHistoricalRestoreDisplayAmount(
   logs: ConsumptionLog[],
@@ -189,19 +208,57 @@ export function getHistoricalRestoreDisplayAmount(
 }
 
 /**
- * UI-only: Auto historical Restore (consumed + auto_daily + valid amount evidence).
+ * Whether a log represents Exact Auto deduction evidence for the requested
+ * occurrence (Issue #269 / #276).
+ *
+ * Decision table:
+ *   exact_auto  → valid only when log.id === exactAutoLogId(...)
+ *   auto_daily  → valid only when log.id === exactAutoLogId(...)  (legacy)
+ *   other types → invalid
+ *
+ * Both current and legacy formats require the deterministic occurrence id.
+ * Malformed exact_auto records with arbitrary ids are NOT evidence.
+ */
+export function isExactAutoDeductionEvidence(
+  log: ConsumptionLog,
+  medicationId: string,
+  doseId: string,
+  calendarDate: string
+): boolean {
+  if (log.type !== 'exact_auto' && log.type !== 'auto_daily') return false;
+  const normalizedDoseId =
+    doseId == null ? '' : String(doseId).trim();
+  if (!normalizedDoseId) return false;
+  return (
+    log.id ===
+    exactAutoLogId(medicationId, normalizedDoseId, calendarDate)
+  );
+}
+
+/**
+ * UI-only: Auto historical Restore (consumed + Exact Auto evidence + valid amount).
+ * Accepts current `exact_auto` and legacy deterministic `auto_daily` Exact logs.
  */
 export function isUiAutoHistoricalRestoreEligible(
   consumed: boolean,
   skipped: boolean,
-  activeDeductionType: string | null | undefined,
-  historicalAmount: number | null
+  activeDeduction: ConsumptionLog | null | undefined,
+  historicalAmount: number | null,
+  medicationId: string,
+  doseId: string,
+  calendarDate: string
 ): boolean {
   return (
     consumed &&
     !skipped &&
-    activeDeductionType === 'auto_daily' &&
-    historicalAmount != null
+    historicalAmount != null &&
+    activeDeduction != null &&
+    isExactAutoDeductionEvidence(
+      activeDeduction,
+      medicationId,
+      doseId,
+      calendarDate
+    )
   );
 }
 
@@ -232,7 +289,7 @@ export function findActualDeductedAmountForOccurrence(
  *
  * Issue #267: Restore reverses a durable deduction log for the occurrence
  * (medicationId + doseId + calendarDate). The restore amount is
- * `abs(log.amount)` from the active deduction log (dose_taken or auto_daily).
+ * `abs(log.amount)` from the active deduction log (dose_taken, exact_auto, or legacy-compatible auto_daily).
  * If no active deduction log exists → reject `missing_deduction_evidence`.
  *
  * There is NO pure-projection Restore (elapsed time without a durable

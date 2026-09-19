@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { restoreDose } from '@/utils/medActions';
 import type { ConsumptionLog, Medication } from '@/types';
+import { exactAutoLogId } from '@/utils/autoDeductionReconciliation';
 
 const TODAY = '2026-09-14';
 
@@ -38,11 +39,11 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
     });
     const logs: ConsumptionLog[] = [
       {
-        id: 'auto-d1',
+        id: exactAutoLogId('med-1', 'd1', TODAY),
         medicationId: 'med-1',
         doseId: 'd1',
         amount: -2,
-        type: 'auto_daily',
+        type: 'exact_auto',
         timestamp: '2026-09-14T08:00:00.000Z',
         date: TODAY,
       },
@@ -63,7 +64,7 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
     expect(result.wasActuallyConsumed).toBe(true);
     expect(result.restoredAmount).toBe(2);
     expect(result.doseId).toBe('d1');
-    expect(result.reversedLogId).toBe('auto-d1');
+    expect(result.reversedLogId).toBe(exactAutoLogId('med-1', 'd1', TODAY));
     expect(result.updatedMed.currentPills).toBe(20); // +2 only
   });
 
@@ -74,11 +75,11 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
     });
     const logs: ConsumptionLog[] = [
       {
-        id: 'auto-d1',
+        id: exactAutoLogId('med-1', 'd1', TODAY),
         medicationId: 'med-1',
         doseId: 'd1',
         amount: -2,
-        type: 'auto_daily',
+        type: 'exact_auto',
         timestamp: '2026-09-14T08:00:00.000Z',
         date: TODAY,
       },
@@ -102,7 +103,7 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.restoredAmount).toBe(2);
-    expect(result.reversedLogId).toBe('auto-d1');
+    expect(result.reversedLogId).toBe(exactAutoLogId('med-1', 'd1', TODAY));
     expect(result.reversedLogId).not.toBe('manual-d2');
   });
 
@@ -112,11 +113,11 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
       currentPills: 18,
     });
     const autoLog: ConsumptionLog = {
-      id: 'auto-d1',
+      id: exactAutoLogId('med-1', 'd1', TODAY),
       medicationId: 'med-1',
       doseId: 'd1',
       amount: -2,
-      type: 'auto_daily',
+      type: 'exact_auto',
       timestamp: '2026-09-14T08:00:00.000Z',
       date: TODAY,
     };
@@ -125,7 +126,7 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
     const first = restoreDose(med, 'd1', TODAY, now, [autoLog]);
     expect(first.ok).toBe(true);
     if (!first.ok) return;
-    expect(first.reversedLogId).toBe('auto-d1');
+    expect(first.reversedLogId).toBe(exactAutoLogId('med-1', 'd1', TODAY));
     expect(first.restoredAmount).toBe(2);
 
     // Simulate reversed auto + new manual take
@@ -152,7 +153,7 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
     if (!second.ok) return;
     expect(second.reversedLogId).toBe('take-d1');
     expect(second.restoredAmount).toBe(2);
-    expect(second.reversedLogId).not.toBe('auto-d1');
+    expect(second.reversedLogId).not.toBe(exactAutoLogId('med-1', 'd1', TODAY));
   });
 
   it('consumed marker without active deduction log fails closed (no stock, no invent)', () => {
@@ -202,11 +203,11 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
     });
     const logs: ConsumptionLog[] = [
       {
-        id: 'orphan-auto',
+        id: exactAutoLogId('med-1', 'd1', TODAY),
         medicationId: 'med-1',
         // no doseId — not valid occurrence evidence under #267
         amount: -2,
-        type: 'auto_daily',
+        type: 'exact_auto',
         timestamp: '2026-09-14T08:00:00.000Z',
         date: TODAY,
       },

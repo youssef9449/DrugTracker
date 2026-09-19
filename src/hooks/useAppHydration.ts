@@ -77,14 +77,14 @@ export function useAppHydration(setters: AppHydrationSetters): void {
     // explicitly saved" (loadJson returns []).
     const savedMedsRaw = localStorage.getItem(STORAGE_MEDS_KEY);
     const autoDeductPromptedRaw = localStorage.getItem(STORAGE_AUTO_DEDUCT_PROMPTED_KEY);
-    if (savedMedsRaw === null) {
-      // First-ever open: no saved meds. The seed data is a demo —
-      // flag it so the auto-deduction + alert + reminder effects
-      // don't fire ghost notifications/alarms for seed meds.
+    // First-ever open: no saved meds. Flag isFirstRun so scheduler effects
+    // stay gated until the user completes the Auto-Deduct decision.
+    // Do NOT open the prompt here — wait until hydrated=true (see finally).
+    const isFirstEverOpen = savedMedsRaw === null;
+    const shouldShowAutoDeductPrompt =
+      isFirstEverOpen && autoDeductPromptedRaw === null;
+    if (isFirstEverOpen) {
       setIsFirstRun(true);
-      if (autoDeductPromptedRaw === null) {
-        setIsAutoDeductPromptOpen(true);
-      }
     } else {
       // #15: accept an empty array here (don't gate on length > 0).
       // Otherwise, when the user deletes all medications, the persisted
@@ -221,7 +221,13 @@ export function useAppHydration(setters: AppHydrationSetters): void {
         console.warn('[App] Native bridge init failed:', err);
       }),
     ]).finally(() => {
+      // hydrated means storage + permissions + native bridge finished —
+      // not that onboarding completed.
       setHydrated(true);
+      // First-run Auto prompt is eligible only after hydration completes.
+      if (shouldShowAutoDeductPrompt) {
+        setIsAutoDeductPromptOpen(true);
+      }
     });
   }, []);
 

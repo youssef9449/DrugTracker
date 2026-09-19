@@ -62,7 +62,6 @@ import { persist } from './utils/storage';
 import { TOAST_MESSAGES, PERSIST_FAILURE_MESSAGES } from './constants/uiStrings';
 import {
   STORAGE_PHARMACY_KEY,
-  STORAGE_AUTO_DEDUCT_PROMPTED_KEY,
   SOUND_KEY,
   NOTIFICATIONS_KEY,
   FONT_SIZE_KEY,
@@ -103,6 +102,8 @@ export default function App() {
   // alarms for it. Set during hydration.
   const [isFirstRun, setIsFirstRun] = useState(false);
   const [isAutoDeductPromptOpen, setIsAutoDeductPromptOpen] = useState(false);
+  /** Stable ref so Android Back can invoke the same first-run decision path. */
+  const handleConfirmAutoDeductPromptRef = useRef<(enable: boolean) => void>(() => {});
 
   const [filter, setFilter] = useState<'all' | 'alerts' | 'sufficient'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -186,8 +187,9 @@ export default function App() {
         return true;
       }
       if (isAutoDeductPromptOpen) {
-        setIsAutoDeductPromptOpen(false);
-        persist(STORAGE_AUTO_DEDUCT_PROMPTED_KEY, 'true', { json: false });
+        // Same durable decision path as choosing "لا" — never mark prompted
+        // without a successful global Auto policy mutation.
+        handleConfirmAutoDeductPromptRef.current(false);
         return true;
       }
       if (isAddModalOpen) { setIsAddModalOpen(false); setEditingMedication(null); return true; }
@@ -458,6 +460,7 @@ export default function App() {
     setLogs,
     setGlobalAutoDeductEnabled,
     setIsAutoDeductPromptOpen,
+    setIsFirstRun,
     setNotificationsEnabled,
     setCriticalStockAlertsEnabled,
     setSelectDoseMed,
@@ -467,6 +470,9 @@ export default function App() {
     dismissAlarm,
     snoozeAlarm,
   });
+
+  handleConfirmAutoDeductPromptRef.current = handleConfirmAutoDeductPrompt;
+
 
   const {
     handleSavePharmacySettings,

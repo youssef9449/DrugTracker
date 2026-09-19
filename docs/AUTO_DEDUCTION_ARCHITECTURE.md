@@ -149,32 +149,6 @@ Outcomes include: `applied`, `already_applied`, `skipped_missing_med`, `skipped_
 
 ---
 
-## Exact-event historical settlement
-
-When applying an exact event on calendar date **D** for a gated medication, earlier unsettled days may still need folding into `currentPills`.
-
-**Rule:**
-
-```text
-Prior historical units =
-  days strictly after lastSyncDate
-  AND strictly before D
-  (historicalRangeDueUnits(lastSync, D))
-
-Then apply event.amount for the occurrence on D.
-```
-
-Equivalently: settle eligible history with **dates &lt; D**, then apply exact occurrence **D**.  
-**Not:** settle history with **dates ≤ D**, then apply **D** again.
-
-That exclusion of **D** prevents double-charging the same occurrence when `pastDueUnits` measured through “today” would already include day D.
-
-Days **before** D that are still due continue to participate. Same-day **sibling** doses on D are **not** auto-settled by this prior window.
-
-After folding prior units, `lastSyncDate` may advance only to the end of that prior window (day before D), not automatically to “today.”
-
----
-
 ## Multi-dose behavior and sibling isolation
 
 - Each slot has its own `doseId` and scheduled amount.

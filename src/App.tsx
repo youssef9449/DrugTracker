@@ -139,9 +139,11 @@ export default function App() {
   const [criticalAlarmResumeTick, setCriticalAlarmResumeTick] = useState(0);
   // Bumped on every app resume (appStateChange) so the dose-reminder
   // scheduler re-runs its CONSUMPTION SUPPRESSION: an already-consumed
-  // dose (lastConsumedDate === today) can never produce today's
-  // reminder, even if a previous suppression attempt failed while the
-  // process was backgrounded/killed. Mirrors criticalAlarmResumeTick.
+  // dose occurrence (per-dose markers for medId + doseId on today) can
+  // never produce today's reminder, even if a previous suppression
+  // attempt failed while the process was backgrounded/killed.
+  // Medication-level lastConsumedDate is not the source of truth here.
+  // Mirrors criticalAlarmResumeTick.
   const [doseAlarmResumeTick, setDoseAlarmResumeTick] = useState(0);
   // Bumped on EVERY app state transition (foreground ↔ background) so the
   // dose-reminder scheduler re-runs and re-arms all pending reminders on
@@ -561,8 +563,8 @@ export default function App() {
       .catch(() => void 0);
   };
 
-  // Consume-pill feature: manually consume a dose from the card.
-  // Subtracts dailyDose from currentPills, marks the med as consumed
+  // Consume-pill feature: manually consume a selected explicit dose from the card.
+  // Subtracts that dose's schedule amount from currentPills; marks the dose occurrence as consumed
 
   const {
     medicationsWithStatus,

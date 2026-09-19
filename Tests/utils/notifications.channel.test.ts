@@ -253,12 +253,6 @@ describe('doseId identity — preserved through scheduling', () => {
     expect(notif.extra.doseId).toBe(doseId);
   });
 
-  it('scheduleDoseReminder without a doseId omits it (legacy path)', async () => {
-    await scheduleDoseReminder('med-legacy', 'Test', '09:00', 1, 'قرص');
-    const notif = lastScheduledNotification();
-    expect(notif.extra.medicationId).toBe('med-legacy');
-    expect(notif.extra.doseId).toBeUndefined();
-  });
 
   it('the notification id matches doseReminderAlarmIdForDose for the same med+dose', async () => {
     const medId = 'med-id-match';

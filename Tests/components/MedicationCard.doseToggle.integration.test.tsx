@@ -48,24 +48,6 @@ import { getNextScheduledDose } from '@/utils/doseSchedule';
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
 
-function makeLegacy(overrides: Partial<Medication> = {}): Medication {
-  return {
-    id: 'med-legacy',
-    name: 'Legacy One Dose',
-    currentPills: 10,
-    dailyDose: 1,
-    unit: 'قرص',
-    warningThresholdDays: 5,
-    colorTag: 'teal',
-    createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: '2024-09-10',
-    autoDeductEnabled: false,
-    reminderEnabled: false,
-    reminderTime: '20:00',
-    ...overrides,
-  };
-}
-
 function makeSingle(overrides: Partial<Medication> = {}): Medication {
   return {
     id: 'med-single',
@@ -135,31 +117,6 @@ afterEach(() => {
 });
 
 describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
-  it('legacy: Take then Restore returns stock; second click is Restore not second Take', async () => {
-    localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeLegacy({ currentPills: 10 })]));
-    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
-
-    render(<App />);
-    await waitFor(() => expect(screen.getByText('Legacy One Dose')).toBeInTheDocument());
-
-    fireEvent.click(screen.getByTitle(/تناول جرعة/));
-    await waitFor(() => {
-      const med = readMeds().find((m) => m.id === 'med-legacy')!;
-      expect(med.lastConsumedDate).toBe(getTodayDateString());
-      expect(med.currentPills).toBe(9);
-    });
-
-    await waitFor(() => expect(screen.getByTitle(/استرجاع الجرعة/)).toBeInTheDocument());
-    fireEvent.click(screen.getByTitle(/استرجاع الجرعة/));
-
-    await waitFor(() => {
-      const med = readMeds().find((m) => m.id === 'med-legacy')!;
-      expect(med.currentPills).toBe(10);
-      const restoreLog = readLogs().find((l) => l.type === 'skipped_day');
-      expect(restoreLog?.amount).toBe(1);
-    });
-  });
-
   it('single-slot: Take and Restore use amount 2 not dailyDose 4', async () => {
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeSingle({ currentPills: 20 })]));
     localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));

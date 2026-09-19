@@ -220,17 +220,6 @@ describe('useDoseReminders', () => {
     expect(result.current.alarmingDoseId).toBe('d2');
   });
 
-  it('legacy openAlarm without doseId leaves alarmingDoseId null', () => {
-    const med = makeMed({ id: 'med-legacy-alarm' });
-    const { result } = renderHook(() =>
-      useDoseReminders(defaultOpts({ medications: [med] }))
-    );
-    act(() => {
-      result.current.openAlarm('med-legacy-alarm');
-    });
-    expect(result.current.alarmingMedication?.id).toBe('med-legacy-alarm');
-    expect(result.current.alarmingDoseId).toBeNull();
-  });
 
   describe('testAlarm', () => {
     it('opens the modal without writing FIRED_KEY', () => {

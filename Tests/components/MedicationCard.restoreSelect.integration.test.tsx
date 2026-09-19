@@ -112,30 +112,12 @@ function makeSingle(overrides: Partial<Medication> = {}): Medication {
   };
 }
 
-function makeLegacy(overrides: Partial<Medication> = {}): Medication {
-  return {
-    id: 'med-legacy',
-    name: 'Legacy Med',
-    currentPills: 15,
-    dailyDose: 2,
-    unit: 'قرص',
-    warningThresholdDays: 3,
-    colorTag: 'rose',
-    createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: TEST_DATE,
-    autoDeductEnabled: true,
-    reminderEnabled: false,
-    lastConsumedDate: TEST_DATE,
-    ...overrides,
-  };
-}
-
 async function clickCardManage(medId: string = MED_ID): Promise<void> {
   const btn = await screen.findByTestId(`manage-doses-${medId}`);
   fireEvent.click(btn);
 }
 
-/** Single-dose / legacy Card restore path — no manage modal, direct restore button. */
+/** Explicit single-slot Card restore path — no manage modal, direct restore button. */
 async function clickCardRestoreDirect(medId: string): Promise<void> {
   const btn = await screen.findByTestId(`restore-dose-${medId}`);
   fireEvent.click(btn);
@@ -362,30 +344,6 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
     });
   });
 
-  it('Test 6b — legacy single daily dose restores without selector', async () => {
-    localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeLegacy()]));
-    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
-
-    render(<App />);
-    await waitFor(() => {
-      expect(screen.getByText('Legacy Med')).toBeInTheDocument();
-    });
-
-    // Legacy card has no manage-doses button; it shows the per-dose manual
-    // Restore button directly.
-    expect(screen.queryByTestId('manage-doses-med-legacy')).not.toBeInTheDocument();
-    await clickCardRestoreDirect('med-legacy');
-
-    await waitFor(() => {
-      expect(screen.queryByText('اختر الإجراء المناسب لكل جرعة')).not.toBeInTheDocument();
-      // lastConsumedDate cleared by restore path for legacy via consume clear
-      const restores = readLogs().filter(
-        (l) => l.type === 'skipped_day' && l.medicationId === 'med-legacy'
-      );
-      expect(restores).toHaveLength(1);
-      expect(restores[0].amount).toBe(2);
-    });
-  });
 
   it('Test 7 — restored amount uses selectedDose.amount not dailyDose', async () => {
     // dailyDose=3, d1=1, d2=2 — select d2 → +2 only

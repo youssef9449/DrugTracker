@@ -31,33 +31,6 @@ function timeMinutes(t: string): number {
 }
 
 describe('doseSchedule helpers', () => {
-  // ── Legacy compatibility ──────────────────────────────────────────
-  it('maps legacy medication to a one-item schedule', () => {
-    const schedule = getDoseScheduleForUI({
-      dailyDose: 2,
-      reminderTime: '20:00',
-    });
-    expect(schedule).toHaveLength(1);
-    expect(schedule[0].amount).toBe(2);
-    expect(schedule[0].time).toBe('20:00');
-  });
-
-  it('uses 09:00 when legacy reminderTime is missing', () => {
-    const schedule = getDoseScheduleForUI({ dailyDose: 1 });
-    expect(schedule).toHaveLength(1);
-    expect(schedule[0].time).toBe('09:00');
-    expect(schedule[0].amount).toBe(1);
-  });
-
-  it('uses 09:00 when legacy reminderTime is invalid', () => {
-    const schedule = getDoseScheduleForUI({
-      dailyDose: 1,
-      reminderTime: 'not-a-time',
-    });
-    expect(schedule).toHaveLength(1);
-    expect(schedule[0].time).toBe('09:00');
-  });
-
   // ── Source of truth: doseSchedule.length ──────────────────────────
   it('prefers stored doseSchedule when present (ignores conflicting dosesPerDay)', () => {
     // Inconsistent: dosesPerDay=3 but only 2 schedule rows.

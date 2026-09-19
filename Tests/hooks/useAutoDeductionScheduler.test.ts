@@ -451,3 +451,53 @@ describe('scheduler transaction serialization (model)', () => {
     expect(state.alarms.get(key)?.version).toBe('A');
   });
 });
+
+describe('Exact Auto desired slots ignore reminder/dailyDose fields', () => {
+  it('dailyDose change does not alter desired Exact slots when doseSchedule is unchanged', () => {
+    const base = baseMed({
+      autoDeductEnabled: true,
+      dailyDose: 1,
+      doseSchedule: [{ id: 'd1', amount: 1, time: '20:00' }],
+    });
+    const slotsA = getAutoDeductionSlotsForDate(base, '2026-09-14');
+    const slotsB = getAutoDeductionSlotsForDate(
+      { ...base, dailyDose: base.dailyDose + 99 },
+      '2026-09-14'
+    );
+    expect(slotsA).toEqual(slotsB);
+    expect(slotsA).toHaveLength(1);
+    expect(slotsA[0].amount).toBe(1);
+  });
+
+  it('reminderTime change does not alter desired Exact slots when doseSchedule is unchanged', () => {
+    const base = baseMed({
+      autoDeductEnabled: true,
+      reminderTime: '20:00',
+      doseSchedule: [{ id: 'd1', amount: 1, time: '20:00' }],
+    });
+    const slotsA = getAutoDeductionSlotsForDate(base, '2026-09-14');
+    const slotsB = getAutoDeductionSlotsForDate(
+      {
+        ...base,
+        reminderTime: '21:00',
+        doseSchedule: [{ id: 'd1', amount: 1, time: '20:00' }],
+      },
+      '2026-09-14'
+    );
+    expect(slotsA).toEqual(slotsB);
+  });
+
+  it('reminderEnabled change does not alter desired Exact slots when doseSchedule is unchanged', () => {
+    const base = baseMed({
+      autoDeductEnabled: true,
+      reminderEnabled: true,
+      doseSchedule: [{ id: 'd1', amount: 1, time: '20:00' }],
+    });
+    const slotsA = getAutoDeductionSlotsForDate(base, '2026-09-14');
+    const slotsB = getAutoDeductionSlotsForDate(
+      { ...base, reminderEnabled: false },
+      '2026-09-14'
+    );
+    expect(slotsA).toEqual(slotsB);
+  });
+});

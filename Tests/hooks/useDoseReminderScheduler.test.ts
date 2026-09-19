@@ -416,8 +416,9 @@ describe('useDoseReminderScheduler — doseSignature (no unnecessary reschedule)
     const callsAfterMount = mocks.schedule.mock.calls.length;
     const cancelAfterMount = mocks.cancel.mock.calls.length;
 
+    // Only medication-level lastConsumedDate changes; per-dose markers unchanged.
     rerender({
-      medications: [{ ...med, doseConsumption: { d1: getTodayDateString() } }],
+      medications: [{ ...med, lastConsumedDate: getTodayDateString() }],
     });
     await Promise.resolve();
     await Promise.resolve();

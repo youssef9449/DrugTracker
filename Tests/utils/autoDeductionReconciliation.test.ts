@@ -978,7 +978,7 @@ describe('reconcileFiredEvents — invalid amount must not ACK', () => {
   });
 });
 
-describe('reconcileFiredEvents — applyExact failure must not ACK (P5-1)', () => {
+describe('reconcileFiredEvents — malformed identity is terminal ACK (#262 Finding 3)', () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-09-14T15:00:00'));
@@ -987,14 +987,57 @@ describe('reconcileFiredEvents — applyExact failure must not ACK (P5-1)', () =
     vi.useRealTimers();
   });
 
-  it('invalid_calendarDate apply failure: skipped_invalid, no ACK, no stock/log mutation', () => {
+  it('missing medicationId: no stock/log, skipped_invalid, ACK terminal', () => {
     const med = baseMed({
       currentPills: 10,
       lastSyncDate: '2026-09-13',
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     });
-    // Non-empty calendarDate passes reconcileFiredEvents gate, but length !== 10
-    // fails inside applyExactAutoEventToMedication (invalid_calendarDate).
+    const e = fired({
+      medicationId: '',
+      doseId: 'd1',
+      calendarDate: '2026-09-14',
+      amount: 2,
+    });
+    const r = reconcileFiredEvents([med], [], [e]);
+    expect(r.details[0].outcome).toBe('skipped_invalid');
+    expect(r.toAcknowledge).toEqual([
+      { medicationId: '', doseId: 'd1', calendarDate: '2026-09-14' },
+    ]);
+    expect(r.mutated).toBe(false);
+    expect(r.medications[0].currentPills).toBe(10);
+    expect(r.newExactLogs).toEqual([]);
+    expect(r.logs).toEqual([]);
+  });
+
+  it('missing calendarDate: no stock/log, skipped_invalid, ACK terminal', () => {
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      calendarDate: '',
+      amount: 2,
+    });
+    const r = reconcileFiredEvents([med], [], [e]);
+    expect(r.details[0].outcome).toBe('skipped_invalid');
+    expect(r.toAcknowledge).toEqual([
+      { medicationId: 'med-1', doseId: 'd1', calendarDate: '' },
+    ]);
+    expect(r.mutated).toBe(false);
+    expect(r.medications[0].currentPills).toBe(10);
+    expect(r.newExactLogs).toEqual([]);
+  });
+
+  it('malformed calendarDate (not YYYY-MM-DD): terminal ACK, no stock/log', () => {
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+    });
     const e = fired({
       medicationId: 'med-1',
       doseId: 'd1',
@@ -1002,28 +1045,46 @@ describe('reconcileFiredEvents — applyExact failure must not ACK (P5-1)', () =
       amount: 2,
     });
     const r = reconcileFiredEvents([med], [], [e]);
-    expect(r.details).toEqual([
-      expect.objectContaining({
-        medicationId: 'med-1',
-        doseId: 'd1',
-        outcome: 'skipped_invalid',
-      }),
+    expect(r.details[0].outcome).toBe('skipped_invalid');
+    expect(r.toAcknowledge).toEqual([
+      { medicationId: 'med-1', doseId: 'd1', calendarDate: 'bad-date' },
     ]);
-    expect(r.toAcknowledge).toEqual([]);
     expect(r.mutated).toBe(false);
     expect(r.medications[0].currentPills).toBe(10);
     expect(r.newExactLogs).toEqual([]);
     expect(r.logs).toEqual([]);
   });
 
-  it('invalid_calendarDate no-ACK does not poison later valid occurrence apply + ACK', () => {
-    // applyExact's only non-terminal public failure for a well-formed amount is
-    // invalid_calendarDate. Fixing the date changes occurrence identity
-    // (medicationId + doseId + calendarDate), so this is NOT same-occurrence retry.
-    // Same-occurrence retry for non-terminal failure is covered by the invalid
-    // amount suite (amount can be corrected without changing the occurrence key).
-    // Here we only assert: prior applyExact failure left no ACK / no mutation,
-    // and a subsequent distinct valid occurrence still applies exactly once.
+  it('second reconciliation of same malformed event does not mutate stock or add logs', () => {
+    const med = baseMed({
+      currentPills: 10,
+      lastSyncDate: '2026-09-13',
+      doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      calendarDate: 'bad-date',
+      amount: 2,
+    });
+    const r1 = reconcileFiredEvents([med], [], [e]);
+    expect(r1.toAcknowledge).toHaveLength(1);
+    expect(r1.medications[0].currentPills).toBe(10);
+
+    // Simulate native still listing the same malformed payload before ACK lands
+    const r2 = reconcileFiredEvents(r1.medications, r1.logs, [e]);
+    expect(r2.details[0].outcome).toBe('skipped_invalid');
+    expect(r2.toAcknowledge).toEqual([
+      { medicationId: 'med-1', doseId: 'd1', calendarDate: 'bad-date' },
+    ]);
+    expect(r2.mutated).toBe(false);
+    expect(r2.medications[0].currentPills).toBe(10);
+    expect(r2.newExactLogs).toEqual([]);
+    expect(r2.logs).toEqual([]);
+  });
+
+  it('malformed identity terminal ACK does not block a distinct valid occurrence', () => {
+    // Fixing calendarDate changes occurrence identity — not same-occurrence retry.
     const med = baseMed({
       currentPills: 10,
       lastSyncDate: '2026-09-13',
@@ -1036,11 +1097,10 @@ describe('reconcileFiredEvents — applyExact failure must not ACK (P5-1)', () =
       amount: 2,
     });
     const r1 = reconcileFiredEvents([med], [], [invalid]);
-    expect(r1.details[0].outcome).toBe('skipped_invalid');
-    expect(r1.toAcknowledge).toEqual([]);
+    expect(r1.toAcknowledge).toEqual([
+      { medicationId: 'med-1', doseId: 'd1', calendarDate: 'bad-date' },
+    ]);
     expect(r1.medications[0].currentPills).toBe(10);
-    expect(r1.newExactLogs).toEqual([]);
-    expect(r1.logs).toEqual([]);
 
     const valid = fired({
       medicationId: 'med-1',
@@ -1058,4 +1118,8 @@ describe('reconcileFiredEvents — applyExact failure must not ACK (P5-1)', () =
       { medicationId: 'med-1', doseId: 'd1', calendarDate: '2026-09-14' },
     ]);
   });
+});
+
+describe('reconcileFiredEvents — invalid amount remains retryable (not terminal)', () => {
+  // Existing suite below keeps invalid-amount no-ACK behavior.
 });

@@ -20,7 +20,59 @@ Native `AlarmManager.setExactAndAllowWhileIdle` one-shot per occurrence (`AutoDe
 
 Occurrence identity: `medicationId + doseId + calendarDate` (`AutoDeductionContract`). Boot / timezone / permission restore: `AutoDeductionSystemReceiver` + `AutoDeductionScheduler.restoreFutureSchedules`.
 
-## Validation environment — attempt of 2026-09-18
+## Validation run of 2026-09-19 — successful (real Android runtime)
+
+### Device & environment
+
+| Field | Value |
+| ----- | ----- |
+| Date | 2026-09-19 (guest/device clock = UTC) |
+| Device | Android emulator `emulator-5554`, headless (`-no-window`) |
+| Android version / API | **Android 11 / API 30**, AOSP `system-images;android-30;default;x86_64` |
+| Emulator | **37.1.11.0** (build 15917651), pure-software CPU emulation (`-no-accel`, no KVM available on host), SwiftShader GPU, 720x1280 |
+| App build | `fix/phase5-failed-exact-auto-no-ack` @ `ec22bb1` + docs-only `f56990c`; web assets = unmodified `vite build` of that tree |
+| APK | `app-debug.apk` (debug, Capacitor 6), installed via `adb install -r` |
+| Package | `app.drugtracker` |
+| Build tooling | non-npm per task constraints: `bun install`/`bun run build` (vite), `bun x cap add/sync android`, `bun scripts/prepare-android.mjs`, `gradlew assembleDebug` on a local JDK 17 |
+| Test medication | `med-1789782413984` "P52 ExactAuto", Auto Deduct ON, 50 pills stock, dose amount 1, created through the real UI (DOM-driven via WebView CDP — no production hooks) |
+| Verification channels | native SharedPreferences via root `adb` (`sch:`/`evt:`/pending/fire-retry stores), `dumpsys alarm`, `logcat` (`AutoDeduction*` tags), WebView CDP (`localStorage` meds/logs) |
+
+**Build-time disclosure (finding F-2):** the repo tree at `ec22bb1` does **not compile** — `javac` fails on `native-android/auto-deduction/AutoDeductionScheduler.java:1219` (`'try' without 'catch', 'finally' or resource declarations`, introduced by `6977e83`, present in `main`). The **locally generated** (gitignored) android project received one minimal syntax repair before `assembleDebug`: the dangling outer `try {` in the fire-retry setup was closed with `} catch (Exception e) { Log.e(TAG, "fire retry scheduling failed (setup)", e); return false; }` — the method's own documented fail-closed contract. This changes no behaviour on any path exercised below (all fires succeeded on the first attempt; the retry path never triggered). The repository files themselves are untouched; the fix must land as its own production commit (see Findings).
+
+### Results matrix (all values observed on-device)
+
+| Scenario | Scheduled (device clock) | Fired | FIRED persisted | Stock deducted | Log count | RECONCILED | Result |
+| -------- | ------------------------ | ----- | --------------- | -------------- | --------- | ---------- | ------ |
+| 1. Foreground exact fire | 02:50:00.000 | 02:50:00.126 (**+126 ms**) | yes (`evt:` row) | 50 → 49 (once) | 1 | yes, 02:50:01.364 | **PASS** |
+| 2. Background (process alive) | 03:05:00.000 | 03:05:00.071 (**+71 ms**, HOME before fire) | yes | 49 → 48 (once) | 1 (total 2) | yes, 03:06:11.561 — after a single app resume; JS does not reconcile while backgrounded (no polling, by design) | **PASS** |
+| 3. Killed / cold process | 03:15:00.000 | 03:15:00 in a **fresh process** (app `kill`-ed at 03:08; new pid started by the delivery) | yes | 48 → 47 (once) | 1 (total 3) | yes, on cold-start launch reconciliation | **PASS** |
+| 4. Multiple exact occurrences | 02:50 / 03:05 / 03:15 / 04:05 (4 independent dose identities, one medication) | each fired at its own time | yes (4 `evt:` keys) | −1 each, never twice (50 → 46) | 4 deterministic `exact-auto:…` ids | yes, all 4 | **PASS** |
+| 5. Reboot recovery | 04:05:00.000 (scheduled pre-reboot) | 04:05:00.388 (**+388 ms**) after a real `adb reboot` at 03:18 | yes | 47 → 46 (once) | 1 (total 4) | yes | **PASS** — schedule presence alone was not counted; the fire after reboot is proven |
+| 6. Exact-alarm permission recovery | — | — | — | — | — | — | **BLOCKED — API 30 limitation**: `appops set … SCHEDULE_EXACT_ALARM deny` → `Error: Unknown operation string` (the appop exists only on API 31+). Manifest declares the permission and `SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED`; the granted-side behaviour is exercised by every other scenario | **NOT EXECUTABLE on API 30** |
+| 7. Duplicate FIRED delivery | same occurrence re-delivered (same identity re-armed through the production `scheduleOccurrence` contract; past trigger fires immediately) | re-delivery observed | `insertFiredIfAbsent` → no second `evt:` row (terminal RECONCILED kept) | **no** change (stayed 47 with 3 logs at the time of the test) | unchanged | state unchanged | **PASS** |
+
+### Per-scenario records
+
+**Scenario 1 — foreground.** Medication created through the real add-medication UI (dose 02:50). Native evidence: `drugtracker_auto_deduction_schedules_v1.xml` holds `sch:med␟dose␟2026-09-19` with `scheduledAtEpochMs=1789786200000` + `recurrenceGeneration=3`, plus the D+1 successor for 2026-09-20; `dumpsys alarm` shows the one-shot `RTC_WAKEUP … app.drugtracker.action.AUTO_DEDUCTION` with `flags=0x5`. Fire: `evt:` row `createdAtEpochMs=1789786200126`. Reconcile: `reconciledAtEpochMs=1789786201364`, `currentPills 50→49`, single log id `exact-auto:med-1789782413984:dose-1789782319393-knem8jbq:2026-09-19` (amount −1, source `auto_daily`).
+
+**Scenario 2 — background.** Dose 2 added via the edit UI (03:05). App sent HOME before delivery (`mResumedActivity = launcher`). Fire in background: `createdAtEpochMs=1789787100071`, status `FIRED`, `reconciledAtEpochMs=null` — reconciliation did **not** run while backgrounded (matches the design: "Not polling: hydrate/resume/midnight triggers only"). One `am start` resume → `RECONCILED` at 1789787171561, stock 49→48, log total 2.
+
+**Scenario 3 — killed process.** Dose 3 added (03:15). Process killed via root `kill` (`am kill` refused — activity in recents; `force-stop` would cancel alarms and is not equivalent). After the kill: `pidof` empty, `dumpsys alarm` still held the 03:15 alarm plus the D+1 chain. At 03:15 the delivery started a **fresh process** (new pid 5909) which persisted FIRED. Launching the app afterwards reconciled on cold start: stock 48→47, log total 3, event `RECONCILED`.
+
+**Scenario 4 — multiple occurrences.** Covered by doses 1–4 above: four independent identities (`med␟doseN␟2026-09-19`), each fired at its own wall time, exactly one deduction each (50→49→48→47→46), log count == successful occurrences == 4, every event `RECONCILED`, no duplicate deduction at any point.
+
+**Scenario 5 — reboot.** Dose 4 scheduled for 04:05 (2 `sch:` rows pre-reboot; 7 `AUTO_DEDUCTION` alarms registered). `adb reboot` at 03:18:45. After boot (`sys.boot_completed=1`): 5 `AUTO_DEDUCTION` alarms re-registered by `AutoDeductionSystemReceiver` (`BOOT_COMPLETED` → restore) — 04:05 today + the 4 D+1 successors. The receiver log lines themselves were evicted from the rotated logcat buffer; the restored `dumpsys alarm` state is the functional proof (nothing else re-registers alarms after boot). Fire at 04:05:00.388 → `AutoDeductionReceiver: FIRED event persisted` → launch → reconcile → stock 47→46, log total 4, `RECONCILED`.
+
+**Scenario 7 — duplicate delivery.** The same occurrence (dose 1, terminal RECONCILED) was re-delivered through the production contract (`scheduleOccurrence` with the identical identity/ownership tokens and a past trigger — AlarmManager delivers immediately). Result: no second `evt:` row, no stock change (47 stayed 47), no new log. Idempotency layers (`insertFiredIfAbsent` keying + deterministic log id + durable stock gate) held.
+
+### Findings from the 2026-09-19 run
+
+1. **F-1 (critical, production): `isFirstRun` is never reset — exact scheduling is dead for the entire first session after a fresh install.** `src/hooks/useAppHydration.ts:84` sets `setIsFirstRun(true)` when no meds key exists; no code path ever sets it back to `false`. `useAutoDeductionScheduler`'s effect (`useAutoDeductionScheduler.ts:300`) gates on `!hydrated || isFirstRun`, and `useStockAlerts` gates on `isFirstRun` as well. Observed on-device: the medication created in the first session produced **zero** native calls (`scheduleOccurrence`/`restoreFutureSchedules`/`listScheduledOccurrences` absent from the Capacitor bridge log for ~12 minutes despite a future dose time), while the same state change after an app restart scheduled immediately. The intent of the flag is to suppress ghost alarms for seed data on first run, but as written it disables the whole exact-auto scheduler for the first session of every real install; a user's first medication never schedules until the app is restarted (restart clears the flag because the meds key now exists). Record only — **no production change made in this task**.
+2. **F-2 (critical, production): the tree does not compile.** `AutoDeductionScheduler.java:1219` dangling `try` (commit `6977e83`, already in `main`). `compileDebugJavaWithJavac` fails; no APK can be built from `main`/PR #263 as-is. The local build for this validation required the minimal documented repair above.
+3. **F-3 (environment): scenario 6 is not executable on API 30** (no `SCHEDULE_EXACT_ALARM` appop; revocation UI exists from API 31). Retest on an API 31+ image.
+4. No runtime failures were observed in any exercised path: fire precision was 71–388 ms across foreground/background/cold-process/post-reboot deliveries; exactly-once deduction and deterministic single-log behaviour held in all cases including duplicate delivery.
+
+## Validation environment — attempt of 2026-09-18 (superseded by the run above; kept as the record of the blocked first attempt)
 
 | Field | Value |
 | ----- | ----- |
@@ -60,7 +112,7 @@ Occurrence identity: `medicationId + doseId + calendarDate` (`AutoDeductionContr
 
 **Consequence: scenarios 1–7 are BLOCKED / NOT EXECUTED in this environment.** No row below may be read as PASS. This mirrors the honesty rule of `docs/ANDROID_NOTIFICATION_RUNTIME_VALIDATION.md`: *"If no emulator/device/adb is available, mark the entire runtime section BLOCKED / NOT EXECUTED."*
 
-## Scenario matrix (2026-09-18 attempt)
+## Scenario matrix (2026-09-18 attempt — superseded, all rows NOT EXECUTED)
 
 `Scheduled` / `Fired` columns would carry the actual device clock times observed during a real run; no clock times exist for this attempt.
 

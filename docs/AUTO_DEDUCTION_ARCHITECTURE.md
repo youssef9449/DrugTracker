@@ -331,7 +331,7 @@ After an exact occurrence is applied, markers remove that slot from due helpers 
 
 **Repository:** Architecture and key invariants are covered by repository unit tests and static review of the implementation. **This documentation change does not execute those tests and does not alter production code.**
 
-**Android runtime / emulator / device:** End-to-end validation of AlarmManager fire → FIRED → cold start → single stock apply → RECONCILED under real device conditions remains **unverified in the environment used for this documentation work**. Do not treat the pipeline as field-proven on hardware until that validation is performed and recorded separately. The dedicated runtime-validation record is `docs/EXACT_AUTO_RUNTIME_VALIDATION.md`; its 2026-09-18 attempt is recorded there as **BLOCKED (no Android runtime available — see the recorded evidence and reproducible procedures)**.
+**Android runtime / emulator / device:** End-to-end validation of AlarmManager fire → FIRED → cold start → single stock apply → RECONCILED under real device conditions is recorded in the dedicated runtime-validation record `docs/EXACT_AUTO_RUNTIME_VALIDATION.md`. The 2026-09-19 run executed on a real Android 11 (API 30) emulator: scenarios 1–5 and 7 **PASS** with 71–388 ms fire precision, exactly-once deduction, and deterministic single logs; scenario 6 (permission revoke/re-grant) is not executable on API 30; findings F-1 (`isFirstRun` never reset — first-session scheduling dead) and F-2 (tree does not compile, dangling `try` in `AutoDeductionScheduler.java:1219`) are recorded there and must be fixed in their own production commits.
 
 ---
 

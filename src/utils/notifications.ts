@@ -1009,7 +1009,7 @@ export function doseReminderAlarmIdForDose(
  */
 export async function isDoseReminderPending(
   medId: string,
-  doseId: string = ''
+  doseId: string
 ): Promise<boolean> {
   if (!isNativePlatform()) return false;
   try {
@@ -1050,16 +1050,15 @@ export async function isDoseReminderPending(
  */
 export async function isNativeDoseReminderReArmed(
   medId: string,
-  doseId: string = '',
+  doseId: string,
   reminderTime?: string
 ): Promise<boolean> {
   if (!isNativePlatform()) return false;
+  const id = typeof doseId === 'string' ? doseId.trim() : '';
+  if (!id) return false;
   if (!reminderTime || reminderTime.indexOf(':') < 0) return false;
   try {
-    const opts =
-      doseId
-        ? { medicationId: medId, doseId, reminderTime }
-        : { medicationId: medId, reminderTime };
+    const opts = { medicationId: medId, doseId: id, reminderTime };
     const result = await DoseReminderNative.getNextOccurrence(opts);
     return result?.valid === true;
   } catch (err) {
@@ -1074,14 +1073,13 @@ export async function isNativeDoseReminderReArmed(
  */
 export async function clearNativeDoseReminderReArm(
   medId: string,
-  doseId: string = ''
+  doseId: string
 ): Promise<void> {
   if (!isNativePlatform()) return;
+  const id = typeof doseId === 'string' ? doseId.trim() : '';
+  if (!id) return;
   try {
-    const opts =
-      doseId
-        ? { medicationId: medId, doseId }
-        : { medicationId: medId };
+    const opts = { medicationId: medId, doseId: id };
     await DoseReminderNative.clearReArm(opts);
   } catch (err) {
     console.warn('[notifications] clearNativeDoseReminderReArm failed:', err);
@@ -1338,8 +1336,9 @@ export async function scheduleDoseReminder(
   medId: string,
   medName: string,
   reminderTime: string,
-  dailyDose: number,
+  doseAmount: number,
   unit: string,
+  doseId: string,
   options?: ScheduleDoseReminderOptions,
 ): Promise<void> {
   // Validate the HH:MM string and compute the next fire Date.
@@ -1358,13 +1357,15 @@ export async function scheduleDoseReminder(
     fireToday.setDate(fireToday.getDate() + 1);
   }
 
+  const id = typeof doseId === 'string' ? doseId.trim() : '';
+  if (!id) return;
+  if (!(Number(doseAmount) > 0)) return;
+  const notifId = doseReminderAlarmIdForDose(medId, id);
+  if (notifId == null) return;
+
   const title = `⏰ حان موعد دواء: ${medName}`;
   // Display 12h for the user; reminderTime stays 24h for schedule + extra.
-  const body = `موعد الجرعة الساعة ${formatReminderTime12h(reminderTime)}. جرعتك المقررة: ${dailyDose} ${unit}.`;
-  const doseId = typeof options?.doseId === 'string' ? options.doseId.trim() : '';
-  // Issue #268: explicit doseSchedule slot id required — no med-only / legacy id.
-  if (!doseId) return;
-  const notifId = doseReminderAlarmIdForDose(medId, doseId);
+  const body = `موعد الجرعة الساعة ${formatReminderTime12h(reminderTime)}. جرعتك المقررة: ${doseAmount} ${unit}.`;
 
   if (isNativePlatform()) {
     try {
@@ -1398,9 +1399,7 @@ export async function scheduleDoseReminder(
             autoCancel: true,
             extra: {
               medicationId: medId,
-              // Phase 3/4: doseId identifies the exact schedule slot for
-              // openAlarm / take-dose (legacy omits doseId).
-              ...(doseId ? { doseId } : {}),
+              doseId: id,
               reminderTime,
               doseRecurring: true,
             },

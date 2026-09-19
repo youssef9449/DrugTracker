@@ -322,14 +322,10 @@ export function useDoseReminderScheduler({
           if (doseGenerationRef.current.get(key) !== gen) return;
           if (nativeReArmed) return;
           const opts = {
-            ...(doseId ? { doseId } : {}),
             ...(slotConsumedToday ? { skipToday: true as const } : {}),
             ...(isAutoActive ? { autoDeductEnabled: true } : {}),
           };
-          const hasOpts = Object.keys(opts).length > 0;
-          await (hasOpts
-            ? scheduleDoseReminder(medId, name, time, amount, unit, opts)
-            : scheduleDoseReminder(medId, name, time, amount, unit));
+          await scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts);
           if (doseGenerationRef.current.get(key) !== gen) {
             await cancelDoseReminder(medId, doseId);
             return;
@@ -344,14 +340,10 @@ export function useDoseReminderScheduler({
         cancelDoseReminder(medId, doseId).then(async () => {
           if (doseGenerationRef.current.get(key) !== gen) return;
           const opts = {
-            ...(doseId ? { doseId } : {}),
             ...(slotConsumedToday ? { skipToday: true as const } : {}),
             ...(isAutoActive ? { autoDeductEnabled: true } : {}),
           };
-          const hasOpts = Object.keys(opts).length > 0;
-          await (hasOpts
-            ? scheduleDoseReminder(medId, name, time, amount, unit, opts)
-            : scheduleDoseReminder(medId, name, time, amount, unit));
+          await scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts);
           if (doseGenerationRef.current.get(key) !== gen) {
             await cancelDoseReminder(medId, doseId);
             return;
@@ -463,11 +455,10 @@ export function useDoseReminderScheduler({
                 if (doseGenerationRef.current.get(key) !== gen) return;
                 const isAutoActive = med.autoDeductEnabled !== false;
                 const opts = {
-                  ...(doseId ? { doseId } : {}),
                   skipToday: true as const,
                   ...(isAutoActive ? { autoDeductEnabled: true } : {}),
                 };
-                return scheduleDoseReminder(medId, name, time, amount, unit, opts).then(
+                return scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts).then(
                   () => {
                     if (doseGenerationRef.current.get(key) !== gen) {
                       return cancelDoseReminder(medId, doseId);
@@ -490,15 +481,9 @@ export function useDoseReminderScheduler({
               if (doseGenerationRef.current.get(key) !== gen) return;
               const isAutoActive = med.autoDeductEnabled !== false;
               const opts = {
-                ...(doseId ? { doseId } : {}),
                 ...(isAutoActive ? { autoDeductEnabled: true } : {}),
               };
-              const hasOpts = Object.keys(opts).length > 0;
-              return (
-                hasOpts
-                  ? scheduleDoseReminder(medId, name, time, amount, unit, opts)
-                  : scheduleDoseReminder(medId, name, time, amount, unit)
-              ).then(() => {
+              return scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts).then(() => {
                 if (doseGenerationRef.current.get(key) !== gen) {
                   return cancelDoseReminder(medId, doseId);
                 }

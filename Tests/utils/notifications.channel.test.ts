@@ -41,7 +41,6 @@ import {
   scheduleSnoozedDoseReminder,
   cancelDoseReminder,
   doseReminderAlarmIdForDose,
-  LEGACY_DOSE_ID,
 } from '@/utils/notifications';
 
 beforeEach(() => {
@@ -268,14 +267,6 @@ describe('doseId identity — preserved through scheduling', () => {
     await scheduleDoseReminder(medId, 'Test', '09:00', 1, 'قرص', { doseId });
     expect(lastScheduledNotification().id).toBe(
       doseReminderAlarmIdForDose(medId, doseId)
-    );
-  });
-
-  it('legacy dose id produces the med-only notification id', async () => {
-    const medId = 'med-legacy-id';
-    await scheduleDoseReminder(medId, 'Test', '09:00', 1, 'قرص');
-    expect(lastScheduledNotification().id).toBe(
-      doseReminderAlarmIdForDose(medId, LEGACY_DOSE_ID)
     );
   });
 });

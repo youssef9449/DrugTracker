@@ -3,7 +3,6 @@ import {
   effectiveCurrentPills,
   countDueAutoDoses,
   computeDueDoseBreakdown,
-  syncAutoDailyDeductions,
   settleDoseChange,
   settleAutoDeductToggle,
 } from '@/utils/dateCalculations';
@@ -114,34 +113,27 @@ describe('reminderTime-gated auto-deduction timing', () => {
   it('app closed before reminderTime, opened after: today dose is due (reflected in the live balance)', () => {
     const now = at('2026-09-11T21:00:00Z'); // opened at 21:00 (> 20:00)
     const med = makeRemindedMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2026-09-10' });
-    // The live balance reflects the now-due dose.
+    // The live balance reflects the now-due dose. The legacy day-based
+    // catch-up that used to settle today's dose on app-open was removed
+    // (Issue #268 / PR #271); today's dose stays a dynamic projection
+    // (effectiveCurrentPills) until a manual Take or an Exact FIRED
+    // occurrence settles it. The snapshot is not reduced, but the live
+    // balance is correct.
     expect(countDueAutoDoses(med, now, '2026-09-11')).toBe(1);
     expect(effectiveCurrentPills(med, '2026-09-11', now)).toBe(28);
-
-    // sync on open settles ONLY past days (there are none here: betweenDays
-    // = 0); today's dose stays dynamic and is settled at the next existing
-    // execution point (a later mutation, or the next app-open sync) — NOT
-    // automatically at the calendar-day boundary. The snapshot is not yet
-    // reduced, but the live balance (effectiveCurrentPills) is correct.
-    const result = syncAutoDailyDeductions([med], '2026-09-11', now);
-    expect(result.updatedMeds[0].currentPills).toBe(30); // today NOT settled by sync
-    expect(result.newLogs).toHaveLength(0); // nothing past to settle
-    expect(effectiveCurrentPills(result.updatedMeds[0], '2026-09-11', now)).toBe(28);
+    expect(med.currentPills).toBe(30); // snapshot unchanged (no auto settlement)
   });
 
-  it('app closed before reminderTime, opened after: the due dose is settled when sync next runs (next app open)', () => {
-    // Continuation of the above: the dose that became due is not lost —
-    // it is settled when syncAutoDailyDeductions next runs (e.g. on the
-    // next app open) and treats it as a fully-elapsed past day. There is
-    // no automatic midnight settlement while the app stays open.
+  it('app closed before reminderTime, opened after: the past day stays reflected in the live balance (not lost)', () => {
+    // The dose that became due is not lost — it stays reflected in the live
+    // balance (effectiveCurrentPills) the next day. There is no automatic
+    // day-based settlement; a later mutation (refill / dose-change / toggle)
+    // or an Exact FIRED occurrence settles it.
     const med = makeRemindedMed({ currentPills: 30, dailyDose: 2, lastSyncDate: '2026-09-10' });
     const now = at('2026-09-12T15:00:00Z'); // next day at 15:00 (< 20:00)
-    const result = syncAutoDailyDeductions([med], '2026-09-12', now);
-    // 2026-09-11 (fully elapsed) settled; 2026-09-12 (today, < 20:00) not.
-    expect(result.updatedMeds[0].currentPills).toBe(28); // 30 - 1*2
-    expect(result.updatedMeds[0].lastSyncDate).toBe('2026-09-11'); // yesterday
-    expect(result.newLogs).toHaveLength(1);
-    expect(result.newLogs[0].amount).toBe(-2);
+    // 2026-09-11 (fully elapsed) due; 2026-09-12 (today, < 20:00) not due yet.
+    expect(countDueAutoDoses(med, now, '2026-09-12')).toBe(1);
+    expect(effectiveCurrentPills(med, '2026-09-12', now)).toBe(28);
   });
 
   // ─── 7. app closed a full day, open before next day's reminderTime ─
@@ -151,15 +143,11 @@ describe('reminderTime-gated auto-deduction timing', () => {
     // Live balance: 09-11 (fully elapsed) due, 09-12 (today, before 20:00) NOT due.
     expect(countDueAutoDoses(med, now, '2026-09-12')).toBe(1);
     expect(effectiveCurrentPills(med, '2026-09-12', now)).toBe(28);
-    // sync settles 09-11 only.
-    const result = syncAutoDailyDeductions([med], '2026-09-12', now);
-    expect(result.updatedMeds[0].currentPills).toBe(28);
-    expect(result.updatedMeds[0].lastSyncDate).toBe('2026-09-11');
-    // After sync, today (09-12, before 20:00) is still NOT due.
-    expect(effectiveCurrentPills(result.updatedMeds[0], '2026-09-12', now)).toBe(28);
+    // Snapshot unchanged (no auto day-based settlement).
+    expect(med.currentPills).toBe(30);
     // …but at 20:00 today's dose becomes due (projected, not yet settled).
     const nowAtTime = at('2026-09-12T20:00:00Z');
-    expect(effectiveCurrentPills(result.updatedMeds[0], '2026-09-12', nowAtTime)).toBe(26);
+    expect(effectiveCurrentPills(med, '2026-09-12', nowAtTime)).toBe(26);
   });
 
   // ─── 8. app closed several days → count by times, not calendar days ─
@@ -170,9 +158,6 @@ describe('reminderTime-gated auto-deduction timing', () => {
     // (fully elapsed), 09-13 NOT due (before 20:00) → 2 doses, not 3.
     expect(countDueAutoDoses(med, now, '2026-09-13')).toBe(2);
     expect(effectiveCurrentPills(med, '2026-09-13', now)).toBe(26); // 30 - 2*2
-    const result = syncAutoDailyDeductions([med], '2026-09-13', now);
-    expect(result.updatedMeds[0].currentPills).toBe(26);
-    expect(result.updatedMeds[0].lastSyncDate).toBe('2026-09-12');
   });
 
   it('app closed several days, opened after today reminderTime: today also due', () => {
@@ -334,20 +319,20 @@ describe('reminderTime-gated auto-deduction timing', () => {
   });
 
   // ─── already-consumed-today guard (gated) ──────────────────────────
-  it('sync skips a gated med already consumed today (no double-deduction)', () => {
+  it('a gated med already consumed today is not double-deducted (no auto settlement on top)', () => {
     const now = at('2026-09-11T21:00:00Z'); // after reminderTime
     // The user manually consumed today (lastConsumedDate = today); the
-    // manual consume already settled the snapshot.
+    // manual consume already settled the snapshot. The legacy day-based
+    // catch-up that could have re-charged was removed (Issue #268 / PR #271),
+    // so no automatic deduction runs on top — the snapshot stays settled.
     const med = makeRemindedMed({
       currentPills: 28, // 30 - 2 (already deducted by the manual consume)
       dailyDose: 2,
       lastSyncDate: '2026-09-11',
       lastConsumedDate: '2026-09-11',
     });
-    const result = syncAutoDailyDeductions([med], '2026-09-11', now);
-    expect(result.updatedMeds[0].currentPills).toBe(28); // unchanged
-    expect(result.newLogs).toHaveLength(0);
-    expect(effectiveCurrentPills(result.updatedMeds[0], '2026-09-11', now)).toBe(28);
+    expect(med.currentPills).toBe(28); // unchanged (no auto settlement)
+    expect(effectiveCurrentPills(med, '2026-09-11', now)).toBe(28);
   });
 });
 
@@ -491,10 +476,10 @@ describe('same-day lastSyncDate === today (reminderTime-gated)', () => {
     // betweenDays = 2 (09-11, 09-12); today (09-13) NOT due (before 20:00).
     expect(countDueAutoDoses(med, now, '2026-09-13')).toBe(2);
     expect(effectiveCurrentPills(med, '2026-09-13', now)).toBe(26); // 30 - 2*2
-    // sync settles the 2 past days.
-    const result = syncAutoDailyDeductions([med], '2026-09-13', now);
-    expect(result.updatedMeds[0].currentPills).toBe(26);
-    expect(result.updatedMeds[0].lastSyncDate).toBe('2026-09-12'); // yesterday
+    // The live balance reflects the 2 past days (effectiveCurrentPills). The
+    // legacy day-based catch-up that used to settle them into the snapshot
+    // was removed (Issue #268 / PR #271); the snapshot is not auto-reduced.
+    expect(med.currentPills).toBe(30);
   });
 
   it('multi-day regression: past days + today (after reminderTime)', () => {

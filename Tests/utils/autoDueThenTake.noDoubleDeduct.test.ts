@@ -9,15 +9,16 @@
  *   In-app: DoseAlarmModal onTakeDose → same handleTakeDoseFromAlarm
  *
  * Architecture (gated multi-dose — always gated when doseSchedule exists):
- *   - syncAutoDailyDeductions settles ONLY fully-elapsed **past** days
- *     (pastDueUnits). Today's slots stay dynamic projection via
- *     effectiveCurrentPills / todayDueUnits until consumeDose settles them.
+ *   - The legacy day-based catch-up (syncAutoDailyDeductions) was removed in
+ *     Issue #268 / PR #271. Today's slots stay a dynamic projection via
+ *     effectiveCurrentPills / todayDueUnits until consumeDose (manual Take) or
+ *     an Exact FIRED occurrence settles them.
  *   - Therefore "actual auto snapshot settlement of **today's** d1, then
  *     same-day Take of d1" is **impossible by design** — not a missing
  *     test, a production boundary. Same-day due is projection-only.
- *   - Actual auto settlement CAN occur for historical past days; Take
- *     always targets **today's** identity, so it must not re-apply past
- *     auto units and must not invent a second charge for today's slot.
+ *   - Take always targets **today's** identity, so it must not invent a
+ *     second charge for today's slot (the durable per-dose consume marker
+ *     prevents a second Take).
  *
  * Scenario (product request):
  *   med-1: d1@08:00 amount 1, d2@20:00 amount 2
@@ -26,7 +27,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   effectiveCurrentPills,
-  syncAutoDailyDeductions,
   computeDueDoseBreakdown,
   isDoseConsumedOnDate,
   todayDueUnits,
@@ -35,7 +35,6 @@ import { consumeDose } from '@/utils/medActions';
 import type { Medication, ConsumptionLog } from '@/types';
 
 const TODAY = '2024-09-12';
-const YESTERDAY = '2024-09-11';
 const NOW_AFTER_D1 = new Date('2024-09-12T09:00:00');
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
@@ -82,10 +81,14 @@ afterEach(() => {
 });
 
 describe('Architecture boundary: same-day multi is projection-only', () => {
-  it('syncAutoDailyDeductions does NOT settle today d1 into currentPills (gated multi)', () => {
+  it('today d1 is projection-only (effectiveCurrentPills), NOT settled into currentPills (gated multi)', () => {
     // Documents why "actual auto-deduct of today's d1 then Take" cannot
-    // occur: dueUnits for gated = pastDueUnits only; same-day lastSync
-    // → betweenDays 0 → no snapshot change.
+    // double-deduct: for a gated multi med, today's dose is a dynamic
+    // projection (effectiveCurrentPills / todayDueUnits) and is NOT
+    // settled into the durable snapshot at the calendar-day boundary.
+    // (The legacy day-based catch-up that used to settle today's dose on
+    // app-open was removed in Issue #268 / PR #271; today's dose is
+    // settled only by a manual Take or an Exact FIRED occurrence.)
     const med = makeMed({ currentPills: 30, lastSyncDate: TODAY });
     const now = NOW_AFTER_D1;
 
@@ -96,12 +99,7 @@ describe('Architecture boundary: same-day multi is projection-only', () => {
     expect(before.fullDueUnits).toBe(1);
     expect(med.currentPills).toBe(30);
     expect(effectiveCurrentPills(med, TODAY, now)).toBe(29);
-
-    const sync = syncAutoDailyDeductions([med], TODAY, now);
-    expect(sync.newLogs.filter((l) => l.type === 'auto_daily')).toHaveLength(0);
-    expect(sync.updatedMeds[0]!.currentPills).toBe(30); // snapshot unchanged
-    expect(effectiveCurrentPills(sync.updatedMeds[0]!, TODAY, now)).toBe(29);
-    expect(isDoseConsumedOnDate(sync.updatedMeds[0]!, 'd1', TODAY)).toBe(false);
+    expect(isDoseConsumedOnDate(med, 'd1', TODAY)).toBe(false);
   });
 });
 
@@ -167,33 +165,6 @@ describe('A — Today projection path: auto-due + Take (alarm) — one deduction
     expect(effectiveCurrentPills(afterFirst, TODAY, now)).toBe(29);
   });
 
-  it('Case 2: after alarm Take, syncAutoDailyDeductions does not re-deduct same dose/day', () => {
-    const med = makeMed();
-    const now = NOW_AFTER_D1;
-
-    const preSync = syncAutoDailyDeductions([med], TODAY, now);
-    expect(preSync.newLogs.filter((l) => l.type === 'auto_daily')).toHaveLength(0);
-    const medAfterPreSync = preSync.updatedMeds[0]!;
-    expect(medAfterPreSync.currentPills).toBe(30);
-    expect(effectiveCurrentPills(medAfterPreSync, TODAY, now)).toBe(29);
-
-    const take = consumeDose(medAfterPreSync, 'alarm', TODAY, now, 'd1');
-    expect(take.doseAmount).toBe(1);
-    const afterTake = take.updatedMed!;
-    expect(afterTake.currentPills).toBe(29);
-    expect(afterTake.doseConsumption?.d1).toBe(TODAY);
-    const snap = identitySnapshot(afterTake);
-
-    const postSync = syncAutoDailyDeductions([afterTake], TODAY, now);
-    expect(postSync.newLogs.filter((l) => l.type === 'auto_daily')).toHaveLength(0);
-    expect(postSync.updatedMeds[0]!.currentPills).toBe(29);
-    expect(postSync.updatedMeds[0]!.doseConsumption?.d1).toBe(TODAY);
-    expect(postSync.updatedMeds[0]!.doseConsumption?.d2).toBeUndefined();
-    expect(effectiveCurrentPills(postSync.updatedMeds[0]!, TODAY, now)).toBe(29);
-    // lastSync may be normalized by sync when no deduction — still no double charge.
-    expect(postSync.updatedMeds[0]!.doseConsumption).toEqual(snap.doseConsumption);
-  });
-
   it('sibling isolation: taking d1 never mutates d2; later d2 Take is independent', () => {
     const med = makeMed();
     const now = NOW_AFTER_D1;
@@ -238,125 +209,6 @@ describe('A — Today projection path: auto-due + Take (alarm) — one deduction
     expect(take.updatedMed!.currentPills).toBe(29);
   });
 });
-
-describe('B — Actual historical past settlement + same-day Take of today d1', () => {
-  /**
-   * Production allows actual auto snapshot change only for fully-elapsed
-   * **past** days (betweenDays). After that settlement, Take for **today's**
-   * d1 must still charge exactly once for today's identity and must not
-   * re-apply past units (pastDueUnits becomes 0 after lastSync advances).
-   */
-  it('past auto_daily settles snapshot; then alarm Take of today d1 charges once only', () => {
-    // lastSync = day before yesterday → one fully-elapsed day (yesterday)
-    // between lastSync and today. daily schedule = 3 units for that day.
-    const med = makeMed({
-      currentPills: 30,
-      lastSyncDate: '2024-09-10', // betweenDays to TODAY = 1 fully-elapsed day (11th)
-    });
-    const now = NOW_AFTER_D1;
-
-    const breakdownBefore = computeDueDoseBreakdown(med, now, TODAY);
-    expect(breakdownBefore.gated).toBe(true);
-    expect(breakdownBefore.betweenDays).toBe(1);
-    expect(breakdownBefore.pastDueUnits).toBe(3); // full yesterday schedule
-    expect(breakdownBefore.todayDueUnits).toBe(1); // d1 only
-    expect(breakdownBefore.fullDueUnits).toBe(4);
-    expect(effectiveCurrentPills(med, TODAY, now)).toBe(26); // 30 - 4
-
-    // Actual auto settlement of past only.
-    const sync = syncAutoDailyDeductions([med], TODAY, now);
-    const autoLogs = sync.newLogs.filter((l) => l.type === 'auto_daily');
-    expect(autoLogs).toHaveLength(1);
-    expect(autoLogs[0]!.amount).toBe(-3);
-    expect(autoLogs[0]!.medicationId).toBe('med-1');
-    expect(autoLogs[0]!.date).toBe(TODAY);
-
-    const afterSync = sync.updatedMeds[0]!;
-    expect(afterSync.currentPills).toBe(27); // 30 - 3 past only
-    // Today d1 still not marked consumed — projection remains.
-    expect(isDoseConsumedOnDate(afterSync, 'd1', TODAY)).toBe(false);
-    expect(isDoseConsumedOnDate(afterSync, 'd2', TODAY)).toBe(false);
-    expect(effectiveCurrentPills(afterSync, TODAY, now)).toBe(26); // 27 - 1 today d1
-    expect(todayDueUnits(afterSync, now, TODAY)).toBe(1);
-
-    // Past should no longer be due after settlement lastSync advance.
-    const afterBreakdown = computeDueDoseBreakdown(afterSync, now, TODAY);
-    expect(afterBreakdown.pastDueUnits).toBe(0);
-    expect(afterBreakdown.todayDueUnits).toBe(1);
-
-    // Take today's d1 via alarm path (same as Push / In-App handler).
-    const take = consumeDose(afterSync, 'alarm', TODAY, now, 'd1');
-    expect(take.reason).toBeUndefined();
-    expect(take.doseAmount).toBe(1);
-    expect(take.log?.type).toBe('dose_taken');
-    expect(take.log?.doseId).toBe('d1');
-    expect(take.log?.amount).toBe(-1);
-    expect(take.log?.date).toBe(TODAY);
-
-    const afterTake = take.updatedMed!;
-    // Snapshot: 27 → 26 (today d1 only). Combined with auto: 30 - 3 - 1 = 26.
-    expect(afterTake.currentPills).toBe(26);
-    expect(afterTake.doseConsumption?.d1).toBe(TODAY);
-    expect(afterTake.doseConsumption?.d2).toBeUndefined();
-    expect(effectiveCurrentPills(afterTake, TODAY, now)).toBe(26);
-
-    // Accounting invariant: one auto_daily (-3) + one dose_taken (-1);
-    // no second dose_taken; d2 never charged.
-    expect(autoLogs).toHaveLength(1);
-    expect(take.log).not.toBeNull();
-
-    // Second Take same identity — no mutation.
-    const snap = identitySnapshot(afterTake);
-    const second = consumeDose(afterTake, 'alarm', TODAY, now, 'd1');
-    expect(second.reason).toBe('already_consumed');
-    expect(second.log).toBeNull();
-    expect(second.updatedMed).toBeNull();
-    expect(identitySnapshot(afterTake)).toEqual(snap);
-
-    // Sync again after Take — no additional auto_daily for today d1.
-    const postSync = syncAutoDailyDeductions([afterTake], TODAY, now);
-    expect(postSync.newLogs.filter((l) => l.type === 'auto_daily')).toHaveLength(0);
-    expect(postSync.updatedMeds[0]!.currentPills).toBe(26);
-    expect(postSync.updatedMeds[0]!.doseConsumption?.d1).toBe(TODAY);
-    expect(postSync.updatedMeds[0]!.doseConsumption?.d2).toBeUndefined();
-  });
-
-  it('past-day slot already recorded as consumed is skipped by historical auto (no double with later Take of today)', () => {
-    // Yesterday's d1 was manually taken; auto must not charge that slot amount
-    // again when settling the past day — only d2 of yesterday remains due.
-    const med = makeMed({
-      currentPills: 30,
-      lastSyncDate: '2024-09-10',
-      doseConsumption: { d1: YESTERDAY },
-      doseConsumptionHistory: { d1: [YESTERDAY] },
-    });
-    const now = NOW_AFTER_D1;
-
-    const b = computeDueDoseBreakdown(med, now, TODAY);
-    // Yesterday: d1 skipped (consumed), d2 amount 2 still due → pastDueUnits 2
-    expect(b.pastDueUnits).toBe(2);
-    expect(b.todayDueUnits).toBe(1); // today d1 not consumed
-
-    const sync = syncAutoDailyDeductions([med], TODAY, now);
-    expect(sync.newLogs.filter((l) => l.type === 'auto_daily')).toHaveLength(1);
-    expect(sync.newLogs[0]!.amount).toBe(-2);
-    expect(sync.updatedMeds[0]!.currentPills).toBe(28);
-
-    const take = consumeDose(sync.updatedMeds[0]!, 'alarm', TODAY, now, 'd1');
-    expect(take.doseAmount).toBe(1);
-    expect(take.log?.doseId).toBe('d1');
-    expect(take.log?.date).toBe(TODAY);
-    // 28 - 1 today; yesterday d1 was already in history, not re-charged.
-    expect(take.updatedMed!.currentPills).toBe(27);
-    expect(take.updatedMed!.doseConsumption?.d1).toBe(TODAY);
-    // History still knows about yesterday when present.
-    expect(
-      take.updatedMed!.doseConsumptionHistory?.d1?.includes(YESTERDAY) ||
-        take.updatedMed!.doseConsumption?.d1 === TODAY
-    ).toBe(true);
-  });
-});
-
 describe('Push take_dose action uses same alarm consume path', () => {
   /**
    * Mirrors App.tsx:

@@ -35,7 +35,6 @@ import {
 } from './dateCalculations';
 import { pruneDoseConsumption } from './pruneDoseConsumption';
 import { isValidDoseTime, normalizeTimeString } from './doseSchedule';
-import { LEGACY_DOSE_ID } from './notifications';
 import {
   withAutoStockMutationGate,
   commitDurableAutoStockState,
@@ -111,7 +110,6 @@ function resolveConsumeDoseId(med: Medication, doseId?: string): string | undefi
   const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
   if (doseId != null && doseId !== '') return doseId;
   if (schedule.length === 1) return schedule[0].id;
-  if (schedule.length === 0) return LEGACY_DOSE_ID;
   return undefined;
 }
 
@@ -132,8 +130,6 @@ function recurrenceDoseIds(med: Medication): string[] {
       const id = typeof d?.id === 'string' ? d.id.trim() : '';
       if (id) ids.add(id);
     }
-  } else {
-    ids.add(LEGACY_DOSE_ID);
   }
   return [...ids];
 }
@@ -214,25 +210,15 @@ function recurrenceDefinition(
 ): { doseId: string; time: string; amount: number } | null {
   if (med.autoDeductEnabled === false) return null;
   const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
-  if (schedule.length > 0) {
-    const dose = schedule.find((d) => d?.id === doseId);
-    if (!dose || !isValidDoseTime(dose.time) || !(Number(dose.amount) > 0)) {
-      return null;
-    }
-    return {
-      doseId: String(dose.id),
-      time: normalizeTimeString(dose.time),
-      amount: Number(dose.amount),
-    };
-  }
-  if (doseId !== LEGACY_DOSE_ID || med.reminderEnabled !== true) return null;
-  if (!med.reminderTime || !isValidDoseTime(med.reminderTime) || !(Number(med.dailyDose) > 0)) {
+  if (schedule.length === 0) return null;
+  const dose = schedule.find((d) => d?.id === doseId);
+  if (!dose || !isValidDoseTime(dose.time) || !(Number(dose.amount) > 0)) {
     return null;
   }
   return {
-    doseId: LEGACY_DOSE_ID,
-    time: normalizeTimeString(med.reminderTime),
-    amount: Number(med.dailyDose),
+    doseId: String(dose.id),
+    time: normalizeTimeString(dose.time),
+    amount: Number(dose.amount),
   };
 }
 
@@ -670,14 +656,8 @@ export function runGatedManualRestore(opts: {
     // already set, no consume marker) is a true no-op (already_restored).
     // But the FIRST auto-only restore must NOT be skipped — it needs to
     // persist the skip marker that restoreDose computed in updatedMed.
-    // Occurrence identity: the restored slot id for scheduled meds; the
-    // LEGACY_DOSE_ID sentinel for legacy meds (no doseSchedule) — the same
-    // identity the per-day legacy due calculation and Exact Auto
-    // reconciliation use for the implicit daily dose.
-    const isLegacyOccurrence =
-      !Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0;
-    const occurrenceDoseId =
-      result.doseId ?? (isLegacyOccurrence ? LEGACY_DOSE_ID : undefined);
+    // Occurrence identity: explicit doseSchedule slot id only.
+    const occurrenceDoseId = result.doseId;
     const skipAlreadySet = occurrenceDoseId
       ? isDoseSkippedOnDate(med, occurrenceDoseId, todayStr)
       : false;

@@ -6,16 +6,14 @@ import {
   isSnoozeActive,
   setSnoozeUntil,
 } from '@/utils/doseReminderStorage';
-import { LEGACY_DOSE_ID } from '@/utils/notifications';
 
 describe('doseReminderStorage Phase 3B dose-scoped snooze', () => {
   beforeEach(() => {
     localStorage.clear();
   });
 
-  it('legacy key is med-only', () => {
+  it('omitted doseId key is med-only', () => {
     expect(snoozeStorageKey('m1')).toBe('m1');
-    expect(snoozeStorageKey('m1', LEGACY_DOSE_ID)).toBe('m1');
     expect(snoozeStorageKey('m1', null)).toBe('m1');
   });
 

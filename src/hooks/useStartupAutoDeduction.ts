@@ -1,17 +1,22 @@
 import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import type { Medication, ConsumptionLog } from '../types';
-import { getTodayDateString, syncAutoDailyDeductions } from '../utils/dateCalculations';
 import { withAutoStockMutationGate } from '../utils/autoDeductionStockGate';
 import { reconcileExactBeforeLegacySettlement } from '../utils/reconcileExactBeforeLegacySettlement';
 import { TOAST_MESSAGES } from '../constants/uiStrings';
-import { commitWithManualEnvelope } from '../utils/manualStockMutation';
 
 /**
  * One-shot per session auto-deduction after hydration.
- * Same semantics as the previous inline effect in App.tsx.
  *
- * Ordering invariant: durable native FIRED exact events are reconciled
- * inside the gate BEFORE legacy syncAutoDailyDeductions historical settlement.
+ * Issue #268 / PR #271: the legacy day-based catch-up
+ * (`syncAutoDailyDeductions`) is removed entirely. Exact FIRED occurrences are
+ * the SOLE source of timed automatic stock deduction. There is no automatic
+ * deduction for app startup / app open / resume / calendar-day passing / or a
+ * later mutation running a day-based catch-up. No `dailyDose`-based catch-up,
+ * no `lastConsumedDate` / `lastSyncDate` / `LEGACY_DOSE_ID` workaround.
+ *
+ * This effect only reconciles durable native FIRED exact events inside the
+ * gate (which commits the exact deductions durably) and then mirrors the
+ * post-reconciliation durable state into React so the UI reflects it.
  */
 export function useStartupAutoDeduction(opts: {
   hydrated: boolean;
@@ -47,47 +52,35 @@ export function useStartupAutoDeduction(opts: {
       const pre = await reconcileExactBeforeLegacySettlement({
         fresh,
         // Valid FIRED events are reconciled regardless of current policy.
-        // The post-reconciliation durable global value is the authority for
-        // whether legacy settlement may proceed.
         globalAutoDeductEnabled: fresh.globalAutoDeductEnabled !== false,
       });
-      // Native read failure OR unresolved Exact durability: do not run
-      // legacy settlement on top of an unresolved exact occurrence.
+      // Native read failure OR unresolved Exact durability: do not mutate
+      // React state on top of an unresolved exact occurrence. The exact
+      // reconciliation itself commits durably on its mutating path; on a
+      // durability block / native-list failure it commits nothing.
       if (pre.nativeListFailed || pre.durabilityBlocked) {
         return;
       }
-      // Sync Global preference for UI (bulk last-applied state + new-med default).
-      // Runtime Auto still follows each medication.autoDeductEnabled.
+      // Sync Global preference for UI (bulk last-applied state + new-med
+      // default). Runtime Auto still follows each medication.autoDeductEnabled.
       const durableGlobalAutoDeductEnabled = pre.state.globalAutoDeductEnabled !== false;
       setGlobalAutoDeductEnabled(durableGlobalAutoDeductEnabled);
-      // Legacy catch-up runs per medication (syncAutoDailyDeductions respects
-      // med.autoDeductEnabled).
-      const today = getTodayDateString();
-      const result = syncAutoDailyDeductions(pre.state.medications, today);
-      if (result.newLogs.length > 0 || pre.reconciliation?.mutated) {
-        const nextLogs =
-          result.newLogs.length > 0
-            ? [...result.newLogs, ...pre.state.logs]
-            : pre.state.logs;
-        const nextMeds = result.newLogs.length > 0 ? result.updatedMeds : pre.state.medications;
-        // Legacy date-based startup settlement is still a stock mutation.
-        // It must use the same durable recovery envelope as Manual Take/Restore
-        // rather than writing meds/logs directly and risking a partial snapshot.
-        const err = commitWithManualEnvelope({
-          medications: nextMeds,
-          logs: nextLogs,
-          globalAutoDeductEnabled: pre.state.globalAutoDeductEnabled,
-        });
-        if (!err) {
-          setMedications(nextMeds);
-          setLogs(nextLogs);
-          if (result.deductedSummary.length > 0) {
-            const totalPills = result.deductedSummary.reduce(
-              (sum, item) => sum + item.pillsDeducted,
-              0
-            );
-            showToast(TOAST_MESSAGES.autoDeductSummary(totalPills));
-          }
+      // Mirror the post-Exact durable state into React. The exact
+      // reconciliation already committed meds/logs durably on its mutating
+      // path; React only needs the reflected snapshot. No legacy day-based
+      // settlement runs on top — Exact FIRED is the sole timed deduction.
+      const nextMeds = pre.state.medications;
+      const nextLogs = pre.state.logs;
+      setMedications(nextMeds);
+      setLogs(nextLogs);
+      const recon = pre.reconciliation;
+      if (recon && recon.newExactLogs.length > 0) {
+        const totalPills = recon.newExactLogs.reduce(
+          (sum, log) => sum + Math.abs(log.amount),
+          0
+        );
+        if (totalPills > 0) {
+          showToast(TOAST_MESSAGES.autoDeductSummary(totalPills));
         }
       }
     });

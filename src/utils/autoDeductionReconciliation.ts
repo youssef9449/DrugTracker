@@ -1,11 +1,15 @@
 /**
  * Phase 3 — JS reconciliation of native exact-time auto-deduction FIRED events.
  *
- * Idempotency vs legacy syncAutoDailyDeductions:
+ * Idempotency:
  * - Per-dose consume/skip markers (same as Take)
  * - lastSyncDate day-settlement horizon: past calendar days already folded
- *   into currentPills by gated/legacy sync are treated as applied without
- *   inventing fake consume markers for slots that were only day-settled
+ *   into currentPills by a prior mutation settlement are treated as applied
+ *   without inventing fake consume markers for slots that were only
+ *   day-settled. (The legacy day-based catch-up `syncAutoDailyDeductions` was
+ *   removed in Issue #268 / PR #271; Exact FIRED is the sole timed automatic
+ *   deduction. The day-settlement horizon still applies to past mutation
+ *   settlements.)
  *
  * Log identity for exact events is deterministic so retries do not create
  * duplicate ConsumptionLog rows.
@@ -22,7 +26,6 @@ import {
   isDoseSkippedOnDate,
   recordDoseConsumed,
 } from './dateCalculations';
-import { LEGACY_DOSE_ID } from './notifications';
 
 export type ReconcileEventOutcome =
   | 'applied'
@@ -78,29 +81,48 @@ export function isValidExactCalendarDate(calendarDate: string): boolean {
 
 /**
  * Occurrence identity for Exact Auto is medicationId + doseId + calendarDate.
- * doseId may be normalized to the legacy sentinel when empty; medicationId and
- * calendarDate must be present and well-formed. Malformed identity cannot be
- * repaired by a later amount fix and must not remain FIRED forever (#262 F3).
+ * All three components are required and non-empty. Empty/missing doseId is
+ * invalid (not a legacy sentinel) — Issue #268. Malformed identity cannot
+ * be repaired by a later amount fix and must not remain FIRED forever (#262 F3).
  */
 export function isValidExactOccurrenceIdentity(
   medicationId: string,
+  doseId: string,
   calendarDate: string
 ): boolean {
   return (
     typeof medicationId === 'string' &&
     medicationId.trim().length > 0 &&
+    typeof doseId === 'string' &&
+    doseId.trim().length > 0 &&
     isValidExactCalendarDate(calendarDate)
   );
 }
 
+/**
+ * Normalize doseId for keying. Does not invent an identity for missing values —
+ * null/undefined become '' which fails {@link isValidExactOccurrenceIdentity}.
+ */
 export function normalizeExactDoseId(doseId: string | undefined | null): string {
-  if (doseId == null || doseId === '') return LEGACY_DOSE_ID;
-  return doseId;
+  if (doseId == null) return '';
+  return String(doseId).trim();
 }
 
 /**
  * Deterministic log id for one exact auto occurrence (retry-safe).
- * Not used for legacy bulk auto_daily logs from syncAutoDailyDeductions.
+ * Not used for legacy bulk auto_daily logs (the legacy day-based catch-up
+ * `syncAutoDailyDeductions` that produced them was removed in Issue #268 /
+ * PR #271).
+ *
+ * Issue #268 / PR #271: this id MUST never be built with an empty doseId.
+ * `applyExactAutoEventToMedication` rejects any event whose `doseId` is empty
+ * (malformed identity → terminal ACK at the runner level, before apply).
+ * A FIRED Exact occurrence that already fired is durable: its identity is
+ * `medicationId + doseId + calendarDate` and `event.amount` is the
+ * authoritative charge, even if the dose was later edited or removed from
+ * the Medication's current `doseSchedule`. `doseSchedule` is the sole source
+ * for scheduling FUTURE occurrences, NOT a precondition for reconciling a
+ * FIRED one.
  */
 export function exactAutoLogId(
   medicationId: string,
@@ -127,9 +149,9 @@ export function findExactAutoLog(
  *
  * Sources (any one is enough):
  * 1. dose consume / skip history (Take, prior exact apply, Restore skip)
- * 2. legacy lastConsumedDate for single-dose
- * 3. lastSyncDate day-settlement horizon — past days already settled into
- *    currentPills by syncAutoDailyDeductions (no fake consume markers invented)
+ * 2. lastSyncDate day-settlement horizon — past days already settled into
+ *    currentPills by a prior mutation settlement (no fake consume markers
+ *    invented)
  */
 export function isExactAutoOccurrenceApplied(
   med: Medication,
@@ -138,25 +160,15 @@ export function isExactAutoOccurrenceApplied(
   todayStr: string = getTodayDateString()
 ): boolean {
   const id = normalizeExactDoseId(doseId);
-  const multi = Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0;
+  if (!id) return false;
 
-  if (!multi || id === LEGACY_DOSE_ID) {
-    if (med.lastConsumedDate === calendarDate) return true;
-    if (isDoseConsumedOnDate(med, LEGACY_DOSE_ID, calendarDate)) return true;
-    if (isDoseSkippedOnDate(med, LEGACY_DOSE_ID, calendarDate)) return true;
-  } else {
-    if (isDoseConsumedOnDate(med, id, calendarDate)) return true;
-    if (isDoseSkippedOnDate(med, id, calendarDate)) return true;
-  }
+  if (isDoseConsumedOnDate(med, id, calendarDate)) return true;
+  if (isDoseSkippedOnDate(med, id, calendarDate)) return true;
 
   const lastSync = med.lastSyncDate;
   if (lastSync && calendarDate.length === 10) {
     // Past calendar day already included in day settlement into currentPills
     if (calendarDate < todayStr && calendarDate <= lastSync) {
-      return true;
-    }
-    // Legacy non-schedule: sync settles today when lastSync advances to today
-    if (!multi && calendarDate === todayStr && lastSync === todayStr) {
       return true;
     }
   }
@@ -216,12 +228,24 @@ export function findPendingExactAutoOccurrence(
   return null;
 }
 
-
 export function applyExactAutoEventToMedication(
   med: Medication,
   event: AutoDeductionEvent,
   now: Date = new Date()
 ): { ok: true; updatedMed: Medication; log: ConsumptionLog } | { ok: false; reason: string } {
+  // Issue #268 / PR #271 — a FIRED Exact occurrence is durable: the native
+  // AlarmManager created and persisted it at schedule time with identity
+  // (medicationId + doseId + calendarDate) and amount. Editing or removing
+  // the dose from the Medication's CURRENT `doseSchedule` AFTER the alarm
+  // fired does NOT invalidate the already-occurred event; `event.amount`
+  // remains authoritative. `doseSchedule` is the sole source for scheduling
+  // FUTURE occurrences, NOT a precondition for reconciling a FIRED one.
+  //
+  // Apply validation (no Legacy Single-Dose fallback): positive finite
+  // amount, non-empty doseId, valid YYYY-MM-DD calendarDate, occurrence not
+  // already applied. No dailyDose / reminderTime / reminderEnabled /
+  // lastConsumedDate / first-or-next dose / array-index / empty-sentinel
+  // doseId fallback for amount or identity.
   if (!isValidEventAmount(event.amount)) {
     return { ok: false, reason: 'invalid_amount' };
   }
@@ -230,6 +254,12 @@ export function applyExactAutoEventToMedication(
   const calendarDate = event.calendarDate;
   if (!calendarDate || calendarDate.length !== 10) {
     return { ok: false, reason: 'invalid_calendarDate' };
+  }
+  // Empty doseId is a malformed identity — rejected here, and the runner
+  // treats it as terminal ACK (no infinite retry). This is the ONLY identity
+  // failure that prevents a FIRED occurrence from applying.
+  if (!doseId) {
+    return { ok: false, reason: 'invalid_dose_id' };
   }
 
   const todayStr = getTodayDateString();
@@ -262,30 +292,30 @@ export function applyExactAutoEventToMedication(
   let nextHistory = med.doseConsumptionHistory;
   let lastConsumedDate = med.lastConsumedDate;
 
-  if (doseId === LEGACY_DOSE_ID || !Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0) {
-    lastConsumedDate = calendarDate;
-    const recorded = recordDoseConsumed(med, LEGACY_DOSE_ID, calendarDate);
-    nextConsumption = recorded.doseConsumption;
-    nextHistory = recorded.doseConsumptionHistory;
-  } else {
-    const recorded = recordDoseConsumed(med, doseId, calendarDate);
-    nextConsumption = recorded.doseConsumption;
-    nextHistory = recorded.doseConsumptionHistory;
-    const allConsumed =
-      Array.isArray(med.doseSchedule) &&
-      med.doseSchedule.every((d) =>
-        d.id === doseId
-          ? true
-          : isDoseConsumedOnDate(
-              {
-                ...med,
-                doseConsumption: nextConsumption,
-                doseConsumptionHistory: nextHistory,
-              },
-              d.id,
-              calendarDate
-            )
-      );
+  const recorded = recordDoseConsumed(med, doseId, calendarDate);
+  nextConsumption = recorded.doseConsumption;
+  nextHistory = recorded.doseConsumptionHistory;
+  // Exact Auto updates lastConsumedDate ONLY when the Medication still has an
+  // explicit, non-empty `doseSchedule` AND every slot for the calendar day is
+  // consumed. A med whose schedule was removed (or edited so this slot is no
+  // longer a member) still gets its FIRED occurrence applied via event.amount,
+  // but with no schedule to test all-slots-consumed it does NOT write
+  // lastConsumedDate — there is no Legacy Single-Dose doseId-only write.
+  // #268 / PR #271.
+  if (Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) {
+    const allConsumed = med.doseSchedule.every((d) =>
+      normalizeExactDoseId(d.id) === doseId
+        ? true
+        : isDoseConsumedOnDate(
+            {
+              ...med,
+              doseConsumption: nextConsumption,
+              doseConsumptionHistory: nextHistory,
+            },
+            d.id,
+            calendarDate
+          )
+    );
     if (allConsumed) {
       lastConsumedDate = calendarDate;
     }
@@ -321,7 +351,7 @@ export function applyExactAutoEventToMedication(
     date: calendarDate,
     timestamp: new Date(now).toISOString(),
     description: `خصم تلقائي دقيق (−${actualDeducted} ${med.unit || 'وحدة'})`,
-    doseId: doseId === LEGACY_DOSE_ID ? undefined : doseId,
+    doseId,
   };
 
   return { ok: true, updatedMed, log };
@@ -374,12 +404,11 @@ export function reconcileFiredEvents(
       occurrenceKey,
     };
 
-    // Validation order (#262 Finding 3):
-    //   1) occurrence identity — terminal ACK if irreparable
-    //   2) amount — no ACK (retryable if identity is valid)
-    // doseId is normalized above; empty doseId maps to the legacy sentinel
-    // and remains a valid identity component.
-    if (!isValidExactOccurrenceIdentity(medicationId, calendarDate)) {
+    // Validation order (#262 Finding 3 / Issue #268):
+    //   1) occurrence identity (medicationId + doseId + calendarDate) —
+    //      terminal ACK if any component is missing/invalid
+    //   2) amount — no ACK (retryable when identity is valid)
+    if (!isValidExactOccurrenceIdentity(medicationId, doseId, calendarDate)) {
       details.push({ ...baseDetail, outcome: 'skipped_invalid' });
       // Terminal: malformed identity cannot become a valid Exact occurrence
       // without changing the key. ACK via existing markReconciled path so the
@@ -431,8 +460,15 @@ export function reconcileFiredEvents(
         // Identity malformed (should normally be filtered above). Terminal ACK.
         details.push({ ...baseDetail, outcome: 'skipped_invalid' });
         toAcknowledge.push({ medicationId, doseId, calendarDate });
+      } else if (applied.reason === 'invalid_dose_id') {
+        // Malformed identity (empty doseId) — terminal ACK (no infinite retry).
+        // The apply gate normally filters this, but this defensive branch keeps
+        // the contract airtight if amount/date were valid but doseId empty.
+        details.push({ ...baseDetail, outcome: 'skipped_invalid' });
+        toAcknowledge.push({ medicationId, doseId, calendarDate });
       } else if (applied.reason === 'invalid_amount') {
-        // Amount still retryable — defensive if amount gate is bypassed.
+        // Valid identity, invalid amount → no stock mutation, no log, NO ACK.
+        // Stays unreconciled for a later pass with a corrected valid amount.
         details.push({ ...baseDetail, outcome: 'skipped_invalid' });
       } else {
         // Unknown apply failure: no stock mutation; do not invent policy.

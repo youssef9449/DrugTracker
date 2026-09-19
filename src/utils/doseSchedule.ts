@@ -16,7 +16,6 @@ import type { Medication, MedicationDose } from '../types';
 import { generateId } from './id';
 import { timeToMinutes } from './time';
 import { isDoseConsumedOnDate, isDoseSkippedOnDate, getTodayDateString } from './dateCalculations';
-import { LEGACY_DOSE_ID } from './legacyDoseId';
 
 /**
  * Auto-Deduction active for a medication based solely on its own preference.
@@ -92,42 +91,27 @@ export function totalDailyAmount(schedule: MedicationDose[]): number {
 }
 
 /**
- * Map a medication (legacy or new) to a UI-ready schedule.
+ * Map a medication to a UI-ready schedule from explicit `doseSchedule` only.
  *
- * Source-of-truth rule:
- *   If a non-empty stored `doseSchedule` exists, it is authoritative
- *   (including its length). `dosesPerDay` is ignored when the two disagree.
- *   Legacy meds without a schedule map to one row from dailyDose + reminderTime
- *   (default time 09:00 when reminderTime is missing/invalid).
- *
- * Existing dose IDs are preserved; missing IDs get a new stable id once.
+ * No synthetic rows from dailyDose/reminderTime. Empty/missing schedule → [].
+ * Existing ids/amounts/times are preserved (ids still generated only when a
+ * stored row is missing id — not a whole-schedule invention).
  */
 export function getDoseScheduleForUI(
-  med: Pick<Medication, 'dailyDose' | 'reminderTime' | 'dosesPerDay' | 'doseSchedule'>
+  med: Pick<Medication, 'doseSchedule'>
 ): MedicationDose[] {
-  if (Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) {
-    // Defensive chronological order for legacy/corrupted/unsorted stored data.
-    // Length remains authoritative; ids/amounts/times are preserved.
-    return sortDoseSchedule(
-      med.doseSchedule.map((d) => ({
-        id: d.id || generateId('dose'),
-        amount: Number(d.amount) > 0 ? Number(d.amount) : 1,
-        time: normalizeTimeString(d.time || '09:00'),
-      }))
-    );
+  if (!Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0) {
+    return [];
   }
-  const amount = Number(med.dailyDose) > 0 ? Number(med.dailyDose) : 1;
-  const time =
-    med.reminderTime && isValidDoseTime(med.reminderTime)
-      ? normalizeTimeString(med.reminderTime)
-      : '09:00';
-  return [
-    {
-      id: generateId('dose'),
-      amount,
-      time,
-    },
-  ];
+  return sortDoseSchedule(
+    med.doseSchedule
+      .filter((d) => d && isValidDoseTime(d.time) && Number(d.amount) > 0)
+      .map((d) => ({
+        id: d.id || generateId('dose'),
+        amount: Number(d.amount),
+        time: normalizeTimeString(d.time),
+      }))
+  );
 }
 
 /**
@@ -374,7 +358,7 @@ export function getNextScheduledDose(
 
 /**
  * Returns the dose amount for the next upcoming dose.
- * For single-dose medications without a schedule, returns `med.dailyDose`.
+ * Without an explicit doseSchedule, returns 0.
  * For multi-dose medications, returns the amount of the next scheduled dose.
  */
 export function getNextDoseAmount(
@@ -382,16 +366,14 @@ export function getNextDoseAmount(
   now: Date = new Date(),
   todayStr: string = getTodayDateString()
 ): number {
-  if (Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) {
-    const nextDose = getNextScheduledDose(med, now, todayStr);
-    if (nextDose && Number(nextDose.amount) > 0) {
-      return Number(nextDose.amount);
-    }
-    return (
-      Number(med.doseSchedule[0]?.amount) || Number(med.dailyDose) || 1
-    );
+  if (!Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0) {
+    return 0;
   }
-  return Number(med.dailyDose) || 1;
+  const nextDose = getNextScheduledDose(med, now, todayStr);
+  if (nextDose && Number(nextDose.amount) > 0) {
+    return Number(nextDose.amount);
+  }
+  return Number(med.doseSchedule[0]?.amount) || 0;
 }
 
 
@@ -415,7 +397,7 @@ export function getNextDoseAmount(
  * Auto-Deduct state (via {@link isMedicationAutoDeductActive}) controls
  * whether elapsed time alone marks a slot completed. Medication-level only.
  *
- * Legacy (no schedule): lastConsumedDate / dailyDose.
+ * Without doseSchedule: no toggle target.
  */
 export function getCardDoseToggleTarget(
   med: Medication,
@@ -430,13 +412,7 @@ export function getCardDoseToggleTarget(
   const autoActive = isMedicationAutoDeductActive(med);
   const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
   if (schedule.length === 0) {
-    const taken = med.lastConsumedDate === todayStr;
-    const amount = Number(med.dailyDose) || 1;
-    return {
-      amount,
-      canTake: !taken && amount > 0,
-      canRestore: taken,
-    };
+    return { amount: 0, canTake: false, canRestore: false };
   }
 
   const sorted = sortDoseSchedule(schedule);
@@ -473,7 +449,7 @@ export function getCardDoseToggleTarget(
   const nominal = sorted[0];
   return {
     doseId: nominal?.id,
-    amount: Number(nominal?.amount) || Number(med.dailyDose) || 0,
+    amount: Number(nominal?.amount) || 0,
     canTake: false,
     canRestore: false,
   };
@@ -497,8 +473,7 @@ export function getCardDoseToggleTarget(
  * opens SelectDoseModal — this helper only answers "is there anything
  * restorable" and supplies the single-dose doseId when needed.
  *
- * Legacy (no schedule): returns a synthetic dose with the reminderTime so
- * callers can detect eligibility; identity remains undefined (no doseId).
+ * Requires an explicit doseSchedule; no synthetic legacy dose.
  */
 export function getAutoRestorableDose(
   med: Medication,
@@ -509,22 +484,7 @@ export function getAutoRestorableDose(
   if (med.autoDeductEnabled === false) return null;
 
   const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
-
-  if (schedule.length === 0) {
-    // Legacy: auto-completed when time elapsed and no manual lastConsumedDate.
-    if (med.lastConsumedDate === todayStr) return null;
-    // Already restored today (durable LEGACY_DOSE_ID skip marker): the
-    // implicit legacy occurrence is settled — same eligibility rule as the
-    // scheduled slots below ("not already skipped/restored today").
-    if (isDoseSkippedOnDate(med, LEGACY_DOSE_ID, todayStr)) return null;
-    const time =
-      med.reminderTime && isValidDoseTime(med.reminderTime)
-        ? med.reminderTime
-        : '09:00';
-    if (!isDoseTimeElapsedToday(time, now)) return null;
-    // Synthetic marker — no real doseId for legacy path.
-    return { id: '', amount: Number(med.dailyDose) || 1, time };
-  }
+  if (schedule.length === 0) return null;
 
   const sorted = sortDoseSchedule(schedule);
   for (const d of sorted) {

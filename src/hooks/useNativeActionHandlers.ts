@@ -16,7 +16,7 @@ import { playSuccessChime } from '../utils/sound';
 export function useNativeActionHandlers(opts: {
   medications: Medication[];
   handleTakeDoseFromAlarmById: (medicationId: string, doseId?: string) => void;
-  openAlarm: (medId: string, doseId?: string) => void;
+  openAlarm: (medId: string, doseId: string) => void;
   soundEnabled: boolean;
   setDoseLifecycleTick: Dispatch<SetStateAction<number>>;
   setCriticalAlarmResumeTick: Dispatch<SetStateAction<number>>;
@@ -54,11 +54,13 @@ export function useNativeActionHandlers(opts: {
   // existing soundEnabled setting, exactly like all other UI feedback.
   useEffect(() => {
     registerDoseReceivedHandler((medicationId, doseId) => {
+      // Issue #268: interactive alarm requires explicit doseSchedule doseId.
+      if (!doseId || !String(doseId).trim()) return;
       const med = medications.find((m) => m.id === medicationId);
       if (med && med.autoDeductEnabled !== false) {
         return;
       }
-      openAlarm(medicationId, doseId);
+      openAlarm(medicationId, String(doseId).trim());
       if (soundEnabled) playSuccessChime();
     });
     return () => registerDoseReceivedHandler(null);

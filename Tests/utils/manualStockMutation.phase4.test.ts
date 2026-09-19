@@ -44,7 +44,6 @@ import {
   consumeDose,
   restoreDose,
 } from '../../src/utils/medActions';
-import { LEGACY_DOSE_ID } from '../../src/utils/legacyDoseId';
 
 const TODAY = '2026-09-16';
 
@@ -3232,13 +3231,6 @@ describe('Phase 4 — stale scheduled dose identity must not downgrade to legacy
     const r = restoreDose(m, 'd1', TODAY, new Date(`${TODAY}T12:00:00`), []);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe('invalid_dose_id');
-  });
-
-  it('LEGACY_DOSE_ID remains a valid explicit identity for true legacy callers', () => {
-    const m = med({ doseSchedule: undefined, currentPills: 10, dailyDose: 1 });
-    const r = consumeDose(m, 'manual', TODAY, new Date(`${TODAY}T12:00:00`), LEGACY_DOSE_ID);
-    expect(r.updatedMed).not.toBeNull();
-    expect(r.doseAmount).toBe(1);
   });
 });
 

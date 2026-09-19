@@ -445,8 +445,10 @@ export interface MedicationWithStatus {
 
 export function calculateMedicationStatus(med: Medication): MedicationStatusInfo {
   // The dynamic balance: projects currentPills forward from lastSyncDate
-  // by dailyDose. This keeps status correct even if the app was closed
-  // for many days and syncAutoDailyDeductions hasn't run yet.
+  // by dailyDose. This keeps status correct even if the app was closed for
+  // many days and no settlement has run (the legacy day-based catch-up
+  // `syncAutoDailyDeductions` was removed in Issue #268 / PR #271; the
+  // projection is the live authority between settlements).
   const effPills = effectiveCurrentPills(med);
   const daysLeft = effectiveDaysLeft(med);
 

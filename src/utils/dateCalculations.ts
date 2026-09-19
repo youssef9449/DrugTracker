@@ -1,7 +1,6 @@
 import { Medication, ConsumptionLog, getCriticalThresholdDays } from '../types';
 import { generateId } from './id';
 import { MS_PER_DAY, NEVER_DEPLETES_DAYS, CRITICAL_ALARM_FIRE_HOUR, timeToMinutes } from './time';
-import { LEGACY_DOSE_ID } from './legacyDoseId';
 
 /**
  * Returns today's date as a deterministic YYYY-MM-DD string, using
@@ -63,11 +62,10 @@ function localDateStr(d: Date): string {
 /**
  * Add `n` days to a YYYY-MM-DD string (UTC day arithmetic, DST-safe).
  * Used to compute "yesterday" for the settlement lastSyncDate rule:
- * a reminderTime-gated settlement that does NOT settle today's dose
+ * a reminderTime-gated mutation that does NOT settle today's dose
  * advances lastSyncDate to yesterday so today's dose stays projectable
- * (and is settled at the next existing execution point — app-open
- * syncAutoDailyDeductions or a later mutation such as
- * refill/consume/dose-change/toggle). The projection
+ * (and is settled at the next existing execution point — a later
+ * mutation such as refill/consume/dose-change/toggle). The projection
  * (effectiveCurrentPills) reflects today's dose across the
  * calendar-day boundary without settling the snapshot.
  */
@@ -565,12 +563,12 @@ export function countDueAutoDoses(
  *   Used by {@link effectiveCurrentPills} and the legacy settlement
  *   path (which settles today's dose at the start of the calendar day).
  * - `pastDueDoses`: the past-only count (excludes today's auto-dose).
- *   Used by the reminderTime-gated settlement (sync / refill / consume /
+ *   Used by the reminderTime-gated mutations (refill / consume /
  *   dose-change / toggle): settling only past days leaves today's dose
  *   dynamic so a later manual consume can replace it without
  *   double-deduction; today's dose is settled at the next existing
- *   execution point (app-open syncAutoDailyDeductions or a later
- *   mutation), NOT automatically at the calendar-day boundary.
+ *   execution point (a later mutation), NOT automatically at the
+ *   calendar-day boundary.
  *
  * For legacy (non-gated) meds, both equal `totalDays` (today is settled
  * at the start of the calendar day — the pre-change behavior).
@@ -645,40 +643,13 @@ export function computeDueDoseBreakdown(
         fullDueUnits = fullDueDoses * med.dailyDose;
       }
     } else if (totalDays > 0) {
-      // Legacy non-gated: a day's dose is due at the start of the calendar
-      // day (pre-change behavior). Due units are computed **per calendar
-      // day** across the whole (lastSyncDate, todayStr] window instead of a
-      // single totalDays * dailyDose aggregate, so a day whose implicit
-      // legacy occurrence (LEGACY_DOSE_ID) already has a durable consume or
-      // skip marker is excluded BY ITS SPECIFIC DATE — historical
-      // Exact Auto / Manual Take / Restore days are never re-charged, while
-      // every other day in the window (including today) stays due exactly
-      // as before. isDoseConsumedOnDate checks the durable
-      // doseConsumptionHistory markers first and falls back to the legacy
-      // lastConsumedDate single-date behavior; lastConsumedDate alone is
-      // never the primary source. When NO markers exist inside the window,
-      // the loop sums dailyDose for each of the totalDays days — bit-for-bit
-      // the pre-change legacy semantics. This single computation is shared
-      // by every downstream consumer (settleAutoDeductToggle /
-      // settleDoseChange / syncAutoDailyDeductions / effectiveCurrentPills),
-      // so no consumer can double-deduct an occurrence already charged by
-      // its exact event.amount, and a consumed today never blocks
-      // settlement of the historical unconsumed days (occurrence identity
-      // is medicationId + doseId + calendarDate — not a day count).
-      let dueDays = 0;
-      let dueUnitsAccum = 0;
-      const legacyLastSync = med.lastSyncDate || todayStr;
-      for (let dayIdx = 1; dayIdx <= totalDays; dayIdx++) {
-        const day = addDaysToDateStr(legacyLastSync, dayIdx);
-        if (isDoseConsumedOnDate(med, LEGACY_DOSE_ID, day)) continue;
-        if (isDoseSkippedOnDate(med, LEGACY_DOSE_ID, day)) continue;
-        dueDays += 1;
-        dueUnitsAccum += med.dailyDose;
-      }
-      fullDueDoses = dueDays;
-      pastDueDoses = dueDays;
-      pastDueUnits = dueUnitsAccum;
-      fullDueUnits = dueUnitsAccum;
+      // No explicit doseSchedule: day-level due uses dailyDose for each day
+      // in (lastSyncDate, today]. Consume/skip exclusion requires explicit
+      // doseSchedule markers (no LEGACY_DOSE_ID identity).
+      fullDueDoses = totalDays;
+      pastDueDoses = totalDays;
+      pastDueUnits = totalDays * med.dailyDose;
+      fullDueUnits = totalDays * med.dailyDose;
     }
   }
 
@@ -697,45 +668,15 @@ export function computeDueDoseBreakdown(
 }
 
 /**
- * Settlement lastSyncDate rule for the reminderTime-gated settlement
- * (which settles ONLY past days, leaving today dynamic).
- *
- * - `dueDoses === 0` → keep the existing lastSyncDate (default to
- *   todayStr if it was empty). Nothing was settled; today's dose stays
- *   pending exactly as before.
- * - reminderTime-gated with `dueDoses > 0` and no manual consume today
- *   → yesterday: the past days are now settled, but today's dose is
- *   NOT (it stays projectable via {@link effectiveCurrentPills}'s
- *   `todayDue` until the next existing execution point — manual
- *   consume, app-open sync, or a later mutation).
- * - Legacy path (or reminderTime-gated with a manual consume today)
- *   → today: legacy settles today's dose at the start of the calendar
- *   day; a manual consume today already set lastSyncDate = today.
- */
-export function settlementLastSyncDate(
-  med: Medication,
-  todayStr: string,
-  dueDoses: number,
-  consumedToday: boolean,
-  gated: boolean
-): string {
-  if (dueDoses <= 0) return med.lastSyncDate || todayStr;
-  if (gated && !consumedToday) return addDaysToDateStr(todayStr, -1);
-  return todayStr;
-}
-
-/**
  * Settlement lastSyncDate rule for MUTATIONS (refill / dose-change /
- * auto-deduct toggle / refill-undo). Unlike {@link settlementLastSyncDate}
- * (used by sync, which keeps lastSyncDate when nothing is settled), a
- * mutation always advances lastSyncDate so the snapshot reflects the
- * post-mutation state:
+ * auto-deduct toggle / refill-undo). A mutation always advances lastSyncDate
+ * so the snapshot reflects the post-mutation state:
  *   - Legacy: today (the pre-change behavior — always bump on mutation).
  *   - reminderTime-gated with a manual consume today: today (the manual
  *     consume already settled today's dose).
  *   - reminderTime-gated otherwise: yesterday — today's dose stays
  *     dynamic (projectable via todayDue, and settled at the next
- *     existing execution point — app-open sync or a later mutation).
+ *     existing execution point — a later mutation).
  *     This lets, e.g., a dose change apply the NEW dose to today's
  *     (still-dynamic) dose.
  */
@@ -850,142 +791,6 @@ export function getDepletionDate(med: Medication): {
     dateStr,
     formattedArabic,
     daysLeft,
-  };
-}
-
-export interface AutoSyncResult {
-  updatedMeds: Medication[];
-  newLogs: ConsumptionLog[];
-  deductedSummary: {
-    medName: string;
-    daysPassed: number;
-    pillsDeducted: number;
-    remainingPills: number;
-  }[];
-}
-
-/**
- * Legacy day/window stock catch-up (Phase 7 / D7-2).
- *
- * **Authority split:**
- * - Exact Auto (native FIRED → `reconcileFiredEvents`) is the
- *   authoritative **timed occurrence** path when FIRED evidence exists.
- * - This function is a **secondary defensive catch-up** for due history
- *   that is still unrepresented in durable state **after** Exact
- *   reconciliation.
- *
- * **Ordering (must not reverse):**
- * `withAutoStockMutationGate` → envelope recovery →
- * `reconcileExactBeforeLegacySettlement` → only then this function.
- * If native list/durability fails, callers must not run this mutation.
- *
- * **What this function does NOT do:**
- * - Re-apply Exact FIRED occurrences (consume/skip markers + due math
- *   already exclude them after Exact apply)
- * - Create Exact occurrence IDs or `exact-auto:*` logs
- * - ACK / RECONCILE native EventStore rows
- * - Act as an occurrence ledger (`medicationId + doseId + calendarDate`)
- *
- * **What it does:**
- * - Uses {@link computeDueDoseBreakdown} due units only
- * - Multi-dose / reminder-gated: settles **past** fully-elapsed days;
- *   today's slots stay dynamic for Exact/manual (existing contract)
- * - Legacy non-gated: existing per-day due loop (unchanged unless a
- *   proven double-deduction path appears)
- * - When post-Exact `dueUnits === 0`: no durable stock mutation and no
- *   `auto_daily` log for that med
- *
- * **`auto_daily` logs** are audit records of day/window catch-up only.
- * They are **not** evidence that a specific Exact occurrence fired or
- * was applied, and must not gate Exact FIRED reconciliation.
- */
-export function syncAutoDailyDeductions(
-  medications: Medication[],
-  todayStr: string = getTodayDateString(),
-  now: Date = new Date()
-): AutoSyncResult {
-  const updatedMeds: Medication[] = [];
-  const newLogs: ConsumptionLog[] = [];
-  const deductedSummary: AutoSyncResult['deductedSummary'] = [];
-
-  medications.forEach((med) => {
-    const breakdown = computeDueDoseBreakdown(med, now, todayStr);
-
-    // For the reminderTime-gated path, sync settles ONLY fully-elapsed
-    // past days (betweenDays). Today's dose is left dynamic (projected
-    // by effectiveCurrentPills via todayDue) so a later manual consume
-    // can replace it without double-deduction; today's dose is settled
-    // at the next existing execution point (a later mutation, or the
-    // next app-open sync), NOT automatically at the calendar-day
-    // boundary. For the legacy path, sync settles totalDays (today
-    // included) — the pre-change behavior.
-    const dueUnits = breakdown.gated ? breakdown.pastDueUnits : breakdown.fullDueUnits;
-    const dueDoses = breakdown.gated ? breakdown.pastDueDoses : breakdown.fullDueDoses;
-
-    // `consumedToday` must never be a GLOBAL sync blocker for the legacy
-    // non-gated path: fullDueUnits there is computed per calendar day, so a
-    // consumed TODAY only excludes today's own occurrence while the
-    // historical unconsumed days stay due and must still be settled
-    // (e.g. an Exact Auto event on today historically left days
-    // (lastSync, today) un-settled whenever this guard swallowed the whole
-    // sync). For gated meds the pre-existing consumedToday guard is
-    // preserved unchanged.
-    const consumedTodayBlocksSync = breakdown.gated && breakdown.consumedToday;
-
-    if (
-      med.autoDeductEnabled !== false &&
-      dailyScheduleAmount(med) > 0 &&
-      dueUnits > 0 &&
-      !consumedTodayBlocksSync
-    ) {
-      const pillsToDeduct = Math.min(med.currentPills, dueUnits);
-      const newPills = Math.max(0, med.currentPills - pillsToDeduct);
-      const newLastSync = settlementLastSyncDate(
-        med,
-        todayStr,
-        dueDoses,
-        breakdown.consumedToday,
-        breakdown.gated
-      );
-
-      updatedMeds.push({
-        ...med,
-        currentPills: newPills,
-        lastSyncDate: newLastSync,
-      });
-
-      if (pillsToDeduct > 0) {
-        newLogs.push({
-          id: generateId('log'),
-          medicationId: med.id,
-          medicationName: med.name,
-          type: 'auto_daily',
-          amount: -pillsToDeduct,
-          date: todayStr,
-          timestamp: new Date().toISOString(),
-          description: `خصم تلقائي لمرور ${dueDoses} ${dueDoses === 1 ? 'يوم' : 'أيام'} (-${pillsToDeduct} ${med.unit})`,
-        });
-
-        deductedSummary.push({
-          medName: med.name,
-          daysPassed: dueDoses,
-          pillsDeducted: pillsToDeduct,
-          remainingPills: newPills,
-        });
-      }
-    } else {
-      // Just keep as is, ensuring lastSyncDate is set
-      updatedMeds.push({
-        ...med,
-        lastSyncDate: med.lastSyncDate || todayStr,
-      });
-    }
-  });
-
-  return {
-    updatedMeds,
-    newLogs,
-    deductedSummary,
   };
 }
 

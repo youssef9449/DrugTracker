@@ -5,13 +5,11 @@ import {
   scheduleDoseReminder,
   cancelDoseReminder,
   cancelSnoozedDoseReminder,
-  cancelLegacyDoseReminderAlarm,
   isDoseReminderPending,
   isNativeDoseReminderReArmed,
   isDoseReminderTimeStillAhead,
   doseReminderAlarmIdForDose,
   cancelStaleDoseReminderAlarms,
-  LEGACY_DOSE_ID,
 } from '../utils/notifications';
 import { clearSnoozedDose } from '../utils/doseReminderStorage';
 import { isValidDoseTime } from '../utils/doseSchedule';
@@ -57,9 +55,7 @@ export interface UseDoseReminderSchedulerOptions {
 }
 
 /**
- * One schedulable dose slot derived from a medication.
- * - Multi-dose meds: one entry per `doseSchedule` row (stable dose id).
- * - Legacy meds (no schedule): single entry with {@link LEGACY_DOSE_ID}.
+ * One schedulable dose slot derived from explicit `doseSchedule` row.
  */
 export interface DoseReminderSlot {
   medId: string;
@@ -77,62 +73,38 @@ export function doseScheduleKey(medId: string, doseId: string): string {
 
 export function parseDoseScheduleKey(key: string): { medId: string; doseId: string } {
   const idx = key.indexOf('::');
-  if (idx < 0) return { medId: key, doseId: LEGACY_DOSE_ID };
+  if (idx < 0) return { medId: key, doseId: '' };
   return { medId: key.slice(0, idx), doseId: key.slice(idx + 2) };
 }
 
 /**
- * Build the list of dose reminder slots for a medication.
- *
- * Source of truth for multi-dose: non-empty `doseSchedule` (by dose id).
- * Legacy: single slot at `reminderTime` with amount = `dailyDose`.
- * Invalid/missing times are skipped.
- *
- * Does not mutate the medication. Does not implement stock logic.
+ * Build dose reminder slots from explicit `doseSchedule` only.
+ * Missing/empty schedule → []. No dailyDose/reminderTime synthetic slot.
  */
 export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
   const name = med.name;
   const unit = med.unit || 'قرص';
-
-  if (Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) {
-    // Multi-dose path: every scheduled row must carry a non-empty stable
-    // doseId. Missing/empty/whitespace ids are skipped — never mapped to
-    // LEGACY_DOSE_ID (that identity is only for meds without a usable
-    // doseSchedule). Keep first occurrence of each valid doseId.
-    const seen = new Set<string>();
-    const slots: DoseReminderSlot[] = [];
-    for (const d of med.doseSchedule) {
-      if (!d || !isValidDoseTime(d.time) || !(Number(d.amount) > 0)) continue;
-      const doseId = typeof d.id === 'string' ? d.id.trim() : '';
-      if (!doseId) continue;
-      if (seen.has(doseId)) continue;
-      seen.add(doseId);
-      slots.push({
-        medId: med.id,
-        doseId,
-        time: d.time,
-        amount: Number(d.amount),
-        name,
-        unit,
-      });
-    }
-    return slots;
+  if (!Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0) {
+    return [];
   }
-
-  if (med.reminderTime && isValidDoseTime(med.reminderTime)) {
-    return [
-      {
-        medId: med.id,
-        doseId: LEGACY_DOSE_ID,
-        time: med.reminderTime,
-        amount: Number(med.dailyDose) > 0 ? Number(med.dailyDose) : 1,
-        name,
-        unit,
-      },
-    ];
+  const seen = new Set<string>();
+  const slots: DoseReminderSlot[] = [];
+  for (const d of med.doseSchedule) {
+    if (!d || !isValidDoseTime(d.time) || !(Number(d.amount) > 0)) continue;
+    const doseId = typeof d.id === 'string' ? d.id.trim() : '';
+    if (!doseId) continue;
+    if (seen.has(doseId)) continue;
+    seen.add(doseId);
+    slots.push({
+      medId: med.id,
+      doseId,
+      time: d.time,
+      amount: Number(d.amount),
+      name,
+      unit,
+    });
   }
-
-  return [];
+  return slots;
 }
 
 /**
@@ -140,11 +112,11 @@ export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
  *
  * Phase 2: for each medication with `reminderEnabled`, schedules one
  * RECURRING daily notification per dose slot (multi-dose `doseSchedule`,
- * or a single legacy `reminderTime` slot). Each slot uses a stable
+ * Each slot uses a stable
  * notification id derived from medicationId + doseId.
  *
  * The recurring alarm is config-driven. Consumption suppression still
- * uses per-dose consumption (`doseConsumption` / legacy lastConsumedDate).
+ * uses per-dose consumption (`doseConsumption`).
  * skipToday applies only to slots consumed today.
  *
  * Generation counter + per-key serialization chain prevent races when
@@ -275,12 +247,6 @@ export function useDoseReminderScheduler({
       const slots = getDoseReminderSlots(med);
       if (slots.length === 0) continue;
 
-      if (slots.some((sl) => sl.doseId !== LEGACY_DOSE_ID)) {
-        enqueue(doseScheduleKey(med.id, '__legacy_cleanup__'), () =>
-          cancelLegacyDoseReminderAlarm(med.id)
-        );
-      }
-
       for (const slot of slots) {
         const key = doseScheduleKey(slot.medId, slot.doseId);
         const slotConsumedToday = isDoseConsumedOnDate(med, slot.doseId, today);
@@ -294,7 +260,8 @@ export function useDoseReminderScheduler({
           isAutoActive ? '1' : '0',
         ].join('|');
         stillScheduled.add(key);
-        keepNativeIds.add(doseReminderAlarmIdForDose(slot.medId, slot.doseId));
+        const nid = doseReminderAlarmIdForDose(slot.medId, slot.doseId);
+        if (nid != null) keepNativeIds.add(nid);
         desired.push({
           key,
           medId: slot.medId,
@@ -355,14 +322,10 @@ export function useDoseReminderScheduler({
           if (doseGenerationRef.current.get(key) !== gen) return;
           if (nativeReArmed) return;
           const opts = {
-            ...(doseId !== LEGACY_DOSE_ID ? { doseId } : {}),
             ...(slotConsumedToday ? { skipToday: true as const } : {}),
             ...(isAutoActive ? { autoDeductEnabled: true } : {}),
           };
-          const hasOpts = Object.keys(opts).length > 0;
-          await (hasOpts
-            ? scheduleDoseReminder(medId, name, time, amount, unit, opts)
-            : scheduleDoseReminder(medId, name, time, amount, unit));
+          await scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts);
           if (doseGenerationRef.current.get(key) !== gen) {
             await cancelDoseReminder(medId, doseId);
             return;
@@ -377,14 +340,10 @@ export function useDoseReminderScheduler({
         cancelDoseReminder(medId, doseId).then(async () => {
           if (doseGenerationRef.current.get(key) !== gen) return;
           const opts = {
-            ...(doseId !== LEGACY_DOSE_ID ? { doseId } : {}),
             ...(slotConsumedToday ? { skipToday: true as const } : {}),
             ...(isAutoActive ? { autoDeductEnabled: true } : {}),
           };
-          const hasOpts = Object.keys(opts).length > 0;
-          await (hasOpts
-            ? scheduleDoseReminder(medId, name, time, amount, unit, opts)
-            : scheduleDoseReminder(medId, name, time, amount, unit));
+          await scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts);
           if (doseGenerationRef.current.get(key) !== gen) {
             await cancelDoseReminder(medId, doseId);
             return;
@@ -496,11 +455,10 @@ export function useDoseReminderScheduler({
                 if (doseGenerationRef.current.get(key) !== gen) return;
                 const isAutoActive = med.autoDeductEnabled !== false;
                 const opts = {
-                  ...(doseId !== LEGACY_DOSE_ID ? { doseId } : {}),
                   skipToday: true as const,
                   ...(isAutoActive ? { autoDeductEnabled: true } : {}),
                 };
-                return scheduleDoseReminder(medId, name, time, amount, unit, opts).then(
+                return scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts).then(
                   () => {
                     if (doseGenerationRef.current.get(key) !== gen) {
                       return cancelDoseReminder(medId, doseId);
@@ -523,15 +481,9 @@ export function useDoseReminderScheduler({
               if (doseGenerationRef.current.get(key) !== gen) return;
               const isAutoActive = med.autoDeductEnabled !== false;
               const opts = {
-                ...(doseId !== LEGACY_DOSE_ID ? { doseId } : {}),
                 ...(isAutoActive ? { autoDeductEnabled: true } : {}),
               };
-              const hasOpts = Object.keys(opts).length > 0;
-              return (
-                hasOpts
-                  ? scheduleDoseReminder(medId, name, time, amount, unit, opts)
-                  : scheduleDoseReminder(medId, name, time, amount, unit)
-              ).then(() => {
+              return scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts).then(() => {
                 if (doseGenerationRef.current.get(key) !== gen) {
                   return cancelDoseReminder(medId, doseId);
                 }

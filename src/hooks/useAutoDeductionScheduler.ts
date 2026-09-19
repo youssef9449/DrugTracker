@@ -7,7 +7,6 @@ import { useEffect, useMemo, useRef } from 'react';
 import type { Medication } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
 import { isValidDoseTime, normalizeTimeString } from '../utils/doseSchedule';
-import { LEGACY_DOSE_ID } from '../utils/notifications';
 import {
   cancelAutoDeduction,
   invalidateAutoDeductionRecurrence,
@@ -54,48 +53,27 @@ export function getAutoDeductionSlotsForDate(
 ): AutoDeductionSlot[] {
   if (med.autoDeductEnabled === false) return [];
 
-  if (Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) {
-    const seen = new Set<string>();
-    const slots: AutoDeductionSlot[] = [];
-    for (const d of med.doseSchedule) {
-      if (!d || !isValidDoseTime(d.time) || !(Number(d.amount) > 0)) continue;
-      const doseId = typeof d.id === 'string' ? d.id.trim() : '';
-      if (!doseId) continue;
-      if (seen.has(doseId)) continue;
-      seen.add(doseId);
-      slots.push({
-        medId: med.id,
-        doseId,
-        time: normalizeTimeString(d.time),
-        amount: Number(d.amount),
-        calendarDate,
-      });
-    }
-    return slots;
+  // Issue #268: Exact slots come only from explicit doseSchedule rows.
+  if (!Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0) {
+    return [];
   }
-
-  // Legacy single-dose exact timing is valid only when the legacy reminder
-  // timing is actually enabled. This must match isReminderTimeGated() in
-  // dateCalculations.ts; otherwise legacy sync can settle the calendar day
-  // while this scheduler also creates an exact occurrence for the same day.
-  if (
-    med.reminderEnabled === true &&
-    med.reminderTime &&
-    isValidDoseTime(med.reminderTime) &&
-    Number(med.dailyDose) > 0
-  ) {
-    return [
-      {
-        medId: med.id,
-        doseId: LEGACY_DOSE_ID,
-        time: normalizeTimeString(med.reminderTime),
-        amount: Number(med.dailyDose),
-        calendarDate,
-      },
-    ];
+  const seen = new Set<string>();
+  const slots: AutoDeductionSlot[] = [];
+  for (const d of med.doseSchedule) {
+    if (!d || !isValidDoseTime(d.time) || !(Number(d.amount) > 0)) continue;
+    const doseId = typeof d.id === 'string' ? d.id.trim() : '';
+    if (!doseId) continue;
+    if (seen.has(doseId)) continue;
+    seen.add(doseId);
+    slots.push({
+      medId: med.id,
+      doseId,
+      time: normalizeTimeString(d.time),
+      amount: Number(d.amount),
+      calendarDate,
+    });
   }
-
-  return [];
+  return slots;
 }
 
 type GuardedCancelResult = {

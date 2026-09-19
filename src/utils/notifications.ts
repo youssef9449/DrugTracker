@@ -470,47 +470,6 @@ export async function sendCriticalStockAlert(
 }
 
 /**
- * LEGACY-ONLY: med-scoped dose reminder (no doseId).
- *
- * Uses only `medId` + `dailyDose` — **not** valid for multi-dose
- * `doseSchedule` slots. Production multi-dose scheduling must use
- * {@link scheduleDoseReminder} which keys by `medId + doseId`.
- *
- * Kept for backward-compatible tests and any historical med-only
- * reminder callers. Do not call this for multi-dose medications.
- *
- * @param medId Stable medication id (for a unique notification id)
- * @param medicineName Medication name (title)
- * @param dailyDose Daily dose amount (body)
- * @param unit Unit (e.g., 'قرص')
- * @param reminderTime HH:MM string (24-hour) for the scheduled time
- */
-export async function sendMedicationDoseReminder(
-  medId: string,
-  medicineName: string,
-  dailyDose: number,
-  unit: string = 'قرص',
-  reminderTime?: string,
-  autoDeductEnabled?: boolean,
-): Promise<void> {
-  const timeHint = reminderTime
-    ? ` الساعة ${formatReminderTime12h(reminderTime)}`
-    : '';
-  const title = `⏰ حان موعد دواء: ${medicineName}`;
-  const body = `موعد الجرعة${timeHint}. جرعتك المقررة: ${dailyDose} ${unit}.`;
-
-  await scheduleNotification({
-    id: notificationId('dose', medId),
-    title,
-    body,
-    channelId: getDoseReminderChannelId(),
-    smallIcon: 'ic_launcher',
-    actionTypeId: autoDeductEnabled ? undefined : 'dose-reminder',
-    extra: { medicationId: medId },
-  });
-}
-
-/**
  * Internal helper: schedule a notification on whichever platform
  * the app is running on. Falls back to the browser Notification API
  * when Capacitor isn't available.
@@ -1016,35 +975,21 @@ export async function scheduleCriticalAlarm(
 // Sentinel lives in a leaf module so pure-logic modules (dateCalculations)
 // can reference it without importing the notification stack.
 // Re-exported here for backward compatibility with existing importers.
-export { LEGACY_DOSE_ID } from './legacyDoseId';
-import { LEGACY_DOSE_ID } from './legacyDoseId';
 
 /**
- * Compute the unique notification id for a medication's recurring dose
- * alarm. Stable across calls so cancel + reschedule work.
- *
- * Single-argument form preserves the Phase-0/1 id for legacy meds.
- */
-export function doseReminderAlarmId(medId: string): number {
-  return notificationId('doseAlarm', medId);
-}
-
-/**
- * Recurring dose-alarm id for a specific dose row.
- *
- * Identity = medicationId + doseId so each daily dose slot is independently
- * schedulable/cancellable. The legacy sentinel (`LEGACY_DOSE_ID`) maps to
- * the historical med-only id so pre-Phase-2 single-dose alarms remain valid.
+ * Recurring dose-alarm id for an explicit doseSchedule row (Issue #268).
+ * Identity = medicationId + doseId. Requires non-empty doseId.
+ * Returns null when doseId is missing — callers must not schedule/cancel.
  *
  * Band: doseAlarm (6_000_000 + hash(...) % 1_000_000).
  */
-export function doseReminderAlarmIdForDose(medId: string, doseId: string): number {
-  if (!doseId || doseId === LEGACY_DOSE_ID) {
-    return doseReminderAlarmId(medId);
-  }
-  // Composite key stays inside the same doseAlarm band; distinct from the
-  // med-only hash for all practical med/dose id pairs.
-  return notificationId('doseAlarm', `${medId}::${doseId}`);
+export function doseReminderAlarmIdForDose(
+  medId: string,
+  doseId: string
+): number | null {
+  const id = typeof doseId === 'string' ? doseId.trim() : '';
+  if (!id) return null;
+  return notificationId('doseAlarm', `${medId}::${id}`);
 }
 
 /**
@@ -1064,12 +1009,13 @@ export function doseReminderAlarmIdForDose(medId: string, doseId: string): numbe
  */
 export async function isDoseReminderPending(
   medId: string,
-  doseId: string = LEGACY_DOSE_ID
+  doseId: string
 ): Promise<boolean> {
   if (!isNativePlatform()) return false;
   try {
     const pending = await LocalNotifications.getPending();
     const id = doseReminderAlarmIdForDose(medId, doseId);
+    if (id == null) return false;
     const entry = pending.notifications.find((n) => n.id === id);
     if (!entry) return false;
     const at = (entry.schedule as { at?: unknown } | undefined)?.at;
@@ -1104,16 +1050,15 @@ export async function isDoseReminderPending(
  */
 export async function isNativeDoseReminderReArmed(
   medId: string,
-  doseId: string = LEGACY_DOSE_ID,
+  doseId: string,
   reminderTime?: string
 ): Promise<boolean> {
   if (!isNativePlatform()) return false;
+  const id = typeof doseId === 'string' ? doseId.trim() : '';
+  if (!id) return false;
   if (!reminderTime || reminderTime.indexOf(':') < 0) return false;
   try {
-    const opts =
-      doseId && doseId !== LEGACY_DOSE_ID
-        ? { medicationId: medId, doseId, reminderTime }
-        : { medicationId: medId, reminderTime };
+    const opts = { medicationId: medId, doseId: id, reminderTime };
     const result = await DoseReminderNative.getNextOccurrence(opts);
     return result?.valid === true;
   } catch (err) {
@@ -1128,33 +1073,16 @@ export async function isNativeDoseReminderReArmed(
  */
 export async function clearNativeDoseReminderReArm(
   medId: string,
-  doseId: string = LEGACY_DOSE_ID
+  doseId: string
 ): Promise<void> {
   if (!isNativePlatform()) return;
+  const id = typeof doseId === 'string' ? doseId.trim() : '';
+  if (!id) return;
   try {
-    const opts =
-      doseId && doseId !== LEGACY_DOSE_ID
-        ? { medicationId: medId, doseId }
-        : { medicationId: medId };
+    const opts = { medicationId: medId, doseId: id };
     await DoseReminderNative.clearReArm(opts);
   } catch (err) {
     console.warn('[notifications] clearNativeDoseReminderReArm failed:', err);
-  }
-}
-
-/**
- * Cancel the pre-Phase-2 med-only doseAlarm id for a medication.
- * Idempotent. Call when reconciling multi-dose slots so a legacy single-id
- * alarm cannot fire alongside per-dose ids.
- */
-export async function cancelLegacyDoseReminderAlarm(medId: string): Promise<void> {
-  if (!isNativePlatform()) return;
-  try {
-    await LocalNotifications.cancel({
-      notifications: [{ id: doseReminderAlarmId(medId) }],
-    });
-  } catch (err) {
-    console.warn('[notifications] cancelLegacyDoseReminderAlarm failed:', err);
   }
 }
 
@@ -1197,66 +1125,53 @@ export async function cancelStaleDoseReminderAlarms(keepIds: ReadonlySet<number>
   }
 }
 
-/** Stable, separate id for a one-shot snoozed dose reminder. */
-export function snoozeDoseReminderId(medId: string, doseId?: string): number {
-  if (!doseId || doseId === LEGACY_DOSE_ID) {
-    return notificationId('doseSnooze', medId);
-  }
-  return notificationId('doseSnooze', `${medId}::${doseId}`);
+/**
+ * One-shot snooze notification id for an explicit dose row (Issue #268).
+ * Requires non-empty doseId. Returns null when missing.
+ */
+export function snoozeDoseReminderId(medId: string, doseId: string): number | null {
+  const id = typeof doseId === 'string' ? doseId.trim() : '';
+  if (!id) return null;
+  return notificationId('doseSnooze', `${medId}::${id}`);
 }
 
+
 /**
- * Cancel any pending recurring dose-reminder alarm for this medication
- * (and optionally a specific dose row).
- *
- * - `cancelDoseReminder(medId)` — legacy / med-only id (Phase 0/1).
- * - `cancelDoseReminder(medId, doseId)` — that dose's id only.
- *
- * On web: no-op (web has no persistent recurring alarm to cancel).
+ * Cancel a pending recurring dose-reminder alarm for an explicit dose row.
+ * Requires non-empty doseId (Issue #268).
  */
-export async function cancelDoseReminder(medId: string, doseId?: string): Promise<void> {
+export async function cancelDoseReminder(medId: string, doseId: string): Promise<void> {
   if (!isNativePlatform()) return;
+  const notifId = doseReminderAlarmIdForDose(medId, doseId);
+  if (notifId == null) return;
   try {
-    const id =
-      doseId !== undefined
-        ? doseReminderAlarmIdForDose(medId, doseId)
-        : doseReminderAlarmId(medId);
     await LocalNotifications.cancel({
-      notifications: [{ id }],
+      notifications: [{ id: notifId }],
     });
-    // Drop delivery/re-arm evidence so a later missing-alarm check can repair.
-    await clearNativeDoseReminderReArm(medId, doseId ?? LEGACY_DOSE_ID);
+    await clearNativeDoseReminderReArm(medId, doseId);
   } catch (err) {
     console.warn('[notifications] cancelDoseReminder failed:', err);
   }
 }
 
 /**
- * Cancel pending one-shot snooze notification(s) for a medication.
- *
- * - cancelSnoozedDoseReminder(medId) — legacy med-only + historical dose id.
- * - cancelSnoozedDoseReminder(medId, doseId) — that dose's snooze id only
- *   (plus the legacy med-only id when doseId is LEGACY_DOSE_ID / omitted).
+ * Cancel pending one-shot snooze for an explicit dose row (Issue #268).
  */
 export async function cancelSnoozedDoseReminder(
   medId: string,
-  doseId?: string
+  doseId: string
 ): Promise<void> {
   if (!isNativePlatform()) return;
+  const id = snoozeDoseReminderId(medId, doseId);
+  if (id == null) return;
   try {
-    const ids: { id: number }[] = [
-      { id: snoozeDoseReminderId(medId, doseId) },
-    ];
-    // Always clear historical med-only / immediate-dose ids so a
-    // pre-Phase-3B snooze cannot linger (including when cancelling a
-    // multi-dose slot that may share an old med-level pending notif).
-    ids.push({ id: snoozeDoseReminderId(medId) });
-    ids.push({ id: notificationId('dose', medId) });
-    await LocalNotifications.cancel({ notifications: ids });
+    await LocalNotifications.cancel({ notifications: [{ id }] });
   } catch (err) {
     console.warn('[notifications] cancelSnoozedDoseReminder failed:', err);
   }
 }
+
+
 
 /**
  * Schedule a ONE-SHOT dose-reminder notification `minutes` in the future.
@@ -1284,19 +1199,24 @@ export async function cancelSnoozedDoseReminder(
 export async function scheduleSnoozedDoseReminder(
   medId: string,
   medName: string,
-  dailyDose: number,
+  doseAmount: number,
   unit: string,
   reminderTime: string | undefined,
   minutes: number,
-  doseId?: string,
+  doseId: string,
   autoDeductEnabled?: boolean,
 ): Promise<void> {
+  const id = typeof doseId === 'string' ? doseId.trim() : '';
+  if (!id) return;
+  const notifId = snoozeDoseReminderId(medId, id);
+  if (notifId == null) return;
+
   const fireAt = new Date(Date.now() + minutes * 60_000);
   const timeHint = reminderTime
     ? ` (موعد الجرعة الأصلي ${formatReminderTime12h(reminderTime)})`
     : '';
   const title = `⏰ تذكير مجدد: ${medName}`;
-  const body = `غفوة ${minutes} دقيقة انتهت${timeHint}. جرعتك المقررة: ${dailyDose} ${unit}.`;
+  const body = `غفوة ${minutes} دقيقة انتهت${timeHint}. جرعتك المقررة: ${doseAmount} ${unit}.`;
 
   if (isNativePlatform()) {
     try {
@@ -1310,7 +1230,7 @@ export async function scheduleSnoozedDoseReminder(
       await LocalNotifications.schedule({
         notifications: [
           {
-            id: snoozeDoseReminderId(medId, doseId),
+            id: notifId,
             title,
             body,
             schedule: {
@@ -1324,7 +1244,7 @@ export async function scheduleSnoozedDoseReminder(
             autoCancel: true,
             extra: {
               medicationId: medId,
-              ...(doseId && doseId !== LEGACY_DOSE_ID ? { doseId } : {}),
+              doseId: id,
             },
           },
         ],
@@ -1363,7 +1283,7 @@ export interface ScheduleDoseReminderOptions {
   skipToday?: boolean;
   /**
    * Specific dose-row id from `Medication.doseSchedule`. When omitted or
-   * set to {@link LEGACY_DOSE_ID}, the historical med-only notification
+   * set to {@link empty doseId}, the historical med-only notification
    * id is used (single-dose / legacy path).
    */
   doseId?: string;
@@ -1416,8 +1336,9 @@ export async function scheduleDoseReminder(
   medId: string,
   medName: string,
   reminderTime: string,
-  dailyDose: number,
+  doseAmount: number,
   unit: string,
+  doseId: string,
   options?: ScheduleDoseReminderOptions,
 ): Promise<void> {
   // Validate the HH:MM string and compute the next fire Date.
@@ -1436,11 +1357,15 @@ export async function scheduleDoseReminder(
     fireToday.setDate(fireToday.getDate() + 1);
   }
 
+  const id = typeof doseId === 'string' ? doseId.trim() : '';
+  if (!id) return;
+  if (!(Number(doseAmount) > 0)) return;
+  const notifId = doseReminderAlarmIdForDose(medId, id);
+  if (notifId == null) return;
+
   const title = `⏰ حان موعد دواء: ${medName}`;
   // Display 12h for the user; reminderTime stays 24h for schedule + extra.
-  const body = `موعد الجرعة الساعة ${formatReminderTime12h(reminderTime)}. جرعتك المقررة: ${dailyDose} ${unit}.`;
-  const doseId = options?.doseId;
-  const notifId = doseReminderAlarmIdForDose(medId, doseId ?? LEGACY_DOSE_ID);
+  const body = `موعد الجرعة الساعة ${formatReminderTime12h(reminderTime)}. جرعتك المقررة: ${doseAmount} ${unit}.`;
 
   if (isNativePlatform()) {
     try {
@@ -1474,9 +1399,7 @@ export async function scheduleDoseReminder(
             autoCancel: true,
             extra: {
               medicationId: medId,
-              // Phase 3/4: doseId identifies the exact schedule slot for
-              // openAlarm / take-dose (legacy omits doseId).
-              ...(doseId ? { doseId } : {}),
+              doseId: id,
               reminderTime,
               doseRecurring: true,
             },

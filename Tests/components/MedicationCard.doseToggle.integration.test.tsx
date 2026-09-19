@@ -33,7 +33,6 @@ vi.mock('@/utils/notifications', () => ({
   cancelSnoozedDoseReminder: vi.fn(() => Promise.resolve()),
   scheduleSnoozedDoseReminder: vi.fn(() => Promise.resolve()),
   isDoseReminderTimeStillAhead: vi.fn(() => true),
-  LEGACY_DOSE_ID: 'legacy',
 }));
 
 vi.mock('@/utils/sound', () => ({

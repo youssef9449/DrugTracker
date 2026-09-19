@@ -14,7 +14,6 @@ import {
   isFireRetryRecoveryPending,
 } from '../../src/hooks/useAutoDeductionScheduler';
 import { autoDeductionOccurrenceKey } from '../../src/utils/autoDeductionNative';
-import { LEGACY_DOSE_ID } from '../../src/utils/notifications';
 
 function baseMed(over: Partial<Medication> = {}): Medication {
   return {
@@ -100,28 +99,31 @@ describe('multi-dose amount isolation', () => {
   });
 });
 
-describe('legacy single-dose', () => {
-  it('does not schedule a legacy exact occurrence when reminder timing is disabled', () => {
-    const med = baseMed({
-      reminderEnabled: false,
-      reminderTime: '08:30',
-      dailyDose: 2,
-      doseSchedule: undefined,
-    });
-    expect(getAutoDeductionSlotsForDate(med, '2026-09-14')).toEqual([]);
-  });
-
-  it('uses LEGACY_DOSE_ID and dailyDose', () => {
+describe('legacy single-dose (post #268 migration)', () => {
+  it('does not invent slots from reminder fields without explicit doseSchedule', () => {
     const med = baseMed({
       reminderEnabled: true,
       reminderTime: '08:30',
       dailyDose: 2,
       doseSchedule: undefined,
     });
+    // Scheduler is doseSchedule-only; hydration migrates before scheduling.
+    expect(getAutoDeductionSlotsForDate(med, '2026-09-14')).toEqual([]);
+  });
+
+  it('schedules migrated explicit single-dose using doseSchedule id/amount/time', () => {
+    const med = baseMed({
+      reminderEnabled: true,
+      reminderTime: '08:30',
+      dailyDose: 2,
+      doseSchedule: [{ id: 'dose-med-1-s1', amount: 2, time: '08:30' }],
+    });
     const slots = getAutoDeductionSlotsForDate(med, '2026-09-14');
     expect(slots).toHaveLength(1);
-    expect(slots[0].doseId).toBe(LEGACY_DOSE_ID);
+    expect(slots[0].doseId).toBe('dose-med-1-s1');
     expect(slots[0].amount).toBe(2);
+    expect(slots[0].time).toBe('08:30');
+    expect(slots[0].doseId).not.toBe('legacy');
   });
 });
 

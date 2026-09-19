@@ -5,7 +5,6 @@ import type { Medication } from '@/types';
 import { getTodayDateString } from '@/utils/dateCalculations';
 import { useDoseReminderScheduler, getDoseReminderSlots } from '@/hooks/useDoseReminderScheduler';
 import {
-  LEGACY_DOSE_ID,
   doseReminderAlarmIdForDose,
   doseReminderAlarmId,
 } from '@/utils/notifications';
@@ -1071,7 +1070,7 @@ describe('Phase 4 — dose-scoped cancel on removal', () => {
     expect(slots.find((s) => s.doseId === 'd1')?.amount).toBe(1);
   });
 
-  it('skips empty doseIds (does not map to LEGACY_DOSE_ID)', () => {
+  it('skips empty doseIds', () => {
     const med = makeMed({
       doseSchedule: [
         { id: '', amount: 1, time: '08:00' },
@@ -1081,7 +1080,6 @@ describe('Phase 4 — dose-scoped cancel on removal', () => {
     });
     const slots = getDoseReminderSlots(med);
     expect(slots.map((s) => s.doseId)).toEqual(['d2']);
-    expect(slots.every((s) => s.doseId !== LEGACY_DOSE_ID)).toBe(true);
   });
 
   it('skips whitespace-only doseIds', () => {
@@ -1096,7 +1094,7 @@ describe('Phase 4 — dose-scoped cancel on removal', () => {
     expect(slots.map((s) => s.doseId)).toEqual(['d2']);
   });
 
-  it('skips missing doseIds rather than becoming LEGACY_DOSE_ID', () => {
+  it('skips missing doseIds', () => {
     const med = makeMed({
       doseSchedule: [
         { id: undefined as unknown as string, amount: 1, time: '08:00' },
@@ -1106,7 +1104,6 @@ describe('Phase 4 — dose-scoped cancel on removal', () => {
     });
     const slots = getDoseReminderSlots(med);
     expect(slots.map((s) => s.doseId)).toEqual(['d2']);
-    expect(slots.some((s) => s.doseId === LEGACY_DOSE_ID)).toBe(false);
   });
 
   it('two empty-id rows do not collapse into one legacy slot', () => {
@@ -1121,7 +1118,11 @@ describe('Phase 4 — dose-scoped cancel on removal', () => {
     expect(slots).toEqual([]);
   });
 
-  it('legacy med without doseSchedule still uses LEGACY_DOSE_ID', () => {
+  it('no-schedule med produces no reminder slots (no legacy sentinel)', () => {
+    // Issue #268 / PR #271: the legacy single-dose reminder sentinel is gone.
+    // A med without an explicit doseSchedule produces no reminder slots —
+    // getDoseReminderSlots returns [] (no dailyDose/reminderTime synthetic
+    // slot, no LEGACY_DOSE_ID).
     const med = makeMed({
       doseSchedule: undefined,
       dosesPerDay: undefined,
@@ -1130,9 +1131,7 @@ describe('Phase 4 — dose-scoped cancel on removal', () => {
       dailyDose: 1,
     });
     const slots = getDoseReminderSlots(med);
-    expect(slots).toHaveLength(1);
-    expect(slots[0].doseId).toBe(LEGACY_DOSE_ID);
-    expect(slots[0].time).toBe('09:00');
+    expect(slots).toEqual([]);
   });
 });
 

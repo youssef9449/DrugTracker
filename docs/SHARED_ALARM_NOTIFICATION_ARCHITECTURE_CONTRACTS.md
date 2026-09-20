@@ -356,20 +356,77 @@ Dose Reminder owns deciding what the next desired occurrence is.
 
 Dose Reminder remains a calendar-daily recurring feature.
 
-Its recurrence implementation must preserve current behavior:
+Its recurrence policy is feature-specific:
 
 - one scheduled occurrence at a time;
 - next occurrence at the same local HH:mm on the next calendar day;
 - no fixed-interval 24-hour assumption;
 - no generic Critical/Auto recurrence semantics.
 
-The existing `TimedNotificationPublisher` recurrence behavior is feature-specific and must not become part of the shared exact-alarm core.
+The native implementation is split across two layers:
 
-## 8.4 Delivery channel
+- Dose Reminder decides the next desired occurrence;
+- the shared Exact Alarm Runtime performs exact timing;
+- `DoseReminderAlarmReceiver` performs feature-specific delivery and asks the exact runtime to arm the next occurrence.
+
+The Exact Alarm Runtime does not know that the payload is a dose, does not create notifications, and does not decide recurrence.
+
+## 8.4 Notification delivery
+
+Notification creation/display is a separate concern from exact timing.
+
+The shared Notification Runtime owns:
+
+- Android notification posting;
+- Android notification cancellation;
+- notification permission state;
+- notification channels;
+- generic notification action routing;
+- foreground/background notification-delivery events.
+
+The feature remains responsible for the notification content and policy it requests.
+
+Dose Reminder therefore follows:
+
+```
+Dose Reminder business
+      │
+      ├── Exact Alarm Runtime ──> DoseReminderAlarmReceiver
+      │                              │
+      │                              └──> Notification Runtime
+      │
+      └── notification action/content policy
+```
+
+Critical Stock follows the same pattern:
+
+```
+Critical Stock business
+      │
+      ├── Exact Alarm Runtime ──> CriticalStockAlarmReceiver
+      │                              │
+      │                              └──> Notification Runtime
+      │
+      └── notification content/episode policy
+```
+
+Auto Deduction follows a different path:
+
+```
+Auto Deduction business
+      │
+      └── Exact Alarm Runtime ──> AutoDeductionReceiver
+                                      │
+                                      └── deduction event
+```
+
+Auto Deduction must not import, call, or require Notification Runtime.
+
+## 8.5 Delivery channel
 
 Foreground/background channel selection is Dose Reminder behavior.
 
-The shared notification runtime may expose a generic channel/posting API, but the decision that Dose Reminder uses a silent foreground channel and a sounding background channel remains Dose Reminder policy.
+The shared Notification Runtime accepts the feature-selected channel definition but does not decide whether Dose Reminder should be silent or sounding.
 
 ---
 
@@ -615,6 +672,8 @@ Running the same recovery event more than once must not:
 | Boot/timezone/permission lifecycle dispatch | Shared exact-alarm runtime |
 | Notification permission | Shared notification runtime |
 | Notification posting/cancel mechanics | Shared notification runtime |
+| Notification action routing | Shared notification runtime |
+| Notification content/policy | owning feature |
 | Dose channel policy | Dose Reminder |
 | Critical notification content | Critical Stock |
 | Auto Deduction business event | Auto Deduction |
@@ -713,19 +772,20 @@ The refactor is complete only when all are true:
 3. One shared native lifecycle/recovery implementation exists.
 4. One shared scheduling/cancellation serialization primitive exists.
 5. One shared alarm identity encoding strategy exists.
-6. One shared notification runtime exists.
-7. Dose Reminder contains its own business/recur/suppression policy only.
-8. Critical Stock contains its own episode/claim/crossing policy only.
-9. Auto Deduction contains its own event/recovery/stock policy only.
-10. Auto Deduction has no dependency on notification posting.
-11. Critical Stock does not use DoseAlarmModal/dose action semantics.
-12. Dose Reminder does not use Critical claims or Auto FIRED state.
-13. Timezone change can rebuild still-future alarms without requiring React to launch.
-14. Boot and exact-permission recovery are durable and idempotent.
-15. Same medication can simultaneously have Dose Reminder, Critical Stock, and Auto Deduction work without identity collision or cross-feature cancellation.
-16. Feature-level hash/ID allocation duplication is removed.
-17. Old duplicate infrastructure is deleted after migration.
-18. Existing feature contracts remain behaviorally unchanged unless a separate approved change explicitly modifies them.
+6. One shared notification runtime exists, with no AlarmManager scheduling responsibility.
+7. Exact Alarm Runtime contains no notification-posting responsibility.
+8. Dose Reminder contains its own business/recur/suppression policy only.
+9. Critical Stock contains its own episode/claim/crossing policy only.
+10. Auto Deduction contains its own event/recovery/stock policy only.
+11. Auto Deduction has no dependency on notification posting.
+12. Critical Stock does not use DoseAlarmModal/dose action semantics.
+13. Dose Reminder does not use Critical claims or Auto FIRED state.
+14. Timezone change can rebuild still-future alarms without requiring React to launch.
+15. Boot and exact-permission recovery are durable and idempotent.
+16. Same medication can simultaneously have Dose Reminder, Critical Stock, and Auto Deduction work without identity collision or cross-feature cancellation.
+17. Feature-level hash/ID allocation duplication is removed.
+18. Old duplicate infrastructure is deleted after migration.
+19. Existing feature contracts remain behaviorally unchanged unless a separate approved change explicitly modifies them.
 
 ---
 
@@ -763,7 +823,12 @@ Implement Critical Stock on the shared runtime and remove the parallel PR #291 l
 Migrate Dose Reminder to the shared alarm runtime while preserving its recurrence/channel behavior.
 
 ### Phase 6
-Split generic notification mechanics from feature notification policy.
+Split Notification Runtime from Exact Alarm Runtime:
+
+- notification posting/cancellation/channels/actions become shared notification infrastructure;
+- Dose and Critical retain exact-alarm adapters/receivers that call Notification Runtime at delivery;
+- Auto Deduction stays on the exact-alarm path without Notification Runtime;
+- remove the old Capacitor LocalNotifications alarm-delivery/recurrence bridge from Android.
 
 ### Phase 7
 Remove obsolete ID/hash registries, duplicate permission checks, duplicate lifecycle code, and unused bridges.

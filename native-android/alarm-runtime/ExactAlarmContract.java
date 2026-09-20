@@ -17,11 +17,7 @@ public final class ExactAlarmContract {
     public static final String FIELD_STORAGE_KEY = "storageKey";
     public static final String FIELD_ACTION = "action";
     public static final String FIELD_RECEIVER_CLASS = "receiverClass";
-    public static final String FIELD_CALENDAR_DATE = "calendarDate";
-    public static final String FIELD_TIME_HHMM = "timeHhmm";
     public static final String FIELD_TRIGGER_AT_EPOCH_MS = "triggerAtEpochMs";
-    public static final String FIELD_DELIVERY_EXTRAS = "deliveryExtras";
-    public static final String FIELD_RESTORE_ON_LIFECYCLE = "restoreOnLifecycle";
     public static final String EXTRA_OPERATION_VERSION = "operationVersion";
     public static final String SCHEDULE_KEY_PREFIX = "sch:";
     public static final String CANCEL_KEY_PREFIX = "cancel:";

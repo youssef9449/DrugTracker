@@ -20,18 +20,19 @@ import app.drugtracker.alarmruntime.ExactAlarmOperationLock;
  * this class owns recurrence authorization, FIRED/recovery, catch-up,
  * cancellation policy, retry evidence, amount authority, and recovery snapshots.
  *
- * PendingIntent identity:
- *   - ACTION_AUTO_DEDUCTION
- *   - full data URI = occurrenceUri(med, dose, date)
- *   - fixed request code is supplied to the shared runtime as a namespace only
+ * Auto business state:
+ *   recurrence authorization, FIRED/RECONCILED semantics, catch-up, fire retry,
+ *   amount authority, and cancellation policy remain here.
  *
- * Scheduler transaction serialization (SCHEDULE_LOCK):
- *   For each occurrence, one process-wide critical section covers:
- *     1. durable metadata commit (with scheduleVersion)
- *     2. shared runtime AlarmManager install
- *     3. shared runtime ownership-safe failure rollback
- *   cancelOccurrence uses the same lock for alarm cancel + metadata remove.
- *   This prevents interleaving that could leave metadata=B while alarm=A.
+ * Fire/cancel linearization:
+ *   SCHEDULE_LOCK remains the common serialization boundary between Auto's
+ *   durable FIRED/event-store transitions and the scheduling adapter so exactly
+ *   one fire/cancel operation linearizes first. The adapter then delegates the
+ *   actual AlarmManager transaction to ExactAlarmRuntime.
+ *
+ * Native scheduling identity and PendingIntent mechanics are not implemented here;
+ * AutoDeductionSchedulingAdapter translates the feature identity and payload into
+ * the shared runtime request.
  *
  * Fire-vs-cancel linearization (same SCHEDULE_LOCK):
  *   fireOccurrenceIfNotCancelled performs the effective-cancellation check and

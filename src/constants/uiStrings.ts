@@ -32,10 +32,10 @@ export const TOAST_MESSAGES = {
 
   // Notification permission outcomes
   notificationsOn:
-    'تم تفعيل الإشعارات والتنبيهات بنجاح 🔔',
+    'تم تفعيل تذكيرات مواعيد الجرعات 🔔',
   notificationsPermissionDenied:
     'تعذّر الحصول على إذن الإشعارات ❌ — يرجى السماح بالإشعارات من إعدادات الجهاز ثم إعادة المحاولة',
-  notificationsOff: 'تم إيقاف الإشعارات والتنبيهات 🔕',
+  notificationsOff: 'تم إيقاف تذكيرات مواعيد الجرعات 🔕',
 
   // Test notification
   testNotificationSent: 'تم إرسال إشعار تجريبي وتشغيل صوت التنبيه بنجاح! 🔔',

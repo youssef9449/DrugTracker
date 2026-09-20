@@ -168,18 +168,18 @@ public final class AutoDeductionSchedulingAdapter {
      * All durable tombstone / AlarmManager / metadata ordering remains owned by
      * {@link ExactAlarmRuntime}.
      */
-    public ExactAlarmRuntime.CancelResult cancelOccurrence(
+    public CancelResult cancelOccurrence(
             String medicationId,
             String doseId,
             String calendarDate) {
         if (medicationId == null || medicationId.isEmpty()
                 || doseId == null || doseId.isEmpty()
                 || !AutoDeductionContract.isValidCalendarDate(calendarDate)) {
-            return ExactAlarmRuntime.CancelResult.fail("invalid_args");
+            return CancelResult.failure("invalid_args");
         }
 
         syncTestControls();
-        return alarmRuntime.cancel(
+        ExactAlarmRuntime.CancelResult result = alarmRuntime.cancel(
                 AutoDeductionContract.occurrenceUri(
                         medicationId,
                         doseId,
@@ -190,6 +190,13 @@ public final class AutoDeductionSchedulingAdapter {
                         calendarDate),
                 AutoDeductionContract.ACTION_AUTO_DEDUCTION,
                 AutoDeductionReceiver.class);
+        if (result.status == ExactAlarmRuntime.CancelResult.Status.ALREADY_ABSENT) {
+            return CancelResult.alreadyAbsent();
+        }
+        if (!result.isOk()) {
+            return CancelResult.failure(result.error);
+        }
+        return CancelResult.success();
     }
 
     /**
@@ -335,6 +342,38 @@ public final class AutoDeductionSchedulingAdapter {
 
     public static long[] parseOrdering(String raw) {
         return ExactAlarmStore.parseOrdering(raw);
+    }
+
+    public static final class CancelResult {
+        public enum Status {
+            SUCCESS,
+            ALREADY_ABSENT,
+            FAILED
+        }
+
+        public final Status status;
+        public final String error;
+
+        private CancelResult(Status status, String error) {
+            this.status = status;
+            this.error = error;
+        }
+
+        public boolean isOk() {
+            return status != Status.FAILED;
+        }
+
+        static CancelResult success() {
+            return new CancelResult(Status.SUCCESS, null);
+        }
+
+        static CancelResult alreadyAbsent() {
+            return new CancelResult(Status.ALREADY_ABSENT, null);
+        }
+
+        static CancelResult failure(String error) {
+            return new CancelResult(Status.FAILED, error);
+        }
     }
 
     public static boolean isOrderingNewer(

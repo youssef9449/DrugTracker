@@ -186,9 +186,19 @@ export function dailyScheduleAmount(med: Medication): number {
 function floorRatioSafely(numerator: number, denominator: number): number {
   const ratio = numerator / denominator;
   if (!Number.isFinite(ratio)) return Math.floor(ratio);
+
   const tolerance =
     Number.EPSILON * Math.max(1, Math.abs(ratio)) * 8;
-  return Math.floor(ratio + tolerance);
+  const nearestInteger = Math.round(ratio);
+
+  if (
+    ratio < nearestInteger &&
+    nearestInteger - ratio <= tolerance
+  ) {
+    return nearestInteger;
+  }
+
+  return Math.floor(ratio);
 }
 
 export function daysLeftFromCurrentStock(med: Medication): number {

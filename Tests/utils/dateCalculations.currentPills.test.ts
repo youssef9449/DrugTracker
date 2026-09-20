@@ -534,4 +534,31 @@ describe('getCriticalAlarmDate — bulk-jump performance path', () => {
     expect(d.getMinutes()).toBe(0);
   });
 
+  it('large genuinely fractional ratio is not promoted to next integer', () => {
+    // The old floorRatioSafely used Math.floor(ratio + tolerance).
+    // At large ratios, the tolerance grows with abs(ratio) and can exceed
+    // the fractional distance to the next integer, incorrectly promoting
+    // a genuine .5 fraction to the next integer.
+    //
+    // Reproduce: numerator = 999999999999999.5, denominator = 1
+    // ratio = 999999999999999.5 (genuinely fractional)
+    // Old: tolerance = EPSILON * 999999999999999.5 * 8 ≈ 1.776
+    //     Math.floor(999999999999999.5 + 1.776) = 1000000000000000 (wrong!)
+    // New: nearestInteger = 1000000000000000
+    //     nearestInteger - ratio = 0.5 > tolerance (1.776) → false
+    //     Math.floor(999999999999999.5) = 999999999999999 (correct)
+    //
+    // Use daysLeftFromCurrentStock as the public caller to verify.
+    const med = makeMed({
+      currentPills: 999999999999999.5,
+      dailyDose: 1,
+      warningThresholdDays: 5,
+      autoDeductEnabled: true,
+      doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+    });
+    expect(daysLeftFromCurrentStock(med)).toBe(999999999999999);
+    // Verify it is NOT promoted to 999999999999999 + 1
+    expect(daysLeftFromCurrentStock(med)).not.toBe(1000000000000000);
+  });
+
 });

@@ -6,7 +6,6 @@ import android.util.Log;
 import org.json.JSONObject;
 
 import app.drugtracker.dosereminder.DoseReminderAlarmAdapter;
-import app.drugtracker.notificationruntime.NotificationRuntime;
 
 /**
  * Shared-lifecycle adapter for Dose Reminder.
@@ -25,9 +24,6 @@ public final class DoseReminderAlarmFeature
             String reason,
             boolean exactAlarmPermissionGranted) {
         if (!exactAlarmPermissionGranted) {
-            return;
-        }
-        if (!new NotificationRuntime(context).areNotificationsEnabled()) {
             return;
         }
 

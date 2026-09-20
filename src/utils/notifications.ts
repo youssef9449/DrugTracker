@@ -42,12 +42,7 @@ import {
   SW_READY_TIMEOUT_MS,
   formatReminderTime12h,
 } from './time';
-import {
-  DOSE_REMINDER_CHANNEL_ID,
-  DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
-  LOW_STOCK_CHANNEL_ID,
-  postNativeNotification,
-} from './notificationRuntime';
+import { postNativeNotification } from './notificationRuntime';
 
 import {
   scheduleCriticalAlarmNative,

@@ -307,12 +307,11 @@ public final class AutoDeductionScheduler {
 
                 String occurrenceKey = AutoDeductionContract.occurrenceKey(
                         medicationId, doseId, date);
-                ExactAlarmRuntime.CancelResult result = schedulingAdapter.cancelOccurrence(
-                        AutoDeductionContract.occurrenceUri(
-                                medicationId, doseId, date).toString(),
-                        occurrenceKey,
-                        AutoDeductionContract.ACTION_AUTO_DEDUCTION,
-                        AutoDeductionReceiver.class);
+                AutoDeductionSchedulingAdapter.CancelResult result =
+                        schedulingAdapter.cancelOccurrence(
+                                medicationId,
+                                doseId,
+                                date);
                 if (!result.isOk()) return CancelResult.fail(result.error);
             } catch (JSONException ex) {
                 if (!quarantineMalformedScheduleMetadata(

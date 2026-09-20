@@ -12,7 +12,6 @@ import {
   saveCriticalNotificationClaims,
   getCriticalNotificationClaim,
   setCriticalNotificationClaim,
-  enqueueCriticalAlarmOp,
 } from '../utils/criticalNotificationClaims';
 import { OperationQueue } from '../utils/async/OperationQueue';
 import { GenerationGuard } from '../utils/async/GenerationGuard';
@@ -133,7 +132,7 @@ export interface UseCriticalAlarmSchedulerOptions {
  * Async race safety (all in-memory, nothing persisted for it):
  *   - Per-medication serialization: every native cancel/schedule runs on
  *     the shared per-medication operation queue
- *     (enqueueCriticalAlarmOp), so operations for one medication never
+ *     (OperationQueue), so operations for one medication never
  *     interleave (they share one stable native notification id).
  *   - Generation counter: each effect run bumps a per-med generation; a
  *     chained operation captures its generation and abandons everything

@@ -4,7 +4,6 @@
  * Idempotency:
  * - Per-dose consume/skip markers (same as Take)
  * - Existing exact auto log (deterministic id) for the occurrence
- * - Issue #265/#267: `lastSyncDate` is NOT occurrence-level evidence and is
  *   NOT used to mark an occurrence as applied. Idempotency relies solely on
  *   durable occurrence-specific evidence.
  *
@@ -145,7 +144,6 @@ export function findExactAutoLog(
  * 1. dose consume / skip history (Take, prior exact apply, Restore skip)
  * 2. existing exact auto log for this occurrence (deterministic id)
  *
- * Issue #265/#267: `lastSyncDate` is NOT occurrence-level evidence and must
  * NOT prevent a FIRED event from being applied. Idempotency relies solely
  * on durable occurrence-specific evidence (consume/skip markers + the
  * deterministic exact log id), not on a global date-based settlement
@@ -218,7 +216,6 @@ export function applyExactAutoEventToMedication(
   // is NO historical / day-based settlement folded into this apply: the stock
   // change is exactly `currentPills → currentPills - event.amount` (clamped
   // at zero). No `computeDueDoseBreakdown`, no `historicalRangeDueUnits`, no
-  // `lastSyncDate` advance, no `dailyDose` / current-schedule-amount fallback.
   // A single FIRED event charges its own amount only; past calendar days are
   // not auto-settled by this path.
   //
@@ -248,7 +245,6 @@ export function applyExactAutoEventToMedication(
 
   // Stock deduction is exactly event.amount (clamped at zero). No historical
   // / day-based settlement is folded into this apply — Exact FIRED is the
-  // sole timed automatic deduction, and `lastSyncDate` does not influence the
   // amount charged for this FIRED occurrence.
   const settleBase = Math.max(0, med.currentPills);
   const requested = event.amount;
@@ -285,8 +281,6 @@ export function applyExactAutoEventToMedication(
     }
   }
 
-  // The Exact apply does NOT advance lastSyncDate: no prior days are folded
-  // into the snapshot by this path. lastSyncDate is preserved as-is (only a
   // mutation settlement would advance it).
   const updatedMed: Medication = {
     ...med,

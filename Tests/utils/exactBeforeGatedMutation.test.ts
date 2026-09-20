@@ -34,7 +34,6 @@ function baseMed(over: Partial<Medication> = {}): Medication {
     // occurrence is reconcilable on ANY real calendar day — the past-day
     // horizon guard in isExactAutoOccurrenceApplied must not swallow the
     // event (calendarDate <= lastSync && calendarDate < realToday).
-    lastSyncDate: '2026-09-13',
     autoDeductEnabled: true,
     doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
     ...over,
@@ -125,7 +124,7 @@ describe('exact FIRED amount precedes gated mutation', () => {
 
   beforeEach(() => {
     durable = {
-      medications: [baseMed({ currentPills: 10, lastSyncDate: '2026-09-13' })],
+      medications: [baseMed({ currentPills: 10})],
       logs: [],
     };
     seqCounter = { n: 1 };
@@ -135,7 +134,7 @@ describe('exact FIRED amount precedes gated mutation', () => {
   afterEach(() => clearHooks());
 
   it('reconcileFiredEvents uses event.amount=2 not schedule amount=1', () => {
-    const med = baseMed({ currentPills: 10, lastSyncDate: '2026-09-13' });
+    const med = baseMed({ currentPills: 10});
     const r = reconcileFiredEvents([med], [], [firedEvent(2)]);
     expect(r.medications[0].currentPills).toBe(8);
     expect(r.newExactLogs).toHaveLength(1);
@@ -216,7 +215,6 @@ describe('exact FIRED amount precedes gated mutation', () => {
     durable.medications = [
       baseMed({
         currentPills: 10,
-        lastSyncDate: '2026-09-13',
         autoDeductEnabled: true,
       }),
     ];
@@ -241,7 +239,6 @@ describe('exact FIRED amount precedes gated mutation', () => {
     durable.medications = [
       baseMed({
         currentPills: 10,
-        lastSyncDate: '2026-09-13',
         doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
       }),
     ];
@@ -283,7 +280,7 @@ describe('runGatedGlobalAutoDeductToggle exact-before-mutation', () => {
 
   beforeEach(() => {
     durable = {
-      medications: [baseMed({ currentPills: 10, lastSyncDate: '2026-09-14' })],
+      medications: [baseMed({ currentPills: 10})],
       logs: [],
     };
     seqCounter = { n: 1 };
@@ -297,7 +294,6 @@ describe('runGatedGlobalAutoDeductToggle exact-before-mutation', () => {
     durable.medications = [
       baseMed({
         currentPills: 10,
-        lastSyncDate: '2026-09-13',
         doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
       }),
     ];
@@ -327,7 +323,6 @@ describe('runGatedGlobalAutoDeductToggle exact-before-mutation', () => {
     durable.medications = [
       baseMed({
         currentPills: 8,
-        lastSyncDate: '2026-09-14',
         autoDeductEnabled: false,
         doseConsumptionHistory: { d1: ['2026-09-14'] },
       }),
@@ -378,7 +373,6 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
       medications: [
         baseMed({
           currentPills: 10,
-          lastSyncDate: '2026-09-14',
           dailyDose: 1,
           doseSchedule: [
             { id: 'd1', amount: 1, time: '08:00' },
@@ -441,7 +435,6 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
         currentPills: 10,
         dailyDose: 1,
         doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
-        lastSyncDate: '2026-09-13',
         doseConsumptionHistory: { d1: ['2026-09-13'] },
       }),
     ];
@@ -495,7 +488,6 @@ describe('gated paths call exact reconciliation before mutation', () => {
     durable.medications = [
       baseMed({
         currentPills: 10,
-        lastSyncDate: '2026-09-13',
         doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
       }),
     ];
@@ -515,7 +507,6 @@ describe('gated paths call exact reconciliation before mutation', () => {
     durable.medications = [
       baseMed({
         currentPills: 10,
-        lastSyncDate: '2026-09-13',
         doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
       }),
     ];
@@ -535,7 +526,6 @@ describe('gated paths call exact reconciliation before mutation', () => {
     durable.medications = [
       baseMed({
         currentPills: 10,
-        lastSyncDate: '2026-09-13',
         dailyDose: 1,
         doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
       }),
@@ -588,7 +578,6 @@ describe('FIRED durable after schedule edit/remove (#268 / PR #271)', () => {
     return baseMed({
       // d1 was removed after fire; only d2 remains in the current schedule.
       doseSchedule: [{ id: 'd2', amount: 1, time: '20:00' }],
-      lastSyncDate: '2026-09-13',
       ...over,
     });
   }

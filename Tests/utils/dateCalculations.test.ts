@@ -6,9 +6,7 @@ import { NEVER_DEPLETES_DAYS } from '@/utils/time';
 import type { Medication } from '@/types';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
-  // lastSyncDate defaults to today so currentPills ===
   // currentPills (no days have passed). Tests that exercise the
-  // dynamic-balance projection override lastSyncDate explicitly.
   return {
     id: 'med-1',
     name: 'Test',
@@ -18,13 +16,11 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: getTodayDateString(),
     autoDeductEnabled: true,
     ...overrides,
   };
 }
 
-// Wave 13 #123: pin system time so makeMed's `lastSyncDate: getTodayDateString()`
 // default and the `getDepletionDate(...)` assertions that compute the date
 // string 7 days out resolve to a deterministic date (2024-09-10T12:00:00Z).
 // Prevents midnight-UTC flake risk where the test process's wall-clock date

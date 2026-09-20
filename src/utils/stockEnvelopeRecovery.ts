@@ -189,7 +189,7 @@ export function finalizeMutationSeq(mutationSeq: number): string | null {
  * Contract:
  * - medications: same count, same order, every field deep-equal (id, name,
  *   currentPills, dailyDose, unit, warningThresholdDays, colorTag,
- *   category, notes, createdAt, lastSyncDate, lastConsumedDate,
+ *   category, notes, createdAt, lastConsumedDate,
  *   autoDeductEnabled, packageSize, stripsPerBox, pillsPerStrip,
  *   targetOrderQuantity, reminderEnabled, reminderTime, dosesPerDay,
  *   doseConsumptionHistory (record + per-dose array order-aware),

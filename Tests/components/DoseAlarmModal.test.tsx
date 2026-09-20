@@ -20,7 +20,6 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: '2024-01-01',
     reminderEnabled: true,
     reminderTime: '09:00',
     ...overrides,
@@ -204,7 +203,6 @@ describe('DoseAlarmModal — medication-level stock display', () => {
       currentPills: 30,
       dailyDose: 2,
       autoDeductEnabled: true,
-      lastSyncDate: '2024-01-01',
     });
     render(
       <DoseAlarmModal
@@ -217,7 +215,6 @@ describe('DoseAlarmModal — medication-level stock display', () => {
       />
     );
     const line = screen.getByText(/المخزون المتوفر لديك حالياً/);
-    // Issue #266: lastSyncDate must not reduce displayed stock.
     expect(line.textContent).toMatch(/حالياً: 30 /);
   });
 
@@ -226,7 +223,6 @@ describe('DoseAlarmModal — medication-level stock display', () => {
       currentPills: 30,
       dailyDose: 2,
       autoDeductEnabled: false,
-      lastSyncDate: '2024-01-01',
     });
     render(
       <DoseAlarmModal

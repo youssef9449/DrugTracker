@@ -869,7 +869,7 @@ export interface GatedRefillResult {
  * a stale snapshot over a just-committed deduction (and vice versa).
  *
  * Behavior preserved:  at the effective balance + add the
- * refill amount, set lastSyncDate=today, prepend a refill log. The only
+ * refill amount, prepend a refill log. The only
  * change is that the settle + commit happen inside the gate against FRESH
  * durable state (not a potentially-stale React snapshot), and the commit
  * uses the Manual envelope crash-recovery path (allocate seq → envelope →
@@ -942,7 +942,6 @@ export function runGatedRefill(opts: {
     }
 
     // Issue #267: refill adds user-entered amount to durable currentPills only.
-    // No settlement, no lastSyncDate change.
     const updatedMed = applyDurableStockDelta(med, opts.addedPills);
     const medications = fresh.medications.map((m) =>
       m.id === opts.medicationId ? updatedMed : m
@@ -1624,7 +1623,6 @@ export function runGatedMedicationUpdate(opts: {
       id: freshMed.id,
       createdAt: freshMed.createdAt,
       currentPills: stockBase.currentPills,
-      lastSyncDate: stockBase.lastSyncDate,
       lastConsumedDate: stockBase.lastConsumedDate,
       autoDeductEnabled: stockBase.autoDeductEnabled,
       // Explicitly take pruned history (not stockBase) so removed dose IDs stay gone.

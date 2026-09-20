@@ -15,7 +15,6 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2026-01-01T00:00:00.000Z',
-    lastSyncDate: '2026-09-13',
     autoDeductEnabled: true,
     doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     ...overrides,
@@ -23,8 +22,8 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
 }
 
 describe('startup stock is durable currentPills', () => {
-  it('does not reduce currentPills for elapsed days since lastSyncDate', () => {
-    const med = makeMed({ currentPills: 10, lastSyncDate: '2026-09-13' });
+  it('does not reduce currentPills merely because calendar days elapsed', () => {
+    const med = makeMed({ currentPills: 10});
     expect(med.currentPills).toBe(10);
     expect(daysLeftFromCurrentStock(med)).toBe(5);
   });

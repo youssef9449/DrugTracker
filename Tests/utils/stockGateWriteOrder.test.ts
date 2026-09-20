@@ -59,7 +59,6 @@ function baseMed(over: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2026-01-01T00:00:00.000Z',
-    lastSyncDate: '2026-09-14',
     autoDeductEnabled: true,
     ...over,
   };

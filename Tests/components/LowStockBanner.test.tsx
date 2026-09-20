@@ -29,7 +29,6 @@ describe('LowStockBanner (Material 3 Design)', () => {
           warningThresholdDays: 5,
           colorTag: 'rose',
           createdAt: '2024-01-01T00:00:00.000Z',
-          lastSyncDate: '2024-01-01',
           autoDeductEnabled: true,
           reminderEnabled: false,
         },

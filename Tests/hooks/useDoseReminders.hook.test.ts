@@ -34,7 +34,6 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: getTodayDateString(),
     reminderEnabled: true,
     reminderTime: '23:59',
     doseSchedule: [{ id: 'd1', amount: 1, time: '23:59' }],

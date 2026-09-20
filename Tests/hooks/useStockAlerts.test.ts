@@ -26,7 +26,6 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: getTodayDateString(),
     autoDeductEnabled: true,
     ...overrides,
   };
@@ -170,7 +169,7 @@ describe('useStockAlerts — one notification per critical episode', () => {
     vi.setSystemTime(new Date('2024-09-11T12:00:00Z'));
     rerender({
       medications: [
-        makeMed({ currentPills: 6, dailyDose: 1, warningThresholdDays: 7, lastSyncDate: '2024-09-11' }),
+        makeMed({ currentPills: 6, dailyDose: 1, warningThresholdDays: 7}),
       ],
     });
     expect(sendMock).toHaveBeenCalledTimes(1);
@@ -178,7 +177,7 @@ describe('useStockAlerts — one notification per critical episode', () => {
     // Manual consumption while critical.
     rerender({
       medications: [
-        makeMed({ currentPills: 3, dailyDose: 1, warningThresholdDays: 7, lastSyncDate: '2024-09-11' }),
+        makeMed({ currentPills: 3, dailyDose: 1, warningThresholdDays: 7}),
       ],
     });
     expect(sendMock).toHaveBeenCalledTimes(1);
@@ -186,7 +185,7 @@ describe('useStockAlerts — one notification per critical episode', () => {
     // Critical → out_of_stock: same episode, no second notification.
     rerender({
       medications: [
-        makeMed({ currentPills: 0, dailyDose: 1, warningThresholdDays: 7, lastSyncDate: '2024-09-11' }),
+        makeMed({ currentPills: 0, dailyDose: 1, warningThresholdDays: 7}),
       ],
     });
     expect(sendMock).toHaveBeenCalledTimes(1);
@@ -241,7 +240,7 @@ describe('useStockAlerts — one notification per critical episode', () => {
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
   });
 
-  it('changing currentPills / lastSyncDate does not create a new episode while critical', () => {
+  it('changing currentPills / elapsed-day settlement does not create a new episode while critical', () => {
     const { rerender } = renderHook(({ medications }) => useAlerts({ medications }), {
       initialProps: {
         medications: [makeMed({ currentPills: 4, dailyDose: 1, warningThresholdDays: 5 })],
@@ -525,7 +524,6 @@ describe('useStockAlerts — medication-level Auto projection', () => {
             currentPills: 30,
             dailyDose: 2,
             autoDeductEnabled: true,
-            lastSyncDate: '2024-01-01',
             warningThresholdDays: 5,
           }),
         ],
@@ -542,7 +540,6 @@ describe('useStockAlerts — medication-level Auto projection', () => {
             currentPills: 30,
             dailyDose: 2,
             autoDeductEnabled: false,
-            lastSyncDate: '2024-01-01',
             warningThresholdDays: 5,
           }),
         ],
@@ -556,7 +553,6 @@ describe('useStockAlerts — medication-level Auto projection', () => {
       currentPills: 30,
       dailyDose: 1,
       autoDeductEnabled: true,
-      lastSyncDate: getTodayDateString(),
       warningThresholdDays: 5,
     });
     const projectedT = getCriticalAlarmDate(med, getTodayDateString()) as number;

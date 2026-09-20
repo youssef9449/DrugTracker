@@ -364,7 +364,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       ...medData,
       id: 'med-' + Date.now(),
       createdAt: new Date().toISOString(),
-      lastSyncDate: getTodayDateString(),
       autoDeductEnabled: globalAutoDeductEnabledRef.current,
     };
     void (async () => {

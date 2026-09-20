@@ -3,8 +3,6 @@
  * historical/day-based settlement.
  *
  * Covers the 14 regression scenarios from the issue task description:
- *  1. Manual Take after old `lastSyncDate`: deduction = dose amount only,
- *     no historical catch-up, `lastSyncDate` unchanged.
  *  2. Refill after several days: `currentPills += addedPills` only.
  *  3. Refill Undo after Exact deductions: reverses only refill amount
  *     from durable balance, no re-settlement.
@@ -21,7 +19,6 @@
  * 11. Schedule removed after Exact FIRED: FIRED reconciliation still
  *     authoritative, no `dailyDose` fallback.
  * 12. Multiple dose isolation: d1 mutation doesn't affect d2.
- * 13. `lastSyncDate`: not changed by any manual stock mutation.
  * 14. No pure projection Restore: elapsed time without durable deduction
  *     doesn't add stock.
  */
@@ -65,8 +62,7 @@ function med(over: Partial<Medication> = {}): Medication {
     unit: 'قرص',
     warningThresholdDays: 5,
     colorTag: 'teal',
-    createdAt: '2026-01-01T00:00:00.000Z',
-    lastSyncDate: '2026-09-10', // 6 days before TODAY
+    createdAt: '2026-01-01T00:00:00.000Z', // 6 days before TODAY
     autoDeductEnabled: true,
     doseSchedule: [
       { id: 'd1', amount: 1, time: '08:00' },
@@ -200,23 +196,19 @@ afterEach(() => {
 });
 
 // ───────────────────────────────────────────────────────────────────────
-// 1. Manual Take after old `lastSyncDate`: deduction = dose amount only,
-//    no historical catch-up, `lastSyncDate` unchanged.
 // ───────────────────────────────────────────────────────────────────────
-describe('#267 regression 1 — Manual Take after old lastSyncDate', () => {
-  it('deducts only the dose amount (no historical catch-up) and does not bump lastSyncDate (unit)', () => {
-    const m = med({ currentPills: 30, lastSyncDate: '2026-09-10' }); // 6 days before TODAY
+describe('#267 regression 1 — Manual Take after old elapsed-day settlement', () => {
+  it('deducts only the dose amount (no historical catch-up) from durable currentPills only (unit)', () => {
+    const m = med({ currentPills: 30}); // 6 days before TODAY
     const result = consumeDose(m, 'manual', TODAY, new Date(`${TODAY}T15:00:00`), 'd1');
     expect(result.doseAmount).toBe(1);
     expect(result.updatedMed).not.toBeNull();
     // 30 - 1 = 29 (NOT 30 - 6*2 - 1 = 17 — no historical catch-up).
     expect(result.updatedMed!.currentPills).toBe(29);
-    // lastSyncDate is NOT bumped (no settlement).
-    expect(result.updatedMed!.lastSyncDate).toBe('2026-09-10');
   });
 
-  it('gate-level: Take does not bump lastSyncDate (no settlement horizon)', async () => {
-    installDurableState({ medications: [med({ currentPills: 30, lastSyncDate: '2026-09-10' })], logs: [] });
+  it('gate-level: Take does not invent stock from elapsed days', async () => {
+    installDurableState({ medications: [med({ currentPills: 30})], logs: [] });
     const r = await runGatedManualConsume({
       medicationId: 'med-1',
       doseId: 'd1',
@@ -227,7 +219,6 @@ describe('#267 regression 1 — Manual Take after old lastSyncDate', () => {
     expect(r.outcome).toBe('applied');
     expect(r.doseAmount).toBe(1);
     expect(durable.medications[0].currentPills).toBe(29); // 30 - 1 (no catch-up)
-    expect(durable.medications[0].lastSyncDate).toBe('2026-09-10'); // unchanged
   });
 });
 
@@ -235,9 +226,9 @@ describe('#267 regression 1 — Manual Take after old lastSyncDate', () => {
 // 2. Refill after several days: `currentPills += addedPills` only.
 // ───────────────────────────────────────────────────────────────────────
 describe('#267 regression 2 — Refill after several days', () => {
-  it('adds the addedPills to durable currentPills only (no settlement, no lastSyncDate change)', async () => {
+  it('adds the addedPills to durable currentPills only (no settlement; currentPills += addedPills only)', async () => {
     installDurableState({
-      medications: [med({ currentPills: 20, lastSyncDate: '2026-09-10' })],
+      medications: [med({ currentPills: 20})],
       logs: [],
     });
     const r = await runGatedRefill({
@@ -250,18 +241,15 @@ describe('#267 regression 2 — Refill after several days', () => {
     expect(r.addedPills).toBe(15);
     // 20 + 15 = 35 (no past-day settlement baked in).
     expect(durable.medications[0].currentPills).toBe(35);
-    // lastSyncDate is NOT bumped (no settlement).
-    expect(durable.medications[0].lastSyncDate).toBe('2026-09-10');
     // A refill log is prepended (no exact_auto log).
     expect(durable.logs.some((l) => l.id === 'refill-1' && l.type === 'refill')).toBe(true);
     expect(durable.logs.some((l) => l.type === 'exact_auto')).toBe(false);
   });
 
   it('applyDurableStockDelta: pure helper adds the delta to currentPills only', () => {
-    const m = med({ currentPills: 20, lastSyncDate: '2026-09-10' });
+    const m = med({ currentPills: 20});
     const result = applyDurableStockDelta(m, 15);
     expect(result.currentPills).toBe(35);
-    expect(result.lastSyncDate).toBe('2026-09-10'); // unchanged
   });
 });
 
@@ -274,7 +262,7 @@ describe('#267 regression 3 — Refill Undo after Exact deductions', () => {
     // Med was refilled +20 (currentPills=25 after some auto deductions).
     // Undo reverses min(20, 25) = 20 from the durable balance.
     installDurableState({
-      medications: [med({ currentPills: 25, lastSyncDate: '2026-09-10' })],
+      medications: [med({ currentPills: 25})],
       logs: [
         makeRefillLog('med-1', 'TestMed', TODAY, 20, 'refill-1'),
         // Some exact deductions already baked into the durable snapshot:
@@ -290,8 +278,6 @@ describe('#267 regression 3 — Refill Undo after Exact deductions', () => {
     // reversedAmount = min(20, 25) = 20 (no re-settlement of past days).
     expect(r.addedPills).toBe(-20);
     expect(durable.medications[0].currentPills).toBe(5); // 25 - 20
-    // lastSyncDate is NOT bumped.
-    expect(durable.medications[0].lastSyncDate).toBe('2026-09-10');
     // A refill_undo log is prepended, linked to the original refill.
     const undoLog = durable.logs.find((l) => l.id === 'refill-undo-1');
     expect(undoLog?.type).toBe('refill_undo');
@@ -304,7 +290,7 @@ describe('#267 regression 3 — Refill Undo after Exact deductions', () => {
   it('refill undo clamps the reversal at 0 (no negative balance, no re-settlement)', async () => {
     // currentPills=5; refill amount=20; only 5 is reversible.
     installDurableState({
-      medications: [med({ currentPills: 5, lastSyncDate: '2026-09-10', autoDeductEnabled: false })],
+      medications: [med({ currentPills: 5, autoDeductEnabled: false })],
       logs: [makeRefillLog('med-1', 'TestMed', TODAY, 20, 'refill-1')],
     });
     const r = await runGatedUndoRefill({
@@ -325,13 +311,12 @@ describe('#267 regression 3 — Refill Undo after Exact deductions', () => {
 describe('#267 regression 4 — Dose edit after several days', () => {
   it('changes dailyDose/doseSchedule without changing currentPills or adding an exact_auto log', async () => {
     installDurableState({
-      medications: [med({ currentPills: 30, lastSyncDate: '2026-09-10' })],
+      medications: [med({ currentPills: 30})],
       logs: [],
     });
     const next: Medication = {
       ...med(),
       currentPills: 30,
-      lastSyncDate: '2026-09-10',
       dailyDose: 6,
       doseSchedule: [
         { id: 'd1', amount: 3, time: '09:00' },
@@ -349,8 +334,6 @@ describe('#267 regression 4 — Dose edit after several days', () => {
     expect(r.settleLog).toBeNull(); // no exact_auto log
     // currentPills unchanged.
     expect(durable.medications[0].currentPills).toBe(30);
-    // lastSyncDate unchanged.
-    expect(durable.medications[0].lastSyncDate).toBe('2026-09-10');
     // dailyDose + doseSchedule are updated.
     expect(durable.medications[0].dailyDose).toBe(6);
     expect(durable.medications[0].doseSchedule?.find((d) => d.id === 'd1')?.amount).toBe(3);
@@ -364,9 +347,9 @@ describe('#267 regression 4 — Dose edit after several days', () => {
 //    historical log.
 // ───────────────────────────────────────────────────────────────────────
 describe('#267 regression 5 — Auto ON/OFF after several days', () => {
-  it('toggle ON→OFF: flips the flag only (no stock change, no exact_auto log, no lastSyncDate change)', async () => {
+  it('toggle ON→OFF: flips the flag only (no stock change, no exact_auto log)', async () => {
     installDurableState({
-      medications: [med({ currentPills: 30, lastSyncDate: '2026-09-10', autoDeductEnabled: true })],
+      medications: [med({ currentPills: 30, autoDeductEnabled: true })],
       logs: [],
     });
     const r = await runGatedAutoDeductToggle({
@@ -379,15 +362,13 @@ describe('#267 regression 5 — Auto ON/OFF after several days', () => {
     expect(durable.medications[0].autoDeductEnabled).toBe(false);
     // currentPills unchanged.
     expect(durable.medications[0].currentPills).toBe(30);
-    // lastSyncDate unchanged.
-    expect(durable.medications[0].lastSyncDate).toBe('2026-09-10');
     // No exact_auto log was created.
     expect(durable.logs.some((l) => l.type === 'exact_auto')).toBe(false);
   });
 
   it('toggle OFF→ON: flips the flag only (no retroactive deduction, no log)', async () => {
     installDurableState({
-      medications: [med({ currentPills: 30, lastSyncDate: '2026-09-10', autoDeductEnabled: false })],
+      medications: [med({ currentPills: 30, autoDeductEnabled: false })],
       logs: [],
     });
     const r = await runGatedAutoDeductToggle({
@@ -400,8 +381,6 @@ describe('#267 regression 5 — Auto ON/OFF after several days', () => {
     expect(durable.medications[0].autoDeductEnabled).toBe(true);
     // currentPills unchanged (no retroactive deduction for the frozen period).
     expect(durable.medications[0].currentPills).toBe(30);
-    // lastSyncDate unchanged.
-    expect(durable.medications[0].lastSyncDate).toBe('2026-09-10');
     // No exact_auto log was created.
     expect(durable.logs.some((l) => l.type === 'exact_auto')).toBe(false);
   });
@@ -413,7 +392,7 @@ describe('#267 regression 5 — Auto ON/OFF after several days', () => {
 describe('#267 regression 6 — Exact Auto → Manual Take: no double deduction', () => {
   it('after Exact Auto reconciles FIRED d1, Manual Take for d1 is already_consumed (no second deduction)', async () => {
     installDurableState({
-      medications: [med({ currentPills: 30, lastSyncDate: TODAY, doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }] })],
+      medications: [med({ currentPills: 30, doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }] })],
       logs: [],
     });
 
@@ -459,7 +438,7 @@ describe('#267 regression 6 — Exact Auto → Manual Take: no double deduction'
 describe('#267 regression 7 — Manual Take → Exact Auto: same occurrence not deducted twice', () => {
   it('after Manual Take for d1, Exact Auto FIRED for d1 is already_applied (no second deduction)', async () => {
     installDurableState({
-      medications: [med({ currentPills: 30, lastSyncDate: TODAY, doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }] })],
+      medications: [med({ currentPills: 30, doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }] })],
       logs: [],
     });
 
@@ -510,7 +489,6 @@ describe('#267 regression 8 — Exact Auto → Restore: amount = exact active lo
       medications: [
         med({
           currentPills: 28, // 30 - 2 (the exact auto deduction)
-          lastSyncDate: TODAY,
           doseConsumptionHistory: { d1: [TODAY] },
           doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
         }),
@@ -549,7 +527,6 @@ describe('#267 regression 9 — Manual Take → Restore: amount = dose_taken amo
       medications: [
         med({
           currentPills: 27, // 30 - 3 (the manual Take)
-          lastSyncDate: TODAY,
           doseConsumptionHistory: { d1: [TODAY] },
           doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }], // current schedule is 1
         }),
@@ -572,7 +549,6 @@ describe('#267 regression 9 — Manual Take → Restore: amount = dose_taken amo
   it('unit-level: restoreDose returns the dose_taken log amount', () => {
     const m = med({
       currentPills: 27,
-      lastSyncDate: TODAY,
       doseConsumptionHistory: { d1: [TODAY] },
       doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
     });
@@ -596,7 +572,6 @@ describe('#267 regression 10 — Schedule changed after Exact deduction: Restore
     // amount), not 5 (the current schedule amount).
     const m = med({
       currentPills: 28, // 30 - 2 (the exact deduction)
-      lastSyncDate: TODAY,
       doseConsumptionHistory: { d1: [TODAY] },
       doseSchedule: [{ id: 'd1', amount: 5, time: '08:00' }], // edited from 2
     });
@@ -615,7 +590,6 @@ describe('#267 regression 10 — Schedule changed after Exact deduction: Restore
     // amount), not 5 (the current schedule amount).
     const m = med({
       currentPills: 28,
-      lastSyncDate: TODAY,
       doseConsumptionHistory: { d1: [TODAY] },
       doseSchedule: [{ id: 'd1', amount: 5, time: '08:00' }],
     });
@@ -639,7 +613,6 @@ describe('#267 regression 11 — Schedule removed after Exact FIRED: FIRED still
       medications: [
         med({
           currentPills: 30,
-          lastSyncDate: TODAY,
           doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
         }),
       ],
@@ -677,7 +650,6 @@ describe('#267 regression 11 — Schedule removed after Exact FIRED: FIRED still
     const next: Medication = {
       ...med(),
       currentPills: pillsAfterAuto,
-      lastSyncDate: TODAY,
       dailyDose: 5,
       doseSchedule: [],
       dosesPerDay: 0,
@@ -725,7 +697,7 @@ describe('#267 regression 11 — Schedule removed after Exact FIRED: FIRED still
 // ───────────────────────────────────────────────────────────────────────
 describe('#267 regression 12 — Multiple dose isolation', () => {
   it('Manual Take d1 does not affect d2 (unit)', () => {
-    const m = med({ currentPills: 30, lastSyncDate: TODAY });
+    const m = med({ currentPills: 30});
     const r = consumeDose(m, 'manual', TODAY, new Date(`${TODAY}T15:00:00`), 'd1');
     expect(r.doseAmount).toBe(1); // d1 amount
     expect(r.updatedMed?.doseConsumptionHistory?.d1).toBe(TODAY);
@@ -737,7 +709,7 @@ describe('#267 regression 12 — Multiple dose isolation', () => {
 
   it('gate-level: Take d1 then Auto FIRED d2 → both applied, no cross-effect', async () => {
     installDurableState({
-      medications: [med({ currentPills: 30, lastSyncDate: TODAY })],
+      medications: [med({ currentPills: 30})],
       logs: [],
     });
 
@@ -781,7 +753,6 @@ describe('#267 regression 12 — Multiple dose isolation', () => {
   it('Take d1 then Restore d1 leaves d2 untouched (unit)', () => {
     const m = med({
       currentPills: 29, // 30 - 1 (after Take d1)
-      lastSyncDate: TODAY,
       doseConsumptionHistory: { d1: [TODAY] },
     });
     const logs: ConsumptionLog[] = [makeDoseTakenLog('med-1', 'TestMed', 'd1', TODAY, 1, 'take-1')];
@@ -797,37 +768,35 @@ describe('#267 regression 12 — Multiple dose isolation', () => {
 });
 
 // ───────────────────────────────────────────────────────────────────────
-// 13. `lastSyncDate`: not changed by any manual stock mutation.
 // ───────────────────────────────────────────────────────────────────────
-describe('#267 regression 13 — lastSyncDate never changed by manual mutations', () => {
-  it('consumeDose does NOT change lastSyncDate', () => {
-    const m = med({ currentPills: 30, lastSyncDate: '2026-09-10' });
+describe('#267 regression 13 — manual mutations do not perform elapsed-day settlement', () => {
+  it('consumeDose deducts only the intended dose amount from currentPills', () => {
+    const m = med({ currentPills: 30 });
     const r = consumeDose(m, 'manual', TODAY, new Date(`${TODAY}T15:00:00`), 'd1');
-    expect(r.updatedMed?.lastSyncDate).toBe('2026-09-10'); // unchanged
+    expect(r.medication.currentPills).toBe(29);
   });
 
-  it('restoreDose does NOT change lastSyncDate', () => {
+  it('restoreDose restores only the evidenced dose amount', () => {
     const m = med({
       currentPills: 29,
-      lastSyncDate: '2026-09-10',
       doseConsumptionHistory: { d1: [TODAY] },
     });
     const logs: ConsumptionLog[] = [makeDoseTakenLog('med-1', 'TestMed', 'd1', TODAY, 1, 'take-1')];
     const r = restoreDose(m, 'd1', TODAY, new Date(`${TODAY}T15:00:00`), logs);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.updatedMed.lastSyncDate).toBe('2026-09-10'); // unchanged
+    expect(r.medication.currentPills).toBe(30);
   });
 
-  it('applyDurableStockDelta does NOT change lastSyncDate', () => {
-    const m = med({ currentPills: 30, lastSyncDate: '2026-09-10' });
+  it('applyDurableStockDelta changes currentPills by the signed delta only', () => {
+    const m = med({ currentPills: 30 });
     const r = applyDurableStockDelta(m, 5);
-    expect(r.lastSyncDate).toBe('2026-09-10'); // unchanged
+    expect(r.currentPills).toBe(35);
   });
 
-  it('runGatedRefill does NOT change lastSyncDate', async () => {
+  it('runGatedRefill adds only the refill amount to currentPills', async () => {
     installDurableState({
-      medications: [med({ currentPills: 20, lastSyncDate: '2026-09-10' })],
+      medications: [med({ currentPills: 20 })],
       logs: [],
     });
     const r = await runGatedRefill({
@@ -837,12 +806,12 @@ describe('#267 regression 13 — lastSyncDate never changed by manual mutations'
       makeLogId: () => 'refill-1',
     });
     expect(r.outcome).toBe('applied');
-    expect(durable.medications[0].lastSyncDate).toBe('2026-09-10'); // unchanged
+    expect(r.medications[0].currentPills).toBe(30);
   });
 
-  it('runGatedUndoRefill does NOT change lastSyncDate', async () => {
+  it('runGatedUndoRefill reverses only the refill amount', async () => {
     installDurableState({
-      medications: [med({ currentPills: 30, lastSyncDate: '2026-09-10' })],
+      medications: [med({ currentPills: 30 })],
       logs: [makeRefillLog('med-1', 'TestMed', TODAY, 10, 'refill-1')],
     });
     const r = await runGatedUndoRefill({
@@ -851,12 +820,12 @@ describe('#267 regression 13 — lastSyncDate never changed by manual mutations'
       makeLogId: () => 'refill-undo-1',
     });
     expect(r.outcome).toBe('applied');
-    expect(durable.medications[0].lastSyncDate).toBe('2026-09-10'); // unchanged
+    expect(r.medications[0].currentPills).toBe(20);
   });
 
-  it('runGatedAutoDeductToggle does NOT change lastSyncDate', async () => {
+  it('runGatedAutoDeductToggle flips the flag without inventing stock from elapsed days', async () => {
     installDurableState({
-      medications: [med({ currentPills: 30, lastSyncDate: '2026-09-10', autoDeductEnabled: true })],
+      medications: [med({ currentPills: 30, autoDeductEnabled: true })],
       logs: [],
     });
     const r = await runGatedAutoDeductToggle({
@@ -865,18 +834,17 @@ describe('#267 regression 13 — lastSyncDate never changed by manual mutations'
       todayStr: TODAY,
     });
     expect(r.outcome).toBe('applied');
-    expect(durable.medications[0].lastSyncDate).toBe('2026-09-10'); // unchanged
+    expect(r.medications[0].currentPills).toBe(30);
   });
 
-  it('runGatedMedicationUpdate does NOT change lastSyncDate', async () => {
+  it('runGatedMedicationUpdate preserves currentPills (config-only edit)', async () => {
     installDurableState({
-      medications: [med({ currentPills: 30, lastSyncDate: '2026-09-10' })],
+      medications: [med({ currentPills: 30 })],
       logs: [],
     });
     const next: Medication = {
       ...med(),
       currentPills: 30,
-      lastSyncDate: '2026-09-10',
       dailyDose: 4,
       doseSchedule: [
         { id: 'd1', amount: 2, time: '09:00' },
@@ -884,26 +852,22 @@ describe('#267 regression 13 — lastSyncDate never changed by manual mutations'
         { id: 'd3', amount: 1, time: '22:00' },
       ],
     };
+    const { id: _id, createdAt: _c, ...medData } = next;
     const r = await runGatedMedicationUpdate({
       editId: 'med-1',
-      medData: next,
-      globalAutoDeductEnabled: true,
+      medData,
       todayStr: TODAY,
     });
     expect(r.outcome).toBe('applied');
-    expect(durable.medications[0].lastSyncDate).toBe('2026-09-10'); // unchanged
+    expect(r.medications[0].currentPills).toBe(30);
   });
 });
 
-// ───────────────────────────────────────────────────────────────────────
-// 14. No pure projection Restore: elapsed time without durable deduction
-//     doesn't add stock.
-// ───────────────────────────────────────────────────────────────────────
+
 describe('#267 regression 14 — No pure-projection Restore', () => {
   it('restoreDose rejects with missing_deduction_evidence when no log exists (elapsed time alone does not add stock)', () => {
-    // Med has lastSyncDate a week ago — projection shows past-due. But there
     // is NO durable deduction log for d1 today. Restore must NOT add stock.
-    const m = med({ currentPills: 30, lastSyncDate: '2026-09-10' });
+    const m = med({ currentPills: 30});
     const r = restoreDose(m, 'd1', TODAY, new Date(`${TODAY}T15:00:00`), []);
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -912,7 +876,7 @@ describe('#267 regression 14 — No pure-projection Restore', () => {
 
   it('gate-level: Restore without an active deduction log is rejected (no projection-only restore)', async () => {
     installDurableState({
-      medications: [med({ currentPills: 30, lastSyncDate: '2026-09-10' })], // 6 days elapsed
+      medications: [med({ currentPills: 30})], // 6 days elapsed
       logs: [],
     });
     const r = await runGatedManualRestore({
@@ -935,7 +899,6 @@ describe('#267 regression 14 — No pure-projection Restore', () => {
     // restore. Now another Restore has NO active deduction to reverse → rejects.
     const m = med({
       currentPills: 30, // back to 30 after the first restore
-      lastSyncDate: TODAY,
       // doseConsumptionHistory.d1 was cleared by the first restore.
     });
     const logs: ConsumptionLog[] = [

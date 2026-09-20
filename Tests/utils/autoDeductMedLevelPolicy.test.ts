@@ -15,7 +15,6 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: '2024-01-01',
     autoDeductEnabled: true,
     doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     ...overrides,

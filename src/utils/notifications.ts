@@ -692,7 +692,6 @@ function notificationId(
 // the fields that affect the critical date change:
 //   - currentPills (snapshot)
 //   - dailyDose
-//   - lastSyncDate
 //   - warningThresholdDays (IS the user-configured critical threshold)
 //   - autoDeductEnabled
 //   - medication id (med deleted/created)

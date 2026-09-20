@@ -108,7 +108,6 @@ function makeMulti(overrides: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: '2024-09-10',
     autoDeductEnabled: true,
     reminderEnabled: false,
     reminderTime: '08:00',
@@ -435,7 +434,6 @@ describe('doseId propagation — production callers (integration)', () => {
 
     const afterFirst = {
       currentPills: med.currentPills,
-      lastSyncDate: med.lastSyncDate,
       doseConsumptionHistory: { ...(med.doseConsumptionHistory ?? {}) },
       doseSkippedHistory: JSON.stringify(med.doseSkippedHistory ?? {}),
       doseConsumptionHistory: JSON.stringify(med.doseConsumptionHistory ?? {}),
@@ -448,7 +446,6 @@ describe('doseId propagation — production callers (integration)', () => {
     });
     med = readMeds()[0]!;
     expect(med.currentPills).toBe(afterFirst.currentPills);
-    expect(med.lastSyncDate).toBe(afterFirst.lastSyncDate);
     expect({ ...(med.doseConsumptionHistory ?? {}) }).toEqual(afterFirst.doseConsumptionHistory);
     expect(JSON.stringify(med.doseSkippedHistory ?? {})).toBe(afterFirst.doseSkippedHistory);
     expect(JSON.stringify(med.doseConsumptionHistory ?? {})).toBe(
@@ -509,7 +506,6 @@ describe('doseId propagation — production callers (integration)', () => {
 
     const afterFirst = {
       currentPills: med.currentPills,
-      lastSyncDate: med.lastSyncDate,
       doseConsumptionHistory: { ...(med.doseConsumptionHistory ?? {}) },
       doseSkippedHistory: JSON.stringify(med.doseSkippedHistory ?? {}),
       doseConsumptionHistory: JSON.stringify(med.doseConsumptionHistory ?? {}),
@@ -534,7 +530,6 @@ describe('doseId propagation — production callers (integration)', () => {
     med = readMeds()[0]!;
     expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(1);
     expect(med.currentPills).toBe(afterFirst.currentPills);
-    expect(med.lastSyncDate).toBe(afterFirst.lastSyncDate);
     expect({ ...(med.doseConsumptionHistory ?? {}) }).toEqual(afterFirst.doseConsumptionHistory);
     expect(JSON.stringify(med.doseSkippedHistory ?? {})).toBe(afterFirst.doseSkippedHistory);
     expect(JSON.stringify(med.doseConsumptionHistory ?? {})).toBe(

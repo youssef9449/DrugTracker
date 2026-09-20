@@ -68,7 +68,6 @@ function makeMulti(overrides: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: TEST_DATE,
     autoDeductEnabled: false,
     reminderEnabled: false,
     doseSchedule: [
@@ -237,7 +236,6 @@ describe('Management modal stays open after actions', () => {
           warningThresholdDays: 5,
           colorTag: 'teal',
           createdAt: '2024-01-01T00:00:00.000Z',
-          lastSyncDate: TEST_DATE,
           autoDeductEnabled: false,
           reminderEnabled: false,
           doseSchedule: [{ id: 's1', amount: 2, time: '09:00' }],

@@ -175,8 +175,7 @@ export function dailyScheduleAmount(med: Medication): number {
 
 /**
  * Days of stock remaining from durable `currentPills` and the current
- * schedule rate. Does NOT subtract lastSyncDate horizons or elapsed
- * uncommitted doses (Issue #266).
+ * schedule rate. Does NOT subtract elapsed-day settlement or uncommitted-dose projection (Issue #266).
  */
 export function daysLeftFromCurrentStock(med: Medication): number {
   const dayAmt = dailyScheduleAmount(med);
@@ -228,7 +227,7 @@ export function formatLogTime(timestamp?: string | number): string {
 
 /**
  * Depletion date from durable `Medication.currentPills` only (Issue #266).
- * No lastSyncDate / elapsed-dose projection.
+ * No elapsed-day / projected-dose settlement.
  */
 export function getDepletionDate(med: Medication): {
   dateStr: string;
@@ -270,7 +269,7 @@ export function getDepletionDate(med: Medication): {
 
 /**
  * Future critical-threshold crossing from durable `currentPills` and the
- * current schedule rate. Independent of `lastSyncDate` (Issue #266).
+ * current schedule rate. No elapsed-day settlement is applied (Issue #266).
  * Returns null when already critical, no rate, or Auto OFF (frozen stock).
  */
 export function getCriticalAlarmDate(

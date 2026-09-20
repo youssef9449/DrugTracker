@@ -69,7 +69,6 @@ import { initNativeBridge } from '@/native';
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 
 // Wave 13 #123: pin system time so the many `new Date().toISOString()`
-// calls used by App's seed data + lastSyncDate defaults resolve to a
 // known date (2024-09-10T12:00:00Z). Prevents midnight-UTC flake risk
 // where the test process's wall-clock date rolls over mid-run. Only
 // the Date object is faked so React/testing-library's setTimeout-based
@@ -123,7 +122,6 @@ describe('App — hydration (#15)', () => {
       warningThresholdDays: 5,
       colorTag: 'teal',
       createdAt: '2024-01-01T00:00:00.000Z',
-      lastSyncDate: '2024-01-01',
       reminderEnabled: false,
     };
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([savedMed]));
@@ -200,7 +198,6 @@ describe('handleToggleAutoDeduct logic (#27)', () => {
  *
  * The Auto-Deduction toggle changes ONLY the `autoDeductEnabled` configuration.
  * It does NOT settle historical elapsed doses, modify `currentPills`, advance
- * `lastSyncDate`, or create an `exact_auto` deduction log. The tests below
  * verify observable/durable behavior (not internal helper call counts).
  */
 
@@ -242,8 +239,6 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
           warningThresholdDays: 5,
           colorTag: 'teal',
           createdAt: '2024-01-01T00:00:00.000Z',
-          // lastSyncDate = today so there are no elapsed days to settle.
-          lastSyncDate: todayStr,
           autoDeductEnabled: true,
           reminderEnabled: false,
           ...overrides,
@@ -269,7 +264,7 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
     return JSON.parse(raw) as Record<string, unknown>[];
   }
 
-  it('Test A — ON → OFF: changes autoDeductEnabled only; currentPills/lastSyncDate unchanged; no exact_auto log', async () => {
+  it('Test A — ON → OFF: changes autoDeductEnabled only; currentPills unchanged; no exact_auto log', async () => {
     const todayStr = new Date().toISOString().slice(0, 10);
     seedMed({ autoDeductEnabled: true });
 
@@ -291,7 +286,6 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
     const med = getDurableMed();
     expect(med?.autoDeductEnabled).toBe(false);
     expect(med?.currentPills).toBe(60);
-    expect(med?.lastSyncDate).toBe(todayStr);
 
     // No exact_auto settlement log created by the toggle.
     const logs = getDurableLogs();
@@ -314,7 +308,6 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
     // Capture the pre-toggle durable medication state.
     const preToggleMed = getDurableMed();
     expect(preToggleMed?.autoDeductEnabled).toBe(true);
-    const preToggleLastSync = preToggleMed?.lastSyncDate as string;
     const preToggleCurrentPills = preToggleMed?.currentPills as number;
 
     // Instrument the durable stock gate to count commits where the
@@ -385,8 +378,6 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
     // Issue #267: currentPills unchanged from pre-toggle value.
     expect(med?.currentPills).toBe(preToggleCurrentPills);
 
-    // lastSyncDate unchanged from the pre-toggle durable medication.
-    expect(med?.lastSyncDate).toBe(preToggleLastSync);
 
     // No exact_auto settlement log created by the toggle.
     const logs = getDurableLogs();
@@ -422,7 +413,6 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
     const med = getDurableMed();
     expect(med?.autoDeductEnabled).toBe(true);
     expect(med?.currentPills).toBe(60);
-    expect(med?.lastSyncDate).toBe(todayStr);
 
     const logs = getDurableLogs();
     expect(logs.filter((l) => l.type === 'exact_auto')).toHaveLength(0);
@@ -486,8 +476,7 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
         unit: 'قرص',
         warningThresholdDays: 5,
         colorTag: 'teal',
-        createdAt: '2024-01-01T00:00:00.000Z',
-        lastSyncDate: new Date().toISOString().slice(0, 10),
+        createdAt: '2024-01-01T00:00:00.000Z', 10),
         autoDeductEnabled: true,
         reminderEnabled: false,
       },
@@ -517,8 +506,7 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
         unit: 'قرص',
         warningThresholdDays: 5,
         colorTag: 'teal',
-        createdAt: '2024-01-01T00:00:00.000Z',
-        lastSyncDate: new Date().toISOString().slice(0, 10),
+        createdAt: '2024-01-01T00:00:00.000Z', 10),
         autoDeductEnabled: true,
         reminderEnabled: false,
       },
@@ -563,8 +551,7 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
         unit: 'قرص',
         warningThresholdDays: 5,
         colorTag: 'teal',
-        createdAt: '2024-01-01T00:00:00.000Z',
-        lastSyncDate: new Date().toISOString().slice(0, 10),
+        createdAt: '2024-01-01T00:00:00.000Z', 10),
         autoDeductEnabled: true,
         reminderEnabled: false,
       },
@@ -576,8 +563,7 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
         unit: 'قرص',
         warningThresholdDays: 5,
         colorTag: 'teal',
-        createdAt: '2024-01-01T00:00:00.000Z',
-        lastSyncDate: new Date().toISOString().slice(0, 10),
+        createdAt: '2024-01-01T00:00:00.000Z', 10),
         autoDeductEnabled: true,
         reminderEnabled: false,
       },
@@ -589,8 +575,7 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
         unit: 'قرص',
         warningThresholdDays: 7,
         colorTag: 'teal',
-        createdAt: '2024-01-01T00:00:00.000Z',
-        lastSyncDate: new Date().toISOString().slice(0, 10),
+        createdAt: '2024-01-01T00:00:00.000Z', 10),
         autoDeductEnabled: true,
         reminderEnabled: false,
       },
@@ -636,8 +621,7 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
         unit: 'قرص',
         warningThresholdDays: 5,
         colorTag: 'teal',
-        createdAt: '2024-01-01T00:00:00.000Z',
-        lastSyncDate: new Date().toISOString().slice(0, 10),
+        createdAt: '2024-01-01T00:00:00.000Z', 10),
         autoDeductEnabled: true,
         reminderEnabled: false,
       },
@@ -669,7 +653,6 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
       warningThresholdDays: 5,
       colorTag: 'teal',
       createdAt: '2024-01-01T00:00:00.000Z',
-      lastSyncDate: today,
       autoDeductEnabled: false,
       reminderEnabled: false,
     }]));
@@ -722,7 +705,6 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
       warningThresholdDays: 5,
       colorTag: 'teal',
       createdAt: '2024-01-01T00:00:00.000Z',
-      lastSyncDate: today,
       autoDeductEnabled: false,
       reminderEnabled: false,
     }]));
@@ -788,7 +770,6 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
       warningThresholdDays: 5,
       colorTag: 'teal',
       createdAt: '2024-01-01T00:00:00.000Z',
-      lastSyncDate: today,
       autoDeductEnabled: true,
       reminderEnabled: false,
       doseSchedule: [{ id: 'd1', amount: 2, time: '09:00' }],
@@ -914,8 +895,7 @@ describe('Success chime on toggle actions', () => {
           unit: 'قرص',
           warningThresholdDays: 5,
           colorTag: 'teal',
-          createdAt: '2024-01-01T00:00:00.000Z',
-          lastSyncDate: new Date().toISOString().slice(0, 10),
+          createdAt: '2024-01-01T00:00:00.000Z', 10),
           autoDeductEnabled: true,
           reminderEnabled: false,
           ...overrides,

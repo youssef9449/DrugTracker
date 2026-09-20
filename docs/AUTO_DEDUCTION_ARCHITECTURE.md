@@ -164,7 +164,6 @@ Outcomes include: `applied`, `already_applied`, `skipped_missing_med`, `skipped_
 
 There is **no** day-based / elapsed-days stock settlement on startup or calendar-day pass. Exact Auto is occurrence-based only.
 
-- `lastSyncDate` is retained as a companion field to durable `currentPills` where other paths still use it; it is **not** occurrence-level Exact Auto evidence and must not prevent applying a FIRED event.
 - Per-dose truth for consumption/skip remains `doseConsumptionHistory` / `doseSkippedHistory`.
 - Medication-level `lastConsumedDate` does **not** mark an arbitrary dose occurrence as consumed when `doseSchedule` is missing.
 

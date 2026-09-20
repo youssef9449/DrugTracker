@@ -15,6 +15,8 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
       {
         id: exactAutoLogId('med', 'd1', today),
         medicationId: 'med',
+        medicationName: 'Test Medication',
+        description: 'Test dose',
         doseId: 'd1',
         amount: -2,
         type: 'exact_auto',
@@ -24,6 +26,8 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
       {
         id: 'log-d2-manual',
         medicationId: 'med',
+        medicationName: 'Test Medication',
+        description: 'Test dose',
         doseId: 'd2',
         amount: -1,
         type: 'dose_taken',
@@ -45,6 +49,8 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
       {
         id: exactAutoLogId('med', 'd1', today),
         medicationId: 'med',
+        medicationName: 'Test Medication',
+        description: 'Test dose',
         doseId: 'd1',
         amount: -2,
         type: 'exact_auto',
@@ -67,6 +73,8 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
       {
         id: exactAutoLogId('med', 'd2', today),
         medicationId: 'med',
+        medicationName: 'Test Medication',
+        description: 'Test dose',
         doseId: 'd2',
         amount: -5,
         type: 'exact_auto',
@@ -85,6 +93,8 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
       {
         id: exactAutoLogId('med', 'd1', today),
         medicationId: 'med',
+        medicationName: 'Test Medication',
+        description: 'Test dose',
         doseId: 'd1',
         amount: -3,
         type: 'exact_auto',
@@ -110,6 +120,8 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
       {
         id: 'legacy-log',
         medicationId: 'med',
+        medicationName: 'Test Medication',
+        description: 'Test dose',
         amount: -2,
         type: 'exact_auto',
         timestamp: '2026-09-14T08:00:00.000Z',
@@ -119,7 +131,7 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
     const active = findActiveDeductionForOccurrence(
       logs,
       'med',
-      undefined,
+      '',
       today
     );
     expect(active).toBeNull();
@@ -130,6 +142,8 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
       {
         id: 'd1-log',
         medicationId: 'med',
+        medicationName: 'Test Medication',
+        description: 'Test dose',
         doseId: 'd1',
         amount: -2,
         type: 'dose_taken',
@@ -151,6 +165,8 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
       {
         id: 'd1-log',
         medicationId: 'med',
+        medicationName: 'Test Medication',
+        description: 'Test dose',
         doseId: 'd1',
         amount: -2,
         type: 'dose_taken',
@@ -167,6 +183,8 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
       {
         id: exactAutoLogId('med', 'd1', today),
         medicationId: 'med',
+        medicationName: 'Test Medication',
+        description: 'Test dose',
         doseId: 'd1',
         amount: -2,
         type: 'exact_auto',

@@ -30,7 +30,6 @@ import { Medication, ConsumptionLog } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
 
 export function getInitialMedications(todayStr: string = getTodayDateString()): Medication[] {
-  const today = todayStr;
   const nowIso = new Date().toISOString();
   return [
     {

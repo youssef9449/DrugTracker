@@ -773,7 +773,7 @@ describe('#267 regression 13 — manual mutations do not perform elapsed-day set
   it('consumeDose deducts only the intended dose amount from currentPills', () => {
     const m = med({ currentPills: 30 });
     const r = consumeDose(m, 'manual', TODAY, new Date(`${TODAY}T15:00:00`), 'd1');
-    expect(r.medication.currentPills).toBe(29);
+    expect(r.updatedMed!.currentPills).toBe(29);
   });
 
   it('restoreDose restores only the evidenced dose amount', () => {
@@ -785,7 +785,7 @@ describe('#267 regression 13 — manual mutations do not perform elapsed-day set
     const r = restoreDose(m, 'd1', TODAY, new Date(`${TODAY}T15:00:00`), logs);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.medication.currentPills).toBe(30);
+    expect(r.updatedMed.currentPills).toBe(30);
   });
 
   it('applyDurableStockDelta changes currentPills by the signed delta only', () => {

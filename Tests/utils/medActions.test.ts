@@ -448,7 +448,7 @@ describe('restoreDose (#267 — durable deduction evidence)', () => {
     const result = restoreDose(med, 'd1', today, now, logs);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.medication.currentPills).toBe(30);
+    expect(result.updatedMed.currentPills).toBe(30);
   });
 
   it('restores from the historical deduction log amount, not the current schedule amount', () => {

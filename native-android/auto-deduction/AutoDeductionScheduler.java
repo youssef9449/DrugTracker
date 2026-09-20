@@ -18,18 +18,20 @@ import app.drugtracker.alarmruntime.ExactAlarmRuntime;
 import app.drugtracker.alarmruntime.ExactAlarmStore;
 
 /**
- * One-shot exact-time auto-deduction scheduler (AlarmManager).
+ * One-shot exact-time auto-deduction feature scheduler. The shared
+ * ExactAlarmRuntime owns AlarmManager/PendingIntent mechanics; this class
+ * owns Auto Deduction recurrence, fire, cancellation, and recovery policy.
  *
  * PendingIntent identity:
  *   - ACTION_AUTO_DEDUCTION
- *   - data URI = occurrenceUri(med, dose, date)  [full identity]
- *   - fixed request code PENDING_INTENT_REQUEST_CODE (namespace only)
+ *   - full data URI = occurrenceUri(med, dose, date)
+ *   - fixed request code is supplied to the shared runtime as a namespace only
  *
  * Scheduler transaction serialization (SCHEDULE_LOCK):
  *   For each occurrence, one process-wide critical section covers:
  *     1. durable metadata commit (with scheduleVersion)
- *     2. AlarmManager setExact / setExactAndAllowWhileIdle
- *     3. ownership-safe failure rollback
+ *     2. shared runtime AlarmManager install
+ *     3. shared runtime ownership-safe failure rollback
  *   cancelOccurrence uses the same lock for alarm cancel + metadata remove.
  *   This prevents interleaving that could leave metadata=B while alarm=A.
  *
@@ -43,7 +45,8 @@ import app.drugtracker.alarmruntime.ExactAlarmStore;
  *   Lock order is always SCHEDULE_LOCK then (nested) EventStore.LOCK — never the
  *   reverse — so nesting cannot deadlock.
  *
- * scheduleVersion remains an ownership guard for rollback (belt-and-suspenders
+ * operationVersion is the shared generic ownership guard for rollback (with
+ * legacy scheduleVersion remaining readable during migration). It remains a
  * against concurrent metadata replace). It is NOT a medication-level disable epoch.
  *
  * Recurrence authorization (Issue #217):
@@ -70,7 +73,7 @@ public final class AutoDeductionScheduler {
     /** Durable marker: this occurrence is awaiting fire-persistence retry/recovery. */
     public static final String FIELD_FIRE_RETRY_COUNT = "fireRetryCount";
 
-    /** Process-wide lock: metadata + AlarmManager install/cancel + rollback. */
+    /** Shared lock for Auto fire/cancel policy and exact-alarm runtime transactions. */
     private static final Object SCHEDULE_LOCK = ExactAlarmOperationLock.LOCK;
 
     private final Context appContext;
@@ -114,7 +117,8 @@ public final class AutoDeductionScheduler {
      */
     volatile boolean forceFireRetryEvidenceCommitFailureForTest = false;
     /**
-     * Test-only: when true, {@link #allocateOrderingTokenLocked()} returns null
+     * Test-only: when true, the shared runtime's durable operation-version
+     * allocation is forced to fail
      * (simulating a durable ordering-token allocation failure) to exercise the
      * Issue #241 fail-closed path. Production never sets this; the durable
      * ordering-token semantics are unchanged when it is false.
@@ -276,7 +280,8 @@ public final class AutoDeductionScheduler {
     }
 
     /**
-     * Cancel AlarmManager + remove schedule metadata for every occurrence of
+     * Cancel each occurrence through the shared exact-alarm runtime; Auto Deduction
+ * keeps ownership of which occurrences belong to the dose chain. of
      * this medication+dose. Caller must hold {@link #SCHEDULE_LOCK}.
      * Also writes occurrence cancellation tombstones so fire cannot promote them.
      *
@@ -888,52 +893,16 @@ public final class AutoDeductionScheduler {
             } catch (JSONException e) {
                 return ScheduleResult.fail("payload_build_failed");
             }
-            Intent intent = buildOccurrenceIntent(
-                    medicationId, doseId, calendarDate, triggerAt, amount, timeHhmm, 0L, null);
-            PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
-            // Pass expected generation so locked schedule cannot stamp a newer gen.
+            // Pass expected generation so the shared runtime cannot stamp a newer gen.
             return scheduleOccurrenceLocked(
-                    futurePrefKey, futureKey, payload, triggerAt, pi, null,
-                    expectedRecurrenceGeneration);
+                    futurePrefKey, futureKey, payload, triggerAt, null,
+                    null, expectedRecurrenceGeneration);
         }
     }
 
 
     /**
-     * Allocate a durable ordering token for one schedule or cancel operation.
-     * Format: "{millis}-{seq}-{uuid}". Not part of occurrence identity (med/dose/date).
-     * <p>
-     * Caller MUST hold {@link #SCHEDULE_LOCK}. Sequence is read-increment-commit from
-     * durable SharedPreferences so ordering survives process death. Skipped values
-     * after a crash are acceptable; reusing an older durable seq is not.
-     *
-     * @return token, or {@code null} if the durable counter commit failed (caller
-     *         must fail the operation — do not fall back to volatile memory).
-     */
-    private String allocateOrderingTokenLocked() {
-        if (forceOrderingTokenAllocationFailureForTest) {
-            // Test-only (Issue #241): simulate a durable ordering-token allocation
-            // failure so cancelAll/invalidate can prove the fail-closed path.
-            // Production never sets this; allocation/commit semantics are unchanged.
-            return null;
-        }
-        long last = orderingPrefs.getLong(AutoDeductionContract.KEY_ORDERING_SEQ, 0L);
-        long next = last + 1L;
-        boolean committed = orderingPrefs.edit()
-                .putLong(AutoDeductionContract.KEY_ORDERING_SEQ, next)
-                .commit();
-        if (!committed) {
-            Log.e(TAG, "allocateOrderingTokenLocked: durable sequence commit failed");
-            return null;
-        }
-        return System.currentTimeMillis()
-                + "-"
-                + next
-                + "-"
-                + UUID.randomUUID().toString();
-    }
-
-    /**
+     * Pure ownership check used by conditional rollback.    /**
      * Pure ownership check used by conditional rollback.
      * Package-visible for focused verification.
      */
@@ -1448,7 +1417,8 @@ public final class AutoDeductionScheduler {
     /**
      * Core scheduling transaction. Caller MUST hold {@link #SCHEDULE_LOCK}.
      *
-     * scheduleVersion is generated here (inside the lock) so its (millis, seq)
+     * operationVersion is generated by the shared runtime inside the same
+     * serialized lock, so its (millis, seq)
      * ordering token reflects serialized operation order versus concurrent
      * cancelOccurrence tombstones — not the wall-clock time at which a thread
      * waited for the lock. Same-millisecond operations are distinguished by seq.
@@ -1997,10 +1967,6 @@ public final class AutoDeductionScheduler {
             return ScheduleResult.fail("payload_failed");
         }
 
-        Intent intent = buildOccurrenceIntent(
-                medicationId, doseId, resolvedNextDate, triggerAt, amount, timeHhmm, 0L, null);
-        PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
-
         synchronized (SCHEDULE_LOCK) {
             // Snapshot must still own past D — otherwise amount/time are obsolete.
             String currentPast = schedulePrefs.getString(pastPrefKey, null);
@@ -2026,14 +1992,14 @@ public final class AutoDeductionScheduler {
                 return ScheduleResult.success(nextKey);
             }
             return scheduleOccurrenceLocked(
-                    nextPrefKey, nextKey, payload, triggerAt, pi, /*requiredVersion*/ null);
+                    nextPrefKey, nextKey, payload, triggerAt, null, /*requiredVersion*/ null);
         }
     }
 
     /**
      * Restore future alarms from persisted schedule payloads (reboot).
      *
-     * Snapshot under lock (prefKey + raw JSON + observed scheduleVersion).
+     * Snapshot under lock (prefKey + raw JSON + observed operationVersion).
      * For each future entry, ownership validation + AlarmManager install +
      * metadata rewrite run under one continuous SCHEDULE_LOCK critical section
      * so cancel cannot interleave and resurrect a canceled schedule.

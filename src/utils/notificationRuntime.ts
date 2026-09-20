@@ -1,4 +1,4 @@
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 
 export const DOSE_REMINDER_CHANNEL_ID = 'dose-reminder-v3';
 export const DOSE_REMINDER_FOREGROUND_CHANNEL_ID =
@@ -34,6 +34,10 @@ interface NotificationRuntimePlugin {
     identity: string;
   }): Promise<{ ok: boolean }>;
   checkPermission(): Promise<{ enabled: boolean }>;
+  addListener(
+    eventName: 'notificationReceived' | 'notificationActionPerformed',
+    listener: (event: Record<string, unknown>) => void
+  ): Promise<PluginListenerHandle>;
 }
 
 const NotificationRuntime = registerPlugin<NotificationRuntimePlugin>(
@@ -89,4 +93,21 @@ export async function areNativeNotificationsEnabled(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export function addNotificationReceivedListener(
+  listener: (event: Record<string, unknown>) => void
+): Promise<PluginListenerHandle | null> {
+  if (!isAndroidNotificationRuntime()) return Promise.resolve(null);
+  return NotificationRuntime.addListener('notificationReceived', listener);
+}
+
+export function addNotificationActionPerformedListener(
+  listener: (event: Record<string, unknown>) => void
+): Promise<PluginListenerHandle | null> {
+  if (!isAndroidNotificationRuntime()) return Promise.resolve(null);
+  return NotificationRuntime.addListener(
+    'notificationActionPerformed',
+    listener
+  );
 }

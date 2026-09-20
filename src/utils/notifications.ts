@@ -60,32 +60,6 @@ import {
   cancelStaleDoseReminderAlarmsNative,
 } from './doseReminderNative';
 
-/**
- * Native bridge for temporary dose-reminder delivery/re-arm evidence
- * (TimedNotificationPublisher → DoseReminderRecurrenceStore).
- * Validity requires current desired reminderTime so stale config cannot
- * block repair. Web / missing plugin: query helpers no-op as invalid.
- */
-const DOSE_REMINDER_CHANNEL_ID = 'dose-reminder-v3';
-
-/**
- * The FOREGROUND dose-reminder notification channel — SILENT.
- *
- * Used when the app is in the foreground so the scheduled notification
- * triggers the `localNotificationReceived` event (which opens the
- * DoseAlarmModal + plays the in-app chime) WITHOUT producing an audible
- * Android notification sound.
- *
- * Created in native.ts with:
- *   - no `sound` property → no sound
- *   - importance: LOW (no sound, no heads-up, appears in shade only)
- *   - visibility: PUBLIC (lock screen)
- *
- * Versioned (v1) so the sound config can be changed if ever needed
- * (Android channel sound is immutable after creation).
- */
-export const DOSE_REMINDER_FOREGROUND_CHANNEL_ID = 'dose-reminder-foreground-v1';
-
 // ─────────────────────────────────────────────────────────────
 // App foreground/background state tracker.
 //

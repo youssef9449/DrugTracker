@@ -131,7 +131,7 @@ for (const { src, dest, marker } of copies) {
   console.info(`[prepare-android] Installed ${path.relative(root, src)} → ${path.relative(root, dest)}`);
 }
 
-// ── 4. Phase 2: install shared exact-alarm runtime + Auto Deduction sources ──
+// ── 4. Install shared exact-alarm runtime + Auto Deduction sources ────────────
 const alarmRuntimeSrcDir = path.join(root, 'native-android', 'alarm-runtime');
 const alarmRuntimeDestDir = path.join(
   androidDir,
@@ -183,6 +183,7 @@ const autoDeductionFiles = [
   'AutoDeductionContract.java',
   'AutoDeductionEventStore.java',
   'AutoDeductionScheduler.java',
+  'AutoDeductionSchedulingAdapter.java',
   'AutoDeductionReceiver.java',
   'AutoDeductionLifecycle.java',
   'AutoDeductionAlarmFeature.java',

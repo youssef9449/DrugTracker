@@ -323,3 +323,29 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 });
+
+
+describe('AddMedicationModal — stock helper fields allow empty mid-edit', () => {
+  afterEach(() => cleanup());
+
+  it('علب كاملة / أشرطة إضافية / حبات منفردة can be cleared then retyped', () => {
+    render(<AddMedicationModal {...baseProps()} />);
+
+    fireEvent.click(screen.getByText(/احسب من العلب والأشرطة المتوفرة/));
+    expect(screen.getByText('علب كاملة')).toBeInTheDocument();
+    expect(screen.getByText('أشرطة إضافية')).toBeInTheDocument();
+    expect(screen.getByText('حبات منفردة')).toBeInTheDocument();
+    expect(screen.queryByText('حبات فَرط')).not.toBeInTheDocument();
+
+    for (const label of ['علب كاملة', 'أشرطة إضافية', 'حبات منفردة'] as const) {
+      const labelEl = screen.getByText(label);
+      const input = labelEl.parentElement!.querySelector('input') as HTMLInputElement;
+      expect(input).toBeTruthy();
+      fireEvent.change(input, { target: { value: '' } });
+      // Empty number inputs report null/empty in the DOM value.
+      expect(input.value).toBe('');
+      fireEvent.change(input, { target: { value: '2' } });
+      expect(input.value).toBe('2');
+    }
+  });
+});

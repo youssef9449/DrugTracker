@@ -737,6 +737,15 @@ export async function cancelCriticalAlarm(medId: string): Promise<void> {
   }
 }
 
+function pendingAtMatchesAlarmTime(at: unknown, alarmTimeMs: number): boolean {
+  if (typeof at === 'number') return at === alarmTimeMs;
+  if (typeof at === 'string') {
+    const parsed = new Date(at).getTime();
+    return !Number.isNaN(parsed) && Math.abs(parsed - alarmTimeMs) <= 2000;
+  }
+  return false;
+}
+
 export async function verifyCriticalAlarmPending(
   medId: string,
   alarmTimeMs: number
@@ -879,18 +888,17 @@ export async function isDoseReminderPending(
   medId: string,
   doseId: string
 ): Promise<boolean> {
+  if (getNativePlatform() === 'android') {
+    return isDoseReminderScheduledNative(medId, doseId);
+  }
   if (!isNativePlatform()) return false;
   try {
     const pending = await LocalNotifications.getPending();
-    const id = doseReminderAlarmIdForDose(medId, doseId);
-    if (id == null) return false;
+    const id = notificationId('doseAlarm', `${medId}::${doseId}`);
     const entry = pending.notifications.find((n) => n.id === id);
     if (!entry) return false;
     const at = (entry.schedule as { at?: unknown } | undefined)?.at;
-    if (at == null) {
-      // Present without at: treat as armed (defensive; dose path always sets at).
-      return true;
-    }
+    if (at == null) return true;
     const atMs =
       typeof at === 'number'
         ? at
@@ -898,7 +906,6 @@ export async function isDoseReminderPending(
           ? at.getTime()
           : Date.parse(String(at));
     if (Number.isNaN(atMs)) return true;
-    // Future (or within 60s tolerance for clock skew) counts as armed.
     return atMs > Date.now() - 60_000;
   } catch (err) {
     console.warn('[notifications] isDoseReminderPending failed:', err);
@@ -919,20 +926,10 @@ export async function isDoseReminderPending(
 export async function isNativeDoseReminderReArmed(
   medId: string,
   doseId: string,
-  reminderTime?: string
+  _reminderTime?: string
 ): Promise<boolean> {
-  if (!isNativePlatform()) return false;
-  const id = typeof doseId === 'string' ? doseId.trim() : '';
-  if (!id) return false;
-  if (!reminderTime || reminderTime.indexOf(':') < 0) return false;
-  try {
-    const opts = { medicationId: medId, doseId: id, reminderTime };
-    const result = await DoseReminderNative.getNextOccurrence(opts);
-    return result?.valid === true;
-  } catch (err) {
-    console.warn('[notifications] isNativeDoseReminderReArmed failed:', err);
-    return false;
-  }
+  if (getNativePlatform() !== 'android') return false;
+  return isDoseReminderScheduledNative(medId, doseId);
 }
 
 /**
@@ -940,56 +937,36 @@ export async function isNativeDoseReminderReArmed(
  * Idempotent. Web no-op.
  */
 export async function clearNativeDoseReminderReArm(
-  medId: string,
-  doseId: string
+  _medId: string,
+  _doseId: string
 ): Promise<void> {
-  if (!isNativePlatform()) return;
-  const id = typeof doseId === 'string' ? doseId.trim() : '';
-  if (!id) return;
-  try {
-    const opts = { medicationId: medId, doseId: id };
-    await DoseReminderNative.clearReArm(opts);
-  } catch (err) {
-    console.warn('[notifications] clearNativeDoseReminderReArm failed:', err);
-  }
+  // No separate delivery-evidence store remains. ExactAlarmRuntime's durable
+  // schedule row is the only scheduling source of truth.
 }
 
-function isDoseAlarmBandId(id: number): boolean {
-  const base = NOTIFICATION_ID_BASE.doseAlarm;
-  return id >= base && id < base + ID_RANGE_SIZE;
+function isDoseAlarmBandId(_id: number): boolean {
+  return false;
 }
 
 /**
  * Pending notification ids in the doseAlarm band (persisted native truth).
  */
 export async function listPendingDoseReminderAlarmIds(): Promise<number[]> {
-  if (!isNativePlatform()) return [];
-  try {
-    const pending = await LocalNotifications.getPending();
-    return pending.notifications
-      .map((x) => x.id)
-      .filter((id): id is number => typeof id === 'number' && isDoseAlarmBandId(id));
-  } catch (err) {
-    console.warn('[notifications] listPendingDoseReminderAlarmIds failed:', err);
-    return [];
-  }
+  // Deprecated compatibility helper. Alarm identity is now logical
+  // medId + doseId inside ExactAlarmRuntime; no feature numeric-id band exists.
+  return [];
 }
 
 /**
  * Cancel pending doseAlarm-band notifications not in keepIds (stale after
  * process death / dose removal). Does not touch other bands.
  */
-export async function cancelStaleDoseReminderAlarms(keepIds: ReadonlySet<number>): Promise<void> {
-  if (!isNativePlatform()) return;
-  try {
-    const pendingIds = await listPendingDoseReminderAlarmIds();
-    const toCancel = pendingIds.filter((id) => !keepIds.has(id));
-    if (toCancel.length === 0) return;
-    await LocalNotifications.cancel({
-      notifications: toCancel.map((id) => ({ id })),
-    });
-  } catch (err) {
-    console.warn('[notifications] cancelStaleDoseReminderAlarms failed:', err);
+export async function cancelStaleDoseReminderAlarms(
+  keepKeys: ReadonlySet<string>
+): Promise<void> {
+  if (getNativePlatform() === 'android') {
+    await cancelStaleDoseReminderAlarmsNative(keepKeys);
+    return;
   }
 }
 

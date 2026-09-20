@@ -786,17 +786,14 @@ export async function scheduleCriticalAlarm(
 // ─────────────────────────────────────────────────────────────────────
 // Daily dose-reminder alarm (AlarmManager-backed).
 //
-// Architecture (Capacitor local-notifications 6.1.3 Android):
-// - JS schedules a ONE-SHOT exact alarm at the next due `at` time
-//   (stable id = medicationId + doseId). Does NOT use repeats:true
-//   (that path calls AlarmManager.setRepeating with interval=at-now).
-// - TimedNotificationPublisher is the sole recurrence owner: on delivery
-//   it arms exactly one next-day alarm at extra.reminderTime.
-// - useDoseReminderScheduler performs idempotent reconciliation against
-//   LocalNotifications.getPending() — lifecycle must not cancel+reschedule
-//   when the stable id is already pending.
-//
-// Id band doseAlarm (6M) is separate from immediate dose (3M).
+// Android architecture:
+// - JavaScript chooses the next desired occurrence and calls DoseReminder's
+//   exact-alarm adapter.
+// - ExactAlarmRuntime owns AlarmManager timing and durable schedule identity.
+// - DoseReminderAlarmReceiver posts through NotificationRuntime at delivery
+//   and asks ExactAlarmRuntime to arm the next calendar-day occurrence.
+// - useDoseReminderScheduler reconciles against the native exact-alarm state.
+// iOS keeps its existing LocalNotifications fallback path.
 
 // Sentinel lives in a leaf module so pure-logic modules (dateCalculations)
 // can reference it without importing the notification stack.
@@ -807,7 +804,9 @@ export async function scheduleCriticalAlarm(
  * Identity = medicationId + doseId. Requires non-empty doseId.
  * Returns null when doseId is missing — callers must not schedule/cancel.
  *
- * Band: doseAlarm (6_000_000 + hash(...) % 1_000_000).
+ * This helper is retained for the iOS LocalNotifications fallback only.
+ * Android future-alarm identity is the full logical medId::doseId inside
+ * ExactAlarmRuntime.
  */
 export function doseReminderAlarmIdForDose(
   medId: string,
@@ -819,17 +818,11 @@ export function doseReminderAlarmIdForDose(
 }
 
 /**
- * True when Capacitor `LocalNotifications.getPending()` reports a *future*
- * occurrence for this stable dose-alarm id.
+ * True when the logical Dose Reminder occurrence is still armed.
  *
- * Layer contract (post-delivery):
- * - AlarmManager: wall-clock arm (not directly queryable here)
- * - NotificationStorage / getPending(): plugin-visible future `schedule.at`
- * - DoseReminderRecurrenceStore: temporary delivery evidence; valid only when
- *   storage still holds a matching future occurrence for the same notification id
- *
- * Reconciliation asks the native exact-alarm runtime whether the logical
- * occurrence is still armed. JS must not use Capacitor repeats/every.
+ * Android queries ExactAlarmRuntime's actual PendingIntent state. iOS uses
+ * the existing LocalNotifications pending list. JS must not use repeats/every
+ * for the Android path.
  */
 export async function isDoseReminderPending(
   medId: string,
@@ -861,14 +854,8 @@ export async function isDoseReminderPending(
 }
 
 /**
- * True when native TimedNotificationPublisher has persisted temporary
- * delivery/re-arm evidence for this medicationId + doseId that still
- * matches the current desired reminderTime and a future next occurrence.
- * Independent of getPending() / React memory. Stale config, expired, or
- * absent → false so JS can repair. Does not prove AlarmManager still holds
- * the alarm.
- *
- * @param reminderTime current desired HH:MM for this dose slot (required)
+ * Compatibility reconciliation helper for the Dose Reminder scheduler.
+ * Android now queries the ExactAlarmRuntime pending state directly.
  */
 export async function isNativeDoseReminderReArmed(
   medId: string,
@@ -880,8 +867,8 @@ export async function isNativeDoseReminderReArmed(
 }
 
 /**
- * Clear native re-arm evidence for a dose slot (cancel / signature change).
- * Idempotent. Web no-op.
+ * Legacy compatibility no-op retained for the existing scheduler API.
+ * Delivery evidence is no longer stored in a separate notification plugin store.
  */
 export async function clearNativeDoseReminderReArm(
   _medId: string,

@@ -936,7 +936,7 @@ describe('#267 regression 14 — No pure-projection Restore', () => {
     const m = med({
       currentPills: 30, // back to 30 after the first restore
       lastSyncDate: TODAY,
-      // doseConsumption.d1 was cleared by the first restore.
+      // doseConsumptionHistory.d1 was cleared by the first restore.
     });
     const logs: ConsumptionLog[] = [
       {

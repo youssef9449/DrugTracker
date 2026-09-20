@@ -1995,7 +1995,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
 
   it('Auto → Restore leaves durable skip so does not re-project', async () => {
     // d1@08:00, now 15:00 → d1 elapsed. Simulate Exact Auto having applied
-    // d1 (doseConsumption marker + exact_auto log) without going through
+    // d1 (doseConsumptionHistory marker + exact_auto log) without going through
     // the gated path (the durable state is the post-Auto snapshot).
     durable = {
       medications: [

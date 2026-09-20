@@ -48,7 +48,6 @@ export interface AppSettingsModalProps {
   criticalStockAlertsEnabled?: boolean;
   onSendTestNotification?: () => void;
   autoDeductEnabled?: boolean;
-  onToggleAutoDeduct?: () => void;
   /**
    * Apply app preference toggles only when the user confirms with حفظ الإعدادات.
    * Closing the modal without save discards draft changes.

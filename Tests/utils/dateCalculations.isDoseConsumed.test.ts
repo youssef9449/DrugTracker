@@ -30,7 +30,7 @@ describe('isDoseConsumedOnDate — explicit per-dose only (no lastConsumedDate f
     expect(isDoseConsumedOnDate(med, 'any', TODAY)).toBe(false);
   });
 
-  it('explicit doseConsumption[doseId] still marks that dose consumed', () => {
+  it('explicit doseConsumptionHistory[doseId] marks that dose consumed', () => {
     const med = makeMed({
       doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
       doseConsumptionHistory: { d1: [TODAY] },
@@ -39,13 +39,6 @@ describe('isDoseConsumedOnDate — explicit per-dose only (no lastConsumedDate f
     expect(isDoseConsumedOnDate(med, 'd2', TODAY)).toBe(false);
   });
 
-  it('explicit doseConsumptionHistory[doseId] still marks that dose consumed', () => {
-    const med = makeMed({
-      doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
-      doseConsumptionHistory: { d1: [TODAY] },
-    });
-    expect(isDoseConsumedOnDate(med, 'd1', TODAY)).toBe(true);
-  });
 
   it('single-slot explicit schedule works with per-dose consumption only', () => {
     const med = makeMed({

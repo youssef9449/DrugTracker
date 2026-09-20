@@ -2,6 +2,76 @@ import { Medication, getCriticalThresholdDays } from '../types';
 import { MS_PER_DAY, NEVER_DEPLETES_DAYS, CRITICAL_ALARM_FIRE_HOUR } from './time';
 
 /**
+ * Returns today's date as a deterministic YYYY-MM-DD string, using
+ * the client's local timezone.
+ *
+ * This is a client-side Vite SPA (no SSR), so there is no server/client
+ * hydration concern. The function is kept pure (no window/localStorage
+ * access) simply so it can be safely called during module init and
+ * from the seed-data file without side effects.
+ */
+export function getTodayDateString(): string {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Parse a "YYYY-MM-DD" string into a UTC midnight Date.
+ *
+ * Why UTC: `new Date(2024, m, d)` interprets the components in the
+ * LOCAL timezone, and `setDate`/`getTime` math then crosses DST
+ * boundaries with 23- or 25-hour days — producing off-by-one errors
+ * around DST transitions. Treating YYYY-MM-DD as a UTC calendar date
+ * makes day arithmetic exact (1 day = 86400000 ms, always).
+ */
+function parseUtcDate(dateStr: string): Date | null {
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return null;
+  const y = Number(parts[0]);
+  const m = Number(parts[1]);
+  const d = Number(parts[2]);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+  // Date.UTC month is 0-indexed.
+  return new Date(Date.UTC(y, m - 1, d));
+}
+
+/** Format a Date (interpreted as UTC) back to "YYYY-MM-DD". */
+function formatUtcDateString(d: Date): string {
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+/** True when the med has a non-empty dose schedule. */
+export function hasDoseSchedule(med: Medication): boolean {
+  return Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0;
+}
+
+/**
+ * Dates on which `doseId` was consumed, from `doseConsumptionHistory` only.
+ * Missing or empty history → no consumed dates.
+ */
+function getDoseConsumedDates(med: Medication, doseId: string): string[] {
+  const hist = med.doseConsumptionHistory?.[doseId];
+  if (!Array.isArray(hist) || hist.length === 0) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const d of hist) {
+    if (typeof d === 'string' && d && !seen.has(d)) {
+      seen.add(d);
+      out.push(d);
+    }
+  }
+  return out;
+}
+
+/**
  * Whether a specific dose slot was consumed on `dateStr`.
  * Uses only `doseConsumptionHistory` (no medication-level lastConsumedDate fallback).
  */

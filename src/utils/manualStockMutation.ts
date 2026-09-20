@@ -409,7 +409,7 @@ export function runGatedManualConsume(opts: {
       now,
     });
     if (pre.nativeListFailed || pre.durabilityBlocked === true) {
-      // Fail-closed: do not run legacy or manual mutation when native read failed.
+      // Fail-closed: do not run manual mutation when native read failed.
       return {
         outcome: 'persist_failed' as const,
         medications: pre.state.medications,
@@ -588,7 +588,7 @@ export function runGatedManualRestore(opts: {
       now,
     });
     if (pre.nativeListFailed || pre.durabilityBlocked === true) {
-      // Fail-closed: do not run legacy or manual mutation when native read failed.
+      // Fail-closed: do not run manual mutation when native read failed.
       return {
         outcome: 'persist_failed' as const,
         medications: pre.state.medications,
@@ -906,7 +906,7 @@ export function runGatedRefill(opts: {
       now,
     });
     if (pre.nativeListFailed || pre.durabilityBlocked === true) {
-      // Fail-closed: do not run legacy or manual mutation when native read failed.
+      // Fail-closed: do not run manual mutation when native read failed.
       return {
         outcome: 'persist_failed' as const,
         medications: pre.state.medications,
@@ -1022,7 +1022,7 @@ export function runGatedUndoRefill(opts: {
       now,
     });
     if (pre.nativeListFailed || pre.durabilityBlocked === true) {
-      // Fail-closed: do not run legacy or manual mutation when native read failed.
+      // Fail-closed: do not run manual mutation when native read failed.
       return {
         outcome: 'persist_failed' as const,
         medications: pre.state.medications,

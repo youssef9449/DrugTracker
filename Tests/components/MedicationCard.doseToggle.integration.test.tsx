@@ -306,7 +306,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
           doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
           dosesPerDay: 1,
           dailyDose: 1,
-          // no doseConsumption — elapsed only via auto
+          // no doseConsumptionHistory — elapsed only via auto
         }),
       ])
     );

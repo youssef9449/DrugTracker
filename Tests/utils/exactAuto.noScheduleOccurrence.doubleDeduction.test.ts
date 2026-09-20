@@ -182,7 +182,7 @@ describe('no-schedule FIRED occurrence (no doseSchedule): FIRED is durable; no n
   });
 
   it('reconcileFiredEvents: no doseSchedule + valid identity → durable consume marker written for the occurrence', () => {
-    // The exact apply writes a per-occurrence consume marker (doseConsumption +
+    // The exact apply writes a per-occurrence consume marker (doseConsumptionHistory +
     // doseConsumptionHistory) keyed by doseId+calendarDate, independent of the
     // current schedule membership. This is the recovery source on retry.
     const med = legacyMed({ currentPills: 10 });

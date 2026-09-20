@@ -189,7 +189,7 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
         autoDeductEnabled: true,
         doseSchedule: multiSchedule,
         dosesPerDay: 3,
-        // no doseConsumption — d1 elapsed → auto completed; skip to d2 Take
+        // no doseConsumptionHistory — d1 elapsed → auto completed; skip to d2 Take
       }),
       noon
     );

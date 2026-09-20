@@ -165,13 +165,12 @@ Outcomes include: `applied`, `already_applied`, `skipped_missing_med`, `skipped_
 There is **no** current Legacy day-based catch-up engine (`syncAutoDailyDeductions` was removed). Exact Auto is occurrence-based only.
 
 - `lastSyncDate` is retained as a companion field to durable `currentPills` where other paths still use it; it is **not** occurrence-level Exact Auto evidence and must not prevent applying a FIRED event.
-- Per-dose truth for consumption/skip remains `doseConsumption` / `doseConsumptionHistory` / `doseSkippedHistory`.
+- Per-dose truth for consumption/skip remains `doseConsumptionHistory` / `doseSkippedHistory`.
 - Medication-level `lastConsumedDate` does **not** mark an arbitrary dose occurrence as consumed when `doseSchedule` is missing.
 
 ### Log types
 
 - **Current Exact Auto production logs** use `type: 'exact_auto'` with deterministic id `exact-auto:<medicationId>:<doseId>:<calendarDate>`.
-- **`auto_daily`** remains in the type union only for **read-only compatibility** with old persisted logs. Ordinary legacy `auto_daily` records are not treated as Exact occurrences; only those whose id matches the deterministic Exact identity are interpreted as historical Exact evidence.
 
 ---
 
@@ -189,7 +188,7 @@ Exact reconciliation uses the same occurrence-level consumption and skip history
 
 | Layer | Role |
 |-------|------|
-| **Occurrence markers** | `doseConsumption` / history, `doseSkippedHistory` — terminal for that dose+date |
+| **Occurrence markers** | `doseConsumptionHistory` / history, `doseSkippedHistory` — terminal for that dose+date |
 | **Deterministic exact-auto log** | `exact-auto:{medicationId}:{doseId}:{calendarDate}` with `type: 'exact_auto'` — retries do not create a second logical exact-auto log row |
 | **Native insert-if-absent** | One durable native row per occurrence key |
 | **Serialized gate** | One mutation job at a time, each on fresh durable state |

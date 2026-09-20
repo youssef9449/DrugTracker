@@ -290,10 +290,9 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
   });
 
   it('auto-deduct-only does NOT offer Restore; card is non-interactive when only auto-elapsed', async () => {
-    // PR #196: auto-elapsed-only is not the manual Card Restore path. Single
-    // slot fully auto-completed → canTake false, canRestore false → no manual
-    // Take/Restore button on the card. (Pure auto restore lives on a separate
-    // auto-restore-dose-<id> button for single-dose, NOT restore-dose-<id>.)
+    // Auto-elapsed / auto-deduct-only occurrence is NOT a Manual Card Restore
+    // target. Card Restore depends only on durable deduction evidence. There is
+    // no pure-projection Auto Restore button on the Card.
     localStorage.setItem(
       STORAGE_MEDS_KEY,
       JSON.stringify([

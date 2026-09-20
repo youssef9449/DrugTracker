@@ -49,9 +49,8 @@ function shoppingRequestedPills(
   const selectedUnit = (orderUnits[med.id] || (hasStrips ? ['strips'] : ['boxes']))[0];
   const unitSize = selectedUnit === 'boxes' ? boxSize : stripSize > 0 ? stripSize : 1;
   const unitQty =
-    customOrderQuantities[med.id] !== undefined
-      ? customOrderQuantities[med.id]
-      : Math.max(1, Math.ceil(suggestedPills / unitSize));
+    customOrderQuantities[med.id] ||
+    Math.max(1, Math.ceil(suggestedPills / unitSize));
   if (selectedUnit === 'boxes') return unitQty * boxSize;
   if (selectedUnit === 'strips') return unitQty * stripSize;
   return unitQty;

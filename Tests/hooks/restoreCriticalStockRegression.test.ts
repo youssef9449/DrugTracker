@@ -295,6 +295,7 @@ describe('restore dose → critical stock reconciliation', () => {
     // A projection-only restore (no consume marker, no deduction log) is rejected.
     const med = makeMed({ currentPills: 30 });
     const result = restoreDose(med, 'morning', TEST_DATE, TEST_NOW, []);
+    expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toBe('missing_deduction_evidence');
   });

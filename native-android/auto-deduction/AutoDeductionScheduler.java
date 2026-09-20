@@ -78,7 +78,6 @@ public final class AutoDeductionScheduler {
 
     private final Context appContext;
     private final SharedPreferences schedulePrefs;
-    private final SharedPreferences cancelPrefs;
     /** Durable last-allocated ordering sequence (survives process death). */
     /** Active recurrence generation per (medicationId, doseId) — Issue #217. */
     private final SharedPreferences recurrenceAuthPrefs;
@@ -148,8 +147,6 @@ public final class AutoDeductionScheduler {
         this.appContext = context.getApplicationContext();
         this.schedulePrefs = appContext.getSharedPreferences(
                 AutoDeductionContract.PREFS_SCHEDULES, Context.MODE_PRIVATE);
-        this.cancelPrefs = appContext.getSharedPreferences(
-                AutoDeductionContract.PREFS_CANCELLED, Context.MODE_PRIVATE);
         this.recurrenceAuthPrefs = appContext.getSharedPreferences(
                 AutoDeductionContract.PREFS_RECURRENCE_AUTH, Context.MODE_PRIVATE);
         this.fireRetryPrefs = appContext.getSharedPreferences(
@@ -310,13 +307,11 @@ public final class AutoDeductionScheduler {
 
                 String date = metadata.optString("calendarDate", "");
                 if (!AutoDeductionContract.isValidCalendarDate(date)) {
-                    String featureStorageKey =
-                            prefKey.substring(SCHEDULE_KEY_PREFIX.length());
-                    if (!forceScheduleMetadataRemovalFailureForTest
-                            && alarmRuntime.store().removeScheduleLocked(featureStorageKey)) {
-                        continue;
+                    if (!quarantineMalformedScheduleMetadata(
+                            prefKey, raw, "malformed_calendar_date")) {
+                        return CancelResult.fail("schedule_metadata_removal_failed");
                     }
-                    return CancelResult.fail("schedule_metadata_removal_failed");
+                    continue;
                 }
 
                 String occurrenceKey = AutoDeductionContract.occurrenceKey(
@@ -329,13 +324,10 @@ public final class AutoDeductionScheduler {
                         AutoDeductionReceiver.class);
                 if (!result.isOk()) return CancelResult.fail(result.error);
             } catch (JSONException ex) {
-                String featureStorageKey =
-                        prefKey.substring(SCHEDULE_KEY_PREFIX.length());
-                if (!forceScheduleMetadataRemovalFailureForTest
-                        && alarmRuntime.store().removeScheduleLocked(featureStorageKey)) {
-                    continue;
+                if (!quarantineMalformedScheduleMetadata(
+                        prefKey, raw, "invalid_json")) {
+                    return CancelResult.fail("schedule_metadata_removal_failed");
                 }
-                return CancelResult.fail("schedule_metadata_removal_failed");
             }
         }
         return CancelResult.success();
@@ -631,7 +623,7 @@ public final class AutoDeductionScheduler {
                     JSONObject meta = new JSONObject(metaRaw);
                     timeHhmm = meta.optString("timeHhmm", "");
                     if (scheduleVersion.isEmpty()) {
-                        scheduleVersion = meta.optString(FIELD_SCHEDULE_VERSION, "");
+                        scheduleVersion = ExactAlarmStore.extractOperationVersion(meta);
                     }
                     if (gen <= 0L) {
                         gen = meta.optLong(FIELD_RECURRENCE_GENERATION, 0L);
@@ -651,7 +643,7 @@ public final class AutoDeductionScheduler {
     /**
      * Issue #243 — recover a historical missed occurrence as durable FIRED without
      * requiring live schedule metadata for that calendar date (unlike a real
-     * AlarmManager delivery which must match scheduleVersion ownership).
+     * AlarmManager delivery which must match operationVersion ownership).
      *
      * <p>Under {@link #SCHEDULE_LOCK}:
      * <ol>

@@ -161,3 +161,147 @@ describe('Issue #266 — durable currentPills is sole live stock', () => {
   });
 
 });
+
+describe('getCriticalAlarmDate — exact dose occurrence time', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    // Local noon so morning doses today are still in the future for some cases.
+    vi.setSystemTime(new Date(2024, 8, 10, 12, 0, 0, 0)); // 2024-09-10 local
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('returns exact dose time 20:00, not 09:00, for single daily dose crossing', () => {
+    // dayAmt=10, threshold=5 → critical when floor(pills/10) <= 5 i.e. pills <= 59
+    // Start 70 → one 10-pill dose → 60 still ok (daysLeft=6); second dose → 50 critical.
+    // With one dose/day at 20:00: daysLeft=7, need reduce to <=59 → after 2nd day dose? 
+    // floor(70/10)=7 > 5; after -10 → 60, floor=6 > 5; after -10 → 50, floor=5 ≤ 5.
+    // So 2nd occurrence at 20:00 tomorrow.
+    const med = makeMed({
+      currentPills: 70,
+      dailyDose: 10,
+      warningThresholdDays: 5,
+      autoDeductEnabled: true,
+      doseSchedule: [{ id: 'd1', amount: 10, time: '20:00' }],
+    });
+    const ts = getCriticalAlarmDate(med, '2024-09-10');
+    expect(ts).not.toBeNull();
+    const d = new Date(ts!);
+    expect(d.getHours()).toBe(20);
+    expect(d.getMinutes()).toBe(0);
+    expect(d.getHours()).not.toBe(9);
+  });
+
+  it('picks the exact multi-dose slot that first crosses the threshold', () => {
+    // dayAmt=15 (10+5), threshold=1 → critical when floor(pills/15) <= 1 i.e. pills <= 29
+    // Start 40: floor=2 > 1. After 08:00 dose -10 → 30, floor=2. After 20:00 -5 → 25, floor=1 critical.
+    const med = makeMed({
+      currentPills: 40,
+      dailyDose: 15,
+      warningThresholdDays: 1,
+      autoDeductEnabled: true,
+      doseSchedule: [
+        { id: 'd1', amount: 10, time: '08:00' },
+        { id: 'd2', amount: 5, time: '20:00' },
+      ],
+    });
+    // now is 12:00 local → 08:00 today already past; 20:00 today is next
+    // After skipping 08:00 past without deducting (already passed, not projected):
+    // We skip past occurrences without deducting — so pills stay 40 until 20:00 -5 = 35 still floor=2.
+    // Need careful fixture: make morning not yet passed OR account for skip.
+    // Set now to 07:00 so both doses today are future.
+    vi.setSystemTime(new Date(2024, 8, 10, 7, 0, 0, 0));
+    const ts = getCriticalAlarmDate(med, '2024-09-10');
+    expect(ts).not.toBeNull();
+    const d = new Date(ts!);
+    expect(d.getHours()).toBe(20);
+    expect(d.getMinutes()).toBe(0);
+  });
+
+  it('does not select a dose time that already passed today', () => {
+    vi.setSystemTime(new Date(2024, 8, 10, 21, 0, 0, 0)); // after 20:00
+    const med = makeMed({
+      currentPills: 70,
+      dailyDose: 10,
+      warningThresholdDays: 5,
+      autoDeductEnabled: true,
+      doseSchedule: [{ id: 'd1', amount: 10, time: '20:00' }],
+    });
+    const ts = getCriticalAlarmDate(med, '2024-09-10');
+    expect(ts).not.toBeNull();
+    const d = new Date(ts!);
+    // Must be a future day at 20:00, not today
+    expect(d.getDate()).toBeGreaterThan(10);
+    expect(d.getHours()).toBe(20);
+  });
+
+  it('returns today\'s later dose when that occurrence causes the crossing', () => {
+    vi.setSystemTime(new Date(2024, 8, 10, 7, 0, 0, 0));
+    // dayAmt=10, threshold=5 → critical at pills<=59. Start 65 → one dose crosses.
+    const med = makeMed({
+      currentPills: 65,
+      dailyDose: 10,
+      warningThresholdDays: 5,
+      autoDeductEnabled: true,
+      doseSchedule: [{ id: 'd1', amount: 10, time: '20:00' }],
+    });
+    const ts = getCriticalAlarmDate(med, '2024-09-10');
+    expect(ts).not.toBeNull();
+    const d = new Date(ts!);
+    expect(d.getFullYear()).toBe(2024);
+    expect(d.getMonth()).toBe(8);
+    expect(d.getDate()).toBe(10);
+    expect(d.getHours()).toBe(20);
+  });
+
+  it('returns null when Auto Deduct is OFF', () => {
+    const med = makeMed({
+      currentPills: 100,
+      dailyDose: 10,
+      warningThresholdDays: 5,
+      autoDeductEnabled: false,
+      doseSchedule: [{ id: 'd1', amount: 10, time: '20:00' }],
+    });
+    expect(getCriticalAlarmDate(med, '2024-09-10')).toBeNull();
+  });
+
+  it('returns null when already critical', () => {
+    const med = makeMed({
+      currentPills: 30, // daysLeft=3 <= 5
+      dailyDose: 10,
+      warningThresholdDays: 5,
+      autoDeductEnabled: true,
+      doseSchedule: [{ id: 'd1', amount: 10, time: '20:00' }],
+    });
+    expect(getCriticalAlarmDate(med, '2024-09-10')).toBeNull();
+  });
+
+  it('returns null when schedule is empty / zero rate', () => {
+    const med = makeMed({
+      currentPills: 100,
+      dailyDose: 0,
+      doseSchedule: [],
+      warningThresholdDays: 5,
+      autoDeductEnabled: true,
+    });
+    expect(getCriticalAlarmDate(med, '2024-09-10')).toBeNull();
+  });
+
+  it('future-day crossing uses that day\'s dose time, not 09:00', () => {
+    vi.setSystemTime(new Date(2024, 8, 10, 12, 0, 0, 0));
+    const med = makeMed({
+      currentPills: 100,
+      dailyDose: 10,
+      warningThresholdDays: 5,
+      autoDeductEnabled: true,
+      doseSchedule: [{ id: 'd1', amount: 10, time: '20:00' }],
+    });
+    // daysLeft=10, critical at <=5 → after 5 doses of 10 (100→50)
+    const ts = getCriticalAlarmDate(med, '2024-09-10');
+    expect(ts).not.toBeNull();
+    const d = new Date(ts!);
+    expect(d.getHours()).toBe(20);
+    expect(d.getHours()).not.toBe(9);
+  });
+});

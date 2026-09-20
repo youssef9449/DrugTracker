@@ -130,15 +130,23 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
     }
 
     /**
-     * DrugTracker dose reminder if extra.medicationId is set, or the
-     * notification is already on a dose-reminder channel.
+     * Dose reminder only when occurrence identity is present
+     * (medicationId + non-empty doseId), or the notification is already on a
+     * dose-reminder channel. medicationId alone (Critical Stock / low-stock)
+     * is NOT a dose reminder.
      */
     static boolean isDoseReminderNotification(Notification notification, JSObject notificationJson) {
         if (notificationJson != null) {
             try {
                 JSObject extra = notificationJson.getJSObject("extra");
-                if (extra != null && extra.has("medicationId") && extra.getString("medicationId") != null) {
-                    return true;
+                if (extra != null) {
+                    String medId = extra.has("medicationId") ? extra.getString("medicationId") : null;
+                    String doseId = extra.has("doseId") ? extra.getString("doseId") : null;
+                    boolean hasMed = medId != null && !medId.isEmpty();
+                    boolean hasDose = doseId != null && !doseId.trim().isEmpty();
+                    if (hasMed && hasDose) {
+                        return true;
+                    }
                 }
             } catch (Exception ignored) {
                 // fall through

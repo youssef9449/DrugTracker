@@ -1,5 +1,5 @@
 import { Medication, getCriticalThresholdDays } from '../types';
-import { MS_PER_DAY, NEVER_DEPLETES_DAYS, CRITICAL_ALARM_FIRE_HOUR } from './time';
+import { MS_PER_DAY, NEVER_DEPLETES_DAYS } from './time';
 
 /**
  * Returns today's date as a deterministic YYYY-MM-DD string, using
@@ -270,35 +270,96 @@ export function getDepletionDate(med: Medication): {
 
 /**
  * Future critical-threshold crossing from durable `currentPills` and the
- * current schedule rate (Issue #266). Calendar days alone do not change stock.
- * Returns null when already critical, no rate, or Auto OFF (frozen stock).
+ * medication's explicit `doseSchedule` times.
+ *
+ * Walks scheduled dose occurrences in chronological order and returns the
+ * exact local timestamp of the first projected deduction that causes
+ * `daysLeft <= criticalThresholdDays` (or stock ≤ 0). Does not invent
+ * calendar-day deductions and does not use a fixed fire hour.
+ *
+ * Returns null when already critical, no rate, Auto OFF, or no future crossing.
  */
 export function getCriticalAlarmDate(
   med: Medication,
-  todayStr: string = getTodayDateString()
+  todayStr: string = getTodayDateString(),
+  nowMs: number = Date.now()
 ): number | null {
-  if (dailyScheduleAmount(med) <= 0) return null;
+  const dayAmt = dailyScheduleAmount(med);
+  if (dayAmt <= 0) return null;
 
   const criticalThresholdDays = getCriticalThresholdDays(med);
-  const daysLeft = daysLeftFromCurrentStock(med);
+  const startingPills = Number(med.currentPills) || 0;
+  if (startingPills <= 0) return null;
 
-  if (daysLeft <= criticalThresholdDays) return null;
+  const startingDaysLeft = Math.floor(startingPills / dayAmt);
+  if (startingDaysLeft <= criticalThresholdDays) return null;
 
   // Auto OFF: stock does not auto-decline → no future crossing.
   if (med.autoDeductEnabled === false) return null;
 
-  const daysUntilCritical = daysLeft - criticalThresholdDays;
-  if (daysUntilCritical <= 0) return null;
+  if (!hasDoseSchedule(med) || !med.doseSchedule || med.doseSchedule.length === 0) {
+    return null;
+  }
 
-  const todayUtc = parseUtcDate(todayStr) ?? new Date(Date.UTC(1970, 0, 1));
-  const targetUtcMs = todayUtc.getTime() + daysUntilCritical * MS_PER_DAY;
-  const targetUtcDate = new Date(targetUtcMs);
-  const target = new Date(
-    targetUtcDate.getUTCFullYear(),
-    targetUtcDate.getUTCMonth(),
-    targetUtcDate.getUTCDate(),
-    CRITICAL_ALARM_FIRE_HOUR,
-    0, 0, 0
-  );
-  return target.getTime();
+  // Sorted by local clock time within a day (HH:mm).
+  const slots = [...med.doseSchedule]
+    .map((d) => {
+      const time = typeof d.time === 'string' ? d.time : '';
+      const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(time);
+      if (!match) return null;
+      const amount = Number(d.amount) || 0;
+      if (amount <= 0 || !d.id) return null;
+      return {
+        id: d.id,
+        amount,
+        hour: parseInt(match[1], 10),
+        minute: parseInt(match[2], 10),
+      };
+    })
+    .filter((s): s is NonNullable<typeof s> => s != null)
+    .sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute));
+
+  if (slots.length === 0) return null;
+
+  const isCritical = (pills: number): boolean => {
+    if (pills <= 0) return true;
+    return Math.floor(pills / dayAmt) <= criticalThresholdDays;
+  };
+
+  let pills = startingPills;
+  // Bound simulation: enough days to exhaust any realistic stock.
+  const maxDays = Math.min(730, Math.ceil(startingPills / dayAmt) + criticalThresholdDays + 2);
+
+  for (let dayOffset = 0; dayOffset <= maxDays; dayOffset++) {
+    const dayUtc = parseUtcDate(todayStr);
+    if (!dayUtc) return null;
+    const dateUtc = new Date(dayUtc.getTime() + dayOffset * MS_PER_DAY);
+    const dateStr = formatUtcDateString(dateUtc);
+    // Local calendar components matching YYYY-MM-DD string (same as app date model).
+    const y = dateUtc.getUTCFullYear();
+    const m = dateUtc.getUTCMonth();
+    const d = dateUtc.getUTCDate();
+
+    for (const slot of slots) {
+      // Already consumed or skipped today/on this date → do not project again.
+      if (isDoseConsumedOnDate(med, slot.id, dateStr)) continue;
+      if (isDoseSkippedOnDate(med, slot.id, dateStr)) continue;
+
+      const occurrenceMs = new Date(y, m, d, slot.hour, slot.minute, 0, 0).getTime();
+      // Past occurrences are not future alarms.
+      if (occurrenceMs <= nowMs) continue;
+
+      const after = pills - slot.amount;
+      if (isCritical(after)) {
+        return occurrenceMs;
+      }
+      pills = after;
+      if (pills <= 0) {
+        // Exhausted without having returned — treat last occurrence as crossing.
+        return occurrenceMs;
+      }
+    }
+  }
+
+  return null;
 }

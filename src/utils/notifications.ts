@@ -339,6 +339,8 @@ export async function sendMedicineAlert(
 
   await scheduleNotification({
     id: notificationId('lowStock', medId),
+    namespace: 'low-stock',
+    identity: medId,
     title,
     body,
     channelId: 'low-stock',
@@ -400,6 +402,8 @@ export async function sendCriticalStockAlert(
   // platform. Callers (the foreground stock-alert fallback) must only
   // record "sent" state after a successful send.
   return scheduleNotification({
+    namespace: 'critical-stock-immediate',
+    identity: medId,
     // Disjoint id range from sendMedicineAlert's lowStock band so the
     // two notifications don't collide / overwrite each other.
     id: notificationId('critical', medId),
@@ -420,6 +424,8 @@ export async function sendCriticalStockAlert(
  */
 async function scheduleNotification(opts: {
   id: number;
+  namespace?: string;
+  identity?: string;
   title: string;
   body: string;
   channelId: string;
@@ -433,8 +439,8 @@ async function scheduleNotification(opts: {
     // Android identity is namespace + logical notification identity.
     if (getNativePlatform() === 'android') {
       const native = await postNativeNotification({
-        namespace: 'app-notification',
-        identity: String(opts.id),
+        namespace: opts.namespace || 'app-notification',
+        identity: opts.identity || String(opts.id),
         title: opts.title,
         body: opts.body,
         channelId: opts.channelId,
@@ -491,6 +497,8 @@ async function scheduleNotification(opts: {
 export async function sendTestAlertNotification(): Promise<void> {
   await scheduleNotification({
     id: notificationId('test'),
+    namespace: 'test',
+    identity: 'test',
     title: '🔔 إشعار تجريبي: متابع الأدوية',
     body: 'الإشعارات والتنبيهات تعمل بشكل سليم على جهازك!',
     channelId: getDoseReminderChannelId(),

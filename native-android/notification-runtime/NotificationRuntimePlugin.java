@@ -90,18 +90,15 @@ public final class NotificationRuntimePlugin extends Plugin {
         if (importance == null) importance = 4;
         if (visibility == null) visibility = 1;
 
-        JSObject actionJson = call.getObject("action");
+        String actionId = call.getString("actionId", "");
+        String actionTitle = call.getString("actionTitle", "");
+        boolean actionForeground = call.getBoolean("actionForeground", false);
         NotificationRuntime.Action action = null;
-        if (actionJson != null) {
-            String actionId = actionJson.optString("id", "");
-            String actionTitle = actionJson.optString("title", "");
-            boolean foreground = actionJson.optBoolean("foreground", false);
-            if (!actionId.isEmpty() && !actionTitle.isEmpty()) {
-                action = new NotificationRuntime.Action(
-                        actionId,
-                        actionTitle,
-                        foreground);
-            }
+        if (!actionId.isEmpty() && !actionTitle.isEmpty()) {
+            action = new NotificationRuntime.Action(
+                    actionId,
+                    actionTitle,
+                    actionForeground);
         }
 
         NotificationRuntime runtime =

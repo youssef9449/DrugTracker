@@ -3,7 +3,8 @@
  * Used by unit tests to lock the stale-rollback concurrency contract without Android.
  *
  * A failed scheduling attempt may remove schedule metadata only when the
- * currently stored scheduleVersion still matches the attempt's own version.
+ * currently stored operationVersion still matches the attempt's own version.
+ * Legacy scheduleVersion remains readable during migration.
  */
 
 export const FIELD_OPERATION_VERSION = 'operationVersion';
@@ -93,7 +94,7 @@ export function runSerializedScheduleTxn(
   });
   state.metadata.set(prefKey, json);
   if (!installSucceeds) {
-    conditionalRollback(state.metadata, prefKey, payload.scheduleVersion);
+    conditionalRollback(state.metadata, prefKey, payload.operationVersion);
     state.alarms.set(prefKey, null);
     return { ok: false };
   }

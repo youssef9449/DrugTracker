@@ -24,14 +24,13 @@ public final class NotificationRuntimeActionReceiver extends BroadcastReceiver {
                 NotificationRuntime.EXTRA_ACTION_ID);
 
         if (namespace == null || namespace.isEmpty()
-                || identity == null || identity.isEmpty()
-                || actionId == null || actionId.isEmpty()) {
+                || identity == null || identity.isEmpty()) {
             return;
         }
 
         boolean foreground = intent.getBooleanExtra(EXTRA_FOREGROUND, false);
 
-        if (foreground) {
+        if (foreground || actionId == null || actionId.isEmpty()) {
             Intent launch = context.getPackageManager()
                     .getLaunchIntentForPackage(context.getPackageName());
             if (launch != null) {

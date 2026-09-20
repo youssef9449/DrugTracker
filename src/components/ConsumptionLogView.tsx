@@ -2,10 +2,8 @@ import { useState, type FC } from 'react';
 import { Clock, ArrowUpRight, ArrowDownLeft, ChevronRight, ChevronLeft } from 'lucide-react';
 import { Medication, ConsumptionLog } from '../types';
 import { SegmentedButton } from './ui/SegmentedButton';
-import { formatArabicDate, formatLogTime, dailyScheduleAmount } from '../utils/dateCalculations';
+import { formatArabicDate, formatLogTime } from '../utils/dateCalculations';
 import { DAYS_PER_MONTH } from '../utils/time';
-import { getMedSizes } from '../utils/medicationPackaging';
-import { pluralizeArabic } from '../lib/arabicPlural';
 
 const LOGS_PER_PAGE = 15;
 
@@ -16,92 +14,14 @@ interface ConsumptionLogViewProps {
 }
 
 /**
- * Formats a medication's scheduled requirement (daily or monthly) into
- * natural packaging and unit counts, e.g.:
- * "علبتين (30 قرص)" or "علبة (10 أكياس)" or "قرص واحد".
+ * Daily scheduled dose *slots* for Auto-ON medications only.
+ * Source of truth is doseSchedule length — never dailyDose fallback.
+ * Auto-OFF medications contribute 0 regardless of schedule.
  */
-function formatMedicationScheduleBreakdown(med: Medication, isDaily: boolean): string {
-  const dailyAmt = dailyScheduleAmount(med);
-  const amount = isDaily ? dailyAmt : dailyAmt * DAYS_PER_MONTH;
-  if (amount <= 0) {
-    return '0 ' + med.unit;
-  }
-
-  const sz = getMedSizes(med);
-  const boxLabel = med.unit === 'مل' ? 'عبوة' : 'علبة';
-  const boxSize = sz.boxSize > 0 ? sz.boxSize : (med.unit === 'مل' ? 100 : 30);
-
-  // Natural Arabic unit count (e.g., "30 قرص", "10 أكياس", "قرص واحد", "قرصين")
-  const getUnitDisplay = (count: number, unit: string) => {
-    if (count === 1) {
-      if (unit === 'قرص') return 'قرص واحد';
-      if (unit === 'كبسولة') return 'كبسولة واحدة';
-      if (unit === 'كيس') return 'كيس واحد';
-      return `1 ${unit}`;
-    }
-    if (count === 2) {
-      if (unit === 'قرص') return 'قرصين';
-      if (unit === 'كبسولة') return 'كبسولتين';
-      if (unit === 'كيس') return 'كيسين';
-      return `2 ${unit}`;
-    }
-    if (count <= 10) {
-      return pluralizeArabic(count, unit);
-    }
-    return `${count} ${unit}`;
-  };
-
-  const formattedUnit = getUnitDisplay(amount, med.unit);
-
-  // If amount forms one or more boxes:
-  if (amount >= boxSize) {
-    const boxes = Math.floor(amount / boxSize);
-    const remainder = amount % boxSize;
-
-    let boxPart = '';
-    if (boxes === 1) {
-      boxPart = boxLabel;
-    } else if (boxes === 2) {
-      boxPart = boxLabel === 'علبة' ? 'علبتين' : 'عبوتين';
-    } else if (boxes <= 10) {
-      boxPart = `${boxes} ${boxLabel === 'علبة' ? 'علب' : 'عبوات'}`;
-    } else {
-      boxPart = `${boxes} ${boxLabel}`;
-    }
-
-    if (remainder === 0) {
-      return `${boxPart} (${formattedUnit})`;
-    }
-
-    // Remainder exists: check if strips apply
-    if (sz.hasStrips && sz.stripSize > 0) {
-      const strips = Math.floor(remainder / sz.stripSize);
-      const loose = remainder % sz.stripSize;
-      const parts: string[] = [boxPart];
-      if (strips === 1) parts.push('شريط');
-      else if (strips === 2) parts.push('شريطين');
-      else if (strips > 2) parts.push(`${strips} أشرطة`);
-      if (loose > 0) parts.push(getUnitDisplay(loose, med.unit));
-
-      return `${parts.join(' و ')} (${formattedUnit})`;
-    }
-
-    return `${boxPart} و ${getUnitDisplay(remainder, med.unit)} (${formattedUnit})`;
-  }
-
-  // If amount < boxSize, but can be expressed in strips:
-  if (sz.hasStrips && sz.stripSize > 0 && amount >= sz.stripSize) {
-    const strips = Math.floor(amount / sz.stripSize);
-    const loose = amount % sz.stripSize;
-    let stripPart = strips === 1 ? 'شريط' : strips === 2 ? 'شريطين' : `${strips} أشرطة`;
-    if (loose > 0) {
-      stripPart += ` و ${getUnitDisplay(loose, med.unit)}`;
-    }
-    return `${stripPart} (${formattedUnit})`;
-  }
-
-  // Under a box / strip:
-  return formattedUnit;
+function scheduledDailySlots(med: Medication): number {
+  if (med.autoDeductEnabled === false) return 0;
+  if (!Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0) return 0;
+  return med.doseSchedule.length;
 }
 
 /**
@@ -118,6 +38,13 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
   const [currentPage, setCurrentPage] = useState<number>(1);
 
   const isDaily = scheduleMode === 'daily';
+
+  const totalDailySlots = medications.reduce(
+    (sum, med) => sum + scheduledDailySlots(med),
+    0
+  );
+  const totalMonthlySlots = totalDailySlots * DAYS_PER_MONTH;
+  const scheduleTotal = isDaily ? totalDailySlots : totalMonthlySlots;
 
   // Pagination calculations
   const totalLogs = logs.length;
@@ -151,14 +78,13 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
           </div>
         </div>
 
-        {/* Scheduled-dose breakdown card — full-width with Daily / Monthly toggle */}
+        {/* Scheduled-dose slot totals — Auto ON + doseSchedule only */}
         <div className="mt-4 p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <span className="text-xs font-bold text-slate-700 block">
-              تفاصيل الجرعات المجدولة ({isDaily ? 'الجرعة اليومية' : 'الجرعة الشهرية'})
+              {isDaily ? 'الجرعات المجدولة يومياً' : 'الجرعات المجدولة شهرياً'}
             </span>
 
-            {/* Toggle: Monthly vs Daily (M3 Segmented Button) */}
             <SegmentedButton<'monthly' | 'daily'>
               id="schedule-mode-toggle"
               size="sm"
@@ -172,14 +98,24 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
             />
           </div>
 
-          {/* Breakdown per medication */}
+          <div className="flex items-center justify-center py-2">
+            <span className="text-3xl font-black text-teal-800 tabular-nums">
+              {scheduleTotal}
+            </span>
+            <span className="text-xs text-slate-500 mr-2">
+              {isDaily ? 'جرعة / يوم' : 'جرعة / شهر'}
+            </span>
+          </div>
+
+          {/* Per-medication slot breakdown (Auto ON + schedule only shown as contributing) */}
           <div className="pt-2 border-t border-slate-200/70 space-y-1.5">
             {medications.length === 0 ? (
               <p className="text-xs text-slate-400 py-1">لا توجد أدوية مضافة حالياً.</p>
             ) : (
               <div className="space-y-1.5">
                 {medications.map((med) => {
-                  const breakdown = formatMedicationScheduleBreakdown(med, isDaily);
+                  const slots = scheduledDailySlots(med);
+                  const amount = isDaily ? slots : slots * DAYS_PER_MONTH;
                   return (
                     <div
                       key={med.id}
@@ -189,7 +125,7 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
                         {med.name}:
                       </span>
                       <span className="font-semibold text-teal-800 text-left shrink-0">
-                        {breakdown}
+                        {amount} {isDaily ? 'جرعة' : 'جرعة'}
                       </span>
                     </div>
                   );
@@ -200,106 +136,86 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
         </div>
       </div>
 
-      {/* Activity Timeline list */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between px-1">
-          <h3 className="text-xs font-bold text-slate-700">
-            سجل العمليات ({totalLogs}):
-          </h3>
-          {totalPages > 1 && (
-            <span className="text-[11px] text-slate-500 font-medium">
-              صفحة {safeCurrentPage} من {totalPages}
-            </span>
-          )}
-        </div>
+      {/* Activity log */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-xs space-y-3">
+        <h3 className="text-sm font-bold text-slate-800">سجل العمليات:</h3>
 
         {totalLogs === 0 ? (
-          <div className="p-6 bg-white rounded-2xl text-center text-xs text-slate-400 border border-slate-200/80">
+          <p className="text-xs text-slate-400 py-6 text-center leading-relaxed">
             لا توجد سجلات بعد، ستظهر هنا عمليات الخصم والتعبئة والتغييرات على المخزون.
-          </div>
+          </p>
         ) : (
           <>
             <div className="space-y-2">
               {currentLogs.map((log) => {
-                const isDeduction = log.amount < 0;
-                const logTime = formatLogTime(log.timestamp);
+                const isIn = Number(log.amount) > 0;
                 return (
                   <div
                     key={log.id}
-                    className="bg-white rounded-xl border border-slate-200/80 p-3 flex items-center justify-between text-xs shadow-2xs"
+                    className="flex items-start gap-3 p-3 rounded-xl border border-slate-100 bg-slate-50/80"
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div
-                        className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                          isDeduction
-                            ? 'bg-rose-50 text-rose-600'
-                            : 'bg-emerald-50 text-emerald-600'
-                        }`}
-                      >
-                        {isDeduction ? (
-                          <ArrowDownLeft className="w-4 h-4" />
-                        ) : (
-                          <ArrowUpRight className="w-4 h-4" />
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <h4 className="font-bold text-slate-800 text-xs truncate">
-                          {log.medicationName}
-                        </h4>
-                        <p className="text-[11px] text-slate-500">{log.description}</p>
-                      </div>
+                    <div
+                      className={`mt-0.5 w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                        isIn
+                          ? 'bg-emerald-50 text-emerald-600'
+                          : 'bg-rose-50 text-rose-600'
+                      }`}
+                    >
+                      {isIn ? (
+                        <ArrowDownLeft className="w-4 h-4" />
+                      ) : (
+                        <ArrowUpRight className="w-4 h-4" />
+                      )}
                     </div>
-
-                    <div className="text-left shrink-0">
-                      <span
-                        className={`font-mono font-bold text-xs ${
-                          isDeduction ? 'text-rose-600' : 'text-emerald-600'
-                        }`}
-                      >
-                        {log.amount > 0 ? `+${log.amount}` : log.amount}
-                      </span>
-                      <span className="text-[10px] text-slate-400 block mt-0.5">
-                        {formatArabicDate(log.date, false)}
-                      </span>
-                      {logTime ? (
-                        <span className="text-[10px] text-slate-500 font-medium block mt-0.5" dir="rtl">
-                          {logTime}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-bold text-slate-900 truncate">
+                          {log.medicationName}
                         </span>
-                      ) : null}
+                        <span
+                          className={`text-sm font-black tabular-nums ${
+                            isIn ? 'text-emerald-700' : 'text-rose-700'
+                          }`}
+                        >
+                          {isIn ? '+' : ''}
+                          {log.amount}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                        {log.description}
+                      </p>
+                      <p className="text-[10px] text-slate-400 mt-1">
+                        {formatArabicDate(log.date)} · {formatLogTime(log.timestamp)}
+                      </p>
                     </div>
                   </div>
                 );
               })}
             </div>
 
-            {/* Pagination Controls */}
             {totalPages > 1 && (
-              <div className="bg-white rounded-2xl border border-slate-200/80 p-3 shadow-xs mt-3">
-                <div className="flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handlePageChange(safeCurrentPage - 1)}
-                    disabled={safeCurrentPage <= 1}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                    <span>الأحدث</span>
-                  </button>
-
-                  <div className="text-xs font-bold text-slate-800 bg-slate-100 px-3 py-1.5 rounded-xl">
-                    صفحة {safeCurrentPage} من {totalPages}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => handlePageChange(safeCurrentPage + 1)}
-                    disabled={safeCurrentPage >= totalPages}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
-                  >
-                    <span>الأقدم</span>
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                </div>
+              <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => handlePageChange(safeCurrentPage - 1)}
+                  disabled={safeCurrentPage <= 1}
+                  className="p-2 rounded-lg text-slate-600 disabled:opacity-30 hover:bg-slate-100"
+                  aria-label="الصفحة السابقة"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+                <span className="text-xs text-slate-500">
+                  {safeCurrentPage} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handlePageChange(safeCurrentPage + 1)}
+                  disabled={safeCurrentPage >= totalPages}
+                  className="p-2 rounded-lg text-slate-600 disabled:opacity-30 hover:bg-slate-100"
+                  aria-label="الصفحة التالية"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
               </div>
             )}
           </>

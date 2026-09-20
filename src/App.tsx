@@ -615,7 +615,7 @@ export default function App() {
           alertsCount={alertsCount}
           notificationsEnabled={notificationsEnabled}
           onToggleNotifications={handleToggleNotifications}
-          criticalStockAlertsEnabled={criticalStockAlertsEnabled && notificationsEnabled}
+          criticalStockAlertsEnabled={criticalStockAlertsEnabled}
           onToggleCriticalStockAlerts={handleToggleCriticalStockAlerts}
           isPhoneFrame={isPhoneFrame}
           onTogglePhoneFrame={() => setIsPhoneFrame(!isPhoneFrame)}

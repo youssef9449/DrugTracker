@@ -111,7 +111,7 @@ const IN_FLIGHT_CLAIM = { claimed: true, alarmTime: null } as const;
  */
 export function useStockAlerts({
   medications,
-  notificationsEnabled,
+  // notificationsEnabled intentionally unused: dose-reminder preference is independent.
   criticalStockAlertsEnabled,
   hydrated,
   isFirstRun,
@@ -133,7 +133,9 @@ export function useStockAlerts({
       }
     }
 
-    const canNotify = notificationsEnabled && criticalStockAlertsEnabled;
+    // App preference for critical-stock alerts only (independent of dose reminders).
+  // OS permission is enforced inside the notification utility on send.
+  const canNotify = criticalStockAlertsEnabled;
 
     for (const med of medications) {
       const { status, daysLeft } = calculateMedicationStatus(med);
@@ -235,5 +237,5 @@ export function useStockAlerts({
     if (changed) {
       saveCriticalNotificationClaims(claims);
     }
-  }, [medications, notificationsEnabled, criticalStockAlertsEnabled, hydrated, isFirstRun]);
+  }, [medications, criticalStockAlertsEnabled, hydrated, isFirstRun]);
 }

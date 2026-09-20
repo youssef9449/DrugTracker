@@ -103,6 +103,37 @@ public final class ExactAlarmRuntime {
         }
     }
 
+    /**
+     * Returns whether the OS currently has a matching PendingIntent for the
+     * exact-alarm identity. This inspects Android AlarmManager state only;
+     * it does not treat durable metadata as proof that the alarm is armed.
+     */
+    public boolean isPending(
+            String identityUri,
+            String action,
+            Class<? extends BroadcastReceiver> receiverClass) {
+        if (!ExactAlarmContract.isValidIdentityUri(identityUri)
+                || action == null
+                || action.isEmpty()
+                || receiverClass == null) {
+            return false;
+        }
+        synchronized (ExactAlarmOperationLock.LOCK) {
+            try {
+                PendingIntent pendingIntent = buildPendingIntent(
+                        identityUri,
+                        action,
+                        receiverClass,
+                        null,
+                        null);
+                if (pendingIntent == null) return false;
+                return true;
+            } catch (Exception e) {
+                return false;
+            }
+        }
+    }
+
     public ScheduleResult schedule(ScheduleRequest request) {
         if (!isValidScheduleRequest(request)) {
             return ScheduleResult.fail("invalid_request");

@@ -25,7 +25,13 @@ export interface NotificationRuntimePostOptions {
 }
 
 interface NotificationRuntimePlugin {
-  post(options: NotificationRuntimePostOptions): Promise<{
+  post(
+    options: NotificationRuntimePostOptions & {
+      actionId?: string;
+      actionTitle?: string;
+      actionForeground?: boolean;
+    }
+  ): Promise<{
     ok: boolean;
     error?: string;
   }>;
@@ -60,7 +66,17 @@ export async function postNativeNotification(
 ): Promise<boolean> {
   if (!isAndroidNotificationRuntime()) return false;
   try {
-    const result = await NotificationRuntime.post(options);
+    const { action, ...base } = options;
+    const result = await NotificationRuntime.post({
+      ...base,
+      ...(action
+        ? {
+            actionId: action.id,
+            actionTitle: action.title,
+            actionForeground: action.foreground === true,
+          }
+        : {}),
+    });
     return result?.ok === true;
   } catch (error) {
     console.warn('[notification-runtime] post failed:', error);

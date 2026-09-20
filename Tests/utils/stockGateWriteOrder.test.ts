@@ -1,18 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
- * Write-order invariant pin (legacy-envelope "3b proof" premise).
+ * Durable stock-gate write-order invariant pin.
  *
- * The legacy Exact-Auto envelope recovery case 3b proves "the medications
- * snapshot landed" from the presence of the envelope's log IDs. That proof is
- * only sound because every producer of those logs writes medications BEFORE
- * logs. This test mechanically pins the invariant in the single durable
- * writer: commitDurableAutoStockState must persist in the exact order
+ * commitDurableAutoStockState must persist in the exact order
  *
  *   medications → logs → global master switch → lastAppliedMutationSeq → stock generation
  *
  * and must stop at the first failed write (fail-closed — a later write may
- * never land while an earlier one failed).
+ * never land while an earlier one failed). This ordering is the current
+ * durable contract of the single stock-gate writer.
  */
 
 const mocks = vi.hoisted(() => {
@@ -62,7 +59,6 @@ function baseMed(over: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2026-01-01T00:00:00.000Z',
-    lastSyncDate: '2026-09-14',
     autoDeductEnabled: true,
     ...over,
   };

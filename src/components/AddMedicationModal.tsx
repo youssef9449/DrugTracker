@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, type FC, type FormEvent } from 'react';
 import { X, Pill, ShieldAlert, Check, Zap, Layers, Box, Calculator, Clock } from 'lucide-react';
 import { Medication, MedicationDose, describeStockInStrips, formatTimeArabic, isSolidUnit } from '../types';
-import { getTodayDateString } from '../utils/dateCalculations';
 import {
   MAX_DOSES_PER_DAY,
   getDoseScheduleForUI,
@@ -309,7 +308,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
         category: category.trim(),
         notes: initialData?.notes || '',
         colorTag,
-        lastSyncDate: initialData?.lastSyncDate || getTodayDateString(),
         autoDeductEnabled: initialData?.autoDeductEnabled ?? true,
         stripsPerBox: stripsPerBoxNum,
         pillsPerStrip: pillsPerStripNum,

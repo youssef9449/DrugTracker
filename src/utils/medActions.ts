@@ -16,10 +16,9 @@ import { exactAutoLogId } from './autoDeductionReconciliation';
  *
  * Manual stock mutations use `applyDurableStockDelta` — a simple helper that
  * applies a signed delta to `med.currentPills` with a zero clamp. There is NO
- * settlement, NO `lastSyncDate` horizon, NO `computeDueDoseBreakdown`, NO
- * `effectiveCurrentPills` projection folded into manual mutations. The
- * durable `currentPills` is the single source of truth for manual stock
- * changes.
+ * elapsed-day settlement and NO read-time stock projection inside manual
+ * mutations. The durable `currentPills` is the single source of truth for
+ * manual stock changes.
  */
 
 /**
@@ -28,8 +27,7 @@ import { exactAutoLogId } from './autoDeductionReconciliation';
  * - base = `Math.max(0, med.currentPills)` (never negative).
  * - positive delta increases the balance; negative delta decreases it.
  * - result clamped at zero.
- * - `lastSyncDate` is NOT changed (Issue #267 — no settlement horizon for
- *   manual mutations).
+ * - No elapsed-day settlement is performed as part of the manual mutation (Issue #267).
  *
  * @param med The medication to adjust.
  * @param delta The signed pill delta (positive for restore/refill, negative
@@ -288,9 +286,9 @@ export function findActualDeductedAmountForOccurrence(
  *
  * There is NO pure-projection Restore (elapsed time without a durable
  * deduction does NOT add stock). There is NO `dailyDose` fallback, NO
- * `computeDueDoseBreakdown`, NO `lastSyncDate` settlement.
+ * `computeDueDoseBreakdown`, NO elapsed-day settlement settlement.
  *
- * `lastSyncDate` is NOT changed by restore.
+ * elapsed-day settlement is NOT changed by restore.
  *
  * Skip marker logic is preserved: when the restore date is past-due, a
  * durable skip is recorded so the same occurrence is not re-deducted by
@@ -413,7 +411,7 @@ export function restoreDose(
       );
 
     // Issue #267: apply the restored amount to durable currentPills only.
-    // No settlement, no lastSyncDate change.
+    // No settlement, no elapsed-day settlement change.
     const updatedMed: Medication = applyDurableStockDelta(med, restoredAmount);
     const result: Medication = {
       ...updatedMed,
@@ -440,8 +438,8 @@ export function restoreDose(
  * Consume one daily dose from a medication.
  *
  * Issue #267: the stock deduction is `currentPills → currentPills - doseAmount`
- * (clamped at zero). No `computeDueDoseBreakdown`, no `effectiveCurrentPills`,
- * no `lastSyncDate` settlement. The durable `currentPills` is the sole base.
+ * (clamped at zero). No read-time projection and no elapsed-day settlement.
+ * The durable `currentPills` is the sole base.
  *
  * Amount authority:
  * - `amountOverride` (Exact Auto FIRED event amount) when provided.
@@ -455,7 +453,7 @@ export function restoreDose(
  * Metadata preserved: doseConsumptionHistory,
  * doseSkippedHistory, lastConsumedDate, dose_taken log.
  *
- * `lastSyncDate` is NOT changed.
+ * elapsed-day settlement is NOT changed.
  */
 export function consumeDose(
   med: Medication,
@@ -557,7 +555,7 @@ export function consumeDose(
   }
 
   // Issue #267: stock deduction from durable currentPills only.
-  // No settlement, no lastSyncDate change.
+  // No settlement, no elapsed-day settlement change.
   const settleBase = Math.max(0, med.currentPills);
   const doseAmount = Math.min(targetAmount, settleBase);
   if (doseAmount <= 0) {
@@ -594,7 +592,7 @@ export function consumeDose(
 
   const lastConsumedDate = allSlotsConsumedToday ? todayStr : med.lastConsumedDate;
 
-  // Issue #267: lastSyncDate is NOT changed by consume.
+  // Issue #267: elapsed-day settlement is NOT changed by consume.
   const updatedMed: Medication = {
     ...med,
     currentPills: newSnapshot,

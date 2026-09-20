@@ -20,7 +20,6 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: '2024-01-01',
     autoDeductEnabled: true,
     ...overrides,
   };
@@ -287,7 +286,6 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     const med = makeMed({
       id: 'med-edit-stock',
       currentPills: 42,
-      lastSyncDate: '2024-06-01',
       lastConsumedDate: '2024-06-01',
       dailyDose: 1,
       reminderTime: '09:00',
@@ -306,7 +304,6 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     expect(onSave).toHaveBeenCalledTimes(1);
     const saved = onSave.mock.calls[0][0];
     expect(saved.currentPills).toBe(42);
-    expect(saved.lastSyncDate).toBe('2024-06-01');
     expect(saved.doseSchedule).toHaveLength(1);
     expect(saved.dosesPerDay).toBe(1);
     expect(saved.dailyDose).toBe(1);

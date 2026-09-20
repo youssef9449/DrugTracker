@@ -63,7 +63,7 @@ medicationId + doseId + calendarDate
 
 - الجرعات المتعددة في اليوم مستقلة عن بعضها؛ تطبيق جرعة لا يؤدي إلى خصم جرعة شقيقة تلقائيًا.
 - توجد آليات idempotency وdurability تمنع الخصم المكرر عند إعادة المحاولة أو فشل تأكيد الحدث الأصلي.
-- `currentPills` يمثل المخزون المحفوظ، بينما `effectiveCurrentPills` يمثل الرصيد المتوقع المعروض بعد احتساب الاستهلاك المستحق.
+- `currentPills` هو رصيد المخزون المحفوظ (durable). لا يوجد إسقاط elapsed-days عند القراءة؛ خصم الجرعات التلقائي يأتي فقط من Exact FIRED occurrences.
 
 التفاصيل التقنية الكاملة موجودة في [`docs/AUTO_DEDUCTION_ARCHITECTURE.md`](./docs/AUTO_DEDUCTION_ARCHITECTURE.md).
 

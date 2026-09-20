@@ -75,7 +75,6 @@ function makeMulti(overrides: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: TEST_DATE,
     autoDeductEnabled: false,
     reminderEnabled: false,
     doseSchedule: [

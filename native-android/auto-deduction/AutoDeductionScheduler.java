@@ -557,19 +557,18 @@ public final class AutoDeductionScheduler {
      * <ol>
      *   <li>Evaluate effective cancellation (tombstone vs schedule ordering)</li>
      *   <li>Require active schedule metadata for this occurrence</li>
-     *   <li>Require current/tokenized delivery to match {@code scheduleVersion} +
-     *       {@code recurrenceGeneration} exactly (reject stale queued alarms after
-     *       disable → re-enable reschedule). A delivery with no tokens is
-     *       accepted only when the active durable schedule metadata is also truly
-     *       legacy (both tokens absent), preserving pre-token queued alarms without
-     *       weakening the versioned stale-fire guard.</li>
+     *   <li>Require every delivery to carry a non-empty {@code scheduleVersion}
+     *       and a positive {@code recurrenceGeneration}. Both values must match
+     *       the active durable schedule metadata exactly. Missing, invalid, or
+     *       mismatched tokens mean the delivery is stale/cancelled. There is no
+     *       pre-token or tokenless compatibility path.</li>
      *   <li>If ownership holds → persist FIRED via insertFiredIfAbsent</li>
      * </ol>
      *
      * @param deliveryScheduleVersion {@link AutoDeductionContract#EXTRA_SCHEDULE_VERSION}
-     *        from the firing Intent; must match active metadata
+     *        from the firing Intent; must be present and match active metadata
      * @param deliveryRecurrenceGeneration {@link AutoDeductionContract#EXTRA_RECURRENCE_GENERATION}
-     *        from the firing Intent; must match active metadata
+     *        from the firing Intent; must be positive and match active metadata
      */
     public FireResult fireOccurrenceIfNotCancelled(
             String medicationId,

@@ -692,7 +692,6 @@ function notificationId(
 // the fields that affect the critical date change:
 //   - currentPills (snapshot)
 //   - dailyDose
-//   - lastSyncDate
 //   - warningThresholdDays (IS the user-configured critical threshold)
 //   - autoDeductEnabled
 //   - medication id (med deleted/created)
@@ -706,7 +705,7 @@ function notificationId(
 // Edge cases (handled by getCriticalAlarmDate, which returns null to
 // signal "do not schedule"):
 //   - dailyDose <= 0 → no consumption rate → no critical date.
-//   - effectiveCurrentPills <= 0 OR daysLeft <= critical threshold →
+//   - currentPills / daysLeftFromCurrentStock already at or below critical threshold →
 //     the med is ALREADY critical. The one-shot alarm is only for
 //     FUTURE crossings; the existing alert effect (which runs when
 //     the app is open and tracks already-alerted statuses via

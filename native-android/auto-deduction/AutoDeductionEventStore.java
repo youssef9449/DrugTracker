@@ -310,10 +310,6 @@ public final class AutoDeductionEventStore {
                 : PendingFiresResult.success(promoted);
     }
 
-    /** Backward-compatible count API used by non-authoritative callers/tests. */
-    public int promotePendingFires() {
-        return promotePendingFiresResult().promoted;
-    }
 
     public boolean hasEvent(String medicationId, String doseId, String calendarDate) {
         String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);

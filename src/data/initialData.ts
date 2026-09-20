@@ -17,8 +17,7 @@
  * "today" values; now each call gets the current date.
  *
  * Both functions accept an optional `todayStr` parameter so the caller
- * can share a single date snapshot. Medications use it for lastSyncDate;
- * getInitialLogs returns an empty collection (Issue #269).
+ * can share a single date snapshot. getInitialLogs returns an empty collection (Issue #269).
  *
  * NOTE: if AI Studio's preview shows an error like
  *     Failed to resolve import "./data/initialData" from "src/App.tsx"
@@ -45,7 +44,6 @@ export function getInitialMedications(todayStr: string = getTodayDateString()): 
       category: 'ضغط الدم',
       notes: 'قرص صباحاً بعد الإفطار',
       createdAt: nowIso,
-      lastSyncDate: today,
       autoDeductEnabled: true,
       stripsPerBox: 3,
       pillsPerStrip: 10,
@@ -64,7 +62,6 @@ export function getInitialMedications(todayStr: string = getTodayDateString()): 
       category: 'السكري',
       notes: 'قرص مع الغداء وقرص مع العشاء',
       createdAt: nowIso,
-      lastSyncDate: today,
       autoDeductEnabled: true,
       stripsPerBox: 5,
       pillsPerStrip: 10,
@@ -83,7 +80,6 @@ export function getInitialMedications(todayStr: string = getTodayDateString()): 
       category: 'فيتامينات',
       notes: 'كبسولة يومياً بعد وجبة دسمة',
       createdAt: nowIso,
-      lastSyncDate: today,
       autoDeductEnabled: true,
       stripsPerBox: 3,
       pillsPerStrip: 10,

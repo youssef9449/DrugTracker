@@ -26,7 +26,6 @@ function baseMed(over: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2026-01-01T00:00:00.000Z',
-    lastSyncDate: '2026-09-14',
     autoDeductEnabled: true,
     ...over,
   };
@@ -91,7 +90,6 @@ describe('stock gate — fresh durable state', () => {
         baseMed({
           doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
           currentPills: 10,
-          lastSyncDate: '2026-09-13',
         }),
       ],
       logs: [],
@@ -153,7 +151,6 @@ describe('stock gate — fresh durable state', () => {
       baseMed({
         doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
         currentPills: 10,
-        lastSyncDate: '2026-09-12',
         dailyDose: 2,
       }),
     ];
@@ -172,10 +169,9 @@ describe('stock gate — fresh durable state', () => {
     expect(durable.medications[0].currentPills).toBe(8);
     expect(isExactAutoOccurrenceApplied(durable.medications[0], 'd', '2026-09-13')).toBe(true);
 
-    // The legacy day-based catch-up (syncAutoDailyDeductions) was removed in
-    // Issue #268 / PR #271 — there is no second automatic deduction at all
-    // (no app-open / calendar-day settlement). A second gate entry simply
-    // observes the durable committed state; it must NOT re-apply the same
+    // There is no second automatic deduction from app-open or calendar-day
+    // settlement (Issue #268 / PR #271). A second gate entry simply observes
+    // the durable committed state; it must NOT re-apply the same
     // occurrence (the durable consume marker + exact log make it
     // already_applied). 8, not 6.
     await withAutoStockMutationGate(async (fresh) => {
@@ -187,16 +183,12 @@ describe('stock gate — fresh durable state', () => {
     expect(durable.medications[0].currentPills).toBe(8);
   });
 
-  it('lastSyncDateDoesNotBlockFIRED (#265/#267)', async () => {
-    // Issue #265/#267: lastSyncDate is NOT occurrence-level evidence.
-    // A FIRED event for a past date (calendarDate == lastSyncDate) with no
-    // durable consume/skip marker must be APPLIED — lastSyncDate does not
+  it('elapsed-day settlementDoesNotBlockFIRED (#265/#267)', async () => {
     // prevent the FIRED deduction.
     durable.medications = [
       baseMed({
         doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
         currentPills: 10,
-        lastSyncDate: '2026-09-13',
         dailyDose: 2,
       }),
     ];
@@ -215,8 +207,6 @@ describe('stock gate — fresh durable state', () => {
     });
     // event.amount (2) deducted exactly once.
     expect(durable.medications[0].currentPills).toBe(8);
-    // lastSyncDate is NOT changed by the Exact apply (Issue #265).
-    expect(durable.medications[0].lastSyncDate).toBe('2026-09-13');
 
     // Second reconciliation of the same FIRED: now there IS durable evidence
     // (consume marker) → already_applied → no second deduction.
@@ -236,7 +226,6 @@ describe('stock gate — fresh durable state', () => {
           { id: 'b', amount: 2, time: '14:00' },
         ],
         currentPills: 10,
-        lastSyncDate: '2026-09-14',
       }),
     ];
     const events = [
@@ -288,7 +277,6 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
         { id: 'b', amount: 2, time: '14:00' },
       ],
       currentPills: 10,
-      lastSyncDate: '2026-09-14',
     });
     const events = [
       fired({
@@ -378,7 +366,6 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
     const med = baseMed({
       doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
       currentPills: 10,
-      lastSyncDate: '2026-09-14',
     });
     const e = fired({
       medicationId: 'med-1',
@@ -439,7 +426,6 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
     const med = baseMed({
       doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
       currentPills: 10,
-      lastSyncDate: '2026-09-14',
     });
     const e = fired({
       medicationId: 'med-1',
@@ -518,7 +504,6 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
     const med = baseMed({
       doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
       currentPills: 10,
-      lastSyncDate: '2026-09-14',
     });
     const e = fired({
       medicationId: 'med-1',
@@ -562,7 +547,6 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
     const med = baseMed({
       doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
       currentPills: 8,
-      lastSyncDate: '2026-09-14',
     });
     const envelope = {
       version: 1 as const,
@@ -580,7 +564,7 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
 
     const result = await runAutoDeductionReconciliation({
       alreadyInGate: true,
-      medications: [baseMed({ currentPills: 10, lastSyncDate: '2026-09-14' })],
+      medications: [baseMed({ currentPills: 10})],
       logs: [],
       globalAutoDeductEnabled: true,
       listFired: async () => ({ ok: true, events: [] }),
@@ -620,7 +604,6 @@ describe('multi-dose', () => {
       ],
       dailyDose: 4,
       currentPills: 20,
-      lastSyncDate: '2026-09-14',
     });
     const r = reconcileFiredEvents(
       [med],
@@ -637,7 +620,6 @@ describe('multi-dose', () => {
     const med = baseMed({
       doseSchedule: [{ id: 'd', amount: 1, time: '08:00' }],
       currentPills: 10,
-      lastSyncDate: '2026-09-14',
       doseConsumptionHistory: { d: ['2026-09-13'] },
     });
     expect(isExactAutoOccurrenceApplied(med, 'd', '2026-09-13')).toBe(true);
@@ -658,7 +640,6 @@ describe('durable currentPills after Exact apply (Issue #266)', () => {
     const med = baseMed({
       doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
       currentPills: 10,
-      lastSyncDate: '2026-09-14',
     });
     const r = reconcileFiredEvents(
       [med],
@@ -683,7 +664,6 @@ describe('deterministicLogPreventsDuplicate', () => {
     const med = baseMed({
       doseSchedule: [{ id: 'd', amount: 1, time: '08:00' }],
       currentPills: 5,
-      lastSyncDate: '2026-09-14',
     });
     const e = fired({
       medicationId: 'med-1',
@@ -711,7 +691,6 @@ describe('exact event day must not be double-settled', () => {
     const med = baseMed({
       doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
       currentPills: 10,
-      lastSyncDate: '2026-09-12',
       dailyDose: 2,
     });
     const r = reconcileFiredEvents(
@@ -738,7 +717,6 @@ describe('exact event day must not be double-settled', () => {
         { id: 'evening', amount: 3, time: '20:00' },
       ],
       currentPills: 10,
-      lastSyncDate: '2026-09-12',
       dailyDose: 5,
     });
     const r = reconcileFiredEvents(
@@ -770,7 +748,6 @@ describe('exact event day must not be double-settled', () => {
         { id: 'evening', amount: 3, time: '20:00' },
       ],
       currentPills: 10,
-      lastSyncDate: '2026-09-12',
       dailyDose: 5,
     });
     const events = [
@@ -797,7 +774,6 @@ describe('exact event day must not be double-settled', () => {
   it('oldLastSyncDoesNotFoldHistoricalDaysIntoExactApply (#265)', () => {
     // Issue #265: a single FIRED event deducts ONLY event.amount. No
     // historical / day-based settlement is folded into the Exact apply —
-    // `lastSyncDate` does not influence the amount charged for this FIRED
     // occurrence. lastSync=09-10, event=09-13 amount 2 → 10 - 2 = 8 (NOT
     // 10 - 4 [days 11+12] - 2 = 4). The days 11+12 are NOT auto-settled by
     // this path; they stay as a live projection until a mutation or their
@@ -805,7 +781,6 @@ describe('exact event day must not be double-settled', () => {
     const med = baseMed({
       doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
       currentPills: 10,
-      lastSyncDate: '2026-09-10',
       dailyDose: 2,
     });
     const r = reconcileFiredEvents(
@@ -822,9 +797,7 @@ describe('exact event day must not be double-settled', () => {
     );
     expect(r.details[0].outcome).toBe('applied');
     expect(r.medications[0].currentPills).toBe(8);
-    // lastSyncDate is preserved (no prior-day folding).
-    expect(r.medications[0].lastSyncDate).toBe('2026-09-10');
-    // Exactly one exact log (the FIRED occurrence); no legacy day-settlement log.
+    // Exactly one exact log (the FIRED occurrence); no second day-based settlement log.
     expect(r.newExactLogs).toHaveLength(1);
     expect(r.newExactLogs[0].amount).toBe(-2);
   });
@@ -833,7 +806,6 @@ describe('exact event day must not be double-settled', () => {
     const med = baseMed({
       doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
       currentPills: 10,
-      lastSyncDate: '2026-09-14',
       dailyDose: 2,
     });
     const r = reconcileFiredEvents(
@@ -855,7 +827,6 @@ describe('exact event day must not be double-settled', () => {
     const med = baseMed({
       doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
       currentPills: 10,
-      lastSyncDate: '2026-09-12',
       dailyDose: 2,
     });
     const e = fired({
@@ -874,7 +845,6 @@ describe('exact event day must not be double-settled', () => {
     const med = baseMed({
       doseSchedule: [{ id: 'd', amount: 1, time: '08:00' }],
       currentPills: 10,
-      lastSyncDate: '2026-09-14',
       dailyDose: 1,
       autoDeductEnabled: true,
     });
@@ -900,7 +870,6 @@ describe('exact event day must not be double-settled', () => {
     const med = baseMed({
       doseSchedule: [{ id: 'd', amount: 1, time: '08:00' }],
       currentPills: 10,
-      lastSyncDate: '2026-09-14',
       dailyDose: 1,
       autoDeductEnabled: false,
     });
@@ -925,7 +894,6 @@ describe('exact event day must not be double-settled', () => {
     const med = baseMed({
       doseSchedule: [{ id: 'd', amount: 1, time: '08:00' }],
       currentPills: 10,
-      lastSyncDate: '2026-09-14',
       dailyDose: 1,
     });
     const e = fired({
@@ -955,7 +923,6 @@ describe('reconcileFiredEvents — invalid amount must not ACK', () => {
   it('amount <= 0 / NaN / Infinity → skipped_invalid, empty toAcknowledge, no stock/log', () => {
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     });
     for (const amount of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
@@ -985,7 +952,6 @@ describe('reconcileFiredEvents — invalid amount must not ACK', () => {
   it('invalid then valid amount on same occurrence: no ACK first, applied + ACK second', () => {
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     });
     const invalid = fired({
@@ -1020,7 +986,6 @@ describe('reconcileFiredEvents — invalid amount must not ACK', () => {
   it('empty doseId: no stock/log, skipped_invalid, ACK terminal (#268)', () => {
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     });
     const e = fired({
@@ -1043,7 +1008,6 @@ describe('reconcileFiredEvents — invalid amount must not ACK', () => {
   it('missing doseId (undefined normalized): terminal ACK, no stock/log (#268)', () => {
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     });
     const e = fired({
@@ -1065,7 +1029,6 @@ describe('reconcileFiredEvents — invalid amount must not ACK', () => {
   it('valid identity + invalid amount remains retryable (no ACK)', () => {
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     });
     const e = fired({
@@ -1096,7 +1059,6 @@ describe('reconcileFiredEvents — malformed identity is terminal ACK (#262 Find
   it('missing medicationId: no stock/log, skipped_invalid, ACK terminal', () => {
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     });
     const e = fired({
@@ -1119,7 +1081,6 @@ describe('reconcileFiredEvents — malformed identity is terminal ACK (#262 Find
   it('missing calendarDate: no stock/log, skipped_invalid, ACK terminal', () => {
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     });
     const e = fired({
@@ -1141,7 +1102,6 @@ describe('reconcileFiredEvents — malformed identity is terminal ACK (#262 Find
   it('malformed calendarDate (not YYYY-MM-DD): terminal ACK, no stock/log', () => {
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     });
     const e = fired({
@@ -1164,7 +1124,6 @@ describe('reconcileFiredEvents — malformed identity is terminal ACK (#262 Find
   it('second reconciliation of same malformed event does not mutate stock or add logs', () => {
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     });
     const e = fired({
@@ -1193,7 +1152,6 @@ describe('reconcileFiredEvents — malformed identity is terminal ACK (#262 Find
     // Fixing calendarDate changes occurrence identity — not same-occurrence retry.
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     });
     const invalid = fired({
@@ -1238,7 +1196,6 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
   it('malformed FIRED reaches markReconciled once; stock/log unchanged; no second ACK after terminal', async () => {
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     });
     // Malformed identity (invalid calendarDate) with positive amount
@@ -1324,7 +1281,6 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
   it('valid identity + invalid amount does not call markReconciled (remains retryable)', async () => {
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     });
     const invalidAmount = fired({
@@ -1370,7 +1326,6 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
   it('empty doseId FIRED: runner path terminal ACK via markAll; no stock/log/marker (#268)', async () => {
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       lastConsumedDate: '2026-09-12',
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     });
@@ -1465,7 +1420,6 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
   it('missing doseId FIRED: runner path terminal ACK via markAll; no stock/log/marker (#268)', async () => {
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       lastConsumedDate: '2026-09-12',
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     });
@@ -1558,7 +1512,6 @@ describe('runAutoDeductionReconciliation — FIRED durable regardless of current
     // once and dropped from the native FIRED set (terminal, no infinite retry).
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       lastConsumedDate: '2026-09-12',
       doseSchedule: undefined,
       dailyDose: 5,
@@ -1627,7 +1580,6 @@ describe('runAutoDeductionReconciliation — FIRED durable regardless of current
     // durable consume marker / exact log → already_applied, no duplicate.
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       lastConsumedDate: '2026-09-12',
       // Current schedule no longer contains d1.
       doseSchedule: [{ id: 'd2', amount: 1, time: '20:00' }],
@@ -1719,7 +1671,6 @@ describe('runAutoDeductionReconciliation — FIRED durable regardless of current
     // This contract is unchanged by the schedule-durability fix.
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     });
     const invalidAmount = fired({
@@ -1775,7 +1726,6 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
   it('with explicit doseSchedule: Exact applies; lastConsumedDate updates only when all slots consumed', () => {
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       lastConsumedDate: '2026-09-12',
       doseSchedule: [
         { id: 'd1', amount: 1, time: '08:00' },
@@ -1809,7 +1759,6 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
     // lastConsumedDate is NOT written (no schedule to test all-consumed).
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       lastConsumedDate: '2026-09-12',
       // Current schedule no longer contains d1 — it was removed after fire.
       doseSchedule: [{ id: 'd2', amount: 1, time: '20:00' }],
@@ -1845,7 +1794,6 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
     // written (no schedule to test all-consumed → no doseId-only write).
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       lastConsumedDate: '2026-09-12',
       // no doseSchedule — would be the pre-PR legacy single-dose shape
       doseSchedule: undefined,
@@ -1879,7 +1827,6 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
     // dailyDose = 5 but the FIRED event carries amount = 2 → stock drops by 2.
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       lastConsumedDate: '2026-09-12',
       doseSchedule: undefined,
       dailyDose: 5,
@@ -1904,7 +1851,6 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
   it('empty doseSchedule array: FIRED event still applies with event.amount', () => {
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       lastConsumedDate: '2026-09-12',
       doseSchedule: [],
     });
@@ -1928,7 +1874,6 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
     // from applying. It is a malformed identity (terminal at the runner level).
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
     });
     const e = fired({
@@ -1950,7 +1895,6 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
     // consumed so this Exact apply completes the day → lastConsumedDate moves.
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       lastConsumedDate: '2026-09-12',
       doseSchedule: [
         { id: 'd1', amount: 1, time: '08:00' },
@@ -1979,7 +1923,6 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
     // occurrence; the current schedule is only for scheduling FUTURE ones.
     const med = baseMed({
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       lastConsumedDate: '2026-09-12',
       doseSchedule: [{ id: 'd1', amount: 3, time: '08:00' }],
       dailyDose: 3,
@@ -2003,7 +1946,6 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
     // A single FIRED event on a past calendar day deducts ONLY its own
     // event.amount. No historical / sibling-day settlement is folded into
     // the apply — other elapsed days (e.g. between lastSync and the event
-    // day) are NOT auto-charged by this path. lastSyncDate is preserved.
     // lastSync=09-10, event=09-13 amount 2 → 10 − 2 = 8. Days 09-11/09-12
     // are NOT charged here (they stay a live projection until a mutation or
     // their own FIRED occurrences settle them).
@@ -2013,7 +1955,6 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
         { id: 'd2', amount: 2, time: '20:00' },
       ],
       currentPills: 10,
-      lastSyncDate: '2026-09-10',
       lastConsumedDate: '2026-09-09',
       dailyDose: 4,
     });
@@ -2029,28 +1970,22 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
       // Only the FIRED occurrence's amount (2). No sibling d2, no days
       // 09-11/09-12, no dailyDose(4)-based catch-up.
       expect(applied.updatedMed.currentPills).toBe(8);
-      // lastSyncDate preserved (no prior-day folding).
-      expect(applied.updatedMed.lastSyncDate).toBe('2026-09-10');
       // Only one exact log (this occurrence).
       expect(applied.log.amount).toBe(-2);
       expect(applied.log.doseId).toBe('d1');
     }
   });
 
-  it('old lastSyncDate does not increase the Exact deduction (#265)', () => {
-    // The same FIRED event (amount 2) deducts exactly 2 whether lastSyncDate
-    // is recent or many days old. lastSyncDate has no influence on the Exact
+  it('old elapsed-day settlement does not increase the Exact deduction (#265)', () => {
     // deduction amount.
     const recent = baseMed({
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
       currentPills: 10,
-      lastSyncDate: '2026-09-13',
       dailyDose: 2,
     });
     const old = baseMed({
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
       currentPills: 10,
-      lastSyncDate: '2026-09-01',
       dailyDose: 2,
     });
     const e = fired({
@@ -2064,7 +1999,6 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
     expect(r1.ok).toBe(true);
     expect(r2.ok).toBe(true);
     if (r1.ok && r2.ok) {
-      // Both deduct exactly event.amount (2) — lastSyncDate is irrelevant.
       expect(r1.updatedMed.currentPills).toBe(8);
       expect(r2.updatedMed.currentPills).toBe(8);
     }

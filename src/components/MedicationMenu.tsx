@@ -17,11 +17,6 @@ interface MedicationMenuProps {
   medication: Medication;
   /** Effective Auto-Deduct (global ∧ medication). Used for runtime state only. */
   isAutoActive: boolean;
-  /**
-   * @deprecated Global bulk-sets all meds; this menu edits one medication only.
-   * Kept optional so existing callers still type-check.
-   */
-  showRefillInMenu?: boolean;
   onOpenRefill?: (medication: Medication) => void;
   onEdit: (medication: Medication) => void;
   onDelete: (id: string) => void;

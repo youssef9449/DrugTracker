@@ -18,7 +18,6 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: '2024-09-01',
     autoDeductEnabled: true,
     ...overrides,
   };
@@ -34,11 +33,10 @@ afterEach(() => {
 });
 
 describe('Issue #266 — durable currentPills is sole live stock', () => {
-  it('old lastSyncDate does not reduce live stock or daysLeft', () => {
+  it('old elapsed-day settlement does not reduce live stock or daysLeft', () => {
     const med = makeMed({
       currentPills: 100,
       dailyDose: 10,
-      lastSyncDate: '2024-01-01',
       doseSchedule: [{ id: 'd1', amount: 10, time: '08:00' }],
     });
     expect(med.currentPills).toBe(100);
@@ -65,7 +63,6 @@ describe('Issue #266 — durable currentPills is sole live stock', () => {
     const med = makeMed({
       currentPills: 20,
       autoDeductEnabled: false,
-      lastSyncDate: '2024-01-01',
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     });
     expect(med.currentPills).toBe(20);
@@ -78,7 +75,6 @@ describe('Issue #266 — durable currentPills is sole live stock', () => {
       currentPills: 15,
       dailyDose: 3,
       doseSchedule: [{ id: 'd1', amount: 3, time: '09:00' }],
-      lastSyncDate: '2020-01-01',
     });
     const status = calculateMedicationStatus(med);
     const depletion = getDepletionDate(med);
@@ -87,7 +83,7 @@ describe('Issue #266 — durable currentPills is sole live stock', () => {
     expect(med.currentPills).toBe(15);
   });
 
-  it('critical alarm date does not depend on lastSyncDate alone', () => {
+  it('critical alarm date does not depend on elapsed-day settlement alone', () => {
     const base = {
       currentPills: 100,
       dailyDose: 10,
@@ -95,8 +91,8 @@ describe('Issue #266 — durable currentPills is sole live stock', () => {
       autoDeductEnabled: true,
       doseSchedule: [{ id: 'd1', amount: 10, time: '08:00' }],
     } as const;
-    const a = makeMed({ ...base, lastSyncDate: '2024-09-10' });
-    const b = makeMed({ ...base, lastSyncDate: '2020-01-01' });
+    const a = makeMed({ ...base});
+    const b = makeMed({ ...base});
     expect(getCriticalAlarmDate(a)).toBe(getCriticalAlarmDate(b));
     // daysLeft=10, threshold=5 → 5 days until critical
     expect(daysLeftFromCurrentStock(a)).toBe(10);

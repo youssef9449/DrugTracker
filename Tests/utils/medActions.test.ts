@@ -22,7 +22,6 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: '2024-01-10',
     autoDeductEnabled: true,
     doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     dosesPerDay: 1,
@@ -64,10 +63,10 @@ describe('applyDurableStockDelta (#267 — durable stock mutation)', () => {
     expect(result.currentPills).toBe(0);
   });
 
-  it('does NOT change lastSyncDate (no settlement horizon)', () => {
-    const med = makeMed({ currentPills: 30, lastSyncDate: '2024-01-01' });
+  it('applyDurableStockDelta changes only currentPills by the signed delta', () => {
+    const med = makeMed({ currentPills: 30 });
     const result = applyDurableStockDelta(med, 5);
-    expect(result.lastSyncDate).toBe('2024-01-01');
+    expect(result.currentPills).toBe(35);
   });
 
   it('does NOT mutate the input medication', () => {
@@ -88,14 +87,12 @@ describe('applyDurableStockDelta (#267 — durable stock mutation)', () => {
 // ─── consumeDose (#267 contract) ──────────────────────────────────────
 describe('consumeDose (#267 — durable deduction, no settlement)', () => {
   it('consumes a dose from the alarm path (source: alarm)', () => {
-    const med = makeMed({ currentPills: 30, lastSyncDate: '2024-01-10' });
+    const med = makeMed({ currentPills: 30});
     const result = consumeDose(med, 'alarm', '2024-01-10', new Date('2024-01-10T08:00:00'), 'd1');
     expect(result.doseAmount).toBe(2);
     expect(result.updatedMed).not.toBeNull();
     expect(result.updatedMed!.currentPills).toBe(28);
     expect(result.updatedMed!.lastConsumedDate).toBe('2024-01-10');
-    // Issue #267: lastSyncDate is NOT changed by consume.
-    expect(result.updatedMed!.lastSyncDate).toBe('2024-01-10');
     expect(result.log).not.toBeNull();
     expect(result.log!.type).toBe('dose_taken');
     expect(result.log!.amount).toBe(-2);
@@ -104,7 +101,7 @@ describe('consumeDose (#267 — durable deduction, no settlement)', () => {
   });
 
   it('consumes a dose from the manual path (source: manual)', () => {
-    const med = makeMed({ currentPills: 30, lastSyncDate: '2024-01-10' });
+    const med = makeMed({ currentPills: 30});
     const result = consumeDose(med, 'manual', '2024-01-10', new Date('2024-01-10T08:00:00'), 'd1');
     expect(result.doseAmount).toBe(2);
     expect(result.updatedMed!.currentPills).toBe(28);
@@ -112,7 +109,7 @@ describe('consumeDose (#267 — durable deduction, no settlement)', () => {
   });
 
   it('returns null when the durable balance is 0', () => {
-    const med = makeMed({ currentPills: 0, lastSyncDate: '2024-01-10' });
+    const med = makeMed({ currentPills: 0});
     const result = consumeDose(med, 'manual', '2024-01-10', new Date('2024-01-10T08:00:00'), 'd1');
     expect(result.doseAmount).toBe(0);
     expect(result.updatedMed).toBeNull();
@@ -122,7 +119,6 @@ describe('consumeDose (#267 — durable deduction, no settlement)', () => {
   it('clamps the dose to the durable balance (partial consumption)', () => {
     const med = makeMed({
       currentPills: 1,
-      lastSyncDate: '2024-01-10',
       doseSchedule: [{ id: 'd1', amount: 5, time: '08:00' }],
     });
     // settleBase = max(0, 1) = 1. dose = min(5, 1) = 1. newSnapshot = 0.
@@ -131,34 +127,30 @@ describe('consumeDose (#267 — durable deduction, no settlement)', () => {
     expect(result.updatedMed!.currentPills).toBe(0);
   });
 
-  it('does NOT project forward from lastSyncDate before consuming (no historical catch-up)', () => {
+  it('does NOT project forward from elapsed-day settlement before consuming (no historical catch-up)', () => {
     // Issue #267: app closed for days. The OLD behavior deducted
     // daysPassed*dailyDose from the effective balance before the consume.
     // The NEW behavior deducts from durable currentPills only — no
-    // historical catch-up, no effective balance, no lastSyncDate change.
     const med = makeMed({
       currentPills: 30,
-      dailyDose: 2,
-      lastSyncDate: '2024-01-01', // 9 days passed
+      dailyDose: 2, // 9 days passed
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
     });
     const result = consumeDose(med, 'manual', '2024-01-10', new Date('2024-01-10T08:00:00'), 'd1');
     expect(result.doseAmount).toBe(2);
     // 30 - 2 = 28 (NOT 30 - 9*2 - 2 = 10).
     expect(result.updatedMed!.currentPills).toBe(28);
-    // lastSyncDate is NOT bumped.
-    expect(result.updatedMed!.lastSyncDate).toBe('2024-01-01');
   });
 
   it('does not mutate the input medication', () => {
-    const med = makeMed({ currentPills: 30, lastSyncDate: '2024-01-10' });
+    const med = makeMed({ currentPills: 30});
     consumeDose(med, 'alarm', '2024-01-10', new Date('2024-01-10T08:00:00'), 'd1');
     expect(med.currentPills).toBe(30);
     expect(med.lastConsumedDate).toBeUndefined();
   });
 
   it('uses generateId("consume") for the log id (not Date.now() — #64)', () => {
-    const med = makeMed({ currentPills: 30, lastSyncDate: '2024-01-10' });
+    const med = makeMed({ currentPills: 30});
     const result = consumeDose(med, 'manual', '2024-01-10', new Date('2024-01-10T08:00:00'), 'd1');
     // generateId('consume') → 'consume-<uuid>' (40 chars). Not 'consume-<timestamp>'.
     expect(result.log!.id).toMatch(/^consume-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
@@ -171,7 +163,6 @@ describe('consumeDose strict doseId identity', () => {
     makeMed({
       currentPills: 30,
       dailyDose: 4,
-      lastSyncDate: '2024-09-13',
       doseSchedule: [
         { id: 'd1', amount: 1, time: '08:00' },
         { id: 'd2', amount: 2, time: '14:00' },
@@ -218,7 +209,6 @@ describe('consumeDose strict doseId identity', () => {
     const med = makeMed({
       currentPills: 20,
       dailyDose: 4,
-      lastSyncDate: '2024-09-13',
       doseSchedule: [{ id: 'only', amount: 2, time: '09:00' }],
       dosesPerDay: 1,
     });
@@ -306,7 +296,6 @@ describe('resolveRestoreDoseId (identity only — #267)', () => {
     makeMed({
       currentPills: 20,
       dailyDose: 4,
-      lastSyncDate: '2024-09-13',
       doseSchedule: [
         { id: 'd1', amount: 1, time: '08:00' },
         { id: 'd2', amount: 2, time: '14:00' },
@@ -370,7 +359,6 @@ describe('restoreDose (#267 — durable deduction evidence)', () => {
   it('restores the active deduction log amount (Manual Take)', () => {
     const med = makeMed({
       currentPills: 28, // 30 - 2 (after manual Take of d1=2)
-      lastSyncDate: '2024-01-10',
       doseConsumptionHistory: { d1: [today] },
     });
     const logs: ConsumptionLog[] = [
@@ -389,7 +377,6 @@ describe('restoreDose (#267 — durable deduction evidence)', () => {
   it('restores the active deduction log amount (Exact Auto)', () => {
     const med = makeMed({
       currentPills: 28,
-      lastSyncDate: '2024-01-10',
       doseConsumptionHistory: { d1: [today] },
     });
     const logs: ConsumptionLog[] = [
@@ -406,8 +393,7 @@ describe('restoreDose (#267 — durable deduction evidence)', () => {
     // Pure-projection Restore is GONE (#267): elapsed time without a durable
     // deduction log does NOT add stock.
     const med = makeMed({
-      currentPills: 30,
-      lastSyncDate: '2024-01-01', // 9 days passed
+      currentPills: 30, // 9 days passed
     });
     const result = restoreDose(med, 'd1', '2024-01-10', now, []);
     expect(result.ok).toBe(false);
@@ -418,7 +404,6 @@ describe('restoreDose (#267 — durable deduction evidence)', () => {
   it('rejects with already_restored when the consume marker exists but the deduction is reversed', () => {
     const med = makeMed({
       currentPills: 30,
-      lastSyncDate: '2024-01-10',
       doseConsumptionHistory: { d1: [today] },
     });
     // The deduction log exists but is already reversed.
@@ -452,10 +437,9 @@ describe('restoreDose (#267 — durable deduction evidence)', () => {
     expect(result.reason).toBe('missing_dose_id');
   });
 
-  it('does NOT change lastSyncDate (no settlement horizon)', () => {
+  it('restoreDose changes only currentPills by the evidenced amount (no elapsed-day settlement)', () => {
     const med = makeMed({
       currentPills: 28,
-      lastSyncDate: '2024-01-01', // 9 days passed
       doseConsumptionHistory: { d1: [today] },
     });
     const logs: ConsumptionLog[] = [
@@ -464,7 +448,7 @@ describe('restoreDose (#267 — durable deduction evidence)', () => {
     const result = restoreDose(med, 'd1', today, now, logs);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.updatedMed.lastSyncDate).toBe('2024-01-01'); // unchanged
+    expect(result.medication.currentPills).toBe(30);
   });
 
   it('restores from the historical deduction log amount, not the current schedule amount', () => {
@@ -472,7 +456,6 @@ describe('restoreDose (#267 — durable deduction evidence)', () => {
     // schedule to 5. Restore must use the historical 2, not the current 5.
     const med = makeMed({
       currentPills: 28,
-      lastSyncDate: '2024-01-10',
       doseConsumptionHistory: { d1: [today] },
       doseSchedule: [{ id: 'd1', amount: 5, time: '08:00' }], // edited from 2
     });

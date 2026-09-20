@@ -52,7 +52,6 @@ function med(over: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2026-01-01T00:00:00.000Z',
-    lastSyncDate: '2026-09-15',
     autoDeductEnabled: true,
     doseSchedule: [
       { id: 'd1', amount: 1, time: '08:00' },
@@ -1914,7 +1913,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     // A refill log of +10 exists but only 5 is actually reversible (settleBase=5).
     // Undo must record -5 in the refill_undo log, not -10.
     durable = {
-      medications: [med({ currentPills: 5, autoDeductEnabled: false, lastSyncDate: TODAY })],
+      medications: [med({ currentPills: 5, autoDeductEnabled: false})],
       logs: [
         { id: 'refill-10', medicationId: 'med-1', medicationName: 'TestMed', type: 'refill', amount: 10, date: TODAY, timestamp: '2026-09-16T10:00:00.000Z', description: 'refill' },
       ],
@@ -1936,7 +1935,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
   it('runGatedUndoRefill with full reversible amount reverses the full refill.amount', async () => {
     // currentPills=20 → settleBase=20 → full 10 is reversible.
     durable = {
-      medications: [med({ currentPills: 20, autoDeductEnabled: false, lastSyncDate: TODAY })],
+      medications: [med({ currentPills: 20, autoDeductEnabled: false})],
       logs: [
         { id: 'refill-full', medicationId: 'med-1', medicationName: 'TestMed', type: 'refill', amount: 10, date: TODAY, timestamp: '2026-09-16T10:00:00.000Z', description: 'refill' },
       ],
@@ -1953,7 +1952,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
   it('runGatedUndoRefill with zero reversible quantity records actual 0, not -refill.amount', async () => {
     // currentPills=0 → settleBase=0 → nothing to reverse.
     durable = {
-      medications: [med({ currentPills: 0, autoDeductEnabled: false, lastSyncDate: TODAY })],
+      medications: [med({ currentPills: 0, autoDeductEnabled: false})],
       logs: [
         { id: 'refill-zero', medicationId: 'med-1', medicationName: 'TestMed', type: 'refill', amount: 10, date: TODAY, timestamp: '2026-09-16T10:00:00.000Z', description: 'refill' },
       ],
@@ -1972,7 +1971,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
 
   it('runGatedUndoRefill: second undo of the same refill is rejected (no double reversal)', async () => {
     durable = {
-      medications: [med({ currentPills: 20, autoDeductEnabled: false, lastSyncDate: TODAY })],
+      medications: [med({ currentPills: 20, autoDeductEnabled: false})],
       logs: [
         { id: 'refill-dbl', medicationId: 'med-1', medicationName: 'TestMed', type: 'refill', amount: 10, date: TODAY, timestamp: '2026-09-16T10:00:00.000Z', description: 'refill' },
       ],

@@ -24,7 +24,6 @@ function baseMed(over: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2026-01-01T00:00:00.000Z',
-    lastSyncDate: '2026-09-14',
     ...over,
   };
 }
@@ -106,11 +105,11 @@ describe('no doseSchedule (doseSchedule-only scheduler)', () => {
       dailyDose: 2,
       doseSchedule: undefined,
     });
-    // Scheduler is doseSchedule-only; hydration migrates before scheduling.
+    // Scheduler is doseSchedule-only; only the current explicit schedule is schedulable.
     expect(getAutoDeductionSlotsForDate(med, '2026-09-14')).toEqual([]);
   });
 
-  it('schedules migrated explicit single-dose using doseSchedule id/amount/time', () => {
+  it('schedules an explicit single-dose from doseSchedule id/amount/time', () => {
     const med = baseMed({
       reminderEnabled: true,
       reminderTime: '08:30',
@@ -389,9 +388,8 @@ describe('schedule metadata ownership / conditional rollback', () => {
     expect(isMetadataOwnedByVersion('{"scheduleVersion":"v1"}', 'v1')).toBe(true);
   });
 
-  it('legacy metadata without scheduleVersion is not owned by any attempt', () => {
-    // Old PR #203 entries without version: failed attempts must not delete them
-    // via version-owned path (cancel/restore may still drop intentionally).
+  it('metadata without scheduleVersion is never owned by a versioned attempt', () => {
+    // Metadata without scheduleVersion is never owned by a versioned attempt.
     expect(isMetadataOwnedByVersion('{"medicationId":"m"}', 'v-any')).toBe(false);
   });
 });

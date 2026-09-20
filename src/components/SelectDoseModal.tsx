@@ -321,7 +321,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                 );
               }
 
-              // Legacy take / restore list (single-purpose)
+              // Single-purpose take / restore list.
               // Restore list: evidence-only amount; take list: schedule amount.
               const amountLabel = isRestore
                 ? historicalAmount != null

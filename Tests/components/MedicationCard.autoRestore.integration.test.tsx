@@ -77,7 +77,6 @@ function makeSingleAuto(overrides: Partial<Medication> = {}): Medication {
     colorTag: 'teal',
     category: 'مزمن',
     createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: TEST_DATE,
     autoDeductEnabled: true,
     reminderEnabled: false,
     doseSchedule: [{ id: 's1', amount: 2, time: '08:00' }],
@@ -98,7 +97,6 @@ function makeMultiAuto(overrides: Partial<Medication> = {}): Medication {
     colorTag: 'teal',
     category: 'مزمن',
     createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: TEST_DATE,
     autoDeductEnabled: true,
     reminderEnabled: false,
     doseSchedule: [

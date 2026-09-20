@@ -39,8 +39,6 @@ export interface Medication {
   category?: string;
   notes?: string;
   createdAt: string;
-  /** YYYY-MM-DD settlement horizon companion to `currentPills`. */
-  lastSyncDate: string
   autoDeductEnabled?: boolean; // Default true
   packageSize?: number; // Size of standard package when bought (e.g. 30)
   stripsPerBox?: number; // عدد الأشرطة في العلبة (مثال: 3 أشرطة)

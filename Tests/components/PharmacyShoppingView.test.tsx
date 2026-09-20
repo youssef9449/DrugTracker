@@ -6,8 +6,6 @@ import type { Medication, PharmacySettings } from '@/types';
 import { getTodayDateString } from '@/utils/dateCalculations';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
-  // lastSyncDate defaults to today so currentPills ===
-  // currentPills (no projection); tests set their own lastSyncDate to
   // exercise the dynamic balance.
   return {
     id: 'med-1',
@@ -18,7 +16,6 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: getTodayDateString(),
     ...overrides,
   };
 }
@@ -46,7 +43,6 @@ function renderView(overrides: Record<string, unknown> = {}) {
 }
 
 // Wave 13 #123: pin system time so getTodayDateString() (used by
-// makeMed's lastSyncDate default) resolves to a deterministic date.
 // Only Date is faked so React/testing-library's internal scheduling
 // keeps working unchanged. These top-level hooks run before/after every
 // test in this file, including those in nested describe blocks.
@@ -291,7 +287,6 @@ describe('PharmacyShoppingView — medication-level stock projection', () => {
       currentPills: 30,
       dailyDose: 2,
       autoDeductEnabled: true,
-      lastSyncDate: '2024-01-01',
       warningThresholdDays: 5,
     });
     render(
@@ -312,7 +307,6 @@ describe('PharmacyShoppingView — medication-level stock projection', () => {
       currentPills: 30,
       dailyDose: 2,
       autoDeductEnabled: false,
-      lastSyncDate: '2024-01-01',
       warningThresholdDays: 5,
     });
     render(

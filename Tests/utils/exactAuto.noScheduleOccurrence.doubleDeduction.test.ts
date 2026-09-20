@@ -48,7 +48,6 @@ function unscheduledMed(over: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2026-01-01T00:00:00.000Z',
-    lastSyncDate: '2026-09-13',
     autoDeductEnabled: true,
     ...over,
   };
@@ -214,7 +213,6 @@ describe('explicit doseSchedule: Exact Auto amount authority', () => {
     const multiMed: Medication = {
       ...unscheduledMed(),
       doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
-      lastSyncDate: '2026-09-13',
     };
     const event: AutoDeductionEvent = {
       ...noScheduleFiredEvent(2),

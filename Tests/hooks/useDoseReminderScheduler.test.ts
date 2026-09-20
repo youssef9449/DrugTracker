@@ -63,7 +63,6 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
-    lastSyncDate: getTodayDateString(),
     reminderEnabled: true,
     reminderTime,
     // Explicit single-slot schedule so reminder slots are defined by doseSchedule.
@@ -315,8 +314,8 @@ describe('useDoseReminderScheduler — doseSignature (no unnecessary reschedule)
     expect(mocks.schedule.mock.calls.length).toBe(callsAfterFirst);
   });
 
-  it('does NOT reschedule when lastSyncDate changes', async () => {
-    const med = makeMed({ id: 'med-sync', reminderTime: '09:00', lastSyncDate: '2024-09-09' });
+  it('does NOT reschedule when elapsed-day settlement changes', async () => {
+    const med = makeMed({ id: 'med-sync', reminderTime: '09:00'});
     const { rerender } = renderHook(
       ({ medications }) => useDoseReminderScheduler(defaultOpts({ medications })),
       { initialProps: { medications: [med] } }
@@ -325,7 +324,7 @@ describe('useDoseReminderScheduler — doseSignature (no unnecessary reschedule)
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
     const callsAfterFirst = mocks.schedule.mock.calls.length;
 
-    const medUpdated = { ...med, lastSyncDate: '2024-09-10' };
+    const medUpdated = { ...med};
     rerender({ medications: [medUpdated] });
 
     await new Promise((r) => setTimeout(r, 50));
@@ -644,7 +643,7 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
     expect(mocks.cancelSnoozed).not.toHaveBeenCalled();
   });
 
-  it('Test 10 — a pure stock change (currentPills/lastSyncDate) without consumption does NOT suppress or reschedule', async () => {
+  it('Test 10 — a pure stock change (currentPills/elapsed-day settlement) without consumption does NOT suppress or reschedule', async () => {
     const med = makeMed({ id: 'med-stock2', reminderTime: '09:00', currentPills: 30 });
     const { rerender } = renderHook(
       ({ medications }) => useDoseReminderScheduler(defaultOpts({ medications })),
@@ -653,7 +652,7 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
     const schedulesBefore = mocks.schedule.mock.calls.length;
 
-    rerender({ medications: [{ ...med, currentPills: 29, lastSyncDate: '2024-09-10' }] });
+    rerender({ medications: [{ ...med, currentPills: 29}] });
     await new Promise((r) => setTimeout(r, 30));
 
     expect(mocks.schedule.mock.calls.length).toBe(schedulesBefore);

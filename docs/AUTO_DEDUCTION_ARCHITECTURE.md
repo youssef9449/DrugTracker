@@ -68,7 +68,7 @@ JavaScript owns **business stock, markers, logs, and acknowledgement**.
 |----------|------------------------|
 | Did this occurrence fire at wall time while the app might be dead? | Native event store (SharedPreferences), status until successfully marked reconciled |
 | What is the app’s committed inventory? | `Medication.currentPills` (+ related history fields) in localStorage (`android_med_tracker_items_v2`) |
-| What does the UI show as “effective” remaining? | `effectiveCurrentPills(...)` — a **projection** from committed state + remaining due slots, **not** a second durable ledger |
+| What is the durable remaining stock? | `Medication.currentPills` — the single durable stock balance; automatic deductions come only from Exact FIRED occurrences, not read-time elapsed-day projection |
 | What prevents applying the same dose twice? | Occurrence markers, deterministic exact-auto log ids, native insert-if-absent, serialized gate |
 
 **Native does not** write `currentPills`, does not write JS localStorage, and does not run settlement math.  
@@ -162,9 +162,8 @@ Outcomes include: `applied`, `already_applied`, `skipped_missing_med`, `skipped_
 
 ## Day-based settlement (removed)
 
-There is **no** current Legacy day-based catch-up engine (`syncAutoDailyDeductions` was removed). Exact Auto is occurrence-based only.
+There is **no** day-based / elapsed-days stock settlement on startup or calendar-day pass. Exact Auto is occurrence-based only.
 
-- `lastSyncDate` is retained as a companion field to durable `currentPills` where other paths still use it; it is **not** occurrence-level Exact Auto evidence and must not prevent applying a FIRED event.
 - Per-dose truth for consumption/skip remains `doseConsumptionHistory` / `doseSkippedHistory`.
 - Medication-level `lastConsumedDate` does **not** mark an arbitrary dose occurrence as consumed when `doseSchedule` is missing.
 
@@ -258,12 +257,12 @@ Clearing the JS envelope after durable application does **not** imply every nati
 
 ---
 
-## Committed stock vs effective balance
+## Durable stock balance
 
-- **`currentPills`:** committed, persisted application snapshot.
-- **`effectiveCurrentPills`:** derived projection (snapshot minus still-due auto amounts given markers and schedule). It is **not** an independent durable stock source of truth.
+- **`currentPills`:** committed, persisted application stock balance — the single source of truth for inventory.
+- There is **no** read-time elapsed-days projection and **no** separate projected stock balance. Automatic stock mutations come only from Exact FIRED occurrences (plus explicit manual paths).
 
-After an exact occurrence is applied, markers remove that slot from due helpers so projection does not subtract the same occurrence again on top of the snapshot.
+After an exact occurrence is applied, markers and deterministic exact-auto logs keep reconciliation idempotent so the same occurrence is not subtracted twice.
 
 ---
 
@@ -294,7 +293,7 @@ After an exact occurrence is applied, markers remove that slot from due helpers 
 5. Stock mutations for auto paths load **fresh durable state** inside the mutation gate.
 6. Mutating reconcile persists JS state before relying on successful native acknowledgement; failed marks remain safely retryable.
 7. Duplicate reconciliation is idempotent for stock and exact-auto logs.
-8. `effectiveCurrentPills` is a projection over committed state, not a second ledger.
+8. `currentPills` is the sole durable stock balance; there is no separate projected ledger.
 9. Android device/emulator field verification of the full path is tracked explicitly (see below)—not implied by unit coverage alone.
 
 ---

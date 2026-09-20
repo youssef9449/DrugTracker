@@ -121,9 +121,9 @@ export function isDoseSkippedOnDate(
 }
 
 /**
- * Record that `doseId` was restored/skipped on `dateStr` so auto-sync
- * and projection will not re-deduct that slot for that date.
- * Idempotent per doseId+date.
+ * Record that `doseId` was restored/skipped on `dateStr` so the same
+ * occurrence is not treated as still due for Exact Auto deduction.
+ * Idempotent per doseId+date; does not itself change durable `currentPills`.
  */
 export function recordDoseSkipped(
   med: Medication,
@@ -175,7 +175,8 @@ export function dailyScheduleAmount(med: Medication): number {
 
 /**
  * Days of stock remaining from durable `currentPills` and the current
- * schedule rate. Does NOT subtract elapsed-day settlement or uncommitted-dose projection (Issue #266).
+ * schedule rate only (Issue #266). Does not invent deductions from elapsed
+ * calendar days.
  */
 export function daysLeftFromCurrentStock(med: Medication): number {
   const dayAmt = dailyScheduleAmount(med);
@@ -226,8 +227,8 @@ export function formatLogTime(timestamp?: string | number): string {
 
 
 /**
- * Depletion date from durable `Medication.currentPills` only (Issue #266).
- * No elapsed-day / projected-dose settlement.
+ * Depletion date from durable `Medication.currentPills` and the current
+ * schedule rate only (Issue #266).
  */
 export function getDepletionDate(med: Medication): {
   dateStr: string;
@@ -269,7 +270,7 @@ export function getDepletionDate(med: Medication): {
 
 /**
  * Future critical-threshold crossing from durable `currentPills` and the
- * current schedule rate. No elapsed-day settlement is applied (Issue #266).
+ * current schedule rate (Issue #266). Calendar days alone do not change stock.
  * Returns null when already critical, no rate, or Auto OFF (frozen stock).
  */
 export function getCriticalAlarmDate(

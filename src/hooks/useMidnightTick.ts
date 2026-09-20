@@ -4,11 +4,12 @@ import { useEffect, useState } from 'react';
  * Returns a counter that increments once per local calendar-day rollover
  * (midnight in the device's local timezone) while the app stays open.
  *
- * The dynamic stock projection and the exact-auto scheduler both compute
- * "today" from the wall clock at effect-run time, but those effects only re-run
- * on hydration/resume/config change. While the app sits open across midnight,
- * this tick re-runs them at the boundary so the new calendar day is projected
- * and scheduled without waiting for the next resume.
+ * Effects that depend on the current calendar date (Exact Auto scheduling,
+ * reconciliation, and related date-bound work) compute "today" from the wall
+ * clock at effect-run time, but only re-run on hydration/resume/config change.
+ * While the app stays open across midnight, this tick fires at the day boundary
+ * so those consumers re-run for the new calendar date without waiting for the
+ * next resume.
  *
  * Implementation notes:
  * - One self-correcting timer, re-armed from the current wall clock after

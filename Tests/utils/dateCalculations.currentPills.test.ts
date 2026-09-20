@@ -33,7 +33,7 @@ afterEach(() => {
 });
 
 describe('Issue #266 — durable currentPills is sole live stock', () => {
-  it('old elapsed-day settlement does not reduce live stock or daysLeft', () => {
+  it('calendar days alone do not reduce durable currentPills or daysLeft', () => {
     const med = makeMed({
       currentPills: 100,
       dailyDose: 10,
@@ -59,7 +59,7 @@ describe('Issue #266 — durable currentPills is sole live stock', () => {
     expect(calculateMedicationStatus(med).daysLeft).toBe(4);
   });
 
-  it('Auto OFF never creates projected subtraction from currentPills', () => {
+  it('Auto OFF does not subtract from currentPills without a durable deduction', () => {
     const med = makeMed({
       currentPills: 20,
       autoDeductEnabled: false,
@@ -83,7 +83,7 @@ describe('Issue #266 — durable currentPills is sole live stock', () => {
     expect(med.currentPills).toBe(15);
   });
 
-  it('critical alarm date does not depend on elapsed-day settlement alone', () => {
+  it('critical alarm date is derived from durable currentPills and schedule rate', () => {
     const base = {
       currentPills: 100,
       dailyDose: 10,

@@ -18,23 +18,30 @@ public final class AutoDeductionLifecycle {
 
     /**
      * Promote pending-fire records, then restore schedules from durable metadata
-     * when exact-alarm permission allows. Past snapshots use multi-day catch-up
+     * when the shared lifecycle dispatcher reports exact-alarm permission available. Past snapshots use multi-day catch-up
      * (Issue #243): every due occurrence is recovered as FIRED (no horizon), then
      * the first future occurrence is installed.
      */
-    public static void promoteAndRestore(Context context, String reason) {
+    public static void promoteAndRestore(
+            Context context,
+            String reason,
+            boolean exactAlarmPermissionGranted) {
         try {
             AutoDeductionEventStore store = new AutoDeductionEventStore(context);
             int promoted = store.promotePendingFiresResult().promoted;
             if (promoted > 0) {
                 Log.i(TAG, reason + ": promoted " + promoted + " pending-fire record(s)");
             }
-            AutoDeductionScheduler scheduler = new AutoDeductionScheduler(context);
-            if (!scheduler.canScheduleExactAlarms()) {
-                Log.w(TAG, reason + ": exact alarm permission not granted — skip restore");
+            if (!exactAlarmPermissionGranted) {
+                Log.w(TAG, reason
+                        + ": exact alarm permission not granted — skip alarm restore");
                 return;
             }
-            AutoDeductionScheduler.RestoreResult rr = scheduler.restoreFutureSchedules();
+
+            AutoDeductionScheduler scheduler =
+                    new AutoDeductionScheduler(context);
+            AutoDeductionScheduler.RestoreResult rr =
+                    scheduler.restoreFutureSchedules();
             if (rr.ok) {
                 Log.i(TAG, reason + ": restored " + rr.restored
                         + " future auto-deduction alarms (failed=" + rr.failed + ")");

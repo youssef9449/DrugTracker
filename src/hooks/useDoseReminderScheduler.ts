@@ -8,7 +8,6 @@ import {
   isDoseReminderPending,
   isNativeDoseReminderReArmed,
   isDoseReminderTimeStillAhead,
-  doseReminderAlarmIdForDose,
   cancelStaleDoseReminderAlarms,
 } from '../utils/notifications';
 import { clearSnoozedDose } from '../utils/doseReminderStorage';
@@ -214,7 +213,7 @@ export function useDoseReminderScheduler({
     }
 
     const stillScheduled = new Set<string>();
-    const keepNativeIds = new Set<number>();
+    const keepNativeIds = new Set<string>();
     const today = getTodayDateString();
 
     type DesiredSlot = {
@@ -250,8 +249,7 @@ export function useDoseReminderScheduler({
           isAutoActive ? '1' : '0',
         ].join('|');
         stillScheduled.add(key);
-        const nid = doseReminderAlarmIdForDose(slot.medId, slot.doseId);
-        if (nid != null) keepNativeIds.add(nid);
+        keepNativeIds.add(key);
         desired.push({
           key,
           medId: slot.medId,

@@ -219,7 +219,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
 
   const handleToggleAutoDeduct = (medicationId: string) => {
     // Phase 4: durable gate — settlement from React snapshot is forbidden.
-    // Exact FIRED reconciliation runs inside the gate before legacy toggle settle.
+    // Exact FIRED reconciliation runs inside the gate before the current toggle mutation.
     void (async () => {
       const result = await runGatedAutoDeductToggle({
         medicationId,

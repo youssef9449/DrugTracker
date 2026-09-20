@@ -1,6 +1,6 @@
 /**
  * Regression: durable native FIRED amount must win over current schedule amount
- * when exact reconciliation runs before any legacy settlement path.
+ * when exact reconciliation runs before any gated mutation path.
  * Also covers runGatedMedicationUpdate pruning and global toggle ordering.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -119,7 +119,7 @@ function mockExactFirst(
     });
 }
 
-describe('exact FIRED amount precedes legacy settlement', () => {
+describe('exact FIRED amount precedes gated mutation', () => {
   let durable: { medications: Medication[]; logs: ConsumptionLog[] };
   let seqCounter: { n: number };
 
@@ -185,8 +185,8 @@ describe('exact FIRED amount precedes legacy settlement', () => {
     const exactId = exactAutoLogId('med-1', 'd1', '2026-09-14');
     expect(recon.logs.some((l) => l.id === exactId)).toBe(true);
 
-    // The legacy day-based catch-up (syncAutoDailyDeductions) was removed
-    // (Issue #268 / PR #271); there is no second automatic deduction at all.
+    // Day-based catch-up (syncAutoDailyDeductions) was removed
+    // (Issue #268 / PR #271); there is no second automatic deduction after Exact FIRED reconciliation.
     // A second reconciliation re-listing the same FIRED finds the durable
     // exact log + consume marker → already_applied → no double-charge (8).
     const recon2 = await runAutoDeductionReconciliation({
@@ -236,7 +236,7 @@ describe('exact FIRED amount precedes legacy settlement', () => {
 
   it('per-med toggle: exact amount 2 applied first; final stock is 8', async () => {
     const callOrder: string[] = [];
-    // lastSync yesterday so legacy settlement WOULD charge schedule amount=1
+    // lastSync yesterday so a day-based charge of schedule amount=1 would
     // if it ran before exact — wrong order yields 7 (10-1-2), correct order yields 8.
     durable.medications = [
       baseMed({
@@ -255,8 +255,8 @@ describe('exact FIRED amount precedes legacy settlement', () => {
     });
     expect(callOrder[0]).toBe('exact');
     expect(result.outcome).toBe('applied');
-    // exact-first: 10→8; same occurrence already applied so legacy must not charge 1 → 8
-    // legacy-first would be 10→9 then exact →7
+    // exact-first: 10→8; same occurrence already applied so no second deduction → 8
+    // mutation-first would be 10→9 then exact →7
     expect(result.medications[0].currentPills).toBe(8);
     const exactLogs = result.logs.filter(
       (l) => l.id === exactAutoLogId('med-1', 'd1', '2026-09-14')
@@ -277,7 +277,7 @@ describe('exact FIRED amount precedes legacy settlement', () => {
   });
 });
 
-describe('runGatedGlobalAutoDeductToggle exact-before-legacy', () => {
+describe('runGatedGlobalAutoDeductToggle exact-before-mutation', () => {
   let durable: { medications: Medication[]; logs: ConsumptionLog[] };
   let seqCounter: { n: number };
 
@@ -311,7 +311,7 @@ describe('runGatedGlobalAutoDeductToggle exact-before-legacy', () => {
     expect(callOrder[0]).toBe('exact');
     expect(result.outcome).toBe('applied');
     expect(result.enable).toBe(false);
-    // exact-first → 8; legacy-first would yield 7
+    // exact-first → 8; mutation-first would yield 7
     expect(result.medications[0].currentPills).toBe(8);
     expect(result.medications[0].autoDeductEnabled).toBe(false);
     const exactLogs = result.logs.filter(
@@ -475,7 +475,7 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
   });
 });
 
-describe('gated paths call exact reconciliation before legacy settlement', () => {
+describe('gated paths call exact reconciliation before mutation', () => {
   let durable: { medications: Medication[]; logs: ConsumptionLog[] };
   let seqCounter: { n: number };
 
@@ -490,7 +490,7 @@ describe('gated paths call exact reconciliation before legacy settlement', () =>
 
   afterEach(() => clearHooks());
 
-  it('runGatedAutoDeductToggle: exact first yields stock 8 (legacy-first would be 7)', async () => {
+  it('runGatedAutoDeductToggle: exact first yields stock 8 (mutation-first would be 7)', async () => {
     const callOrder: string[] = [];
     durable.medications = [
       baseMed({
@@ -565,7 +565,7 @@ describe('gated paths call exact reconciliation before legacy settlement', () =>
  * Medication's CURRENT doseSchedule.
  *
  * The pre-PR block here used a no-`doseSchedule` fixture to prove the
- * exact-before-legacy ordering under the old contract (Exact was a no-op for
+ * exact-before-mutation ordering under the current contract (Exact was a no-op for
  * a no-schedule med). That contract was wrong: a FIRED Exact occurrence is
  * durable — the native AlarmManager created it at schedule time with
  * identity (medicationId + doseId + calendarDate) and `event.amount`. Editing
@@ -576,7 +576,7 @@ describe('gated paths call exact reconciliation before legacy settlement', () =>
  *
  * These tests assert the new contract: a FIRED event for a dose that is no
  * longer in the current schedule still applies `event.amount` exactly once,
- * with no Legacy Single-Dose fallback (amount is event.amount, NOT dailyDose
+ * with no Single-Dose fallback (amount is event.amount, NOT dailyDose
  * and NOT the current schedule amount).
  */
 describe('FIRED durable after schedule edit/remove (#268 / PR #271)', () => {

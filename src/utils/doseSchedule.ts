@@ -278,8 +278,8 @@ export function isDoseTimeElapsedToday(
  * Returns true if a dose slot is completed today (either manually consumed or auto-deducted because its time elapsed).
  *
  * Auto-elapsed completion uses the effective Auto-Deduct state when provided
- * (`autoDeductActive`), otherwise falls back to medication-level
- * `autoDeductEnabled !== false` for backward-compatible callers.
+ * (`autoDeductActive`); when the option is omitted,
+ * `autoDeductEnabled !== false` uses the current default.
  * Effective state must come from {@link isMedicationAutoDeductActive}
  * (medication.autoDeductEnabled only — Global is not a kill switch).
  */

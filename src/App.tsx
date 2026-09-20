@@ -256,7 +256,7 @@ export default function App() {
   // gated mutation and overwrite the committed durable state.
   //
   // Hydration remains responsible for the initial read; every post-hydration
-  // mutation path (add/edit/delete/take/restore/refill/undo/exact/legacy)
+  // mutation path (add/edit/delete/take/restore/refill/undo/exact)
   // commits through the same gate.
 
   // M12: pharmacy settings are written via a 400ms debounce so rapid

@@ -12,7 +12,7 @@ Current-state technical specification for DrugTracker’s exact-time automatic d
 | Durable native event store | `AutoDeductionEventStore.java` |
 | Exact alarm install / cancel / boot restore | `AutoDeductionScheduler.java` |
 | Exact-alarm delivery receiver (background-threaded via `goAsync`, bounded fire-persistence retry) | `AutoDeductionReceiver.java` |
-| Shared boot / timezone / exact-permission receiver | `native-android/alarm-runtime/ExactAlarmSystemReceiver.java` |
+| Shared boot / timezone / exact-permission receiver | `native-android/alarm-runtime/DrugTrackerAlarmSystemReceiver.java` |
 | Capacitor plugin | `AutoDeductionPlugin.java` |
 | Pure reconcile / apply | `src/utils/autoDeductionReconciliation.ts` |
 | Orchestration, envelope, marks | `src/utils/runAutoDeductionReconciliation.ts` |
@@ -312,11 +312,11 @@ Shared exact-alarm runtime owns timing mechanics, AlarmManager install/cancel, P
 
 ### Exact-alarm permission lifecycle
 
-- Schedule paths require `canScheduleExactAlarms()` (API 31+).
+- Schedule paths use the shared exact-alarm capability check on API 31+.
 - Manifest registers `SCHEDULE_EXACT_ALARM` and `RECEIVE_BOOT_COMPLETED`.
 - **Receiver separation (security):**
   - `AutoDeductionReceiver` — `ACTION_AUTO_DEDUCTION` only, `android:exported="false"` (explicit AlarmManager PendingIntent).
-  - `ExactAlarmSystemReceiver` — shared `BOOT_COMPLETED` / `QUICKBOOT_POWERON` / `TIMEZONE_CHANGED` / `ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED`, `android:exported="true"` (system broadcasts on API 31+). Dispatches to `AutoDeductionAlarmFeature`, which invokes `AutoDeductionLifecycle.promoteAndRestore`.
+  - `DrugTrackerAlarmSystemReceiver` — the single shared system lifecycle receiver for `BOOT_COMPLETED`, `QUICKBOOT_POWERON`, `TIMEZONE_CHANGED`, and `SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED`, `android:exported="true"`. `ExactAlarmLifecycle` performs the single exact-alarm capability check and dispatches that result through feature adapters.
 - On `TIMEZONE_CHANGED`, future alarms are rebuilt from durable schedule metadata using the current default timezone (`calendarDate` + `timeHhmm`); historical FIRED/RECONCILED events are not altered and occurrence identity is unchanged.
 - JS desired-state reconciliation lists native schedule metadata via `listScheduledOccurrences` and cancels keys not in the desired set (avoids resurrecting stale schedules after process restart). System restore is **not** invoked on every JS schedule pass.
 

@@ -15,6 +15,7 @@
 
 import type { CriticalNotificationClaim } from '../types';
 import { loadJson, saveJson } from './storage';
+import { OperationQueue } from './async/OperationQueue';
 
 export const CRITICAL_CLAIMS_STORAGE_KEY = 'android_med_tracker_critical_claims_v3';
 
@@ -101,19 +102,15 @@ export function claimsEqual(
 // around their operations (see useCriticalAlarmScheduler).
 // ─────────────────────────────────────────────────────────────────────
 
-const alarmChains = new Map<string, Promise<void>>();
+const criticalAlarmOperationQueue = new OperationQueue<string>();
 
 /**
- * Append an async native-alarm operation to the per-medication chain.
- * The operation runs only after every previously-enqueued operation for
- * this medication has settled.
+ * Append an async native-alarm operation to the per-medication queue.
+ * Business ownership/generation rules remain in the calling feature code.
  */
-export function enqueueCriticalAlarmOp(medId: string, op: () => Promise<void>): Promise<void> {
-  const prev = alarmChains.get(medId) ?? Promise.resolve();
-  const next = prev.then(op, op); // run whether prev resolved or rejected
-  alarmChains.set(medId, next);
-  // Swallow the stored tail's rejection so it never surfaces as an
-  // unhandled rejection; ops catch their own errors.
-  next.catch(() => undefined);
-  return next;
+export function enqueueCriticalAlarmOp(
+  medId: string,
+  op: () => Promise<void>
+): Promise<void> {
+  return criticalAlarmOperationQueue.enqueue(medId, op);
 }

@@ -516,6 +516,17 @@ Each scheduler decides:
 
 There must not be one generic business-state scheduler that attempts to understand all three domains.
 
+## 11.3 Shared JavaScript async primitives
+
+The repeated async hygiene used by Auto Deduction, Dose Reminder, and Critical Stock is implemented with two small utilities:
+
+- `src/utils/async/OperationQueue.ts` — keyed promise serialization. Each feature chooses its own key granularity.
+- `src/utils/async/GenerationGuard.ts` — keyed in-memory generation counters for stale-operation checks.
+
+The feature hooks use these primitives directly. `criticalNotificationClaims.ts` keeps its existing `enqueueCriticalAlarmOp` feature-facing function, but delegates its queueing to `OperationQueue`.
+
+These utilities contain no medication state machine, recurrence policy, stock logic, notification policy, or other feature-specific business rules. Do not introduce a universal scheduler abstraction such as `UniversalMedicationScheduler<TBusinessState>`.
+
 ---
 
 # 12. Permission contract

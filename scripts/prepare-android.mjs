@@ -7,10 +7,11 @@ import { fileURLToPath } from 'node:url';
  *
  * 1. Ensure SCHEDULE_EXACT_ALARM in AndroidManifest.xml
  * 2. Remove legacy dose_reminder.wav (v3 uses system default sound)
- * 3. Install repository-owned notification delivery sources:
- *    - TimedNotificationPublisher.java  (Capacitor 6.1.3 + delivery channel)
- *    - AppForegroundState.java          (process-local lifecycle flag)
- *    - MainActivity.java                (onResume/onPause → AppForegroundState)
+ * 3. Install repository-owned shared notification runtime sources:
+ *    - NotificationRuntime.java
+ *    - NotificationRuntimeActionReceiver.java
+ *    - NotificationRuntimePlugin.java
+ *    - AppForegroundState.java
  *
  * Whole-file copies only. No string/regex patching of dependency source.
  * Fails hard if required destinations are missing.

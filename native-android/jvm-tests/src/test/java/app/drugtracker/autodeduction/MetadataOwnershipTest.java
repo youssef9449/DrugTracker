@@ -32,12 +32,19 @@ public class MetadataOwnershipTest {
 
     @Test
     public void isMetadataOwnedByVersion_matchesExactScheduleVersion() {
-        String json = "{\"scheduleVersion\":\"1000-1-aaa\",\"amount\":1}";
+        String json = "{\"operationVersion\":\"1000-1-aaa\",\"amount\":1}";
         assertTrue(AutoDeductionScheduler.isMetadataOwnedByVersion(json, "1000-1-aaa"));
         assertFalse(AutoDeductionScheduler.isMetadataOwnedByVersion(json, "1000-2-bbb"));
         assertFalse(AutoDeductionScheduler.isMetadataOwnedByVersion(null, "1000-1-aaa"));
         assertFalse(AutoDeductionScheduler.isMetadataOwnedByVersion(json, null));
         assertFalse(AutoDeductionScheduler.isMetadataOwnedByVersion("{bad", "1000-1-aaa"));
+    }
+
+    @Test
+    public void legacyScheduleVersionRemainsReadable() {
+        String json = "{"scheduleVersion":"1000-7-legacy","amount":1}";
+        assertTrue(AutoDeductionScheduler.isMetadataOwnedByVersion(
+                json, "1000-7-legacy"));
     }
 
     @Test
@@ -69,7 +76,7 @@ public class MetadataOwnershipTest {
         String prefKey = schKey(key);
         String raw = schedulePrefs().getString(prefKey, null);
         assertNotNull(raw);
-        String v1 = new JSONObject(raw).getString("scheduleVersion");
+        String v1 = new JSONObject(raw).getString("operationVersion");
 
         // Stale observed version must not delete a newer (or still v1-mismatched) row
         // when the expected token does not match — ownership-safe remove.
@@ -90,12 +97,12 @@ public class MetadataOwnershipTest {
 
         String key = AutoDeductionContract.occurrenceKey("med", "dose", date);
         String prefKey = schKey(key);
-        String v1 = new JSONObject(schedulePrefs().getString(prefKey, "{}")).getString("scheduleVersion");
+        String v1 = new JSONObject(schedulePrefs().getString(prefKey, "{}")).getString("operationVersion");
 
         // Newer legitimate schedule replaces metadata (new scheduleVersion).
         assertTrue(s.scheduleOccurrence(
                 "med", "dose", date, "11:00", 2.0, futureEpochMs(date, "11:00")).ok);
-        String v2 = new JSONObject(schedulePrefs().getString(prefKey, "{}")).getString("scheduleVersion");
+        String v2 = new JSONObject(schedulePrefs().getString(prefKey, "{}")).getString("operationVersion");
         assertFalse(v1.equals(v2));
 
         // Stale snapshot still holding v1 must not delete the v2 row (#219).

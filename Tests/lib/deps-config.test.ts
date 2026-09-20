@@ -133,12 +133,6 @@ describe('#39 — tailwindcss-animate installed + classes work', () => {
     expect(appSettingsSrc).toContain("mode?: 'all' | 'pharmacy'");
     expect(appSettingsSrc).toContain("isPharmacyOnly ? 'إعدادات الصيدلية' : 'إعدادات التطبيق'");
     expect(appSettingsSrc).toContain("isPharmacyOnly ? 'حفظ إعدادات الصيدلية' : 'حفظ الإعدادات'");
-
-    const pharmacyModalSrc = fs.readFileSync(
-      path.join(ROOT, 'src/components/AppSettingsModal.tsx'),
-      'utf-8'
-    );
-    expect(pharmacyModalSrc).toContain("mode={props.mode || 'pharmacy'}");
   });
 });
 

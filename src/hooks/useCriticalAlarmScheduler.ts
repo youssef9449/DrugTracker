@@ -20,7 +20,6 @@ import {
  */
 export interface UseCriticalAlarmSchedulerOptions {
   medications: Medication[];
-  notificationsEnabled: boolean;
   criticalStockAlertsEnabled: boolean;
   hydrated: boolean;
   isFirstRun: boolean;
@@ -84,13 +83,14 @@ export interface UseCriticalAlarmSchedulerOptions {
  *     ending the business episode (clearing the claim) is the foreground
  *     hook's synchronous job (useStockAlerts).
  *
- *   Flags disabled (either notificationsEnabled or
- *   criticalStockAlertsEnabled false):
+ *   criticalStockAlertsEnabled false:
  *     cancel every possibly-armed critical alarm (this session's and any
  *     left over from a previous session, found via the claim map). No
  *     claim writes — the claim's business lifecycle belongs to
  *     useStockAlerts (a Sufficient med's claim is cleared there
  *     synchronously; re-enabling re-arms from a clean slate).
+ *     Dose-reminder preference (notificationsEnabled) does not gate
+ *     critical alarms.
  *
  *   Deleted medications: their alarms are cancelled (their claim entries
  *   are removed by the foreground hook).
@@ -147,7 +147,6 @@ export interface UseCriticalAlarmSchedulerOptions {
  */
 export function useCriticalAlarmScheduler({
   medications,
-  notificationsEnabled,
   criticalStockAlertsEnabled,
   hydrated,
   isFirstRun,
@@ -204,7 +203,8 @@ export function useCriticalAlarmScheduler({
 
     // ── Flags disabled: cancel every possibly-armed alarm ──
     // ── (claim writes belong to the foreground hook) ──
-    if (!notificationsEnabled || !criticalStockAlertsEnabled) {
+    // Gated only by critical-stock preference (independent of dose reminders).
+    if (!criticalStockAlertsEnabled) {
       const ids = new Set([
         ...scheduledCriticalIdsRef.current,
         ...Object.keys(loadCriticalNotificationClaims()),
@@ -361,7 +361,6 @@ export function useCriticalAlarmScheduler({
     scheduledCriticalIdsRef.current = stillScheduled;
   }, [
     criticalSignature,
-    notificationsEnabled,
     criticalStockAlertsEnabled,
     hydrated,
     isFirstRun,

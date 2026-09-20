@@ -1,6 +1,6 @@
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { ConsumptionLogView } from '@/components/ConsumptionLogView';
 import type { Medication, ConsumptionLog, MedicationDose } from '@/types';
 
@@ -51,9 +51,19 @@ describe('ConsumptionLogView', () => {
 
     expect(screen.getByText('سجل الاستهلاك')).toBeInTheDocument();
     expect(screen.getByText('متابعة جرعاتك المسجلة وحركات المخزون')).toBeInTheDocument();
+    // Initial scheduleMode is monthly — only that heading is shown.
     expect(screen.getByText('الجرعات المجدولة شهرياً')).toBeInTheDocument();
-    expect(screen.getByText('الجرعات المجدولة يومياً')).toBeInTheDocument();
+    expect(screen.queryByText('الجرعات المجدولة يومياً')).not.toBeInTheDocument();
+    // SegmentedButton labels
+    expect(screen.getByText('الجرعة الشهرية')).toBeInTheDocument();
+    expect(screen.getByText('الجرعة اليومية')).toBeInTheDocument();
     expect(screen.getByText('سجل العمليات:')).toBeInTheDocument();
+
+    // Switch to daily mode — heading updates; no-schedule med still shows 0.
+    fireEvent.click(screen.getByText('الجرعة اليومية'));
+    expect(screen.getByText('الجرعات المجدولة يومياً')).toBeInTheDocument();
+    expect(screen.queryByText('الجرعات المجدولة شهرياً')).not.toBeInTheDocument();
+    expect(screen.getByText('0')).toBeInTheDocument();
 
     // Removed / legacy phrases must not appear
     expect(screen.queryByText('تاريخ آخر مزامنة')).not.toBeInTheDocument();

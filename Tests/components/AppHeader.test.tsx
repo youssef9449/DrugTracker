@@ -77,3 +77,36 @@ describe('AppHeader — no sound management (moved to settings)', () => {
     expect(screen.getByText('حساب استهلاك الأدوية وتنبيهات النفاذ تلقائياً')).toBeInTheDocument();
   });
 });
+
+describe('AppHeader — independent dose reminder vs critical stock toggles', () => {
+  afterEach(() => cleanup());
+
+  it('can show dose reminders OFF and critical stock ON at the same time', () => {
+    const onToggleNotifications = vi.fn();
+    const onToggleCriticalStockAlerts = vi.fn();
+    renderHeader({
+      notificationsEnabled: false,
+      criticalStockAlertsEnabled: true,
+      onToggleNotifications,
+      onToggleCriticalStockAlerts,
+    });
+
+    const doseBtn = screen.getByRole('button', {
+      name: 'تذكيرات مواعيد الجرعات متوقفة — انقر للتفعيل',
+    });
+    const criticalBtn = screen.getByRole('button', {
+      name: 'تنبيه النفاذ الحرج مفعّل',
+    });
+
+    expect(doseBtn).toHaveAttribute('aria-pressed', 'false');
+    expect(criticalBtn).toHaveAttribute('aria-pressed', 'true');
+
+    doseBtn.click();
+    expect(onToggleNotifications).toHaveBeenCalledTimes(1);
+    expect(onToggleCriticalStockAlerts).not.toHaveBeenCalled();
+
+    criticalBtn.click();
+    expect(onToggleCriticalStockAlerts).toHaveBeenCalledTimes(1);
+    expect(onToggleNotifications).toHaveBeenCalledTimes(1);
+  });
+});

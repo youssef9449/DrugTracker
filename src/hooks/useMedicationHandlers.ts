@@ -66,7 +66,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     medications,
     soundEnabled,
     globalAutoDeductEnabled,
-    notificationsEnabled,
     criticalStockAlertsEnabled,
     selectDoseMode,
     setMedications,
@@ -590,11 +589,9 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
   // #79: extracted from two byte-identical inline handlers passed to
   // AppHeader and AppSettingsModal. useCallback so both props get the
   // same stable reference.
-  // handleToggleCriticalStockAlerts must be async because it requests
-  // notification permission when turning ON. Previously it was a sync
-  // useCallback that always flipped the toggle on without checking
-  // permission — now it requests permission first and does NOT activate
-  // if the user denies.
+  // Critical-stock alerts are independent of dose-reminder preference.
+  // Turning ON only requires OS notification permission; it must NOT
+  // flip notificationsEnabled (dose-time reminders).
   const handleToggleCriticalStockAlerts = useCallback(async () => {
     const next = !criticalStockAlertsEnabled;
     if (!next) {
@@ -604,33 +601,29 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       return;
     }
 
-    // Turning ON — ensure notification permission is granted first.
-    // If notifications aren't enabled yet (or permission is missing),
-    // request it. On denial, do NOT activate the toggle.
-    if (!notificationsEnabled) {
-      let pushAllowed = false;
-      try {
-        const currentPerm = await getNotificationPermission();
-        if (currentPerm === 'granted') {
-          pushAllowed = true;
-        } else if (currentPerm === 'default') {
-          pushAllowed = await requestNotificationPermission();
-        }
-      } catch (err) {
-        console.warn('[App] Notification permission error (critical toggle):', err);
+    // Turning ON — ensure OS notification permission is granted.
+    // On denial/error, do NOT activate the toggle. Never mutate
+    // notificationsEnabled here (dose reminders stay independent).
+    let pushAllowed = false;
+    try {
+      const currentPerm = await getNotificationPermission();
+      if (currentPerm === 'granted') {
+        pushAllowed = true;
+      } else if (currentPerm === 'default') {
+        pushAllowed = await requestNotificationPermission();
       }
-      if (!pushAllowed) {
-        showToast(TOAST_MESSAGES.notificationsPermissionDenied);
-        return;
-      }
-      // Permission granted → also flip the notifications toggle on.
-      setNotificationsEnabled(true);
+    } catch (err) {
+      console.warn('[App] Notification permission error (critical toggle):', err);
+    }
+    if (!pushAllowed) {
+      showToast(TOAST_MESSAGES.notificationsPermissionDenied);
+      return;
     }
 
     setCriticalStockAlertsEnabled(true);
     if (soundEnabled) playSuccessChime();
     showToast(TOAST_MESSAGES.criticalAlertsOn);
-  }, [criticalStockAlertsEnabled, notificationsEnabled, soundEnabled, showToast, setCriticalStockAlertsEnabled, setNotificationsEnabled]);
+  }, [criticalStockAlertsEnabled, soundEnabled, showToast, setCriticalStockAlertsEnabled]);
 
   // #88: Single memoized medications-with-status array. Previously
   // calculateMedicationStatus(med) was recomputed in 4 separate memos

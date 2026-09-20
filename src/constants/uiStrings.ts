@@ -27,18 +27,18 @@ export const TOAST_MESSAGES = {
     `تم استرجاع جرعة "${name}" اليوم بالفعل.`,
 
   // Critical-stock toggle
-  criticalAlertsOn: 'تم تفعيل تنبيهات النفاذ الحرج ⚠️ (إشعار فوري عند اقتراب نفاد أي دواء أو نفاذه — حسب إعداد كل دواء)',
+  criticalAlertsOn: 'تم تفعيل تنبيهات النفاذ الحرج (إشعار فوري عند اقتراب نفاد أي دواء أو نفاذه — حسب إعداد كل دواء)',
   criticalAlertsOff: 'تم إيقاف تنبيهات النفاذ الحرج',
 
   // Notification permission outcomes
   notificationsOn:
-    'تم تفعيل الإشعارات والتنبيهات بنجاح 🔔',
+    'تم تفعيل تذكيرات مواعيد الجرعات',
   notificationsPermissionDenied:
-    'تعذّر الحصول على إذن الإشعارات ❌ — يرجى السماح بالإشعارات من إعدادات الجهاز ثم إعادة المحاولة',
-  notificationsOff: 'تم إيقاف الإشعارات والتنبيهات 🔕',
+    'تعذّر الحصول على إذن الإشعارات — يرجى السماح بالإشعارات من إعدادات الجهاز ثم إعادة المحاولة',
+  notificationsOff: 'تم إيقاف تذكيرات مواعيد الجرعات',
 
   // Test notification
-  testNotificationSent: 'تم إرسال إشعار تجريبي وتشغيل صوت التنبيه بنجاح! 🔔',
+  testNotificationSent: 'تم إرسال إشعار تجريبي وتشغيل صوت التنبيه بنجاح!',
 
   // Auto-deduct
   autoDeductSummary: (totalPills: number) =>

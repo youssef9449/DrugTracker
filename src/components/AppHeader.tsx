@@ -97,13 +97,13 @@ export const AppHeader: FC<AppHeaderProps> = ({
             onClick={onToggleNotifications}
             title={
               notificationsEnabled
-                ? 'التنبيهات مفعلة (انقر للإيقاف المؤقت)'
-                : 'التنبيهات متوقفة (انقر لتفعيل التنبيهات والمنبه)'
+                ? 'تذكيرات مواعيد الجرعات مفعّلة (انقر للإيقاف)'
+                : 'تذكيرات مواعيد الجرعات متوقفة (انقر للتفعيل)'
             }
             aria-label={
               notificationsEnabled
-                ? 'التنبيهات مفعلة — انقر للإيقاف'
-                : 'التنبيهات متوقفة — انقر للتفعيل'
+                ? 'تذكيرات مواعيد الجرعات مفعّلة — انقر للإيقاف'
+                : 'تذكيرات مواعيد الجرعات متوقفة — انقر للتفعيل'
             }
             aria-pressed={notificationsEnabled}
             className={`p-2 rounded-xl transition active:scale-95 relative border ${

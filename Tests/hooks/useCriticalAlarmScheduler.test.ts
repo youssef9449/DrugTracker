@@ -76,7 +76,6 @@ function defaultOpts(
 ): UseCriticalAlarmSchedulerOptions {
   return {
     medications: [],
-    notificationsEnabled: true,
     criticalStockAlertsEnabled: true,
     hydrated: true,
     isFirstRun: false,
@@ -487,7 +486,7 @@ describe('useCriticalAlarmScheduler — never schedules for critical or frozen m
 });
 
 describe('useCriticalAlarmScheduler — opt-out and cleanup', () => {
-  it('cancels alarms when notifications are disabled and leaves claims to the foreground hook', async () => {
+  it('cancels alarms when critical-stock alerts are disabled and leaves claims to the foreground hook', async () => {
     const med = makeMed();
     const expectedT = getCriticalAlarmDate(med, getTodayDateString()) as number;
 
@@ -497,7 +496,7 @@ describe('useCriticalAlarmScheduler — opt-out and cleanup', () => {
     await flush();
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: expectedT });
 
-    rerender(defaultOpts({ medications: [med], notificationsEnabled: false }));
+    rerender(defaultOpts({ medications: [med], criticalStockAlertsEnabled: false }));
     await flush();
 
     expect(cancelMock).toHaveBeenCalledWith('med-1');
@@ -510,7 +509,7 @@ describe('useCriticalAlarmScheduler — opt-out and cleanup', () => {
   it('keeps consumed claims (foreground send / past alarm) on opt-out', async () => {
     writeClaims({ 'med-1': { claimed: true, alarmTime: null } });
     renderHook((props) => useCriticalAlarmScheduler(props), {
-      initialProps: defaultOpts({ medications: [makeMed()], notificationsEnabled: false }),
+      initialProps: defaultOpts({ medications: [makeMed()], criticalStockAlertsEnabled: false }),
     });
     await flush();
 
@@ -537,7 +536,7 @@ describe('useCriticalAlarmScheduler — opt-out and cleanup', () => {
     // notifications disabled — the claim map still names the med.
     writeClaims({ 'med-old': { claimed: true, alarmTime: Date.now() + 86_400_000 } });
     renderHook((props) => useCriticalAlarmScheduler(props), {
-      initialProps: defaultOpts({ medications: [], notificationsEnabled: false }),
+      initialProps: defaultOpts({ medications: [], criticalStockAlertsEnabled: false }),
     });
     await flush();
 

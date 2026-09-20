@@ -144,35 +144,31 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   };
 
   /**
-   * OFF → ON for critical-stock alerts: require notification permission when
-   * phone notifications are not already draft-on (matches home critical toggle).
-   * On success also enables draftNotifications when it was off.
+   * OFF → ON for critical-stock alerts: require OS notification permission.
+   * Independent of dose-reminder draft — never flips draftNotifications.
    */
   const handleDraftCriticalToggle = async () => {
     if (draftCritical) {
       setDraftCritical(false);
       return;
     }
-    if (!draftNotifications) {
-      let pushAllowed = false;
-      try {
-        const currentPerm = await getNotificationPermission();
-        if (currentPerm === 'granted') {
-          pushAllowed = true;
-        } else if (currentPerm === 'default') {
-          pushAllowed = await requestNotificationPermission();
-        }
-      } catch (err) {
-        console.warn(
-          '[AppSettingsModal] Notification permission error (critical toggle):',
-          err
-        );
+    let pushAllowed = false;
+    try {
+      const currentPerm = await getNotificationPermission();
+      if (currentPerm === 'granted') {
+        pushAllowed = true;
+      } else if (currentPerm === 'default') {
+        pushAllowed = await requestNotificationPermission();
       }
-      if (!pushAllowed) {
-        showToast?.(TOAST_MESSAGES.notificationsPermissionDenied);
-        return;
-      }
-      setDraftNotifications(true);
+    } catch (err) {
+      console.warn(
+        '[AppSettingsModal] Notification permission error (critical toggle):',
+        err
+      );
+    }
+    if (!pushAllowed) {
+      showToast?.(TOAST_MESSAGES.notificationsPermissionDenied);
+      return;
     }
     setDraftCritical(true);
   };
@@ -367,7 +363,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-800">التنبيهات وإشعارات الهاتف</span>
+                        <span className="text-xs font-bold text-slate-800">تذكيرات مواعيد الجرعات</span>
                         <span
                           className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
                             draftNotifications ? 'bg-amber-100 text-amber-900 border border-amber-300/50' : 'bg-slate-200 text-slate-700'
@@ -376,7 +372,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                           {draftNotifications ? 'مفعّلة' : 'متوقفة'}
                         </span>
                       </div>
-                      <p className="text-[10px] text-slate-500">منبه مواعيد الجرعات وتنبيهات المخزون</p>
+                      <p className="text-[10px] text-slate-500">تذكيرات الجرعات في المواعيد المحددة فقط</p>
                     </div>
                   </div>
                   <Toggle
@@ -385,8 +381,8 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     onChange={() => { void handleDraftNotificationsToggle(); }}
                     label={
                       draftNotifications
-                        ? 'التنبيهات مفعلة — انقر للإيقاف'
-                        : 'التنبيهات متوقفة — انقر للتفعيل'
+                        ? 'تذكيرات مواعيد الجرعات مفعّلة — انقر للإيقاف'
+                        : 'تذكيرات مواعيد الجرعات متوقفة — انقر للتفعيل'
                     }
                     color="amber"
                   />

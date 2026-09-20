@@ -9,7 +9,7 @@
  *  3. Refill Undo after Exact deductions: reverses only refill amount
  *     from durable balance, no re-settlement.
  *  4. Dose edit after several days: `currentPills` unchanged, no
- *     `auto_daily` log.
+ *     `exact_auto` log.
  *  5. Auto ON/OFF after several days: `currentPills` unchanged, no
  *     historical log.
  *  6. Exact Auto → Manual Take: no double deduction.
@@ -252,9 +252,9 @@ describe('#267 regression 2 — Refill after several days', () => {
     expect(durable.medications[0].currentPills).toBe(35);
     // lastSyncDate is NOT bumped (no settlement).
     expect(durable.medications[0].lastSyncDate).toBe('2026-09-10');
-    // A refill log is prepended (no auto_daily log).
+    // A refill log is prepended (no exact_auto log).
     expect(durable.logs.some((l) => l.id === 'refill-1' && l.type === 'refill')).toBe(true);
-    expect(durable.logs.some((l) => l.type === 'auto_daily')).toBe(false);
+    expect(durable.logs.some((l) => l.type === 'exact_auto')).toBe(false);
   });
 
   it('applyDurableStockDelta: pure helper adds the delta to currentPills only', () => {
@@ -320,10 +320,10 @@ describe('#267 regression 3 — Refill Undo after Exact deductions', () => {
 
 // ───────────────────────────────────────────────────────────────────────
 // 4. Dose edit after several days: `currentPills` unchanged, no
-//    `auto_daily` log.
+//    `exact_auto` log.
 // ───────────────────────────────────────────────────────────────────────
 describe('#267 regression 4 — Dose edit after several days', () => {
-  it('changes dailyDose/doseSchedule without changing currentPills or adding an auto_daily log', async () => {
+  it('changes dailyDose/doseSchedule without changing currentPills or adding an exact_auto log', async () => {
     installDurableState({
       medications: [med({ currentPills: 30, lastSyncDate: '2026-09-10' })],
       logs: [],
@@ -346,7 +346,7 @@ describe('#267 regression 4 — Dose edit after several days', () => {
       todayStr: TODAY,
     });
     expect(r.outcome).toBe('applied');
-    expect(r.settleLog).toBeNull(); // no auto_daily log
+    expect(r.settleLog).toBeNull(); // no exact_auto log
     // currentPills unchanged.
     expect(durable.medications[0].currentPills).toBe(30);
     // lastSyncDate unchanged.
@@ -354,8 +354,8 @@ describe('#267 regression 4 — Dose edit after several days', () => {
     // dailyDose + doseSchedule are updated.
     expect(durable.medications[0].dailyDose).toBe(6);
     expect(durable.medications[0].doseSchedule?.find((d) => d.id === 'd1')?.amount).toBe(3);
-    // No auto_daily log was created.
-    expect(durable.logs.some((l) => l.type === 'auto_daily')).toBe(false);
+    // No exact_auto log was created.
+    expect(durable.logs.some((l) => l.type === 'exact_auto')).toBe(false);
   });
 });
 
@@ -364,7 +364,7 @@ describe('#267 regression 4 — Dose edit after several days', () => {
 //    historical log.
 // ───────────────────────────────────────────────────────────────────────
 describe('#267 regression 5 — Auto ON/OFF after several days', () => {
-  it('toggle ON→OFF: flips the flag only (no stock change, no auto_daily log, no lastSyncDate change)', async () => {
+  it('toggle ON→OFF: flips the flag only (no stock change, no exact_auto log, no lastSyncDate change)', async () => {
     installDurableState({
       medications: [med({ currentPills: 30, lastSyncDate: '2026-09-10', autoDeductEnabled: true })],
       logs: [],
@@ -381,8 +381,8 @@ describe('#267 regression 5 — Auto ON/OFF after several days', () => {
     expect(durable.medications[0].currentPills).toBe(30);
     // lastSyncDate unchanged.
     expect(durable.medications[0].lastSyncDate).toBe('2026-09-10');
-    // No auto_daily log was created.
-    expect(durable.logs.some((l) => l.type === 'auto_daily')).toBe(false);
+    // No exact_auto log was created.
+    expect(durable.logs.some((l) => l.type === 'exact_auto')).toBe(false);
   });
 
   it('toggle OFF→ON: flips the flag only (no retroactive deduction, no log)', async () => {
@@ -402,8 +402,8 @@ describe('#267 regression 5 — Auto ON/OFF after several days', () => {
     expect(durable.medications[0].currentPills).toBe(30);
     // lastSyncDate unchanged.
     expect(durable.medications[0].lastSyncDate).toBe('2026-09-10');
-    // No auto_daily log was created.
-    expect(durable.logs.some((l) => l.type === 'auto_daily')).toBe(false);
+    // No exact_auto log was created.
+    expect(durable.logs.some((l) => l.type === 'exact_auto')).toBe(false);
   });
 });
 
@@ -503,15 +503,14 @@ describe('#267 regression 7 — Manual Take → Exact Auto: same occurrence not 
 // 8. Exact Auto → Restore: Restore amount = exact active log amount.
 // ───────────────────────────────────────────────────────────────────────
 describe('#267 regression 8 — Exact Auto → Restore: amount = exact active log amount', () => {
-  it('Restore reverses the auto_daily log amount (NOT the current schedule amount)', async () => {
+  it('Restore reverses the exact_auto log amount (NOT the current schedule amount)', async () => {
     // Med had Exact Auto FIRED with amount=2 for d1. Schedule d1 amount is 1.
-    // The auto_daily log records -2 (the exact FIRED amount).
+    // The exact_auto log records -2 (the exact FIRED amount).
     installDurableState({
       medications: [
         med({
           currentPills: 28, // 30 - 2 (the exact auto deduction)
           lastSyncDate: TODAY,
-          doseConsumption: { d1: TODAY },
           doseConsumptionHistory: { d1: [TODAY] },
           doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
         }),
@@ -526,15 +525,15 @@ describe('#267 regression 8 — Exact Auto → Restore: amount = exact active lo
       makeLogId: () => 'restore-1',
     });
     expect(r.outcome).toBe('applied');
-    // Restored amount = abs(auto_daily log amount) = 2 (the exact FIRED amount).
+    // Restored amount = abs(exact_auto log amount) = 2 (the exact FIRED amount).
     expect(r.restoredAmount).toBe(2);
     expect(durable.medications[0].currentPills).toBe(30); // 28 + 2
-    // The restore (skipped_day) log links to the reversed auto_daily log.
+    // The restore (skipped_day) log links to the reversed exact_auto log.
     const restoreLog = durable.logs.find((l) => l.id === 'restore-1');
     expect(restoreLog?.type).toBe('skipped_day');
     expect(restoreLog?.amount).toBe(2);
     expect(restoreLog?.relatedLogId).toBe(exactAutoLogId('med-1', 'd1', TODAY));
-    // The auto_daily log is marked reversed.
+    // The exact_auto log is marked reversed.
     expect(durable.logs.find((l) => l.id === exactAutoLogId('med-1', 'd1', TODAY))?.reversedAt).toBeTruthy();
   });
 });
@@ -551,7 +550,6 @@ describe('#267 regression 9 — Manual Take → Restore: amount = dose_taken amo
         med({
           currentPills: 27, // 30 - 3 (the manual Take)
           lastSyncDate: TODAY,
-          doseConsumption: { d1: TODAY },
           doseConsumptionHistory: { d1: [TODAY] },
           doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }], // current schedule is 1
         }),
@@ -575,7 +573,6 @@ describe('#267 regression 9 — Manual Take → Restore: amount = dose_taken amo
     const m = med({
       currentPills: 27,
       lastSyncDate: TODAY,
-      doseConsumption: { d1: TODAY },
       doseConsumptionHistory: { d1: [TODAY] },
       doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
     });
@@ -595,12 +592,11 @@ describe('#267 regression 9 — Manual Take → Restore: amount = dose_taken amo
 describe('#267 regression 10 — Schedule changed after Exact deduction: Restore uses historical log amount', () => {
   it('Schedule d1 amount changed 2→5 after exact deduction; Restore uses the historical 2', () => {
     // d1 schedule amount was 2 when the exact deduction happened. Now it's 5.
-    // The auto_daily log records -2. Restore must use 2 (the historical log
+    // The exact_auto log records -2. Restore must use 2 (the historical log
     // amount), not 5 (the current schedule amount).
     const m = med({
       currentPills: 28, // 30 - 2 (the exact deduction)
       lastSyncDate: TODAY,
-      doseConsumption: { d1: TODAY },
       doseConsumptionHistory: { d1: [TODAY] },
       doseSchedule: [{ id: 'd1', amount: 5, time: '08:00' }], // edited from 2
     });
@@ -620,7 +616,6 @@ describe('#267 regression 10 — Schedule changed after Exact deduction: Restore
     const m = med({
       currentPills: 28,
       lastSyncDate: TODAY,
-      doseConsumption: { d1: TODAY },
       doseConsumptionHistory: { d1: [TODAY] },
       doseSchedule: [{ id: 'd1', amount: 5, time: '08:00' }],
     });
@@ -678,7 +673,7 @@ describe('#267 regression 11 — Schedule removed after Exact FIRED: FIRED still
     // The consume marker for d1 today is preserved (pruned only by schedule).
     // After edit: no schedule → consume marker may be pruned too. The FIRED
     // event for d1 is still listed → reconciliation must still authoritative
-    // (already_applied because the auto_daily log already exists for d1+TODAY).
+    // (already_applied because the exact_auto log already exists for d1+TODAY).
     const next: Medication = {
       ...med(),
       currentPills: pillsAfterAuto,
@@ -686,7 +681,6 @@ describe('#267 regression 11 — Schedule removed after Exact FIRED: FIRED still
       dailyDose: 5,
       doseSchedule: [],
       dosesPerDay: 0,
-      doseConsumption: {},
       doseConsumptionHistory: {},
     };
     const edit = await runGatedMedicationUpdate({
@@ -699,7 +693,7 @@ describe('#267 regression 11 — Schedule removed after Exact FIRED: FIRED still
     // currentPills unchanged by the dose edit (no settlement).
     expect(durable.medications[0].currentPills).toBe(pillsAfterAuto);
 
-    // Second reconciliation: FIRED d1 is still listed. The auto_daily log
+    // Second reconciliation: FIRED d1 is still listed. The exact_auto log
     // already exists for (med-1, d1, TODAY) → already_applied (no fallback
     // to dailyDose=5, no second deduction).
     const recon2 = await runAutoDeductionReconciliation({
@@ -734,9 +728,9 @@ describe('#267 regression 12 — Multiple dose isolation', () => {
     const m = med({ currentPills: 30, lastSyncDate: TODAY });
     const r = consumeDose(m, 'manual', TODAY, new Date(`${TODAY}T15:00:00`), 'd1');
     expect(r.doseAmount).toBe(1); // d1 amount
-    expect(r.updatedMed?.doseConsumption?.d1).toBe(TODAY);
-    expect(r.updatedMed?.doseConsumption?.d2).toBeUndefined();
-    expect(r.updatedMed?.doseConsumption?.d3).toBeUndefined();
+    expect(r.updatedMed?.doseConsumptionHistory?.d1).toBe(TODAY);
+    expect(r.updatedMed?.doseConsumptionHistory?.d2).toBeUndefined();
+    expect(r.updatedMed?.doseConsumptionHistory?.d3).toBeUndefined();
     // d1 only deducted 1 (d2, d3 untouched).
     expect(r.updatedMed?.currentPills).toBe(29);
   });
@@ -788,7 +782,6 @@ describe('#267 regression 12 — Multiple dose isolation', () => {
     const m = med({
       currentPills: 29, // 30 - 1 (after Take d1)
       lastSyncDate: TODAY,
-      doseConsumption: { d1: TODAY },
       doseConsumptionHistory: { d1: [TODAY] },
     });
     const logs: ConsumptionLog[] = [makeDoseTakenLog('med-1', 'TestMed', 'd1', TODAY, 1, 'take-1')];
@@ -798,8 +791,8 @@ describe('#267 regression 12 — Multiple dose isolation', () => {
     expect(r.restoredAmount).toBe(1);
     expect(r.updatedMed.currentPills).toBe(30); // back to 30
     // d1 consume marker cleared; d2 untouched (still undefined).
-    expect(r.updatedMed.doseConsumption?.d1).toBeUndefined();
-    expect(r.updatedMed.doseConsumption?.d2).toBeUndefined();
+    expect(r.updatedMed.doseConsumptionHistory?.d1).toBeUndefined();
+    expect(r.updatedMed.doseConsumptionHistory?.d2).toBeUndefined();
   });
 });
 
@@ -817,7 +810,6 @@ describe('#267 regression 13 — lastSyncDate never changed by manual mutations'
     const m = med({
       currentPills: 29,
       lastSyncDate: '2026-09-10',
-      doseConsumption: { d1: TODAY },
       doseConsumptionHistory: { d1: [TODAY] },
     });
     const logs: ConsumptionLog[] = [makeDoseTakenLog('med-1', 'TestMed', 'd1', TODAY, 1, 'take-1')];
@@ -944,7 +936,7 @@ describe('#267 regression 14 — No pure-projection Restore', () => {
     const m = med({
       currentPills: 30, // back to 30 after the first restore
       lastSyncDate: TODAY,
-      // doseConsumption.d1 was cleared by the first restore.
+      // doseConsumptionHistory.d1 was cleared by the first restore.
     });
     const logs: ConsumptionLog[] = [
       {

@@ -69,7 +69,7 @@ describe('explicit schedule only', () => {
     const t = getCardDoseToggleTarget(
       {
         ...med,
-        doseConsumption: { d1: '2026-09-14' },
+        doseConsumptionHistory: { d1: ['2026-09-14'] },
       },
       new Date('2026-09-14T22:00:00'),
       '2026-09-14'

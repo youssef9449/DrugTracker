@@ -162,8 +162,8 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     });
 
     // Opening selector must not have written consumption yet.
-    expect(readMeds()[0]?.doseConsumption?.d1).toBeUndefined();
-    expect(readMeds()[0]?.doseConsumption?.d2).toBeUndefined();
+    expect(readMeds()[0]?.doseConsumptionHistory?.d1).toBeUndefined();
+    expect(readMeds()[0]?.doseConsumptionHistory?.d2).toBeUndefined();
     expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(0);
 
     const doseButtons = screen
@@ -182,13 +182,13 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     const today = getTodayDateString();
     await waitFor(() => {
       const med = readMeds().find((m) => m.id === 'med-multi');
-      expect(med?.doseConsumption?.d2).toBe(today);
+      expect(med?.doseConsumptionHistory?.d2).toBe(today);
     });
 
     const med = readMeds().find((m) => m.id === 'med-multi')!;
-    expect(med.doseConsumption?.d1).toBeUndefined();
-    expect(med.doseConsumption?.d3).toBeUndefined();
-    expect(med.doseConsumption?.d2).toBe(today);
+    expect(med.doseConsumptionHistory?.d1).toBeUndefined();
+    expect(med.doseConsumptionHistory?.d3).toBeUndefined();
+    expect(med.doseConsumptionHistory?.d2).toBe(today);
     // Stock reduced by d2.amount (2), not dailyDose (4)
     expect(med.currentPills).toBe(28);
 
@@ -236,7 +236,7 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     });
 
     const med = readMeds().find((m) => m.id === 'med-multi')!;
-    expect(med.doseConsumption).toBeUndefined();
+    expect(med.doseConsumptionHistory).toBeUndefined();
     expect(med.doseConsumptionHistory).toBeUndefined();
     expect(med.currentPills).toBe(30);
     expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(0);
@@ -271,8 +271,8 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     await waitFor(() => {
       expect(screen.getByText('اختر الإجراء المناسب لكل جرعة')).toBeInTheDocument();
     });
-    expect(readMeds()[0]?.doseConsumption?.d1).toBeUndefined();
-    expect(readMeds()[0]?.doseConsumption?.d2).toBeUndefined();
+    expect(readMeds()[0]?.doseConsumptionHistory?.d1).toBeUndefined();
+    expect(readMeds()[0]?.doseConsumptionHistory?.d2).toBeUndefined();
     expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(0);
 
     // C: select d1 → only d1 consumed, stock -= d1.amount (1), d2/d3 unconsumed, log doseId=d1.
@@ -286,13 +286,13 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     const today = getTodayDateString();
     await waitFor(() => {
       const med = readMeds().find((m) => m.id === 'med-multi');
-      expect(med?.doseConsumption?.d1).toBe(today);
+      expect(med?.doseConsumptionHistory?.d1).toBe(today);
     });
 
     const med = readMeds().find((m) => m.id === 'med-multi')!;
-    expect(med.doseConsumption?.d1).toBe(today);
-    expect(med.doseConsumption?.d2).toBeUndefined();
-    expect(med.doseConsumption?.d3).toBeUndefined();
+    expect(med.doseConsumptionHistory?.d1).toBe(today);
+    expect(med.doseConsumptionHistory?.d2).toBeUndefined();
+    expect(med.doseConsumptionHistory?.d3).toBeUndefined();
     expect(med.currentPills).toBe(29); // 30 - d1.amount(1)
 
     const doseLog = readLogs().find(
@@ -341,13 +341,13 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     const today = getTodayDateString();
     await waitFor(() => {
       const med = readMeds().find((m) => m.id === 'med-multi');
-      expect(med?.doseConsumption?.d2).toBe(today);
+      expect(med?.doseConsumptionHistory?.d2).toBe(today);
     });
 
     const med = readMeds().find((m) => m.id === 'med-multi')!;
-    expect(med.doseConsumption?.d2).toBe(today);
-    expect(med.doseConsumption?.d1).toBeUndefined();
-    expect(med.doseConsumption?.d3).toBeUndefined();
+    expect(med.doseConsumptionHistory?.d2).toBe(today);
+    expect(med.doseConsumptionHistory?.d1).toBeUndefined();
+    expect(med.doseConsumptionHistory?.d3).toBeUndefined();
     expect(med.currentPills).toBe(28); // 30 - d2.amount(2)
 
     const doseLog = readLogs().find(
@@ -383,7 +383,7 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     // Opening the modal alone must not consume/restore/skip anything.
     const after = readMeds()[0]!;
     expect(after.currentPills).toBe(beforePills);
-    expect(after.doseConsumption).toStrictEqual(before.doseConsumption);
+    expect(after.doseConsumptionHistory).toStrictEqual(before.doseConsumptionHistory);
     expect(after.doseConsumptionHistory).toStrictEqual(
       before.doseConsumptionHistory
     );
@@ -428,7 +428,7 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     const today = getTodayDateString();
     await waitFor(() => {
       const med = readMeds().find((m) => m.id === 'med-multi');
-      expect(med?.doseConsumption?.d1).toBe(today);
+      expect(med?.doseConsumptionHistory?.d1).toBe(today);
     });
   });
 
@@ -471,7 +471,7 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     const today = getTodayDateString();
     localStorage.setItem(
       STORAGE_MEDS_KEY,
-      JSON.stringify([makeMulti({ doseConsumption: { d1: today } })])
+      JSON.stringify([makeMulti({ doseConsumptionHistory: { d1: [today] } })])
     );
     localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
 
@@ -513,7 +513,7 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     const today = getTodayDateString();
     await waitFor(() => {
       const med = readMeds().find((m) => m.name === 'Single Slot Med');
-      expect(med?.doseConsumption?.only).toBe(today);
+      expect(med?.doseConsumptionHistory?.only).toBe(today);
     });
 
     const log = readLogs().find((l) => l.type === 'dose_taken');
@@ -554,7 +554,7 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
       STORAGE_MEDS_KEY,
       JSON.stringify([
         makeMulti({
-          doseConsumption: { d1: today, d2: today, d3: today },
+          doseConsumptionHistory: { d1: [today], d2: [today], d3: [today] },
         }),
       ])
     );
@@ -601,12 +601,12 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     expect(actionBtn('d1', 'take')).toBeTruthy();
     fireEvent.click(actionBtn('d1', 'take'));
     await waitFor(() => {
-      expect(readMeds().find((m) => m.id === 'med-multi')?.doseConsumption?.d1).toBe(today);
+      expect(readMeds().find((m) => m.id === 'med-multi')?.doseConsumptionHistory?.d1).toBe(today);
     });
     let med = readMeds().find((m) => m.id === 'med-multi')!;
     expect(med.currentPills).toBe(28); // 30 - d1.amount(2)
-    expect(med.doseConsumption?.d2).toBeUndefined();
-    expect(med.doseConsumption?.d3).toBeUndefined();
+    expect(med.doseConsumptionHistory?.d2).toBeUndefined();
+    expect(med.doseConsumptionHistory?.d3).toBeUndefined();
 
     // 2. After Take, d1 offers Restore.
     await openManage();
@@ -614,20 +614,20 @@ describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
     fireEvent.click(actionBtn('d1', 'restore'));
     await waitFor(() => {
       expect(
-        readMeds().find((m) => m.id === 'med-multi')?.doseConsumption?.d1
+        readMeds().find((m) => m.id === 'med-multi')?.doseConsumptionHistory?.d1
       ).toBeUndefined();
     });
     med = readMeds().find((m) => m.id === 'med-multi')!;
     expect(med.currentPills).toBe(30); // restored
-    expect(med.doseConsumption?.d2).toBeUndefined();
-    expect(med.doseConsumption?.d3).toBeUndefined();
+    expect(med.doseConsumptionHistory?.d2).toBeUndefined();
+    expect(med.doseConsumptionHistory?.d3).toBeUndefined();
 
     // 3. After Restore, d1 is takeable AGAIN — the cycle repeats (not terminal).
     await openManage();
     expect(actionBtn('d1', 'take')).toBeTruthy();
     fireEvent.click(actionBtn('d1', 'take'));
     await waitFor(() => {
-      expect(readMeds().find((m) => m.id === 'med-multi')?.doseConsumption?.d1).toBe(today);
+      expect(readMeds().find((m) => m.id === 'med-multi')?.doseConsumptionHistory?.d1).toBe(today);
     });
     med = readMeds().find((m) => m.id === 'med-multi')!;
     expect(med.currentPills).toBe(28); // 30 - 2 again

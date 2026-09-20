@@ -166,7 +166,7 @@ describe('MedicationCard Restore — durable Exact evidence', () => {
     // Schedule amount edited to 5; historical Exact log still -2.
     const med = makeSingleAuto({
       currentPills: 18,
-      doseConsumption: { s1: TEST_DATE },
+      doseConsumptionHistory: { s1: [TEST_DATE] },
       doseSchedule: [{ id: 's1', amount: 5, time: '08:00' }],
     });
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([med]));
@@ -195,7 +195,7 @@ describe('MedicationCard Restore — durable Exact evidence', () => {
     localStorage.setItem(COMPACT_VIEW_KEY, 'false');
     const med = makeSingleAuto({
       currentPills: 18,
-      doseConsumption: { s1: TEST_DATE },
+      doseConsumptionHistory: { s1: [TEST_DATE] },
     });
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([med]));
     localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([durableS1AutoLog(-2)]));

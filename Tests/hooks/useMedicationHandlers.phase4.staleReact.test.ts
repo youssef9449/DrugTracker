@@ -150,7 +150,6 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       medications: [
         med({
           currentPills: 9,
-          doseConsumption: { d1: TODAY },
           doseConsumptionHistory: { d1: [TODAY] },
         }),
       ],
@@ -187,7 +186,6 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       medications: [
         med({
           currentPills: 9,
-          doseConsumption: { d1: TODAY },
           doseConsumptionHistory: { d1: [TODAY] },
           doseSchedule: [
             { id: 'd1', amount: 1, time: '08:00' },
@@ -214,7 +212,6 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       med({
         currentPills: 10,
         doseSchedule: [{ id: 'd2', amount: 1, time: '14:00' }],
-        doseConsumption: {},
         doseConsumptionHistory: {},
       }),
     ];
@@ -234,7 +231,6 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       medications: [
         med({
           currentPills: 9,
-          doseConsumption: { d1: TODAY },
           doseConsumptionHistory: { d1: [TODAY] },
         }),
       ],
@@ -256,7 +252,6 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       med({
         currentPills: 10,
         doseSkippedHistory: { d1: [TODAY] },
-        doseConsumption: {},
         doseConsumptionHistory: {},
       }),
     ];
@@ -276,7 +271,6 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       medications: [
         med({
           currentPills: 9,
-          doseConsumption: { d1: TODAY },
           doseConsumptionHistory: { d1: [TODAY] },
         }),
       ],
@@ -447,7 +441,6 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     reactMeds = [
       med({
         currentPills: 9,
-        doseConsumption: { d1: TODAY },
         doseConsumptionHistory: { d1: [TODAY] },
       }),
     ];
@@ -472,7 +465,6 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       medications: [
         med({
           currentPills: 9,
-          doseConsumption: { d1: TODAY },
           doseConsumptionHistory: { d1: [TODAY] },
         }),
       ],
@@ -587,7 +579,6 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       medications: [
         med({
           currentPills: 9,
-          doseConsumption: { d1: TODAY },
           doseConsumptionHistory: { d1: [TODAY] },
         }),
       ],
@@ -664,7 +655,6 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       medications: [
         med({
           currentPills: 9,
-          doseConsumption: { d1: TODAY },
           doseConsumptionHistory: { d1: [TODAY] },
         }),
       ],

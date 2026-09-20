@@ -70,7 +70,7 @@ function makeConsumedMed(
   const med: Medication = {
     ...baseMed,
     currentPills: Math.max(0, baseMed.currentPills - deductedAmount),
-    doseConsumption: { ...(baseMed.doseConsumption ?? {}), [doseId]: date },
+    doseConsumptionHistory: { ...(baseMed.doseConsumptionHistory ?? {}), [doseId]: date },
     doseConsumptionHistory: {
       ...(baseMed.doseConsumptionHistory ?? {}),
       [doseId]: [date],
@@ -205,11 +205,7 @@ describe('restore dose → critical stock reconciliation', () => {
     const med: Medication = {
       ...baseMed,
       currentPills: 7,
-      doseConsumption: { morning: TEST_DATE, evening: TEST_DATE },
-      doseConsumptionHistory: {
-        morning: [TEST_DATE],
-        evening: [TEST_DATE],
-      },
+      doseConsumptionHistory: { morning: [TEST_DATE], evening: [TEST_DATE] },
     };
 
     // Restore morning first (+1) → 8.
@@ -251,11 +247,7 @@ describe('restore dose → critical stock reconciliation', () => {
     const med: Medication = {
       ...baseMed,
       currentPills: 0,
-      doseConsumption: { morning: TEST_DATE, evening: TEST_DATE },
-      doseConsumptionHistory: {
-        morning: [TEST_DATE],
-        evening: [TEST_DATE],
-      },
+      doseConsumptionHistory: { morning: [TEST_DATE], evening: [TEST_DATE] },
     };
 
     const { rerender } = renderHook(({ medications }) => useAlerts(medications), {

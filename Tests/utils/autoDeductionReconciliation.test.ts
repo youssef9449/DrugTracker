@@ -639,7 +639,6 @@ describe('multi-dose', () => {
       currentPills: 10,
       lastSyncDate: '2026-09-14',
       doseConsumptionHistory: { d: ['2026-09-13'] },
-      doseConsumption: { d: '2026-09-13' },
     });
     expect(isExactAutoOccurrenceApplied(med, 'd', '2026-09-13')).toBe(true);
     expect(isExactAutoOccurrenceApplied(med, 'd', '2026-09-14')).toBe(false);
@@ -1677,7 +1676,7 @@ describe('runAutoDeductionReconciliation — FIRED durable regardless of current
     expect(first.newExactLogs[0].amount).toBe(-2);
     expect(first.newExactLogs[0].id).toBe(exactAutoLogId('med-1', 'd1', '2026-09-14'));
     expect(first.newExactLogs[0].type).toBe('exact_auto');
-    expect(first.logs.filter((l) => l.type === 'auto_daily')).toHaveLength(0);
+    expect(first.logs.filter((l) => l.type === 'exact_auto')).toHaveLength(0);
     expect(first.toAcknowledge).toEqual([
       { medicationId: 'med-1', doseId: 'd1', calendarDate: '2026-09-14' },
     ]);
@@ -1957,7 +1956,6 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
         { id: 'd1', amount: 1, time: '08:00' },
         { id: 'd2', amount: 1, time: '20:00' },
       ],
-      doseConsumption: { d2: '2026-09-14' },
       doseConsumptionHistory: { d2: ['2026-09-14'] },
     });
     const e = fired({

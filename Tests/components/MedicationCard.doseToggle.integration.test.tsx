@@ -128,7 +128,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     await waitFor(() => {
       const med = readMeds().find((m) => m.id === 'med-single')!;
       expect(med.currentPills).toBe(18);
-      expect(med.doseConsumption?.s1).toBe(getTodayDateString());
+      expect(med.doseConsumptionHistory?.s1).toBe(getTodayDateString());
     });
     const doseLog = readLogs().find((l) => l.type === 'dose_taken');
     expect(doseLog?.amount).toBe(-2);
@@ -154,7 +154,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
         makeSingle({
           currentPills: 18,
           doseSchedule: [{ id: 's1', amount: 1, time: '08:00' }],
-          doseConsumption: { s1: today },
+          doseConsumptionHistory: { s1: [today] },
         }),
       ])
     );
@@ -214,7 +214,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     fireEvent.click(takeD1Btn!);
     await waitFor(() => {
       const med = readMeds().find((m) => m.id === 'med-multi')!;
-      expect(med.doseConsumption?.d1).toBe(today);
+      expect(med.doseConsumptionHistory?.d1).toBe(today);
       expect(med.currentPills).toBe(19);
     });
     const takeLog = readLogs().find((l) => l.type === 'dose_taken');
@@ -239,7 +239,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
       expect(restoreLog?.doseId).toBe('d1');
       expect(restoreLog?.amount).toBe(1);
       // d1 no longer marked consumed
-      expect(med.doseConsumption?.d1).toBeUndefined();
+      expect(med.doseConsumptionHistory?.d1).toBeUndefined();
     });
 
     // After restore lifecycle, next-dose resolution can still identify d1 as next
@@ -255,7 +255,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
         makeMulti({
           currentPills: 16,
           // earlier slots auto-completed by time; only d3 manual
-          doseConsumption: { d3: today },
+          doseConsumptionHistory: { d3: [today] },
           lastSyncDate: today,
         }),
       ])
@@ -306,7 +306,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
           doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
           dosesPerDay: 1,
           dailyDose: 1,
-          // no doseConsumption — elapsed only via auto
+          // no doseConsumptionHistory — elapsed only via auto
         }),
       ])
     );

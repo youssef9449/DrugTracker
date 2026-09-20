@@ -149,7 +149,6 @@ describe('useDoseReminders', () => {
     it('does NOT open when today’s dose was already consumed (manual or alarm-action consumption)', () => {
       const med = makeMed({
         id: 'med-consumed-today',
-        doseConsumption: { d1: getTodayDateString() },
         doseConsumptionHistory: { d1: [getTodayDateString()] },
       });
       const { result } = renderHook(() =>
@@ -166,7 +165,6 @@ describe('useDoseReminders', () => {
     it('still opens when the dose was consumed YESTERDAY (guard is current-calendar-day based)', () => {
       const med = makeMed({
         id: 'med-consumed-yesterday',
-        doseConsumption: { d1: '2024-09-09' },
         doseConsumptionHistory: { d1: ['2024-09-09'] },
       });
       const { result } = renderHook(() =>
@@ -329,7 +327,6 @@ describe('useDoseReminders', () => {
       const med = makeMed({
         id: 'med-snooze-taken',
         reminderTime: '09:00',
-        doseConsumption: { d1: getTodayDateString() },
         doseConsumptionHistory: { d1: [getTodayDateString()] },
       });
       const { result } = renderHook(() =>

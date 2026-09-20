@@ -162,17 +162,6 @@ public final class AutoDeductionContract {
                 .build();
     }
 
-    /**
-     * @deprecated Prefer {@link #PENDING_INTENT_REQUEST_CODE} with
-     * {@link #occurrenceUri}. Kept only for reference; must not be used
-     * as the sole PendingIntent identity.
-     */
-    @Deprecated
-    public static int pendingIntentRequestCode(String occurrenceKey) {
-        // Stable helper only — Intent data URI is the uniqueness source.
-        return PENDING_INTENT_REQUEST_CODE;
-    }
-
     public static boolean isValidAmount(double amount) {
         return !Double.isNaN(amount) && !Double.isInfinite(amount) && amount > 0;
     }

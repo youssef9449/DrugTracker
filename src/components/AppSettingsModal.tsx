@@ -44,15 +44,10 @@ export interface AppSettingsModalProps {
   activeOrderItems?: OrderItem[];
   onSaveSettings: (newSettings: PharmacySettings) => void;
   soundEnabled: boolean;
-  /** @deprecated Toggles are draft-only until Save; kept optional for compatibility. */
-  onToggleSound?: () => void;
   notificationsEnabled?: boolean;
-  onToggleNotifications?: () => void;
   criticalStockAlertsEnabled?: boolean;
-  onToggleCriticalStockAlerts?: () => void;
   onSendTestNotification?: () => void;
   autoDeductEnabled?: boolean;
-  onToggleAutoDeduct?: () => void;
   /**
    * Apply app preference toggles only when the user confirms with حفظ الإعدادات.
    * Closing the modal without save discards draft changes.

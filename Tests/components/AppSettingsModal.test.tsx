@@ -42,8 +42,7 @@ describe('AppSettingsModal — Notification Controls', () => {
 
   it('renders notification toggles as MD3 switches; clicking flips draft state and Save commits via onApplyAppPreferences', async () => {
     // The modal stores preference toggles as DRAFT state (setDraftNotifications /
-    // setDraftCritical) — the deprecated onToggleNotifications /
-    // onToggleCriticalStockAlerts callbacks are NOT wired into the modal body.
+    // draft toggles + onApplyAppPreferences are the current preference path.
     // Drafts are committed only on حفظ الإعدادات via onApplyAppPreferences.
     const onApplyAppPreferences = vi.fn();
     const onSaveSettings = vi.fn();
@@ -56,11 +55,8 @@ describe('AppSettingsModal — Notification Controls', () => {
         medications={[]}
         onSaveSettings={onSaveSettings}
         soundEnabled={true}
-        onToggleSound={vi.fn()}
         notificationsEnabled={true}
-        onToggleNotifications={vi.fn()}
         criticalStockAlertsEnabled={true}
-        onToggleCriticalStockAlerts={vi.fn()}
         onApplyAppPreferences={onApplyAppPreferences}
       />
     );
@@ -106,11 +102,8 @@ describe('AppSettingsModal — Notification Controls', () => {
         medications={[]}
         onSaveSettings={vi.fn()}
         soundEnabled={true}
-        onToggleSound={vi.fn()}
         notificationsEnabled={false}
-        onToggleNotifications={vi.fn()}
         criticalStockAlertsEnabled={false}
-        onToggleCriticalStockAlerts={vi.fn()}
       />
     );
 
@@ -339,61 +332,7 @@ describe('AppSettingsModal — draft-only until Save', () => {
   });
   afterEach(() => cleanup());
 
-  it('notifications OFF→ON without Save: draft ON, no onApplyAppPreferences', async () => {
-    const onApplyAppPreferences = vi.fn();
-    const onToggleNotifications = vi.fn();
-    render(
-      <AppSettingsModal
-        isOpen={true}
-        onClose={vi.fn()}
-        settings={mockSettings}
-        medications={[]}
-        onSaveSettings={vi.fn()}
-        soundEnabled={true}
-        notificationsEnabled={false}
-        criticalStockAlertsEnabled={false}
-        onToggleNotifications={onToggleNotifications}
-        onApplyAppPreferences={onApplyAppPreferences}
-      />
-    );
-    const notifSwitch = screen.getByRole('switch', {
-      name: 'التنبيهات متوقفة — انقر للتفعيل',
-    });
-    fireEvent.click(notifSwitch);
-    await waitFor(() => {
-      expect(notifSwitch).toHaveAttribute('aria-checked', 'true');
-    });
-    expect(onApplyAppPreferences).not.toHaveBeenCalled();
-    expect(onToggleNotifications).not.toHaveBeenCalled();
-  });
 
-  it('notifications ON→OFF without Save: draft OFF, no onApplyAppPreferences', async () => {
-    const onApplyAppPreferences = vi.fn();
-    const onToggleNotifications = vi.fn();
-    render(
-      <AppSettingsModal
-        isOpen={true}
-        onClose={vi.fn()}
-        settings={mockSettings}
-        medications={[]}
-        onSaveSettings={vi.fn()}
-        soundEnabled={true}
-        notificationsEnabled={true}
-        criticalStockAlertsEnabled={true}
-        onToggleNotifications={onToggleNotifications}
-        onApplyAppPreferences={onApplyAppPreferences}
-      />
-    );
-    const notifSwitch = screen.getByRole('switch', {
-      name: 'التنبيهات مفعلة — انقر للإيقاف',
-    });
-    fireEvent.click(notifSwitch);
-    await waitFor(() => {
-      expect(notifSwitch).toHaveAttribute('aria-checked', 'false');
-    });
-    expect(onApplyAppPreferences).not.toHaveBeenCalled();
-    expect(onToggleNotifications).not.toHaveBeenCalled();
-  });
 
   it('notifications OFF→ON with Save commits true only on Save', async () => {
     const onApplyAppPreferences = vi.fn();
@@ -456,59 +395,7 @@ describe('AppSettingsModal — draft-only until Save', () => {
     });
   });
 
-  it('critical OFF→ON without Save: draft ON, no onApplyAppPreferences', async () => {
-    const onApplyAppPreferences = vi.fn();
-    const onToggleCriticalStockAlerts = vi.fn();
-    render(
-      <AppSettingsModal
-        isOpen={true}
-        onClose={vi.fn()}
-        settings={mockSettings}
-        medications={[]}
-        onSaveSettings={vi.fn()}
-        soundEnabled={true}
-        notificationsEnabled={false}
-        criticalStockAlertsEnabled={false}
-        onToggleCriticalStockAlerts={onToggleCriticalStockAlerts}
-        onApplyAppPreferences={onApplyAppPreferences}
-      />
-    );
-    const criticalSwitch = screen.getByRole('switch', {
-      name: 'تنبيهات المخزون الحرج متوقفة — انقر للتفعيل',
-    });
-    fireEvent.click(criticalSwitch);
-    await waitFor(() => {
-      expect(criticalSwitch).toHaveAttribute('aria-checked', 'true');
-    });
-    expect(onApplyAppPreferences).not.toHaveBeenCalled();
-    expect(onToggleCriticalStockAlerts).not.toHaveBeenCalled();
-  });
 
-  it('critical ON→OFF without Save: draft OFF, no onApplyAppPreferences', async () => {
-    const onApplyAppPreferences = vi.fn();
-    const onToggleCriticalStockAlerts = vi.fn();
-    render(
-      <AppSettingsModal
-        isOpen={true}
-        onClose={vi.fn()}
-        settings={mockSettings}
-        medications={[]}
-        onSaveSettings={vi.fn()}
-        soundEnabled={true}
-        notificationsEnabled={true}
-        criticalStockAlertsEnabled={true}
-        onToggleCriticalStockAlerts={onToggleCriticalStockAlerts}
-        onApplyAppPreferences={onApplyAppPreferences}
-      />
-    );
-    const criticalSwitch = screen.getByRole('switch', {
-      name: 'تنبيهات المخزون الحرج مفعلة — انقر للإيقاف',
-    });
-    fireEvent.click(criticalSwitch);
-    expect(criticalSwitch).toHaveAttribute('aria-checked', 'false');
-    expect(onApplyAppPreferences).not.toHaveBeenCalled();
-    expect(onToggleCriticalStockAlerts).not.toHaveBeenCalled();
-  });
 
   it('critical OFF→ON with Save commits true only on Save', async () => {
     const onApplyAppPreferences = vi.fn();

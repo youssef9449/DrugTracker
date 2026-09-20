@@ -1,5 +1,5 @@
 /**
- * Issue #268 / PR #271 — Legacy Single-Dose Exact fallback removed.
+ * Issue #268 / PR #271 — no-schedule occurrence Exact fallback removed.
  *
  * A FIRED Exact occurrence is durable: the native AlarmManager created and
  * persisted it at schedule time with identity (medicationId + doseId +
@@ -9,7 +9,7 @@
  * schedule AFTER the alarm fired does NOT invalidate the already-occurred
  * event; `event.amount` remains the authoritative charge.
  *
- * No Legacy Single-Dose fallback:
+ * No synthetic no-schedule occurrence path:
  *   - no `LEGACY_DOSE_ID` sentinel,
  *   - no `dailyDose` / `reminderTime` / `reminderEnabled` / `lastConsumedDate`
  *     fallback for amount or identity,
@@ -38,10 +38,10 @@ import {
 const TODAY = '2026-09-14';
 const NOW = new Date('2026-09-14T09:00:00');
 
-function legacyMed(over: Partial<Medication> = {}): Medication {
+function unscheduledMed(over: Partial<Medication> = {}): Medication {
   return {
     id: 'med-1',
-    name: 'LegacyMed',
+    name: 'UnscheduledMed',
     currentPills: 10,
     dailyDose: 1,
     unit: 'قرص',
@@ -68,9 +68,9 @@ function noScheduleFiredEvent(amount: number): AutoDeductionEvent {
   };
 }
 
-describe('legacy single-dose (no doseSchedule): FIRED is durable; no Legacy Single-Dose fallback (#268 / PR #271)', () => {
+describe('no-schedule FIRED occurrence (no doseSchedule): FIRED is durable; no no-schedule occurrence fallback (#268 / PR #271)', () => {
   it('applyExactAutoEventToMedication: no doseSchedule + non-empty doseId → applies event.amount (NOT dailyDose)', () => {
-    const med = legacyMed({ dailyDose: 5 });
+    const med = unscheduledMed({ dailyDose: 5 });
     const e = noScheduleFiredEvent(2);
     const applied = applyExactAutoEventToMedication(med, e, NOW);
     expect(applied.ok).toBe(true);
@@ -86,7 +86,7 @@ describe('legacy single-dose (no doseSchedule): FIRED is durable; no Legacy Sing
   });
 
   it('applyExactAutoEventToMedication: empty doseSchedule array → applies event.amount', () => {
-    const med = legacyMed({ doseSchedule: [] });
+    const med = unscheduledMed({ doseSchedule: [] });
     const e = noScheduleFiredEvent(2);
     const applied = applyExactAutoEventToMedication(med, e, NOW);
     expect(applied.ok).toBe(true);
@@ -100,7 +100,7 @@ describe('legacy single-dose (no doseSchedule): FIRED is durable; no Legacy Sing
     // The med was scheduled with d1; the native created FIRED med-1+d1+TODAY.
     // The user then removed d1 from the current doseSchedule. The FIRED
     // occurrence already happened → reconciliation applies event.amount.
-    const med = legacyMed({
+    const med = unscheduledMed({
       doseSchedule: [{ id: 'd2', amount: 1, time: '20:00' }],
     });
     const e = noScheduleFiredEvent(2);
@@ -116,7 +116,7 @@ describe('legacy single-dose (no doseSchedule): FIRED is durable; no Legacy Sing
 
   it('applyExactAutoEventToMedication: empty doseId → ok:false (malformed identity, not applied)', () => {
     // Empty doseId is the ONLY identity failure that blocks application.
-    const med = legacyMed();
+    const med = unscheduledMed();
     const e: AutoDeductionEvent = {
       ...noScheduleFiredEvent(2),
       doseId: '',
@@ -129,7 +129,7 @@ describe('legacy single-dose (no doseSchedule): FIRED is durable; no Legacy Sing
   });
 
   it('reconcileFiredEvents: no doseSchedule + non-empty doseId → applied once with event.amount; terminal ACK', () => {
-    const med = legacyMed({ currentPills: 10, dailyDose: 5 });
+    const med = unscheduledMed({ currentPills: 10, dailyDose: 5 });
     const r = reconcileFiredEvents([med], [], [noScheduleFiredEvent(2)], {
       now: NOW,
     });
@@ -149,7 +149,7 @@ describe('legacy single-dose (no doseSchedule): FIRED is durable; no Legacy Sing
 
   it('reconcileFiredEvents: no doseSchedule + empty doseId → skipped_invalid, terminal ACK (malformed identity)', () => {
     // Empty doseId is a malformed identity → terminal ACK, no stock, no log.
-    const med = legacyMed();
+    const med = unscheduledMed();
     const e: AutoDeductionEvent = { ...noScheduleFiredEvent(2), doseId: '' };
     const r = reconcileFiredEvents([med], [], [e], { now: NOW });
     expect(r.details[0].outcome).toBe('skipped_invalid');
@@ -163,7 +163,7 @@ describe('legacy single-dose (no doseSchedule): FIRED is durable; no Legacy Sing
   });
 
   it('reconcileFiredEvents: retry of the same FIRED after apply → already_applied, no duplicate deduction/log', () => {
-    const med = legacyMed({ currentPills: 10 });
+    const med = unscheduledMed({ currentPills: 10 });
     const e = noScheduleFiredEvent(2);
     const r1 = reconcileFiredEvents([med], [], [e], { now: NOW });
     expect(r1.mutated).toBe(true);
@@ -182,25 +182,25 @@ describe('legacy single-dose (no doseSchedule): FIRED is durable; no Legacy Sing
   });
 
   it('reconcileFiredEvents: no doseSchedule + valid identity → durable consume marker written for the occurrence', () => {
-    // The exact apply writes a per-occurrence consume marker (doseConsumption +
-    // doseConsumptionHistory) keyed by doseId+calendarDate, independent of the
-    // current schedule membership. This is the recovery source on retry.
-    const med = legacyMed({ currentPills: 10 });
+    // The exact apply writes a per-occurrence consume marker in
+    // doseConsumptionHistory keyed by doseId + calendarDate.
+    // This remains the recovery source on retry even when the current
+    // schedule no longer contains that dose row.
+    const med = unscheduledMed({ currentPills: 10 });
     const r = reconcileFiredEvents([med], [], [noScheduleFiredEvent(2)], {
       now: NOW,
     });
-    expect(r.medications[0].doseConsumption?.['d1']).toBe(TODAY);
-    expect(r.medications[0].doseConsumptionHistory?.['d1']).toContain(TODAY);
+    expect(r.medications[0].doseConsumptionHistory?.['d1']).toEqual([TODAY]);
   });
 
   it('no Exact log id is ever built with an empty doseId', () => {
-    // exactAutoLogId with an empty doseId is the historical legacy shape.
+    // exactAutoLogId with an empty doseId is not a valid occurrence identity.
     // The malformed-identity path never reaches log construction.
-    const med = legacyMed();
+    const med = unscheduledMed();
     const e: AutoDeductionEvent = { ...noScheduleFiredEvent(2), doseId: '' };
     const r = reconcileFiredEvents([med], [], [e], { now: NOW });
-    const legacyLogId = exactAutoLogId('med-1', '', TODAY);
-    expect(r.logs.find((l) => l.id === legacyLogId)).toBeUndefined();
+    const invalidLogId = exactAutoLogId('med-1', '', TODAY);
+    expect(r.logs.find((l) => l.id === invalidLogId)).toBeUndefined();
   });
 });
 
@@ -209,10 +209,10 @@ describe('legacy single-dose (no doseSchedule): FIRED is durable; no Legacy Sing
  * scheduling FUTURE occurrences. `event.amount` is the authoritative charge
  * for a FIRED occurrence even when it differs from the current schedule amount.
  */
-describe('explicit doseSchedule: Exact Auto unchanged after legacy removal', () => {
+describe('explicit doseSchedule: Exact Auto amount authority', () => {
   it('schedule amount 1 and exact amount 2 → final stock 8 (authoritative event.amount)', () => {
     const multiMed: Medication = {
-      ...legacyMed(),
+      ...unscheduledMed(),
       doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
       lastSyncDate: '2026-09-13',
     };

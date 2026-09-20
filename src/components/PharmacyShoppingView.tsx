@@ -46,20 +46,9 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   const [customOrderQuantities, setCustomOrderQuantities] = useState<Record<string, number>>({});
   const pharmacies = settings.pharmacies || [];
   const selectedPharmacy = pharmacies.find((pharmacy) => pharmacy.id === settings.selectedPharmacyId)
-    || pharmacies[0]
-    || (settings.pharmacyPhone || settings.pharmacyName || settings.customerCode
-      ? { id: 'legacy', name: settings.pharmacyName || 'الصيدلية', phone: settings.pharmacyPhone || '', customerCode: settings.customerCode || '' }
-      : undefined);
-  const whatsappContacts = settings.whatsappContacts?.length
-    ? settings.whatsappContacts
-    : settings.contactPhone
-      ? [{ id: 'legacy-contact', label: 'رقم التواصل', phone: settings.contactPhone }]
-      : [];
-  const whatsappAddresses = settings.whatsappAddresses?.length
-    ? settings.whatsappAddresses
-    : settings.address
-      ? [{ id: 'legacy-address', label: 'عنوان التوصيل', address: settings.address }]
-      : [];
+    || pharmacies[0];
+  const whatsappContacts = settings.whatsappContacts ?? [];
+  const whatsappAddresses = settings.whatsappAddresses ?? [];
   const selectedWhatsappContactIds = settings.selectedWhatsappContactIds
     ?? whatsappContacts.map((contact) => contact.id);
   const selectedWhatsappAddressIds = settings.selectedWhatsappAddressIds
@@ -633,7 +622,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                     <option key={pharmacy.id} value={pharmacy.id}>{pharmacy.name}</option>
                   ))}
                   {pharmacies.length === 0 && selectedPharmacy && (
-                    <option value="legacy">{selectedPharmacy.name}</option>
+                    <option value={selectedPharmacy.id}>{selectedPharmacy.name}</option>
                   )}
                 </select>
               </label>

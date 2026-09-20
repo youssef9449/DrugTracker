@@ -30,29 +30,22 @@ describe('isDoseConsumedOnDate — explicit per-dose only (no lastConsumedDate f
     expect(isDoseConsumedOnDate(med, 'any', TODAY)).toBe(false);
   });
 
-  it('explicit doseConsumption[doseId] still marks that dose consumed', () => {
-    const med = makeMed({
-      doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
-      doseConsumption: { d1: TODAY },
-    });
-    expect(isDoseConsumedOnDate(med, 'd1', TODAY)).toBe(true);
-    expect(isDoseConsumedOnDate(med, 'd2', TODAY)).toBe(false);
-  });
-
-  it('explicit doseConsumptionHistory[doseId] still marks that dose consumed', () => {
+  it('explicit doseConsumptionHistory[doseId] marks that dose consumed', () => {
     const med = makeMed({
       doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
       doseConsumptionHistory: { d1: [TODAY] },
     });
     expect(isDoseConsumedOnDate(med, 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(med, 'd2', TODAY)).toBe(false);
   });
+
 
   it('single-slot explicit schedule works with per-dose consumption only', () => {
     const med = makeMed({
       doseSchedule: [{ id: 's1', amount: 2, time: '09:00' }],
       dosesPerDay: 1,
       lastConsumedDate: TODAY, // must NOT alone make s1 consumed
-      doseConsumption: { s1: TODAY },
+      doseConsumptionHistory: { s1: [TODAY] },
     });
     expect(isDoseConsumedOnDate(med, 's1', TODAY)).toBe(true);
     const medLcdOnly = makeMed({

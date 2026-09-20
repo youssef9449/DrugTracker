@@ -171,13 +171,8 @@ public final class AutoDeductionScheduler {
 
     /**
      * Under {@link #SCHEDULE_LOCK}: whether successor creation is still authorized.
-     *
-     * <ul>
-     *   <li>If {@code expectedGeneration > 0}: must equal the durable active generation.</li>
-     *   <li>If {@code expectedGeneration <= 0} (legacy delivery without stamp): authorized
-     *       only when active generation is 0 (never invalidated). After any invalidate,
-     *       active &gt; 0 and legacy receivers cannot create successors.</li>
-     * </ul>
+     * Requires {@code expectedGeneration > 0} and equality with the durable active
+     * recurrence generation for this medicationId + doseId.
      */
     private boolean isRecurrenceGenerationAuthorizedLocked(
             String medicationId,
@@ -185,14 +180,9 @@ public final class AutoDeductionScheduler {
             long expectedGeneration
     ) {
         long active = getRecurrenceGenerationLocked(medicationId, doseId);
-        if (expectedGeneration > 0L) {
-            return active == expectedGeneration;
-        }
-        // Legacy: only allow if never invalidated (active still 0) — first schedules
-        // set active to 1 inside scheduleOccurrenceLocked, so a fire from a schedule
-        // created after this code is deployed will always carry expectedGeneration > 0.
-        return active <= 0L;
+        return expectedGeneration > 0L && expectedGeneration == active;
     }
+
 
 
     /**
@@ -612,49 +602,29 @@ public final class AutoDeductionScheduler {
                 Log.i(TAG, "fire linearization: STALE (no active schedule metadata) for " + key);
                 return FireResult.cancelled();
             }
-            // Legacy pre-token alarms can legitimately still be queued across an
-            // app upgrade. They are accepted only when the active durable
-            // schedule row is itself still legacy (no version/generation).
-            // Tokenized deliveries must carry BOTH ownership tokens.
+            // Tokenized delivery must own the current schedule row exactly.
+            // Missing or mismatched scheduleVersion / recurrenceGeneration → STALE.
             try {
                 JSONObject meta = new JSONObject(metaRaw);
                 String activeVersion = meta.optString(FIELD_SCHEDULE_VERSION, "");
                 long activeGen = meta.optLong(FIELD_RECURRENCE_GENERATION, 0L);
-                boolean legacyDelivery = (deliveryScheduleVersion == null
-                        || deliveryScheduleVersion.isEmpty())
-                        && deliveryRecurrenceGeneration <= 0L;
-                boolean legacyActiveMetadata = activeVersion.isEmpty() && activeGen <= 0L;
-
-                if (legacyDelivery) {
-                    // Backward compatibility for alarms queued by the pre-token scheduler:
-                    // accept ONLY while the durable schedule row itself is still genuinely
-                    // legacy. Once this row has been rewritten with scheduleVersion or a
-                    // recurrence generation, a legacy queued alarm is stale and must not FIRE.
-                    if (!legacyActiveMetadata) {
-                        Log.i(TAG, "fire linearization: STALE legacy delivery against versioned metadata for "
-                                + key);
-                        return FireResult.cancelled();
-                    }
-                } else {
-                    // Current/tokenized delivery must own the current schedule row exactly.
-                    if (deliveryScheduleVersion == null || deliveryScheduleVersion.isEmpty()
-                            || deliveryRecurrenceGeneration <= 0L) {
-                        Log.i(TAG, "fire linearization: STALE (delivery partially missing version/generation) for "
-                                + key);
-                        return FireResult.cancelled();
-                    }
-                    if (!deliveryScheduleVersion.equals(activeVersion)) {
-                        Log.i(TAG, "fire linearization: STALE scheduleVersion for " + key
-                                + " delivery=" + deliveryScheduleVersion
-                                + " active=" + activeVersion);
-                        return FireResult.cancelled();
-                    }
-                    if (deliveryRecurrenceGeneration != activeGen) {
-                        Log.i(TAG, "fire linearization: STALE recurrenceGeneration for " + key
-                                + " delivery=" + deliveryRecurrenceGeneration
-                                + " active=" + activeGen);
-                        return FireResult.cancelled();
-                    }
+                if (deliveryScheduleVersion == null || deliveryScheduleVersion.isEmpty()
+                        || deliveryRecurrenceGeneration <= 0L) {
+                    Log.i(TAG, "fire linearization: STALE (delivery partially missing version/generation) for "
+                            + key);
+                    return FireResult.cancelled();
+                }
+                if (!deliveryScheduleVersion.equals(activeVersion)) {
+                    Log.i(TAG, "fire linearization: STALE scheduleVersion for " + key
+                            + " delivery=" + deliveryScheduleVersion
+                            + " active=" + activeVersion);
+                    return FireResult.cancelled();
+                }
+                if (deliveryRecurrenceGeneration != activeGen) {
+                    Log.i(TAG, "fire linearization: STALE recurrenceGeneration for " + key
+                            + " delivery=" + deliveryRecurrenceGeneration
+                            + " active=" + activeGen);
+                    return FireResult.cancelled();
                 }
             } catch (JSONException e) {
                 Log.e(TAG, "fire linearization: malformed schedule metadata for " + key, e);
@@ -1149,23 +1119,12 @@ public final class AutoDeductionScheduler {
                     JSONObject current = new JSONObject(currentRaw);
                     String activeVersion = current.optString(FIELD_SCHEDULE_VERSION, "");
                     long activeGen = current.optLong(FIELD_RECURRENCE_GENERATION, 0L);
-                    boolean legacyDelivery = (scheduleVersion == null || scheduleVersion.isEmpty())
-                            && recurrenceGeneration <= 0L;
-                    boolean legacyActiveMetadata = activeVersion.isEmpty() && activeGen <= 0L;
-
-                    if (legacyDelivery) {
-                        if (!legacyActiveMetadata) {
-                            Log.i(TAG, "fire retry skipped: stale legacy ownership " + key);
-                            return false;
-                        }
-                    } else {
-                        if (scheduleVersion == null || scheduleVersion.isEmpty()
-                                || recurrenceGeneration <= 0L
-                                || !scheduleVersion.equals(activeVersion)
-                                || recurrenceGeneration != activeGen) {
-                            Log.i(TAG, "fire retry skipped: ownership changed for " + key);
-                            return false;
-                        }
+                    if (scheduleVersion == null || scheduleVersion.isEmpty()
+                            || recurrenceGeneration <= 0L
+                            || !scheduleVersion.equals(activeVersion)
+                            || recurrenceGeneration != activeGen) {
+                        Log.i(TAG, "fire retry skipped: ownership changed for " + key);
+                        return false;
                     }
 
                     int previousRetryCount = current.optInt(FIELD_FIRE_RETRY_COUNT, 0);

@@ -201,7 +201,7 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
      * Requires notification JSON extra:
      *   doseRecurring: true
      *   reminderTime: "HH:MM"
-     *   medicationId (optional doseId for multi-dose identity)
+     *   medicationId (required), doseId (required)
      *
      * Atomicity after AlarmManager.set* succeeds:
      *   NotificationStorage persist (must succeed)
@@ -237,13 +237,22 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
             }
 
             String medicationId = extra.getString("medicationId");
+            if (medicationId == null || medicationId.isEmpty()) {
+                Log.w("LN", "TimedNotificationPublisher: missing medicationId; skip next-day recurrence");
+                return false;
+            }
             String doseId = null;
             try {
                 if (extra.has("doseId")) {
                     doseId = extra.getString("doseId");
                 }
             } catch (Exception ignored) {
-                // optional doseId for multi-dose identity
+                doseId = null;
+            }
+            // Full occurrence identity required — no next-day arm without doseId.
+            if (doseId == null || doseId.isEmpty()) {
+                Log.w("LN", "TimedNotificationPublisher: missing doseId; skip next-day recurrence");
+                return false;
             }
 
             Calendar cal = Calendar.getInstance();
@@ -288,7 +297,9 @@ public class TimedNotificationPublisher extends BroadcastReceiver {
             // Never write evidence for a storage state that was not persisted.
             boolean persisted =
                     persistDoseReminderNextAt(context, id, notificationJson, trigger);
-            if (persisted && medicationId != null && !medicationId.isEmpty()) {
+            if (persisted
+                    && medicationId != null && !medicationId.isEmpty()
+                    && doseId != null && !doseId.isEmpty()) {
                 DoseReminderRecurrenceStore.markReArmed(
                         context, medicationId, doseId, trigger, reminderTime, id);
             } else if (!persisted) {

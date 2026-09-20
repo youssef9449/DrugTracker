@@ -70,7 +70,7 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
       dailyDose: 4,
       doseSchedule: multiSchedule,
       dosesPerDay: 3,
-      doseConsumption: { d1: today },
+      doseConsumptionHistory: { d1: [today] },
     });
     const t = getCardDoseToggleTarget(med, early);
     expect(t.canTake).toBe(false);
@@ -100,7 +100,7 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
         dailyDose: 4,
         doseSchedule: multiSchedule,
         dosesPerDay: 3,
-        doseConsumption: { d1: today, d2: today },
+        doseConsumptionHistory: { d1: [today], d2: [today] },
       }),
       new Date(`${today}T22:00:00`)
     );
@@ -116,7 +116,7 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
         dailyDose: 4,
         doseSchedule: multiSchedule,
         dosesPerDay: 3,
-        doseConsumption: { d1: today, d2: today, d3: today },
+        doseConsumptionHistory: { d1: [today], d2: [today], d3: [today] },
         lastConsumedDate: today,
       }),
       new Date(`${today}T22:00:00`)
@@ -133,7 +133,7 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
         dailyDose: 4,
         doseSchedule: multiSchedule,
         dosesPerDay: 3,
-        doseConsumption: { d3: today },
+        doseConsumptionHistory: { d3: [today] },
       }),
       new Date(`${today}T06:00:00`)
     );
@@ -152,7 +152,7 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
         dailyDose: 4,
         doseSchedule: multiSchedule,
         dosesPerDay: 3,
-        doseConsumption: { d3: today },
+        doseConsumptionHistory: { d3: [today] },
       }),
       late
     );
@@ -189,7 +189,7 @@ describe('getCardDoseToggleTarget — stable doseId Take→Restore', () => {
         autoDeductEnabled: true,
         doseSchedule: multiSchedule,
         dosesPerDay: 3,
-        // no doseConsumption — d1 elapsed → auto completed; skip to d2 Take
+        // no doseConsumptionHistory — d1 elapsed → auto completed; skip to d2 Take
       }),
       noon
     );
@@ -271,7 +271,7 @@ describe('getCardDoseToggleTarget — medication-level Auto only', () => {
       autoDeductEnabled: true,
       doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
       dosesPerDay: 1,
-      doseConsumption: { d1: today },
+      doseConsumptionHistory: { d1: [today] },
     });
     const t = getCardDoseToggleTarget(med, late, today);
     expect(t.canTake).toBe(false);

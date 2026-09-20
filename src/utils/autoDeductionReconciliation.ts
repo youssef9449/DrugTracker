@@ -105,7 +105,6 @@ export function normalizeExactDoseId(doseId: string | undefined | null): string 
 
 /**
  * Deterministic log id for one exact auto occurrence (retry-safe).
- * Not used for legacy bulk auto_daily logs (the legacy day-based catch-up
  * `syncAutoDailyDeductions` that produced them was removed in Issue #268 /
  * PR #271).
  *
@@ -256,13 +255,10 @@ export function applyExactAutoEventToMedication(
   // Actual stock change after clamping at zero (may be < requested).
   const actualDeducted = Math.min(Math.max(0, requested), settleBase);
   const newPills = settleBase - actualDeducted;
-
-  let nextConsumption = med.doseConsumption;
   let nextHistory = med.doseConsumptionHistory;
   let lastConsumedDate = med.lastConsumedDate;
 
   const recorded = recordDoseConsumed(med, doseId, calendarDate);
-  nextConsumption = recorded.doseConsumption;
   nextHistory = recorded.doseConsumptionHistory;
   // Exact Auto updates lastConsumedDate ONLY when the Medication still has an
   // explicit, non-empty `doseSchedule` AND every slot for the calendar day is
@@ -278,7 +274,6 @@ export function applyExactAutoEventToMedication(
         : isDoseConsumedOnDate(
             {
               ...med,
-              doseConsumption: nextConsumption,
               doseConsumptionHistory: nextHistory,
             },
             d.id,
@@ -297,7 +292,6 @@ export function applyExactAutoEventToMedication(
     ...med,
     currentPills: newPills,
     lastConsumedDate,
-    doseConsumption: nextConsumption,
     doseConsumptionHistory: nextHistory,
   };
 

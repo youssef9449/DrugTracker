@@ -21,7 +21,7 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
       { id: 'd1', time: '08:00', amount: 2 },
       { id: 'd2', time: '14:00', amount: 1 },
     ],
-    doseConsumption: {},
+    doseConsumptionHistory: {},
     ...overrides,
   };
 }
@@ -34,7 +34,7 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
         { id: 'd2', time: '14:00', amount: 1 },
       ],
       // d1 was consumed (Exact Auto path sets consume mark when reconciled)
-      doseConsumption: { d1: TODAY },
+      doseConsumptionHistory: { d1: [TODAY] },
       currentPills: 18, // 20 - 2 historical auto
     });
     const logs: ConsumptionLog[] = [
@@ -70,7 +70,7 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
 
   it('sibling isolation: Restore d1 never uses d2 amount', () => {
     const med = makeMed({
-      doseConsumption: { d1: TODAY, d2: TODAY },
+      doseConsumptionHistory: { d1: [TODAY], d2: [TODAY] },
       currentPills: 17,
     });
     const logs: ConsumptionLog[] = [
@@ -109,7 +109,7 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
 
   it('Auto → Restore → Take → Restore reverses the NEW Take, not the old auto', () => {
     const med = makeMed({
-      doseConsumption: { d1: TODAY },
+      doseConsumptionHistory: { d1: [TODAY] },
       currentPills: 18,
     });
     const autoLog: ConsumptionLog = {
@@ -142,7 +142,7 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
     };
     const afterTake: Medication = {
       ...first.updatedMed,
-      doseConsumption: { d1: TODAY },
+      doseConsumptionHistory: { d1: [TODAY] },
       currentPills: 18,
     };
     const second = restoreDose(afterTake, 'd1', TODAY, now, [
@@ -158,7 +158,7 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
 
   it('consumed marker without active deduction log fails closed (no stock, no invent)', () => {
     const med = makeMed({
-      doseConsumption: { d1: TODAY },
+      doseConsumptionHistory: { d1: [TODAY] },
       currentPills: 18,
       doseSchedule: [
         { id: 'd1', time: '08:00', amount: 5 },
@@ -179,7 +179,7 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
 
   it('no durable deduction evidence → missing_deduction_evidence, stock unchanged', () => {
     const med = makeMed({
-      doseConsumption: {},
+      doseConsumptionHistory: {},
       currentPills: 20,
     });
     const result = restoreDose(
@@ -198,7 +198,7 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
   it('missing dose identity is not valid Restore evidence', () => {
     const med = makeMed({
       doseSchedule: [{ id: 'd1', time: '08:00', amount: 2 }],
-      doseConsumption: { d1: TODAY },
+      doseConsumptionHistory: { d1: [TODAY] },
       currentPills: 18,
     });
     const logs: ConsumptionLog[] = [

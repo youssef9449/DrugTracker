@@ -46,49 +46,34 @@ function formatUtcDateString(d: Date): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-
-
-
-
-/** True when the med has a non-empty multi-dose schedule (Phase 1+). */
+/** True when the med has a non-empty dose schedule. */
 export function hasDoseSchedule(med: Medication): boolean {
   return Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0;
 }
 
 /**
- * Dates on which `doseId` was manually consumed.
- *
- * Prefers {@link Medication.doseConsumptionHistory}. When history is
- * absent (pre-Phase-3B data), falls back to
- * {@link Medication.doseConsumption} as a **single** known date — not a
- * reconstructed multi-day ledger. Overwritten last-dates from the old
- * model cannot be recovered and are never invented here.
+ * Dates on which `doseId` was consumed, from `doseConsumptionHistory` only.
+ * Missing or empty history → no consumed dates.
  */
-export function getDoseConsumedDates(med: Medication, doseId: string): string[] {
+function getDoseConsumedDates(med: Medication, doseId: string): string[] {
   const hist = med.doseConsumptionHistory?.[doseId];
-  if (Array.isArray(hist) && hist.length > 0) {
-    // Deduplicate while preserving order
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const d of hist) {
-      if (typeof d === 'string' && d && !seen.has(d)) {
-        seen.add(d);
-        out.push(d);
-      }
-    }
-    return out;
+  if (!Array.isArray(hist) || hist.length === 0) {
+    return [];
   }
-  const last = med.doseConsumption?.[doseId];
-  return typeof last === 'string' && last ? [last] : [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const d of hist) {
+    if (typeof d === 'string' && d && !seen.has(d)) {
+      seen.add(d);
+      out.push(d);
+    }
+  }
+  return out;
 }
 
 /**
  * Whether a specific dose slot was consumed on `dateStr`.
- * True only when the requested doseId has that date in per-dose data:
- * `doseConsumptionHistory[doseId]` or the `doseConsumption[doseId]`
- * pre-3B compatibility fallback.
- * Medication-level `lastConsumedDate` is NOT used (no no-schedule
- * single-dose runtime fallback).
+ * Uses only `doseConsumptionHistory` (no medication-level lastConsumedDate fallback).
  */
 export function isDoseConsumedOnDate(
   med: Medication,
@@ -100,39 +85,25 @@ export function isDoseConsumedOnDate(
 
 /**
  * Record a manual consumption of `doseId` on `dateStr`.
- * Updates last-date map (`doseConsumption`) and append-only history
- * (`doseConsumptionHistory`, no duplicate dates). Seeds history from
- * any pre-existing last-date entries so first post-upgrade consume does
- * not drop the one known pre-3B date.
+ * Appends to `doseConsumptionHistory` (no duplicate dates).
  */
 export function recordDoseConsumed(
   med: Medication,
   doseId: string,
   dateStr: string
 ): {
-  doseConsumption: Record<string, string>;
   doseConsumptionHistory: Record<string, string[]>;
 } {
-  const doseConsumption: Record<string, string> = {
-    ...(med.doseConsumption ?? {}),
-    [doseId]: dateStr,
-  };
   const doseConsumptionHistory: Record<string, string[]> = {
     ...(med.doseConsumptionHistory ?? {}),
   };
-  // Seed history from any pre-existing last-date entries not yet in history
-  for (const [id, last] of Object.entries(med.doseConsumption ?? {})) {
-    if (!doseConsumptionHistory[id]?.length && last) {
-      doseConsumptionHistory[id] = [last];
-    }
-  }
   const prev = doseConsumptionHistory[doseId] ?? [];
   if (!prev.includes(dateStr)) {
     doseConsumptionHistory[doseId] = [...prev, dateStr];
   } else {
     doseConsumptionHistory[doseId] = prev;
   }
-  return { doseConsumption, doseConsumptionHistory };
+  return { doseConsumptionHistory };
 }
 
 /**

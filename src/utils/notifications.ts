@@ -974,7 +974,7 @@ export async function scheduleCriticalAlarm(
 
 // Sentinel lives in a leaf module so pure-logic modules (dateCalculations)
 // can reference it without importing the notification stack.
-// Re-exported here for backward compatibility with existing importers.
+// Re-exported here for convenient access from existing importers.
 
 /**
  * Recurring dose-alarm id for an explicit doseSchedule row (Issue #268).
@@ -1269,7 +1269,7 @@ export interface ScheduleDoseReminderOptions {
    * is still in the future.
    *
    * Used when today's occurrence for this dose slot has already been
-   * consumed (per-dose markers: doseConsumption / doseConsumptionHistory).
+   * consumed (per-dose markers: doseConsumptionHistory).
    * The pending alarm is cancelled and re-armed from tomorrow so the
    * already-taken occurrence cannot produce today's reminder. Tomorrow
    * and later days fire normally at the schedule-row time.

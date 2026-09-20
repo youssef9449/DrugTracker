@@ -30,8 +30,8 @@ export interface SelectDoseModalProps {
   isOpen: boolean;
   medication: Medication | null;
   /**
-   * take = pick a dose to consume (legacy path).
-   * restore = pick a dose to undo (legacy path).
+   * take = single-purpose dose selection.
+   * restore = single-purpose restore selection.
    * manage = unified multi-dose management (preferred for Card).
    */
   mode?: SelectDoseMode;
@@ -55,8 +55,7 @@ export interface SelectDoseModalProps {
  *   Every dose is listed with status + the single available action
  *   (تناول الجرعة | استرجاع الجرعة) or disabled when not actionable.
  *
- * mode='take' / 'restore': legacy single-purpose selection (kept for
- *   callers that still pass those modes).
+ * mode='take' / 'restore': single-purpose selection modes.
  */
 export const SelectDoseModal: FC<SelectDoseModalProps> = ({
   isOpen,
@@ -173,7 +172,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                 today
               );
               // Auto historical Restore requires Exact Auto evidence + valid amount.
-              // Issue #269: exact_auto (current) or legacy auto_daily with deterministic Exact id.
+              // Issue #269: exact_auto (current).
               const isAutoConsumed = isUiAutoHistoricalRestoreEligible(
                 consumed,
                 skipped,
@@ -210,7 +209,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                 let actionLabel: string;
 
                 if (isAutoConsumed) {
-                  // Exact Auto with active exact_auto (or legacy deterministic auto_daily) evidence → historical Restore.
+                  // Exact Auto with active exact_auto evidence → historical Restore.
                   statusText = 'تم الخصم تلقائيًا';
                   action = 'restore';
                   actionLabel = 'استرجاع الجرعة';

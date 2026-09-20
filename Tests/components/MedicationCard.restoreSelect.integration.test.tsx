@@ -84,9 +84,9 @@ function makeMulti(overrides: Partial<Medication> = {}): Medication {
     ],
     dosesPerDay: 2,
     // Both slots already settled as manual consume so Restore is available.
-    doseConsumption: {
-      d1: TEST_DATE,
-      d2: TEST_DATE,
+    doseConsumptionHistory: {
+      d1: [TEST_DATE],
+      d2: [TEST_DATE],
     },
     ...overrides,
   };
@@ -107,7 +107,7 @@ function makeSingle(overrides: Partial<Medication> = {}): Medication {
     reminderEnabled: false,
     doseSchedule: [{ id: 'only', amount: 1, time: '09:00' }],
     dosesPerDay: 1,
-    doseConsumption: { only: TEST_DATE },
+    doseConsumptionHistory: { only: [TEST_DATE] },
     ...overrides,
   };
 }
@@ -164,7 +164,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
     });
 
     const pillsBefore = readMeds()[0].currentPills;
-    const consumptionBefore = { ...readMeds()[0].doseConsumption };
+    const consumptionBefore = { ...readMeds()[0].doseConsumptionHistory };
 
     await clickCardManage();
 
@@ -174,7 +174,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
 
     // No mutation until a dose is selected.
     expect(readMeds()[0].currentPills).toBe(pillsBefore);
-    expect(readMeds()[0].doseConsumption).toEqual(consumptionBefore);
+    expect(readMeds()[0].doseConsumptionHistory).toEqual(consumptionBefore);
     expect(readLogs().filter((l) => l.type === 'skipped_day')).toHaveLength(0);
   });
 
@@ -203,7 +203,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
       expect(restores[0].amount).not.toBe(1); // not d1 amount
       // Manual restore settles amount back into snapshot.
       expect(med.currentPills).toBe(pillsBefore + 2);
-      expect(med.doseConsumption?.d2).toBeUndefined();
+      expect(med.doseConsumptionHistory?.d2).toBeUndefined();
     });
   });
 
@@ -221,9 +221,9 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
 
     await waitFor(() => {
       const med = readMeds()[0];
-      expect(med.doseConsumption?.d1).toBe(TEST_DATE);
+      expect(med.doseConsumptionHistory?.d1).toBe(TEST_DATE);
       expect(med.doseSkippedHistory?.d1).toBeUndefined();
-      expect(med.doseConsumption?.d2).toBeUndefined();
+      expect(med.doseConsumptionHistory?.d2).toBeUndefined();
       expect(med.doseSkippedHistory?.d2).toEqual([getTodayDateString()]);
       expect(
         readLogs().filter((l) => l.type === 'skipped_day' && l.doseId === 'd1')
@@ -247,9 +247,9 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
 
     await waitFor(() => {
       const med = readMeds()[0];
-      expect(med.doseConsumption?.d1).toBeUndefined();
+      expect(med.doseConsumptionHistory?.d1).toBeUndefined();
       expect(med.doseSkippedHistory?.d1).toEqual([getTodayDateString()]);
-      expect(med.doseConsumption?.d2).toBe(TEST_DATE);
+      expect(med.doseConsumptionHistory?.d2).toBe(TEST_DATE);
       expect(med.doseSkippedHistory?.d2).toBeUndefined();
       const restores = readLogs().filter(
         (l) => l.type === 'skipped_day' && l.doseId === 'd1'
@@ -335,7 +335,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
       expect(screen.queryByText('اختر الإجراء المناسب لكل جرعة')).not.toBeInTheDocument();
       expect(screen.queryByText(/اختر الجرعة التي تناولتها/)).not.toBeInTheDocument();
       const med = readMeds().find((m) => m.id === 'med-single')!;
-      expect(med.doseConsumption?.only).toBeUndefined();
+      expect(med.doseConsumptionHistory?.only).toBeUndefined();
       const restores = readLogs().filter(
         (l) => l.type === 'skipped_day' && l.medicationId === 'med-single'
       );
@@ -381,7 +381,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
       expect(restores[0].amount).not.toBe(3);
       expect(readMeds()[0].currentPills).toBe(before + 2);
       // siblings unchanged
-      expect(readMeds()[0].doseConsumption?.d1).toBe(TEST_DATE);
+      expect(readMeds()[0].doseConsumptionHistory?.d1).toBe(TEST_DATE);
     });
 
   });

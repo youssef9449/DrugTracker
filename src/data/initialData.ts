@@ -6,7 +6,6 @@
  *
  * It provides the default 3 medications that appear on a fresh install
  * (before the user has saved anything to localStorage). Seed logs are
- * intentionally empty — legacy auto_daily automatic-deduction seed logs
  * were removed in Issue #269 (Exact Auto uses occurrence-based exact_auto
  * logs produced at runtime, not day-based seed data). Once the user adds / edits medications, the state
  * is persisted in localStorage (`android_med_tracker_items_v2`)
@@ -97,7 +96,6 @@ export function getInitialMedications(todayStr: string = getTodayDateString()): 
 
 /**
  * Fresh installs start with no consumption logs.
- * Issue #269: do not seed legacy auto_daily automatic-deduction logs.
  * Exact Auto produces exact_auto occurrence logs at runtime only.
  */
 export function getInitialLogs(_todayStr: string = getTodayDateString()): ConsumptionLog[] {

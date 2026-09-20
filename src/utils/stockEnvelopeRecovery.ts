@@ -42,7 +42,7 @@ export interface ExactAutoEnvelopeStored {
     calendarDate: string;
   }>;
   createdAt: string;
-  /** Required causal order with Manual envelopes — no legacy/missing seq. */
+  /** Required causal order with Manual envelopes. mutationSeq is required. */
   mutationSeq: number;
 }
 
@@ -66,8 +66,8 @@ function isValidPhase4ExactEnvelope(
   if (!Array.isArray(raw.medications) || !Array.isArray(raw.logs)) return false;
   if (!Array.isArray(raw.toAcknowledge)) return false;
   if (typeof raw.createdAt !== 'string' || raw.createdAt.length === 0) return false;
-  // Phase 4 only: mutationSeq is mandatory. Missing/legacy seq → reject (no
-  // coercion to 0, no pre-fix acceptance).
+  // mutationSeq is required and must be a finite positive number.
+  // Invalid or missing mutationSeq is rejected (no fallback).
   if (
     typeof raw.mutationSeq !== 'number' ||
     !Number.isFinite(raw.mutationSeq) ||
@@ -192,7 +192,6 @@ export function finalizeMutationSeq(mutationSeq: number): string | null {
  *   category, notes, createdAt, lastSyncDate, lastConsumedDate,
  *   autoDeductEnabled, packageSize, stripsPerBox, pillsPerStrip,
  *   targetOrderQuantity, reminderEnabled, reminderTime, dosesPerDay,
- *   doseSchedule (array order-aware), doseConsumption (record),
  *   doseConsumptionHistory (record + per-dose array order-aware),
  *   doseSkippedHistory (record + per-dose array order-aware)).
  * - logs: same count, same order, every field deep-equal (id, medicationId,
@@ -213,8 +212,8 @@ export function durableMatchesEnvelopeSnapshot(
   },
   durable: AutoStockDurableState
 ): boolean {
-  // Global master switch is part of Phase 4 durable snapshots. Legacy envelopes
-  // may omit it; in that case only the medication/log snapshot is compared.
+  // Global master switch is part of Phase 4 durable snapshots. If absent,
+  // only the medication/log snapshot is compared.
   if (
     envelope.globalAutoDeductEnabled !== undefined &&
     durable.globalAutoDeductEnabled !== undefined &&
@@ -492,8 +491,7 @@ export function recoverManualEnvelopeInto(
       clear: () => saveManualStockEnvelope(null),
     });
   }
-  // Issue #267: Legacy Exact Auto envelope migration removed. Only
-  // current Phase 4 envelopes (with mutationSeq) are valid.
+  // Only current Phase 4 envelopes (with mutationSeq) are valid.
   const exact = loadExactAutoStockEnvelope();
   if (exact) {
     pending.push({

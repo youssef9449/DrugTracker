@@ -26,13 +26,13 @@ public class ExactAlarmStoreTest {
     @Test
     public void ownership_acceptsGenericAndLegacyMetadata() {
         assertTrue(ExactAlarmStore.isMetadataOwnedByOperationVersion(
-                "{" + ""operationVersion"" + ":"2000-3-new"}",
+                "{\"operationVersion\":\"2000-3-new\"}",
                 "2000-3-new"));
         assertTrue(ExactAlarmStore.isMetadataOwnedByOperationVersion(
-                "{" + ""scheduleVersion"" + ":"2000-2-old"}",
+                "{\"scheduleVersion\":\"2000-2-old\"}",
                 "2000-2-old"));
         assertFalse(ExactAlarmStore.isMetadataOwnedByOperationVersion(
-                "{"operationVersion":"2000-3-new"}",
+                "{\"operationVersion\":\"2000-3-new\"}",
                 "2000-2-old"));
     }
 

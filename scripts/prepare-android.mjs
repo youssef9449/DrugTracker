@@ -48,7 +48,35 @@ if (fs.existsSync(soundPath)) {
   console.info('Removed legacy dose_reminder.wav (notification runtime uses channel defaults).');
 }
 
-// ── 3. Install repository-owned shared notification runtime ─────────────
+// ── 3. Remove obsolete generated Phase-5 notification-delivery sources ──
+const legacyNotificationJavaDir = path.join(
+  androidDir,
+  'app',
+  'src',
+  'main',
+  'java',
+  'com',
+  'capacitorjs',
+  'plugins',
+  'localnotifications'
+);
+for (const file of [
+  'TimedNotificationPublisher.java',
+  'DoseReminderRecurrenceStore.java',
+  'AppForegroundState.java',
+]) {
+  const legacyPath = path.join(legacyNotificationJavaDir, file);
+  if (fs.existsSync(legacyPath)) {
+    fs.unlinkSync(legacyPath);
+    console.info(
+      '[prepare-android] Removed obsolete generated source ' +
+        path.relative(root, legacyPath)
+    );
+  }
+}
+
+// ── 3b. Install repository-owned shared notification runtime ───────────
+
 const notificationRuntimeSrcDir = path.join(root, 'native-android', 'notification-runtime');
 const notificationRuntimeDestDir = path.join(
   androidDir,
@@ -399,6 +427,10 @@ function upsertApplicationMetaData(xml, androidName, value) {
 ({ manifest } = removeReceiverByName(
   manifest,
   'app.drugtracker.autodeduction.AutoDeductionSystemReceiver'
+));
+({ manifest } = removeReceiverByName(
+  manifest,
+  'com.capacitorjs.plugins.localnotifications.TimedNotificationPublisher'
 ));
 ({ manifest } = removeReceiverByName(
   manifest,

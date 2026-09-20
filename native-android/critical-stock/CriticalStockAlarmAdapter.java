@@ -113,6 +113,13 @@ public final class CriticalStockAlarmAdapter {
         return CancelResult.success();
     }
 
+    public boolean isPending(String medicationId) {
+        return runtime.isPending(
+                occurrenceUri(medicationId),
+                ACTION_CRITICAL_STOCK,
+                CriticalStockAlarmReceiver.class);
+    }
+
     public JSONObject getScheduleMetadata(String medicationId) {
         return runtime.getScheduleMetadata(occurrenceKey(medicationId));
     }

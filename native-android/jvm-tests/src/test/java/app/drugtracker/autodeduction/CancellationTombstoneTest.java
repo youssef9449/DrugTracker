@@ -128,6 +128,16 @@ public class CancellationTombstoneTest {
     }
 
     @Test
+    public void operationVersionIsUsedForOrderingAndLegacyIsStillReadable() throws Exception {
+        String key = AutoDeductionContract.occurrenceKey("m", "d", "2026-09-25");
+        cancelPrefs().edit().putString(cancelKey(key), "5000-2-c").commit();
+        JSONObject meta = new JSONObject();
+        meta.put("operationVersion", "5000-3-s");
+        schedulePrefs().edit().putString(schKey(key), meta.toString()).commit();
+        assertFalse(newScheduler().isOccurrenceCancelledKey(key));
+    }
+
+    @Test
     public void malformedOrdering_withTombstone_failSafeCancelled() throws Exception {
         String key = AutoDeductionContract.occurrenceKey("m", "d", "2026-09-24");
         cancelPrefs().edit().putString(cancelKey(key), "not-a-token").commit();

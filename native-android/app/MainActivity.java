@@ -1,29 +1,42 @@
 package app.drugtracker;
 
+import android.content.Intent;
 import android.os.Bundle;
-import com.capacitorjs.plugins.localnotifications.AppForegroundState;
+
 import com.getcapacitor.BridgeActivity;
+
+import app.drugtracker.alarmruntime.ExactAlarmPlugin;
 import app.drugtracker.autodeduction.AutoDeductionPlugin;
+import app.drugtracker.criticalstock.CriticalStockPlugin;
 import app.drugtracker.dosereminder.DoseReminderPlugin;
+import app.drugtracker.notificationruntime.AppForegroundState;
+import app.drugtracker.notificationruntime.NotificationRuntimePlugin;
 
 /**
- * Capacitor BridgeActivity with process-local foreground tracking for
- * dose-reminder delivery-time channel selection.
+ * Capacitor BridgeActivity.
  *
- * Phase 2: registers AutoDeductionPlugin for exact-time auto-deduction
- * scheduling and durable event ledger bridge.
- * DoseReminderPlugin: query native next-day re-arm evidence
- * (TimedNotificationPublisher → DoseReminderRecurrenceStore).
- *
- * Installed by scripts/prepare-android.mjs over the generated MainActivity.
+ * <p>Registers the feature bridges and the shared capability/notification
+ * runtime. Exact alarms and notification presentation are separate native
+ * services.</p>
  */
 public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(ExactAlarmPlugin.class);
+        registerPlugin(NotificationRuntimePlugin.class);
         registerPlugin(AutoDeductionPlugin.class);
         registerPlugin(DoseReminderPlugin.class);
+        registerPlugin(CriticalStockPlugin.class);
         super.onCreate(savedInstanceState);
+        NotificationRuntimePlugin.dispatchActionIntent(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        NotificationRuntimePlugin.dispatchActionIntent(intent);
     }
 
     @Override

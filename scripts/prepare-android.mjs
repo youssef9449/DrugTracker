@@ -193,6 +193,39 @@ for (const file of doseReminderFiles) {
   console.info(`[prepare-android] Installed ${path.relative(root, src)} → ${path.relative(root, dest)}`);
 }
 
+
+// ── 4c. Critical Stock alarm lifecycle (timezone rebase) ───────────────
+const criticalAlarmSrcDir = path.join(root, 'native-android', 'critical-alarm');
+const criticalAlarmDestDir = path.join(
+  androidDir,
+  'app',
+  'src',
+  'main',
+  'java',
+  'app',
+  'drugtracker',
+  'criticalalarm'
+);
+const criticalAlarmFiles = [
+  'CriticalAlarmStore.java',
+  'CriticalAlarmLifecycle.java',
+  'CriticalAlarmSystemReceiver.java',
+  'CriticalAlarmPlugin.java',
+];
+if (!fs.existsSync(criticalAlarmDestDir)) {
+  fs.mkdirSync(criticalAlarmDestDir, { recursive: true });
+}
+for (const file of criticalAlarmFiles) {
+  const src = path.join(criticalAlarmSrcDir, file);
+  const dest = path.join(criticalAlarmDestDir, file);
+  if (!fs.existsSync(src)) {
+    console.error('[prepare-android] FATAL: missing critical-alarm source:', src);
+    process.exit(1);
+  }
+  fs.copyFileSync(src, dest);
+  console.info(`[prepare-android] Installed ${path.relative(root, src)} → ${path.relative(root, dest)}`);
+}
+
 // ── 5. Phase 2: register private alarm receiver + system lifecycle receiver ─
 manifest = fs.readFileSync(manifestPath, 'utf8');
 const bootPermission = '<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />';
@@ -284,9 +317,25 @@ const systemLifecycleReceiver = `        <receiver
   systemLifecycleReceiver
 ));
 
+
+const criticalAlarmTzReceiver = `        <receiver
+            android:name="app.drugtracker.criticalalarm.CriticalAlarmSystemReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>`;
+
+({ manifest } = upsertReceiverByName(
+  manifest,
+  'app.drugtracker.criticalalarm.CriticalAlarmSystemReceiver',
+  criticalAlarmTzReceiver
+));
+
 fs.writeFileSync(manifestPath, manifest);
 console.info(
   '[prepare-android] Ensured AutoDeductionReceiver (private) + AutoDeductionSystemReceiver (lifecycle).'
 );
 
-console.info('Prepared Android exact-alarm permission + dose-reminder delivery sources + auto-deduction.');
+console.info('Prepared Android exact-alarm permission + dose-reminder + critical-alarm timezone lifecycle + auto-deduction.');

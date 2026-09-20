@@ -64,6 +64,22 @@ interface DoseReminderNativePlugin {
 
 const DoseReminderNative = registerPlugin<DoseReminderNativePlugin>('DoseReminder');
 
+interface CriticalAlarmNativePlugin {
+  recordArmed(opts: {
+    medicationId: string;
+    notificationId: number;
+    targetDate: string;
+    targetLocalTime: string;
+    fireAtMs: number;
+    timezoneId: string;
+    title: string;
+    body: string;
+  }): Promise<{ ok: boolean }>;
+  clearArmed(opts: { medicationId: string }): Promise<{ ok: boolean }>;
+}
+const CriticalAlarmNative = registerPlugin<CriticalAlarmNativePlugin>('CriticalAlarm');
+
+
 /**
  * The BACKGROUND/KILLED dose-reminder notification channel.
  * Versioned because Android channel sound settings are immutable —
@@ -379,6 +395,53 @@ export async function openExactAlarmSettings(): Promise<boolean> {
  * @param daysLeft Days of supply remaining (in the body)
  * @param currentPills Current pill count (in the body)
  */
+/**
+ * Ensure OS permissions required to enable Critical Stock alerts.
+ *
+ * Contract (same for every UI path that may set criticalStockAlertsEnabled):
+ * 1. Notification display permission must be granted.
+ * 2. On Android, exact-alarm permission must also be granted.
+ * 3. If display is missing, request/open the existing notification flow.
+ * 4. If exact-alarm is missing on Android, openExactAlarmSettings().
+ * 5. Returns true only when ALL required permissions are granted — callers
+ *    must NOT set or persist criticalStockAlertsEnabled while this is false.
+ * 6. Disabling Critical Stock remains possible regardless of permissions
+ *    (callers handle that path separately).
+ * 7. notificationsEnabled (dose reminders) is intentionally independent.
+ */
+export async function ensureCriticalStockPermissions(): Promise<boolean> {
+  let displayGranted = false;
+  try {
+    const current = await getNotificationPermission();
+    if (current === 'granted') {
+      displayGranted = true;
+    } else if (current === 'default') {
+      displayGranted = await requestNotificationPermission();
+    }
+  } catch (err) {
+    console.warn('[notifications] ensureCriticalStockPermissions display check failed:', err);
+  }
+  if (!displayGranted) return false;
+
+  if (getNativePlatform() === 'android') {
+    const exact = await getExactAlarmPermission();
+    if (exact !== 'granted') {
+      // Open settings so the user can grant; resume reconciliation will
+      // arm alarms once permission is present. Do not treat as granted.
+      try {
+        await openExactAlarmSettings();
+      } catch {
+        /* ignore */
+      }
+      // Re-check once (settings may have been already granted / <API 31).
+      const again = await getExactAlarmPermission();
+      if (again !== 'granted') return false;
+    }
+  }
+  return true;
+}
+
+
 export async function sendMedicineAlert(
   medId: string,
   medicineName: string,
@@ -462,6 +525,8 @@ export async function sendCriticalStockAlert(
   // Returns whether the notification was actually handed to the
   // platform. Callers (the foreground stock-alert fallback) must only
   // record "sent" state after a successful send.
+  // On native, require ScheduleResult membership of the expected id so
+  // a resolve without the id cannot claim the Critical episode.
   return scheduleNotification({
     // Disjoint id range from sendMedicineAlert's lowStock band so the
     // two notifications don't collide / overwrite each other.
@@ -470,6 +535,7 @@ export async function sendCriticalStockAlert(
     body,
     channelId: 'low-stock',
     smallIcon: 'ic_launcher',
+    requireScheduleResultId: true,
   });
 }
 
@@ -489,6 +555,13 @@ async function scheduleNotification(opts: {
   smallIcon: string;
   actionTypeId?: string;
   extra?: Record<string, unknown>;
+  /**
+   * When true (Critical Stock immediate send on native), treat a resolved
+   * schedule() as success ONLY if ScheduleResult lists the expected id.
+   * Never fall back to a browser notification as native Critical delivery.
+   * Default false preserves existing non-critical notification behavior.
+   */
+  requireScheduleResultId?: boolean;
 }): Promise<boolean> {
   if (isNativePlatform()) {
     try {
@@ -498,7 +571,7 @@ async function scheduleNotification(opts: {
         return false;
       }
 
-      await LocalNotifications.schedule({
+      const result = await LocalNotifications.schedule({
         notifications: [
           {
             id: opts.id,
@@ -516,8 +589,18 @@ async function scheduleNotification(opts: {
           },
         ],
       });
+      if (opts.requireScheduleResultId) {
+        // Critical Stock: a resolve without our id is failure. Do NOT
+        // fall through to browser notification — that would masquerade
+        // as successful native Critical delivery.
+        return result.notifications.some((n) => n.id === opts.id);
+      }
     } catch (err) {
       console.warn('[notifications] Capacitor schedule failed:', err);
+      if (opts.requireScheduleResultId) {
+        // Native Critical path: exception is failure, never browser fallback.
+        return false;
+      }
       return scheduleWebNotification(opts.title, opts.body);
     }
     return true;
@@ -641,9 +724,9 @@ const NOTIFICATION_ID_BASE = {
 type NotificationCategory = keyof typeof NOTIFICATION_ID_BASE;
 
 /**
- * Stable string hash mapped into [0, ID_RANGE_SIZE). Used to derive a
- * per-medication slot within a category's id range so the same med
- * always maps to the same notification id.
+ * Stable string hash mapped into [0, ID_RANGE_SIZE). Preferred initial
+ * slot for the collision-resolving allocator; not the sole uniqueness
+ * mechanism (see allocateNotificationSlot).
  */
 function hashToRange(str: string, rangeSize: number): number {
   let hash = 0;
@@ -653,22 +736,141 @@ function hashToRange(str: string, rangeSize: number): number {
   return Math.abs(hash) % rangeSize;
 }
 
+/** localStorage key for the versioned per-category notification-ID registry. */
+const NOTIFICATION_ID_REGISTRY_KEY = 'drugtracker:notificationIdRegistry:v1';
+
+type NotificationIdRegistry = Record<string, Record<string, number>>;
+
+let registryCache: NotificationIdRegistry | null = null;
+
+function loadNotificationIdRegistry(): NotificationIdRegistry {
+  if (registryCache) return registryCache;
+  try {
+    if (typeof localStorage === 'undefined') {
+      registryCache = {};
+      return registryCache;
+    }
+    const raw = localStorage.getItem(NOTIFICATION_ID_REGISTRY_KEY);
+    if (!raw) {
+      registryCache = {};
+      return registryCache;
+    }
+    const parsed = JSON.parse(raw) as NotificationIdRegistry;
+    registryCache = parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    registryCache = {};
+  }
+  return registryCache;
+}
+
+function saveNotificationIdRegistry(reg: NotificationIdRegistry): void {
+  registryCache = reg;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(NOTIFICATION_ID_REGISTRY_KEY, JSON.stringify(reg));
+    }
+  } catch {
+    // Quota / private mode — in-memory cache still serves this session.
+  }
+}
+
 /**
- * Compute a stable notification id for a given category + medication.
+ * Collision-resolving slot allocator for a category + logical identity.
  *
- * - test category returns a fixed constant (there is only ever one
- *   test notification at a time).
- * - All other categories return BASE + hash(medId) % RANGE_SIZE, so the
- *   same med always maps to the same id within its category's band, and
- *   different categories never collide (disjoint bands).
+ * 1. Preferred slot = hash(identity) % range.
+ * 2. If unused → allocate.
+ * 3. If owned by the SAME identity → reuse.
+ * 4. Otherwise linear-probe next slots (modulo range) until free or same id.
+ * 5. Persist the mapping so restarts return the same numeric id.
+ *
+ * Categories remain in disjoint bands. Finite hash alone is collision-prone
+ * (e.g. "Aa" vs "BB"); the registry gives actual uniqueness among allocated
+ * identities.
+ */
+function allocateNotificationSlot(
+  category: NotificationCategory,
+  logicalIdentity: string
+): number {
+  const base = NOTIFICATION_ID_BASE[category];
+  if (category === 'test') return base;
+
+  const reg = loadNotificationIdRegistry();
+  const catMap = reg[category] ?? (reg[category] = {});
+  const existing = catMap[logicalIdentity];
+  if (typeof existing === 'number') {
+    return base + existing;
+  }
+
+  const preferred = hashToRange(logicalIdentity, ID_RANGE_SIZE);
+  const usedBySlot = new Map<number, string>();
+  for (const [identity, slot] of Object.entries(catMap)) {
+    usedBySlot.set(slot, identity);
+  }
+
+  let slot = preferred;
+  for (let i = 0; i < ID_RANGE_SIZE; i++) {
+    const owner = usedBySlot.get(slot);
+    if (owner === undefined || owner === logicalIdentity) {
+      catMap[logicalIdentity] = slot;
+      saveNotificationIdRegistry(reg);
+      return base + slot;
+    }
+    slot = (slot + 1) % ID_RANGE_SIZE;
+  }
+
+  // Exhausted (pathological): fall back to preferred; uniqueness is best-effort.
+  catMap[logicalIdentity] = preferred;
+  saveNotificationIdRegistry(reg);
+  return base + preferred;
+}
+
+/**
+ * Lookup an already-allocated slot without allocating a new one.
+ * Used by cancellation paths so a missing mapping never invents an
+ * unrelated id that could cancel the wrong notification.
+ * Returns null when no allocation exists for this identity.
+ */
+function lookupNotificationSlot(
+  category: NotificationCategory,
+  logicalIdentity: string
+): number | null {
+  const base = NOTIFICATION_ID_BASE[category];
+  if (category === 'test') return base;
+  const reg = loadNotificationIdRegistry();
+  const catMap = reg[category];
+  if (!catMap) return null;
+  const slot = catMap[logicalIdentity];
+  if (typeof slot !== 'number') return null;
+  return base + slot;
+}
+
+/**
+ * Compute a stable notification id for a given category + logical identity.
+ * Allocates (and persists) on first use; subsequent calls return the same id.
+ *
+ * - test category returns a fixed constant.
+ * - Other categories: BASE + collision-resolved slot in [0, RANGE).
+ *
+ * Prefer lookupNotificationSlot for pure cancel paths that must not allocate.
  */
 function notificationId(
   category: NotificationCategory,
   medId?: string
 ): number {
-  const base = NOTIFICATION_ID_BASE[category];
-  if (category === 'test') return base;
-  return base + hashToRange(medId ?? '', ID_RANGE_SIZE);
+  if (category === 'test') return NOTIFICATION_ID_BASE.test;
+  return allocateNotificationSlot(category, medId ?? '');
+}
+
+/** Test-only: clear the in-memory + persisted registry (for unit tests). */
+export function __resetNotificationIdRegistryForTests(): void {
+  registryCache = null;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(NOTIFICATION_ID_REGISTRY_KEY);
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -743,12 +945,33 @@ export function criticalAlarmId(medId: string): number {
  */
 export async function cancelCriticalAlarm(medId: string): Promise<void> {
   if (!isNativePlatform()) return;
+  // Lookup only — do not allocate a brand-new id merely because the
+  // mapping is missing; there would be nothing known to cancel.
+  const id = lookupNotificationSlot('criticalAlarm', medId);
+  if (id == null) {
+    // Still clear native lifecycle record if any (cold cancel).
+    try {
+      if (isNativePlatform() && getNativePlatform() === 'android') {
+        await CriticalAlarmNative.clearArmed({ medicationId: medId });
+      }
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
   try {
     await LocalNotifications.cancel({
-      notifications: [{ id: criticalAlarmId(medId) }],
+      notifications: [{ id }],
     });
   } catch (err) {
     console.warn('[notifications] cancelCriticalAlarm failed:', err);
+  }
+  try {
+    if (getNativePlatform() === 'android') {
+      await CriticalAlarmNative.clearArmed({ medicationId: medId });
+    }
+  } catch (err) {
+    console.warn('[notifications] CriticalAlarm.clearArmed failed:', err);
   }
 }
 
@@ -788,10 +1011,11 @@ function pendingAtMatchesAlarmTime(at: unknown, alarmTimeMs: number): boolean {
  * v6 API only:
  *   1. `checkPermissions()` — display permission still granted. Without
  *      it a pending alarm fires but is never shown.
- *   2. On Android: `checkExactNotificationSetting()` is not 'denied'.
- *      When it flips to denied the OS cancels the app's exact alarms;
- *      the plugin's pending list may still list them, so that state
- *      must never count as "armed".
+ *   2. On Android: exact-alarm permission must be exactly `granted`
+ *      (via getExactAlarmPermission). `prompt`, `denied`, and
+ *      `unsupported` must never count as verified — when exact is
+ *      unavailable the OS may cancel or never arm exact alarms; the
+ *      plugin's pending list is not trusted in that state.
  *   3. `getPending()` contains this medication's stable critical-alarm
  *      id with schedule.at === alarmTimeMs (see
  *      pendingAtMatchesAlarmTime for platform shapes).
@@ -833,19 +1057,16 @@ export async function verifyCriticalAlarmPending(
     const perm = await LocalNotifications.checkPermissions();
     if (perm.display !== 'granted') return false;
     if (getNativePlatform() === 'android') {
-      try {
-        const exact = await LocalNotifications.checkExactNotificationSetting();
-        if (exact.exact_alarm === 'denied') return false;
-      } catch (err) {
-        console.warn(
-          '[notifications] verifyCriticalAlarmPending: exact-alarm check failed:',
-          err
-        );
-        return false;
-      }
+      // Exact-alarm must be exactly 'granted'. prompt / denied /
+      // unsupported must NOT count as verified — getExactAlarmPermission
+      // already normalizes Android prompt → denied.
+      const exact = await getExactAlarmPermission();
+      if (exact !== 'granted') return false;
     }
     const pending = await LocalNotifications.getPending();
-    const id = criticalAlarmId(medId);
+    // Lookup only: if we never allocated, there is nothing to verify.
+    const id = lookupNotificationSlot('criticalAlarm', medId);
+    if (id == null) return false;
     return pending.notifications.some(
       (n) =>
         n.id === id &&
@@ -909,6 +1130,21 @@ export async function scheduleCriticalAlarm(
         console.warn('[notifications] scheduleCriticalAlarm skipped: permission not granted');
         return false;
       }
+      // Exact-alarm is a hard requirement for Critical Stock future alarms
+      // on Android. Inexact delivery would violate the contract that the
+      // notification fires at the exact projected critical occurrence.
+      // Treat denied, prompt, and unsupported as scheduling failure —
+      // never call schedule() or claim a future alarm without exact grant.
+      if (getNativePlatform() === 'android') {
+        const exact = await getExactAlarmPermission();
+        if (exact !== 'granted') {
+          console.warn(
+            '[notifications] scheduleCriticalAlarm skipped: exact-alarm permission is',
+            exact
+          );
+          return false;
+        }
+      }
       const result = await LocalNotifications.schedule({
         notifications: [
           {
@@ -938,7 +1174,37 @@ export async function scheduleCriticalAlarm(
       // list) is not a native future alarm and must be reported as a
       // failure — the scheduler then leaves the claim open instead of
       // persisting an armed claim with no alarm behind it.
-      return result.notifications.some((n) => n.id === criticalAlarmId(medId));
+      const notifId = criticalAlarmId(medId);
+      const accepted = result.notifications.some((n) => n.id === notifId);
+      if (accepted && getNativePlatform() === 'android') {
+        // Record native lifecycle metadata AFTER schedule acceptance so
+        // TIMEZONE_CHANGED can rebase while the app is closed.
+        try {
+          const fire = new Date(criticalDateMs);
+          const y = fire.getFullYear();
+          const m = String(fire.getMonth() + 1).padStart(2, '0');
+          const d = String(fire.getDate()).padStart(2, '0');
+          const hh = String(fire.getHours()).padStart(2, '0');
+          const mm = String(fire.getMinutes()).padStart(2, '0');
+          const tz =
+            typeof Intl !== 'undefined' && Intl.DateTimeFormat
+              ? Intl.DateTimeFormat().resolvedOptions().timeZone
+              : 'UTC';
+          await CriticalAlarmNative.recordArmed({
+            medicationId: medId,
+            notificationId: notifId,
+            targetDate: `${y}-${m}-${d}`,
+            targetLocalTime: `${hh}:${mm}`,
+            fireAtMs: criticalDateMs,
+            timezoneId: tz || 'UTC',
+            title,
+            body,
+          });
+        } catch (err) {
+          console.warn('[notifications] CriticalAlarm.recordArmed failed:', err);
+        }
+      }
+      return accepted;
     } catch (err) {
       console.warn('[notifications] Capacitor scheduleCriticalAlarm failed:', err);
       // Native failure (permission, bridge, or schedule rejection) →

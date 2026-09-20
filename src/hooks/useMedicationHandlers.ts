@@ -30,6 +30,7 @@ import { STORAGE_AUTO_DEDUCT_PROMPTED_KEY } from '../constants/storageKeys';
 import {
   requestNotificationPermission,
   getNotificationPermission,
+  ensureCriticalStockPermissions,
 } from '../utils/notifications';
 import { DEFAULT_SNOOZE_MINUTES } from '../utils/time';
 
@@ -595,27 +596,22 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
   const handleToggleCriticalStockAlerts = useCallback(async () => {
     const next = !criticalStockAlertsEnabled;
     if (!next) {
-      // Turning OFF — always allowed.
+      // Turning OFF — always allowed regardless of current permissions.
       setCriticalStockAlertsEnabled(false);
       showToast(TOAST_MESSAGES.criticalAlertsOff);
       return;
     }
 
-    // Turning ON — ensure OS notification permission is granted.
-    // On denial/error, do NOT activate the toggle. Never mutate
-    // notificationsEnabled here (dose reminders stay independent).
-    let pushAllowed = false;
+    // Turning ON — shared permission contract: display + (Android) exact-alarm.
+    // Do NOT set or persist enabled while required permission is still missing.
+    // Never mutate notificationsEnabled here (dose reminders stay independent).
+    let allowed = false;
     try {
-      const currentPerm = await getNotificationPermission();
-      if (currentPerm === 'granted') {
-        pushAllowed = true;
-      } else if (currentPerm === 'default') {
-        pushAllowed = await requestNotificationPermission();
-      }
+      allowed = await ensureCriticalStockPermissions();
     } catch (err) {
-      console.warn('[App] Notification permission error (critical toggle):', err);
+      console.warn('[App] Critical stock permission error (toggle):', err);
     }
-    if (!pushAllowed) {
+    if (!allowed) {
       showToast(TOAST_MESSAGES.notificationsPermissionDenied);
       return;
     }

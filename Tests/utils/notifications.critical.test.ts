@@ -18,6 +18,8 @@ vi.mock('@capacitor/core', () => ({
   registerPlugin: () => ({
     getNextOccurrence: () => Promise.resolve({ valid: false, nextOccurrenceMs: 0 }),
     clearReArm: () => Promise.resolve({ ok: true }),
+    recordArmed: () => Promise.resolve({ ok: true }),
+    clearArmed: () => Promise.resolve({ ok: true }),
   }),
 }));
 
@@ -300,5 +302,113 @@ describe('verifyCriticalAlarmPending — the claim is not proof the alarm exists
       verifyCriticalAlarmPending('med-1', Date.now() + 7 * 24 * 60 * 60 * 1000)
     ).resolves.toBe(false);
     warnSpy.mockRestore();
+  });
+});
+
+describe('scheduleCriticalAlarm exact-alarm hard requirement (Android)', () => {
+  beforeEach(() => {
+    mocks.platform.mockReturnValue('android');
+    mocks.checkPermissions.mockResolvedValue({ display: 'granted' });
+    mocks.schedule.mockResolvedValue({
+      notifications: [{ id: criticalAlarmId('med-exact') }],
+    });
+  });
+
+  it('proceeds when exact=granted', async () => {
+    mocks.checkExactNotificationSetting.mockResolvedValue({ exact_alarm: 'granted' });
+    const ok = await scheduleCriticalAlarm('med-exact', 'Med', Date.now() + 60_000);
+    expect(mocks.schedule).toHaveBeenCalled();
+    expect(ok).toBe(true);
+  });
+
+  it('returns false and does not schedule when exact=denied', async () => {
+    mocks.checkExactNotificationSetting.mockResolvedValue({ exact_alarm: 'denied' });
+    const ok = await scheduleCriticalAlarm('med-exact', 'Med', Date.now() + 60_000);
+    expect(ok).toBe(false);
+    expect(mocks.schedule).not.toHaveBeenCalled();
+  });
+
+  it('returns false and does not schedule when exact=prompt (normalized denied)', async () => {
+    mocks.checkExactNotificationSetting.mockResolvedValue({ exact_alarm: 'prompt' });
+    const ok = await scheduleCriticalAlarm('med-exact', 'Med', Date.now() + 60_000);
+    expect(ok).toBe(false);
+    expect(mocks.schedule).not.toHaveBeenCalled();
+  });
+
+  it('returns false when exact API fails (unsupported)', async () => {
+    mocks.checkExactNotificationSetting.mockRejectedValue(new Error('no api'));
+    const ok = await scheduleCriticalAlarm('med-exact', 'Med', Date.now() + 60_000);
+    expect(ok).toBe(false);
+    expect(mocks.schedule).not.toHaveBeenCalled();
+  });
+});
+
+describe('verifyCriticalAlarmPending exact-alarm hard requirement', () => {
+  const future = Date.now() + 120_000;
+
+  beforeEach(() => {
+    mocks.platform.mockReturnValue('android');
+    mocks.checkPermissions.mockResolvedValue({ display: 'granted' });
+    mocks.getPending.mockResolvedValue({
+      notifications: [
+        {
+          id: criticalAlarmId('med-v'),
+          schedule: { at: future },
+        },
+      ],
+    });
+  });
+
+  it('returns false for exact=prompt', async () => {
+    mocks.checkExactNotificationSetting.mockResolvedValue({ exact_alarm: 'prompt' });
+    expect(await verifyCriticalAlarmPending('med-v', future)).toBe(false);
+  });
+
+  it('returns false for exact=denied', async () => {
+    mocks.checkExactNotificationSetting.mockResolvedValue({ exact_alarm: 'denied' });
+    expect(await verifyCriticalAlarmPending('med-v', future)).toBe(false);
+  });
+
+  it('returns true when exact=granted and pending matches', async () => {
+    mocks.checkExactNotificationSetting.mockResolvedValue({ exact_alarm: 'granted' });
+    expect(await verifyCriticalAlarmPending('med-v', future)).toBe(true);
+  });
+});
+
+describe('sendCriticalStockAlert trusts ScheduleResult', () => {
+  beforeEach(() => {
+    mocks.platform.mockReturnValue('android');
+    mocks.checkPermissions.mockResolvedValue({ display: 'granted' });
+  });
+
+  it('returns true when result contains expected id', async () => {
+    const { sendCriticalStockAlert, notificationId: _ } = await import('@/utils/notifications');
+    // critical id band 2M
+    mocks.schedule.mockImplementation(async (opts: { notifications: { id: number }[] }) => ({
+      notifications: opts.notifications,
+    }));
+    const ok = await sendCriticalStockAlert('med-s', 'Med', 1, 2, 'قرص');
+    expect(ok).toBe(true);
+  });
+
+  it('returns false when result is empty', async () => {
+    const { sendCriticalStockAlert } = await import('@/utils/notifications');
+    mocks.schedule.mockResolvedValue({ notifications: [] });
+    const ok = await sendCriticalStockAlert('med-s2', 'Med', 1, 2, 'قرص');
+    expect(ok).toBe(false);
+  });
+
+  it('returns false when result has different id', async () => {
+    const { sendCriticalStockAlert } = await import('@/utils/notifications');
+    mocks.schedule.mockResolvedValue({ notifications: [{ id: 999 }] });
+    const ok = await sendCriticalStockAlert('med-s3', 'Med', 1, 2, 'قرص');
+    expect(ok).toBe(false);
+  });
+
+  it('returns false when schedule throws', async () => {
+    const { sendCriticalStockAlert } = await import('@/utils/notifications');
+    mocks.schedule.mockRejectedValue(new Error('boom'));
+    const ok = await sendCriticalStockAlert('med-s4', 'Med', 1, 2, 'قرص');
+    expect(ok).toBe(false);
   });
 });

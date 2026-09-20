@@ -17,6 +17,8 @@ vi.mock('@capacitor/core', () => ({
   registerPlugin: () => ({
     getNextOccurrence: () => Promise.resolve({ valid: false, nextOccurrenceMs: 0 }),
     clearReArm: () => Promise.resolve({ ok: true }),
+    recordArmed: () => Promise.resolve({ ok: true }),
+    clearArmed: () => Promise.resolve({ ok: true }),
   }),
 }));
 vi.mock('@capacitor/local-notifications', () => ({

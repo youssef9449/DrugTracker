@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Medication, calculateMedicationStatus } from '../types';
 import { getCriticalAlarmDate, getTodayDateString } from '../utils/dateCalculations';
 import { sendCriticalStockAlert, cancelCriticalAlarm } from '../utils/notifications';
@@ -21,6 +21,35 @@ interface UseStockAlertsOptions {
 
 /** The claim value an in-flight foreground send has written. */
 const IN_FLIGHT_CLAIM = { claimed: true, alarmTime: null } as const;
+
+/**
+ * Module-level per-medication Critical episode generation.
+ *
+ * Advances when the business episode changes:
+ *   sufficient/non-critical → Critical/Out-of-Stock
+ *   Critical/Out-of-Stock → sufficient/non-critical
+ *   medication deleted
+ *   medication removed and later recreated with the same id
+ *
+ * Does NOT increment on ordinary re-renders while the med stays in the
+ * same business state. Used so a stale foreground send success/failure
+ * from an earlier episode cannot cancel a newer episode's alarm or clear
+ * a newer in-flight claim. claimsEqual alone cannot distinguish two
+ * legitimate { claimed: true, alarmTime: null } markers from different
+ * episodes.
+ */
+const episodeGenerationByMedId = new Map<string, number>();
+const lastCriticalishByMedId = new Map<string, boolean>();
+
+function advanceEpisodeGeneration(medId: string): number {
+  const next = (episodeGenerationByMedId.get(medId) ?? 0) + 1;
+  episodeGenerationByMedId.set(medId, next);
+  return next;
+}
+
+function currentEpisodeGeneration(medId: string): number {
+  return episodeGenerationByMedId.get(medId) ?? 0;
+}
 
 /**
  * Foreground critical-stock notification fallback.
@@ -85,11 +114,14 @@ const IN_FLIGHT_CLAIM = { claimed: true, alarmTime: null } as const;
  * re-renders while the send is in flight can never start a second send,
  * and a failed send restores the opportunity (the fallback is never
  * suppressed). After a successful foreground send any armed native alarm
- * for the med is cancelled (it could only ever fire a second
- * notification for the same claimed episode).
+ * for the med is cancelled only when the success still belongs to the
+ * same Critical episode (generation + claim + criticalish state).
  *
- * Deleted medications have their claim entries removed here (the
- * scheduler cancels their native alarms).
+ * Deleted medications: claims are read first; if alarmTime is non-null
+ * a native cancel is enqueued (writes nothing to claims), then the claim
+ * entry is removed synchronously. Cold start has empty scheduler memory;
+ * the persisted claim is sufficient to discover and cancel a previously
+ * armed future Critical alarm.
  *
  * Race safety (all local, nothing persisted for it):
  *   - Every claim write is a synchronous load → write → save of the map
@@ -100,10 +132,9 @@ const IN_FLIGHT_CLAIM = { claimed: true, alarmTime: null } as const;
  *     precede the scheduler's cancel/schedule chain for the same render.
  *   - The foreground writes claims only for CRITICAL meds; the scheduler
  *     only for SUFFICIENT ones — they never race on the same state.
- *   - The send resolves asynchronously; the failure-revert is a tiny
- *     CAS: if the claim moved since this pass marked it (episode ended +
- *     re-armed, med deleted, …), the revert is skipped — a stale
- *     foreground result can never overwrite newer business state.
+ *   - Episode generation + claim CAS ensure a stale foreground result
+ *     can never overwrite newer business state or cancel a newer episode's
+ *     alarm.
  *   - Native alarm cancels go through the shared per-medication
  *     operation queue so they serialize against the scheduler's
  *     cancel/schedule chain.
@@ -114,6 +145,10 @@ export function useStockAlerts({
   hydrated,
   isFirstRun,
 }: UseStockAlertsOptions): void {
+  // Track med ids present on the previous effect run so delete/recreate
+  // of the same id advances episode generation.
+  const prevMedIdsRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     if (!hydrated) return;
     if (isFirstRun) return;
@@ -121,23 +156,52 @@ export function useStockAlerts({
     const claims = loadCriticalNotificationClaims();
     let changed = false;
 
-    // Clean up claims for deleted medications (the scheduler cancels
-    // their native alarms on its side).
     const medIdSet = new Set(medications.map((m) => m.id));
+
+    // Clean up claims for deleted medications. Read claim FIRST; if it
+    // records a future alarm, enqueue cancel (no claim writes), then
+    // remove the claim entry synchronously. Scheduler in-memory state is
+    // not required — cold start starts with empty scheduledCriticalIdsRef.
     for (const id of Object.keys(claims)) {
       if (!medIdSet.has(id)) {
+        const claim = getCriticalNotificationClaim(claims, id);
+        if (
+          claim?.claimed &&
+          claim.alarmTime !== null &&
+          claim.alarmTime > Date.now()
+        ) {
+          void enqueueCriticalAlarmOp(id, () => cancelCriticalAlarm(id));
+        }
         clearCriticalNotificationClaim(claims, id);
         changed = true;
+        // Deleted med: advance (or clear) episode tracking so a later
+        // recreate with the same id is a new episode.
+        lastCriticalishByMedId.delete(id);
+        advanceEpisodeGeneration(id);
       }
     }
 
     // App preference for critical-stock alerts only (independent of dose reminders).
-  // OS permission is enforced inside the notification utility on send.
-  const canNotify = criticalStockAlertsEnabled;
+    // OS permission is enforced inside the notification utility on send.
+    const canNotify = criticalStockAlertsEnabled;
 
     for (const med of medications) {
       const { status, daysLeft } = calculateMedicationStatus(med);
       const isCriticalish = status === 'critical' || status === 'out_of_stock';
+
+      // Advance episode generation on business-state transitions only.
+      const prevCriticalish = lastCriticalishByMedId.get(med.id);
+      if (prevCriticalish === undefined) {
+        // First sighting this session (or after delete): seed without
+        // forcing a generation bump on ordinary re-entry while critical.
+        lastCriticalishByMedId.set(med.id, isCriticalish);
+        if (isCriticalish && !episodeGenerationByMedId.has(med.id)) {
+          advanceEpisodeGeneration(med.id);
+        }
+      } else if (prevCriticalish !== isCriticalish) {
+        lastCriticalishByMedId.set(med.id, isCriticalish);
+        advanceEpisodeGeneration(med.id);
+      }
 
       if (!isCriticalish) {
         // ── Sufficient: this hook ends the business episode, here and
@@ -206,6 +270,11 @@ export function useStockAlerts({
       setCriticalNotificationClaim(claims, med.id, { ...IN_FLIGHT_CLAIM });
       changed = true;
 
+      // Capture episode identity for this send so a stale success/failure
+      // cannot affect a newer episode after this one ends.
+      const sendGeneration = currentEpisodeGeneration(med.id);
+      const inFlightMarker = { ...IN_FLIGHT_CLAIM };
+
       const currentPills = Number(med.currentPills) || 0;
       const unit = med.unit || 'قرص';
       Promise.resolve(sendCriticalStockAlert(med.id, med.name, daysLeft, currentPills, unit))
@@ -213,27 +282,55 @@ export function useStockAlerts({
         .catch(() => false)
         .then((sent) => {
           if (sent) {
-            // The foreground consumed the episode's notification — make
-            // sure no armed critical alarm for this med survives as a
-            // second user-facing notification. Serialized through the
-            // per-medication queue; idempotent.
-            void enqueueCriticalAlarmOp(med.id, () => cancelCriticalAlarm(med.id));
+            // Cancel native alarm ONLY when this success still belongs to
+            // the same Critical episode: med exists, still criticalish,
+            // generation matches, claim still the in-flight marker we wrote.
+            void enqueueCriticalAlarmOp(med.id, async () => {
+              const freshMedsClaim = loadCriticalNotificationClaims();
+              const currentClaim = getCriticalNotificationClaim(freshMedsClaim, med.id);
+              if (!claimsEqual(currentClaim, inFlightMarker)) return;
+              if (currentEpisodeGeneration(med.id) !== sendGeneration) return;
+              // Re-read criticalish from last known business state map
+              // (hook owns episode lifecycle; generation advances on leave).
+              if (lastCriticalishByMedId.get(med.id) !== true) return;
+              if (currentEpisodeGeneration(med.id) !== sendGeneration) return;
+              await cancelCriticalAlarm(med.id);
+            });
             return;
           }
           // Send failed → un-claim so the opportunity stays available
-          // (never suppress the fallback). CAS: only revert the mark we
-          // ourselves wrote; if the claim moved under us (episode ended,
-          // med deleted, …) the newer state wins and we do nothing.
+          // (never suppress the fallback). Episode-aware CAS: only revert
+          // when claim and generation still match this send — a stale
+          // failure from Episode A must not clear Episode B's claim.
+          if (currentEpisodeGeneration(med.id) !== sendGeneration) return;
           const fresh = loadCriticalNotificationClaims();
           const current = getCriticalNotificationClaim(fresh, med.id);
-          if (!claimsEqual(current, IN_FLIGHT_CLAIM)) return;
+          if (!claimsEqual(current, inFlightMarker)) return;
+          if (currentEpisodeGeneration(med.id) !== sendGeneration) return;
           setCriticalNotificationClaim(fresh, med.id, { claimed: false, alarmTime: null });
           saveCriticalNotificationClaims(fresh);
         });
     }
 
+    // Drop tracking for meds no longer present (already handled claims above).
+    for (const id of prevMedIdsRef.current) {
+      if (!medIdSet.has(id)) {
+        lastCriticalishByMedId.delete(id);
+      }
+    }
+    prevMedIdsRef.current = medIdSet;
+
     if (changed) {
       saveCriticalNotificationClaims(claims);
     }
   }, [medications, criticalStockAlertsEnabled, hydrated, isFirstRun]);
+}
+
+/** Test-only helpers for episode-generation regressions. */
+export function __getEpisodeGenerationForTests(medId: string): number {
+  return currentEpisodeGeneration(medId);
+}
+export function __resetEpisodeGenerationForTests(): void {
+  episodeGenerationByMedId.clear();
+  lastCriticalishByMedId.clear();
 }

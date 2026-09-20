@@ -902,12 +902,27 @@ export default function App() {
             );
           }
           if (prefs.criticalStockAlertsEnabled !== criticalStockAlertsEnabled) {
-            setCriticalStockAlertsEnabled(prefs.criticalStockAlertsEnabled);
-            showToast(
-              prefs.criticalStockAlertsEnabled
-                ? TOAST_MESSAGES.criticalAlertsOn
-                : TOAST_MESSAGES.criticalAlertsOff
-            );
+            if (prefs.criticalStockAlertsEnabled) {
+              // Shared permission contract — identical to the toggle path.
+              // Do not enable/persist while display or (Android) exact-alarm
+              // permission is still missing.
+              let allowed = false;
+              try {
+                allowed = await ensureCriticalStockPermissions();
+              } catch (err) {
+                console.warn('[App] Critical stock permission error (prefs):', err);
+              }
+              if (!allowed) {
+                showToast(TOAST_MESSAGES.notificationsPermissionDenied);
+              } else {
+                setCriticalStockAlertsEnabled(true);
+                showToast(TOAST_MESSAGES.criticalAlertsOn);
+              }
+            } else {
+              // Disabling is always allowed regardless of permissions.
+              setCriticalStockAlertsEnabled(false);
+              showToast(TOAST_MESSAGES.criticalAlertsOff);
+            }
           }
           // Confirm feedback only when the committed preference leaves sound on.
           if (prefs.soundEnabled) {

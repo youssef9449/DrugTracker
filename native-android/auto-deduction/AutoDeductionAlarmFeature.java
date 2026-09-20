@@ -10,9 +10,11 @@ public final class AutoDeductionAlarmFeature
     @Override
     public void restore(
             Context context,
-            String reason) {
+            String reason,
+            boolean exactAlarmPermissionGranted) {
         AutoDeductionLifecycle.promoteAndRestore(
                 context,
-                reason);
+                reason,
+                exactAlarmPermissionGranted);
     }
 }

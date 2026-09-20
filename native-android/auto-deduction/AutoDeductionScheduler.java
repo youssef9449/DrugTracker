@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.TimeZone;
 
 import app.drugtracker.alarmruntime.ExactAlarmOperationLock;
+import app.drugtracker.alarmruntime.ExactAlarmStore;
 
 /**
  * Auto Deduction business/recovery service. Exact Alarm Android scheduling
@@ -76,6 +77,9 @@ public final class AutoDeductionScheduler {
     private static final Object SCHEDULE_LOCK = ExactAlarmOperationLock.LOCK;
 
     private final Context appContext;
+    /** Auto schedule metadata persistence used by feature recovery/business semantics. */
+    private final SharedPreferences schedulePrefs;
+    private final ExactAlarmStore scheduleStore;
     /** Durable last-allocated ordering sequence (survives process death). */
     /** Active recurrence generation per (medicationId, doseId) — Issue #217. */
     private final SharedPreferences recurrenceAuthPrefs;
@@ -143,6 +147,13 @@ public final class AutoDeductionScheduler {
 
     public AutoDeductionScheduler(Context context) {
         this.appContext = context.getApplicationContext();
+        this.schedulePrefs = appContext.getSharedPreferences(
+                AutoDeductionContract.PREFS_SCHEDULES, Context.MODE_PRIVATE);
+        this.scheduleStore = new ExactAlarmStore(
+                appContext,
+                AutoDeductionContract.PREFS_SCHEDULES,
+                AutoDeductionContract.PREFS_CANCELLED,
+                AutoDeductionContract.PREFS_ORDERING);
         this.recurrenceAuthPrefs = appContext.getSharedPreferences(
                 AutoDeductionContract.PREFS_RECURRENCE_AUTH, Context.MODE_PRIVATE);
         this.fireRetryPrefs = appContext.getSharedPreferences(
@@ -283,7 +294,7 @@ public final class AutoDeductionScheduler {
      * the tombstone rewrite, and occurrences with no metadata skip removal.
      */
     private CancelResult cancelAllSchedulesForDoseLocked(String medicationId, String doseId) {
-        Map<String, ?> all = schedulingAdapter.getAllScheduleMetadata();
+        Map<String, ?> all = getAllScheduleMetadata();
         if (all == null || all.isEmpty()) return CancelResult.success();
 
         syncAlarmRuntimeTestControls();
@@ -560,7 +571,7 @@ public final class AutoDeductionScheduler {
 
             // Issue #240: delivery must own the *current* schedule row.
             final String prefKey = SCHEDULE_KEY_PREFIX + key;
-            final String metaRaw = schedulingAdapter.getScheduleRaw(prefKey);
+            final String metaRaw = getScheduleRaw(prefKey);
             if (metaRaw == null || metaRaw.isEmpty()) {
                 Log.i(TAG, "fire linearization: STALE (no active schedule metadata) for " + key);
                 return FireResult.cancelled();
@@ -569,7 +580,7 @@ public final class AutoDeductionScheduler {
             // Missing or mismatched scheduleVersion / recurrenceGeneration → STALE.
             try {
                 JSONObject meta = new JSONObject(metaRaw);
-                String activeVersion = AutoDeductionSchedulingAdapter.extractOperationVersion(meta);
+                String activeVersion = ExactAlarmStore.extractOperationVersion(meta);
                 long activeGen = meta.optLong(FIELD_RECURRENCE_GENERATION, 0L);
                 if (deliveryScheduleVersion == null || deliveryScheduleVersion.isEmpty()
                         || deliveryRecurrenceGeneration <= 0L) {
@@ -614,7 +625,7 @@ public final class AutoDeductionScheduler {
                     JSONObject meta = new JSONObject(metaRaw);
                     timeHhmm = meta.optString("timeHhmm", "");
                     if (scheduleVersion.isEmpty()) {
-                        scheduleVersion = AutoDeductionSchedulingAdapter.extractOperationVersion(meta);
+                        scheduleVersion = ExactAlarmStore.extractOperationVersion(meta);
                     }
                     if (gen <= 0L) {
                         gen = meta.optLong(FIELD_RECURRENCE_GENERATION, 0L);
@@ -835,7 +846,7 @@ public final class AutoDeductionScheduler {
             }
             // Past snapshot must still be the one we are recovering from (if present).
             if (pastPrefKey != null && observedVersion != null && !observedVersion.isEmpty()) {
-                String cur = schedulingAdapter.getScheduleRaw(pastPrefKey);
+                String cur = getScheduleRaw(pastPrefKey);
                 if (cur != null && !isMetadataOwnedByVersion(cur, observedVersion)) {
                     return ScheduleResult.fail("snapshot_stale");
                 }
@@ -853,7 +864,7 @@ public final class AutoDeductionScheduler {
                     pastPrefKey != null && pastPrefKey.equals(futurePrefKey);
             String existing = sameKeyRecovery
                     ? null
-                    : schedulingAdapter.getScheduleRaw(futurePrefKey);
+                    : getScheduleRaw(futurePrefKey);
             if (existing != null && !existing.isEmpty()) {
                 return new ScheduleResult(true, "already_present", futureKey);
             }
@@ -894,7 +905,7 @@ public final class AutoDeductionScheduler {
      * Package-visible for focused verification.
      */
     static boolean isMetadataOwnedByVersion(String currentJson, String expectedVersion) {
-        return AutoDeductionSchedulingAdapter.isMetadataOwnedByVersion(
+        return ExactAlarmStore.isMetadataOwnedByOperationVersion(
                 currentJson, expectedVersion);
     }
 
@@ -975,14 +986,14 @@ public final class AutoDeductionScheduler {
                 return false;
             }
 
-            String currentRaw = schedulingAdapter.getScheduleRaw(prefKey);
+            String currentRaw = getScheduleRaw(prefKey);
             int persistedRetryCount = nextRetryCount;
 
             if (currentRaw != null && !currentRaw.isEmpty()) {
                 try {
                     JSONObject current = new JSONObject(currentRaw);
                     String activeVersion =
-                            AutoDeductionSchedulingAdapter.extractOperationVersion(current);
+                            ExactAlarmStore.extractOperationVersion(current);
                     long activeGen =
                             current.optLong(FIELD_RECURRENCE_GENERATION, 0L);
                     if (scheduleVersion == null || scheduleVersion.isEmpty()
@@ -999,7 +1010,7 @@ public final class AutoDeductionScheduler {
                     current.put(FIELD_FIRE_RETRY_COUNT, persistedRetryCount);
 
                     if (forceFireRetryScheduleMarkerCommitFailureForTest
-                            || !schedulingAdapter.writeScheduleRaw(
+                            || !writeScheduleRaw(
                                     prefKey,
                                     current.toString())) {
                         return false;
@@ -1285,7 +1296,7 @@ public final class AutoDeductionScheduler {
      * Schedule-metadata marker is secondary; independent evidence is the authority.
      */
     private boolean clearFireRetryMarkerLocked(String prefKey) {
-        String raw = schedulingAdapter.getScheduleRaw(prefKey);
+        String raw = getScheduleRaw(prefKey);
         if (raw == null || raw.isEmpty()) {
             return true;
         }
@@ -1296,7 +1307,7 @@ public final class AutoDeductionScheduler {
             }
             obj.remove(FIELD_FIRE_RETRY_COUNT);
             boolean committed =
-                    schedulingAdapter.writeScheduleRaw(
+                    writeScheduleRaw(
                             prefKey,
                             obj.toString());
             if (!committed) {
@@ -1447,6 +1458,77 @@ public final class AutoDeductionScheduler {
         return ScheduleResult.success(key);
     }
 
+    private String normalizeFeatureStorageKey(String keyOrPrefKey) {
+        if (keyOrPrefKey == null || keyOrPrefKey.isEmpty()) return null;
+        return keyOrPrefKey.startsWith(SCHEDULE_KEY_PREFIX)
+                ? keyOrPrefKey.substring(SCHEDULE_KEY_PREFIX.length())
+                : keyOrPrefKey;
+    }
+
+    private String getScheduleRaw(String keyOrPrefKey) {
+        String featureStorageKey = normalizeFeatureStorageKey(keyOrPrefKey);
+        return featureStorageKey == null
+                ? null
+                : scheduleStore.getScheduleRaw(featureStorageKey);
+    }
+
+    private boolean hasSchedule(String keyOrPrefKey) {
+        String featureStorageKey = normalizeFeatureStorageKey(keyOrPrefKey);
+        return featureStorageKey != null
+                && !featureStorageKey.isEmpty()
+                && scheduleStore.hasSchedule(featureStorageKey);
+    }
+
+    private Map<String, ?> getAllScheduleMetadata() {
+        return schedulePrefs.getAll();
+    }
+
+    private boolean writeScheduleRaw(String keyOrPrefKey, String raw) {
+        String prefKey = keyOrPrefKey != null
+                && keyOrPrefKey.startsWith(SCHEDULE_KEY_PREFIX)
+                ? keyOrPrefKey
+                : keyOrPrefKey == null || keyOrPrefKey.isEmpty()
+                        ? null
+                        : SCHEDULE_KEY_PREFIX + keyOrPrefKey;
+        if (prefKey == null || raw == null) return false;
+        return schedulePrefs.edit().putString(prefKey, raw).commit();
+    }
+
+    private boolean removeScheduleIfOwned(
+            String keyOrPrefKey,
+            String expectedOperationVersion) {
+        String featureStorageKey = normalizeFeatureStorageKey(keyOrPrefKey);
+        return featureStorageKey != null
+                && !featureStorageKey.isEmpty()
+                && scheduleStore.removeScheduleIfOwnedLocked(
+                        featureStorageKey,
+                        expectedOperationVersion);
+    }
+
+    private boolean removeSchedule(String keyOrPrefKey) {
+        String featureStorageKey = normalizeFeatureStorageKey(keyOrPrefKey);
+        return featureStorageKey != null
+                && !featureStorageKey.isEmpty()
+                && scheduleStore.removeScheduleLocked(featureStorageKey);
+    }
+
+    private boolean hasCancellationTombstoneStored(String occurrenceKey) {
+        return occurrenceKey != null
+                && !occurrenceKey.isEmpty()
+                && scheduleStore.hasCancellationTombstoneLocked(occurrenceKey);
+    }
+
+    private boolean isEffectivelyCancelledStored(String occurrenceKey) {
+        return occurrenceKey != null
+                && !occurrenceKey.isEmpty()
+                && scheduleStore.isEffectivelyCancelledLocked(occurrenceKey);
+    }
+
+    private boolean clearCancellationTombstoneStored(String occurrenceKey) {
+        if (occurrenceKey == null || occurrenceKey.isEmpty()) return true;
+        return scheduleStore.removeCancellationTombstoneLocked(occurrenceKey);
+    }
+
     /**
      * Conditional rollback — caller MUST already hold {@link #SCHEDULE_LOCK}.
      */
@@ -1456,7 +1538,7 @@ public final class AutoDeductionScheduler {
                 && prefKey.startsWith(SCHEDULE_KEY_PREFIX)
                 ? prefKey.substring(SCHEDULE_KEY_PREFIX.length())
                 : prefKey;
-        return schedulingAdapter.removeScheduleIfOwned(
+        return removeScheduleIfOwned(
                 featureStorageKey, expectedVersion);
     }
 
@@ -1479,7 +1561,7 @@ public final class AutoDeductionScheduler {
                 && prefKey.startsWith(SCHEDULE_KEY_PREFIX)
                 ? prefKey.substring(SCHEDULE_KEY_PREFIX.length())
                 : prefKey;
-        schedulingAdapter.removeSchedule(featureStorageKey);
+        removeSchedule(featureStorageKey);
     }
 
     private void removeScheduleMetadata(String prefKey) {
@@ -1535,7 +1617,7 @@ public final class AutoDeductionScheduler {
     boolean hasCancellationTombstone(String occurrenceKey) {
         if (occurrenceKey == null || occurrenceKey.isEmpty()) return false;
         synchronized (SCHEDULE_LOCK) {
-            return schedulingAdapter.hasCancellationTombstone(occurrenceKey);
+            return hasCancellationTombstoneStored(occurrenceKey);
         }
     }
 
@@ -1556,22 +1638,22 @@ public final class AutoDeductionScheduler {
     boolean isOccurrenceCancelledKey(String occurrenceKey) {
         if (occurrenceKey == null || occurrenceKey.isEmpty()) return false;
         synchronized (SCHEDULE_LOCK) {
-            return schedulingAdapter.isEffectivelyCancelled(occurrenceKey);
+            return isEffectivelyCancelledStored(occurrenceKey);
         }
     }
 
     private static long[] parseOrderingToken(String raw) {
-        return AutoDeductionSchedulingAdapter.parseOrdering(raw);
+        return ExactAlarmStore.parseOrdering(raw);
     }
 
     private static long[] parseScheduleVersionOrdering(String scheduleRaw) {
-        return AutoDeductionSchedulingAdapter.parseOrdering(
-                AutoDeductionSchedulingAdapter.extractOperationVersion(scheduleRaw));
+        return ExactAlarmStore.parseOrdering(
+                ExactAlarmStore.extractOperationVersion(scheduleRaw));
     }
 
     private static boolean isOrderingNewer(
             long aMillis, long aSeq, long bMillis, long bSeq) {
-        return AutoDeductionSchedulingAdapter.isOrderingNewer(
+        return ExactAlarmStore.isOrderingNewer(
                 aMillis, aSeq, bMillis, bSeq);
     }
 
@@ -1585,7 +1667,7 @@ public final class AutoDeductionScheduler {
 
     private boolean clearCancellationTombstoneLocked(String occurrenceKey) {
         if (occurrenceKey == null || occurrenceKey.isEmpty()) return true;
-        return schedulingAdapter.clearCancellationTombstone(occurrenceKey);
+        return clearCancellationTombstoneStored(occurrenceKey);
     }
 
     public ScheduleResult scheduleNextOccurrence(
@@ -1677,7 +1759,7 @@ public final class AutoDeductionScheduler {
 
         if (!canScheduleExactAlarms()) {
             synchronized (SCHEDULE_LOCK) {
-                if (schedulingAdapter.hasSchedule(nextPrefKey)) {
+                if (hasSchedule(nextPrefKey)) {
                     return ScheduleResult.success(nextKey);
                 }
                 // Absent + cancelled: do not report permission denial as a need to create.
@@ -1712,7 +1794,7 @@ public final class AutoDeductionScheduler {
                         + " expectedGen=" + expectedRecurrenceGeneration);
                 return ScheduleResult.fail("recurrence_authorization_invalid");
             }
-            if (schedulingAdapter.hasSchedule(nextPrefKey)) {
+            if (hasSchedule(nextPrefKey)) {
                 Log.i(TAG, "scheduleNextOccurrenceIfAbsent: successor already present — "
                         + "not overwriting " + nextPrefKey);
                 return ScheduleResult.success(nextKey);
@@ -1853,12 +1935,12 @@ public final class AutoDeductionScheduler {
             // D+1 may already exist — check under lock; otherwise cannot install.
             synchronized (SCHEDULE_LOCK) {
                 if (!isMetadataOwnedByVersion(
-                        schedulingAdapter.getScheduleRaw(pastPrefKey), observedVersion)) {
+                        getScheduleRaw(pastPrefKey), observedVersion)) {
                     return ScheduleResult.fail("snapshot_stale");
                 }
                 String nextKey = AutoDeductionContract.occurrenceKey(
                         medicationId, doseId, nextDate);
-                if (schedulingAdapter.hasSchedule(SCHEDULE_KEY_PREFIX + nextKey)) {
+                if (hasSchedule(SCHEDULE_KEY_PREFIX + nextKey)) {
                     return ScheduleResult.success(nextKey);
                 }
             }
@@ -1886,7 +1968,7 @@ public final class AutoDeductionScheduler {
 
         synchronized (SCHEDULE_LOCK) {
             // Snapshot must still own past D — otherwise amount/time are obsolete.
-            String currentPast = schedulingAdapter.getScheduleRaw(pastPrefKey);
+            String currentPast = getScheduleRaw(pastPrefKey);
             if (!isMetadataOwnedByVersion(currentPast, observedVersion)) {
                 return ScheduleResult.fail("snapshot_stale");
             }
@@ -1903,7 +1985,7 @@ public final class AutoDeductionScheduler {
                 return ScheduleResult.fail("recurrence_authorization_invalid");
             }
             // Never overwrite an existing successor with recovery snapshot params.
-            if (schedulingAdapter.hasSchedule(nextPrefKey)) {
+            if (hasSchedule(nextPrefKey)) {
                 Log.i(TAG, "restore past: successor already present — not overwriting "
                         + nextPrefKey);
                 return ScheduleResult.success(nextKey);
@@ -1969,7 +2051,7 @@ public final class AutoDeductionScheduler {
 
         java.util.List<String[]> snapshot = new java.util.ArrayList<>();
         synchronized (SCHEDULE_LOCK) {
-            Map<String, ?> all = schedulingAdapter.getAllScheduleMetadata();
+            Map<String, ?> all = getAllScheduleMetadata();
             for (Map.Entry<String, ?> e : all.entrySet()) {
                 if (!e.getKey().startsWith(SCHEDULE_KEY_PREFIX)) continue;
                 Object v = e.getValue();
@@ -1978,7 +2060,7 @@ public final class AutoDeductionScheduler {
                 String observedVersion = "";
                 try {
                     JSONObject tmp = new JSONObject(raw);
-                    observedVersion = AutoDeductionSchedulingAdapter.extractOperationVersion(tmp);
+                    observedVersion = ExactAlarmStore.extractOperationVersion(tmp);
                 } catch (JSONException ignored) {
                 }
                 snapshot.add(new String[]{ e.getKey(), raw, observedVersion });
@@ -2239,7 +2321,7 @@ public final class AutoDeductionScheduler {
             String reason
     ) {
         synchronized (SCHEDULE_LOCK) {
-            String currentRaw = schedulingAdapter.getScheduleRaw(prefKey);
+            String currentRaw = getScheduleRaw(prefKey);
             if (currentRaw == null) return true;
             if (expectedRaw != null && !expectedRaw.equals(currentRaw)) return true;
 
@@ -2277,7 +2359,7 @@ public final class AutoDeductionScheduler {
     public java.util.List<JSONObject> listScheduledOccurrences() {
         java.util.List<JSONObject> out = new java.util.ArrayList<>();
         synchronized (SCHEDULE_LOCK) {
-            Map<String, ?> all = schedulingAdapter.getAllScheduleMetadata();
+            Map<String, ?> all = getAllScheduleMetadata();
             for (Map.Entry<String, ?> e : all.entrySet()) {
                 if (!e.getKey().startsWith(SCHEDULE_KEY_PREFIX)) continue;
                 Object v = e.getValue();
@@ -2467,7 +2549,7 @@ public final class AutoDeductionScheduler {
                 return new OccurrenceSnapshot(OccurrenceSnapshot.Status.CANCELLED, null);
             }
             final String prefKey = SCHEDULE_KEY_PREFIX + key;
-            String metaRaw = schedulingAdapter.getScheduleRaw(prefKey);
+            String metaRaw = getScheduleRaw(prefKey);
             if (metaRaw != null && !metaRaw.isEmpty()) {
                 try {
                     JSONObject meta = new JSONObject(metaRaw);

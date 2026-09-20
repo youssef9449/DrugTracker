@@ -7,11 +7,8 @@ import android.os.Bundle;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.util.Map;
-
 import app.drugtracker.alarmruntime.ExactAlarmContract;
 import app.drugtracker.alarmruntime.ExactAlarmRuntime;
-import app.drugtracker.alarmruntime.ExactAlarmStore;
 
 /**
  * Auto Deduction adapter over the feature-neutral exact-alarm runtime.
@@ -29,7 +26,6 @@ public final class AutoDeductionSchedulingAdapter {
 
     private final Context appContext;
     private final ExactAlarmRuntime alarmRuntime;
-    private final android.content.SharedPreferences schedulePrefs;
 
     public volatile boolean forceOrderingTokenAllocationFailureForTest;
     public volatile boolean forceTombstoneCommitFailureForTest;
@@ -37,9 +33,6 @@ public final class AutoDeductionSchedulingAdapter {
 
     public AutoDeductionSchedulingAdapter(Context context) {
         appContext = context.getApplicationContext();
-        schedulePrefs = appContext.getSharedPreferences(
-                AutoDeductionContract.PREFS_SCHEDULES,
-                Context.MODE_PRIVATE);
         alarmRuntime = new ExactAlarmRuntime(
                 appContext,
                 AutoDeductionContract.PREFS_SCHEDULES,
@@ -94,17 +87,6 @@ public final class AutoDeductionSchedulingAdapter {
             long triggerAtEpochMs,
             long recurrenceGeneration,
             String expectedOperationVersion) {
-        if (occurrenceKey == null || occurrenceKey.isEmpty()
-                || medicationId == null || medicationId.isEmpty()
-                || doseId == null || doseId.isEmpty()
-                || !AutoDeductionContract.isValidCalendarDate(calendarDate)
-                || !AutoDeductionContract.isValidTimeHhmm(timeHhmm)
-                || !AutoDeductionContract.isValidAmount(amount)
-                || triggerAtEpochMs <= 0L
-                || recurrenceGeneration <= 0L) {
-            return ScheduleResult.failure("invalid_schedule_request");
-        }
-
         JSONObject featureMetadata = new JSONObject();
         try {
             featureMetadata.put("medicationId", medicationId);
@@ -172,12 +154,6 @@ public final class AutoDeductionSchedulingAdapter {
             String medicationId,
             String doseId,
             String calendarDate) {
-        if (medicationId == null || medicationId.isEmpty()
-                || doseId == null || doseId.isEmpty()
-                || !AutoDeductionContract.isValidCalendarDate(calendarDate)) {
-            return CancelResult.failure("invalid_args");
-        }
-
         syncTestControls();
         ExactAlarmRuntime.CancelResult result = alarmRuntime.cancel(
                 AutoDeductionContract.occurrenceUri(
@@ -213,15 +189,6 @@ public final class AutoDeductionSchedulingAdapter {
             long recurrenceGeneration,
             String scheduleVersion,
             int retryCount) {
-        if (medicationId == null || medicationId.isEmpty()
-                || doseId == null || doseId.isEmpty()
-                || !AutoDeductionContract.isValidCalendarDate(calendarDate)
-                || !AutoDeductionContract.isValidAmount(amount)
-                || recurrenceGeneration <= 0L
-                || retryCount <= 0) {
-            return false;
-        }
-
         Bundle extras = new Bundle();
         extras.putString(
                 AutoDeductionContract.EXTRA_MEDICATION_ID,
@@ -267,83 +234,6 @@ public final class AutoDeductionSchedulingAdapter {
                 true);
     }
 
-    public String getScheduleRaw(String keyOrPrefKey) {
-        String featureStorageKey = stripSchedulePrefix(keyOrPrefKey);
-        return alarmRuntime.store().getScheduleRaw(featureStorageKey);
-    }
-
-    public boolean hasSchedule(String keyOrPrefKey) {
-        String featureStorageKey = stripSchedulePrefix(keyOrPrefKey);
-        return featureStorageKey != null
-                && !featureStorageKey.isEmpty()
-                && alarmRuntime.store().hasSchedule(featureStorageKey);
-    }
-
-    public Map<String, ?> getAllScheduleMetadata() {
-        return schedulePrefs.getAll();
-    }
-
-    public boolean writeScheduleRaw(String keyOrPrefKey, String raw) {
-        String prefKey = normalizeSchedulePrefKey(keyOrPrefKey);
-        if (prefKey == null || raw == null) return false;
-        return schedulePrefs.edit().putString(prefKey, raw).commit();
-    }
-
-    public boolean removeScheduleIfOwned(
-            String keyOrPrefKey,
-            String expectedOperationVersion) {
-        String featureStorageKey = stripSchedulePrefix(keyOrPrefKey);
-        return alarmRuntime.store().removeScheduleIfOwnedLocked(
-                featureStorageKey,
-                expectedOperationVersion);
-    }
-
-    public boolean removeSchedule(String keyOrPrefKey) {
-        String featureStorageKey = stripSchedulePrefix(keyOrPrefKey);
-        if (featureStorageKey == null || featureStorageKey.isEmpty()) {
-            return false;
-        }
-        return alarmRuntime.store().removeScheduleLocked(featureStorageKey);
-    }
-
-    public boolean hasCancellationTombstone(String occurrenceKey) {
-        return occurrenceKey != null
-                && !occurrenceKey.isEmpty()
-                && alarmRuntime.store().hasCancellationTombstoneLocked(occurrenceKey);
-    }
-
-    public boolean isEffectivelyCancelled(String occurrenceKey) {
-        return occurrenceKey != null
-                && !occurrenceKey.isEmpty()
-                && alarmRuntime.store().isEffectivelyCancelledLocked(occurrenceKey);
-    }
-
-    public boolean clearCancellationTombstone(String occurrenceKey) {
-        if (occurrenceKey == null || occurrenceKey.isEmpty()) return true;
-        return alarmRuntime.store().removeCancellationTombstoneLocked(
-                occurrenceKey);
-    }
-
-    public static boolean isMetadataOwnedByVersion(
-            String currentJson,
-            String expectedVersion) {
-        return ExactAlarmStore.isMetadataOwnedByOperationVersion(
-                currentJson,
-                expectedVersion);
-    }
-
-    public static String extractOperationVersion(JSONObject metadata) {
-        return ExactAlarmStore.extractOperationVersion(metadata);
-    }
-
-    public static String extractOperationVersion(String raw) {
-        return ExactAlarmStore.extractOperationVersion(raw);
-    }
-
-    public static long[] parseOrdering(String raw) {
-        return ExactAlarmStore.parseOrdering(raw);
-    }
-
     public static final class CancelResult {
         public enum Status {
             SUCCESS,
@@ -374,34 +264,6 @@ public final class AutoDeductionSchedulingAdapter {
         static CancelResult failure(String error) {
             return new CancelResult(Status.FAILED, error);
         }
-    }
-
-    public static boolean isOrderingNewer(
-            long firstMillis,
-            long firstSequence,
-            long secondMillis,
-            long secondSequence) {
-        return ExactAlarmStore.isOrderingNewer(
-                firstMillis,
-                firstSequence,
-                secondMillis,
-                secondSequence);
-    }
-
-    private static String stripSchedulePrefix(String keyOrPrefKey) {
-        if (keyOrPrefKey == null) return null;
-        return keyOrPrefKey.startsWith(ExactAlarmContract.SCHEDULE_KEY_PREFIX)
-                ? keyOrPrefKey.substring(
-                        ExactAlarmContract.SCHEDULE_KEY_PREFIX.length())
-                : keyOrPrefKey;
-    }
-
-    private static String normalizeSchedulePrefKey(String keyOrPrefKey) {
-        if (keyOrPrefKey == null || keyOrPrefKey.isEmpty()) return null;
-        return keyOrPrefKey.startsWith(
-                ExactAlarmContract.SCHEDULE_KEY_PREFIX)
-                ? keyOrPrefKey
-                : ExactAlarmContract.SCHEDULE_KEY_PREFIX + keyOrPrefKey;
     }
 
     public static final class ScheduleResult {

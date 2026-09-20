@@ -31,8 +31,8 @@ assert(
   'business scheduler must not import ExactAlarmRuntime'
 );
 assert(
-  !scheduler.includes('import app.drugtracker.alarmruntime.ExactAlarmStore'),
-  'business scheduler must not import ExactAlarmStore'
+  scheduler.includes('import app.drugtracker.alarmruntime.ExactAlarmStore;'),
+  'Auto business recovery may use the shared durable schedule store directly'
 );
 assert(
   !scheduler.includes('new ExactAlarmRuntime('),
@@ -43,14 +43,22 @@ assert(
   'business scheduler must not call the shared runtime directly'
 );
 assert(
-  !scheduler.includes('schedulePrefs.'),
-  'business scheduler must not manipulate shared schedule preferences directly'
-);
-
-assert(
   adapter.includes('import app.drugtracker.alarmruntime.ExactAlarmRuntime;'),
   'scheduling adapter must own the ExactAlarmRuntime dependency'
 );
+assert(
+  !adapter.includes('ExactAlarmStore'),
+  'scheduling adapter must not become an ExactAlarmStore facade'
+);
+assert(
+  !adapter.includes('SharedPreferences'),
+  'scheduling adapter must not own schedule SharedPreferences'
+);
+assert(
+  !adapter.includes('schedulePrefs'),
+  'scheduling adapter must not own durable schedule preference access'
+);
+
 assert(
   adapter.includes('alarmRuntime.schedule('),
   'scheduling adapter must delegate durable occurrence scheduling'

@@ -2,6 +2,8 @@ package app.drugtracker.autodeduction;
 
 import android.net.Uri;
 
+import app.drugtracker.alarmruntime.ExactAlarmContract;
+
 /**
  * Shared constants and canonical occurrence-key helpers for exact-time
  * automatic dose deduction (Phase 2).
@@ -38,11 +40,15 @@ public final class AutoDeductionContract {
      */
     public static final String EXTRA_RECURRENCE_GENERATION = "recurrenceGeneration";
     /**
-     * Per-schedule ownership token stamped into the PendingIntent when the alarm
-     * was installed (Issue #240). Delivery must match active schedule metadata
-     * or fire is rejected. Not part of occurrence identity.
+     * Legacy per-schedule ownership token key. New alarms use the generic
+     * shared-runtime operationVersion extra; the receiver accepts this legacy
+     * key for pre-migration alarms.
      */
     public static final String EXTRA_SCHEDULE_VERSION = "scheduleVersion";
+
+    /** Generic shared-runtime ownership token carried by new alarm PendingIntents. */
+    public static final String EXTRA_OPERATION_VERSION =
+            ExactAlarmContract.EXTRA_OPERATION_VERSION;
 
     /**
      * Bounded fire-persistence retry counter carried on a retry delivery (0 on

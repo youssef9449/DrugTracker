@@ -18,7 +18,6 @@ import {
 import {
   loadLastAppliedMutationSeq,
   persistLastAppliedMutationSeq,
-  envelopeLogIdsPresentInDurable,
 } from './stockMutationOrdering';
 import { loadJson, persist } from './storage';
 

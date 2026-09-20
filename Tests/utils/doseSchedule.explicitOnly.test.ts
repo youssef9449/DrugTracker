@@ -5,8 +5,7 @@ import { describe, it, expect } from 'vitest';
 import type { Medication } from '../../src/types';
 import {
   getDoseScheduleForUI,
-  getCardDoseToggleTarget,
-  getNextDoseAmount } from '../../src/utils/doseSchedule';
+  getCardDoseToggleTarget } from '../../src/utils/doseSchedule';
 import { getAutoDeductionSlotsForDate } from '../../src/hooks/useAutoDeductionScheduler';
 import { getDoseReminderSlots } from '../../src/hooks/useDoseReminderScheduler';
 import {

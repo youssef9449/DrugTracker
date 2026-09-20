@@ -141,7 +141,6 @@ assert(
 );
 
 // Idempotency: run again
-const once = manifest;
 ({ manifest } = upsertReceiverByName(
   manifest,
   'app.drugtracker.autodeduction.AutoDeductionReceiver',

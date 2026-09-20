@@ -438,7 +438,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     if (shouldDismissAlarmAfterManualTake(result.outcome)) {
       dismissAlarm();
     }
-  }, [dismissAlarm, soundEnabled]);
+  }, [dismissAlarm, soundEnabled, setMedications, setLogs, showToast]);
 
   const handleTakeDoseFromAlarm = useCallback((med: Medication, doseId?: string) => {
     void runAlarmTake(med.id, doseId, med);
@@ -630,7 +630,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     setCriticalStockAlertsEnabled(true);
     if (soundEnabled) playSuccessChime();
     showToast(TOAST_MESSAGES.criticalAlertsOn);
-  }, [criticalStockAlertsEnabled, notificationsEnabled, soundEnabled, showToast]);
+  }, [criticalStockAlertsEnabled, notificationsEnabled, soundEnabled, showToast, setCriticalStockAlertsEnabled, setNotificationsEnabled]);
 
   // #88: Single memoized medications-with-status array. Previously
   // calculateMedicationStatus(med) was recomputed in 4 separate memos

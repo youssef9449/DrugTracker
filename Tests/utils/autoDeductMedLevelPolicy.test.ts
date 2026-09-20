@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Medication } from '@/types';
 import {
-  isMedicationAutoDeductActive,
-  getCardDoseToggleTarget } from '@/utils/doseSchedule';
+  isMedicationAutoDeductActive } from '@/utils/doseSchedule';
 import { daysLeftFromCurrentStock } from '@/utils/dateCalculations';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {

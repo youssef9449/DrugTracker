@@ -793,7 +793,6 @@ export default function App() {
                       medication={med}
                       viewFilter={filter}
                       isCompact={isCompactView}
-                      globalAutoDeductEnabled={globalAutoDeductEnabled}
                       logs={logs}
                       onOpenRefill={setRefillMedication}
                       onEdit={(m) => {
@@ -958,7 +957,6 @@ export default function App() {
             : null
         }
         mode={selectDoseMode}
-        globalAutoDeductEnabled={globalAutoDeductEnabled}
         logs={logs}
         onSelect={handleSelectDoseFromModal}
         onRestore={handleCardRestoreDose}

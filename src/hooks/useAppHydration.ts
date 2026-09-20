@@ -227,6 +227,20 @@ export function useAppHydration(setters: AppHydrationSetters): void {
         setIsAutoDeductPromptOpen(true);
       }
     });
-  }, []);
+  }, [
+    setMedications,
+    setLogs,
+    setPharmacySettings,
+    setHydrated,
+    setIsFirstRun,
+    setIsAutoDeductPromptOpen,
+    setSoundEnabled,
+    setNotificationsEnabled,
+    setCriticalStockAlertsEnabled,
+    setExactAlarmEnabled,
+    setGlobalAutoDeductEnabled,
+    setFontScale,
+    setIsCompactView,
+  ]);
 
 }

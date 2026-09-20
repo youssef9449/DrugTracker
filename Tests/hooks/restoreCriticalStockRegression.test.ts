@@ -65,11 +65,9 @@ function makeConsumedMed(
   date: string,
   deductedAmount: number
 ): { med: Medication; logs: ConsumptionLog[] } {
-  const slot = baseMed.doseSchedule!.find((d) => d.id === doseId)!;
   const med: Medication = {
     ...baseMed,
     currentPills: Math.max(0, baseMed.currentPills - deductedAmount),
-    doseConsumptionHistory: { ...(baseMed.doseConsumptionHistory ?? {}), [doseId]: date },
     doseConsumptionHistory: {
       ...(baseMed.doseConsumptionHistory ?? {}),
       [doseId]: [date],

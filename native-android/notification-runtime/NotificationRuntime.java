@@ -7,10 +7,6 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
-import android.os.Bundle;
-
-import androidx.core.app.NotificationCompat;
-
 import java.nio.charset.StandardCharsets;
 
 /**
@@ -121,7 +117,15 @@ public final class NotificationRuntime {
                             .setContentIntent(contentIntent);
 
             if (request.action != null) {
-                builder.addAction(buildNotificationAction(request));
+                PendingIntent actionIntent = buildActionIntent(
+                        request.namespace,
+                        request.identity,
+                        request.action.id,
+                        request.action.foreground);
+                builder.addAction(
+                        0,
+                        request.action.title,
+                        actionIntent);
             }
             return builder.build();
         }
@@ -137,22 +141,17 @@ public final class NotificationRuntime {
                         .setContentIntent(contentIntent);
 
         if (request.action != null) {
-            builder.addAction(buildNotificationAction(request));
+            PendingIntent actionIntent = buildActionIntent(
+                    request.namespace,
+                    request.identity,
+                    request.action.id,
+                    request.action.foreground);
+            builder.addAction(
+                    0,
+                    request.action.title,
+                    actionIntent);
         }
         return builder.build();
-    }
-
-    private Notification.Action buildNotificationAction(Request request) {
-        Action action = request.action;
-        PendingIntent pendingIntent = buildActionIntent(
-                request.namespace,
-                request.identity,
-                action.id,
-                action.foreground);
-        return new Notification.Action.Builder(
-                null,
-                action.title,
-                pendingIntent).build();
     }
 
     private PendingIntent buildActionIntent(

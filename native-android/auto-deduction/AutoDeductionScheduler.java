@@ -887,8 +887,12 @@ public final class AutoDeductionScheduler {
             }
             // Pass expected generation so the shared runtime cannot stamp a newer gen.
             return scheduleOccurrenceLocked(
-                    futurePrefKey, futureKey, payload, triggerAt, null,
-                    null, expectedRecurrenceGeneration);
+                    futurePrefKey,
+                    futureKey,
+                    payload,
+                    triggerAt,
+                    null,
+                    expectedRecurrenceGeneration);
         }
     }
 
@@ -1401,7 +1405,6 @@ public final class AutoDeductionScheduler {
                     key,
                     payload,
                     triggerAt,
-                    null,
                     null);
         }
     }
@@ -1424,12 +1427,15 @@ public final class AutoDeductionScheduler {
             String key,
             JSONObject payload,
             long triggerAt,
-            Object ignoredPendingIntent,
             String requiredVersion
     ) {
         return scheduleOccurrenceLocked(
-                prefKey, key, payload, triggerAt,
-                ignoredPendingIntent, requiredVersion, null);
+                prefKey,
+                key,
+                payload,
+                triggerAt,
+                requiredVersion,
+                null);
     }
 
     private ScheduleResult scheduleOccurrenceLocked(
@@ -1437,7 +1443,6 @@ public final class AutoDeductionScheduler {
             String key,
             JSONObject payload,
             long triggerAt,
-            Object ignoredPendingIntent,
             String requiredVersion,
             Long requiredRecurrenceGeneration
     ) {
@@ -1801,7 +1806,7 @@ public final class AutoDeductionScheduler {
                 return ScheduleResult.success(nextKey);
             }
             return scheduleOccurrenceLocked(
-                    nextPrefKey, nextKey, payload, triggerAt, null, /*requiredVersion*/ null);
+                    nextPrefKey, nextKey, payload, triggerAt, /*requiredVersion*/ null);
         }
     }
 
@@ -2215,7 +2220,7 @@ public final class AutoDeductionScheduler {
                         continue;
                     }
                     ScheduleResult r = scheduleOccurrenceLocked(
-                            prefKey, key, payload, epoch, null, observedVersion);
+                            prefKey, key, payload, epoch, observedVersion);
                     if (r.ok) {
                         restored++;
                     } else if ("ownership_lost".equals(r.error)) {

@@ -608,6 +608,39 @@ function notificationId(
   return base + hashToRange(medId ?? '', ID_RANGE_SIZE);
 }
 
+/**
+ * One-time upgrade cleanup for alarms created by the pre-Phase-6
+ * LocalNotifications scheduler. Android may still have those old AlarmManager
+ * entries after an app update, so they must be removed before the new
+ * ExactAlarmRuntime schedules the same logical occurrences.
+ */
+export async function clearLegacyScheduledAlarmNotifications(): Promise<void> {
+  if (getNativePlatform() !== 'android') return;
+  try {
+    const pending = await LocalNotifications.getPending();
+    const legacyBases = [
+      NOTIFICATION_ID_BASE.criticalAlarm,
+      NOTIFICATION_ID_BASE.doseAlarm,
+      NOTIFICATION_ID_BASE.doseSnooze,
+    ];
+    const legacyIds = pending.notifications
+      .map((notification) => notification.id)
+      .filter(
+        (id): id is number =>
+          typeof id === 'number' &&
+          legacyBases.some(
+            (base) => id >= base && id < base + ID_RANGE_SIZE
+          )
+      );
+    if (legacyIds.length === 0) return;
+    await LocalNotifications.cancel({
+      notifications: legacyIds.map((id) => ({ id })),
+    });
+  } catch (err) {
+    console.warn('[notifications] legacy alarm cleanup failed:', err);
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // One-shot critical-stock alarm (AlarmManager-backed).
 //

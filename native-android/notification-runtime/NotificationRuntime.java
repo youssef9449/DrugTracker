@@ -7,8 +7,6 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
-import java.nio.charset.StandardCharsets;
-
 /**
  * Shared Android notification-delivery runtime.
  *
@@ -180,15 +178,15 @@ public final class NotificationRuntime {
                 NotificationRuntimeActionReceiver.EXTRA_FOREGROUND,
                 foreground);
 
-        int requestCode = stableRequestCode(
-                namespace + "\u001f" + identity + "\u001f" + (actionId == null ? "" : actionId));
+        // Full Intent data URI participates in PendingIntent identity, so the
+        // request code is deliberately constant and never acts as identity.
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             flags |= PendingIntent.FLAG_IMMUTABLE;
         }
         return PendingIntent.getBroadcast(
                 appContext,
-                requestCode,
+                1,
                 intent,
                 flags);
     }
@@ -238,17 +236,13 @@ public final class NotificationRuntime {
                 Context.NOTIFICATION_SERVICE);
     }
 
-    private static String tagFor(String namespace, String identity) {
+    /** Full namespace + logical identity is the notification authority. */
+    public static String notificationTag(String namespace, String identity) {
         return namespace + ":" + identity;
     }
 
-    private static int stableRequestCode(String value) {
-        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-        int hash = 17;
-        for (byte b : bytes) {
-            hash = 31 * hash + (b & 0xff);
-        }
-        return hash & 0x7fffffff;
+    private static String tagFor(String namespace, String identity) {
+        return namespace + ":" + identity;
     }
 
     private static String encodeSegment(String value) {

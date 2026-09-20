@@ -55,14 +55,14 @@ public final class CriticalStockPlugin extends Plugin {
         Long expectedAt = call.getLong("alarmTimeMs");
         boolean ok = false;
         if (expectedAt != null) {
+            CriticalStockAlarmAdapter adapter =
+                    new CriticalStockAlarmAdapter(getContext());
             org.json.JSONObject meta =
-                    new CriticalStockAlarmAdapter(getContext())
-                            .getScheduleMetadata(medicationId);
-            if (meta != null) {
-                long actual = meta.optLong("triggerAtEpochMs", Long.MIN_VALUE);
-                // ExactAlarmRuntime stores triggerAtEpochMs as generic metadata.
-                // The metadata field is authoritative for the shared runtime.
-                ok = actual == expectedAt.longValue();
+                    adapter.getScheduleMetadata(medicationId);
+            if (meta != null
+                    && meta.optLong("triggerAtEpochMs", Long.MIN_VALUE)
+                            == expectedAt.longValue()) {
+                ok = adapter.isPending(medicationId);
             }
         }
         JSObject ret = new JSObject();

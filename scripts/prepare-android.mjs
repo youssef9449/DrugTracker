@@ -371,11 +371,11 @@ function upsertApplicationMetaData(xml, androidName, value) {
 manifest = upsertApplicationMetaData(
   manifest,
   'app.drugtracker.EXACT_ALARM_FEATURE_ADAPTERS',
-  'app.drugtracker.autodeduction.AutoDeductionAlarmFeature'
+  'app.drugtracker.autodeduction.AutoDeductionAlarmFeature,app.drugtracker.alarmruntime.CriticalStockAlarmFeature,app.drugtracker.alarmruntime.DoseReminderAlarmFeature'
 );
 
 fs.writeFileSync(manifestPath, manifest);
 console.info(
-  '[prepare-android] Ensured private AutoDeductionReceiver + shared DrugTrackerAlarmSystemReceiver (lifecycle).'
+  '[prepare-android] Ensured private AutoDeductionReceiver + shared DrugTrackerAlarmSystemReceiver (lifecycle adapters: Auto, Critical Stock, Dose Reminder).'
 );
 console.info('Prepared Android exact-alarm permission + shared alarm runtime + dose-reminder delivery sources + auto-deduction.');

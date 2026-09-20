@@ -11,13 +11,13 @@ export interface ConsumptionLog {
   date: string; // YYYY-MM-DD
   timestamp: string;
   description: string;
-  /** Set when this refill has already been reversed. Legacy logs omit it. */
+  /** Set when this refill has already been reversed. Older logs may omit it. */
   reversedAt?: string;
   /** Links a refill_undo log to the original refill log. */
   relatedLogId?: string;
   /**
    * Stable MedicationDose.id when this log is for a specific dose slot
-   * (Phase 3). Legacy dose_taken logs omit it.
+   * (Phase 3). Older dose_taken logs may omit it.
    */
   doseId?: string;
 }
@@ -60,9 +60,9 @@ export interface Medication {
   doseSchedule?: MedicationDose[];
   /**
    * YYYY-MM-DD of the last day the user manually consumed a dose.
-   * Legacy single-dose: when this equals today, auto-deduction and
+   * Single-dose: when this equals today, auto-deduction and
    * reminders for the med are suppressed for today.
-   * Multi-dose: compatibility / UI badge when ALL of today's schedule
+   * Multi-dose: UI badge when ALL of today's schedule
    * slots are consumed. Per-slot authority is
    * {@link doseConsumptionHistory}.
    */

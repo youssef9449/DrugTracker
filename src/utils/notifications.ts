@@ -974,7 +974,7 @@ export async function scheduleCriticalAlarm(
 
 // Sentinel lives in a leaf module so pure-logic modules (dateCalculations)
 // can reference it without importing the notification stack.
-// Re-exported here for backward compatibility with existing importers.
+// Re-exported here for convenient access from existing importers.
 
 /**
  * Recurring dose-alarm id for an explicit doseSchedule row (Issue #268).

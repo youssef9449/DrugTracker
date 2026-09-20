@@ -621,7 +621,9 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                   {pharmacies.map((pharmacy) => (
                     <option key={pharmacy.id} value={pharmacy.id}>{pharmacy.name}</option>
                   ))}
-                  {pharmacies.length === 0 && selectedPharmacy && (                  )}
+                  {pharmacies.length === 0 && selectedPharmacy && (
+                    <option value={selectedPharmacy.id}>{selectedPharmacy.name}</option>
+                  )}
                 </select>
               </label>
               <div className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-slate-200">

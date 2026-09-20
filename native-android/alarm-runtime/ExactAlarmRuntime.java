@@ -63,6 +63,46 @@ public final class ExactAlarmRuntime {
         return manager != null && manager.canScheduleExactAlarms();
     }
 
+    /** Snapshot of one durable schedule row. The returned object is a defensive copy. */
+    public JSONObject getScheduleMetadata(String storageKey) {
+        if (storageKey == null || storageKey.isEmpty()) return null;
+        synchronized (ExactAlarmOperationLock.LOCK) {
+            String raw = store.getScheduleRaw(storageKey);
+            if (raw == null || raw.isEmpty()) return null;
+            try {
+                return new JSONObject(raw.toString());
+            } catch (JSONException e) {
+                return null;
+            }
+        }
+    }
+
+    /** Feature-neutral list of durable schedule storage keys. */
+    public java.util.List<String> listScheduledStorageKeys() {
+        synchronized (ExactAlarmOperationLock.LOCK) {
+            return new java.util.ArrayList<>(store.listFeatureStorageKeys());
+        }
+    }
+
+    /**
+     * Remove a one-shot durable schedule only when the delivery still owns the
+     * current operation version. A cancelled/replaced schedule is never removed.
+     */
+    public boolean completeOneShot(
+            String storageKey,
+            String expectedOperationVersion) {
+        if (storageKey == null || storageKey.isEmpty()
+                || expectedOperationVersion == null
+                || expectedOperationVersion.isEmpty()) {
+            return false;
+        }
+        synchronized (ExactAlarmOperationLock.LOCK) {
+            return store.removeScheduleIfOwnedLocked(
+                    storageKey,
+                    expectedOperationVersion);
+        }
+    }
+
     public ScheduleResult schedule(ScheduleRequest request) {
         if (!isValidScheduleRequest(request)) {
             return ScheduleResult.fail("invalid_request");

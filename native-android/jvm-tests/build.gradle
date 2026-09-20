@@ -25,9 +25,13 @@ def productionSources = fileTree("../auto-deduction") {
             "AutoDeductionEventStore.java",
             "AutoDeductionScheduler.java",
             "AutoDeductionReceiver.java",
-            "AutoDeductionSystemReceiver.java",
-            "AutoDeductionLifecycle.java"
+            "AutoDeductionLifecycle.java",
+            "AutoDeductionAlarmFeature.java"
     )
+}
+
+def alarmRuntimeSources = fileTree("../alarm-runtime") {
+    include("*.java")
 }
 
 def doseLocalNotifDir = file("../capacitor-local-notifications")
@@ -40,12 +44,18 @@ def doseRecurrenceSources = fileTree(doseLocalNotifDir) {
 }
 
 def syncedMain = layout.buildDirectory.dir("synced-main/app/drugtracker/autodeduction")
+def syncedAlarmRuntime = layout.buildDirectory.dir("synced-main/app/drugtracker/alarmruntime")
 def syncedDoseLocalNotif = layout.buildDirectory.dir(
         "synced-main/com/capacitorjs/plugins/localnotifications")
 
 tasks.register("syncProductionSources", Copy) {
     from productionSources
     into syncedMain
+}
+
+tasks.register("syncAlarmRuntime", Copy) {
+    from alarmRuntimeSources
+    into syncedAlarmRuntime
 }
 
 tasks.register("syncDoseLocalNotifications", Copy) {
@@ -66,10 +76,10 @@ sourceSets {
 }
 
 tasks.named("compileJava").configure {
-    dependsOn("syncProductionSources", "syncDoseLocalNotifications")
+    dependsOn("syncProductionSources", "syncAlarmRuntime", "syncDoseLocalNotifications")
 }
 tasks.named("processResources").configure {
-    dependsOn("syncProductionSources", "syncDoseLocalNotifications")
+    dependsOn("syncProductionSources", "syncAlarmRuntime", "syncDoseLocalNotifications")
 }
 
 configurations {

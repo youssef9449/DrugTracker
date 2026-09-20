@@ -3,9 +3,11 @@
  * Used by unit tests to lock the stale-rollback concurrency contract without Android.
  *
  * A failed scheduling attempt may remove schedule metadata only when the
- * currently stored scheduleVersion still matches the attempt's own version.
+ * currently stored operationVersion still matches the attempt's own version.
+ * Legacy scheduleVersion remains readable during migration.
  */
 
+export const FIELD_OPERATION_VERSION = 'operationVersion';
 export const FIELD_SCHEDULE_VERSION = 'scheduleVersion';
 
 export interface ScheduleMetadataLike {
@@ -15,6 +17,7 @@ export interface ScheduleMetadataLike {
   timeHhmm?: string;
   amount?: number;
   scheduledAtEpochMs?: number;
+  operationVersion?: string;
   scheduleVersion?: string;
   [key: string]: unknown;
 }
@@ -31,7 +34,9 @@ export function isMetadataOwnedByVersion(
   if (currentJson == null || currentJson === '') return false;
   try {
     const o = JSON.parse(currentJson) as ScheduleMetadataLike;
-    const current = typeof o.scheduleVersion === 'string' ? o.scheduleVersion : '';
+    const current = typeof o.operationVersion === 'string'
+      ? o.operationVersion
+      : (typeof o.scheduleVersion === 'string' ? o.scheduleVersion : '');
     return expectedVersion === current;
   } catch {
     return false;
@@ -57,9 +62,9 @@ export function conditionalRollback(
   return true;
 }
 
-/** Build a schedule metadata JSON string with a version stamp. */
+/** Build new metadata using the shared runtime's generic operationVersion field. */
 export function buildSchedulePayload(
-  fields: Omit<ScheduleMetadataLike, 'scheduleVersion'> & { scheduleVersion: string }
+  fields: Omit<ScheduleMetadataLike, 'operationVersion'> & { operationVersion: string }
 ): string {
   return JSON.stringify(fields);
 }
@@ -79,22 +84,22 @@ export interface SchedulerTxnState {
 export function runSerializedScheduleTxn(
   state: SchedulerTxnState,
   prefKey: string,
-  payload: { scheduleVersion: string; scheduledAtEpochMs: number },
+  payload: { operationVersion: string; scheduledAtEpochMs: number },
   installSucceeds: boolean
 ): { ok: boolean } {
   // Entire txn is atomic from the caller's perspective (models SCHEDULE_LOCK).
   const json = buildSchedulePayload({
-    scheduleVersion: payload.scheduleVersion,
+    operationVersion: payload.operationVersion,
     scheduledAtEpochMs: payload.scheduledAtEpochMs,
   });
   state.metadata.set(prefKey, json);
   if (!installSucceeds) {
-    conditionalRollback(state.metadata, prefKey, payload.scheduleVersion);
+    conditionalRollback(state.metadata, prefKey, payload.operationVersion);
     state.alarms.set(prefKey, null);
     return { ok: false };
   }
   state.alarms.set(prefKey, {
-    version: payload.scheduleVersion,
+    version: payload.operationVersion,
     triggerAt: payload.scheduledAtEpochMs,
   });
   return { ok: true };

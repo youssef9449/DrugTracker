@@ -8,11 +8,11 @@ Current-state technical specification for DrugTracker’s exact-time automatic d
 |---------|------------------|
 | JS → native schedule / list / mark bridge | `src/utils/autoDeductionNative.ts` |
 | JS schedule requests (post-hydration) | `src/hooks/useAutoDeductionScheduler.ts` |
-| Native constants, occurrence key, PendingIntent URI | `native-android/auto-deduction/AutoDeductionContract.java` |
+| Native occurrence contract and feature payload | `native-android/auto-deduction/AutoDeductionContract.java` |
 | Durable native event store | `AutoDeductionEventStore.java` |
 | Exact alarm install / cancel / boot restore | `AutoDeductionScheduler.java` |
 | Exact-alarm delivery receiver (background-threaded via `goAsync`, bounded fire-persistence retry) | `AutoDeductionReceiver.java` |
-| Boot / timezone / permission restore receiver | `AutoDeductionSystemReceiver.java` |
+| Shared boot / timezone / exact-permission receiver | `native-android/alarm-runtime/ExactAlarmSystemReceiver.java` |
 | Capacitor plugin | `AutoDeductionPlugin.java` |
 | Pure reconcile / apply | `src/utils/autoDeductionReconciliation.ts` |
 | Orchestration, envelope, marks | `src/utils/runAutoDeductionReconciliation.ts` |
@@ -99,7 +99,7 @@ Used consistently for:
 
 1. After hydration (and when exact-alarm capability allows), JS requests `scheduleOccurrence` with medication, dose, calendar date, time, and **amount**.
 2. Native persists schedule metadata and installs the one-shot alarm inside a serialized, process-wide scheduling critical section (durable metadata write, then AlarmManager install, with ownership-safe / conditional metadata rollback if installation fails). This is not an ACID transaction spanning SharedPreferences and AlarmManager; it is a process-local serialization of those steps.
-3. PendingIntent identity matches schedule and cancel: action `AUTO_DEDUCTION` + occurrence URI from the identity triple.
+3. Shared `ExactAlarmRuntime` constructs the PendingIntent from action + full occurrence URI + receiver; Auto Deduction supplies the feature identity.
 4. On fire, `AutoDeductionReceiver` performs all durable work on a background thread (`goAsync()` keeps the broadcast alive while synchronous `commit()` disk I/O completes, so the main thread is never blocked). The delivery then calls `insertFiredIfAbsent` — durable **FIRED** row; **no** stock update; may schedule the next one-shot occurrence. If persistence fails **without** a durable pending-fire record, the receiver schedules a bounded **same-identity retry alarm** (same occurrence URI + ownership tokens, `FIRE_RETRY_DELAY_MS` delay, max `MAX_FIRE_RETRIES` attempts) instead of silently consuming the one-shot delivery; retries stay idempotent (`ALREADY_EXISTS`) and stale-protected (ownership tokens).
 5. On boot / quick boot, system restore promotes past schedules (serialized fire + ownership-safe metadata removal) and reinstalls future alarms from schedule preferences. Hydration/resume/local-midnight recovery also invokes the same idempotent native restore before the JS FIRED read, so an unresolved past schedule cannot be destructively canceled before recovery.
 
@@ -308,7 +308,7 @@ After an exact occurrence is applied, markers and deterministic exact-auto logs 
 
 ## Phase 2 native platform notes (closure)
 
-Native owns timing, AlarmManager install/cancel, boot/permission restore, and durable FIRED (plus pending-fire recovery namespace). JavaScript owns stock mutation, reconciliation, and RECONCILED acknowledgement (Phase 3) as specified above.
+Shared exact-alarm runtime owns timing mechanics, AlarmManager install/cancel, PendingIntent identity, durable schedule/cancellation ordering, and system lifecycle dispatch. Auto Deduction owns durable FIRED/pending-fire state, recurrence authorization, catch-up, and feature recovery policy. JavaScript owns stock mutation, reconciliation, and RECONCILED acknowledgement (Phase 3) as specified above.
 
 ### Exact-alarm permission lifecycle
 
@@ -316,7 +316,7 @@ Native owns timing, AlarmManager install/cancel, boot/permission restore, and du
 - Manifest registers `SCHEDULE_EXACT_ALARM` and `RECEIVE_BOOT_COMPLETED`.
 - **Receiver separation (security):**
   - `AutoDeductionReceiver` — `ACTION_AUTO_DEDUCTION` only, `android:exported="false"` (explicit AlarmManager PendingIntent).
-  - `AutoDeductionSystemReceiver` — `BOOT_COMPLETED` / `QUICKBOOT_POWERON` / `TIMEZONE_CHANGED` / `ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED`, `android:exported="true"` (system broadcasts on API 31+). Invokes `AutoDeductionLifecycle.promoteAndRestore`.
+  - `ExactAlarmSystemReceiver` — shared `BOOT_COMPLETED` / `QUICKBOOT_POWERON` / `TIMEZONE_CHANGED` / `ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED`, `android:exported="true"` (system broadcasts on API 31+). Dispatches to `AutoDeductionAlarmFeature`, which invokes `AutoDeductionLifecycle.promoteAndRestore`.
 - On `TIMEZONE_CHANGED`, future alarms are rebuilt from durable schedule metadata using the current default timezone (`calendarDate` + `timeHhmm`); historical FIRED/RECONCILED events are not altered and occurrence identity is unchanged.
 - JS desired-state reconciliation lists native schedule metadata via `listScheduledOccurrences` and cancels keys not in the desired set (avoids resurrecting stale schedules after process restart). System restore is **not** invoked on every JS schedule pass.
 
@@ -413,4 +413,3 @@ Given a persisted schedule snapshot on calendar date `D` for `(medicationId, dos
 ## Future work (narrow)
 
 Further product-level completion of the Take / Restore × exact-native-auto interaction matrix beyond the occurrence-level compatibility already shared via consumption/skip markers. Notification and scheduling UX remain outside this subsystem’s stock path.
-

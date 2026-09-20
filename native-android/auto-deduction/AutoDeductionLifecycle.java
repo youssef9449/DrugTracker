@@ -4,9 +4,11 @@ import android.content.Context;
 import android.util.Log;
 
 /**
- * Shared lifecycle recovery for Phase 2 auto-deduction.
- * Used by {@link AutoDeductionSystemReceiver} after boot / exact-alarm
- * permission changes / timezone changes. Does NOT handle ACTION_AUTO_DEDUCTION fires.
+ * Feature lifecycle recovery for Phase 2 auto-deduction; the shared
+ * alarm runtime dispatches system lifecycle events to this feature.
+ * Invoked by the shared exact-alarm lifecycle receiver after boot /
+ * exact-alarm permission changes / timezone changes. Does NOT handle
+ * ACTION_AUTO_DEDUCTION fires.
  */
 public final class AutoDeductionLifecycle {
 

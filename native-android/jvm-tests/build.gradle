@@ -24,6 +24,7 @@ def productionSources = fileTree("../auto-deduction") {
             "AutoDeductionContract.java",
             "AutoDeductionEventStore.java",
             "AutoDeductionScheduler.java",
+            "AutoDeductionSchedulingAdapter.java",
             "AutoDeductionReceiver.java",
             "AutoDeductionLifecycle.java",
             "AutoDeductionAlarmFeature.java"

@@ -142,10 +142,6 @@ public final class ExactAlarmRuntime {
                         "schedule_metadata_write_failed");
             }
 
-            store.clearCancellationIfSupersededLocked(
-                    request.storageKey,
-                    operationVersion);
-
             AlarmManager manager = alarmManager();
             if (manager == null) {
                 rollbackScheduleLocked(
@@ -196,6 +192,14 @@ public final class ExactAlarmRuntime {
                         operationVersion);
                 return ScheduleResult.fail("schedule_failed");
             }
+
+            // Only after AlarmManager accepted the new schedule may an older
+            // cancellation tombstone be physically removed. If this cleanup fails,
+            // ordering still makes the newer schedule authoritative; if install
+            // fails, the older tombstone remains intact.
+            store.clearCancellationIfSupersededLocked(
+                    request.storageKey,
+                    operationVersion);
 
             return ScheduleResult.success(
                     request.identityUri,

@@ -131,6 +131,40 @@ for (const { src, dest, marker } of copies) {
   console.info(`[prepare-android] Installed ${path.relative(root, src)} → ${path.relative(root, dest)}`);
 }
 
+// ── 4. Phase 2: install shared exact-alarm runtime + Auto Deduction sources ──
+const alarmRuntimeSrcDir = path.join(root, 'native-android', 'alarm-runtime');
+const alarmRuntimeDestDir = path.join(
+  androidDir,
+  'app',
+  'src',
+  'main',
+  'java',
+  'app',
+  'drugtracker',
+  'alarmruntime'
+);
+const alarmRuntimeFiles = [
+  'ExactAlarmContract.java',
+  'ExactAlarmOperationLock.java',
+  'ExactAlarmStore.java',
+  'ExactAlarmRuntime.java',
+  'ExactAlarmLifecycle.java',
+  'ExactAlarmSystemReceiver.java',
+  'ExactAlarmFeatureAdapter.java',
+];
+if (!fs.existsSync(alarmRuntimeDestDir)) {
+  fs.mkdirSync(alarmRuntimeDestDir, { recursive: true });
+}
+for (const file of alarmRuntimeFiles) {
+  const src = path.join(alarmRuntimeSrcDir, file);
+  const dest = path.join(alarmRuntimeDestDir, file);
+  if (!fs.existsSync(src)) {
+    console.error('[prepare-android] FATAL: missing alarm-runtime source:', src);
+    process.exit(1);
+  }
+  fs.copyFileSync(src, dest);
+  console.info('[prepare-android] Installed ' + path.relative(root, src) + ' → ' + path.relative(root, dest));
+}
 // ── 4. Phase 2: install auto-deduction native sources ──────────────────
 const autoDeductionSrcDir = path.join(root, 'native-android', 'auto-deduction');
 const autoDeductionDestDir = path.join(
@@ -148,8 +182,8 @@ const autoDeductionFiles = [
   'AutoDeductionEventStore.java',
   'AutoDeductionScheduler.java',
   'AutoDeductionReceiver.java',
-  'AutoDeductionSystemReceiver.java',
   'AutoDeductionLifecycle.java',
+  'AutoDeductionAlarmFeature.java',
   'AutoDeductionPlugin.java',
 ];
 if (!fs.existsSync(autoDeductionDestDir)) {
@@ -193,7 +227,7 @@ for (const file of doseReminderFiles) {
   console.info(`[prepare-android] Installed ${path.relative(root, src)} → ${path.relative(root, dest)}`);
 }
 
-// ── 5. Phase 2: register private alarm receiver + system lifecycle receiver ─
+// ── 5. Phase 2: register private Auto receiver + shared system lifecycle receiver ─
 manifest = fs.readFileSync(manifestPath, 'utf8');
 const bootPermission = '<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />';
 if (!manifest.includes(bootPermission)) {
@@ -257,10 +291,10 @@ const privateAlarmReceiver = `        <receiver
             </intent-filter>
         </receiver>`;
 
-// System lifecycle only — BOOT + timezone + exact-alarm permission state (API 31+).
+// System lifecycle is owned by the shared exact-alarm runtime.
 // exported=true is required for system-delivered broadcasts on API 31+.
 const systemLifecycleReceiver = `        <receiver
-            android:name="app.drugtracker.autodeduction.AutoDeductionSystemReceiver"
+            android:name="app.drugtracker.alarmruntime.ExactAlarmSystemReceiver"
             android:exported="true"
             android:enabled="true">
             <intent-filter>
@@ -273,20 +307,71 @@ const systemLifecycleReceiver = `        <receiver
             </intent-filter>
         </receiver>`;
 
+function removeReceiverByName(xml, androidName) {
+  const nameAttr = `android:name="${androidName}"`;
+  const nameIdx = xml.indexOf(nameAttr);
+  if (nameIdx === -1) return xml;
+  const openIdx = xml.lastIndexOf('<receiver', nameIdx);
+  if (openIdx === -1) return xml;
+  const closeTag = '</receiver>';
+  const closeIdx = xml.indexOf(closeTag, nameIdx);
+  if (closeIdx === -1) {
+    console.error('[prepare-android] FATAL: unclosed <receiver for', androidName);
+    process.exit(1);
+  }
+  let start = openIdx;
+  while (start > 0 && (xml[start - 1] === ' ' || xml[start - 1] === '\t')) start--;
+  if (start > 0 && xml[start - 1] === '\n') start--;
+  return xml.slice(0, start) + xml.slice(closeIdx + closeTag.length);
+}
+
+function upsertApplicationMetaData(xml, androidName, value) {
+  const nameAttr = `android:name="${androidName}"`;
+  const metaXml = `        <meta-data
+            android:name="${androidName}"
+            android:value="${value}" />`;
+  const nameIdx = xml.indexOf(nameAttr);
+  if (nameIdx === -1) {
+    if (!xml.includes('</application>')) {
+      console.error('[prepare-android] FATAL: </application> not found in AndroidManifest.xml');
+      process.exit(1);
+    }
+    return xml.replace('</application>', `${metaXml}\n    </application>`);
+  }
+  const openIdx = xml.lastIndexOf('<meta-data', nameIdx);
+  const closeIdx = xml.indexOf('/>', nameIdx);
+  if (openIdx === -1 || closeIdx === -1) {
+    console.error('[prepare-android] FATAL: malformed <meta-data for', androidName);
+    process.exit(1);
+  }
+  let start = openIdx;
+  while (start > 0 && (xml[start - 1] === ' ' || xml[start - 1] === '\t')) start--;
+  if (start > 0 && xml[start - 1] === '\n') start--;
+  return xml.slice(0, start) + metaXml + xml.slice(closeIdx + 2);
+}
+
 ({ manifest } = upsertReceiverByName(
   manifest,
   'app.drugtracker.autodeduction.AutoDeductionReceiver',
   privateAlarmReceiver
 ));
+({ manifest } = removeReceiverByName(
+  manifest,
+  'app.drugtracker.autodeduction.AutoDeductionSystemReceiver'
+));
 ({ manifest } = upsertReceiverByName(
   manifest,
-  'app.drugtracker.autodeduction.AutoDeductionSystemReceiver',
+  'app.drugtracker.alarmruntime.ExactAlarmSystemReceiver',
   systemLifecycleReceiver
 ));
+manifest = upsertApplicationMetaData(
+  manifest,
+  'app.drugtracker.EXACT_ALARM_FEATURE_ADAPTERS',
+  'app.drugtracker.autodeduction.AutoDeductionAlarmFeature'
+);
 
 fs.writeFileSync(manifestPath, manifest);
 console.info(
-  '[prepare-android] Ensured AutoDeductionReceiver (private) + AutoDeductionSystemReceiver (lifecycle).'
+  '[prepare-android] Ensured AutoDeductionReceiver (private) + shared ExactAlarmSystemReceiver (lifecycle).'
 );
-
-console.info('Prepared Android exact-alarm permission + dose-reminder delivery sources + auto-deduction.');
+console.info('Prepared Android exact-alarm permission + shared alarm runtime + dose-reminder delivery sources + auto-deduction.');

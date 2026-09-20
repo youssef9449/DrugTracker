@@ -1,11 +1,8 @@
 package app.drugtracker.autodeduction;
 
-import android.app.AlarmManager;
-import android.app.PendingIntent;
 import android.content.Context;
-import android.content.Intent;
 import android.content.SharedPreferences;
-import android.os.Build;
+import android.os.Bundle;
 import android.util.Log;
 
 import org.json.JSONException;
@@ -15,7 +12,10 @@ import java.util.Calendar;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TimeZone;
-import java.util.UUID;
+
+import app.drugtracker.alarmruntime.ExactAlarmOperationLock;
+import app.drugtracker.alarmruntime.ExactAlarmRuntime;
+import app.drugtracker.alarmruntime.ExactAlarmStore;
 
 /**
  * One-shot exact-time auto-deduction scheduler (AlarmManager).
@@ -71,13 +71,12 @@ public final class AutoDeductionScheduler {
     public static final String FIELD_FIRE_RETRY_COUNT = "fireRetryCount";
 
     /** Process-wide lock: metadata + AlarmManager install/cancel + rollback. */
-    private static final Object SCHEDULE_LOCK = new Object();
+    private static final Object SCHEDULE_LOCK = ExactAlarmOperationLock.LOCK;
 
     private final Context appContext;
     private final SharedPreferences schedulePrefs;
     private final SharedPreferences cancelPrefs;
     /** Durable last-allocated ordering sequence (survives process death). */
-    private final SharedPreferences orderingPrefs;
     /** Active recurrence generation per (medicationId, doseId) — Issue #217. */
     private final SharedPreferences recurrenceAuthPrefs;
     /**
@@ -85,6 +84,8 @@ public final class AutoDeductionScheduler {
      * Survives config mutation that removes sch: rows.
      */
     private final SharedPreferences fireRetryPrefs;
+    /** Shared feature-neutral exact-alarm mechanism; Auto Deduction owns only business policy. */
+    private final ExactAlarmRuntime alarmRuntime;
     /**
      * Test-only: when true, {@link #invalidateRecurrenceAuthorization} treats the
      * generation commit as failed (fail-closed). Production code never sets this.
@@ -145,12 +146,25 @@ public final class AutoDeductionScheduler {
                 AutoDeductionContract.PREFS_SCHEDULES, Context.MODE_PRIVATE);
         this.cancelPrefs = appContext.getSharedPreferences(
                 AutoDeductionContract.PREFS_CANCELLED, Context.MODE_PRIVATE);
-        this.orderingPrefs = appContext.getSharedPreferences(
-                AutoDeductionContract.PREFS_ORDERING, Context.MODE_PRIVATE);
         this.recurrenceAuthPrefs = appContext.getSharedPreferences(
                 AutoDeductionContract.PREFS_RECURRENCE_AUTH, Context.MODE_PRIVATE);
         this.fireRetryPrefs = appContext.getSharedPreferences(
                 AutoDeductionContract.PREFS_FIRE_RETRY, Context.MODE_PRIVATE);
+        this.alarmRuntime = new ExactAlarmRuntime(
+                appContext,
+                AutoDeductionContract.PREFS_SCHEDULES,
+                AutoDeductionContract.PREFS_CANCELLED,
+                AutoDeductionContract.PREFS_ORDERING,
+                AutoDeductionContract.PENDING_INTENT_REQUEST_CODE);
+    }
+
+    private void syncAlarmRuntimeTestControls() {
+        alarmRuntime.forceOrderingTokenAllocationFailureForTest =
+                forceOrderingTokenAllocationFailureForTest;
+        alarmRuntime.forceTombstoneCommitFailureForTest =
+                forceTombstoneCommitFailureForTest;
+        alarmRuntime.forceScheduleMetadataRemovalFailureForTest =
+                forceScheduleMetadataRemovalFailureForTest;
     }
 
 
@@ -275,86 +289,48 @@ public final class AutoDeductionScheduler {
      * the tombstone rewrite, and occurrences with no metadata skip removal.
      */
     private CancelResult cancelAllSchedulesForDoseLocked(String medicationId, String doseId) {
-        // Iterate a snapshot of all schedule keys and match medicationId + doseId.
-        java.util.Map<String, ?> all = schedulePrefs.getAll();
-        if (all == null || all.isEmpty()) {
-            return CancelResult.success();
-        }
-        for (java.util.Map.Entry<String, ?> e : all.entrySet()) {
+        Map<String, ?> all = schedulePrefs.getAll();
+        if (all == null || all.isEmpty()) return CancelResult.success();
+
+        syncAlarmRuntimeTestControls();
+        for (Map.Entry<String, ?> e : all.entrySet()) {
             String prefKey = e.getKey();
-            if (prefKey == null || !prefKey.startsWith(SCHEDULE_KEY_PREFIX)) {
-                continue;
-            }
-            Object val = e.getValue();
-            if (!(val instanceof String)) {
-                continue;
-            }
-            String raw = (String) val;
+            if (prefKey == null || !prefKey.startsWith(SCHEDULE_KEY_PREFIX)) continue;
+            if (!(e.getValue() instanceof String)) continue;
+
             try {
-                org.json.JSONObject o = new org.json.JSONObject(raw);
-                if (!medicationId.equals(o.optString("medicationId", ""))
-                        || !doseId.equals(o.optString("doseId", ""))) {
-                    continue;
-                }
-                String calendarDate = o.optString("calendarDate", "");
-                if (!AutoDeductionContract.isValidCalendarDate(calendarDate)) {
-                    // Malformed — drop metadata only; a removal failure is still durable.
-                    boolean removed = !forceScheduleMetadataRemovalFailureForTest
-                            && schedulePrefs.edit().remove(prefKey).commit();
-                    if (!removed) {
-                        return CancelResult.fail("schedule_metadata_removal_failed");
+                JSONObject metadata = new JSONObject((String) e.getValue());
+                if (!medicationId.equals(metadata.optString("medicationId", ""))
+                        || !doseId.equals(metadata.optString("doseId", ""))) continue;
+
+                String date = metadata.optString("calendarDate", "");
+                if (!AutoDeductionContract.isValidCalendarDate(date)) {
+                    String featureStorageKey =
+                            prefKey.substring(SCHEDULE_KEY_PREFIX.length());
+                    if (!forceScheduleMetadataRemovalFailureForTest
+                            && alarmRuntime.store().removeScheduleLocked(featureStorageKey)) {
+                        continue;
                     }
-                    continue;
-                }
-                String occKey = AutoDeductionContract.occurrenceKey(
-                        medicationId, doseId, calendarDate);
-                String cancelKey = CANCEL_KEY_PREFIX + occKey;
-                boolean hadMetadata = schedulePrefs.contains(prefKey);
-                boolean alreadyCancelled = cancelPrefs.contains(cancelKey);
-                // Retry-safe: do not rewrite a tombstone that is already present.
-                if (!alreadyCancelled) {
-                    final String cancelToken = allocateOrderingTokenLocked();
-                    if (cancelToken == null) {
-                        return CancelResult.fail("ordering_sequence_write_failed");
-                    }
-                    boolean tombstoneWritten = !forceTombstoneCommitFailureForTest
-                            && cancelPrefs.edit().putString(cancelKey, cancelToken).commit();
-                    if (!tombstoneWritten) {
-                        Log.e(TAG, "cancelAllSchedulesForDoseLocked: tombstone commit failed for " + occKey);
-                        return CancelResult.fail("cancellation_tombstone_write_failed");
-                    }
-                }
-                Intent intent = buildOccurrenceIntent(
-                        medicationId, doseId, calendarDate, 0L, 0d, null, 0L, null);
-                PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
-                AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
-                if (am == null) {
-                    // AlarmManager is not a durable guard, but mirror cancelOccurrence:
-                    // do not treat its absence as silent success.
-                    return CancelResult.fail("alarm_manager_unavailable");
-                }
-                if (pi != null) {
-                    am.cancel(pi);
-                    pi.cancel();
-                }
-                // Retry-safe: skip metadata removal if already absent.
-                if (!hadMetadata) {
-                    continue;
-                }
-                boolean removed = !forceScheduleMetadataRemovalFailureForTest
-                        && schedulePrefs.edit().remove(prefKey).commit();
-                if (!removed) {
-                    Log.e(TAG, "cancelAllSchedulesForDoseLocked: metadata remove failed for " + occKey
-                            + " (tombstone remains — stale fire stays rejected)");
                     return CancelResult.fail("schedule_metadata_removal_failed");
                 }
-                Log.i(TAG, "cancelAllSchedulesForDoseLocked: cancelled " + occKey);
-            } catch (org.json.JSONException ex) {
-                boolean removed = !forceScheduleMetadataRemovalFailureForTest
-                        && schedulePrefs.edit().remove(prefKey).commit();
-                if (!removed) {
-                    return CancelResult.fail("schedule_metadata_removal_failed");
+
+                String occurrenceKey = AutoDeductionContract.occurrenceKey(
+                        medicationId, doseId, date);
+                ExactAlarmRuntime.CancelResult result = alarmRuntime.cancel(
+                        AutoDeductionContract.occurrenceUri(
+                                medicationId, doseId, date).toString(),
+                        occurrenceKey,
+                        AutoDeductionContract.ACTION_AUTO_DEDUCTION,
+                        AutoDeductionReceiver.class);
+                if (!result.isOk()) return CancelResult.fail(result.error);
+            } catch (JSONException ex) {
+                String featureStorageKey =
+                        prefKey.substring(SCHEDULE_KEY_PREFIX.length());
+                if (!forceScheduleMetadataRemovalFailureForTest
+                        && alarmRuntime.store().removeScheduleLocked(featureStorageKey)) {
+                    continue;
                 }
+                return CancelResult.fail("schedule_metadata_removal_failed");
             }
         }
         return CancelResult.success();
@@ -605,7 +581,7 @@ public final class AutoDeductionScheduler {
             // Missing or mismatched scheduleVersion / recurrenceGeneration → STALE.
             try {
                 JSONObject meta = new JSONObject(metaRaw);
-                String activeVersion = meta.optString(FIELD_SCHEDULE_VERSION, "");
+                String activeVersion = ExactAlarmStore.extractOperationVersion(meta);
                 long activeGen = meta.optLong(FIELD_RECURRENCE_GENERATION, 0L);
                 if (deliveryScheduleVersion == null || deliveryScheduleVersion.isEmpty()
                         || deliveryRecurrenceGeneration <= 0L) {
@@ -962,19 +938,8 @@ public final class AutoDeductionScheduler {
      * Package-visible for focused verification.
      */
     static boolean isMetadataOwnedByVersion(String currentJson, String expectedVersion) {
-        if (expectedVersion == null || expectedVersion.isEmpty()) {
-            return false;
-        }
-        if (currentJson == null || currentJson.isEmpty()) {
-            return false;
-        }
-        try {
-            JSONObject o = new JSONObject(currentJson);
-            String current = o.optString(FIELD_SCHEDULE_VERSION, "");
-            return expectedVersion.equals(current);
-        } catch (JSONException e) {
-            return false;
-        }
+        return ExactAlarmStore.isMetadataOwnedByOperationVersion(
+                currentJson, expectedVersion);
     }
 
     /**
@@ -1002,52 +967,6 @@ public final class AutoDeductionScheduler {
         return fr.allowsRecurrence();
     }
 
-
-    private Intent buildOccurrenceIntent(
-            String medicationId,
-            String doseId,
-            String calendarDate,
-            long triggerAt,
-            double amount,
-            String timeHhmm,
-            long recurrenceGeneration,
-            String scheduleVersion
-    ) {
-        Intent intent = new Intent(appContext, AutoDeductionReceiver.class);
-        intent.setAction(AutoDeductionContract.ACTION_AUTO_DEDUCTION);
-        intent.setData(AutoDeductionContract.occurrenceUri(medicationId, doseId, calendarDate));
-        intent.putExtra(AutoDeductionContract.EXTRA_MEDICATION_ID, medicationId);
-        intent.putExtra(AutoDeductionContract.EXTRA_DOSE_ID, doseId);
-        intent.putExtra(AutoDeductionContract.EXTRA_CALENDAR_DATE, calendarDate);
-        intent.putExtra(AutoDeductionContract.EXTRA_SCHEDULED_AT_EPOCH_MS, triggerAt);
-        intent.putExtra(AutoDeductionContract.EXTRA_AMOUNT, amount);
-        if (timeHhmm != null) {
-            intent.putExtra(AutoDeductionContract.EXTRA_TIME_HHMM, timeHhmm);
-        }
-        if (recurrenceGeneration > 0L) {
-            intent.putExtra(
-                    AutoDeductionContract.EXTRA_RECURRENCE_GENERATION, recurrenceGeneration);
-        }
-        // Issue #240: bind this PendingIntent to the exact schedule row that
-        // installed it so a queued stale delivery cannot FIRE after reschedule.
-        if (scheduleVersion != null && !scheduleVersion.isEmpty()) {
-            intent.putExtra(
-                    AutoDeductionContract.EXTRA_SCHEDULE_VERSION, scheduleVersion);
-        }
-        return intent;
-    }
-
-    private PendingIntent buildPendingIntent(Intent intent, int flags) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            flags |= PendingIntent.FLAG_IMMUTABLE;
-        }
-        return PendingIntent.getBroadcast(
-                appContext,
-                AutoDeductionContract.PENDING_INTENT_REQUEST_CODE,
-                intent,
-                flags
-        );
-    }
 
     /**
      * Bounded one-shot retry for a fire delivery whose durable FIRED/pending
@@ -1095,16 +1014,8 @@ public final class AutoDeductionScheduler {
                 medicationId, doseId, calendarDate);
         final String prefKey = SCHEDULE_KEY_PREFIX + key;
 
-        /*
-         * CRITICAL: retry installation is serialized with fire/cancel/reschedule.
-         * The retry uses the SAME PendingIntent identity as the normal occurrence.
-         * Therefore it must validate ownership and update its durable recovery marker
-         * under SCHEDULE_LOCK before touching AlarmManager; otherwise a stale retry
-         * could overwrite a newer schedule's alarm.
-         */
         synchronized (SCHEDULE_LOCK) {
             if (isOccurrenceCancelledKey(key)) {
-                Log.i(TAG, "fire retry skipped: occurrence is cancelled " + key);
                 return false;
             }
 
@@ -1112,106 +1023,96 @@ public final class AutoDeductionScheduler {
             int persistedRetryCount = nextRetryCount;
 
             if (currentRaw != null && !currentRaw.isEmpty()) {
-                // Ownership MUST be validated BEFORE writing independent evidence so a
-                // stale retry cannot stamp old recovery data onto a newer schedule.
                 try {
                     JSONObject current = new JSONObject(currentRaw);
-                    String activeVersion = current.optString(FIELD_SCHEDULE_VERSION, "");
-                    long activeGen = current.optLong(FIELD_RECURRENCE_GENERATION, 0L);
+                    String activeVersion =
+                            ExactAlarmStore.extractOperationVersion(current);
+                    long activeGen =
+                            current.optLong(FIELD_RECURRENCE_GENERATION, 0L);
                     if (scheduleVersion == null || scheduleVersion.isEmpty()
                             || recurrenceGeneration <= 0L
                             || !scheduleVersion.equals(activeVersion)
                             || recurrenceGeneration != activeGen) {
-                        Log.i(TAG, "fire retry skipped: ownership changed for " + key);
                         return false;
                     }
 
-                    int previousRetryCount = current.optInt(FIELD_FIRE_RETRY_COUNT, 0);
-                    persistedRetryCount = Math.max(previousRetryCount, nextRetryCount);
+                    int previousRetryCount =
+                            current.optInt(FIELD_FIRE_RETRY_COUNT, 0);
+                    persistedRetryCount =
+                            Math.max(previousRetryCount, nextRetryCount);
                     current.put(FIELD_FIRE_RETRY_COUNT, persistedRetryCount);
 
-                    boolean markerCommitted =
-                            !forceFireRetryScheduleMarkerCommitFailureForTest
-                            && schedulePrefs.edit()
+                    if (forceFireRetryScheduleMarkerCommitFailureForTest
+                            || !schedulePrefs.edit()
                                     .putString(prefKey, current.toString())
-                                    .commit();
-                    if (!markerCommitted) {
-                        Log.e(TAG, "fire retry schedule-metadata marker commit failed for "
-                                + key + " — fail-closed, no alarm");
+                                    .commit()) {
+                        return false;
+                    }
+
+                    if (!recordIndependentFireRetryEvidenceLocked(
+                            medicationId, doseId, calendarDate,
+                            scheduledAtEpochMs, amount, timeHhmm,
+                            recurrenceGeneration, scheduleVersion,
+                            persistedRetryCount)) {
                         return false;
                     }
                 } catch (JSONException e) {
-                    Log.e(TAG, "fire retry ownership metadata malformed for " + key, e);
-                    return false;
-                }
-                // Ownership OK + marker durable — now refresh independent evidence.
-                boolean evidenceOk = recordIndependentFireRetryEvidenceLocked(
-                        medicationId, doseId, calendarDate, scheduledAtEpochMs, amount,
-                        timeHhmm, recurrenceGeneration, scheduleVersion, persistedRetryCount);
-                if (!evidenceOk) {
-                    Log.e(TAG, "fire retry independent evidence commit failed for "
-                            + key + " — fail-closed, no alarm");
                     return false;
                 }
             } else {
-                // No sch: — must not invent evidence; only continue from prior failure evidence.
                 JSONObject existing = getIndependentFireRetryEvidence(
                         medicationId, doseId, calendarDate);
-                if (existing == null) {
-                    Log.i(TAG, "fire retry skipped: no sch: and no independent evidence for " + key);
-                    return false;
-                }
-                Log.i(TAG, "fire retry: schedule metadata missing — using independent evidence for " + key);
+                if (existing == null) return false;
+
                 int prior = existing.optInt("retryCount", 0);
                 persistedRetryCount = Math.max(prior, nextRetryCount);
-                boolean evidenceOk = recordIndependentFireRetryEvidenceLocked(
-                        medicationId, doseId, calendarDate, scheduledAtEpochMs, amount,
-                        timeHhmm, recurrenceGeneration, scheduleVersion, persistedRetryCount);
-                if (!evidenceOk) {
-                    Log.e(TAG, "fire retry independent evidence commit failed (no sch:) for "
-                            + key + " — fail-closed, no alarm");
+                if (!recordIndependentFireRetryEvidenceLocked(
+                        medicationId, doseId, calendarDate,
+                        scheduledAtEpochMs, amount, timeHhmm,
+                        recurrenceGeneration, scheduleVersion,
+                        persistedRetryCount)) {
                     return false;
                 }
             }
 
-            try {
-                Intent intent = buildOccurrenceIntent(
-                        medicationId, doseId, calendarDate, scheduledAtEpochMs, amount,
-                        timeHhmm, recurrenceGeneration, scheduleVersion);
-                intent.putExtra(
-                        AutoDeductionContract.EXTRA_FIRE_RETRY_COUNT, persistedRetryCount);
-                PendingIntent pi = buildPendingIntent(
-                        intent, PendingIntent.FLAG_UPDATE_CURRENT);
-                AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
-                if (am == null) {
-                    Log.w(TAG, "fire retry skipped: alarm manager unavailable " + key);
-                    return false;
-                }
-
-                long triggerAt = System.currentTimeMillis()
-                        + AutoDeductionContract.FIRE_RETRY_DELAY_MS;
-                try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        am.setExactAndAllowWhileIdle(
-                                AlarmManager.RTC_WAKEUP, triggerAt, pi);
-                    } else {
-                        am.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pi);
-                    }
-                    return true;
-                } catch (SecurityException se) {
-                    Log.w(TAG, "fire retry setExact denied — falling back to inexact", se);
-                    try {
-                        am.set(AlarmManager.RTC_WAKEUP, triggerAt, pi);
-                        return true;
-                    } catch (Exception e) {
-                        Log.e(TAG, "fire retry scheduling failed", e);
-                        return false;
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "fire retry scheduling failed", e);
-                    return false;
-                }
+            Bundle extras = new Bundle();
+            extras.putString(
+                    AutoDeductionContract.EXTRA_MEDICATION_ID, medicationId);
+            extras.putString(
+                    AutoDeductionContract.EXTRA_DOSE_ID, doseId);
+            extras.putString(
+                    AutoDeductionContract.EXTRA_CALENDAR_DATE, calendarDate);
+            extras.putLong(
+                    AutoDeductionContract.EXTRA_SCHEDULED_AT_EPOCH_MS,
+                    scheduledAtEpochMs);
+            extras.putDouble(
+                    AutoDeductionContract.EXTRA_AMOUNT, amount);
+            extras.putString(
+                    AutoDeductionContract.EXTRA_TIME_HHMM,
+                    timeHhmm != null ? timeHhmm : "");
+            extras.putLong(
+                    AutoDeductionContract.EXTRA_RECURRENCE_GENERATION,
+                    recurrenceGeneration);
+            extras.putInt(
+                    AutoDeductionContract.EXTRA_FIRE_RETRY_COUNT,
+                    persistedRetryCount);
+            if (scheduleVersion != null && !scheduleVersion.isEmpty()) {
+                extras.putString(
+                        AutoDeductionContract.EXTRA_SCHEDULE_VERSION,
+                        scheduleVersion);
             }
+
+            syncAlarmRuntimeTestControls();
+            long triggerAt = System.currentTimeMillis()
+                    + AutoDeductionContract.FIRE_RETRY_DELAY_MS;
+            return alarmRuntime.scheduleOneShot(
+                    AutoDeductionContract.occurrenceUri(
+                            medicationId, doseId, calendarDate).toString(),
+                    AutoDeductionContract.ACTION_AUTO_DEDUCTION,
+                    AutoDeductionReceiver.class,
+                    extras,
+                    triggerAt,
+                    true);
         }
     }
 
@@ -1496,45 +1397,30 @@ public final class AutoDeductionScheduler {
             double amount,
             long scheduledAtEpochMs
     ) {
-        // ── Validation outside lock ──
-        if (medicationId == null || medicationId.isEmpty()) {
+        if (medicationId == null || medicationId.isEmpty())
             return ScheduleResult.fail("missing_medicationId");
-        }
-        if (doseId == null || doseId.isEmpty()) {
+        if (doseId == null || doseId.isEmpty())
             return ScheduleResult.fail("missing_doseId");
-        }
-        if (!AutoDeductionContract.isValidCalendarDate(calendarDate)) {
+        if (!AutoDeductionContract.isValidCalendarDate(calendarDate))
             return ScheduleResult.fail("invalid_calendarDate");
-        }
-        if (!AutoDeductionContract.isValidTimeHhmm(timeHhmm)) {
+        if (!AutoDeductionContract.isValidTimeHhmm(timeHhmm))
             return ScheduleResult.fail("invalid_time");
-        }
-        if (!AutoDeductionContract.isValidAmount(amount)) {
+        if (!AutoDeductionContract.isValidAmount(amount))
             return ScheduleResult.fail("invalid_amount");
-        }
 
         long triggerAt = scheduledAtEpochMs;
-        if (triggerAt <= 0) {
+        if (triggerAt <= 0L) {
             Long computed = computeEpochMs(calendarDate, timeHhmm);
-            if (computed == null) {
-                return ScheduleResult.fail("invalid_datetime");
-            }
+            if (computed == null) return ScheduleResult.fail("invalid_datetime");
             triggerAt = computed;
         }
-
-        if (triggerAt <= System.currentTimeMillis() - 2000L) {
+        if (triggerAt <= System.currentTimeMillis() - 2000L)
             return ScheduleResult.fail("trigger_in_past");
-        }
-
-        if (!canScheduleExactAlarms()) {
+        if (!canScheduleExactAlarms())
             return ScheduleResult.fail("exact_alarm_permission_denied");
-        }
 
-        String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
-        String prefKey = SCHEDULE_KEY_PREFIX + key;
-
-        // Payload without scheduleVersion — authoritative version is assigned inside
-        // SCHEDULE_LOCK so ordering vs cancellation tombstones matches lock order.
+        String key = AutoDeductionContract.occurrenceKey(
+                medicationId, doseId, calendarDate);
         JSONObject payload = new JSONObject();
         try {
             payload.put("medicationId", medicationId);
@@ -1548,13 +1434,14 @@ public final class AutoDeductionScheduler {
             return ScheduleResult.fail("payload_build_failed");
         }
 
-        Intent intent = buildOccurrenceIntent(
-                medicationId, doseId, calendarDate, triggerAt, amount, timeHhmm, 0L, null);
-        PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
-
         synchronized (SCHEDULE_LOCK) {
             return scheduleOccurrenceLocked(
-                    prefKey, key, payload, triggerAt, pi, /*requiredVersion*/ null);
+                    SCHEDULE_KEY_PREFIX + key,
+                    key,
+                    payload,
+                    triggerAt,
+                    null,
+                    null);
         }
     }
 
@@ -1575,130 +1462,114 @@ public final class AutoDeductionScheduler {
             String key,
             JSONObject payload,
             long triggerAt,
-            PendingIntent pi,
+            Object ignoredPendingIntent,
             String requiredVersion
     ) {
         return scheduleOccurrenceLocked(
-                prefKey, key, payload, triggerAt, pi, requiredVersion, null);
+                prefKey, key, payload, triggerAt,
+                ignoredPendingIntent, requiredVersion, null);
     }
 
-    /**
-     * @param requiredRecurrenceGeneration when non-null, active generation must still
-     *        match this value and the schedule is stamped with it (recovery path).
-     *        When null, use {@link #ensureRecurrenceGenerationLocked} (normal schedule).
-     */
     private ScheduleResult scheduleOccurrenceLocked(
             String prefKey,
             String key,
             JSONObject payload,
             long triggerAt,
-            PendingIntent pi,
+            Object ignoredPendingIntent,
             String requiredVersion,
             Long requiredRecurrenceGeneration
     ) {
         if (requiredVersion != null) {
-            String current = schedulePrefs.getString(prefKey, null);
-            if (!isMetadataOwnedByVersion(current, requiredVersion)) {
-                Log.i(TAG, "scheduleOccurrenceLocked: skip — ownership lost for " + prefKey);
+            String current = alarmRuntime.store().getScheduleRaw(key);
+            if (!ExactAlarmStore.isMetadataOwnedByOperationVersion(
+                    current, requiredVersion)) {
                 return ScheduleResult.fail("ownership_lost");
             }
         }
 
-        // Recurrence authorization generation (Issue #217) — under SCHEDULE_LOCK so
-        // concurrent invalidateRecurrenceAuthorization cannot race a stamp with a bump.
-        final String medIdForGen = payload.optString("medicationId", "");
-        final String doseIdForGen = payload.optString("doseId", "");
-        final long recurrenceGen;
+        final String medicationId = payload.optString("medicationId", "");
+        final String doseId = payload.optString("doseId", "");
+        final long recurrenceGeneration;
         if (requiredRecurrenceGeneration != null) {
             if (!isRecurrenceGenerationAuthorizedLocked(
-                    medIdForGen, doseIdForGen, requiredRecurrenceGeneration)) {
-                Log.i(TAG, "scheduleOccurrenceLocked: generation mismatch required="
-                        + requiredRecurrenceGeneration);
+                    medicationId, doseId, requiredRecurrenceGeneration)) {
                 return ScheduleResult.fail("recurrence_generation_unauthorized");
             }
-            recurrenceGen = requiredRecurrenceGeneration;
+            recurrenceGeneration = requiredRecurrenceGeneration;
         } else {
-            long ensured = ensureRecurrenceGenerationLocked(medIdForGen, doseIdForGen);
+            long ensured = ensureRecurrenceGenerationLocked(medicationId, doseId);
             if (ensured <= 0L) {
                 return ScheduleResult.fail("recurrence_generation_write_failed");
             }
-            recurrenceGen = ensured;
+            recurrenceGeneration = ensured;
         }
 
-        // Authoritative durable ordering/version for this scheduling attempt — only
-        // after acquiring SCHEDULE_LOCK (same serialization boundary as cancel).
-        final String myVersion = allocateOrderingTokenLocked();
-        if (myVersion == null) {
-            return ScheduleResult.fail("ordering_sequence_write_failed");
-        }
+        JSONObject featureMetadata = new JSONObject();
         try {
-            payload.put(FIELD_SCHEDULE_VERSION, myVersion);
-            payload.put(FIELD_RECURRENCE_GENERATION, recurrenceGen);
+            featureMetadata.put("medicationId", medicationId);
+            featureMetadata.put("doseId", doseId);
+            featureMetadata.put("calendarDate", payload.optString("calendarDate", ""));
+            featureMetadata.put("timeHhmm", payload.optString("timeHhmm", ""));
+            featureMetadata.put("amount", payload.optDouble("amount", Double.NaN));
+            featureMetadata.put("scheduledAtEpochMs", triggerAt);
+            featureMetadata.put(FIELD_RECURRENCE_GENERATION, recurrenceGeneration);
         } catch (JSONException e) {
-            Log.e(TAG, "schedule version attach failed", e);
             return ScheduleResult.fail("payload_build_failed");
         }
 
-        // Rebuild PendingIntent with stamped generation so the receiver can refuse
-        // successor creation after a concurrent disable bumps the active generation.
-        final String calDate = payload.optString("calendarDate", "");
-        final String timeHhmm = payload.optString("timeHhmm", null);
-        final double amount = payload.optDouble("amount", Double.NaN);
-        Intent genIntent = buildOccurrenceIntent(
-                medIdForGen, doseIdForGen, calDate, triggerAt, amount, timeHhmm,
-                recurrenceGen, myVersion);
-        pi = buildPendingIntent(genIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+        Bundle deliveryExtras = new Bundle();
+        deliveryExtras.putString(
+                AutoDeductionContract.EXTRA_MEDICATION_ID, medicationId);
+        deliveryExtras.putString(
+                AutoDeductionContract.EXTRA_DOSE_ID, doseId);
+        deliveryExtras.putString(
+                AutoDeductionContract.EXTRA_CALENDAR_DATE,
+                payload.optString("calendarDate", ""));
+        deliveryExtras.putLong(
+                AutoDeductionContract.EXTRA_SCHEDULED_AT_EPOCH_MS, triggerAt);
+        deliveryExtras.putDouble(
+                AutoDeductionContract.EXTRA_AMOUNT,
+                payload.optDouble("amount", Double.NaN));
+        deliveryExtras.putString(
+                AutoDeductionContract.EXTRA_TIME_HHMM,
+                payload.optString("timeHhmm", ""));
+        deliveryExtras.putLong(
+                AutoDeductionContract.EXTRA_RECURRENCE_GENERATION,
+                recurrenceGeneration);
 
-        boolean metaWritten = schedulePrefs.edit()
-                .putString(prefKey, payload.toString())
-                .commit();
-        if (!metaWritten) {
-            Log.e(TAG, "schedule metadata commit failed for key=" + key);
-            return ScheduleResult.fail("schedule_metadata_write_failed");
-        }
-
-        // New schedule metadata (with lock-ordered scheduleVersion token) supersedes
-        // any prior cancellation tombstone. Clear is best-effort: if the remove commit
-        // fails, isOccurrenceCancelledKey still treats a strictly newer schedule
-        // ordering token as active so restore/receiver do not suppress the new schedule.
-        clearCancellationTombstoneLocked(key);
-
-        AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
-        if (am == null) {
-            removeScheduleMetadataIfVersionLocked(prefKey, myVersion);
-            return ScheduleResult.fail("alarm_manager_unavailable");
-        }
-
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi);
-            } else {
-                am.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pi);
-            }
-        } catch (SecurityException se) {
-            Log.w(TAG, "setExactAndAllowWhileIdle denied", se);
-            removeScheduleMetadataIfVersionLocked(prefKey, myVersion);
-            return ScheduleResult.fail("exact_alarm_permission_denied");
-        } catch (Exception e) {
-            Log.e(TAG, "schedule failed", e);
-            removeScheduleMetadataIfVersionLocked(prefKey, myVersion);
-            return ScheduleResult.fail("schedule_failed");
-        }
-
+        syncAlarmRuntimeTestControls();
+        ExactAlarmRuntime.ScheduleResult result = alarmRuntime.schedule(
+                new ExactAlarmRuntime.ScheduleRequest(
+                        AutoDeductionContract.occurrenceUri(
+                                medicationId,
+                                doseId,
+                                payload.optString("calendarDate", ""))
+                                .toString(),
+                        key,
+                        AutoDeductionContract.ACTION_AUTO_DEDUCTION,
+                        AutoDeductionReceiver.class,
+                        payload.optString("calendarDate", ""),
+                        payload.optString("timeHhmm", ""),
+                        triggerAt,
+                        featureMetadata,
+                        deliveryExtras,
+                        requiredVersion,
+                        true));
+        if (!result.ok) return ScheduleResult.fail(result.error);
         return ScheduleResult.success(key);
     }
 
     /**
      * Conditional rollback — caller MUST already hold {@link #SCHEDULE_LOCK}.
      */
-    private boolean removeScheduleMetadataIfVersionLocked(String prefKey, String expectedVersion) {
-        String current = schedulePrefs.getString(prefKey, null);
-        if (!isMetadataOwnedByVersion(current, expectedVersion)) {
-            Log.i(TAG, "skip stale rollback for " + prefKey
-                    + " (current metadata not owned by this attempt)");
-            return false;
-        }
-        return schedulePrefs.edit().remove(prefKey).commit();
+    private boolean removeScheduleMetadataIfVersionLocked(
+            String prefKey, String expectedVersion) {
+        String featureStorageKey = prefKey != null
+                && prefKey.startsWith(SCHEDULE_KEY_PREFIX)
+                ? prefKey.substring(SCHEDULE_KEY_PREFIX.length())
+                : prefKey;
+        return alarmRuntime.store().removeScheduleIfOwnedLocked(
+                featureStorageKey, expectedVersion);
     }
 
     /**
@@ -1716,7 +1587,11 @@ public final class AutoDeductionScheduler {
      * Caller must hold SCHEDULE_LOCK, or use the public cancel path.
      */
     private void removeScheduleMetadataLocked(String prefKey) {
-        schedulePrefs.edit().remove(prefKey).commit();
+        String featureStorageKey = prefKey != null
+                && prefKey.startsWith(SCHEDULE_KEY_PREFIX)
+                ? prefKey.substring(SCHEDULE_KEY_PREFIX.length())
+                : prefKey;
+        alarmRuntime.store().removeScheduleLocked(featureStorageKey);
     }
 
     private void removeScheduleMetadata(String prefKey) {
@@ -1741,62 +1616,30 @@ public final class AutoDeductionScheduler {
      * write fails, or metadata remove commit fails (stale metadata must not
      * be reported as success when cancellation intent is not durable).
      */
-    public CancelResult cancelOccurrence(String medicationId, String doseId, String calendarDate) {
+    public CancelResult cancelOccurrence(
+            String medicationId,
+            String doseId,
+            String calendarDate) {
         if (medicationId == null || medicationId.isEmpty()
                 || doseId == null || doseId.isEmpty()
                 || !AutoDeductionContract.isValidCalendarDate(calendarDate)) {
             return CancelResult.fail("invalid_args");
         }
-        String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
-        String prefKey = SCHEDULE_KEY_PREFIX + key;
-        String cancelKey = CANCEL_KEY_PREFIX + key;
 
-        Intent intent = buildOccurrenceIntent(medicationId, doseId, calendarDate, 0L, 0d, null, 0L, null);
-        PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
-
+        String key = AutoDeductionContract.occurrenceKey(
+                medicationId, doseId, calendarDate);
         synchronized (SCHEDULE_LOCK) {
-            boolean hadMetadata = schedulePrefs.contains(prefKey);
-            boolean alreadyCancelled = cancelPrefs.contains(cancelKey);
-
-            // Durable cancellation intent before AlarmManager.cancel / metadata remove.
-            // Ordering token (same format as scheduleVersion) is allocated under
-            // SCHEDULE_LOCK from a durable sequence so same-millisecond ops and
-            // post-restart ops remain strictly ordered and reconstructible.
-            if (!alreadyCancelled) {
-                final String cancelToken = allocateOrderingTokenLocked();
-                if (cancelToken == null) {
-                    return CancelResult.fail("ordering_sequence_write_failed");
-                }
-                boolean tombstoneWritten = cancelPrefs.edit()
-                        .putString(cancelKey, cancelToken)
-                        .commit();
-                if (!tombstoneWritten) {
-                    Log.e(TAG, "cancelOccurrence: cancellation tombstone commit failed for " + key);
-                    return CancelResult.fail("cancellation_tombstone_write_failed");
-                }
-            }
-
-            AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
-            if (am == null) {
-                Log.e(TAG, "cancelOccurrence: AlarmManager unavailable for " + key);
-                return CancelResult.fail("alarm_manager_unavailable");
-            }
-            if (pi != null) {
-                am.cancel(pi);
-                pi.cancel();
-            }
-
-            if (!hadMetadata) {
-                return alreadyCancelled ? CancelResult.alreadyAbsent() : CancelResult.success();
-            }
-
-            boolean removed = schedulePrefs.edit().remove(prefKey).commit();
-            if (!removed) {
-                Log.e(TAG, "cancelOccurrence: metadata remove commit failed for " + key
-                        + " (cancellation tombstone remains — restore will not promote to FIRED)");
-                return CancelResult.fail("schedule_metadata_remove_failed");
-            }
-            return CancelResult.success();
+            syncAlarmRuntimeTestControls();
+            ExactAlarmRuntime.CancelResult result = alarmRuntime.cancel(
+                    AutoDeductionContract.occurrenceUri(
+                            medicationId, doseId, calendarDate).toString(),
+                    key,
+                    AutoDeductionContract.ACTION_AUTO_DEDUCTION,
+                    AutoDeductionReceiver.class);
+            if (!result.isOk()) return CancelResult.fail(result.error);
+            return result.status == ExactAlarmRuntime.CancelResult.Status.ALREADY_ABSENT
+                    ? CancelResult.alreadyAbsent()
+                    : CancelResult.success();
         }
     }
 
@@ -1804,158 +1647,58 @@ public final class AutoDeductionScheduler {
     boolean hasCancellationTombstone(String occurrenceKey) {
         if (occurrenceKey == null || occurrenceKey.isEmpty()) return false;
         synchronized (SCHEDULE_LOCK) {
-            return cancelPrefs.contains(CANCEL_KEY_PREFIX + occurrenceKey);
+            return alarmRuntime.store().hasCancellationTombstoneLocked(occurrenceKey);
         }
     }
 
-    /**
-     * Whether the occurrence is effectively cancelled for fire handling and restore.
-     * <p>
-     * Rules (deterministic from durable state only):
-     * <ul>
-     *   <li>No tombstone → not cancelled</li>
-     *   <li>Tombstone present, no schedule metadata → cancelled</li>
-     *   <li>Both present → compare durable ordering tokens (millis then seq from
-     *       scheduleVersion / cancel tombstone). A strictly newer schedule
-     *       supersedes the tombstone (active); a strictly newer cancel remains
-     *       cancelled. Same-millisecond ops and post-restart ops are ordered
-     *       by the durable sequence allocated under SCHEDULE_LOCK.</li>
-     * </ul>
-     * This allows a legitimate reschedule to win even if tombstone removal failed
-     * after the new schedule metadata commit, while still blocking cancel-then-
-     * failed-metadata-remove from promoting stale schedule metadata to FIRED.
-     */
     public boolean isOccurrenceCancelled(
-            String medicationId, String doseId, String calendarDate) {
+            String medicationId,
+            String doseId,
+            String calendarDate) {
         if (medicationId == null || medicationId.isEmpty()
                 || doseId == null || doseId.isEmpty()
                 || !AutoDeductionContract.isValidCalendarDate(calendarDate)) {
             return false;
         }
-        String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
-        return isOccurrenceCancelledKey(key);
+        return isOccurrenceCancelledKey(
+                AutoDeductionContract.occurrenceKey(
+                        medicationId, doseId, calendarDate));
     }
 
-    /**
-     * Package-visible key-based check used by restore and tests.
-     */
     boolean isOccurrenceCancelledKey(String occurrenceKey) {
         if (occurrenceKey == null || occurrenceKey.isEmpty()) return false;
         synchronized (SCHEDULE_LOCK) {
-            String cancelKey = CANCEL_KEY_PREFIX + occurrenceKey;
-            String cancelRaw = cancelPrefs.getString(cancelKey, null);
-            if (cancelRaw == null) {
-                return false;
-            }
-            String prefKey = SCHEDULE_KEY_PREFIX + occurrenceKey;
-            String scheduleRaw = schedulePrefs.getString(prefKey, null);
-            if (scheduleRaw == null || scheduleRaw.isEmpty()) {
-                return true;
-            }
-            long[] cancelOrd = parseOrderingToken(cancelRaw);
-            long[] scheduleOrd = parseScheduleVersionOrdering(scheduleRaw);
-            // Strict total order: (millis, seq). Schedule newer than cancel → active.
-            if (scheduleOrd[0] >= 0L && cancelOrd[0] >= 0L
-                    && isOrderingNewer(scheduleOrd[0], scheduleOrd[1], cancelOrd[0], cancelOrd[1])) {
-                return false;
-            }
-            // Ambiguous or cancel-after-schedule: treat as cancelled.
-            return true;
+            return alarmRuntime.store().isEffectivelyCancelledLocked(occurrenceKey);
         }
     }
 
-    /**
-     * Parse a durable ordering token "{millis}-{seq}-...".
-     * Returns long[2] = {millis, seq}; millis=-1 if unparseable or not versioned.
-     * Pure-millis tokens are rejected.
-     */
     private static long[] parseOrderingToken(String raw) {
-        long[] out = new long[] { -1L, 0L };
-        if (raw == null || raw.isEmpty()) return out;
-        String s = raw.trim();
-        try {
-            int firstDash = s.indexOf('-');
-            if (firstDash <= 0) {
-                // Current format requires "{millis}-{seq}-..."; pure millis is invalid.
-                return out;
-            }
-            out[0] = Long.parseLong(s.substring(0, firstDash).trim());
-            int secondDash = s.indexOf('-', firstDash + 1);
-            String seqPart = secondDash > firstDash
-                    ? s.substring(firstDash + 1, secondDash)
-                    : s.substring(firstDash + 1);
-            out[1] = Long.parseLong(seqPart.trim());
-            return out;
-        } catch (NumberFormatException e) {
-            out[0] = -1L;
-            out[1] = 0L;
-            return out;
-        }
+        return ExactAlarmStore.parseOrdering(raw);
     }
 
-    /**
-     * Extract (millis, seq) from schedule JSON scheduleVersion field.
-     * Returns {-1, 0} if missing/unparseable.
-     */
     private static long[] parseScheduleVersionOrdering(String scheduleRaw) {
-        if (scheduleRaw == null || scheduleRaw.isEmpty()) {
-            return new long[] { -1L, 0L };
-        }
-        try {
-            JSONObject o = new JSONObject(scheduleRaw);
-            String version = o.optString(FIELD_SCHEDULE_VERSION, "");
-            if (version.isEmpty()) return new long[] { -1L, 0L };
-            return parseOrderingToken(version);
-        } catch (Exception e) {
-            return new long[] { -1L, 0L };
-        }
+        return ExactAlarmStore.parseOrdering(
+                ExactAlarmStore.extractOperationVersion(scheduleRaw));
     }
 
-    /**
-     * True if (aMillis, aSeq) is strictly newer than (bMillis, bSeq).
-     * Primary key: millis; secondary: durable seq allocated under SCHEDULE_LOCK.
-     */
-    private static boolean isOrderingNewer(long aMillis, long aSeq, long bMillis, long bSeq) {
-        if (aMillis != bMillis) {
-            return aMillis > bMillis;
-        }
-        return aSeq > bSeq;
+    private static boolean isOrderingNewer(
+            long aMillis, long aSeq, long bMillis, long bSeq) {
+        return ExactAlarmStore.isOrderingNewer(
+                aMillis, aSeq, bMillis, bSeq);
     }
 
-    /**
-     * Leading millis segment of scheduleVersion in schedule JSON payload.
-     * scheduleVersion format: "{millis}-{seq}-{uuid}". Returns -1 if missing.
-     */
     private static long parseScheduleVersionEpochMs(String scheduleRaw) {
-        long[] ord = parseScheduleVersionOrdering(scheduleRaw);
-        return ord[0];
+        return parseScheduleVersionOrdering(scheduleRaw)[0];
     }
 
-    /** Parse cancel tombstone ordering millis (versioned token). -1 if unparseable. */
     private static long parseCancelEpochMs(String cancelRaw) {
-        long[] ord = parseOrderingToken(cancelRaw);
-        return ord[0];
+        return parseOrderingToken(cancelRaw)[0];
     }
 
-    /**
-     * Clear cancellation tombstone when a new legitimate schedule is installed
-     * for the same occurrence identity (re-enable / reschedule after cancel).
-     * Caller must hold SCHEDULE_LOCK.
-     * Returns whether the remove commit reported success (best-effort; restore
-     * and fire paths use {@link #isOccurrenceCancelledKey} when clear fails).
-     */
     private boolean clearCancellationTombstoneLocked(String occurrenceKey) {
         if (occurrenceKey == null || occurrenceKey.isEmpty()) return true;
-        String cancelKey = CANCEL_KEY_PREFIX + occurrenceKey;
-        if (!cancelPrefs.contains(cancelKey)) {
-            return true;
-        }
-        boolean ok = cancelPrefs.edit().remove(cancelKey).commit();
-        if (!ok) {
-            Log.w(TAG, "clearCancellationTombstone commit failed for " + occurrenceKey
-                    + " — schedule metadata remains authoritative via version ordering");
-        }
-        return ok;
+        return alarmRuntime.store()
+                .removeCancellationTombstoneLocked(occurrenceKey);
     }
 
     public ScheduleResult scheduleNextOccurrence(
@@ -2073,10 +1816,6 @@ public final class AutoDeductionScheduler {
             return ScheduleResult.fail("payload_failed");
         }
 
-        Intent intent = buildOccurrenceIntent(
-                medicationId, doseId, resolvedNextDate, triggerAt, amount, timeHhmm, 0L, null);
-        PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
-
         synchronized (SCHEDULE_LOCK) {
             // Issue #217: refuse successor if disable/cancel invalidated this chain.
             if (!isRecurrenceGenerationAuthorizedLocked(
@@ -2100,7 +1839,7 @@ public final class AutoDeductionScheduler {
                 return ScheduleResult.success(nextKey);
             }
             return scheduleOccurrenceLocked(
-                    nextPrefKey, nextKey, payload, triggerAt, pi, /*requiredVersion*/ null);
+                    nextPrefKey, nextKey, payload, triggerAt, null, /*requiredVersion*/ null);
         }
     }
 
@@ -2356,7 +2095,7 @@ public final class AutoDeductionScheduler {
                 String observedVersion = "";
                 try {
                     JSONObject tmp = new JSONObject(raw);
-                    observedVersion = tmp.optString(FIELD_SCHEDULE_VERSION, "");
+                    observedVersion = ExactAlarmStore.extractOperationVersion(tmp);
                 } catch (JSONException ignored) {
                 }
                 snapshot.add(new String[]{ e.getKey(), raw, observedVersion });
@@ -2507,9 +2246,6 @@ public final class AutoDeductionScheduler {
                     boundaryOk = false;
                     continue;
                 }
-                Intent intent = buildOccurrenceIntent(medId, doseId, date, epoch, amount, time, 0L, null);
-                PendingIntent pi = buildPendingIntent(intent, PendingIntent.FLAG_UPDATE_CURRENT);
-
                 synchronized (SCHEDULE_LOCK) {
                     // Issue #217: drop future schedules whose generation was invalidated.
                     long metaGen = o.optLong(FIELD_RECURRENCE_GENERATION, 0L);
@@ -2521,7 +2257,7 @@ public final class AutoDeductionScheduler {
                         continue;
                     }
                     ScheduleResult r = scheduleOccurrenceLocked(
-                            prefKey, key, payload, epoch, pi, observedVersion);
+                            prefKey, key, payload, epoch, null, observedVersion);
                     if (r.ok) {
                         restored++;
                     } else if ("ownership_lost".equals(r.error)) {
@@ -2621,54 +2357,27 @@ public final class AutoDeductionScheduler {
     ) {
         synchronized (SCHEDULE_LOCK) {
             String currentRaw = schedulePrefs.getString(prefKey, null);
-            if (currentRaw == null) {
-                return true;
-            }
-            if (expectedRaw != null && !expectedRaw.equals(currentRaw)) {
-                Log.i(TAG, "quarantine skip (snapshot stale): " + prefKey);
-                return true;
-            }
+            if (currentRaw == null) return true;
+            if (expectedRaw != null && !expectedRaw.equals(currentRaw)) return true;
 
             ScheduleStorageIdentity identity = parseScheduleStorageKey(prefKey);
-            if (identity == null) {
-                Log.e(TAG, "cannot quarantine malformed schedule with unsafe key: "
-                        + prefKey + " reason=" + reason);
-                return false;
-            }
+            if (identity == null) return false;
 
-            AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
-            if (am == null) {
-                Log.e(TAG, "cannot quarantine malformed schedule without AlarmManager: " + prefKey);
-                return false;
-            }
+            String occurrenceKey = AutoDeductionContract.occurrenceKey(
+                    identity.medicationId,
+                    identity.doseId,
+                    identity.calendarDate);
+            syncAlarmRuntimeTestControls();
+            ExactAlarmRuntime.CancelResult result = alarmRuntime.cancel(
+                    AutoDeductionContract.occurrenceUri(
+                            identity.medicationId,
+                            identity.doseId,
+                            identity.calendarDate).toString(),
+                    occurrenceKey,
+                    AutoDeductionContract.ACTION_AUTO_DEDUCTION,
+                    AutoDeductionReceiver.class);
+            if (!result.isOk()) return false;
 
-            try {
-                Intent intent = buildOccurrenceIntent(
-                        identity.medicationId,
-                        identity.doseId,
-                        identity.calendarDate,
-                        0L,
-                        0d,
-                        null,
-                        0L,
-                        null);
-                PendingIntent pi = buildPendingIntent(
-                        intent,
-                        PendingIntent.FLAG_UPDATE_CURRENT);
-                if (pi != null) {
-                    am.cancel(pi);
-                    pi.cancel();
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "failed to cancel malformed schedule alarm: " + prefKey, e);
-                return false;
-            }
-
-            boolean removed = schedulePrefs.edit().remove(prefKey).commit();
-            if (!removed) {
-                Log.e(TAG, "failed to remove quarantined schedule metadata: " + prefKey);
-                return false;
-            }
             Log.w(TAG, "quarantined malformed schedule metadata: " + prefKey
                     + " reason=" + reason);
             return true;
@@ -2740,11 +2449,7 @@ public final class AutoDeductionScheduler {
     }
 
     public boolean canScheduleExactAlarms() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-            return true;
-        }
-        AlarmManager am = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
-        return am != null && am.canScheduleExactAlarms();
+        return alarmRuntime.canScheduleExactAlarms();
     }
 
     public static Long computeEpochMs(String calendarDate, String timeHhmm) {

@@ -178,12 +178,25 @@ export function dailyScheduleAmount(med: Medication): number {
  * schedule rate only (Issue #266). Does not invent deductions from elapsed
  * calendar days.
  */
+/**
+ * Floor of numerator/denominator that corrects only tiny IEEE-754 errors
+ * immediately below an integer boundary (e.g. 1.8 / 0.30000000000000004).
+ * Does not change Critical business thresholds.
+ */
+function floorRatioSafely(numerator: number, denominator: number): number {
+  const ratio = numerator / denominator;
+  if (!Number.isFinite(ratio)) return Math.floor(ratio);
+  const tolerance =
+    Number.EPSILON * Math.max(1, Math.abs(ratio)) * 8;
+  return Math.floor(ratio + tolerance);
+}
+
 export function daysLeftFromCurrentStock(med: Medication): number {
   const dayAmt = dailyScheduleAmount(med);
   if (dayAmt <= 0) return NEVER_DEPLETES_DAYS;
   const pills = Number(med.currentPills) || 0;
   if (pills <= 0) return 0;
-  return Math.floor(pills / dayAmt);
+  return floorRatioSafely(pills, dayAmt);
 }
 
 export function formatArabicDate(dateStr: string, includeWeekday: boolean = true): string {
@@ -294,7 +307,7 @@ export function getCriticalAlarmDate(
   const startingPills = Number(med.currentPills) || 0;
   if (startingPills <= 0) return null;
 
-  const startingDaysLeft = Math.floor(startingPills / dayAmt);
+  const startingDaysLeft = floorRatioSafely(startingPills, dayAmt);
   if (startingDaysLeft <= criticalThresholdDays) return null;
 
   // Auto OFF: stock does not auto-decline → no future crossing.
@@ -334,7 +347,7 @@ export function getCriticalAlarmDate(
 
   const isCritical = (pills: number): boolean => {
     if (pills <= 0) return true;
-    return Math.floor(pills / dayAmt) <= criticalThresholdDays;
+    return floorRatioSafely(pills, dayAmt) <= criticalThresholdDays;
   };
 
   const todayUtc = parseUtcDate(todayStr);

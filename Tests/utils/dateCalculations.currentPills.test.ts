@@ -474,4 +474,30 @@ describe('getCriticalAlarmDate — bulk-jump performance path', () => {
     expect(d.getHours()).toBe(20);
     expect(d.getMinutes()).toBe(0);
   });
+
+  it('IEEE-754 0.1+0.2 boundary does not treat 1.8 stock as already Critical', () => {
+    vi.setSystemTime(new Date(2024, 8, 10, 6, 0, 0, 0));
+    const med = makeMed({
+      currentPills: 1.8,
+      dailyDose: 0.3,
+      warningThresholdDays: 5,
+      autoDeductEnabled: true,
+      doseSchedule: [
+        { id: 'd1', amount: 0.1, time: '08:00' },
+        { id: 'd2', amount: 0.2, time: '20:00' },
+      ],
+    });
+    // Starting stock is mathematically 6 days left → not already Critical.
+    expect(daysLeftFromCurrentStock(med)).toBe(6);
+    const ts = getCriticalAlarmDate(med, '2024-09-10');
+    expect(ts).not.toBeNull();
+    // First future dose 08:00: 1.8 - 0.1 = 1.7 → floor(1.7/0.3)=5 ≤ 5 → Critical.
+    const d = new Date(ts!);
+    expect(d.getFullYear()).toBe(2024);
+    expect(d.getMonth()).toBe(8);
+    expect(d.getDate()).toBe(10);
+    expect(d.getHours()).toBe(8);
+    expect(d.getMinutes()).toBe(0);
+  });
+
 });

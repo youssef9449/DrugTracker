@@ -229,7 +229,10 @@ public final class ExactAlarmRuntime {
                     store.hasCancellationTombstoneLocked(
                             storageKey);
 
-            if (!alreadyCancelled) {
+            // Every cancellation of an existing schedule must publish a fresh
+            // ordering tombstone so an older leftover tombstone cannot lose to the
+            // current schedule if metadata removal later fails.
+            if (hadMetadata || !alreadyCancelled) {
                 String cancelToken =
                         allocateOperationVersionLocked();
                 if (cancelToken == null) {

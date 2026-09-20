@@ -413,7 +413,7 @@ describe('getCriticalAlarmDate — bulk-jump performance path', () => {
 
     const withSkip = {
       ...base,
-      doseConsumptionHistory: { d1: ['2024-09-15'] },
+      doseConsumptionHistory: { d1: ['2024-09-11'] },
     };
     const t1 = getCriticalAlarmDate(withSkip, '2024-09-10');
     expect(t1).not.toBeNull();
@@ -437,5 +437,41 @@ describe('getCriticalAlarmDate — bulk-jump performance path', () => {
     expect(d.getMonth()).toBe(8);
     expect(d.getDate()).toBe(10);
     expect(d.getHours()).toBe(20);
+  });
+
+  it('fractional dose amounts cross at exact 20:00 slot', () => {
+    // dayAmt = 2.5, threshold 5 → Critical when floor(pills/2.5) <= 5
+    // i.e. pills < 15. Start 17 (floor=6). Use early clock so both slots today are future.
+    vi.setSystemTime(new Date(2024, 8, 10, 6, 0, 0, 0));
+    const med = makeMed({
+      currentPills: 17,
+      dailyDose: 2.5,
+      warningThresholdDays: 5,
+      autoDeductEnabled: true,
+      doseSchedule: [
+        { id: 'd1', amount: 2, time: '08:00' },
+        { id: 'd2', amount: 0.5, time: '20:00' },
+      ],
+    });
+    // Today: 17-2=15 (floor 6), 15-0.5=14.5 (floor 5) → Critical today 20:00
+    // User scenario wants tomorrow if only future relative to "before doses".
+    // With both today future, crossing is today 20:00.
+    const tsToday = getCriticalAlarmDate(med, '2024-09-10');
+    expect(tsToday).not.toBeNull();
+    const dToday = new Date(tsToday!);
+    expect(dToday.getDate()).toBe(10);
+    expect(dToday.getHours()).toBe(20);
+
+    // After today is fully past, same stock still 17 (no durable change) → tomorrow 20:00
+    // if we only project future: set clock after 20:00 so today contributes nothing.
+    vi.setSystemTime(new Date(2024, 8, 10, 21, 0, 0, 0));
+    const ts = getCriticalAlarmDate(med, '2024-09-10');
+    expect(ts).not.toBeNull();
+    const d = new Date(ts!);
+    expect(d.getFullYear()).toBe(2024);
+    expect(d.getMonth()).toBe(8);
+    expect(d.getDate()).toBe(11);
+    expect(d.getHours()).toBe(20);
+    expect(d.getMinutes()).toBe(0);
   });
 });

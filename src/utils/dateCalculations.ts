@@ -326,8 +326,11 @@ export function getCriticalAlarmDate(
 
   const doseIdSet = new Set(slots.map((s) => s.id));
 
-  /** Max pills that are still non-critical under floor(pills/dayAmt) <= threshold. */
-  const criticalPillsLimit = (criticalThresholdDays + 1) * dayAmt - 1;
+  /**
+   * Non-critical when floor(pills/dayAmt) > threshold, i.e. pills >= (threshold+1)*dayAmt.
+   * Exact for fractional dayAmt/currentPills (not the integer-only `* dayAmt - 1` bound).
+   */
+  const minNonCriticalPills = (criticalThresholdDays + 1) * dayAmt;
 
   const isCritical = (pills: number): boolean => {
     if (pills <= 0) return true;
@@ -409,7 +412,7 @@ export function getCriticalAlarmDate(
 
   // Safety: enough stock-driven progress without per-day loops.
   // We only iterate exception dates + at most one normal crossing day.
-  while (pills > criticalPillsLimit) {
+  while (pills >= minNonCriticalPills) {
     const nextExceptionStr =
       exceptionIdx < sortedExceptions.length ? sortedExceptions[exceptionIdx] : null;
     const nextExceptionUtc = nextExceptionStr ? parseUtcDate(nextExceptionStr) : null;
@@ -421,17 +424,18 @@ export function getCriticalAlarmDate(
       continue;
     }
 
-    const requiredDeduction = Math.max(0, pills - criticalPillsLimit);
-    const fullDaysNeeded = Math.ceil(requiredDeduction / dayAmt);
+    // Complete normal days until end-of-day stock would be Critical, then
+    // process that day slot-by-slot for the exact crossing timestamp.
+    const fullDaysNeeded =
+      Math.floor((pills - minNonCriticalPills) / dayAmt) + 1;
 
     if (fullDaysNeeded <= 0) {
-      // Already at/below limit without further deduction — should not happen.
+      // Already Critical without further deduction — should not happen.
       return null;
     }
 
     if (nextExceptionUtc && nextExceptionStr) {
       // Number of full normal days strictly before the exception date.
-      const cursorStr = formatUtcDateString(cursorUtc);
       const daysUntilException = Math.round(
         (nextExceptionUtc.getTime() - cursorUtc.getTime()) / MS_PER_DAY
       );

@@ -1989,7 +1989,7 @@ public final class AutoDeductionScheduler {
                 return ScheduleResult.success(nextKey);
             }
             return scheduleOccurrenceLocked(
-                    nextPrefKey, nextKey, payload, triggerAt, null, /*requiredVersion*/ null);
+                    nextPrefKey, nextKey, payload, triggerAt, /*requiredVersion*/ null);
         }
     }
 

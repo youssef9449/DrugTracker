@@ -1,10 +1,5 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 
-import {
-  DOSE_REMINDER_CHANNEL_ID,
-  DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
-  isAndroidNotificationRuntime,
-} from './notificationRuntime';
 
 interface DoseReminderPlugin {
   schedule(options: {

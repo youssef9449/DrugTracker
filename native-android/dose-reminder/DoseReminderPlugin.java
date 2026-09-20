@@ -112,10 +112,24 @@ public final class DoseReminderPlugin extends Plugin {
     public void isScheduled(PluginCall call) {
         String medicationId = call.getString("medicationId");
         String doseId = call.getString("doseId");
-        boolean ok = new DoseReminderAlarmAdapter(getContext())
-                .isScheduled(medicationId, doseId);
+        DoseReminderAlarmAdapter adapter =
+                new DoseReminderAlarmAdapter(getContext());
+        org.json.JSONObject metadata =
+                adapter.getScheduleMetadata(medicationId, doseId);
+
         JSObject ret = new JSObject();
-        ret.put("scheduled", ok);
+        ret.put("scheduled", metadata != null);
+        if (metadata != null) {
+            ret.put(
+                    "triggerAtEpochMs",
+                    metadata.optLong("triggerAtEpochMs", -1L));
+            ret.put(
+                    "operationVersion",
+                    metadata.optString(
+                            app.drugtracker.alarmruntime.ExactAlarmContract
+                                    .FIELD_OPERATION_VERSION,
+                            ""));
+        }
         call.resolve(ret);
     }
 

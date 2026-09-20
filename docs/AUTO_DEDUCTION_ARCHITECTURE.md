@@ -10,7 +10,8 @@ Current-state technical specification for DrugTracker’s exact-time automatic d
 | JS schedule requests (post-hydration) | `src/hooks/useAutoDeductionScheduler.ts` |
 | Native occurrence contract and feature payload | `native-android/auto-deduction/AutoDeductionContract.java` |
 | Durable native event store | `AutoDeductionEventStore.java` |
-| Exact alarm install / cancel / boot restore | `AutoDeductionScheduler.java` |
+| Auto scheduling adapter over shared exact-alarm runtime | `native-android/auto-deduction/AutoDeductionSchedulingAdapter.java` |
+| Auto business/recovery service | `native-android/auto-deduction/AutoDeductionScheduler.java` |
 | Exact-alarm delivery receiver (background-threaded via `goAsync`, bounded fire-persistence retry) | `AutoDeductionReceiver.java` |
 | Shared boot / timezone / exact-permission receiver | `native-android/alarm-runtime/DrugTrackerAlarmSystemReceiver.java` |
 | Capacitor plugin | `AutoDeductionPlugin.java` |
@@ -98,10 +99,10 @@ Used consistently for:
 ## Native scheduling and fire path
 
 1. After hydration (and when exact-alarm capability allows), JS requests `scheduleOccurrence` with medication, dose, calendar date, time, and **amount**.
-2. Native persists schedule metadata and installs the one-shot alarm inside a serialized, process-wide scheduling critical section (durable metadata write, then AlarmManager install, with ownership-safe / conditional metadata rollback if installation fails). This is not an ACID transaction spanning SharedPreferences and AlarmManager; it is a process-local serialization of those steps.
-3. Shared `ExactAlarmRuntime` constructs the PendingIntent from action + full occurrence URI + receiver; Auto Deduction supplies the feature identity.
+2. `AutoDeductionSchedulingAdapter` translates the Auto occurrence identity, amount, recurrence generation, and delivery extras into an `ExactAlarmRuntime.ScheduleRequest`. The shared runtime performs the serialized durable schedule transaction (metadata write → AlarmManager install → ownership-safe rollback on failure). This is not an ACID transaction spanning SharedPreferences and AlarmManager; it is a process-local serialization of those steps.
+3. `ExactAlarmRuntime`, reached only through `AutoDeductionSchedulingAdapter`, constructs the PendingIntent from action + full occurrence URI + receiver and owns the platform AlarmManager mechanics. Auto Deduction supplies the feature identity/payload through the adapter.
 4. On fire, `AutoDeductionReceiver` performs all durable work on a background thread (`goAsync()` keeps the broadcast alive while synchronous `commit()` disk I/O completes, so the main thread is never blocked). The delivery then calls `insertFiredIfAbsent` — durable **FIRED** row; **no** stock update; may schedule the next one-shot occurrence. If persistence fails **without** a durable pending-fire record, the receiver schedules a bounded **same-identity retry alarm** (same occurrence URI + ownership tokens, `FIRE_RETRY_DELAY_MS` delay, max `MAX_FIRE_RETRIES` attempts) instead of silently consuming the one-shot delivery; retries stay idempotent (`ALREADY_EXISTS`) and stale-protected (ownership tokens).
-5. On boot / quick boot, system restore promotes past schedules (serialized fire + ownership-safe metadata removal) and reinstalls future alarms from schedule preferences. Hydration/resume/local-midnight recovery also invokes the same idempotent native restore before the JS FIRED read, so an unresolved past schedule cannot be destructively canceled before recovery.
+5. On boot / quick boot, shared lifecycle dispatch enters the Auto Deduction business/recovery service; its scheduling adapter is the only Auto boundary that invokes the shared exact-alarm runtime for future schedule installation/cancellation. Past-due recovery, catch-up, FIRED persistence, and recurrence authorization remain Auto-specific. Hydration/resume/local-midnight recovery also invokes the same idempotent native restore before the JS FIRED read, so an unresolved past schedule cannot be destructively canceled before recovery.
 
 Exact fire does **not** require WebView or a running JS bridge.
 

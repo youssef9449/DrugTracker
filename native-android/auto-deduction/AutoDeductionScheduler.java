@@ -1515,13 +1515,10 @@ public final class AutoDeductionScheduler {
                         key,
                         AutoDeductionContract.ACTION_AUTO_DEDUCTION,
                         AutoDeductionReceiver.class,
-                        payload.optString("calendarDate", ""),
-                        payload.optString("timeHhmm", ""),
                         triggerAt,
                         featureMetadata,
                         deliveryExtras,
-                        requiredVersion,
-                        true));
+                        requiredVersion));
         if (!result.ok) return ScheduleResult.fail(result.error);
         return ScheduleResult.success(key);
     }

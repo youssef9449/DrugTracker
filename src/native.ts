@@ -34,7 +34,10 @@ import {
   addNotificationActionPerformedListener,
   addNotificationReceivedListener,
 } from './utils/notificationRuntime';
-import { setAppInForeground } from './utils/notifications';
+import {
+  clearLegacyScheduledAlarmNotifications,
+  setAppInForeground,
+} from './utils/notifications';
 
 let initialized = false;
 
@@ -109,6 +112,11 @@ export async function initNativeBridge(): Promise<void> {
     // Running in a browser or AI Studio preview — no native bridge.
     return;
   }
+
+  // Remove pre-Phase-6 LocalNotifications alarms before the new exact-alarm
+  // runtime can create the same logical occurrences. This is deliberately an
+  // idempotent migration cleanup, not a scheduling dependency.
+  await clearLegacyScheduledAlarmNotifications();
 
   try {
     await StatusBar.setBackgroundColor({ color: '#0f766e' });

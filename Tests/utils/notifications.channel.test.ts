@@ -65,7 +65,7 @@ import {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.platform.mockReturnValue('android');
+  mocks.platform.mockReturnValue('ios');
   mocks.checkPermissions.mockResolvedValue({ display: 'granted' });
   mocks.checkExactNotificationSetting.mockResolvedValue({ exact_alarm: 'granted' });
   mocks.schedule.mockResolvedValue(undefined);

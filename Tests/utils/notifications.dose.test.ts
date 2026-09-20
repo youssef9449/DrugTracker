@@ -195,7 +195,7 @@ describe('isDoseReminderTimeStillAhead — suppression boundary', () => {
 
 describe('Phase 4 — doseId in notification extra', () => {
   it('scheduleDoseReminder embeds doseId in extra for multi-dose slots', async () => {
-    await scheduleDoseReminder('med-x', 'Drug', '14:00', 1, 'قرص', 'd1', { doseId: 'd2' });
+    await scheduleDoseReminder('med-x', 'Drug', '14:00', 1, 'قرص', 'd2');
     expect(mocks.schedule).toHaveBeenCalled();
     const notif = mocks.schedule.mock.calls[0][0].notifications[0];
     expect(notif.extra.medicationId).toBe('med-x');
@@ -204,8 +204,8 @@ describe('Phase 4 — doseId in notification extra', () => {
   });
 
   it('two doses get distinct notification ids', async () => {
-    await scheduleDoseReminder('med-x', 'Drug', '08:00', 2, 'قرص', 'd1', { doseId: 'd1' });
-    await scheduleDoseReminder('med-x', 'Drug', '14:00', 1, 'قرص', 'd1', { doseId: 'd2' });
+    await scheduleDoseReminder('med-x', 'Drug', '08:00', 2, 'قرص', 'd1');
+    await scheduleDoseReminder('med-x', 'Drug', '14:00', 1, 'قرص', 'd2');
     const id1 = mocks.schedule.mock.calls[0][0].notifications[0].id;
     const id2 = mocks.schedule.mock.calls[1][0].notifications[0].id;
     expect(id1).not.toBe(id2);

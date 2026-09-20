@@ -244,10 +244,8 @@ export { getExactAlarmPermission, openExactAlarmSettings } from './exactAlarm';
  * Send a "low stock" notification when a medication is about to
  * run out. The notification fires immediately on the device.
  *
- * On Capacitor native: uses LocalNotifications.schedule() with a
- * 1-second offset so it appears as a real Android system
- * notification (icon + drawer entry + sound), even if the app
- * is in the background.
+ * On Android: posts through the repository Notification Runtime.
+ * On iOS: keeps the existing LocalNotifications fallback.
  *
  * On web: uses new Notification(title, body) directly.
  *

@@ -30,7 +30,7 @@ export const EmptyState: FC<EmptyStateProps> = ({
         </p>
         <button
           onClick={onClearSearch}
-          className="mt-4 px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold rounded-xl transition shadow-xs"
+          className="mt-4 h-10 px-5 bg-teal-700 hover:bg-teal-800 text-white text-xs font-semibold rounded-full transition shadow-2xs cursor-pointer"
         >
           مسح البحث وعرض الأدوية
         </button>
@@ -54,7 +54,7 @@ export const EmptyState: FC<EmptyStateProps> = ({
         {onFilterChange && (
           <button
             onClick={() => onFilterChange('all')}
-            className="mt-4 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-xs"
+            className="mt-4 h-10 px-5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold rounded-full flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
           >
             <span>عرض جميع الأدوية</span>
             <ArrowRight className="w-3.5 h-3.5 rotate-180" />
@@ -80,7 +80,7 @@ export const EmptyState: FC<EmptyStateProps> = ({
         {onFilterChange && (
           <button
             onClick={() => onFilterChange('alerts')}
-            className="mt-4 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-xs"
+            className="mt-4 h-10 px-5 bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold rounded-full flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
           >
             <span>مراجعة الأدوية التي قاربت على النفاذ</span>
             <ArrowRight className="w-3.5 h-3.5 rotate-180" />
@@ -102,7 +102,7 @@ export const EmptyState: FC<EmptyStateProps> = ({
       </p>
       <button
         onClick={onOpenAddModal}
-        className="mt-4 px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-xs"
+        className="mt-4 h-10 px-5 bg-teal-700 hover:bg-teal-800 text-white text-xs font-semibold rounded-full flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
       >
         <Plus className="w-4 h-4" />
         <span>أضف أول دواء الآن</span>

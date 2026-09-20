@@ -40,11 +40,11 @@ export const Checkbox: FC<CheckboxProps> = ({
       onChange={onChange}
       aria-label={ariaLabel}
       disabled={disabled}
-      className="peer appearance-none w-4 h-4 rounded border border-slate-300 bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-50 disabled:cursor-not-allowed"
+      className="peer appearance-none w-[18px] h-[18px] rounded-[4px] border-2 border-slate-400 bg-white cursor-pointer peer-checked:bg-teal-700 peer-checked:border-teal-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/40 transition-colors disabled:opacity-38 disabled:cursor-not-allowed"
     />
-    {/* Teal checkmark — shown only when checked. Background stays white. */}
+    {/* White checkmark — shown only when checked (M3 standard) */}
     <svg
-      className="pointer-events-none absolute w-3 h-3 text-teal-600 opacity-0 peer-checked:opacity-100 transition-opacity"
+      className="pointer-events-none absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 transition-opacity"
       viewBox="0 0 12 12"
       fill="none"
       aria-hidden="true"

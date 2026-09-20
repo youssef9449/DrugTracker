@@ -39,23 +39,55 @@ export const PharmacyManagementView: FC<PharmacyManagementViewProps> = ({ pharma
     <div className="p-4 space-y-4" dir="rtl">
       <div className="flex items-center justify-between gap-3">
         <div><h2 className="text-lg font-bold text-slate-900">إدارة الصيدليات</h2><p className="text-xs text-slate-500 mt-1">احفظ بيانات كل صيدلية لاستخدامها في الطلبات.</p></div>
-        <button type="button" onClick={() => openForm()} className="px-3 py-2 rounded-xl bg-teal-700 text-white text-xs font-bold flex items-center gap-1.5"><Plus className="w-4 h-4" /> إضافة</button>
+        <button
+          type="button"
+          onClick={() => openForm()}
+          className="h-10 px-4 rounded-full bg-teal-700 hover:bg-teal-800 text-white text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition cursor-pointer"
+        >
+          <Plus className="w-4 h-4" />
+          <span>إضافة</span>
+        </button>
       </div>
       {pharmacies.length === 0 ? (
-        <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-8 text-center text-sm text-slate-500"><Store className="w-8 h-8 mx-auto mb-2 text-slate-300" />لم تتم إضافة صيدليات بعد.</div>
+        <div className="bg-white border border-dashed border-slate-300 rounded-3xl p-8 text-center text-sm text-slate-500">
+          <Store className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+          لم تتم إضافة صيدليات بعد.
+        </div>
       ) : (
-        <div className="space-y-3">{pharmacies.map((pharmacy) => (
-          <div key={pharmacy.id} className="bg-white rounded-2xl border border-slate-200 p-4 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <h3 className="font-bold text-slate-900 truncate">{pharmacy.name}</h3>
-              <p className="text-xs text-slate-500 mt-1" dir="ltr">+{pharmacy.phone}</p>
-              {pharmacy.customerCode && (
-                <p className="text-xs text-slate-500 mt-1">كود العميل: {pharmacy.customerCode}</p>
-              )}
+        <div className="space-y-3">
+          {pharmacies.map((pharmacy) => (
+            <div
+              key={pharmacy.id}
+              className="bg-white rounded-2xl border border-slate-200 p-4 flex items-center justify-between gap-3 shadow-2xs"
+            >
+              <div className="min-w-0">
+                <h3 className="font-bold text-slate-900 truncate">{pharmacy.name}</h3>
+                <p className="text-xs text-slate-500 mt-1" dir="ltr">+{pharmacy.phone}</p>
+                {pharmacy.customerCode && (
+                  <p className="text-xs text-slate-500 mt-1">كود العميل: {pharmacy.customerCode}</p>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => openForm(pharmacy)}
+                  aria-label={`تعديل ${pharmacy.name}`}
+                  className="w-9 h-9 rounded-full bg-slate-100 text-slate-700 hover:bg-slate-200 transition flex items-center justify-center cursor-pointer"
+                >
+                  <Pencil className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDelete(pharmacy.id)}
+                  aria-label={`حذف ${pharmacy.name}`}
+                  className="w-9 h-9 rounded-full bg-rose-50 text-rose-700 hover:bg-rose-100 transition flex items-center justify-center cursor-pointer"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-1 shrink-0"><button type="button" onClick={() => openForm(pharmacy)} aria-label={`تعديل ${pharmacy.name}`} className="p-2 rounded-xl bg-slate-100 text-slate-700"><Pencil className="w-4 h-4" /></button><button type="button" onClick={() => onDelete(pharmacy.id)} aria-label={`حذف ${pharmacy.name}`} className="p-2 rounded-xl bg-rose-50 text-rose-700"><Trash2 className="w-4 h-4" /></button></div>
-          </div>
-        ))}</div>
+          ))}
+        </div>
       )}
       {isFormOpen && (
         <Modal
@@ -64,11 +96,52 @@ export const PharmacyManagementView: FC<PharmacyManagementViewProps> = ({ pharma
           label={editing ? 'تعديل الصيدلية' : 'إضافة صيدلية'}
         >
           <form onSubmit={handleSubmit} className="bg-white rounded-3xl w-full max-w-md p-5 space-y-4" dir="rtl">
-            <div className="flex items-center justify-between"><h3 className="font-bold text-slate-900">{editing ? 'تعديل الصيدلية' : 'إضافة صيدلية'}</h3><button type="button" onClick={() => setIsFormOpen(false)} aria-label="إغلاق"><X className="w-5 h-5 text-slate-500" /></button></div>
-            <label className="block text-xs font-bold text-slate-700">اسم الصيدلية<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-300" /></label>
-            <label className="block text-xs font-bold text-slate-700">رقم واتساب الصيدلية<input required type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-300 font-mono" dir="ltr" /></label>
-            <label className="block text-xs font-bold text-slate-700">كود العميل<input value={form.customerCode} onChange={(e) => setForm({ ...form, customerCode: e.target.value })} className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-300 font-mono" dir="ltr" /></label>
-            <button type="submit" className="w-full py-3 rounded-xl bg-teal-700 text-white font-bold flex items-center justify-center gap-2"><Check className="w-4 h-4" /> حفظ</button>
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-slate-900">{editing ? 'تعديل الصيدلية' : 'إضافة صيدلية'}</h3>
+              <button
+                type="button"
+                onClick={() => setIsFormOpen(false)}
+                aria-label="إغلاق"
+                className="w-9 h-9 rounded-full hover:bg-slate-100 text-slate-500 flex items-center justify-center transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <label className="block text-xs font-bold text-slate-700">
+              اسم الصيدلية
+              <input
+                required
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-700"
+              />
+            </label>
+            <label className="block text-xs font-bold text-slate-700">
+              رقم واتساب الصيدلية
+              <input
+                required
+                type="tel"
+                value={form.phone}
+                onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-300 font-mono focus:outline-none focus:ring-2 focus:ring-teal-700"
+                dir="ltr"
+              />
+            </label>
+            <label className="block text-xs font-bold text-slate-700">
+              كود العميل
+              <input
+                value={form.customerCode}
+                onChange={(e) => setForm({ ...form, customerCode: e.target.value })}
+                className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-300 font-mono focus:outline-none focus:ring-2 focus:ring-teal-700"
+                dir="ltr"
+              />
+            </label>
+            <button
+              type="submit"
+              className="w-full h-11 rounded-full bg-teal-700 hover:bg-teal-800 text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-2xs transition cursor-pointer"
+            >
+              <Check className="w-4 h-4" /> حفظ
+            </button>
           </form>
         </Modal>
       )}

@@ -62,7 +62,7 @@ export function MedicationMenu({
     : 'الخصم التلقائي متوقف — اضغط للتفعيل';
   const autoToggleClass = isAutoActive
     ? 'bg-teal-100 text-teal-800 hover:bg-teal-200'
-    : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-600';
+    : 'bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-300/50';
 
   useEffect(() => {
     if (!deleteConfirmOpen) return;
@@ -86,12 +86,12 @@ export function MedicationMenu({
     size === 'xs'
       ? 'h-5 w-5 rounded-full'
       : size === 'md'
-      ? 'h-8 w-8 rounded-xl'
+      ? 'h-8 w-8 rounded-full'
       : 'h-6 w-6 rounded-full';
 
   const iconDims = size === 'xs' ? 'h-3 w-3' : 'h-3.5 w-3.5';
 
-  const iconButtonClass = `inline-flex ${btnDims} shrink-0 items-center justify-center transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/40`;
+  const iconButtonClass = `inline-flex ${btnDims} shrink-0 items-center justify-center transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/40 cursor-pointer`;
 
   const deleteDialog = deleteConfirmOpen && typeof document !== 'undefined'
     ? createPortal(
@@ -131,7 +131,7 @@ export function MedicationMenu({
               <button
                 type="button"
                 onClick={() => setDeleteConfirmOpen(false)}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500"
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 cursor-pointer"
                 aria-label="إغلاق"
                 title="إلغاء"
               >
@@ -143,14 +143,14 @@ export function MedicationMenu({
               <button
                 type="button"
                 onClick={() => setDeleteConfirmOpen(false)}
-                className="min-h-10 flex-1 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500"
+                className="h-10 flex-1 rounded-full border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 cursor-pointer"
               >
                 إلغاء
               </button>
               <button
                 type="button"
                 onClick={confirmDelete}
-                className="min-h-10 flex-1 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+                className="h-10 flex-1 rounded-full bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700 shadow-2xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 cursor-pointer"
               >
                 حذف الدواء
               </button>
@@ -194,7 +194,7 @@ export function MedicationMenu({
         data-auto-effective={isAutoActive ? 'on' : 'off'}
       >
         <Zap
-          className={`${iconDims} ${isAutoActive ? 'fill-teal-600/30' : ''}`}
+          className={`${iconDims} ${isAutoActive ? 'fill-teal-600/30' : 'text-amber-600 fill-amber-400/20'}`}
           aria-hidden="true"
         />
       </button>

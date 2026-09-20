@@ -141,8 +141,13 @@ export function useAppHydration(setters: AppHydrationSetters): void {
     // Font size — persisted as 'normal'/'large' string.
     if (loadString(FONT_SIZE_KEY, 'normal') === 'large') setFontScale('large');
 
-    // Critical-stock alerts — default true (persisted as 'true'/'false').
-    setCriticalStockAlertsEnabled(loadString(CRITICAL_STOCK_ALERTS_KEY, 'true') !== 'false');
+    // Critical-stock alerts — if explicitly set, respect user choice; otherwise default false on first run.
+    const savedCritical = loadString(CRITICAL_STOCK_ALERTS_KEY, '');
+    if (savedCritical === 'true' || savedCritical === 'false') {
+      setCriticalStockAlertsEnabled(savedCritical === 'true');
+    } else {
+      setCriticalStockAlertsEnabled(false);
+    }
 
     // Global auto-deduct — default true.
     setGlobalAutoDeductEnabled(loadString(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'true') !== 'false');

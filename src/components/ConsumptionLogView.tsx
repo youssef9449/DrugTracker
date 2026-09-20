@@ -1,8 +1,13 @@
-import { type FC } from 'react';
-import { Clock, ShieldCheck, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { useState, type FC } from 'react';
+import { Clock, ArrowUpRight, ArrowDownLeft, ChevronRight, ChevronLeft } from 'lucide-react';
 import { Medication, ConsumptionLog } from '../types';
-import { formatArabicDate, formatLogTime } from '../utils/dateCalculations';
-import { MAX_LOG_ROWS, DAYS_PER_MONTH } from '../utils/time';
+import { SegmentedButton } from './ui/SegmentedButton';
+import { formatArabicDate, formatLogTime, dailyScheduleAmount } from '../utils/dateCalculations';
+import { DAYS_PER_MONTH } from '../utils/time';
+import { getMedSizes } from '../utils/medicationPackaging';
+import { pluralizeArabic } from '../lib/arabicPlural';
+
+const LOGS_PER_PAGE = 15;
 
 interface ConsumptionLogViewProps {
   medications: Medication[];
@@ -11,21 +16,96 @@ interface ConsumptionLogViewProps {
 }
 
 /**
- * Count daily dose *slots* for a medication under the current model.
- * Explicit doseSchedule only: length of the schedule when Auto is on.
- * Missing/empty doseSchedule → 0 (no dailyDose synthetic slot).
- * Medications with autoDeductEnabled === false contribute zero slots.
+ * Formats a medication's scheduled requirement (daily or monthly) into
+ * natural packaging and unit counts, e.g.:
+ * "علبتين (30 قرص)" or "علبة (10 أكياس)" or "قرص واحد".
  */
-function dailyScheduledSlots(med: Medication): number {
-  if (med.autoDeductEnabled === false) return 0;
-  if (med.doseSchedule && med.doseSchedule.length > 0) {
-    return med.doseSchedule.length;
+function formatMedicationScheduleBreakdown(med: Medication, isDaily: boolean): string {
+  const dailyAmt = dailyScheduleAmount(med);
+  const amount = isDaily ? dailyAmt : dailyAmt * DAYS_PER_MONTH;
+  if (amount <= 0) {
+    return '0 ' + med.unit;
   }
-  return 0;
+
+  const sz = getMedSizes(med);
+  const boxLabel = med.unit === 'مل' ? 'عبوة' : 'علبة';
+  const boxSize = sz.boxSize > 0 ? sz.boxSize : (med.unit === 'مل' ? 100 : 30);
+
+  // Natural Arabic unit count (e.g., "30 قرص", "10 أكياس", "قرص واحد", "قرصين")
+  const getUnitDisplay = (count: number, unit: string) => {
+    if (count === 1) {
+      if (unit === 'قرص') return 'قرص واحد';
+      if (unit === 'كبسولة') return 'كبسولة واحدة';
+      if (unit === 'كيس') return 'كيس واحد';
+      return `1 ${unit}`;
+    }
+    if (count === 2) {
+      if (unit === 'قرص') return 'قرصين';
+      if (unit === 'كبسولة') return 'كبسولتين';
+      if (unit === 'كيس') return 'كيسين';
+      return `2 ${unit}`;
+    }
+    if (count <= 10) {
+      return pluralizeArabic(count, unit);
+    }
+    return `${count} ${unit}`;
+  };
+
+  const formattedUnit = getUnitDisplay(amount, med.unit);
+
+  // If amount forms one or more boxes:
+  if (amount >= boxSize) {
+    const boxes = Math.floor(amount / boxSize);
+    const remainder = amount % boxSize;
+
+    let boxPart = '';
+    if (boxes === 1) {
+      boxPart = boxLabel;
+    } else if (boxes === 2) {
+      boxPart = boxLabel === 'علبة' ? 'علبتين' : 'عبوتين';
+    } else if (boxes <= 10) {
+      boxPart = `${boxes} ${boxLabel === 'علبة' ? 'علب' : 'عبوات'}`;
+    } else {
+      boxPart = `${boxes} ${boxLabel}`;
+    }
+
+    if (remainder === 0) {
+      return `${boxPart} (${formattedUnit})`;
+    }
+
+    // Remainder exists: check if strips apply
+    if (sz.hasStrips && sz.stripSize > 0) {
+      const strips = Math.floor(remainder / sz.stripSize);
+      const loose = remainder % sz.stripSize;
+      const parts: string[] = [boxPart];
+      if (strips === 1) parts.push('شريط');
+      else if (strips === 2) parts.push('شريطين');
+      else if (strips > 2) parts.push(`${strips} أشرطة`);
+      if (loose > 0) parts.push(getUnitDisplay(loose, med.unit));
+
+      return `${parts.join(' و ')} (${formattedUnit})`;
+    }
+
+    return `${boxPart} و ${getUnitDisplay(remainder, med.unit)} (${formattedUnit})`;
+  }
+
+  // If amount < boxSize, but can be expressed in strips:
+  if (sz.hasStrips && sz.stripSize > 0 && amount >= sz.stripSize) {
+    const strips = Math.floor(amount / sz.stripSize);
+    const loose = amount % sz.stripSize;
+    let stripPart = strips === 1 ? 'شريط' : strips === 2 ? 'شريطين' : `${strips} أشرطة`;
+    if (loose > 0) {
+      stripPart += ` و ${getUnitDisplay(loose, med.unit)}`;
+    }
+    return `${stripPart} (${formattedUnit})`;
+  }
+
+  // Under a box / strip:
+  return formattedUnit;
 }
 
 /**
- * Consumption activity timeline (logs + scheduled-dose summary).
+ * Consumption activity timeline (logs + scheduled-dose breakdown with pagination).
  * Dose restore controls were intentionally removed from this view;
  * restore remains available via MedicationCard + SelectDoseModal.
  * The showToast prop is retained for App wiring compatibility.
@@ -34,13 +114,24 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
   medications,
   logs,
 }) => {
-  // Sum of daily dose slots across auto-deduct medications, then × DAYS_PER_MONTH.
-  // Explicit doseSchedule length only; no-schedule meds contribute 0.
-  const totalDailyScheduled = medications.reduce(
-    (acc, m) => acc + dailyScheduledSlots(m),
-    0
-  );
-  const totalMonthlyDoses = totalDailyScheduled * DAYS_PER_MONTH;
+  const [scheduleMode, setScheduleMode] = useState<'monthly' | 'daily'>('monthly');
+  const [currentPage, setCurrentPage] = useState<number>(1);
+
+  const isDaily = scheduleMode === 'daily';
+
+  // Pagination calculations
+  const totalLogs = logs.length;
+  const totalPages = Math.max(1, Math.ceil(totalLogs / LOGS_PER_PAGE));
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+
+  const startIndex = (safeCurrentPage - 1) * LOGS_PER_PAGE;
+  const currentLogs = logs.slice(startIndex, startIndex + LOGS_PER_PAGE);
+
+  const handlePageChange = (newPage: number) => {
+    if (newPage >= 1 && newPage <= totalPages) {
+      setCurrentPage(newPage);
+    }
+  };
 
   return (
     <div className="p-4 space-y-4">
@@ -60,97 +151,158 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
           </div>
         </div>
 
-        {/* Info Pill */}
-        <div className="mt-3 p-3 bg-teal-50/70 border border-teal-100 rounded-xl text-xs text-teal-900 leading-relaxed flex items-start gap-2">
-          <ShieldCheck className="w-4 h-4 text-teal-700 shrink-0 mt-0.5" />
-          <div>
-            <strong>كيف يعمل النظام؟</strong> يتم احتساب الجرعات المستحقة حسب مواعيد الجرعات المجدولة، وتظهر عمليات الخصم والتعبئة والتغييرات هنا تلقائياً.
-          </div>
-        </div>
-
-        {/* Scheduled-dose summary stats */}
-        <div className="mt-3 grid grid-cols-2 gap-2 text-center text-xs">
-          <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-            <span className="text-[11px] text-slate-500 block">الجرعات المجدولة شهرياً</span>
-            <span className="text-lg font-extrabold font-mono text-teal-800">
-              {totalMonthlyDoses}
+        {/* Scheduled-dose breakdown card — full-width with Daily / Monthly toggle */}
+        <div className="mt-4 p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-xs font-bold text-slate-700 block">
+              تفاصيل الجرعات المجدولة ({isDaily ? 'الجرعة اليومية' : 'الجرعة الشهرية'})
             </span>
-            <span className="text-[11px] text-slate-600 mr-1">جرعة / شهر</span>
+
+            {/* Toggle: Monthly vs Daily (M3 Segmented Button) */}
+            <SegmentedButton<'monthly' | 'daily'>
+              id="schedule-mode-toggle"
+              size="sm"
+              value={scheduleMode}
+              onChange={setScheduleMode}
+              options={[
+                { value: 'monthly', label: 'الجرعة الشهرية' },
+                { value: 'daily', label: 'الجرعة اليومية' },
+              ]}
+              aria-label="نوع تفاصيل الجرعات المجدولة"
+            />
           </div>
 
-          <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-            <span className="text-[11px] text-slate-500 block">الجرعات المجدولة يومياً</span>
-            <span className="text-lg font-extrabold font-mono text-teal-800 block mt-0.5">
-              {totalDailyScheduled}
-            </span>
-            <span className="text-[11px] text-slate-600">جرعة / يوم</span>
+          {/* Breakdown per medication */}
+          <div className="pt-2 border-t border-slate-200/70 space-y-1.5">
+            {medications.length === 0 ? (
+              <p className="text-xs text-slate-400 py-1">لا توجد أدوية مضافة حالياً.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {medications.map((med) => {
+                  const breakdown = formatMedicationScheduleBreakdown(med, isDaily);
+                  return (
+                    <div
+                      key={med.id}
+                      className="p-2.5 px-3 rounded-xl bg-white border border-slate-200/60 flex items-center justify-between text-xs gap-3 shadow-2xs"
+                    >
+                      <span className="font-bold text-slate-900 truncate">
+                        {med.name}:
+                      </span>
+                      <span className="font-semibold text-teal-800 text-left shrink-0">
+                        {breakdown}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Activity Timeline list */}
       <div className="space-y-2">
-        <h3 className="text-xs font-bold text-slate-700 px-1">
-          سجل العمليات:
-        </h3>
+        <div className="flex items-center justify-between px-1">
+          <h3 className="text-xs font-bold text-slate-700">
+            سجل العمليات ({totalLogs}):
+          </h3>
+          {totalPages > 1 && (
+            <span className="text-[11px] text-slate-500 font-medium">
+              صفحة {safeCurrentPage} من {totalPages}
+            </span>
+          )}
+        </div>
 
-        {logs.length === 0 ? (
+        {totalLogs === 0 ? (
           <div className="p-6 bg-white rounded-2xl text-center text-xs text-slate-400 border border-slate-200/80">
             لا توجد سجلات بعد، ستظهر هنا عمليات الخصم والتعبئة والتغييرات على المخزون.
           </div>
         ) : (
-          <div className="space-y-2">
-            {logs.slice(0, MAX_LOG_ROWS).map((log) => {
-              const isDeduction = log.amount < 0;
-              const logTime = formatLogTime(log.timestamp);
-              return (
-                <div
-                  key={log.id}
-                  className="bg-white rounded-xl border border-slate-200/80 p-3 flex items-center justify-between text-xs shadow-2xs"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div
-                      className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                        isDeduction
-                          ? 'bg-rose-50 text-rose-600'
-                          : 'bg-emerald-50 text-emerald-600'
-                      }`}
-                    >
-                      {isDeduction ? (
-                        <ArrowDownLeft className="w-4 h-4" />
-                      ) : (
-                        <ArrowUpRight className="w-4 h-4" />
-                      )}
+          <>
+            <div className="space-y-2">
+              {currentLogs.map((log) => {
+                const isDeduction = log.amount < 0;
+                const logTime = formatLogTime(log.timestamp);
+                return (
+                  <div
+                    key={log.id}
+                    className="bg-white rounded-xl border border-slate-200/80 p-3 flex items-center justify-between text-xs shadow-2xs"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div
+                        className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                          isDeduction
+                            ? 'bg-rose-50 text-rose-600'
+                            : 'bg-emerald-50 text-emerald-600'
+                        }`}
+                      >
+                        {isDeduction ? (
+                          <ArrowDownLeft className="w-4 h-4" />
+                        ) : (
+                          <ArrowUpRight className="w-4 h-4" />
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <h4 className="font-bold text-slate-800 text-xs truncate">
+                          {log.medicationName}
+                        </h4>
+                        <p className="text-[11px] text-slate-500">{log.description}</p>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <h4 className="font-bold text-slate-800 text-xs truncate">
-                        {log.medicationName}
-                      </h4>
-                      <p className="text-[11px] text-slate-500">{log.description}</p>
+
+                    <div className="text-left shrink-0">
+                      <span
+                        className={`font-mono font-bold text-xs ${
+                          isDeduction ? 'text-rose-600' : 'text-emerald-600'
+                        }`}
+                      >
+                        {log.amount > 0 ? `+${log.amount}` : log.amount}
+                      </span>
+                      <span className="text-[10px] text-slate-400 block mt-0.5">
+                        {formatArabicDate(log.date, false)}
+                      </span>
+                      {logTime ? (
+                        <span className="text-[10px] text-slate-500 font-medium block mt-0.5" dir="rtl">
+                          {logTime}
+                        </span>
+                      ) : null}
                     </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="bg-white rounded-2xl border border-slate-200/80 p-3 shadow-xs mt-3">
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handlePageChange(safeCurrentPage - 1)}
+                    disabled={safeCurrentPage <= 1}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                    <span>الأحدث</span>
+                  </button>
+
+                  <div className="text-xs font-bold text-slate-800 bg-slate-100 px-3 py-1.5 rounded-xl">
+                    صفحة {safeCurrentPage} من {totalPages}
                   </div>
 
-                  <div className="text-left shrink-0">
-                    <span
-                      className={`font-mono font-bold text-xs ${
-                        isDeduction ? 'text-rose-600' : 'text-emerald-600'
-                      }`}
-                    >
-                      {log.amount > 0 ? `+${log.amount}` : log.amount}
-                    </span>
-                    <span className="text-[10px] text-slate-400 block mt-0.5">
-                      {formatArabicDate(log.date, false)}
-                    </span>
-                    {logTime ? (
-                      <span className="text-[10px] text-slate-500 font-medium block mt-0.5" dir="rtl">
-                        {logTime}
-                      </span>
-                    ) : null}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handlePageChange(safeCurrentPage + 1)}
+                    disabled={safeCurrentPage >= totalPages}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  >
+                    <span>الأقدم</span>
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
                 </div>
-              );
-            })}
-          </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

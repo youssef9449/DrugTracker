@@ -162,7 +162,8 @@ export interface CriticalNotificationClaim {
  * across app restarts / re-renders / days does NOT produce duplicates.
  */
 export function getCriticalThresholdDays(med: Medication): number {
-  return Math.max(1, med.warningThresholdDays || 5);
+  const val = Number(med.warningThresholdDays);
+  return !Number.isNaN(val) && val >= 1 ? Math.floor(val) : 5;
 }
 
 /**
@@ -426,14 +427,20 @@ export function calculateMedicationStatus(med: Medication): MedicationStatusInfo
 
   if (daysLeft <= thresholdDays) {
     const daysWord =
-      daysLeft === 1 ? 'يوم واحد' : daysLeft === 2 ? 'يومين' : `${daysLeft} أيام`;
+      daysLeft === 1
+        ? 'يوم واحد'
+        : daysLeft === 2
+        ? 'يومين'
+        : daysLeft <= 10
+        ? `${daysLeft} أيام`
+        : `${daysLeft} يوماً`;
     return {
       daysLeft,
       status: 'critical',
       statusLabel: `حرج (${daysWord})`,
       statusColorClass: 'text-rose-600',
       badgeBg: 'bg-rose-50 text-rose-700 border-rose-200',
-      badgeText: `🚨 باقي ${daysLeft === 1 ? 'يوم فقط' : `${daysLeft} أيام`}`,
+      badgeText: `🚨 باقي ${daysLeft === 1 ? 'يوم فقط' : daysWord}`,
     };
   }
 

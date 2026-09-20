@@ -440,15 +440,19 @@ export async function sendCriticalStockAlert(
   // Title reflects the actual situation: out of stock, or critical
   // with N days left (the critical threshold IS the user-configured
   // warningThresholdDays — see getCriticalThresholdDays).
+  const daysWord =
+    daysLeft === 1
+      ? 'يوم واحد'
+      : daysLeft === 2
+      ? 'يومين'
+      : daysLeft <= 10
+      ? `${daysLeft} أيام`
+      : `${daysLeft} يوماً`;
+
   const title =
     currentPills <= 0
       ? `🚨 ${medicineName}: نفد المخزون!`
-      : daysLeft <= 1
-      ? `🚨 ${medicineName}: حرج — باقي يوم واحد!`
-      : `🚨 ${medicineName}: حرج — باقي ${daysLeft} أيام!`;
-
-  const daysWord =
-    daysLeft === 1 ? 'يوم واحد' : daysLeft === 2 ? 'يومين' : `${daysLeft} أيام`;
+      : `🚨 ${medicineName}: حرج — باقي ${daysWord}!`;
 
   const body =
     currentPills <= 0

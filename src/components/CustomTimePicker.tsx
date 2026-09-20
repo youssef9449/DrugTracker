@@ -65,7 +65,7 @@ export const CustomTimePicker: FC<CustomTimePickerProps> = ({
   };
 
   const selectClass =
-    'flex-1 px-2 py-2 rounded-xl border border-slate-300 bg-white text-sm font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 appearance-none cursor-pointer';
+    'flex-1 h-10 px-3 rounded-xl border border-slate-300 bg-white text-sm font-mono font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-700 appearance-none cursor-pointer text-center';
 
   return (
     <div className="flex items-stretch gap-2">
@@ -115,7 +115,7 @@ export const CustomTimePicker: FC<CustomTimePickerProps> = ({
           onChange={(e) =>
             update(parsed.hour12, parsed.minute, e.target.value === 'PM')
           }
-          className="w-full px-2 py-2 rounded-xl border border-slate-300 bg-slate-50 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 appearance-none cursor-pointer text-center"
+          className="w-full h-10 px-2 rounded-xl border border-slate-300 bg-slate-50 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-700 appearance-none cursor-pointer text-center"
         >
           <option value="AM">ص</option>
           <option value="PM">م</option>

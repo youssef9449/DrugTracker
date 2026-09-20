@@ -50,6 +50,56 @@ export const AutoDeductPausedNote: FC = () => (
   </div>
 );
 
+interface AutoDeductStatusBadgeProps {
+  isAutoActive: boolean;
+  onToggle?: () => void;
+  size?: 'xs' | 'sm';
+  medicationId?: string;
+  className?: string;
+}
+
+/**
+ * Status card / badge indicating the medication's Auto-Deduction state.
+ * Rendered alongside the category badge in "All Medications" view.
+ */
+export const AutoDeductStatusBadge: FC<AutoDeductStatusBadgeProps> = ({
+  isAutoActive,
+  onToggle,
+  size = 'sm',
+  medicationId,
+  className = '',
+}) => {
+  const isXs = size === 'xs';
+  const label = isAutoActive ? 'خصم تلقائي: مفعّل' : 'خصم تلقائي: متوقف';
+  const title = isAutoActive
+    ? 'الخصم التلقائي مفعّل (انقر للتعطيل)'
+    : 'الخصم التلقائي متوقف (انقر للتفعيل)';
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle?.();
+      }}
+      data-testid={medicationId ? `auto-deduct-badge-${medicationId}` : 'auto-deduct-badge'}
+      title={title}
+      aria-label={label}
+      className={`font-medium rounded-full inline-flex items-center shrink-0 transition-all cursor-pointer active:scale-95 border select-none ${
+        isXs
+          ? 'text-[8px] px-1.5 py-0.5'
+          : 'text-[9px] px-2 py-0.5'
+      } ${
+        isAutoActive
+          ? 'bg-teal-50 text-teal-800 border-teal-200/90 hover:bg-teal-100 hover:border-teal-300'
+          : 'bg-amber-50 text-amber-800 border-amber-200/90 hover:bg-amber-100 hover:border-amber-300'
+      } ${className}`}
+    >
+      <span className="whitespace-nowrap">{label}</span>
+    </button>
+  );
+};
+
 export interface UndoRefillBannerProps {
   lastRefillQuantity: number;
   unit: string;

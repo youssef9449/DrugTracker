@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { Medication } from '../types';
 import { calculateMedicationStatus } from '../types';
-import { getTodayDateString, getCriticalAlarmDate } from '../utils/dateCalculations';
+import { getTodayDateString, getCriticalAlarmDate, dailyScheduleAmount } from '../utils/dateCalculations';
 import {
   scheduleCriticalAlarm,
   cancelCriticalAlarm,
@@ -178,6 +178,7 @@ export function useCriticalAlarmScheduler({
             m.id,
             m.currentPills,
             m.dailyDose,
+            dailyScheduleAmount(m),
             m.warningThresholdDays,
             m.autoDeductEnabled === false ? 0 : 1,
             m.name,

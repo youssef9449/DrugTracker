@@ -1,6 +1,6 @@
 import { useState, useEffect, type FC, type FormEvent } from 'react';
 import { X, PlusCircle, Check, Layers, Box, Pill } from 'lucide-react';
-import { Medication, describeStockInStrips } from '../types';
+import { Medication, describeStockInStrips, isSolidUnit } from '../types';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { getMedSizes } from '../utils/medicationPackaging';
 import { Modal } from './ui/Modal';
@@ -24,16 +24,23 @@ export const RefillModal: FC<RefillModalProps> = ({
   const [addedCount, setAddedCount] = useState<number>(30);
   // Per-unit quantity — what the user types in the selected unit.
   const [unitQty, setUnitQty] = useState<number>(1);
-  const [refillUnit, setRefillUnit] = useState<RefillUnit>('pills');
+  const [refillUnit, setRefillUnit] = useState<RefillUnit>('boxes');
 
   // Sync defaults when modal opens.
   useEffect(() => {
     if (medication && isOpen) {
       const sz = getMedSizes(medication);
-      // Default to 1 box.
-      setAddedCount(sz.boxSize);
+      const units = getAvailableUnits(sz, medication.unit);
+      const defaultUnit: RefillUnit = units.includes('boxes') ? 'boxes' : units[0] || 'boxes';
+      setRefillUnit(defaultUnit);
       setUnitQty(1);
-      setRefillUnit('boxes');
+      if (defaultUnit === 'boxes') {
+        setAddedCount(sz.boxSize);
+      } else if (defaultUnit === 'strips') {
+        setAddedCount(sz.stripSize);
+      } else {
+        setAddedCount(1);
+      }
     }
   }, [medication, isOpen]);
 
@@ -120,7 +127,8 @@ export const RefillModal: FC<RefillModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded-full text-teal-200 hover:text-white hover:bg-teal-700 transition"
+            className="w-9 h-9 rounded-full text-teal-200 hover:text-white hover:bg-teal-700/80 transition flex items-center justify-center cursor-pointer"
+            aria-label="إغلاق"
           >
             <X className="w-5 h-5" />
           </button>
@@ -151,11 +159,11 @@ export const RefillModal: FC<RefillModalProps> = ({
             )}
           </div>
 
-          {/* Unit selector chips */}
+          {/* Unit selector chips - M3 Filter Chips */}
           <div className="flex items-center gap-1.5 flex-wrap">
             {availableUnits.map((u) => {
               const isActive = refillUnit === u;
-              const icon = u === 'pills' ? <Pill className="w-3 h-3" /> : u === 'boxes' ? <Box className="w-3 h-3" /> : <Layers className="w-3 h-3" />;
+              const icon = u === 'pills' ? <Pill className="w-3.5 h-3.5" /> : u === 'boxes' ? <Box className="w-3.5 h-3.5" /> : <Layers className="w-3.5 h-3.5" />;
               const label = u === 'pills' ? medication.unit : u === 'boxes' ? boxLabel : 'شريط';
               return (
                 <button
@@ -163,10 +171,10 @@ export const RefillModal: FC<RefillModalProps> = ({
                   type="button"
                   onClick={() => handleUnitChange(u)}
                   disabled={availableUnits.length === 1}
-                  className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition ${
+                  className={`h-8 px-3 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer border ${
                     isActive
-                      ? 'bg-teal-700 text-white shadow-xs'
-                      : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'
+                      ? 'bg-teal-100 text-teal-950 border-teal-300 font-bold shadow-2xs'
+                      : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
                   }`}
                 >
                   {icon}
@@ -177,11 +185,12 @@ export const RefillModal: FC<RefillModalProps> = ({
           </div>
 
           {/* Quantity input with +/- in the selected unit */}
-          <div className="flex items-center justify-center gap-2">
+          <div className="flex items-center justify-center gap-3">
             <button
               type="button"
               onClick={() => handleQtyChange(unitQty - unitStep)}
-              className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-200 font-bold text-sm"
+              className="w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-base flex items-center justify-center transition active:scale-95 cursor-pointer"
+              aria-label="إنقاص الكمية"
             >
               -
             </button>
@@ -191,7 +200,7 @@ export const RefillModal: FC<RefillModalProps> = ({
                 min="1"
                 value={unitQty}
                 onChange={(e) => handleQtyChange(parseInt(e.target.value) || 1)}
-                className="w-20 px-2 py-1.5 text-center font-mono font-bold text-base border border-slate-300 rounded-xl focus:ring-2 focus:ring-teal-500"
+                className="w-20 px-2 py-2 text-center font-mono font-bold text-base border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500"
               />
               <div className="text-[10px] text-slate-400 mt-0.5">
                 {refillUnit === 'pills' ? pluralizeArabic(unitQty, medication.unit) : refillUnit === 'boxes' ? pluralizeArabic(unitQty, boxLabel) : pluralizeArabic(unitQty, 'شريط')}
@@ -200,14 +209,15 @@ export const RefillModal: FC<RefillModalProps> = ({
             <button
               type="button"
               onClick={() => handleQtyChange(unitQty + unitStep)}
-              className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-200 font-bold text-sm"
+              className="w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-base flex items-center justify-center transition active:scale-95 cursor-pointer"
+              aria-label="زيادة الكمية"
             >
               +
             </button>
           </div>
 
           {/* New estimation preview */}
-          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs space-y-1">
+          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs space-y-1">
             <div className="flex justify-between items-center text-emerald-950 font-medium">
               <span>المجموع بعد الإضافة:</span>
               <div className="text-left">
@@ -225,7 +235,7 @@ export const RefillModal: FC<RefillModalProps> = ({
 
           <button
             type="submit"
-            className="w-full py-3 px-4 bg-teal-700 hover:bg-teal-800 active:scale-98 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-sm transition"
+            className="w-full h-11 px-6 bg-teal-700 hover:bg-teal-800 active:scale-98 text-white rounded-full font-semibold text-sm flex items-center justify-center gap-2 shadow-2xs transition cursor-pointer"
           >
             <Check className="w-4 h-4" />
             <span>تأكيد إضافة المخزون (+{addedCount} {medication.unit})</span>
@@ -245,6 +255,13 @@ function getAvailableUnits(sz: ReturnType<typeof getMedSizes>, medUnit?: string)
   // For liquid medications in 'مل', restocking is measured exclusively in bottles ('عبوة')
   if (medUnit === 'مل') {
     return ['boxes'];
+  }
+  // For solid medications ('قرص' or 'كبسولة'), remove the pill/capsule option so user refills by packaging (boxes / strips) only
+  if (medUnit && isSolidUnit(medUnit)) {
+    const units: RefillUnit[] = [];
+    if (sz.boxSize > 0) units.push('boxes');
+    if (sz.hasStrips && sz.stripSize > 0) units.push('strips');
+    return units.length > 0 ? units : ['boxes'];
   }
   const units: RefillUnit[] = ['pills'];
   if (sz.boxSize > 0) units.push('boxes');

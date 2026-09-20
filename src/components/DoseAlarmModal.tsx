@@ -50,7 +50,7 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
           <div className="absolute top-2 left-2">
             <button
               onClick={onDismiss}
-              className="p-1.5 rounded-full text-teal-200 hover:text-white hover:bg-teal-700/50 transition"
+              className="w-9 h-9 rounded-full text-teal-200 hover:text-white hover:bg-teal-700/50 transition flex items-center justify-center cursor-pointer"
               aria-label="إغلاق"
             >
               <X className="w-5 h-5" />
@@ -98,11 +98,11 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
             </div>
           </div>
 
-          <div className="space-y-2 pt-1">
+          <div className="space-y-2.5 pt-1">
             <button
               type="button"
               onClick={() => onTakeDose(medication, normalizedDoseId)}
-              className="w-full py-3 px-4 bg-teal-700 hover:bg-teal-800 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-sm transition active:scale-98"
+              className="w-full h-11 px-6 bg-teal-700 hover:bg-teal-800 text-white rounded-full font-semibold text-sm flex items-center justify-center gap-2 shadow-2xs transition active:scale-98 cursor-pointer"
               data-testid="alarm-take-dose"
             >
               <Check className="w-4 h-4" />
@@ -113,7 +113,7 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
               <button
                 type="button"
                 onClick={() => onSnooze(medication)}
-                className="py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-98"
+                className="h-10 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-full font-semibold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 cursor-pointer"
               >
                 <Clock className="w-3.5 h-3.5 text-slate-500" />
                 <span>تأجيل 10 دقائق</span>
@@ -122,7 +122,7 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
               <button
                 type="button"
                 onClick={onDismiss}
-                className="py-2.5 px-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl font-bold text-xs transition active:scale-98"
+                className="h-10 px-3 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-full font-semibold text-xs flex items-center justify-center transition active:scale-98 cursor-pointer"
               >
                 إغلاق التنبيه
               </button>

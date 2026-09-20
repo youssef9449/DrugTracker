@@ -22,6 +22,7 @@ import {
 } from '../utils/whatsapp';
 import { getMedSizes } from '../utils/medicationPackaging';
 import { Checkbox } from './ui/Checkbox';
+import { SegmentedButton } from './ui/SegmentedButton';
 
 
 function shoppingDurationDays(
@@ -526,22 +527,17 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
 
               {/* Unit selector + quantity input */}
               <div className="mt-3 space-y-2">
-                <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
-                  <button
-                    type="button"
-                    onClick={() => handleToggleQuantityMode(med, 'period', suggestedPills)}
-                    className={`rounded-lg px-2 py-1.5 text-[10px] font-bold ${getQuantityMode(med) === 'period' ? 'bg-teal-700 text-white' : 'text-slate-600'}`}
-                  >
-                    حسب الفترة
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleToggleQuantityMode(med, 'custom', suggestedPills)}
-                    className={`rounded-lg px-2 py-1.5 text-[10px] font-bold ${getQuantityMode(med) === 'custom' ? 'bg-teal-700 text-white' : 'text-slate-600'}`}
-                  >
-                    كمية محددة
-                  </button>
-                </div>
+                <SegmentedButton<'period' | 'custom'>
+                  className="w-full flex"
+                  size="sm"
+                  value={getQuantityMode(med)}
+                  onChange={(val) => handleToggleQuantityMode(med, val, suggestedPills)}
+                  options={[
+                    { value: 'period', label: 'حسب الفترة' },
+                    { value: 'custom', label: 'كمية محددة' },
+                  ]}
+                  aria-label={`طريقة حساب كمية طلب ${med.name}`}
+                />
 
                 {getQuantityMode(med) === 'period' && (
                   <div className="flex items-center justify-between gap-2 rounded-xl border border-teal-100 bg-teal-50/60 px-3 py-2">
@@ -567,7 +563,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                     </div>
                   </div>
                 )}
-                {/* Unit selector chips */}
+                {/* Unit selector chips (M3 Filter Chips) */}
                 {availableUnits.length > 1 && (
                   <div className="flex items-center gap-1.5 flex-wrap">
                     {availableUnits.map((u) => {
@@ -580,10 +576,10 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                           key={u}
                           type="button"
                           onClick={() => handleToggleOrderUnit(med, u, suggestedPills)}
-                          className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition ${
+                          className={`h-7 px-2.5 rounded-lg text-[10px] font-bold flex items-center gap-1 transition cursor-pointer border ${
                             isActive
-                              ? 'bg-teal-700 text-white'
-                              : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'
+                              ? 'bg-teal-100 text-teal-950 border-teal-300 shadow-2xs'
+                              : 'bg-slate-50/80 text-slate-600 border-slate-200/90 hover:bg-slate-100'
                           }`}
                         >
                           {icon}

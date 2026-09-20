@@ -52,6 +52,16 @@
   display: none;
 }
 
+/* Hide default browser search cancel and decoration buttons so custom M3 clear icon doesn't duplicate */
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-decoration,
+input[type="search"]::-webkit-search-results-button,
+input[type="search"]::-webkit-search-results-decoration {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  display: none !important;
+}
+
 /* Accessible Large Font Mode (fontScale === 'large')
  * Scales root rem units gracefully so all Tailwind text classes
  * (text-xs, text-sm, text-base, text-lg, etc.) enlarge proportionally,

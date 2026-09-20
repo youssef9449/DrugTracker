@@ -10,9 +10,9 @@
  *   <button className={ICON_BUTTON_CLASS}>...</button>
  */
 
-/** Small icon button used in AppHeader (settings, phone-frame toggle, font toggle). */
+/** Standard M3 circular icon button used in AppHeader and headers. */
 export const ICON_BUTTON_CLASS =
-  'p-2 rounded-xl text-teal-100 hover:text-white hover:bg-teal-700/80 transition active:scale-95';
+  'w-9 h-9 rounded-full flex items-center justify-center text-teal-100 hover:text-white hover:bg-teal-700/80 transition active:scale-95 cursor-pointer';
 
 /** Teal icon box centered above empty-state messages (EmptyState component). */
 export const EMPTY_STATE_ICON_BOX =

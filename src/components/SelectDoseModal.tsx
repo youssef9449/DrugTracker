@@ -135,10 +135,10 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 text-slate-500"
+            className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-slate-100 text-slate-500 transition cursor-pointer"
             aria-label="إغلاق"
           >
-            <X className="w-4 h-4" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
@@ -295,10 +295,10 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                             onSelect(medication.id, dose.id);
                           }
                         }}
-                        className={`shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition active:scale-95 ${
+                        className={`shrink-0 h-8 px-3.5 rounded-full text-xs font-semibold transition active:scale-95 cursor-pointer ${
                           action === 'restore'
-                            ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
-                            : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                            ? 'bg-amber-100 text-amber-900 hover:bg-amber-200 border border-amber-300/50'
+                            : 'bg-teal-700 text-white hover:bg-teal-800 shadow-2xs'
                         }`}
                       >
                         {action === 'restore' ? (

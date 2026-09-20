@@ -1,5 +1,5 @@
 import { type FC } from 'react';
-import { Bell, BellOff, Search, Smartphone, Monitor, Settings, AlertTriangle } from 'lucide-react';
+import { Bell, BellOff, Search, Smartphone, Monitor, Settings, AlertTriangle, Check, X } from 'lucide-react';
 import { ActiveTab } from './AndroidBottomNav';
 import { ICON_BUTTON_CLASS } from '../lib/styles';
 
@@ -177,10 +177,10 @@ export const AppHeader: FC<AppHeaderProps> = ({
         </div>
       </div>
 
-      {/* In Stock Tab: Search and Filters */}
+      {/* In Stock Tab: Search and Filters (M3 Search Bar & Filter Chips) */}
       {activeTab === 'stock' && (
         <div className="px-4 pb-3 space-y-2.5">
-          {/* Search Input */}
+          {/* M3 Search Bar (Full Pill shape with surface container color) */}
           <div className="relative">
             <input
               type="search"
@@ -193,57 +193,72 @@ export const AppHeader: FC<AppHeaderProps> = ({
               onChange={(e) => onSearchChange(e.target.value)}
               onInput={(e) => onSearchChange((e.target as HTMLInputElement).value)}
               placeholder="بحث عن دواء..."
-              className="w-full pl-3 pr-9 py-1.5 rounded-xl bg-teal-900/40 border border-teal-700 text-white placeholder-teal-300/70 text-xs focus:outline-none focus:ring-1 focus:ring-teal-300 focus:bg-teal-900/60 transition"
+              className="w-full pl-8 pr-9 py-2 rounded-full bg-teal-900/50 border border-teal-600/70 text-white placeholder-teal-300/70 text-xs focus:outline-none focus:ring-2 focus:ring-teal-300 focus:bg-teal-900/70 transition shadow-inner [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
             />
-            <Search className="w-4 h-4 text-teal-300/80 absolute right-3 top-2 pointer-events-none" />
+            <Search className="w-4 h-4 text-teal-200 absolute right-3 top-2.5 pointer-events-none" />
             {searchQuery && (
               <button
+                type="button"
                 onClick={() => onSearchChange('')}
-                className="absolute left-2.5 top-1.5 text-[11px] text-teal-300 hover:text-white px-1.5 py-0.5 rounded-md bg-teal-800"
+                aria-label="مسح البحث"
+                title="مسح البحث"
+                className="absolute left-2.5 top-2 w-5 h-5 rounded-full flex items-center justify-center text-teal-200 hover:text-white hover:bg-teal-800/80 active:bg-teal-700 transition cursor-pointer"
               >
-                مسح
+                <X className="w-3.5 h-3.5 stroke-[2.5]" />
               </button>
             )}
           </div>
 
-          {/* Filter Chips */}
+          {/* M3 Filter Chips (8dp rounded rectangle with checkmark on selection) */}
           <div className="flex items-center gap-2 overflow-x-auto pb-0.5 no-scrollbar text-xs">
             <button
+              type="button"
               onClick={() => onFilterChange('all')}
-              className={`px-3 py-1.5 rounded-xl font-medium transition whitespace-nowrap active:scale-95 ${
+              className={`h-8 px-3 rounded-lg font-medium transition whitespace-nowrap flex items-center gap-1.5 active:scale-95 border cursor-pointer ${
                 filter === 'all'
-                  ? 'bg-white text-teal-900 font-bold shadow-xs'
-                  : 'bg-teal-700/60 text-teal-100 hover:bg-teal-700'
+                  ? 'bg-white text-teal-950 font-bold border-white shadow-xs'
+                  : 'bg-teal-700/50 text-teal-100 border-teal-600/50 hover:bg-teal-700/80'
               }`}
             >
-              جميع الأدوية
+              {filter === 'all' && <Check className="w-3.5 h-3.5 text-teal-900 stroke-[2.5]" />}
+              <span>جميع الأدوية</span>
             </button>
 
             <button
+              type="button"
               onClick={() => onFilterChange('alerts')}
-              className={`px-3 py-1.5 rounded-xl font-medium transition whitespace-nowrap flex items-center gap-1.5 active:scale-95 ${
+              className={`h-8 px-3 rounded-lg font-medium transition whitespace-nowrap flex items-center gap-1.5 active:scale-95 border cursor-pointer ${
                 filter === 'alerts'
-                  ? 'bg-rose-500 text-white font-bold shadow-xs'
-                  : 'bg-teal-700/60 text-teal-100 hover:bg-teal-700'
+                  ? 'bg-white text-teal-950 font-bold border-white shadow-xs'
+                  : 'bg-teal-700/50 text-teal-100 border-teal-600/50 hover:bg-teal-700/80'
               }`}
             >
+              {filter === 'alerts' && <Check className="w-3.5 h-3.5 text-teal-900 stroke-[2.5]" />}
               <span>قارب على النفاذ</span>
               {alertsCount > 0 && (
-                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-600 text-white font-mono font-bold">
+                <span
+                  className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold transition ${
+                    filter === 'alerts'
+                      ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                      : 'bg-rose-700 text-white'
+                  }`}
+                >
                   {alertsCount}
                 </span>
               )}
             </button>
 
             <button
+              type="button"
               onClick={() => onFilterChange('sufficient')}
-              className={`px-3 py-1.5 rounded-xl font-medium transition whitespace-nowrap active:scale-95 ${
+              className={`h-8 px-3 rounded-lg font-medium transition whitespace-nowrap flex items-center gap-1.5 active:scale-95 border cursor-pointer ${
                 filter === 'sufficient'
-                  ? 'bg-white text-teal-900 font-bold shadow-xs'
-                  : 'bg-teal-700/60 text-teal-100 hover:bg-teal-700'
+                  ? 'bg-white text-teal-950 font-bold border-white shadow-xs'
+                  : 'bg-teal-700/50 text-teal-100 border-teal-600/50 hover:bg-teal-700/80'
               }`}
             >
-              المخزون الكافي
+              {filter === 'sufficient' && <Check className="w-3.5 h-3.5 text-teal-900 stroke-[2.5]" />}
+              <span>المخزون الكافي</span>
             </button>
           </div>
         </div>

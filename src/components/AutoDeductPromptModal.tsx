@@ -24,10 +24,10 @@ export const AutoDeductPromptModal: FC<AutoDeductPromptModalProps> = ({
       label="إعداد الخصم التلقائي للمخزون"
       variant="center"
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-auto overflow-hidden border border-slate-100 text-right">
+      <div className="bg-white rounded-[28px] shadow-2xl w-full max-w-sm mx-auto overflow-hidden border border-slate-100 text-right">
         {/* Header with icon and title */}
-        <div className="bg-gradient-to-b from-teal-50 to-white px-5 pt-5 pb-3 text-center">
-          <div className="w-12 h-12 rounded-2xl bg-teal-600 text-white flex items-center justify-center mx-auto shadow-md shadow-teal-600/20 mb-3">
+        <div className="bg-gradient-to-b from-teal-50 to-white px-5 pt-6 pb-3 text-center">
+          <div className="w-12 h-12 rounded-2xl bg-teal-700 text-white flex items-center justify-center mx-auto shadow-md shadow-teal-700/20 mb-3">
             <Zap className="w-6 h-6" />
           </div>
           <h2 className="text-base font-bold text-slate-900 leading-snug">
@@ -40,9 +40,9 @@ export const AutoDeductPromptModal: FC<AutoDeductPromptModalProps> = ({
 
         {/* Explanation Card */}
         <div className="px-5 py-3 space-y-2.5">
-          <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 space-y-2 text-xs">
+          <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 space-y-2 text-xs">
             <div className="flex items-start gap-2">
-              <Info className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
+              <Info className="w-4 h-4 text-teal-700 shrink-0 mt-0.5" />
               <div>
                 <span className="font-bold text-slate-800 block text-[11px] mb-0.5">
                   ماذا تفعل هذه الميزة؟
@@ -55,7 +55,7 @@ export const AutoDeductPromptModal: FC<AutoDeductPromptModalProps> = ({
 
             <div className="pt-2 border-t border-slate-200/60 text-[10.5px] text-slate-500 leading-relaxed space-y-1">
               <div className="flex items-center gap-1.5">
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-teal-500 shrink-0" />
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-teal-600 shrink-0" />
                 <span><strong className="text-teal-900 font-semibold">اختيار نعم:</strong> خصم تلقائي في موعد الجرعات وتحديث مستمر للمخزون.</span>
               </div>
               <div className="flex items-center gap-1.5">
@@ -71,23 +71,23 @@ export const AutoDeductPromptModal: FC<AutoDeductPromptModalProps> = ({
         </div>
 
         {/* Choice Buttons: نعم / لا */}
-        <div className="p-4 pt-1 bg-slate-50/50 border-t border-slate-100 grid grid-cols-2 gap-2.5">
+        <div className="p-4 pt-2 bg-slate-50/50 border-t border-slate-100 grid grid-cols-2 gap-2.5">
           <button
             type="button"
             id="btn-auto-deduct-yes"
             onClick={() => onConfirm(true)}
-            className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+            className="flex items-center justify-center gap-1.5 h-10 px-4 bg-teal-700 hover:bg-teal-800 active:bg-teal-900 text-white rounded-full text-xs font-semibold transition shadow-2xs cursor-pointer"
           >
-            <Check className="w-4 h-4 stroke-[2.5]" />
+            <Check className="w-4 h-4 stroke-[2.25]" />
             <span>نعم (تفعيل)</span>
           </button>
           <button
             type="button"
             id="btn-auto-deduct-no"
             onClick={() => onConfirm(false)}
-            className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-white hover:bg-slate-100 active:bg-slate-200 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold transition cursor-pointer"
+            className="flex items-center justify-center gap-1.5 h-10 px-4 bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 border border-slate-300 rounded-full text-xs font-semibold transition cursor-pointer"
           >
-            <X className="w-4 h-4 stroke-[2.5]" />
+            <X className="w-4 h-4 stroke-[2.25]" />
             <span>لا (إيقاف)</span>
           </button>
         </div>

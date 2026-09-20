@@ -31,6 +31,7 @@ import { SelectDoseModal } from './components/SelectDoseModal';
 import { AutoDeductPromptModal } from './components/AutoDeductPromptModal';
 import { UpdatePrompt } from './components/UpdatePrompt';
 import { Toggle } from './components/ui/Toggle';
+import { SegmentedButton } from './components/ui/SegmentedButton';
 import {
   requestNotificationPermission,
   sendTestAlertNotification,
@@ -118,12 +119,9 @@ export default function App() {
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(false);
   // Critical-stock alerts (the urgent "حرج" notifications) — default
-  // true so the user gets alerts by default on first install (the
-  // headline feature). The toggle in AppHeader lets them turn it off.
-  // The critical THRESHOLD is derived per-medication from
-  // warningThresholdDays via getCriticalThresholdDays() — not a fixed
-  // pill count (see C3 in the audit fix).
-  const [criticalStockAlertsEnabled, setCriticalStockAlertsEnabled] = useState<boolean>(true);
+  // false so stock alerts do not show active on first start regardless of state.
+  // The toggle in AppHeader lets the user turn it on.
+  const [criticalStockAlertsEnabled, setCriticalStockAlertsEnabled] = useState<boolean>(false);
   // Exact-alarm permission state (Android 12+). null means the native
   // permission check has not completed yet. When false, dose-reminder
   // scheduling is BLOCKED — inexact alarms are unacceptable for medication
@@ -617,7 +615,7 @@ export default function App() {
           alertsCount={alertsCount}
           notificationsEnabled={notificationsEnabled}
           onToggleNotifications={handleToggleNotifications}
-          criticalStockAlertsEnabled={criticalStockAlertsEnabled}
+          criticalStockAlertsEnabled={criticalStockAlertsEnabled && notificationsEnabled}
           onToggleCriticalStockAlerts={handleToggleCriticalStockAlerts}
           isPhoneFrame={isPhoneFrame}
           onTogglePhoneFrame={() => setIsPhoneFrame(!isPhoneFrame)}
@@ -648,7 +646,7 @@ export default function App() {
                     <div className="flex items-center gap-2">
                       <div
                         className={`w-6 h-6 rounded-lg text-white flex items-center justify-center shrink-0 ${
-                          globalAutoDeductEnabled ? 'bg-teal-600' : 'bg-amber-600'
+                          globalAutoDeductEnabled ? 'bg-teal-600' : 'bg-amber-500'
                         }`}
                       >
                         {globalAutoDeductEnabled ? (
@@ -660,9 +658,7 @@ export default function App() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5">
                           <span className="font-bold text-slate-900 block text-[11px] leading-tight">
-                            {globalAutoDeductEnabled
-                              ? 'الخصم التلقائي لجميع الأدوية: مفعّل'
-                              : 'الخصم التلقائي لجميع الأدوية: متوقف'}
+                            الخصم التلقائي لجميع الأدوية
                           </span>
                           <span
                             className={`text-[9.5px] px-1.5 py-0.2 rounded-full font-bold ${
@@ -722,45 +718,27 @@ export default function App() {
                   <div className="mx-4 mt-3 flex items-center justify-between bg-white px-3 py-2 rounded-2xl border border-slate-200/80 shadow-2xs">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-bold text-slate-800">قائمة الأدوية</span>
-                      {/* Only surface a count here when it adds information the
-                          "إجمالي الأدوية" stat card above doesn't already give —
-                          i.e. an active search is narrowing the list. Otherwise
-                          this badge would just repeat the same total number. */}
-                      {searchQuery.trim() && filteredMedications.length !== medications.length && (
-                        <span
-                          className="text-[11px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-700 font-mono font-bold"
-                          aria-label={`${filteredMedications.length} نتيجة بحث من إجمالي ${medications.length}`}
-                        >
-                          {filteredMedications.length} نتيجة
-                        </span>
-                      )}
                     </div>
 
-                    <label
-                      htmlFor="toggle-compact-view"
-                      className="flex items-center gap-2 cursor-pointer select-none"
-                    >
-                      <span className="text-xs font-medium text-slate-700">
-                        {isCompactView ? 'العرض المختصر' : 'العرض الطبيعي'}
-                      </span>
-                      <Toggle
-                        id="toggle-compact-view"
-                        checked={isCompactView}
-                        onChange={() => {
-                          const next = !isCompactView;
-                          setIsCompactView(next);
-                          showToast(
-                            next
-                              ? 'تم تفعيل العرض المختصر'
-                              : 'تم إرجاع العرض الطبيعي'
-                          );
-                          if (soundEnabled) playSuccessChime();
-                        }}
-                        label="تبديل العرض بين المختصر والعرض الطبيعي"
-                        size="sm"
-                        color="teal"
-                      />
-                    </label>
+                    {/* View mode toggle: compact vs detailed cards (M3 Segmented Button) */}
+                    <SegmentedButton<'normal' | 'compact'>
+                      id="card-view-mode-toggle"
+                      size="sm"
+                      value={isCompactView ? 'compact' : 'normal'}
+                      onChange={(val) => {
+                        const next = val === 'compact';
+                        setIsCompactView(next);
+                        showToast(
+                          next ? 'تم تفعيل العرض المختصر' : 'تم إرجاع العرض الطبيعي'
+                        );
+                        if (soundEnabled) playSuccessChime();
+                      }}
+                      options={[
+                        { value: 'normal', label: 'العرض الطبيعي' },
+                        { value: 'compact', label: 'العرض المختصر' },
+                      ]}
+                      aria-label="نوع عرض كروت الأدوية"
+                    />
                   </div>
                 </div>
               )}

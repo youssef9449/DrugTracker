@@ -79,8 +79,8 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   activeOrderItems,
   onSaveSettings,
   soundEnabled,
-  notificationsEnabled = true,
-  criticalStockAlertsEnabled = true,
+  notificationsEnabled = false,
+  criticalStockAlertsEnabled = false,
   onSendTestNotification,
   autoDeductEnabled = true,
   onApplyAppPreferences,
@@ -298,7 +298,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded-full text-teal-200 hover:text-white hover:bg-teal-700 transition"
+            className="w-9 h-9 rounded-full text-teal-200 hover:text-white hover:bg-teal-700/80 transition flex items-center justify-center cursor-pointer"
             title="إغلاق"
             aria-label="إغلاق"
           >
@@ -316,10 +316,10 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                   <div className="flex items-center gap-2">
                     <div
                       className={`p-1.5 rounded-lg ${
-                        draftAutoDeduct ? 'bg-teal-600 text-white' : 'bg-slate-200 text-slate-500'
+                        draftAutoDeduct ? 'bg-teal-600 text-white' : 'bg-amber-100 text-amber-600 border border-amber-300/60'
                       }`}
                     >
-                      {draftAutoDeduct ? <Zap className="w-4 h-4" /> : <ZapOff className="w-4 h-4" />}
+                      {draftAutoDeduct ? <Zap className="w-4 h-4" /> : <ZapOff className="w-4 h-4 text-amber-500" />}
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
@@ -442,16 +442,16 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                   <button
                     type="button"
                     onClick={onSendTestNotification}
-                    className="w-full py-2 px-3 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300/80 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition active:scale-98 shadow-xs"
+                    className="w-full h-10 px-4 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300/80 rounded-full text-xs font-semibold flex items-center justify-center gap-2 transition active:scale-98 cursor-pointer"
                   >
                     <Bell className="w-4 h-4 text-amber-600" />
-                    <span>🔔 تجربة إشعار وتنبيه صوتي الآن (اختبار فوري)</span>
+                    <span>تجربة إشعار وتنبيه صوتي الآن (اختبار فوري)</span>
                   </button>
                 )}
 
                 {/* Exact-alarm permission warning (Android 12+) */}
                 {draftNotifications && !exactAlarmEnabled && onOpenExactAlarmSettings && (
-                  <div className="bg-rose-50 border border-rose-300/80 rounded-xl p-3 space-y-2">
+                  <div className="bg-rose-50 border border-rose-300/80 rounded-2xl p-3.5 space-y-2">
                     <div className="flex items-start gap-2">
                       <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                       <div className="text-[11px] text-rose-900 leading-relaxed">
@@ -465,7 +465,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     <button
                       type="button"
                       onClick={onOpenExactAlarmSettings}
-                      className="w-full py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition active:scale-98 shadow-xs"
+                      className="w-full h-10 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-full text-xs font-semibold flex items-center justify-center gap-2 transition active:scale-98 shadow-2xs cursor-pointer"
                     >
                       <Bell className="w-4 h-4" />
                       <span>السماح بالمنبهات الدقيقة (إعدادات Android)</span>
@@ -631,14 +631,14 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     href={waUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex-1 py-2.5 px-3 bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition shadow-sm"
+                    className="flex-1 h-10 px-4 bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-full text-xs font-semibold flex items-center justify-center gap-2 transition active:scale-98 shadow-2xs cursor-pointer"
                   >
                     <MessageCircle className="w-4 h-4" />
                     <span>فتح واتساب الآن ({formattedPhone || pharmacyPhone})</span>
                   </a>
                   <a
                     href={appUrl}
-                    className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-[11px] font-bold transition border border-slate-700 shrink-0"
+                    className="h-10 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-full text-xs font-semibold transition border border-slate-700 shrink-0 flex items-center justify-center cursor-pointer"
                     title="فتح عبر تطبيق واتساب مباشرة"
                   >
                     تطبيق الهاتف
@@ -652,7 +652,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
           <div className="pt-2">
             <button
               type="submit"
-              className="w-full py-3 px-4 bg-teal-700 hover:bg-teal-800 active:scale-98 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-sm transition"
+              className="w-full h-11 px-6 bg-teal-700 hover:bg-teal-800 active:scale-98 text-white rounded-full font-semibold text-sm flex items-center justify-center gap-2 shadow-2xs transition cursor-pointer"
             >
               <Check className="w-4 h-4" />
               <span>{isPharmacyOnly ? 'حفظ إعدادات الصيدلية' : 'حفظ الإعدادات'}</span>

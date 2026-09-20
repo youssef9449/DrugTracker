@@ -39,8 +39,8 @@ export const AndroidBottomNav: FC<AndroidBottomNavProps> = ({
             }`}
           >
             <div
-              className={`px-4 py-1 rounded-full flex items-center justify-center relative transition ${
-                isActive ? 'bg-teal-100 text-teal-800' : 'bg-transparent'
+              className={`w-14 h-8 rounded-full flex items-center justify-center relative transition-all duration-200 ${
+                isActive ? 'bg-teal-100 text-teal-950 font-bold' : 'bg-transparent text-slate-600'
               }`}
             >
               <Icon className={`w-5 h-5 ${iconClassName ?? ''}`} />
@@ -50,7 +50,13 @@ export const AndroidBottomNav: FC<AndroidBottomNavProps> = ({
                 </span>
               )}
             </div>
-            <span className="text-[11px] mt-1">{label}</span>
+            <span
+              className={`text-[11px] mt-1 transition-colors ${
+                isActive ? 'text-teal-950 font-bold' : 'text-slate-600 font-medium'
+              }`}
+            >
+              {label}
+            </span>
           </button>
         );
       })}

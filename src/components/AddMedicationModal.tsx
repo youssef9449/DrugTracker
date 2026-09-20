@@ -298,13 +298,16 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       ? initialData.currentPills
       : Number(currentPills);
 
+    const parsedThreshold = parseInt(warningThresholdDays, 10);
+    const savedWarningThreshold = !Number.isNaN(parsedThreshold) && parsedThreshold >= 1 ? parsedThreshold : 5;
+
     onSave(
       {
         name: name.trim(),
         currentPills: savedCurrentPills,
         dailyDose: doseNum,
         unit,
-        warningThresholdDays: Number(warningThresholdDays) || 5,
+        warningThresholdDays: savedWarningThreshold,
         category: category.trim(),
         notes: initialData?.notes || '',
         colorTag,
@@ -350,7 +353,8 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded-full text-teal-200 hover:text-white hover:bg-teal-700 transition"
+            className="w-9 h-9 rounded-full text-teal-200 hover:text-white hover:bg-teal-700/80 transition flex items-center justify-center"
+            aria-label="إغلاق"
           >
             <X className="w-5 h-5" />
           </button>
@@ -849,7 +853,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
 
           <button
             type="submit"
-            className="w-full py-3 px-4 bg-teal-700 hover:bg-teal-800 active:scale-98 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-sm transition"
+            className="w-full h-11 px-6 bg-teal-700 hover:bg-teal-800 active:scale-98 text-white rounded-full font-semibold text-sm flex items-center justify-center gap-2 shadow-2xs transition cursor-pointer"
           >
             <Check className="w-4 h-4" />
             <span>{initialData ? 'حفظ التعديلات' : 'إضافة الدواء'}</span>

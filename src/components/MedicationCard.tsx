@@ -26,7 +26,7 @@ import { pluralizeArabic } from '../lib/arabicPlural';
 import { VISUAL_RANGE_MULTIPLIER, MIN_VISUAL_RANGE_DAYS, DAYS_PER_MONTH } from '../utils/time';
 import { MedicationMenu } from './MedicationMenu';
 import { ReminderBadge } from './ReminderBadge';
-import { StripsBadge, PackageSizeBadge, AutoDeductPausedNote } from './medicationCardParts';
+import { StripsBadge, PackageSizeBadge, AutoDeductPausedNote, AutoDeductStatusBadge } from './medicationCardParts';
 
 /**
  * Map a medication's `colorTag` (the user-selected card color from the
@@ -309,7 +309,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         <div className="mt-3 flex items-center gap-2">
           <button
             onClick={() => onOpenRefill(medication)}
-            className="flex-1 py-2 px-3 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 shadow-xs"
+            className="flex-1 h-9 px-4 rounded-full bg-teal-700 hover:bg-teal-800 text-white font-semibold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 shadow-2xs cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>تعبئة رصيد</span>
@@ -318,7 +318,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           {onNavigateToShopping && (
             <button
               onClick={onNavigateToShopping}
-              className="py-2 px-3 rounded-xl bg-white hover:bg-slate-50 text-teal-800 border border-teal-300 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 shadow-2xs shrink-0"
+              className="h-9 px-4 rounded-full bg-white hover:bg-slate-50 text-teal-800 border border-teal-300 font-semibold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 cursor-pointer shrink-0"
               title="تجهيز طلب الشراء في الواتساب"
             >
               <ShoppingCart className="w-3.5 h-3.5 text-teal-700" />
@@ -497,13 +497,19 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           {medication.name}
         </h3>
 
-        {/* Row 2: Category + Status only (independent of name and actions) */}
+        {/* Row 2: Category + Auto-Deduct Status + Stock Status (independent of name and actions) */}
         <div className="flex items-center gap-1 flex-wrap min-w-0 mb-1">
           {medication.category && (
             <span className={`text-[8px] font-medium px-1.5 py-0.2 rounded-full shrink-0 ${tag.badge}`}>
               {medication.category}
             </span>
           )}
+          <AutoDeductStatusBadge
+            isAutoActive={isAutoActive}
+            onToggle={() => onToggleAutoDeduct(medication.id)}
+            size="xs"
+            medicationId={medication.id}
+          />
           {isOut ? (
             <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 flex items-center gap-0.5 shrink-0 w-fit">
               <AlertCircle className="w-2 h-2" />
@@ -538,7 +544,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 title="إدارة الجرعات"
                 aria-label="إدارة الجرعات"
                 data-testid={`manage-doses-${medication.id}`}
-                className="w-5 h-5 flex items-center justify-center rounded-lg bg-teal-100 text-teal-800 hover:bg-teal-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
+                className="w-5 h-5 flex items-center justify-center rounded-full bg-teal-100 text-teal-800 hover:bg-teal-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95 cursor-pointer"
               >
                 <ListChecks className="w-3 h-3" strokeWidth={2.25} aria-hidden />
               </button>
@@ -559,7 +565,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                       ? `استرجاع الجرعة (+${manualRestoreAmount})`
                       : 'استرجاع الجرعة'
                   }
-                  className="w-5 h-5 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
+                  className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95 cursor-pointer"
                   data-testid={`restore-dose-${medication.id}`}
                 >
                   <RotateCcw className="w-3 h-3" strokeWidth={2.25} aria-hidden />
@@ -571,7 +577,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   disabled={currentPills <= 0 || takeAmount <= 0}
                   title={`تناول جرعة (-${takeAmount})`}
                   aria-label={`تناول جرعة (-${takeAmount})`}
-                  className={`w-5 h-5 flex items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 active:scale-95 ${
+                  className={`w-5 h-5 flex items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 active:scale-95 cursor-pointer ${
                     currentPills <= 0 || takeAmount <= 0
                       ? 'bg-slate-100 text-slate-300 cursor-not-allowed'
                       : 'bg-emerald-600 text-white hover:bg-emerald-700'
@@ -582,7 +588,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               ) : !isAutoActive ? (
                 <span
                   title="تم تناول جرعة اليوم"
-                  className="w-5 h-5 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-700"
+                  className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-700"
                 >
                   <CheckCircle className="w-3 h-3" />
                 </span>
@@ -592,7 +598,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               type="button"
               onClick={() => onOpenRefill(medication)}
               title="تعبئة"
-              className="w-5 h-5 flex items-center justify-center rounded-full bg-teal-100 text-teal-800 hover:bg-teal-200 transition-colors active:scale-95"
+              className="w-5 h-5 flex items-center justify-center rounded-full bg-teal-100 text-teal-800 hover:bg-teal-200 transition-colors active:scale-95 cursor-pointer"
             >
               <Plus className="w-3 h-3" />
             </button>
@@ -679,13 +685,19 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           {medication.name}
         </h3>
 
-        {/* Row 2: Category + Status only (independent of name and actions) */}
+        {/* Row 2: Category + Auto-Deduct Status + Stock Status (independent of name and actions) */}
         <div className="flex items-center gap-1.5 flex-wrap min-w-0 mt-1">
           {medication.category && (
             <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${tag.badge}`}>
               {medication.category}
             </span>
           )}
+          <AutoDeductStatusBadge
+            isAutoActive={isAutoActive}
+            onToggle={() => onToggleAutoDeduct(medication.id)}
+            size="sm"
+            medicationId={medication.id}
+          />
           {isOut ? (
             <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 flex items-center gap-0.5 shrink-0">
               <AlertCircle className="w-2.5 h-2.5" />
@@ -720,7 +732,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 title="إدارة الجرعات"
                 aria-label="إدارة الجرعات"
                 data-testid={`manage-doses-${medication.id}`}
-                className="w-6 h-6 flex items-center justify-center rounded-lg bg-teal-100 text-teal-800 hover:bg-teal-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
+                className="w-6 h-6 flex items-center justify-center rounded-full bg-teal-100 text-teal-800 hover:bg-teal-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95 cursor-pointer"
               >
                 <ListChecks className="w-3.5 h-3.5" strokeWidth={2.25} aria-hidden />
               </button>
@@ -741,7 +753,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                       ? `استرجاع الجرعة (+${manualRestoreAmount})`
                       : 'استرجاع الجرعة'
                   }
-                  className="w-6 h-6 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
+                  className="w-6 h-6 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95 cursor-pointer"
                   data-testid={`restore-dose-${medication.id}`}
                 >
                   <RotateCcw className="w-3.5 h-3.5" strokeWidth={2.25} aria-hidden />
@@ -753,7 +765,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   disabled={currentPills <= 0 || takeAmount <= 0}
                   title={`تناول جرعة (-${takeAmount})`}
                   aria-label={`تناول جرعة (-${takeAmount})`}
-                  className={`w-6 h-6 flex items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 active:scale-95 ${
+                  className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 active:scale-95 cursor-pointer ${
                     currentPills <= 0 || takeAmount <= 0
                       ? 'bg-slate-100 text-slate-300 cursor-not-allowed'
                       : 'bg-emerald-600 text-white hover:bg-emerald-700'
@@ -764,7 +776,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               ) : !isAutoActive ? (
                 <span
                   title="تم تناول جرعة اليوم"
-                  className="w-6 h-6 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-700"
+                  className="w-6 h-6 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-700"
                 >
                   <CheckCircle className="w-3.5 h-3.5" />
                 </span>
@@ -775,7 +787,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               type="button"
               onClick={() => onOpenRefill(medication)}
               title="تعبئة رصيد"
-              className="w-6 h-6 flex items-center justify-center rounded-full bg-teal-100 text-teal-800 hover:bg-teal-200 transition-colors active:scale-95"
+              className="w-6 h-6 flex items-center justify-center rounded-full bg-teal-100 text-teal-800 hover:bg-teal-200 transition-colors active:scale-95 cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
             </button>

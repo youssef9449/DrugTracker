@@ -73,8 +73,8 @@ function upsertApplicationMetaData(xml, androidName, value) {
   const closeIdx = xml.indexOf('/>', nameIdx);
   if (openIdx === -1 || closeIdx === -1) throw new Error('malformed meta-data');
   let start = openIdx;
-  while (start > 0 && (xml[start - 1] === ' ' || xml[start - 1] === '\\t')) start--;
-  if (start > 0 && xml[start - 1] === '\\n') start--;
+  while (start > 0 && (xml[start - 1] === ' ' || xml[start - 1] === '\t')) start--;
+  if (start > 0 && xml[start - 1] === '\n') start--;
   return xml.slice(0, start) + metaXml + xml.slice(closeIdx + 2);
 }
 

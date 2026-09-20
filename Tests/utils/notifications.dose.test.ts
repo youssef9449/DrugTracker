@@ -96,10 +96,35 @@ beforeEach(() => {
   mocks.checkPermissions.mockResolvedValue({ display: 'granted' });
   mocks.checkExactNotificationSetting.mockResolvedValue({ exact_alarm: 'granted' });
   mocks.schedule.mockResolvedValue({ notifications: [] });
+  mocks.nativeSchedule.mockResolvedValue({ ok: true });
+  mocks.nativeCancel.mockResolvedValue({ ok: true, status: 'SUCCESS' });
+  mocks.nativeSnooze.mockResolvedValue({ ok: true });
+  mocks.nativeCancelSnooze.mockResolvedValue({ ok: true });
+  mocks.nativeIsScheduled.mockResolvedValue({
+    scheduled: true,
+    triggerAtEpochMs: Date.now() + 60_000,
+  });
 });
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe('Android Phase 6 scheduling boundary', () => {
+  it('uses the Dose Reminder exact-alarm bridge and does not call LocalNotifications.schedule', async () => {
+    mocks.platform.mockReturnValue('android');
+    await scheduleDoseReminder('med-android', 'Test', '20:00', 2, 'قرص', 'd1');
+
+    expect(mocks.nativeSchedule).toHaveBeenCalledTimes(1);
+    expect(mocks.schedule).not.toHaveBeenCalled();
+
+    const options = mocks.nativeSchedule.mock.calls[0][0];
+    expect(options.medicationId).toBe('med-android');
+    expect(options.doseId).toBe('d1');
+    expect(options.reminderTime).toBe('20:00');
+    expect(options.amount).toBe(2);
+    expect(options.triggerAtEpochMs).toBeGreaterThan(Date.now());
+  });
 });
 
 describe('scheduleDoseReminder — skipToday (consumed-day suppression)', () => {

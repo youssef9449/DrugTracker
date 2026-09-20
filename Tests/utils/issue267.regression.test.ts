@@ -423,7 +423,7 @@ describe('#267 regression 6 — Exact Auto → Manual Take: no double deduction'
       medications: durable.medications,
       logs: durable.logs,
       globalAutoDeductEnabled: true,
-      listFired: async () => [fired({ doseId: 'd1', calendarDate: TODAY, amount: 1 })],
+      listFired: async () => ({ ok: true, events: [fired({ doseId: 'd1', calendarDate: TODAY, amount: 1 })] }),
       markReconciled: async () => ({ ok: true, changed: true }),
       persistMeds: (m) => {
         durable.medications = m;
@@ -481,7 +481,7 @@ describe('#267 regression 7 — Manual Take → Exact Auto: same occurrence not 
       medications: durable.medications,
       logs: durable.logs,
       globalAutoDeductEnabled: true,
-      listFired: async () => [fired({ doseId: 'd1', calendarDate: TODAY, amount: 1 })],
+      listFired: async () => ({ ok: true, events: [fired({ doseId: 'd1', calendarDate: TODAY, amount: 1 })] }),
       markReconciled: async () => ({ ok: true, changed: true }),
       persistMeds: (m) => {
         durable.medications = m;
@@ -652,7 +652,7 @@ describe('#267 regression 11 — Schedule removed after Exact FIRED: FIRED still
       medications: durable.medications,
       logs: durable.logs,
       globalAutoDeductEnabled: true,
-      listFired: async () => [fired({ doseId: 'd1', calendarDate: TODAY, amount: 1 })],
+      listFired: async () => ({ ok: true, events: [fired({ doseId: 'd1', calendarDate: TODAY, amount: 1 })] }),
       markReconciled: async () => ({ ok: true, changed: true }),
       persistMeds: (m) => {
         durable.medications = m;
@@ -701,7 +701,7 @@ describe('#267 regression 11 — Schedule removed after Exact FIRED: FIRED still
       medications: durable.medications,
       logs: durable.logs,
       globalAutoDeductEnabled: true,
-      listFired: async () => [fired({ doseId: 'd1', calendarDate: TODAY, amount: 1 })],
+      listFired: async () => ({ ok: true, events: [fired({ doseId: 'd1', calendarDate: TODAY, amount: 1 })] }),
       markReconciled: async () => ({ ok: true, changed: true }),
       persistMeds: (m) => {
         durable.medications = m;
@@ -760,7 +760,7 @@ describe('#267 regression 12 — Multiple dose isolation', () => {
       medications: durable.medications,
       logs: durable.logs,
       globalAutoDeductEnabled: true,
-      listFired: async () => [fired({ doseId: 'd2', calendarDate: TODAY, amount: 1 })],
+      listFired: async () => ({ ok: true, events: [fired({ doseId: 'd2', calendarDate: TODAY, amount: 1 })] }),
       markReconciled: async () => ({ ok: true, changed: true }),
       persistMeds: (m) => {
         durable.medications = m;

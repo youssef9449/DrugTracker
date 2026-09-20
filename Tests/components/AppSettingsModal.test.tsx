@@ -23,13 +23,13 @@ vi.mock('@/utils/notifications', async () => {
 });
 
 const mockSettings: PharmacySettings = {
-  pharmacyPhone: '01000000000',
-  pharmacyName: 'صيدلية الأمل',
-  customerCode: '12345',
   defaultDurationDays: 30,
-  customQuantities: {},
-  address: 'شارع التحرير',
-  contactPhone: '01100000000',
+  pharmacies: [],
+  selectedPharmacyId: '',
+  whatsappContacts: [],
+  whatsappAddresses: [],
+  selectedWhatsappContactIds: [],
+  selectedWhatsappAddressIds: [],
 };
 
 describe('AppSettingsModal — Notification Controls', () => {

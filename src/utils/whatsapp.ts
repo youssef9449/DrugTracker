@@ -249,8 +249,7 @@ export interface CalculatedOrderQuantity {
  */
 export function calculateMedicationOrderQuantity(
   med: Medication,
-  durationDays: number,
-  customQuantities?: Record<string, number>
+  durationDays: number
 ): CalculatedOrderQuantity {
   const monthsMultiplier = durationDays / 30;
   const packSize =
@@ -259,22 +258,6 @@ export function calculateMedicationOrderQuantity(
       : med.packageSize && med.packageSize > 0
       ? med.packageSize
       : 30;
-
-  // Preserve the legacy custom-quantity behavior for settings and older
-  // saved data. The shopping view now calculates directly from duration.
-  if (
-    customQuantities &&
-    customQuantities[med.id] !== undefined &&
-    customQuantities[med.id] > 0
-  ) {
-    const baseMonthlyQuantity = customQuantities[med.id];
-    return {
-      quantity: baseMonthlyQuantity * monthsMultiplier,
-      isCustom: true,
-      baseMonthlyQuantity,
-      monthsMultiplier,
-    };
-  }
 
   // Calculate the actual consumption for the selected number of days.
   let quantity: number;

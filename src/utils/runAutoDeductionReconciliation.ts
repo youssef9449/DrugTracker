@@ -61,7 +61,7 @@ export interface RunReconciliationInput {
   /** Prefer omit — gate loads durable state. Kept for tests that inject. */
   medications?: Medication[];
   logs?: ConsumptionLog[];
-  listFired?: () => Promise<ListFiredEventsResult | AutoDeductionEvent[]>;
+  listFired?: () => Promise<ListFiredEventsResult>;
   markReconciled?: (
     medicationId: string,
     doseId: string,
@@ -280,13 +280,9 @@ async function runOnce(
   let listOk = true;
   try {
     const listed = await listFired();
-    if (Array.isArray(listed)) {
-      // Legacy test injects that still return AutoDeductionEvent[]
-      events = listed;
-    } else {
-      listOk = listed.ok !== false;
-      events = listed.events ?? [];
-      if (!listOk) {
+    listOk = listed.ok !== false;
+    events = listed.events ?? [];
+    if (!listOk) {
         return {
           medications: baseMeds,
           logs: baseLogs,
@@ -300,7 +296,6 @@ async function runOnce(
           nativeListFailed: true,
           nativeListError: listed.error,
         } as RunReconciliationOutput;
-      }
     }
   } catch (e) {
     return {

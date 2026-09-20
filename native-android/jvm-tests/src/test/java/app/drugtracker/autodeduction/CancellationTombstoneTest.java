@@ -128,21 +128,6 @@ public class CancellationTombstoneTest {
     }
 
     @Test
-    public void legacyPureMillisTombstone_comparedByMillis() throws Exception {
-        String key = AutoDeductionContract.occurrenceKey("m", "d", "2026-09-23");
-        // legacy cancel millis=1000; schedule 1000-1 is newer → active
-        cancelPrefs().edit().putString(cancelKey(key), "1000").commit();
-        JSONObject meta = new JSONObject();
-        meta.put("scheduleVersion", "1000-1-u");
-        schedulePrefs().edit().putString(schKey(key), meta.toString()).commit();
-        assertFalse(newScheduler().isOccurrenceCancelledKey(key));
-
-        // cancel pure millis 2000 newer than schedule 1000-1 → cancelled
-        cancelPrefs().edit().putString(cancelKey(key), "2000").commit();
-        assertTrue(newScheduler().isOccurrenceCancelledKey(key));
-    }
-
-    @Test
     public void malformedOrdering_withTombstone_failSafeCancelled() throws Exception {
         String key = AutoDeductionContract.occurrenceKey("m", "d", "2026-09-24");
         cancelPrefs().edit().putString(cancelKey(key), "not-a-token").commit();

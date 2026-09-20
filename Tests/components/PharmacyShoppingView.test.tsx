@@ -24,13 +24,13 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
 }
 
 const defaultSettings: PharmacySettings = {
-  pharmacyPhone: '01012345678',
-  pharmacyName: 'Test Pharmacy',
-  customerCode: '',
   defaultDurationDays: 30,
-  customQuantities: {},
-  address: '',
-  contactPhone: '',
+  pharmacies: [],
+  selectedPharmacyId: '',
+  whatsappContacts: [],
+  whatsappAddresses: [],
+  selectedWhatsappContactIds: [],
+  selectedWhatsappAddressIds: [],
 };
 
 function renderView(overrides: Record<string, unknown> = {}) {

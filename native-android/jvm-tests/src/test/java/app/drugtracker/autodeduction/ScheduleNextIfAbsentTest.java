@@ -43,7 +43,7 @@ public class ScheduleNextIfAbsentTest {
 
         AutoDeductionScheduler s = newScheduler();
         AutoDeductionScheduler.ScheduleResult r =
-                s.scheduleNextOccurrenceIfAbsent("med", "dose", d, "08:00", 1.5);
+                s.scheduleNextOccurrenceIfAbsent("med", "dose", d, "08:00", 1.5, 1L);
         assertTrue("expected create ok, got " + r.error, r.ok);
 
         String d1Key = AutoDeductionContract.occurrenceKey("med", "dose", d1);
@@ -138,7 +138,7 @@ public class ScheduleNextIfAbsentTest {
         assertNotNull(d1);
 
         AutoDeductionScheduler s = newScheduler();
-        assertTrue(s.scheduleNextOccurrenceIfAbsent("med", "dose", d, "07:00", 1.0).ok);
+        assertTrue(s.scheduleNextOccurrenceIfAbsent("med", "dose", d, "07:00", 1.0, 1L).ok);
         String d1Key = AutoDeductionContract.occurrenceKey("med", "dose", d1);
         String firstRaw = schedulePrefs().getString(schKey(d1Key), null);
         assertNotNull(firstRaw);

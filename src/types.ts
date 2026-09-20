@@ -354,41 +354,23 @@ export interface UserAddress {
 }
 
 export interface PharmacySettings {
-  pharmacyPhone: string; // e.g., "01012345678"
-  pharmacyName: string; // e.g., "صيدلية الإسعاف"
-  customerCode: string; // customer code at the pharmacy (optional)
   defaultDurationDays: 30 | 60;
-  customQuantities: Record<string, number>; // medId -> custom quantity
-  /**
-   * Customer's delivery address — included in the WhatsApp order
-   * message so the pharmacy knows where to deliver.
-   */
-  address: string;
-  /**
-   * Customer's contact phone number — included in the WhatsApp
-   * order message so the pharmacy can call back to confirm.
-   */
-  contactPhone: string;
-  pharmacies?: Pharmacy[];
-  selectedPharmacyId?: string;
-  whatsappContacts?: UserContact[];
-  whatsappAddresses?: UserAddress[];
+  pharmacies: Pharmacy[];
+  selectedPharmacyId: string;
+  whatsappContacts: UserContact[];
+  whatsappAddresses: UserAddress[];
   selectedWhatsappContactIds?: string[];
   selectedWhatsappAddressIds?: string[];
 }
 
 export const DEFAULT_PHARMACY_SETTINGS: PharmacySettings = {
-  pharmacyPhone: '',
-  pharmacyName: '',
-  customerCode: '',
   defaultDurationDays: 30,
-  customQuantities: {},
-  address: '',
-  contactPhone: '',
   pharmacies: [],
   selectedPharmacyId: '',
   whatsappContacts: [],
   whatsappAddresses: [],
+  selectedWhatsappContactIds: [],
+  selectedWhatsappAddressIds: [],
 };
 
 export type MedicationStatus = 'out_of_stock' | 'critical' | 'warning' | 'sufficient';

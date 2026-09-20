@@ -1,5 +1,5 @@
 /**
- * Regression tests for safe AutoDeduction receiver upsert in prepare-android.
+ * Regression tests for safe shared alarm lifecycle receiver upsert and adapter registration in prepare-android.
  * Run: node scripts/test-prepare-android-receivers.mjs
  * No npm/npx required.
  */
@@ -45,13 +45,38 @@ const PRIVATE = `        <receiver
         </receiver>`;
 
 const SYSTEM = `        <receiver
-            android:name="app.drugtracker.autodeduction.AutoDeductionSystemReceiver"
+            android:name="app.drugtracker.alarmruntime.DrugTrackerAlarmSystemReceiver"
             android:exported="true"
             android:enabled="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>`;
+
+function upsertApplicationMetaData(xml, androidName, value) {
+  const nameAttr = `android:name="${androidName}"`;
+  const metaXml = `        <meta-data
+            android:name="${androidName}"
+            android:value="${value}" />`;
+  const nameIdx = xml.indexOf(nameAttr);
+  if (nameIdx === -1) {
+    if (!xml.includes('</application>')) {
+      throw new Error('</application> not found');
+    }
+    return xml.replace('</application>', `${metaXml}
+    </application>`);
+  }
+  const openIdx = xml.lastIndexOf('<meta-data', nameIdx);
+  const closeIdx = xml.indexOf('/>', nameIdx);
+  if (openIdx === -1 || closeIdx === -1) throw new Error('malformed meta-data');
+  let start = openIdx;
+  while (start > 0 && (xml[start - 1] === ' ' || xml[start - 1] === '\t')) start--;
+  if (start > 0 && xml[start - 1] === '\n') start--;
+  return xml.slice(0, start) + metaXml + xml.slice(closeIdx + 2);
+}
 
 function countName(xml, name) {
   let n = 0;
@@ -130,14 +155,18 @@ assert(
 
 ({ manifest } = upsertReceiverByName(
   manifest,
-  'app.drugtracker.autodeduction.AutoDeductionSystemReceiver',
+  'app.drugtracker.alarmruntime.DrugTrackerAlarmSystemReceiver',
   SYSTEM
 ));
 assert(manifest.includes('com.other.ReceiverA'), 'A still after system insert');
 assert(manifest.includes('com.other.ReceiverB'), 'B still after system insert');
 assert(
-  countName(manifest, 'app.drugtracker.autodeduction.AutoDeductionSystemReceiver') === 1,
-  'one system receiver'
+  countName(manifest, 'app.drugtracker.alarmruntime.DrugTrackerAlarmSystemReceiver') === 1,
+  'one shared system lifecycle receiver'
+);
+assert(
+  countName(manifest, 'app.drugtracker.autodeduction.AutoDeductionSystemReceiver') === 0,
+  'legacy Auto system receiver removed'
 );
 
 // Idempotency: run again
@@ -148,7 +177,7 @@ assert(
 ));
 ({ manifest } = upsertReceiverByName(
   manifest,
-  'app.drugtracker.autodeduction.AutoDeductionSystemReceiver',
+  'app.drugtracker.alarmruntime.DrugTrackerAlarmSystemReceiver',
   SYSTEM
 ));
 assert(
@@ -156,11 +185,28 @@ assert(
   'idempotent private'
 );
 assert(
-  countName(manifest, 'app.drugtracker.autodeduction.AutoDeductionSystemReceiver') === 1,
+  countName(manifest, 'app.drugtracker.alarmruntime.DrugTrackerAlarmSystemReceiver') === 1,
   'idempotent system'
 );
 assert(manifest.includes('com.other.ReceiverA'), 'A after idempotent pass');
 assert(manifest.includes('com.other.ReceiverB'), 'B after idempotent pass');
+assert(manifest.includes('android.intent.action.QUICKBOOT_POWERON'), 'shared receiver handles QUICKBOOT');
+assert(manifest.includes('android.intent.action.TIMEZONE_CHANGED'), 'shared receiver handles TIMEZONE_CHANGED');
+assert(manifest.includes('android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED'), 'shared receiver handles exact permission');
+manifest = upsertApplicationMetaData(
+  manifest,
+  'app.drugtracker.EXACT_ALARM_FEATURE_ADAPTERS',
+  'app.drugtracker.autodeduction.AutoDeductionAlarmFeature,app.drugtracker.alarmruntime.CriticalStockAlarmFeature,app.drugtracker.alarmruntime.DoseReminderAlarmFeature'
+);
+const adapterMeta = 'app.drugtracker.EXACT_ALARM_FEATURE_ADAPTERS';
+assert(countName(manifest, adapterMeta) === 1, 'one shared feature-adapter registry');
+assert(
+  manifest.includes('app.drugtracker.autodeduction.AutoDeductionAlarmFeature') &&
+  manifest.includes('app.drugtracker.alarmruntime.CriticalStockAlarmFeature') &&
+  manifest.includes('app.drugtracker.alarmruntime.DoseReminderAlarmFeature'),
+  'Auto + Critical Stock + Dose Reminder adapters are registered'
+);
+
 
 // Dangerous regex must NOT be used — prove old pattern would delete A
 const dangerous = /\s*<receiver[\s\S]*?app\.drugtracker\.autodeduction\.AutoDeductionReceiver[\s\S]*?<\/receiver>/;

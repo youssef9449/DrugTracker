@@ -1,17 +1,26 @@
 package app.drugtracker.alarmruntime;
 
-import android.app.AlarmManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.os.Build;
 import android.util.Log;
 
-/** Shared system receiver for exact-alarm lifecycle recovery. */
-public final class ExactAlarmSystemReceiver
+/**
+ * Single application receiver for Android system lifecycle events that can
+ * require restoration of native alarm state.
+ *
+ * <p>Feature recovery is delegated through {@link ExactAlarmLifecycle};
+ * this receiver contains no Auto/Critical/Dose business logic.</p>
+ */
+public final class DrugTrackerAlarmSystemReceiver
         extends BroadcastReceiver {
     private static final String TAG =
-            "ExactAlarmSystemReceiver";
+            "DrugTrackerAlarmSystemReceiver";
+
+    private static final String ACTION_QUICKBOOT_POWERON =
+            "android.intent.action.QUICKBOOT_POWERON";
+    private static final String ACTION_EXACT_ALARM_PERMISSION =
+            "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED";
 
     @Override
     public void onReceive(
@@ -21,19 +30,15 @@ public final class ExactAlarmSystemReceiver
             return;
         }
 
-        String action = intent.getAction();
+        final String action = intent.getAction();
         final String reason;
 
         if (Intent.ACTION_BOOT_COMPLETED.equals(action)
-                || "android.intent.action.QUICKBOOT_POWERON"
-                        .equals(action)) {
+                || ACTION_QUICKBOOT_POWERON.equals(action)) {
             reason = "BOOT";
         } else if (Intent.ACTION_TIMEZONE_CHANGED.equals(action)) {
             reason = "TIMEZONE_CHANGED";
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-                && AlarmManager
-                        .ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED
-                        .equals(action)) {
+        } else if (ACTION_EXACT_ALARM_PERMISSION.equals(action)) {
             reason = "EXACT_ALARM_PERMISSION";
         } else {
             Log.w(TAG,
@@ -53,6 +58,6 @@ public final class ExactAlarmSystemReceiver
             } finally {
                 pendingResult.finish();
             }
-        }, "exact-alarm-restore").start();
+        }, "drugtracker-alarm-restore").start();
     }
 }

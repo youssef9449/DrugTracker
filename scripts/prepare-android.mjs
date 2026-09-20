@@ -149,8 +149,10 @@ const alarmRuntimeFiles = [
   'ExactAlarmStore.java',
   'ExactAlarmRuntime.java',
   'ExactAlarmLifecycle.java',
-  'ExactAlarmSystemReceiver.java',
+  'DrugTrackerAlarmSystemReceiver.java',
   'ExactAlarmFeatureAdapter.java',
+  'CriticalStockAlarmFeature.java',
+  'DoseReminderAlarmFeature.java',
 ];
 if (!fs.existsSync(alarmRuntimeDestDir)) {
   fs.mkdirSync(alarmRuntimeDestDir, { recursive: true });
@@ -227,7 +229,7 @@ for (const file of doseReminderFiles) {
   console.info(`[prepare-android] Installed ${path.relative(root, src)} → ${path.relative(root, dest)}`);
 }
 
-// ── 5. Phase 2: register private Auto receiver + shared system lifecycle receiver ─
+// ── 5. Register private feature delivery + one shared system lifecycle receiver ─
 manifest = fs.readFileSync(manifestPath, 'utf8');
 const bootPermission = '<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />';
 if (!manifest.includes(bootPermission)) {
@@ -294,7 +296,7 @@ const privateAlarmReceiver = `        <receiver
 // System lifecycle is owned by the shared exact-alarm runtime.
 // exported=true is required for system-delivered broadcasts on API 31+.
 const systemLifecycleReceiver = `        <receiver
-            android:name="app.drugtracker.alarmruntime.ExactAlarmSystemReceiver"
+            android:name="app.drugtracker.alarmruntime.DrugTrackerAlarmSystemReceiver"
             android:exported="true"
             android:enabled="true">
             <intent-filter>
@@ -359,19 +361,23 @@ function upsertApplicationMetaData(xml, androidName, value) {
   manifest,
   'app.drugtracker.autodeduction.AutoDeductionSystemReceiver'
 ));
+({ manifest } = removeReceiverByName(
+  manifest,
+  'app.drugtracker.alarmruntime.ExactAlarmSystemReceiver'
+));
 ({ manifest } = upsertReceiverByName(
   manifest,
-  'app.drugtracker.alarmruntime.ExactAlarmSystemReceiver',
+  'app.drugtracker.alarmruntime.DrugTrackerAlarmSystemReceiver',
   systemLifecycleReceiver
 ));
 manifest = upsertApplicationMetaData(
   manifest,
   'app.drugtracker.EXACT_ALARM_FEATURE_ADAPTERS',
-  'app.drugtracker.autodeduction.AutoDeductionAlarmFeature'
+  'app.drugtracker.autodeduction.AutoDeductionAlarmFeature,app.drugtracker.alarmruntime.CriticalStockAlarmFeature,app.drugtracker.alarmruntime.DoseReminderAlarmFeature'
 );
 
 fs.writeFileSync(manifestPath, manifest);
 console.info(
-  '[prepare-android] Ensured AutoDeductionReceiver (private) + shared ExactAlarmSystemReceiver (lifecycle).'
+  '[prepare-android] Ensured private AutoDeductionReceiver + shared DrugTrackerAlarmSystemReceiver (lifecycle adapters: Auto, Critical Stock, Dose Reminder).'
 );
 console.info('Prepared Android exact-alarm permission + shared alarm runtime + dose-reminder delivery sources + auto-deduction.');

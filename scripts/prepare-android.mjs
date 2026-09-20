@@ -151,6 +151,8 @@ const alarmRuntimeFiles = [
   'ExactAlarmLifecycle.java',
   'DrugTrackerAlarmSystemReceiver.java',
   'ExactAlarmFeatureAdapter.java',
+  'CriticalStockAlarmFeature.java',
+  'DoseReminderAlarmFeature.java',
 ];
 if (!fs.existsSync(alarmRuntimeDestDir)) {
   fs.mkdirSync(alarmRuntimeDestDir, { recursive: true });

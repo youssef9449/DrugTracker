@@ -48,7 +48,6 @@ import {
   scheduleCriticalAlarmNative,
   cancelCriticalAlarmNative,
   verifyCriticalAlarmPendingNative,
-  listScheduledCriticalMedicationIdsNative,
 } from './criticalAlarmNative';
 import {
   scheduleDoseReminderNative,
@@ -56,7 +55,6 @@ import {
   scheduleDoseSnoozeNative,
   cancelDoseSnoozeNative,
   isDoseReminderScheduledNative,
-  listDoseReminderScheduledKeysNative,
   cancelStaleDoseReminderAlarmsNative,
 } from './doseReminderNative';
 
@@ -890,10 +888,6 @@ export async function clearNativeDoseReminderReArm(
 ): Promise<void> {
   // No separate delivery-evidence store remains. ExactAlarmRuntime's durable
   // schedule row is the only scheduling source of truth.
-}
-
-function isDoseAlarmBandId(_id: number): boolean {
-  return false;
 }
 
 /**

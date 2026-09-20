@@ -23,7 +23,7 @@ public final class AutoDeductionLifecycle {
     public static void promoteAndRestore(Context context, String reason) {
         try {
             AutoDeductionEventStore store = new AutoDeductionEventStore(context);
-            int promoted = store.promotePendingFires();
+            int promoted = store.promotePendingFiresResult().promoted;
             if (promoted > 0) {
                 Log.i(TAG, reason + ": promoted " + promoted + " pending-fire record(s)");
             }

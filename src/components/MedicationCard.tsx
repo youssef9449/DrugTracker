@@ -250,7 +250,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           <MedicationMenu
             medication={medication}
             isAutoActive={isAutoActive}
-            showRefillInMenu={false}
             onOpenRefill={onOpenRefill}
             onEdit={onEdit}
             onDelete={onDelete}
@@ -383,7 +382,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           <MedicationMenu
             medication={medication}
             isAutoActive={isAutoActive}
-            showRefillInMenu={false}
             onOpenRefill={onOpenRefill}
             onEdit={onEdit}
             onDelete={onDelete}
@@ -635,7 +633,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             <MedicationMenu
               medication={medication}
               isAutoActive={isAutoActive}
-              showRefillInMenu={false}
               onOpenRefill={onOpenRefill}
               onEdit={onEdit}
               onDelete={onDelete}
@@ -852,7 +849,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             <MedicationMenu
               medication={medication}
               isAutoActive={isAutoActive}
-              showRefillInMenu={false}
               onOpenRefill={onOpenRefill}
               onEdit={onEdit}
               onDelete={onDelete}

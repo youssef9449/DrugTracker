@@ -559,7 +559,7 @@ public final class AutoDeductionScheduler {
 
             // Issue #240: delivery must own the *current* schedule row.
             final String prefKey = SCHEDULE_KEY_PREFIX + key;
-            final String metaRaw = schedulingAdapter.getScheduleRaw(prefKey, null);
+            final String metaRaw = schedulingAdapter.getScheduleRaw(prefKey);
             if (metaRaw == null || metaRaw.isEmpty()) {
                 Log.i(TAG, "fire linearization: STALE (no active schedule metadata) for " + key);
                 return FireResult.cancelled();
@@ -834,7 +834,7 @@ public final class AutoDeductionScheduler {
             }
             // Past snapshot must still be the one we are recovering from (if present).
             if (pastPrefKey != null && observedVersion != null && !observedVersion.isEmpty()) {
-                String cur = schedulingAdapter.getScheduleRaw(pastPrefKey, null);
+                String cur = schedulingAdapter.getScheduleRaw(pastPrefKey);
                 if (cur != null && !isMetadataOwnedByVersion(cur, observedVersion)) {
                     return ScheduleResult.fail("snapshot_stale");
                 }
@@ -852,7 +852,7 @@ public final class AutoDeductionScheduler {
                     pastPrefKey != null && pastPrefKey.equals(futurePrefKey);
             String existing = sameKeyRecovery
                     ? null
-                    : schedulingAdapter.getScheduleRaw(futurePrefKey, null);
+                    : schedulingAdapter.getScheduleRaw(futurePrefKey);
             if (existing != null && !existing.isEmpty()) {
                 return new ScheduleResult(true, "already_present", futureKey);
             }
@@ -974,7 +974,7 @@ public final class AutoDeductionScheduler {
                 return false;
             }
 
-            String currentRaw = schedulingAdapter.getScheduleRaw(prefKey, null);
+            String currentRaw = schedulingAdapter.getScheduleRaw(prefKey);
             int persistedRetryCount = nextRetryCount;
 
             if (currentRaw != null && !currentRaw.isEmpty()) {
@@ -998,9 +998,9 @@ public final class AutoDeductionScheduler {
                     current.put(FIELD_FIRE_RETRY_COUNT, persistedRetryCount);
 
                     if (forceFireRetryScheduleMarkerCommitFailureForTest
-                            || !schedulePrefs.edit()
-                                    .putString(prefKey, current.toString())
-                                    .commit()) {
+                            || !schedulingAdapter.writeScheduleRaw(
+                                    prefKey,
+                                    current.toString())) {
                         return false;
                     }
 
@@ -1284,7 +1284,7 @@ public final class AutoDeductionScheduler {
      * Schedule-metadata marker is secondary; independent evidence is the authority.
      */
     private boolean clearFireRetryMarkerLocked(String prefKey) {
-        String raw = schedulingAdapter.getScheduleRaw(prefKey, null);
+        String raw = schedulingAdapter.getScheduleRaw(prefKey);
         if (raw == null || raw.isEmpty()) {
             return true;
         }
@@ -1294,9 +1294,10 @@ public final class AutoDeductionScheduler {
                 return true;
             }
             obj.remove(FIELD_FIRE_RETRY_COUNT);
-            boolean committed = schedulePrefs.edit()
-                    .putString(prefKey, obj.toString())
-                    .commit();
+            boolean committed =
+                    schedulingAdapter.writeScheduleRaw(
+                            prefKey,
+                            obj.toString());
             if (!committed) {
                 Log.w(TAG, "fire retry marker clear failed for " + prefKey
                         + " — durable FIRED evidence remains authoritative");
@@ -1516,14 +1517,14 @@ public final class AutoDeductionScheduler {
                 medicationId, doseId, calendarDate);
         synchronized (SCHEDULE_LOCK) {
             syncAlarmRuntimeTestControls();
-            ExactAlarmRuntime.CancelResult result = schedulingAdapter.cancelOccurrence(
-                    AutoDeductionContract.occurrenceUri(
-                            medicationId, doseId, calendarDate).toString(),
-                    key,
-                    AutoDeductionContract.ACTION_AUTO_DEDUCTION,
-                    AutoDeductionReceiver.class);
+            AutoDeductionSchedulingAdapter.CancelResult result =
+                    schedulingAdapter.cancelOccurrence(
+                            medicationId,
+                            doseId,
+                            calendarDate);
             if (!result.isOk()) return CancelResult.fail(result.error);
-            return result.status == ExactAlarmRuntime.CancelResult.Status.ALREADY_ABSENT
+            return result.status
+                    == AutoDeductionSchedulingAdapter.CancelResult.Status.ALREADY_ABSENT
                     ? CancelResult.alreadyAbsent()
                     : CancelResult.success();
         }
@@ -1851,7 +1852,7 @@ public final class AutoDeductionScheduler {
             // D+1 may already exist — check under lock; otherwise cannot install.
             synchronized (SCHEDULE_LOCK) {
                 if (!isMetadataOwnedByVersion(
-                        schedulingAdapter.getScheduleRaw(pastPrefKey, null), observedVersion)) {
+                        schedulingAdapter.getScheduleRaw(pastPrefKey), observedVersion)) {
                     return ScheduleResult.fail("snapshot_stale");
                 }
                 String nextKey = AutoDeductionContract.occurrenceKey(
@@ -1884,7 +1885,7 @@ public final class AutoDeductionScheduler {
 
         synchronized (SCHEDULE_LOCK) {
             // Snapshot must still own past D — otherwise amount/time are obsolete.
-            String currentPast = schedulingAdapter.getScheduleRaw(pastPrefKey, null);
+            String currentPast = schedulingAdapter.getScheduleRaw(pastPrefKey);
             if (!isMetadataOwnedByVersion(currentPast, observedVersion)) {
                 return ScheduleResult.fail("snapshot_stale");
             }
@@ -2237,7 +2238,7 @@ public final class AutoDeductionScheduler {
             String reason
     ) {
         synchronized (SCHEDULE_LOCK) {
-            String currentRaw = schedulingAdapter.getScheduleRaw(prefKey, null);
+            String currentRaw = schedulingAdapter.getScheduleRaw(prefKey);
             if (currentRaw == null) return true;
             if (expectedRaw != null && !expectedRaw.equals(currentRaw)) return true;
 
@@ -2249,14 +2250,11 @@ public final class AutoDeductionScheduler {
                     identity.doseId,
                     identity.calendarDate);
             syncAlarmRuntimeTestControls();
-            ExactAlarmRuntime.CancelResult result = schedulingAdapter.cancelOccurrence(
-                    AutoDeductionContract.occurrenceUri(
+            AutoDeductionSchedulingAdapter.CancelResult result =
+                    schedulingAdapter.cancelOccurrence(
                             identity.medicationId,
                             identity.doseId,
-                            identity.calendarDate).toString(),
-                    occurrenceKey,
-                    AutoDeductionContract.ACTION_AUTO_DEDUCTION,
-                    AutoDeductionReceiver.class);
+                            identity.calendarDate);
             if (!result.isOk()) return false;
 
             Log.w(TAG, "quarantined malformed schedule metadata: " + prefKey
@@ -2468,7 +2466,7 @@ public final class AutoDeductionScheduler {
                 return new OccurrenceSnapshot(OccurrenceSnapshot.Status.CANCELLED, null);
             }
             final String prefKey = SCHEDULE_KEY_PREFIX + key;
-            String metaRaw = schedulingAdapter.getScheduleRaw(prefKey, null);
+            String metaRaw = schedulingAdapter.getScheduleRaw(prefKey);
             if (metaRaw != null && !metaRaw.isEmpty()) {
                 try {
                     JSONObject meta = new JSONObject(metaRaw);

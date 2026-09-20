@@ -30,7 +30,17 @@ def productionSources = fileTree("../auto-deduction") {
 }
 
 def alarmRuntimeSources = fileTree("../alarm-runtime") {
-    include("*.java")
+    include(
+            "ExactAlarmContract.java",
+            "ExactAlarmOperationLock.java",
+            "ExactAlarmStore.java",
+            "ExactAlarmRuntime.java",
+            "ExactAlarmLifecycle.java",
+            "DrugTrackerAlarmSystemReceiver.java",
+            "ExactAlarmFeatureAdapter.java",
+            "CriticalStockAlarmFeature.java",
+            "DoseReminderAlarmFeature.java"
+    )
 }
 
 def notificationRuntimeSources = fileTree("../notification-runtime") {

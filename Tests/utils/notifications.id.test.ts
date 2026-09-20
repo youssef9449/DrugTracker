@@ -7,7 +7,18 @@ const mocks = vi.hoisted(() => ({
   checkPermissions: vi.fn(),
   checkExactNotificationSetting: vi.fn(),
   changeExactNotificationSetting: vi.fn(),
-  platform: vi.fn(() => 'android'),
+  nativeSchedule: vi.fn(),
+  nativeCancel: vi.fn(),
+  nativeSnooze: vi.fn(),
+  nativeCancelSnooze: vi.fn(),
+  nativeIsScheduled: vi.fn(),
+  nativeListScheduled: vi.fn(),
+  nativePost: vi.fn(),
+  nativeCheckPermission: vi.fn(),
+  nativeCanExact: vi.fn(),
+  nativeOpenSettings: vi.fn(),
+  nativeAddListener: vi.fn(),
+  platform: vi.fn(() => 'ios'),
 }));
 
 vi.mock('@capacitor/core', () => ({
@@ -15,8 +26,17 @@ vi.mock('@capacitor/core', () => ({
     getPlatform: mocks.platform,
   },
   registerPlugin: () => ({
-    getNextOccurrence: () => Promise.resolve({ valid: false, nextOccurrenceMs: 0 }),
-    clearReArm: () => Promise.resolve({ ok: true }),
+    schedule: mocks.nativeSchedule,
+    cancel: mocks.nativeCancel,
+    scheduleSnooze: mocks.nativeSnooze,
+    cancelSnooze: mocks.nativeCancelSnooze,
+    isScheduled: mocks.nativeIsScheduled,
+    listScheduled: mocks.nativeListScheduled,
+    post: mocks.nativePost,
+    checkPermission: mocks.nativeCheckPermission,
+    canScheduleExactAlarms: mocks.nativeCanExact,
+    openSettings: mocks.nativeOpenSettings,
+    addListener: mocks.nativeAddListener,
   }),
 }));
 

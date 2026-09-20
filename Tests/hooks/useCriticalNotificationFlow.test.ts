@@ -85,20 +85,17 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
 
 function useBothHooks(props: {
   medications: Medication[];
-  notificationsEnabled?: boolean;
   criticalStockAlertsEnabled?: boolean;
   resumeTick?: number;
 }) {
   useStockAlerts({
     medications: props.medications,
-    notificationsEnabled: props.notificationsEnabled ?? true,
     criticalStockAlertsEnabled: props.criticalStockAlertsEnabled ?? true,
     hydrated: true,
     isFirstRun: false,
   });
   useCriticalAlarmScheduler({
     medications: props.medications,
-    notificationsEnabled: props.notificationsEnabled ?? true,
     criticalStockAlertsEnabled: props.criticalStockAlertsEnabled ?? true,
     hydrated: true,
     isFirstRun: false,

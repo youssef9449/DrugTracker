@@ -20,7 +20,6 @@ import {
  */
 export interface UseCriticalAlarmSchedulerOptions {
   medications: Medication[];
-  notificationsEnabled: boolean;
   criticalStockAlertsEnabled: boolean;
   hydrated: boolean;
   isFirstRun: boolean;

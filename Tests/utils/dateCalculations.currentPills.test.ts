@@ -117,4 +117,47 @@ describe('Issue #266 — durable currentPills is sole live stock', () => {
   it('getTodayDateString is stable under pinned time', () => {
     expect(getTodayDateString()).toBe('2024-09-10');
   });
+
+  it('warningThresholdDays is per-medication: higher threshold yields earlier critical alarm', () => {
+    // Same stock + rate: daysLeft = 100/10 = 10.
+    // threshold 5 → alarm in 5 days; threshold 8 → alarm in 2 days (earlier).
+    const shared = {
+      currentPills: 100,
+      dailyDose: 10,
+      autoDeductEnabled: true,
+      doseSchedule: [{ id: 'd1', amount: 10, time: '08:00' }],
+    } as const;
+    const med5 = makeMed({ ...shared, id: 'med-t5', warningThresholdDays: 5 });
+    const med8 = makeMed({ ...shared, id: 'med-t8', warningThresholdDays: 8 });
+    const today = getTodayDateString();
+    const t5 = getCriticalAlarmDate(med5, today);
+    const t8 = getCriticalAlarmDate(med8, today);
+    expect(t5).not.toBeNull();
+    expect(t8).not.toBeNull();
+    expect(t5).not.toBe(t8);
+    // Larger threshold ⇒ critical state reached sooner ⇒ earlier alarm timestamp.
+    expect(t8!).toBeLessThan(t5!);
+  });
+
+  it('changing another medication threshold does not affect this medication alarm date', () => {
+    const shared = {
+      currentPills: 100,
+      dailyDose: 10,
+      autoDeductEnabled: true,
+      doseSchedule: [{ id: 'd1', amount: 10, time: '08:00' }],
+    } as const;
+    const medA = makeMed({ ...shared, id: 'med-a', warningThresholdDays: 5 });
+    const medB5 = makeMed({ ...shared, id: 'med-b', warningThresholdDays: 5 });
+    const medB8 = makeMed({ ...shared, id: 'med-b', warningThresholdDays: 8 });
+    const today = getTodayDateString();
+    const aBefore = getCriticalAlarmDate(medA, today);
+    const b5 = getCriticalAlarmDate(medB5, today);
+    const b8 = getCriticalAlarmDate(medB8, today);
+    const aAfter = getCriticalAlarmDate(medA, today);
+    expect(aBefore).toBe(aAfter);
+    expect(aBefore).toBe(b5);
+    expect(b8).not.toBe(b5);
+    expect(b8!).toBeLessThan(b5!);
+  });
+
 });

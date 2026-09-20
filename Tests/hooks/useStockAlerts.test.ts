@@ -33,13 +33,11 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
 
 function useAlerts(props: {
   medications: Medication[];
-  notificationsEnabled?: boolean;
   criticalStockAlertsEnabled?: boolean;
   hydrated?: boolean;
   isFirstRun?: boolean;
 }) {
   return useStockAlerts({
-    notificationsEnabled: true,
     criticalStockAlertsEnabled: true,
     hydrated: true,
     isFirstRun: false,
@@ -91,15 +89,15 @@ describe('useStockAlerts — gating', () => {
     expect(sendMock).not.toHaveBeenCalled();
   });
 
-  it('does NOT fire when notifications are disabled, and does not mark the episode claimed', () => {
+  it('fires critical alert when critical preference is ON (independent of dose reminders)', () => {
     renderHook(() =>
       useAlerts({
         medications: [makeMed({ currentPills: 0, dailyDose: 1 })],
-        notificationsEnabled: false,
+        criticalStockAlertsEnabled: true,
       })
     );
-    expect(sendMock).not.toHaveBeenCalled();
-    expect(readClaims()['med-1']?.claimed).toBeFalsy();
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(readClaims()['med-1']?.claimed).toBe(true);
   });
 
   it('does NOT fire when critical stock alerts are disabled, and does not mark claimed', () => {
@@ -357,12 +355,12 @@ describe('useStockAlerts — Sufficient clears the claim synchronously (episode 
     expect(sendMock).not.toHaveBeenCalled();
   });
 
-  it('clears an ended episode\u2019s claim even while notifications are disabled (bookkeeping, not notification)', () => {
+  it('clears an ended episode\u2019s claim while critical preference is OFF (bookkeeping, not notification)', () => {
     writeClaim('med-1', { claimed: true, alarmTime: null });
     renderHook(() =>
       useAlerts({
         medications: [makeMed({ currentPills: 30, dailyDose: 1, warningThresholdDays: 5 })],
-        notificationsEnabled: false,
+        criticalStockAlertsEnabled: false,
       })
     );
     expect(sendMock).not.toHaveBeenCalled();
@@ -466,12 +464,12 @@ describe('useStockAlerts — threshold semantics (user-configured threshold only
 describe('useStockAlerts — re-enabling alerts mid-episode', () => {
   it('disabling then re-enabling while still critical allows exactly one notification', () => {
     const { rerender } = renderHook(
-      ({ medications, notificationsEnabled }) =>
-        useAlerts({ medications, notificationsEnabled }),
+      ({ medications, criticalStockAlertsEnabled }) =>
+        useAlerts({ medications, criticalStockAlertsEnabled }),
       {
         initialProps: {
           medications: [makeMed({ currentPills: 7, dailyDose: 1, warningThresholdDays: 7 })],
-          notificationsEnabled: true,
+          criticalStockAlertsEnabled: true,
         },
       }
     );
@@ -480,7 +478,7 @@ describe('useStockAlerts — re-enabling alerts mid-episode', () => {
     // Disabled: nothing sent, nothing claimed.
     rerender({
       medications: [makeMed({ currentPills: 7, dailyDose: 1, warningThresholdDays: 7 })],
-      notificationsEnabled: false,
+      criticalStockAlertsEnabled: false,
     });
     expect(sendMock).toHaveBeenCalledTimes(1);
 
@@ -488,19 +486,19 @@ describe('useStockAlerts — re-enabling alerts mid-episode', () => {
     // opportunity with the first send, so no duplicate.
     rerender({
       medications: [makeMed({ currentPills: 7, dailyDose: 1, warningThresholdDays: 7 })],
-      notificationsEnabled: true,
+      criticalStockAlertsEnabled: true,
     });
     expect(sendMock).toHaveBeenCalledTimes(1);
   });
 
   it('an episode that became critical while disabled notifies exactly once when re-enabled', () => {
     const { rerender } = renderHook(
-      ({ medications, notificationsEnabled }) =>
-        useAlerts({ medications, notificationsEnabled }),
+      ({ medications, criticalStockAlertsEnabled }) =>
+        useAlerts({ medications, criticalStockAlertsEnabled }),
       {
         initialProps: {
           medications: [makeMed({ currentPills: 7, dailyDose: 1, warningThresholdDays: 7 })],
-          notificationsEnabled: false,
+          criticalStockAlertsEnabled: false,
         },
       }
     );
@@ -508,7 +506,7 @@ describe('useStockAlerts — re-enabling alerts mid-episode', () => {
 
     rerender({
       medications: [makeMed({ currentPills: 7, dailyDose: 1, warningThresholdDays: 7 })],
-      notificationsEnabled: true,
+      criticalStockAlertsEnabled: true,
     });
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });

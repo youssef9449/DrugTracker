@@ -346,7 +346,6 @@ export default function App() {
   // Extracted into useStockAlerts for testability (#87).
   useStockAlerts({
     medications,
-    notificationsEnabled,
     criticalStockAlertsEnabled,
     hydrated,
     isFirstRun,
@@ -362,14 +361,13 @@ export default function App() {
   //     critical date and persisting claim=true only after success
   //   - cancel + reschedule when any of the 6 trigger fields change
   //   - cancel for deleted meds
-  //   - cancel all when the user opts out of either flag (re-opening
+  //   - cancel all when the user opts out of critical-stock alerts (re-opening
   //     claims whose future alarm was cancelled before firing)
   //   - per-med operation queue + generation guard so a stale async
   //     operation can never overwrite newer claim state
   // ─────────────────────────────────────────────────────────────
   useCriticalAlarmScheduler({
     medications,
-    notificationsEnabled,
     criticalStockAlertsEnabled,
     hydrated,
     isFirstRun,

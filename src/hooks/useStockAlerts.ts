@@ -14,7 +14,6 @@ import {
 
 interface UseStockAlertsOptions {
   medications: Medication[];
-  notificationsEnabled: boolean;
   criticalStockAlertsEnabled: boolean;
   hydrated: boolean;
   isFirstRun: boolean;
@@ -111,7 +110,6 @@ const IN_FLIGHT_CLAIM = { claimed: true, alarmTime: null } as const;
  */
 export function useStockAlerts({
   medications,
-  // notificationsEnabled intentionally unused: dose-reminder preference is independent.
   criticalStockAlertsEnabled,
   hydrated,
   isFirstRun,

@@ -82,7 +82,6 @@ function makeConsumedMed(
 function useAlerts(medications: Medication[]) {
   return useStockAlerts({
     medications,
-    notificationsEnabled: true,
     criticalStockAlertsEnabled: true,
     hydrated: true,
     isFirstRun: false,

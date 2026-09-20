@@ -30,8 +30,11 @@
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { App } from '@capacitor/app';
-import { LocalNotifications, type Channel, type Importance, type Visibility } from '@capacitor/local-notifications';
-import { DOSE_REMINDER_CHANNEL_ID, DOSE_REMINDER_FOREGROUND_CHANNEL_ID, setAppInForeground } from './utils/notifications';
+import {
+  addNotificationActionPerformedListener,
+  addNotificationReceivedListener,
+} from './utils/notificationRuntime';
+import { setAppInForeground } from './utils/notifications';
 
 let initialized = false;
 
@@ -161,190 +164,50 @@ export async function initNativeBridge(): Promise<void> {
     console.warn('[native] appStateChange listener failed:', err);
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Create notification channels (Android 8.0+ requirement)
-  // ─────────────────────────────────────────────────────────────
-  // Without an Android NotificationChannel, scheduled notifications
-  // silently fail on Android 8.0+. Capacitor LocalNotifications
-  // creates a default channel automatically, but the notification
-  // channel id used in `schedule({ channelId: DOSE_REMINDER_CHANNEL_ID })`
-  // must be created first or Android will fall back to the default
-  // channel (which is acceptable but means we lose the ability to
-  // later customize per-channel importance / sound / vibration).
-  //
-  // We also need to create a separate channel for the "low-stock"
-  // alerts so the user can mute them independently from the dose
-  // reminders.
-  //
-  // On iOS this is a no-op (iOS doesn't have channels — it uses the
-  // notification's category identifier for grouping instead).
-  //
-  // #37: the Capacitor 6.x TypeScript definitions DO include
-  // `createChannel` and `listChannels` (with proper `Channel`,
-  // `Importance`, and `Visibility` types), so no cast is needed.
-  try {
-    await LocalNotifications.registerActionTypes({
-      types: [
-        {
-          id: 'dose-reminder',
-          actions: [
-            {
-              id: 'take_dose',
-              title: 'تم أخذ الجرعة',
-              foreground: true,
-            },
-          ],
-        },
-      ],
-    });
-
-    const existing = await LocalNotifications.listChannels();
-    const existingIds = new Set(
-      (existing?.channels || []).map((c) => c.id)
-    );
-
-    // Importance: 4 = HIGH (makes a sound + shows as heads-up
-    // notification briefly). Visibility: 1 = PUBLIC (shows on
-    // the lock screen).
-    //
-    // Two dose-reminder channels:
-    //
-    // 1. dose-reminder-v3 — BACKGROUND/KILLED channel.
-    //    No `sound` property is set. This is NOT silent — it produces
-    //    the Android default system notification sound. The chain is:
-    //      - Capacitor 6.x NotificationChannelManager.createChannel()
-    //        (node_modules/@capacitor/local-notifications/android/.../
-    //         NotificationChannelManager.java lines 91-102) reads
-    //        `sound` and ONLY calls NotificationChannel.setSound() when
-    //        sound is a non-empty string. When sound is omitted (as we
-    //        do here), setSound() is never called.
-    //      - The Android NotificationChannel constructor
-    //        (new NotificationChannel(id, name, importance)) sets the
-    //        default sound to Settings.System.DEFAULT_NOTIFICATION_URI
-    //        — the user's chosen default notification sound.
-    //      - So: sound omitted → no setSound call → constructor
-    //        default → system default notification sound. ✓
-    //    Additionally, LocalNotificationManager.buildNotification()
-    //        (line 203) calls mBuilder.setDefaults(DEFAULT_ALL) when
-    //        the notification has no per-notification sound AND no
-    //        global sound is configured in capacitor.config — which is
-    //        our case. DEFAULT_ALL includes DEFAULT_SOUND, providing a
-    //        second path to the system default sound.
-    //    HIGH importance so the user gets a heads-up + sound when the
-    //    app is not open.
-    //
-    // 2. dose-reminder-foreground-v1 — FOREGROUND channel. SILENT.
-    //    LOW importance (2) → Android produces no sound, no heads-up.
-    //    No `sound` property → no setSound call (same as above), but
-    //    LOW importance overrides: LOW channels never make sound
-    //    regardless of the sound URI. The scheduled notification still
-    //    triggers `localNotificationReceived` (which opens the
-    //    DoseAlarmModal + plays the in-app chime) WITHOUT producing an
-    //    audible Android notification. The notification appears in the
-    //    shade (silently) as a fallback.
-    //
-    // The previous v2 channel used a custom 'dose_reminder.wav' that
-    // users found unpleasant; since channel sound is immutable, we
-    // bump to a new channel id (v3) and delete the old one below.
-    //
-    // Delivery-time safety net: native-android TimedNotificationPublisher
-    // + AppForegroundState (MainActivity onResume/onPause) re-select the
-    // dose-reminder channel at alarm delivery. Fresh process defaults to
-    // background → v3. JS scheduling remains the live fast path.
-    const channels: Channel[] = [
-      {
-        id: DOSE_REMINDER_CHANNEL_ID,
-        name: 'تذكير الجرعات',
-        description: 'تذكيرات يومية بمواعيد الأدوية',
-        importance: 4 as Importance,
-        visibility: 1 as Visibility,
-        // No `sound` property → system default notification sound.
-        // See the comment above for the full Capacitor + Android chain.
-      },
-      {
-        id: DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
-        name: 'تذكير الجرعات (أثناء التشغيل)',
-        description: 'تذكيرات صامتة أثناء فتح التطبيق',
-        importance: 2 as Importance, // LOW — no sound, no heads-up
-        visibility: 1 as Visibility,
-        // No `sound` property → no sound (silent channel).
-      },
-      {
-        id: 'low-stock',
-        name: 'تنبيهات النفاذ',
-        description: 'تنبيه عند اقتراب نفاذ دواء من المخزون',
-        importance: 4 as Importance,
-        visibility: 1 as Visibility,
-      },
-    ];
-
-    for (const ch of channels) {
-      if (!existingIds.has(ch.id)) {
-        await LocalNotifications.createChannel(ch);
-        console.info(
-          `[native] Notification channel created: ${ch.id} (${ch.name})`
-        );
-      }
-    }
-  } catch (err) {
-    console.warn('[native] Notification channel creation failed:', err);
-  }
+  // Notification channels, posting/cancellation, and notification identity
+  // are owned by NotificationRuntime. This bridge only maps the generic
+  // notification events to the existing Dose Reminder handlers.
 
   try {
-    notificationActionHandle = await LocalNotifications.addListener(
-      'localNotificationActionPerformed',
-      (event: {
-        actionId: string;
-        notification?: { extra?: { medicationId?: string; doseId?: string } };
-      }) => {
-        const medicationId = event.notification?.extra?.medicationId;
-        const doseId = event.notification?.extra?.doseId;
-        if (medicationId && notificationActionHandler) {
-          notificationActionHandler(event.actionId, medicationId, doseId);
+    notificationActionHandle = await addNotificationActionPerformedListener(
+      (event) => {
+        const namespace =
+          typeof event.namespace === 'string' ? event.namespace : '';
+        const identity =
+          typeof event.identity === 'string' ? event.identity : '';
+        const actionId =
+          typeof event.actionId === 'string' ? event.actionId : '';
+
+        if (namespace !== 'dose-reminder' || !actionId || !identity) return;
+
+        const separator = identity.indexOf('::');
+        if (separator <= 0) return;
+        const medicationId = identity.slice(0, separator);
+        const doseId = identity.slice(separator + 2);
+        if (medicationId && doseId && notificationActionHandler) {
+          notificationActionHandler(actionId, medicationId, doseId);
         }
       }
     );
   } catch (err) {
-    console.warn('[native] localNotificationActionPerformed listener failed:', err);
+    console.warn('[native] NotificationRuntime action listener failed:', err);
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Foreground notification listener — opens the in-app DoseAlarmModal.
-  // ─────────────────────────────────────────────────────────────
-  // When a local notification fires while the app is in the foreground,
-  // Capacitor delivers it to this listener. The listener's ONLY job is
-  // to extract the medicationId and call the registered handler so
-  // App.tsx can open the DoseAlarmModal.
-  //
-  // NO sound playback happens here. When the app is in the foreground,
-  // the notification was scheduled on the SILENT foreground channel
-  // (dose-reminder-foreground-v1), so Android produces no audible alert.
-  // The in-app chime (playSuccessChime, gated by soundEnabled) is played
-  // by App.tsx's doseReceivedHandler — that is the ONLY sound in the
-  // foreground. There is no other JS sound path for dose reminders.
-  //
-  // #38: await the addListener and store the handle so it can be
-  // removed if needed (prevents duplicate listeners across HMR).
   try {
-    notificationHandle = await LocalNotifications.addListener(
-      'localNotificationReceived',
-      (notification: {
-        extra?: {
-          medicationId?: string;
-          doseId?: string;
-        };
-      }) => {
-        const medicationId = notification?.extra?.medicationId;
-        const rawDoseId = notification?.extra?.doseId;
-        // Critical Stock alarms carry medicationId only (no doseId).
-        // Dose reminders require occurrence identity: both present and non-empty.
-        const doseId =
-          typeof rawDoseId === 'string' ? rawDoseId.trim() : '';
-        if (
-          medicationId &&
-          doseId &&
-          doseReceivedHandler
-        ) {
+    notificationHandle = await addNotificationReceivedListener(
+      (event) => {
+        const namespace =
+          typeof event.namespace === 'string' ? event.namespace : '';
+        const identity =
+          typeof event.identity === 'string' ? event.identity : '';
+
+        if (namespace !== 'dose-reminder' || !identity) return;
+
+        const separator = identity.indexOf('::');
+        if (separator <= 0) return;
+        const medicationId = identity.slice(0, separator);
+        const doseId = identity.slice(separator + 2);
+        if (medicationId && doseId && doseReceivedHandler) {
           try {
             doseReceivedHandler(medicationId, doseId);
           } catch (err) {
@@ -354,7 +217,7 @@ export async function initNativeBridge(): Promise<void> {
       }
     );
   } catch (err) {
-    console.warn('[native] localNotificationReceived listener failed:', err);
+    console.warn('[native] NotificationRuntime received listener failed:', err);
   }
 }
 

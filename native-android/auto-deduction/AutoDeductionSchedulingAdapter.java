@@ -10,7 +10,6 @@ import org.json.JSONObject;
 import java.util.Map;
 
 import app.drugtracker.alarmruntime.ExactAlarmContract;
-import app.drugtracker.alarmruntime.ExactAlarmOperationLock;
 import app.drugtracker.alarmruntime.ExactAlarmRuntime;
 import app.drugtracker.alarmruntime.ExactAlarmStore;
 
@@ -115,7 +114,7 @@ public final class AutoDeductionSchedulingAdapter {
             featureMetadata.put("amount", amount);
             featureMetadata.put("scheduledAtEpochMs", triggerAtEpochMs);
             featureMetadata.put(
-                    AutoDeductionScheduler.FIELD_RECURRENCE_GENERATION,
+                    AutoDeductionContract.EXTRA_RECURRENCE_GENERATION,
                     recurrenceGeneration);
         } catch (JSONException e) {
             return ScheduleResult.failure("payload_build_failed");

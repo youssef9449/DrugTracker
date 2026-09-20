@@ -15,7 +15,6 @@ import type { ConsumptionLog, Medication } from '../types';
 import type { AutoDeductionEvent } from './autoDeductionNative';
 import { autoDeductionOccurrenceKey } from './autoDeductionNative';
 import {
-  getTodayDateString,
   isDoseConsumedOnDate,
   isDoseSkippedOnDate,
   recordDoseConsumed,
@@ -152,8 +151,7 @@ export function findExactAutoLog(
 export function isExactAutoOccurrenceApplied(
   med: Medication,
   doseId: string,
-  calendarDate: string,
-  todayStr: string = getTodayDateString()
+  calendarDate: string
 ): boolean {
   const id = normalizeExactDoseId(doseId);
   if (!id) return false;
@@ -238,8 +236,7 @@ export function applyExactAutoEventToMedication(
     return { ok: false, reason: 'invalid_dose_id' };
   }
 
-  const todayStr = getTodayDateString();
-  if (isExactAutoOccurrenceApplied(med, doseId, calendarDate, todayStr)) {
+  if (isExactAutoOccurrenceApplied(med, doseId, calendarDate)) {
     return { ok: false, reason: 'already_applied' };
   }
 
@@ -314,7 +311,6 @@ export function reconcileFiredEvents(
   } = {}
 ): ReconcileFiredResult {
   const now = options.now ?? new Date();
-  const todayStr = getTodayDateString();
 
   const sorted = [...events].sort((a, b) => {
     const ta = Number(a.scheduledAtEpochMs) || 0;
@@ -391,7 +387,7 @@ export function reconcileFiredEvents(
       continue;
     }
 
-    if (isExactAutoOccurrenceApplied(med, doseId, calendarDate, todayStr)) {
+    if (isExactAutoOccurrenceApplied(med, doseId, calendarDate)) {
       details.push({ ...baseDetail, outcome: 'already_applied' });
       toAcknowledge.push({ medicationId, doseId, calendarDate });
       continue;

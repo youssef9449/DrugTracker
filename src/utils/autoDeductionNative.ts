@@ -54,6 +54,7 @@ export interface ScheduledOccurrence {
   timeHhmm?: string;
   amount?: number;
   scheduledAtEpochMs?: number;
+  fireRetryCount?: number;
 }
 
 /**

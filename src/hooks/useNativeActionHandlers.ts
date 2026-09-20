@@ -109,6 +109,11 @@ export function useNativeActionHandlers(opts: {
       }
     });
     return () => registerAppResumeHandler(null);
-  }, []);
+  }, [
+    setDoseLifecycleTick,
+    setCriticalAlarmResumeTick,
+    setDoseAlarmResumeTick,
+    setExactAlarmEnabled,
+  ]);
 
 }

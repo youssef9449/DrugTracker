@@ -85,28 +85,6 @@ function makeSingleAuto(overrides: Partial<Medication> = {}): Medication {
   };
 }
 
-/** Multi-dose fixture retained for layout/non-restore coverage if needed. */
-function makeMultiAuto(overrides: Partial<Medication> = {}): Medication {
-  return {
-    id: MED_ID,
-    name: 'Auto Restore Multi',
-    currentPills: 30,
-    dailyDose: 3,
-    unit: 'قرص',
-    warningThresholdDays: 5,
-    colorTag: 'teal',
-    category: 'مزمن',
-    createdAt: '2024-01-01T00:00:00.000Z',
-    autoDeductEnabled: true,
-    reminderEnabled: false,
-    doseSchedule: [
-      { id: 'd1', amount: 1, time: '08:00' },
-      { id: 'd2', amount: 2, time: '14:00' },
-    ],
-    dosesPerDay: 2,
-    ...overrides,
-  };
-}
 
 /** Durable Exact Auto deduction for s1 (amount may differ from current schedule). */
 function durableS1AutoLog(amount = -2): ConsumptionLog {

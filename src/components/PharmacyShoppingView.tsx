@@ -23,6 +23,40 @@ import {
 import { getMedSizes } from '../utils/medicationPackaging';
 import { Checkbox } from './ui/Checkbox';
 
+
+function shoppingDurationDays(
+  med: Medication,
+  medicationPeriods: Record<string, { value: number; unit: 'day' | 'month' }>,
+  defaultDurationDays: number
+): number {
+  const period = medicationPeriods[med.id] || {
+    value: defaultDurationDays === 60 ? 2 : 30,
+    unit: (defaultDurationDays === 60 ? 'month' : 'day') as 'day' | 'month',
+  };
+  return Math.max(1, period.value || 1) * (period.unit === 'month' ? 30 : 1);
+}
+
+function shoppingRequestedPills(
+  med: Medication,
+  suggestedPills: number,
+  quantityModes: Record<string, 'period' | 'custom'>,
+  customOrderQuantities: Record<string, number>,
+  orderUnits: Record<string, Array<'pills' | 'boxes' | 'strips'>>
+): number {
+  const mode = quantityModes[med.id] || 'period';
+  if (mode !== 'custom') return suggestedPills;
+  const { boxSize, stripSize, hasStrips } = getMedSizes(med);
+  const selectedUnit = (orderUnits[med.id] || (hasStrips ? ['strips'] : ['boxes']))[0];
+  const unitSize = selectedUnit === 'boxes' ? boxSize : stripSize > 0 ? stripSize : 1;
+  const unitQty =
+    customOrderQuantities[med.id] !== undefined
+      ? customOrderQuantities[med.id]
+      : Math.max(1, Math.ceil(suggestedPills / unitSize));
+  if (selectedUnit === 'boxes') return unitQty * boxSize;
+  if (selectedUnit === 'strips') return unitQty * stripSize;
+  return unitQty;
+}
+
 interface PharmacyShoppingViewProps {
   medications: Medication[];
   settings: PharmacySettings;
@@ -47,8 +81,14 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   const pharmacies = settings.pharmacies || [];
   const selectedPharmacy = pharmacies.find((pharmacy) => pharmacy.id === settings.selectedPharmacyId)
     || pharmacies[0];
-  const whatsappContacts = settings.whatsappContacts ?? [];
-  const whatsappAddresses = settings.whatsappAddresses ?? [];
+  const whatsappContacts = useMemo(
+    () => settings.whatsappContacts ?? [],
+    [settings.whatsappContacts]
+  );
+  const whatsappAddresses = useMemo(
+    () => settings.whatsappAddresses ?? [],
+    [settings.whatsappAddresses]
+  );
   const selectedWhatsappContactIds = settings.selectedWhatsappContactIds
     ?? whatsappContacts.map((contact) => contact.id);
   const selectedWhatsappAddressIds = settings.selectedWhatsappAddressIds
@@ -272,33 +312,51 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     return displayList
       .filter((med) => selectedMedIds.has(med.id))
       .map((med) => {
-        const { quantity: suggestedPills } = getRequestedAmount(med);
+        const { quantity: suggestedPills } = calculateMedicationOrderQuantity(
+          med,
+          shoppingDurationDays(med, medicationPeriods, settings.defaultDurationDays)
+        );
         return {
           name: med.name,
-          quantity: getRequestedPills(med, suggestedPills),
+          quantity: shoppingRequestedPills(
+            med,
+            suggestedPills,
+            quantityModes,
+            customOrderQuantities,
+            orderUnits
+          ),
           unit: med.unit,
           stripsPerBox: med.stripsPerBox,
           pillsPerStrip: med.pillsPerStrip,
           packageSize: med.packageSize,
         };
       });
-  }, [displayList, selectedMedIds, medicationPeriods, quantityModes, customOrderQuantities, orderUnits]);
+  }, [displayList, selectedMedIds, medicationPeriods, quantityModes, customOrderQuantities, orderUnits, settings.defaultDurationDays]);
 
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
   const orderItemsForMessage = useMemo((): OrderItem[] => {
     if (activeOrderItems.length > 0) return activeOrderItems;
     return medications.map((med) => {
-      const { quantity: suggestedPills } = getRequestedAmount(med);
+      const { quantity: suggestedPills } = calculateMedicationOrderQuantity(
+        med,
+        shoppingDurationDays(med, medicationPeriods, settings.defaultDurationDays)
+      );
       return {
         name: med.name,
-        quantity: getRequestedPills(med, suggestedPills),
+        quantity: shoppingRequestedPills(
+          med,
+          suggestedPills,
+          quantityModes,
+          customOrderQuantities,
+          orderUnits
+        ),
         unit: med.unit,
         stripsPerBox: med.stripsPerBox,
         pillsPerStrip: med.pillsPerStrip,
         packageSize: med.packageSize,
       };
     });
-  }, [activeOrderItems, medications, medicationPeriods, quantityModes, customOrderQuantities, orderUnits]);
+  }, [activeOrderItems, medications, medicationPeriods, quantityModes, customOrderQuantities, orderUnits, settings.defaultDurationDays]);
 
   const currentWhatsAppMessage = useMemo(() => {
     return generatePharmacyOrderMessage(

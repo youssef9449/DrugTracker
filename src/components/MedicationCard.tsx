@@ -118,7 +118,6 @@ interface MedicationCardProps {
   logs?: ConsumptionLog[];
   lastRefillQuantity?: number;
   onUndoRefill?: () => void;
-  globalAutoDeductEnabled?: boolean;
 }
 
 export const MedicationCard: FC<MedicationCardProps> = ({
@@ -135,7 +134,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   logs = [],
   lastRefillQuantity,
   onUndoRefill,
-  globalAutoDeductEnabled = true,
 }) => {
   const isAutoActive = isMedicationAutoDeductActive(medication);
   // Issue #266: durable currentPills is the sole live stock balance.
@@ -487,14 +485,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     // Take uses current schedule slot amount from the manual toggle target.
     const takeAmount = doseToggle.amount;
 
-    // Auto-restorable occurrence is independent of getCardDoseToggleTarget.
-    // Issue #267: pure-projection auto-restore (auto enabled + time elapsed +
-    // not consumed) is removed. Restore requires durable deduction evidence.
-    const autoRestorableDose: { id: string } | null = null;
-    const showAutoRestore = false;
-    const autoRestoreAmount = null;
-
-
     return (
       <div
         id={`med-card-${medication.id}`}
@@ -571,30 +561,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   }
                   className="w-5 h-5 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
                   data-testid={`restore-dose-${medication.id}`}
-                >
-                  <RotateCcw className="w-3 h-3" strokeWidth={2.25} aria-hidden />
-                </button>
-              ) : showAutoRestore && onRestoreDose ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    onRestoreDose(
-                      medication.id,
-                      autoRestorableDose?.id || undefined
-                    )
-                  }
-                  title={
-                    autoRestoreAmount != null
-                      ? `استرجاع الجرعة (+${autoRestoreAmount})`
-                      : 'استرجاع الجرعة'
-                  }
-                  aria-label={
-                    autoRestoreAmount != null
-                      ? `استرجاع الجرعة (+${autoRestoreAmount})`
-                      : 'استرجاع الجرعة'
-                  }
-                  className="w-5 h-5 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
-                  data-testid={`auto-restore-dose-${medication.id}`}
                 >
                   <RotateCcw className="w-3 h-3" strokeWidth={2.25} aria-hidden />
                 </button>
@@ -695,14 +661,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     // Take uses current schedule slot amount from the manual toggle target.
     const takeAmount = doseToggle.amount;
 
-    // Auto-restorable occurrence is independent of getCardDoseToggleTarget.
-    // Issue #267: pure-projection auto-restore (auto enabled + time elapsed +
-    // not consumed) is removed. Restore requires durable deduction evidence.
-    const autoRestorableDose: { id: string } | null = null;
-    const showAutoRestore = false;
-    const autoRestoreAmount = null;
-
-
     return (
       <div
         id={`med-card-${medication.id}`}
@@ -785,30 +743,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                   }
                   className="w-6 h-6 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
                   data-testid={`restore-dose-${medication.id}`}
-                >
-                  <RotateCcw className="w-3.5 h-3.5" strokeWidth={2.25} aria-hidden />
-                </button>
-              ) : showAutoRestore && onRestoreDose ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    onRestoreDose(
-                      medication.id,
-                      autoRestorableDose?.id || undefined
-                    )
-                  }
-                  title={
-                    autoRestoreAmount != null
-                      ? `استرجاع الجرعة (+${autoRestoreAmount})`
-                      : 'استرجاع الجرعة'
-                  }
-                  aria-label={
-                    autoRestoreAmount != null
-                      ? `استرجاع الجرعة (+${autoRestoreAmount})`
-                      : 'استرجاع الجرعة'
-                  }
-                  className="w-6 h-6 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95"
-                  data-testid={`auto-restore-dose-${medication.id}`}
                 >
                   <RotateCcw className="w-3.5 h-3.5" strokeWidth={2.25} aria-hidden />
                 </button>

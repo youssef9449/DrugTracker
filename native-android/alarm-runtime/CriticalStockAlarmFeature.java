@@ -6,7 +6,6 @@ import android.util.Log;
 import org.json.JSONObject;
 
 import app.drugtracker.criticalstock.CriticalStockAlarmAdapter;
-import app.drugtracker.notificationruntime.NotificationRuntime;
 
 /**
  * Shared-lifecycle adapter for Critical Stock.
@@ -25,9 +24,6 @@ public final class CriticalStockAlarmFeature
             String reason,
             boolean exactAlarmPermissionGranted) {
         if (!exactAlarmPermissionGranted) {
-            return;
-        }
-        if (!new NotificationRuntime(context).areNotificationsEnabled()) {
             return;
         }
 

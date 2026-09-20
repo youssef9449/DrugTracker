@@ -13,11 +13,6 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.util.ArrayList;
-import java.util.Calendar;
-import java.util.List;
-import java.util.Locale;
-import java.util.TimeZone;
 
 /**
  * Shared native exact-alarm runtime.
@@ -27,11 +22,13 @@ import java.util.TimeZone;
  *
  * <p>The durable cancellation transaction is:
  * lock -> durable tombstone -> AlarmManager.cancel -> metadata removal.</p>
+ *
+ * <p>Feature date/time semantics and lifecycle recovery remain outside this
+ * mechanism class. Feature adapters reconstruct their own schedule requests
+ * from feature-owned durable state.</p>
  */
 public final class ExactAlarmRuntime {
     private static final String TAG = "ExactAlarmRuntime";
-    private static final String TYPE = "type";
-    private static final String VALUE = "value";
 
     private final Context appContext;
     private final ExactAlarmStore store;
@@ -116,21 +113,8 @@ public final class ExactAlarmRuntime {
                         ExactAlarmContract.FIELD_RECEIVER_CLASS,
                         request.receiverClass.getName());
                 metadata.put(
-                        ExactAlarmContract.FIELD_CALENDAR_DATE,
-                        request.calendarDate);
-                metadata.put(
-                        ExactAlarmContract.FIELD_TIME_HHMM,
-                        request.timeHhmm);
-                metadata.put(
                         ExactAlarmContract.FIELD_TRIGGER_AT_EPOCH_MS,
                         request.triggerAtEpochMs);
-                metadata.put(
-                        ExactAlarmContract.FIELD_DELIVERY_EXTRAS,
-                        bundleToJson(
-                                request.deliveryExtras));
-                metadata.put(
-                        ExactAlarmContract.FIELD_RESTORE_ON_LIFECYCLE,
-                        request.restoreOnLifecycle);
             } catch (JSONException | RuntimeException e) {
                 return ScheduleResult.fail("metadata_build_failed");
             }
@@ -393,141 +377,10 @@ public final class ExactAlarmRuntime {
         }
     }
 
-    public boolean isEffectivelyCancelled(
-            String storageKey) {
-        if (storageKey == null || storageKey.isEmpty()) {
-            return false;
-        }
-        synchronized (ExactAlarmOperationLock.LOCK) {
-            return store.isEffectivelyCancelledLocked(storageKey);
-        }
-    }
-
-    public JSONObject getScheduleMetadata(
-            String storageKey) {
-        String raw = store.getScheduleRaw(storageKey);
-        if (raw == null || raw.isEmpty()) return null;
-        try {
-            return new JSONObject(raw);
-        } catch (JSONException e) {
-            return null;
-        }
-    }
-
-    public boolean removeScheduleIfOwned(
-            String storageKey,
-            String expectedOperationVersion) {
-        if (storageKey == null || storageKey.isEmpty()) {
-            return false;
-        }
-        synchronized (ExactAlarmOperationLock.LOCK) {
-            return store.removeScheduleIfOwnedLocked(
-                    storageKey,
-                    expectedOperationVersion);
-        }
-    }
-
-    public List<JSONObject> listScheduledMetadata() {
-        List<JSONObject> result = new ArrayList<>();
-        synchronized (ExactAlarmOperationLock.LOCK) {
-            for (String storageKey
-                    : store.listFeatureStorageKeys()) {
-                String raw =
-                        store.getScheduleRaw(storageKey);
-                if (raw == null || raw.isEmpty()) continue;
-                try {
-                    JSONObject metadata =
-                            new JSONObject(raw);
-                    metadata.put(
-                            ExactAlarmContract.FIELD_STORAGE_KEY,
-                            storageKey);
-                    result.add(metadata);
-                } catch (JSONException e) {
-                    Log.w(TAG,
-                            "malformed schedule metadata: "
-                                    + storageKey);
-                }
-            }
-        }
-        return result;
-    }
-
     /**
      * Reinstall a durable row after lifecycle recovery. The caller supplies the
      * current local-date-derived epoch and the expected ownership token.
      */
-    public ScheduleResult restore(
-            String identityUri,
-            String storageKey,
-            String expectedOperationVersion,
-            long triggerAtEpochMs) {
-        if (!ExactAlarmContract.isValidIdentityUri(identityUri)
-                || storageKey == null
-                || storageKey.isEmpty()
-                || expectedOperationVersion == null
-                || expectedOperationVersion.isEmpty()
-                || triggerAtEpochMs
-                        <= System.currentTimeMillis() - 2000L) {
-            return ScheduleResult.fail(
-                    "invalid_restore_request");
-        }
-
-        JSONObject raw =
-                getScheduleMetadata(storageKey);
-        if (raw == null) {
-            return ScheduleResult.fail(
-                    "schedule_absent");
-        }
-
-        if (!expectedOperationVersion.equals(
-                ExactAlarmStore.extractOperationVersion(raw))) {
-            return ScheduleResult.fail("ownership_lost");
-        }
-
-        try {
-            String action = raw.optString(
-                    ExactAlarmContract.FIELD_ACTION, "");
-            String receiverName = raw.optString(
-                    ExactAlarmContract.FIELD_RECEIVER_CLASS,
-                    "");
-            Class<? extends BroadcastReceiver> receiver =
-                    resolveReceiverClass(receiverName);
-            if (action.isEmpty() || receiver == null) {
-                return ScheduleResult.fail(
-                        "restore_metadata_invalid");
-            }
-
-            Bundle extras = jsonToBundle(
-                    raw.optJSONObject(
-                            ExactAlarmContract.FIELD_DELIVERY_EXTRAS));
-            JSONObject featureMetadata =
-                    new JSONObject(raw.toString());
-            removeCoreFields(featureMetadata);
-
-            return schedule(new ScheduleRequest(
-                    identityUri,
-                    storageKey,
-                    action,
-                    receiver,
-                    raw.optString(
-                            ExactAlarmContract.FIELD_CALENDAR_DATE,
-                            ""),
-                    raw.optString(
-                            ExactAlarmContract.FIELD_TIME_HHMM,
-                            ""),
-                    triggerAtEpochMs,
-                    featureMetadata,
-                    extras,
-                    expectedOperationVersion,
-                    raw.optBoolean(
-                            ExactAlarmContract.FIELD_RESTORE_ON_LIFECYCLE,
-                            true)));
-        } catch (JSONException e) {
-            return ScheduleResult.fail(
-                    "restore_metadata_invalid");
-        }
-    }
-
     private void rollbackScheduleLocked(
             String storageKey,
             String expectedOperationVersion) {
@@ -602,36 +455,7 @@ public final class ExactAlarmRuntime {
                 && request.action != null
                 && !request.action.isEmpty()
                 && request.receiverClass != null
-                && isValidCalendarDate(
-                        request.calendarDate)
-                && isValidTimeHhmm(
-                        request.timeHhmm)
                 && request.triggerAtEpochMs > 0L;
-    }
-
-    private Class<? extends BroadcastReceiver> resolveReceiverClass(
-            String name) {
-        if (name == null
-                || !name.startsWith(
-                        appContext.getPackageName() + ".")) {
-            return null;
-        }
-        try {
-            Class<?> clazz = Class.forName(name);
-            if (!BroadcastReceiver.class.isAssignableFrom(
-                    clazz)) {
-                return null;
-            }
-            @SuppressWarnings("unchecked")
-            Class<? extends BroadcastReceiver> receiver =
-                    (Class<? extends BroadcastReceiver>) clazz;
-            return receiver;
-        } catch (Exception e) {
-            Log.e(TAG,
-                    "failed to resolve receiver: " + name,
-                    e);
-            return null;
-        }
     }
 
     private static void copyFeatureMetadata(
@@ -649,260 +473,34 @@ public final class ExactAlarmRuntime {
         }
     }
 
-    public static JSONObject bundleToJson(
-            Bundle bundle) {
-        JSONObject out = new JSONObject();
-        if (bundle == null) return out;
-
-        for (String key : bundle.keySet()) {
-            Object value = bundle.get(key);
-            JSONObject entry = new JSONObject();
-            try {
-                if (value instanceof String) {
-                    entry.put(TYPE, "string");
-                } else if (value instanceof Long) {
-                    entry.put(TYPE, "long");
-                } else if (value instanceof Integer) {
-                    entry.put(TYPE, "int");
-                } else if (value instanceof Double) {
-                    entry.put(TYPE, "double");
-                } else if (value instanceof Boolean) {
-                    entry.put(TYPE, "boolean");
-                } else {
-                    throw new IllegalArgumentException(
-                            "unsupported delivery extra: " + key);
-                }
-                entry.put(VALUE, value);
-                out.put(key, entry);
-            } catch (JSONException e) {
-                throw new IllegalArgumentException(
-                        "delivery extra serialization failed",
-                        e);
-            }
-        }
-        return out;
-    }
-
-    public static Bundle jsonToBundle(
-            JSONObject json) throws JSONException {
-        Bundle out = new Bundle();
-        if (json == null || json.names() == null) {
-            return out;
-        }
-
-        JSONArray names = json.names();
-        for (int i = 0; i < names.length(); i++) {
-            String key = names.optString(i, "");
-            JSONObject entry = json.optJSONObject(key);
-            if (key.isEmpty() || entry == null) continue;
-
-            String type = entry.optString(TYPE, "");
-            if ("string".equals(type)) {
-                out.putString(key, entry.optString(VALUE, ""));
-            } else if ("long".equals(type)) {
-                out.putLong(key, entry.optLong(VALUE, 0L));
-            } else if ("int".equals(type)) {
-                out.putInt(key, entry.optInt(VALUE, 0));
-            } else if ("double".equals(type)) {
-                out.putDouble(
-                        key,
-                        entry.optDouble(
-                                VALUE, Double.NaN));
-            } else if ("boolean".equals(type)) {
-                out.putBoolean(
-                        key,
-                        entry.optBoolean(VALUE, false));
-            }
-        }
-        return out;
-    }
-
-    public static Long computeEpochMs(
-            String calendarDate,
-            String timeHhmm) {
-        if (!isValidCalendarDate(calendarDate)
-                || !isValidTimeHhmm(timeHhmm)) {
-            return null;
-        }
-        try {
-            int year = Integer.parseInt(
-                    calendarDate.substring(0, 4));
-            int month = Integer.parseInt(
-                    calendarDate.substring(5, 7));
-            int day = Integer.parseInt(
-                    calendarDate.substring(8, 10));
-
-            int colon = timeHhmm.indexOf(':');
-            int hour = Integer.parseInt(
-                    timeHhmm.substring(0, colon));
-            int minute = Integer.parseInt(
-                    timeHhmm.substring(colon + 1));
-
-            Calendar calendar = Calendar.getInstance(
-                    TimeZone.getDefault(),
-                    Locale.getDefault());
-            calendar.clear();
-            calendar.set(
-                    Calendar.YEAR, year);
-            calendar.set(
-                    Calendar.MONTH, month - 1);
-            calendar.set(
-                    Calendar.DAY_OF_MONTH, day);
-            calendar.set(
-                    Calendar.HOUR_OF_DAY, hour);
-            calendar.set(
-                    Calendar.MINUTE, minute);
-            calendar.set(Calendar.SECOND, 0);
-            calendar.set(Calendar.MILLISECOND, 0);
-            return calendar.getTimeInMillis();
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    public static String nextCalendarDate(
-            String calendarDate) {
-        if (!isValidCalendarDate(calendarDate)) {
-            return null;
-        }
-        try {
-            int year = Integer.parseInt(
-                    calendarDate.substring(0, 4));
-            int month = Integer.parseInt(
-                    calendarDate.substring(5, 7));
-            int day = Integer.parseInt(
-                    calendarDate.substring(8, 10));
-
-            Calendar calendar = Calendar.getInstance(
-                    TimeZone.getDefault(),
-                    Locale.getDefault());
-            calendar.clear();
-            calendar.set(Calendar.YEAR, year);
-            calendar.set(Calendar.MONTH, month - 1);
-            calendar.set(Calendar.DAY_OF_MONTH, day);
-            calendar.set(Calendar.HOUR_OF_DAY, 0);
-            calendar.set(Calendar.MINUTE, 0);
-            calendar.set(Calendar.SECOND, 0);
-            calendar.set(Calendar.MILLISECOND, 0);
-            calendar.add(Calendar.DAY_OF_MONTH, 1);
-
-            return String.format(
-                    Locale.US,
-                    "%04d-%02d-%02d",
-                    calendar.get(Calendar.YEAR),
-                    calendar.get(Calendar.MONTH) + 1,
-                    calendar.get(Calendar.DAY_OF_MONTH));
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    public static boolean isValidCalendarDate(
-            String date) {
-        if (date == null || date.length() != 10) {
-            return false;
-        }
-        for (int i = 0; i < 10; i++) {
-            char c = date.charAt(i);
-            if (i == 4 || i == 7) {
-                if (c != '-') return false;
-            } else if (c < '0' || c > '9') {
-                return false;
-            }
-        }
-
-        try {
-            int year = Integer.parseInt(
-                    date.substring(0, 4));
-            int month = Integer.parseInt(
-                    date.substring(5, 7));
-            int day = Integer.parseInt(
-                    date.substring(8, 10));
-            if (month < 1 || month > 12 || day < 1) {
-                return false;
-            }
-
-            int maxDay;
-            switch (month) {
-                case 2:
-                    boolean leap = year % 4 == 0
-                            && (year % 100 != 0
-                            || year % 400 == 0);
-                    maxDay = leap ? 29 : 28;
-                    break;
-                case 4:
-                case 6:
-                case 9:
-                case 11:
-                    maxDay = 30;
-                    break;
-                default:
-                    maxDay = 31;
-            }
-            return day <= maxDay;
-        } catch (NumberFormatException e) {
-            return false;
-        }
-    }
-
-    public static boolean isValidTimeHhmm(
-            String time) {
-        if (time == null
-                || time.length() < 4
-                || time.length() > 5) {
-            return false;
-        }
-        int colon = time.indexOf(':');
-        if (colon < 1) return false;
-        try {
-            int hour = Integer.parseInt(
-                    time.substring(0, colon));
-            int minute = Integer.parseInt(
-                    time.substring(colon + 1));
-            return hour >= 0 && hour <= 23
-                    && minute >= 0 && minute <= 59;
-        } catch (NumberFormatException e) {
-            return false;
-        }
-    }
-
     public static final class ScheduleRequest {
         public final String identityUri;
         public final String storageKey;
         public final String action;
         public final Class<? extends BroadcastReceiver> receiverClass;
-        public final String calendarDate;
-        public final String timeHhmm;
         public final long triggerAtEpochMs;
         public final JSONObject featureMetadata;
         public final Bundle deliveryExtras;
         public final String expectedExistingOperationVersion;
-        public final boolean restoreOnLifecycle;
 
         public ScheduleRequest(
                 String identityUri,
                 String storageKey,
                 String action,
                 Class<? extends BroadcastReceiver> receiverClass,
-                String calendarDate,
-                String timeHhmm,
                 long triggerAtEpochMs,
                 JSONObject featureMetadata,
                 Bundle deliveryExtras,
-                String expectedExistingOperationVersion,
-                boolean restoreOnLifecycle) {
+                String expectedExistingOperationVersion) {
             this.identityUri = identityUri;
             this.storageKey = storageKey;
             this.action = action;
             this.receiverClass = receiverClass;
-            this.calendarDate = calendarDate;
-            this.timeHhmm = timeHhmm;
             this.triggerAtEpochMs = triggerAtEpochMs;
             this.featureMetadata = featureMetadata;
             this.deliveryExtras = deliveryExtras;
             this.expectedExistingOperationVersion =
                     expectedExistingOperationVersion;
-            this.restoreOnLifecycle = restoreOnLifecycle;
         }
     }
 
@@ -981,29 +579,4 @@ public final class ExactAlarmRuntime {
         }
     }
 
-    private static void removeCoreFields(
-            JSONObject metadata) {
-        metadata.remove(
-                ExactAlarmContract.FIELD_OPERATION_VERSION);
-        metadata.remove(
-                ExactAlarmContract.LEGACY_FIELD_SCHEDULE_VERSION);
-        metadata.remove(
-                ExactAlarmContract.FIELD_IDENTITY_URI);
-        metadata.remove(
-                ExactAlarmContract.FIELD_STORAGE_KEY);
-        metadata.remove(
-                ExactAlarmContract.FIELD_ACTION);
-        metadata.remove(
-                ExactAlarmContract.FIELD_RECEIVER_CLASS);
-        metadata.remove(
-                ExactAlarmContract.FIELD_CALENDAR_DATE);
-        metadata.remove(
-                ExactAlarmContract.FIELD_TIME_HHMM);
-        metadata.remove(
-                ExactAlarmContract.FIELD_TRIGGER_AT_EPOCH_MS);
-        metadata.remove(
-                ExactAlarmContract.FIELD_DELIVERY_EXTRAS);
-        metadata.remove(
-                ExactAlarmContract.FIELD_RESTORE_ON_LIFECYCLE);
-    }
 }

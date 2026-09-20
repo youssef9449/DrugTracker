@@ -224,31 +224,4 @@ describe('native.ts — two-channel dose-reminder design', () => {
     expect(bgChannel.sound).toBeFalsy();
   });
 
-  it('deletes old dose-reminder and dose-reminder-v2 channels on migration', async () => {
-    vi.resetModules();
-
-    const { LocalNotifications } = await import('@capacitor/local-notifications');
-    const { initNativeBridge } = await import('@/native');
-
-    // Simulate an existing install with old v1 + v2 channels.
-    vi.mocked(LocalNotifications.listChannels).mockResolvedValue({
-      channels: [
-        { id: 'dose-reminder', name: 'old' },
-        { id: 'dose-reminder-v2', name: 'old' },
-        { id: 'low-stock', name: 'stock' },
-      ],
-    });
-    vi.mocked(LocalNotifications.deleteChannel).mockClear();
-    vi.mocked(LocalNotifications.createChannel).mockClear();
-
-    await initNativeBridge();
-
-    const deleted = vi.mocked(LocalNotifications.deleteChannel).mock.calls.map(
-      (c) => c[0].id
-    );
-    expect(deleted).toContain('dose-reminder');
-    expect(deleted).toContain('dose-reminder-v2');
-    // low-stock is NOT deleted (unrelated channel preserved).
-    expect(deleted).not.toContain('low-stock');
-  });
 });

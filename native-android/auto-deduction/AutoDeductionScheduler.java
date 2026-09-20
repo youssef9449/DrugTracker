@@ -559,7 +559,7 @@ public final class AutoDeductionScheduler {
      *   <li>Require active schedule metadata for this occurrence</li>
      *   <li>Require current/tokenized delivery to match {@code scheduleVersion} +
      *       {@code recurrenceGeneration} exactly (reject stale queued alarms after
-     *       disable → re-enable reschedule). A legacy delivery with no tokens is
+     *       disable → re-enable reschedule). A delivery with no tokens is
      *       accepted only when the active durable schedule metadata is also truly
      *       legacy (both tokens absent), preserving pre-token queued alarms without
      *       weakening the versioned stale-fire guard.</li>
@@ -1617,17 +1617,7 @@ public final class AutoDeductionScheduler {
                         + requiredRecurrenceGeneration);
                 return ScheduleResult.fail("recurrence_generation_unauthorized");
             }
-            if (requiredRecurrenceGeneration > 0L) {
-                recurrenceGen = requiredRecurrenceGeneration;
-            } else {
-                // Legacy expected 0 only authorized while active is still 0 —
-                // first install promotes via ensure under the same lock.
-                long ensured = ensureRecurrenceGenerationLocked(medIdForGen, doseIdForGen);
-                if (ensured <= 0L) {
-                    return ScheduleResult.fail("recurrence_generation_write_failed");
-                }
-                recurrenceGen = ensured;
-            }
+            recurrenceGen = requiredRecurrenceGeneration;
         } else {
             long ensured = ensureRecurrenceGenerationLocked(medIdForGen, doseIdForGen);
             if (ensured <= 0L) {
@@ -1876,9 +1866,9 @@ public final class AutoDeductionScheduler {
     }
 
     /**
-     * Parse a durable ordering token "{millis}-{seq}-..." or legacy pure millis.
-     * Returns long[2] = {millis, seq}; millis=-1 if unparseable. Legacy pure-millis
-     * tokens use seq=0 so they remain comparable with versioned tokens.
+     * Parse a durable ordering token "{millis}-{seq}-...".
+     * Returns long[2] = {millis, seq}; millis=-1 if unparseable or not versioned.
+     * Pure-millis tokens are rejected.
      */
     private static long[] parseOrderingToken(String raw) {
         long[] out = new long[] { -1L, 0L };
@@ -1887,9 +1877,7 @@ public final class AutoDeductionScheduler {
         try {
             int firstDash = s.indexOf('-');
             if (firstDash <= 0) {
-                // Legacy pure-millis tombstone.
-                out[0] = Long.parseLong(s);
-                out[1] = 0L;
+                // Current format requires "{millis}-{seq}-..."; pure millis is invalid.
                 return out;
             }
             out[0] = Long.parseLong(s.substring(0, firstDash).trim());
@@ -1938,14 +1926,13 @@ public final class AutoDeductionScheduler {
     /**
      * Leading millis segment of scheduleVersion in schedule JSON payload.
      * scheduleVersion format: "{millis}-{seq}-{uuid}". Returns -1 if missing.
-     * Retained for compatibility with any external/test callers that only need millis.
      */
     private static long parseScheduleVersionEpochMs(String scheduleRaw) {
         long[] ord = parseScheduleVersionOrdering(scheduleRaw);
         return ord[0];
     }
 
-    /** Parse cancel tombstone ordering millis (legacy pure millis or versioned). -1 if unparseable. */
+    /** Parse cancel tombstone ordering millis (versioned token). -1 if unparseable. */
     private static long parseCancelEpochMs(String cancelRaw) {
         long[] ord = parseOrderingToken(cancelRaw);
         return ord[0];
@@ -2017,26 +2004,10 @@ public final class AutoDeductionScheduler {
      * {@code ALREADY_EXISTS} / pending recovery cannot corrupt an existing D+1
      * or resurrect a cancelled successor.
      */
-    public ScheduleResult scheduleNextOccurrenceIfAbsent(
-            String medicationId,
-            String doseId,
-            String fromCalendarDate,
-            String timeHhmm,
-            double amount
-    ) {
-        return scheduleNextOccurrenceIfAbsent(
-                medicationId, doseId, fromCalendarDate, timeHhmm, amount, /*expectedGen*/ 0L);
-    }
-
     /**
      * @param expectedRecurrenceGeneration generation stamped on the firing occurrence's
-     *        Intent (Issue #217). When {@code > 0}, successor creation is refused unless
-     *        the active durable generation still matches — i.e. disable/cancel has not
-     *        invalidated this recurrence chain. When {@code 0} (legacy), still refuses if
-     *        active generation was invalidated (active {@code > 0} is always required to
-     *        create a new successor after an invalidate has run at least once... 
-     *        actually: if expected is 0, compare only when active > 0 and we require match
-     *        of metadata path). Prefer always passing the Intent generation.
+     *        Intent. Must be {@code > 0} and match the durable active generation;
+     *        otherwise successor creation is refused.
      */
     public ScheduleResult scheduleNextOccurrenceIfAbsent(
             String medicationId,

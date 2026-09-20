@@ -317,7 +317,7 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
       medications: medsStore,
       logs: logsStore,
       globalAutoDeductEnabled: true,
-      listFired: async () => events,
+      listFired: async () => ({ ok: true, events: events }),
       markReconciled: async (_medicationId, doseId, _calendarDate) => {
         const k = `${doseId}`;
         if (k === 'b' && failB) return { ok: false, changed: false };
@@ -352,7 +352,7 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
       medications: medsStore,
       logs: logsStore,
       globalAutoDeductEnabled: true,
-      listFired: async () => stillFired,
+      listFired: async () => ({ ok: true, events: stillFired }),
       markReconciled: async (_m, doseId) => {
         marked.add(doseId);
         return { ok: true, changed: true };
@@ -393,7 +393,7 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
       medications: medsStore,
       logs: logsStore,
       globalAutoDeductEnabled: true,
-      listFired: async () => [e],
+      listFired: async () => ({ ok: true, events: [e] }),
       markReconciled: async () => {
         return { ok: false, changed: false };
       },
@@ -414,7 +414,7 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
       medications: medsStore,
       logs: logsStore,
       globalAutoDeductEnabled: true,
-      listFired: async () => [e],
+      listFired: async () => ({ ok: true, events: [e] }),
       markReconciled: async () => ({ ok: true, changed: true }),
       persistMeds: (m) => {
         medsStore = m;
@@ -456,7 +456,7 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
       medications: medsStore,
       logs: logsStore,
       globalAutoDeductEnabled: true,
-      listFired: async () => [e],
+      listFired: async () => ({ ok: true, events: [e] }),
       markReconciled: async () => {
         markCalls += 1;
         return { ok: false, changed: false };
@@ -487,7 +487,7 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
       medications: medsStore,
       logs: logsStore,
       globalAutoDeductEnabled: true,
-      listFired: async () => [e],
+      listFired: async () => ({ ok: true, events: [e] }),
       markReconciled: async () => {
         markCalls += 1;
         return { ok: true, changed: true };
@@ -534,7 +534,7 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
       medications: medsStore,
       logs: logsStore,
       globalAutoDeductEnabled: true,
-      listFired: async () => [e],
+      listFired: async () => ({ ok: true, events: [e] }),
       markReconciled: async () => ({ ok: true, changed: false }),
       persistMeds: (m) => {
         medsStore = m;
@@ -583,7 +583,7 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
       medications: [baseMed({ currentPills: 10, lastSyncDate: '2026-09-14' })],
       logs: [],
       globalAutoDeductEnabled: true,
-      listFired: async () => [],
+      listFired: async () => ({ ok: true, events: [] }),
       markReconciled: async () => {
         markCalls += 1;
         return { ok: true, changed: true };
@@ -1262,7 +1262,7 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
       medications: [med],
       logs: [],
       globalAutoDeductEnabled: true,
-      listFired: async () => nativeFired,
+      listFired: async () => ({ ok: true, events: nativeFired }),
       markReconciled: async (medicationId, doseId, calendarDate) => {
         markCalls.push({ medicationId, doseId, calendarDate });
         // Terminal native ACK: drop from unreconciled FIRED set
@@ -1303,7 +1303,7 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
       medications: first.medications,
       logs: first.logs,
       globalAutoDeductEnabled: true,
-      listFired: async () => nativeFired,
+      listFired: async () => ({ ok: true, events: nativeFired }),
       markReconciled: async (medicationId, doseId, calendarDate) => {
         markCalls.push({ medicationId, doseId, calendarDate });
         return { ok: true, changed: false };
@@ -1345,7 +1345,7 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
       medications: [med],
       logs: [],
       globalAutoDeductEnabled: true,
-      listFired: async () => nativeFired,
+      listFired: async () => ({ ok: true, events: nativeFired }),
       markReconciled: async (medicationId, doseId, calendarDate) => {
         markCalls.push({ medicationId, doseId, calendarDate });
         return { ok: true, changed: true };
@@ -1398,7 +1398,7 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
       medications: [med],
       logs: [],
       globalAutoDeductEnabled: true,
-      listFired: async () => nativeFired,
+      listFired: async () => ({ ok: true, events: nativeFired }),
       markReconciled: async (medicationId, doseId, calendarDate) => {
         markCalls.push({ medicationId, doseId, calendarDate });
         // Terminal native ACK: drop the corrupt row from the FIRED set.
@@ -1443,7 +1443,7 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
       medications: first.medications,
       logs: first.logs,
       globalAutoDeductEnabled: true,
-      listFired: async () => nativeFired,
+      listFired: async () => ({ ok: true, events: nativeFired }),
       markReconciled: async (medicationId, doseId, calendarDate) => {
         markCalls.push({ medicationId, doseId, calendarDate });
         return { ok: true, changed: false };
@@ -1487,7 +1487,7 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
       medications: [med],
       logs: [],
       globalAutoDeductEnabled: true,
-      listFired: async () => nativeFired,
+      listFired: async () => ({ ok: true, events: nativeFired }),
       markReconciled: async (medicationId, doseId, calendarDate) => {
         markCalls.push({ medicationId, doseId, calendarDate });
         nativeFired = nativeFired.filter(
@@ -1581,7 +1581,7 @@ describe('runAutoDeductionReconciliation — FIRED durable regardless of current
       medications: [med],
       logs: [],
       globalAutoDeductEnabled: true,
-      listFired: async () => nativeFired,
+      listFired: async () => ({ ok: true, events: nativeFired }),
       markReconciled: async (medicationId, doseId, calendarDate) => {
         markCalls.push({ medicationId, doseId, calendarDate });
         nativeFired = nativeFired.filter(
@@ -1650,7 +1650,7 @@ describe('runAutoDeductionReconciliation — FIRED durable regardless of current
       medications: [med],
       logs: [],
       globalAutoDeductEnabled: true,
-      listFired: async () => nativeFired,
+      listFired: async () => ({ ok: true, events: nativeFired }),
       markReconciled: async (medicationId, doseId, calendarDate) => {
         markCalls.push({ medicationId, doseId, calendarDate });
         nativeFired = nativeFired.filter(
@@ -1692,7 +1692,7 @@ describe('runAutoDeductionReconciliation — FIRED durable regardless of current
       medications: first.medications,
       logs: first.logs,
       globalAutoDeductEnabled: true,
-      listFired: async () => sameFired,
+      listFired: async () => ({ ok: true, events: sameFired }),
       markReconciled: async (medicationId, doseId, calendarDate) => {
         markCalls.push({ medicationId, doseId, calendarDate });
         return { ok: true, changed: false };
@@ -1740,7 +1740,7 @@ describe('runAutoDeductionReconciliation — FIRED durable regardless of current
       medications: [med],
       logs: [],
       globalAutoDeductEnabled: true,
-      listFired: async () => nativeFired,
+      listFired: async () => ({ ok: true, events: nativeFired }),
       markReconciled: async (medicationId, doseId, calendarDate) => {
         markCalls.push({ medicationId, doseId, calendarDate });
         return { ok: true, changed: true };

@@ -5,8 +5,7 @@ import type { Medication } from '@/types';
 import { getTodayDateString } from '@/utils/dateCalculations';
 import { useDoseReminderScheduler, getDoseReminderSlots } from '@/hooks/useDoseReminderScheduler';
 import {
-  doseReminderAlarmIdForDose,
-  doseReminderAlarmId } from '@/utils/notifications';
+  doseReminderAlarmIdForDose } from '@/utils/notifications';
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 
@@ -33,7 +32,6 @@ const mocks = vi.hoisted(() => ({
   cancelSnoozed: vi.fn(),
   isPending: vi.fn(),
   isNativeReArmed: vi.fn(),
-  cancelLegacy: vi.fn(),
   cancelStale: vi.fn(),
 }));
 
@@ -48,7 +46,6 @@ vi.mock('@/utils/notifications', async () => {
     cancelSnoozedDoseReminder: mocks.cancelSnoozed,
     isDoseReminderPending: mocks.isPending,
     isNativeDoseReminderReArmed: mocks.isNativeReArmed,
-    cancelLegacyDoseReminderAlarm: mocks.cancelLegacy,
     // cancelStaleDoseReminderAlarms: NOT mocked — real implementation runs
     // so the test can verify actual IDs sent to LocalNotifications.cancel.
   };
@@ -97,13 +94,11 @@ beforeEach(() => {
   mocks.cancelSnoozed.mockReset();
   mocks.isPending.mockReset();
   mocks.isNativeReArmed.mockReset();
-  mocks.cancelLegacy.mockReset();
   mocks.cancel.mockResolvedValue(undefined);
   mocks.cancelSnoozed.mockResolvedValue(undefined);
   mocks.schedule.mockResolvedValue(undefined);
   mocks.isPending.mockResolvedValue(false);
   mocks.isNativeReArmed.mockResolvedValue(false);
-  mocks.cancelLegacy.mockResolvedValue(undefined);
   // Default: no pending notifications (web platform / no stale alarms).
   vi.mocked(LocalNotifications.getPending).mockResolvedValue({ notifications: [] });
   localStorage.clear();
@@ -1666,22 +1661,6 @@ describe('idempotent lifecycle reconciliation', () => {
     expect(mocks.schedule).toHaveBeenCalled();
   });
 
-  it('cancels legacy med-only id when multi-dose slots are active', async () => {
-    const med = makeMed({
-      reminderTime: undefined,
-      doseSchedule: [
-        { id: 'd1', time: '08:00', amount: 1 },
-        { id: 'd2', time: '20:00', amount: 1 },
-      ],
-    });
-    renderHook(() =>
-      useDoseReminderScheduler(defaultOpts({ medications: [med] }))
-    );
-    await vi.advanceTimersByTimeAsync(0);
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(mocks.cancelLegacy).toHaveBeenCalledWith('med-1');
-  });
 });
 
 describe('stale native pending cleanup', () => {
@@ -1698,17 +1677,15 @@ describe('stale native pending cleanup', () => {
 
     const currentId = doseReminderAlarmIdForDose(med.id, 'd1');
     const staleDoseId = doseReminderAlarmIdForDose('med-stale', 'd-old');
-    const legacyMedId = doseReminderAlarmId(med.id);
     const nonDoseAlarmId = 999_999_999; // outside doseAlarm band
 
-    // Mock getPending to contain current + stale + legacy + non-doseAlarm IDs.
+    // Mock getPending to contain current + stale dose-specific + non-doseAlarm IDs.
     // (title/body are required by PendingLocalNotificationSchema but unused by
     // the stale-cleanup logic which only inspects `id`.)
     vi.mocked(LocalNotifications.getPending).mockResolvedValue({
       notifications: [
         { id: currentId, title: '', body: '' },
         { id: staleDoseId, title: '', body: '' },
-        { id: legacyMedId, title: '', body: '' },
         { id: nonDoseAlarmId, title: '', body: '' },
       ],
     });
@@ -1720,7 +1697,7 @@ describe('stale native pending cleanup', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    // Verify actual IDs sent to cancel: stale + legacy cancelled,
+    // Verify actual IDs sent to cancel: stale cancelled,
     // current + non-doseAlarm NOT cancelled.
     expect(LocalNotifications.cancel).toHaveBeenCalled();
     const cancelledIds = vi.mocked(LocalNotifications.cancel).mock.calls.flatMap(
@@ -1730,7 +1707,6 @@ describe('stale native pending cleanup', () => {
         )
     );
     expect(cancelledIds).toContain(staleDoseId);
-    expect(cancelledIds).toContain(legacyMedId);
     expect(cancelledIds).not.toContain(currentId);
     expect(cancelledIds).not.toContain(nonDoseAlarmId);
   });

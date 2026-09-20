@@ -175,11 +175,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
         ...nextPeriod,
       },
     }));
-    if (settings.customQuantities[medId] !== undefined) {
-      const nextCustom = { ...settings.customQuantities };
-      delete nextCustom[medId];
-      onUpdateSettings({ ...settings, customQuantities: nextCustom });
-    }
   };
 
   const getRequestedAmount = (med: Medication) =>
@@ -287,7 +282,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
           packageSize: med.packageSize,
         };
       });
-  }, [displayList, selectedMedIds, settings.customQuantities, medicationPeriods, quantityModes, customOrderQuantities, orderUnits]);
+  }, [displayList, selectedMedIds, medicationPeriods, quantityModes, customOrderQuantities, orderUnits]);
 
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
   const orderItemsForMessage = useMemo((): OrderItem[] => {

@@ -22,7 +22,6 @@ vi.mock('@/utils/notifications', async () => {
 });
 
 import { scheduleSnoozedDoseReminder } from '@/utils/notifications';
-import { clearSnoozedDoseForMed } from '@/utils/doseReminderStorage';
 
 /** Build a medication with a reminder enabled at the given time. */
 function makeMed(overrides: Partial<Medication> = {}): Medication {
@@ -342,30 +341,6 @@ describe('useDoseReminders', () => {
     });
   });
 
-  describe('clearSnoozedDoseForMed', () => {
-    it('removes the persisted snooze marker for the medication', () => {
-      const SNOOZE_KEY = 'android_med_tracker_snooze_v1';
-      localStorage.setItem(
-        SNOOZE_KEY,
-        JSON.stringify({
-          'med-a': Date.now() + 60_000,
-          'med-b': Date.now() + 60_000,
-        })
-      );
-
-      clearSnoozedDoseForMed('med-a');
-
-      const snooze = JSON.parse(
-        localStorage.getItem(SNOOZE_KEY) || '{}'
-      ) as Record<string, number>;
-      expect(snooze['med-a']).toBeUndefined();
-      expect(snooze['med-b']).toBeDefined();
-    });
-
-    it('is a no-op when no marker exists', () => {
-      expect(() => clearSnoozedDoseForMed('med-none')).not.toThrow();
-    });
-  });
 });
 
 describe('useDoseReminders — medication-level Auto (openAlarm)', () => {

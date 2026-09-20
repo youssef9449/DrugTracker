@@ -91,15 +91,24 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   mode = 'all',
 }) => {
   const isPharmacyOnly = mode === 'pharmacy';
-  const [pharmacyPhone, setPharmacyPhone] = useState(settings.pharmacyPhone || '');
-  const [pharmacyName, setPharmacyName] = useState(
-    (settings.pharmacyName === 'الصيدلية' ? '' : settings.pharmacyName) || ''
-  );
-  const [customerCode, setCustomerCode] = useState(
-    (settings.customerCode === '14739' ? '' : settings.customerCode) || ''
-  );
-  const [address, setAddress] = useState(settings.address || '');
-  const [contactPhone, setContactPhone] = useState(settings.contactPhone || '');
+  // Current pharmacy / contact / address identity comes only from the
+  // pharmacies + whatsappContacts + whatsappAddresses collections.
+  const selectedPharmacy =
+    (settings.pharmacies ?? []).find((p) => p.id === settings.selectedPharmacyId) ??
+    (settings.pharmacies ?? [])[0];
+  const pharmacyPhone = selectedPharmacy?.phone ?? '';
+  const pharmacyName = selectedPharmacy?.name ?? '';
+  const customerCode = selectedPharmacy?.customerCode ?? '';
+  const selectedContactIds = settings.selectedWhatsappContactIds ?? [];
+  const selectedAddressIds = settings.selectedWhatsappAddressIds ?? [];
+  const selectedContact =
+    (settings.whatsappContacts ?? []).find((c) => selectedContactIds.includes(c.id)) ??
+    (settings.whatsappContacts ?? [])[0];
+  const selectedAddress =
+    (settings.whatsappAddresses ?? []).find((a) => selectedAddressIds.includes(a.id)) ??
+    (settings.whatsappAddresses ?? [])[0];
+  const address = selectedAddress?.address ?? '';
+  const contactPhone = selectedContact?.phone ?? '';
 
   // App preference drafts — committed only on حفظ الإعدادات.
   const [draftSound, setDraftSound] = useState(soundEnabled);
@@ -176,11 +185,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   // the moment the modal opens (audit #93).
   useEffect(() => {
     if (isOpen) {
-      setPharmacyPhone(settings.pharmacyPhone || '');
-      setPharmacyName((settings.pharmacyName === 'الصيدلية' ? '' : settings.pharmacyName) || '');
-      setCustomerCode((settings.customerCode === '14739' ? '' : settings.customerCode) || '');
-      setAddress(settings.address || '');
-      setContactPhone(settings.contactPhone || '');
       // Reset preference drafts from committed parent state on open.
       setDraftSound(soundEnabled);
       setDraftNotifications(notificationsEnabled);
@@ -203,8 +207,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
         : medications.map((m) => {
             const { quantity } = calculateMedicationOrderQuantity(
               m,
-              settings.defaultDurationDays,
-              settings.customQuantities
+              settings.defaultDurationDays
             );
             return {
               name: m.name,
@@ -232,7 +235,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
     activeOrderItems,
     medications,
     settings.defaultDurationDays,
-    settings.customQuantities,
     customerCode,
     address,
     contactPhone,
@@ -244,20 +246,13 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
     onSaveSettings({
-      pharmacyPhone: isPharmacyOnly ? pharmacyPhone.trim() : settings.pharmacyPhone,
-      pharmacyName: isPharmacyOnly ? pharmacyName.trim() : settings.pharmacyName,
-      customerCode: isPharmacyOnly ? customerCode.trim() : settings.customerCode,
-      // Preserve the duration/quantities managed by the shopping view.
       defaultDurationDays: settings.defaultDurationDays,
-      customQuantities: settings.customQuantities,
-      address: isPharmacyOnly ? address.trim() : settings.address,
-      contactPhone: isPharmacyOnly ? contactPhone.trim() : settings.contactPhone,
-      pharmacies: settings.pharmacies,
-      selectedPharmacyId: settings.selectedPharmacyId,
-      whatsappContacts: settings.whatsappContacts,
-      whatsappAddresses: settings.whatsappAddresses,
-      selectedWhatsappContactIds: settings.selectedWhatsappContactIds,
-      selectedWhatsappAddressIds: settings.selectedWhatsappAddressIds,
+      pharmacies: settings.pharmacies ?? [],
+      selectedPharmacyId: settings.selectedPharmacyId ?? '',
+      whatsappContacts: settings.whatsappContacts ?? [],
+      whatsappAddresses: settings.whatsappAddresses ?? [],
+      selectedWhatsappContactIds: settings.selectedWhatsappContactIds ?? [],
+      selectedWhatsappAddressIds: settings.selectedWhatsappAddressIds ?? [],
     });
     // Commit preference drafts only on explicit Save (not on close / dismiss).
     if (!isPharmacyOnly && onApplyAppPreferences) {
@@ -520,9 +515,9 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
               <input
                 type="tel"
                 value={pharmacyPhone}
-                onChange={(e) => setPharmacyPhone(e.target.value)}
-                placeholder="مثال: 01012345678 أو 0123456789"
-                className="w-full px-3.5 py-2.5 rounded-xl border border-teal-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+                readOnly
+                placeholder="اختر صيدلية من إدارة الصيدليات"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-teal-300 text-sm font-mono bg-slate-50 text-slate-700"
               />
               <div className="text-[11px] text-teal-800 flex items-center justify-between">
                 <span>سيتم إرسال الطلب لهذا الرقم مباشرة عبر واتساب.</span>
@@ -545,7 +540,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                 <input
                   type="text"
                   value={customerCode}
-                  onChange={(e) => setCustomerCode(e.target.value)}
+                  readOnly
                   placeholder="اكتب كود العميل إن وجد (اختياري)"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono font-bold focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
                 />
@@ -568,7 +563,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                 <input
                   type="text"
                   value={pharmacyName}
-                  onChange={(e) => setPharmacyName(e.target.value)}
+                  readOnly
                   placeholder="اكتب اسم الصيدلية (اختياري)"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
                 />
@@ -584,7 +579,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                 </label>
                 <textarea
                   value={address}
-                  onChange={(e) => setAddress(e.target.value)}
+                  readOnly
                   placeholder="مثال: شارع 15، عمارة 20، الدور الثالث، شقة 8 — مدينة نصر"
                   rows={2}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white resize-none"
@@ -603,10 +598,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                   type="tel"
                   inputMode="tel"
                   value={contactPhone}
-                  onChange={(e) => {
-                    const digits = normalizeArabicDigits(e.target.value).replace(/\D/g, '');
-                    setContactPhone(digits);
-                  }}
+                  readOnly
                   placeholder="مثال: 01012345678"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono font-bold focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
                 />

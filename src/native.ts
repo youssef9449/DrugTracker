@@ -278,17 +278,6 @@ export async function initNativeBridge(): Promise<void> {
       },
     ];
 
-    // Android channel sound is immutable. Delete the old v1 and v2
-    // channels so the v3 channel with the default system sound takes
-    // over. (v1 used a default sound; v2 used the custom 'dose_reminder.wav';
-    // v3 uses the system default again.)
-    for (const oldId of ['dose-reminder', 'dose-reminder-v2']) {
-      if (existingIds.has(oldId)) {
-        await LocalNotifications.deleteChannel({ id: oldId });
-        console.info(`[native] Migrated ${oldId} channel to ${DOSE_REMINDER_CHANNEL_ID}`);
-      }
-    }
-
     for (const ch of channels) {
       if (!existingIds.has(ch.id)) {
         await LocalNotifications.createChannel(ch);

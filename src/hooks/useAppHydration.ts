@@ -94,18 +94,38 @@ export function useAppHydration(setters: AppHydrationSetters): void {
     const savedLogs = loadJson<ConsumptionLog[] | null>(STORAGE_LOGS_KEY, null);
     if (Array.isArray(savedLogs)) setLogs(savedLogs);
 
-    // Pharmacy settings — current schema only (pharmacies array).
+    // Pharmacy settings — explicit current schema only (no unknown-key pass-through).
     const parsed = loadJson<Partial<PharmacySettings> | null>(
       STORAGE_PHARMACY_KEY,
       null
     );
     if (parsed && typeof parsed === 'object') {
       const pharmacies = Array.isArray(parsed.pharmacies) ? parsed.pharmacies : [];
+      const whatsappContacts = Array.isArray(parsed.whatsappContacts)
+        ? parsed.whatsappContacts
+        : [];
+      const whatsappAddresses = Array.isArray(parsed.whatsappAddresses)
+        ? parsed.whatsappAddresses
+        : [];
+      const selectedWhatsappContactIds = Array.isArray(parsed.selectedWhatsappContactIds)
+        ? parsed.selectedWhatsappContactIds
+        : [];
+      const selectedWhatsappAddressIds = Array.isArray(parsed.selectedWhatsappAddressIds)
+        ? parsed.selectedWhatsappAddressIds
+        : [];
+      const defaultDurationDays =
+        parsed.defaultDurationDays === 60 ? 60 : DEFAULT_PHARMACY_SETTINGS.defaultDurationDays;
       setPharmacySettings({
-        ...DEFAULT_PHARMACY_SETTINGS,
-        ...parsed,
+        defaultDurationDays,
         pharmacies,
-        selectedPharmacyId: parsed.selectedPharmacyId || pharmacies[0]?.id || '',
+        selectedPharmacyId:
+          typeof parsed.selectedPharmacyId === 'string' && parsed.selectedPharmacyId
+            ? parsed.selectedPharmacyId
+            : pharmacies[0]?.id || '',
+        whatsappContacts,
+        whatsappAddresses,
+        selectedWhatsappContactIds,
+        selectedWhatsappAddressIds,
       });
     }
 

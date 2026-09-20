@@ -32,7 +32,6 @@ vi.mock('@capacitor/local-notifications', () => ({
 
 import {
   criticalAlarmId,
-  doseReminderAlarmId,
   doseReminderAlarmIdForDose,
   sendMedicineAlert,
   sendCriticalStockAlert,
@@ -209,43 +208,14 @@ describe('criticalAlarmId — stable across calls, disjoint from other categorie
   });
 });
 
-describe('doseReminderAlarmId — stable across calls, disjoint from other categories', () => {
-  it('returns the same id for the same medId on every call', () => {
-    expect(doseReminderAlarmId('med-x')).toBe(doseReminderAlarmId('med-x'));
-  });
-
-  it('returns different ids for different medIds', () => {
-    expect(doseReminderAlarmId('med-x')).not.toBe(doseReminderAlarmId('med-y'));
-  });
-
-  it('lives in the doseAlarm band (6_000_000–6_999_999)', () => {
-    const id = doseReminderAlarmId('med-band');
-    expect(id).toBeGreaterThanOrEqual(6_000_000);
-    expect(id).toBeLessThan(7_000_000);
-  });
-
-  it('cancel + reschedule use the SAME stable id', async () => {
-    const medId = 'med-dose-reschedule';
-
-    await cancelDoseReminder(medId);
-    await scheduleDoseReminder(medId, 'Test', '09:00', 1, 'قرص');
-
-    expect(mocks.cancel).toHaveBeenCalledTimes(1);
-    expect(mocks.schedule).toHaveBeenCalledTimes(1);
-
-    const cancelledId = mocks.cancel.mock.calls[0][0].notifications[0].id;
-    const scheduledId = mocks.schedule.mock.calls[0][0].notifications[0].id;
-    expect(cancelledId).toBe(scheduledId);
-    expect(cancelledId).toBe(doseReminderAlarmId(medId));
-  });
-});
-
 describe('snoozeDoseReminderId — distinct from daily dose alarms', () => {
   it('is stable and does not collide with the recurring dose alarm', () => {
-    expect(snoozeDoseReminderId('med-x')).toBe(snoozeDoseReminderId('med-x'));
-    expect(snoozeDoseReminderId('med-x')).not.toBe(doseReminderAlarmId('med-x'));
-    expect(snoozeDoseReminderId('med-x')).toBeGreaterThanOrEqual(7_000_000);
-    expect(snoozeDoseReminderId('med-x')).toBeLessThan(8_000_000);
+    const snoozeId = snoozeDoseReminderId('med-x', 'd1');
+    const doseId = doseReminderAlarmIdForDose('med-x', 'd1');
+    expect(snoozeId).toBe(snoozeDoseReminderId('med-x', 'd1'));
+    expect(snoozeId).not.toBe(doseId);
+    expect(snoozeId).toBeGreaterThanOrEqual(7_000_000);
+    expect(snoozeId).toBeLessThan(8_000_000);
   });
 });
 
@@ -345,7 +315,6 @@ describe('doseReminderAlarmIdForDose — multi-dose identity (Phase 2)', () => {
     const a = doseReminderAlarmIdForDose('med-x', 'dose-a');
     const b = doseReminderAlarmIdForDose('med-x', 'dose-b');
     expect(a).not.toBe(b);
-    expect(a).not.toBe(doseReminderAlarmId('med-x'));
   });
 
   it('same med+dose pair is stable across calls', () => {
@@ -365,8 +334,6 @@ describe('Phase 3B snooze notification ids', () => {
   it('multi-dose snooze ids differ per dose', () => {
     const a = snoozeDoseReminderId('med-x', 'd1');
     const b = snoozeDoseReminderId('med-x', 'd2');
-    const only = snoozeDoseReminderId('med-x');
     expect(a).not.toBe(b);
-    expect(a).not.toBe(only);
   });
 });

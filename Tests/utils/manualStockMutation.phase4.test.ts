@@ -2074,7 +2074,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
           currentPills: 9,
           doseConsumptionHistory: { d1: [TODAY] },
         }),
-      ] }),
+      ],
       logs: [
         {
           id: exactAutoLogId('med-1', 'd1', TODAY),

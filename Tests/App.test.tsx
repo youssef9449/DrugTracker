@@ -226,7 +226,6 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
 
   /** Seed a single med in localStorage so App renders one MedicationCard. */
   function seedMed(overrides: Record<string, unknown> = {}): void {
-    const todayStr = new Date().toISOString().slice(0, 10);
     localStorage.setItem(
       'android_med_tracker_items_v2',
       JSON.stringify([
@@ -265,7 +264,6 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
   }
 
   it('Test A — ON → OFF: changes autoDeductEnabled only; currentPills unchanged; no exact_auto log', async () => {
-    const todayStr = new Date().toISOString().slice(0, 10);
     seedMed({ autoDeductEnabled: true });
 
     render(<App />);
@@ -391,7 +389,6 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
   });
 
   it('Test C — OFF → ON: changes autoDeductEnabled to true; currentPills unchanged; no exact_auto log', async () => {
-    const todayStr = new Date().toISOString().slice(0, 10);
     seedMed({ autoDeductEnabled: false });
 
     render(<App />);

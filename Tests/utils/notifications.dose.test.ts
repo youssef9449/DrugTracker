@@ -226,7 +226,7 @@ describe('scheduleDoseReminder — 12h display body, 24h schedule identity', () 
     async (hhmm, display) => {
       // Pick a system time so every sample is still "ahead" today (before midnight).
       vi.setSystemTime(new Date(2024, 8, 10, 0, 0, 0));
-      await scheduleDoseReminder('med-12h', 'Aspirin', hhmm, 1, 'قرص');
+      await scheduleDoseReminder('med-12h', 'Aspirin', hhmm, 1, 'قرص', 'd1');
 
       expect(mocks.schedule).toHaveBeenCalled();
       const notif = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1][0]

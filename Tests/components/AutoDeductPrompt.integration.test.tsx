@@ -154,7 +154,7 @@ describe('Auto-Deduction First Run Prompt Integration', () => {
 
   it('Android Back uses the same OFF decision path as choosing "لا"', async () => {
     let backHandler: (() => boolean) | null = null;
-    vi.mocked(registerBackButtonHandler).mockImplementation((fn: () => boolean) => {
+    vi.mocked(registerBackButtonHandler).mockImplementation((fn: (() => boolean) | null) => {
       backHandler = fn;
       return () => {};
     });
@@ -179,7 +179,7 @@ describe('Auto-Deduction First Run Prompt Integration', () => {
 
   it('Android Back failure leaves prompt open and prompted unset', async () => {
     let backHandler: (() => boolean) | null = null;
-    vi.mocked(registerBackButtonHandler).mockImplementation((fn: () => boolean) => {
+    vi.mocked(registerBackButtonHandler).mockImplementation((fn: (() => boolean) | null) => {
       backHandler = fn;
       return () => {};
     });

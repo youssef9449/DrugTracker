@@ -260,7 +260,7 @@ describe('useDoseReminders', () => {
       );
 
       act(() => {
-        result.current.snoozeAlarm(med, 10);
+        result.current.snoozeAlarm(10);
       });
       expect(result.current.alarmingMedication).toBeNull();
 
@@ -279,7 +279,7 @@ describe('useDoseReminders', () => {
         result.current.openAlarm('med-snooze-sched', 'd1');
       });
       act(() => {
-        result.current.snoozeAlarm(med, 15);
+        result.current.snoozeAlarm(15);
       });
 
       expect(scheduleSnoozedDoseReminder).toHaveBeenCalledWith(
@@ -308,7 +308,7 @@ describe('useDoseReminders', () => {
       );
 
       act(() => {
-        result.current.snoozeAlarm(med, 10);
+        result.current.snoozeAlarm(10);
       });
       expect(result.current.alarmingMedication).toBeNull();
 

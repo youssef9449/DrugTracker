@@ -114,6 +114,7 @@ function mockExactFirst(
           partialNativeAck: false,
         },
         nativeListFailed: false,
+        durabilityBlocked: false,
       };
     });
 }
@@ -349,6 +350,7 @@ describe('runGatedGlobalAutoDeductToggle exact-before-mutation', () => {
         state: opts.fresh,
         reconciliation: null,
         nativeListFailed: false,
+        durabilityBlocked: false,
       };
     });
 
@@ -400,6 +402,7 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
       state: opts.fresh,
       reconciliation: null,
       nativeListFailed: false,
+      durabilityBlocked: false,
     }));
 
     const formMed = durable.medications[0];
@@ -613,6 +616,7 @@ describe('FIRED durable after schedule edit/remove (#268 / PR #271)', () => {
             partialNativeAck: false,
           },
           nativeListFailed: false,
+          durabilityBlocked: false,
         };
       });
   }

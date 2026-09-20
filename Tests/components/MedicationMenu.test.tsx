@@ -5,7 +5,6 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { MedicationMenu } from '@/components/MedicationMenu';
 import { isMedicationAutoDeductActive } from '@/utils/doseSchedule';
 import type { Medication } from '@/types';
-import { getTodayDateString } from '@/utils/dateCalculations';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
   return {

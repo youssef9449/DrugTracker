@@ -90,7 +90,7 @@ describe('Issue #266 — durable currentPills is sole live stock', () => {
       warningThresholdDays: 5,
       autoDeductEnabled: true,
       doseSchedule: [{ id: 'd1', amount: 10, time: '08:00' }],
-    } as const;
+    };
     const a = makeMed({ ...base});
     const b = makeMed({ ...base});
     expect(getCriticalAlarmDate(a)).toBe(getCriticalAlarmDate(b));

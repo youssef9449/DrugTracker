@@ -535,18 +535,16 @@ describe('getCriticalAlarmDate — bulk-jump performance path', () => {
   });
 
   it('large genuinely fractional ratio is not promoted to next integer', () => {
-    // The old floorRatioSafely used Math.floor(ratio + tolerance).
-    // At large ratios, the tolerance grows with abs(ratio) and can exceed
-    // the fractional distance to the next integer, incorrectly promoting
-    // a genuine .5 fraction to the next integer.
+    // floorRatioSafely uses a one-ULP tolerance: only ratios within one
+    // ULP below an integer are promoted. Genuine fractions at any
+    // magnitude are not.
     //
-    // Reproduce: numerator = 999999999999999.5, denominator = 1
-    // ratio = 999999999999999.5 (genuinely fractional)
-    // Old: tolerance = EPSILON * 999999999999999.5 * 8 ≈ 1.776
-    //     Math.floor(999999999999999.5 + 1.776) = 1000000000000000 (wrong!)
-    // New: nearestInteger = 1000000000000000
-    //     nearestInteger - ratio = 0.5 > tolerance (1.776) → false
-    //     Math.floor(999999999999999.5) = 999999999999999 (correct)
+    // ratio = 999999999999999.5, denominator = 1
+    // nearestInteger = 1000000000000000
+    // difference = 0.5
+    // one ULP at this magnitude is much smaller than 0.5
+    // therefore no promotion occurs
+    // Math.floor(999999999999999.5) = 999999999999999 (correct)
     //
     // Use daysLeftFromCurrentStock as the public caller to verify.
     const med = makeMed({

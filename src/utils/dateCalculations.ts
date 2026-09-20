@@ -187,13 +187,14 @@ function floorRatioSafely(numerator: number, denominator: number): number {
   const ratio = numerator / denominator;
   if (!Number.isFinite(ratio)) return Math.floor(ratio);
 
-  const tolerance =
-    Number.EPSILON * Math.max(1, Math.abs(ratio)) * 8;
+  const absRatio = Math.abs(ratio);
+  const exponent = absRatio > 0 ? Math.floor(Math.log2(absRatio)) : 0;
+  const ulp = absRatio > 0 ? 2 ** (exponent - 52) : Number.EPSILON;
   const nearestInteger = Math.round(ratio);
 
   if (
     ratio < nearestInteger &&
-    nearestInteger - ratio <= tolerance
+    nearestInteger - ratio <= ulp
   ) {
     return nearestInteger;
   }

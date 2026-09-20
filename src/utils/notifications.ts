@@ -3,14 +3,12 @@
  *
  * Two backends are used depending on platform:
  *
- * - **Capacitor (Android/iOS)**: uses @capacitor/local-notifications,
- *   which schedules notifications natively via Android's
- *   NotificationManager. This means notifications fire even when
- *   the app is in the background or killed, and they appear in
- *   the Android notification drawer with the app's icon. On
- *   Android 13+ (API 33+), this plugin also handles the
- *   POST_NOTIFICATIONS runtime permission request automatically
- *   — without this permission, no notification will be shown.
+ * - **Android**: notification presentation is owned by the repository
+ *   Notification Runtime. Exact timing is owned separately by the
+ *   Exact Alarm Runtime.
+ * - **iOS**: this facade keeps the existing @capacitor/local-notifications
+ *   presentation/scheduling fallback.
+ * - **Web**: this facade uses the browser Notification API fallback.
  *
  * - **Web (Chrome / Edge / Firefox / Safari)**: uses the standard
  *   browser `Notification` API. This is the case when running in
@@ -66,19 +64,10 @@ import {
 //   foreground → DOSE_REMINDER_FOREGROUND_CHANNEL_ID (silent)
 //   background → DOSE_REMINDER_CHANNEL_ID (system default sound)
 //
-// The scheduler (useDoseReminderScheduler) re-arms all pending dose
-// reminders via idempotent reconciliation (lifecycleTick), so the
-// channel matches the current app state for the common case.
-//
-// IMPORTANT — schedule-time channel is not a hard guarantee under
-// process death: if the app is killed after setAppInForeground(false)
-// but before cancel+reschedule completes, a silent foreground-channel
-// notification could still be pending. The authority for killed-process
-// correctness is the repository-owned TimedNotificationPublisher +
-// AppForegroundState in native-android/ (installed by prepare-android.mjs).
-// Delivery uses process-local MainActivity onResume/onPause state; a fresh
-// process defaults to false → dose-reminder-v3. JS reconciliation remains
-// the fast path for live transitions.
+// The Android scheduler no longer selects the delivery channel. At alarm
+// delivery, the native Dose Reminder receiver reads the shared foreground
+// state and asks Notification Runtime to post on the feature-selected channel.
+// iOS keeps the existing schedule-time channel selection in this facade.
 // ─────────────────────────────────────────────────────────────
 let appInForeground = true;
 
@@ -226,29 +215,10 @@ export async function requestNotificationPermission(): Promise<boolean> {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Exact-alarm permission (Android 12+ / API 31+)
+// Exact-alarm capability (Android 12+ / API 31+)
 //
-// @capacitor/local-notifications v6 schedules notifications via
-// AlarmManager. On Android 12+, exact alarms require the
-// SCHEDULE_EXACT_ALARM permission, which the user must grant via the
-// Android settings screen (ACTION_REQUEST_SCHEDULE_EXACT_ALARM).
-//
-// When exact-alarm permission is GRANTED, the plugin uses
-// AlarmManager.setExactAndAllowWhileIdle → the notification fires at
-// the exact scheduled time.
-//
-// When DENIED, the plugin falls back to setAndAllowWhileIdle (inexact)
-// → the notification may be delayed by minutes or hours. For medication
-// dose reminders this is unacceptable, so we treat exact-alarm as a
-// mandatory capability and surface its state to the UI.
-//
-// The plugin's API:
-//   checkExactNotificationSetting() → { exact_alarm: 'granted' | 'denied' | 'prompt' }
-//   changeExactNotificationSetting() → opens the Android settings screen
-//     (returns 'granted' on Android < 12 where no permission is needed)
-//
-// Note: on Android < 12, checkExactNotificationSetting returns 'granted'
-// because exact alarms don't require a separate permission.
+// The shared Exact Alarm Runtime owns the Android exact-alarm capability check
+// and settings action. Notification Runtime does not own or schedule alarms.
 // ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -391,8 +361,8 @@ export async function sendCriticalStockAlert(
  * the app is running on. Falls back to the browser Notification API
  * when Capacitor isn't available.
  *
- * The notification sound is handled entirely by the Android notification
- * channel (bundled native sound). No JS sound playback is involved.
+ * Android notification presentation is handled by Notification Runtime;
+ * JS only supplies the feature's content and policy.
  */
 async function scheduleNotification(opts: {
   id: number;
@@ -858,10 +828,8 @@ export function doseReminderAlarmIdForDose(
  * - DoseReminderRecurrenceStore: temporary delivery evidence; valid only when
  *   storage still holds a matching future occurrence for the same notification id
  *
- * Reconciliation checks getPending first, then native re-arm evidence so a
- * brief getPending lag during delivery does not force a duplicate schedule.
- * Recurrence owner remains TimedNotificationPublisher (next calendar day).
- * JS must not use Capacitor repeats/every.
+ * Reconciliation asks the native exact-alarm runtime whether the logical
+ * occurrence is still armed. JS must not use Capacitor repeats/every.
  */
 export async function isDoseReminderPending(
   medId: string,
@@ -1115,8 +1083,8 @@ export interface ScheduleDoseReminderOptions {
  *
  * Used by useDoseReminderScheduler when suppressing a consumed dose:
  *   - still ahead → cancel + schedule next with skipToday.
- *   - already past → do not retract a delivered notification; native
- *     TimedNotificationPublisher may already have armed tomorrow.
+ *   - already past → do not retract a delivered notification; the native
+ *     delivery receiver may already have armed the next calendar-day occurrence.
  */
 export function isDoseReminderTimeStillAhead(
   reminderTime: string,
@@ -1138,9 +1106,8 @@ export function isDoseReminderTimeStillAhead(
  * tomorrow when options.skipToday). Uses a stable id
  * (medicationId + doseId) so reschedule replaces, not duplicates.
  *
- * Recurrence: NOT via Capacitor repeats/every (those use setRepeating
- * with a wrong interval for daily wall-clock times). Native
- * TimedNotificationPublisher arms the next day from extra.reminderTime.
+ * Recurrence: NOT via Capacitor repeats/every. The native Dose Reminder
+ * receiver asks the shared exact-alarm runtime to arm the next calendar day.
  *
  * `allowWhileIdle: true` lets the alarm fire in Doze mode.
  * Channel: dose-reminder-v3 / foreground silent variant at delivery.

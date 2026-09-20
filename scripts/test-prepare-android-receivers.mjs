@@ -1,5 +1,5 @@
 /**
- * Regression tests for safe AutoDeduction receiver upsert in prepare-android.
+ * Regression tests for safe shared alarm lifecycle receiver upsert and adapter registration in prepare-android.
  * Run: node scripts/test-prepare-android-receivers.mjs
  * No npm/npx required.
  */

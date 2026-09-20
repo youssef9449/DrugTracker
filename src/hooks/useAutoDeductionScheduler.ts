@@ -19,6 +19,8 @@ import {
   restoreFutureSchedulesOnce,
 } from '../utils/restoreFutureSchedulesBoundary';
 import { withAutoStockMutationGate } from '../utils/autoDeductionStockGate';
+import { OperationQueue } from '../utils/async/OperationQueue';
+import { GenerationGuard } from '../utils/async/GenerationGuard';
 
 export interface UseAutoDeductionSchedulerOptions {
   medications: Medication[];
@@ -242,8 +244,8 @@ export function useAutoDeductionScheduler({
   midnightTick = 0,
 }: UseAutoDeductionSchedulerOptions): void {
   const trackedRef = useRef<Set<string>>(new Set());
-  const generationRef = useRef(0);
-  const chainRef = useRef<Promise<void>>(Promise.resolve());
+  const generationGuardRef = useRef(new GenerationGuard<string>());
+  const operationQueueRef = useRef(new OperationQueue<string>());
   const recoveryBoundaryRef = useRef<string | null>(null);
 
   const signature = useMemo(
@@ -277,10 +279,10 @@ export function useAutoDeductionScheduler({
     if (!hydrated || isFirstRun) return;
     if (exactAlarmEnabled !== true) {
       if (exactAlarmEnabled === false) {
-        const gen = ++generationRef.current;
+        const gen = generationGuardRef.current.bump('auto-deduction');
         const toCancel = Array.from(trackedRef.current);
-        chainRef.current = chainRef.current.then(async () => {
-          if (gen !== generationRef.current) return;
+        operationQueueRef.current.enqueue('auto-deduction', async () => {
+          if (!generationGuardRef.current.isCurrent('auto-deduction', gen)) return;
           for (const key of toCancel) {
             const [medId, doseId, date] = key.split('::');
             if (medId && doseId && date) {
@@ -291,7 +293,7 @@ export function useAutoDeductionScheduler({
                 /* force */ true
               );
               // Only drop tracking when native reports terminal success.
-              if (res.ok && gen === generationRef.current) {
+              if (res.ok && generationGuardRef.current.isCurrent('auto-deduction', gen)) {
                 trackedRef.current.delete(key);
               }
             }
@@ -301,7 +303,7 @@ export function useAutoDeductionScheduler({
       return;
     }
 
-    const gen = ++generationRef.current;
+    const gen = generationGuardRef.current.bump('auto-deduction');
     const today = getTodayDateString();
     const tomorrow = tomorrowDateString(today);
     const now = Date.now();
@@ -321,8 +323,8 @@ export function useAutoDeductionScheduler({
       }
     }
 
-    chainRef.current = chainRef.current.then(async () => {
-      if (gen !== generationRef.current) return;
+    operationQueueRef.current.enqueue('auto-deduction', async () => {
+      if (!generationGuardRef.current.isCurrent('auto-deduction', gen)) return;
 
       // Recovery boundary: rebuild/promo any past native schedule entries before
       // the destructive desired-state comparison. This makes missed fires
@@ -340,7 +342,7 @@ export function useAutoDeductionScheduler({
           return;
         }
         recoveryBoundaryRef.current = recoveryBoundary;
-        if (gen !== generationRef.current) return;
+        if (!generationGuardRef.current.isCurrent('auto-deduction', gen)) return;
       }
 
       // Reconcile against durable native schedule metadata (not process-local
@@ -356,7 +358,7 @@ export function useAutoDeductionScheduler({
         const listedKeys = new Set<string>();
         const retryProtectedKeys = new Set<string>();
         for (const s of listResult.schedules) {
-          if (gen !== generationRef.current) return;
+          if (!generationGuardRef.current.isCurrent('auto-deduction', gen)) return;
           const key = autoDeductionScheduleKey(
             s.medicationId,
             s.doseId,
@@ -391,7 +393,7 @@ export function useAutoDeductionScheduler({
               // Fail-closed: keep tracking, skip cancel, retry next pass.
               continue;
             }
-            if (!res.skipped && gen === generationRef.current) {
+            if (!res.skipped && generationGuardRef.current.isCurrent('auto-deduction', gen)) {
               trackedRef.current.delete(key);
             }
           } else {
@@ -400,7 +402,7 @@ export function useAutoDeductionScheduler({
           }
         }
 
-        if (gen !== generationRef.current) return;
+        if (!generationGuardRef.current.isCurrent('auto-deduction', gen)) return;
 
         // The successful native list is authoritative. A tracked key that
         // disappeared from the native snapshot is already absent natively;
@@ -418,15 +420,15 @@ export function useAutoDeductionScheduler({
         // trackedRef is left unchanged for a later successful reconciliation.
       }
 
-      if (gen !== generationRef.current) return;
+      if (!generationGuardRef.current.isCurrent('auto-deduction', gen)) return;
 
       for (const [key, slot] of desired) {
-        if (gen !== generationRef.current) return;
+        if (!generationGuardRef.current.isCurrent('auto-deduction', gen)) return;
         const result = await scheduleExactOccurrenceFromDurable(slot);
         if (
           result.ok &&
           !(result as { skipped?: boolean }).skipped &&
-          gen === generationRef.current
+          generationGuardRef.current.isCurrent('auto-deduction', gen)
         ) {
           trackedRef.current.add(key);
         } else if (!result.ok && result.error === 'exact_alarm_permission_denied') {

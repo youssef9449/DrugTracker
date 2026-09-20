@@ -57,16 +57,19 @@ const cancelMock = vi.mocked(cancelCriticalAlarm);
 const verifyMock = mocks.verify;
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
+  const dailyDose = overrides.dailyDose ?? 1;
   return {
     id: 'med-1',
     name: 'Test Med',
     currentPills: 30,
-    dailyDose: 1,
+    dailyDose,
     unit: 'قرص',
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
     autoDeductEnabled: true,
+    // Explicit schedule required for getCriticalAlarmDate projection.
+    doseSchedule: [{ id: 'd1', amount: dailyDose, time: '20:00' }],
     ...overrides,
   };
 }
@@ -626,5 +629,132 @@ describe('useCriticalAlarmScheduler — stale-async safety', () => {
     await flush();
 
     expect(readClaims()['med-1']).toBeUndefined();
+  });
+});
+
+describe('useCriticalAlarmScheduler — exact-time input reschedule', () => {
+  it('reschedules when only dose time changes', async () => {
+    const medT1 = makeMed({
+      currentPills: 100,
+      dailyDose: 10,
+      doseSchedule: [{ id: 'd1', amount: 10, time: '20:00' }],
+    });
+    const t1 = getCriticalAlarmDate(medT1, getTodayDateString());
+    expect(t1).not.toBeNull();
+
+    const { rerender } = renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({ medications: [medT1] }),
+    });
+    await flush();
+    expect(scheduleMock).toHaveBeenCalledWith('med-1', 'Test Med', t1, 'قرص');
+    scheduleMock.mockClear();
+    cancelMock.mockClear();
+
+    const medT2 = makeMed({
+      currentPills: 100,
+      dailyDose: 10,
+      doseSchedule: [{ id: 'd1', amount: 10, time: '21:30' }],
+    });
+    const t2 = getCriticalAlarmDate(medT2, getTodayDateString());
+    expect(t2).not.toBeNull();
+    expect(t2).not.toBe(t1);
+
+    rerender(defaultOpts({ medications: [medT2] }));
+    await flush();
+    expect(cancelMock).toHaveBeenCalledWith('med-1');
+    expect(scheduleMock).toHaveBeenCalledWith('med-1', 'Test Med', t2, 'قرص');
+  });
+
+  it('reschedules when dose amounts are redistributed (same daily total)', async () => {
+    const medA = makeMed({
+      currentPills: 40,
+      dailyDose: 15,
+      warningThresholdDays: 1,
+      doseSchedule: [
+        { id: 'd1', amount: 10, time: '18:00' },
+        { id: 'd2', amount: 5, time: '22:00' },
+      ],
+    });
+    const tA = getCriticalAlarmDate(medA, getTodayDateString());
+    expect(tA).not.toBeNull();
+
+    const { rerender } = renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({ medications: [medA] }),
+    });
+    await flush();
+    scheduleMock.mockClear();
+    cancelMock.mockClear();
+
+    // Swap amounts so the crossing slot can move (still daily 15).
+    const medB = makeMed({
+      currentPills: 40,
+      dailyDose: 15,
+      warningThresholdDays: 1,
+      doseSchedule: [
+        { id: 'd1', amount: 5, time: '18:00' },
+        { id: 'd2', amount: 10, time: '22:00' },
+      ],
+    });
+    const tB = getCriticalAlarmDate(medB, getTodayDateString());
+    expect(tB).not.toBeNull();
+    expect(tB).not.toBe(tA);
+
+    rerender(defaultOpts({ medications: [medB] }));
+    await flush();
+    expect(cancelMock).toHaveBeenCalledWith('med-1');
+    expect(scheduleMock).toHaveBeenCalledWith('med-1', 'Test Med', tB, 'قرص');
+  });
+
+  it('reschedules when dose consumption history changes the crossing', async () => {
+    const base = makeMed({
+      currentPills: 65,
+      dailyDose: 10,
+      warningThresholdDays: 5,
+      doseSchedule: [{ id: 'd1', amount: 10, time: '20:00' }],
+    });
+    // Without history, today 20:00 crosses (65→55, daysLeft floor 5).
+    const t0 = getCriticalAlarmDate(base, getTodayDateString());
+    expect(t0).not.toBeNull();
+
+    const { rerender } = renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({ medications: [base] }),
+    });
+    await flush();
+    scheduleMock.mockClear();
+    cancelMock.mockClear();
+
+    // Mark today consumed: projection skips that occurrence → later day.
+    const withConsumed = {
+      ...base,
+      doseConsumptionHistory: { d1: ['2024-09-10'] },
+    };
+    const t1 = getCriticalAlarmDate(withConsumed, getTodayDateString());
+    expect(t1).not.toBeNull();
+    expect(t1).not.toBe(t0);
+
+    rerender(defaultOpts({ medications: [withConsumed] }));
+    await flush();
+    expect(cancelMock).toHaveBeenCalledWith('med-1');
+    expect(scheduleMock).toHaveBeenCalledWith('med-1', 'Test Med', t1, 'قرص');
+  });
+
+  it('does not churn alarms when only medication array order changes', async () => {
+    const a = makeMed({ id: 'med-a', currentPills: 100, dailyDose: 10 });
+    const b = makeMed({ id: 'med-b', currentPills: 80, dailyDose: 10 });
+    const { rerender } = renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({ medications: [a, b] }),
+    });
+    await flush();
+    const scheduleCount = scheduleMock.mock.calls.length;
+    scheduleMock.mockClear();
+    cancelMock.mockClear();
+
+    rerender(defaultOpts({ medications: [b, a] }));
+    await flush();
+    expect(scheduleMock).not.toHaveBeenCalled();
+    expect(cancelMock).not.toHaveBeenCalled();
+    // claims unchanged
+    expect(Object.keys(readClaims()).sort()).toEqual(['med-a', 'med-b']);
+    void scheduleCount;
   });
 });

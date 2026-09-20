@@ -165,29 +165,70 @@ export function useCriticalAlarmScheduler({
     medicationsRef.current = medications;
   }, [medications]);
 
-  // Stable signature capturing ONLY the fields that affect the critical
-  // alarm date (per getCriticalAlarmDate + scheduleCriticalAlarm), so the
-  // cancel+schedule chains re-run only when a med's alarm-relevant
-  // config actually changes.
-  const criticalSignature = useMemo(
-    () =>
-      medications
-        .map((m) =>
-          [
-            m.id,
-            m.currentPills,
-            m.dailyDose,
-            dailyScheduleAmount(m),
-            m.warningThresholdDays,
-            m.autoDeductEnabled === false ? 0 : 1,
-            m.name,
-            m.unit ?? '',
-          ].join('|')
-        )
-        .sort()
-        .join('\n'),
-    [medications]
-  );
+  // Stable signature of every field that can change getCriticalAlarmDate()
+  // (stock, threshold, auto, explicit schedule rows, consume/skip history).
+  // Deterministic serialization avoids false churn from object key order.
+  const criticalSignature = useMemo(() => {
+    const serializeHistory = (
+      hist: Record<string, string[]> | undefined,
+      doseIds: string[]
+    ): string => {
+      if (!hist || doseIds.length === 0) return '';
+      return doseIds
+        .map((id) => {
+          const dates = hist[id];
+          if (!Array.isArray(dates) || dates.length === 0) return `${id}:`;
+          // Sort dates so insertion order does not affect the signature.
+          const sorted = [...dates].filter((d) => typeof d === 'string' && d).sort();
+          return `${id}:${sorted.join(',')}`;
+        })
+        .join(';');
+    };
+
+    const serializeSchedule = (
+      schedule: Medication['doseSchedule']
+    ): { schedulePart: string; doseIds: string[] } => {
+      if (!Array.isArray(schedule) || schedule.length === 0) {
+        return { schedulePart: '', doseIds: [] };
+      }
+      const rows = schedule
+        .map((d) => ({
+          id: d?.id != null ? String(d.id) : '',
+          amount: Number(d?.amount) || 0,
+          time: typeof d?.time === 'string' ? d.time : '',
+        }))
+        // Deterministic order by time then id (not array index).
+        .sort((a, b) => {
+          const t = a.time.localeCompare(b.time);
+          return t !== 0 ? t : a.id.localeCompare(b.id);
+        });
+      const doseIds = rows.map((r) => r.id).filter(Boolean);
+      const schedulePart = rows
+        .map((r) => `${r.id}@${r.time}=${r.amount}`)
+        .join(',');
+      return { schedulePart, doseIds };
+    };
+
+    return medications
+      .map((m) => {
+        const { schedulePart, doseIds } = serializeSchedule(m.doseSchedule);
+        return [
+          m.id,
+          m.currentPills,
+          m.dailyDose,
+          dailyScheduleAmount(m),
+          m.warningThresholdDays,
+          m.autoDeductEnabled === false ? 0 : 1,
+          m.name,
+          m.unit ?? '',
+          schedulePart,
+          serializeHistory(m.doseConsumptionHistory, doseIds),
+          serializeHistory(m.doseSkippedHistory, doseIds),
+        ].join('|');
+      })
+      .sort()
+      .join('\n');
+  }, [medications]);
 
   useEffect(() => {
     if (!hydrated || isFirstRun) return;

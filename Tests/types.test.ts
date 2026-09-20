@@ -98,4 +98,19 @@ describe('calculateMedicationStatus', () => {
       ).status
     ).toBe('sufficient');
   });
+
+  it('does not treat 1.8 / (0.1+0.2) as critical due to IEEE-754 (daysLeft stays 6)', () => {
+    const med = makeMed({
+      currentPills: 1.8,
+      dailyDose: 0.3,
+      warningThresholdDays: 5,
+      doseSchedule: [
+        { id: 'd1', amount: 0.1, time: '08:00' },
+        { id: 'd2', amount: 0.2, time: '20:00' },
+      ],
+    });
+    const s = calculateMedicationStatus(med);
+    expect(s.daysLeft).toBe(6);
+    expect(s.status).toBe('sufficient');
+  });
 });

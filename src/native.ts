@@ -335,8 +335,16 @@ export async function initNativeBridge(): Promise<void> {
         };
       }) => {
         const medicationId = notification?.extra?.medicationId;
-        const doseId = notification?.extra?.doseId;
-        if (medicationId && doseReceivedHandler) {
+        const rawDoseId = notification?.extra?.doseId;
+        // Critical Stock alarms carry medicationId only (no doseId).
+        // Dose reminders require occurrence identity: both present and non-empty.
+        const doseId =
+          typeof rawDoseId === 'string' ? rawDoseId.trim() : '';
+        if (
+          medicationId &&
+          doseId &&
+          doseReceivedHandler
+        ) {
           try {
             doseReceivedHandler(medicationId, doseId);
           } catch (err) {

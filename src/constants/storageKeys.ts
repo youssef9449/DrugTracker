@@ -18,7 +18,9 @@ export const NOTIFICATIONS_KEY = 'android_med_tracker_notifications_v1';
 /** Font size preference: 'normal' | 'large'. */
 export const FONT_SIZE_KEY = 'android_med_tracker_font_size_v1';
 /**
- * Critical-stock alerts toggle. Default true.
+ * Critical-stock alerts toggle.
+ * Default: false (disabled until the user explicitly enables it on first run).
+ * When a value is already saved, that explicit user choice is restored.
  * Threshold itself is derived per-medication via getCriticalThresholdDays().
  */
 export const CRITICAL_STOCK_ALERTS_KEY = 'android_med_tracker_critical_alerts_v1';

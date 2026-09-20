@@ -225,3 +225,59 @@ describe('native.ts — two-channel dose-reminder design', () => {
   });
 
 });
+
+describe('native.ts — localNotificationReceived dose isolation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  async function captureReceivedListener(): Promise<(n: { extra?: { medicationId?: string; doseId?: string } }) => void> {
+    vi.resetModules();
+    const { LocalNotifications } = await import('@capacitor/local-notifications');
+    const { initNativeBridge, registerDoseReceivedHandler } = await import('@/native');
+    const { cleanupNativeListeners } = await import('@/native');
+    await cleanupNativeListeners();
+    vi.mocked(LocalNotifications.addListener).mockImplementation((event, cb) => {
+      (LocalNotifications as unknown as { __cb?: Record<string, unknown> }).__cb =
+        (LocalNotifications as unknown as { __cb?: Record<string, unknown> }).__cb || {};
+      (LocalNotifications as unknown as { __cb: Record<string, unknown> }).__cb[event as string] = cb;
+      return Promise.resolve({ remove: vi.fn(() => Promise.resolve()) });
+    });
+    await initNativeBridge();
+    const cb = (LocalNotifications as unknown as { __cb: Record<string, (n: unknown) => void> }).__cb[
+      'localNotificationReceived'
+    ];
+    if (!cb) throw new Error('localNotificationReceived listener not registered');
+    return cb as (n: { extra?: { medicationId?: string; doseId?: string } }) => void;
+  }
+
+  it('does not call doseReceivedHandler for Critical Stock shape (medicationId only)', async () => {
+    const handler = vi.fn();
+    const { registerDoseReceivedHandler } = await import('@/native');
+    registerDoseReceivedHandler(handler);
+    const received = await captureReceivedListener();
+    // Re-register after module reset inside capture
+    const mod = await import('@/native');
+    mod.registerDoseReceivedHandler(handler);
+    received({ extra: { medicationId: 'med-1' } });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('calls doseReceivedHandler for dose reminder (medicationId + doseId)', async () => {
+    const handler = vi.fn();
+    const received = await captureReceivedListener();
+    const mod = await import('@/native');
+    mod.registerDoseReceivedHandler(handler);
+    received({ extra: { medicationId: 'med-1', doseId: 'd1' } });
+    expect(handler).toHaveBeenCalledWith('med-1', 'd1');
+  });
+
+  it('does not call doseReceivedHandler for blank doseId', async () => {
+    const handler = vi.fn();
+    const received = await captureReceivedListener();
+    const mod = await import('@/native');
+    mod.registerDoseReceivedHandler(handler);
+    received({ extra: { medicationId: 'med-1', doseId: '   ' } });
+    expect(handler).not.toHaveBeenCalled();
+  });
+});

@@ -72,6 +72,16 @@ public final class DoseReminderAlarmAdapter {
             metadata.put("medicationId", medicationId);
             metadata.put("doseId", doseId);
             metadata.put("reminderTime", reminderTime);
+            java.util.Calendar scheduled = java.util.Calendar.getInstance();
+            scheduled.setTimeInMillis(triggerAtEpochMs);
+            metadata.put(
+                    "calendarDate",
+                    String.format(
+                            java.util.Locale.US,
+                            "%04d-%02d-%02d",
+                            scheduled.get(java.util.Calendar.YEAR),
+                            scheduled.get(java.util.Calendar.MONTH) + 1,
+                            scheduled.get(java.util.Calendar.DAY_OF_MONTH)));
             metadata.put("amount", amount);
             metadata.put("medicationName", medicationName == null ? "" : medicationName);
             metadata.put("unit", unit == null ? "" : unit);

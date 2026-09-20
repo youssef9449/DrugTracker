@@ -42,7 +42,7 @@ public class MetadataOwnershipTest {
 
     @Test
     public void legacyScheduleVersionRemainsReadable() {
-        String json = "{"scheduleVersion":"1000-7-legacy","amount":1}";
+        String json = "{\"scheduleVersion\":\"1000-7-legacy\",\"amount\":1}";
         assertTrue(AutoDeductionScheduler.isMetadataOwnedByVersion(
                 json, "1000-7-legacy"));
     }

@@ -133,9 +133,7 @@ public final class ExactAlarmRuntime {
                         pendingIntentRequestCode,
                         intent,
                         flags);
-                if (pendingIntent == null) return false;
-                pendingIntent.cancel();
-                return true;
+                return pendingIntent != null;
             } catch (Exception e) {
                 return false;
             }

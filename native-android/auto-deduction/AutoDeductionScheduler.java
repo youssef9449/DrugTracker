@@ -1584,8 +1584,7 @@ public final class AutoDeductionScheduler {
 
     private boolean clearCancellationTombstoneLocked(String occurrenceKey) {
         if (occurrenceKey == null || occurrenceKey.isEmpty()) return true;
-        return alarmRuntime.store()
-                .removeCancellationTombstoneLocked(occurrenceKey);
+        return schedulingAdapter.clearCancellationTombstone(occurrenceKey);
     }
 
     public ScheduleResult scheduleNextOccurrence(

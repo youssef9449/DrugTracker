@@ -66,41 +66,7 @@ import {
  * Validity requires current desired reminderTime so stale config cannot
  * block repair. Web / missing plugin: query helpers no-op as invalid.
  */
-interface DoseReminderNativePlugin {
-  getNextOccurrence(options: {
-    medicationId: string;
-    doseId?: string;
-    /** Current desired HH:MM — required for valid===true. */
-    reminderTime?: string;
-  }): Promise<{ valid: boolean; nextOccurrenceMs: number }>;
-  clearReArm(options: {
-    medicationId: string;
-    doseId?: string;
-  }): Promise<{ ok: boolean }>;
-}
-
-const DoseReminderNative = registerPlugin<DoseReminderNativePlugin>('DoseReminder');
-
-/**
- * The BACKGROUND/KILLED dose-reminder notification channel.
- * Versioned because Android channel sound settings are immutable —
- * bumping the suffix is the only way to change the sound.
- *
- * v3: uses the default system notification sound (no custom sound).
- * v2: used a custom 'dose_reminder.wav' (removed — users found it
- *      unpleasant).
- *
- * The channel is created in native.ts with:
- *   - no custom sound → Android default system notification sound
- *   - importance: HIGH (heads-up + sound)
- *   - visibility: PUBLIC (lock screen)
- *
- * This channel is used when the app is in the BACKGROUND or KILLED.
- * When the app is in the FOREGROUND, {@link DOSE_REMINDER_FOREGROUND_CHANNEL_ID}
- * is used instead (silent — no Android sound) so only the in-app
- * DoseAlarmModal + chime are produced.
- */
-export const DOSE_REMINDER_CHANNEL_ID = 'dose-reminder-v3';
+const DOSE_REMINDER_CHANNEL_ID = 'dose-reminder-v3';
 
 /**
  * The FOREGROUND dose-reminder notification channel — SILENT.
@@ -985,15 +951,18 @@ export function snoozeDoseReminderId(medId: string, doseId: string): number | nu
  * Cancel a pending recurring dose-reminder alarm for an explicit dose row.
  * Requires non-empty doseId (Issue #268).
  */
-export async function cancelDoseReminder(medId: string, doseId: string): Promise<void> {
+export async function cancelDoseReminder(
+  medId: string,
+  doseId: string
+): Promise<void> {
+  if (getNativePlatform() === 'android') {
+    await cancelDoseReminderNative(medId, doseId);
+    return;
+  }
   if (!isNativePlatform()) return;
-  const notifId = doseReminderAlarmIdForDose(medId, doseId);
-  if (notifId == null) return;
+  const id = notificationId('doseAlarm', `${medId}::${doseId}`);
   try {
-    await LocalNotifications.cancel({
-      notifications: [{ id: notifId }],
-    });
-    await clearNativeDoseReminderReArm(medId, doseId);
+    await LocalNotifications.cancel({ notifications: [{ id }] });
   } catch (err) {
     console.warn('[notifications] cancelDoseReminder failed:', err);
   }
@@ -1006,17 +975,18 @@ export async function cancelSnoozedDoseReminder(
   medId: string,
   doseId: string
 ): Promise<void> {
+  if (getNativePlatform() === 'android') {
+    await cancelDoseSnoozeNative(medId, doseId);
+    return;
+  }
   if (!isNativePlatform()) return;
-  const id = snoozeDoseReminderId(medId, doseId);
-  if (id == null) return;
+  const id = notificationId('doseSnooze', `${medId}::${doseId}`);
   try {
     await LocalNotifications.cancel({ notifications: [{ id }] });
   } catch (err) {
     console.warn('[notifications] cancelSnoozedDoseReminder failed:', err);
   }
 }
-
-
 
 /**
  * Schedule a ONE-SHOT dose-reminder notification `minutes` in the future.
@@ -1053,55 +1023,53 @@ export async function scheduleSnoozedDoseReminder(
 ): Promise<void> {
   const id = typeof doseId === 'string' ? doseId.trim() : '';
   if (!id) return;
-  const notifId = snoozeDoseReminderId(medId, id);
-  if (notifId == null) return;
 
-  const fireAt = new Date(Date.now() + minutes * 60_000);
   const timeHint = reminderTime
     ? ` (موعد الجرعة الأصلي ${formatReminderTime12h(reminderTime)})`
     : '';
   const title = `⏰ تذكير مجدد: ${medName}`;
   const body = `غفوة ${minutes} دقيقة انتهت${timeHint}. جرعتك المقررة: ${doseAmount} ${unit}.`;
 
-  if (isNativePlatform()) {
-    try {
-      if (await getExactAlarmPermission() !== 'granted') {
-        throw new Error('Exact-alarm permission is required for snoozed dose reminders');
-      }
-      const perm = await LocalNotifications.checkPermissions();
-      if (perm.display !== 'granted') {
-        throw new Error('Notification permission is required for snoozed dose reminders');
-      }
-      await LocalNotifications.schedule({
-        notifications: [
-          {
-            id: notifId,
-            title,
-            body,
-            schedule: {
-              at: fireAt,
-              allowWhileIdle: true,
-            },
-            smallIcon: 'ic_launcher',
-            channelId: getDoseReminderChannelId(),
-            actionTypeId: autoDeductEnabled ? undefined : 'dose-reminder',
-            ongoing: false,
-            autoCancel: true,
-            extra: {
-              medicationId: medId,
-              doseId: id,
-            },
-          },
-        ],
-      });
-      return;
-    } catch (err) {
-      console.warn('[notifications] Capacitor scheduleSnoozedDoseReminder failed:', err);
-      throw err;
-    }
+  if (getNativePlatform() === 'android') {
+    await scheduleDoseSnoozeNative(
+      medId,
+      medName,
+      doseAmount,
+      unit,
+      reminderTime,
+      minutes,
+      id,
+      autoDeductEnabled === true
+    );
+    return;
   }
 
-  // Web fallback: fire immediately (can't wake a future time reliably).
+  if (getNativePlatform() === 'ios') {
+    const notifId = notificationId('doseSnooze', `${medId}::${id}`);
+    const fireAt = new Date(Date.now() + minutes * 60_000);
+    const permission = await LocalNotifications.checkPermissions();
+    if (permission.display !== 'granted') {
+      throw new Error('Notification permission is required for snoozed dose reminders');
+    }
+    await LocalNotifications.schedule({
+      notifications: [
+        {
+          id: notifId,
+          title,
+          body,
+          schedule: { at: fireAt, allowWhileIdle: true },
+          smallIcon: 'ic_launcher',
+          channelId: getDoseReminderChannelId(),
+          actionTypeId: autoDeductEnabled ? undefined : 'dose-reminder',
+          ongoing: false,
+          autoCancel: true,
+          extra: { medicationId: medId, doseId: id },
+        },
+      ],
+    });
+    return;
+  }
+
   scheduleWebNotification(title, body);
 }
 
@@ -1177,84 +1145,72 @@ export async function scheduleDoseReminder(
   doseId: string,
   options?: ScheduleDoseReminderOptions,
 ): Promise<void> {
-  // Validate the HH:MM string and compute the next fire Date.
   const parts = reminderTime.split(':').map((n) => parseInt(n, 10));
   const [hour, minute] = parts;
   if (parts.length < 2 || Number.isNaN(hour) || Number.isNaN(minute)) return;
   if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return;
 
+  const id = typeof doseId === 'string' ? doseId.trim() : '';
+  if (!id || !(Number(doseAmount) > 0)) return;
+
+  if (getNativePlatform() === 'android') {
+    await scheduleDoseReminderNative(
+      medId,
+      medName,
+      reminderTime,
+      Number(doseAmount),
+      unit,
+      id,
+      options?.skipToday === true,
+      options?.autoDeductEnabled === true
+    );
+    return;
+  }
+
   const now = new Date();
   const fireToday = new Date();
   fireToday.setHours(hour, minute, 0, 0);
-  // Move to tomorrow when today's fire time already passed, or when the
-  // caller asked to skip today (today's dose was already consumed).
-  // Exactly ONE increment in either case — never two.
   if (fireToday.getTime() <= now.getTime() || options?.skipToday === true) {
     fireToday.setDate(fireToday.getDate() + 1);
   }
 
-  const id = typeof doseId === 'string' ? doseId.trim() : '';
-  if (!id) return;
-  if (!(Number(doseAmount) > 0)) return;
-  const notifId = doseReminderAlarmIdForDose(medId, id);
-  if (notifId == null) return;
-
   const title = `⏰ حان موعد دواء: ${medName}`;
-  // Display 12h for the user; reminderTime stays 24h for schedule + extra.
   const body = `موعد الجرعة الساعة ${formatReminderTime12h(reminderTime)}. جرعتك المقررة: ${doseAmount} ${unit}.`;
 
-  if (isNativePlatform()) {
-    try {
-      if (await getExactAlarmPermission() !== 'granted') {
-        throw new Error('Exact-alarm permission is required for dose reminders');
-      }
-      const perm = await LocalNotifications.checkPermissions();
-      if (perm.display !== 'granted') {
-        throw new Error('Notification permission is required for dose reminders');
-      }
-      // Dose path: initial ONE-SHOT LocalNotifications.schedule (`at`, no
-      // repeats). Capacitor at+repeats:true uses setRepeating with a wrong
-      // interval for daily wall-clock times — not used. Sole recurrence owner:
-      // TimedNotificationPublisher.rescheduleDoseReminderNextDay (next calendar
-      // day) + DoseReminderRecurrenceStore evidence. Same stable id means
-      // concurrent JS schedule replaces rather than duplicates.
-      await LocalNotifications.schedule({
-        notifications: [
-          {
-            id: notifId,
-            title,
-            body,
-            schedule: {
-              at: fireToday,
-              allowWhileIdle: true,
-            },
-            smallIcon: 'ic_launcher',
-            channelId: getDoseReminderChannelId(),
-            actionTypeId: options?.autoDeductEnabled ? undefined : 'dose-reminder',
-            ongoing: false,
-            autoCancel: true,
-            extra: {
-              medicationId: medId,
-              doseId: id,
-              reminderTime,
-              doseRecurring: true,
-            },
-          },
-        ],
-      });
-      return;
-    } catch (err) {
-      console.warn('[notifications] Capacitor scheduleDoseReminder failed:', err);
-      throw err;
+  if (getNativePlatform() === 'ios') {
+    const notifId = notificationId('doseAlarm', `${medId}::${id}`);
+    const permission = await LocalNotifications.checkPermissions();
+    if (permission.display !== 'granted') {
+      throw new Error('Notification permission is required for dose reminders');
     }
+    await LocalNotifications.schedule({
+      notifications: [
+        {
+          id: notifId,
+          title,
+          body,
+          schedule: { at: fireToday, allowWhileIdle: true },
+          smallIcon: 'ic_launcher',
+          channelId: getDoseReminderChannelId(),
+          actionTypeId:
+            options?.autoDeductEnabled ? undefined : 'dose-reminder',
+          ongoing: false,
+          autoCancel: true,
+          extra: {
+            medicationId: medId,
+            doseId: id,
+            reminderTime,
+            doseRecurring: true,
+          },
+        },
+      ],
+    });
+    return;
   }
 
-  // Web fallback: no persistent recurring scheduling — fire immediately.
-  // With skipToday there is nothing to remind about today (the dose was
-  // already consumed), so the immediate fallback is skipped entirely —
-  // a consumed dose must not produce today's web reminder either.
-  if (options?.skipToday === true) return;
-  scheduleWebNotification(title, body);
+  if (options?.skipToday !== true) {
+    scheduleWebNotification(title, body);
+  }
 }
 
 /**

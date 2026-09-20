@@ -327,8 +327,10 @@ export function getCriticalAlarmDate(
   };
 
   let pills = startingPills;
-  // Bound simulation: enough days to exhaust any realistic stock.
-  const maxDays = Math.min(730, Math.ceil(startingPills / dayAmt) + criticalThresholdDays + 2);
+  // Bound only by durable stock and positive daily rate: enough future
+  // occurrences to reach critical/out-of-stock, plus a small margin for
+  // threshold arithmetic. No arbitrary fixed calendar ceiling.
+  const maxDays = Math.ceil(startingPills / dayAmt) + criticalThresholdDays + 2;
 
   for (let dayOffset = 0; dayOffset <= maxDays; dayOffset++) {
     const dayUtc = parseUtcDate(todayStr);

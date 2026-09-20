@@ -226,7 +226,7 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
     const appliedTake = take.outcome === 'applied' ? 1 : 0;
     const appliedRecon = recon.details.some((d) => d.outcome === 'applied') ? 1 : 0;
     expect(appliedTake + appliedRecon).toBe(1);
-    expect(isDoseConsumedOnDate(durable.medications[0] }), 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
     // 10 - 1 = 9 (d1 amount); not 8.
     expect(durable.medications[0].currentPills).toBe(9);
   });
@@ -263,7 +263,7 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
 
     expect(recon.details[0]?.outcome).toBe('applied');
     expect(durable.medications[0].currentPills).toBe(afterD1 - 1);
-    expect(isDoseConsumedOnDate(durable.medications[0] }), 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
     expect(isDoseConsumedOnDate(durable.medications[0], 'd2', TODAY)).toBe(true);
   });
 
@@ -594,7 +594,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
 
     expect(manualEnvelope).toBeNull();
     expect(durable.medications[0].currentPills).toBe(9);
-    expect(isDoseConsumedOnDate(durable.medications[0] }), 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
     expect(durable.logs.length).toBe(newerLogs.length);
     expect(marked).toEqual([]);
   });

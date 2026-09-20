@@ -30,7 +30,6 @@ vi.mock('@capacitor/local-notifications', () => ({
 
 import {
   scheduleDoseReminder,
-  doseReminderAlarmId,
   doseReminderAlarmIdForDose,
   isDoseReminderTimeStillAhead } from '@/utils/notifications';
 
@@ -86,7 +85,7 @@ afterEach(() => {
 describe('scheduleDoseReminder — skipToday (consumed-day suppression)', () => {
   it('baseline: without options, a still-future reminder time fires TODAY', async () => {
     // now = 12:00, reminder 20:00 → today at 20:00.
-    await scheduleDoseReminder('med-1', 'Test', '20:00', 1, 'قرص');
+    await scheduleDoseReminder('med-1', 'Test', '20:00', 1, 'قرص', 'd1');
 
     expect(mocks.schedule).toHaveBeenCalledTimes(1);
     const payload = lastDoseSchedulePayload();
@@ -106,7 +105,7 @@ describe('scheduleDoseReminder — skipToday (consumed-day suppression)', () => 
   it('skipToday: an already-consumed day re-arms the recurring alarm from TOMORROW (same HH:MM, still repeats daily)', async () => {
     // now = 12:00, reminder 20:00 still ahead — but today's dose was
     // consumed, so the first occurrence must be tomorrow 20:00.
-    await scheduleDoseReminder('med-1', 'Test', '20:00', 1, 'قرص', { skipToday: true });
+    await scheduleDoseReminder('med-1', 'Test', '20:00', 1, 'قرص', 'd1', { skipToday: true });
 
     expect(mocks.schedule).toHaveBeenCalledTimes(1);
     const payload = lastDoseSchedulePayload();
@@ -119,14 +118,14 @@ describe('scheduleDoseReminder — skipToday (consumed-day suppression)', () => 
     expect(payload.every).toBeUndefined();
     expect(payload.doseRecurring).toBe(true);
     // Same stable medication-specific id band as the normal schedule.
-    expect(payload.id).toBe(doseReminderAlarmId('med-1'));
+    expect(payload.id).toBe(doseReminderAlarmIdForDose('med-1', 'd1'));
   });
 
   it('skipToday after the reminder time already passed: exactly ONE day increment (tomorrow, never the day after)', async () => {
     // now = 21:00, reminder 20:00 already passed → normal logic gives
     // tomorrow; skipToday must NOT add a second increment.
     vi.setSystemTime(new Date(2024, 8, 10, 21, 0, 0));
-    await scheduleDoseReminder('med-1', 'Test', '20:00', 1, 'قرص', { skipToday: true });
+    await scheduleDoseReminder('med-1', 'Test', '20:00', 1, 'قرص', 'd1', { skipToday: true });
 
     const payload = lastDoseSchedulePayload();
     expect(ymd(payload.at)).toBe('2024-09-11'); // tomorrow — not 2024-09-12
@@ -135,7 +134,7 @@ describe('scheduleDoseReminder — skipToday (consumed-day suppression)', () => 
 
   it('without options after the reminder time passed: tomorrow as before (existing behavior unchanged)', async () => {
     vi.setSystemTime(new Date(2024, 8, 10, 21, 0, 0));
-    await scheduleDoseReminder('med-1', 'Test', '20:00', 1, 'قرص');
+    await scheduleDoseReminder('med-1', 'Test', '20:00', 1, 'قرص', 'd1');
 
     const payload = lastDoseSchedulePayload();
     expect(ymd(payload.at)).toBe('2024-09-11');
@@ -143,7 +142,7 @@ describe('scheduleDoseReminder — skipToday (consumed-day suppression)', () => 
 
   it('skipToday on web: no immediate web fallback fires for a consumed day', async () => {
     mocks.platform.mockReturnValue('web');
-    await scheduleDoseReminder('med-1', 'Test', '20:00', 1, 'قرص', { skipToday: true });
+    await scheduleDoseReminder('med-1', 'Test', '20:00', 1, 'قرص', 'd1', { skipToday: true });
 
     // Neither the native bridge nor the web immediate fallback fired —
     // the day's reminder is consumed.
@@ -151,13 +150,13 @@ describe('scheduleDoseReminder — skipToday (consumed-day suppression)', () => 
   });
 
   it('skipToday keeps the exact same stable notification id as a normal schedule', async () => {
-    await scheduleDoseReminder('med-1', 'Test', '09:00', 1, 'قرص');
+    await scheduleDoseReminder('med-1', 'Test', '09:00', 1, 'قرص', 'd1');
     const normalId = lastDoseSchedulePayload().id;
-    await scheduleDoseReminder('med-1', 'Test', '09:00', 1, 'قرص', { skipToday: true });
+    await scheduleDoseReminder('med-1', 'Test', '09:00', 1, 'قرص', 'd1', { skipToday: true });
     const skippedId = lastDoseSchedulePayload().id;
 
     expect(skippedId).toBe(normalId);
-    expect(skippedId).toBe(doseReminderAlarmId('med-1'));
+    expect(skippedId).toBe(doseReminderAlarmIdForDose('med-1', 'd1'));
   });
 });
 
@@ -196,7 +195,7 @@ describe('isDoseReminderTimeStillAhead — suppression boundary', () => {
 
 describe('Phase 4 — doseId in notification extra', () => {
   it('scheduleDoseReminder embeds doseId in extra for multi-dose slots', async () => {
-    await scheduleDoseReminder('med-x', 'Drug', '14:00', 1, 'قرص', { doseId: 'd2' });
+    await scheduleDoseReminder('med-x', 'Drug', '14:00', 1, 'قرص', 'd1', { doseId: 'd2' });
     expect(mocks.schedule).toHaveBeenCalled();
     const notif = mocks.schedule.mock.calls[0][0].notifications[0];
     expect(notif.extra.medicationId).toBe('med-x');
@@ -205,8 +204,8 @@ describe('Phase 4 — doseId in notification extra', () => {
   });
 
   it('two doses get distinct notification ids', async () => {
-    await scheduleDoseReminder('med-x', 'Drug', '08:00', 2, 'قرص', { doseId: 'd1' });
-    await scheduleDoseReminder('med-x', 'Drug', '14:00', 1, 'قرص', { doseId: 'd2' });
+    await scheduleDoseReminder('med-x', 'Drug', '08:00', 2, 'قرص', 'd1', { doseId: 'd1' });
+    await scheduleDoseReminder('med-x', 'Drug', '14:00', 1, 'قرص', 'd1', { doseId: 'd2' });
     const id1 = mocks.schedule.mock.calls[0][0].notifications[0].id;
     const id2 = mocks.schedule.mock.calls[1][0].notifications[0].id;
     expect(id1).not.toBe(id2);

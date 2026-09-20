@@ -409,3 +409,5 @@ describe('SelectDoseModal', () => {
     expect(onSelect).toHaveBeenCalledWith('med-multi', 'd1');
   });
 });
+
+});

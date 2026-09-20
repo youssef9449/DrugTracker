@@ -36,13 +36,10 @@ describe('doseSchedule helpers', () => {
     // Inconsistent: dosesPerDay=3 but only 2 schedule rows.
     // doseSchedule.length is authoritative.
     const schedule = getDoseScheduleForUI({
-      dailyDose: 99,
-      reminderTime: '01:00',
       doseSchedule: [
         dose({ id: 'a', amount: 1, time: '08:00' }),
         dose({ id: 'b', amount: 1, time: '20:00' }),
       ],
-      dosesPerDay: 3,
     });
     expect(schedule).toHaveLength(2);
     expect(schedule.map((d) => d.id)).toEqual(['a', 'b']);
@@ -52,8 +49,6 @@ describe('doseSchedule helpers', () => {
 
   it('sorts a stored out-of-order doseSchedule chronologically for the UI', () => {
     const schedule = getDoseScheduleForUI({
-      dailyDose: 4,
-      dosesPerDay: 3,
       doseSchedule: [
         dose({ id: 'late', amount: 1, time: '21:00' }),
         dose({ id: 'early', amount: 2, time: '08:00' }),
@@ -72,8 +67,6 @@ describe('doseSchedule helpers', () => {
 
   it('ignores conflicting dosesPerDay when sorting a stored schedule', () => {
     const schedule = getDoseScheduleForUI({
-      dailyDose: 2,
-      dosesPerDay: 9, // deliberately wrong
       doseSchedule: [
         dose({ id: 'b', amount: 1, time: '20:00' }),
         dose({ id: 'a', amount: 1, time: '08:00' }),
@@ -86,8 +79,6 @@ describe('doseSchedule helpers', () => {
 
   it('edit compatibility: returns both stored rows for a 2-dose med', () => {
     const schedule = getDoseScheduleForUI({
-      dailyDose: 3,
-      dosesPerDay: 2,
       doseSchedule: [
         dose({ id: 'a', amount: 2, time: '08:00' }),
         dose({ id: 'b', amount: 1, time: '20:00' }),

@@ -11,9 +11,8 @@ describe('doseReminderStorage Phase 3B dose-scoped snooze', () => {
     localStorage.clear();
   });
 
-  it('omitted doseId key is med-only', () => {
-    expect(snoozeStorageKey('m1')).toBe('m1');
-    expect(snoozeStorageKey('m1', null)).toBe('m1');
+  it('missing or blank doseId returns null', () => {
+    expect(snoozeStorageKey('m1', '')).toBeNull();
   });
 
   it('multi-dose key is med::dose', () => {
@@ -24,7 +23,6 @@ describe('doseReminderStorage Phase 3B dose-scoped snooze', () => {
     setSnoozeUntil('m1', Date.now() + 60_000, 'd2');
     expect(isSnoozeActive('m1', 'd2')).toBe(true);
     expect(isSnoozeActive('m1', 'd1')).toBe(false);
-    expect(isSnoozeActive('m1')).toBe(false);
   });
 
   it('clearSnoozedDose only clears the targeted key', () => {

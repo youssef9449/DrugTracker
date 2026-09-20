@@ -144,7 +144,7 @@ describe('lifecycle transitions — channel switches on app state change', () =>
 
     // App goes to background — re-schedule.
     setAppInForeground(false);
-    await cancelDoseReminder('med-x');
+    await cancelDoseReminder('med-x', 'd1');
     await scheduleDoseReminder('med-x', 'Test', '09:00', 1, 'قرص', 'd1');
     expect(lastScheduledChannelId()).toBe(DOSE_REMINDER_CHANNEL_ID);
   });
@@ -157,7 +157,7 @@ describe('lifecycle transitions — channel switches on app state change', () =>
 
     // App returns to foreground — re-schedule.
     setAppInForeground(true);
-    await cancelDoseReminder('med-y');
+    await cancelDoseReminder('med-y', 'd1');
     await scheduleDoseReminder('med-y', 'Test', '09:00', 1, 'قرص', 'd1');
     expect(lastScheduledChannelId()).toBe(DOSE_REMINDER_FOREGROUND_CHANNEL_ID);
   });
@@ -197,12 +197,12 @@ describe('background channel — no JS sound dependency', () => {
   it('scheduleSnoozedDoseReminder also uses the lifecycle-aware channel', async () => {
     // Snoozed reminder while backgrounded → background channel (system sound).
     setAppInForeground(false);
-    await scheduleSnoozedDoseReminder('med-snooze', 'Test', 1, 'قرص', '09:00', 10);
+    await scheduleSnoozedDoseReminder('med-snooze', 'Test', 1, 'قرص', '09:00', 10, 'd1', false);
     expect(lastScheduledChannelId()).toBe(DOSE_REMINDER_CHANNEL_ID);
 
     // Snoozed reminder while foregrounded → foreground channel (silent).
     setAppInForeground(true);
-    await scheduleSnoozedDoseReminder('med-snooze', 'Test', 1, 'قرص', '09:00', 10);
+    await scheduleSnoozedDoseReminder('med-snooze', 'Test', 1, 'قرص', '09:00', 10, 'd1', false);
     expect(lastScheduledChannelId()).toBe(DOSE_REMINDER_FOREGROUND_CHANNEL_ID);
   });
 });
@@ -217,7 +217,7 @@ describe('scheduling/cancellation invariants — preserved', () => {
     await scheduleDoseReminder(medId, 'Test', '09:00', 1, 'قرص', 'd1');
     const scheduledId = lastScheduledNotification().id;
 
-    await cancelDoseReminder(medId);
+    await cancelDoseReminder(medId, 'd1');
     await scheduleDoseReminder(medId, 'Test', '09:00', 1, 'قرص', 'd1');
     const rescheduledId = lastScheduledNotification().id;
 
@@ -231,7 +231,7 @@ describe('scheduling/cancellation invariants — preserved', () => {
     await scheduleDoseReminder(medId, 'Test', '09:00', 1, 'قرص', 'd1');
     const scheduledId = lastScheduledNotification().id;
 
-    await cancelDoseReminder(medId);
+    await cancelDoseReminder(medId, 'd1');
     expect(mocks.cancel).toHaveBeenCalledTimes(1);
     const cancelledId = mocks.cancel.mock.calls[0][0].notifications[0].id;
     expect(cancelledId).toBe(scheduledId);
@@ -358,7 +358,7 @@ describe('lifecycle transition race — channel selector is synchronous', () => 
     setAppInForeground(false);
 
     // Scheduler re-arms: cancel old + schedule new.
-    await cancelDoseReminder('med-imminent');
+    await cancelDoseReminder('med-imminent', 'd1');
     await scheduleDoseReminder('med-imminent', 'Test', '09:00', 1, 'قرص', 'd1');
 
     // The re-armed notification is on the background channel → system sound.
@@ -366,7 +366,7 @@ describe('lifecycle transition race — channel selector is synchronous', () => 
 
     // Transition back to foreground (user reopens app before dose fires).
     setAppInForeground(true);
-    await cancelDoseReminder('med-imminent');
+    await cancelDoseReminder('med-imminent', 'd1');
     await scheduleDoseReminder('med-imminent', 'Test', '09:00', 1, 'قرص', 'd1');
     expect(lastScheduledChannelId()).toBe(DOSE_REMINDER_FOREGROUND_CHANNEL_ID);
   });

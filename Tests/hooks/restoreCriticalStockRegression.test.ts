@@ -296,7 +296,7 @@ describe('restore dose → critical stock reconciliation', () => {
     const med = makeMed({ currentPills: 30 });
     const result = restoreDose(med, 'morning', TEST_DATE, TEST_NOW, []);
     expect(result.ok).toBe(false);
-    if (!result.ok) return;
+    if (result.ok) return;
     expect(result.reason).toBe('missing_deduction_evidence');
   });
 });

@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { PharmacyShoppingView } from '@/components/PharmacyShoppingView';
 import type { Medication, PharmacySettings } from '@/types';
-import { getTodayDateString } from '@/utils/dateCalculations';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
   // exercise the dynamic balance.

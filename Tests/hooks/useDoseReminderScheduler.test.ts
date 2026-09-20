@@ -1462,7 +1462,7 @@ describe('useDoseReminderScheduler — restore re-arms future dose notification'
       reminderEnabled: true,
       doseSchedule: [{ id: doseId, amount: 1, time: doseTime }],
       dosesPerDay: 1,
-      doseConsumptionHistory: { [doseId]: today },
+      doseConsumptionHistory: { [doseId]: [today] },
     });
 
     const { rerender } = renderHook(
@@ -1676,6 +1676,9 @@ describe('stale native pending cleanup', () => {
 
     const currentId = doseReminderAlarmIdForDose(med.id, 'd1');
     const staleDoseId = doseReminderAlarmIdForDose('med-stale', 'd-old');
+    if (currentId === null || staleDoseId === null) {
+      throw new Error('Expected valid notification ids for non-empty dose ids');
+    }
     const nonDoseAlarmId = 999_999_999; // outside doseAlarm band
 
     // Mock getPending to contain current + stale dose-specific + non-doseAlarm IDs.

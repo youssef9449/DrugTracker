@@ -28,7 +28,6 @@ import {
 } from '../utils/whatsapp';
 
 
-import { normalizeArabicDigits } from '../utils/whatsapp';
 import {
   getNotificationPermission,
   requestNotificationPermission,

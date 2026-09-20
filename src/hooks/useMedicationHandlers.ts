@@ -53,8 +53,8 @@ export interface MedicationHandlersDeps {
   setEditingMedication: Dispatch<SetStateAction<Medication | null>>;
   showToast: (message: string) => void;
   dismissAlarm: () => void;
-  /** Matches useDoseReminders.snoozeAlarm(med, minutes?). */
-  snoozeAlarm: (medication: Medication, minutes?: number) => void;
+  /** Matches useDoseReminders.snoozeAlarm(minutes?). */
+  snoozeAlarm: (minutes?: number) => void;
 }
 
 /**
@@ -451,7 +451,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
 
 
   const handleSnoozeFromAlarm = (med: Medication) => {
-    snoozeAlarm(med, DEFAULT_SNOOZE_MINUTES);
+    snoozeAlarm(DEFAULT_SNOOZE_MINUTES);
     showToast(TOAST_MESSAGES.doseSnoozed(med.name));
   };
 

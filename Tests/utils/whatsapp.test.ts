@@ -3,7 +3,6 @@ import {
   normalizeArabicDigits,
   cleanPhoneNumber,
   generatePharmacyOrderMessage,
-  buildWhatsAppUrl,
   calculateMedicationOrderQuantity } from '@/utils/whatsapp';
 import type { Medication } from '@/types';
 

@@ -35,13 +35,11 @@ import {
   doseReminderAlarmIdForDose,
   sendMedicineAlert,
   sendCriticalStockAlert,
-  sendMedicationDoseReminder,
   sendTestAlertNotification,
   cancelCriticalAlarm,
   scheduleCriticalAlarm,
   scheduleDoseReminder,
   snoozeDoseReminderId,
-  cancelDoseReminder,
   getExactAlarmPermission,
   openExactAlarmSettings } from '@/utils/notifications';
 
@@ -72,16 +70,13 @@ describe('notification ID scheme — disjoint ranges per category (#65)', () => 
     await sendCriticalStockAlert(medId, 'Test', 3, 5, 'قرص'); // critical
     const criticalId = lastScheduledId();
 
-    await sendMedicationDoseReminder(medId, 'Test', 1, 'قرص', '09:00'); // dose
-    const doseId = lastScheduledId();
-
     await sendTestAlertNotification(); // test
     const testId = lastScheduledId();
 
     await scheduleCriticalAlarm(medId, 'Test', Date.now() + 86_400_000, 'قرص'); // criticalAlarm
     const alarmId = lastScheduledId();
 
-    await scheduleDoseReminder(medId, 'Test', '09:00', 1, 'قرص'); // doseAlarm
+    await scheduleDoseReminder(medId, 'Test', '09:00', 1, 'قرص', 'd1'); // doseAlarm
     const doseAlarmId = lastScheduledId();
 
     // Each category must fall in its own disjoint 1M band.
@@ -90,9 +85,6 @@ describe('notification ID scheme — disjoint ranges per category (#65)', () => 
 
     expect(criticalId).toBeGreaterThanOrEqual(2_000_000);
     expect(criticalId).toBeLessThan(3_000_000);
-
-    expect(doseId).toBeGreaterThanOrEqual(3_000_000);
-    expect(doseId).toBeLessThan(4_000_000);
 
     // Test notification is a fixed constant: exactly 4_000_000.
     expect(testId).toBe(4_000_000);
@@ -116,9 +108,8 @@ describe('notification ID scheme — disjoint ranges per category (#65)', () => 
     for (const medId of medIds) {
       await sendMedicineAlert(medId, 'T', 5, 10);
       await sendCriticalStockAlert(medId, 'T', 3, 5, 'قرص');
-      await sendMedicationDoseReminder(medId, 'T', 1, 'قرص', '09:00');
       await scheduleCriticalAlarm(medId, 'T', Date.now() + 86_400_000, 'قرص');
-      await scheduleDoseReminder(medId, 'T', '09:00', 1, 'قرص');
+      await scheduleDoseReminder(medId, 'T', '09:00', 1, 'قرص', 'd1');
     }
 
     // Collect all scheduled ids across all categories + medIds.
@@ -128,8 +119,8 @@ describe('notification ID scheme — disjoint ranges per category (#65)', () => 
       }
     }
 
-    // 5 categories * 7 medIds = 35 distinct ids (test notif not included here).
-    expect(ids.size).toBe(35);
+    // 4 categories * 7 medIds = 28 distinct ids (test notif not included here).
+    expect(ids.size).toBe(28);
   });
 
   it('different medIds within the same category map to different ids (no intra-category collision across 100 meds)', async () => {
@@ -152,11 +143,11 @@ describe('notification ID scheme — disjoint ranges per category (#65)', () => 
 describe('dose-reminder ID stability — no Date.now() (#66)', () => {
   it('produces the SAME id for the same med on repeated calls (snooze replaces, not duplicates)', async () => {
     const medId = 'med-dose-stable';
-    await sendMedicationDoseReminder(medId, 'Test', 1, 'قرص', '09:00');
+    await scheduleDoseReminder(medId, 'Test', '09:00', 1, 'قرص', 'd1');
     const firstId = lastScheduledId();
 
-    // Simulate a snooze-and-refire: call again for the same med.
-    await sendMedicationDoseReminder(medId, 'Test', 1, 'قرص', '09:00');
+    // Simulate a snooze-and-refire: call again for the same med + dose.
+    await scheduleDoseReminder(medId, 'Test', '09:00', 1, 'قرص', 'd1');
     const secondId = lastScheduledId();
 
     // The id must be stable so the new notification replaces (not
@@ -166,10 +157,10 @@ describe('dose-reminder ID stability — no Date.now() (#66)', () => {
   });
 
   it('produces DIFFERENT ids for different meds', async () => {
-    await sendMedicationDoseReminder('med-alpha', 'A', 1, 'قرص', '09:00');
+    await scheduleDoseReminder('med-alpha', 'A', '09:00', 1, 'قرص', 'd1');
     const idA = lastScheduledId();
 
-    await sendMedicationDoseReminder('med-beta', 'B', 1, 'قرص', '09:00');
+    await scheduleDoseReminder('med-beta', 'B', '09:00', 1, 'قرص', 'd1');
     const idB = lastScheduledId();
 
     expect(idA).not.toBe(idB);

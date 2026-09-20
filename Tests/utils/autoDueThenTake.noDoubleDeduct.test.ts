@@ -39,12 +39,13 @@ describe('Take deducts durable currentPills once (no projection)', () => {
   it('Manual/alarm Take deducts schedule amount once', () => {
     const med = makeMed();
     const take = consumeDose(med, 'alarm', TODAY, NOW, 'd1');
-    expect(take.ok).toBe(true);
-    if (!take.ok) return;
-    expect(take.updatedMed.currentPills).toBe(29);
-    expect(isDoseConsumedOnDate(take.updatedMed, 'd1', TODAY)).toBe(true);
+    expect(take.updatedMed).not.toBeNull();
+    expect(take.doseAmount).toBe(1);
+    expect(take.log).not.toBeNull();
+    expect(take.updatedMed!.currentPills).toBe(29);
+    expect(isDoseConsumedOnDate(take.updatedMed!, 'd1', TODAY)).toBe(true);
     // Second take same slot must not double-deduct.
-    const again = consumeDose(take.updatedMed, 'alarm', TODAY, NOW, 'd1');
-    expect(again.ok).toBe(false);
+    const again = consumeDose(take.updatedMed!, 'alarm', TODAY, NOW, 'd1');
+    expect(again.updatedMed).toBeNull();
   });
 });

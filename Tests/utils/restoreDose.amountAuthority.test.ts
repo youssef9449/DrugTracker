@@ -40,6 +40,8 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
       {
         id: exactAutoLogId('med-1', 'd1', TODAY),
         medicationId: 'med-1',
+        medicationName: 'Test Medication',
+        description: 'Test dose',
         doseId: 'd1',
         amount: -2,
         type: 'exact_auto',
@@ -49,6 +51,8 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
       {
         id: 'manual-d2',
         medicationId: 'med-1',
+        medicationName: 'Test Medication',
+        description: 'Test dose',
         doseId: 'd2',
         amount: -1,
         type: 'dose_taken',
@@ -76,6 +80,8 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
       {
         id: exactAutoLogId('med-1', 'd1', TODAY),
         medicationId: 'med-1',
+        medicationName: 'Test Medication',
+        description: 'Test dose',
         doseId: 'd1',
         amount: -2,
         type: 'exact_auto',
@@ -85,6 +91,8 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
       {
         id: 'manual-d2',
         medicationId: 'med-1',
+        medicationName: 'Test Medication',
+        description: 'Test dose',
         doseId: 'd2',
         amount: -1,
         type: 'dose_taken',
@@ -114,6 +122,8 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
     const autoLog: ConsumptionLog = {
       id: exactAutoLogId('med-1', 'd1', TODAY),
       medicationId: 'med-1',
+      medicationName: 'Test Medication',
+      description: 'Test dose',
       doseId: 'd1',
       amount: -2,
       type: 'exact_auto',
@@ -133,6 +143,8 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
     const takeLog: ConsumptionLog = {
       id: 'take-d1',
       medicationId: 'med-1',
+      medicationName: 'Test Medication',
+      description: 'Test dose',
       doseId: 'd1',
       amount: -2,
       type: 'dose_taken',
@@ -204,6 +216,8 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
       {
         id: exactAutoLogId('med-1', 'd1', TODAY),
         medicationId: 'med-1',
+        medicationName: 'Test Medication',
+        description: 'Test dose',
         // no doseId — not valid occurrence evidence under #267
         amount: -2,
         type: 'exact_auto',

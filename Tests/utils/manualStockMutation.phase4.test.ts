@@ -496,7 +496,10 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
         expect(manualEnvelope).toBeNull();
         expect(marked).toEqual([]);
         markPhase = 'listFired';
-        return [fired({ doseId: 'd1', calendarDate: TODAY, amount: 1 })];
+        return {
+          ok: true,
+          events: [fired({ doseId: 'd1', calendarDate: TODAY, amount: 1 })],
+        };
       },
       markReconciled: async (medicationId, doseId, calendarDate) => {
         expect(markPhase).toBe('listFired');
@@ -745,6 +748,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       ],
       createdAt: new Date().toISOString(),
       mutationSeq: 2,
+      globalAutoDeductEnabled: true,
     };
 
     marked = [];
@@ -864,6 +868,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       toAcknowledge: [],
       createdAt: new Date().toISOString(),
       mutationSeq: 2,
+      globalAutoDeductEnabled: true,
     };
 
     await runAutoDeductionReconciliation({
@@ -944,6 +949,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       ],
       createdAt: new Date().toISOString(),
       mutationSeq: 11,
+      globalAutoDeductEnabled: true,
     };
 
     marked = [];
@@ -1030,6 +1036,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       toAcknowledge: [],
       createdAt: new Date().toISOString(),
       mutationSeq: 10,
+      globalAutoDeductEnabled: true,
     };
 
     await runAutoDeductionReconciliation({
@@ -1086,6 +1093,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       ],
       createdAt: new Date().toISOString(),
       mutationSeq: 11,
+      globalAutoDeductEnabled: true,
     };
 
     marked = [];
@@ -1522,6 +1530,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }],
       createdAt: new Date().toISOString(),
       mutationSeq: 5,
+      globalAutoDeductEnabled: true,
     };
     __setExactAutoEnvelopeStorageTestHooks({
       load: () => exactEnv,

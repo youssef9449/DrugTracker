@@ -181,7 +181,7 @@ describe('doseId propagation — production callers (integration)', () => {
     const today = getTodayDateString();
     await waitFor(() => {
       const med = readMeds().find((m) => m.id === 'med-multi');
-      expect(med?.doseConsumptionHistory?.d2).toBe(today);
+      expect(med?.doseConsumptionHistory?.d2).toEqual([today]);
     });
 
     const med = readMeds().find((m) => m.id === 'med-multi')!;
@@ -240,7 +240,7 @@ describe('doseId propagation — production callers (integration)', () => {
 
     const today = getTodayDateString();
     await waitFor(() => {
-      expect(readMeds()[0]?.doseConsumptionHistory?.d2).toBe(today);
+      expect(readMeds()[0]?.doseConsumptionHistory?.d2).toEqual([today]);
     });
 
     const med = readMeds()[0]!;
@@ -301,7 +301,7 @@ describe('doseId propagation — production callers (integration)', () => {
 
     const today = getTodayDateString();
     await waitFor(() => {
-      expect(readMeds()[0]?.doseConsumptionHistory?.d2).toBe(today);
+      expect(readMeds()[0]?.doseConsumptionHistory?.d2).toEqual([today]);
     });
 
     const med = readMeds()[0]!;
@@ -345,7 +345,7 @@ describe('doseId propagation — production callers (integration)', () => {
 
     const today = getTodayDateString();
     await waitFor(() => {
-      expect(readMeds()[0]?.doseConsumptionHistory?.d1).toBe(today);
+      expect(readMeds()[0]?.doseConsumptionHistory?.d1).toEqual([today]);
     });
     expect(readLogs().find((l) => l.type === 'dose_taken')?.doseId).toBe('d1');
 
@@ -414,13 +414,13 @@ describe('doseId propagation — production callers (integration)', () => {
 
     const today = getTodayDateString();
     await waitFor(() => {
-      expect(readMeds()[0]?.doseConsumptionHistory?.d1).toBe(today);
+      expect(readMeds()[0]?.doseConsumptionHistory?.d1).toEqual([today]);
     });
 
     let med = readMeds()[0]!;
     // Transition 30 → 29 is the settled Take (not a second projection hit).
     expect(med.currentPills).toBe(29);
-    expect(med.doseConsumptionHistory?.d1).toBe(today);
+    expect(med.doseConsumptionHistory?.d1).toEqual([today]);
     expect(med.doseConsumptionHistory?.d2).toBeUndefined();
     expect(med.currentPills).toBe(29);
 
@@ -436,7 +436,9 @@ describe('doseId propagation — production callers (integration)', () => {
       currentPills: med.currentPills,
       doseConsumptionHistory: { ...(med.doseConsumptionHistory ?? {}) },
       doseSkippedHistory: JSON.stringify(med.doseSkippedHistory ?? {}),
-      doseConsumptionHistory: JSON.stringify(med.doseConsumptionHistory ?? {}),
+      doseConsumptionHistoryJson: JSON.stringify(
+        med.doseConsumptionHistory ?? {}
+      ),
     };
 
     // Repeat same push action → no second log / no second deduction / no field drift
@@ -449,7 +451,7 @@ describe('doseId propagation — production callers (integration)', () => {
     expect({ ...(med.doseConsumptionHistory ?? {}) }).toEqual(afterFirst.doseConsumptionHistory);
     expect(JSON.stringify(med.doseSkippedHistory ?? {})).toBe(afterFirst.doseSkippedHistory);
     expect(JSON.stringify(med.doseConsumptionHistory ?? {})).toBe(
-      afterFirst.doseConsumptionHistory
+      afterFirst.doseConsumptionHistoryJson
     );
     expect(med.doseConsumptionHistory?.d2).toBeUndefined();
     expect(med.currentPills).toBe(29);
@@ -492,7 +494,7 @@ describe('doseId propagation — production callers (integration)', () => {
 
     const today = getTodayDateString();
     await waitFor(() => {
-      expect(readMeds()[0]?.doseConsumptionHistory?.d1).toBe(today);
+      expect(readMeds()[0]?.doseConsumptionHistory?.d1).toEqual([today]);
     });
 
     let med = readMeds()[0]!;
@@ -508,7 +510,9 @@ describe('doseId propagation — production callers (integration)', () => {
       currentPills: med.currentPills,
       doseConsumptionHistory: { ...(med.doseConsumptionHistory ?? {}) },
       doseSkippedHistory: JSON.stringify(med.doseSkippedHistory ?? {}),
-      doseConsumptionHistory: JSON.stringify(med.doseConsumptionHistory ?? {}),
+      doseConsumptionHistoryJson: JSON.stringify(
+        med.doseConsumptionHistory ?? {}
+      ),
     };
 
     // Dismiss any residual modal UI, then deliver a duplicate/stale notification
@@ -533,9 +537,9 @@ describe('doseId propagation — production callers (integration)', () => {
     expect({ ...(med.doseConsumptionHistory ?? {}) }).toEqual(afterFirst.doseConsumptionHistory);
     expect(JSON.stringify(med.doseSkippedHistory ?? {})).toBe(afterFirst.doseSkippedHistory);
     expect(JSON.stringify(med.doseConsumptionHistory ?? {})).toBe(
-      afterFirst.doseConsumptionHistory
+      afterFirst.doseConsumptionHistoryJson
     );
-    expect(med.doseConsumptionHistory?.d1).toBe(today);
+    expect(med.doseConsumptionHistory?.d1).toEqual([today]);
     expect(med.doseConsumptionHistory?.d2).toBeUndefined();
     expect(med.currentPills).toBe(29);
   });

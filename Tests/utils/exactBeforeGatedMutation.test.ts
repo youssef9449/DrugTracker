@@ -185,10 +185,10 @@ describe('exact FIRED amount precedes gated mutation', () => {
     const exactId = exactAutoLogId('med-1', 'd1', '2026-09-14');
     expect(recon.logs.some((l) => l.id === exactId)).toBe(true);
 
-    // Day-based catch-up (syncAutoDailyDeductions) was removed
-    // (Issue #268 / PR #271); there is no second automatic deduction after Exact FIRED reconciliation.
-    // A second reconciliation re-listing the same FIRED finds the durable
-    // exact log + consume marker → already_applied → no double-charge (8).
+    // No second automatic deduction from app-open or calendar-day settlement
+    // (Issue #268 / PR #271). A second reconciliation re-listing the same FIRED
+    // finds the durable exact log + consume marker → already_applied → no
+    // double-charge (8).
     const recon2 = await runAutoDeductionReconciliation({
       globalAutoDeductEnabled: true,
       medications: recon.medications,

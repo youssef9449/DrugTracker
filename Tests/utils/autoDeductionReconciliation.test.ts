@@ -172,10 +172,9 @@ describe('stock gate — fresh durable state', () => {
     expect(durable.medications[0].currentPills).toBe(8);
     expect(isExactAutoOccurrenceApplied(durable.medications[0], 'd', '2026-09-13')).toBe(true);
 
-    // The legacy day-based catch-up (syncAutoDailyDeductions) was removed in
-    // Issue #268 / PR #271 — there is no second automatic deduction at all
-    // (no app-open / calendar-day settlement). A second gate entry simply
-    // observes the durable committed state; it must NOT re-apply the same
+    // There is no second automatic deduction from app-open or calendar-day
+    // settlement (Issue #268 / PR #271). A second gate entry simply observes
+    // the durable committed state; it must NOT re-apply the same
     // occurrence (the durable consume marker + exact log make it
     // already_applied). 8, not 6.
     await withAutoStockMutationGate(async (fresh) => {
@@ -824,7 +823,7 @@ describe('exact event day must not be double-settled', () => {
     expect(r.medications[0].currentPills).toBe(8);
     // lastSyncDate is preserved (no prior-day folding).
     expect(r.medications[0].lastSyncDate).toBe('2026-09-10');
-    // Exactly one exact log (the FIRED occurrence); no legacy day-settlement log.
+    // Exactly one exact log (the FIRED occurrence); no second day-based settlement log.
     expect(r.newExactLogs).toHaveLength(1);
     expect(r.newExactLogs[0].amount).toBe(-2);
   });

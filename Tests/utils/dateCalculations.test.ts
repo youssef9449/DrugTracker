@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   getTodayDateString,
-  getDaysDifference,
   getDepletionDate } from '@/utils/dateCalculations';
 import { NEVER_DEPLETES_DAYS } from '@/utils/time';
 import type { Medication } from '@/types';
@@ -45,33 +44,6 @@ describe('getTodayDateString', () => {
   });
 });
 
-describe('getDaysDifference', () => {
-  it('returns 0 for equal dates', () => {
-    expect(getDaysDifference('2024-03-15', '2024-03-15')).toBe(0);
-  });
-
-  it('returns the positive whole-day difference', () => {
-    expect(getDaysDifference('2024-03-10', '2024-03-15')).toBe(5);
-  });
-
-  it('clamps negative differences to 0', () => {
-    expect(getDaysDifference('2024-03-20', '2024-03-15')).toBe(0);
-  });
-
-  it('handles month + year boundaries correctly (UTC, no DST off-by-one)', () => {
-    // Across a month boundary
-    expect(getDaysDifference('2024-01-31', '2024-02-01')).toBe(1);
-    // Across a year boundary
-    expect(getDaysDifference('2024-12-31', '2025-01-01')).toBe(1);
-    // Leap year February
-    expect(getDaysDifference('2024-02-28', '2024-03-01')).toBe(2); // 2024 is a leap year
-  });
-
-  it('returns 0 for malformed input', () => {
-    expect(getDaysDifference('not-a-date', '2024-03-15')).toBe(0);
-    expect(getDaysDifference('2024-03-15', '')).toBe(0);
-  });
-});
 
 describe('getDepletionDate', () => {
   it('returns "ينفد اليوم" when daysLeft is 0', () => {
@@ -95,10 +67,8 @@ describe('getDepletionDate', () => {
   it('returns a dateStr 7 days out for 7 daysLeft', () => {
     const r = getDepletionDate(makeMed({ currentPills: 7, dailyDose: 1 }));
     expect(r.daysLeft).toBe(7);
-    // dateStr is today + 7 days (UTC). We assert it's a valid YYYY-MM-DD
-    // and that the diff from today is exactly 7.
-    expect(r.dateStr).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(getDaysDifference(getTodayDateString(), r.dateStr)).toBe(7);
+    // dateStr is today + 7 days (UTC); system time pinned in beforeEach.
+    expect(r.dateStr).toBe('2024-09-17');
   });
 
   it(`treats dailyDose <= 0 as ${NEVER_DEPLETES_DAYS} days (effectively never depletes)`, () => {

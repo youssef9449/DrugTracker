@@ -5,14 +5,12 @@ import { reconcileExactBeforeManualMutation } from '../utils/reconcileExactBefor
 import { TOAST_MESSAGES } from '../constants/uiStrings';
 
 /**
- * One-shot per session auto-deduction after hydration.
+ * One-shot per session Exact reconciliation after hydration.
  *
- * Issue #268 / PR #271: the legacy day-based catch-up
- * (`syncAutoDailyDeductions`) is removed entirely. Exact FIRED occurrences are
- * the SOLE source of timed automatic stock deduction. There is no automatic
- * deduction for app startup / app open / resume / calendar-day passing / or a
- * later mutation running a day-based catch-up. No `dailyDose`-based catch-up,
- * no `lastConsumedDate` / `lastSyncDate` / `LEGACY_DOSE_ID` workaround.
+ * Startup does not run day-based stock settlement and does not deduct
+ * `dailyDose` from elapsed calendar days. Exact FIRED occurrences are the
+ * sole source of timed automatic stock deduction; missed occurrences are
+ * recovered through the exact occurrence recovery path, not elapsed-day math.
  *
  * This effect only reconciles durable native FIRED exact events inside the
  * gate (which commits the exact deductions durably) and then mirrors the
@@ -68,7 +66,7 @@ export function useStartupAutoDeduction(opts: {
       setGlobalAutoDeductEnabled(durableGlobalAutoDeductEnabled);
       // Mirror the post-Exact durable state into React. The exact
       // reconciliation already committed meds/logs durably on its mutating
-      // path; React only needs the reflected snapshot. No legacy day-based
+      // path; React only needs the reflected snapshot. No day-based
       // settlement runs on top — Exact FIRED is the sole timed deduction.
       const nextMeds = pre.state.medications;
       const nextLogs = pre.state.logs;

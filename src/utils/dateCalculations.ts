@@ -225,17 +225,6 @@ export function formatLogTime(timestamp?: string | number): string {
   }
 }
 
-export function getDaysDifference(fromDateStr: string, toDateStr: string): number {
-  try {
-    const date1 = parseUtcDate(fromDateStr);
-    const date2 = parseUtcDate(toDateStr);
-    if (!date1 || !date2) return 0;
-    const diffDays = Math.round((date2.getTime() - date1.getTime()) / MS_PER_DAY);
-    return Math.max(0, diffDays);
-  } catch {
-    return 0;
-  }
-}
 
 /**
  * Depletion date from durable `Medication.currentPills` only (Issue #266).

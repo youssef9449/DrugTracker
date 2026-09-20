@@ -167,8 +167,10 @@ public final class DoseReminderAlarmAdapter {
     }
 
     public boolean isScheduled(String medicationId, String doseId) {
-        return runtime.getScheduleMetadata(
-                occurrenceKey(medicationId, doseId)) != null;
+        return runtime.isPending(
+                occurrenceUri(medicationId, doseId),
+                ACTION_DOSE_REMINDER,
+                DoseReminderAlarmReceiver.class);
     }
 
     public List<String> listScheduledKeys() {

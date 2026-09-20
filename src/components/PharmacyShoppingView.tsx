@@ -27,21 +27,22 @@ import { SegmentedButton } from './ui/SegmentedButton';
 
 function shoppingDurationDays(
   med: Medication,
-  medicationPeriods: Record<string, { value: number; unit: 'day' | 'month' }>,
+  medicationPeriods: Record<string, { value: number | ''; unit: 'day' | 'month' }>,
   defaultDurationDays: number
 ): number {
   const period = medicationPeriods[med.id] || {
     value: defaultDurationDays === 60 ? 2 : 30,
     unit: (defaultDurationDays === 60 ? 'month' : 'day') as 'day' | 'month',
   };
-  return Math.max(1, period.value || 1) * (period.unit === 'month' ? 30 : 1);
+  const rawValue = period.value === '' ? 1 : period.value;
+  return Math.max(1, rawValue || 1) * (period.unit === 'month' ? 30 : 1);
 }
 
 function shoppingRequestedPills(
   med: Medication,
   suggestedPills: number,
   quantityModes: Record<string, 'period' | 'custom'>,
-  customOrderQuantities: Record<string, number>,
+  customOrderQuantities: Record<string, number | ''>,
   orderUnits: Record<string, Array<'pills' | 'boxes' | 'strips'>>
 ): number {
   const mode = quantityModes[med.id] || 'period';
@@ -49,9 +50,11 @@ function shoppingRequestedPills(
   const { boxSize, stripSize, hasStrips } = getMedSizes(med);
   const selectedUnit = (orderUnits[med.id] || (hasStrips ? ['strips'] : ['boxes']))[0];
   const unitSize = selectedUnit === 'boxes' ? boxSize : stripSize > 0 ? stripSize : 1;
+  const stored = customOrderQuantities[med.id];
   const unitQty =
-    customOrderQuantities[med.id] ||
-    Math.max(1, Math.ceil(suggestedPills / unitSize));
+    stored === '' || stored === undefined
+      ? Math.max(1, Math.ceil(suggestedPills / unitSize))
+      : stored;
   if (selectedUnit === 'boxes') return unitQty * boxSize;
   if (selectedUnit === 'strips') return unitQty * stripSize;
   return unitQty;
@@ -73,11 +76,11 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   onOpenUserContactsSettings = () => {},
 }) => {
   type PeriodUnit = 'day' | 'month';
-  type MedicationPeriod = { value: number; unit: PeriodUnit };
+  type MedicationPeriod = { value: number | ''; unit: PeriodUnit };
   type QuantityMode = 'period' | 'custom';
   const [medicationPeriods, setMedicationPeriods] = useState<Record<string, MedicationPeriod>>({});
   const [quantityModes, setQuantityModes] = useState<Record<string, QuantityMode>>({});
-  const [customOrderQuantities, setCustomOrderQuantities] = useState<Record<string, number>>({});
+  const [customOrderQuantities, setCustomOrderQuantities] = useState<Record<string, number | ''>>({});
   const pharmacies = settings.pharmacies || [];
   const selectedPharmacy = pharmacies.find((pharmacy) => pharmacy.id === settings.selectedPharmacyId)
     || pharmacies[0];
@@ -197,7 +200,8 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
 
   const getDurationDays = (med: Medication) => {
     const period = getMedicationPeriod(med);
-    return Math.max(1, period.value || 1) * (period.unit === 'month' ? 30 : 1);
+    const rawValue = period.value === '' ? 1 : period.value;
+    return Math.max(1, rawValue || 1) * (period.unit === 'month' ? 30 : 1);
   };
 
   const getQuantityMode = (med: Medication): QuantityMode => quantityModes[med.id] || 'period';
@@ -205,15 +209,19 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   const handleMedicationPeriodChange = (medId: string, field: keyof MedicationPeriod, value: string) => {
     const med = medications.find((item) => item.id === medId);
     if (!med) return;
-    const nextPeriod = {
+    let nextField: MedicationPeriod[keyof MedicationPeriod];
+    if (field === 'value') {
+      nextField = value === '' ? '' : Math.max(1, parseInt(value, 10) || 1);
+    } else {
+      nextField = value as PeriodUnit;
+    }
+    const nextPeriod: MedicationPeriod = {
       ...getMedicationPeriod(med),
-      [field]: field === 'value' ? Math.max(1, parseInt(value, 10) || 1) : value,
-    } as MedicationPeriod;
+      [field]: nextField,
+    };
     setMedicationPeriods((prev) => ({
       ...prev,
-      [medId]: {
-        ...nextPeriod,
-      },
+      [medId]: nextPeriod,
     }));
   };
 
@@ -247,11 +255,27 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   function getUnitQuantity(med: Medication, unit: OrderUnit, suggestedPills: number): number {
     const { boxSize, stripSize } = getMedSizes(med);
     if (getQuantityMode(med) === 'custom') {
-      return customOrderQuantities[med.id] || Math.max(1, Math.ceil(suggestedPills / (unit === 'boxes' ? boxSize : stripSize)));
+      const stored = customOrderQuantities[med.id];
+      if (stored === '' || stored === undefined) {
+        return Math.max(1, Math.ceil(suggestedPills / (unit === 'boxes' ? boxSize : stripSize)));
+      }
+      return stored;
     }
     if (unit === 'boxes') return Math.max(1, Math.ceil(suggestedPills / boxSize));
     if (unit === 'strips') return Math.max(1, Math.ceil(suggestedPills / stripSize));
     return 0;
+  }
+
+  /** Display value for the custom quantity input — may be '' while editing. */
+  function getCustomQuantityInputValue(
+    med: Medication,
+    unit: OrderUnit,
+    suggestedPills: number
+  ): number | '' {
+    if (Object.prototype.hasOwnProperty.call(customOrderQuantities, med.id)) {
+      return customOrderQuantities[med.id];
+    }
+    return getUnitQuantity(med, unit, suggestedPills);
   }
 
   function getRequestedPills(med: Medication, suggestedPills: number): number {
@@ -291,10 +315,15 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     }
   };
 
-  const handleCustomQuantityChange = (med: Medication, quantity: number) => {
+  const handleCustomQuantityChange = (med: Medication, raw: string) => {
+    if (raw === '') {
+      setCustomOrderQuantities((prev) => ({ ...prev, [med.id]: '' }));
+      return;
+    }
+    const parsed = parseInt(raw, 10);
     setCustomOrderQuantities((prev) => ({
       ...prev,
-      [med.id]: Math.max(1, quantity || 1),
+      [med.id]: Math.max(1, Number.isFinite(parsed) ? parsed : 1),
     }));
   };
 
@@ -593,6 +622,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                 <div className="space-y-2">
                   {selectedUnits.map((unit) => {
                     const unitQty = getUnitQuantity(med, unit, suggestedPills);
+                    const inputValue = getCustomQuantityInputValue(med, unit, suggestedPills);
                     return (
                       <div key={unit} className="flex items-center justify-between gap-2">
                         <span className="text-[10px] text-slate-500 font-bold">{unitLabel(unit, med, unitQty)}</span>
@@ -600,8 +630,8 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                           <input
                             type="number"
                             min="1"
-                            value={unitQty}
-                            onChange={(event) => handleCustomQuantityChange(med, parseInt(event.target.value, 10) || 1)}
+                            value={inputValue}
+                            onChange={(event) => handleCustomQuantityChange(med, event.target.value)}
                             className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-center font-mono font-bold text-sm focus:ring-1 focus:ring-teal-500"
                             aria-label={`كمية ${med.name}`}
                           />

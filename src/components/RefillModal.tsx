@@ -22,8 +22,10 @@ export const RefillModal: FC<RefillModalProps> = ({
 }) => {
   // Total pill count — what gets passed to onConfirmRefill.
   const [addedCount, setAddedCount] = useState<number>(30);
-  // Per-unit quantity — what the user types in the selected unit.
+  // Per-unit quantity — committed numeric value used by +/- buttons and calc.
   const [unitQty, setUnitQty] = useState<number>(1);
+  // String editing mirror so the field can be fully cleared mid-edit.
+  const [unitQtyStr, setUnitQtyStr] = useState<string>('1');
   const [refillUnit, setRefillUnit] = useState<RefillUnit>('boxes');
 
   // Sync defaults when modal opens.
@@ -34,6 +36,7 @@ export const RefillModal: FC<RefillModalProps> = ({
       const defaultUnit: RefillUnit = units.includes('boxes') ? 'boxes' : units[0] || 'boxes';
       setRefillUnit(defaultUnit);
       setUnitQty(1);
+      setUnitQtyStr('1');
       if (defaultUnit === 'boxes') {
         setAddedCount(sz.boxSize);
       } else if (defaultUnit === 'strips') {
@@ -62,15 +65,40 @@ export const RefillModal: FC<RefillModalProps> = ({
   // current unitQty in the new unit.
   function handleUnitChange(newUnit: RefillUnit) {
     setRefillUnit(newUnit);
-    const pills = unitToPills(unitQty, newUnit);
-    setAddedCount(Math.max(1, pills));
+    if (unitQtyStr === '') {
+      // Keep empty editing state; no committed quantity while blank.
+      setAddedCount(0);
+      return;
+    }
+    const parsed = parseInt(unitQtyStr, 10);
+    if (Number.isFinite(parsed) && parsed >= 1) {
+      setUnitQty(parsed);
+      setAddedCount(unitToPills(parsed, newUnit));
+    } else {
+      setAddedCount(0);
+    }
   }
 
-  // When the user types a quantity in the current unit, recompute pills.
+  // +/- buttons and other numeric pathways: commit a valid quantity.
   function handleQtyChange(newQty: number) {
     const safeQty = Math.max(1, newQty);
     setUnitQty(safeQty);
+    setUnitQtyStr(String(safeQty));
     setAddedCount(unitToPills(safeQty, refillUnit));
+  }
+
+  // Text input: allow empty mid-edit; only commit when a valid integer >= 1.
+  function handleQtyInputChange(raw: string) {
+    setUnitQtyStr(raw);
+    if (raw === '') {
+      setAddedCount(0);
+      return;
+    }
+    const parsed = parseInt(raw, 10);
+    if (Number.isFinite(parsed) && parsed >= 1) {
+      setUnitQty(parsed);
+      setAddedCount(unitToPills(parsed, refillUnit));
+    }
   }
 
   const handleSave = (e: FormEvent) => {
@@ -198,8 +226,8 @@ export const RefillModal: FC<RefillModalProps> = ({
               <input
                 type="number"
                 min="1"
-                value={unitQty}
-                onChange={(e) => handleQtyChange(parseInt(e.target.value) || 1)}
+                value={unitQtyStr}
+                onChange={(e) => handleQtyInputChange(e.target.value)}
                 className="w-20 px-2 py-2 text-center font-mono font-bold text-base border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500"
               />
               <div className="text-[10px] text-slate-400 mt-0.5">

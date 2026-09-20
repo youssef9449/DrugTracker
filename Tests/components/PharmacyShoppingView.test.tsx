@@ -319,3 +319,45 @@ describe('PharmacyShoppingView — medication-level stock projection', () => {
     expect(screen.queryByText('Frozen Med')).not.toBeInTheDocument();
   });
 });
+
+
+describe('PharmacyShoppingView — period and custom quantity allow empty mid-edit', () => {
+  afterEach(() => cleanup());
+
+  it('مدة الطلب value can be cleared then set to 2', () => {
+    const med = makeMed({
+      currentPills: 1,
+      dailyDose: 1,
+      stripsPerBox: 3,
+      pillsPerStrip: 10,
+      packageSize: 30,
+    });
+    renderView({ medications: [med] });
+    // Period value is the number spinbutton near "مدة الطلب"
+    const periodLabel = screen.getByText('مدة الطلب');
+    const periodInput = periodLabel.parentElement!.querySelector('input[type="number"]') as HTMLInputElement;
+    expect(periodInput).toBeTruthy();
+    fireEvent.change(periodInput, { target: { value: '' } });
+    expect(periodInput.value).toBe('');
+    fireEvent.change(periodInput, { target: { value: '2' } });
+    expect(periodInput.value).toBe('2');
+  });
+
+  it('كمية محددة can be cleared then set to 2 without snapping back to 1', () => {
+    const med = makeMed({
+      currentPills: 1,
+      dailyDose: 1,
+      stripsPerBox: 3,
+      pillsPerStrip: 10,
+      packageSize: 30,
+    });
+    renderView({ medications: [med] });
+    fireEvent.click(screen.getByRole('button', { name: 'كمية محددة' }));
+    const qty = screen.getByRole('spinbutton', { name: 'كمية Test Med' }) as HTMLInputElement;
+    fireEvent.change(qty, { target: { value: '' } });
+    expect(qty.value).toBe('');
+    fireEvent.change(qty, { target: { value: '2' } });
+    expect(qty.value).toBe('2');
+    expect(screen.getByText(/الإجمالي:/)).toBeInTheDocument();
+  });
+});

@@ -80,3 +80,31 @@ describe('RefillModal', () => {
     expect(screen.getByRole('button', { name: /^شريط$/i })).toBeInTheDocument();
   });
 });
+
+
+describe('RefillModal — quantity input allows empty mid-edit', () => {
+  afterEach(() => cleanup());
+
+  it('clearing the quantity field leaves it empty; typing 2 works', () => {
+    const med = makeMed({
+      currentPills: 10,
+      stripsPerBox: 3,
+      pillsPerStrip: 10,
+      packageSize: 30,
+      unit: 'قرص',
+    });
+    render(
+      <RefillModal
+        medication={med}
+        isOpen={true}
+        onClose={() => {}}
+        onConfirmRefill={vi.fn()}
+      />
+    );
+    const input = screen.getByRole('spinbutton') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '' } });
+    expect(input.value).toBe('');
+    fireEvent.change(input, { target: { value: '2' } });
+    expect(input.value).toBe('2');
+  });
+});

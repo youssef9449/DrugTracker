@@ -73,14 +73,19 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
   // number state because it's used in validation + display only.
   const [packageSize, setPackageSize] = useState<number>(30);
   const [showStockHelper, setShowStockHelper] = useState(false);
-  const [helperBoxes, setHelperBoxes] = useState<number>(1);
-  const [helperStrips, setHelperStrips] = useState<number>(0);
-  const [helperLoose, setHelperLoose] = useState<number>(0);
+  // String editing state so the user can clear the field mid-edit (select-all →
+  // delete) without parseInt||0 snapping back to 0. Parsed only for calculation.
+  const [helperBoxes, setHelperBoxes] = useState<string>('1');
+  const [helperStrips, setHelperStrips] = useState<string>('0');
+  const [helperLoose, setHelperLoose] = useState<string>('0');
   // #111: extracted from an inline IIFE — the stock-helper total.
   const helperTotal = useMemo(() => {
     const s = Math.max(1, parseInt(stripsPerBox, 10) || 1);
     const p = Math.max(1, parseInt(pillsPerStrip, 10) || 1);
-    return helperBoxes * (s * p) + helperStrips * p + helperLoose;
+    const boxes = Math.max(0, parseInt(helperBoxes, 10) || 0);
+    const strips = Math.max(0, parseInt(helperStrips, 10) || 0);
+    const loose = Math.max(0, parseInt(helperLoose, 10) || 0);
+    return boxes * (s * p) + strips * p + loose;
   }, [helperBoxes, helperStrips, helperLoose, stripsPerBox, pillsPerStrip]);
   const [error, setError] = useState('');
 
@@ -156,9 +161,9 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       setNoStrips(false);
       setPackageSize(30);
       setPackageSizeStr('30');
-      setHelperBoxes(1);
-      setHelperStrips(0);
-      setHelperLoose(0);
+      setHelperBoxes('1');
+      setHelperStrips('0');
+      setHelperLoose('0');
       setReminderEnabled(false);
     }
     setShowStockHelper(false);
@@ -234,7 +239,10 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
     const sBox = Math.max(1, parseInt(stripsPerBox, 10) || 1);
     const pStrip = Math.max(1, parseInt(pillsPerStrip, 10) || 1);
     const boxSize = sBox * pStrip;
-    const computed = helperBoxes * boxSize + helperStrips * pStrip + helperLoose;
+    const boxes = Math.max(0, parseInt(helperBoxes, 10) || 0);
+    const strips = Math.max(0, parseInt(helperStrips, 10) || 0);
+    const loose = Math.max(0, parseInt(helperLoose, 10) || 0);
+    const computed = boxes * boxSize + strips * pStrip + loose;
     const clamped = Math.max(0, computed);
     setCurrentPills(clamped);
     setCurrentPillsStr(String(clamped));
@@ -483,7 +491,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                       type="number"
                       min="0"
                       value={helperBoxes}
-                      onChange={(e) => setHelperBoxes(Math.max(0, parseInt(e.target.value) || 0))}
+                      onChange={(e) => setHelperBoxes(e.target.value)}
                       className="w-full px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs font-mono text-center focus:ring-1 focus:ring-teal-500"
                     />
                   </div>
@@ -493,17 +501,17 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                       type="number"
                       min="0"
                       value={helperStrips}
-                      onChange={(e) => setHelperStrips(Math.max(0, parseInt(e.target.value) || 0))}
+                      onChange={(e) => setHelperStrips(e.target.value)}
                       className="w-full px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs font-mono text-center focus:ring-1 focus:ring-teal-500"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] text-slate-600 mb-0.5">حبات فَرط</label>
+                    <label className="block text-[10px] text-slate-600 mb-0.5">حبات منفردة</label>
                     <input
                       type="number"
                       min="0"
                       value={helperLoose}
-                      onChange={(e) => setHelperLoose(Math.max(0, parseInt(e.target.value) || 0))}
+                      onChange={(e) => setHelperLoose(e.target.value)}
                       className="w-full px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs font-mono text-center focus:ring-1 focus:ring-teal-500"
                     />
                   </div>

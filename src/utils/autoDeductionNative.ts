@@ -123,7 +123,6 @@ interface AutoDeductionPlugin {
     doseId: string;
     calendarDate: string;
   }): Promise<MarkReconciledResult>;
-  canScheduleExactAlarms(): Promise<{ granted: boolean }>;
   restoreFutureSchedules(): Promise<RestoreFutureSchedulesResult>;
   listScheduledOccurrences(): Promise<{ schedules: ScheduledOccurrence[] }>;
 }
@@ -357,48 +356,4 @@ export async function markAutoDeductionEventReconciled(
   }
 }
 
-export async function canScheduleAutoDeductionExactAlarms(): Promise<boolean> {
-  if (!isNativeAndroid()) return false;
-  try {
-    const res = await AutoDeduction.canScheduleExactAlarms();
-    return res.granted === true;
-  } catch {
-    return false;
-  }
-}
 
-export async function restoreFutureAutoDeductionSchedules(): Promise<RestoreFutureSchedulesResult> {
-  if (!isNativeAndroid()) {
-    return { ok: true, restored: 0, failed: 0 };
-  }
-  try {
-    const res = await AutoDeduction.restoreFutureSchedules();
-    const ok = res != null && res.ok !== false;
-    return {
-      ok,
-      restored: Number(res?.restored) || 0,
-      failed: Number(res?.failed) || 0,
-      error: res?.error,
-    };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'restore_failed';
-    return { ok: false, restored: 0, failed: 0, error: msg };
-  }
-}
-
-export async function listScheduledAutoDeductionOccurrences(): Promise<ListScheduledOccurrencesResult> {
-  // Web / non-Android: no native AlarmManager — successful empty set (not a failure).
-  if (!isNativeAndroid()) {
-    return { ok: true, schedules: [] };
-  }
-  try {
-    const res = await AutoDeduction.listScheduledOccurrences();
-    return { ok: true, schedules: res.schedules ?? [] };
-  } catch (e) {
-    return {
-      ok: false,
-      schedules: [],
-      error: e instanceof Error ? e.message : 'list_schedules_failed',
-    };
-  }
-}

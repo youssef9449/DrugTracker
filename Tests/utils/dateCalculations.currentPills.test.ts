@@ -500,4 +500,38 @@ describe('getCriticalAlarmDate — bulk-jump performance path', () => {
     expect(d.getMinutes()).toBe(0);
   });
 
+  it('fractional schedule bulk-jump: exact integer ratio that raw float misses', () => {
+    // dayAmt = 0.1 + 0.2 = 0.30000000000000004 (IEEE-754)
+    // threshold = 3, start = 2.1
+    // floorRatioSafely(2.1, 0.30000000000000004) = 7 (mathematically 7 exact)
+    // 7 - 3 = 4 fullDaysNeeded → after 3 full normal days, 4th day slot-by-slot.
+    // But raw float: Math.floor((2.1 - (3+1)*0.30000000000000004) / 0.30000000000000004) + 1
+    // = Math.floor((2.1 - 1.2000000000000002) / 0.30000000000000004) + 1
+    // = Math.floor(0.8999999999999998 / 0.30000000000000004) + 1
+    // = Math.floor(2.9999999999999996) + 1 = 3 → wrong (should be 4).
+    // This test verifies the floorRatioSafely-based fullDaysNeeded is correct.
+    vi.setSystemTime(new Date(2024, 8, 10, 21, 0, 0, 0)); // after all today's doses
+    const med = makeMed({
+      currentPills: 2.1,
+      dailyDose: 0.3,
+      warningThresholdDays: 3,
+      autoDeductEnabled: true,
+      doseSchedule: [
+        { id: 'd1', amount: 0.1, time: '08:00' },
+        { id: 'd2', amount: 0.2, time: '20:00' },
+      ],
+    });
+    expect(daysLeftFromCurrentStock(med)).toBe(7);
+    const ts = getCriticalAlarmDate(med, '2024-09-10');
+    expect(ts).not.toBeNull();
+    // After 3 full days (daysBeforeCrossing=3): pills = 2.1 - 3*0.30000000000000004 = 1.1999999999999997
+    // Day 4 (2024-09-14): 08:00 dose -0.1 = 1.0999999999999997 → floor(1.0999.../0.3) = 3 ≤ 3 → Critical
+    const d = new Date(ts!);
+    expect(d.getFullYear()).toBe(2024);
+    expect(d.getMonth()).toBe(8);
+    expect(d.getDate()).toBe(14);
+    expect(d.getHours()).toBe(8);
+    expect(d.getMinutes()).toBe(0);
+  });
+
 });

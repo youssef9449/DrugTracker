@@ -339,12 +339,6 @@ export function getCriticalAlarmDate(
 
   const doseIdSet = new Set(slots.map((s) => s.id));
 
-  /**
-   * Non-critical when floor(pills/dayAmt) > threshold, i.e. pills >= (threshold+1)*dayAmt.
-   * Exact for fractional dayAmt/currentPills (not the integer-only `* dayAmt - 1` bound).
-   */
-  const minNonCriticalPills = (criticalThresholdDays + 1) * dayAmt;
-
   const isCritical = (pills: number): boolean => {
     if (pills <= 0) return true;
     return floorRatioSafely(pills, dayAmt) <= criticalThresholdDays;
@@ -425,7 +419,7 @@ export function getCriticalAlarmDate(
 
   // Safety: enough stock-driven progress without per-day loops.
   // We only iterate exception dates + at most one normal crossing day.
-  while (pills >= minNonCriticalPills) {
+  while (!isCritical(pills)) {
     const nextExceptionStr =
       exceptionIdx < sortedExceptions.length ? sortedExceptions[exceptionIdx] : null;
     const nextExceptionUtc = nextExceptionStr ? parseUtcDate(nextExceptionStr) : null;
@@ -440,7 +434,7 @@ export function getCriticalAlarmDate(
     // Complete normal days until end-of-day stock would be Critical, then
     // process that day slot-by-slot for the exact crossing timestamp.
     const fullDaysNeeded =
-      Math.floor((pills - minNonCriticalPills) / dayAmt) + 1;
+      floorRatioSafely(pills, dayAmt) - criticalThresholdDays;
 
     if (fullDaysNeeded <= 0) {
       // Already Critical without further deduction — should not happen.

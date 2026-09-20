@@ -16,10 +16,9 @@ import { exactAutoLogId } from './autoDeductionReconciliation';
  *
  * Manual stock mutations use `applyDurableStockDelta` — a simple helper that
  * applies a signed delta to `med.currentPills` with a zero clamp. There is NO
- * settlement, NO elapsed-day settlement horizon, NO `computeDueDoseBreakdown`, NO
- * `effectiveCurrentPills` projection folded into manual mutations. The
- * durable `currentPills` is the single source of truth for manual stock
- * changes.
+ * elapsed-day settlement and NO read-time stock projection inside manual
+ * mutations. The durable `currentPills` is the single source of truth for
+ * manual stock changes.
  */
 
 /**
@@ -439,8 +438,8 @@ export function restoreDose(
  * Consume one daily dose from a medication.
  *
  * Issue #267: the stock deduction is `currentPills → currentPills - doseAmount`
- * (clamped at zero). No `computeDueDoseBreakdown`, no `effectiveCurrentPills`,
- * no elapsed-day settlement. The durable `currentPills` is the sole base.
+ * (clamped at zero). No read-time projection and no elapsed-day settlement.
+ * The durable `currentPills` is the sole base.
  *
  * Amount authority:
  * - `amountOverride` (Exact Auto FIRED event amount) when provided.

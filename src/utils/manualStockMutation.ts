@@ -1081,7 +1081,7 @@ export function runGatedUndoRefill(opts: {
 
     // Issue #267: refill undo reverses from durable currentPills only.
     // reversedAmount = min(refill.amount, max(0, currentPills)).
-    // No computeDueDoseBreakdown, no effectiveCurrentPills, no settlement.
+    // No read-time projection and no elapsed-day settlement.
     const reversedAmount = Math.min(
       Math.max(0, refill.amount),
       Math.max(0, med.currentPills)

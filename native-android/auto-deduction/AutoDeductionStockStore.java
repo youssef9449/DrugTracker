@@ -26,6 +26,7 @@ public final class AutoDeductionStockStore {
     private static final String PREFS_NAME = "drugtracker_auto_stock_v1";
     private static final String KEY_STOCK_PREFIX = "stock:";
     private static final String KEY_AUTO_PREFIX = "auto:";
+    private static final String KEY_FOREGROUND_OCCURRENCE_PREFIX = "foreground:";
     private static final String KEY_LAST_FOREGROUND_SEQ = "lastForegroundMutationSeq";
     private static final String KEY_STOCK_INITIALIZED = "stockInitialized";
     private static final String KEY_RECOVERY_READY = "recoveryReady";
@@ -155,6 +156,30 @@ public final class AutoDeductionStockStore {
         public StockDelta(String medicationId, double delta) {
             this.medicationId = medicationId;
             this.delta = delta;
+        }
+    }
+
+    public static final class OccurrenceResolution {
+        public enum Type {
+            CONSUMED,
+            SKIPPED
+        }
+
+        public final String medicationId;
+        public final String doseId;
+        public final String calendarDate;
+        public final Type type;
+
+        public OccurrenceResolution(
+                String medicationId,
+                String doseId,
+                String calendarDate,
+                Type type
+        ) {
+            this.medicationId = medicationId;
+            this.doseId = doseId;
+            this.calendarDate = calendarDate;
+            this.type = type;
         }
     }
 
@@ -362,6 +387,21 @@ public final class AutoDeductionStockStore {
                 return AutoApplyResult.alreadyApplied(actual, current);
             }
 
+            // A foreground Take/Restore for this exact occurrence is already
+            // reflected in Native stock. The upcoming Auto alarm must not deduct
+            // the same occurrence again. The resolution is committed atomically
+            // with the foreground stock delta.
+            String foregroundResolution =
+                    prefs.getString(foregroundOccurrenceKey(
+                            medicationId, doseId, calendarDate), null);
+            if (foregroundResolution != null) {
+                Double current = readStockLocked(medicationId);
+                if (current == null) {
+                    return AutoApplyResult.failure("stock_not_initialized");
+                }
+                return AutoApplyResult.alreadyApplied(0.0, current);
+            }
+
             Double currentObj = readStockLocked(medicationId);
             if (currentObj == null) {
                 return AutoApplyResult.failure("stock_not_initialized");
@@ -394,7 +434,8 @@ public final class AutoDeductionStockStore {
      */
     public ForegroundApplyResult applyForegroundDeltas(
             long mutationSeq,
-            List<StockDelta> deltas
+            List<StockDelta> deltas,
+            List<OccurrenceResolution> resolutions
     ) {
         if (mutationSeq <= 0L) {
             return ForegroundApplyResult.failure("invalid_mutation_seq");
@@ -436,6 +477,19 @@ public final class AutoDeductionStockStore {
             }
 
             SharedPreferences.Editor editor = prefs.edit();
+            if (resolutions != null) {
+                for (OccurrenceResolution resolution : resolutions) {
+                    if (!isValidResolution(resolution)) {
+                        return ForegroundApplyResult.failure("invalid_occurrence_resolution");
+                    }
+                    editor.putString(
+                            foregroundOccurrenceKey(
+                                    resolution.medicationId,
+                                    resolution.doseId,
+                                    resolution.calendarDate),
+                            resolution.type.name());
+                }
+            }
             for (Map.Entry<String, Double> entry : nextValues.entrySet()) {
                 editor.putString(entry.getKey().startsWith(KEY_STOCK_PREFIX)
                         ? entry.getKey()
@@ -448,6 +502,24 @@ public final class AutoDeductionStockStore {
             }
             return ForegroundApplyResult.success(readAllStocksLocked());
         }
+    }
+
+    private static boolean isValidResolution(OccurrenceResolution resolution) {
+        return resolution != null
+                && isValidId(resolution.medicationId)
+                && isValidId(resolution.doseId)
+                && resolution.calendarDate != null
+                && AutoDeductionContract.isValidCalendarDate(resolution.calendarDate)
+                && resolution.type != null;
+    }
+
+    private static String foregroundOccurrenceKey(
+            String medicationId,
+            String doseId,
+            String calendarDate
+    ) {
+        return KEY_FOREGROUND_OCCURRENCE_PREFIX
+                + medicationId + KEY_SEPARATOR + doseId + KEY_SEPARATOR + calendarDate;
     }
 
     private Map<String, Double> readAllStocksLocked() {

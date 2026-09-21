@@ -309,6 +309,8 @@ public class FireRetryScheduleTest {
         String version = meta.optString(ExactAlarmContract.FIELD_OPERATION_VERSION, "");
         long gen = meta.optLong(AutoDeductionScheduler.FIELD_RECURRENCE_GENERATION, 0L);
 
+        seedAutoStock("med", 10.0);
+
         AutoDeductionReceiver.handleFireDelivery(
                 appContext(), "med", "dose", date, epoch, 1.0, "12:00",
                 gen, version, 0);
@@ -511,6 +513,8 @@ public class FireRetryScheduleTest {
                     "med", "dose", date, 1000L, 1.0, "08:00", 1L, "v1", 1));
         }
         int before = alarmCount();
+        seedAutoStock("med", 10.0);
+
         AutoDeductionReceiver.handleFireDelivery(
                 appContext(), "med", "dose", date, 1000L, 1.0, "08:00",
                 1L, "v1", 1);

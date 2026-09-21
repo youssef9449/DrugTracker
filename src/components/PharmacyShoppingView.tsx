@@ -664,8 +664,8 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                     aria-label={`طريقة حساب كمية طلب ${med.name}`}
                   />
 
-                  {/* Unit selector chips (M3 Filter Chips) */}
-                  {availableUnits.length > 1 && (
+                  {/* Unit selector chips stay in the toolbar only for period mode. */}
+                  {getQuantityMode(med) === 'period' && availableUnits.length > 1 && (
                     <div className="flex items-center gap-1 shrink-0">
                       {availableUnits.map((u) => {
                         const isActive = selectedUnits.includes(u);
@@ -677,6 +677,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                             key={u}
                             type="button"
                             onClick={() => handleToggleOrderUnit(med, u, suggestedPills)}
+                            aria-pressed={isActive}
                             className={`h-[28px] px-2 rounded-lg text-[10px] font-bold flex items-center gap-1 transition cursor-pointer border ${
                               isActive
                                 ? 'bg-teal-100 text-teal-950 border-teal-300 shadow-2xs'
@@ -728,19 +729,37 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                     })}
                   </div>
                 ) : (
-                  <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     {selectedUnits.map((unit) => {
                       const inputValue = getCustomQuantityInputValue(med, unit, suggestedPills);
+                      const icon = unit === 'pills'
+                        ? <Pill className="w-2.5 h-2.5" />
+                        : unit === 'boxes'
+                        ? <Box className="w-2.5 h-2.5" />
+                        : <Layers className="w-2.5 h-2.5" />;
+                      const boxLabel = med.unit === 'مل' ? 'عبوة' : 'علبة';
+                      const label = unit === 'pills' ? med.unit : unit === 'boxes' ? boxLabel : 'شريط';
                       return (
-                        <div key={unit} className="flex items-center gap-1.5 rounded-lg border border-slate-200/80 bg-slate-50/60 px-2.5 py-1">
-                          <span className="text-[10px] text-slate-500 font-medium">الكمية:</span>
+                        <div
+                          key={unit}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200/80 bg-slate-50/60 px-1.5 py-1"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handleToggleOrderUnit(med, unit, suggestedPills)}
+                            aria-pressed="true"
+                            className="flex items-center gap-1 rounded-md px-1 py-0.5 text-[10px] font-bold text-slate-700 hover:bg-white transition"
+                          >
+                            {icon}
+                            <span>{label}</span>
+                          </button>
                           <input
                             type="number"
                             min="1"
                             value={inputValue}
                             onChange={(event) => handleCustomQuantityChange(med, unit, event.target.value)}
                             className="w-14 rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-center font-mono font-bold text-xs focus:ring-1 focus:ring-teal-500"
-                            aria-label={`كمية ${med.name} ${unitLabel(unit, med, 1)}`}
+                            aria-label={`كمية ${med.name} ${label}`}
                           />
                         </div>
                       );

@@ -831,7 +831,16 @@ Split Notification Runtime from Exact Alarm Runtime:
 - remove the old Capacitor LocalNotifications alarm-delivery/recurrence bridge from Android.
 
 ### Phase 7
-Remove obsolete ID/hash registries, duplicate permission checks, duplicate lifecycle code, and unused bridges.
+Split the TypeScript notification utility by responsibility without changing notification behavior:
+
+- notification permission/settings behavior is isolated from feature notification code;
+- deterministic notification identity stays in a dedicated ID module;
+- generic notification presentation mechanics remain separate from feature content/policy;
+- Dose Reminder and Critical Stock notification-facing behavior remain feature-specific;
+- browser notification fallback remains isolated to the web notification module;
+- exact-alarm scheduling/capability concerns remain on the Exact Alarm side rather than in the Notification Runtime layer;
+- Auto Deduction remains independent of the notification modules;
+- src/utils/notifications.ts is reduced to a thin compatibility re-export facade with no notification implementation.
 
 ### Phase 8
 Add cross-feature coexistence and lifecycle regression coverage.

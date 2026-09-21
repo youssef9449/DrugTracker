@@ -1,10 +1,8 @@
 package app.drugtracker.alarmruntime;
 
-import android.app.AlarmManager;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
-import android.os.Build;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -21,9 +19,8 @@ public final class ExactAlarmPlugin extends Plugin {
 
     @PluginMethod
     public void canScheduleExactAlarms(PluginCall call) {
-        AlarmManager manager = alarmManager();
-        boolean granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.S
-                || (manager != null && manager.canScheduleExactAlarms());
+        boolean granted = ExactAlarmRuntime.canScheduleExactAlarms(
+                getContext());
         JSObject ret = new JSObject();
         ret.put("granted", granted);
         call.resolve(ret);
@@ -55,8 +52,4 @@ public final class ExactAlarmPlugin extends Plugin {
         }
     }
 
-    private AlarmManager alarmManager() {
-        return (AlarmManager) getContext().getSystemService(
-                Context.ALARM_SERVICE);
-    }
 }

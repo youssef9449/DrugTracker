@@ -75,7 +75,7 @@ public final class CriticalStockAlarmAdapter
                     ExactAlarmContract.FIELD_OPERATION_VERSION,
                     ExactAlarmContract.LEGACY_FIELD_SCHEDULE_VERSION);
 
-            long triggerAt = resolveLocalDateTime(date, time);
+            long triggerAt = ExactAlarmContract.resolveLocalDateTimeEpochMs(date, time, false);
             long now = System.currentTimeMillis();
             if (triggerAt <= 0L) continue;
 
@@ -100,30 +100,6 @@ public final class CriticalStockAlarmAdapter
                         reason + ": failed to restore " + medicationId
                                 + " (" + result.error + ")");
             }
-        }
-    }
-
-    private static long resolveLocalDateTime(
-            String date,
-            String time) {
-        if (date == null || date.length() != 10
-                || time == null || time.length() != 5) {
-            return -1L;
-        }
-        try {
-            int year = Integer.parseInt(date.substring(0, 4));
-            int month = Integer.parseInt(date.substring(5, 7));
-            int day = Integer.parseInt(date.substring(8, 10));
-            int hour = Integer.parseInt(time.substring(0, 2));
-            int minute = Integer.parseInt(time.substring(3, 5));
-
-            Calendar calendar = Calendar.getInstance();
-            calendar.clear();
-            calendar.setLenient(false);
-            calendar.set(year, month - 1, day, hour, minute, 0);
-            return calendar.getTimeInMillis();
-        } catch (Exception e) {
-            return -1L;
         }
     }
 
@@ -253,6 +229,9 @@ public final class CriticalStockAlarmAdapter
 
     public static String occurrenceUri(String medicationId) {
         return ExactAlarmContract.buildIdentityUri(
+                "content",
+                "app.drugtracker.alarm",
+                "alarm",
                 "critical-stock",
                 medicationId == null ? "" : medicationId).toString();
     }

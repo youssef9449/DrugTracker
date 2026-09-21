@@ -43,10 +43,6 @@ public final class DoseReminderAlarmAdapter {
                 PENDING_INTENT_REQUEST_CODE);
     }
 
-    public boolean canScheduleExactAlarms() {
-        return runtime.canScheduleExactAlarms();
-    }
-
     public ScheduleResult scheduleOccurrence(
             String medicationId,
             String doseId,
@@ -202,6 +198,9 @@ public final class DoseReminderAlarmAdapter {
 
     public static String occurrenceUri(String medicationId, String doseId) {
         return ExactAlarmContract.buildIdentityUri(
+                "content",
+                "app.drugtracker.alarm",
+                "alarm",
                 "dose-reminder",
                 medicationId == null ? "" : medicationId,
                 doseId == null ? "" : doseId).toString();
@@ -209,6 +208,9 @@ public final class DoseReminderAlarmAdapter {
 
     public static String snoozeUri(String medicationId, String doseId) {
         return ExactAlarmContract.buildIdentityUri(
+                "content",
+                "app.drugtracker.alarm",
+                "alarm",
                 "dose-reminder-snooze",
                 medicationId == null ? "" : medicationId,
                 doseId == null ? "" : doseId).toString();

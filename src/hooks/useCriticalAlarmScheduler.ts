@@ -46,12 +46,10 @@ export interface UseCriticalAlarmSchedulerOptions {
  * One-shot critical-alarm scheduling effect.
  *
  * For each SUFFICIENT medication whose projected critical date is in the
- * future, schedules a SINGLE one-shot notification at that date via
- * Android's AlarmManager (Capacitor LocalNotifications). The alarm fires
- * even if the app is killed — the user sees the alert in their drawer at
- * the projected critical date without ever opening the app. On Android,
- * the plugin persists scheduled notifications and re-arms them on
- * BOOT_COMPLETED, so alarms survive device reboots with no extra code.
+ * future, schedules a SINGLE one-shot exact alarm at that date through
+ * CriticalStockAlarmAdapter → ExactAlarmRuntime. The alarm fires
+ * even if the app is killed; system lifecycle recovery is handled by
+ * DrugTrackerAlarmSystemReceiver → ExactAlarmLifecycle.
  *
  * The persistent claim ({@link CriticalNotificationClaim}) is the
  * business source of truth; this hook is just the EXECUTOR that arms and

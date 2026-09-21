@@ -2364,26 +2364,13 @@ public final class AutoDeductionScheduler {
                 || !AutoDeductionContract.isValidTimeHhmm(timeHhmm)) {
             return null;
         }
-        try {
-            int y = Integer.parseInt(calendarDate.substring(0, 4));
-            int mo = Integer.parseInt(calendarDate.substring(5, 7));
-            int d = Integer.parseInt(calendarDate.substring(8, 10));
-            int colon = timeHhmm.indexOf(':');
-            int h = Integer.parseInt(timeHhmm.substring(0, colon));
-            int mi = Integer.parseInt(timeHhmm.substring(colon + 1));
-            Calendar cal = Calendar.getInstance(TimeZone.getDefault(), Locale.getDefault());
-            cal.clear();
-            cal.set(Calendar.YEAR, y);
-            cal.set(Calendar.MONTH, mo - 1);
-            cal.set(Calendar.DAY_OF_MONTH, d);
-            cal.set(Calendar.HOUR_OF_DAY, h);
-            cal.set(Calendar.MINUTE, mi);
-            cal.set(Calendar.SECOND, 0);
-            cal.set(Calendar.MILLISECOND, 0);
-            return cal.getTimeInMillis();
-        } catch (Exception e) {
-            return null;
-        }
+        Long resolved = AutoDeductionSchedulingAdapter.resolveLocalDateTimeEpochMs(
+                calendarDate,
+                timeHhmm,
+                true);
+        return resolved == null || resolved.longValue() < 0L
+                ? null
+                : resolved;
     }
 
     public static String nextCalendarDate(String calendarDate) {

@@ -5,6 +5,10 @@ import android.net.Uri;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.Calendar;
+import java.util.Locale;
+import java.util.TimeZone;
+
 /**
  * Feature-neutral contract for one-shot exact alarms.
  *
@@ -84,23 +88,30 @@ public final class ExactAlarmContract {
     }
 
     private static final String SCHEME = "content";
-    private static final String AUTHORITY = "app.drugtracker.alarm";
-    private static final String ROOT = "alarm";
 
+    /**
+     * Single generic native identity encoder.
+     *
+     * <p>The caller supplies its feature-neutral URI scheme/authority/path
+     * segments. The shared contract owns validation and encoding; it does not
+     * know Auto, Dose, or Critical namespaces.</p>
+     */
     public static Uri buildIdentityUri(
-            String featureNamespace,
-            String... identitySegments) {
-        if (featureNamespace == null
-                || featureNamespace.trim().isEmpty()) {
-            throw new IllegalArgumentException("featureNamespace");
+            String scheme,
+            String authority,
+            String... pathSegments) {
+        if (scheme == null || scheme.trim().isEmpty()) {
+            throw new IllegalArgumentException("scheme");
         }
+        if (authority == null || authority.trim().isEmpty()) {
+            throw new IllegalArgumentException("authority");
+        }
+
         Uri.Builder builder = new Uri.Builder()
-                .scheme(SCHEME)
-                .authority(AUTHORITY)
-                .appendPath(ROOT)
-                .appendPath(featureNamespace);
-        if (identitySegments != null) {
-            for (String segment : identitySegments) {
+                .scheme(scheme)
+                .authority(authority);
+        if (pathSegments != null) {
+            for (String segment : pathSegments) {
                 if (segment == null || segment.isEmpty()) {
                     throw new IllegalArgumentException("identity segment");
                 }
@@ -108,6 +119,58 @@ public final class ExactAlarmContract {
             }
         }
         return builder.build();
+    }
+
+    /**
+     * Resolve a local calendar date + wall-clock time to epoch milliseconds in
+     * the device's current timezone. This is the shared generic conversion;
+     * the caller supplies the calendar-field leniency policy.
+     *
+     * @param lenient whether Calendar may normalize nonexistent/overflowing
+     *                calendar fields; feature-specific validation remains outside.
+     * @return epoch milliseconds, or -1L when the input cannot be resolved.
+     */
+    public static long resolveLocalDateTimeEpochMs(
+            String calendarDate,
+            String timeHhmm,
+            boolean lenient) {
+        if (calendarDate == null || calendarDate.length() != 10
+                || calendarDate.charAt(4) != '-'
+                || calendarDate.charAt(7) != '-') {
+            return -1L;
+        }
+        for (int i = 0; i < calendarDate.length(); i++) {
+            if (i == 4 || i == 7) continue;
+            char c = calendarDate.charAt(i);
+            if (c < '0' || c > '9') return -1L;
+        }
+        if (timeHhmm == null || (timeHhmm.length() != 4 && timeHhmm.length() != 5)) {
+            return -1L;
+        }
+        int colon = timeHhmm.indexOf(':');
+        if (colon < 1 || colon > 2 || colon != timeHhmm.lastIndexOf(':')) {
+            return -1L;
+        }
+        for (int i = 0; i < timeHhmm.length(); i++) {
+            if (i == colon) continue;
+            char c = timeHhmm.charAt(i);
+            if (c < '0' || c > '9') return -1L;
+        }
+        try {
+            int year = Integer.parseInt(calendarDate.substring(0, 4));
+            int month = Integer.parseInt(calendarDate.substring(5, 7));
+            int day = Integer.parseInt(calendarDate.substring(8, 10));
+            int hour = Integer.parseInt(timeHhmm.substring(0, colon));
+            int minute = Integer.parseInt(timeHhmm.substring(colon + 1));
+
+            Calendar calendar = Calendar.getInstance(TimeZone.getDefault(), Locale.US);
+            calendar.clear();
+            calendar.setLenient(lenient);
+            calendar.set(year, month - 1, day, hour, minute, 0);
+            return calendar.getTimeInMillis();
+        } catch (Exception e) {
+            return -1L;
+        }
     }
 
     /** Full URI is authoritative identity; no hash is used. */

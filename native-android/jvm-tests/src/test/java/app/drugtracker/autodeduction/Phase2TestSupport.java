@@ -39,6 +39,7 @@ final class Phase2TestSupport {
         clearPrefs(ctx, AutoDeductionContract.PREFS_ORDERING);
         clearPrefs(ctx, AutoDeductionContract.PREFS_RECURRENCE_AUTH);
         clearPrefs(ctx, AutoDeductionContract.PREFS_FIRE_RETRY);
+        clearPrefs(ctx, "drugtracker_auto_stock_v1");
     }
 
     private static void clearPrefs(Context ctx, String name) {

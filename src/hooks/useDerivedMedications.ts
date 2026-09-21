@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import type { Medication, ConsumptionLog } from '../types';
 import { calculateMedicationStatus } from '../types';
+import { sortMedications, type MedicationSortDirection, type MedicationSortField } from '../utils/medicationSorting';
 /**
  * Derived medication lists and counts used by the inventory UI.
  * Stock/status projection follows medication Auto only.
@@ -9,7 +10,9 @@ export function useDerivedMedications(
   medications: Medication[],
   logs: ConsumptionLog[],
   filter: 'all' | 'alerts' | 'sufficient',
-  searchQuery: string
+  searchQuery: string,
+  sortField: MedicationSortField = 'name',
+  sortDirection: MedicationSortDirection = 'asc'
 ) {
   const medicationsWithStatus = useMemo(
     () =>
@@ -66,6 +69,11 @@ export function useDerivedMedications(
     }).map(({ med }) => med);
   }, [medicationsWithStatus, searchQuery, filter]);
 
+  const sortedMedications = useMemo(
+    () => sortMedications(filteredMedications, sortField, sortDirection),
+    [filteredMedications, sortField, sortDirection]
+  );
+
   const alertsCount = useMemo(
     () => medicationsWithStatus.filter(({ statusInfo }) =>
       statusInfo.status === 'out_of_stock' ||
@@ -83,7 +91,7 @@ export function useDerivedMedications(
   return {
     medicationsWithStatus,
     lastRefillByMed,
-    filteredMedications,
+    filteredMedications: sortedMedications,
     alertsCount,
     sufficientCount,
   };

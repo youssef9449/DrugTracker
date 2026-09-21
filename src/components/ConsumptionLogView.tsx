@@ -14,12 +14,11 @@ interface ConsumptionLogViewProps {
 }
 
 /**
- * Daily scheduled dose *slots* for Auto-ON medications only.
+ * Daily scheduled dose *slots*.
  * Source of truth is doseSchedule length — never dailyDose fallback.
- * Auto-OFF medications contribute 0 regardless of schedule.
+ * Slot totals are independent of Auto Deduction state.
  */
 function scheduledDailySlots(med: Medication): number {
-  if (med.autoDeductEnabled === false) return 0;
   if (!Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0) return 0;
   return med.doseSchedule.length;
 }
@@ -78,7 +77,7 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
           </div>
         </div>
 
-        {/* Scheduled-dose slot totals — Auto ON + doseSchedule only */}
+        {/* Scheduled-dose slot totals — based on doseSchedule regardless of Auto Deduction */} 
         <div className="mt-4 p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <span className="text-xs font-bold text-slate-700 block">
@@ -107,7 +106,7 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
             </span>
           </div>
 
-          {/* Per-medication slot breakdown (Auto ON + schedule only shown as contributing) */}
+          {/* Per-medication slot breakdown — based on doseSchedule regardless of Auto Deduction */}
           <div className="pt-2 border-t border-slate-200/70 space-y-1.5">
             {medications.length === 0 ? (
               <p className="text-xs text-slate-400 py-1">لا توجد أدوية مضافة حالياً.</p>

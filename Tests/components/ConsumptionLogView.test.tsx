@@ -112,6 +112,25 @@ describe('ConsumptionLogView', () => {
     expect(screen.getByText('1')).toBeInTheDocument();
   });
 
+  it('explicit single-slot schedule counts even when auto deduction is disabled', () => {
+    render(
+      <ConsumptionLogView
+        medications={[
+          makeMed('med-a', 'Med A', {
+            autoDeductEnabled: false,
+            doseSchedule: [makeDose('d1', 2, '09:00')],
+            dosesPerDay: 1,
+          }),
+        ]}
+        logs={[]}
+        showToast={() => {}}
+      />
+    );
+
+    expect(screen.getByText('30')).toBeInTheDocument();
+    expect(screen.getByText('1')).toBeInTheDocument();
+  });
+
   it('counts multi-dose doseSchedule length as daily slots', () => {
     const schedule = [
       makeDose('d1', 1, '08:00'),
@@ -137,7 +156,7 @@ describe('ConsumptionLogView', () => {
     expect(screen.getByText('3')).toBeInTheDocument();
   });
 
-  it('sums explicit single-slot + multi-dose slots and excludes autoDeductEnabled === false', () => {
+  it('sums scheduled slots regardless of auto deduction state', () => {
     const multi = [
       makeDose('d1', 1, '08:00'),
       makeDose('d2', 1, '14:00'),
@@ -147,19 +166,16 @@ describe('ConsumptionLogView', () => {
       <ConsumptionLogView
         medications={[
           makeMed('med-a', 'Med A', {
-            dailyDose: 1,
-            autoDeductEnabled: true,
             doseSchedule: [makeDose('s1', 1, '08:00')],
             dosesPerDay: 1,
+            autoDeductEnabled: true,
           }),
           makeMed('med-b', 'Med B', {
-            dailyDose: 3,
             doseSchedule: multi,
             dosesPerDay: 3,
             autoDeductEnabled: true,
           }),
           makeMed('med-c', 'Med C', {
-            dailyDose: 2,
             doseSchedule: [makeDose('x', 1, '09:00'), makeDose('y', 1, '21:00')],
             dosesPerDay: 2,
             autoDeductEnabled: false,
@@ -169,9 +185,10 @@ describe('ConsumptionLogView', () => {
         showToast={() => {}}
       />
     );
-    // 1 + 3 = 4 daily slots → 120 monthly; disabled med contributes 0
-    expect(screen.getByText('120')).toBeInTheDocument();
-    expect(screen.getByText('4')).toBeInTheDocument();
+
+    // 1 + 3 + 2 = 6 daily slots → 180 monthly; Auto-OFF still contributes its schedule.
+    expect(screen.getByText('180')).toBeInTheDocument();
+    expect(screen.getByText('6')).toBeInTheDocument();
   });
 
   it('renders the updated empty-state copy', () => {

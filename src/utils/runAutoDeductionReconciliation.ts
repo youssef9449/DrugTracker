@@ -22,6 +22,7 @@ import {
   type MarkReconciledResult,
 } from './autoDeductionNative';
 import {
+  isExactAutoOccurrenceApplied,
   reconcileFiredEvents,
   type ReconcileFiredResult,
 } from './autoDeductionReconciliation';

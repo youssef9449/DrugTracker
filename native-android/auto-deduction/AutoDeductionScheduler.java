@@ -45,8 +45,8 @@ import app.drugtracker.alarmruntime.ExactAlarmContract;
  *   reverse — so nesting cannot deadlock.
  *
  * operationVersion is the shared generic ownership guard for rollback (with
- * legacy scheduleVersion remaining readable during migration). It remains a
- * against concurrent metadata replace). It is NOT a medication-level disable epoch.
+ * legacy scheduleVersion remaining readable during migration). It guards
+ * concurrent metadata replacement and is NOT a medication-level disable epoch.
  *
  * Recurrence authorization (Issue #217):
  *   PREFS_RECURRENCE_AUTH holds a monotonic generation per (medicationId, doseId).
@@ -519,7 +519,7 @@ public final class AutoDeductionScheduler {
      *   <li>If ownership holds → persist FIRED via insertFiredIfAbsent</li>
      * </ol>
      *
-     * @param deliveryOperationVersion {@link AutoDeductionContract#EXTRA_SCHEDULE_VERSION}
+     * @param deliveryOperationVersion {@link AutoDeductionContract#EXTRA_OPERATION_VERSION}
      *        from the firing Intent; must be present and match active metadata
      * @param deliveryRecurrenceGeneration {@link AutoDeductionContract#EXTRA_RECURRENCE_GENERATION}
      *        from the firing Intent; must be positive and match active metadata
@@ -1385,13 +1385,6 @@ public final class AutoDeductionScheduler {
             return ScheduleResult.fail(result.error);
         }
         return ScheduleResult.success(key);
-    }
-
-    private String normalizeFeatureStorageKey(String keyOrPrefKey) {
-        if (keyOrPrefKey == null || keyOrPrefKey.isEmpty()) return null;
-        return keyOrPrefKey.startsWith(SCHEDULE_KEY_PREFIX)
-                ? keyOrPrefKey.substring(SCHEDULE_KEY_PREFIX.length())
-                : keyOrPrefKey;
     }
 
     private String normalizeFeatureStorageKey(String keyOrPrefKey) {

@@ -366,6 +366,32 @@ public class AutoDeductionPlugin extends Plugin {
      * Repair/apply one exact Auto occurrence on the Native stock authority.
      * The operation is occurrence-idempotent.
      */
+    /**
+     * Mark a legacy JS-applied occurrence as already reflected in Native stock.
+     * This is used only during migration when JS occurrence markers prove that
+     * the old implementation already deducted the stock before this Native
+     * authority existed.
+     */
+    @PluginMethod
+    public void adoptAlreadyAppliedOccurrence(PluginCall call) {
+        String medicationId = call.getString("medicationId");
+        String doseId = call.getString("doseId");
+        String calendarDate = call.getString("calendarDate");
+        Double amountObj = call.getDouble("amount");
+        double amount = amountObj != null ? amountObj : Double.NaN;
+
+        AutoDeductionStockStore.AutoApplyResult result =
+                new AutoDeductionStockStore(getContext()).adoptAlreadyAppliedOccurrence(
+                        medicationId, doseId, calendarDate, amount);
+        JSObject ret = new JSObject();
+        ret.put("ok", result.ok);
+        ret.put("applied", result.applied);
+        ret.put("actualDeducted", result.actualDeducted);
+        ret.put("currentPills", result.currentPills);
+        if (result.error != null) ret.put("error", result.error);
+        call.resolve(ret);
+    }
+
     @PluginMethod
     public void applyAutoDeductionStock(PluginCall call) {
         String medicationId = call.getString("medicationId");

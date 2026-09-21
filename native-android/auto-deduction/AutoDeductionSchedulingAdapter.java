@@ -4,6 +4,8 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.os.Bundle;
 
+import java.util.Map;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -222,7 +224,7 @@ public final class AutoDeductionSchedulingAdapter {
             double amount,
             String timeHhmm,
             long recurrenceGeneration,
-            String scheduleVersion,
+            String operationVersion,
             int retryCount) {
         Bundle extras = new Bundle();
         extras.putString(
@@ -249,10 +251,10 @@ public final class AutoDeductionSchedulingAdapter {
         extras.putInt(
                 AutoDeductionContract.EXTRA_FIRE_RETRY_COUNT,
                 retryCount);
-        if (scheduleVersion != null && !scheduleVersion.isEmpty()) {
+        if (operationVersion != null && !operationVersion.isEmpty()) {
             extras.putString(
                     AutoDeductionContract.EXTRA_OPERATION_VERSION,
-                    scheduleVersion);
+                    operationVersion);
         }
 
         syncTestControls();

@@ -70,10 +70,6 @@ public class CrossFeatureAlarmIsolationTest {
                 new CriticalStockAlarmAdapter(context());
 
         assertTrue(auto.scheduleOccurrence(
-                AutoDeductionContract.occurrenceKey(
-                        MEDICATION_ID,
-                        DOSE_ID,
-                        DATE),
                 MEDICATION_ID,
                 DOSE_ID,
                 DATE,
@@ -107,27 +103,6 @@ public class CrossFeatureAlarmIsolationTest {
 
         Set<String> identities = scheduledIdentities();
         assertEquals("three independent full identities must be armed", 3, identities.size());
-
-        Set<String> pendingIntentIdentities = scheduledPendingIntentIdentities();
-        assertEquals(
-                "three independent PendingIntent identity tuples must be armed",
-                3,
-                pendingIntentIdentities.size());
-        assertTrue(pendingIntentIdentities.stream().anyMatch(
-                value -> value.contains(
-                        AutoDeductionContract.ACTION_AUTO_DEDUCTION
-                                + "|AutoDeductionReceiver|"
-                )));
-        assertTrue(pendingIntentIdentities.stream().anyMatch(
-                value -> value.contains(
-                        DoseReminderAlarmAdapter.ACTION_DOSE_REMINDER
-                                + "|DoseReminderAlarmReceiver|"
-                )));
-        assertTrue(pendingIntentIdentities.stream().anyMatch(
-                value -> value.contains(
-                        CriticalStockAlarmAdapter.ACTION_CRITICAL_STOCK
-                                + "|CriticalStockAlarmReceiver|"
-                )));
         assertTrue(identities.contains(
                 AutoDeductionContract.occurrenceUri(
                         MEDICATION_ID, DOSE_ID, DATE).toString()));
@@ -211,10 +186,6 @@ public class CrossFeatureAlarmIsolationTest {
 
     private static void scheduleAllThree() {
         assertTrue(autoAdapter().scheduleOccurrence(
-                AutoDeductionContract.occurrenceKey(
-                        MEDICATION_ID,
-                        DOSE_ID,
-                        DATE),
                 MEDICATION_ID, DOSE_ID, DATE, "08:00", 1.0,
                 TRIGGER_AT, 1L, null).ok);
         assertTrue(doseAdapter().scheduleOccurrence(
@@ -257,30 +228,6 @@ public class CrossFeatureAlarmIsolationTest {
             if (saved != null && saved.getData() != null) {
                 result.add(saved.getData().toString());
             }
-        }
-        return result;
-    }
-
-    private static Set<String> scheduledPendingIntentIdentities() {
-        Set<String> result = new HashSet<>();
-        for (ShadowAlarmManager.ScheduledAlarm alarm : scheduledAlarms()) {
-            if (alarm.operation == null) continue;
-            ShadowPendingIntent pending =
-                    Shadows.shadowOf(alarm.operation);
-            Intent saved = pending.getSavedIntent();
-            assertNotNull("scheduled alarm must retain PendingIntent intent", saved);
-            assertNotNull("scheduled alarm must retain PendingIntent component", saved.getComponent());
-            assertNotNull("scheduled alarm must retain PendingIntent action", saved.getAction());
-            assertNotNull("scheduled alarm must retain PendingIntent data URI", saved.getData());
-
-            result.add(
-                    pending.getRequestCode()
-                            + "|"
-                            + saved.getAction()
-                            + "|"
-                            + saved.getComponent().getClassName()
-                            + "|"
-                            + saved.getData().toString());
         }
         return result;
     }

@@ -138,10 +138,19 @@ for (const rel of javaFiles) {
       && !content.includes('manager.set('),
     'AlarmManager scheduling installation must remain in ExactAlarmRuntime only: ' + rel
   );
-  assert(
-    !content.includes('PendingIntent.getBroadcast('),
-    'Alarm PendingIntent construction/matching must remain in ExactAlarmRuntime only: ' + rel
-  );
+  if (rel !== notificationRuntime) {
+    assert(
+      !content.includes('PendingIntent.getBroadcast('),
+      'Alarm PendingIntent construction/matching must remain in ExactAlarmRuntime only; NotificationRuntime is the sole notification-action exception: ' + rel
+    );
+  }
+  else {
+    assert(
+      count(content, 'PendingIntent.getBroadcast(') === 1
+        && content.includes('NotificationRuntimeActionReceiver.class'),
+      'NotificationRuntime PendingIntent must remain limited to its notification-action receiver'
+    );
+  }
   assert(
     !content.includes('PendingIntent.FLAG_NO_CREATE'),
     'Alarm PendingIntent matching must remain in ExactAlarmRuntime only: ' + rel

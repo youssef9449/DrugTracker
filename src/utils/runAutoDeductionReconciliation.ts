@@ -399,8 +399,10 @@ async function runOnce(
     }
     repairedEvents.push({
       ...event,
-      nativeStockApplied: true,
-      actualDeducted: stockResult.actualDeducted,
+      nativeStockApplied: stockResult.native,
+      ...(stockResult.native
+        ? { actualDeducted: stockResult.actualDeducted }
+        : {}),
     });
   }
 

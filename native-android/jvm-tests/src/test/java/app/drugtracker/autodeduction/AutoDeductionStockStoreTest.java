@@ -103,20 +103,8 @@ public class AutoDeductionStockStoreTest {
 
         assertFalse(result.ok);
         assertEquals("invalid_native_stock", result.error);
-        assertFalse("corrupt stock must not mark Native recovery ready",
-                store.isRecoveryReady());
-    }
-
-    @Test
-    public void recoveryReady_isIndependentFromBaselineInitialization() {
-        store.ensureMissingAndRead(java.util.Collections.singletonList(
-                new AutoDeductionStockStore.StockSeed("med-1", 20.0)));
-
-        assertTrue(store.isInitialized());
-        assertFalse(store.isRecoveryReady());
-        assertTrue(store.markRecoveryReady());
-        assertTrue(store.isRecoveryReady());
-        assertTrue(store.markRecoveryReady());
+        assertFalse("corrupt stock must not initialize Native baseline",
+                store.isInitialized());
     }
 
     @Test

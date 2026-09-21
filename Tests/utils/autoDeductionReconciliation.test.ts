@@ -1723,6 +1723,30 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
     vi.useRealTimers();
   });
 
+  it('nativeStockApplied_doesNotSubtractCurrentPillsAgain_butRecordsActualCharge', () => {
+    const med = baseMed({
+      currentPills: 8,
+      doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd1',
+      calendarDate: '2026-09-14',
+      amount: 2,
+      nativeStockApplied: true,
+      actualDeducted: 2,
+    });
+
+    const applied = applyExactAutoEventToMedication(med, e, new Date());
+    expect(applied.ok).toBe(true);
+    if (applied.ok) {
+      // Native has already moved 10 -> 8; JS must not perform 8 -> 6.
+      expect(applied.updatedMed.currentPills).toBe(8);
+      expect(applied.updatedMed.doseConsumptionHistory?.d1).toEqual(['2026-09-14']);
+      expect(applied.log.amount).toBe(-2);
+    }
+  });
+
   it('with explicit doseSchedule: Exact applies; lastConsumedDate updates only when all slots consumed', () => {
     const med = baseMed({
       currentPills: 10,

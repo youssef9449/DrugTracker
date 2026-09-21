@@ -1253,6 +1253,20 @@ public final class AutoDeductionScheduler {
                             + key + " — " + stockResult.error);
                     return new FireResult(FireResult.Status.FAILED, false);
                 }
+
+                // The retry has now completed the same durable Auto occurrence that
+                // originally failed. If the original schedule row is still the active
+                // owner of this occurrence, continue the recurrence chain immediately.
+                // The ownership check is deliberately strict so a later reschedule or
+                // disable cannot recreate D+1 from stale retry evidence. When D is no
+                // longer present/owned, the independent evidence must not invent a new
+                // schedule; the normal scheduler/recovery path remains authoritative.
+                ScheduleResult successor = scheduleNextOccurrenceFromIndependentEvidenceLocked(
+                        medicationId, doseId, calendarDate, evidence);
+                if (!successor.ok) {
+                    Log.i(TAG, "recover independent evidence: successor not scheduled from "
+                            + "retry evidence (" + successor.error + ") for " + key);
+                }
                 clearIndependentFireRetryEvidenceLocked(key);
             } else if (result.status == FireResult.Status.FAILED
                     && !result.pendingRecorded) {
@@ -1268,6 +1282,80 @@ public final class AutoDeductionScheduler {
             Log.i(TAG, "recover independent evidence: " + result.status
                     + " pending=" + result.pendingRecorded + " for " + key);
             return result;
+        }
+    }
+
+    /**
+     * Continue recurrence after a successful independent-fire recovery only when
+     * the still-present D schedule metadata proves that the retry evidence owns it.
+     *
+     * <p>This closes the retry gap where Native stock recovery succeeds after the
+     * one-shot D alarm was consumed: D+1 must be re-established before the native
+     * process goes idle. The evidence's operationVersion, recurrence generation,
+     * amount, and time must still match the live D metadata. Missing/replaced
+     * metadata is treated as stale evidence and is never allowed to resurrect a
+     * successor from obsolete configuration.</p>
+     *
+     * Caller MUST hold SCHEDULE_LOCK.
+     */
+    private ScheduleResult scheduleNextOccurrenceFromIndependentEvidenceLocked(
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            JSONObject evidence
+    ) {
+        if (evidence == null
+                || medicationId == null || medicationId.isEmpty()
+                || doseId == null || doseId.isEmpty()
+                || !AutoDeductionContract.isValidCalendarDate(calendarDate)) {
+            return ScheduleResult.fail("snapshot_stale");
+        }
+
+        String prefKey = AutoDeductionContract.occurrenceKey(
+                medicationId, doseId, calendarDate);
+        String currentRaw = getScheduleRaw(prefKey);
+        if (currentRaw == null || currentRaw.isEmpty()) {
+            return ScheduleResult.fail("snapshot_stale");
+        }
+
+        String evidenceVersion = evidence.optString(
+                AutoDeductionSchedulingAdapter.extractOperationVersion(evidence), "");
+        if (evidenceVersion.isEmpty()) {
+            evidenceVersion = evidence.optString("operationVersion", "");
+        }
+        long evidenceGeneration = evidence.optLong("recurrenceGeneration", 0L);
+        String evidenceTime = evidence.optString("timeHhmm", "");
+        double evidenceAmount = evidence.optDouble("amount", Double.NaN);
+
+        try {
+            JSONObject current = new JSONObject(currentRaw);
+            String activeVersion =
+                    AutoDeductionSchedulingAdapter.extractOperationVersion(current);
+            long activeGeneration =
+                    getEffectiveRecurrenceGenerationLocked(medicationId, doseId, current);
+            String activeTime = current.optString("timeHhmm", "");
+            double activeAmount = current.optDouble("amount", Double.NaN);
+
+            if (evidenceVersion.isEmpty()
+                    || evidenceGeneration <= 0L
+                    || !AutoDeductionContract.isValidTimeHhmm(evidenceTime)
+                    || !AutoDeductionContract.isValidAmount(evidenceAmount)
+                    || !evidenceVersion.equals(activeVersion)
+                    || evidenceGeneration != activeGeneration
+                    || !evidenceTime.equals(activeTime)
+                    || Double.compare(evidenceAmount, activeAmount) != 0) {
+                return ScheduleResult.fail("snapshot_stale");
+            }
+
+            return scheduleNextOccurrenceIfAbsent(
+                    medicationId,
+                    doseId,
+                    calendarDate,
+                    evidenceTime,
+                    evidenceAmount,
+                    evidenceGeneration);
+        } catch (JSONException e) {
+            return ScheduleResult.fail("snapshot_stale");
         }
     }
 

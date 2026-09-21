@@ -54,6 +54,41 @@ public final class AutoDeductionSchedulingAdapter {
                 forceScheduleMetadataRemovalFailureForTest;
     }
 
+    public String getScheduleRaw(String storageKey) {
+        return alarmRuntime.getScheduleRaw(storageKey);
+    }
+
+    public Map<String, String> listScheduleMetadata() {
+        return alarmRuntime.listScheduleMetadata();
+    }
+
+    public boolean hasSchedule(String storageKey) {
+        return alarmRuntime.hasSchedule(storageKey);
+    }
+
+    public boolean removeScheduleIfOwned(
+            String storageKey,
+            String expectedOperationVersion) {
+        return alarmRuntime.removeScheduleIfOwned(
+                storageKey, expectedOperationVersion);
+    }
+
+    public boolean removeSchedule(String storageKey) {
+        return alarmRuntime.removeSchedule(storageKey);
+    }
+
+    public boolean hasCancellationTombstone(String storageKey) {
+        return alarmRuntime.hasCancellationTombstone(storageKey);
+    }
+
+    public boolean isEffectivelyCancelled(String storageKey) {
+        return alarmRuntime.isEffectivelyCancelled(storageKey);
+    }
+
+    public boolean clearCancellationTombstone(String storageKey) {
+        return alarmRuntime.clearCancellationTombstone(storageKey);
+    }
+
     public boolean canScheduleExactAlarms() {
         return alarmRuntime.canScheduleExactAlarms();
     }
@@ -216,7 +251,7 @@ public final class AutoDeductionSchedulingAdapter {
                 retryCount);
         if (scheduleVersion != null && !scheduleVersion.isEmpty()) {
             extras.putString(
-                    AutoDeductionContract.EXTRA_SCHEDULE_VERSION,
+                    AutoDeductionContract.EXTRA_OPERATION_VERSION,
                     scheduleVersion);
         }
 

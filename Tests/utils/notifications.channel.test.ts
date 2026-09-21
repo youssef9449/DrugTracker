@@ -431,7 +431,7 @@ describe('lifecycle transition race — channel selector is synchronous', () => 
 //
 // Killed-process guarantee (native):
 //   AppForegroundState defaults to false in a fresh process
-//   → TimedNotificationPublisher resolves dose-reminder-v3
+//   → DoseReminderAlarmReceiver resolves dose-reminder-v3
 //   MainActivity onResume/onPause owns the live foreground flag.
 // ---------------------------------------------------------------------------
 
@@ -453,8 +453,8 @@ describe('lifecycle race — rapid transitions converge on latest state', () => 
   });
 
   it('channel id constants stay aligned with native delivery override', () => {
-    // native-android TimedNotificationPublisher hard-codes the same ids.
-    // Drift would break delivery-time rewriting.
+    // native-android DoseReminderAlarmReceiver hard-codes the same ids.
+    // Drift would break native delivery.
     expect(DOSE_REMINDER_CHANNEL_ID).toBe('dose-reminder-v3');
     expect(DOSE_REMINDER_FOREGROUND_CHANNEL_ID).toBe('dose-reminder-foreground-v1');
   });

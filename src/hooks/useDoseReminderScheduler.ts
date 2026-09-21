@@ -110,27 +110,28 @@ export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
 }
 
 /**
- * Native recurring daily dose-reminder scheduler.
+ * Native Dose Reminder scheduler.
  *
- * Phase 2: for each medication with `reminderEnabled`, schedules one
- * RECURRING daily notification per dose slot (multi-dose `doseSchedule`,
- * Each slot uses a stable
- * notification id derived from medicationId + doseId.
+ * For each medication with `reminderEnabled`, schedules one exact one-shot
+ * alarm per explicit `doseSchedule` row. Each slot uses the stable
+ * medicationId + doseId identity.
  *
- * The recurring alarm is config-driven. Consumption suppression still
- * uses per-dose consumption (`doseConsumptionHistory`).
- * skipToday applies only to slots consumed today.
+ * Exact timing, native identity, durable alarm metadata, cancellation,
+ * ordering, timezone/boot recovery, and exact-alarm permission are owned by
+ * the shared ExactAlarmRuntime through the native Dose Reminder adapter.
+ * Dose Reminder owns the feature policy: consumption suppression,
+ * `skipToday`, daily recurrence, and foreground/background notification
+ * channel selection.
  *
  * Generation counter + per-key serialization chain prevent races when
  * config changes quickly or resume reconciliation overlaps a schedule op.
  *
  * Lifecycle / hydration / resume re-runs are idempotent: unchanged dose
- * signatures with a still-pending native id are left untouched. Daily
- * recurrence after delivery is owned only by TimedNotificationPublisher
- * (initial one-shot LocalNotifications.schedule + next calendar-day arm
- * from extra.reminderTime; evidence in DoseReminderRecurrenceStore).
- * Stale native pending ids (process death) are cancelled via getPending()
- * against the desired set.
+ * signatures with a still-pending native alarm are left untouched. When a
+ * delivery occurs, DoseReminderAlarmReceiver owns the feature-specific
+ * next-calendar-day re-arm through the shared ExactAlarmRuntime.
+ * Stale native pending alarms (process death) are cancelled against the
+ * desired set.
  */
 export function useDoseReminderScheduler({
   medications,
@@ -293,12 +294,13 @@ export function useDoseReminderScheduler({
           if (!generationGuardRef.current.isCurrent(key, gen)) return;
           // Reconciliation when signature is unchanged:
           //   A) pending=true → no-op
-          //   B) pending=false + valid native re-arm for this occurrence identity
-          //      (DoseReminderRecurrenceStore: future + matching reminderTime)
-          //      → no-op (delivery transition; TimedNotificationPublisher owns next day)
-          //   C) pending=false + no/stale re-arm evidence → one repair schedule
-          //   D) expired or config-mismatched re-arm → treated as absent (repair)
-          // Store is temporary delivery evidence, not proof AlarmManager still holds the alarm.
+          //   B) pending=false + native delivery transition already re-armed the
+          //      successor occurrence for this dose identity → no-op
+          //   C) pending=false + no valid native re-arm → one repair schedule
+          //   D) expired or config-mismatched native state → treated as absent
+          //      and repaired
+          // The native pending state is the scheduling authority; there is no
+          // separate recurrence-evidence store.
           const pending = await isDoseReminderPending(medId, doseId);
           if (!generationGuardRef.current.isCurrent(key, gen)) return;
           if (pending) return;

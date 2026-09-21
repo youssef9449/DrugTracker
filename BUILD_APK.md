@@ -354,7 +354,7 @@ JavaScript is involved.
 Foreground dose reminders use a separate silent channel
 (`dose-reminder-foreground-v1`). Delivery-time channel selection for
 scheduled alarms is enforced in
-`native-android/capacitor-local-notifications/TimedNotificationPublisher.java`
+`native-android/dose-reminder/DoseReminderAlarmReceiver.java`
 using process-local `AppForegroundState` (see `MainActivity` onResume/onPause).
 
 **Runtime validation (device/emulator):** TypeScript tests cannot prove

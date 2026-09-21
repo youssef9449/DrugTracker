@@ -26,10 +26,11 @@ Channel creation (JS → Capacitor → Android):
 - Background: `dose-reminder-v3`, importance 4, **no** `sound` property (Android constructor default sound)
 - Foreground: `dose-reminder-foreground-v1`, importance 2, **no** `sound` property (LOW → no audible alert)
 
-Delivery-time rewrite (native):
+Delivery-time channel selection (native):
 
-- `native-android/.../TimedNotificationPublisher.java` may rewrite dose-reminder notifications onto the channel selected by `AppForegroundState` (`MainActivity` onResume/onPause).
+- `native-android/dose-reminder/DoseReminderAlarmReceiver.java` selects the notification channel from the current `AppForegroundState`.
 - Fresh process: `AppForegroundState` defaults to **false** → background channel.
+- The receiver posts directly through `NotificationRuntime`; there is no separate delivery-rewrite layer.
 
 Package ID: `app.drugtracker`
 
@@ -98,7 +99,7 @@ Prefer short, deterministic triggers over waiting for a real dose time.
 
 Settings → send test notification (`sendTestAlertNotification`).
 
-This uses `getDoseReminderChannelId()` at **schedule** time (JS lifecycle tracker). It is useful for a quick smoke check of permission + basic delivery, but it does **not** fully exercise `TimedNotificationPublisher` delivery-time rewrite after process death.
+This uses `getDoseReminderChannelId()` at **schedule** time (JS lifecycle tracker). It is useful for a quick smoke check of permission + basic delivery, but it does **not** fully exercise the native `DoseReminderAlarmReceiver` delivery-time channel selection after process death.
 
 - Foreground: open app → send test → expect silent/low channel behavior.
 - Background: open app, Home to background, send test via an already-open path only if still reachable; otherwise use a scheduled dose (B).
@@ -156,7 +157,7 @@ Fill **Result** only after real device/emulator observation. Leave blank or `NOT
    ```
 
 3. Do **not** reopen the app. Keep device unlocked / able to show notifications.
-4. On delivery, the BroadcastReceiver runs in a **fresh** process: `AppForegroundState` defaults to `false` → rewrite to `dose-reminder-v3`.
+4. On delivery, the `DoseReminderAlarmReceiver` runs in a **fresh** process: `AppForegroundState` defaults to `false` → selects `dose-reminder-v3`.
 5. **Pass if** delivered channel is `dose-reminder-v3` with background/system-alert behavior—not the foreground silent channel.
 
 ## Inspection commands
@@ -220,8 +221,8 @@ Useful while a reminder fires; not a substitute for reading the posted notificat
 
 - `Tests/utils/notifications.channel.test.ts` — JS channel ID selection via `setAppInForeground` / `getDoseReminderChannelId`
 - `Tests/native.test.ts` — channel create arguments (mocked Capacitor)
-- `TimedNotificationPublisher.resolveDoseReminderChannel(boolean)` — pure decision helper in Java source
-- `scripts/prepare-android.mjs` — installs the vendor Java overrides after `cap sync`
+- `DoseReminderAlarmReceiver` — selects the delivery channel from `AppForegroundState` and posts through `NotificationRuntime`
+- `scripts/prepare-android.mjs` — installs the native Dose Reminder receiver/runtime sources after `cap sync`
 
 None of the above prove OEM `NotificationManager` channel properties or delivered notification channel IDs after alarm delivery.
 

@@ -437,3 +437,21 @@ This section describes the implementation boundary; it does not introduce new st
 ## Future work (narrow)
 
 Further product-level completion of the Take / Restore × exact-native-auto interaction matrix beyond the occurrence-level compatibility already shared via consumption/skip markers. Notification and scheduling UX remain outside this subsystem’s stock path.
+
+### Phase 6 notification boundary (enforced)
+
+Auto Deduction remains a pure exact-time event consumer. Its production path ends at the FIRED event and does not enter the notification stack.
+
+```
+Auto business
+    ↓
+Auto exact-alarm adapter
+    ↓
+Exact Alarm Runtime
+    ↓
+AutoDeductionReceiver
+    ↓
+FIRED event / JS reconciliation
+```
+
+Forbidden Auto dependencies are explicit: NotificationRuntime, notification ID allocation/registry, notification channel definitions, notification posting/cancellation helpers, and Capacitor Local Notifications. The repository guard scripts/test-alarm-notification-boundary-phase6.mjs enforces this boundary together with the shared Exact Alarm Runtime / Notification Runtime separation.

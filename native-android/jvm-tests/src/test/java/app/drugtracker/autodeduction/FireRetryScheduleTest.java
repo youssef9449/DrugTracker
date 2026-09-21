@@ -32,6 +32,7 @@ import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowAlarmManager;
 import org.robolectric.shadows.ShadowPendingIntent;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -562,6 +563,110 @@ public class FireRetryScheduleTest {
         assertNull(
                 "successful recovery completes Native stock and clears retry evidence",
                 s.getIndependentFireRetryEvidence("med", "dose", date));
+    }
+
+    @Test
+    public void recoverIndependentEvidence_ownedSchedule_resumesSuccessor() throws Exception {
+        String date = futureCalendarDate(2);
+        long epoch = futureEpochMs(date, "12:00");
+        AutoDeductionScheduler s = newScheduler();
+
+        assertTrue(s.scheduleOccurrence(
+                "med", "dose", date, "12:00", 1.0, epoch).ok);
+        String[] vg = activeVersionAndGen("med", "dose", date);
+        drainAlarms();
+        seedAutoStock("med", 10.0);
+
+        synchronized (getScheduleLock()) {
+            assertTrue(s.recordIndependentFireRetryEvidenceLocked(
+                    "med",
+                    "dose",
+                    date,
+                    epoch,
+                    1.0,
+                    "12:00",
+                    Long.parseLong(vg[1]),
+                    vg[0],
+                    1));
+        }
+
+        AutoDeductionScheduler.FireResult fr =
+                s.recoverFireFromIndependentEvidence("med", "dose", date);
+
+        assertTrue(
+                "successful independent recovery must complete the Auto occurrence",
+                fr.status == AutoDeductionScheduler.FireResult.Status.CREATED
+                        || fr.status == AutoDeductionScheduler.FireResult.Status.ALREADY_EXISTS);
+        AutoDeductionStockStore.SnapshotResult stock =
+                new AutoDeductionStockStore(appContext()).readAll();
+        assertEquals(9.0, stock.stocks.get("med"), 0.0001);
+
+        // The consumed D alarm is gone; successful retry recovery must immediately
+        // recreate only the next occurrence while the D schedule still owns the evidence.
+        assertEquals("retry recovery must resume the recurrence chain", 1, alarmCount());
+        ShadowAlarmManager.ScheduledAlarm alarm = firstAlarm();
+        assertNotNull(alarm.operation);
+        Intent saved = Shadows.shadowOf(alarm.operation).getSavedIntent();
+        assertNotNull(saved);
+        String expectedNextDate = LocalDate.parse(date).plusDays(1).toString();
+        assertEquals(expectedNextDate,
+                saved.getStringExtra(AutoDeductionContract.EXTRA_CALENDAR_DATE));
+        assertEquals(0,
+                saved.getIntExtra(AutoDeductionContract.EXTRA_FIRE_RETRY_COUNT, 0));
+        assertEquals(vg[0],
+                saved.getStringExtra(AutoDeductionContract.EXTRA_OPERATION_VERSION));
+
+        // The retry evidence is no longer needed after both stock and successor
+        // scheduling have reached their durable boundary.
+        assertNull(s.getIndependentFireRetryEvidence("med", "dose", date));
+    }
+
+    @Test
+    public void recoverIndependentEvidence_replacedScheduleDoesNotResurrectStaleSuccessor()
+            throws Exception {
+        String date = futureCalendarDate(3);
+        long epoch = futureEpochMs(date, "12:00");
+        AutoDeductionScheduler s = newScheduler();
+
+        assertTrue(s.scheduleOccurrence(
+                "med", "dose", date, "12:00", 1.0, epoch).ok);
+        String[] oldVg = activeVersionAndGen("med", "dose", date);
+        drainAlarms();
+
+        assertTrue(s.scheduleOccurrence(
+                "med", "dose", date, "12:00", 2.0, epoch).ok);
+        String[] newVg = activeVersionAndGen("med", "dose", date);
+        assertFalse(oldVg[0].equals(newVg[0]));
+        drainAlarms();
+
+        seedAutoStock("med", 10.0);
+        synchronized (getScheduleLock()) {
+            assertTrue(s.recordIndependentFireRetryEvidenceLocked(
+                    "med",
+                    "dose",
+                    date,
+                    epoch,
+                    1.0,
+                    "12:00",
+                    Long.parseLong(oldVg[1]),
+                    oldVg[0],
+                    1));
+        }
+
+        AutoDeductionScheduler.FireResult fr =
+                s.recoverFireFromIndependentEvidence("med", "dose", date);
+
+        assertTrue(
+                "stale retry evidence may still recover the already-authorized D stock mutation",
+                fr.status == AutoDeductionScheduler.FireResult.Status.CREATED
+                        || fr.status == AutoDeductionScheduler.FireResult.Status.ALREADY_EXISTS);
+        AutoDeductionStockStore.SnapshotResult stock =
+                new AutoDeductionStockStore(appContext()).readAll();
+        assertEquals(9.0, stock.stocks.get("med"), 0.0001);
+
+        // The replacement schedule is the current owner; old evidence must not create D+1.
+        assertEquals(0, alarmCount());
+        assertNull(s.getIndependentFireRetryEvidence("med", "dose", date));
     }
 
     @Test

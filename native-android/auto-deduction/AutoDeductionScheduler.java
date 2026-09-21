@@ -530,7 +530,7 @@ public final class AutoDeductionScheduler {
             String calendarDate,
             long scheduledAtEpochMs,
             double amount,
-            String deliveryScheduleVersion,
+            String deliveryOperationVersion,
             long deliveryRecurrenceGeneration
     ) {
         if (medicationId == null || medicationId.isEmpty()
@@ -561,15 +561,15 @@ public final class AutoDeductionScheduler {
                 JSONObject meta = new JSONObject(metaRaw);
                 String activeVersion = ExactAlarmContract.extractOperationVersion(meta);
                 long activeGen = meta.optLong(FIELD_RECURRENCE_GENERATION, 0L);
-                if (deliveryScheduleVersion == null || deliveryScheduleVersion.isEmpty()
+                if (deliveryOperationVersion == null || deliveryOperationVersion.isEmpty()
                         || deliveryRecurrenceGeneration <= 0L) {
                     Log.i(TAG, "fire linearization: STALE (delivery partially missing version/generation) for "
                             + key);
                     return FireResult.cancelled();
                 }
-                if (!deliveryScheduleVersion.equals(activeVersion)) {
+                if (!deliveryOperationVersion.equals(activeVersion)) {
                     Log.i(TAG, "fire linearization: STALE operationVersion for " + key
-                            + " delivery=" + deliveryScheduleVersion
+                            + " delivery=" + deliveryOperationVersion
                             + " active=" + activeVersion);
                     return FireResult.cancelled();
                 }
@@ -596,8 +596,8 @@ public final class AutoDeductionScheduler {
                 // Independent durable failure evidence under SCHEDULE_LOCK — must not
                 // depend on schedule metadata that config mutation may remove next.
                 String timeHhmm = "";
-                String operationVersion = deliveryScheduleVersion != null
-                        ? deliveryScheduleVersion : "";
+                String operationVersion = deliveryOperationVersion != null
+                        ? deliveryOperationVersion : "";
                 long gen = deliveryRecurrenceGeneration;
                 try {
                     JSONObject meta = new JSONObject(metaRaw);

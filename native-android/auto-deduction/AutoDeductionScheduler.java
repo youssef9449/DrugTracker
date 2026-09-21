@@ -698,6 +698,21 @@ public final class AutoDeductionScheduler {
             AutoDeductionEventStore.InsertFiredResult ir = store.insertFiredIfAbsent(
                     medicationId, doseId, calendarDate, scheduledAtEpochMs, amount);
             FireResult result = FireResult.fromInsert(ir);
+
+            // The Auto alarm/recovery path owns the stock mutation itself. The
+            // native stock marker is occurrence-idempotent, so both CREATED and
+            // ALREADY_EXISTS can safely pass through this same operation.
+            if (result.allowsRecurrence()) {
+                AutoDeductionStockStore.AutoApplyResult stockResult =
+                        new AutoDeductionStockStore(appContext).applyAutoDeduction(
+                                medicationId, doseId, calendarDate, amount);
+                if (!stockResult.ok) {
+                    Log.e(TAG, "recoverMissed: native stock apply failed for " + key
+                            + " — " + stockResult.error);
+                    return new FireResult(FireResult.Status.FAILED, false);
+                }
+            }
+
             Log.i(TAG, "recoverMissed: " + result.status
                     + " pendingRecorded=" + result.pendingRecorded + " for " + key);
             return result;

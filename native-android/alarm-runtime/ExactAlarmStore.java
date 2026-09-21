@@ -158,6 +158,11 @@ final class ExactAlarmStore {
         }
     }
 
+    /** Caller MUST hold ExactAlarmOperationLock.LOCK. */
+    java.util.Map<String, ?> getAllScheduleMetadata() {
+        return schedules.getAll();
+    }
+
     boolean isEffectivelyCancelledLocked(
             String featureStorageKey) {
         String cancellation =

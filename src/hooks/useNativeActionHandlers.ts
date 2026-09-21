@@ -5,7 +5,7 @@ import {
   registerDoseReceivedHandler,
   registerAppResumeHandler,
 } from '../native';
-import { getExactAlarmPermission } from '../utils/notifications';
+import { getExactAlarmPermission } from '../utils/exactAlarm';
 import { playSuccessChime } from '../utils/sound';
 
 /**

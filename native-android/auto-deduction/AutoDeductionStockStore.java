@@ -3,7 +3,6 @@ package app.drugtracker.autodeduction;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -182,20 +181,20 @@ public final class AutoDeductionStockStore {
         }
     }
 
-    /**
-     * Seed only missing medication balances and import any already-terminal
-     * foreground occurrence resolutions from the legacy JS model, then return
-     * the authoritative Native balances for the requested medication IDs.
-     *
-     * <p>An existing Native balance is never overwritten by a JS snapshot. The
-     * legacy occurrence resolutions are only used to suppress a later duplicate
-     * Auto occurrence; they do not mutate stock.</p>
-     */
-    /** Backward-compatible helper for tests/callers that only seed balances. */
+    /** Backward-compatible helper for callers that only seed balances. */
     public SnapshotResult ensureMissingAndRead(List<StockSeed> seeds) {
         return ensureMissingAndRead(seeds, java.util.Collections.emptyList());
     }
 
+    /**
+     * Seed only missing medication balances and import already-terminal
+     * occurrence resolutions from the legacy JS model, then return authoritative
+     * Native balances for the requested medication IDs.
+     *
+     * <p>An existing Native balance is never overwritten by a JS snapshot.
+     * Occurrence resolutions suppress duplicate Auto execution without changing
+     * stock.</p>
+     */
     public SnapshotResult ensureMissingAndRead(
             List<StockSeed> seeds,
             List<OccurrenceResolution> resolutions

@@ -444,7 +444,7 @@ function upsertApplicationMetaData(xml, androidName, value) {
 manifest = upsertApplicationMetaData(
   manifest,
   'app.drugtracker.EXACT_ALARM_FEATURE_ADAPTERS',
-  'app.drugtracker.autodeduction.AutoDeductionAlarmFeature,app.drugtracker.alarmruntime.CriticalStockAlarmFeature,app.drugtracker.alarmruntime.DoseReminderAlarmFeature'
+  'app.drugtracker.autodeduction.AutoDeductionAlarmFeature,app.drugtracker.criticalstock.CriticalStockAlarmAdapter,app.drugtracker.alarmruntime.DoseReminderAlarmFeature'
 );
 
 fs.writeFileSync(manifestPath, manifest);

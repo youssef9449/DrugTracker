@@ -6,14 +6,17 @@ import android.os.Bundle;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.List;
+import java.util.ArrayList;
 
 import app.drugtracker.alarmruntime.ExactAlarmContract;
+import app.drugtracker.alarmruntime.ExactAlarmFeatureAdapter;
 import app.drugtracker.alarmruntime.ExactAlarmRuntime;
 
 /** Critical Stock boundary over the shared exact-alarm runtime. */
-public final class CriticalStockAlarmAdapter {
+public final class CriticalStockAlarmAdapter
+        implements ExactAlarmFeatureAdapter {
     private static final String PREFS_SCHEDULES =
             "drugtracker_critical_stock_alarm_schedules_v1";
     private static final String PREFS_CANCELLED =
@@ -27,6 +30,11 @@ public final class CriticalStockAlarmAdapter {
 
     private final ExactAlarmRuntime runtime;
 
+    /** Required by ExactAlarmLifecycle for manifest-driven recovery dispatch. */
+    public CriticalStockAlarmAdapter() {
+        runtime = null;
+    }
+
     public CriticalStockAlarmAdapter(Context context) {
         runtime = new ExactAlarmRuntime(
                 context,
@@ -36,50 +44,135 @@ public final class CriticalStockAlarmAdapter {
                 PENDING_INTENT_REQUEST_CODE);
     }
 
-    public boolean canScheduleExactAlarms() {
-        return runtime.canScheduleExactAlarms();
+    /**
+     * Shared lifecycle recovery entry point. Only durable Critical Stock
+     * schedules are restored here; episode/claim policy remains in TypeScript.
+     */
+    @Override
+    public void restore(
+            Context context,
+            String reason,
+            boolean exactAlarmPermissionGranted) {
+        if (!exactAlarmPermissionGranted) return;
+
+        CriticalStockAlarmAdapter adapter =
+                new CriticalStockAlarmAdapter(context);
+
+        for (String medicationId : adapter.listScheduledMedicationIds()) {
+            JSONObject metadata =
+                    adapter.getScheduleMetadata(medicationId);
+            if (metadata == null) continue;
+
+            String medicationName = metadata.optString("medicationName", "");
+            String unit = metadata.optString("unit", "قرص");
+            String notificationTitle =
+                    metadata.optString("notificationTitle", "");
+            String notificationBody =
+                    metadata.optString("notificationBody", "");
+            String date = metadata.optString("alarmDate", "");
+            String time = metadata.optString("alarmTime", "");
+            String operationVersion = metadata.optString(
+                    ExactAlarmContract.FIELD_OPERATION_VERSION,
+                    ExactAlarmContract.LEGACY_FIELD_SCHEDULE_VERSION);
+
+            long triggerAt = resolveLocalDateTime(date, time);
+            long now = System.currentTimeMillis();
+            if (triggerAt <= 0L) continue;
+
+            if (triggerAt <= now) {
+                triggerAt = now + 15_000L;
+            }
+
+            ScheduleResult result = adapter.schedule(
+                    medicationId,
+                    medicationName,
+                    triggerAt,
+                    unit,
+                    notificationTitle,
+                    notificationBody,
+                    operationVersion.isEmpty()
+                            ? null
+                            : operationVersion);
+
+            if (!result.ok) {
+                android.util.Log.w(
+                        "CriticalStockAlarmAdapter",
+                        reason + ": failed to restore " + medicationId
+                                + " (" + result.error + ")");
+            }
+        }
+    }
+
+    private static long resolveLocalDateTime(
+            String date,
+            String time) {
+        if (date == null || date.length() != 10
+                || time == null || time.length() != 5) {
+            return -1L;
+        }
+        try {
+            int year = Integer.parseInt(date.substring(0, 4));
+            int month = Integer.parseInt(date.substring(5, 7));
+            int day = Integer.parseInt(date.substring(8, 10));
+            int hour = Integer.parseInt(time.substring(0, 2));
+            int minute = Integer.parseInt(time.substring(3, 5));
+
+            Calendar calendar = Calendar.getInstance();
+            calendar.clear();
+            calendar.setLenient(false);
+            calendar.set(year, month - 1, day, hour, minute, 0);
+            return calendar.getTimeInMillis();
+        } catch (Exception e) {
+            return -1L;
+        }
     }
 
     public ScheduleResult schedule(
             String medicationId,
             String medicationName,
-            String unit,
             long triggerAtEpochMs,
+            String unit,
+            String notificationTitle,
+            String notificationBody,
             String expectedOperationVersion) {
         if (medicationId == null || medicationId.isEmpty()
-                || triggerAtEpochMs <= 0L) {
+                || triggerAtEpochMs <= 0L
+                || notificationTitle == null
+                || notificationBody == null) {
             return ScheduleResult.failure("invalid_request");
         }
 
         JSONObject metadata = new JSONObject();
         try {
-            java.util.Calendar cal = java.util.Calendar.getInstance();
+            Calendar cal = Calendar.getInstance();
             cal.setTimeInMillis(triggerAtEpochMs);
             String date = String.format(
                     java.util.Locale.US,
                     "%04d-%02d-%02d",
-                    cal.get(java.util.Calendar.YEAR),
-                    cal.get(java.util.Calendar.MONTH) + 1,
-                    cal.get(java.util.Calendar.DAY_OF_MONTH));
+                    cal.get(Calendar.YEAR),
+                    cal.get(Calendar.MONTH) + 1,
+                    cal.get(Calendar.DAY_OF_MONTH));
             String time = String.format(
                     java.util.Locale.US,
                     "%02d:%02d",
-                    cal.get(java.util.Calendar.HOUR_OF_DAY),
-                    cal.get(java.util.Calendar.MINUTE));
+                    cal.get(Calendar.HOUR_OF_DAY),
+                    cal.get(Calendar.MINUTE));
 
             metadata.put("medicationId", medicationId);
             metadata.put("medicationName", medicationName == null ? "" : medicationName);
             metadata.put("unit", unit == null ? "" : unit);
             metadata.put("alarmDate", date);
             metadata.put("alarmTime", time);
+            metadata.put("notificationTitle", notificationTitle);
+            metadata.put("notificationBody", notificationBody);
         } catch (JSONException e) {
             return ScheduleResult.failure("metadata_build_failed");
         }
 
         Bundle extras = new Bundle();
         extras.putString("medicationId", medicationId);
-        extras.putString("medicationName", medicationName == null ? "" : medicationName);
-        extras.putString("unit", unit == null ? "" : unit);
+        extras.putString("notificationTitle", notificationTitle);
+        extras.putString("notificationBody", notificationBody);
 
         String storageKey = occurrenceKey(medicationId);
         ExactAlarmRuntime.ScheduleResult result = runtime.schedule(
@@ -113,18 +206,31 @@ public final class CriticalStockAlarmAdapter {
         return CancelResult.success();
     }
 
-    public boolean isPending(String medicationId) {
+    public boolean verify(
+            String medicationId,
+            long expectedAlarmTimeMs) {
+        JSONObject metadata = getScheduleMetadata(medicationId);
+        if (metadata == null
+                || metadata.optLong(
+                        ExactAlarmContract.FIELD_TRIGGER_AT_EPOCH_MS,
+                        Long.MIN_VALUE) != expectedAlarmTimeMs) {
+            return false;
+        }
+        return isPending(medicationId);
+    }
+
+    boolean isPending(String medicationId) {
         return runtime.isPending(
                 occurrenceUri(medicationId),
                 ACTION_CRITICAL_STOCK,
                 CriticalStockAlarmReceiver.class);
     }
 
-    public JSONObject getScheduleMetadata(String medicationId) {
+    JSONObject getScheduleMetadata(String medicationId) {
         return runtime.getScheduleMetadata(occurrenceKey(medicationId));
     }
 
-    public List<String> listScheduledMedicationIds() {
+    List<String> listScheduledMedicationIds() {
         List<String> keys = runtime.listScheduledStorageKeys();
         List<String> result = new ArrayList<>();
         for (String key : keys) {
@@ -135,7 +241,7 @@ public final class CriticalStockAlarmAdapter {
         return result;
     }
 
-    public boolean completeOneShot(String medicationId, String operationVersion) {
+    boolean completeOneShot(String medicationId, String operationVersion) {
         return runtime.completeOneShot(
                 occurrenceKey(medicationId),
                 operationVersion);
@@ -156,18 +262,18 @@ public final class CriticalStockAlarmAdapter {
         public final String error;
         public final String operationVersion;
 
-        private ScheduleResult(boolean ok, String error, String operationVersion) {
+        private ScheduleResult(String error, String operationVersion, boolean ok) {
             this.ok = ok;
             this.error = error;
             this.operationVersion = operationVersion;
         }
 
         static ScheduleResult success(String operationVersion) {
-            return new ScheduleResult(true, null, operationVersion);
+            return new ScheduleResult(null, operationVersion, true);
         }
 
         static ScheduleResult failure(String error) {
-            return new ScheduleResult(false, error, null);
+            return new ScheduleResult(error, null, false);
         }
     }
 

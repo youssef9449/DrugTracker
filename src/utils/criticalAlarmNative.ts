@@ -6,18 +6,15 @@ interface CriticalStockPlugin {
     medicationName: string;
     unit: string;
     triggerAtEpochMs: number;
+    notificationTitle: string;
+    notificationBody: string;
   }): Promise<{ ok: boolean; error?: string }>;
-  cancel(options: {
-    medicationId: string;
-  }): Promise<{
+  cancel(options: { medicationId: string }): Promise<{
     ok: boolean;
     status?: 'SUCCESS' | 'ALREADY_ABSENT' | 'FAILED';
     error?: string;
   }>;
-  verify(options: {
-    medicationId: string;
-    alarmTimeMs: number;
-  }): Promise<{ ok: boolean }>;
+  verify(options: { medicationId: string; alarmTimeMs: number }): Promise<{ ok: boolean }>;
   listScheduled(): Promise<{ ids: string[] }>;
 }
 
@@ -25,9 +22,7 @@ const CriticalStock = registerPlugin<CriticalStockPlugin>('CriticalStock');
 
 function isAndroid(): boolean {
   try {
-    return (
-      typeof Capacitor !== 'undefined' && Capacitor.getPlatform() === 'android'
-    );
+    return typeof Capacitor !== 'undefined' && Capacitor.getPlatform() === 'android';
   } catch {
     return false;
   }
@@ -37,7 +32,9 @@ export async function scheduleCriticalAlarmNative(
   medId: string,
   medName: string,
   criticalDateMs: number,
-  unit: string
+  unit: string,
+  notificationTitle: string,
+  notificationBody: string
 ): Promise<boolean> {
   if (!isAndroid()) return false;
   try {
@@ -46,6 +43,8 @@ export async function scheduleCriticalAlarmNative(
       medicationName: medName,
       unit,
       triggerAtEpochMs: criticalDateMs,
+      notificationTitle,
+      notificationBody,
     });
     return result?.ok === true;
   } catch (error) {
@@ -54,9 +53,7 @@ export async function scheduleCriticalAlarmNative(
   }
 }
 
-export async function cancelCriticalAlarmNative(
-  medId: string
-): Promise<void> {
+export async function cancelCriticalAlarmNative(medId: string): Promise<void> {
   if (!isAndroid()) return;
   try {
     await CriticalStock.cancel({ medicationId: medId });
@@ -71,19 +68,14 @@ export async function verifyCriticalAlarmPendingNative(
 ): Promise<boolean> {
   if (!isAndroid()) return false;
   try {
-    const result = await CriticalStock.verify({
-      medicationId: medId,
-      alarmTimeMs,
-    });
+    const result = await CriticalStock.verify({ medicationId: medId, alarmTimeMs });
     return result?.ok === true;
   } catch {
     return false;
   }
 }
 
-export async function listScheduledCriticalMedicationIdsNative(): Promise<
-  string[]
-> {
+export async function listScheduledCriticalMedicationIdsNative(): Promise<string[]> {
   if (!isAndroid()) return [];
   try {
     const result = await CriticalStock.listScheduled();

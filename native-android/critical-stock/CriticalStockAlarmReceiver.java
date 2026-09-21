@@ -8,8 +8,8 @@ import app.drugtracker.alarmruntime.ExactAlarmContract;
 import app.drugtracker.notificationruntime.NotificationRuntime;
 
 /**
- * Exact-alarm delivery for one future Critical Stock notification.
- * Alarm timing and notification presentation are intentionally separate.
+ * Private delivery plumbing for the Critical Stock alarm.
+ * It contains no Critical Stock business policy or notification content.
  */
 public final class CriticalStockAlarmReceiver extends BroadcastReceiver {
     @Override
@@ -25,22 +25,25 @@ public final class CriticalStockAlarmReceiver extends BroadcastReceiver {
         new Thread(() -> {
             try {
                 String medicationId = intent.getStringExtra("medicationId");
-                String medicationName = intent.getStringExtra("medicationName");
-                String unit = intent.getStringExtra("unit");
+                String notificationTitle =
+                        intent.getStringExtra("notificationTitle");
+                String notificationBody =
+                        intent.getStringExtra("notificationBody");
                 String operationVersion = intent.getStringExtra(
                         ExactAlarmContract.EXTRA_OPERATION_VERSION);
 
-                if (medicationId == null || medicationId.isEmpty()) return;
+                if (medicationId == null || medicationId.isEmpty()
+                        || notificationTitle == null
+                        || notificationBody == null) {
+                    return;
+                }
 
                 new NotificationRuntime(appContext).post(
                         new NotificationRuntime.Request(
                                 "critical-stock",
                                 medicationId,
-                                "🚨 " + medicationName + ": اقترب النفاد الحرج",
-                                "مخزون \"" + medicationName
-                                        + "\" دخل مرحلة النفاد الحرج ("
-                                        + (unit == null ? "قرص" : unit)
-                                        + "). يرجى التعبئة فوراً!",
+                                notificationTitle,
+                                notificationBody,
                                 "low-stock",
                                 "تنبيهات النفاذ",
                                 4,

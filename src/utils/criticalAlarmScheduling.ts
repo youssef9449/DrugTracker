@@ -1,6 +1,6 @@
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { scheduleCriticalAlarmNative, cancelCriticalAlarmNative, verifyCriticalAlarmPendingNative } from './criticalAlarmNative';
-import { notificationId } from './notifications/notificationIds';
+import { iosCriticalAlarmId } from './notifications/notificationIds';
 import { getNativePlatform, isNativePlatform } from './notifications/notificationPlatform';
 import { scheduleWebNotification } from './notifications/webNotifications';
 
@@ -12,7 +12,7 @@ export async function cancelCriticalAlarm(medId: string): Promise<void> {
   if (!isNativePlatform()) return;
   try {
     await LocalNotifications.cancel({
-      notifications: [{ id: notificationId('criticalAlarm', medId) }],
+      notifications: [{ id: iosCriticalAlarmId(medId) }],
     });
   } catch (err) {
     console.warn('[notifications] cancelCriticalAlarm failed:', err);
@@ -43,7 +43,7 @@ export async function verifyCriticalAlarmPending(
     }
 
     const pending = await LocalNotifications.getPending();
-    const id = notificationId('criticalAlarm', medId);
+    const id = iosCriticalAlarmId(medId);
     return pending.notifications.some(
       (n) =>
         n.id === id &&
@@ -92,7 +92,7 @@ export async function scheduleCriticalAlarm(
     const result = await LocalNotifications.schedule({
       notifications: [
         {
-          id: notificationId('criticalAlarm', medId),
+          id: iosCriticalAlarmId(medId),
           title,
           body,
           schedule: { at: fireAt, allowWhileIdle: true },
@@ -105,7 +105,7 @@ export async function scheduleCriticalAlarm(
       ],
     });
     return result.notifications.some(
-      (n) => n.id === notificationId('criticalAlarm', medId)
+      (n) => n.id === iosCriticalAlarmId(medId)
     );
   } catch (err) {
     console.warn('[notifications] iOS scheduleCriticalAlarm failed:', err);

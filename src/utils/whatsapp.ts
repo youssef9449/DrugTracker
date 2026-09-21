@@ -79,6 +79,13 @@ export function cleanPhoneNumber(rawPhone: string): string {
   return cleaned;
 }
 
+export type OrderQuantityUnit = 'pills' | 'boxes' | 'strips';
+
+export interface OrderQuantitySelection {
+  unit: OrderQuantityUnit;
+  quantity: number;
+}
+
 export interface OrderItem {
   name: string;
   quantity: number;
@@ -87,6 +94,27 @@ export interface OrderItem {
   stripsPerBox?: number;
   pillsPerStrip?: number;
   packageSize?: number;
+  orderBreakdown?: OrderQuantitySelection[];
+}
+
+export function describeOrderQuantityBreakdown(
+  breakdown: OrderQuantitySelection[],
+  medicationUnit: string
+): string {
+  const boxLabel = medicationUnit === 'مل' ? 'عبوة' : 'علبة';
+
+  return breakdown
+    .filter((item) => item.quantity > 0)
+    .map((item) => {
+      const label =
+        item.unit === 'boxes'
+          ? boxLabel
+          : item.unit === 'strips'
+          ? 'شريط'
+          : medicationUnit;
+      return pluralizeArabic(item.quantity, label);
+    })
+    .join(' و ');
 }
 
 export function generatePharmacyOrderMessage(
@@ -102,6 +130,12 @@ export function generatePharmacyOrderMessage(
   let text = `السلام عليكم ورحمة الله،\nمن فضلك عايز الأدوية دي:\n\n`;
 
   items.forEach((item, idx) => {
+    if (item.orderBreakdown && item.orderBreakdown.length > 0) {
+      const breakdownDesc = describeOrderQuantityBreakdown(item.orderBreakdown, item.unit);
+      text += (idx + 1) + '. ' + item.name + ' - المطلوب: ' + breakdownDesc + '\n';
+      return;
+    }
+
     const packagingDesc = describeOrderInBoxes(
       item.quantity,
       item.stripsPerBox,

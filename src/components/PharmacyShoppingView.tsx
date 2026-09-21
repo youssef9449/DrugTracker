@@ -16,6 +16,7 @@ import { getDepletionDate } from '../utils/dateCalculations';
 import {
   cleanPhoneNumber,
   generatePharmacyOrderMessage,
+  describeOrderQuantityBreakdown,
   OrderItem,
   calculateMedicationOrderQuantity,
   buildWhatsAppUrl,
@@ -38,26 +39,60 @@ function shoppingDurationDays(
   return Math.max(1, rawValue || 1) * (period.unit === 'month' ? 30 : 1);
 }
 
+type OrderUnit = 'pills' | 'boxes' | 'strips';
+type CustomOrderQuantities = Record<string, Partial<Record<OrderUnit, number | ''>>>;
+
+function getShoppingAvailableUnits(med: Medication): OrderUnit[] {
+  const { boxSize, stripSize, hasStrips } = getMedSizes(med);
+
+  // Solid medications with configured strips can be ordered as strips and/or boxes.
+  if (hasStrips && stripSize > 0) {
+    return boxSize > 0 ? ['strips', 'boxes'] : ['strips'];
+  }
+
+  // Sachets/doses may be ordered as loose units and/or full boxes.
+  if ((med.unit === 'كيس' || med.unit === 'جرعة') && boxSize > 0) {
+    return ['pills', 'boxes'];
+  }
+
+  return ['boxes'];
+}
+
+function getShoppingDefaultUnits(med: Medication): OrderUnit[] {
+  return [getShoppingAvailableUnits(med)[0]];
+}
+
+function getShoppingUnitSize(med: Medication, unit: OrderUnit): number {
+  const { boxSize, stripSize } = getMedSizes(med);
+  if (unit === 'boxes') return boxSize > 0 ? boxSize : 1;
+  if (unit === 'strips') return stripSize > 0 ? stripSize : 1;
+  return 1;
+}
+
+function shoppingUnitToPills(med: Medication, unit: OrderUnit, quantity: number): number {
+  return quantity * getShoppingUnitSize(med, unit);
+}
+
 function shoppingRequestedPills(
   med: Medication,
   suggestedPills: number,
   quantityModes: Record<string, 'period' | 'custom'>,
-  customOrderQuantities: Record<string, number | ''>,
-  orderUnits: Record<string, Array<'pills' | 'boxes' | 'strips'>>
+  customOrderQuantities: CustomOrderQuantities,
+  orderUnits: Record<string, OrderUnit[]>
 ): number {
   const mode = quantityModes[med.id] || 'period';
   if (mode !== 'custom') return suggestedPills;
-  const { boxSize, stripSize, hasStrips } = getMedSizes(med);
-  const selectedUnit = (orderUnits[med.id] || (hasStrips ? ['strips'] : ['boxes']))[0];
-  const unitSize = selectedUnit === 'boxes' ? boxSize : stripSize > 0 ? stripSize : 1;
-  const stored = customOrderQuantities[med.id];
-  const unitQty =
-    stored === '' || stored === undefined
-      ? Math.max(1, Math.ceil(suggestedPills / unitSize))
-      : stored;
-  if (selectedUnit === 'boxes') return unitQty * boxSize;
-  if (selectedUnit === 'strips') return unitQty * stripSize;
-  return unitQty;
+
+  const selectedUnits = orderUnits[med.id] || getShoppingDefaultUnits(med);
+  return selectedUnits.reduce((total, unit) => {
+    const stored = customOrderQuantities[med.id]?.[unit];
+    const unitQty = stored === ''
+      ? 0
+      : stored ?? Math.max(1, Math.ceil(
+          suggestedPills / getShoppingUnitSize(med, unit)
+        ));
+    return total + shoppingUnitToPills(med, unit, unitQty);
+  }, 0);
 }
 
 interface PharmacyShoppingViewProps {
@@ -80,7 +115,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   type QuantityMode = 'period' | 'custom';
   const [medicationPeriods, setMedicationPeriods] = useState<Record<string, MedicationPeriod>>({});
   const [quantityModes, setQuantityModes] = useState<Record<string, QuantityMode>>({});
-  const [customOrderQuantities, setCustomOrderQuantities] = useState<Record<string, number | ''>>({});
+  const [customOrderQuantities, setCustomOrderQuantities] = useState<CustomOrderQuantities>({});
   const pharmacies = settings.pharmacies || [];
   const selectedPharmacy = pharmacies.find((pharmacy) => pharmacy.id === settings.selectedPharmacyId)
     || pharmacies[0];
@@ -98,9 +133,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     ?? whatsappAddresses.map((item) => item.id);
 
   const [showAllForPlanning, setShowAllForPlanning] = useState(false);
-  // Per-med order unit selector: 'pills' | 'boxes' | 'strips'.
-  // Stored per med id so the user's choice persists within the session.
-  type OrderUnit = 'pills' | 'boxes' | 'strips';
+  // Multiple order units may be selected together in "كمية محددة".
   const [orderUnits, setOrderUnits] = useState<Record<string, OrderUnit[]>>({});
   const [removedFromShoppingIds, setRemovedFromShoppingIds] = useState<Set<string>>(new Set());
   // #20: track meds the user explicitly DESELECTED so the
@@ -209,19 +242,34 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   const handleMedicationPeriodChange = (medId: string, field: keyof MedicationPeriod, value: string) => {
     const med = medications.find((item) => item.id === medId);
     if (!med) return;
-    let nextField: MedicationPeriod[keyof MedicationPeriod];
-    if (field === 'value') {
-      nextField = value === '' ? '' : Math.max(1, parseInt(value, 10) || 1);
-    } else {
-      nextField = value as PeriodUnit;
+
+    const currentPeriod = getMedicationPeriod(med);
+
+    if (field === 'unit') {
+      const nextUnit = value as PeriodUnit;
+      const currentValue = currentPeriod.value === '' ? 1 : currentPeriod.value;
+      const currentDays = currentValue * (currentPeriod.unit === 'month' ? 30 : 1);
+      const nextValue = nextUnit === 'month'
+        ? Math.max(1, Math.ceil(currentDays / 30))
+        : Math.max(1, currentDays);
+
+      setMedicationPeriods((prev) => ({
+        ...prev,
+        [medId]: {
+          value: nextValue,
+          unit: nextUnit,
+        },
+      }));
+      return;
     }
-    const nextPeriod: MedicationPeriod = {
-      ...getMedicationPeriod(med),
-      [field]: nextField,
-    };
+
+    const nextValue = value === '' ? '' : Math.max(1, parseInt(value, 10) || 1);
     setMedicationPeriods((prev) => ({
       ...prev,
-      [medId]: nextPeriod,
+      [medId]: {
+        ...currentPeriod,
+        value: nextValue,
+      },
     }));
   };
 
@@ -232,109 +280,146 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   // The selected unit only changes how the calculated quantity is shown.
   // It must never change the quantity required for the selected period.
 
-  /** Available display units: boxes and strips when strip packaging exists. */
-  function getAvailableUnits(med: Medication): Array<'pills' | 'boxes' | 'strips'> {
-    const { boxSize, stripSize, hasStrips } = getMedSizes(med);
-    const units: Array<'pills' | 'boxes' | 'strips'> = hasStrips ? ['strips'] : ['boxes'];
-    if (boxSize <= 0) return units;
-    if (hasStrips && stripSize > 0) units.push('boxes');
-    return units;
+  /** Available order units; custom mode can select more than one simultaneously. */
+  function getAvailableUnits(med: Medication): OrderUnit[] {
+    return getShoppingAvailableUnits(med);
   }
 
   function getSelectedUnits(med: Medication): OrderUnit[] {
-    return orderUnits[med.id] || (getMedSizes(med).hasStrips ? ['strips'] : ['boxes']);
-  }
-
-  function unitToPills(quantity: number, unit: OrderUnit, med: Medication): number {
-    const { boxSize, stripSize } = getMedSizes(med);
-    if (unit === 'boxes') return quantity * boxSize;
-    if (unit === 'strips') return quantity * stripSize;
-    return quantity;
+    return orderUnits[med.id] || getShoppingDefaultUnits(med);
   }
 
   function getUnitQuantity(med: Medication, unit: OrderUnit, suggestedPills: number): number {
-    const { boxSize, stripSize } = getMedSizes(med);
     if (getQuantityMode(med) === 'custom') {
-      const stored = customOrderQuantities[med.id];
-      if (stored === '' || stored === undefined) {
-        return Math.max(1, Math.ceil(suggestedPills / (unit === 'boxes' ? boxSize : stripSize)));
-      }
-      return stored;
+      const stored = customOrderQuantities[med.id]?.[unit];
+      if (stored === '') return 0;
+      if (stored !== undefined) return stored;
     }
-    if (unit === 'boxes') return Math.max(1, Math.ceil(suggestedPills / boxSize));
-    if (unit === 'strips') return Math.max(1, Math.ceil(suggestedPills / stripSize));
-    return 0;
+
+    const unitSize = getShoppingUnitSize(med, unit);
+    return Math.max(1, Math.ceil(suggestedPills / unitSize));
   }
 
-  /** Display value for the custom quantity input — may be '' while editing. */
+  /** Display value for each custom-unit input. */
   function getCustomQuantityInputValue(
     med: Medication,
     unit: OrderUnit,
     suggestedPills: number
   ): number | '' {
-    if (Object.prototype.hasOwnProperty.call(customOrderQuantities, med.id)) {
-      return customOrderQuantities[med.id];
-    }
+    const stored = customOrderQuantities[med.id]?.[unit];
+    if (stored !== undefined) return stored;
     return getUnitQuantity(med, unit, suggestedPills);
   }
 
   function getRequestedPills(med: Medication, suggestedPills: number): number {
-    if (getQuantityMode(med) === 'custom') {
-      const selectedUnit = getSelectedUnits(med)[0];
-      return unitToPills(getUnitQuantity(med, selectedUnit, suggestedPills), selectedUnit, med);
-    }
-    return suggestedPills;
+    return shoppingRequestedPills(
+      med,
+      suggestedPills,
+      quantityModes,
+      customOrderQuantities,
+      orderUnits
+    );
   }
 
   const handleToggleQuantityMode = (med: Medication, mode: QuantityMode, suggestedPills: number) => {
     setQuantityModes((prev) => ({ ...prev, [med.id]: mode }));
-    if (mode === 'custom' && customOrderQuantities[med.id] === undefined) {
-      const selectedUnit = getSelectedUnits(med)[0];
-      const { boxSize, stripSize } = getMedSizes(med);
-      const unitSize = selectedUnit === 'boxes' ? boxSize : stripSize;
-      setCustomOrderQuantities((prev) => ({
+
+    if (mode !== 'custom') return;
+
+    const selectedUnits = getSelectedUnits(med);
+    setCustomOrderQuantities((prev) => {
+      const current = prev[med.id] || {};
+      const next = { ...current };
+      for (const unit of selectedUnits) {
+        if (next[unit] === undefined) {
+          next[unit] = Math.max(1, Math.ceil(
+            suggestedPills / getShoppingUnitSize(med, unit)
+          ));
+        }
+      }
+      return {
         ...prev,
-        [med.id]: Math.max(1, Math.ceil(suggestedPills / unitSize)),
-      }));
-    }
+        [med.id]: next,
+      };
+    });
   };
 
   const handleToggleOrderUnit = (med: Medication, unit: OrderUnit, suggestedPills: number) => {
-    const currentUnit = getSelectedUnits(med)[0];
-    const currentQuantity = getQuantityMode(med) === 'custom'
-      ? getUnitQuantity(med, currentUnit, suggestedPills)
-      : Math.max(1, Math.ceil(suggestedPills / (currentUnit === 'boxes' ? getMedSizes(med).boxSize : getMedSizes(med).stripSize)));
-    const currentPills = unitToPills(currentQuantity, currentUnit, med);
-    const nextUnitSize = unit === 'boxes' ? getMedSizes(med).boxSize : getMedSizes(med).stripSize;
-    setOrderUnits((prev) => ({ ...prev, [med.id]: [unit] }));
-    if (getQuantityMode(med) === 'custom') {
-      setCustomOrderQuantities((prev) => ({
-        ...prev,
-        [med.id]: Math.max(1, Math.ceil(currentPills / nextUnitSize)),
-      }));
-    }
-  };
+    const selected = getSelectedUnits(med);
 
-  const handleCustomQuantityChange = (med: Medication, raw: string) => {
-    if (raw === '') {
-      setCustomOrderQuantities((prev) => ({ ...prev, [med.id]: '' }));
+    if (getQuantityMode(med) !== 'custom') {
+      // "حسب الفترة" keeps the existing single-unit display selection.
+      setOrderUnits((prev) => ({
+        ...prev,
+        [med.id]: [unit],
+      }));
       return;
     }
+
+    if (selected.includes(unit)) {
+      // Keep at least one unit active in custom mode.
+      if (selected.length <= 1) return;
+      setOrderUnits((prev) => ({
+        ...prev,
+        [med.id]: selected.filter((item) => item !== unit),
+      }));
+      return;
+    }
+
+    setOrderUnits((prev) => ({
+      ...prev,
+      [med.id]: [...selected, unit],
+    }));
+
+    setCustomOrderQuantities((prev) => ({
+      ...prev,
+      [med.id]: {
+        ...(prev[med.id] || {}),
+        [unit]: 1,
+      },
+    }));
+  };
+
+  const handleCustomQuantityChange = (med: Medication, unit: OrderUnit, raw: string) => {
+    if (raw === '') {
+      setCustomOrderQuantities((prev) => ({
+        ...prev,
+        [med.id]: {
+          ...(prev[med.id] || {}),
+          [unit]: '',
+        },
+      }));
+      return;
+    }
+
     const parsed = parseInt(raw, 10);
     setCustomOrderQuantities((prev) => ({
       ...prev,
-      [med.id]: Math.max(1, Number.isFinite(parsed) ? parsed : 1),
+      [med.id]: {
+        ...(prev[med.id] || {}),
+        [unit]: Math.max(1, Number.isFinite(parsed) ? parsed : 1),
+      },
     }));
   };
 
   /** Display label for a unit. */
-  function unitLabel(unit: 'pills' | 'boxes' | 'strips', med: Medication, count: number): string {
+  function unitLabel(unit: OrderUnit, med: Medication, count: number): string {
     if (unit === 'pills') return pluralizeArabic(count, med.unit);
     if (unit === 'boxes') {
       const boxName = med.unit === 'مل' ? 'عبوة' : 'علبة';
       return pluralizeArabic(count, boxName);
     }
     return pluralizeArabic(count, 'شريط');
+  }
+
+  function getOrderBreakdown(med: Medication, suggestedPills: number) {
+    if (getQuantityMode(med) !== 'custom') return undefined;
+    return getSelectedUnits(med)
+      .map((unit) => ({
+        unit,
+        quantity: getUnitQuantity(med, unit, suggestedPills),
+      }))
+      .filter((item) => item.quantity > 0);
   }
 
   const activeOrderItems = useMemo((): OrderItem[] => {
@@ -358,6 +443,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
           stripsPerBox: med.stripsPerBox,
           pillsPerStrip: med.pillsPerStrip,
           packageSize: med.packageSize,
+          orderBreakdown: getOrderBreakdown(med, suggestedPills),
         };
       });
   }, [displayList, selectedMedIds, medicationPeriods, quantityModes, customOrderQuantities, orderUnits, settings.defaultDurationDays]);
@@ -383,6 +469,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
         stripsPerBox: med.stripsPerBox,
         pillsPerStrip: med.pillsPerStrip,
         packageSize: med.packageSize,
+        orderBreakdown: getOrderBreakdown(med, suggestedPills),
       };
     });
   }, [activeOrderItems, medications, medicationPeriods, quantityModes, customOrderQuantities, orderUnits, settings.defaultDurationDays]);
@@ -651,9 +738,9 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                             type="number"
                             min="1"
                             value={inputValue}
-                            onChange={(event) => handleCustomQuantityChange(med, event.target.value)}
+                            onChange={(event) => handleCustomQuantityChange(med, unit, event.target.value)}
                             className="w-14 rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-center font-mono font-bold text-xs focus:ring-1 focus:ring-teal-500"
-                            aria-label={`كمية ${med.name}`}
+                            aria-label={`كمية ${med.name} ${unitLabel(unit, med, 1)}`}
                           />
                         </div>
                       );
@@ -663,7 +750,13 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
 
                 {/* Total order description */}
                 <div className="text-[10.5px] text-teal-800 text-left font-medium px-0.5">
-                  الإجمالي: {describeOrderInBoxes(requestedPills, med.stripsPerBox, med.pillsPerStrip, med.packageSize, med.unit)}
+                  الإجمالي:{' '}
+                  {getQuantityMode(med) === 'custom'
+                    ? describeOrderQuantityBreakdown(getOrderBreakdown(med, suggestedPills) || [], med.unit)
+                    : describeOrderInBoxes(requestedPills, med.stripsPerBox, med.pillsPerStrip, med.packageSize, med.unit)}
+                  {getQuantityMode(med) === 'custom' && requestedPills > 0
+                    ? ` (${pluralizeArabic(requestedPills, med.unit)})`
+                    : ''}
                 </div>
               </div>
             </div>

@@ -207,7 +207,7 @@ describe('PharmacyShoppingView — refill actions', () => {
     expect(screen.getByText('الإجمالي: علبة واحدة (30 قرصاً)')).toBeInTheDocument();
   });
 
-  it('allows a custom quantity independently from the selected period', () => {
+  it('allows a custom quantity to combine box + strip quantities', () => {
     const med = makeMed({
       currentPills: 1,
       dailyDose: 1,
@@ -218,13 +218,63 @@ describe('PharmacyShoppingView — refill actions', () => {
     renderView({ medications: [med] });
 
     fireEvent.click(screen.getByRole('button', { name: 'كمية محددة' }));
-    expect(screen.getByRole('spinbutton', { name: 'كمية Test Med' })).toHaveValue(3);
+    const stripQty = screen.getByRole('spinbutton', { name: /كمية Test Med شريط/ });
+    expect(stripQty).toHaveValue(3);
 
     fireEvent.click(screen.getByRole('button', { name: 'علبة' }));
-    expect(screen.getByRole('spinbutton', { name: 'كمية Test Med' })).toHaveValue(1);
+    const boxQty = screen.getByRole('spinbutton', { name: /كمية Test Med علبة/ });
+    expect(boxQty).toHaveValue(1);
 
-    fireEvent.change(screen.getByRole('spinbutton', { name: 'كمية Test Med' }), { target: { value: '2' } });
-    expect(screen.getByText('الإجمالي: علبتين (60 قرصاً)')).toBeInTheDocument();
+    expect(screen.getByText('الإجمالي: علبة واحدة و 3 أشرطة (60 قرصاً)')).toBeInTheDocument();
+
+    fireEvent.change(boxQty, { target: { value: '2' } });
+    expect(screen.getByText('الإجمالي: علبتين و 3 أشرطة (90 قرصاً)')).toBeInTheDocument();
+  });
+
+  it('allows a custom sachet quantity to combine bags + box', () => {
+    const med = makeMed({
+      id: 'sachet-med',
+      name: 'فوار',
+      currentPills: 1,
+      dailyDose: 1,
+      unit: 'كيس',
+      packageSize: 10,
+    });
+    renderView({ medications: [med] });
+
+    fireEvent.click(screen.getByRole('button', { name: 'كمية محددة' }));
+    const bagQty = screen.getByRole('spinbutton', { name: /كمية فوار كيس/ });
+    expect(bagQty).toHaveValue(30);
+
+    fireEvent.click(screen.getByRole('button', { name: 'علبة' }));
+    const boxQty = screen.getByRole('spinbutton', { name: /كمية فوار علبة/ });
+    expect(boxQty).toHaveValue(1);
+
+    fireEvent.change(bagQty, { target: { value: '2' } });
+    expect(screen.getByText('الإجمالي: علبة واحدة و كيسان (12 كيساً)')).toBeInTheDocument();
+  });
+
+  it('converts a 30-day period to 1 month when the unit changes', () => {
+    const med = makeMed({
+      currentPills: 1,
+      dailyDose: 1,
+      stripsPerBox: 3,
+      pillsPerStrip: 10,
+      packageSize: 30,
+    });
+    renderView({ medications: [med] });
+
+    const periodLabel = screen.getByText('مدة الطلب');
+    const periodContainer = periodLabel.parentElement!;
+    const periodInput = periodContainer.querySelector('input[type="number"]') as HTMLInputElement;
+    const periodSelect = periodContainer.querySelector('select') as HTMLSelectElement;
+
+    expect(periodInput.value).toBe('30');
+    fireEvent.change(periodSelect, { target: { value: 'month' } });
+    expect(periodInput.value).toBe('1');
+
+    fireEvent.change(periodSelect, { target: { value: 'day' } });
+    expect(periodInput.value).toBe('30');
   });
 
   it('clicking WhatsApp send button opens the send modal with analyzed order quantities', () => {
@@ -353,7 +403,7 @@ describe('PharmacyShoppingView — period and custom quantity allow empty mid-ed
     });
     renderView({ medications: [med] });
     fireEvent.click(screen.getByRole('button', { name: 'كمية محددة' }));
-    const qty = screen.getByRole('spinbutton', { name: 'كمية Test Med' }) as HTMLInputElement;
+    const qty = screen.getByRole('spinbutton', { name: /كمية Test Med شريط/ }) as HTMLInputElement;
     fireEvent.change(qty, { target: { value: '' } });
     expect(qty.value).toBe('');
     fireEvent.change(qty, { target: { value: '2' } });

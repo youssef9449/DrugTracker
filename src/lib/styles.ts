@@ -10,9 +10,20 @@
  *   <button className={ICON_BUTTON_CLASS}>...</button>
  */
 
-/** Standard M3 circular icon button used in AppHeader and headers. */
+/** M3-aligned circular icon button: 40dp touch target, 24dp icon slot. */
 export const ICON_BUTTON_CLASS =
-  'w-9 h-9 rounded-full flex items-center justify-center text-teal-100 hover:text-white hover:bg-teal-700/80 transition active:scale-95 cursor-pointer';
+  'w-10 h-10 rounded-full flex items-center justify-center text-slate-700 hover:bg-slate-100 active:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 transition-colors cursor-pointer';
+
+/** M3-aligned text/icon action button metrics shared by compact actions. */
+export const M3_TEXT_BUTTON_CLASS =
+  'min-h-10 rounded-full px-4 inline-flex items-center justify-center gap-2 text-sm font-medium text-teal-800 hover:bg-teal-50 active:bg-teal-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 transition-colors cursor-pointer';
+
+/** M3 shape/elevation tokens expressed as Tailwind utilities for this web implementation. */
+export const M3_SURFACE_CARD_CLASS =
+  'rounded-xl border border-slate-200 bg-white shadow-xs';
+
+export const M3_MENU_CLASS =
+  'rounded-sm border-0 bg-white shadow-lg';
 
 /** Teal icon box centered above empty-state messages (EmptyState component). */
 export const EMPTY_STATE_ICON_BOX =

@@ -114,6 +114,7 @@ interface MedicationCardProps {
   onConsumeDose?: (medicationId: string, doseId?: string) => void;
   /** Restore a manually consumed dose via the same App path as logs. */
   onRestoreDose?: (medicationId: string, doseId?: string) => void;
+  onOpenHistory?: (medication: Medication) => void;
   /** Durable stock logs used to display the exact historical Restore amount. */
   logs?: ConsumptionLog[];
   lastRefillQuantity?: number;
@@ -131,6 +132,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   onNavigateToShopping,
   onConsumeDose,
   onRestoreDose,
+  onOpenHistory,
   logs = [],
   lastRefillQuantity,
   onUndoRefill,
@@ -252,6 +254,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             onEdit={onEdit}
             onDelete={onDelete}
             onToggleAutoDeduct={onToggleAutoDeduct}
+            onOpenHistory={onOpenHistory}
           />
         </div>
 
@@ -384,6 +387,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             onEdit={onEdit}
             onDelete={onDelete}
             onToggleAutoDeduct={onToggleAutoDeduct}
+            onOpenHistory={onOpenHistory}
           />
         </div>
 
@@ -609,6 +613,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               onEdit={onEdit}
               onDelete={onDelete}
               onToggleAutoDeduct={onToggleAutoDeduct}
+              onOpenHistory={onOpenHistory}
               size="xs"
             />
         </div>
@@ -799,6 +804,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               onEdit={onEdit}
               onDelete={onDelete}
               onToggleAutoDeduct={onToggleAutoDeduct}
+              onOpenHistory={onOpenHistory}
               size="sm"
             />
         </div>

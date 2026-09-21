@@ -502,7 +502,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
         </div>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-2">
         {displayList.map((med) => {
           const { status } = calculateMedicationStatus(med);
           const { quantity: suggestedPills } = getRequestedAmount(med);
@@ -514,33 +514,40 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
           return (
             <div
               key={med.id}
-              className={`bg-white rounded-2xl border p-3.5 shadow-xs ${
+              className={`bg-white rounded-2xl border p-2.5 sm:p-3 shadow-xs transition-colors ${
                 isSelected ? 'border-teal-300 ring-1 ring-teal-100' : 'border-slate-200/80 opacity-75'
               }`}
             >
+              {/* Header: Select Checkbox, Name, Status Badge, Remaining/Depletion & Remove Button */}
               <div className="flex items-start justify-between gap-2">
-                <div className="flex items-start gap-2.5 min-w-0">
-                  <button type="button" onClick={() => handleToggleSelect(med.id)} className="mt-0.5 text-teal-700">
-                    {isSelected ? <CheckSquare className="w-5 h-5 text-teal-700" /> : <Square className="w-5 h-5 text-slate-300" />}
+                <div className="flex items-start gap-2 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleSelect(med.id)}
+                    className="mt-0.5 text-teal-700 shrink-0 transition hover:scale-105 active:scale-95"
+                  >
+                    {isSelected ? <CheckSquare className="w-4.5 h-4.5 text-teal-700" /> : <Square className="w-4.5 h-4.5 text-slate-300" />}
                   </button>
                   <div className="min-w-0">
-                    <h4 className="font-bold text-slate-900 text-sm">{med.name}</h4>
-                    <div className="text-xs text-slate-500 mt-0.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <h4 className="font-bold text-slate-900 text-xs sm:text-sm leading-tight">{med.name}</h4>
+                      <span
+                        className={`inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded border leading-none ${
+                          status === 'out_of_stock'
+                            ? 'bg-red-50 text-red-700 border-red-200'
+                            : status === 'critical'
+                            ? 'bg-rose-50 text-rose-700 border-rose-200'
+                            : status === 'warning'
+                            ? 'bg-amber-50 text-amber-700 border-amber-200'
+                            : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        }`}
+                      >
+                        {status === 'out_of_stock' ? 'نفد' : status === 'critical' ? 'حرج' : status === 'warning' ? 'تنبيه' : 'آمن'}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-0.5 leading-tight">
                       المتبقي: <strong className="font-mono text-slate-700">{med.currentPills}</strong> • ينفد {depletion.formattedArabic}
                     </div>
-                    <span
-                      className={`inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded-lg border ${
-                        status === 'out_of_stock'
-                          ? 'bg-red-50 text-red-700 border-red-200'
-                          : status === 'critical'
-                          ? 'bg-rose-50 text-rose-700 border-rose-200'
-                          : status === 'warning'
-                          ? 'bg-amber-50 text-amber-700 border-amber-200'
-                          : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                      }`}
-                    >
-                      {status === 'out_of_stock' ? 'نفد' : status === 'critical' ? 'حرج' : status === 'warning' ? 'تنبيه' : 'آمن'}
-                    </span>
                   </div>
                 </div>
                 <button
@@ -548,104 +555,117 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                   onClick={() => handleRemoveFromShopping(med.id)}
                   aria-label={`إزالة ${med.name} من قائمة الشراء`}
                   title="إزالة من قائمة الشراء"
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 active:scale-95"
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 active:scale-95"
                 >
-                  <X className="h-4 w-4" />
+                  <X className="h-3.5 w-3.5" />
                 </button>
               </div>
 
-              {/* Unit selector + quantity input */}
-              <div className="mt-3 space-y-2">
-                <SegmentedButton<'period' | 'custom'>
-                  className="w-full flex"
-                  size="sm"
-                  value={getQuantityMode(med)}
-                  onChange={(val) => handleToggleQuantityMode(med, val, suggestedPills)}
-                  options={[
-                    { value: 'period', label: 'حسب الفترة' },
-                    { value: 'custom', label: 'كمية محددة' },
-                  ]}
-                  aria-label={`طريقة حساب كمية طلب ${med.name}`}
-                />
+              {/* Unit selector + quantity controls */}
+              <div className="mt-2 pt-2 border-t border-slate-100 space-y-1.5">
+                {/* Controls toolbar: Mode selector & Packaging unit filter chips */}
+                <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                  <SegmentedButton<'period' | 'custom'>
+                    className="shrink-0"
+                    size="sm"
+                    value={getQuantityMode(med)}
+                    onChange={(val) => handleToggleQuantityMode(med, val, suggestedPills)}
+                    options={[
+                      { value: 'period', label: 'حسب الفترة' },
+                      { value: 'custom', label: 'كمية محددة' },
+                    ]}
+                    aria-label={`طريقة حساب كمية طلب ${med.name}`}
+                  />
 
-                {getQuantityMode(med) === 'period' && (
-                  <div className="flex items-center justify-between gap-2 rounded-xl border border-teal-100 bg-teal-50/60 px-3 py-2">
-                    <span className="text-[11px] font-bold text-teal-900">مدة الطلب</span>
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="number"
-                        min="1"
-                        value={getMedicationPeriod(med).value}
-                        onChange={(event) => handleMedicationPeriodChange(med.id, 'value', event.target.value)}
-                        className="w-14 rounded-lg border border-teal-200 bg-white px-2 py-1 text-center font-mono font-bold text-xs focus:ring-1 focus:ring-teal-500"
-                        aria-label={`عدد مدة طلب ${med.name}`}
-                      />
-                      <select
-                        value={getMedicationPeriod(med).unit}
-                        onChange={(event) => handleMedicationPeriodChange(med.id, 'unit', event.target.value)}
-                        className="rounded-lg border border-teal-200 bg-white px-2 py-1 font-bold text-xs text-teal-900 outline-none"
-                        aria-label={`وحدة مدة طلب ${med.name}`}
-                      >
-                        <option value="day">يوم</option>
-                        <option value="month">شهر</option>
-                      </select>
+                  {/* Unit selector chips (M3 Filter Chips) */}
+                  {availableUnits.length > 1 && (
+                    <div className="flex items-center gap-1 shrink-0">
+                      {availableUnits.map((u) => {
+                        const isActive = selectedUnits.includes(u);
+                        const icon = u === 'pills' ? <Pill className="w-2.5 h-2.5" /> : u === 'boxes' ? <Box className="w-2.5 h-2.5" /> : <Layers className="w-2.5 h-2.5" />;
+                        const boxLabel = med.unit === 'مل' ? 'عبوة' : 'علبة';
+                        const label = u === 'pills' ? med.unit : u === 'boxes' ? boxLabel : 'شريط';
+                        return (
+                          <button
+                            key={u}
+                            type="button"
+                            onClick={() => handleToggleOrderUnit(med, u, suggestedPills)}
+                            className={`h-[28px] px-2 rounded-lg text-[10px] font-bold flex items-center gap-1 transition cursor-pointer border ${
+                              isActive
+                                ? 'bg-teal-100 text-teal-950 border-teal-300 shadow-2xs'
+                                : 'bg-slate-50/80 text-slate-600 border-slate-200/90 hover:bg-slate-100'
+                            }`}
+                          >
+                            {icon}
+                            <span>{label}</span>
+                          </button>
+                        );
+                      })}
                     </div>
-                  </div>
-                )}
-                {/* Unit selector chips (M3 Filter Chips) */}
-                {availableUnits.length > 1 && (
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {availableUnits.map((u) => {
-                      const isActive = selectedUnits.includes(u);
-                      const icon = u === 'pills' ? <Pill className="w-3 h-3" /> : u === 'boxes' ? <Box className="w-3 h-3" /> : <Layers className="w-3 h-3" />;
-                      const boxLabel = med.unit === 'مل' ? 'عبوة' : 'علبة';
-                      const label = u === 'pills' ? med.unit : u === 'boxes' ? boxLabel : 'شريط';
-                      return (
-                        <button
-                          key={u}
-                          type="button"
-                          onClick={() => handleToggleOrderUnit(med, u, suggestedPills)}
-                          className={`h-7 px-2.5 rounded-lg text-[10px] font-bold flex items-center gap-1 transition cursor-pointer border ${
-                            isActive
-                              ? 'bg-teal-100 text-teal-950 border-teal-300 shadow-2xs'
-                              : 'bg-slate-50/80 text-slate-600 border-slate-200/90 hover:bg-slate-100'
-                          }`}
+                  )}
+                </div>
+
+                {/* Duration or Custom Quantity configuration row */}
+                {getQuantityMode(med) === 'period' ? (
+                  <div className="flex items-center justify-between gap-2 rounded-lg border border-teal-100/90 bg-teal-50/40 px-2.5 py-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-bold text-teal-900">مدة الطلب</span>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          min="1"
+                          value={getMedicationPeriod(med).value}
+                          onChange={(event) => handleMedicationPeriodChange(med.id, 'value', event.target.value)}
+                          className="w-12 rounded-md border border-teal-200 bg-white px-1 py-0.5 text-center font-mono font-bold text-xs focus:ring-1 focus:ring-teal-500"
+                          aria-label={`عدد مدة طلب ${med.name}`}
+                        />
+                        <select
+                          value={getMedicationPeriod(med).unit}
+                          onChange={(event) => handleMedicationPeriodChange(med.id, 'unit', event.target.value)}
+                          className="rounded-md border border-teal-200 bg-white px-1.5 py-0.5 font-bold text-xs text-teal-900 outline-none cursor-pointer"
+                          aria-label={`وحدة مدة طلب ${med.name}`}
                         >
-                          {icon}
-                          <span>{label}</span>
-                        </button>
+                          <option value="day">يوم</option>
+                          <option value="month">شهر</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {selectedUnits.map((unit) => {
+                      const unitQty = getUnitQuantity(med, unit, suggestedPills);
+                      return (
+                        <span key={unit} className="text-[11px] text-teal-900 font-bold bg-white/90 border border-teal-200/80 rounded-md px-2 py-0.5 shadow-2xs">
+                          {unitLabel(unit, med, unitQty)}
+                        </span>
                       );
                     })}
                   </div>
-                )}
-
-                <div className="space-y-2">
-                  {selectedUnits.map((unit) => {
-                    const unitQty = getUnitQuantity(med, unit, suggestedPills);
-                    const inputValue = getCustomQuantityInputValue(med, unit, suggestedPills);
-                    return (
-                      <div key={unit} className="flex items-center justify-between gap-2">
-                        <span className="text-[10px] text-slate-500 font-bold">{unitLabel(unit, med, unitQty)}</span>
-                        {getQuantityMode(med) === 'custom' && (
+                ) : (
+                  <div className="space-y-1">
+                    {selectedUnits.map((unit) => {
+                      const inputValue = getCustomQuantityInputValue(med, unit, suggestedPills);
+                      return (
+                        <div key={unit} className="flex items-center gap-1.5 rounded-lg border border-slate-200/80 bg-slate-50/60 px-2.5 py-1">
+                          <span className="text-[10px] text-slate-500 font-medium">الكمية:</span>
                           <input
                             type="number"
                             min="1"
                             value={inputValue}
                             onChange={(event) => handleCustomQuantityChange(med, event.target.value)}
-                            className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-center font-mono font-bold text-sm focus:ring-1 focus:ring-teal-500"
+                            className="w-14 rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-center font-mono font-bold text-xs focus:ring-1 focus:ring-teal-500"
                             aria-label={`كمية ${med.name}`}
                           />
-                        )}
-                      </div>
-                    );
-                  })}
-                  <div className="text-[11px] text-teal-800 text-left">
-                    الإجمالي: {describeOrderInBoxes(requestedPills, med.stripsPerBox, med.pillsPerStrip, med.packageSize, med.unit)}
+                        </div>
+                      );
+                    })}
                   </div>
+                )}
+
+                {/* Total order description */}
+                <div className="text-[10.5px] text-teal-800 text-left font-medium px-0.5">
+                  الإجمالي: {describeOrderInBoxes(requestedPills, med.stripsPerBox, med.pillsPerStrip, med.packageSize, med.unit)}
                 </div>
-
               </div>
-
             </div>
           );
         })}

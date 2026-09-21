@@ -28,6 +28,7 @@ import { AndroidFab } from './components/AndroidFab';
 import { EmptyState } from './components/EmptyState';
 import { DoseAlarmModal } from './components/DoseAlarmModal';
 import { SelectDoseModal } from './components/SelectDoseModal';
+import { MedicationHistoryModal } from './components/MedicationHistoryModal';
 import { AutoDeductPromptModal } from './components/AutoDeductPromptModal';
 import { UpdatePrompt } from './components/UpdatePrompt';
 import { Toggle } from './components/ui/Toggle';
@@ -180,6 +181,7 @@ export default function App() {
   // Phase 3A: multi-dose manual consume / restore requires explicit dose selection.
   const [selectDoseMed, setSelectDoseMed] = useState<Medication | null>(null);
   const [selectDoseMode, setSelectDoseMode] = useState<'take' | 'restore' | 'manage'>('take');
+  const [historyMedication, setHistoryMedication] = useState<Medication | null>(null);
 
   // #21: register a back-button handler that closes the top modal
   // instead of exiting the app. The handler returns true (modal was
@@ -197,6 +199,10 @@ export default function App() {
         setSelectDoseMode('take');
         return true;
       }
+      if (historyMedication) {
+        setHistoryMedication(null);
+        return true;
+      }
       if (isAutoDeductPromptOpen) {
         // Same durable decision path as choosing "لا" — never mark prompted
         // without a successful global Auto policy mutation.
@@ -208,7 +214,7 @@ export default function App() {
       if (isSettingsModalOpen) { setIsSettingsModalOpen(false); return true; }
       return false;
     });
-  }, [alarmingMedication, selectDoseMed, isAutoDeductPromptOpen, isAddModalOpen, refillMedication, isSettingsModalOpen, dismissAlarm]);
+  }, [alarmingMedication, selectDoseMed, historyMedication, isAutoDeductPromptOpen, isAddModalOpen, refillMedication, isSettingsModalOpen, dismissAlarm]);
 
   // #38: on unmount, remove all Capacitor listeners so duplicate
   // listeners don't accumulate across HMR re-initializations. Also
@@ -802,6 +808,7 @@ export default function App() {
                       onTriggerAlarm={testAlarm}
                       onConsumeDose={handleConsumeDose}
                       onRestoreDose={handleCardRestoreDose}
+                      onOpenHistory={(m) => setHistoryMedication(m)}
                       lastRefillQuantity={(() => {
                         const lastRefill = lastRefillByMed.get(med.id);
                         return lastRefill && lastRefill.amount > 0 ? lastRefill.amount : undefined;
@@ -961,6 +968,16 @@ export default function App() {
           setSelectDoseMed(null);
           setSelectDoseMode('take');
         }}
+      />
+      <MedicationHistoryModal
+        isOpen={Boolean(historyMedication)}
+        medication={
+          historyMedication
+            ? (medications.find((m) => m.id === historyMedication.id) ?? historyMedication)
+            : null
+        }
+        logs={logs}
+        onClose={() => setHistoryMedication(null)}
       />
       <AutoDeductPromptModal
         isOpen={isAutoDeductPromptOpen}

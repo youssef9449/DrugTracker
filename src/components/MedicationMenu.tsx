@@ -8,6 +8,7 @@ import {
   Droplets,
   Syringe,
   Package,
+  History,
   X,
 } from 'lucide-react';
 import { Medication } from '../types';
@@ -21,6 +22,7 @@ interface MedicationMenuProps {
   onEdit: (medication: Medication) => void;
   onDelete: (id: string) => void;
   onToggleAutoDeduct: (id: string) => void;
+  onOpenHistory?: (medication: Medication) => void;
   size?: 'xs' | 'sm' | 'md';
   showTypeIcon?: boolean;
 }
@@ -46,6 +48,7 @@ export function MedicationMenu({
   onEdit,
   onDelete,
   onToggleAutoDeduct,
+  onOpenHistory,
   size = 'sm',
   showTypeIcon = false,
 }: MedicationMenuProps) {
@@ -171,6 +174,18 @@ export function MedicationMenu({
         >
           <MedicationTypeIcon unit={medication.unit} className={iconDims} />
         </span>
+      )}
+
+      {onOpenHistory && (
+        <button
+          type="button"
+          onClick={() => onOpenHistory(medication)}
+          className={`${iconButtonClass} bg-teal-50 text-teal-800 hover:bg-teal-100 hover:text-teal-900 border border-teal-200/60`}
+          aria-label="سجل حركات الدواء"
+          title="سجل حركات الدواء (الخصم والتناول والتعبئة)"
+        >
+          <History className={iconDims} aria-hidden="true" />
+        </button>
       )}
 
       <button

@@ -103,13 +103,13 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
         final String timeHhmm = intent.getStringExtra(AutoDeductionContract.EXTRA_TIME_HHMM);
         final long recurrenceGeneration = intent.getLongExtra(
                 AutoDeductionContract.EXTRA_RECURRENCE_GENERATION, 0L);
-        final String operationVersion = intent.getStringExtra(
+        final String deliveryOperationVersion = intent.getStringExtra(
                 AutoDeductionContract.EXTRA_OPERATION_VERSION);
         final String legacyScheduleVersion = intent.getStringExtra(
                 AutoDeductionContract.EXTRA_SCHEDULE_VERSION);
         final String operationVersion =
-                operationVersion != null && !operationVersion.isEmpty()
-                        ? operationVersion
+                deliveryOperationVersion != null && !deliveryOperationVersion.isEmpty()
+                        ? deliveryOperationVersion
                         : legacyScheduleVersion;
         final int fireRetryCount = intent.getIntExtra(
                 AutoDeductionContract.EXTRA_FIRE_RETRY_COUNT, 0);

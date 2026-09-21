@@ -654,20 +654,24 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                     end side in their original place. In custom mode each
                     quantity input is rendered directly under its unit toggle. */}
                 <div className="flex items-start justify-between gap-1.5 flex-wrap">
-                  <SegmentedButton<'period' | 'custom'>
-                    className="shrink-0"
-                    size="sm"
-                    value={getQuantityMode(med)}
-                    onChange={(val) => handleToggleQuantityMode(med, val, suggestedPills)}
-                    options={[
-                      { value: 'period', label: 'حسب الفترة' },
-                      { value: 'custom', label: 'كمية محددة' },
-                    ]}
-                    aria-label={`طريقة حساب كمية طلب ${med.name}`}
-                  />
+                  <div className={`shrink-0 ${getQuantityMode(med) === 'custom' ? 'order-2' : 'order-1'}`}>
+                    <SegmentedButton<'period' | 'custom'>
+                      className="shrink-0"
+                      size="sm"
+                      value={getQuantityMode(med)}
+                      onChange={(val) => handleToggleQuantityMode(med, val, suggestedPills)}
+                      options={[
+                        { value: 'period', label: 'حسب الفترة' },
+                        { value: 'custom', label: 'كمية محددة' },
+                      ]}
+                      aria-label={`طريقة حساب كمية طلب ${med.name}`}
+                    />
+                  </div>
 
                   {availableUnits.length > 1 ? (
-                    <div className="flex items-start gap-1 shrink-0">
+                    <div
+                      className={`flex items-start gap-1 shrink-0 ${getQuantityMode(med) === 'custom' ? 'order-1' : 'order-2'}`}
+                    >
                       {availableUnits.map((u) => {
                         const isActive = selectedUnits.includes(u);
                         const icon =
@@ -739,7 +743,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                           onChange={(event) =>
                             handleCustomQuantityChange(med, unit, event.target.value)
                           }
-                          className="w-14 shrink-0 rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-center font-mono font-bold text-xs focus:ring-1 focus:ring-teal-500"
+                          className={`w-14 shrink-0 rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-center font-mono font-bold text-xs focus:ring-1 focus:ring-teal-500 ${getQuantityMode(med) === 'custom' ? 'order-1' : ''}`}
                           aria-label={`كمية ${med.name} ${label}`}
                         />
                       );

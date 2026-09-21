@@ -114,7 +114,7 @@ export interface ManualStockEnvelope {
   baseGeneration: number;
   mutationSeq: number;
   /** Native Auto-owned stock deltas applied with this foreground mutation. */
-  stockDeltas: Array<{ medicationId: string; delta: number }>;
+  stockDeltas?: Array<{ medicationId: string; delta: number }>;
 }
 
 export interface PendingEnvelopeRef {

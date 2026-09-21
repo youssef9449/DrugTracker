@@ -40,6 +40,21 @@ public final class AutoDeductionLifecycle {
 
             AutoDeductionScheduler scheduler =
                     new AutoDeductionScheduler(context);
+
+            // Native FIRED events can outlive the JS process. Before restoring
+            // schedules, make sure their stock side is also durable even when
+            // the WebView remains unavailable during boot/recovery.
+            AutoDeductionScheduler.RestoreResult stockRecovery =
+                    scheduler.recoverFiredStockPass();
+            if (stockRecovery.ok) {
+                Log.i(TAG, reason + ": recovered Native stock for "
+                        + stockRecovery.restored + " FIRED occurrence(s)");
+            } else {
+                Log.e(TAG, reason + ": Native FIRED stock recovery incomplete: "
+                        + stockRecovery.error + " recovered="
+                        + stockRecovery.restored + " failed=" + stockRecovery.failed);
+            }
+
             AutoDeductionScheduler.RestoreResult rr =
                     scheduler.restoreFutureSchedules();
             if (rr.ok) {

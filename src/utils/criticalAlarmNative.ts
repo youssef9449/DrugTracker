@@ -3,9 +3,17 @@ import { Capacitor, registerPlugin } from '@capacitor/core';
 interface CriticalStockPlugin {
   schedule(options: {
     medicationId: string;
-    medicationName: string;
-    unit: string;
-    triggerAtEpochMs: number;
+    localDate: string;
+    localTime: string;
+    title: string;
+    body: string;
+    channelId: string;
+    channelName: string;
+    channelImportance: number;
+    channelVisibility: number;
+    smallIcon: string;
+    autoCancel: boolean;
+    ongoing: boolean;
   }): Promise<{ ok: boolean; error?: string }>;
   cancel(options: {
     medicationId: string;
@@ -16,9 +24,10 @@ interface CriticalStockPlugin {
   }>;
   verify(options: {
     medicationId: string;
-    alarmTimeMs: number;
-  }): Promise<{ ok: boolean }>;
-  listScheduled(): Promise<{ ids: string[] }>;
+  }): Promise<{
+    ok: boolean;
+    triggerAtEpochMs?: number;
+  }>;
 }
 
 const CriticalStock = registerPlugin<CriticalStockPlugin>('CriticalStock');
@@ -33,6 +42,23 @@ function isAndroid(): boolean {
   }
 }
 
+function localDate(epochMs: number): string {
+  const value = new Date(epochMs);
+  return [
+    value.getFullYear(),
+    String(value.getMonth() + 1).padStart(2, '0'),
+    String(value.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function localTime(epochMs: number): string {
+  const value = new Date(epochMs);
+  return [
+    String(value.getHours()).padStart(2, '0'),
+    String(value.getMinutes()).padStart(2, '0'),
+  ].join(':');
+}
+
 export async function scheduleCriticalAlarmNative(
   medId: string,
   medName: string,
@@ -40,12 +66,21 @@ export async function scheduleCriticalAlarmNative(
   unit: string
 ): Promise<boolean> {
   if (!isAndroid()) return false;
+
   try {
     const result = await CriticalStock.schedule({
       medicationId: medId,
-      medicationName: medName,
-      unit,
-      triggerAtEpochMs: criticalDateMs,
+      localDate: localDate(criticalDateMs),
+      localTime: localTime(criticalDateMs),
+      title: `🚨 ${medName}: اقترب النفاد الحرج`,
+      body: `مخزون "${medName}" دخل مرحلة النفاد الحرج (${unit}). يرجى التعبئة فوراً!`,
+      channelId: 'low-stock',
+      channelName: 'تنبيهات النفاذ',
+      channelImportance: 4,
+      channelVisibility: 1,
+      smallIcon: 'ic_launcher',
+      autoCancel: true,
+      ongoing: false,
     });
     return result?.ok === true;
   } catch (error) {
@@ -70,25 +105,16 @@ export async function verifyCriticalAlarmPendingNative(
   alarmTimeMs: number
 ): Promise<boolean> {
   if (!isAndroid()) return false;
+
   try {
     const result = await CriticalStock.verify({
       medicationId: medId,
-      alarmTimeMs,
     });
-    return result?.ok === true;
+    return (
+      result?.ok === true &&
+      result.triggerAtEpochMs === alarmTimeMs
+    );
   } catch {
     return false;
-  }
-}
-
-export async function listScheduledCriticalMedicationIdsNative(): Promise<
-  string[]
-> {
-  if (!isAndroid()) return [];
-  try {
-    const result = await CriticalStock.listScheduled();
-    return Array.isArray(result?.ids) ? result.ids : [];
-  } catch {
-    return [];
   }
 }

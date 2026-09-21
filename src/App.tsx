@@ -128,7 +128,7 @@ export default function App() {
   // permission check has not completed yet. When false, dose-reminder
   // scheduling is BLOCKED — inexact alarms are unacceptable for medication
   // reminders. The user grants this via Android settings (the plugin's
-  // changeExactNotificationSetting opens the settings screen). On web /
+  // The native ExactAlarmRuntime bridge opens the exact-alarm settings screen. On web /
   // Android < 12 this is always true.
   const [exactAlarmPermission, setExactAlarmPermission] = useState<ExactAlarmPermission | null>(null);
   // Bumped on every app resume (appStateChange) so the critical-alarm

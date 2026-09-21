@@ -162,6 +162,12 @@ interface AutoDeductionPlugin {
   applyForegroundStockDeltas(options: {
     mutationSeq: number;
     deltas: Array<{ medicationId: string; delta: number }>;
+    occurrenceResolutions?: Array<{
+      medicationId: string;
+      doseId: string;
+      calendarDate: string;
+      type: 'CONSUMED' | 'SKIPPED';
+    }>;
   }): Promise<ApplyForegroundStockDeltasResult>;
   applyAutoDeductionStock(options: {
     medicationId: string;
@@ -273,13 +279,33 @@ export async function convergeAutoDeductionStock(
 
 export async function applyForegroundAutoStockDeltas(
   mutationSeq: number,
-  deltas: Array<{ medicationId: string; delta: number }>
+  deltas: Array<{ medicationId: string; delta: number }>,
+  occurrenceResolutions: Array<{
+    medicationId: string;
+    doseId: string;
+    calendarDate: string;
+    type: 'CONSUMED' | 'SKIPPED';
+  }> = []
 ): Promise<ApplyForegroundStockDeltasResult> {
   if (!isNativeAndroid()) {
     return { ok: true, alreadyApplied: false, stocks: [] };
   }
   if (!(mutationSeq > 0)) {
     return { ok: false, alreadyApplied: false, stocks: [], error: 'invalid_mutation_seq' };
+  }
+  if (occurrenceResolutions.some((resolution) =>
+    typeof resolution.medicationId !== 'string' ||
+    !resolution.medicationId.trim() ||
+    typeof resolution.doseId !== 'string' ||
+    !resolution.doseId.trim() ||
+    (resolution.type !== 'CONSUMED' && resolution.type !== 'SKIPPED')
+  )) {
+    return {
+      ok: false,
+      alreadyApplied: false,
+      stocks: [],
+      error: 'invalid_occurrence_resolution',
+    };
   }
   try {
     const cleanDeltas = deltas
@@ -294,6 +320,12 @@ export async function applyForegroundAutoStockDeltas(
     return await AutoDeduction.applyForegroundStockDeltas({
       mutationSeq,
       deltas: cleanDeltas,
+      occurrenceResolutions: occurrenceResolutions.map((resolution) => ({
+        medicationId: resolution.medicationId.trim(),
+        doseId: resolution.doseId.trim(),
+        calendarDate: resolution.calendarDate,
+        type: resolution.type,
+      })),
     });
   } catch (e) {
     return {

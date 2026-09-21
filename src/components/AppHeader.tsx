@@ -89,7 +89,7 @@ export const AppHeader: FC<AppHeaderProps> = ({
             title="الإعدادات"
             className={ICON_BUTTON_CLASS}
           >
-            <Settings className="w-4 h-4" />
+            <Settings className="w-6 h-6" />
           </button>
 
           {/* Browser / In-App Notification toggle */}
@@ -114,11 +114,11 @@ export const AppHeader: FC<AppHeaderProps> = ({
           >
             {notificationsEnabled ? (
               <>
-                <Bell className="w-5 h-5 fill-teal-800/10 text-teal-900" />
+                <Bell className="w-6 h-6 fill-teal-800/10 text-teal-900" />
                 <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-emerald-600 ring-2 ring-white animate-pulse" />
               </>
             ) : (
-              <BellOff className="w-4 h-4" />
+              <BellOff className="w-6 h-6" />
             )}
           </button>
 
@@ -136,10 +136,10 @@ export const AppHeader: FC<AppHeaderProps> = ({
                 : 'تنبيه النفاذ الحرج متوقف'
             }
             aria-pressed={criticalStockAlertsEnabled}
-            className={`w-10 h-10 rounded-full transition-colors relative flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 ${criticalStockAlertsEnabled ? 'bg-rose-100 text-rose-800' : 'text-slate-600 hover:bg-slate-100 active:bg-slate-200'}`}
+            className={`w-12 h-12 rounded-full transition-colors relative flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 ${criticalStockAlertsEnabled ? 'bg-rose-100 text-rose-800' : 'text-slate-600 hover:bg-slate-100 active:bg-slate-200'}`}
           >
             <AlertTriangle
-              className={`w-4 h-4 ${
+              className={`w-6 h-6 ${
                 criticalStockAlertsEnabled ? 'fill-rose-200 text-rose-800' : 'text-slate-600'
               }`}
             />
@@ -152,7 +152,7 @@ export const AppHeader: FC<AppHeaderProps> = ({
             title={isPhoneFrame ? 'التبديل إلى وضع الشاشة الكاملة' : 'التبديل إلى مظهر هاتف أندرويد'}
             className={`hidden md:flex ${ICON_BUTTON_CLASS}`}
           >
-            {isPhoneFrame ? <Monitor className="w-4 h-4" /> : <Smartphone className="w-4 h-4" />}
+            {isPhoneFrame ? <Monitor className="w-6 h-6" /> : <Smartphone className="w-6 h-6" />}
           </button>
 
           {/* Font size toggle — compact A+/A- only (no Type icon) */}
@@ -160,7 +160,7 @@ export const AppHeader: FC<AppHeaderProps> = ({
             onClick={onToggleFontScale}
             title={fontScale === 'large' ? 'إرجاع حجم الخط للطبيعي' : 'تكبير حجم الخط'}
             aria-label={fontScale === 'large' ? 'إرجاع حجم الخط للطبيعي' : 'تكبير حجم الخط'}
-            className={`min-w-10 h-10 rounded-full transition-colors flex items-center justify-center font-bold leading-none focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 ${
+            className={`min-w-12 h-12 rounded-full transition-colors flex items-center justify-center font-bold leading-none focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 ${
               fontScale === 'large'
                 ? 'bg-teal-100 text-teal-900'
                 : 'text-slate-700 hover:bg-slate-100 active:bg-slate-200'
@@ -189,43 +189,43 @@ export const AppHeader: FC<AppHeaderProps> = ({
               onChange={(e) => onSearchChange(e.target.value)}
               onInput={(e) => onSearchChange((e.target as HTMLInputElement).value)}
               placeholder="بحث عن دواء..."
-              className="w-full h-14 pl-11 pr-11 rounded-full bg-slate-100 border border-transparent text-slate-900 placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600/30 focus:bg-white focus:border-slate-300 transition-colors [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
+              className="w-full h-14 pl-14 pr-14 rounded-full bg-slate-100 border border-transparent text-slate-900 placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600/30 focus:bg-white focus:border-slate-300 transition-colors [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
             />
-            <Search className="w-5 h-5 text-slate-600 absolute right-4 top-4 pointer-events-none" />
+            <Search className="w-6 h-6 text-slate-600 absolute right-4 top-4 pointer-events-none" />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => onSearchChange('')}
                 aria-label="مسح البحث"
                 title="مسح البحث"
-                className="absolute left-3 top-4 w-6 h-6 rounded-full flex items-center justify-center text-slate-600 hover:bg-slate-200 active:bg-slate-300 transition-colors cursor-pointer"
+                className="absolute left-1 top-1 w-12 h-12 rounded-full flex items-center justify-center text-slate-600 hover:bg-slate-200 active:bg-slate-300 transition-colors cursor-pointer"
               >
-                <X className="w-3.5 h-3.5 stroke-[2.5]" />
+                <X className="w-6 h-6 stroke-[2.25]" />
               </button>
             )}
           </div>
 
-          {/* M3 Filter Chips (8dp rounded rectangle with checkmark on selection) */}
+          {/* M3 Filter Chips: 40dp height, outlined/unselected and tonal selected state. */}
           <div className="flex items-center gap-2 overflow-x-auto pb-0.5 no-scrollbar text-xs">
             <button
               type="button"
               onClick={() => onFilterChange('all')}
-              className={`h-10 px-4 rounded-full font-medium transition-colors whitespace-nowrap flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 cursor-pointer ${
+              className={`h-10 px-4 rounded-lg font-medium transition-colors whitespace-nowrap flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 cursor-pointer ${
                 filter === 'all'
                   ? 'bg-teal-100 text-teal-950 font-medium'
                   : 'bg-transparent text-slate-700 border border-slate-400 hover:bg-slate-100 active:bg-slate-200'
               }`}
             >
-              {filter === 'all' && <Check className="w-3.5 h-3.5 text-teal-900 stroke-[2.5]" />}
+              {filter === 'all' && <Check className="w-4 h-4 text-teal-900 stroke-[2.5]" />}
               <span>جميع الأدوية</span>
             </button>
 
             <button
               type="button"
               onClick={() => onFilterChange('alerts')}
-              className={`h-10 px-4 rounded-full font-medium transition-colors whitespace-nowrap flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 cursor-pointer ${filter === 'alerts' ? 'bg-teal-100 text-teal-950' : 'bg-transparent text-slate-700 border border-slate-400 hover:bg-slate-100 active:bg-slate-200'}`}
+              className={`h-10 px-4 rounded-lg font-medium transition-colors whitespace-nowrap flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 cursor-pointer ${filter === 'alerts' ? 'bg-teal-100 text-teal-950' : 'bg-transparent text-slate-700 border border-slate-400 hover:bg-slate-100 active:bg-slate-200'}`}
             >
-              {filter === 'alerts' && <Check className="w-3.5 h-3.5 text-teal-900 stroke-[2.5]" />}
+              {filter === 'alerts' && <Check className="w-4 h-4 text-teal-900 stroke-[2.5]" />}
               <span>قارب على النفاذ</span>
               {alertsCount > 0 && (
                 <span
@@ -243,9 +243,9 @@ export const AppHeader: FC<AppHeaderProps> = ({
             <button
               type="button"
               onClick={() => onFilterChange('sufficient')}
-              className={`h-10 px-4 rounded-full font-medium transition-colors whitespace-nowrap flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 cursor-pointer ${filter === 'sufficient' ? 'bg-teal-100 text-teal-950' : 'bg-transparent text-slate-700 border border-slate-400 hover:bg-slate-100 active:bg-slate-200'}`}
+              className={`h-10 px-4 rounded-lg font-medium transition-colors whitespace-nowrap flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 cursor-pointer ${filter === 'sufficient' ? 'bg-teal-100 text-teal-950' : 'bg-transparent text-slate-700 border border-slate-400 hover:bg-slate-100 active:bg-slate-200'}`}
             >
-              {filter === 'sufficient' && <Check className="w-3.5 h-3.5 text-teal-900 stroke-[2.5]" />}
+              {filter === 'sufficient' && <Check className="w-4 h-4 text-teal-900 stroke-[2.5]" />}
               <span>المخزون الكافي</span>
             </button>
           </div>

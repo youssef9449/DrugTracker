@@ -90,7 +90,7 @@ for (const relDir of [
 ]) {
   const names = fs
     .readdirSync(path.join(root, relDir))
-    .filter((name) => /SystemReceiver\\.java$/i.test(name));
+    .filter((name) => /SystemReceiver\.java$/i.test(name));
   assert(
     names.length === 0,
     'Feature package must not contain a parallel system receiver: '
@@ -107,7 +107,7 @@ assert(
   'Shared system receiver must dispatch restoration through ExactAlarmLifecycle'
 );
 assert(
-  !/restore\\s*\\(/.test(receiver.replace('ExactAlarmLifecycle.restoreAll(', '')),
+  !/restore\s*\(/.test(receiver.replace('ExactAlarmLifecycle.restoreAll(', '')),
   'Shared system receiver must not contain feature recovery implementations'
 );
 

@@ -728,19 +728,42 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                     })}
                   </div>
                 ) : (
-                  <div className="space-y-1">
+                  /* Each selected unit keeps its quantity input beside its unit icon/label
+                     so multi-unit custom orders stay readable (input is not orphaned
+                     from the packaging unit the user is ordering). */
+                  <div className="flex flex-wrap items-center gap-1.5">
                     {selectedUnits.map((unit) => {
                       const inputValue = getCustomQuantityInputValue(med, unit, suggestedPills);
+                      const icon =
+                        unit === 'pills' ? (
+                          <Pill className="w-2.5 h-2.5 shrink-0" />
+                        ) : unit === 'boxes' ? (
+                          <Box className="w-2.5 h-2.5 shrink-0" />
+                        ) : (
+                          <Layers className="w-2.5 h-2.5 shrink-0" />
+                        );
+                      const boxLabel = med.unit === 'مل' ? 'عبوة' : 'علبة';
+                      const label =
+                        unit === 'pills' ? med.unit : unit === 'boxes' ? boxLabel : 'شريط';
                       return (
-                        <div key={unit} className="flex items-center gap-1.5 rounded-lg border border-slate-200/80 bg-slate-50/60 px-2.5 py-1">
-                          <span className="text-[10px] text-slate-500 font-medium">الكمية:</span>
+                        <div
+                          key={unit}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200/80 bg-slate-50/60 pl-1.5 pr-1 py-1"
+                        >
+                          <span
+                            className="inline-flex items-center gap-0.5 rounded-md bg-teal-50 text-teal-900 border border-teal-200/80 px-1.5 py-0.5 text-[10px] font-bold"
+                            title={label}
+                          >
+                            {icon}
+                            <span>{label}</span>
+                          </span>
                           <input
                             type="number"
                             min="1"
                             value={inputValue}
                             onChange={(event) => handleCustomQuantityChange(med, unit, event.target.value)}
                             className="w-14 rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-center font-mono font-bold text-xs focus:ring-1 focus:ring-teal-500"
-                            aria-label={`كمية ${med.name} ${unitLabel(unit, med, 1)}`}
+                            aria-label={`كمية ${med.name} ${label}`}
                           />
                         </div>
                       );

@@ -43,6 +43,39 @@ function isNativeAndroid(): boolean {
     return false;
   }
 }
+
+/**
+ * Generation of the last JS snapshot the native execution shadow confirmed.
+ *
+ * Correctness barrier: an exact Auto schedule must never be created while the
+ * native shadow does not yet reflect the current durable stock generation.
+ * Otherwise an alarm firing with the app closed could hit a missing or stale
+ * shadow row and the closed-app deduction would fail. Every successful
+ * native sync records the generation it sent; a later committed mutation
+ * advances the durable generation past it and forces a fresh sync before
+ * scheduling.
+ */
+let lastSyncedStockGeneration: number | null = null;
+
+export function isBackgroundStockSyncedForCurrentGeneration(): boolean {
+  if (!isNativeAndroid()) return true;
+  return (
+    lastSyncedStockGeneration != null &&
+    lastSyncedStockGeneration === loadStockGeneration()
+  );
+}
+
+/**
+ * Validate one medication's stock value for the native execution shadow.
+ *
+ * Fail-closed: a corrupted stock value (undefined / NaN / '' / negative) must
+ * never be coerced to 0 and mirrored into the native ledger — that would
+ * silently turn unknown stock into "empty" and let Auto deduct from it.
+ * The sync is refused instead; native applies the same rule independently.
+ */
+function isValidShadowPills(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
 function occurrenceKey(medicationId: string, doseId: string, calendarDate: string): string {
   return `${medicationId}\u001f${doseId}\u001f${calendarDate}`;
 }
@@ -125,17 +158,34 @@ export async function syncBackgroundStock(
   }
   try {
     const applied = buildAppliedOccurrenceSets(medications, logs);
-    return await AutoDeduction.syncBackgroundStock({
-      medications: medications.map((med) => ({
+    const stockGeneration = loadStockGeneration();
+    const nativeMedications: NativeBackgroundMedication[] = [];
+    for (const med of medications) {
+      if (!isValidShadowPills(med.currentPills)) {
+        return {
+          ok: false,
+          backgroundVersion: 0,
+          currentPillsByMedication: {},
+          error: 'invalid_medication_snapshot',
+        };
+      }
+      nativeMedications.push({
         medicationId: med.id,
-        currentPills: Math.max(0, Number(med.currentPills) || 0),
-      })),
-      stockGeneration: loadStockGeneration(),
+        currentPills: med.currentPills,
+      });
+    }
+    const result = await AutoDeduction.syncBackgroundStock({
+      medications: nativeMedications,
+      stockGeneration,
       alreadyAppliedOccurrences: applied.all,
       clearAppliedOccurrences,
       jsManualTakeOccurrences: applied.manualTake,
       jsRestoreOccurrences: applied.restore,
     });
+    if (result.ok) {
+      lastSyncedStockGeneration = stockGeneration;
+    }
+    return result;
   } catch (e) {
     return {
       ok: false,
@@ -161,24 +211,35 @@ export async function convergeBackgroundStock(
     return { ok: true, medications };
   }
 
-  const result = await syncBackgroundStock(
-    medications,
-    logs,
-    clearAppliedOccurrences
-  );
-  if (!result.ok) {
-    return { ok: false, medications, error: result.error };
-  }
-  const merged = medications.map((med) => {
-    const nativePills = result.currentPillsByMedication[med.id];
-    return typeof nativePills === 'number' && Number.isFinite(nativePills)
-      ? { ...med, currentPills: Math.max(0, nativePills) }
-      : med;
-  });
-  const changed = merged.some(
-    (med, index) => med.currentPills !== medications[index].currentPills
-  );
-  if (changed) {
+  // Bounded convergence: each pass sends the freshest JS snapshot and adopts
+  // the native result. The re-anchor pass no longer discards its returned
+  // pills, so a native Auto fire landing mid-convergence is reflected in the
+  // returned snapshot (or triggers one more pass) instead of leaving JS with
+  // the older first-sync value until a later reconciliation.
+  const MAX_PASSES = 3;
+  let current = medications;
+  for (let pass = 0; pass < MAX_PASSES; pass++) {
+    const result = await syncBackgroundStock(
+      current,
+      logs,
+      pass === 0 ? clearAppliedOccurrences : []
+    );
+    if (!result.ok) {
+      return { ok: false, medications, error: result.error };
+    }
+    const merged = current.map((med) => {
+      const nativePills = result.currentPillsByMedication[med.id];
+      return typeof nativePills === 'number' && Number.isFinite(nativePills)
+        ? { ...med, currentPills: Math.max(0, nativePills) }
+        : med;
+    });
+    const changed = merged.some(
+      (med, index) => med.currentPills !== current[index].currentPills
+    );
+    if (!changed) {
+      // Native view is consistent with the snapshot we last sent — done.
+      return { ok: true, medications: merged };
+    }
     const persistError = persist(STORAGE_MEDS_KEY, merged, { json: true });
     if (persistError) {
       console.warn('[App] background stock convergence could not persist JS stock:', persistError);
@@ -188,13 +249,12 @@ export async function convergeBackgroundStock(
     // stock-mutation generation. Re-anchor the native JS baseline at the same
     // generation so the next real foreground mutation contributes only its
     // own delta.
-    const reanchor = await syncBackgroundStock(merged, logs);
-    if (!reanchor.ok) {
-      console.warn('[App] background stock re-anchor failed:', reanchor.error);
-      return { ok: false, medications, error: reanchor.error };
-    }
+    current = merged;
   }
-  return { ok: true, medications: merged };
+  // Pass budget exhausted with a concurrent native writer still active.
+  // Return the last persisted (freshest) merged snapshot; the next
+  // reconciliation converges again from here.
+  return { ok: true, medications: current };
 }
 
 export async function repairBackgroundStockFromFiredEvents(): Promise<{

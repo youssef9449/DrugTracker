@@ -427,6 +427,34 @@ public class AutoDeductionPlugin extends Plugin {
                 }
             }
 
+            // Marker-retention pruning protection: occurrences guarded by an
+            // unreconciled FIRED event must never lose their applied marker,
+            // because the repair boundary re-applies exactly those occurrences
+            // and a pruned marker would allow a second deduction for an
+            // occurrence whose native stock effect was already applied.
+            // If the FIRED list cannot be read, pass null so this sync keeps
+            // legacy behavior (no pruning) instead of risking a double deduct.
+            java.util.Set<String> pruneProtected = null;
+            try {
+                AutoDeductionEventStore.FiredEventsResult firedEvents =
+                        new AutoDeductionEventStore(getContext()).listFiredEventsResult();
+                if (firedEvents != null && firedEvents.ok) {
+                    pruneProtected = new java.util.HashSet<>();
+                    for (JSONObject o : firedEvents.events) {
+                        String key = AutoDeductionContract.occurrenceKey(
+                                o.optString("medicationId", ""),
+                                o.optString("doseId", ""),
+                                o.optString("calendarDate", ""));
+                        if (!key.isEmpty()) {
+                            pruneProtected.add(key);
+                        }
+                    }
+                }
+            } catch (Exception pruneLookupError) {
+                Log.w(TAG, "applied-marker prune protection lookup failed; pruning disabled for this sync", pruneLookupError);
+                pruneProtected = null;
+            }
+
             BackgroundStockStore.SyncResult result =
                     new BackgroundStockStore(getContext()).syncFromJs(
                             rows,
@@ -434,7 +462,8 @@ public class AutoDeductionPlugin extends Plugin {
                             already,
                             clear,
                             manualTake,
-                            restore);
+                            restore,
+                            pruneProtected);
             JSObject ret = new JSObject();
             ret.put("ok", result.ok);
             ret.put("backgroundVersion", result.backgroundVersion);

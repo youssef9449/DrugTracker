@@ -26,6 +26,7 @@ import {
   withAutoStockMutationGate,
   commitDurableAutoStockState,
   loadDurableGlobalAutoDeductEnabled,
+  loadStockGeneration,
   type AutoStockDurableState,
 } from './autoDeductionStockGate';
 import {
@@ -58,6 +59,14 @@ export interface ExactAutoEnvelope {
   createdAt: string;
   /** Shared causal order with Manual envelopes — required (no legacy seq). */
   mutationSeq: number;
+  /**
+   * Durable stock generation captured BEFORE this envelope's commit. Recovery
+   * uses it to prove the commit's generation bump persisted before finalizing
+   * (a lost generation write would otherwise let a same-generation native sync
+   * revert the recovered mutation). Production always sets it; absent on
+   * legacy envelopes, which recover fail-closed (generation re-established).
+   */
+  baseGeneration?: number;
 }
 
 export interface RunReconciliationInput {
@@ -455,6 +464,9 @@ async function runOnce(
     toAcknowledge: result.toAcknowledge,
     createdAt: new Date().toISOString(),
     mutationSeq,
+    // Pre-commit generation: recovery's finalization proof compares the
+    // durable generation against this base to detect a lost generation write.
+    baseGeneration: loadStockGeneration(),
   };
 
   const envErr = saveEnvelope(envelope);

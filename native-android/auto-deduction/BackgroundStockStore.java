@@ -13,6 +13,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TimeZone;
 
 /**
  * Auto-owned durable stock execution ledger used while the WebView is unavailable.
@@ -36,6 +37,14 @@ public final class BackgroundStockStore {
     private static final String KEY_MED_PREFIX = "med:";
     private static final String KEY_APPLIED_PREFIX = "applied:";
     private static final Object LOCK = new Object();
+
+    /**
+     * Retention window for applied occurrence markers not referenced by the
+     * current JS snapshot. Markers guarding an unreconciled FIRED event, or
+     * still derivable from JS history, are never pruned regardless of age.
+     */
+    private static final int APPLIED_MARKER_RETENTION_DAYS = 60;
+    private static final long MILLIS_PER_DAY = 86_400_000L;
 
     private static final String MARKER_SOURCE_AUTO = "auto";
     private static final String MARKER_SOURCE_JS = "js";
@@ -169,6 +178,24 @@ public final class BackgroundStockStore {
             Set<String> clearAppliedOccurrences,
             Set<String> jsManualTakeOccurrences,
             Set<String> jsRestoreOccurrences) {
+        return syncFromJs(
+                medications,
+                jsGeneration,
+                alreadyAppliedOccurrences,
+                clearAppliedOccurrences,
+                jsManualTakeOccurrences,
+                jsRestoreOccurrences,
+                /* pruneProtectedOccurrences */ null);
+    }
+
+    public SyncResult syncFromJs(
+            List<MedicationState> medications,
+            long jsGeneration,
+            Set<String> alreadyAppliedOccurrences,
+            Set<String> clearAppliedOccurrences,
+            Set<String> jsManualTakeOccurrences,
+            Set<String> jsRestoreOccurrences,
+            Set<String> pruneProtectedOccurrences) {
         if (medications == null || jsGeneration < 0L) {
             return SyncResult.failure(
                     readVersion(),
@@ -315,6 +342,36 @@ public final class BackgroundStockStore {
                 }
             }
 
+            // Durable-growth control for applied markers (safe pruning).
+            // A marker is pruned only when ALL of the following hold:
+            //  - pruning is enabled for this sync (pruneProtectedOccurrences != null);
+            //  - the occurrence is not part of the incoming JS snapshot set
+            //    (those are re-seeded/rewritten below anyway);
+            //  - it is not a Manual Take / Restore resolution or an explicit clear;
+            //  - it does not guard an unreconciled FIRED event (the repair
+            //    boundary re-applies exactly those occurrences, so losing the
+            //    marker could double-deduct an already-applied native effect);
+            //  - its occurrence date is older than the retention window.
+            // Unparseable dates are conservatively kept.
+            if (pruneProtectedOccurrences != null) {
+                long todayUtcDay = Math.floorDiv(System.currentTimeMillis(), MILLIS_PER_DAY);
+                for (String key : existingPrefs.keySet()) {
+                    if (!key.startsWith(KEY_APPLIED_PREFIX)) continue;
+                    String occurrence = key.substring(KEY_APPLIED_PREFIX.length());
+                    if (occurrence.isEmpty()) continue;
+                    if (containsOccurrence(alreadyAppliedOccurrences, occurrence)) continue;
+                    if (containsOccurrence(jsManualTakeOccurrences, occurrence)) continue;
+                    if (containsOccurrence(jsRestoreOccurrences, occurrence)) continue;
+                    if (containsOccurrence(clearAppliedOccurrences, occurrence)) continue;
+                    if (pruneProtectedOccurrences.contains(occurrence)) continue;
+                    Long markerUtcDay = occurrenceUtcDay(occurrence);
+                    if (markerUtcDay == null) continue;
+                    if (todayUtcDay - markerUtcDay > APPLIED_MARKER_RETENTION_DAYS) {
+                        sync.remove(key);
+                    }
+                }
+            }
+
             // Restore-before-fire: a Restore occurrence without active skip history
             // must re-arm the occurrence even when no explicit clear list is supplied.
             if (jsRestoreOccurrences != null) {
@@ -429,13 +486,26 @@ public final class BackgroundStockStore {
                 long nextVersion = readVersionLocked() + 1L;
 
                 obj.put("currentPills", nextPills);
-                if (!prefs.edit()
+                boolean written = prefs.edit()
                         .putString(medKey, obj.toString())
                         .putString(
                                 appliedKey,
                                 buildMarkerJson(MARKER_SOURCE_AUTO, actual))
                         .putLong(KEY_VERSION, nextVersion)
-                        .commit()) {
+                        .commit();
+                if (!written) {
+                    // One immediate retry: a transient commit failure must not
+                    // leave durable FIRED evidence unpaired with the stock
+                    // effect and burn a bounded fire-retry alarm on it.
+                    written = prefs.edit()
+                            .putString(medKey, obj.toString())
+                            .putString(
+                                    appliedKey,
+                                    buildMarkerJson(MARKER_SOURCE_AUTO, actual))
+                            .putLong(KEY_VERSION, nextVersion)
+                            .commit();
+                }
+                if (!written) {
                     return ApplyResult.failure(
                             current,
                             readVersionLocked(),
@@ -597,6 +667,30 @@ public final class BackgroundStockStore {
 
     private static boolean containsOccurrence(Set<String> set, String occurrence) {
         return set != null && occurrence != null && set.contains(occurrence);
+    }
+
+    /**
+     * UTC day number of the calendar date embedded in an occurrence key
+     * (medicationId \u001f doseId \u001f yyyy-MM-dd). Returns null when the key does
+     * not carry a parseable calendar date — such markers are never pruned.
+     */
+    private static Long occurrenceUtcDay(String occurrence) {
+        if (occurrence == null) return null;
+        int lastSep = occurrence.lastIndexOf('\u001f');
+        if (lastSep < 0 || lastSep == occurrence.length() - 1) return null;
+        String date = occurrence.substring(lastSep + 1);
+        if (!AutoDeductionContract.isValidCalendarDate(date)) return null;
+        try {
+            int year = Integer.parseInt(date.substring(0, 4));
+            int month = Integer.parseInt(date.substring(5, 7));
+            int day = Integer.parseInt(date.substring(8, 10));
+            Calendar c = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
+            c.clear();
+            c.set(year, month - 1, day, 0, 0, 0);
+            return Math.floorDiv(c.getTimeInMillis(), MILLIS_PER_DAY);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private static boolean isOccurrenceForMedication(String occurrence, String medicationId) {

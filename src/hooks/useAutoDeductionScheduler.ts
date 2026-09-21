@@ -21,6 +21,10 @@ import {
   restoreFutureSchedulesOnce,
 } from '../utils/restoreFutureSchedulesBoundary';
 import { withAutoStockMutationGate } from '../utils/autoDeductionStockGate';
+import {
+  isBackgroundStockSyncedForCurrentGeneration,
+  syncBackgroundStock,
+} from '../utils/backgroundStockNative';
 import { OperationQueue } from '../utils/async/OperationQueue';
 import { GenerationGuard } from '../utils/async/GenerationGuard';
 
@@ -108,6 +112,21 @@ async function scheduleExactOccurrenceFromDurable(slot: AutoDeductionSlot) {
     const epoch = localEpochMs(current.calendarDate, current.time);
     if (epoch == null || epoch <= Date.now() - 2000) {
       return { ok: true, skipped: true } as const;
+    }
+
+    // Correctness barrier: an exact schedule must never be created while the
+    // native background execution shadow is not synchronized with the current
+    // durable stock generation. Otherwise a fire while the app is fully closed
+    // could hit a missing/stale shadow row and the closed-app deduction would
+    // fail. Fail closed — the next scheduler pass retries the sync first.
+    if (!isBackgroundStockSyncedForCurrentGeneration()) {
+      const sync = await syncBackgroundStock(fresh.medications, fresh.logs);
+      if (!sync.ok) {
+        return {
+          ok: false,
+          error: 'background_stock_sync_failed',
+        } as const;
+      }
     }
 
     // IMPORTANT: use the durable slot, not the stale React snapshot.
@@ -435,7 +454,13 @@ export function useAutoDeductionScheduler({
           generationGuardRef.current.isCurrent('auto-deduction', gen)
         ) {
           trackedRef.current.add(key);
-        } else if (!result.ok && result.error === 'exact_alarm_permission_denied') {
+        } else if (
+          !result.ok &&
+          (result.error === 'exact_alarm_permission_denied' ||
+            result.error === 'background_stock_sync_failed')
+        ) {
+          // Shared-environment failure: no point hammering the remaining slots
+          // in this pass. Both are retried on the next scheduler pass.
           break;
         }
       }

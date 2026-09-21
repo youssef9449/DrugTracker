@@ -12,7 +12,10 @@
 
 import type { ConsumptionLog, Medication } from '../types';
 import {
+  STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
+  bumpStockGeneration,
   commitDurableAutoStockState,
+  loadStockGeneration,
   type AutoStockDurableState,
 } from './autoDeductionStockGate';
 import {
@@ -43,6 +46,13 @@ export interface ExactAutoEnvelopeStored {
   createdAt: string;
   /** Required causal order with Manual envelopes. mutationSeq is required. */
   mutationSeq: number;
+  /**
+   * Durable stock generation captured BEFORE this envelope's commit.
+   * Required on newly written envelopes so recovery can prove the commit's
+   * generation bump persisted; older envelopes without it recover fail-closed
+   * (generation is re-established before finalization).
+   */
+  baseGeneration?: number;
 }
 
 let testLoadExact: (() => ExactAutoEnvelopeStored | null) | null = null;
@@ -121,6 +131,8 @@ export interface PendingEnvelopeRef {
   logs: ConsumptionLog[];
   /** Durable global master switch captured with Phase 4 snapshots. */
   globalAutoDeductEnabled?: boolean;
+  /** Pre-mutation stock generation; required for the finalization proof when present. */
+  baseGeneration?: number;
   /** Exact Auto only — native ACK ownership stays with Exact Auto path. */
   toAcknowledge?: Array<{
     medicationId: string;
@@ -178,6 +190,31 @@ export function finalizeMutationSeq(mutationSeq: number): string | null {
   const last = loadLastAppliedMutationSeq();
   if (mutationSeq <= last) return null;
   return persistLastAppliedMutationSeq(mutationSeq);
+}
+
+/**
+ * Generation durability proof for envelope finalization.
+ *
+ * A fully committed mutation advances the stock generation beyond the
+ * envelope's pre-mutation baseGeneration. If the durable generation has NOT
+ * advanced past that base, the commit's generation write was lost (crash or
+ * persist failure between meds/logs/global and the generation write).
+ * Finalizing such an envelope without re-establishing the generation would
+ * let the next same-generation native sync treat the real foreground
+ * mutation as a re-anchor and revert the user's stock — the causal evidence
+ * distinguishing the mutation must survive.
+ *
+ * Known baseGeneration: bump only when the durable generation does not
+ * already prove advancement. Unknown (legacy envelope): cannot prove the
+ * bump persisted, so re-establish it (an unnecessary bump is harmless —
+ * the native delta math treats it as a zero-delta advance — while a missing
+ * necessary bump reverts user stock).
+ */
+function ensureGenerationAdvanced(baseGeneration: number | null | undefined): string | null {
+  if (baseGeneration != null && loadStockGeneration() > baseGeneration) {
+    return null;
+  }
+  return bumpStockGeneration();
 }
 
 /**
@@ -385,6 +422,16 @@ export function recoverAllPendingStockEnvelopes(
     }
 
     if (durableMatchesEnvelopeSnapshot(env, state)) {
+      // Finalization proof must include generation durability, not only
+      // meds/logs/global equality: a partial commit (generation write lost)
+      // leaves the durable snapshot equal to the envelope while the causal
+      // generation evidence is missing. Re-establish it before finalizing.
+      const genErr = ensureGenerationAdvanced(env.baseGeneration);
+      if (genErr) {
+        durabilityBlocked = true;
+        blocked = true;
+        break;
+      }
       const finErr = finalizeMutationSeq(env.mutationSeq);
       if (finErr) {
         durabilityBlocked = true;
@@ -487,6 +534,7 @@ export function recoverManualEnvelopeInto(
       medications: manual.medications,
       logs: manual.logs,
       globalAutoDeductEnabled: manual.globalAutoDeductEnabled,
+      baseGeneration: manual.baseGeneration,
       clear: () => saveManualStockEnvelope(null),
     });
   }
@@ -499,6 +547,7 @@ export function recoverManualEnvelopeInto(
       medications: exact.medications,
       logs: exact.logs,
       globalAutoDeductEnabled: exact.globalAutoDeductEnabled,
+      baseGeneration: exact.baseGeneration,
       toAcknowledge: exact.toAcknowledge,
       clear: () => saveExactAutoStockEnvelope(null),
     });
@@ -521,6 +570,20 @@ export function recoverManualEnvelopeInto(
       if (medErr) return medErr;
       const logErr = opts.persistLogs(state.logs);
       if (logErr) return logErr;
+      // Same causal order as commitDurableAutoStockState: global switch,
+      // then generation, then lastApplied. Skipping the generation bump here
+      // would finalize a mutation whose foreground/native delta evidence was
+      // never written.
+      if (state.globalAutoDeductEnabled != null) {
+        const globalErr = persist(
+          STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
+          String(state.globalAutoDeductEnabled),
+          { json: false }
+        );
+        if (globalErr) return globalErr;
+      }
+      const generationErr = bumpStockGeneration();
+      if (generationErr) return generationErr;
       return finalizeMutationSeq(appliedMutationSeq);
     }
     return commitDurableAutoStockState(state, { appliedMutationSeq });

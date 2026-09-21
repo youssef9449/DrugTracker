@@ -164,14 +164,42 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
           result.logs,
           clearOccurrences
         );
-        if (!backgroundSync.ok) {
+        let backgroundSyncOk = backgroundSync.ok;
+        if (!backgroundSyncOk) {
           console.warn(
             '[App] background stock sync failed after Restore:',
             backgroundSync.error
           );
+          // One immediate retry: the native marker clear (restore-before-fire
+          // re-arm) must not stay unconfirmed on a transient failure. A later
+          // successful sync also re-arms the occurrence from durable Restore
+          // evidence, so this retry is defense in depth, not the only path.
+          const retry = await syncBackgroundStock(
+            result.medications,
+            result.logs,
+            clearOccurrences
+          );
+          backgroundSyncOk = retry.ok;
+          if (!retry.ok) {
+            console.warn(
+              '[App] background stock sync retry failed after Restore:',
+              retry.error
+            );
+          }
         }
         if (soundEnabled) playSuccessChime();
-        if (displayName) showToast(`تم استرجاع الجرعة — ${displayName}`);
+        if (displayName) {
+          if (backgroundSyncOk) {
+            showToast(`تم استرجاع الجرعة — ${displayName}`);
+          } else {
+            // Never claim full success while the required native clear is
+            // still unconfirmed: the JS restore is durable, but the user must
+            // know the background ledger needs the next sync to confirm.
+            showToast(
+              `تم استرجاع الجرعة، لكن تعذّرت مزامنة المخزون مع الخلفية — سيتم التأكيد تلقائيًا عند أقرب مزامنة (${displayName})`
+            );
+          }
+        }
         return {
           medication: result.medications.find((m) => m.id === medicationId) ?? null,
           result,

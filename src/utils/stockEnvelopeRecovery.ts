@@ -295,7 +295,9 @@ export interface UnifiedRecoveryResult {
 /**
  * Recover all pending stock envelopes using mutationSeq causal order.
  * Highest seq above lastApplied is applied/finalized first; lower pending
- * envelopes are cleared only after lastApplied covers them.
+ * envelopes are cleared only after lastApplied covers them. Manual envelopes
+ * also carry the signed Native stock delta that must be applied idempotently
+ * before the JS snapshot is finalized.
  */
 export async function recoverAllPendingStockEnvelopes(
   fresh: AutoStockDurableState,

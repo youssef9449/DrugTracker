@@ -283,37 +283,8 @@ public class AutoDeductionPlugin extends Plugin {
                 }
             }
 
-            List<AutoDeductionStockStore.OccurrenceResolution> resolutions =
-                    new ArrayList<AutoDeductionStockStore.OccurrenceResolution>();
-            JSArray rawResolutions = call.getArray("occurrenceResolutions");
-            if (rawResolutions != null) {
-                for (int i = 0; i < rawResolutions.length(); i++) {
-                    JSONObject obj = rawResolutions.optJSONObject(i);
-                    if (obj == null) continue;
-                    String type = obj.optString("type", "").trim().toUpperCase();
-                    AutoDeductionStockStore.OccurrenceResolution.Type resolutionType;
-                    try {
-                        resolutionType =
-                                AutoDeductionStockStore.OccurrenceResolution.Type.valueOf(type);
-                    } catch (IllegalArgumentException e) {
-                        JSObject ret = new JSObject();
-                        ret.put("ok", false);
-                        ret.put("stocks", new JSArray());
-                        ret.put("error", "invalid_occurrence_resolution");
-                        call.resolve(ret);
-                        return;
-                    }
-                    resolutions.add(new AutoDeductionStockStore.OccurrenceResolution(
-                            obj.optString("medicationId", "").trim(),
-                            obj.optString("doseId", "").trim(),
-                            obj.optString("calendarDate", ""),
-                            resolutionType));
-                }
-            }
-
             AutoDeductionStockStore.SnapshotResult result =
-                    new AutoDeductionStockStore(getContext()).ensureMissingAndRead(
-                            seeds, resolutions);
+                    new AutoDeductionStockStore(getContext()).ensureMissingAndRead(seeds);
             JSObject ret = new JSObject();
             ret.put("ok", result.ok);
             JSArray stocks = new JSArray();
@@ -423,32 +394,6 @@ public class AutoDeductionPlugin extends Plugin {
      * Repair/apply one exact Auto occurrence on the Native stock authority.
      * The operation is occurrence-idempotent.
      */
-    /**
-     * Mark a legacy JS-applied occurrence as already reflected in Native stock.
-     * This is used only during migration when JS occurrence markers prove that
-     * the old implementation already deducted the stock before this Native
-     * authority existed.
-     */
-    @PluginMethod
-    public void adoptAlreadyAppliedOccurrence(PluginCall call) {
-        String medicationId = call.getString("medicationId");
-        String doseId = call.getString("doseId");
-        String calendarDate = call.getString("calendarDate");
-        Double amountObj = call.getDouble("amount");
-        double amount = amountObj != null ? amountObj : Double.NaN;
-
-        AutoDeductionStockStore.AutoApplyResult result =
-                new AutoDeductionStockStore(getContext()).adoptAlreadyAppliedOccurrence(
-                        medicationId, doseId, calendarDate, amount);
-        JSObject ret = new JSObject();
-        ret.put("ok", result.ok);
-        ret.put("applied", result.applied);
-        ret.put("actualDeducted", result.actualDeducted);
-        ret.put("currentPills", result.currentPills);
-        if (result.error != null) ret.put("error", result.error);
-        call.resolve(ret);
-    }
-
     @PluginMethod
     public void applyAutoDeductionStock(PluginCall call) {
         String medicationId = call.getString("medicationId");

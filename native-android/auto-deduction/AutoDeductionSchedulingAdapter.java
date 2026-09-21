@@ -4,6 +4,8 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.os.Bundle;
 
+import java.util.Map;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -54,6 +56,56 @@ public final class AutoDeductionSchedulingAdapter {
                 forceScheduleMetadataRemovalFailureForTest;
     }
 
+    private static String normalizeStorageKey(String storageKey) {
+        if (storageKey == null || storageKey.isEmpty()) return null;
+        return storageKey.startsWith(ExactAlarmContract.SCHEDULE_KEY_PREFIX)
+                ? storageKey.substring(ExactAlarmContract.SCHEDULE_KEY_PREFIX.length())
+                : storageKey;
+    }
+
+    public String getScheduleRaw(String storageKey) {
+        String key = normalizeStorageKey(storageKey);
+        return key == null ? null : alarmRuntime.getScheduleRaw(key);
+    }
+
+    public Map<String, String> listScheduleMetadata() {
+        return alarmRuntime.listScheduleMetadata();
+    }
+
+    public boolean hasSchedule(String storageKey) {
+        String key = normalizeStorageKey(storageKey);
+        return key != null && alarmRuntime.hasSchedule(key);
+    }
+
+    public boolean removeScheduleIfOwned(
+            String storageKey,
+            String expectedOperationVersion) {
+        String key = normalizeStorageKey(storageKey);
+        return key != null
+                && alarmRuntime.removeScheduleIfOwned(
+                        key, expectedOperationVersion);
+    }
+
+    public boolean removeSchedule(String storageKey) {
+        String key = normalizeStorageKey(storageKey);
+        return key != null && alarmRuntime.removeSchedule(key);
+    }
+
+    public boolean hasCancellationTombstone(String storageKey) {
+        String key = normalizeStorageKey(storageKey);
+        return key != null && alarmRuntime.hasCancellationTombstone(key);
+    }
+
+    public boolean isEffectivelyCancelled(String storageKey) {
+        String key = normalizeStorageKey(storageKey);
+        return key != null && alarmRuntime.isEffectivelyCancelled(key);
+    }
+
+    public boolean clearCancellationTombstone(String storageKey) {
+        String key = normalizeStorageKey(storageKey);
+        return key == null || alarmRuntime.clearCancellationTombstone(key);
+    }
+
     public boolean canScheduleExactAlarms() {
         return alarmRuntime.canScheduleExactAlarms();
     }
@@ -95,9 +147,10 @@ public final class AutoDeductionSchedulingAdapter {
             featureMetadata.put("timeHhmm", timeHhmm);
             featureMetadata.put("amount", amount);
             featureMetadata.put("scheduledAtEpochMs", triggerAtEpochMs);
-            featureMetadata.put(
-                    AutoDeductionContract.EXTRA_RECURRENCE_GENERATION,
-                    recurrenceGeneration);
+            // Only identity/timing/amount payload is handed to Shared metadata.
+            // Auto recurrence authorization remains delivery-only business state.
+            // No FIRED/RECONCILED/retry/claim/consumption state is persisted here.
+            // only in delivery extras; Shared schedule metadata stays generic.
         } catch (JSONException e) {
             return ScheduleResult.failure("payload_build_failed");
         }
@@ -187,7 +240,7 @@ public final class AutoDeductionSchedulingAdapter {
             double amount,
             String timeHhmm,
             long recurrenceGeneration,
-            String scheduleVersion,
+            String operationVersion,
             int retryCount) {
         Bundle extras = new Bundle();
         extras.putString(
@@ -214,10 +267,10 @@ public final class AutoDeductionSchedulingAdapter {
         extras.putInt(
                 AutoDeductionContract.EXTRA_FIRE_RETRY_COUNT,
                 retryCount);
-        if (scheduleVersion != null && !scheduleVersion.isEmpty()) {
+        if (operationVersion != null && !operationVersion.isEmpty()) {
             extras.putString(
-                    AutoDeductionContract.EXTRA_SCHEDULE_VERSION,
-                    scheduleVersion);
+                    AutoDeductionContract.EXTRA_OPERATION_VERSION,
+                    operationVersion);
         }
 
         syncTestControls();

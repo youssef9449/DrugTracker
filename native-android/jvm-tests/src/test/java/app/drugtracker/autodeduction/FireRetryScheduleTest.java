@@ -12,6 +12,8 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import app.drugtracker.alarmruntime.ExactAlarmContract;
+
 import android.app.AlarmManager;
 import android.content.Context;
 import android.content.Intent;
@@ -93,6 +95,38 @@ public class FireRetryScheduleTest {
         return null;
     }
 
+    private static String[] activeVersionAndGen(
+            String medicationId, String doseId, String calendarDate)
+            throws Exception {
+        String key = AutoDeductionContract.occurrenceKey(
+                medicationId, doseId, calendarDate);
+        String raw = schedulePrefs().getString(
+                "sch:" + key, null);
+        assertNotNull(raw);
+        JSONObject metadata = new JSONObject(raw);
+        assertFalse(
+                "Shared alarm metadata must not persist Auto recurrence authorization",
+                metadata.has(AutoDeductionContract.FIELD_RECURRENCE_GENERATION));
+        String operationVersion = metadata.optString(
+                ExactAlarmContract.FIELD_OPERATION_VERSION, "");
+        assertFalse("schedule must contain operationVersion",
+                operationVersion.isEmpty());
+        long generation = Phase2TestSupport.appContext()
+                .getSharedPreferences(
+                        AutoDeductionContract.PREFS_RECURRENCE_AUTH, 0)
+                .getLong(
+                        AutoDeductionContract.RECURRENCE_AUTH_KEY_PREFIX
+                                + AutoDeductionContract.scheduleIdentityKey(
+                                        medicationId, doseId),
+                        0L);
+        assertTrue("Auto recurrence generation must be durable in its own state",
+                generation > 0L);
+        return new String[] {
+                operationVersion,
+                String.valueOf(generation)
+        };
+    }
+
     @Test
     public void shouldScheduleFireRetry_pureDecision() {
         AutoDeductionScheduler.FireResult failedNoPending =
@@ -148,6 +182,13 @@ public class FireRetryScheduleTest {
         assertEquals("med", saved.getStringExtra(AutoDeductionContract.EXTRA_MEDICATION_ID));
         assertEquals("dose", saved.getStringExtra(AutoDeductionContract.EXTRA_DOSE_ID));
         assertEquals(date, saved.getStringExtra(AutoDeductionContract.EXTRA_CALENDAR_DATE));
+        assertEquals(
+                "retry delivery must use the generic operationVersion token",
+                vg[0],
+                saved.getStringExtra(AutoDeductionContract.EXTRA_OPERATION_VERSION));
+        assertNull(
+                "retry delivery must not create a new legacy scheduleVersion token",
+                saved.getStringExtra(AutoDeductionContract.EXTRA_SCHEDULE_VERSION));
 
         Uri identity = saved.getData();
         assertNotNull("retry must target the exact occurrence identity",
@@ -161,7 +202,7 @@ public class FireRetryScheduleTest {
     }
 
     @Test
-    public void scheduleFireRetry_persistsRecoveryMarkerAndFireClearsIt()
+    public void scheduleFireRetry_keepsRetryStateOutOfSharedMetadata()
             throws Exception {
         String date = futureCalendarDate(2);
         long epoch = futureEpochMs(date, "12:00");
@@ -177,8 +218,13 @@ public class FireRetryScheduleTest {
 
         JSONObject retryMeta = readAnyScheduleMetadata();
         assertNotNull(retryMeta);
-        assertEquals(1, retryMeta.optInt(
-                AutoDeductionScheduler.FIELD_FIRE_RETRY_COUNT, 0));
+        assertFalse(
+                "retry counter must not be persisted in shared alarm metadata",
+                retryMeta.has("fireRetryCount"));
+        JSONObject retryEvidence =
+                s.getIndependentFireRetryEvidence("med", "dose", date);
+        assertNotNull(retryEvidence);
+        assertEquals(1, retryEvidence.optInt("retryCount", 0));
 
         AutoDeductionScheduler.FireResult fire = s.fireOccurrenceIfNotCancelled(
                 "med", "dose", date, epoch, 1.0, vg[0], Long.parseLong(vg[1]));
@@ -186,8 +232,11 @@ public class FireRetryScheduleTest {
 
         JSONObject afterFire = readAnyScheduleMetadata();
         assertNotNull(afterFire);
-        assertFalse("successful durable fire must clear retry marker",
-                afterFire.has(AutoDeductionScheduler.FIELD_FIRE_RETRY_COUNT));
+        assertFalse("successful durable fire must leave shared metadata free of retry state",
+                afterFire.has("fireRetryCount"));
+        assertNull(
+                "successful durable fire must clear Auto retry evidence",
+                s.getIndependentFireRetryEvidence("med", "dose", date));
     }
 
     @Test
@@ -216,9 +265,9 @@ public class FireRetryScheduleTest {
 
         Intent saved = Shadows.shadowOf(firstAlarm().operation).getSavedIntent();
         assertNotNull(saved);
-        assertEquals("new scheduleVersion must remain authoritative",
+        assertEquals("new operationVersion must remain authoritative",
                 newVg[0],
-                saved.getStringExtra(AutoDeductionContract.EXTRA_SCHEDULE_VERSION));
+                saved.getStringExtra(AutoDeductionContract.EXTRA_OPERATION_VERSION));
         assertEquals("new schedule must not be overwritten by retry",
                 0,
                 saved.getIntExtra(AutoDeductionContract.EXTRA_FIRE_RETRY_COUNT, 0));
@@ -253,7 +302,7 @@ public class FireRetryScheduleTest {
         drainAlarms();
         JSONObject meta = readAnyScheduleMetadata();
         assertNotNull(meta);
-        String version = meta.optString(AutoDeductionScheduler.FIELD_SCHEDULE_VERSION, "");
+        String version = meta.optString(ExactAlarmContract.FIELD_OPERATION_VERSION, "");
         long gen = meta.optLong(AutoDeductionScheduler.FIELD_RECURRENCE_GENERATION, 0L);
 
         AutoDeductionReceiver.handleFireDelivery(
@@ -520,37 +569,6 @@ public class FireRetryScheduleTest {
                 || fr.status == AutoDeductionScheduler.FireResult.Status.ALREADY_EXISTS
                 || fr.pendingRecorded);
         assertNull(s.getIndependentFireRetryEvidence("med", "dose", date));
-    }
-
-    @Test
-    public void scheduleFireRetry_scheduleMarkerCommitFailure_failClosed()
-            throws Exception {
-        String date = futureCalendarDate(7);
-        long epoch = futureEpochMs(date, "10:00");
-        AutoDeductionScheduler s = newScheduler();
-        AutoDeductionScheduler.ScheduleResult sr =
-                s.scheduleOccurrence("med", "dose", date, "10:00", 1.0, epoch);
-        assertTrue(sr.ok);
-        String key = AutoDeductionContract.occurrenceKey("med", "dose", date);
-        String prefKey = "sch:" + key;
-        String raw = schedulePrefs().getString(prefKey, null);
-        assertNotNull(raw);
-        JSONObject meta = new JSONObject(raw);
-        String ver = meta.optString(AutoDeductionScheduler.FIELD_SCHEDULE_VERSION, "");
-        long gen = meta.optLong(AutoDeductionScheduler.FIELD_RECURRENCE_GENERATION, 0L);
-
-        int alarmsBefore = alarmCount();
-        s.forceFireRetryScheduleMarkerCommitFailureForTest = true;
-        try {
-            assertFalse(s.scheduleFireRetry(
-                    "med", "dose", date, epoch, 1.0, "10:00", gen, ver, 1));
-        } finally {
-            s.forceFireRetryScheduleMarkerCommitFailureForTest = false;
-        }
-        assertEquals("no retry alarm on marker commit failure", alarmsBefore, alarmCount());
-        assertNull(
-                "independent evidence must not be written after marker failure",
-                s.getIndependentFireRetryEvidence("med", "dose", date));
     }
 
     @Test

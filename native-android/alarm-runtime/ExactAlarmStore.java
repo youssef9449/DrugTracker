@@ -4,7 +4,6 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
 
-import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
@@ -16,14 +15,14 @@ import java.util.UUID;
  * Durable mechanism store. The feature supplies storageKey so existing storage
  * schemas can be migrated without conflating storage identity with PendingIntent identity.
  */
-public final class ExactAlarmStore {
+final class ExactAlarmStore {
     private static final String TAG = "ExactAlarmStore";
 
     private final SharedPreferences schedules;
     private final SharedPreferences cancellations;
     private final SharedPreferences ordering;
 
-    public ExactAlarmStore(
+    ExactAlarmStore(
             Context context,
             String schedulesPrefsName,
             String cancellationsPrefsName,
@@ -37,34 +36,34 @@ public final class ExactAlarmStore {
                 orderingPrefsName, Context.MODE_PRIVATE);
     }
 
-    public String storageKey(String featureStorageKey) {
+    String storageKey(String featureStorageKey) {
         return ExactAlarmContract.SCHEDULE_KEY_PREFIX + featureStorageKey;
     }
 
-    public String cancellationKey(String featureStorageKey) {
+    String cancellationKey(String featureStorageKey) {
         return ExactAlarmContract.CANCEL_KEY_PREFIX + featureStorageKey;
     }
 
-    public String getScheduleRaw(String featureStorageKey) {
+    String getScheduleRaw(String featureStorageKey) {
         return featureStorageKey == null
                 ? null
                 : schedules.getString(
                         storageKey(featureStorageKey), null);
     }
 
-    public boolean hasSchedule(String featureStorageKey) {
+    boolean hasSchedule(String featureStorageKey) {
         return featureStorageKey != null
                 && schedules.contains(storageKey(featureStorageKey));
     }
 
-    public boolean hasCancellationTombstoneLocked(
+    boolean hasCancellationTombstoneLocked(
             String featureStorageKey) {
         return featureStorageKey != null
                 && cancellations.contains(
                         cancellationKey(featureStorageKey));
     }
 
-    public String getCancellationTokenLocked(
+    String getCancellationTokenLocked(
             String featureStorageKey) {
         return featureStorageKey == null
                 ? null
@@ -72,7 +71,7 @@ public final class ExactAlarmStore {
                         cancellationKey(featureStorageKey), null);
     }
 
-    public boolean writeScheduleLocked(
+    boolean writeScheduleLocked(
             String featureStorageKey,
             JSONObject metadata) {
         return schedules.edit()
@@ -82,16 +81,16 @@ public final class ExactAlarmStore {
                 .commit();
     }
 
-    public boolean removeScheduleLocked(String featureStorageKey) {
+    boolean removeScheduleLocked(String featureStorageKey) {
         return schedules.edit()
                 .remove(storageKey(featureStorageKey))
                 .commit();
     }
 
-    public boolean removeScheduleIfOwnedLocked(
+    boolean removeScheduleIfOwnedLocked(
             String featureStorageKey,
             String expectedOperationVersion) {
-        if (!isMetadataOwnedByOperationVersion(
+        if (!ExactAlarmContract.isMetadataOwnedByOperationVersion(
                 getScheduleRaw(featureStorageKey),
                 expectedOperationVersion)) {
             return false;
@@ -99,7 +98,7 @@ public final class ExactAlarmStore {
         return removeScheduleLocked(featureStorageKey);
     }
 
-    public boolean writeCancellationTombstoneLocked(
+    boolean writeCancellationTombstoneLocked(
             String featureStorageKey,
             String operationVersion) {
         return cancellations.edit()
@@ -109,7 +108,7 @@ public final class ExactAlarmStore {
                 .commit();
     }
 
-    public boolean removeCancellationTombstoneLocked(
+    boolean removeCancellationTombstoneLocked(
             String featureStorageKey) {
         return cancellations.edit()
                 .remove(cancellationKey(featureStorageKey))
@@ -117,7 +116,7 @@ public final class ExactAlarmStore {
     }
 
     /** Caller MUST hold ExactAlarmOperationLock.LOCK. */
-    public String allocateOperationVersionLocked() {
+    String allocateOperationVersionLocked() {
         long last = ordering.getLong(
                 ExactAlarmContract.ORDERING_SEQUENCE_KEY, 0L);
         long next = last + 1L;
@@ -136,7 +135,7 @@ public final class ExactAlarmStore {
                 + UUID.randomUUID();
     }
 
-    public void clearCancellationIfSupersededLocked(
+    void clearCancellationIfSupersededLocked(
             String featureStorageKey,
             String scheduleOperationVersion) {
         String cancellation =
@@ -144,11 +143,11 @@ public final class ExactAlarmStore {
         if (cancellation == null) return;
 
         long[] scheduleOrder =
-                parseOrdering(scheduleOperationVersion);
+                ExactAlarmContract.parseOrdering(scheduleOperationVersion);
         long[] cancellationOrder =
-                parseOrdering(cancellation);
+                ExactAlarmContract.parseOrdering(cancellation);
 
-        if (isOrderingNewer(
+        if (ExactAlarmContract.isOrderingNewer(
                 scheduleOrder[0], scheduleOrder[1],
                 cancellationOrder[0], cancellationOrder[1])) {
             if (!removeCancellationTombstoneLocked(featureStorageKey)) {
@@ -158,7 +157,12 @@ public final class ExactAlarmStore {
         }
     }
 
-    public boolean isEffectivelyCancelledLocked(
+    /** Caller MUST hold ExactAlarmOperationLock.LOCK. */
+    java.util.Map<String, ?> getAllScheduleMetadata() {
+        return schedules.getAll();
+    }
+
+    boolean isEffectivelyCancelledLocked(
             String featureStorageKey) {
         String cancellation =
                 getCancellationTokenLocked(featureStorageKey);
@@ -167,13 +171,13 @@ public final class ExactAlarmStore {
         String schedule = getScheduleRaw(featureStorageKey);
         if (schedule == null || schedule.isEmpty()) return true;
 
-        long[] cancellationOrder = parseOrdering(cancellation);
-        long[] scheduleOrder = parseOrdering(
-                extractOperationVersion(schedule));
+        long[] cancellationOrder = ExactAlarmContract.parseOrdering(cancellation);
+        long[] scheduleOrder = ExactAlarmContract.parseOrdering(
+                ExactAlarmContract.extractOperationVersion(schedule));
 
         return scheduleOrder[0] >= 0L
                 && cancellationOrder[0] >= 0L
-                && isOrderingNewer(
+                && ExactAlarmContract.isOrderingNewer(
                         scheduleOrder[0],
                         scheduleOrder[1],
                         cancellationOrder[0],
@@ -182,7 +186,7 @@ public final class ExactAlarmStore {
                 : true;
     }
 
-    public List<String> listFeatureStorageKeys() {
+    List<String> listFeatureStorageKeys() {
         List<String> result = new ArrayList<>();
         for (Map.Entry<String, ?> entry
                 : schedules.getAll().entrySet()) {
@@ -197,64 +201,5 @@ public final class ExactAlarmStore {
         return result;
     }
 
-    public static String extractOperationVersion(String raw) {
-        if (raw == null || raw.isEmpty()) return "";
-        try {
-            return extractOperationVersion(new JSONObject(raw));
-        } catch (JSONException e) {
-            return "";
-        }
-    }
 
-    public static String extractOperationVersion(JSONObject metadata) {
-        if (metadata == null) return "";
-        String current = metadata.optString(
-                ExactAlarmContract.FIELD_OPERATION_VERSION, "");
-        return current.isEmpty()
-                ? metadata.optString(
-                        ExactAlarmContract.LEGACY_FIELD_SCHEDULE_VERSION,
-                        "")
-                : current;
-    }
-
-    public static boolean isMetadataOwnedByOperationVersion(
-            String currentJson,
-            String expectedOperationVersion) {
-        return expectedOperationVersion != null
-                && !expectedOperationVersion.isEmpty()
-                && expectedOperationVersion.equals(
-                        extractOperationVersion(currentJson));
-    }
-
-    public static long[] parseOrdering(String raw) {
-        long[] result = new long[] {-1L, 0L};
-        if (raw == null || raw.trim().isEmpty()) return result;
-        try {
-            String value = raw.trim();
-            int firstDash = value.indexOf('-');
-            if (firstDash <= 0) return result;
-            int secondDash =
-                    value.indexOf('-', firstDash + 1);
-            String sequencePart =
-                    secondDash > firstDash
-                            ? value.substring(
-                                    firstDash + 1, secondDash)
-                            : value.substring(firstDash + 1);
-            result[0] = Long.parseLong(
-                    value.substring(0, firstDash));
-            result[1] = Long.parseLong(sequencePart);
-        } catch (NumberFormatException ignored) {
-        }
-        return result;
-    }
-
-    public static boolean isOrderingNewer(
-            long firstMillis,
-            long firstSequence,
-            long secondMillis,
-            long secondSequence) {
-        return firstMillis != secondMillis
-                ? firstMillis > secondMillis
-                : firstSequence > secondSequence;
-    }
 }

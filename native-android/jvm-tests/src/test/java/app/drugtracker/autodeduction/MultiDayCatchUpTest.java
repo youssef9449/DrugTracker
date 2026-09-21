@@ -279,10 +279,18 @@ public class MultiDayCatchUpTest {
         assertEquals(1, n.firedCreated);
         assertTrue(n.futureInstalled);
         assertTrue(hasSchedule(med, dose, "2026-10-01"));
-        long stamped = new JSONObject(schedulePrefs().getString(
-                schKey(AutoDeductionContract.occurrenceKey(med, dose, "2026-10-01")), "{}"))
-                .getLong("recurrenceGeneration");
-        assertEquals(1L, stamped);
+        JSONObject successor = new JSONObject(schedulePrefs().getString(
+                schKey(AutoDeductionContract.occurrenceKey(med, dose, "2026-10-01")), "{}"));
+        assertTrue(successor.has("operationVersion"));
+        assertFalse(successor.has("recurrenceGeneration"));
+        SharedPreferences auth = appContext().getSharedPreferences(
+                AutoDeductionContract.PREFS_RECURRENCE_AUTH, 0);
+        assertEquals(
+                1L,
+                auth.getLong(
+                        AutoDeductionContract.RECURRENCE_AUTH_KEY_PREFIX
+                                + AutoDeductionContract.scheduleIdentityKey(med, dose),
+                        0L));
 
         assertTrue(s.invalidateRecurrenceAuthorization(med, dose).ok);
         // Existing invalidate cancels futures for the dose

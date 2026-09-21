@@ -7,6 +7,8 @@ import static org.junit.Assert.assertTrue;
 import android.content.SharedPreferences;
 
 import org.json.JSONObject;
+
+import app.drugtracker.alarmruntime.ExactAlarmContract;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -44,21 +46,17 @@ public class DisableVsRecurrenceTest {
         return Phase2TestSupport.schedulePrefs().contains(Phase2TestSupport.schKey(key));
     }
 
-    private long genFromScheduleMeta(String med, String dose, String date) throws Exception {
-        String key = AutoDeductionContract.occurrenceKey(med, dose, date);
-        String raw = Phase2TestSupport.schedulePrefs().getString(
-                Phase2TestSupport.schKey(key), null);
-        if (raw == null) return -1L;
-        return new JSONObject(raw).optLong("recurrenceGeneration", 0L);
+    private long genFromScheduleMeta(String med, String dose, String date) {
+        return readGen(med, dose);
     }
 
     /** Active ownership tokens (Issue #240) read from schedule metadata. */
     private static final class DeliveryTokens {
-        final String scheduleVersion;
+        final String operationVersion;
         final long recurrenceGeneration;
 
-        DeliveryTokens(String scheduleVersion, long recurrenceGeneration) {
-            this.scheduleVersion = scheduleVersion;
+        DeliveryTokens(String operationVersion, long recurrenceGeneration) {
+            this.operationVersion = operationVersion;
             this.recurrenceGeneration = recurrenceGeneration;
         }
     }
@@ -70,8 +68,8 @@ public class DisableVsRecurrenceTest {
                 Phase2TestSupport.schKey(key), null);
         assertTrue(raw != null && !raw.isEmpty());
         JSONObject o = new JSONObject(raw);
-        String v = o.getString("scheduleVersion");
-        long g = o.getLong("recurrenceGeneration");
+        String v = o.getString(ExactAlarmContract.FIELD_OPERATION_VERSION);
+        long g = readGen(med, dose);
         assertTrue(v != null && !v.isEmpty());
         assertTrue(g > 0L);
         return new DeliveryTokens(v, g);
@@ -92,7 +90,7 @@ public class DisableVsRecurrenceTest {
         AutoDeductionScheduler.FireResult fr =
                 scheduler.fireOccurrenceIfNotCancelled(
                         med, dose, d, System.currentTimeMillis(), amount,
-                        t.scheduleVersion, t.recurrenceGeneration);
+                        t.operationVersion, t.recurrenceGeneration);
         assertTrue(fr.allowsRecurrence());
 
         AutoDeductionScheduler.InvalidateResult inv =
@@ -120,7 +118,7 @@ public class DisableVsRecurrenceTest {
         AutoDeductionScheduler.FireResult fr =
                 scheduler.fireOccurrenceIfNotCancelled(
                         med, dose, d, System.currentTimeMillis(), amount,
-                        t.scheduleVersion, t.recurrenceGeneration);
+                        t.operationVersion, t.recurrenceGeneration);
         assertTrue(fr.allowsRecurrence());
 
         AutoDeductionScheduler.ScheduleResult next =
@@ -179,7 +177,7 @@ public class DisableVsRecurrenceTest {
         AutoDeductionScheduler.FireResult fr =
                 scheduler.fireOccurrenceIfNotCancelled(
                         med, dose, d, System.currentTimeMillis(), 1.0,
-                        t.scheduleVersion, t.recurrenceGeneration);
+                        t.operationVersion, t.recurrenceGeneration);
         assertTrue(fr.isCancelled());
     }
 
@@ -216,7 +214,7 @@ public class DisableVsRecurrenceTest {
         AutoDeductionScheduler.FireResult fr =
                 scheduler.fireOccurrenceIfNotCancelled(
                         med, dose, d, System.currentTimeMillis(), 1.0,
-                        t.scheduleVersion, t.recurrenceGeneration);
+                        t.operationVersion, t.recurrenceGeneration);
         assertTrue(fr.isCancelled());
         assertFalse(fr.allowsRecurrence());
     }
@@ -300,7 +298,7 @@ public class DisableVsRecurrenceTest {
                 AutoDeductionScheduler.FireResult fr =
                         scheduler.fireOccurrenceIfNotCancelled(
                                 med, dose, d, System.currentTimeMillis(), amount,
-                                t.scheduleVersion, t.recurrenceGeneration);
+                                t.operationVersion, t.recurrenceGeneration);
                 fireRef.set(fr);
                 if (fr != null && fr.allowsRecurrence()) {
                     // Same path as AutoDeductionReceiver after FIRED.
@@ -353,14 +351,8 @@ public class DisableVsRecurrenceTest {
                         || !dose.equals(o.optString("doseId"))) {
                     continue;
                 }
-                // Any remaining row must not carry the pre-invalidate generation
-                // as an active authorized schedule for a successor date.
-                long rowGen = o.optLong("recurrenceGeneration", 0L);
-                String rowDate = o.optString("calendarDate", "");
-                if (!d.equals(rowDate) && rowGen == genBefore) {
-                    throw new AssertionError(
-                            "successor still present with pre-invalidate generation: " + k);
-                }
+                throw new AssertionError(
+                        "schedule row still present after successful recurrence invalidation: " + k);
             }
         } else {
             // Invalidate failed or lost the race without ok — generation not claimed bumped.

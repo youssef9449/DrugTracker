@@ -191,9 +191,10 @@ export function localEpochMs(calendarDate: string, timeHhmm: string): number | n
 
 /**
  * Protect past-due schedules that carry durable fire-retry evidence.
- * Native fireRetryCount (schedule secondary marker or listed metadata) is the
- * authority — stale React global/med disabled state must not drop recovery
- * evidence for an already-failed FIRED persistence.
+ * fireRetryCount is Auto-owned retry evidence surfaced by the native schedule
+ * listing; it is not part of Shared ExactAlarm schedule metadata. Stale React
+ * global/med disabled state must not drop recovery evidence for an already-failed
+ * FIRED persistence.
  */
 export function isFireRetryRecoveryPending(
   schedule: ScheduledOccurrence,

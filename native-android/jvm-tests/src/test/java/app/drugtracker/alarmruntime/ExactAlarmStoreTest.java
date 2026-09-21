@@ -6,7 +6,7 @@ import static org.junit.Assert.assertTrue;
 import org.json.JSONObject;
 import org.junit.Test;
 
-/** Pure durable-ordering/ownership tests for the shared exact-alarm store helpers. */
+/** Pure durable-ordering/ownership tests for the shared exact-alarm contract helpers. */
 public class ExactAlarmStoreTest {
 
     @Test
@@ -15,7 +15,7 @@ public class ExactAlarmStoreTest {
         generic.put("operationVersion", "1000-2-new");
         generic.put("scheduleVersion", "1000-1-old");
         assertTrue("1000-2-new".equals(
-                ExactAlarmStore.extractOperationVersion(generic)));
+                ExactAlarmContract.extractOperationVersion(generic)));
 
         JSONObject legacy = new JSONObject();
         legacy.put("scheduleVersion", "1000-1-old");
@@ -25,7 +25,7 @@ public class ExactAlarmStoreTest {
 
     @Test
     public void ownership_acceptsGenericAndLegacyMetadata() {
-        assertTrue(ExactAlarmStore.isMetadataOwnedByOperationVersion(
+        assertTrue(ExactAlarmContract.isMetadataOwnedByOperationVersion(
                 "{\"operationVersion\":\"2000-3-new\"}",
                 "2000-3-new"));
         assertTrue(ExactAlarmStore.isMetadataOwnedByOperationVersion(
@@ -38,7 +38,7 @@ public class ExactAlarmStoreTest {
 
     @Test
     public void sameMillisecondSequenceOrdersOperations() {
-        assertTrue(ExactAlarmStore.isOrderingNewer(
+        assertTrue(ExactAlarmContract.isOrderingNewer(
                 5000L, 3L, 5000L, 2L));
         assertFalse(ExactAlarmStore.isOrderingNewer(
                 5000L, 2L, 5000L, 3L));
@@ -46,7 +46,7 @@ public class ExactAlarmStoreTest {
 
     @Test
     public void parseOrdering_rejectsUnversionedOrMalformedValue() {
-        assertTrue(ExactAlarmStore.parseOrdering("5000-3-token")[0] == 5000L);
+        assertTrue(ExactAlarmContract.parseOrdering("5000-3-token")[0] == 5000L);
         assertTrue(ExactAlarmStore.parseOrdering("5000-3-token")[1] == 3L);
         assertTrue(ExactAlarmStore.parseOrdering("5000")[0] < 0L);
         assertTrue(ExactAlarmStore.parseOrdering("not-a-token")[0] < 0L);

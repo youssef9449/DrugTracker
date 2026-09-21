@@ -1,5 +1,7 @@
 package app.drugtracker.autodeduction;
 
+import android.content.SharedPreferences;
+
 import static app.drugtracker.autodeduction.Phase2TestSupport.clearAllDurableState;
 import static app.drugtracker.autodeduction.Phase2TestSupport.evtKey;
 import static app.drugtracker.autodeduction.Phase2TestSupport.eventPrefs;
@@ -14,6 +16,8 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import org.json.JSONObject;
+
+import app.drugtracker.alarmruntime.ExactAlarmContract;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -197,10 +201,15 @@ public class FireVsCancelTest {
         String raw = schedulePrefs().getString(schKey(key), null);
         assertTrue("expected schedule metadata for " + key, raw != null && !raw.isEmpty());
         JSONObject o = new JSONObject(raw);
-        String v = o.optString("scheduleVersion", "");
-        long g = o.optLong("recurrenceGeneration", 0L);
-        assertTrue("scheduleVersion present", v != null && !v.isEmpty());
-        assertTrue("recurrenceGeneration present", g > 0L);
+        String v = o.optString(ExactAlarmContract.FIELD_OPERATION_VERSION, "");
+        assertTrue("operationVersion present", v != null && !v.isEmpty());
+        SharedPreferences auth = Phase2TestSupport.appContext().getSharedPreferences(
+                AutoDeductionContract.PREFS_RECURRENCE_AUTH, 0);
+        long g = auth.getLong(
+                AutoDeductionContract.RECURRENCE_AUTH_KEY_PREFIX
+                        + AutoDeductionContract.scheduleIdentityKey(med, dose),
+                0L);
+        assertTrue("Auto recurrence generation present in feature state", g > 0L);
         return new String[] { v, Long.toString(g) };
     }
 

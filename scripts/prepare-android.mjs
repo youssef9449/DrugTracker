@@ -235,6 +235,23 @@ const criticalStockFiles = [
 if (!fs.existsSync(criticalStockDestDir)) {
   fs.mkdirSync(criticalStockDestDir, { recursive: true });
 }
+
+// Remove the previous split Critical Stock files from generated Android
+// sources. The adapter file is now the only feature-owned Critical Stock
+// boundary.
+for (const file of [
+  'CriticalStockAlarmReceiver.java',
+  'CriticalStockPlugin.java',
+]) {
+  const legacyPath = path.join(criticalStockDestDir, file);
+  if (fs.existsSync(legacyPath)) {
+    fs.unlinkSync(legacyPath);
+    console.info(
+      '[prepare-android] Removed obsolete Critical Stock source ' +
+        path.relative(root, legacyPath)
+    );
+  }
+}
 for (const file of criticalStockFiles) {
   const src = path.join(criticalStockSrcDir, file);
   const dest = path.join(criticalStockDestDir, file);
@@ -248,6 +265,28 @@ for (const file of criticalStockFiles) {
       path.relative(root, src) +
       ' → ' +
       path.relative(root, dest)
+  );
+}
+
+const generatedAlarmRuntimeDir = path.join(
+  androidDir,
+  'app',
+  'src',
+  'main',
+  'java',
+  'app',
+  'drugtracker',
+  'alarmruntime'
+);
+const obsoleteCriticalFeaturePath = path.join(
+  generatedAlarmRuntimeDir,
+  'CriticalStockAlarmFeature.java'
+);
+if (fs.existsSync(obsoleteCriticalFeaturePath)) {
+  fs.unlinkSync(obsoleteCriticalFeaturePath);
+  console.info(
+    '[prepare-android] Removed obsolete generated source ' +
+      path.relative(root, obsoleteCriticalFeaturePath)
   );
 }
 
@@ -426,6 +465,11 @@ function upsertApplicationMetaData(xml, androidName, value) {
   manifest,
   'app.drugtracker.autodeduction.AutoDeductionSystemReceiver'
 ));
+({ manifest } = removeReceiverByName(
+  manifest,
+  'app.drugtracker.criticalstock.CriticalStockAlarmReceiver'
+));
+
 ({ manifest } = removeReceiverByName(
   manifest,
   'com.capacitorjs.plugins.localnotifications.TimedNotificationPublisher'

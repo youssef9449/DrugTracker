@@ -502,6 +502,26 @@ Critical notifications are medication-level.
 
 They must never enter the Dose Reminder / DoseAlarmModal action path merely because both systems use notifications.
 
+## 9.6 Native Critical Stock boundary
+
+Critical Stock has one feature-owned native boundary: `CriticalStockAlarmAdapter`.
+
+The adapter sits directly on top of the shared `ExactAlarmRuntime` and exposes only the feature-facing operations required by the scheduler:
+
+- `schedule(medId, localDate, localTime, notification payload)`
+- `cancel(medId)`
+- `verify(medId)`
+
+Its private delivery and lifecycle-recovery plumbing remains implementation detail inside that adapter. There must not be a second Critical-specific store, lifecycle dispatcher, system receiver, or plugin stack parallel to Auto Deduction.
+
+The business layer remains in TypeScript:
+
+- `criticalNotificationClaims.ts` owns the persistent notification claim state;
+- `useStockAlerts.ts` owns episode start/end, claim lifecycle, and the one-notification opportunity;
+- generation and stale-async protection remain feature-level scheduler behavior.
+
+The native adapter never creates or advances a Critical episode and never decides whether a notification opportunity is available.
+
 ---
 
 # 10. Feature contract: Auto Deduction
@@ -784,8 +804,9 @@ The refactor is complete only when all are true:
 15. Boot and exact-permission recovery are durable and idempotent.
 16. Same medication can simultaneously have Dose Reminder, Critical Stock, and Auto Deduction work without identity collision or cross-feature cancellation.
 17. Feature-level hash/ID allocation duplication is removed.
-18. Old duplicate infrastructure is deleted after migration.
-19. Existing feature contracts remain behaviorally unchanged unless a separate approved change explicitly modifies them.
+18. Critical Stock has one feature-owned native adapter over the shared Exact Alarm Runtime; no duplicate Critical lifecycle/store/plugin stack exists.
+19. Old duplicate infrastructure is deleted after migration.
+20. Existing feature contracts remain behaviorally unchanged unless a separate approved change explicitly modifies them.
 
 ---
 
@@ -843,7 +864,13 @@ Split the TypeScript notification utility by responsibility without changing not
 - src/utils/notifications.ts is reduced to a thin compatibility re-export facade with no notification implementation.
 
 ### Phase 8
-Add cross-feature coexistence and lifecycle regression coverage.
+Collapse the Critical Stock native boundary to one feature adapter over the shared Exact Alarm Runtime:
+
+- `CriticalStockAlarmAdapter` is the only Critical Stock native feature boundary;
+- its schedule/cancel/verify operations use the shared exact-alarm runtime;
+- private delivery and lifecycle-recovery details do not become a second Critical-specific runtime;
+- `criticalNotificationClaims.ts` and `useStockAlerts.ts` remain responsible for episode, claim, generation, and one-notification-per-episode business semantics;
+- stale Critical native implementations are removed after all consumers use the consolidated adapter.
 
 ### Phase 9
 Run final architecture/dead-code audit and update architecture documentation.

@@ -34,10 +34,10 @@ import { Toggle } from './components/ui/Toggle';
 import { SegmentedButton } from './components/ui/SegmentedButton';
 import {
   requestNotificationPermission,
-  sendTestAlertNotification,
   getNotificationPermission,
-  openExactAlarmSettings,
-} from './utils/notifications';
+} from './utils/notifications/notificationPermissions';
+import { sendTestAlertNotification } from './utils/notifications/doseReminderNotifications';
+import { openExactAlarmSettings } from './utils/exactAlarm';
 import { OrderItem } from './utils/whatsapp';
 import { playSuccessChime } from './utils/sound';
 import { useDoseReminders } from './hooks/useDoseReminders';

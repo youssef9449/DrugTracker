@@ -106,7 +106,7 @@ export const AppHeader: FC<AppHeaderProps> = ({
                 : 'تذكيرات مواعيد الجرعات متوقفة — انقر للتفعيل'
             }
             aria-pressed={notificationsEnabled}
-            className={`w-10 h-10 rounded-full transition-colors relative flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 ${
+            className={`w-12 h-12 rounded-full transition-colors relative flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 ${
               notificationsEnabled
                 ? 'bg-teal-100 text-teal-900'
                 : 'text-slate-600 hover:bg-slate-100 active:bg-slate-200'

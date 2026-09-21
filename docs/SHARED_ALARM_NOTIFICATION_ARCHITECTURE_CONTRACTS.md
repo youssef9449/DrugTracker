@@ -403,11 +403,13 @@ Critical Stock follows the same pattern:
 ```
 Critical Stock business
       │
-      ├── Exact Alarm Runtime ──> CriticalStockAlarmReceiver
-      │                              │
-      │                              └──> Notification Runtime
-      │
-      └── notification content/episode policy
+      └── CriticalStockAlarmAdapter
+              │
+              ├── Exact Alarm Runtime
+              │      └── private adapter delivery
+              │              └──> Notification Runtime
+              │
+              └── schedule / cancel / verify boundary
 ```
 
 Auto Deduction follows a different path:

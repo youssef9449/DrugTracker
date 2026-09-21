@@ -37,7 +37,7 @@ export {
 
 // Existing notification identity policy.
 export {
-  criticalAlarmId,
+  iosCriticalAlarmId,
   doseReminderAlarmIdForDose,
   snoozeDoseReminderId,
 } from './notifications/notificationIds';

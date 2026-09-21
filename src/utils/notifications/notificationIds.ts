@@ -1,4 +1,4 @@
-const ID_RANGE_SIZE = 1_000_000;
+export const ID_RANGE_SIZE = 1_000_000;
 
 /** Numeric base for each notification category's id range. */
 export const NOTIFICATION_ID_BASE = {

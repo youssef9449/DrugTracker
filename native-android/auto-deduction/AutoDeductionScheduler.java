@@ -1430,24 +1430,6 @@ public final class AutoDeductionScheduler {
         return schedulingAdapter.listScheduleMetadata();
     }
 
-    private String getScheduleRaw(String keyOrPrefKey) {
-        String featureStorageKey = normalizeFeatureStorageKey(keyOrPrefKey);
-        return featureStorageKey == null
-                ? null
-                : schedulingAdapter.getScheduleRaw(featureStorageKey);
-    }
-
-    private boolean hasSchedule(String keyOrPrefKey) {
-        String featureStorageKey = normalizeFeatureStorageKey(keyOrPrefKey);
-        return featureStorageKey != null
-                && !featureStorageKey.isEmpty()
-                && schedulingAdapter.hasSchedule(featureStorageKey);
-    }
-
-    private Map<String, ?> getAllScheduleMetadata() {
-        return schedulingAdapter.listScheduleMetadata();
-    }
-
     private boolean removeScheduleIfOwned(
             String storageKey,
             String expectedOperationVersion) {

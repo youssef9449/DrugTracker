@@ -210,8 +210,7 @@ export function autoDeductionOccurrenceKey(
 }
 
 export async function initializeAutoDeductionStock(
-  medications: Array<{ medicationId: string; currentPills: number }>,
-  occurrenceResolutions: NativeAutoOccurrenceResolution[] = []
+  medications: Array<{ medicationId: string; currentPills: number }>
 ): Promise<{ ok: true; medications: typeof medications } | { ok: false; error: string; medications: typeof medications }> {
   if (!isNativeAndroid()) {
     return { ok: true, medications };
@@ -230,7 +229,6 @@ export async function initializeAutoDeductionStock(
       }));
     const result = await AutoDeduction.initializeStock({
       medications: cleaned,
-      occurrenceResolutions,
     });
     if (!result || result.ok === false) {
       return {
@@ -261,89 +259,14 @@ export async function initializeAutoDeductionStock(
   }
 }
 
-function isStrictCalendarDate(value: unknown): value is string {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return false;
-  }
-  const [year, month, day] = value.split('-').map(Number);
-  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
-    return false;
-  }
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return (
-    date.getUTCFullYear() === year &&
-    date.getUTCMonth() === month - 1 &&
-    date.getUTCDate() === day
-  );
-}
-
-function buildLegacyOccurrenceResolutions(
-  medications: Medication[],
-  logs: Array<{ medicationId: string; doseId?: string; type: string; date: string }> = []
-): NativeAutoOccurrenceResolution[] {
-  const resolutions: NativeAutoOccurrenceResolution[] = [];
-
-  for (const medication of medications) {
-    for (const [doseId, dates] of Object.entries(
-      medication.doseConsumptionHistory ?? {}
-    )) {
-      for (const calendarDate of dates ?? []) {
-        if (isStrictCalendarDate(calendarDate) && doseId.trim()) {
-          resolutions.push({
-            medicationId: medication.id,
-            doseId,
-            calendarDate,
-            type: 'CONSUMED',
-          });
-        }
-      }
-    }
-
-    for (const [doseId, dates] of Object.entries(
-      medication.doseSkippedHistory ?? {}
-    )) {
-      for (const calendarDate of dates ?? []) {
-        if (isStrictCalendarDate(calendarDate) && doseId.trim()) {
-          resolutions.push({
-            medicationId: medication.id,
-            doseId,
-            calendarDate,
-            type: 'SKIPPED',
-          });
-        }
-      }
-    }
-  }
-
-  for (const log of logs) {
-    if (
-      log.type === 'exact_auto' &&
-      typeof log.doseId === 'string' &&
-      log.doseId.trim() &&
-      isStrictCalendarDate(log.date)
-    ) {
-      resolutions.push({
-        medicationId: log.medicationId,
-        doseId: log.doseId.trim(),
-        calendarDate: log.date,
-        type: 'CONSUMED',
-      });
-    }
-  }
-
-  return resolutions;
-}
-
 export async function convergeAutoDeductionStock(
-  medications: Medication[],
-  logs: Array<{ medicationId: string; doseId?: string; type: string; date: string }> = []
+  medications: Medication[]
 ): Promise<{ ok: true; medications: Medication[] } | { ok: false; medications: Medication[]; error: string }> {
   const result = await initializeAutoDeductionStock(
     medications.map((m) => ({
       medicationId: m.id,
       currentPills: m.currentPills,
-    })),
-    buildLegacyOccurrenceResolutions(medications, logs)
+    }))
   );
   if (!result.ok) {
     return {
@@ -419,61 +342,6 @@ export async function applyForegroundAutoStockDeltas(
       alreadyApplied: false,
       stocks: [],
       error: e instanceof Error ? e.message : 'foreground_stock_failed',
-    };
-  }
-}
-
-export async function adoptAlreadyAppliedAutoOccurrence(
-  medicationId: string,
-  doseId: string,
-  calendarDate: string,
-  amount: number
-): Promise<ApplyAutoDeductionStockResult> {
-  if (!isNativeAndroid()) {
-    return {
-      ok: true,
-      native: false,
-      applied: false,
-      actualDeducted: 0,
-      currentPills: 0,
-    };
-  }
-  if (
-    typeof medicationId !== 'string' ||
-    !medicationId.trim() ||
-    typeof doseId !== 'string' ||
-    !doseId.trim() ||
-    !Number.isFinite(Number(amount)) ||
-    Number(amount) <= 0
-  ) {
-    return {
-      ok: false,
-      native: true,
-      applied: false,
-      actualDeducted: 0,
-      currentPills: 0,
-      error: 'invalid_auto_adoption_args',
-    };
-  }
-  try {
-    const result = await AutoDeduction.adoptAlreadyAppliedOccurrence({
-      medicationId,
-      doseId,
-      calendarDate,
-      amount: Number(amount),
-    });
-    return {
-      ...result,
-      native: true,
-    };
-  } catch (e) {
-    return {
-      ok: false,
-      native: true,
-      applied: false,
-      actualDeducted: 0,
-      currentPills: 0,
-      error: e instanceof Error ? e.message : 'auto_adoption_failed',
     };
   }
 }

@@ -727,6 +727,18 @@ public final class AutoDeductionScheduler {
             Log.w(TAG, "recoverMissedOccurrence: invalid payload");
             return new FireResult(FireResult.Status.FAILED, false);
         }
+
+        // Past-due recovery is ambiguous during the first JS migration boundary:
+        // the pre-Native implementation may already have applied this occurrence.
+        // Wait until JS has seeded the Native baseline and completed one
+        // reconciliation/adoption pass. Future AlarmManager schedules can still
+        // be restored independently.
+        if (!new AutoDeductionStockStore(appContext).isRecoveryReady()) {
+            Log.i(TAG, "recoverMissedOccurrence: recovery boundary not ready — defer " + medicationId
+                    + "/" + doseId + "/" + calendarDate);
+            return new FireResult(FireResult.Status.FAILED, false);
+        }
+
         final String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
         synchronized (SCHEDULE_LOCK) {
             if (isOccurrenceCancelledKey(key)) {
@@ -1341,6 +1353,15 @@ public final class AutoDeductionScheduler {
      * evidence row, even when shared schedule metadata is missing.
      */
     RestoreResult recoverIndependentFireRetryEvidencePass() {
+        // During the first post-upgrade boundary, independent retry evidence may
+        // represent an occurrence already applied by the old JS-only path.
+        // Defer this whole recovery pass until JS has established the Native
+        // baseline and completed migration adoption.
+        if (!new AutoDeductionStockStore(appContext()).isRecoveryReady()) {
+            Log.i(TAG, "independent evidence pass: recovery boundary not ready — defer to JS");
+            return RestoreResult.success(0, 0);
+        }
+
         int recovered = 0;
         int failed = 0;
         boolean ok = true;

@@ -112,24 +112,36 @@ public final class AutoDeductionStockStore {
     public static final class ForegroundApplyResult {
         public final boolean ok;
         public final boolean alreadyApplied;
+        public final Map<String, Double> stocks;
         public final String error;
 
-        private ForegroundApplyResult(boolean ok, boolean alreadyApplied, String error) {
+        private ForegroundApplyResult(
+                boolean ok,
+                boolean alreadyApplied,
+                Map<String, Double> stocks,
+                String error
+        ) {
             this.ok = ok;
             this.alreadyApplied = alreadyApplied;
+            this.stocks = stocks;
             this.error = error;
         }
 
-        public static ForegroundApplyResult success() {
-            return new ForegroundApplyResult(true, false, null);
+        public static ForegroundApplyResult success(Map<String, Double> stocks) {
+            return new ForegroundApplyResult(
+                    true, false, stocks, null);
         }
 
-        public static ForegroundApplyResult alreadyApplied() {
-            return new ForegroundApplyResult(true, true, null);
+        public static ForegroundApplyResult alreadyApplied(Map<String, Double> stocks) {
+            return new ForegroundApplyResult(
+                    true, true, stocks, null);
         }
 
         public static ForegroundApplyResult failure(String error) {
-            return new ForegroundApplyResult(false, false,
+            return new ForegroundApplyResult(
+                    false,
+                    false,
+                    new LinkedHashMap<String, Double>(),
                     error != null && !error.isEmpty() ? error : "foreground_stock_failed");
         }
     }
@@ -291,7 +303,7 @@ public final class AutoDeductionStockStore {
         synchronized (LOCK) {
             long last = prefs.getLong(KEY_LAST_FOREGROUND_SEQ, 0L);
             if (mutationSeq <= last) {
-                return ForegroundApplyResult.alreadyApplied();
+                return ForegroundApplyResult.alreadyApplied(readAllStocksLocked());
             }
 
             Map<String, Double> nextValues = new LinkedHashMap<String, Double>();
@@ -334,8 +346,29 @@ public final class AutoDeductionStockStore {
             if (!editor.commit()) {
                 return ForegroundApplyResult.failure("foreground_stock_commit_failed");
             }
-            return ForegroundApplyResult.success();
+            return ForegroundApplyResult.success(readAllStocksLocked());
         }
+    }
+
+    private Map<String, Double> readAllStocksLocked() {
+        Map<String, Double> out = new LinkedHashMap<String, Double>();
+        Map<String, ?> all = prefs.getAll();
+        for (Map.Entry<String, ?> entry : all.entrySet()) {
+            String key = entry.getKey();
+            if (!key.startsWith(KEY_STOCK_PREFIX) || !(entry.getValue() instanceof String)) {
+                continue;
+            }
+            String medicationId = key.substring(KEY_STOCK_PREFIX.length());
+            try {
+                double value = Double.parseDouble((String) entry.getValue());
+                if (isValidStock(value)) {
+                    out.put(medicationId, value);
+                }
+            } catch (NumberFormatException ignored) {
+                // Ignore malformed diagnostic rows.
+            }
+        }
+        return out;
     }
 
     private Double readStockLocked(String medicationId) {

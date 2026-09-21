@@ -282,33 +282,13 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
             String operationVersion,
             int fireRetryCount
     ) {
+        // The scheduler returns only after FIRED evidence and Native stock
+        // execution have both reached a durable outcome. Notify JS only after
+        // that boundary so a foreground reconciliation can never observe the
+        // pre-deduction Native balance caused by this delivery.
         if (shouldNotifyJavascript(result)) {
             notifyJavascript(
                     context, medicationId, doseId, calendarDate, scheduledAt, amount);
-        }
-
-        if (result.allowsRecurrence()) {
-            AutoDeductionStockStore.AutoApplyResult stockResult =
-                    new AutoDeductionStockStore(context).applyAutoDeduction(
-                            medicationId, doseId, calendarDate, amount);
-            if (!stockResult.ok) {
-                Log.e(TAG, "live fire native stock apply failed: "
-                        + medicationId + "/" + doseId + "/" + calendarDate
-                        + " — " + stockResult.error);
-                if (shouldScheduleStockRetry(result, fireRetryCount)) {
-                    boolean retryScheduled = scheduler.scheduleFireRetry(
-                            medicationId, doseId, calendarDate, scheduledAt, amount,
-                            timeHhmm, recurrenceGeneration, operationVersion,
-                            fireRetryCount + 1);
-                    if (retryScheduled) {
-                        Log.w(TAG, "live fire stock failure — retry #"
-                                + (fireRetryCount + 1) + " scheduled");
-                    }
-                }
-                return;
-            }
-            scheduler.clearIndependentFireRetryEvidenceAfterStock(
-                    medicationId, doseId, calendarDate);
         }
 
         switch (result.status) {

@@ -394,6 +394,15 @@ export async function commitWithManualEnvelope(
     });
   }
 
+  // Refresh the recovery envelope after Native execution. A crash before the
+  // JS commit must recover from this newer Native-aligned snapshot, not the
+  // pre-mutation absolute currentPills value captured before the delta ran.
+  envelope.medications = durableState.medications;
+  const refreshedEnvelopeErr = saveManualStockEnvelope(envelope);
+  if (refreshedEnvelopeErr) {
+    return refreshedEnvelopeErr;
+  }
+
   const commitErr = commitDurableAutoStockState(durableState, {
     appliedMutationSeq: mutationSeq,
   });

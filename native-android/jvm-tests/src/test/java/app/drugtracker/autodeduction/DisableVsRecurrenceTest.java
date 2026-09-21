@@ -90,7 +90,7 @@ public class DisableVsRecurrenceTest {
         AutoDeductionScheduler.FireResult fr =
                 scheduler.fireOccurrenceIfNotCancelled(
                         med, dose, d, System.currentTimeMillis(), amount,
-                        t.scheduleVersion, t.recurrenceGeneration);
+                        t.operationVersion, t.recurrenceGeneration);
         assertTrue(fr.allowsRecurrence());
 
         AutoDeductionScheduler.InvalidateResult inv =
@@ -118,7 +118,7 @@ public class DisableVsRecurrenceTest {
         AutoDeductionScheduler.FireResult fr =
                 scheduler.fireOccurrenceIfNotCancelled(
                         med, dose, d, System.currentTimeMillis(), amount,
-                        t.scheduleVersion, t.recurrenceGeneration);
+                        t.operationVersion, t.recurrenceGeneration);
         assertTrue(fr.allowsRecurrence());
 
         AutoDeductionScheduler.ScheduleResult next =
@@ -177,7 +177,7 @@ public class DisableVsRecurrenceTest {
         AutoDeductionScheduler.FireResult fr =
                 scheduler.fireOccurrenceIfNotCancelled(
                         med, dose, d, System.currentTimeMillis(), 1.0,
-                        t.scheduleVersion, t.recurrenceGeneration);
+                        t.operationVersion, t.recurrenceGeneration);
         assertTrue(fr.isCancelled());
     }
 
@@ -214,7 +214,7 @@ public class DisableVsRecurrenceTest {
         AutoDeductionScheduler.FireResult fr =
                 scheduler.fireOccurrenceIfNotCancelled(
                         med, dose, d, System.currentTimeMillis(), 1.0,
-                        t.scheduleVersion, t.recurrenceGeneration);
+                        t.operationVersion, t.recurrenceGeneration);
         assertTrue(fr.isCancelled());
         assertFalse(fr.allowsRecurrence());
     }
@@ -298,7 +298,7 @@ public class DisableVsRecurrenceTest {
                 AutoDeductionScheduler.FireResult fr =
                         scheduler.fireOccurrenceIfNotCancelled(
                                 med, dose, d, System.currentTimeMillis(), amount,
-                                t.scheduleVersion, t.recurrenceGeneration);
+                                t.operationVersion, t.recurrenceGeneration);
                 fireRef.set(fr);
                 if (fr != null && fr.allowsRecurrence()) {
                     // Same path as AutoDeductionReceiver after FIRED.

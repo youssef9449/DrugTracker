@@ -196,14 +196,15 @@ assert(manifest.includes('android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STA
 manifest = upsertApplicationMetaData(
   manifest,
   'app.drugtracker.EXACT_ALARM_FEATURE_ADAPTERS',
-  'app.drugtracker.autodeduction.AutoDeductionAlarmFeature,app.drugtracker.alarmruntime.CriticalStockAlarmFeature,app.drugtracker.alarmruntime.DoseReminderAlarmFeature'
+  'app.drugtracker.autodeduction.AutoDeductionAlarmFeature,app.drugtracker.criticalstock.CriticalStockAlarmAdapter,app.drugtracker.alarmruntime.DoseReminderAlarmFeature'
 );
 const adapterMeta = 'app.drugtracker.EXACT_ALARM_FEATURE_ADAPTERS';
 assert(countName(manifest, adapterMeta) === 1, 'one shared feature-adapter registry');
 assert(
   manifest.includes('app.drugtracker.autodeduction.AutoDeductionAlarmFeature') &&
-  manifest.includes('app.drugtracker.alarmruntime.CriticalStockAlarmFeature') &&
-  manifest.includes('app.drugtracker.alarmruntime.DoseReminderAlarmFeature'),
+  manifest.includes('app.drugtracker.criticalstock.CriticalStockAlarmAdapter') &&
+  manifest.includes('app.drugtracker.alarmruntime.DoseReminderAlarmFeature') &&
+  !manifest.includes('app.drugtracker.alarmruntime.CriticalStockAlarmFeature'),
   'Auto + Critical Stock + Dose Reminder adapters are registered'
 );
 

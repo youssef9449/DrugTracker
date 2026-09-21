@@ -76,13 +76,20 @@ public final class ExactAlarmRuntime {
         }
     }
 
-    /** Feature-neutral snapshot of all durable schedule metadata. */
+    /** Feature-neutral snapshot of all durable schedule metadata keyed by storage identity. */
     public java.util.Map<String, String> listScheduleMetadata() {
         synchronized (ExactAlarmOperationLock.LOCK) {
             java.util.Map<String, String> result = new java.util.LinkedHashMap<>();
             for (java.util.Map.Entry<String, ?> entry : store.getAllScheduleMetadata().entrySet()) {
-                if (entry.getKey() == null || !(entry.getValue() instanceof String)) continue;
-                result.put(entry.getKey(), (String) entry.getValue());
+                String key = entry.getKey();
+                if (key == null
+                        || !key.startsWith(ExactAlarmContract.SCHEDULE_KEY_PREFIX)
+                        || !(entry.getValue() instanceof String)) {
+                    continue;
+                }
+                result.put(
+                        key.substring(ExactAlarmContract.SCHEDULE_KEY_PREFIX.length()),
+                        (String) entry.getValue());
             }
             return result;
         }

@@ -18,7 +18,7 @@ This document follows the same honesty conventions as `docs/ANDROID_NOTIFICATION
 
 Native `AlarmManager.setExactAndAllowWhileIdle` one-shot per occurrence (`AutoDeductionScheduler`) → delivery into `AutoDeductionReceiver.onReceive` (background thread via `goAsync()`, bounded same-identity fire-persistence retry) → durable **FIRED** row (`AutoDeductionEventStore.insertFiredIfAbsent`) → JS reconciliation (`src/hooks/useExactAutoDeductionReconciliation.ts` → `src/utils/runAutoDeductionReconciliation.ts` → `src/utils/autoDeductionReconciliation.ts`) → stock mutation through the serialized durable stock gate (`src/utils/autoDeductionStockGate.ts`) → exactly one exact log with deterministic id `exact-auto:<medicationId>:<doseId>:<calendarDate>` → native **FIRED → RECONCILED** acknowledgement (`AutoDeductionPlugin.markReconciled`).
 
-Occurrence identity: `medicationId + doseId + calendarDate` (`AutoDeductionContract`). Boot / timezone / permission restore: `AutoDeductionSystemReceiver` + `AutoDeductionScheduler.restoreFutureSchedules`.
+Occurrence identity: `medicationId + doseId + calendarDate` (`AutoDeductionContract`). Boot / timezone / permission restore: `DrugTrackerAlarmSystemReceiver` + `AutoDeductionScheduler.restoreFutureSchedules`.
 
 ## Validation environment — attempt of 2026-09-18
 
@@ -76,12 +76,12 @@ Occurrence identity: `medicationId + doseId + calendarDate` (`AutoDeductionContr
 
 ## Scenario procedures (for a real emulator/device run)
 
-Each scenario lists the reproducible procedure, what PASS requires, and the status of the 2026-09-18 attempt. `app.drugtracker` is the package id (`capacitor.config.ts`). Log tags actually used by the implementation: `AutoDeductionScheduler`, `AutoDeductionReceiver`, `AutoDeductionSystemRx`, `AutoDeductionEventStore`, `AutoDeductionPlugin`, `AutoDeductionLifecycle`.
+Each scenario lists the reproducible procedure, what PASS requires, and the status of the 2026-09-18 attempt. `app.drugtracker` is the package id (`capacitor.config.ts`). Log tags actually used by the implementation: `AutoDeductionScheduler`, `AutoDeductionReceiver`, `DrugTrackerAlarmSystemReceiver`, `AutoDeductionEventStore`, `AutoDeductionPlugin`, `AutoDeductionLifecycle`.
 
 Useful observation commands:
 
 ```bash
-adb logcat -s AutoDeductionScheduler:D AutoDeductionReceiver:D AutoDeductionSystemRx:D \
+adb logcat -s AutoDeductionScheduler:D AutoDeductionReceiver:D DrugTrackerAlarmSystemReceiver:D \
   AutoDeductionEventStore:D AutoDeductionPlugin:D AutoDeductionLifecycle:D
 ```
 
@@ -127,7 +127,7 @@ This is the cold-process FIRED path: AlarmManager delivery → receiver without 
 
 1. Schedule a future exact occurrence; confirm it exists (`listScheduledOccurrences` / logs).
 2. Reboot the device/emulator: `adb reboot`.
-3. After boot, verify the future occurrence was restored (`AutoDeductionSystemRx` logs on `BOOT_COMPLETED`, then `restoreFutureSchedules` result via `listScheduledOccurrences`).
+3. After boot, verify the future occurrence was restored (`DrugTrackerAlarmSystemReceiver` logs on `BOOT_COMPLETED`, then `restoreFutureSchedules` result via `listScheduledOccurrences`).
 4. **Wait for the actual fire** — a restored schedule alone is **not** success — then verify FIRED → reconciliation → single deduction → single log → RECONCILED.
 
 **PASS requires** an observed fire **after** reboot reaching RECONCILED.

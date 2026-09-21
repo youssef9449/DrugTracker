@@ -37,7 +37,7 @@ import {
   getNotificationPermission,
 } from './utils/notifications/notificationPermissions';
 import { sendTestAlertNotification } from './utils/notifications/doseReminderNotifications';
-import { openExactAlarmSettings } from './utils/exactAlarm';
+import { openExactAlarmSettings, type ExactAlarmPermission } from './utils/exactAlarm';
 import { OrderItem } from './utils/whatsapp';
 import { playSuccessChime } from './utils/sound';
 import { useDoseReminders } from './hooks/useDoseReminders';
@@ -128,7 +128,7 @@ export default function App() {
   // reminders. The user grants this via Android settings (the plugin's
   // changeExactNotificationSetting opens the settings screen). On web /
   // Android < 12 this is always true.
-  const [exactAlarmEnabled, setExactAlarmEnabled] = useState<boolean | null>(null);
+  const [exactAlarmPermission, setExactAlarmPermission] = useState<ExactAlarmPermission | null>(null);
   // Bumped on every app resume (appStateChange) so the critical-alarm
   // scheduler re-runs and reconciles its matching claims against the
   // platform's actual pending notifications — the user may have just
@@ -220,7 +220,7 @@ export default function App() {
     setSoundEnabled,
     setNotificationsEnabled,
     setCriticalStockAlertsEnabled,
-    setExactAlarmEnabled,
+    setExactAlarmPermission,
     setGlobalAutoDeductEnabled,
     setFontScale,
     setIsCompactView,
@@ -371,6 +371,7 @@ export default function App() {
     criticalStockAlertsEnabled,
     hydrated,
     isFirstRun,
+    exactAlarmPermission,
     resumeTick: criticalAlarmResumeTick,
   });
 
@@ -392,7 +393,7 @@ export default function App() {
     notificationsEnabled,
     hydrated,
     isFirstRun,
-    exactAlarmEnabled,
+    exactAlarmPermission,
     resumeTick: doseAlarmResumeTick,
     lifecycleTick: doseLifecycleTick,
   });
@@ -410,7 +411,7 @@ export default function App() {
     globalAutoDeductEnabled,
     hydrated,
     isFirstRun,
-    exactAlarmEnabled,
+    exactAlarmPermission,
     resumeTick: doseAlarmResumeTick,
     midnightTick: autoDeductMidnightTick,
   });
@@ -554,7 +555,7 @@ export default function App() {
     setDoseLifecycleTick,
     setCriticalAlarmResumeTick,
     setDoseAlarmResumeTick,
-    setExactAlarmEnabled,
+    setExactAlarmPermission,
   });
 
   const handleOpenExactAlarmSettings = () => {
@@ -879,7 +880,7 @@ export default function App() {
         criticalStockAlertsEnabled={criticalStockAlertsEnabled}
         autoDeductEnabled={globalAutoDeductEnabled}
         onSendTestNotification={handleSendTestNotification}
-        exactAlarmEnabled={exactAlarmEnabled}
+        exactAlarmPermission={exactAlarmPermission}
         onOpenExactAlarmSettings={handleOpenExactAlarmSettings}
         showToast={showToast}
         onApplyAppPreferences={async (prefs) => {

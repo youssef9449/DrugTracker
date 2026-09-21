@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, type FC, type FormEvent } from 'react';
+import type { ExactAlarmPermission } from '../utils/exactAlarm';
 import {
   X,
   Settings,
@@ -61,7 +62,7 @@ export interface AppSettingsModalProps {
    *  on Android 12+. When false, dose reminders CANNOT be guaranteed
    *  to fire on time — the UI shows a warning + a button to open the
    *  Android exact-alarm settings. */
-  exactAlarmEnabled?: boolean | null;
+  exactAlarmPermission?: ExactAlarmPermission | null;
   /** Open the Android settings screen to grant exact-alarm permission. */
   onOpenExactAlarmSettings?: () => void;
   /**
@@ -84,7 +85,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   onSendTestNotification,
   autoDeductEnabled = true,
   onApplyAppPreferences,
-  exactAlarmEnabled = null,
+  exactAlarmPermission = null,
   onOpenExactAlarmSettings,
   showToast,
   mode = 'all',
@@ -446,7 +447,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                 )}
 
                 {/* Exact-alarm permission warning (Android 12+) */}
-                {draftNotifications && !exactAlarmEnabled && onOpenExactAlarmSettings && (
+                {draftNotifications && exactAlarmPermission === 'denied' && onOpenExactAlarmSettings && (
                   <div className="bg-rose-50 border border-rose-300/80 rounded-2xl p-3.5 space-y-2">
                     <div className="flex items-start gap-2">
                       <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
@@ -470,7 +471,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                 )}
 
                 {/* Exact-alarm granted indicator */}
-                {draftNotifications && exactAlarmEnabled && (
+                {draftNotifications && exactAlarmPermission === 'granted' && (
                   <div className="flex items-center gap-1.5 text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-1.5">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                     <span>المنبهات الدقيقة مفعّلة — تذكيرات الجرعات مضمونة في موعدها</span>

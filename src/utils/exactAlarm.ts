@@ -9,6 +9,20 @@ const ExactAlarmRuntime = registerPlugin<ExactAlarmRuntimePlugin>(
   'ExactAlarmRuntime'
 );
 
+/**
+ * Single application-wide exact-alarm permission contract.
+ *
+ * granted means Android exact alarms are currently usable.
+ * denied means Android exact alarms are applicable but not allowed.
+ * unsupported means this app/platform does not expose the Android
+ * exact-alarm capability (for example web/iOS) or the native capability
+ * check could not be completed reliably.
+ */
+export type ExactAlarmPermission =
+  | 'granted'
+  | 'denied'
+  | 'unsupported';
+
 function isAndroid(): boolean {
   try {
     return typeof Capacitor !== 'undefined' && Capacitor.getPlatform() === 'android';
@@ -17,16 +31,22 @@ function isAndroid(): boolean {
   }
 }
 
-export async function getExactAlarmPermission(): Promise<
-  'granted' | 'denied' | 'unsupported'
-> {
-  if (!isAndroid()) return 'granted';
+/**
+ * The single source of truth for the application's exact-alarm capability.
+ * Feature schedulers must consume this status instead of performing their
+ * own Android exact-alarm checks.
+ */
+export async function getExactAlarmPermission(): Promise<ExactAlarmPermission> {
+  if (!isAndroid()) return 'unsupported';
   try {
     const result = await ExactAlarmRuntime.canScheduleExactAlarms();
     return result?.granted === true ? 'granted' : 'denied';
   } catch (error) {
     console.warn('[exact-alarm] capability check failed:', error);
-    return 'unsupported';
+    // Android is an applicable exact-alarm platform; an indeterminate
+    // capability check must therefore fail closed as denied, not become
+    // unsupported/not-applicable.
+    return 'denied';
   }
 }
 

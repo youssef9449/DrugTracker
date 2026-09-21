@@ -16,6 +16,7 @@ import {
 } from '../utils/criticalNotificationClaims';
 import { OperationQueue } from '../utils/async/OperationQueue';
 import { GenerationGuard } from '../utils/async/GenerationGuard';
+import type { ExactAlarmPermission } from '../utils/exactAlarm';
 
 /**
  * Options for {@link useCriticalAlarmScheduler}.
@@ -25,6 +26,8 @@ export interface UseCriticalAlarmSchedulerOptions {
   criticalStockAlertsEnabled: boolean;
   hydrated: boolean;
   isFirstRun: boolean;
+  /** Shared exact-alarm capability status. `unsupported` is not applicable on non-Android platforms. */
+  exactAlarmPermission: ExactAlarmPermission | null;
   /**
    * Bump this counter whenever the app RESUMES to the foreground
    * (App.tsx bumps it from its appStateChange handler). Each change
@@ -152,6 +155,7 @@ export function useCriticalAlarmScheduler({
   criticalStockAlertsEnabled,
   hydrated,
   isFirstRun,
+  exactAlarmPermission,
   resumeTick = 0,
 }: UseCriticalAlarmSchedulerOptions): void {
   // Meds this session armed (or kept) an alarm for — used to cancel
@@ -235,6 +239,11 @@ export function useCriticalAlarmScheduler({
 
   useEffect(() => {
     if (!hydrated || isFirstRun) return;
+    // Android exact-alarm scheduling is fail-closed when the shared permission
+    // service reports denied. `unsupported` means the Android permission model
+    // is not applicable (for example iOS/web), so those platforms keep their
+    // existing notification scheduling behavior.
+    if (exactAlarmPermission === null || exactAlarmPermission === 'denied') return;
 
     // ── Flags disabled: cancel every possibly-armed alarm ──
     // ── (claim writes belong to the foreground hook) ──
@@ -425,5 +434,6 @@ export function useCriticalAlarmScheduler({
     hydrated,
     isFirstRun,
     resumeTick,
+    exactAlarmPermission,
   ]);
 }

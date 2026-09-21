@@ -71,7 +71,7 @@ describe('useAutoDeductionScheduler native list failure (Issue #242)', () => {
         globalAutoDeductEnabled: true,
         hydrated: true,
         isFirstRun: false,
-        exactAlarmEnabled: true,
+        exactAlarmPermission: 'granted',
       })
     );
     await wait(40);
@@ -105,7 +105,7 @@ describe('useAutoDeductionScheduler native list failure (Issue #242)', () => {
           globalAutoDeductEnabled: props.enabled,
           hydrated: true,
           isFirstRun: false,
-          exactAlarmEnabled: true,
+          exactAlarmPermission: 'granted',
           resumeTick: props.resumeTick,
         }),
       {
@@ -180,7 +180,7 @@ describe('useAutoDeductionScheduler native list failure (Issue #242)', () => {
           globalAutoDeductEnabled: false,
           hydrated: true,
           isFirstRun: false,
-          exactAlarmEnabled: true,
+          exactAlarmPermission: 'granted',
           resumeTick: props.resumeTick,
         }),
       { initialProps: { resumeTick: 0 } }

@@ -82,6 +82,7 @@ function defaultOpts(
     criticalStockAlertsEnabled: true,
     hydrated: true,
     isFirstRun: false,
+    exactAlarmPermission: 'unsupported',
     ...overrides,
   };
 }
@@ -134,6 +135,23 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+});
+
+describe('useCriticalAlarmScheduler — shared exact-alarm permission gate', () => {
+  it('does not create a future Critical alarm while exact permission is denied', async () => {
+    platformMock.mockReturnValue('android');
+    const med = makeMed();
+
+    renderHook((props) => useCriticalAlarmScheduler(props), {
+      initialProps: defaultOpts({
+        medications: [med],
+        exactAlarmPermission: 'denied',
+      }),
+    });
+    await flush();
+
+    expect(scheduleMock).not.toHaveBeenCalled();
+  });
 });
 
 describe('useCriticalAlarmScheduler — scheduling and the persistent claim', () => {

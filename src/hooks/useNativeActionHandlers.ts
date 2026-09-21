@@ -5,7 +5,7 @@ import {
   registerDoseReceivedHandler,
   registerAppResumeHandler,
 } from '../native';
-import { getExactAlarmPermission } from '../utils/exactAlarm';
+import { getExactAlarmPermission, type ExactAlarmPermission } from '../utils/exactAlarm';
 import { playSuccessChime } from '../utils/sound';
 
 /**
@@ -21,7 +21,7 @@ export function useNativeActionHandlers(opts: {
   setDoseLifecycleTick: Dispatch<SetStateAction<number>>;
   setCriticalAlarmResumeTick: Dispatch<SetStateAction<number>>;
   setDoseAlarmResumeTick: Dispatch<SetStateAction<number>>;
-  setExactAlarmEnabled: Dispatch<SetStateAction<boolean | null>>;
+  setExactAlarmPermission: Dispatch<SetStateAction<ExactAlarmPermission | null>>;
 }): void {
   const {
     medications,
@@ -31,7 +31,7 @@ export function useNativeActionHandlers(opts: {
     setDoseLifecycleTick,
     setCriticalAlarmResumeTick,
     setDoseAlarmResumeTick,
-    setExactAlarmEnabled,
+    setExactAlarmPermission,
   } = opts;
 
   useEffect(() => {
@@ -72,7 +72,7 @@ export function useNativeActionHandlers(opts: {
   // SCHEDULE_EXACT_ALARM in the Android settings screen (opened via the
   // "السماح بالمنبهات الدقيقة" button in AppSettingsModal). When the
   // permission state changes, the useDoseReminderScheduler effect
-  // (which depends on exactAlarmEnabled) re-runs and reschedules all
+  // (which depends on exactAlarmPermission) re-runs and reschedules all
   // dose reminders with the correct (exact or cancelled) policy.
   //
   // The resume also reconciles the CRITICAL alarms: every resume bumps
@@ -101,7 +101,7 @@ export function useNativeActionHandlers(opts: {
         setDoseAlarmResumeTick((tick) => tick + 1);
         getExactAlarmPermission()
           .then((state) => {
-            setExactAlarmEnabled(state === 'granted');
+            setExactAlarmPermission(state);
           })
           .catch((err) => {
             console.warn('[App] Resume exact-alarm re-check failed:', err);
@@ -113,7 +113,7 @@ export function useNativeActionHandlers(opts: {
     setDoseLifecycleTick,
     setCriticalAlarmResumeTick,
     setDoseAlarmResumeTick,
-    setExactAlarmEnabled,
+    setExactAlarmPermission,
   ]);
 
 }

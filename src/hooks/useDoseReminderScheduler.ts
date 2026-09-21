@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { Medication } from '../types';
+import type { ExactAlarmPermission } from '../utils/exactAlarm';
 import { getTodayDateString } from '../utils/dateCalculations';
 import {
   scheduleDoseReminder,
@@ -33,7 +34,7 @@ export interface UseDoseReminderSchedulerOptions {
    *
    * On web / Android < 12 this is always true (no permission needed).
    */
-  exactAlarmEnabled: boolean | null;
+  exactAlarmPermission: ExactAlarmPermission | null;
   /**
    * Bumped by App.tsx on every app resume (appStateChange) and on mount
    * it simply runs — drives the consumption-suppression reconciliation:
@@ -138,7 +139,7 @@ export function useDoseReminderScheduler({
   notificationsEnabled,
   hydrated,
   isFirstRun,
-  exactAlarmEnabled,
+  exactAlarmPermission,
   resumeTick,
   lifecycleTick,
 }: UseDoseReminderSchedulerOptions): void {
@@ -203,7 +204,7 @@ export function useDoseReminderScheduler({
 
     // User disabled notifications OR exact-alarm permission is missing →
     // cancel all previously-scheduled dose reminders and clear the tracker.
-    if (!notificationsEnabled || exactAlarmEnabled !== true) {
+    if (!notificationsEnabled || exactAlarmPermission === null || exactAlarmPermission === 'denied') {
       scheduledDoseIdsRef.current.forEach((key) => {
         const { medId, doseId } = parseDoseScheduleKey(key);
         cancelSlot(medId, doseId);
@@ -353,7 +354,7 @@ export function useDoseReminderScheduler({
   }, [
     doseSignature,
     notificationsEnabled,
-    exactAlarmEnabled,
+    exactAlarmPermission,
     hydrated,
     isFirstRun,
     lifecycleTick,
@@ -401,7 +402,7 @@ export function useDoseReminderScheduler({
 
   useEffect(() => {
     if (!hydrated || isFirstRun) return;
-    if (!notificationsEnabled || exactAlarmEnabled !== true) return;
+    if (!notificationsEnabled || exactAlarmPermission === null || exactAlarmPermission === 'denied') return;
 
     const today = getTodayDateString();
     const nextConsumedKeys = new Set<string>();
@@ -491,7 +492,7 @@ export function useDoseReminderScheduler({
     consumedSignature,
     resumeTickValue,
     notificationsEnabled,
-    exactAlarmEnabled,
+    exactAlarmPermission,
     hydrated,
     isFirstRun,
   ]);

@@ -307,6 +307,25 @@ After an exact occurrence is applied, markers and deterministic exact-auto logs 
 
 ---
 
+### Phase 8 lifecycle / permission / recovery unification
+
+All Android system lifecycle recovery enters through exactly one system receiver:
+
+```text
+BOOT / QUICKBOOT
+TIMEZONE_CHANGED
+SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED
+        ↓
+DrugTrackerAlarmSystemReceiver
+        ↓
+ExactAlarmLifecycle
+        ↓
+Auto / Critical Stock / Dose Reminder feature adapters
+```
+
+`ExactAlarmRuntime.canScheduleExactAlarms(Context)` is the single native platform permission source. `ExactAlarmLifecycle` performs the capability probe once per system-lifecycle dispatch and passes the resulting boolean to each feature adapter; feature recovery does not implement a second system receiver or a second platform permission probe.
+
+Feature delivery receivers remain separate and private. They receive only their already-scheduled feature alarm actions; they do not handle BOOT, timezone, or exact-alarm permission system broadcasts.
 ## Phase 2 native platform notes (closure)
 
 Shared exact-alarm runtime owns timing mechanics, AlarmManager install/cancel, PendingIntent identity, durable schedule/cancellation ordering, and system lifecycle dispatch. Auto Deduction owns durable FIRED/pending-fire state, recurrence authorization, catch-up, schedule metadata interpretation, cancellation-tombstone semantics needed by fire/cancel policy, and feature recovery policy. The scheduling adapter is only the Auto-to-runtime scheduling boundary; it does not own generic schedule storage. JavaScript owns stock mutation, reconciliation, and RECONCILED acknowledgement (Phase 3) as specified above.

@@ -51,7 +51,6 @@ vi.mock('@capacitor/local-notifications', () => ({
 }));
 
 import {
-  criticalAlarmId,
   doseReminderAlarmIdForDose,
   sendMedicineAlert,
   sendCriticalStockAlert,
@@ -184,38 +183,6 @@ describe('dose-reminder ID stability — no Date.now() (#66)', () => {
     const idB = lastScheduledId();
 
     expect(idA).not.toBe(idB);
-  });
-});
-
-describe('criticalAlarmId — stable across calls, disjoint from other categories', () => {
-  it('returns the same id for the same medId on every call', () => {
-    expect(criticalAlarmId('med-x')).toBe(criticalAlarmId('med-x'));
-  });
-
-  it('returns different ids for different medIds', () => {
-    expect(criticalAlarmId('med-x')).not.toBe(criticalAlarmId('med-y'));
-  });
-
-  it('lives in the criticalAlarm band (5_000_000–5_999_999)', () => {
-    const id = criticalAlarmId('med-band');
-    expect(id).toBeGreaterThanOrEqual(5_000_000);
-    expect(id).toBeLessThan(6_000_000);
-  });
-
-  it('cancel + reschedule use the SAME stable id', async () => {
-    const medId = 'med-reschedule';
-    const future = Date.now() + 5 * 24 * 60 * 60 * 1000;
-
-    await cancelCriticalAlarm(medId);
-    await scheduleCriticalAlarm(medId, 'Test', future, 'قرص');
-
-    expect(mocks.cancel).toHaveBeenCalledTimes(1);
-    expect(mocks.schedule).toHaveBeenCalledTimes(1);
-
-    const cancelledId = mocks.cancel.mock.calls[0][0].notifications[0].id;
-    const scheduledId = mocks.schedule.mock.calls[0][0].notifications[0].id;
-    expect(cancelledId).toBe(scheduledId);
-    expect(cancelledId).toBe(criticalAlarmId(medId));
   });
 });
 

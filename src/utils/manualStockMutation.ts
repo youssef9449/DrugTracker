@@ -19,6 +19,7 @@ import {
 } from './medActions';
 import {
   markAutoDeductionEventReconciled,
+  applyForegroundAutoStockDeltas,
   getOccurrenceSnapshot,
   invalidateAutoDeductionRecurrence,
   scheduleAutoDeduction,
@@ -320,10 +321,32 @@ async function acknowledgeExactAutoEvents(
  * Safe to call from an already-held withAutoStockMutationGate, including
  * startup manual mutation; callers must NOT wrap it in another gate.
  */
-export function commitWithManualEnvelope(
+function buildNativeStockDeltas(
+  baseMedications: Medication[],
+  nextMedications: Medication[]
+): Array<{ medicationId: string; delta: number }> {
+  const baseById = new Map(baseMedications.map((m) => [m.id, m.currentPills]));
+  const deltas: Array<{ medicationId: string; delta: number }> = [];
+
+  for (const medication of nextMedications) {
+    const before = baseById.get(medication.id);
+    const after = Number(medication.currentPills);
+    if (!Number.isFinite(after) || after < 0) continue;
+
+    const delta = before == null ? after : after - Number(before);
+    if (Number.isFinite(delta) && delta !== 0) {
+      deltas.push({ medicationId: medication.id, delta });
+    }
+  }
+
+  return deltas;
+}
+
+export async function commitWithManualEnvelope(
   state: AutoStockDurableState,
+  baseMedications: Medication[],
   globalOverride?: boolean
-): string | null {
+): Promise<string | null> {
   const durableState: AutoStockDurableState = {
     ...state,
     globalAutoDeductEnabled:
@@ -333,6 +356,7 @@ export function commitWithManualEnvelope(
   if (!alloc.ok) return alloc.error;
   const mutationSeq = alloc.seq;
   const baseGeneration = loadStockGeneration();
+  const stockDeltas = buildNativeStockDeltas(baseMedications, durableState.medications);
   const envelope: ManualStockEnvelope = {
     version: 1,
     status: 'manual_js_ready',
@@ -342,29 +366,24 @@ export function commitWithManualEnvelope(
     createdAt: new Date().toISOString(),
     baseGeneration,
     mutationSeq,
+    stockDeltas,
   };
   const envErr = saveManualStockEnvelope(envelope);
   if (envErr) return envErr;
 
-  // meds+logs+lastApplied must all succeed before clearing recovery evidence.
+  const nativeResult = await applyForegroundAutoStockDeltas(mutationSeq, stockDeltas);
+  if (!nativeResult.ok) {
+    return nativeResult.error ?? 'foreground_stock_failed';
+  }
+
   const commitErr = commitDurableAutoStockState(durableState, {
     appliedMutationSeq: mutationSeq,
   });
   if (commitErr) {
-    // Keep envelope (pair and/or lastApplied incomplete).
     return commitErr;
   }
 
-  // Clear after lastApplied is durable. Clear failure is NOT a caller-facing
-  // failure: the mutation is fully durable (meds + logs + lastApplied all
-  // succeeded). lastAppliedMutationSeq is the completion proof. The envelope
-  // stays for retry — recoverManualEnvelopeInto cleans it up on the next
-  // gate entry (mutationSeq <= lastApplied → collect acks + clear). Return
-  // null so the caller sees 'applied' (the mutation is durable; the clear is
-  // best-effort cleanup). This matches the Phase 4 completion contract:
-  // lastAppliedMutationSeq >= envelope.mutationSeq ⇒ mutation finalized.
-  const clearErr = saveManualStockEnvelope(null);
-  if (clearErr) return null;
+  saveManualStockEnvelope(null);
   return null;
 }
 
@@ -390,7 +409,7 @@ export function runGatedManualConsume(opts: {
     const todayStr = opts.todayStr ?? getTodayDateString();
     const now = opts.now ?? new Date();
 
-    const recovered = recoverManualEnvelopeInto(freshIn);
+    const recovered = await recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
         outcome: 'persist_failed' as const,
@@ -531,7 +550,7 @@ export function runGatedManualConsume(opts: {
       m.id === med.id ? result.updatedMed! : m
     );
     const logs = [result.log, ...fresh.logs];
-    const err = commitWithManualEnvelope({ medications, logs });
+    const err = await commitWithManualEnvelope({ medications, logs }, fresh.medications);
     if (err) {
       return {
         outcome: 'persist_failed' as const,
@@ -569,7 +588,7 @@ export function runGatedManualRestore(opts: {
     const todayStr = opts.todayStr ?? getTodayDateString();
     const now = opts.now ?? new Date();
 
-    const recovered = recoverManualEnvelopeInto(freshIn);
+    const recovered = await recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
         outcome: 'persist_failed' as const,
@@ -726,7 +745,7 @@ export function runGatedManualRestore(opts: {
       ),
     ];
 
-    const err = commitWithManualEnvelope({ medications, logs });
+    const err = await commitWithManualEnvelope({ medications, logs }, fresh.medications);
     if (err) {
       return {
         outcome: 'persist_failed' as const,
@@ -771,7 +790,7 @@ export function runGatedAddMedication(opts: {
   medication: Medication;
 }): Promise<GatedAddMedicationResult> {
   return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
-    const recovered = recoverManualEnvelopeInto(freshIn);
+    const recovered = await recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
         outcome: 'persist_failed' as const,
@@ -818,11 +837,11 @@ export function runGatedAddMedication(opts: {
     const medications = [medication, ...pre.state.medications];
     const logs = pre.state.logs;
 
-    const err = commitWithManualEnvelope({
+    const err = await commitWithManualEnvelope({
       medications,
       logs,
       globalAutoDeductEnabled: pre.state.globalAutoDeductEnabled,
-    });
+    }, pre.state.medications);
     if (err) {
       return {
         outcome: 'persist_failed' as const,
@@ -887,7 +906,7 @@ export function runGatedRefill(opts: {
     const todayStr = opts.todayStr ?? getTodayDateString();
     const now = opts.now ?? new Date();
 
-    const recovered = recoverManualEnvelopeInto(freshIn);
+    const recovered = await recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
         outcome: 'persist_failed' as const,
@@ -961,7 +980,7 @@ export function runGatedRefill(opts: {
     };
     const logs = [log, ...fresh.logs];
 
-    const err = commitWithManualEnvelope({ medications, logs });
+    const err = await commitWithManualEnvelope({ medications, logs }, fresh.medications);
     if (err) {
       return {
         outcome: 'persist_failed' as const,
@@ -1002,7 +1021,7 @@ export function runGatedUndoRefill(opts: {
     const todayStr = opts.todayStr ?? getTodayDateString();
     const now = opts.now ?? new Date();
 
-    const recovered = recoverManualEnvelopeInto(freshIn);
+    const recovered = await recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
         outcome: 'persist_failed' as const,
@@ -1108,7 +1127,7 @@ export function runGatedUndoRefill(opts: {
       ),
     ];
 
-    const err = commitWithManualEnvelope({ medications, logs });
+    const err = await commitWithManualEnvelope({ medications, logs }, fresh.medications);
     if (err) {
       return {
         outcome: 'persist_failed' as const,
@@ -1164,7 +1183,7 @@ export function runGatedAutoDeductToggle(opts: {
   return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
     const now = opts.now ?? new Date();
 
-    const recovered = recoverManualEnvelopeInto(freshIn);
+    const recovered = await recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
         outcome: 'persist_failed' as const,
@@ -1233,7 +1252,7 @@ export function runGatedAutoDeductToggle(opts: {
       };
     }
 
-    const err = commitWithManualEnvelope({ medications, logs });
+    const err = await commitWithManualEnvelope({ medications, logs }, fresh.medications);
     if (err) {
       // Native invalidation already linearized the old schedule chain. Restore
       // it when the JS commit fails so a failed mutation does not leave the
@@ -1290,7 +1309,7 @@ export function runGatedGlobalAutoDeductToggle(opts: {
   return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
     const now = opts.now ?? new Date();
 
-    const recovered = recoverManualEnvelopeInto(freshIn);
+    const recovered = await recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
         outcome: 'persist_failed' as const,
@@ -1365,11 +1384,11 @@ export function runGatedGlobalAutoDeductToggle(opts: {
         : { ...med, autoDeductEnabled: opts.enable }
     );
 
-    const err = commitWithManualEnvelope({
+    const err = await commitWithManualEnvelope({
       medications,
       logs: fresh.logs,
       globalAutoDeductEnabled: opts.enable,
-    });
+    }, fresh.medications);
     if (err) {
       for (const completed of invalidatedMeds) {
         if (completed.doseIds.length > 0) {
@@ -1428,7 +1447,7 @@ export function runGatedDeleteMedication(opts: {
   medicationId: string;
 }): Promise<GatedDeleteMedicationResult> {
   return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
-    const recovered = recoverManualEnvelopeInto(freshIn);
+    const recovered = await recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
         outcome: 'persist_failed' as const,
@@ -1479,10 +1498,10 @@ export function runGatedDeleteMedication(opts: {
     }
 
     const medications = pre.state.medications.filter((m) => m.id !== opts.medicationId);
-    const err = commitWithManualEnvelope({
+    const err = await commitWithManualEnvelope({
       medications,
       logs: pre.state.logs,
-    });
+    }, pre.state.medications);
     if (err) {
       if (invalidation.invalidatedDoseIds.length > 0) {
         await restoreInvalidatedRecurrences(med, invalidation.invalidatedDoseIds, new Date());
@@ -1538,7 +1557,7 @@ export function runGatedMedicationUpdate(opts: {
   return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
     const now = opts.now ?? new Date();
 
-    const recovered = recoverManualEnvelopeInto(freshIn);
+    const recovered = await recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
         outcome: 'persist_failed' as const,
@@ -1636,7 +1655,7 @@ export function runGatedMedicationUpdate(opts: {
     );
     const logs = settleLog ? [settleLog, ...fresh.logs] : fresh.logs;
 
-    const err = commitWithManualEnvelope({ medications, logs });
+    const err = await commitWithManualEnvelope({ medications, logs }, fresh.medications);
     if (err) {
       // Only configuration-changing edits invalidate native recurrences.
       // Restore the old chain when the new JS state could not be committed.

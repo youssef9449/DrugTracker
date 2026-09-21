@@ -456,6 +456,10 @@ async function runOnce(
     };
   }
   baseMeds = postRepairConvergence.medications;
+  const nativeStockMirrorChanged = baseMeds.some((m) => {
+    const before = preNativeConvergenceMeds.find((x) => x.id === m.id);
+    return before != null && Number(before.currentPills) !== Number(m.currentPills);
+  });
 
   // Recovery may have durably changed the global master switch while the
   // original `fresh` snapshot is now stale. Re-read it after envelope recovery
@@ -470,17 +474,22 @@ async function runOnce(
   if (!result.mutated && result.toAcknowledge.length === 0) {
     return {
       ...result,
+      // Native stock may have changed even when there was no new JS marker/log.
+      mutated: nativeStockMirrorChanged,
       markedCount: 0,
       recoveredEnvelope: false,
       partialNativeAck: false,
     };
   }
 
-  // Acknowledge-only: markers already durable in baseMeds
+  // Acknowledge-only: markers already durable in baseMeds. If Native changed
+  // the balance while JS was unavailable, expose that mirror update to React;
+  // the normal application persistence path will store it in localStorage.
   if (!result.mutated) {
     const { markedCount, failed } = await markAll(result.toAcknowledge, mark);
     return {
       ...result,
+      mutated: nativeStockMirrorChanged,
       markedCount,
       recoveredEnvelope: false,
       partialNativeAck: failed.length > 0,

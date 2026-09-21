@@ -26,15 +26,58 @@
 @plugin "tailwindcss-animate";
 
 /*
+ * Material Design 3 (M3) Design System Tokens
+ * Defines color roles, elevation, shapes, and motion consistent with Google's M3 specs.
+ */
+:root {
+  /* M3 Primary (Teal theme) */
+  --md-sys-color-primary: #006a60;
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: #72f8e8;
+  --md-sys-color-on-primary-container: #00201d;
+
+  /* M3 Secondary */
+  --md-sys-color-secondary: #4a635f;
+  --md-sys-color-on-secondary: #ffffff;
+  --md-sys-color-secondary-container: #cce8e3;
+  --md-sys-color-on-secondary-container: #05201c;
+
+  /* M3 Tertiary */
+  --md-sys-color-tertiary: #456179;
+  --md-sys-color-on-tertiary: #ffffff;
+  --md-sys-color-tertiary-container: #cde5ff;
+  --md-sys-color-on-tertiary-container: #001e31;
+
+  /* M3 Error */
+  --md-sys-color-error: #ba1a1a;
+  --md-sys-color-on-error: #ffffff;
+  --md-sys-color-error-container: #ffdad6;
+  --md-sys-color-on-error-container: #410002;
+
+  /* M3 Surface & Containers */
+  --md-sys-color-surface: #f8faf9;
+  --md-sys-color-on-surface: #191c1b;
+  --md-sys-color-surface-variant: #dae5e1;
+  --md-sys-color-on-surface-variant: #3f4946;
+  --md-sys-color-surface-container-lowest: #ffffff;
+  --md-sys-color-surface-container-low: #f2f5f3;
+  --md-sys-color-surface-container: #ecefee;
+  --md-sys-color-surface-container-high: #e6e9e8;
+  --md-sys-color-surface-container-highest: #e0e3e2;
+
+  /* M3 Outlines */
+  --md-sys-color-outline: #6f7976;
+  --md-sys-color-outline-variant: #bec9c5;
+
+  /* M3 Elevation Shadows */
+  --md-sys-elevation-1: 0px 1px 3px 1px rgba(0, 0, 0, 0.07), 0px 1px 2px 0px rgba(0, 0, 0, 0.05);
+  --md-sys-elevation-2: 0px 2px 6px 2px rgba(0, 0, 0, 0.08), 0px 1px 2px 0px rgba(0, 0, 0, 0.06);
+  --md-sys-elevation-3: 0px 4px 8px 3px rgba(0, 0, 0, 0.1), 0px 1px 3px 0px rgba(0, 0, 0, 0.08);
+  --md-sys-elevation-4: 0px 6px 10px 4px rgba(0, 0, 0, 0.12), 0px 2px 3px 0px rgba(0, 0, 0, 0.09);
+}
+
+/*
  * System Arabic-capable font stack (L9).
- *
- * Used by the `font-arabic-sans` utility class applied to <body> in
- * index.html. Cairo is listed first so users who have it installed
- * locally still get the intended typeface; the rest is a
- * widely-available system stack with good Arabic coverage on every
- * major platform (Segoe UI on Windows, the -apple- stack on
- * macOS/iOS, Tahoma as a last-resort Arabic fallback). No network
- * request is made.
  */
 @theme {
   --font-arabic-sans: "Cairo", "Segoe UI", -apple-system, BlinkMacSystemFont,

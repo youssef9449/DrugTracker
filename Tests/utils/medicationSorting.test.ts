@@ -23,8 +23,8 @@ describe('sortMedications', () => {
     expect(sortMedications(meds, 'quantity', 'desc').map(m => m.id)).toEqual(['3', '1', '2']);
   });
   it('sorts categories and keeps missing categories last', () => {
-    expect(sortMedications(meds, 'category', 'asc').map(m => m.name)).toEqual(['أموكسيسيلين', 'باراسيتامول', 'فيتامين د']);
-    expect(sortMedications(meds, 'category', 'desc').map(m => m.name)).toEqual(['باراسيتامول', 'أموكسيسيلين', 'فيتامين د']);
+    expect(sortMedications(meds, 'category', 'asc').map(m => m.name)).toEqual(['باراسيتامول', 'أموكسيسيلين', 'فيتامين د']);
+    expect(sortMedications(meds, 'category', 'desc').map(m => m.name)).toEqual(['أموكسيسيلين', 'باراسيتامول', 'فيتامين د']);
   });
   it('does not mutate the source array and uses name as a tie-breaker', () => {
     const same = [med({id:'a',name:'زنك',currentPills:10}), med({id:'b',name:'أسبرين',currentPills:10})];

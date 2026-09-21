@@ -121,12 +121,14 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} label={title} variant="center">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-auto overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-          <div className="flex items-center gap-2 min-w-0">
-            <Pill className="w-5 h-5 shrink-0 text-teal-600" />
+      <div className="bg-white rounded-[28px] shadow-xl w-full max-w-sm mx-auto overflow-hidden border border-slate-200/80">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-full bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
+              <Pill className="w-4 h-4" />
+            </div>
             <div className="min-w-0">
-              <h2 className="text-base font-bold text-slate-800 truncate">
+              <h2 className="text-base font-bold text-slate-900 truncate">
                 {medication.name}
               </h2>
               <p className="text-xs text-slate-500">{subtitle}</p>
@@ -135,7 +137,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-slate-100 text-slate-500 transition cursor-pointer"
+            className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-slate-100 text-slate-500 transition cursor-pointer"
             aria-label="إغلاق"
           >
             <X className="w-5 h-5" />

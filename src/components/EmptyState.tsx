@@ -20,9 +20,9 @@ export const EmptyState: FC<EmptyStateProps> = ({
   // If search query is active
   if (hasSearch) {
     return (
-      <div className="flex flex-col items-center justify-center p-8 text-center bg-white rounded-3xl border border-dashed border-slate-300 m-2 shadow-2xs">
+      <div className="flex flex-col items-center justify-center p-8 text-center bg-white rounded-[28px] border border-dashed border-slate-300 m-2 shadow-xs">
         <div className={EMPTY_STATE_ICON_BOX}>
-          <Pill className="w-7 h-7 rotate-45" />
+          <Pill className="w-8 h-8 rotate-45" />
         </div>
         <h3 className="text-base font-bold text-slate-800">لا توجد نتائج مطابقة للبحث</h3>
         <p className="text-xs text-slate-500 mt-1 max-w-xs leading-relaxed">
@@ -30,7 +30,7 @@ export const EmptyState: FC<EmptyStateProps> = ({
         </p>
         <button
           onClick={onClearSearch}
-          className="mt-4 h-10 px-5 bg-teal-700 hover:bg-teal-800 text-white text-xs font-semibold rounded-full transition shadow-2xs cursor-pointer"
+          className="mt-4 h-10 px-5 bg-teal-700 hover:bg-teal-800 active:bg-teal-900 active:scale-98 text-white text-xs sm:text-sm font-medium rounded-full transition shadow-xs cursor-pointer"
         >
           مسح البحث وعرض الأدوية
         </button>
@@ -41,8 +41,8 @@ export const EmptyState: FC<EmptyStateProps> = ({
   // Filter: 'alerts' (Running Low) has no low stock medicines!
   if (filter === 'alerts') {
     return (
-      <div className="flex flex-col items-center justify-center p-8 text-center bg-emerald-50/60 rounded-3xl border border-emerald-200 m-2 shadow-2xs">
-        <div className="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center mb-3">
+      <div className="flex flex-col items-center justify-center p-8 text-center bg-emerald-50/60 rounded-[28px] border border-emerald-200 m-2 shadow-xs">
+        <div className="w-16 h-16 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-3 shadow-xs">
           <CheckCircle2 className="w-8 h-8" />
         </div>
         <h3 className="text-base font-bold text-emerald-950">
@@ -54,10 +54,10 @@ export const EmptyState: FC<EmptyStateProps> = ({
         {onFilterChange && (
           <button
             onClick={() => onFilterChange('all')}
-            className="mt-4 h-10 px-5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold rounded-full flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
+            className="mt-4 h-10 px-5 bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 active:scale-98 text-white text-xs sm:text-sm font-medium rounded-full flex items-center gap-2 transition shadow-xs cursor-pointer"
           >
             <span>عرض جميع الأدوية</span>
-            <ArrowRight className="w-3.5 h-3.5 rotate-180" />
+            <ArrowRight className="w-4 h-4 rotate-180" />
           </button>
         )}
       </div>
@@ -67,8 +67,8 @@ export const EmptyState: FC<EmptyStateProps> = ({
   // Filter: 'sufficient' has no safe medicines (all are low or empty)
   if (filter === 'sufficient') {
     return (
-      <div className="flex flex-col items-center justify-center p-8 text-center bg-amber-50/70 rounded-3xl border border-amber-200 m-2 shadow-2xs">
-        <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center mb-3">
+      <div className="flex flex-col items-center justify-center p-8 text-center bg-amber-50/70 rounded-[28px] border border-amber-200 m-2 shadow-xs">
+        <div className="w-16 h-16 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mb-3 shadow-xs">
           <AlertTriangle className="w-8 h-8" />
         </div>
         <h3 className="text-base font-bold text-amber-950">
@@ -80,10 +80,10 @@ export const EmptyState: FC<EmptyStateProps> = ({
         {onFilterChange && (
           <button
             onClick={() => onFilterChange('alerts')}
-            className="mt-4 h-10 px-5 bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold rounded-full flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
+            className="mt-4 h-10 px-5 bg-amber-700 hover:bg-amber-800 active:bg-amber-900 active:scale-98 text-white text-xs sm:text-sm font-medium rounded-full flex items-center gap-2 transition shadow-xs cursor-pointer"
           >
             <span>مراجعة الأدوية التي قاربت على النفاذ</span>
-            <ArrowRight className="w-3.5 h-3.5 rotate-180" />
+            <ArrowRight className="w-4 h-4 rotate-180" />
           </button>
         )}
       </div>
@@ -92,9 +92,9 @@ export const EmptyState: FC<EmptyStateProps> = ({
 
   // Filter: 'all' (No medications in system)
   return (
-    <div className="flex flex-col items-center justify-center p-8 text-center bg-white rounded-3xl border border-dashed border-slate-300 m-2 shadow-2xs">
+    <div className="flex flex-col items-center justify-center p-8 text-center bg-white rounded-[28px] border border-dashed border-slate-300 m-2 shadow-xs">
       <div className={EMPTY_STATE_ICON_BOX}>
-        <Pill className="w-7 h-7 rotate-45" />
+        <Pill className="w-8 h-8 rotate-45" />
       </div>
       <h3 className="text-base font-bold text-slate-800">لا توجد أدوية مسجلة حالياً</h3>
       <p className="text-xs text-slate-500 mt-1 max-w-xs leading-relaxed">
@@ -102,9 +102,9 @@ export const EmptyState: FC<EmptyStateProps> = ({
       </p>
       <button
         onClick={onOpenAddModal}
-        className="mt-4 h-10 px-5 bg-teal-700 hover:bg-teal-800 text-white text-xs font-semibold rounded-full flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
+        className="mt-4 h-10 px-5 bg-teal-700 hover:bg-teal-800 active:bg-teal-900 active:scale-98 text-white text-xs sm:text-sm font-medium rounded-full flex items-center gap-2 transition shadow-xs cursor-pointer"
       >
-        <Plus className="w-4 h-4" />
+        <Plus className="w-4 h-4 stroke-[2.5]" />
         <span>أضف أول دواء الآن</span>
       </button>
     </div>

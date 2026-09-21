@@ -85,13 +85,13 @@ export const LowStockBanner: FC<LowStockBannerProps> = ({
         <button
           type="button"
           onClick={onNavigateToShopping}
-          className={`shrink-0 h-8 px-3.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-transform active:scale-95 shadow-2xs ${
+          className={`shrink-0 h-9 px-4 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95 shadow-xs cursor-pointer ${
             isUrgent
-              ? 'bg-rose-600 hover:bg-rose-700 text-white'
-              : 'bg-amber-600 hover:bg-amber-700 text-white'
+              ? 'bg-rose-700 hover:bg-rose-800 active:bg-rose-900 text-white'
+              : 'bg-amber-700 hover:bg-amber-800 active:bg-amber-900 text-white'
           }`}
         >
-          <ShoppingCart className="w-3.5 h-3.5" />
+          <ShoppingCart className="w-4 h-4" />
           <span>قائمة الشراء</span>
         </button>
       </div>

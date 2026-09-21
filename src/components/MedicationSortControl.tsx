@@ -30,29 +30,63 @@ export function MedicationSortControl({ field, direction, onFieldChange, onDirec
   const DirectionIcon = direction === 'asc' ? ArrowUp : ArrowDown;
   return (
     <div ref={rootRef} className="relative shrink-0">
-      <button type="button" aria-haspopup="menu" aria-expanded={open}
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
         aria-label={`ترتيب الأدوية حسب ${label} — ${direction === 'asc' ? 'تصاعدي' : 'تنازلي'}`}
         onClick={() => setOpen((v) => !v)}
-        className="h-10 inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 hover:bg-slate-50 active:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30">
-        <ArrowUpDown className="h-4 w-4 text-teal-700" aria-hidden="true" /><span>ترتيب</span>
+        className="h-[30px] inline-flex items-center gap-1.5 rounded-full border border-slate-300/90 bg-white hover:bg-slate-50 active:bg-slate-100 px-2.5 text-xs font-medium text-slate-700 transition-colors cursor-pointer shadow-2xs focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30"
+      >
+        <ArrowUpDown className="h-3.5 w-3.5 text-teal-700 shrink-0" aria-hidden="true" />
+        <span>ترتيب</span>
       </button>
-      {open && <div role="menu" aria-label="ترتيب الأدوية" className="absolute right-0 top-[calc(100%+4px)] z-50 w-56 overflow-hidden rounded-sm bg-white p-1 shadow-lg">
-        <div className="px-3 py-2 text-xs font-medium text-slate-600">ترتيب حسب</div>
-        {OPTIONS.map((o) => {
-          const selected = o.value === field;
-          return <button key={o.value} type="button" role="menuitemradio" aria-checked={selected}
-            onClick={() => { onFieldChange(o.value); setOpen(false); }}
-            className={`flex h-12 w-full items-center gap-3 rounded-sm px-3 text-right text-sm ${selected ? 'bg-teal-100 text-teal-950 font-medium' : 'text-slate-800 hover:bg-slate-100 active:bg-slate-200/70'}`}>
-            <span className="flex h-5 w-5 items-center justify-center">{selected && <Check className="h-4 w-4 text-teal-800" aria-hidden="true" />}</span><span className="flex-1">{o.label}</span>
-          </button>;
-        })}
-        <div className="my-1 h-px bg-slate-200" />
-        <button type="button" role="menuitem" aria-label="تغيير اتجاه الترتيب"
-          onClick={() => onDirectionChange(direction === 'asc' ? 'desc' : 'asc')}
-          className="flex h-12 w-full items-center gap-3 rounded-sm px-3 text-right text-sm font-medium text-slate-800 hover:bg-slate-100 active:bg-slate-200/70">
-          <DirectionIcon className="h-5 w-5 text-teal-700" aria-hidden="true" /><span className="flex-1">{direction === 'asc' ? 'تصاعدي' : 'تنازلي'}</span><span className="text-xs font-normal text-slate-500">تبديل</span>
-        </button>
-      </div>}
+      {open && (
+        <div
+          role="menu"
+          aria-label="ترتيب الأدوية"
+          className="absolute right-0 top-[calc(100%+4px)] z-50 w-48 overflow-hidden rounded-2xl bg-white p-1.5 shadow-xl border border-slate-200/90 animate-in fade-in zoom-in-95 duration-150"
+        >
+          <div className="px-2.5 py-1 text-[11px] font-semibold text-slate-400">ترتيب حسب</div>
+          {OPTIONS.map((o) => {
+            const selected = o.value === field;
+            return (
+              <button
+                key={o.value}
+                type="button"
+                role="menuitemradio"
+                aria-checked={selected}
+                onClick={() => {
+                  onFieldChange(o.value);
+                  setOpen(false);
+                }}
+                className={`flex h-8.5 w-full items-center gap-2 rounded-xl px-2.5 text-right text-xs transition-colors cursor-pointer ${
+                  selected
+                    ? 'bg-teal-100 text-teal-950 font-semibold'
+                    : 'text-slate-700 hover:bg-slate-100 active:bg-slate-200/70'
+                }`}
+              >
+                <span className="flex h-4 w-4 items-center justify-center shrink-0">
+                  {selected && <Check className="h-3.5 w-3.5 text-teal-900 stroke-[2.5]" aria-hidden="true" />}
+                </span>
+                <span className="flex-1">{o.label}</span>
+              </button>
+            );
+          })}
+          <div className="my-1 h-px bg-slate-100" />
+          <button
+            type="button"
+            role="menuitem"
+            aria-label="تغيير اتجاه الترتيب"
+            onClick={() => onDirectionChange(direction === 'asc' ? 'desc' : 'asc')}
+            className="flex h-8.5 w-full items-center gap-2 rounded-xl px-2.5 text-right text-xs font-medium text-slate-700 hover:bg-slate-100 active:bg-slate-200/70 transition-colors cursor-pointer"
+          >
+            <DirectionIcon className="h-3.5 w-3.5 text-teal-700 shrink-0" aria-hidden="true" />
+            <span className="flex-1">{direction === 'asc' ? 'تصاعدي' : 'تنازلي'}</span>
+            <span className="text-[10px] font-normal text-slate-400">تبديل</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

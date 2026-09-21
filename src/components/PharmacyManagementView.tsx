@@ -95,14 +95,14 @@ export const PharmacyManagementView: FC<PharmacyManagementViewProps> = ({ pharma
           onClose={() => setIsFormOpen(false)}
           label={editing ? 'تعديل الصيدلية' : 'إضافة صيدلية'}
         >
-          <form onSubmit={handleSubmit} className="bg-white rounded-3xl w-full max-w-md p-5 space-y-4" dir="rtl">
+          <form onSubmit={handleSubmit} className="bg-white rounded-[28px] shadow-xl border border-slate-200/80 w-full max-w-md p-5 space-y-4" dir="rtl">
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-slate-900">{editing ? 'تعديل الصيدلية' : 'إضافة صيدلية'}</h3>
+              <h3 className="font-bold text-slate-900 text-base">{editing ? 'تعديل الصيدلية' : 'إضافة صيدلية'}</h3>
               <button
                 type="button"
                 onClick={() => setIsFormOpen(false)}
                 aria-label="إغلاق"
-                className="w-9 h-9 rounded-full hover:bg-slate-100 text-slate-500 flex items-center justify-center transition cursor-pointer"
+                className="w-10 h-10 rounded-full hover:bg-slate-100 text-slate-500 flex items-center justify-center transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -138,7 +138,7 @@ export const PharmacyManagementView: FC<PharmacyManagementViewProps> = ({ pharma
             </label>
             <button
               type="submit"
-              className="w-full h-11 rounded-full bg-teal-700 hover:bg-teal-800 text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-2xs transition cursor-pointer"
+              className="w-full h-11 rounded-full bg-teal-700 hover:bg-teal-800 active:bg-teal-900 text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-xs transition cursor-pointer"
             >
               <Check className="w-4 h-4" /> حفظ
             </button>

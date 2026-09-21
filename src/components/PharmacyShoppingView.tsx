@@ -781,7 +781,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                   onClick={() => {
                     showToast('تم فتح واتساب!');
                   }}
-                  className="w-full py-3 px-4 bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-2xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2.5 shadow-md active:scale-98 transition text-center"
+                  className="w-full h-11 px-6 bg-[#25D366] hover:bg-[#20bd5a] active:bg-[#1da851] text-white rounded-full font-semibold text-sm flex items-center justify-center gap-2.5 shadow-xs active:scale-98 transition text-center cursor-pointer"
                 >
                   <MessageCircle className="w-5 h-5 shrink-0" />
                   <span>فتح محادثة واتساب الآن</span>

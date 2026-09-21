@@ -4,6 +4,7 @@ import { Medication, ConsumptionLog } from '../types';
 import { SegmentedButton } from './ui/SegmentedButton';
 import { formatArabicDate, formatLogTime } from '../utils/dateCalculations';
 import { DAYS_PER_MONTH } from '../utils/time';
+import { formatScheduledDoseBreakdown } from '../utils/medicationPackaging';
 
 const LOGS_PER_PAGE = 15;
 
@@ -113,8 +114,7 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
             ) : (
               <div className="space-y-1.5">
                 {medications.map((med) => {
-                  const slots = scheduledDailySlots(med);
-                  const amount = isDaily ? slots : slots * DAYS_PER_MONTH;
+                  const formattedBreakdown = formatScheduledDoseBreakdown(med, isDaily);
                   return (
                     <div
                       key={med.id}
@@ -124,7 +124,7 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
                         {med.name}:
                       </span>
                       <span className="font-semibold text-teal-800 text-left shrink-0">
-                        {amount} {isDaily ? 'جرعة' : 'جرعة'}
+                        {formattedBreakdown}
                       </span>
                     </div>
                   );
@@ -198,19 +198,19 @@ export const ConsumptionLogView: FC<ConsumptionLogViewProps> = ({
                   type="button"
                   onClick={() => handlePageChange(safeCurrentPage - 1)}
                   disabled={safeCurrentPage <= 1}
-                  className="p-2 rounded-lg text-slate-600 disabled:opacity-30 hover:bg-slate-100"
+                  className="w-9 h-9 flex items-center justify-center rounded-full text-slate-600 disabled:opacity-30 hover:bg-slate-100 active:bg-slate-200 transition cursor-pointer"
                   aria-label="الصفحة السابقة"
                 >
                   <ChevronRight className="w-4 h-4" />
                 </button>
-                <span className="text-xs text-slate-500">
+                <span className="text-xs font-semibold text-slate-600">
                   {safeCurrentPage} / {totalPages}
                 </span>
                 <button
                   type="button"
                   onClick={() => handlePageChange(safeCurrentPage + 1)}
                   disabled={safeCurrentPage >= totalPages}
-                  className="p-2 rounded-lg text-slate-600 disabled:opacity-30 hover:bg-slate-100"
+                  className="w-9 h-9 flex items-center justify-center rounded-full text-slate-600 disabled:opacity-30 hover:bg-slate-100 active:bg-slate-200 transition cursor-pointer"
                   aria-label="الصفحة التالية"
                 >
                   <ChevronLeft className="w-4 h-4" />

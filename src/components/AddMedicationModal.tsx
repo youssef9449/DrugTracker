@@ -347,13 +347,13 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       label={initialData ? 'تعديل بيانات الدواء' : 'إضافة دواء جديد'}
     >
       <div
-        className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
+        className="w-full sm:max-w-md bg-white rounded-t-[28px] sm:rounded-[28px] shadow-xl border border-slate-200/80 overflow-hidden max-h-[90vh] flex flex-col"
         dir="rtl"
       >
         <div className="px-5 py-4 bg-teal-800 text-white flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-teal-700 flex items-center justify-center">
-              <Pill className="w-4 h-4 text-teal-100" />
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-full bg-teal-700/90 flex items-center justify-center">
+              <Pill className="w-5 h-5 text-teal-100" />
             </div>
             <h3 className="font-bold text-base">
               {initialData ? 'تعديل بيانات الدواء' : 'إضافة دواء جديد لمتابعة استهلاكه'}
@@ -361,7 +361,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="w-9 h-9 rounded-full text-teal-200 hover:text-white hover:bg-teal-700/80 transition flex items-center justify-center"
+            className="w-10 h-10 rounded-full text-teal-200 hover:text-white hover:bg-teal-700/80 transition flex items-center justify-center cursor-pointer"
             aria-label="إغلاق"
           >
             <X className="w-5 h-5" />

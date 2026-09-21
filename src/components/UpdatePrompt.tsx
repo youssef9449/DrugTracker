@@ -108,15 +108,15 @@ export function UpdatePrompt() {
   return (
     <div
       dir="rtl"
-      className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] max-w-[92%] sm:max-w-md bg-slate-900 text-white rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3 border border-teal-700/40"
+      className="fixed bottom-20 sm:bottom-6 left-1/2 -translate-x-1/2 z-[60] max-w-[92%] sm:max-w-md bg-slate-900 text-white rounded-[16px] shadow-lg px-4 py-3 flex items-center gap-3 border border-slate-800"
       role="status"
       aria-live="polite"
     >
-      <div className="w-8 h-8 rounded-xl bg-teal-600/30 border border-teal-500/40 flex items-center justify-center shrink-0">
-        <RefreshCw className="w-4 h-4 text-teal-300" />
+      <div className="w-8 h-8 rounded-full bg-teal-500/20 text-teal-300 flex items-center justify-center shrink-0">
+        <RefreshCw className="w-4 h-4" />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="text-xs font-bold">تحديث جديد متاح</div>
+        <div className="text-xs font-bold text-slate-100">تحديث جديد متاح</div>
         <div className="text-[11px] text-slate-300 leading-snug">
           اضغط لتفعيل التحديث وإعادة التحميل.
         </div>
@@ -124,14 +124,14 @@ export function UpdatePrompt() {
       <button
         type="button"
         onClick={handleActivate}
-        className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition active:scale-95 shrink-0"
+        className="px-3.5 py-1.5 rounded-full bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-bold transition active:scale-95 shrink-0 cursor-pointer"
       >
         تحديث
       </button>
       <button
         type="button"
         onClick={() => setDismissed(true)}
-        className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700/60 transition shrink-0"
+        className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition shrink-0 cursor-pointer"
         aria-label="إغلاق"
       >
         <X className="w-4 h-4" />

@@ -145,17 +145,17 @@ export const RefillModal: FC<RefillModalProps> = ({
       label="إعادة تعبئة المخزون"
     >
       <div
-        className="w-full sm:max-w-sm bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom duration-200"
+        className="w-full sm:max-w-sm bg-white rounded-t-[28px] sm:rounded-[28px] shadow-xl overflow-hidden animate-in slide-in-from-bottom duration-200 border border-slate-200/80"
         dir="rtl"
       >
         <div className="px-5 py-4 bg-teal-800 text-white flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <PlusCircle className="w-5 h-5 text-teal-200" />
             <h3 className="font-bold text-base">إعادة تعبئة المخزون</h3>
           </div>
           <button
             onClick={onClose}
-            className="w-9 h-9 rounded-full text-teal-200 hover:text-white hover:bg-teal-700/80 transition flex items-center justify-center cursor-pointer"
+            className="w-10 h-10 rounded-full text-teal-200 hover:text-white hover:bg-teal-700/80 transition flex items-center justify-center cursor-pointer"
             aria-label="إغلاق"
           >
             <X className="w-5 h-5" />

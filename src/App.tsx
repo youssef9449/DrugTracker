@@ -31,7 +31,6 @@ import { SelectDoseModal } from './components/SelectDoseModal';
 import { AutoDeductPromptModal } from './components/AutoDeductPromptModal';
 import { UpdatePrompt } from './components/UpdatePrompt';
 import { Toggle } from './components/ui/Toggle';
-import { SegmentedButton } from './components/ui/SegmentedButton';
 import { MedicationSortControl } from './components/MedicationSortControl';
 import type { MedicationSortField, MedicationSortDirection } from './utils/medicationSorting';
 import {
@@ -729,9 +728,9 @@ export default function App() {
                   </div>
 
                   {/* View mode toggle: compact vs detailed cards */}
-                  <div className="mx-4 mt-3 flex items-center justify-between bg-white px-3 py-2 rounded-2xl border border-slate-200/80 shadow-2xs">
+                  <div className="mx-4 mt-3 flex items-center justify-between gap-2 bg-white px-3 py-2 rounded-2xl border border-slate-200/80 shadow-2xs">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-xs font-bold text-slate-800">قائمة الأدوية</span>
+                      <span className="text-xs font-bold text-slate-800 shrink-0">قائمة الأدوية</span>
                       <MedicationSortControl
                         field={medicationSortField}
                         direction={medicationSortDirection}
@@ -740,25 +739,25 @@ export default function App() {
                       />
                     </div>
 
-                    {/* View mode toggle: compact vs detailed cards (M3 Segmented Button) */}
-                    <SegmentedButton<'normal' | 'compact'>
-                      id="card-view-mode-toggle"
-                      size="sm"
-                      value={isCompactView ? 'compact' : 'normal'}
-                      onChange={(val) => {
-                        const next = val === 'compact';
-                        setIsCompactView(next);
-                        showToast(
-                          next ? 'تم تفعيل العرض المختصر' : 'تم إرجاع العرض الطبيعي'
-                        );
-                        if (soundEnabled) playSuccessChime();
-                      }}
-                      options={[
-                        { value: 'normal', label: 'العرض الطبيعي' },
-                        { value: 'compact', label: 'العرض المختصر' },
-                      ]}
-                      aria-label="نوع عرض كروت الأدوية"
-                    />
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-xs font-medium text-slate-600">
+                        {isCompactView ? 'العرض المختصر' : 'العرض الطبيعي'}
+                      </span>
+                      <Toggle
+                        id="card-view-mode-toggle"
+                        size="sm"
+                        checked={isCompactView}
+                        onChange={() => {
+                          const next = !isCompactView;
+                          setIsCompactView(next);
+                          showToast(
+                            next ? 'تم تفعيل العرض المختصر' : 'تم إرجاع العرض الطبيعي'
+                          );
+                          if (soundEnabled) playSuccessChime();
+                        }}
+                        label="تبديل العرض بين المختصر والعرض الطبيعي"
+                      />
+                    </div>
                   </div>
                 </div>
               )}

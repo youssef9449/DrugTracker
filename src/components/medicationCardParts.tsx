@@ -119,7 +119,7 @@ export const UndoRefillBanner: FC<UndoRefillBannerProps> = ({
     <button
       type="button"
       onClick={onUndoRefill}
-      className="shrink-0 rounded-lg border border-rose-200 bg-white px-2.5 py-1 font-bold text-rose-700 hover:bg-rose-50"
+      className="shrink-0 rounded-full border border-rose-200 bg-white px-3 py-1 font-bold text-rose-700 hover:bg-rose-50 active:bg-rose-100 transition-colors cursor-pointer"
     >
       تراجع عن التعبئة
     </button>

@@ -43,14 +43,14 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
     >
       {medication && canInteract && (
       <div
-        className="w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden border border-teal-200"
+        className="w-full max-w-sm bg-white rounded-[28px] shadow-xl overflow-hidden border border-slate-200/80"
         dir="rtl"
       >
         <div className="bg-gradient-to-r from-teal-700 via-teal-800 to-emerald-800 p-5 text-white text-center relative overflow-hidden">
           <div className="absolute top-2 left-2">
             <button
               onClick={onDismiss}
-              className="w-9 h-9 rounded-full text-teal-200 hover:text-white hover:bg-teal-700/50 transition flex items-center justify-center cursor-pointer"
+              className="w-10 h-10 rounded-full text-teal-200 hover:text-white hover:bg-teal-700/50 transition flex items-center justify-center cursor-pointer"
               aria-label="إغلاق"
             >
               <X className="w-5 h-5" />
@@ -102,10 +102,10 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
             <button
               type="button"
               onClick={() => onTakeDose(medication, normalizedDoseId)}
-              className="w-full h-11 px-6 bg-teal-700 hover:bg-teal-800 text-white rounded-full font-semibold text-sm flex items-center justify-center gap-2 shadow-2xs transition active:scale-98 cursor-pointer"
+              className="w-full h-11 px-6 bg-teal-700 hover:bg-teal-800 active:bg-teal-900 text-white rounded-full font-semibold text-sm flex items-center justify-center gap-2 shadow-xs transition active:scale-98 cursor-pointer"
               data-testid="alarm-take-dose"
             >
-              <Check className="w-4 h-4" />
+              <Check className="w-4 h-4 stroke-[2.5]" />
               <span>تناولت الجرعة الآن</span>
             </button>
 
@@ -113,7 +113,7 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
               <button
                 type="button"
                 onClick={() => onSnooze(medication)}
-                className="h-10 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-full font-semibold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 cursor-pointer"
+                className="h-10 px-3 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-800 rounded-full font-semibold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 cursor-pointer"
               >
                 <Clock className="w-3.5 h-3.5 text-slate-500" />
                 <span>تأجيل 10 دقائق</span>
@@ -122,7 +122,7 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
               <button
                 type="button"
                 onClick={onDismiss}
-                className="h-10 px-3 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-full font-semibold text-xs flex items-center justify-center transition active:scale-98 cursor-pointer"
+                className="h-10 px-3 bg-white border border-slate-300 hover:bg-slate-50 active:bg-slate-100 text-slate-700 rounded-full font-semibold text-xs flex items-center justify-center transition active:scale-98 cursor-pointer"
               >
                 إغلاق التنبيه
               </button>

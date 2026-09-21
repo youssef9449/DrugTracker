@@ -108,7 +108,7 @@ export function MedicationMenu({
             aria-labelledby={`delete-medication-title-${medication.id}`}
             aria-describedby={`delete-medication-description-${medication.id}`}
             dir="rtl"
-            className="w-full max-w-sm overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20"
+            className="w-full max-w-sm overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-xl"
           >
             <div className="flex items-start gap-3 p-5 pb-3">
               <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-rose-50 text-rose-600">
@@ -131,7 +131,7 @@ export function MedicationMenu({
               <button
                 type="button"
                 onClick={() => setDeleteConfirmOpen(false)}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 cursor-pointer"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 cursor-pointer"
                 aria-label="إغلاق"
                 title="إلغاء"
               >
@@ -143,14 +143,14 @@ export function MedicationMenu({
               <button
                 type="button"
                 onClick={() => setDeleteConfirmOpen(false)}
-                className="h-10 flex-1 rounded-full border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 cursor-pointer"
+                className="h-10 flex-1 rounded-full border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 cursor-pointer"
               >
                 إلغاء
               </button>
               <button
                 type="button"
                 onClick={confirmDelete}
-                className="h-10 flex-1 rounded-full bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700 shadow-2xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 cursor-pointer"
+                className="h-10 flex-1 rounded-full bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700 active:bg-rose-800 shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 cursor-pointer"
               >
                 حذف الدواء
               </button>

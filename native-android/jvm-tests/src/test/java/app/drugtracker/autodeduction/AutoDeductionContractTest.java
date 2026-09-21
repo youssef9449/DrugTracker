@@ -47,6 +47,9 @@ public class AutoDeductionContractTest {
         assertNotNull(u1);
         assertNotEquals(u1, u2);
         assertTrue(u1.toString().contains("occurrence"));
+        assertEquals(
+                "content://app.drugtracker.autodeduction/occurrence/m/d1/2026-09-14",
+                u1.toString());
     }
 
     @Test

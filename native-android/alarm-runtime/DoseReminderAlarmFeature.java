@@ -62,7 +62,7 @@ public final class DoseReminderAlarmFeature
                     ExactAlarmContract.FIELD_OPERATION_VERSION,
                     ExactAlarmContract.LEGACY_FIELD_SCHEDULE_VERSION);
 
-            long trigger = resolve(calendarDate, reminderTime);
+            long trigger = ExactAlarmContract.resolveLocalDateTimeEpochMs(calendarDate, reminderTime, false);
             long now = System.currentTimeMillis();
             if (trigger <= now) {
                 trigger = advanceOneCalendarDay(
@@ -100,32 +100,11 @@ public final class DoseReminderAlarmFeature
         }
     }
 
-    private static long resolve(
-            String calendarDate,
-            String reminderTime) {
-        if (calendarDate == null
-                || calendarDate.isEmpty()) {
-            return -1L;
-        }
-        try {
-            String value = calendarDate + " " + reminderTime;
-            java.text.SimpleDateFormat format =
-                    new java.text.SimpleDateFormat(
-                            "yyyy-MM-dd HH:mm",
-                            java.util.Locale.US);
-            format.setLenient(false);
-            java.util.Date parsed = format.parse(value);
-            return parsed == null ? -1L : parsed.getTime();
-        } catch (Exception e) {
-            return -1L;
-        }
-    }
-
     private static long advanceOneCalendarDay(
             String calendarDate,
             String reminderTime,
             long now) {
-        long trigger = resolve(calendarDate, reminderTime);
+        long trigger = ExactAlarmContract.resolveLocalDateTimeEpochMs(calendarDate, reminderTime, false);
         if (trigger <= 0L) {
             return -1L;
         }

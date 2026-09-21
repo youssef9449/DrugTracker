@@ -78,6 +78,22 @@ public final class AutoDeductionSchedulingAdapter {
                 currentJson, expectedOperationVersion);
     }
 
+    /**
+     * Feature scheduling boundary for local wall-clock → epoch conversion.
+     * Auto owns input validation and selects lenient calendar-field resolution
+     * to preserve the established DST-gap normalization behavior.
+     */
+    public static Long resolveLocalDateTimeEpochMs(
+            String calendarDate,
+            String timeHhmm,
+            boolean lenient) {
+        long resolved = ExactAlarmContract.resolveLocalDateTimeEpochMs(
+                calendarDate,
+                timeHhmm,
+                lenient);
+        return resolved < 0L ? null : Long.valueOf(resolved);
+    }
+
     static long[] parseOrdering(String raw) {
         return ExactAlarmContract.parseOrdering(raw);
     }

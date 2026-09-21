@@ -324,7 +324,7 @@ the default system sound). No manual manifest edit is required after a sync.
   doesn't qualify under Google Play's policy.
 - `SCHEDULE_EXACT_ALARM` is for apps that NEED exact alarms but aren't
   alarm-clock apps. The user must grant it via the Android settings screen
-  (the app opens it via `LocalNotifications.changeExactNotificationSetting()`).
+  (the app opens it through the native `ExactAlarmRuntime` bridge).
   On Android < 12 it's granted automatically (no settings screen needed).
 
 The app checks this permission at runtime (`getExactAlarmPermission()` in

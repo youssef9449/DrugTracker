@@ -86,12 +86,9 @@ public final class AutoDeductionContract {
     /**
      * Durable monotonic ordering sequence for generic operationVersion / cancellation tokens.
      * Survives process death so (millis, seq) comparisons remain reconstructible
-     * after reboot. Key {@link #KEY_ORDERING_SEQ} holds the last allocated value.
+     * after reboot. The shared runtime contract owns the ordering-key name.
      */
     public static final String PREFS_ORDERING = "drugtracker_auto_deduction_ordering_v1";
-
-    /** SharedPreferences key: last allocated durable ordering sequence (long). */
-    public static final String KEY_ORDERING_SEQ = "lastAllocatedSequence";
 
     /**
      * Medication+dose schedule recurrence authorization (Issue #217).
@@ -159,14 +156,13 @@ public final class AutoDeductionContract {
         if (medicationId == null) medicationId = "";
         if (doseId == null) doseId = "";
         if (calendarDate == null) calendarDate = "";
-        return new Uri.Builder()
-                .scheme(URI_SCHEME)
-                .authority(URI_AUTHORITY)
-                .appendPath(URI_PATH_PREFIX)
-                .appendPath(medicationId)
-                .appendPath(doseId)
-                .appendPath(calendarDate)
-                .build();
+        return ExactAlarmContract.buildIdentityUri(
+                URI_SCHEME,
+                URI_AUTHORITY,
+                URI_PATH_PREFIX,
+                medicationId,
+                doseId,
+                calendarDate);
     }
 
     public static boolean isValidAmount(double amount) {

@@ -2,12 +2,16 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 import { getNativePlatform } from './notifications/notificationPlatform';
 import { ID_RANGE_SIZE, NOTIFICATION_ID_BASE } from './notifications/notificationIds';
 
+// Legacy Android Critical alarm IDs from the pre-native-runtime scheduler.
+// This constant is migration cleanup only; new Android Critical alarms never use it.
+const LEGACY_CRITICAL_ALARM_ID_BASE = 5_000_000;
+
 export async function clearLegacyScheduledAlarmNotifications(): Promise<void> {
   if (getNativePlatform() !== 'android') return;
   try {
     const pending = await LocalNotifications.getPending();
     const legacyBases = [
-      NOTIFICATION_ID_BASE.criticalAlarm,
+      LEGACY_CRITICAL_ALARM_ID_BASE,
       NOTIFICATION_ID_BASE.doseAlarm,
       NOTIFICATION_ID_BASE.doseSnooze,
     ];

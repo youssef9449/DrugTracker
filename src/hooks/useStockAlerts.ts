@@ -122,15 +122,13 @@ export function useStockAlerts({
     const claims = loadCriticalNotificationClaims();
     let changed = false;
 
-    // A deleted medication cannot remain the owner of a critical alarm.
-    // Clear its business claim synchronously and enqueue the native cancel
-    // before removing the claim so the fresh session cannot leave an orphan.
+    // Clean up claims for deleted medications (the scheduler cancels
+    // their native alarms on its side).
     const medIdSet = new Set(medications.map((m) => m.id));
     for (const id of Object.keys(claims)) {
       if (!medIdSet.has(id)) {
         clearCriticalNotificationClaim(claims, id);
         changed = true;
-        void enqueueCriticalAlarmOp(id, () => cancelCriticalAlarm(id));
       }
     }
 

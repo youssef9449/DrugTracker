@@ -44,8 +44,6 @@ export interface ExactAutoEnvelopeStored {
   createdAt: string;
   /** Required causal order with Manual envelopes. mutationSeq is required. */
   mutationSeq: number;
-  /** Native Auto-owned stock deltas applied with this foreground mutation. */
-  stockDeltas: Array<{ medicationId: string; delta: number }>;
 }
 
 let testLoadExact: (() => ExactAutoEnvelopeStored | null) | null = null;
@@ -115,6 +113,8 @@ export interface ManualStockEnvelope {
   createdAt: string;
   baseGeneration: number;
   mutationSeq: number;
+  /** Native Auto-owned stock deltas applied with this foreground mutation. */
+  stockDeltas: Array<{ medicationId: string; delta: number }>;
 }
 
 export interface PendingEnvelopeRef {

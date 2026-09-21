@@ -12,22 +12,22 @@
 
 /** M3-aligned standard icon button: 48dp minimum touch target with a 24dp icon. */
 export const ICON_BUTTON_CLASS =
-  'w-12 h-12 rounded-full flex items-center justify-center text-slate-700 hover:bg-slate-100 active:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 transition-colors cursor-pointer';
+  'w-12 h-12 rounded-full flex items-center justify-center text-m3-on-surface-variant hover:bg-m3-surface-container active:bg-m3-surface-container-high focus:outline-none focus-visible:ring-2 focus-visible:ring-m3-primary/30 transition-colors cursor-pointer';
 
 /** M3-aligned text/icon action button metrics shared by compact actions. */
 export const M3_TEXT_BUTTON_CLASS =
-  'min-h-10 rounded-full px-4 inline-flex items-center justify-center gap-2 text-sm font-medium text-teal-800 hover:bg-teal-50 active:bg-teal-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 transition-colors cursor-pointer';
+  'min-h-10 rounded-full px-4 inline-flex items-center justify-center gap-2 text-sm font-medium text-m3-primary hover:bg-m3-primary/10 active:bg-m3-primary/16 focus:outline-none focus-visible:ring-2 focus-visible:ring-m3-primary/30 transition-colors cursor-pointer';
 
 /** M3 shape/elevation tokens expressed as Tailwind utilities for this web implementation. */
 export const M3_SURFACE_CARD_CLASS =
-  'rounded-xl border border-slate-200 bg-white shadow-xs';
+  'rounded-xl border border-m3-outline-variant bg-m3-surface shadow-xs';
 
 export const M3_MENU_CLASS =
-  'rounded-sm border-0 bg-white shadow-lg';
+  'rounded-sm border-0 bg-m3-surface shadow-lg';
 
 /** Teal icon box centered above empty-state messages (EmptyState component). */
 export const EMPTY_STATE_ICON_BOX =
-  'w-14 h-14 rounded-2xl bg-teal-50 text-teal-600 flex items-center justify-center mb-3';
+  'w-14 h-14 rounded-2xl bg-m3-primary-container text-m3-on-primary-container flex items-center justify-center mb-3';
 
 /**
  * Amber "auto-deduct paused" note box shown on MedicationCard across all

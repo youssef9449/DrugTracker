@@ -43,6 +43,7 @@
   /* Material 3-aligned semantic tokens for the web implementation. */
   --color-m3-primary: #006a60;
   --color-m3-on-primary: #ffffff;
+  --color-m3-on-error: #ffffff;
   --color-m3-primary-container: #74f8e8;
   --color-m3-on-primary-container: #00201c;
   --color-m3-surface: #f9f9f7;

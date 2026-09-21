@@ -70,17 +70,17 @@ export const SegmentedButton = <T extends string = string>({
             onClick={() => {
               if (!isSelected) onChange(option.value);
             }}
-            className={`relative flex-1 inline-flex items-center justify-center gap-1.5 h-10 border border-slate-400 transition-colors duration-200 focus:outline-none focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal-600/30 cursor-pointer ${shapeClass} ${!isFirst ? '-ml-px' : ''} ${isSm ? 'px-3 text-xs' : 'px-4 text-sm'} ${isSelected ? 'z-[1] bg-teal-100 text-teal-950 font-medium' : 'bg-transparent text-slate-700 hover:bg-slate-100 active:bg-slate-200 font-medium'}`}
+            className={`relative flex-1 inline-flex items-center justify-center gap-1.5 h-10 border border-m3-outline transition-colors duration-200 focus:outline-none focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-m3-primary/30 cursor-pointer ${shapeClass} ${!isFirst ? '-ml-px' : ''} ${isSm ? 'px-3 text-xs' : 'px-4 text-sm'} ${isSelected ? 'z-[1] bg-m3-primary-container text-m3-on-primary-container font-medium' : 'bg-transparent text-m3-on-surface hover:bg-m3-surface-container active:bg-m3-surface-container-high font-medium'}`}
           >
             {isSelected && showCheckmark && (
               <Check
-                className="w-4 h-4 text-teal-800 stroke-[2.5] shrink-0 animate-in fade-in zoom-in-75 duration-150"
+                className="w-4 h-4 text-m3-primary stroke-[2.5] shrink-0 animate-in fade-in zoom-in-75 duration-150"
                 aria-hidden="true"
               />
             )}
             {!isSelected && Icon && (
               <Icon
-                className="w-4 h-4 text-slate-500 shrink-0"
+                className="w-4 h-4 text-m3-on-surface-variant shrink-0"
                 aria-hidden="true"
               />
             )}

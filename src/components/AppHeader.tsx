@@ -71,12 +71,12 @@ export const AppHeader: FC<AppHeaderProps> = ({
   const header = HEADER_BY_TAB[activeTab] ?? HEADER_BY_TAB.stock;
 
   return (
-    <header className="bg-white text-slate-900 border-b border-slate-200">
+    <header className="bg-m3-surface text-m3-on-surface border-b border-m3-outline-variant">
       {/* Top App Bar */}
       <div className="min-h-16 px-4 py-2 flex items-center justify-between gap-3">
         <div>
           <h1 className="text-lg font-medium leading-6 tracking-tight">{header.title}</h1>
-          <p className="text-xs text-slate-600 leading-4">
+          <p className="text-xs text-m3-on-surface-variant leading-4">
             {header.subtitle}
           </p>
         </div>
@@ -106,16 +106,16 @@ export const AppHeader: FC<AppHeaderProps> = ({
                 : 'تذكيرات مواعيد الجرعات متوقفة — انقر للتفعيل'
             }
             aria-pressed={notificationsEnabled}
-            className={`w-12 h-12 rounded-full transition-colors relative flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 ${
+            className={`w-12 h-12 rounded-full transition-colors relative flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-m3-primary/30 ${
               notificationsEnabled
-                ? 'bg-teal-100 text-teal-900'
-                : 'text-slate-600 hover:bg-slate-100 active:bg-slate-200'
+                ? 'bg-m3-primary-container text-m3-on-primary-container'
+                : 'text-m3-on-surface-variant hover:bg-m3-surface-container active:bg-m3-surface-container-high'
             }`}
           >
             {notificationsEnabled ? (
               <>
-                <Bell className="w-6 h-6 fill-teal-800/10 text-teal-900" />
-                <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-emerald-600 ring-2 ring-white animate-pulse" />
+                <Bell className="w-6 h-6 fill-teal-800/10 text-m3-on-primary-container" />
+                <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-m3-primary ring-2 ring-m3-surface animate-pulse" />
               </>
             ) : (
               <BellOff className="w-6 h-6" />
@@ -136,11 +136,11 @@ export const AppHeader: FC<AppHeaderProps> = ({
                 : 'تنبيه النفاذ الحرج متوقف'
             }
             aria-pressed={criticalStockAlertsEnabled}
-            className={`w-12 h-12 rounded-full transition-colors relative flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 ${criticalStockAlertsEnabled ? 'bg-rose-100 text-rose-800' : 'text-slate-600 hover:bg-slate-100 active:bg-slate-200'}`}
+            className={`w-12 h-12 rounded-full transition-colors relative flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-m3-primary/30 ${criticalStockAlertsEnabled ? 'bg-m3-error-container text-m3-on-error-container' : 'text-m3-on-surface-variant hover:bg-m3-surface-container active:bg-m3-surface-container-high'}`}
           >
             <AlertTriangle
               className={`w-6 h-6 ${
-                criticalStockAlertsEnabled ? 'fill-rose-200 text-rose-800' : 'text-slate-600'
+                criticalStockAlertsEnabled ? 'fill-rose-200 text-m3-error' : 'text-m3-on-surface-variant'
               }`}
             />
           </button>
@@ -160,10 +160,10 @@ export const AppHeader: FC<AppHeaderProps> = ({
             onClick={onToggleFontScale}
             title={fontScale === 'large' ? 'إرجاع حجم الخط للطبيعي' : 'تكبير حجم الخط'}
             aria-label={fontScale === 'large' ? 'إرجاع حجم الخط للطبيعي' : 'تكبير حجم الخط'}
-            className={`min-w-12 h-12 rounded-full transition-colors flex items-center justify-center font-bold leading-none focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 ${
+            className={`min-w-12 h-12 rounded-full transition-colors flex items-center justify-center font-bold leading-none focus:outline-none focus-visible:ring-2 focus-visible:ring-m3-primary/30 ${
               fontScale === 'large'
-                ? 'bg-teal-100 text-teal-900'
-                : 'text-slate-700 hover:bg-slate-100 active:bg-slate-200'
+                ? 'bg-m3-primary-container text-m3-on-primary-container'
+                : 'text-m3-on-surface hover:bg-m3-surface-container active:bg-m3-surface-container-high'
             }`}
           >
             <span className="font-mono text-xs">
@@ -189,16 +189,16 @@ export const AppHeader: FC<AppHeaderProps> = ({
               onChange={(e) => onSearchChange(e.target.value)}
               onInput={(e) => onSearchChange((e.target as HTMLInputElement).value)}
               placeholder="بحث عن دواء..."
-              className="w-full h-14 pl-14 pr-14 rounded-full bg-slate-100 border border-transparent text-slate-900 placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600/30 focus:bg-white focus:border-slate-300 transition-colors [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
+              className="w-full h-14 pl-14 pr-14 rounded-full bg-m3-surface-container border border-transparent text-m3-on-surface placeholder:text-m3-on-surface-variant text-sm focus:outline-none focus:ring-2 focus:ring-m3-primary/30 focus:bg-m3-surface focus:border-m3-outline-variant transition-colors [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
             />
-            <Search className="w-6 h-6 text-slate-600 absolute right-4 top-4 pointer-events-none" />
+            <Search className="w-6 h-6 text-m3-on-surface-variant absolute right-4 top-4 pointer-events-none" />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => onSearchChange('')}
                 aria-label="مسح البحث"
                 title="مسح البحث"
-                className="absolute left-1 top-1 w-12 h-12 rounded-full flex items-center justify-center text-slate-600 hover:bg-slate-200 active:bg-slate-300 transition-colors cursor-pointer"
+                className="absolute left-1 top-1 w-12 h-12 rounded-full flex items-center justify-center text-m3-on-surface-variant hover:bg-m3-surface-container-high active:bg-m3-surface-container-high transition-colors cursor-pointer"
               >
                 <X className="w-6 h-6 stroke-[2.25]" />
               </button>
@@ -210,29 +210,29 @@ export const AppHeader: FC<AppHeaderProps> = ({
             <button
               type="button"
               onClick={() => onFilterChange('all')}
-              className={`h-10 px-4 rounded-lg font-medium transition-colors whitespace-nowrap flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 cursor-pointer ${
+              className={`h-10 px-4 rounded-lg font-medium transition-colors whitespace-nowrap flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-m3-primary/30 cursor-pointer ${
                 filter === 'all'
-                  ? 'bg-teal-100 text-teal-950 font-medium'
-                  : 'bg-transparent text-slate-700 border border-slate-400 hover:bg-slate-100 active:bg-slate-200'
+                  ? 'bg-m3-primary-container text-m3-on-primary-container font-medium'
+                  : 'bg-transparent text-m3-on-surface border border-m3-outline hover:bg-m3-surface-container active:bg-m3-surface-container-high'
               }`}
             >
-              {filter === 'all' && <Check className="w-4 h-4 text-teal-900 stroke-[2.5]" />}
+              {filter === 'all' && <Check className="w-4 h-4 text-m3-on-primary-container stroke-[2.5]" />}
               <span>جميع الأدوية</span>
             </button>
 
             <button
               type="button"
               onClick={() => onFilterChange('alerts')}
-              className={`h-10 px-4 rounded-lg font-medium transition-colors whitespace-nowrap flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 cursor-pointer ${filter === 'alerts' ? 'bg-teal-100 text-teal-950' : 'bg-transparent text-slate-700 border border-slate-400 hover:bg-slate-100 active:bg-slate-200'}`}
+              className={`h-10 px-4 rounded-lg font-medium transition-colors whitespace-nowrap flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-m3-primary/30 cursor-pointer ${filter === 'alerts' ? 'bg-m3-primary-container text-m3-on-primary-container' : 'bg-transparent text-m3-on-surface border border-m3-outline hover:bg-m3-surface-container active:bg-m3-surface-container-high'}`}
             >
-              {filter === 'alerts' && <Check className="w-4 h-4 text-teal-900 stroke-[2.5]" />}
+              {filter === 'alerts' && <Check className="w-4 h-4 text-m3-on-primary-container stroke-[2.5]" />}
               <span>قارب على النفاذ</span>
               {alertsCount > 0 && (
                 <span
                   className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold transition ${
                     filter === 'alerts'
-                      ? 'bg-rose-100 text-rose-800'
-                      : 'bg-rose-600 text-white'
+                      ? 'bg-m3-error-container text-m3-on-error-container'
+                      : 'bg-m3-error text-m3-on-error'
                   }`}
                 >
                   {alertsCount}
@@ -243,9 +243,9 @@ export const AppHeader: FC<AppHeaderProps> = ({
             <button
               type="button"
               onClick={() => onFilterChange('sufficient')}
-              className={`h-10 px-4 rounded-lg font-medium transition-colors whitespace-nowrap flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 cursor-pointer ${filter === 'sufficient' ? 'bg-teal-100 text-teal-950' : 'bg-transparent text-slate-700 border border-slate-400 hover:bg-slate-100 active:bg-slate-200'}`}
+              className={`h-10 px-4 rounded-lg font-medium transition-colors whitespace-nowrap flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-m3-primary/30 cursor-pointer ${filter === 'sufficient' ? 'bg-m3-primary-container text-m3-on-primary-container' : 'bg-transparent text-m3-on-surface border border-m3-outline hover:bg-m3-surface-container active:bg-m3-surface-container-high'}`}
             >
-              {filter === 'sufficient' && <Check className="w-4 h-4 text-teal-900 stroke-[2.5]" />}
+              {filter === 'sufficient' && <Check className="w-4 h-4 text-m3-on-primary-container stroke-[2.5]" />}
               <span>المخزون الكافي</span>
             </button>
           </div>

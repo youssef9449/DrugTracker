@@ -136,7 +136,7 @@ export const AppHeader: FC<AppHeaderProps> = ({
                 : 'تنبيه النفاذ الحرج متوقف'
             }
             aria-pressed={criticalStockAlertsEnabled}
-            className={\`w-10 h-10 rounded-full transition-colors relative flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 \${criticalStockAlertsEnabled ? 'bg-rose-100 text-rose-800' : 'text-slate-600 hover:bg-slate-100 active:bg-slate-200'}\`}
+            className={`w-10 h-10 rounded-full transition-colors relative flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 ${criticalStockAlertsEnabled ? 'bg-rose-100 text-rose-800' : 'text-slate-600 hover:bg-slate-100 active:bg-slate-200'}`}
           >
             <AlertTriangle
               className={`w-4 h-4 ${
@@ -223,7 +223,7 @@ export const AppHeader: FC<AppHeaderProps> = ({
             <button
               type="button"
               onClick={() => onFilterChange('alerts')}
-              className={\`h-10 px-4 rounded-full font-medium transition-colors whitespace-nowrap flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 cursor-pointer \${filter === 'alerts' ? 'bg-teal-100 text-teal-950' : 'bg-transparent text-slate-700 border border-slate-400 hover:bg-slate-100 active:bg-slate-200'}\`}
+              className={`h-10 px-4 rounded-full font-medium transition-colors whitespace-nowrap flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 cursor-pointer ${filter === 'alerts' ? 'bg-teal-100 text-teal-950' : 'bg-transparent text-slate-700 border border-slate-400 hover:bg-slate-100 active:bg-slate-200'}`}
             >
               {filter === 'alerts' && <Check className="w-3.5 h-3.5 text-teal-900 stroke-[2.5]" />}
               <span>قارب على النفاذ</span>
@@ -243,7 +243,7 @@ export const AppHeader: FC<AppHeaderProps> = ({
             <button
               type="button"
               onClick={() => onFilterChange('sufficient')}
-              className={\`h-10 px-4 rounded-full font-medium transition-colors whitespace-nowrap flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 cursor-pointer \${filter === 'sufficient' ? 'bg-teal-100 text-teal-950' : 'bg-transparent text-slate-700 border border-slate-400 hover:bg-slate-100 active:bg-slate-200'}\`}
+              className={`h-10 px-4 rounded-full font-medium transition-colors whitespace-nowrap flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 cursor-pointer ${filter === 'sufficient' ? 'bg-teal-100 text-teal-950' : 'bg-transparent text-slate-700 border border-slate-400 hover:bg-slate-100 active:bg-slate-200'}`}
             >
               {filter === 'sufficient' && <Check className="w-3.5 h-3.5 text-teal-900 stroke-[2.5]" />}
               <span>المخزون الكافي</span>

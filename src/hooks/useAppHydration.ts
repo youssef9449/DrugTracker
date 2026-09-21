@@ -8,8 +8,8 @@ import { DEFAULT_PHARMACY_SETTINGS } from '../types';
 import {
   requestNotificationPermission,
   getNotificationPermission,
-  getExactAlarmPermission,
-} from '../utils/notifications';
+} from '../utils/notifications/notificationPermissions';
+import { getExactAlarmPermission } from '../utils/exactAlarm';
 import { initNativeBridge } from '../native';
 import { loadJson, loadString } from '../utils/storage';
 import {

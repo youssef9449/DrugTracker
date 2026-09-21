@@ -8,6 +8,7 @@ import {
   doseReminderAlarmIdForDose } from '@/utils/notifications';
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import type { ExactAlarmPermission } from '@/utils/exactAlarm';
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: { getPlatform: vi.fn(() => 'web') },
@@ -78,7 +79,7 @@ function defaultOpts(overrides: Record<string, unknown> = {}) {
     notificationsEnabled: true,
     hydrated: true,
     isFirstRun: false,
-    exactAlarmEnabled: true as boolean | null,
+    exactAlarmPermission: 'granted' as ExactAlarmPermission | null,
     resumeTick: 0 as number | undefined,
     ...overrides,
   };
@@ -172,18 +173,18 @@ describe('useDoseReminderScheduler — gating', () => {
     expect(mocks.schedule).not.toHaveBeenCalled();
   });
 
-  it('does NOT schedule when exactAlarmEnabled is null', () => {
+  it('does NOT schedule when exactAlarmPermission is null', () => {
     const med = makeMed({ id: 'med-null', reminderTime: '09:00' });
     renderHook(() =>
-      useDoseReminderScheduler(defaultOpts({ medications: [med], exactAlarmEnabled: null }))
+      useDoseReminderScheduler(defaultOpts({ medications: [med], exactAlarmPermission: null }))
     );
     expect(mocks.schedule).not.toHaveBeenCalled();
   });
 
-  it('does NOT schedule when exactAlarmEnabled is false', () => {
+  it('does NOT schedule when exactAlarmPermission is denied', () => {
     const med = makeMed({ id: 'med-false', reminderTime: '09:00' });
     renderHook(() =>
-      useDoseReminderScheduler(defaultOpts({ medications: [med], exactAlarmEnabled: false }))
+      useDoseReminderScheduler(defaultOpts({ medications: [med], exactAlarmPermission: 'denied' }))
     );
     expect(mocks.schedule).not.toHaveBeenCalled();
   });
@@ -218,37 +219,37 @@ describe('useDoseReminderScheduler — gating', () => {
 });
 
 describe('useDoseReminderScheduler — exact-alarm gating', () => {
-  it('cancels previously-scheduled alarms when exactAlarmEnabled turns false', async () => {
+  it('cancels previously-scheduled alarms when exactAlarmPermission turns denied', async () => {
     const med = makeMed({ id: 'med-exact-off', reminderTime: '09:00' });
     const { rerender } = renderHook(
-      ({ exactAlarmEnabled }) =>
+      ({ exactAlarmPermission }: { exactAlarmPermission: ExactAlarmPermission }) =>
         useDoseReminderScheduler(
-          defaultOpts({ medications: [med], exactAlarmEnabled })
+          defaultOpts({ medications: [med], exactAlarmPermission })
         ),
-      { initialProps: { exactAlarmEnabled: true } }
+      { initialProps: { exactAlarmPermission: 'granted' as ExactAlarmPermission } }
     );
 
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
 
-    rerender({ exactAlarmEnabled: false });
+    rerender({ exactAlarmPermission: 'denied' });
     await flushUntil(() => mocks.cancel.mock.calls.some((c) => c[0] === 'med-exact-off'));
 
     expect(mocks.cancel).toHaveBeenCalledWith('med-exact-off', 'd1');
   });
 
-  it('reschedules when exactAlarmEnabled turns from false to true', async () => {
+  it('reschedules when exactAlarmPermission turns from denied to granted', async () => {
     const med = makeMed({ id: 'med-exact-on', reminderTime: '09:00' });
     const { rerender } = renderHook(
-      ({ exactAlarmEnabled }) =>
+      ({ exactAlarmPermission }: { exactAlarmPermission: ExactAlarmPermission }) =>
         useDoseReminderScheduler(
-          defaultOpts({ medications: [med], exactAlarmEnabled })
+          defaultOpts({ medications: [med], exactAlarmPermission })
         ),
-      { initialProps: { exactAlarmEnabled: false } }
+      { initialProps: { exactAlarmPermission: 'denied' as ExactAlarmPermission } }
     );
 
     expect(mocks.schedule).not.toHaveBeenCalled();
 
-    rerender({ exactAlarmEnabled: true });
+    rerender({ exactAlarmPermission: 'granted' });
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
 
     expect(mocks.schedule).toHaveBeenCalledWith(

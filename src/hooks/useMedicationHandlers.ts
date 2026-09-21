@@ -73,7 +73,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     setGlobalAutoDeductEnabled,
     setIsAutoDeductPromptOpen,
     setIsFirstRun,
-    setNotificationsEnabled,
     setCriticalStockAlertsEnabled,
     setSelectDoseMed,
     setSelectDoseMode,

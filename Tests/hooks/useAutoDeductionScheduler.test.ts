@@ -294,7 +294,7 @@ describe('schedule metadata ownership / conditional rollback', () => {
         timeHhmm: '08:00',
         amount: 1,
         scheduledAtEpochMs: 1,
-        scheduleVersion: versionA,
+        operationVersion: versionA,
       })
     );
     expect(conditionalRollback(store, key, versionA)).toBe(true);
@@ -311,7 +311,7 @@ describe('schedule metadata ownership / conditional rollback', () => {
         medicationId: 'med',
         doseId: 'dose',
         calendarDate: '2026-09-14',
-        scheduleVersion: versionA,
+        operationVersion: versionA,
       })
     );
     // B overwrites same occurrence key with newer version
@@ -324,13 +324,13 @@ describe('schedule metadata ownership / conditional rollback', () => {
         timeHhmm: '08:00',
         amount: 1,
         scheduledAtEpochMs: 2,
-        scheduleVersion: versionB,
+        operationVersion: versionB,
       })
     );
     expect(conditionalRollback(store, key, versionA)).toBe(false);
     expect(store.has(key)).toBe(true);
     const remaining = JSON.parse(store.get(key)!);
-    expect(remaining.scheduleVersion).toBe(versionB);
+    expect(remaining.operationVersion).toBe(versionB);
   });
 
   it('successful newer schedule remains: A writes, B writes, B succeeds, A fails → B remains', () => {
@@ -343,7 +343,7 @@ describe('schedule metadata ownership / conditional rollback', () => {
         medicationId: 'med',
         doseId: 'dose',
         calendarDate: '2026-09-14',
-        scheduleVersion: versionA,
+        operationVersion: versionA,
       })
     );
     store.set(
@@ -352,30 +352,30 @@ describe('schedule metadata ownership / conditional rollback', () => {
         medicationId: 'med',
         doseId: 'dose',
         calendarDate: '2026-09-14',
-        scheduleVersion: versionB,
+        operationVersion: versionB,
       })
     );
     // B "succeeded" — no rollback for B
     // A fails
     expect(conditionalRollback(store, key, versionA)).toBe(false);
-    expect(JSON.parse(store.get(key)!).scheduleVersion).toBe(versionB);
+    expect(JSON.parse(store.get(key)!).operationVersion).toBe(versionB);
   });
 
   it('same occurrence identity → one current schedule entry after sequential writes', () => {
     const store = new Map<string, string>();
-    store.set(key, buildSchedulePayload({ scheduleVersion: 'v1' }));
-    store.set(key, buildSchedulePayload({ scheduleVersion: 'v2' }));
-    store.set(key, buildSchedulePayload({ scheduleVersion: 'v3' }));
+    store.set(key, buildSchedulePayload({ operationVersion: 'v1' }));
+    store.set(key, buildSchedulePayload({ operationVersion: 'v2' }));
+    store.set(key, buildSchedulePayload({ operationVersion: 'v3' }));
     expect(store.size).toBe(1);
-    expect(JSON.parse(store.get(key)!).scheduleVersion).toBe('v3');
+    expect(JSON.parse(store.get(key)!).operationVersion).toBe('v3');
   });
 
   it('different occurrences are isolated', () => {
     const store = new Map<string, string>();
     const kA = 'sch:m\u001fd1\u001f2026-09-14';
     const kB = 'sch:m\u001fd2\u001f2026-09-14';
-    store.set(kA, buildSchedulePayload({ scheduleVersion: 'va', doseId: 'd1' }));
-    store.set(kB, buildSchedulePayload({ scheduleVersion: 'vb', doseId: 'd2' }));
+    store.set(kA, buildSchedulePayload({ operationVersion: 'va', doseId: 'd1' }));
+    store.set(kB, buildSchedulePayload({ operationVersion: 'vb', doseId: 'd2' }));
     expect(conditionalRollback(store, kA, 'va')).toBe(true);
     expect(store.has(kA)).toBe(false);
     expect(store.has(kB)).toBe(true);
@@ -408,26 +408,26 @@ describe('scheduler transaction serialization (model)', () => {
 
   it('A then B → final metadata and alarm both B', () => {
     const state = emptyState();
-    runSerializedScheduleTxn(state, key, { scheduleVersion: 'A', scheduledAtEpochMs: 1 }, true);
-    runSerializedScheduleTxn(state, key, { scheduleVersion: 'B', scheduledAtEpochMs: 2 }, true);
-    expect(JSON.parse(state.metadata.get(key)!).scheduleVersion).toBe('B');
+    runSerializedScheduleTxn(state, key, { operationVersion: 'A', scheduledAtEpochMs: 1 }, true);
+    runSerializedScheduleTxn(state, key, { operationVersion: 'B', scheduledAtEpochMs: 2 }, true);
+    expect(JSON.parse(state.metadata.get(key)!).operationVersion).toBe('B');
     expect(state.alarms.get(key)?.version).toBe('B');
   });
 
   it('A fails then B succeeds → metadata and alarm both B', () => {
     const state = emptyState();
-    runSerializedScheduleTxn(state, key, { scheduleVersion: 'A', scheduledAtEpochMs: 1 }, false);
-    runSerializedScheduleTxn(state, key, { scheduleVersion: 'B', scheduledAtEpochMs: 2 }, true);
-    expect(JSON.parse(state.metadata.get(key)!).scheduleVersion).toBe('B');
+    runSerializedScheduleTxn(state, key, { operationVersion: 'A', scheduledAtEpochMs: 1 }, false);
+    runSerializedScheduleTxn(state, key, { operationVersion: 'B', scheduledAtEpochMs: 2 }, true);
+    expect(JSON.parse(state.metadata.get(key)!).operationVersion).toBe('B');
     expect(state.alarms.get(key)?.version).toBe('B');
   });
 
   it('serialized A-fail then B never yields metadata=B alarm=A', () => {
     const state = emptyState();
     // Under SCHEDULE_LOCK, B cannot install until A fully completes (including rollback).
-    runSerializedScheduleTxn(state, key, { scheduleVersion: 'A', scheduledAtEpochMs: 1 }, false);
-    runSerializedScheduleTxn(state, key, { scheduleVersion: 'B', scheduledAtEpochMs: 2 }, true);
-    const metaV = JSON.parse(state.metadata.get(key)!).scheduleVersion;
+    runSerializedScheduleTxn(state, key, { operationVersion: 'A', scheduledAtEpochMs: 1 }, false);
+    runSerializedScheduleTxn(state, key, { operationVersion: 'B', scheduledAtEpochMs: 2 }, true);
+    const metaV = JSON.parse(state.metadata.get(key)!).operationVersion;
     const alarmV = state.alarms.get(key)?.version;
     expect(metaV).toBe(alarmV);
     expect(metaV).toBe('B');
@@ -435,7 +435,7 @@ describe('scheduler transaction serialization (model)', () => {
 
   it('schedule then cancel → canceled final state', () => {
     const state = emptyState();
-    runSerializedScheduleTxn(state, key, { scheduleVersion: 'A', scheduledAtEpochMs: 1 }, true);
+    runSerializedScheduleTxn(state, key, { operationVersion: 'A', scheduledAtEpochMs: 1 }, true);
     runSerializedCancelTxn(state, key);
     expect(state.metadata.has(key)).toBe(false);
     expect(state.alarms.get(key)).toBeNull();
@@ -444,8 +444,8 @@ describe('scheduler transaction serialization (model)', () => {
   it('cancel then schedule → scheduled final state', () => {
     const state = emptyState();
     runSerializedCancelTxn(state, key);
-    runSerializedScheduleTxn(state, key, { scheduleVersion: 'A', scheduledAtEpochMs: 1 }, true);
-    expect(JSON.parse(state.metadata.get(key)!).scheduleVersion).toBe('A');
+    runSerializedScheduleTxn(state, key, { operationVersion: 'A', scheduledAtEpochMs: 1 }, true);
+    expect(JSON.parse(state.metadata.get(key)!).operationVersion).toBe('A');
     expect(state.alarms.get(key)?.version).toBe('A');
   });
 });

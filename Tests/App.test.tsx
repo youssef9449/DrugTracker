@@ -532,10 +532,10 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
   });
 
   it('re-arms all critical alarms when the app is launched (e.g., after a device reboot)', async () => {
-    // After a device reboot, the Capacitor plugin's BootReceiver
-    // re-arms already-scheduled notifications from its persisted
-    // store. But if for some reason the boot receiver doesn't fire
-    // (e.g., the app was force-stopped before the reboot), opening
+    // After a device reboot, the shared
+    // DrugTrackerAlarmSystemReceiver dispatches native alarm recovery
+    // through ExactAlarmLifecycle. If the app also resumes, the normal
+    // JS scheduler/reconciliation paths remain idempotent.
     // the app triggers the reschedule effect to re-arm all alarms
     // from the current medication state. This test verifies that
     // re-arming works for multiple meds on app launch.

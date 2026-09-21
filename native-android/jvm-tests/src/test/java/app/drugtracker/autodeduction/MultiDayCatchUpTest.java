@@ -78,8 +78,8 @@ public class MultiDayCatchUpTest {
         seedGen(med, dose, gen);
 
         // Catch-up now executes the Auto Native stock path as part of recovery.
-        // Tests provide a valid durable Native baseline so the fixture models a
-        // post-migration, recovery-ready installation.
+        // Tests provide a valid durable Native baseline so the fixture models
+        // normal initialized runtime state.
         AutoDeductionStockStore stock = new AutoDeductionStockStore(appContext());
         AutoDeductionStockStore.SnapshotResult seeded =
                 stock.ensureMissingAndRead(

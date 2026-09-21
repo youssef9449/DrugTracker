@@ -226,25 +226,24 @@ export function normalizeDisplayQuantity(value: number): number {
   if (!Number.isFinite(value)) return 0;
 
   const nearest = Math.round(value);
-  // Magnitude-scaled epsilon only (no fixed absolute cutoff).
-  // Large enough that 3 + 1e-12 snaps to 3; tight enough that 5e-10 near 0
-  // is not erased to 0.
+  // Only collapse differences that are within a small, magnitude-scaled
+  // multiple of the value's IEEE-754 spacing. Genuine fractions, including
+  // tiny non-zero values, remain untouched.
   const scale = Math.max(Math.abs(value), Math.abs(nearest), 1);
-  const intEps = Number.EPSILON * scale * 4096;
+  const intEps = Number.EPSILON * scale * 8;
   if (Math.abs(value - nearest) <= intEps) return nearest;
 
   const abs = Math.abs(value);
   if (abs === 0) return 0;
 
-  // Snap to a short decimal only when the distance is within a few ULPs
-  // (representation residue). Otherwise keep the original double.
+  // Clean a decimal artifact only when the rounded decimal is exactly within
+  // one ULP of the original value. Genuine high-precision values are kept.
   const exp2 = Math.floor(Math.log2(abs));
   const ulp = Math.pow(2, exp2 - 52);
-  const tol = ulp * 8;
   for (let places = 1; places <= 17; places++) {
     const factor = 10 ** places;
     const candidate = Math.round(value * factor) / factor;
-    if (Math.abs(value - candidate) <= tol) {
+    if (Math.abs(value - candidate) <= ulp) {
       return candidate;
     }
   }

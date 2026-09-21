@@ -82,9 +82,11 @@ import {
 import { describeStockInStrips, normalizeDisplayQuantity, formatUnitQuantity } from '@/types';
 
 describe('normalizeDisplayQuantity', () => {
-  it('Case A: collapses float noise near integers', () => {
-    expect(normalizeDisplayQuantity(3 + 1e-12)).toBe(3);
-    expect(normalizeDisplayQuantity(10 - 1e-12)).toBe(10);
+  it('Case A: collapses true IEEE-754 noise near integers', () => {
+    const up = 3 + Number.EPSILON * 3 * 4;
+    const down = 10 - Number.EPSILON * 10 * 4;
+    expect(normalizeDisplayQuantity(up)).toBe(3);
+    expect(normalizeDisplayQuantity(down)).toBe(10);
   });
 
   it('Case B: common binary float artifact 0.1 + 0.2 → 0.3', () => {

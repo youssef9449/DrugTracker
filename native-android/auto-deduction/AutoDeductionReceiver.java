@@ -234,31 +234,9 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                     context, medicationId, doseId, calendarDate, scheduledAt, amount);
         }
 
-        if (result.allowsRecurrence()) {
-            AutoDeductionStockStore.AutoApplyResult stockResult =
-                    new AutoDeductionStockStore(context).applyAutoDeduction(
-                            medicationId, doseId, calendarDate, amount);
-            if (!stockResult.ok) {
-                Log.e(TAG, "independent recovery native stock apply failed: "
-                        + medicationId + "/" + doseId + "/" + calendarDate
-                        + " — " + stockResult.error);
-                if (shouldScheduleStockRetry(result, fireRetryCount)) {
-                    boolean retryScheduled = scheduler.scheduleFireRetry(
-                            medicationId, doseId, calendarDate, scheduledAt, amount,
-                            timeHhmm, recurrenceGeneration, operationVersion,
-                            fireRetryCount + 1);
-                    if (retryScheduled) {
-                        Log.w(TAG, "independent recovery stock failure — retry #"
-                                + (fireRetryCount + 1) + " scheduled");
-                    }
-                }
-                return;
-            }
-            // Both FIRED and Native stock are now durable. Only now may the
-            // independent retry evidence be cleared.
-            scheduler.clearIndependentFireRetryEvidenceAfterStock(
-                    medicationId, doseId, calendarDate);
-        }
+        // recoverFireFromIndependentEvidence() completes both the durable FIRED
+        // transition and the Native stock mutation. The Receiver only interprets
+        // the resulting status and never repeats the stock operation.
 
         switch (result.status) {
             case CANCELLED:

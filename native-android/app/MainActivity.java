@@ -7,7 +7,7 @@ import com.getcapacitor.BridgeActivity;
 
 import app.drugtracker.alarmruntime.ExactAlarmPlugin;
 import app.drugtracker.autodeduction.AutoDeductionPlugin;
-import app.drugtracker.criticalstock.CriticalStockPlugin;
+import app.drugtracker.criticalstock.CriticalStockAlarmAdapter;
 import app.drugtracker.dosereminder.DoseReminderPlugin;
 import app.drugtracker.notificationruntime.AppForegroundState;
 import app.drugtracker.notificationruntime.NotificationRuntimePlugin;
@@ -27,7 +27,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(NotificationRuntimePlugin.class);
         registerPlugin(AutoDeductionPlugin.class);
         registerPlugin(DoseReminderPlugin.class);
-        registerPlugin(CriticalStockPlugin.class);
+        registerPlugin(CriticalStockAlarmAdapter.class);
         super.onCreate(savedInstanceState);
         NotificationRuntimePlugin.dispatchActionIntent(getIntent());
     }

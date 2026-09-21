@@ -22,8 +22,8 @@ export interface SegmentedButtonProps<T extends string = string> {
  * Material Design 3 (M3) Segmented Button component.
  *
  * Specifications based on Material 3 Design Guidelines:
- * - Shape: Fully-rounded pill container (rounded-full).
- * - Container: Outlined with 1px border (outline-variant).
+ * - Shape: Medium 12dp container, not a pill.
+ * - Container: Outlined with the M3 outline-variant role.
  * - Selected Segment: Secondary container tonal fill (teal-100) with on-secondary-container text (teal-950),
  *   accompanied by an M3 leading checkmark icon.
  * - Unselected Segment: Transparent surface with on-surface-variant text and hover/active states.
@@ -47,8 +47,8 @@ export const SegmentedButton = <T extends string = string>({
       id={id}
       role="radiogroup"
       aria-label={ariaLabel}
-      className={`inline-flex items-center rounded-full border border-slate-300/90 bg-white/50 overflow-hidden divide-x divide-x-reverse divide-slate-200 select-none shrink-0 ${
-        isSm ? 'h-[30px]' : 'h-9'
+      className={`inline-flex items-center rounded-xl border border-slate-300 bg-white overflow-hidden select-none shrink-0 ${
+        isSm ? 'h-10' : 'h-10'
       } ${className}`}
     >
       {options.map((option) => {
@@ -64,12 +64,12 @@ export const SegmentedButton = <T extends string = string>({
             onClick={() => {
               if (!isSelected) onChange(option.value);
             }}
-            className={`flex-1 inline-flex items-center justify-center gap-1.5 h-full transition-all duration-200 cursor-pointer ${
-              isSm ? 'px-2.5 text-[11px]' : 'px-3.5 text-xs'
+            className={`flex-1 inline-flex items-center justify-center gap-1.5 h-full border-l border-slate-300 last:border-l-0 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal-600/30 cursor-pointer ${
+              isSm ? 'px-3 text-xs' : 'px-4 text-sm'
             } ${
               isSelected
-                ? 'bg-teal-100 text-teal-950 font-bold shadow-2xs'
-                : 'bg-transparent text-slate-600 hover:bg-slate-100/80 active:bg-slate-200/60 font-medium'
+                ? 'bg-teal-100 text-teal-950 font-medium'
+                : 'bg-transparent text-slate-700 hover:bg-slate-100 active:bg-slate-200 font-medium'
             }`}
           >
             {isSelected && showCheckmark && (

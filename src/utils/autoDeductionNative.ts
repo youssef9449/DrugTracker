@@ -14,6 +14,34 @@ export interface AutoDeductionEvent {
   status: 'FIRED' | 'RECONCILED' | 'REJECTED' | string;
   createdAtEpochMs: number;
   reconciledAtEpochMs: number | null;
+  /** Native Auto stock execution result surfaced during JS repair/reconciliation. */
+  nativeStockApplied?: boolean;
+  actualDeducted?: number;
+}
+
+export interface NativeAutoStockMedication {
+  medicationId: string;
+  currentPills: number;
+}
+
+export interface InitializeNativeStockResult {
+  ok: boolean;
+  stocks: NativeAutoStockMedication[];
+  error?: string;
+}
+
+export interface ApplyForegroundStockDeltasResult {
+  ok: boolean;
+  alreadyApplied: boolean;
+  error?: string;
+}
+
+export interface ApplyAutoDeductionStockResult {
+  ok: boolean;
+  applied: boolean;
+  actualDeducted: number;
+  currentPills: number;
+  error?: string;
 }
 
 export interface MarkReconciledResult {
@@ -125,6 +153,19 @@ interface AutoDeductionPlugin {
   }): Promise<MarkReconciledResult>;
   restoreFutureSchedules(): Promise<RestoreFutureSchedulesResult>;
   listScheduledOccurrences(): Promise<{ schedules: ScheduledOccurrence[] }>;
+  initializeStock(options: {
+    medications: NativeAutoStockMedication[];
+  }): Promise<InitializeNativeStockResult>;
+  applyForegroundStockDeltas(options: {
+    mutationSeq: number;
+    deltas: Array<{ medicationId: string; delta: number }>;
+  }): Promise<ApplyForegroundStockDeltasResult>;
+  applyAutoDeductionStock(options: {
+    medicationId: string;
+    doseId: string;
+    calendarDate: string;
+    amount: number;
+  }): Promise<ApplyAutoDeductionStockResult>;
 }
 
 const AutoDeduction = registerPlugin<AutoDeductionPlugin>('AutoDeduction');
@@ -143,6 +184,135 @@ export function autoDeductionOccurrenceKey(
   calendarDate: string
 ): string {
   return `${medicationId}\u001f${doseId}\u001f${calendarDate}`;
+}
+
+export async function initializeAutoDeductionStock(
+  medications: Array<{ medicationId: string; currentPills: number }>
+): Promise<{ ok: true; medications: typeof medications } | { ok: false; error: string; medications: typeof medications }> {
+  if (!isNativeAndroid()) {
+    return { ok: true, medications };
+  }
+  try {
+    const cleaned = medications
+      .filter((m) =>
+        typeof m.medicationId === 'string' &&
+        m.medicationId.trim().length > 0 &&
+        Number.isFinite(Number(m.currentPills)) &&
+        Number(m.currentPills) >= 0
+      )
+      .map((m) => ({
+        medicationId: m.medicationId.trim(),
+        currentPills: Number(m.currentPills),
+      }));
+    const result = await AutoDeduction.initializeStock({ medications: cleaned });
+    if (!result || result.ok === false) {
+      return {
+        ok: false,
+        error: result?.error || 'stock_init_failed',
+        medications,
+      };
+    }
+    const byId = new Map(
+      (result.stocks ?? []).map((s) => [
+        String(s.medicationId).trim(),
+        Number(s.currentPills),
+      ])
+    );
+    const next = medications.map((m) => {
+      const value = byId.get(m.medicationId);
+      return value != null && Number.isFinite(value) && value >= 0
+        ? { ...m, currentPills: value }
+        : m;
+    });
+    return { ok: true, medications: next };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : 'stock_init_failed',
+      medications,
+    };
+  }
+}
+
+export async function applyForegroundAutoStockDeltas(
+  mutationSeq: number,
+  deltas: Array<{ medicationId: string; delta: number }>
+): Promise<ApplyForegroundStockDeltasResult> {
+  if (!isNativeAndroid()) {
+    return { ok: true, alreadyApplied: false };
+  }
+  if (!(mutationSeq > 0)) {
+    return { ok: false, alreadyApplied: false, error: 'invalid_mutation_seq' };
+  }
+  try {
+    const cleanDeltas = deltas
+      .filter((d) => typeof d.medicationId === 'string' && d.medicationId.trim())
+      .map((d) => ({
+        medicationId: d.medicationId.trim(),
+        delta: Number(d.delta),
+      }));
+    if (cleanDeltas.some((d) => !Number.isFinite(d.delta))) {
+      return { ok: false, alreadyApplied: false, error: 'invalid_stock_delta' };
+    }
+    return await AutoDeduction.applyForegroundStockDeltas({
+      mutationSeq,
+      deltas: cleanDeltas,
+    });
+  } catch (e) {
+    return {
+      ok: false,
+      alreadyApplied: false,
+      error: e instanceof Error ? e.message : 'foreground_stock_failed',
+    };
+  }
+}
+
+export async function applyAutoDeductionStock(
+  medicationId: string,
+  doseId: string,
+  calendarDate: string,
+  amount: number
+): Promise<ApplyAutoDeductionStockResult> {
+  if (!isNativeAndroid()) {
+    return {
+      ok: true,
+      applied: false,
+      actualDeducted: 0,
+      currentPills: 0,
+    };
+  }
+  if (
+    typeof medicationId !== 'string' ||
+    !medicationId.trim() ||
+    typeof doseId !== 'string' ||
+    !doseId.trim() ||
+    !Number.isFinite(Number(amount)) ||
+    Number(amount) <= 0
+  ) {
+    return {
+      ok: false,
+      applied: false,
+      actualDeducted: 0,
+      currentPills: 0,
+      error: 'invalid_auto_stock_args',
+    };
+  }
+  try {
+    return await AutoDeduction.applyAutoDeductionStock({
+      medicationId,
+      doseId: doseId.trim(),
+      calendarDate,
+      amount: Number(amount),
+    });
+  } catch (e) {
+    return {
+      ok: false,
+      applied: false,
+      actualDeducted: 0,
+      currentPills: 0,
+      error: e instanceof Error ? e.message : 'auto_stock_failed',
+    };
+  }
 }
 
 export async function scheduleAutoDeduction(

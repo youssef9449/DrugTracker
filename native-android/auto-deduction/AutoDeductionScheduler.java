@@ -728,17 +728,6 @@ public final class AutoDeductionScheduler {
             return new FireResult(FireResult.Status.FAILED, false);
         }
 
-        // Past-due recovery is ambiguous during the first JS migration boundary:
-        // the pre-Native implementation may already have applied this occurrence.
-        // Wait until JS has seeded the Native baseline and completed one
-        // reconciliation/adoption pass. Future AlarmManager schedules can still
-        // be restored independently.
-        if (!new AutoDeductionStockStore(appContext).isRecoveryReady()) {
-            Log.i(TAG, "recoverMissedOccurrence: recovery boundary not ready — defer " + medicationId
-                    + "/" + doseId + "/" + calendarDate);
-            return new FireResult(FireResult.Status.FAILED, false);
-        }
-
         final String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
         synchronized (SCHEDULE_LOCK) {
             if (isOccurrenceCancelledKey(key)) {
@@ -2228,6 +2217,11 @@ public final class AutoDeductionScheduler {
                 // snapshot date forward is recovered as FIRED (no horizon); the first
                 // not-yet-due date becomes the live AlarmManager schedule.
                 if (epoch <= recoveryNowMs()) {
+                    if (!new AutoDeductionStockStore(appContext()).isRecoveryReady()) {
+                        Log.i(TAG, "restore: past occurrence deferred until JS recovery boundary is ready: "
+                                + prefKey);
+                        continue;
+                    }
                     long snapGen;
                     synchronized (SCHEDULE_LOCK) {
                         snapGen = getEffectiveRecurrenceGenerationLocked(
@@ -2286,6 +2280,11 @@ public final class AutoDeductionScheduler {
                 }
                 if (recomputed <= recoveryNowMs()) {
                     // After TZ change this occurrence is now in the past: multi-day catch-up.
+                    if (!new AutoDeductionStockStore(appContext()).isRecoveryReady()) {
+                        Log.i(TAG, "restore: TZ past occurrence deferred until JS recovery boundary is ready: "
+                                + prefKey);
+                        continue;
+                    }
                     long snapGenTz;
                     synchronized (SCHEDULE_LOCK) {
                         snapGenTz = getEffectiveRecurrenceGenerationLocked(

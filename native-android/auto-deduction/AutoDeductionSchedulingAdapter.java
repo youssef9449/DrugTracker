@@ -147,7 +147,9 @@ public final class AutoDeductionSchedulingAdapter {
             featureMetadata.put("timeHhmm", timeHhmm);
             featureMetadata.put("amount", amount);
             featureMetadata.put("scheduledAtEpochMs", triggerAtEpochMs);
-            // Recurrence authorization is Auto business state. It is carried
+            // Only identity/timing/amount payload is handed to Shared metadata.
+            // Auto recurrence authorization remains delivery-only business state.
+            // No FIRED/RECONCILED/retry/claim/consumption state is persisted here.
             // only in delivery extras; Shared schedule metadata stays generic.
         } catch (JSONException e) {
             return ScheduleResult.failure("payload_build_failed");

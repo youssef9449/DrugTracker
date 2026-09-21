@@ -82,12 +82,6 @@ import {
 import { describeStockInStrips, normalizeDisplayQuantity, formatUnitQuantity } from '@/types';
 
 describe('normalizeDisplayQuantity', () => {
-  it('Case E: preserves ordinary genuine fractions', () => {
-    expect(normalizeDisplayQuantity(0.5)).toBe(0.5);
-    expect(normalizeDisplayQuantity(1.5)).toBe(1.5);
-    expect(normalizeDisplayQuantity(2.25)).toBe(2.25);
-  });
-
   it('Case A: collapses float noise near integers', () => {
     expect(normalizeDisplayQuantity(3 + 1e-12)).toBe(3);
     expect(normalizeDisplayQuantity(10 - 1e-12)).toBe(10);
@@ -97,9 +91,20 @@ describe('normalizeDisplayQuantity', () => {
     expect(normalizeDisplayQuantity(0.1 + 0.2)).toBe(0.3);
   });
 
-  it('Case C: genuine high-precision fraction is preserved (>6 decimals)', () => {
-    expect(normalizeDisplayQuantity(0.123456789)).toBe(0.123456789);
-    expect(normalizeDisplayQuantity(0.123456789)).not.toBe(0.123457);
+  it('Case C: genuine tiny non-zero fractions must not become 0', () => {
+    expect(normalizeDisplayQuantity(0.0000000005)).toBe(0.0000000005);
+    expect(normalizeDisplayQuantity(0.0000000009)).toBe(0.0000000009);
+  });
+
+  it('Case D: genuine high-precision fraction equals original', () => {
+    const v = 0.1234567891234567;
+    expect(normalizeDisplayQuantity(v)).toBe(v);
+  });
+
+  it('Case E: ordinary genuine fractions unchanged', () => {
+    expect(normalizeDisplayQuantity(0.5)).toBe(0.5);
+    expect(normalizeDisplayQuantity(1.5)).toBe(1.5);
+    expect(normalizeDisplayQuantity(2.25)).toBe(2.25);
   });
 });
 
@@ -116,8 +121,10 @@ describe('formatUnitQuantity', () => {
     expect(formatUnitQuantity(2.25, 'قرص')).toBe('2.25 قرص');
   });
 
-  it('Case D: high-precision fraction is not capped at 6 decimals', () => {
-    expect(formatUnitQuantity(0.123456789, 'قرص')).toBe('0.123456789 قرص');
+  it('Case F formatter: tiny and high-precision fractions preserved in text', () => {
+    expect(formatUnitQuantity(0.0000000005, 'قرص')).toBe('5e-10 قرص');
+    const v = 0.1234567891234567;
+    expect(formatUnitQuantity(v, 'قرص')).toBe(`${v} قرص`);
   });
 
   it('Case F: whole-number Arabic forms remain unchanged', () => {

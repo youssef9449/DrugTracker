@@ -214,32 +214,41 @@ export { formatLogTime };
  */
 /**
  * Normalize a packaging remainder for display.
- * Whole numbers (incl. float noise near integers) stay integers.
- * Genuine fractional quantities are preserved without Math.round inflation
- * (e.g. 0.5 must not become 1) and without an arbitrary fixed
- * fractional-place cap (dose inputs use step="any").
- * Binary float artifacts such as 0.1 + 0.2 → 0.3000…04 are cleaned via
- * significant-digit rounding (~15 digits, within IEEE-754 double precision).
+ *
+ * - Near-integer IEEE noise → integer (magnitude-scaled Number.EPSILON only;
+ *   no fixed absolute 1e-9 cutoff that would erase genuine tiny fractions).
+ * - Binary float residue (e.g. 0.1 + 0.2 → 0.3000…04) → short decimal only
+ *   when within a few ULPs of that decimal.
+ * - Genuine fractions (including tiny and high-precision) are returned
+ *   unchanged — no fixed 6-decimal or N-significant-digit rounding.
  */
 export function normalizeDisplayQuantity(value: number): number {
   if (!Number.isFinite(value)) return 0;
+
   const nearest = Math.round(value);
-  // Absolute + magnitude-scaled epsilon collapses noise around integers only.
-  const intEps = Math.max(1e-9, Number.EPSILON * Math.max(1, Math.abs(nearest)) * 16);
+  // Magnitude-scaled epsilon only (no fixed absolute cutoff).
+  // Large enough that 3 + 1e-12 snaps to 3; tight enough that 5e-10 near 0
+  // is not erased to 0.
+  const scale = Math.max(Math.abs(value), Math.abs(nearest), 1);
+  const intEps = Number.EPSILON * scale * 4096;
   if (Math.abs(value - nearest) <= intEps) return nearest;
 
   const abs = Math.abs(value);
   if (abs === 0) return 0;
 
-  // Significant-digit rounding removes binary representation noise without
-  // truncating legitimate fractional digits to a fixed place count.
-  const SIGNIFICANT_DIGITS = 15;
-  const exp = Math.floor(Math.log10(abs));
-  const power = SIGNIFICANT_DIGITS - 1 - exp;
-  // Guard pathological magnitudes so Math.pow does not overflow to Infinity.
-  if (power > 300 || power < -300) return value;
-  const factor = Math.pow(10, power);
-  return Math.round(value * factor) / factor;
+  // Snap to a short decimal only when the distance is within a few ULPs
+  // (representation residue). Otherwise keep the original double.
+  const exp2 = Math.floor(Math.log2(abs));
+  const ulp = Math.pow(2, exp2 - 52);
+  const tol = ulp * 8;
+  for (let places = 1; places <= 17; places++) {
+    const factor = 10 ** places;
+    const candidate = Math.round(value * factor) / factor;
+    if (Math.abs(value - candidate) <= tol) {
+      return candidate;
+    }
+  }
+  return value;
 }
 
 /**

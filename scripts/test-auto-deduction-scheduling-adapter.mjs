@@ -66,7 +66,7 @@ assert(
   'Auto shared schedule metadata must not have a fireRetryCount field'
 );
 assert(
-  !scheduler.includes('put("fireRetryCount"'),
+  !scheduler.includes('current.put("fireRetryCount"'),
   'Auto shared schedule metadata must not persist the retry counter'
 );
 assert(

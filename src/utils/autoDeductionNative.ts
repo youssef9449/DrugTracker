@@ -189,7 +189,6 @@ interface AutoDeductionPlugin {
     calendarDate: string;
     amount: number;
   }): Promise<ApplyAutoDeductionStockResult>;
-  markRecoveryReady(): Promise<{ ok: boolean; error?: string }>;
 }
 
 const AutoDeduction = registerPlugin<AutoDeductionPlugin>('AutoDeduction');
@@ -402,20 +401,6 @@ export async function applyForegroundAutoStockDeltas(
       alreadyApplied: false,
       stocks: [],
       error: e instanceof Error ? e.message : 'foreground_stock_failed',
-    };
-  }
-}
-
-export async function markAutoDeductionRecoveryReady(): Promise<{ ok: boolean; error?: string }> {
-  if (!isNativeAndroid()) {
-    return { ok: true };
-  }
-  try {
-    return await AutoDeduction.markRecoveryReady();
-  } catch (e) {
-    return {
-      ok: false,
-      error: e instanceof Error ? e.message : 'recovery_ready_failed',
     };
   }
 }

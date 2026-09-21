@@ -54,11 +54,11 @@ export const SegmentedButton = <T extends string = string>({
         const isLast = index === options.length - 1;
         const shapeClass =
           options.length === 1
-            ? 'rounded-xl'
+            ? 'rounded-[var(--m3-shape-medium)]'
             : isFirst
-              ? 'rounded-l-xl'
+              ? 'rounded-s-[var(--m3-shape-medium)]'
               : isLast
-                ? 'rounded-r-xl'
+                ? 'rounded-e-[var(--m3-shape-medium)]'
                 : 'rounded-none';
 
         return (

@@ -4,6 +4,7 @@
  */
 
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
+import type { Medication } from '../types';
 
 export interface AutoDeductionEvent {
   medicationId: string;
@@ -232,6 +233,33 @@ export async function initializeAutoDeductionStock(
       medications,
     };
   }
+}
+
+export async function convergeAutoDeductionStock(
+  medications: Medication[]
+): Promise<{ ok: true; medications: Medication[] } | { ok: false; medications: Medication[]; error: string }> {
+  const result = await initializeAutoDeductionStock(
+    medications.map((m) => ({
+      medicationId: m.id,
+      currentPills: m.currentPills,
+    }))
+  );
+  if (!result.ok) {
+    return {
+      ok: false,
+      medications,
+      error: result.error,
+    };
+  }
+  return {
+    ok: true,
+    medications: medications.map((m) => {
+      const next = result.medications.find((x) => x.medicationId === m.id);
+      return next
+        ? { ...m, currentPills: next.currentPills }
+        : m;
+    }),
+  };
 }
 
 export async function applyForegroundAutoStockDeltas(

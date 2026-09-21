@@ -179,6 +179,11 @@ public final class AutoDeductionStockStore {
                     if (!prefs.contains(key)) {
                         editor.putString(key, encode(seed.currentPills));
                         changed = true;
+                    } else if (readStockLocked(seed.medicationId) == null) {
+                        // A present-but-invalid Native row must never be treated
+                        // as an absent row and silently replaced by JS. Fail
+                        // closed so a corrupted balance cannot be guessed.
+                        return SnapshotResult.failure("invalid_native_stock");
                     }
                 }
             }

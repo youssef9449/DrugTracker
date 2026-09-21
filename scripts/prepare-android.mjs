@@ -134,6 +134,7 @@ const alarmRuntimeFiles = [
   'DrugTrackerAlarmSystemReceiver.java',
   'ExactAlarmFeatureAdapter.java',
   'ExactAlarmPlugin.java',
+  'CriticalStockAlarmFeature.java',
   'DoseReminderAlarmFeature.java',
 ];
 if (!fs.existsSync(alarmRuntimeDestDir)) {
@@ -230,26 +231,11 @@ const criticalStockDestDir = path.join(
 );
 const criticalStockFiles = [
   'CriticalStockAlarmAdapter.java',
+  'CriticalStockAlarmReceiver.java',
+  'CriticalStockPlugin.java',
 ];
 if (!fs.existsSync(criticalStockDestDir)) {
   fs.mkdirSync(criticalStockDestDir, { recursive: true });
-}
-
-// Remove the previous split Critical Stock files from generated Android
-// sources. The adapter file is now the only feature-owned Critical Stock
-// boundary.
-for (const file of [
-  'CriticalStockAlarmReceiver.java',
-  'CriticalStockPlugin.java',
-]) {
-  const legacyPath = path.join(criticalStockDestDir, file);
-  if (fs.existsSync(legacyPath)) {
-    fs.unlinkSync(legacyPath);
-    console.info(
-      '[prepare-android] Removed obsolete Critical Stock source ' +
-        path.relative(root, legacyPath)
-    );
-  }
 }
 for (const file of criticalStockFiles) {
   const src = path.join(criticalStockSrcDir, file);
@@ -264,28 +250,6 @@ for (const file of criticalStockFiles) {
       path.relative(root, src) +
       ' → ' +
       path.relative(root, dest)
-  );
-}
-
-const generatedAlarmRuntimeDir = path.join(
-  androidDir,
-  'app',
-  'src',
-  'main',
-  'java',
-  'app',
-  'drugtracker',
-  'alarmruntime'
-);
-const obsoleteCriticalFeaturePath = path.join(
-  generatedAlarmRuntimeDir,
-  'CriticalStockAlarmFeature.java'
-);
-if (fs.existsSync(obsoleteCriticalFeaturePath)) {
-  fs.unlinkSync(obsoleteCriticalFeaturePath);
-  console.info(
-    '[prepare-android] Removed obsolete generated source ' +
-      path.relative(root, obsoleteCriticalFeaturePath)
   );
 }
 
@@ -364,7 +328,7 @@ const doseReminderAlarmReceiver = `        <receiver
         </receiver>`;
 
 const criticalStockAlarmReceiver = `        <receiver
-            android:name="app.drugtracker.criticalstock.CriticalStockAlarmAdapter$AlarmReceiver"
+            android:name="app.drugtracker.criticalstock.CriticalStockAlarmReceiver"
             android:exported="false"
             android:enabled="true">
             <intent-filter>
@@ -452,7 +416,7 @@ function upsertApplicationMetaData(xml, androidName, value) {
 ));
 ({ manifest } = upsertReceiverByName(
   manifest,
-  'app.drugtracker.criticalstock.CriticalStockAlarmAdapter$AlarmReceiver',
+  'app.drugtracker.criticalstock.CriticalStockAlarmReceiver',
   criticalStockAlarmReceiver
 ));
 ({ manifest } = upsertReceiverByName(
@@ -464,11 +428,6 @@ function upsertApplicationMetaData(xml, androidName, value) {
   manifest,
   'app.drugtracker.autodeduction.AutoDeductionSystemReceiver'
 ));
-({ manifest } = removeReceiverByName(
-  manifest,
-  'app.drugtracker.criticalstock.CriticalStockAlarmReceiver'
-));
-
 ({ manifest } = removeReceiverByName(
   manifest,
   'com.capacitorjs.plugins.localnotifications.TimedNotificationPublisher'

@@ -25,21 +25,21 @@ export const AndroidBottomNav: FC<AndroidBottomNavProps> = ({
   alertsCount,
 }) => {
   return (
-    <nav className="w-full bg-white border-t border-slate-200/90 px-3 py-2 flex items-center justify-around select-none z-30 shadow-md">
+    <nav className="w-full h-20 bg-white border-t border-slate-200 px-2 flex items-center justify-around select-none z-30">
       {TABS.map(({ id, icon: Icon, label, iconClassName }) => {
         const isActive = activeTab === id;
         return (
           <button
             key={id}
             onClick={() => onTabChange(id)}
-            className={`flex-1 flex flex-col items-center justify-center py-1 rounded-2xl transition-all duration-200 relative ${
+            className={`min-w-0 flex-1 h-full flex flex-col items-center justify-center gap-1 px-1 rounded-xl transition-colors duration-200 relative focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 ${
               isActive
                 ? 'text-teal-800 font-bold'
                 : 'text-slate-500 hover:text-slate-800 font-medium'
             }`}
           >
             <div
-              className={`w-14 h-8 rounded-full flex items-center justify-center relative transition-all duration-200 ${
+              className={`w-16 h-8 rounded-full flex items-center justify-center relative transition-colors duration-200 ${
                 isActive ? 'bg-teal-100 text-teal-950 font-bold' : 'bg-transparent text-slate-600'
               }`}
             >
@@ -51,7 +51,7 @@ export const AndroidBottomNav: FC<AndroidBottomNavProps> = ({
               )}
             </div>
             <span
-              className={`text-[11px] mt-1 transition-colors ${
+              className={`text-xs leading-4 transition-colors ${
                 isActive ? 'text-teal-950 font-bold' : 'text-slate-600 font-medium'
               }`}
             >

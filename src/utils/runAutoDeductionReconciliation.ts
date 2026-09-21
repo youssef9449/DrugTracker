@@ -182,7 +182,7 @@ async function runOnce(
 
   // Auto owns the live stock balance in Native. Seed only missing rows and
   // mirror authoritative Native currentPills into the JS durable snapshot.
-  const initialStockConvergence = await convergeAutoDeductionStock(baseMeds, baseLogs);
+  const initialStockConvergence = await convergeAutoDeductionStock(baseMeds);
   if (!initialStockConvergence.ok) {
     return {
       medications: baseMeds,
@@ -273,7 +273,7 @@ async function runOnce(
       // A recovered foreground envelope may contain a snapshot captured before
       // a later Native Auto deduction. Re-read Native stock after replay so the
       // returned JS mirror can never overwrite a newer background deduction.
-      const postEnvelopeConvergence = await convergeAutoDeductionStock(baseMeds, baseLogs);
+      const postEnvelopeConvergence = await convergeAutoDeductionStock(baseMeds);
       if (!postEnvelopeConvergence.ok) {
         return {
           medications: baseMeds,
@@ -438,7 +438,7 @@ async function runOnce(
     });
   }
 
-  const postRepairConvergence = await convergeAutoDeductionStock(baseMeds, baseLogs);
+  const postRepairConvergence = await convergeAutoDeductionStock(baseMeds);
   if (!postRepairConvergence.ok) {
     return {
       medications: baseMeds,

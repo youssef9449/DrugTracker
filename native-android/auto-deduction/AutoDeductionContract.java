@@ -42,8 +42,9 @@ public final class AutoDeductionContract {
     /**
      * Legacy per-schedule ownership token key. New alarms use the generic
      * shared-runtime operationVersion extra; the receiver accepts this legacy
-     * key for pre-migration alarms.
+     * key only for pre-migration alarms.
      */
+    @Deprecated
     public static final String EXTRA_SCHEDULE_VERSION = "scheduleVersion";
 
     /** Generic shared-runtime ownership token carried by new alarm PendingIntents. */
@@ -70,20 +71,20 @@ public final class AutoDeductionContract {
     public static final String PREFS_PENDING = "drugtracker_auto_deduction_pending_v1";
     /**
      * Independent durable fire-failure / retry evidence, keyed by occurrence identity.
-     * Survives schedule metadata removal (config mutation, disable, delete) so a
-     * failed FIRED persistence can still be retried without depending on schedulePrefs.
+     * Survives shared schedule metadata removal (config mutation, disable, delete) so a
+     * failed FIRED persistence can still be retried without depending on the alarm store.
      */
     public static final String PREFS_FIRE_RETRY = "drugtracker_auto_deduction_fire_retry_v1";
     /**
      * Durable cancellation tombstones keyed by occurrence identity.
      * Survives process death so restore and AutoDeductionReceiver cannot promote a
      * cancelled occurrence to FIRED (stale schedule metadata or stale alarm delivery).
-     * A later schedule with newer scheduleVersion supersedes the tombstone.
+     * A later schedule with newer operationVersion supersedes the tombstone.
      */
     public static final String PREFS_CANCELLED = "drugtracker_auto_deduction_cancelled_v1";
 
     /**
-     * Durable monotonic ordering sequence for scheduleVersion / cancellation tokens.
+     * Durable monotonic ordering sequence for generic operationVersion / cancellation tokens.
      * Survives process death so (millis, seq) comparisons remain reconstructible
      * after reboot. Key {@link #KEY_ORDERING_SEQ} holds the last allocated value.
      */

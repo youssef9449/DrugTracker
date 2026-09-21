@@ -50,7 +50,6 @@ vi.mock('@capacitor/local-notifications', () => ({
 
 import {
   scheduleDoseReminder,
-  doseReminderAlarmIdForDose,
   isDoseReminderTimeStillAhead } from '@/utils/notifications';
 
 /**
@@ -58,7 +57,6 @@ import {
  * LocalNotifications.schedule() call for the recurring dose alarm.
  */
 function lastDoseSchedulePayload(): {
-  id: number;
   at: Date;
   repeats: boolean | undefined;
   every: string | undefined;
@@ -69,7 +67,6 @@ function lastDoseSchedulePayload(): {
   const call = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
   const n = call[0].notifications[0];
   return {
-    id: n.id,
     at: n.schedule.at as Date,
     // Phase 2: dose reminders are ONE-SHOT (no Capacitor repeats/every —
     // those use setRepeating with a wrong interval for daily wall-clock
@@ -162,8 +159,6 @@ describe('scheduleDoseReminder — skipToday (consumed-day suppression)', () => 
     expect(payload.repeats).toBeUndefined();
     expect(payload.every).toBeUndefined();
     expect(payload.doseRecurring).toBe(true);
-    // Same stable medication-specific id band as the normal schedule.
-    expect(payload.id).toBe(doseReminderAlarmIdForDose('med-1', 'd1'));
   });
 
   it('skipToday after the reminder time already passed: exactly ONE day increment (tomorrow, never the day after)', async () => {
@@ -194,15 +189,6 @@ describe('scheduleDoseReminder — skipToday (consumed-day suppression)', () => 
     expect(mocks.schedule).not.toHaveBeenCalled();
   });
 
-  it('skipToday keeps the exact same stable notification id as a normal schedule', async () => {
-    await scheduleDoseReminder('med-1', 'Test', '09:00', 1, 'قرص', 'd1');
-    const normalId = lastDoseSchedulePayload().id;
-    await scheduleDoseReminder('med-1', 'Test', '09:00', 1, 'قرص', 'd1', { skipToday: true });
-    const skippedId = lastDoseSchedulePayload().id;
-
-    expect(skippedId).toBe(normalId);
-    expect(skippedId).toBe(doseReminderAlarmIdForDose('med-1', 'd1'));
-  });
 });
 
 describe('isDoseReminderTimeStillAhead — suppression boundary', () => {
@@ -245,16 +231,10 @@ describe('Phase 4 — doseId in notification extra', () => {
     const notif = mocks.schedule.mock.calls[0][0].notifications[0];
     expect(notif.extra.medicationId).toBe('med-x');
     expect(notif.extra.doseId).toBe('d2');
-    expect(notif.id).toBe(doseReminderAlarmIdForDose('med-x', 'd2'));
+    expect(notif.extra.namespace).toBe('dose-reminder');
+    expect(notif.extra.identity).toBe('med-x::d2');
   });
 
-  it('two doses get distinct notification ids', async () => {
-    await scheduleDoseReminder('med-x', 'Drug', '08:00', 2, 'قرص', 'd1');
-    await scheduleDoseReminder('med-x', 'Drug', '14:00', 1, 'قرص', 'd2');
-    const id1 = mocks.schedule.mock.calls[0][0].notifications[0].id;
-    const id2 = mocks.schedule.mock.calls[1][0].notifications[0].id;
-    expect(id1).not.toBe(id2);
-  });
 });
 
 describe('scheduleDoseReminder — 12h display body, 24h schedule identity', () => {

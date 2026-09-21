@@ -884,17 +884,18 @@ Split Notification Runtime from Exact Alarm Runtime:
 - Auto Deduction stays on the exact-alarm path without Notification Runtime;
 - remove the old Capacitor LocalNotifications alarm-delivery/recurrence bridge from Android.
 
-### Phase 7
-Split the TypeScript notification utility by responsibility without changing notification behavior:
+### Phase 7 — Notification identity machinery closure
+The notification identity contract is now explicit and separate from exact-alarm identity:
 
-- notification permission/settings behavior is isolated from feature notification code;
-- deterministic notification identity stays in a dedicated ID module;
-- generic notification presentation mechanics remain separate from feature content/policy;
-- Dose Reminder and Critical Stock notification-facing behavior remain feature-specific;
-- browser notification fallback remains isolated to the web notification module;
-- exact-alarm scheduling/capability concerns remain on the Exact Alarm side rather than in the Notification Runtime layer;
-- Auto Deduction remains independent of the notification modules;
-- src/utils/notifications.ts is reduced to a thin compatibility re-export facade with no notification implementation.
+- Alarm identity is the full native occurrence identity handled by Exact Alarm Runtime.
+- Notification identity is `namespace + logical identity`.
+- Android Notification Runtime uses that namespace + identity as the authoritative notification identity; feature code never allocates numeric IDs.
+- iOS may require a numeric platform handle internally. Any numeric conversion is an opaque Notification Runtime implementation detail derived from the full logical namespace + identity; it is not a feature-level category, range, registry, or collision-probing mechanism.
+- The obsolete feature-level numeric ID registry (`notificationIds.ts`), range constants, hash-to-range allocator, and pre-Phase-6 scheduled-alarm numeric-ID cleanup are removed.
+- Dose, Critical, and stock notification features provide only explicit namespace + identity plus presentation policy/content.
+- Auto Deduction has no notification identity, notification channel, or notification runtime dependency.
+
+A structural regression guard at `scripts/test-notification-id-machinery-phase7.mjs` protects these invariants.
 
 ### Phase 8
 Collapse the Critical Stock native boundary to one feature adapter over the shared Exact Alarm Runtime:

@@ -8,9 +8,6 @@ import {
   getCardDoseToggleTarget } from '../../src/utils/doseSchedule';
 import { getAutoDeductionSlotsForDate } from '../../src/hooks/useAutoDeductionScheduler';
 import { getDoseReminderSlots } from '../../src/hooks/useDoseReminderScheduler';
-import {
-  doseReminderAlarmIdForDose,
-  snoozeDoseReminderId } from '../../src/utils/notifications';
 
 function baseMed(over: Partial<Medication> = {}): Medication {
   return {
@@ -76,8 +73,10 @@ describe('explicit schedule only', () => {
     expect(t.amount).not.toBe(99);
   });
 
-  it('empty doseId → no alarm/snooze identity', () => {
-    expect(doseReminderAlarmIdForDose('med-1', '')).toBeNull();
-    expect(snoozeDoseReminderId('med-1', '')).toBeNull();
+  it('empty doseId rows are ignored by reminder scheduling sources', () => {
+    const med = baseMed({
+      doseSchedule: [{ id: '', amount: 1, time: '08:00' }],
+    });
+    expect(getDoseReminderSlots(med)).toEqual([]);
   });
 });

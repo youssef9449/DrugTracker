@@ -650,24 +650,26 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
 
               {/* Unit selector + quantity controls */}
               <div className="mt-2 pt-2 border-t border-slate-100 space-y-1.5">
-                {/* Toolbar: mode on the start side; unit toggles stay on the
-                    end side in their original place. In custom mode each
-                    quantity input is rendered directly under its unit toggle. */}
-                <div className="flex items-start justify-between gap-1.5 flex-wrap">
-                  <SegmentedButton<'period' | 'custom'>
-                    className="shrink-0"
-                    size="sm"
-                    value={getQuantityMode(med)}
-                    onChange={(val) => handleToggleQuantityMode(med, val, suggestedPills)}
-                    options={[
-                      { value: 'period', label: 'حسب الفترة' },
-                      { value: 'custom', label: 'كمية محددة' },
-                    ]}
-                    aria-label={`طريقة حساب كمية طلب ${med.name}`}
-                  />
+                {/* Toolbar: keep the quantity-mode switch on the right and
+                    the unit controls in a fixed left column. In custom mode,
+                    each quantity input is rendered directly under its unit toggle. */}
+                <div className="grid grid-cols-[auto_1fr] items-start gap-1.5">
+                  <div className="shrink-0 justify-self-end">
+                    <SegmentedButton<'period' | 'custom'>
+                      className="shrink-0"
+                      size="sm"
+                      value={getQuantityMode(med)}
+                      onChange={(val) => handleToggleQuantityMode(med, val, suggestedPills)}
+                      options={[
+                        { value: 'period', label: 'حسب الفترة' },
+                        { value: 'custom', label: 'كمية محددة' },
+                      ]}
+                      aria-label={`طريقة حساب كمية طلب ${med.name}`}
+                    />
+                  </div>
 
                   {availableUnits.length > 1 ? (
-                    <div className="flex items-start gap-1 shrink-0">
+                    <div className="flex items-start gap-1 shrink-0 justify-self-end">
                       {availableUnits.map((u) => {
                         const isActive = selectedUnits.includes(u);
                         const icon =

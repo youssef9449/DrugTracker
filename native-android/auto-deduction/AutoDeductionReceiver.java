@@ -221,6 +221,29 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
             notifyJavascript(
                     context, medicationId, doseId, calendarDate, scheduledAt, amount);
         }
+
+        if (result.allowsRecurrence()) {
+            AutoDeductionStockStore.AutoApplyResult stockResult =
+                    new AutoDeductionStockStore(context).applyAutoDeduction(
+                            medicationId, doseId, calendarDate, amount);
+            if (!stockResult.ok) {
+                Log.e(TAG, "independent recovery native stock apply failed: "
+                        + medicationId + "/" + doseId + "/" + calendarDate
+                        + " — " + stockResult.error);
+                if (shouldScheduleFireRetry(result, fireRetryCount)) {
+                    boolean retryScheduled = scheduler.scheduleFireRetry(
+                            medicationId, doseId, calendarDate, scheduledAt, amount,
+                            timeHhmm, recurrenceGeneration, operationVersion,
+                            fireRetryCount + 1);
+                    if (retryScheduled) {
+                        Log.w(TAG, "independent recovery stock failure — retry #"
+                                + (fireRetryCount + 1) + " scheduled");
+                    }
+                }
+                return;
+            }
+        }
+
         switch (result.status) {
             case CANCELLED:
                 Log.i(TAG, "independent recovery cancelled (no prior evidence): "
@@ -276,6 +299,29 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
             notifyJavascript(
                     context, medicationId, doseId, calendarDate, scheduledAt, amount);
         }
+
+        if (result.allowsRecurrence()) {
+            AutoDeductionStockStore.AutoApplyResult stockResult =
+                    new AutoDeductionStockStore(context).applyAutoDeduction(
+                            medicationId, doseId, calendarDate, amount);
+            if (!stockResult.ok) {
+                Log.e(TAG, "live fire native stock apply failed: "
+                        + medicationId + "/" + doseId + "/" + calendarDate
+                        + " — " + stockResult.error);
+                if (shouldScheduleFireRetry(result, fireRetryCount)) {
+                    boolean retryScheduled = scheduler.scheduleFireRetry(
+                            medicationId, doseId, calendarDate, scheduledAt, amount,
+                            timeHhmm, recurrenceGeneration, operationVersion,
+                            fireRetryCount + 1);
+                    if (retryScheduled) {
+                        Log.w(TAG, "live fire stock failure — retry #"
+                                + (fireRetryCount + 1) + " scheduled");
+                    }
+                }
+                return;
+            }
+        }
+
         switch (result.status) {
             case CANCELLED:
                 Log.i(TAG, "stale fire ignored (cancel linearized first): "

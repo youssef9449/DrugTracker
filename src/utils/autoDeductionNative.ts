@@ -278,7 +278,8 @@ function isStrictCalendarDate(value: unknown): value is string {
 }
 
 function buildLegacyOccurrenceResolutions(
-  medications: Medication[]
+  medications: Medication[],
+  logs: Array<{ medicationId: string; doseId?: string; type: string; date: string }> = []
 ): NativeAutoOccurrenceResolution[] {
   const resolutions: NativeAutoOccurrenceResolution[] = [];
 
@@ -314,18 +315,35 @@ function buildLegacyOccurrenceResolutions(
     }
   }
 
+  for (const log of logs) {
+    if (
+      log.type === 'exact_auto' &&
+      typeof log.doseId === 'string' &&
+      log.doseId.trim() &&
+      isStrictCalendarDate(log.date)
+    ) {
+      resolutions.push({
+        medicationId: log.medicationId,
+        doseId: log.doseId.trim(),
+        calendarDate: log.date,
+        type: 'CONSUMED',
+      });
+    }
+  }
+
   return resolutions;
 }
 
 export async function convergeAutoDeductionStock(
-  medications: Medication[]
+  medications: Medication[],
+  logs: Array<{ medicationId: string; doseId?: string; type: string; date: string }> = []
 ): Promise<{ ok: true; medications: Medication[] } | { ok: false; medications: Medication[]; error: string }> {
   const result = await initializeAutoDeductionStock(
     medications.map((m) => ({
       medicationId: m.id,
       currentPills: m.currentPills,
     })),
-    buildLegacyOccurrenceResolutions(medications)
+    buildLegacyOccurrenceResolutions(medications, logs)
   );
   if (!result.ok) {
     return {

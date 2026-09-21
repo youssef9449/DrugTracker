@@ -20,7 +20,7 @@ export function getNativePlatform(): 'android' | 'ios' | null {
  * and should use the standard Notification API.
  */
 
-function isNativePlatform(): boolean {
+export function isNativePlatform(): boolean {
   return getNativePlatform() !== null;
 }
 
@@ -30,7 +30,7 @@ function isNativePlatform(): boolean {
  * fallback path.
  */
 
-function isWebNotificationSupported(): boolean {
+export function isWebNotificationSupported(): boolean {
   return typeof window !== 'undefined' && 'Notification' in window;
 }
 

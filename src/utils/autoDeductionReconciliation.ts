@@ -240,14 +240,23 @@ export function applyExactAutoEventToMedication(
     return { ok: false, reason: 'already_applied' };
   }
 
-  // Stock deduction is exactly event.amount (clamped at zero). No historical
-  // / day-based settlement is folded into this apply — Exact FIRED is the
-  // amount charged for this FIRED occurrence.
+  // Native Auto is the stock authority for normal reconciliation. When the
+  // event was already applied natively, currentPills is already the post-dose
+  // balance and JS MUST NOT subtract again. The event carries actualDeducted
+  // from the idempotent Native occurrence marker for exact log/history evidence.
   const settleBase = Math.max(0, med.currentPills);
   const requested = event.amount;
-  // Actual stock change after clamping at zero (may be < requested).
-  const actualDeducted = Math.min(Math.max(0, requested), settleBase);
-  const newPills = settleBase - actualDeducted;
+  let actualDeducted = Math.min(Math.max(0, requested), settleBase);
+  let newPills = settleBase - actualDeducted;
+
+  if (event.nativeStockApplied === true) {
+    const nativeActual = Number(event.actualDeducted);
+    if (!Number.isFinite(nativeActual) || nativeActual < 0) {
+      return { ok: false, reason: 'invalid_native_stock_result' };
+    }
+    actualDeducted = nativeActual;
+    newPills = settleBase;
+  }
   let nextHistory = med.doseConsumptionHistory;
   let lastConsumedDate = med.lastConsumedDate;
 

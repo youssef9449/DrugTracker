@@ -333,7 +333,15 @@ function buildNativeStockDeltas(
     const after = Number(medication.currentPills);
     if (!Number.isFinite(after) || after < 0) continue;
 
-    const delta = before == null ? after : after - Number(before);
+    if (before == null) {
+      // A newly-added medication with zero stock still needs a Native row so
+      // an exact Auto occurrence can be recorded as a zero-unit deduction
+      // instead of failing with stock_not_initialized.
+      deltas.push({ medicationId: medication.id, delta: after });
+      continue;
+    }
+
+    const delta = after - Number(before);
     if (Number.isFinite(delta) && delta !== 0) {
       deltas.push({ medicationId: medication.id, delta });
     }

@@ -66,6 +66,18 @@ assert(
   'Auto business scheduler must not know the shared schedule-key storage format'
 );
 assert(
+  !scheduler.includes('AutoDeductionContract.PREFS_SCHEDULES'),
+  'Auto business scheduler must not own the shared schedules preference'
+);
+assert(
+  !scheduler.includes('AutoDeductionContract.PREFS_ORDERING'),
+  'Auto business scheduler must not own the shared ordering preference'
+);
+assert(
+  !scheduler.includes('AutoDeductionContract.PREFS_CANCELLED'),
+  'Auto business scheduler must not own the shared cancellation preference'
+);
+assert(
   !scheduler.includes('FIELD_FIRE_RETRY_COUNT'),
   'Auto shared schedule metadata must not have a fireRetryCount field'
 );
@@ -105,6 +117,14 @@ assert(
 assert(
   !adapter.includes('featureMetadata.put(\n                    AutoDeductionContract.EXTRA_RECURRENCE_GENERATION'),
   'scheduling adapter must not persist Auto recurrence authorization in shared metadata'
+);
+assert(
+  !adapter.includes('featureMetadata.put("recurrenceGeneration"'),
+  'scheduling adapter must not persist recurrence authorization as Shared metadata'
+);
+assert(
+  !adapter.includes('featureMetadata.put("fireRetryCount"'),
+  'scheduling adapter must not persist retry state as Shared metadata'
 );
 assert(
   !adapter.includes('schedulePrefs'),

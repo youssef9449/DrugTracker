@@ -10,9 +10,9 @@
  *   <button className={ICON_BUTTON_CLASS}>...</button>
  */
 
-/** M3-aligned circular icon button: 40dp touch target, 24dp icon slot. */
+/** M3-aligned standard icon button: 48dp minimum touch target with a 24dp icon. */
 export const ICON_BUTTON_CLASS =
-  'w-10 h-10 rounded-full flex items-center justify-center text-slate-700 hover:bg-slate-100 active:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 transition-colors cursor-pointer';
+  'w-12 h-12 rounded-full flex items-center justify-center text-slate-700 hover:bg-slate-100 active:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 transition-colors cursor-pointer';
 
 /** M3-aligned text/icon action button metrics shared by compact actions. */
 export const M3_TEXT_BUTTON_CLASS =

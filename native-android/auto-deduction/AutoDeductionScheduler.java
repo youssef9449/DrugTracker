@@ -618,13 +618,58 @@ public final class AutoDeductionScheduler {
             AutoDeductionEventStore.InsertFiredResult ir = store.insertFiredIfAbsent(
                     medicationId, doseId, calendarDate, scheduledAtEpochMs, amount);
             FireResult result = FireResult.fromInsert(ir);
-            // FIRED/pending evidence alone does NOT mean stock execution succeeded.
-            // Keep any independent retry evidence until Native stock is confirmed by
-            // the receiver, so a stock-only failure can still be repaired even when
-            // the shared schedule row has disappeared.
-            if (result.status == FireResult.Status.FAILED && !result.pendingRecorded) {
-                // Independent durable failure evidence under SCHEDULE_LOCK — must not
-                // depend on schedule metadata that config mutation may remove next.
+
+            // FIRED evidence and Native stock are one Auto business boundary.
+            // A live delivery is not considered recurrence-safe until the same
+            // occurrence has also been applied to the Native stock authority.
+            if (result.allowsRecurrence()) {
+                AutoDeductionStockStore.AutoApplyResult stockResult =
+                        new AutoDeductionStockStore(appContext).applyAutoDeduction(
+                                medicationId, doseId, calendarDate, amount);
+                if (!stockResult.ok) {
+                    Log.e(TAG, "fire linearization: Native stock apply failed for "
+                            + key + " — " + stockResult.error);
+
+                    // Keep independent retry evidence for a stock-only failure.
+                    // It is self-contained so a later config mutation/removal of
+                    // the schedule row cannot erase the recovery proof.
+                    String timeHhmm = "";
+                    String operationVersion = deliveryOperationVersion != null
+                            ? deliveryOperationVersion : "";
+                    long gen = deliveryRecurrenceGeneration;
+                    try {
+                        JSONObject meta = new JSONObject(metaRaw);
+                        timeHhmm = meta.optString("timeHhmm", "");
+                        if (operationVersion.isEmpty()) {
+                            operationVersion =
+                                    AutoDeductionSchedulingAdapter.extractOperationVersion(meta);
+                        }
+                        if (gen <= 0L) {
+                            gen = getEffectiveRecurrenceGenerationLocked(
+                                    medicationId, doseId, meta);
+                        }
+                    } catch (JSONException ignored) {
+                    }
+
+                    recordIndependentFireRetryEvidenceLocked(
+                            medicationId, doseId, calendarDate, scheduledAtEpochMs,
+                            amount, timeHhmm, gen, operationVersion,
+                            /*nextRetryCount=*/1);
+
+                    // Do not return CREATED/ALREADY_EXISTS/FIRED-pending to the
+                    // receiver because stock is not complete yet. The receiver
+                    // must enter the bounded same-occurrence retry path.
+                    return new FireResult(FireResult.Status.FAILED, false);
+                }
+
+                // Any old retry proof is no longer needed once this occurrence's
+                // Native stock has completed successfully.
+                clearIndependentFireRetryEvidenceLocked(key);
+            } else if (result.status == FireResult.Status.FAILED
+                    && !result.pendingRecorded) {
+                // FIRED persistence itself failed without an independent pending
+                // record: keep retry evidence so the exact occurrence can be
+                // reconstructed even if schedule metadata disappears.
                 String timeHhmm = "";
                 String operationVersion = deliveryOperationVersion != null
                         ? deliveryOperationVersion : "";
@@ -633,7 +678,8 @@ public final class AutoDeductionScheduler {
                     JSONObject meta = new JSONObject(metaRaw);
                     timeHhmm = meta.optString("timeHhmm", "");
                     if (operationVersion.isEmpty()) {
-                        operationVersion = AutoDeductionSchedulingAdapter.extractOperationVersion(meta);
+                        operationVersion =
+                                AutoDeductionSchedulingAdapter.extractOperationVersion(meta);
                     }
                     if (gen <= 0L) {
                         gen = getEffectiveRecurrenceGenerationLocked(
@@ -645,6 +691,7 @@ public final class AutoDeductionScheduler {
                         medicationId, doseId, calendarDate, scheduledAtEpochMs,
                         amount, timeHhmm, gen, operationVersion, /*nextRetryCount=*/1);
             }
+
             Log.i(TAG, "fire linearization: " + result.status
                     + " pendingRecorded=" + result.pendingRecorded + " for " + key);
             return result;

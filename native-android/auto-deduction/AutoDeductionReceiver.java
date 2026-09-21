@@ -107,7 +107,7 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 AutoDeductionContract.EXTRA_OPERATION_VERSION);
         final String legacyScheduleVersion = intent.getStringExtra(
                 AutoDeductionContract.EXTRA_SCHEDULE_VERSION);
-        final String scheduleVersion =
+        final String operationVersion =
                 operationVersion != null && !operationVersion.isEmpty()
                         ? operationVersion
                         : legacyScheduleVersion;
@@ -132,7 +132,7 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 handleFireDelivery(
                         appContext, medicationId, doseId, calendarDate,
                         scheduledAt, amount, timeHhmm,
-                        recurrenceGeneration, scheduleVersion, fireRetryCount);
+                        recurrenceGeneration, operationVersion, fireRetryCount);
             } catch (Exception e) {
                 Log.e(TAG, "auto-deduction fire delivery failed", e);
             } finally {
@@ -154,7 +154,7 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
             double amount,
             String timeHhmm,
             long recurrenceGeneration,
-            String scheduleVersion,
+            String operationVersion,
             int fireRetryCount
     ) {
         AutoDeductionScheduler scheduler = new AutoDeductionScheduler(context);
@@ -177,29 +177,29 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 // Retry delivery without evidence — fall back to live path once.
                 result = scheduler.fireOccurrenceIfNotCancelled(
                         medicationId, doseId, calendarDate, scheduledAt, amount,
-                        scheduleVersion, recurrenceGeneration);
+                        operationVersion, recurrenceGeneration);
                 // Fall-through became a live fire path.
                 handleLiveFireResult(
                         context, scheduler, result,
                         medicationId, doseId, calendarDate, scheduledAt, amount,
-                        timeHhmm, recurrenceGeneration, scheduleVersion, fireRetryCount);
+                        timeHhmm, recurrenceGeneration, operationVersion, fireRetryCount);
                 return;
             }
             handleIndependentRecoveryResult(
                     context, scheduler, result,
                     medicationId, doseId, calendarDate, scheduledAt, amount,
-                    timeHhmm, recurrenceGeneration, scheduleVersion, fireRetryCount);
+                    timeHhmm, recurrenceGeneration, operationVersion, fireRetryCount);
             return;
         }
 
         // Live authorized alarm delivery — ownership tokens apply.
         result = scheduler.fireOccurrenceIfNotCancelled(
                 medicationId, doseId, calendarDate, scheduledAt, amount,
-                scheduleVersion, recurrenceGeneration);
+                operationVersion, recurrenceGeneration);
         handleLiveFireResult(
                 context, scheduler, result,
                 medicationId, doseId, calendarDate, scheduledAt, amount,
-                timeHhmm, recurrenceGeneration, scheduleVersion, fireRetryCount);
+                timeHhmm, recurrenceGeneration, operationVersion, fireRetryCount);
     }
 
     /** Independent evidence recovery: FIRED/pending only — never scheduleNext. */
@@ -214,7 +214,7 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
             double amount,
             String timeHhmm,
             long recurrenceGeneration,
-            String scheduleVersion,
+            String operationVersion,
             int fireRetryCount
     ) {
         if (shouldNotifyJavascript(result)) {
@@ -239,7 +239,7 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 } else if (shouldScheduleFireRetry(result, fireRetryCount)) {
                     boolean retryScheduled = scheduler.scheduleFireRetry(
                             medicationId, doseId, calendarDate, scheduledAt, amount,
-                            timeHhmm, recurrenceGeneration, scheduleVersion,
+                            timeHhmm, recurrenceGeneration, operationVersion,
                             fireRetryCount + 1);
                     if (retryScheduled) {
                         Log.w(TAG, "independent recovery FAILED — retry #"
@@ -269,7 +269,7 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
             double amount,
             String timeHhmm,
             long recurrenceGeneration,
-            String scheduleVersion,
+            String operationVersion,
             int fireRetryCount
     ) {
         if (shouldNotifyJavascript(result)) {
@@ -305,7 +305,7 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 } else if (shouldScheduleFireRetry(result, fireRetryCount)) {
                     boolean retryScheduled = scheduler.scheduleFireRetry(
                             medicationId, doseId, calendarDate, scheduledAt, amount,
-                            timeHhmm, recurrenceGeneration, scheduleVersion,
+                            timeHhmm, recurrenceGeneration, operationVersion,
                             fireRetryCount + 1);
                     if (retryScheduled) {
                         Log.w(TAG, "FIRED persistence FAILED (no pending) — retry #"

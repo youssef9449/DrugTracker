@@ -212,6 +212,58 @@ export { formatLogTime };
  * Uses `pluralizeArabic` for correct Arabic noun forms per count
  * (singular / dual / few 3-10 / many 11+).
  */
+/**
+ * Normalize a packaging remainder for display.
+ *
+ * - Near-integer IEEE noise → integer (magnitude-scaled Number.EPSILON only;
+ *   no fixed absolute 1e-9 cutoff that would erase genuine tiny fractions).
+ * - Binary float residue (e.g. 0.1 + 0.2 → 0.3000…04) → short decimal only
+ *   when within a few ULPs of that decimal.
+ * - Genuine fractions (including tiny and high-precision) are returned
+ *   unchanged — no fixed 6-decimal or N-significant-digit rounding.
+ */
+export function normalizeDisplayQuantity(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+
+  const nearest = Math.round(value);
+  // Only collapse differences that are within a small, magnitude-scaled
+  // multiple of the value's IEEE-754 spacing. Genuine fractions, including
+  // tiny non-zero values, remain untouched.
+  const scale = Math.max(Math.abs(value), Math.abs(nearest), 1);
+  const intEps = Number.EPSILON * scale * 8;
+  if (Math.abs(value - nearest) <= intEps) return nearest;
+
+  const abs = Math.abs(value);
+  if (abs === 0) return 0;
+
+  // Clean a decimal artifact only when the rounded decimal is exactly within
+  // one ULP of the original value. Genuine high-precision values are kept.
+  const exp2 = Math.floor(Math.log2(abs));
+  const ulp = Math.pow(2, exp2 - 52);
+  for (let places = 1; places <= 17; places++) {
+    const factor = 10 ** places;
+    const candidate = Math.round(value * factor) / factor;
+    if (Math.abs(value - candidate) <= ulp) {
+      return candidate;
+    }
+  }
+  return value;
+}
+
+/**
+ * User-facing unit quantity phrase for packaging/display paths.
+ * Whole numbers (after normalizeDisplayQuantity) use existing Arabic
+ * pluralization; genuine fractional quantities use `${n} ${unit}` and
+ * never enter pluralizeArabic (which is integer-grammar only).
+ */
+export function formatUnitQuantity(value: number, unit: string): string {
+  const n = normalizeDisplayQuantity(value);
+  if (Number.isInteger(n)) {
+    return pluralizeArabic(n, unit);
+  }
+  return `${n} ${unit}`;
+}
+
 export function describeStockInStrips(
   pills: number,
   pillsPerStrip?: number,
@@ -223,9 +275,11 @@ export function describeStockInStrips(
   if (!pillsPerStrip || pillsPerStrip <= 0 || pills <= 0) return null;
 
   const totalStrips = Math.floor(pills / pillsPerStrip);
-  const remainingPills = Math.round(pills % pillsPerStrip);
+  // Preserve fractional remainders (0.5, 1.5, …). Only collapse float noise
+  // near whole integers — never Math.round genuine fractions into the next int.
+  const remainingPills = normalizeDisplayQuantity(pills - totalStrips * pillsPerStrip);
 
-  const pillWord = pluralizeArabic(remainingPills, unit);
+  const pillWord = formatUnitQuantity(remainingPills, unit);
 
   // If strips per box is defined, break down into boxes + strips + pills
   if (stripsPerBox && stripsPerBox > 0) {

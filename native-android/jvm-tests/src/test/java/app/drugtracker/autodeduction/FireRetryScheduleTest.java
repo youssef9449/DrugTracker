@@ -421,13 +421,16 @@ public class FireRetryScheduleTest {
             assertTrue(s.recordIndependentFireRetryEvidenceLocked(
                     "med", "dose", date, 1000L, 2.0, "08:00", 1L, "v1", 1));
         }
+        seedAutoStock("med", 10.0);
+        seedAutoStock("med", 10.0);
         AutoDeductionScheduler.FireResult fr =
                 s.recoverFireFromIndependentEvidence("med", "dose", date);
         assertTrue(fr.status == AutoDeductionScheduler.FireResult.Status.CREATED
                 || fr.status == AutoDeductionScheduler.FireResult.Status.ALREADY_EXISTS
                 || fr.pendingRecorded);
-        // FIRED persistence alone is not stock-execution proof.
-        assertNotNull(s.getIndependentFireRetryEvidence("med", "dose", date));
+        assertNull(
+                "successful recovery completes Native stock and clears retry evidence",
+                s.getIndependentFireRetryEvidence("med", "dose", date));
     }
 
     @Test
@@ -490,8 +493,9 @@ public class FireRetryScheduleTest {
                 fr.status == AutoDeductionScheduler.FireResult.Status.CREATED
                         || fr.status == AutoDeductionScheduler.FireResult.Status.ALREADY_EXISTS
                         || fr.pendingRecorded);
-        // FIRED persistence alone is not stock-execution proof.
-        assertNotNull(s.getIndependentFireRetryEvidence("med", "dose", date));
+        assertNull(
+                "successful recovery completes Native stock and clears retry evidence",
+                s.getIndependentFireRetryEvidence("med", "dose", date));
     }
 
     @Test

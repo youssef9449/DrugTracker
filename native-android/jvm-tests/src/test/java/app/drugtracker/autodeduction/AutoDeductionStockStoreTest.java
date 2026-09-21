@@ -89,6 +89,37 @@ public class AutoDeductionStockStoreTest {
     }
 
     @Test
+    public void existingCorruptNativeStockRow_failsClosedInsteadOfUsingJsBaseline() {
+        appContext().getSharedPreferences(
+                "drugtracker_auto_stock_v1",
+                android.content.Context.MODE_PRIVATE)
+                .edit()
+                .putString("stock:med-1", "not-a-number")
+                .commit();
+
+        AutoDeductionStockStore.SnapshotResult result =
+                store.ensureMissingAndRead(java.util.Collections.singletonList(
+                        new AutoDeductionStockStore.StockSeed("med-1", 20.0)));
+
+        assertFalse(result.ok);
+        assertEquals("invalid_native_stock", result.error);
+        assertFalse("corrupt stock must not mark Native recovery ready",
+                store.isRecoveryReady());
+    }
+
+    @Test
+    public void recoveryReady_isIndependentFromBaselineInitialization() {
+        store.ensureMissingAndRead(java.util.Collections.singletonList(
+                new AutoDeductionStockStore.StockSeed("med-1", 20.0)));
+
+        assertTrue(store.isInitialized());
+        assertFalse(store.isRecoveryReady());
+        assertTrue(store.markRecoveryReady());
+        assertTrue(store.isRecoveryReady());
+        assertTrue(store.markRecoveryReady());
+    }
+
+    @Test
     public void adoptAlreadyAppliedOccurrence_marksWithoutChangingStock() {
         store.ensureMissingAndRead(java.util.Collections.singletonList(
                 new AutoDeductionStockStore.StockSeed("med-1", 8.0)));

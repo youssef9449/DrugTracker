@@ -47,7 +47,7 @@ export const SegmentedButton = <T extends string = string>({
       id={id}
       role="radiogroup"
       aria-label={ariaLabel}
-      className={`inline-flex items-center rounded-xl border border-slate-300 bg-white overflow-hidden select-none shrink-0 ${
+      className={`inline-flex items-stretch rounded-xl border border-slate-400 bg-white overflow-hidden select-none shrink-0 ${
         isSm ? 'h-10' : 'h-10'
       } ${className}`}
     >
@@ -64,7 +64,7 @@ export const SegmentedButton = <T extends string = string>({
             onClick={() => {
               if (!isSelected) onChange(option.value);
             }}
-            className={`flex-1 inline-flex items-center justify-center gap-1.5 h-full border-l border-slate-300 last:border-l-0 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal-600/30 cursor-pointer ${
+            className={`flex-1 inline-flex items-center justify-center gap-1.5 h-full border-l border-slate-400 last:border-l-0 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal-600/30 cursor-pointer ${
               isSm ? 'px-3 text-xs' : 'px-4 text-sm'
             } ${
               isSelected
@@ -74,7 +74,7 @@ export const SegmentedButton = <T extends string = string>({
           >
             {isSelected && showCheckmark && (
               <Check
-                className={`${isSm ? 'w-3 h-3' : 'w-3.5 h-3.5'} text-teal-800 stroke-[2.5] shrink-0 animate-in fade-in zoom-in-75 duration-150`}
+                className={`${w-4 h-4} text-teal-800 stroke-[2.5] shrink-0 animate-in fade-in zoom-in-75 duration-150`}
                 aria-hidden="true"
               />
             )}

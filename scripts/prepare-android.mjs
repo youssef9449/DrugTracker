@@ -231,8 +231,6 @@ const criticalStockDestDir = path.join(
 );
 const criticalStockFiles = [
   'CriticalStockAlarmAdapter.java',
-  'CriticalStockAlarmReceiver.java',
-  'CriticalStockPlugin.java',
 ];
 if (!fs.existsSync(criticalStockDestDir)) {
   fs.mkdirSync(criticalStockDestDir, { recursive: true });
@@ -328,7 +326,7 @@ const doseReminderAlarmReceiver = `        <receiver
         </receiver>`;
 
 const criticalStockAlarmReceiver = `        <receiver
-            android:name="app.drugtracker.criticalstock.CriticalStockAlarmReceiver"
+            android:name="app.drugtracker.criticalstock.CriticalStockAlarmAdapter$AlarmReceiver"
             android:exported="false"
             android:enabled="true">
             <intent-filter>
@@ -416,7 +414,7 @@ function upsertApplicationMetaData(xml, androidName, value) {
 ));
 ({ manifest } = upsertReceiverByName(
   manifest,
-  'app.drugtracker.criticalstock.CriticalStockAlarmReceiver',
+  'app.drugtracker.criticalstock.CriticalStockAlarmAdapter$AlarmReceiver',
   criticalStockAlarmReceiver
 ));
 ({ manifest } = upsertReceiverByName(
@@ -444,7 +442,7 @@ function upsertApplicationMetaData(xml, androidName, value) {
 manifest = upsertApplicationMetaData(
   manifest,
   'app.drugtracker.EXACT_ALARM_FEATURE_ADAPTERS',
-  'app.drugtracker.autodeduction.AutoDeductionAlarmFeature,app.drugtracker.alarmruntime.CriticalStockAlarmFeature,app.drugtracker.alarmruntime.DoseReminderAlarmFeature'
+  'app.drugtracker.autodeduction.AutoDeductionAlarmFeature,app.drugtracker.criticalstock.CriticalStockAlarmAdapter,app.drugtracker.alarmruntime.DoseReminderAlarmFeature'
 );
 
 fs.writeFileSync(manifestPath, manifest);

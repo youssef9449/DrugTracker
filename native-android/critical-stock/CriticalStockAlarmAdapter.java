@@ -63,10 +63,12 @@ public final class CriticalStockAlarmAdapter
                     adapter.getScheduleMetadata(medicationId);
             if (metadata == null) continue;
 
-            String medicationName = metadata.optString(
-                    "medicationName", "");
-            String unit = metadata.optString(
-                    "unit", "قرص");
+            String medicationName = metadata.optString("medicationName", "");
+            String unit = metadata.optString("unit", "قرص");
+            String notificationTitle =
+                    metadata.optString("notificationTitle", "");
+            String notificationBody =
+                    metadata.optString("notificationBody", "");
             String date = metadata.optString("alarmDate", "");
             String time = metadata.optString("alarmTime", "");
             String operationVersion = metadata.optString(
@@ -77,8 +79,6 @@ public final class CriticalStockAlarmAdapter
             long now = System.currentTimeMillis();
             if (triggerAt <= 0L) continue;
 
-            // Preserve Phase-6 behavior for an already-due one-shot critical
-            // schedule during boot/timezone/exact-permission recovery.
             if (triggerAt <= now) {
                 triggerAt = now + 15_000L;
             }
@@ -88,6 +88,8 @@ public final class CriticalStockAlarmAdapter
                     medicationName,
                     triggerAt,
                     unit,
+                    notificationTitle,
+                    notificationBody,
                     operationVersion.isEmpty()
                             ? null
                             : operationVersion);
@@ -128,43 +130,49 @@ public final class CriticalStockAlarmAdapter
     public ScheduleResult schedule(
             String medicationId,
             String medicationName,
-            String unit,
             long triggerAtEpochMs,
+            String unit,
+            String notificationTitle,
+            String notificationBody,
             String expectedOperationVersion) {
         if (medicationId == null || medicationId.isEmpty()
-                || triggerAtEpochMs <= 0L) {
+                || triggerAtEpochMs <= 0L
+                || notificationTitle == null
+                || notificationBody == null) {
             return ScheduleResult.failure("invalid_request");
         }
 
         JSONObject metadata = new JSONObject();
         try {
-            java.util.Calendar cal = java.util.Calendar.getInstance();
+            Calendar cal = Calendar.getInstance();
             cal.setTimeInMillis(triggerAtEpochMs);
             String date = String.format(
                     java.util.Locale.US,
                     "%04d-%02d-%02d",
-                    cal.get(java.util.Calendar.YEAR),
-                    cal.get(java.util.Calendar.MONTH) + 1,
-                    cal.get(java.util.Calendar.DAY_OF_MONTH));
+                    cal.get(Calendar.YEAR),
+                    cal.get(Calendar.MONTH) + 1,
+                    cal.get(Calendar.DAY_OF_MONTH));
             String time = String.format(
                     java.util.Locale.US,
                     "%02d:%02d",
-                    cal.get(java.util.Calendar.HOUR_OF_DAY),
-                    cal.get(java.util.Calendar.MINUTE));
+                    cal.get(Calendar.HOUR_OF_DAY),
+                    cal.get(Calendar.MINUTE));
 
             metadata.put("medicationId", medicationId);
             metadata.put("medicationName", medicationName == null ? "" : medicationName);
             metadata.put("unit", unit == null ? "" : unit);
             metadata.put("alarmDate", date);
             metadata.put("alarmTime", time);
+            metadata.put("notificationTitle", notificationTitle);
+            metadata.put("notificationBody", notificationBody);
         } catch (JSONException e) {
             return ScheduleResult.failure("metadata_build_failed");
         }
 
         Bundle extras = new Bundle();
         extras.putString("medicationId", medicationId);
-        extras.putString("medicationName", medicationName == null ? "" : medicationName);
-        extras.putString("unit", unit == null ? "" : unit);
+        extras.putString("notificationTitle", notificationTitle);
+        extras.putString("notificationBody", notificationBody);
 
         String storageKey = occurrenceKey(medicationId);
         ExactAlarmRuntime.ScheduleResult result = runtime.schedule(
@@ -254,18 +262,18 @@ public final class CriticalStockAlarmAdapter
         public final String error;
         public final String operationVersion;
 
-        private ScheduleResult(boolean ok, String error, String operationVersion) {
+        private ScheduleResult(String error, String operationVersion, boolean ok) {
             this.ok = ok;
             this.error = error;
             this.operationVersion = operationVersion;
         }
 
         static ScheduleResult success(String operationVersion) {
-            return new ScheduleResult(true, null, operationVersion);
+            return new ScheduleResult(null, operationVersion, true);
         }
 
         static ScheduleResult failure(String error) {
-            return new ScheduleResult(false, error, null);
+            return new ScheduleResult(error, null, false);
         }
     }
 

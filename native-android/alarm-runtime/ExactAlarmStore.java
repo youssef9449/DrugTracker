@@ -22,7 +22,7 @@ final class ExactAlarmStore {
     private final SharedPreferences cancellations;
     private final SharedPreferences ordering;
 
-    public ExactAlarmStore(
+    ExactAlarmStore(
             Context context,
             String schedulesPrefsName,
             String cancellationsPrefsName,

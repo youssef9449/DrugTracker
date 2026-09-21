@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, Check, ListFilter } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Check } from 'lucide-react';
 import type { MedicationSortDirection, MedicationSortField } from '../utils/medicationSorting';
 
 interface MedicationSortControlProps {

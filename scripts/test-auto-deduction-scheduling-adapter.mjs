@@ -70,6 +70,10 @@ assert(
   'Auto shared schedule metadata must not persist the retry counter'
 );
 assert(
+  !scheduler.includes('meta.put("recurrenceGeneration"'),
+  'Auto shared schedule metadata must not persist recurrence authorization'
+);
+assert(
   !scheduler.includes('new ExactAlarmRuntime('),
   'business scheduler must not construct ExactAlarmRuntime'
 );
@@ -93,6 +97,11 @@ assert(
 assert(
   !adapter.includes('SharedPreferences'),
   'scheduling adapter must not own schedule SharedPreferences'
+);
+assert(
+  !adapter.includes('featureMetadata.put(
+                    AutoDeductionContract.EXTRA_RECURRENCE_GENERATION'),
+  'scheduling adapter must not persist Auto recurrence authorization in shared metadata'
 );
 assert(
   !adapter.includes('schedulePrefs'),

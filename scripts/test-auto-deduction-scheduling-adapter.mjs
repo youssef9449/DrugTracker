@@ -99,8 +99,7 @@ assert(
   'scheduling adapter must not own schedule SharedPreferences'
 );
 assert(
-  !adapter.includes('featureMetadata.put(
-                    AutoDeductionContract.EXTRA_RECURRENCE_GENERATION'),
+  !adapter.includes('featureMetadata.put(\n                    AutoDeductionContract.EXTRA_RECURRENCE_GENERATION'),
   'scheduling adapter must not persist Auto recurrence authorization in shared metadata'
 );
 assert(

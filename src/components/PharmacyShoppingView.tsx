@@ -656,7 +656,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                 <div className="grid grid-cols-[auto_1fr] items-start gap-1.5">
                   <div className="shrink-0 justify-self-end">
                     <SegmentedButton<'period' | 'custom'>
-                      className="shrink-0"
+                      className="w-[150px] shrink-0"
                       size="sm"
                       value={getQuantityMode(med)}
                       onChange={(val) => handleToggleQuantityMode(med, val, suggestedPills)}

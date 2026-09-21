@@ -104,6 +104,9 @@ public class FireRetryScheduleTest {
                 "sch:" + key, null);
         assertNotNull(raw);
         JSONObject metadata = new JSONObject(raw);
+        assertFalse(
+                "Shared alarm metadata must not persist Auto recurrence authorization",
+                metadata.has(AutoDeductionContract.FIELD_RECURRENCE_GENERATION));
         String operationVersion = metadata.optString(
                 ExactAlarmContract.FIELD_OPERATION_VERSION, "");
         long generation = metadata.optLong(

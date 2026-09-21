@@ -216,16 +216,30 @@ export { formatLogTime };
  * Normalize a packaging remainder for display.
  * Whole numbers (incl. float noise near integers) stay integers.
  * Genuine fractional quantities are preserved without Math.round inflation
- * (e.g. 0.5 must not become 1) and without binary float garbage.
+ * (e.g. 0.5 must not become 1) and without an arbitrary fixed
+ * fractional-place cap (dose inputs use step="any").
+ * Binary float artifacts such as 0.1 + 0.2 → 0.3000…04 are cleaned via
+ * significant-digit rounding (~15 digits, within IEEE-754 double precision).
  */
 export function normalizeDisplayQuantity(value: number): number {
   if (!Number.isFinite(value)) return 0;
   const nearest = Math.round(value);
-  if (Math.abs(value - nearest) < 1e-9) return nearest;
-  // Trim binary floating-point noise for user-facing decimals.
-  const trimmed = Math.round(value * 1e6) / 1e6;
-  // Drop trailing zeros via Number (1.500000 → 1.5).
-  return Number(trimmed.toString());
+  // Absolute + magnitude-scaled epsilon collapses noise around integers only.
+  const intEps = Math.max(1e-9, Number.EPSILON * Math.max(1, Math.abs(nearest)) * 16);
+  if (Math.abs(value - nearest) <= intEps) return nearest;
+
+  const abs = Math.abs(value);
+  if (abs === 0) return 0;
+
+  // Significant-digit rounding removes binary representation noise without
+  // truncating legitimate fractional digits to a fixed place count.
+  const SIGNIFICANT_DIGITS = 15;
+  const exp = Math.floor(Math.log10(abs));
+  const power = SIGNIFICANT_DIGITS - 1 - exp;
+  // Guard pathological magnitudes so Math.pow does not overflow to Infinity.
+  if (power > 300 || power < -300) return value;
+  const factor = Math.pow(10, power);
+  return Math.round(value * factor) / factor;
 }
 
 /**

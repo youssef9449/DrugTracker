@@ -82,19 +82,24 @@ import {
 import { describeStockInStrips, normalizeDisplayQuantity, formatUnitQuantity } from '@/types';
 
 describe('normalizeDisplayQuantity', () => {
-  it('preserves genuine fractions', () => {
+  it('Case E: preserves ordinary genuine fractions', () => {
     expect(normalizeDisplayQuantity(0.5)).toBe(0.5);
     expect(normalizeDisplayQuantity(1.5)).toBe(1.5);
     expect(normalizeDisplayQuantity(2.25)).toBe(2.25);
   });
 
-  it('collapses float noise near integers', () => {
+  it('Case A: collapses float noise near integers', () => {
     expect(normalizeDisplayQuantity(3 + 1e-12)).toBe(3);
     expect(normalizeDisplayQuantity(10 - 1e-12)).toBe(10);
   });
 
-  it('trims binary float garbage', () => {
+  it('Case B: common binary float artifact 0.1 + 0.2 → 0.3', () => {
     expect(normalizeDisplayQuantity(0.1 + 0.2)).toBe(0.3);
+  });
+
+  it('Case C: genuine high-precision fraction is preserved (>6 decimals)', () => {
+    expect(normalizeDisplayQuantity(0.123456789)).toBe(0.123456789);
+    expect(normalizeDisplayQuantity(0.123456789)).not.toBe(0.123457);
   });
 });
 
@@ -105,10 +110,20 @@ describe('formatUnitQuantity', () => {
     expect(formatUnitQuantity(3, 'قرص')).toBe('3 أقراص');
   });
 
-  it('fractions use numeric quantity + unit, not pluralizeArabic', () => {
+  it('Case E: fractions use numeric quantity + unit, not pluralizeArabic', () => {
     expect(formatUnitQuantity(0.5, 'قرص')).toBe('0.5 قرص');
     expect(formatUnitQuantity(1.5, 'قرص')).toBe('1.5 قرص');
     expect(formatUnitQuantity(2.25, 'قرص')).toBe('2.25 قرص');
+  });
+
+  it('Case D: high-precision fraction is not capped at 6 decimals', () => {
+    expect(formatUnitQuantity(0.123456789, 'قرص')).toBe('0.123456789 قرص');
+  });
+
+  it('Case F: whole-number Arabic forms remain unchanged', () => {
+    expect(formatUnitQuantity(1, 'قرص')).toBe('قرص واحد');
+    expect(formatUnitQuantity(2, 'قرص')).toBe('قرصين');
+    expect(formatUnitQuantity(3, 'قرص')).toBe('3 أقراص');
   });
 
   it('float noise near integers still uses integer Arabic forms', () => {

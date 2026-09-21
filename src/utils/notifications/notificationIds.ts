@@ -6,7 +6,7 @@ export const NOTIFICATION_ID_BASE = {
   critical: 2_000_000,
   dose: 3_000_000,
   test: 4_000_000,
-  criticalAlarm: 5_000_000,
+  iosCriticalAlarm: 5_000_000,
   doseAlarm: 6_000_000,
   doseSnooze: 7_000_000,
 } as const;
@@ -47,10 +47,6 @@ export function notificationId(
  * ExactAlarmRuntime schedules the same logical occurrences.
  */
 
-
-export function criticalAlarmId(medId: string): number {
-  return notificationId('criticalAlarm', medId);
-}
 
 export function doseReminderAlarmIdForDose(
   medId: string,

@@ -23,8 +23,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Minimal Capacitor bridge for Phase 2 auto-deduction.
- * Does NOT reconcile stock into React state (Phase 3).
+ * Capacitor bridge for Exact Auto scheduling, Native stock execution, and
+ * JavaScript/UI convergence.
  */
 @CapacitorPlugin(name = "AutoDeduction")
 public class AutoDeductionPlugin extends Plugin {

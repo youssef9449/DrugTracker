@@ -176,6 +176,7 @@ async function runOnce(
   // Prefer explicit inject for tests; otherwise durable gate state.
   let baseMeds = input.medications ?? fresh.medications;
   let baseLogs = input.logs ?? fresh.logs;
+  const preNativeConvergenceMeds = baseMeds;
 
   // Auto owns the live stock balance in Native. Seed only missing rows and
   // mirror authoritative Native currentPills into the JS durable snapshot.
@@ -197,6 +198,10 @@ async function runOnce(
     };
   }
   baseMeds = initialStockConvergence.medications;
+  const nativeStockChanged = baseMeds.some((m) => {
+    const before = preNativeConvergenceMeds.find((x) => x.id === m.id);
+    return before != null && Number(before.currentPills) !== Number(m.currentPills);
+  });
 
   // Unified Manual + Exact Auto envelope recovery (mutationSeq causal order).
   // Highest seq above lastApplied is recovered first (full snapshot). Lower
@@ -349,7 +354,7 @@ async function runOnce(
       // Native stock may have changed while JS was unavailable even though
       // the FIRED ledger is already terminal. The mirrored currentPills above
       // is therefore the authoritative JS snapshot for this pass.
-      mutated: false,
+      mutated: nativeStockChanged,
       newExactLogs: [],
       markedCount: 0,
       recoveredEnvelope: false,

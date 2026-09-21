@@ -39,34 +39,6 @@
 @theme {
   --font-arabic-sans: "Cairo", "Segoe UI", -apple-system, BlinkMacSystemFont,
     "Helvetica Neue", Tahoma, "Arial Unicode MS", sans-serif;
-
-  /* Material 3-aligned semantic tokens for the web implementation. */
-  --color-m3-primary: #006a60;
-  --color-m3-on-primary: #ffffff;
-  --color-m3-on-error: #ffffff;
-  --color-m3-primary-container: #74f8e8;
-  --color-m3-on-primary-container: #00201c;
-  --color-m3-surface: #f9f9f7;
-  --color-m3-surface-container: #eeeeec;
-  --color-m3-surface-container-high: #e8e8e6;
-  --color-m3-on-surface: #1a1c1b;
-  --color-m3-on-surface-variant: #404947;
-  --color-m3-outline: #707976;
-  --color-m3-outline-variant: #c0c8c4;
-  --color-m3-error: #ba1a1a;
-  --color-m3-error-container: #ffdad6;
-  --color-m3-on-error-container: #410002;
-}
-
-:root {
-  color-scheme: light;
-  --m3-shape-extra-small: 4px;
-  --m3-shape-small: 8px;
-  --m3-shape-medium: 12px;
-  --m3-shape-large: 16px;
-  --m3-shape-extra-large: 24px;
-  --m3-touch-target: 48px;
-  --m3-navigation-bar-height: 80px;
 }
 
 /* Hide scrollbars on horizontal chip rows (used by AppHeader filter chips).

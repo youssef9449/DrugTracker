@@ -618,11 +618,11 @@ public final class AutoDeductionScheduler {
             AutoDeductionEventStore.InsertFiredResult ir = store.insertFiredIfAbsent(
                     medicationId, doseId, calendarDate, scheduledAtEpochMs, amount);
             FireResult result = FireResult.fromInsert(ir);
-            // Any durable fire evidence supersedes the retry marker. Clearing the
-            // marker is best-effort; the FIRED/pending evidence remains authoritative.
-            if (result.allowsRecurrence()) {
-                clearIndependentFireRetryEvidenceLocked(key);
-            } else if (result.status == FireResult.Status.FAILED && !result.pendingRecorded) {
+            // FIRED/pending evidence alone does NOT mean stock execution succeeded.
+            // Keep any independent retry evidence until Native stock is confirmed by
+            // the receiver, so a stock-only failure can still be repaired even when
+            // the shared schedule row has disappeared.
+            if (result.status == FireResult.Status.FAILED && !result.pendingRecorded) {
                 // Independent durable failure evidence under SCHEDULE_LOCK — must not
                 // depend on schedule metadata that config mutation may remove next.
                 String timeHhmm = "";
@@ -1134,6 +1134,24 @@ public final class AutoDeductionScheduler {
     }
 
     /**
+     * Clear independent fire-retry evidence only after the corresponding Native
+     * stock mutation has been confirmed. This is deliberately separate from FIRED
+     * persistence because FIRED and stock execution are two durable steps.
+     */
+    void clearIndependentFireRetryEvidenceAfterStock(
+            String medicationId,
+            String doseId,
+            String calendarDate
+    ) {
+        if (medicationId == null || doseId == null || calendarDate == null) return;
+        String key = AutoDeductionContract.occurrenceKey(
+                medicationId, doseId, calendarDate);
+        synchronized (SCHEDULE_LOCK) {
+            clearIndependentFireRetryEvidenceLocked(key);
+        }
+    }
+
+    /**
      * Recover a previously authorized fire from independent failure evidence.
      * Does NOT require shared schedule metadata and does NOT schedule recurrence successors.
      * Lock order: SCHEDULE_LOCK → EventStore.LOCK (via insertFiredIfAbsent).
@@ -1174,10 +1192,7 @@ public final class AutoDeductionScheduler {
             AutoDeductionEventStore.InsertFiredResult ir = store.insertFiredIfAbsent(
                     medicationId, doseId, calendarDate, scheduledAt, amount);
             FireResult result = FireResult.fromInsert(ir);
-            if (result.allowsRecurrence()) {
-                // Clear only after durable FIRED or pending proof.
-                clearIndependentFireRetryEvidenceLocked(key);
-            } else if (result.status == FireResult.Status.FAILED
+            if (result.status == FireResult.Status.FAILED
                     && !result.pendingRecorded) {
                 int prior = evidence.optInt("retryCount", 0);
                 int next = Math.min(prior + 1, AutoDeductionContract.MAX_FIRE_RETRIES);

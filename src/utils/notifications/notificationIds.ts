@@ -48,6 +48,14 @@ export function notificationId(
  */
 
 
+/**
+ * iOS-only compatibility identity for Critical Stock.
+ * Android Critical alarms use the native PendingIntent identity instead.
+ */
+export function iosCriticalAlarmId(medId: string): number {
+  return notificationId('iosCriticalAlarm', medId);
+}
+
 export function doseReminderAlarmIdForDose(
   medId: string,
   doseId: string

@@ -23,6 +23,12 @@ function compareName(a: Medication, b: Medication): number {
 export function sortMedications(medications: Medication[], field: MedicationSortField, direction: MedicationSortDirection): Medication[] {
   const sorted = [...medications];
   sorted.sort((a, b) => {
+    if (field === 'category') {
+      const aMissing = !normalizeText(a.category);
+      const bMissing = !normalizeText(b.category);
+      if (aMissing !== bMissing) return aMissing ? 1 : -1;
+    }
+
     let result = field === 'name' ? compareName(a, b) : field === 'quantity'
       ? (Number.isFinite(Number(a.currentPills)) ? Number(a.currentPills) : 0) - (Number.isFinite(Number(b.currentPills)) ? Number(b.currentPills) : 0)
       : compareText(a.category, b.category);

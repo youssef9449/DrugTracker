@@ -14,6 +14,8 @@ import type { ConsumptionLog, Medication } from '../types';
 import {
   listFiredAutoDeductionEvents,
   markAutoDeductionEventReconciled,
+  applyAutoDeductionStock,
+  convergeAutoDeductionStock,
   type AutoDeductionEvent,
   type ListFiredEventsResult,
   type MarkReconciledResult,
@@ -26,6 +28,7 @@ import {
   withAutoStockMutationGate,
   commitDurableAutoStockState,
   loadDurableGlobalAutoDeductEnabled,
+  STORAGE_MEDS_KEY,
   type AutoStockDurableState,
 } from './autoDeductionStockGate';
 import {
@@ -38,6 +41,7 @@ import {
   type PendingEnvelopeRef,
 } from './stockEnvelopeRecovery';
 import { allocateMutationSeq } from './stockMutationOrdering';
+import { persist } from './storage';
 
 export interface ExactAutoEnvelope {
   version: 1;
@@ -88,6 +92,9 @@ export interface RunReconciliationOutput extends ReconcileFiredResult {
   /** True when native FIRED list failed — distinct from empty events; no mutation/ack. */
   nativeListFailed?: boolean;
   nativeListError?: string;
+  /** True when Native Auto stock could not be initialized, repaired, or read. */
+  nativeStockSyncFailed?: boolean;
+  nativeStockSyncError?: string;
 }
 
 /** @internal test-only envelope injectors (shared with Phase 4 manual gate). */
@@ -171,6 +178,32 @@ async function runOnce(
   // Prefer explicit inject for tests; otherwise durable gate state.
   let baseMeds = input.medications ?? fresh.medications;
   let baseLogs = input.logs ?? fresh.logs;
+  const preNativeConvergenceMeds = baseMeds;
+
+  // Auto owns the live stock balance in Native. Seed only missing rows and
+  // mirror authoritative Native currentPills into the JS durable snapshot.
+  const initialStockConvergence = await convergeAutoDeductionStock(baseMeds);
+  if (!initialStockConvergence.ok) {
+    return {
+      medications: baseMeds,
+      logs: baseLogs,
+      toAcknowledge: [],
+      details: [],
+      mutated: false,
+      newExactLogs: [],
+      markedCount: 0,
+      recoveredEnvelope: false,
+      partialNativeAck: false,
+      durabilityBlocked: true,
+      nativeStockSyncFailed: true,
+      nativeStockSyncError: initialStockConvergence.error,
+    };
+  }
+  baseMeds = initialStockConvergence.medications;
+  const nativeStockChanged = baseMeds.some((m) => {
+    const before = preNativeConvergenceMeds.find((x) => x.id === m.id);
+    return before != null && Number(before.currentPills) !== Number(m.currentPills);
+  });
 
   // Unified Manual + Exact Auto envelope recovery (mutationSeq causal order).
   // Highest seq above lastApplied is recovered first (full snapshot). Lower
@@ -187,12 +220,14 @@ async function runOnce(
         medications: manualEnv.medications,
         logs: manualEnv.logs,
         globalAutoDeductEnabled: manualEnv.globalAutoDeductEnabled,
+        stockDeltas: manualEnv.stockDeltas ?? [],
+        occurrenceResolutions: manualEnv.occurrenceResolutions ?? [],
         clear: () => saveManualStockEnvelope(null),
       });
     }
 
-    // Issue #267: Legacy Exact Auto envelope migration removed. Only
-    // current Phase 4 envelopes (with mutationSeq) are valid.
+    // Only current Phase 4 envelopes are valid; the application has not
+    // shipped any older envelope format.
     const existingExact = loadEnvelope();
     if (existingExact) {
       pending.push({
@@ -222,7 +257,7 @@ async function runOnce(
         return commitDurableAutoStockState(state, { appliedMutationSeq });
       };
 
-      const unified = recoverAllPendingStockEnvelopes(
+      const unified = await recoverAllPendingStockEnvelopes(
         {
           medications: baseMeds,
           logs: baseLogs,
@@ -234,6 +269,28 @@ async function runOnce(
 
       baseMeds = unified.state.medications;
       baseLogs = unified.state.logs;
+
+      // A recovered foreground envelope may contain a snapshot captured before
+      // a later Native Auto deduction. Re-read Native stock after replay so the
+      // returned JS mirror can never overwrite a newer background deduction.
+      const postEnvelopeConvergence = await convergeAutoDeductionStock(baseMeds);
+      if (!postEnvelopeConvergence.ok) {
+        return {
+          medications: baseMeds,
+          logs: baseLogs,
+          toAcknowledge: [],
+          details: [],
+          mutated: unified.recovered,
+          newExactLogs: [],
+          markedCount: 0,
+          recoveredEnvelope: unified.recovered,
+          partialNativeAck: false,
+          durabilityBlocked: true,
+          nativeStockSyncFailed: true,
+          nativeStockSyncError: postEnvelopeConvergence.error,
+        };
+      }
+      baseMeds = postEnvelopeConvergence.medications;
 
       if (unified.exactToAcknowledge.length > 0) {
         const { markedCount, failed } = await markAll(unified.exactToAcknowledge, mark);
@@ -314,6 +371,75 @@ async function runOnce(
   }
 
   if (!events.length) {
+    if (nativeStockChanged) {
+      // Native is the Android authority; persist only the JS mirror here.
+      // This is not a stock mutation and must not create a new mutationSeq.
+      const mirrorPersistError = persist(STORAGE_MEDS_KEY, baseMeds, { json: true });
+      if (mirrorPersistError) {
+        console.warn(
+          '[App] Native Auto stock converged but JS stock mirror persist failed:',
+          mirrorPersistError
+        );
+      }
+    }
+    return {
+      medications: baseMeds,
+      logs: baseLogs,
+      toAcknowledge: [],
+      details: [],
+      mutated: nativeStockChanged,
+      newExactLogs: [],
+      markedCount: 0,
+      recoveredEnvelope: false,
+      partialNativeAck: false,
+    };
+  }
+
+  // Every FIRED occurrence is applied/verified against the Native stock
+  // authority before JS creates its log/history evidence.
+  const repairedEvents: AutoDeductionEvent[] = [];
+  for (const event of events) {
+    const med = baseMeds.find((m) => m.id === event.medicationId);
+    if (!med) {
+      // Keep the existing missing-med terminalization policy; there is no
+      // current stock to mutate for a deleted medication.
+      repairedEvents.push(event);
+      continue;
+    }
+
+    const stockResult = await applyAutoDeductionStock(
+      event.medicationId,
+      event.doseId,
+      event.calendarDate,
+      event.amount
+    );
+    if (!stockResult.ok) {
+      return {
+        medications: baseMeds,
+        logs: baseLogs,
+        toAcknowledge: [],
+        details: [],
+        mutated: false,
+        newExactLogs: [],
+        markedCount: 0,
+        recoveredEnvelope: false,
+        partialNativeAck: false,
+        durabilityBlocked: true,
+        nativeStockSyncFailed: true,
+        nativeStockSyncError: stockResult.error,
+      };
+    }
+    repairedEvents.push({
+      ...event,
+      nativeStockApplied: stockResult.native,
+      ...(stockResult.native
+        ? { actualDeducted: stockResult.actualDeducted }
+        : {}),
+    });
+  }
+
+  const postRepairConvergence = await convergeAutoDeductionStock(baseMeds);
+  if (!postRepairConvergence.ok) {
     return {
       medications: baseMeds,
       logs: baseLogs,
@@ -324,15 +450,23 @@ async function runOnce(
       markedCount: 0,
       recoveredEnvelope: false,
       partialNativeAck: false,
+      durabilityBlocked: true,
+      nativeStockSyncFailed: true,
+      nativeStockSyncError: postRepairConvergence.error,
     };
   }
+  baseMeds = postRepairConvergence.medications;
+  const nativeStockMirrorChanged = baseMeds.some((m) => {
+    const before = preNativeConvergenceMeds.find((x) => x.id === m.id);
+    return before != null && Number(before.currentPills) !== Number(m.currentPills);
+  });
 
   // Recovery may have durably changed the global master switch while the
   // original `fresh` snapshot is now stale. Re-read it after envelope recovery
   // and before creating/committing any new Exact-Auto mutation envelope.
   const durableGlobalAutoDeductEnabled = loadDurableGlobalAutoDeductEnabled();
 
-  const result = reconcileFiredEvents(baseMeds, baseLogs, events, {
+  const result = reconcileFiredEvents(baseMeds, baseLogs, repairedEvents, {
     globalAutoDeductEnabled: durableGlobalAutoDeductEnabled,
     now: input.now,
   });
@@ -340,17 +474,22 @@ async function runOnce(
   if (!result.mutated && result.toAcknowledge.length === 0) {
     return {
       ...result,
+      // Native stock may have changed even when there was no new JS marker/log.
+      mutated: nativeStockMirrorChanged,
       markedCount: 0,
       recoveredEnvelope: false,
       partialNativeAck: false,
     };
   }
 
-  // Acknowledge-only: markers already durable in baseMeds
+  // Acknowledge-only: markers already durable in baseMeds. If Native changed
+  // the balance while JS was unavailable, expose that mirror update to React;
+  // the normal application persistence path will store it in localStorage.
   if (!result.mutated) {
     const { markedCount, failed } = await markAll(result.toAcknowledge, mark);
     return {
       ...result,
+      mutated: nativeStockMirrorChanged,
       markedCount,
       recoveredEnvelope: false,
       partialNativeAck: failed.length > 0,

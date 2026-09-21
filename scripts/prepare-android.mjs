@@ -167,6 +167,7 @@ const autoDeductionFiles = [
   'AutoDeductionScheduler.java',
   'AutoDeductionSchedulingAdapter.java',
   'AutoDeductionReceiver.java',
+  'AutoDeductionStockStore.java',
   'AutoDeductionLifecycle.java',
   'AutoDeductionAlarmFeature.java',
   'AutoDeductionPlugin.java',

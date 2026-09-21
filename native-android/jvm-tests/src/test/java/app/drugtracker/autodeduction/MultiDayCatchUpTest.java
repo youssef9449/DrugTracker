@@ -76,6 +76,17 @@ public class MultiDayCatchUpTest {
         o.put("recurrenceGeneration", gen);
         schedulePrefs().edit().putString(prefKey, o.toString()).commit();
         seedGen(med, dose, gen);
+
+        // Catch-up now executes the Auto Native stock path as part of recovery.
+        // Tests provide a valid durable Native baseline so the fixture models
+        // normal initialized runtime state.
+        AutoDeductionStockStore stock = new AutoDeductionStockStore(appContext());
+        AutoDeductionStockStore.SnapshotResult seeded =
+                stock.ensureMissingAndRead(
+                        java.util.Collections.singletonList(
+                                new AutoDeductionStockStore.StockSeed(med, 1000.0)));
+        assertTrue(seeded.ok);
+
         return version;
     }
 

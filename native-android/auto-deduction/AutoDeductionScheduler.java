@@ -618,13 +618,58 @@ public final class AutoDeductionScheduler {
             AutoDeductionEventStore.InsertFiredResult ir = store.insertFiredIfAbsent(
                     medicationId, doseId, calendarDate, scheduledAtEpochMs, amount);
             FireResult result = FireResult.fromInsert(ir);
-            // Any durable fire evidence supersedes the retry marker. Clearing the
-            // marker is best-effort; the FIRED/pending evidence remains authoritative.
+
+            // FIRED evidence and Native stock are one Auto business boundary.
+            // A live delivery is not considered recurrence-safe until the same
+            // occurrence has also been applied to the Native stock authority.
             if (result.allowsRecurrence()) {
+                AutoDeductionStockStore.AutoApplyResult stockResult =
+                        new AutoDeductionStockStore(appContext).applyAutoDeduction(
+                                medicationId, doseId, calendarDate, amount);
+                if (!stockResult.ok) {
+                    Log.e(TAG, "fire linearization: Native stock apply failed for "
+                            + key + " — " + stockResult.error);
+
+                    // Keep independent retry evidence for a stock-only failure.
+                    // It is self-contained so a later config mutation/removal of
+                    // the schedule row cannot erase the recovery proof.
+                    String timeHhmm = "";
+                    String operationVersion = deliveryOperationVersion != null
+                            ? deliveryOperationVersion : "";
+                    long gen = deliveryRecurrenceGeneration;
+                    try {
+                        JSONObject meta = new JSONObject(metaRaw);
+                        timeHhmm = meta.optString("timeHhmm", "");
+                        if (operationVersion.isEmpty()) {
+                            operationVersion =
+                                    AutoDeductionSchedulingAdapter.extractOperationVersion(meta);
+                        }
+                        if (gen <= 0L) {
+                            gen = getEffectiveRecurrenceGenerationLocked(
+                                    medicationId, doseId, meta);
+                        }
+                    } catch (JSONException ignored) {
+                    }
+
+                    recordIndependentFireRetryEvidenceLocked(
+                            medicationId, doseId, calendarDate, scheduledAtEpochMs,
+                            amount, timeHhmm, gen, operationVersion,
+                            /*nextRetryCount=*/1);
+
+                    // Do not return CREATED/ALREADY_EXISTS/FIRED-pending to the
+                    // receiver because stock is not complete yet. The receiver
+                    // must enter the bounded same-occurrence retry path.
+                    return new FireResult(FireResult.Status.FAILED, false);
+                }
+
+                // Any old retry proof is no longer needed once this occurrence's
+                // Native stock has completed successfully.
                 clearIndependentFireRetryEvidenceLocked(key);
-            } else if (result.status == FireResult.Status.FAILED && !result.pendingRecorded) {
-                // Independent durable failure evidence under SCHEDULE_LOCK — must not
-                // depend on schedule metadata that config mutation may remove next.
+            } else if (result.status == FireResult.Status.FAILED
+                    && !result.pendingRecorded) {
+                // FIRED persistence itself failed without an independent pending
+                // record: keep retry evidence so the exact occurrence can be
+                // reconstructed even if schedule metadata disappears.
                 String timeHhmm = "";
                 String operationVersion = deliveryOperationVersion != null
                         ? deliveryOperationVersion : "";
@@ -633,7 +678,8 @@ public final class AutoDeductionScheduler {
                     JSONObject meta = new JSONObject(metaRaw);
                     timeHhmm = meta.optString("timeHhmm", "");
                     if (operationVersion.isEmpty()) {
-                        operationVersion = AutoDeductionSchedulingAdapter.extractOperationVersion(meta);
+                        operationVersion =
+                                AutoDeductionSchedulingAdapter.extractOperationVersion(meta);
                     }
                     if (gen <= 0L) {
                         gen = getEffectiveRecurrenceGenerationLocked(
@@ -645,6 +691,7 @@ public final class AutoDeductionScheduler {
                         medicationId, doseId, calendarDate, scheduledAtEpochMs,
                         amount, timeHhmm, gen, operationVersion, /*nextRetryCount=*/1);
             }
+
             Log.i(TAG, "fire linearization: " + result.status
                     + " pendingRecorded=" + result.pendingRecorded + " for " + key);
             return result;
@@ -662,7 +709,8 @@ public final class AutoDeductionScheduler {
      *   <li>Reject if {@code expectedRecurrenceGeneration} is no longer active</li>
      *   <li>Idempotently {@link AutoDeductionEventStore#insertFiredIfAbsent}</li>
      * </ol>
-     * Does not mutate JS stock / WebView state.
+     * Applies the Auto-owned Native stock mutation before recovery returns; JS only
+     * mirrors the resulting Native balance later.
      */
     public FireResult recoverMissedOccurrence(
             String medicationId,
@@ -679,6 +727,7 @@ public final class AutoDeductionScheduler {
             Log.w(TAG, "recoverMissedOccurrence: invalid payload");
             return new FireResult(FireResult.Status.FAILED, false);
         }
+
         final String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
         synchronized (SCHEDULE_LOCK) {
             if (isOccurrenceCancelledKey(key)) {
@@ -698,6 +747,22 @@ public final class AutoDeductionScheduler {
             AutoDeductionEventStore.InsertFiredResult ir = store.insertFiredIfAbsent(
                     medicationId, doseId, calendarDate, scheduledAtEpochMs, amount);
             FireResult result = FireResult.fromInsert(ir);
+
+            // The Auto alarm/recovery path owns the stock mutation itself. The
+            // native stock marker is occurrence-idempotent, so both CREATED and
+            // ALREADY_EXISTS can safely pass through this same operation.
+            if (result.allowsRecurrence()) {
+                AutoDeductionStockStore.AutoApplyResult stockResult =
+                        new AutoDeductionStockStore(appContext).applyAutoDeduction(
+                                medicationId, doseId, calendarDate, amount);
+                if (!stockResult.ok) {
+                    Log.e(TAG, "recoverMissed: native stock apply failed for " + key
+                            + " — " + stockResult.error);
+                    return new FireResult(FireResult.Status.FAILED, false);
+                }
+                clearIndependentFireRetryEvidenceLocked(key);
+            }
+
             Log.i(TAG, "recoverMissed: " + result.status
                     + " pendingRecorded=" + result.pendingRecorded + " for " + key);
             return result;
@@ -909,7 +974,6 @@ public final class AutoDeductionScheduler {
 
 
     /**
-     * Pure ownership check used by conditional rollback.    /**
      * Pure ownership check used by conditional rollback.
      * Package-visible for focused verification.
      */
@@ -1119,6 +1183,24 @@ public final class AutoDeductionScheduler {
     }
 
     /**
+     * Clear independent fire-retry evidence only after the corresponding Native
+     * stock mutation has been confirmed. This is deliberately separate from FIRED
+     * persistence because FIRED and stock execution are two durable steps.
+     */
+    void clearIndependentFireRetryEvidenceAfterStock(
+            String medicationId,
+            String doseId,
+            String calendarDate
+    ) {
+        if (medicationId == null || doseId == null || calendarDate == null) return;
+        String key = AutoDeductionContract.occurrenceKey(
+                medicationId, doseId, calendarDate);
+        synchronized (SCHEDULE_LOCK) {
+            clearIndependentFireRetryEvidenceLocked(key);
+        }
+    }
+
+    /**
      * Recover a previously authorized fire from independent failure evidence.
      * Does NOT require shared schedule metadata and does NOT schedule recurrence successors.
      * Lock order: SCHEDULE_LOCK → EventStore.LOCK (via insertFiredIfAbsent).
@@ -1160,7 +1242,31 @@ public final class AutoDeductionScheduler {
                     medicationId, doseId, calendarDate, scheduledAt, amount);
             FireResult result = FireResult.fromInsert(ir);
             if (result.allowsRecurrence()) {
-                // Clear only after durable FIRED or pending proof.
+                // Independent recovery is itself a complete Auto execution boundary.
+                // Do not leave FIRED-only proof behind: apply the same occurrence-
+                // idempotent Native stock mutation used by the live receiver.
+                AutoDeductionStockStore.AutoApplyResult stockResult =
+                        new AutoDeductionStockStore(appContext).applyAutoDeduction(
+                                medicationId, doseId, calendarDate, amount);
+                if (!stockResult.ok) {
+                    Log.e(TAG, "recover independent evidence: native stock apply failed for "
+                            + key + " — " + stockResult.error);
+                    return new FireResult(FireResult.Status.FAILED, false);
+                }
+
+                // The retry has now completed the same durable Auto occurrence that
+                // originally failed. If the original schedule row is still the active
+                // owner of this occurrence, continue the recurrence chain immediately.
+                // The ownership check is deliberately strict so a later reschedule or
+                // disable cannot recreate D+1 from stale retry evidence. When D is no
+                // longer present/owned, the independent evidence must not invent a new
+                // schedule; the normal scheduler/recovery path remains authoritative.
+                ScheduleResult successor = scheduleNextOccurrenceFromIndependentEvidenceLocked(
+                        medicationId, doseId, calendarDate, evidence);
+                if (!successor.ok) {
+                    Log.i(TAG, "recover independent evidence: successor not scheduled from "
+                            + "retry evidence (" + successor.error + ") for " + key);
+                }
                 clearIndependentFireRetryEvidenceLocked(key);
             } else if (result.status == FireResult.Status.FAILED
                     && !result.pendingRecorded) {
@@ -1180,10 +1286,153 @@ public final class AutoDeductionScheduler {
     }
 
     /**
+     * Continue recurrence after a successful independent-fire recovery only when
+     * the still-present D schedule metadata proves that the retry evidence owns it.
+     *
+     * <p>This closes the retry gap where Native stock recovery succeeds after the
+     * one-shot D alarm was consumed: D+1 must be re-established before the native
+     * process goes idle. The evidence's operationVersion, recurrence generation,
+     * amount, and time must still match the live D metadata. Missing/replaced
+     * metadata is treated as stale evidence and is never allowed to resurrect a
+     * successor from obsolete configuration.</p>
+     *
+     * Caller MUST hold SCHEDULE_LOCK.
+     */
+    private ScheduleResult scheduleNextOccurrenceFromIndependentEvidenceLocked(
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            JSONObject evidence
+    ) {
+        if (evidence == null
+                || medicationId == null || medicationId.isEmpty()
+                || doseId == null || doseId.isEmpty()
+                || !AutoDeductionContract.isValidCalendarDate(calendarDate)) {
+            return ScheduleResult.fail("snapshot_stale");
+        }
+
+        String prefKey = AutoDeductionContract.occurrenceKey(
+                medicationId, doseId, calendarDate);
+        String currentRaw = getScheduleRaw(prefKey);
+        if (currentRaw == null || currentRaw.isEmpty()) {
+            return ScheduleResult.fail("snapshot_stale");
+        }
+
+        String evidenceVersion =
+                AutoDeductionSchedulingAdapter.extractOperationVersion(evidence);
+        long evidenceGeneration = evidence.optLong("recurrenceGeneration", 0L);
+        String evidenceTime = evidence.optString("timeHhmm", "");
+        double evidenceAmount = evidence.optDouble("amount", Double.NaN);
+
+        try {
+            JSONObject current = new JSONObject(currentRaw);
+            String activeVersion =
+                    AutoDeductionSchedulingAdapter.extractOperationVersion(current);
+            long activeGeneration =
+                    getEffectiveRecurrenceGenerationLocked(medicationId, doseId, current);
+            String activeTime = current.optString("timeHhmm", "");
+            double activeAmount = current.optDouble("amount", Double.NaN);
+
+            if (evidenceVersion.isEmpty()
+                    || evidenceGeneration <= 0L
+                    || !AutoDeductionContract.isValidTimeHhmm(evidenceTime)
+                    || !AutoDeductionContract.isValidAmount(evidenceAmount)
+                    || !evidenceVersion.equals(activeVersion)
+                    || evidenceGeneration != activeGeneration
+                    || !evidenceTime.equals(activeTime)
+                    || Double.compare(evidenceAmount, activeAmount) != 0) {
+                return ScheduleResult.fail("snapshot_stale");
+            }
+
+            return scheduleNextOccurrenceIfAbsent(
+                    medicationId,
+                    doseId,
+                    calendarDate,
+                    evidenceTime,
+                    evidenceAmount,
+                    evidenceGeneration);
+        } catch (JSONException e) {
+            return ScheduleResult.fail("snapshot_stale");
+        }
+    }
+
+    /**
+     * Restore-boundary pass: ensure every durable FIRED occurrence has also reached
+     * the Auto Native stock authority. This is deliberately independent of JavaScript
+     * so a FIRED row left behind after a transient stock failure is recoverable on
+     * boot/timezone/exact-permission lifecycle events even while the WebView is dead.
+     *
+     * <p>This pass never acknowledges the FIRED row. JS still owns marker/log
+     * reconciliation and the final RECONCILED acknowledgement.</p>
+     */
+    RestoreResult recoverFiredStockPass() {
+        AutoDeductionStockStore stock = new AutoDeductionStockStore(appContext);
+
+        // Before the first JS hydration after install/upgrade there is no safe
+        // baseline for Native stock. Legacy FIRED rows may already have been
+        // applied by the old JS-only implementation, so recovery must wait until
+        // JS has seeded the Native authority.
+        if (!stock.isInitialized()) {
+            Log.i(TAG, "recoverFiredStockPass: Native stock not initialized — defer to JS hydration");
+            return RestoreResult.success(0, 0);
+        }
+
+        AutoDeductionEventStore store = new AutoDeductionEventStore(appContext);
+        AutoDeductionEventStore.FiredEventsResult listed = store.listFiredEventsResult();
+        if (!listed.ok) {
+            return RestoreResult.failure(
+                    0, 1,
+                    listed.error != null ? listed.error : "fired_stock_list_failed");
+        }
+
+        int recovered = 0;
+        int failed = 0;
+
+        for (JSONObject event : listed.events) {
+            String medicationId = event.optString("medicationId", "").trim();
+            String doseId = event.optString("doseId", "").trim();
+            String calendarDate = event.optString("calendarDate", "");
+            double amount = event.optDouble("amount", Double.NaN);
+
+            if (medicationId.isEmpty()
+                    || doseId.isEmpty()
+                    || !AutoDeductionContract.isValidCalendarDate(calendarDate)
+                    || !AutoDeductionContract.isValidAmount(amount)) {
+                failed++;
+                continue;
+            }
+
+            AutoDeductionStockStore.AutoApplyResult stockResult =
+                    stock.applyAutoDeduction(
+                            medicationId, doseId, calendarDate, amount);
+            if (stockResult.ok) {
+                recovered++;
+            } else {
+                failed++;
+                Log.e(TAG, "recoverFiredStockPass: native stock apply failed for "
+                        + medicationId + "/" + doseId + "/" + calendarDate
+                        + " — " + stockResult.error);
+            }
+        }
+
+        if (failed > 0) {
+            return RestoreResult.failure(recovered, failed, "fired_stock_pass_failed");
+        }
+        return RestoreResult.success(recovered, 0);
+    }
+
+    /**
      * Restore-boundary pass: attempt recovery for every independent fire-retry
      * evidence row, even when shared schedule metadata is missing.
      */
     RestoreResult recoverIndependentFireRetryEvidencePass() {
+        // Retry evidence can only be recovered once the Native stock baseline
+        // exists; otherwise there is no authoritative balance to apply against.
+        if (!new AutoDeductionStockStore(appContext()).isInitialized()) {
+            Log.i(TAG, "independent evidence pass: Native stock not initialized — defer to JS hydration");
+            return RestoreResult.success(0, 0);
+        }
+
         int recovered = 0;
         int failed = 0;
         boolean ok = true;
@@ -2050,6 +2299,11 @@ public final class AutoDeductionScheduler {
                 // snapshot date forward is recovered as FIRED (no horizon); the first
                 // not-yet-due date becomes the live AlarmManager schedule.
                 if (epoch <= recoveryNowMs()) {
+                    if (!new AutoDeductionStockStore(appContext()).isInitialized()) {
+                        Log.i(TAG, "restore: past occurrence deferred until Native stock is initialized: "
+                                + prefKey);
+                        continue;
+                    }
                     long snapGen;
                     synchronized (SCHEDULE_LOCK) {
                         snapGen = getEffectiveRecurrenceGenerationLocked(
@@ -2108,6 +2362,11 @@ public final class AutoDeductionScheduler {
                 }
                 if (recomputed <= recoveryNowMs()) {
                     // After TZ change this occurrence is now in the past: multi-day catch-up.
+                    if (!new AutoDeductionStockStore(appContext()).isInitialized()) {
+                        Log.i(TAG, "restore: TZ past occurrence deferred until Native stock is initialized: "
+                                + prefKey);
+                        continue;
+                    }
                     long snapGenTz;
                     synchronized (SCHEDULE_LOCK) {
                         snapGenTz = getEffectiveRecurrenceGenerationLocked(

@@ -39,6 +39,7 @@ final class Phase2TestSupport {
         clearPrefs(ctx, AutoDeductionContract.PREFS_ORDERING);
         clearPrefs(ctx, AutoDeductionContract.PREFS_RECURRENCE_AUTH);
         clearPrefs(ctx, AutoDeductionContract.PREFS_FIRE_RETRY);
+        clearPrefs(ctx, "drugtracker_auto_stock_v1");
     }
 
     private static void clearPrefs(Context ctx, String name) {
@@ -126,6 +127,17 @@ final class Phase2TestSupport {
                 AutoDeductionContract.RECURRENCE_AUTH_KEY_PREFIX
                         + AutoDeductionContract.scheduleIdentityKey(medicationId, doseId),
                 0L);
+    }
+
+    static void seedAutoStock(String medicationId, double currentPills) {
+        AutoDeductionStockStore.SnapshotResult result =
+                new AutoDeductionStockStore(appContext()).ensureMissingAndRead(
+                        java.util.Collections.singletonList(
+                                new AutoDeductionStockStore.StockSeed(
+                                        medicationId, currentPills)));
+        if (!result.ok) {
+            throw new AssertionError("failed to seed Auto native stock: " + result.error);
+        }
     }
 
     static AutoDeductionEventStore newEventStore() {

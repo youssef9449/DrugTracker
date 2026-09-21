@@ -20,6 +20,7 @@ import {
   persistLastAppliedMutationSeq,
 } from './stockMutationOrdering';
 import { loadJson, persist } from './storage';
+import { applyForegroundAutoStockDeltas } from './autoDeductionNative';
 
 export const STORAGE_MANUAL_ENVELOPE_KEY =
   'android_med_tracker_manual_stock_envelope_v1';
@@ -112,6 +113,15 @@ export interface ManualStockEnvelope {
   createdAt: string;
   baseGeneration: number;
   mutationSeq: number;
+  /** Native Auto-owned stock deltas applied with this foreground mutation. */
+  stockDeltas?: Array<{ medicationId: string; delta: number }>;
+  /** Manual Take/Restore occurrence resolutions committed atomically in Native. */
+  occurrenceResolutions?: Array<{
+    medicationId: string;
+    doseId: string;
+    calendarDate: string;
+    type: 'CONSUMED' | 'SKIPPED';
+  }>;
 }
 
 export interface PendingEnvelopeRef {
@@ -126,6 +136,15 @@ export interface PendingEnvelopeRef {
     medicationId: string;
     doseId: string;
     calendarDate: string;
+  }>;
+  /** Manual only — durable foreground stock deltas, replayed idempotently in Native. */
+  stockDeltas?: Array<{ medicationId: string; delta: number }>;
+  /** Manual only — occurrence resolutions committed atomically in Native. */
+  occurrenceResolutions?: Array<{
+    medicationId: string;
+    doseId: string;
+    calendarDate: string;
+    type: 'CONSUMED' | 'SKIPPED';
   }>;
   clear: () => string | null;
 }
@@ -151,6 +170,9 @@ export function loadManualStockEnvelope(): ManualStockEnvelope | null {
   );
   if (!raw || raw.version !== 1 || raw.status !== 'manual_js_ready') return null;
   if (!Array.isArray(raw.medications) || !Array.isArray(raw.logs)) return null;
+  if (!Array.isArray(raw.stockDeltas) || !Array.isArray(raw.occurrenceResolutions)) {
+    return null;
+  }
   return raw;
 }
 
@@ -290,16 +312,32 @@ export interface UnifiedRecoveryResult {
 /**
  * Recover all pending stock envelopes using mutationSeq causal order.
  * Highest seq above lastApplied is applied/finalized first; lower pending
- * envelopes are cleared only after lastApplied covers them.
+ * envelopes are cleared only after lastApplied covers them. Manual envelopes
+ * also carry the signed Native stock delta that must be applied idempotently
+ * before the JS snapshot is finalized.
  */
-export function recoverAllPendingStockEnvelopes(
+export async function recoverAllPendingStockEnvelopes(
   fresh: AutoStockDurableState,
   pending: PendingEnvelopeRef[],
   commit: (
     state: AutoStockDurableState,
     appliedMutationSeq: number
-  ) => string | null
-): UnifiedRecoveryResult {
+  ) => string | null,
+  applyNativeStockDeltas: (
+    mutationSeq: number,
+    deltas: Array<{ medicationId: string; delta: number }>,
+    occurrenceResolutions: Array<{
+      medicationId: string;
+      doseId: string;
+      calendarDate: string;
+      type: 'CONSUMED' | 'SKIPPED';
+    }>
+  ) => Promise<{
+    ok: boolean;
+    error?: string;
+    stocks?: Array<{ medicationId: string; currentPills: number }>;
+  }> = applyForegroundAutoStockDeltas
+): Promise<UnifiedRecoveryResult> {
   let state = fresh;
   let recovered = false;
   let durabilityBlocked = false;
@@ -384,7 +422,48 @@ export function recoverAllPendingStockEnvelopes(
       continue;
     }
 
-    if (durableMatchesEnvelopeSnapshot(env, state)) {
+    let envelopeMedications = env.medications;
+
+    if (env.kind === 'manual') {
+      const nativeResult = await applyNativeStockDeltas(
+        env.mutationSeq,
+        env.stockDeltas ?? [],
+        env.occurrenceResolutions ?? []
+      );
+      if (!nativeResult.ok) {
+        durabilityBlocked = true;
+        blocked = true;
+        break;
+      }
+
+      // The Native result is newer than the JS snapshot stored in the envelope.
+      // Merge currentPills from Native before deciding whether the JS snapshot is
+      // already durable; never restore a stale absolute balance over a background
+      // Auto deduction that happened after the envelope was created.
+      if (nativeResult.stocks && nativeResult.stocks.length > 0) {
+        const nativeById = new Map(
+          nativeResult.stocks.map((stock) => [
+            stock.medicationId,
+            Number(stock.currentPills),
+          ])
+        );
+        envelopeMedications = env.medications.map((medication) => {
+          const nativePills = nativeById.get(medication.id);
+          return nativePills != null &&
+              Number.isFinite(nativePills) &&
+              nativePills >= 0
+            ? { ...medication, currentPills: nativePills }
+            : medication;
+        });
+      }
+    }
+
+    const envelopeForComparison = {
+      ...env,
+      medications: envelopeMedications,
+    };
+
+    if (durableMatchesEnvelopeSnapshot(envelopeForComparison, state)) {
       const finErr = finalizeMutationSeq(env.mutationSeq);
       if (finErr) {
         durabilityBlocked = true;
@@ -403,7 +482,7 @@ export function recoverAllPendingStockEnvelopes(
 
     const err = commit(
       {
-        medications: env.medications,
+        medications: envelopeMedications,
         logs: env.logs,
         globalAutoDeductEnabled:
           env.globalAutoDeductEnabled ?? state.globalAutoDeductEnabled,
@@ -416,7 +495,7 @@ export function recoverAllPendingStockEnvelopes(
       break;
     }
     state = {
-      medications: env.medications,
+      medications: envelopeMedications,
       logs: env.logs,
       globalAutoDeductEnabled:
         env.globalAutoDeductEnabled ?? state.globalAutoDeductEnabled,
@@ -463,7 +542,7 @@ export function recoverAllPendingStockEnvelopes(
  * envelopes share mutationSeq ordering. Exact Auto toAcknowledge is collected
  * but NOT natively ACKed here — callers that own reconciliation may ACK.
  */
-export function recoverManualEnvelopeInto(
+export async function recoverManualEnvelopeInto(
   fresh: AutoStockDurableState,
   opts?: {
     persistMeds?: (meds: Medication[]) => string | null;
@@ -487,6 +566,8 @@ export function recoverManualEnvelopeInto(
       medications: manual.medications,
       logs: manual.logs,
       globalAutoDeductEnabled: manual.globalAutoDeductEnabled,
+      stockDeltas: manual.stockDeltas ?? [],
+      occurrenceResolutions: manual.occurrenceResolutions ?? [],
       clear: () => saveManualStockEnvelope(null),
     });
   }
@@ -500,6 +581,8 @@ export function recoverManualEnvelopeInto(
       logs: exact.logs,
       globalAutoDeductEnabled: exact.globalAutoDeductEnabled,
       toAcknowledge: exact.toAcknowledge,
+      stockDeltas: [],
+      occurrenceResolutions: [],
       clear: () => saveExactAutoStockEnvelope(null),
     });
   }
@@ -526,7 +609,7 @@ export function recoverManualEnvelopeInto(
     return commitDurableAutoStockState(state, { appliedMutationSeq });
   };
 
-  const result = recoverAllPendingStockEnvelopes(fresh, pending, commit);
+  const result = await recoverAllPendingStockEnvelopes(fresh, pending, commit);
   if (result.blocked) {
     return {
       ok: false,

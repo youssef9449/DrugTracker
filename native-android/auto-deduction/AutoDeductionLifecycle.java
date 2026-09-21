@@ -7,8 +7,8 @@ import android.util.Log;
  * Feature lifecycle recovery for Phase 2 auto-deduction; the shared
  * alarm runtime dispatches system lifecycle events to this feature.
  * Invoked by the shared exact-alarm lifecycle receiver after boot /
- * exact-alarm permission changes / timezone changes. Does NOT handle
- * ACTION_AUTO_DEDUCTION fires.
+ * exact-alarm permission changes / timezone changes. Does not handle
+ * ACTION_AUTO_DEDUCTION fires; it recovers durable FIRED stock and future schedules.
  */
 public final class AutoDeductionLifecycle {
 
@@ -32,14 +32,29 @@ public final class AutoDeductionLifecycle {
             if (promoted > 0) {
                 Log.i(TAG, reason + ": promoted " + promoted + " pending-fire record(s)");
             }
+            AutoDeductionScheduler scheduler =
+                    new AutoDeductionScheduler(context);
+
+            // Native FIRED events can outlive the JS process. Stock recovery does
+            // not require Exact Alarm permission, so it must happen before the
+            // permission gate used only for restoring future alarms.
+            AutoDeductionScheduler.RestoreResult stockRecovery =
+                    scheduler.recoverFiredStockPass();
+            if (stockRecovery.ok) {
+                Log.i(TAG, reason + ": recovered Native stock for "
+                        + stockRecovery.restored + " FIRED occurrence(s)");
+            } else {
+                Log.e(TAG, reason + ": Native FIRED stock recovery incomplete: "
+                        + stockRecovery.error + " recovered="
+                        + stockRecovery.restored + " failed=" + stockRecovery.failed);
+            }
+
             if (!exactAlarmPermissionGranted) {
                 Log.w(TAG, reason
                         + ": exact alarm permission not granted — skip alarm restore");
                 return;
             }
 
-            AutoDeductionScheduler scheduler =
-                    new AutoDeductionScheduler(context);
             AutoDeductionScheduler.RestoreResult rr =
                     scheduler.restoreFutureSchedules();
             if (rr.ok) {

@@ -10,6 +10,7 @@ Current-state technical specification for DrugTracker’s exact-time automatic d
 | JS schedule requests (post-hydration) | `src/hooks/useAutoDeductionScheduler.ts` |
 | Native occurrence contract and feature payload | `native-android/auto-deduction/AutoDeductionContract.java` |
 | Durable native event store | `AutoDeductionEventStore.java` |
+| Auto-owned native stock authority | `AutoDeductionStockStore.java` |
 | Auto scheduling adapter over shared exact-alarm runtime | `native-android/auto-deduction/AutoDeductionSchedulingAdapter.java` |
 | Auto business/recovery service | `native-android/auto-deduction/AutoDeductionScheduler.java` |
 | Exact-alarm delivery receiver (background-threaded via `goAsync`, bounded fire-persistence retry) | `AutoDeductionReceiver.java` |
@@ -25,7 +26,7 @@ Current-state technical specification for DrugTracker’s exact-time automatic d
 
 ## Purpose and scope
 
-**Purpose:** Fire dose times at exact wall-clock moments even when the app process is not running, then apply each fired occurrence to application stock at most once when JavaScript can run.
+**Purpose:** Fire dose times at exact wall-clock moments even when the app process is not running, and let the Auto subsystem apply each fired occurrence to its durable Native stock authority at most once. JavaScript mirrors that Native balance into `Medication.currentPills` when the WebView is available.
 
 **In scope today:**
 
@@ -48,18 +49,17 @@ Current-state technical specification for DrugTracker’s exact-time automatic d
 ```text
 Schedule (JS)
     → Native exact alarm
-    → Receiver persists FIRED (no stock change)
-    → Native emits exact-auto FIRED event when JS is available
+    → Auto receiver / recovery    → Durable Native stock mutation
+    → Native emits exact-auto FIRED wake-up when JS is available
     → Event listener wakes JS reconciliation immediately
-    → Mutation gate loads fresh durable JS state
-    → Reconcile FIRED events
-    → Apply or no-op (idempotent)
-    → Persist medications + logs
+    → JS converges currentPills from Native
+    → Reconcile markers + logs without a second stock deduction
+    → Persist JS state
     → Mark native RECONCILED
 ```
 
-Native owns **timing and durable fire records**.  
-JavaScript owns **business stock, markers, logs, and acknowledgement**.
+Auto Native owns **timing, durable fire records, and the live stock balance needed while JS is unavailable**.  
+JavaScript owns the UI/application replica (`Medication.currentPills`), markers, logs, and acknowledgement.
 
 ---
 
@@ -68,12 +68,13 @@ JavaScript owns **business stock, markers, logs, and acknowledgement**.
 | Question | Answer in current code |
 |----------|------------------------|
 | Did this occurrence fire at wall time while the app might be dead? | Native event store (SharedPreferences), status until successfully marked reconciled |
-| What is the app’s committed inventory? | `Medication.currentPills` (+ related history fields) in localStorage (`android_med_tracker_items_v2`) |
-| What is the durable remaining stock? | `Medication.currentPills` — the single durable stock balance; automatic deductions come only from Exact FIRED occurrences, not read-time elapsed-day projection |
+| What is the app’s committed UI inventory? | `Medication.currentPills` (+ related history fields) in localStorage (`android_med_tracker_items_v2`) |
+| What is the cross-process durable stock authority on Android? | Auto-owned Native stock balance in `AutoDeductionStockStore` |
+| How does JS become current again? | Native stock is read during hydration/reconciliation and mirrored into `Medication.currentPills` |
 | What prevents applying the same dose twice? | Occurrence markers, deterministic exact-auto log ids, native insert-if-absent, serialized gate |
 
-**Native does not** write `currentPills`, does not write JS localStorage, and does not run settlement math.  
-**A FIRED native row is not a stock mutation.** Stock changes only in JS reconciliation (Exact Auto apply, Manual Take/Restore, Refill).
+**Auto Native** writes only its own durable stock authority; it does not write JS localStorage directly.  
+**A successful Exact Auto fire/recovery includes the Native stock mutation.** JS reconciliation records the corresponding markers/log, then mirrors the Native balance into `currentPills` without subtracting again.
 
 ---
 
@@ -101,7 +102,7 @@ Used consistently for:
 1. After hydration (and when exact-alarm capability allows), JS requests `scheduleOccurrence` with medication, dose, calendar date, time, and **amount**.
 2. `AutoDeductionSchedulingAdapter` translates the already-validated Auto occurrence identity and amount into an `ExactAlarmRuntime.ScheduleRequest`; `recurrenceGeneration` is carried only in the delivery extras as Auto-owned authorization state and is not persisted in Shared alarm metadata. The shared runtime performs the serialized durable schedule transaction (metadata write → AlarmManager install → ownership-safe rollback on failure). This is not an ACID transaction spanning SharedPreferences and AlarmManager; it is a process-local serialization of those steps.
 3. `ExactAlarmRuntime`, reached only through `AutoDeductionSchedulingAdapter`, constructs the PendingIntent from action + full occurrence URI + receiver and owns the platform AlarmManager mechanics. Auto Deduction supplies the feature identity/payload through the adapter.
-4. On fire, `AutoDeductionReceiver` performs all durable work on a background thread (`goAsync()` keeps the broadcast alive while synchronous `commit()` disk I/O completes, so the main thread is never blocked). The delivery then calls `insertFiredIfAbsent` — durable **FIRED** row; **no** stock update; may schedule the next one-shot occurrence. If persistence fails **without** a durable pending-fire record, the receiver schedules a bounded **same-identity retry alarm** (same occurrence URI + ownership tokens, `FIRE_RETRY_DELAY_MS` delay, max `MAX_FIRE_RETRIES` attempts) instead of silently consuming the one-shot delivery; retries stay idempotent (`ALREADY_EXISTS`) and stale-protected (ownership tokens).
+4. On fire, `AutoDeductionReceiver` performs durable work on a background thread (`goAsync()`). The Auto business path persists **FIRED** evidence and applies the same occurrence to `AutoDeductionStockStore` idempotently. The next one-shot occurrence is scheduled only after Native stock execution succeeds. If FIRED persistence or Native stock execution cannot be confirmed, bounded same-identity retry evidence is kept instead of advancing the recurrence.
 5. On boot / quick boot, shared lifecycle dispatch enters the Auto Deduction business/recovery service; its scheduling adapter is the only Auto boundary that invokes the shared exact-alarm runtime for future schedule installation/cancellation. Auto Deduction business/recovery code reads and interprets its durable schedule metadata as needed for catch-up, stale-ownership checks, tombstone semantics, and reconciliation listing; those reads do not move into the scheduling adapter. Past-due recovery, catch-up, FIRED persistence, and recurrence authorization remain Auto-specific. Hydration/resume/local-midnight recovery also invokes the same idempotent native restore before the JS FIRED read, so an unresolved past schedule cannot be destructively canceled before recovery.
 
 Exact fire does **not** require WebView or a running JS bridge.
@@ -119,8 +120,8 @@ Exact fire does **not** require WebView or a running JS bridge.
 
 Valid sequence:
 
-1. JS reads FIRED and applies stock + markers + log  
-2. JS persists durably  
+1. Auto Native has already applied the occurrence stock mutation (or the JS reconciliation path repairs it idempotently)
+2. JS persists markers + deterministic log
 3. `markReconciled` fails  
 
 Native status remains **FIRED**, while JS already holds the applied markers. A later run must **acknowledge only**, not deduct again.
@@ -140,11 +141,12 @@ Orchestration (`runAutoDeductionReconciliation`):
 
 1. Enter `withAutoStockMutationGate`
 2. Load **fresh** medications and logs from durable storage (not a pre-gate React snapshot)
-3. `listFired` native events
-4. `reconcileFiredEvents`: sort by `scheduledAtEpochMs`, then occurrence key
-5. Per event: validate amount/identity; check idempotency; apply or skip; collect acknowledgements
-6. On stock/log mutation: write durability envelope → persist meds → persist logs → mark native events → clear envelope (see durability)
-7. Update React from the **committed** durable result
+3. Converge the JS stock mirror from Auto Native stock
+4. Recover pending foreground envelopes using signed Native stock deltas
+5. `listFired` native events
+6. Repair/verify Native stock for each FIRED occurrence idempotently
+7. `reconcileFiredEvents`: record markers + deterministic logs without subtracting again when Native already applied the stock
+8. Persist the JS mirror + logs and acknowledge native events
 
 Outcomes include: `applied`, `already_applied`, `skipped_missing_med`, `skipped_disabled`, `skipped_invalid`. Missing medication and disabled auto-deduct acknowledge without stock change so FIRED queues do not grow forever on those cases.
 
@@ -249,21 +251,24 @@ Clearing the JS envelope after durable application does **not** imply every nati
 
 ## Hydration, resume, reboot
 
-- **Hydration:** `hydrated` is set only after the initialization work required by the app’s hydration flow completes, including permission initialization and `initNativeBridge()`, so hydration-gated effects (persistence, Exact Auto reconciliation, native schedule hook) do not run against an incomplete native surface. **Exact-alarm capability is separate:** it controls whether exact-alarm scheduling flows may install or restore alarms, and is **not** a general prerequisite for completing hydration itself. The app can finish hydration even when exact-alarm capability is unavailable; scheduling paths handle that capability according to the implementation.
+- **Hydration:** after `initNativeBridge()`, existing JS `currentPills` values seed only missing Native stock rows; an existing Native balance wins and is mirrored back into JS before `hydrated=true`. **Exact-alarm capability is separate:** it controls whether exact-alarm scheduling flows may install or restore alarms, and is **not** a general prerequisite for completing hydration itself.
 - **First run** (`isFirstRun`): seed inventory skips auto deduction / reconcile effects.
 - **Resume:** resume tick can re-enter reconciliation for remaining FIRED events.
 - **Midnight while open:** a single self-correcting local-midnight tick (`useMidnightTick`) re-runs the desired-state scheduler and one recovery reconciliation at the calendar-day boundary, so the new day is projected/scheduled without waiting for a resume.
-- **Reboot:** native restores future schedule alarms; FIRED rows remain until JS acknowledges.
+- **Reboot:** native restores future schedule alarms and recovers missed occurrences through the Auto Native stock path; FIRED rows remain until JS acknowledges.
 - **Empty medication UI text is not a hydration marker**; it can appear whenever the list is empty while the bridge is still pending.
 
 ---
 
 ## Durable stock balance
 
-- **`currentPills`:** committed, persisted application stock balance — the single source of truth for inventory.
-- There is **no** read-time elapsed-days projection and **no** separate projected stock balance. Automatic stock mutations come only from Exact FIRED occurrences (plus explicit manual paths).
+- On Android, `AutoDeductionStockStore` is the cross-process durable stock authority required when JavaScript is unavailable.
+- `Medication.currentPills` in localStorage is the JavaScript/UI replica of that Native balance.
+- Foreground Manual/Refill/Restore mutations reach the same Native authority as signed deltas keyed by `mutationSeq`, so an Auto alarm cannot be overwritten by a stale absolute JS snapshot.
+- There is **no** read-time elapsed-days projection and **no** separate projected stock balance. Automatic stock mutations come only from Exact occurrences plus explicit manual paths.
+- On non-Android/web, the existing JS path remains authoritative because there is no Native stock runtime.
 
-After an exact occurrence is applied, markers and deterministic exact-auto logs keep reconciliation idempotent so the same occurrence is not subtracted twice.
+After an exact occurrence is applied, the Native occurrence marker plus JS consumption markers and deterministic exact-auto logs keep the same occurrence idempotent.
 
 ---
 
@@ -271,8 +276,8 @@ After an exact occurrence is applied, markers and deterministic exact-auto logs 
 
 | Scenario | Expected behavior |
 |----------|-------------------|
-| Native fires, app closed | FIRED stored natively; no JS stock change yet |
-| App opens later | JS reconciles FIRED after hydration |
+| Native fires, app closed | FIRED and Native stock mutation occur without JS; JS is not required at fire time |
+| App opens later | JS converges `currentPills` from Native and reconciles markers/logs |
 | JS persistence fails | No native mark for mutating path; retry from FIRED / envelope |
 | Native ack fails after JS commit | Stays FIRED; retry is acknowledge-only if markers exist |
 | Duplicate FIRED delivery | No second stock deduction; one exact-auto log id |
@@ -287,14 +292,14 @@ After an exact occurrence is applied, markers and deterministic exact-auto logs 
 
 ## Operational invariants
 
-1. Native exact fire does not mutate application stock and does not require WebView.
-2. Occurrence identity is always `medicationId + doseId + calendarDate`.
-3. Multi-dose exact apply uses `event.amount` (authoritative charge for that FIRED occurrence).
-4. Sibling doses on the same date remain isolated.
-5. Stock mutations for auto paths load **fresh durable state** inside the mutation gate.
-6. Mutating reconcile persists JS state before relying on successful native acknowledgement; failed marks remain safely retryable.
-7. Duplicate reconciliation is idempotent for stock and exact-auto logs.
-8. `currentPills` is the sole durable stock balance; there is no separate projected ledger.
+1. Native exact fire does not require WebView.
+2. A successful Exact occurrence includes one idempotent Native stock mutation.
+3. Occurrence identity is always `medicationId + doseId + calendarDate`.
+4. Multi-dose exact apply uses `event.amount` (authoritative charge for that FIRED occurrence).
+5. Sibling doses on the same date remain isolated.
+6. Foreground stock changes use signed Native deltas; no absolute JS snapshot may overwrite a newer Native Auto mutation.
+7. JS reconciliation never subtracts a Native-applied occurrence a second time.
+8. Repeated recovery is idempotent across FIRED, Native stock markers, JS consumption markers, and deterministic logs.
 9. Android device/emulator field verification of the full path is tracked explicitly (see below)—not implied by unit coverage alone.
 
 ---

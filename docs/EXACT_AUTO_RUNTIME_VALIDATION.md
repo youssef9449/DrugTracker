@@ -16,7 +16,7 @@ This document follows the same honesty conventions as `docs/ANDROID_NOTIFICATION
 
 ## Intended pipeline under validation (do not change)
 
-Native `AlarmManager.setExactAndAllowWhileIdle` one-shot per occurrence (`AutoDeductionScheduler`) → delivery into `AutoDeductionReceiver.onReceive` (background thread via `goAsync()`, bounded same-identity fire-persistence retry) → durable **FIRED** row (`AutoDeductionEventStore.insertFiredIfAbsent`) → JS reconciliation (`src/hooks/useExactAutoDeductionReconciliation.ts` → `src/utils/runAutoDeductionReconciliation.ts` → `src/utils/autoDeductionReconciliation.ts`) → stock mutation through the serialized durable stock gate (`src/utils/autoDeductionStockGate.ts`) → exactly one exact log with deterministic id `exact-auto:<medicationId>:<doseId>:<calendarDate>` → native **FIRED → RECONCILED** acknowledgement (`AutoDeductionPlugin.markReconciled`).
+Native `AlarmManager.setExactAndAllowWhileIdle` one-shot per occurrence (`AutoDeductionScheduler`) → delivery into `AutoDeductionReceiver.onReceive` (background thread via `goAsync()`) → durable **FIRED** evidence + occurrence-idempotent Native stock mutation (`AutoDeductionStockStore`) → next recurrence only after Native stock completion → native wake-up when JS is available → JS reconciliation/convergence (`useExactAutoDeductionReconciliation` → `runAutoDeductionReconciliation`) → exactly one exact log/consumption marker without a second stock subtraction → native **FIRED → RECONCILED** acknowledgement (`AutoDeductionPlugin.markReconciled`).
 
 Occurrence identity: `medicationId + doseId + calendarDate` (`AutoDeductionContract`). Boot / timezone / permission restore: `DrugTrackerAlarmSystemReceiver` + `AutoDeductionScheduler.restoreFutureSchedules`.
 
@@ -94,7 +94,7 @@ JS-side state (schedules, fired/reconciled events, stock, logs) is observable th
 3. Verify the exact native schedule exists (`listScheduledOccurrences`, or `AutoDeductionScheduler` logs).
 4. Keep the app in the foreground; wait for the alarm. No polling: observe the single delivery (logcat `AutoDeductionReceiver`).
 5. Record actual fire time; verify durable FIRED (`AutoDeductionEventStore` log + `listFiredEvents`).
-6. Verify reconciliation runs (foreground hydrate/resume trigger), `currentPills` decreased by exactly the dose amount **once**, exactly **one** `exact-auto:` log, and the event transitions to **RECONCILED** (`listEvents`).
+6. Verify the Native stock balance decreases by exactly the dose amount **once** even with JS/WebView unavailable, then after foreground hydrate/resume verify `Medication.currentPills` converges to the Native balance, exactly **one** `exact-auto:` log exists, and the event transitions to **RECONCILED** (`listEvents`).
 
 **PASS requires** all of: schedule observed, fire at requested time, FIRED persisted, single deduction, single log, RECONCILED — with real recorded times.
 **2026-09-18 attempt:** nothing executed on a device; blocked at runtime provisioning (see Validation environment). Unproven: every step above.

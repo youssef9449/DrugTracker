@@ -17,11 +17,13 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 
 import org.json.JSONObject;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
- * Minimal Capacitor bridge for Phase 2 auto-deduction.
- * Does NOT reconcile stock into React state (Phase 3).
+ * Capacitor bridge for Exact Auto scheduling, Native stock execution, and
+ * JavaScript/UI convergence.
  */
 @CapacitorPlugin(name = "AutoDeduction")
 public class AutoDeductionPlugin extends Plugin {
@@ -253,9 +255,165 @@ public class AutoDeductionPlugin extends Plugin {
 
 
     /**
-     * Phase 4 — atomic occurrence snapshot for Manual Take amount authority.
-     * Runs under SCHEDULE_LOCK on the native side.
+     * Initialize Native stock for the currently persisted JS medications.
+     * Existing Native balances are authoritative; only missing rows are seeded
+     * from JS. The returned balances are the values JS must mirror into
+     * Medication.currentPills.
      */
+    @PluginMethod
+    public void initializeStock(PluginCall call) {
+        JSArray medications = call.getArray("medications");
+        List<AutoDeductionStockStore.StockSeed> seeds =
+                new ArrayList<AutoDeductionStockStore.StockSeed>();
+
+        try {
+            if (medications != null) {
+                for (int i = 0; i < medications.length(); i++) {
+                    JSONObject obj = medications.optJSONObject(i);
+                    if (obj == null) continue;
+                    String medicationId = obj.optString("medicationId", "").trim();
+                    double currentPills = obj.optDouble("currentPills", Double.NaN);
+                    if (medicationId.isEmpty()
+                            || !Double.isFinite(currentPills)
+                            || currentPills < 0.0) {
+                        continue;
+                    }
+                    seeds.add(new AutoDeductionStockStore.StockSeed(
+                            medicationId, currentPills));
+                }
+            }
+
+            AutoDeductionStockStore.SnapshotResult result =
+                    new AutoDeductionStockStore(getContext()).ensureMissingAndRead(seeds);
+            JSObject ret = new JSObject();
+            ret.put("ok", result.ok);
+            JSArray stocks = new JSArray();
+            for (Map.Entry<String, Double> entry : result.stocks.entrySet()) {
+                JSObject stock = new JSObject();
+                stock.put("medicationId", entry.getKey());
+                stock.put("currentPills", entry.getValue());
+                stocks.put(stock);
+            }
+            ret.put("stocks", stocks);
+            if (result.error != null) ret.put("error", result.error);
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "initializeStock failed", e);
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("stocks", new JSArray());
+            ret.put("error", e.getMessage() != null
+                    ? e.getMessage()
+                    : "stock_init_failed");
+            call.resolve(ret);
+        }
+    }
+
+    /**
+     * Apply foreground signed stock deltas idempotently by mutationSeq.
+     * Manual/Refill/Restore JS mutations use this path after computing their
+     * result from a Native-converged durable snapshot.
+     */
+    @PluginMethod
+    public void applyForegroundStockDeltas(PluginCall call) {
+        Long mutationSeqObj = call.getLong("mutationSeq");
+        long mutationSeq = mutationSeqObj != null ? mutationSeqObj : 0L;
+        JSArray rawDeltas = call.getArray("deltas");
+        List<AutoDeductionStockStore.StockDelta> deltas =
+                new ArrayList<AutoDeductionStockStore.StockDelta>();
+
+        try {
+            if (rawDeltas != null) {
+                for (int i = 0; i < rawDeltas.length(); i++) {
+                    JSONObject obj = rawDeltas.optJSONObject(i);
+                    if (obj == null) continue;
+                    deltas.add(new AutoDeductionStockStore.StockDelta(
+                            obj.optString("medicationId", "").trim(),
+                            obj.optDouble("delta", Double.NaN)));
+                }
+            }
+
+            List<AutoDeductionStockStore.OccurrenceResolution> resolutions =
+                    new ArrayList<AutoDeductionStockStore.OccurrenceResolution>();
+            JSArray rawResolutions = call.getArray("occurrenceResolutions");
+            if (rawResolutions != null) {
+                for (int i = 0; i < rawResolutions.length(); i++) {
+                    JSONObject obj = rawResolutions.optJSONObject(i);
+                    if (obj == null) continue;
+                    String type = obj.optString("type", "").trim().toUpperCase();
+                    AutoDeductionStockStore.OccurrenceResolution.Type resolutionType;
+                    try {
+                        resolutionType =
+                                AutoDeductionStockStore.OccurrenceResolution.Type.valueOf(type);
+                    } catch (IllegalArgumentException e) {
+                        JSObject ret = new JSObject();
+                        ret.put("ok", false);
+                        ret.put("alreadyApplied", false);
+                        ret.put("stocks", new JSArray());
+                        ret.put("error", "invalid_occurrence_resolution");
+                        call.resolve(ret);
+                        return;
+                    }
+                    resolutions.add(new AutoDeductionStockStore.OccurrenceResolution(
+                            obj.optString("medicationId", "").trim(),
+                            obj.optString("doseId", "").trim(),
+                            obj.optString("calendarDate", ""),
+                            resolutionType));
+                }
+            }
+
+            AutoDeductionStockStore.ForegroundApplyResult result =
+                    new AutoDeductionStockStore(getContext()).applyForegroundDeltas(
+                            mutationSeq, deltas, resolutions);
+            JSObject ret = new JSObject();
+            ret.put("ok", result.ok);
+            ret.put("alreadyApplied", result.alreadyApplied);
+            JSArray stocks = new JSArray();
+            for (Map.Entry<String, Double> entry : result.stocks.entrySet()) {
+                JSObject stock = new JSObject();
+                stock.put("medicationId", entry.getKey());
+                stock.put("currentPills", entry.getValue());
+                stocks.put(stock);
+            }
+            ret.put("stocks", stocks);
+            if (result.error != null) ret.put("error", result.error);
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "applyForegroundStockDeltas failed", e);
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("alreadyApplied", false);
+            ret.put("error", e.getMessage() != null
+                    ? e.getMessage()
+                    : "foreground_stock_failed");
+            call.resolve(ret);
+        }
+    }
+
+    /**
+     * Repair/apply one exact Auto occurrence on the Native stock authority.
+     * The operation is occurrence-idempotent.
+     */
+    @PluginMethod
+    public void applyAutoDeductionStock(PluginCall call) {
+        String medicationId = call.getString("medicationId");
+        String doseId = call.getString("doseId");
+        String calendarDate = call.getString("calendarDate");
+        Double amountObj = call.getDouble("amount");
+        double amount = amountObj != null ? amountObj : Double.NaN;
+
+        AutoDeductionStockStore.AutoApplyResult result =
+                new AutoDeductionStockStore(getContext()).applyAutoDeduction(
+                        medicationId, doseId, calendarDate, amount);
+        JSObject ret = new JSObject();
+        ret.put("ok", result.ok);
+        ret.put("applied", result.applied);
+        ret.put("actualDeducted", result.actualDeducted);
+        ret.put("currentPills", result.currentPills);
+        if (result.error != null) ret.put("error", result.error);
+        call.resolve(ret);
+    }
+
     @PluginMethod
     public void getOccurrenceSnapshot(PluginCall call) {
         String medicationId = call.getString("medicationId");

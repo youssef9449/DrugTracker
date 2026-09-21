@@ -21,16 +21,9 @@ import android.util.Log;
  * no pending, no next recurrence. If fire linearizes first, FIRED/pending is
  * durable before any concurrent cancel can observe the occurrence as still open.
  *
- * Fire linearization result drives next-occurrence scheduling:
- * <ul>
- *   <li>CREATED / ALREADY_EXISTS / FAILED with pending-fire — ensure next via
- *       {@link AutoDeductionScheduler#scheduleNextOccurrenceIfAbsent} (never
- *       overwrite an already-present successor with this delivery's payload)</li>
- *   <li>CANCELLED — no recurrence</li>
- *   <li>FAILED without pending — do not advance recurrence; schedule a bounded
- *       same-occurrence retry alarm (see
- *       {@link AutoDeductionScheduler#scheduleFireRetry})</li>
- * </ul>
+ * Fire linearization and Native stock execution together authorize
+ * next-occurrence scheduling. FIRED/pending evidence is not sufficient to advance
+ * recurrence until the occurrence-specific Native stock mutation succeeds.
  * The receiver payload for a duplicate D delivery is not authoritative recurrence
  * configuration for an existing D+1.
  */
@@ -221,6 +214,11 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
             notifyJavascript(
                     context, medicationId, doseId, calendarDate, scheduledAt, amount);
         }
+
+        // recoverFireFromIndependentEvidence() completes both the durable FIRED
+        // transition and the Native stock mutation. The Receiver only interprets
+        // the resulting status and never repeats the stock operation.
+
         switch (result.status) {
             case CANCELLED:
                 Log.i(TAG, "independent recovery cancelled (no prior evidence): "
@@ -236,7 +234,7 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 if (result.pendingRecorded) {
                     Log.w(TAG, "independent recovery pending recorded (no successor): "
                             + medicationId + "/" + doseId + "/" + calendarDate);
-                } else if (shouldScheduleFireRetry(result, fireRetryCount)) {
+                } else if (shouldScheduleStockRetry(result, fireRetryCount)) {
                     boolean retryScheduled = scheduler.scheduleFireRetry(
                             medicationId, doseId, calendarDate, scheduledAt, amount,
                             timeHhmm, recurrenceGeneration, operationVersion,
@@ -272,10 +270,15 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
             String operationVersion,
             int fireRetryCount
     ) {
+        // The scheduler returns only after FIRED evidence and Native stock
+        // execution have both reached a durable outcome. Notify JS only after
+        // that boundary so a foreground reconciliation can never observe the
+        // pre-deduction Native balance caused by this delivery.
         if (shouldNotifyJavascript(result)) {
             notifyJavascript(
                     context, medicationId, doseId, calendarDate, scheduledAt, amount);
         }
+
         switch (result.status) {
             case CANCELLED:
                 Log.i(TAG, "stale fire ignored (cancel linearized first): "

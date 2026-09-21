@@ -210,6 +210,33 @@ public class AutoDeductionStockStoreTest {
     }
 
     @Test
+    public void seedCanImportLegacyOccurrenceResolutionWithoutChangingStock() {
+        AutoDeductionStockStore.OccurrenceResolution resolution =
+                new AutoDeductionStockStore.OccurrenceResolution(
+                        "med-1",
+                        "dose-1",
+                        "2026-09-21",
+                        AutoDeductionStockStore.OccurrenceResolution.Type.CONSUMED);
+
+        AutoDeductionStockStore.SnapshotResult result =
+                store.ensureMissingAndRead(
+                        java.util.Collections.singletonList(
+                                new AutoDeductionStockStore.StockSeed("med-1", 8.0)),
+                        java.util.Collections.singletonList(resolution));
+
+        assertTrue(result.ok);
+        assertEquals(8.0, result.stocks.get("med-1"), 0.0001);
+
+        AutoDeductionStockStore.AutoApplyResult auto =
+                store.applyAutoDeduction("med-1", "dose-1", "2026-09-21", 2.0);
+
+        assertTrue(auto.ok);
+        assertFalse(auto.applied);
+        assertEquals(0.0, auto.actualDeducted, 0.0001);
+        assertEquals(8.0, auto.currentPills, 0.0001);
+    }
+
+    @Test
     public void foregroundConsumedResolution_preventsSameOccurrenceAutoDeduction() {
         store.ensureMissingAndRead(java.util.Collections.singletonList(
                 new AutoDeductionStockStore.StockSeed("med-1", 10.0)));

@@ -109,11 +109,17 @@ public class FireRetryScheduleTest {
                 metadata.has(AutoDeductionContract.FIELD_RECURRENCE_GENERATION));
         String operationVersion = metadata.optString(
                 ExactAlarmContract.FIELD_OPERATION_VERSION, "");
-        long generation = metadata.optLong(
-                AutoDeductionContract.EXTRA_RECURRENCE_GENERATION, 0L);
         assertFalse("schedule must contain operationVersion",
                 operationVersion.isEmpty());
-        assertTrue("schedule must contain recurrenceGeneration",
+        long generation = Phase2TestSupport.appContext()
+                .getSharedPreferences(
+                        AutoDeductionContract.PREFS_RECURRENCE_AUTH, 0)
+                .getLong(
+                        AutoDeductionContract.RECURRENCE_AUTH_KEY_PREFIX
+                                + AutoDeductionContract.scheduleIdentityKey(
+                                        medicationId, doseId),
+                        0L);
+        assertTrue("Auto recurrence generation must be durable in its own state",
                 generation > 0L);
         return new String[] {
                 operationVersion,

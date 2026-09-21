@@ -129,6 +129,17 @@ final class Phase2TestSupport {
                 0L);
     }
 
+    static void seedAutoStock(String medicationId, double currentPills) {
+        AutoDeductionStockStore.SnapshotResult result =
+                new AutoDeductionStockStore(appContext()).ensureMissingAndRead(
+                        java.util.Collections.singletonList(
+                                new AutoDeductionStockStore.StockSeed(
+                                        medicationId, currentPills)));
+        if (!result.ok) {
+            throw new AssertionError("failed to seed Auto native stock: " + result.error);
+        }
+    }
+
     static AutoDeductionEventStore newEventStore() {
         return new AutoDeductionEventStore(appContext());
     }

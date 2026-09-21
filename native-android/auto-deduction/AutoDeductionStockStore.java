@@ -181,24 +181,12 @@ public final class AutoDeductionStockStore {
         }
     }
 
-    /** Backward-compatible helper for callers that only seed balances. */
-    public SnapshotResult ensureMissingAndRead(List<StockSeed> seeds) {
-        return ensureMissingAndRead(seeds, java.util.Collections.emptyList());
-    }
-
     /**
-     * Seed only missing medication balances and import already-terminal
-     * occurrence resolutions from the legacy JS model, then return authoritative
-     * Native balances for the requested medication IDs.
-     *
-     * <p>An existing Native balance is never overwritten by a JS snapshot.
-     * Occurrence resolutions suppress duplicate Auto execution without changing
-     * stock.</p>
+     * Seed only missing medication balances, then return authoritative Native
+     * balances for the requested medication IDs. Existing Native balances are
+     * never overwritten by the JavaScript snapshot.
      */
-    public SnapshotResult ensureMissingAndRead(
-            List<StockSeed> seeds,
-            List<OccurrenceResolution> resolutions
-    ) {
+    public SnapshotResult ensureMissingAndRead(List<StockSeed> seeds) {
         synchronized (LOCK) {
             SharedPreferences.Editor editor = prefs.edit();
             boolean changed = false;
@@ -220,24 +208,10 @@ public final class AutoDeductionStockStore {
                 }
             }
 
-            if (resolutions != null) {
-                for (OccurrenceResolution resolution : resolutions) {
-                    if (!isValidResolution(resolution)) {
-                        return SnapshotResult.failure("invalid_occurrence_resolution");
-                    }
-                    editor.putString(
-                            foregroundOccurrenceKey(
-                                    resolution.medicationId,
-                                    resolution.doseId,
-                                    resolution.calendarDate),
-                            resolution.type.name());
-                }
-            }
-
             // Mark the Android Native stock authority initialized only in the
-            // same durable commit as the baseline seeding and legacy occurrence
-            // migration. This prevents lifecycle recovery from consuming ambiguous
-            // pre-Native occurrences before JS has established their outcome.
+            // Baseline initialization is committed atomically with initial seeding.
+            // Lifecycle recovery may run only after this durable Native stock
+            // baseline exists.
             editor.putBoolean(KEY_STOCK_INITIALIZED, true);
             if (!editor.commit()) {
                 return SnapshotResult.failure(
@@ -261,62 +235,6 @@ public final class AutoDeductionStockStore {
     public boolean isInitialized() {
         synchronized (LOCK) {
             return prefs.getBoolean(KEY_STOCK_INITIALIZED, false);
-        }
-    }
-
-    /**
-     * Adopt an occurrence whose stock was already reflected by the JavaScript
-     * application before Native stock authority was introduced. This writes only
-     * the occurrence marker; it deliberately does not change the current balance.
-     *
-     * <p>After adoption, lifecycle recovery sees the marker and cannot subtract
-     * that legacy occurrence a second time.</p>
-     */
-    public AutoApplyResult adoptAlreadyAppliedOccurrence(
-            String medicationId,
-            String doseId,
-            String calendarDate,
-            double amount
-    ) {
-        if (!isValidId(medicationId)
-                || !isValidId(doseId)
-                || calendarDate == null
-                || calendarDate.trim().isEmpty()
-                || !AutoDeductionContract.isValidAmount(amount)) {
-            return AutoApplyResult.failure("invalid_adoption_args");
-        }
-
-        final String occurrenceKey =
-                medicationId + KEY_SEPARATOR + doseId + KEY_SEPARATOR + calendarDate;
-        final String autoKey = KEY_AUTO_PREFIX + occurrenceKey;
-
-        synchronized (LOCK) {
-            if (!prefs.getBoolean(KEY_STOCK_INITIALIZED, false)) {
-                return AutoApplyResult.failure("stock_not_initialized");
-            }
-            String markerRaw = prefs.getString(autoKey, null);
-            if (markerRaw != null) {
-                try {
-                    double actual = Double.parseDouble(markerRaw);
-                    Double current = readStockLocked(medicationId);
-                    if (current == null) {
-                        return AutoApplyResult.failure("stock_not_initialized");
-                    }
-                    return AutoApplyResult.alreadyApplied(actual, current);
-                } catch (NumberFormatException e) {
-                    return AutoApplyResult.failure("invalid_auto_marker");
-                }
-            }
-
-            Double current = readStockLocked(medicationId);
-            if (current == null) {
-                return AutoApplyResult.failure("stock_not_initialized");
-            }
-
-            if (!prefs.edit().putString(autoKey, encode(amount)).commit()) {
-                return AutoApplyResult.failure("auto_adoption_commit_failed");
-            }
-            return AutoApplyResult.applied(amount, current);
         }
     }
 

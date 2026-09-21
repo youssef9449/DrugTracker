@@ -31,6 +31,11 @@ public final class CriticalStockAlarmAdapter
 
     private final ExactAlarmRuntime runtime;
 
+    /** Required by ExactAlarmLifecycle for manifest-driven recovery dispatch. */
+    public CriticalStockAlarmAdapter() {
+        runtime = null;
+    }
+
     public CriticalStockAlarmAdapter(Context context) {
         runtime = new ExactAlarmRuntime(
                 context,

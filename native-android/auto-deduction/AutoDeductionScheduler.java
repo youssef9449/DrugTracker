@@ -952,21 +952,19 @@ public final class AutoDeductionScheduler {
      * consumed by the failed delivery, so without a retry the occurrence would
      * only recover via boot/TZ/JS restore paths.
      *
-     * <p>The retry re-delivers the SAME occurrence identity with the SAME
-     * ownership tokens ({@code operationVersion} + {@code recurrenceGeneration}),
+     * <p>The retry re-delivers the SAME occurrence identity with the same
+     * generic operationVersion ownership token and Auto-owned recurrenceGeneration,
      * so {@link #fireOccurrenceIfNotCancelled} remains the single linearized
      * fire path: a retry that races a cancel is rejected as CANCELLED, and
      * insert-if-absent idempotency prevents a duplicate FIRED row or a second
      * JS wake-up. Independent fire-retry evidence in {@link AutoDeductionContract#PREFS_FIRE_RETRY}
-     * is the durable authority for failed-fire recovery; schedule metadata may
-     * also carry a secondary {@code fireRetryCount} marker when the schedule row
-     * still exists, but config mutation must not erase the independent evidence.
+     * is the durable authority for failed-fire recovery; the shared schedule row
+     * does not carry the retry counter.
      *
      * @param nextRetryCount 1-based retry index carried in
      *        {@link AutoDeductionContract#EXTRA_FIRE_RETRY_COUNT}
-     * @return true only when required durable writes succeeded AND AlarmManager
-     *         accepted the retry alarm. Fail-closed: marker or independent-evidence
-     *         commit failure returns false without scheduling.
+     * @return true only when Auto retry evidence was durably recorded and AlarmManager
+     *         accepted the retry alarm. Evidence-write failure returns false without scheduling.
      */
     boolean scheduleFireRetry(
             String medicationId,

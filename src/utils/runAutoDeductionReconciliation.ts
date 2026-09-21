@@ -15,6 +15,7 @@ import {
   listFiredAutoDeductionEvents,
   markAutoDeductionEventReconciled,
   applyAutoDeductionStock,
+  adoptAlreadyAppliedAutoOccurrence,
   convergeAutoDeductionStock,
   type AutoDeductionEvent,
   type ListFiredEventsResult,
@@ -404,6 +405,44 @@ async function runOnce(
       // Keep the existing missing-med terminalization policy; there is no
       // current stock to mutate for a deleted medication.
       repairedEvents.push(event);
+      continue;
+    }
+
+    // Migration boundary: before Native stock authority existed, a FIRED
+    // occurrence could already have been applied by JS while still remaining
+    // FIRED because the native RECONCILED acknowledgement failed. The existing
+    // dose consume/skip markers are durable evidence that the stock mutation
+    // already happened, so adopt the occurrence marker without changing stock.
+    if (isExactAutoOccurrenceApplied(med, event.doseId, event.calendarDate)) {
+      const adoption = await adoptAlreadyAppliedAutoOccurrence(
+        event.medicationId,
+        event.doseId,
+        event.calendarDate,
+        event.amount
+      );
+      if (!adoption.ok) {
+        return {
+          medications: baseMeds,
+          logs: baseLogs,
+          toAcknowledge: [],
+          details: [],
+          mutated: false,
+          newExactLogs: [],
+          markedCount: 0,
+          recoveredEnvelope: false,
+          partialNativeAck: false,
+          durabilityBlocked: true,
+          nativeStockSyncFailed: true,
+          nativeStockSyncError: adoption.error,
+        };
+      }
+      repairedEvents.push({
+        ...event,
+        nativeStockApplied: adoption.native,
+        ...(adoption.native
+          ? { actualDeducted: adoption.actualDeducted }
+          : {}),
+      });
       continue;
     }
 

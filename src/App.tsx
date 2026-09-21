@@ -32,6 +32,8 @@ import { AutoDeductPromptModal } from './components/AutoDeductPromptModal';
 import { UpdatePrompt } from './components/UpdatePrompt';
 import { Toggle } from './components/ui/Toggle';
 import { SegmentedButton } from './components/ui/SegmentedButton';
+import { MedicationSortControl } from './components/MedicationSortControl';
+import type { MedicationSortField, MedicationSortDirection } from './utils/medicationSorting';
 import {
   requestNotificationPermission,
   getNotificationPermission,
@@ -158,6 +160,8 @@ export default function App() {
   const [fontScale, setFontScale] = useState<'normal' | 'large'>('normal');
   // Compact card view for "All Medications" tab
   const [isCompactView, setIsCompactView] = useState<boolean>(false);
+  const [medicationSortField, setMedicationSortField] = useState<MedicationSortField>('name');
+  const [medicationSortDirection, setMedicationSortDirection] = useState<MedicationSortDirection>('asc');
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
 
   const { alarmingMedication, alarmingDoseId, openAlarm, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
@@ -577,7 +581,7 @@ export default function App() {
     filteredMedications,
     alertsCount,
     sufficientCount,
-  } = useDerivedMedications(medications, logs, filter, searchQuery);
+  } = useDerivedMedications(medications, logs, filter, searchQuery, medicationSortField, medicationSortDirection);
 
   const openAdd = () => {
     setEditingMedication(null);

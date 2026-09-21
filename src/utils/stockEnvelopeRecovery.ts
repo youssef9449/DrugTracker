@@ -138,9 +138,9 @@ export interface PendingEnvelopeRef {
     calendarDate: string;
   }>;
   /** Manual only — durable foreground stock deltas, replayed idempotently in Native. */
-  stockDeltas?: Array<{ medicationId: string; delta: number }>;
+  stockDeltas: Array<{ medicationId: string; delta: number }>;
   /** Manual only — occurrence resolutions committed atomically in Native. */
-  occurrenceResolutions?: Array<{
+  occurrenceResolutions: Array<{
     medicationId: string;
     doseId: string;
     calendarDate: string;
@@ -427,8 +427,8 @@ export async function recoverAllPendingStockEnvelopes(
     if (env.kind === 'manual') {
       const nativeResult = await applyNativeStockDeltas(
         env.mutationSeq,
-        env.stockDeltas ?? [],
-        env.occurrenceResolutions ?? []
+        env.stockDeltas,
+        env.occurrenceResolutions
       );
       if (!nativeResult.ok) {
         durabilityBlocked = true;
@@ -581,6 +581,8 @@ export async function recoverManualEnvelopeInto(
       logs: exact.logs,
       globalAutoDeductEnabled: exact.globalAutoDeductEnabled,
       toAcknowledge: exact.toAcknowledge,
+      stockDeltas: [],
+      occurrenceResolutions: [],
       clear: () => saveExactAutoStockEnvelope(null),
     });
   }

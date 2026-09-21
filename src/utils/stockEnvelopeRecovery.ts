@@ -114,9 +114,9 @@ export interface ManualStockEnvelope {
   baseGeneration: number;
   mutationSeq: number;
   /** Native Auto-owned stock deltas applied with this foreground mutation. */
-  stockDeltas: Array<{ medicationId: string; delta: number }>;
+  stockDeltas?: Array<{ medicationId: string; delta: number }>;
   /** Manual Take/Restore occurrence resolutions committed atomically in Native. */
-  occurrenceResolutions: Array<{
+  occurrenceResolutions?: Array<{
     medicationId: string;
     doseId: string;
     calendarDate: string;
@@ -138,9 +138,9 @@ export interface PendingEnvelopeRef {
     calendarDate: string;
   }>;
   /** Manual only — durable foreground stock deltas, replayed idempotently in Native. */
-  stockDeltas: Array<{ medicationId: string; delta: number }>;
+  stockDeltas?: Array<{ medicationId: string; delta: number }>;
   /** Manual only — occurrence resolutions committed atomically in Native. */
-  occurrenceResolutions: Array<{
+  occurrenceResolutions?: Array<{
     medicationId: string;
     doseId: string;
     calendarDate: string;
@@ -427,8 +427,8 @@ export async function recoverAllPendingStockEnvelopes(
     if (env.kind === 'manual') {
       const nativeResult = await applyNativeStockDeltas(
         env.mutationSeq,
-        env.stockDeltas,
-        env.occurrenceResolutions
+        env.stockDeltas ?? [],
+        env.occurrenceResolutions ?? []
       );
       if (!nativeResult.ok) {
         durabilityBlocked = true;
@@ -566,8 +566,8 @@ export async function recoverManualEnvelopeInto(
       medications: manual.medications,
       logs: manual.logs,
       globalAutoDeductEnabled: manual.globalAutoDeductEnabled,
-      stockDeltas: manual.stockDeltas,
-      occurrenceResolutions: manual.occurrenceResolutions,
+      stockDeltas: manual.stockDeltas ?? [],
+      occurrenceResolutions: manual.occurrenceResolutions ?? [],
       clear: () => saveManualStockEnvelope(null),
     });
   }

@@ -64,6 +64,18 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 && fireRetryCount < AutoDeductionContract.MAX_FIRE_RETRIES;
     }
 
+    /**
+     * Native stock application failure is retryable even when FIRED persistence
+     * itself succeeded (CREATED / ALREADY_EXISTS). Re-delivery is occurrence-
+     * idempotent and therefore safe for stock repair.
+     */
+    static boolean shouldScheduleStockRetry(
+            AutoDeductionScheduler.FireResult result, int fireRetryCount) {
+        return result != null
+                && result.allowsRecurrence()
+                && fireRetryCount < AutoDeductionContract.MAX_FIRE_RETRIES;
+    }
+
     static void notifyJavascript(
             Context context,
             String medicationId,
@@ -230,7 +242,7 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 Log.e(TAG, "independent recovery native stock apply failed: "
                         + medicationId + "/" + doseId + "/" + calendarDate
                         + " — " + stockResult.error);
-                if (shouldScheduleFireRetry(result, fireRetryCount)) {
+                if (shouldScheduleStockRetry(result, fireRetryCount)) {
                     boolean retryScheduled = scheduler.scheduleFireRetry(
                             medicationId, doseId, calendarDate, scheduledAt, amount,
                             timeHhmm, recurrenceGeneration, operationVersion,
@@ -259,7 +271,7 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 if (result.pendingRecorded) {
                     Log.w(TAG, "independent recovery pending recorded (no successor): "
                             + medicationId + "/" + doseId + "/" + calendarDate);
-                } else if (shouldScheduleFireRetry(result, fireRetryCount)) {
+                } else if (shouldScheduleStockRetry(result, fireRetryCount)) {
                     boolean retryScheduled = scheduler.scheduleFireRetry(
                             medicationId, doseId, calendarDate, scheduledAt, amount,
                             timeHhmm, recurrenceGeneration, operationVersion,

@@ -38,7 +38,6 @@ def alarmRuntimeSources = fileTree("../alarm-runtime") {
             "ExactAlarmLifecycle.java",
             "DrugTrackerAlarmSystemReceiver.java",
             "ExactAlarmFeatureAdapter.java",
-            "CriticalStockAlarmFeature.java",
             "DoseReminderAlarmFeature.java"
     )
 }
@@ -60,8 +59,7 @@ def doseReminderAlarmSources = fileTree("../dose-reminder") {
 
 def criticalStockAlarmSources = fileTree("../critical-stock") {
     include(
-            "CriticalStockAlarmAdapter.java",
-            "CriticalStockAlarmReceiver.java"
+            "CriticalStockAlarmAdapter.java"
     )
 }
 

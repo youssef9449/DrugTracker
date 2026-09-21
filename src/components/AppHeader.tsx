@@ -114,7 +114,7 @@ export const AppHeader: FC<AppHeaderProps> = ({
           >
             {notificationsEnabled ? (
               <>
-                <Bell className="w-6 h-6 fill-teal-800/10 text-m3-on-primary-container" />
+                <Bell className="w-6 h-6 fill-m3-primary/10 text-m3-on-primary-container" />
                 <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-m3-primary ring-2 ring-m3-surface animate-pulse" />
               </>
             ) : (
@@ -140,7 +140,7 @@ export const AppHeader: FC<AppHeaderProps> = ({
           >
             <AlertTriangle
               className={`w-6 h-6 ${
-                criticalStockAlertsEnabled ? 'fill-rose-200 text-m3-error' : 'text-m3-on-surface-variant'
+                criticalStockAlertsEnabled ? 'fill-m3-error-container text-m3-error' : 'text-m3-on-surface-variant'
               }`}
             />
           </button>

@@ -21,6 +21,11 @@ public final class ExactAlarmLifecycle {
     public static final String FEATURE_ADAPTERS_META_DATA =
             "app.drugtracker.EXACT_ALARM_FEATURE_ADAPTERS";
 
+    public static final String REASON_BOOT = "BOOT";
+    public static final String REASON_TIMEZONE_CHANGED = "TIMEZONE_CHANGED";
+    public static final String REASON_EXACT_ALARM_PERMISSION =
+            "EXACT_ALARM_PERMISSION";
+
     private ExactAlarmLifecycle() {}
 
     public static void restoreAll(

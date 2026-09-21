@@ -1,5 +1,5 @@
 /**
- * Structural regression checks for the Phase 4 Auto Deduction scheduling boundary.
+ * Structural regression checks for the Phase 2 Auto Deduction scheduling boundary.
  * Run: node scripts/test-auto-deduction-scheduling-adapter.mjs
  * No npm/npx required.
  */
@@ -25,19 +25,59 @@ const scheduler = read('native-android/auto-deduction/AutoDeductionScheduler.jav
 const adapter = read('native-android/auto-deduction/AutoDeductionSchedulingAdapter.java');
 const prepare = read('scripts/prepare-android.mjs');
 const gradle = read('native-android/jvm-tests/build.gradle');
+const runtime = read('native-android/alarm-runtime/ExactAlarmRuntime.java');
+const store = read('native-android/alarm-runtime/ExactAlarmStore.java');
+const lock = read('native-android/alarm-runtime/ExactAlarmOperationLock.java');
 
 assert(
   !scheduler.includes('import app.drugtracker.alarmruntime.ExactAlarmRuntime'),
   'business scheduler must not import ExactAlarmRuntime'
 );
 assert(
-  scheduler.includes('import app.drugtracker.alarmruntime.ExactAlarmStore;'),
-  'Auto business recovery may use the shared durable schedule store directly'
+  !scheduler.includes('import app.drugtracker.alarmruntime.ExactAlarmStore;'),
+  'Auto business scheduler must not import the shared alarm store'
+);
+assert(
+  !scheduler.includes('import app.drugtracker.alarmruntime.ExactAlarmOperationLock;'),
+  'Auto business scheduler must not import the shared alarm operation lock'
+);
+assert(
+  !runtime.includes('ExactAlarmStore store()'),
+  'ExactAlarmRuntime must not expose the shared store'
+);
+assert(
+  !store.includes('public final class ExactAlarmStore'),
+  'ExactAlarmStore must remain internal to the alarm-runtime package'
+);
+assert(
+  !lock.includes('public final class ExactAlarmOperationLock'),
+  'ExactAlarmOperationLock must remain internal to the alarm-runtime package'
+);
+assert(
+  !scheduler.includes('schedulePrefs'),
+  'Auto business scheduler must not access shared alarm schedule SharedPreferences'
+);
+assert(
+  !scheduler.includes('scheduleStore'),
+  'Auto business scheduler must not own the shared alarm store'
+);
+assert(
+  !scheduler.includes('FIELD_FIRE_RETRY_COUNT'),
+  'Auto shared schedule metadata must not have a fireRetryCount field'
+);
+assert(
+  !scheduler.includes('put("fireRetryCount"'),
+  'Auto shared schedule metadata must not persist the retry counter'
 );
 assert(
   !scheduler.includes('new ExactAlarmRuntime('),
   'business scheduler must not construct ExactAlarmRuntime'
 );
+assert(
+  !scheduler.includes('ExactAlarmOperationLock.LOCK'),
+  'business scheduler must use its own feature-owned serialization lock'
+);
+
 assert(
   !scheduler.includes('alarmRuntime.'),
   'business scheduler must not call the shared runtime directly'
@@ -57,6 +97,22 @@ assert(
 assert(
   !adapter.includes('schedulePrefs'),
   'scheduling adapter must not own durable schedule preference access'
+);
+assert(
+  adapter.includes('alarmRuntime.getScheduleRaw('),
+  'scheduling adapter must expose schedule reads through ExactAlarmRuntime'
+);
+assert(
+  adapter.includes('alarmRuntime.listScheduleMetadata('),
+  'scheduling adapter must expose schedule snapshots through ExactAlarmRuntime'
+);
+assert(
+  adapter.includes('alarmRuntime.removeScheduleIfOwned('),
+  'scheduling adapter must expose ownership-safe removal through ExactAlarmRuntime'
+);
+assert(
+  adapter.includes('alarmRuntime.isEffectivelyCancelled('),
+  'scheduling adapter must expose cancellation state through ExactAlarmRuntime'
 );
 
 assert(

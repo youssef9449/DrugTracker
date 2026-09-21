@@ -56,8 +56,16 @@ public final class AutoDeductionSchedulingAdapter {
                 forceScheduleMetadataRemovalFailureForTest;
     }
 
+    private static String normalizeStorageKey(String storageKey) {
+        if (storageKey == null || storageKey.isEmpty()) return null;
+        return storageKey.startsWith(ExactAlarmContract.SCHEDULE_KEY_PREFIX)
+                ? storageKey.substring(ExactAlarmContract.SCHEDULE_KEY_PREFIX.length())
+                : storageKey;
+    }
+
     public String getScheduleRaw(String storageKey) {
-        return alarmRuntime.getScheduleRaw(storageKey);
+        String key = normalizeStorageKey(storageKey);
+        return key == null ? null : alarmRuntime.getScheduleRaw(key);
     }
 
     public Map<String, String> listScheduleMetadata() {
@@ -65,30 +73,37 @@ public final class AutoDeductionSchedulingAdapter {
     }
 
     public boolean hasSchedule(String storageKey) {
-        return alarmRuntime.hasSchedule(storageKey);
+        String key = normalizeStorageKey(storageKey);
+        return key != null && alarmRuntime.hasSchedule(key);
     }
 
     public boolean removeScheduleIfOwned(
             String storageKey,
             String expectedOperationVersion) {
-        return alarmRuntime.removeScheduleIfOwned(
-                storageKey, expectedOperationVersion);
+        String key = normalizeStorageKey(storageKey);
+        return key != null
+                && alarmRuntime.removeScheduleIfOwned(
+                        key, expectedOperationVersion);
     }
 
     public boolean removeSchedule(String storageKey) {
-        return alarmRuntime.removeSchedule(storageKey);
+        String key = normalizeStorageKey(storageKey);
+        return key != null && alarmRuntime.removeSchedule(key);
     }
 
     public boolean hasCancellationTombstone(String storageKey) {
-        return alarmRuntime.hasCancellationTombstone(storageKey);
+        String key = normalizeStorageKey(storageKey);
+        return key != null && alarmRuntime.hasCancellationTombstone(key);
     }
 
     public boolean isEffectivelyCancelled(String storageKey) {
-        return alarmRuntime.isEffectivelyCancelled(storageKey);
+        String key = normalizeStorageKey(storageKey);
+        return key != null && alarmRuntime.isEffectivelyCancelled(key);
     }
 
     public boolean clearCancellationTombstone(String storageKey) {
-        return alarmRuntime.clearCancellationTombstone(storageKey);
+        String key = normalizeStorageKey(storageKey);
+        return key == null || alarmRuntime.clearCancellationTombstone(key);
     }
 
     public boolean canScheduleExactAlarms() {

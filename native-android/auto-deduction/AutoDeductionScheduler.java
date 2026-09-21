@@ -73,7 +73,7 @@ public final class AutoDeductionScheduler {
     private final SharedPreferences recurrenceAuthPrefs;
     /**
      * Independent fire-failure / retry evidence (not schedule metadata).
-     * Survives config mutation that removes sch: rows.
+     * Survives config mutation that removes shared schedule rows.
      */
     private final SharedPreferences fireRetryPrefs;
     /** Single Auto-specific scheduling boundary over the shared exact-alarm runtime. */
@@ -1119,7 +1119,7 @@ public final class AutoDeductionScheduler {
 
     /**
      * Recover a previously authorized fire from independent failure evidence.
-     * Does NOT require sch: metadata and does NOT schedule recurrence successors.
+     * Does NOT require shared schedule metadata and does NOT schedule recurrence successors.
      * Lock order: SCHEDULE_LOCK → EventStore.LOCK (via insertFiredIfAbsent).
      */
     public FireResult recoverFireFromIndependentEvidence(
@@ -1180,7 +1180,7 @@ public final class AutoDeductionScheduler {
 
     /**
      * Restore-boundary pass: attempt recovery for every independent fire-retry
-     * evidence row, even when sch: metadata is missing.
+     * evidence row, even when shared schedule metadata is missing.
      */
     RestoreResult recoverIndependentFireRetryEvidencePass() {
         int recovered = 0;
@@ -2199,7 +2199,7 @@ public final class AutoDeductionScheduler {
             }
         }
 
-        // Also recover independent fire-retry evidence (may exist without sch: rows).
+        // Also recover independent fire-retry evidence (may exist without shared schedule rows).
         RestoreResult retryPass = recoverIndependentFireRetryEvidencePass();
         restored += retryPass.restored;
         failed += retryPass.failed;
@@ -2215,7 +2215,7 @@ public final class AutoDeductionScheduler {
     }
 
 
-    /** Parsed medicationId + doseId + calendarDate from a sch: storage key. */
+    /** Parsed medicationId + doseId + calendarDate from an Auto occurrence storage key. */
     private static final class ScheduleStorageIdentity {
         final String medicationId;
         final String doseId;

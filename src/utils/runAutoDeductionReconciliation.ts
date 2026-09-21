@@ -40,6 +40,8 @@ import {
   type PendingEnvelopeRef,
 } from './stockEnvelopeRecovery';
 import { allocateMutationSeq } from './stockMutationOrdering';
+import { persist } from './storage';
+import { STORAGE_MEDS_KEY } from './autoDeductionStockGate';
 
 export interface ExactAutoEnvelope {
   version: 1;
@@ -346,14 +348,22 @@ async function runOnce(
   }
 
   if (!events.length) {
+    if (nativeStockChanged) {
+      // Native is the Android authority; persist only the JS mirror here.
+      // This is not a stock mutation and must not create a new mutationSeq.
+      const mirrorPersistError = persist(STORAGE_MEDS_KEY, baseMeds, { json: true });
+      if (mirrorPersistError) {
+        console.warn(
+          '[App] Native Auto stock converged but JS stock mirror persist failed:',
+          mirrorPersistError
+        );
+      }
+    }
     return {
       medications: baseMeds,
       logs: baseLogs,
       toAcknowledge: [],
       details: [],
-      // Native stock may have changed while JS was unavailable even though
-      // the FIRED ledger is already terminal. The mirrored currentPills above
-      // is therefore the authoritative JS snapshot for this pass.
       mutated: nativeStockChanged,
       newExactLogs: [],
       markedCount: 0,

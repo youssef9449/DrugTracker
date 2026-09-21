@@ -57,18 +57,6 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 && fireRetryCount < AutoDeductionContract.MAX_FIRE_RETRIES;
     }
 
-    /**
-     * Native stock application failure is retryable even when FIRED persistence
-     * itself succeeded (CREATED / ALREADY_EXISTS). Re-delivery is occurrence-
-     * idempotent and therefore safe for stock repair.
-     */
-    static boolean shouldScheduleStockRetry(
-            AutoDeductionScheduler.FireResult result, int fireRetryCount) {
-        return result != null
-                && result.allowsRecurrence()
-                && fireRetryCount < AutoDeductionContract.MAX_FIRE_RETRIES;
-    }
-
     static void notifyJavascript(
             Context context,
             String medicationId,

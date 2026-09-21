@@ -115,29 +115,3 @@ export async function scheduleCriticalAlarm(
     return false;
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────
-// Daily dose-reminder alarm (AlarmManager-backed).
-//
-// Android architecture:
-// - JavaScript chooses the next desired occurrence and calls DoseReminder's
-//   exact-alarm adapter.
-// - ExactAlarmRuntime owns AlarmManager timing and durable schedule identity.
-// - DoseReminderAlarmReceiver posts through NotificationRuntime at delivery
-//   and asks ExactAlarmRuntime to arm the next calendar-day occurrence.
-// - useDoseReminderScheduler reconciles against the native exact-alarm state.
-// iOS keeps its existing LocalNotifications fallback path.
-
-// Sentinel lives in a leaf module so pure-logic modules (dateCalculations)
-// can reference it without importing the notification stack.
-// Re-exported here for convenient access from existing importers.
-
-/**
- * Recurring dose-alarm id for an explicit doseSchedule row (Issue #268).
- * Identity = medicationId + doseId. Requires non-empty doseId.
- * Returns null when doseId is missing — callers must not schedule/cancel.
- *
- * This helper is retained for the iOS LocalNotifications fallback only.
- * Android future-alarm identity is the full logical medId::doseId inside
- * ExactAlarmRuntime.
- */

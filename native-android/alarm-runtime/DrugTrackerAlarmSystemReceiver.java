@@ -10,7 +10,7 @@ import android.util.Log;
  * require restoration of native alarm state.
  *
  * <p>Feature recovery is delegated through {@link ExactAlarmLifecycle};
- * this receiver contains no Auto/Critical/Dose business logic.</p>
+ * this receiver contains no feature-specific business logic.</p>
  */
 public final class DrugTrackerAlarmSystemReceiver
         extends BroadcastReceiver {

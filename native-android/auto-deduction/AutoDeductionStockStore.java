@@ -192,6 +192,11 @@ public final class AutoDeductionStockStore {
      * legacy occurrence resolutions are only used to suppress a later duplicate
      * Auto occurrence; they do not mutate stock.</p>
      */
+    /** Backward-compatible helper for tests/callers that only seed balances. */
+    public SnapshotResult ensureMissingAndRead(List<StockSeed> seeds) {
+        return ensureMissingAndRead(seeds, java.util.Collections.emptyList());
+    }
+
     public SnapshotResult ensureMissingAndRead(
             List<StockSeed> seeds,
             List<OccurrenceResolution> resolutions

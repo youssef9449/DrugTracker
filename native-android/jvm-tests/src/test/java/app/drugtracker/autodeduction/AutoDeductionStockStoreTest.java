@@ -179,6 +179,27 @@ public class AutoDeductionStockStoreTest {
     }
 
     @Test
+    public void zeroDelta_canInitializeNewMedicationStockRow() {
+        AutoDeductionStockStore.ForegroundApplyResult result =
+                store.applyForegroundDeltas(
+                        21L,
+                        java.util.Collections.singletonList(
+                                new AutoDeductionStockStore.StockDelta("new-med", 0.0)));
+
+        assertTrue(result.ok);
+        assertFalse(result.alreadyApplied);
+        assertEquals(0.0, result.stocks.get("new-med"), 0.0001);
+        assertTrue(store.isInitialized());
+
+        AutoDeductionStockStore.AutoApplyResult auto =
+                store.applyAutoDeduction("new-med", "dose-1", "2026-09-21", 1.0);
+        assertTrue("zero-stock Auto occurrence must still become a terminal occurrence",
+                auto.ok);
+        assertEquals(0.0, auto.actualDeducted, 0.0001);
+        assertEquals(0.0, auto.currentPills, 0.0001);
+    }
+
+    @Test
     public void foregroundNegativeDelta_onUnknownMedication_failsClosed() {
         AutoDeductionStockStore.ForegroundApplyResult result =
                 store.applyForegroundDeltas(

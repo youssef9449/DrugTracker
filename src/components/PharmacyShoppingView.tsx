@@ -664,30 +664,78 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                     aria-label={`طريقة حساب كمية طلب ${med.name}`}
                   />
 
-                  {/* Unit selector chips (M3 Filter Chips) */}
+                  {/* Unit + quantity controls: keep each quantity input directly beside
+                      the unit icon/label so mixed custom selections are unambiguous. */}
                   {availableUnits.length > 1 && (
-                    <div className="flex items-center gap-1 shrink-0">
+                    <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
                       {availableUnits.map((u) => {
                         const isActive = selectedUnits.includes(u);
                         const icon = u === 'pills' ? <Pill className="w-2.5 h-2.5" /> : u === 'boxes' ? <Box className="w-2.5 h-2.5" /> : <Layers className="w-2.5 h-2.5" />;
                         const boxLabel = med.unit === 'مل' ? 'عبوة' : 'علبة';
                         const label = u === 'pills' ? med.unit : u === 'boxes' ? boxLabel : 'شريط';
+
                         return (
-                          <button
+                          <div
                             key={u}
-                            type="button"
-                            onClick={() => handleToggleOrderUnit(med, u, suggestedPills)}
-                            className={`h-[28px] px-2 rounded-lg text-[10px] font-bold flex items-center gap-1 transition cursor-pointer border ${
+                            className={`flex items-center gap-1 rounded-lg border px-1 py-0.5 transition ${
                               isActive
-                                ? 'bg-teal-100 text-teal-950 border-teal-300 shadow-2xs'
-                                : 'bg-slate-50/80 text-slate-600 border-slate-200/90 hover:bg-slate-100'
+                                ? 'border-teal-300 bg-teal-50/80'
+                                : 'border-slate-200 bg-slate-50/80'
                             }`}
                           >
-                            {icon}
-                            <span>{label}</span>
-                          </button>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleOrderUnit(med, u, suggestedPills)}
+                              className={`h-[28px] px-2 rounded-md text-[10px] font-bold flex items-center gap-1 transition cursor-pointer ${
+                                isActive
+                                  ? 'bg-teal-100 text-teal-950'
+                                  : 'bg-transparent text-slate-600 hover:bg-white'
+                              }`}
+                              aria-pressed={isActive}
+                            >
+                              {icon}
+                              <span>{label}</span>
+                            </button>
+
+                            {isActive && getQuantityMode(med) === 'custom' && (
+                              <input
+                                type="number"
+                                min="1"
+                                value={getCustomQuantityInputValue(med, u, suggestedPills)}
+                                onChange={(event) => handleCustomQuantityChange(med, u, event.target.value)}
+                                className="w-12 rounded-md border border-teal-200 bg-white px-1 py-1 text-center font-mono font-bold text-xs focus:ring-1 focus:ring-teal-500"
+                                aria-label={`كمية ${med.name} ${unitLabel(u, med, 1)}`}
+                              />
+                            )}
+                          </div>
                         );
                       })}
+                    </div>
+                  )}
+                  {availableUnits.length === 1 && getQuantityMode(med) === 'custom' && (
+                    <div className="flex items-center gap-1 rounded-lg border border-teal-300 bg-teal-50/80 px-1 py-0.5 shrink-0">
+                      <div className="h-[28px] px-2 rounded-md bg-teal-100 text-teal-950 text-[10px] font-bold flex items-center gap-1">
+                        {availableUnits[0] === 'pills'
+                          ? <Pill className="w-2.5 h-2.5" />
+                          : availableUnits[0] === 'boxes'
+                          ? <Box className="w-2.5 h-2.5" />
+                          : <Layers className="w-2.5 h-2.5" />}
+                        <span>
+                          {availableUnits[0] === 'pills'
+                            ? med.unit
+                            : availableUnits[0] === 'boxes'
+                            ? (med.unit === 'مل' ? 'عبوة' : 'علبة')
+                            : 'شريط'}
+                        </span>
+                      </div>
+                      <input
+                        type="number"
+                        min="1"
+                        value={getCustomQuantityInputValue(med, availableUnits[0], suggestedPills)}
+                        onChange={(event) => handleCustomQuantityChange(med, availableUnits[0], event.target.value)}
+                        className="w-12 rounded-md border border-teal-200 bg-white px-1 py-1 text-center font-mono font-bold text-xs focus:ring-1 focus:ring-teal-500"
+                        aria-label={`كمية ${med.name} ${unitLabel(availableUnits[0], med, 1)}`}
+                      />
                     </div>
                   )}
                 </div>
@@ -728,23 +776,8 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                     })}
                   </div>
                 ) : (
-                  <div className="space-y-1">
-                    {selectedUnits.map((unit) => {
-                      const inputValue = getCustomQuantityInputValue(med, unit, suggestedPills);
-                      return (
-                        <div key={unit} className="flex items-center gap-1.5 rounded-lg border border-slate-200/80 bg-slate-50/60 px-2.5 py-1">
-                          <span className="text-[10px] text-slate-500 font-medium">الكمية:</span>
-                          <input
-                            type="number"
-                            min="1"
-                            value={inputValue}
-                            onChange={(event) => handleCustomQuantityChange(med, unit, event.target.value)}
-                            className="w-14 rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-center font-mono font-bold text-xs focus:ring-1 focus:ring-teal-500"
-                            aria-label={`كمية ${med.name} ${unitLabel(unit, med, 1)}`}
-                          />
-                        </div>
-                      );
-                    })}
+                  <div className="text-[10px] text-slate-500">
+                    حدد الوحدة والكمية من نفس البطاقة بالأعلى.
                   </div>
                 )}
 

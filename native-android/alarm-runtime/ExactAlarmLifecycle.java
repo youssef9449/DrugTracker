@@ -1,8 +1,6 @@
 package app.drugtracker.alarmruntime;
 
-import android.app.AlarmManager;
 import android.content.Context;
-import android.os.Build;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
@@ -15,7 +13,7 @@ import java.util.List;
  * Shared system-lifecycle dispatcher.
  *
  * <p>This class owns adapter discovery and the single platform exact-alarm
- * permission check. Feature business rules remain in adapters.</p>
+ * permission authority. Feature business rules remain in adapters.</p>
  */
 public final class ExactAlarmLifecycle {
     private static final String TAG = "ExactAlarmLifecycle";
@@ -25,23 +23,12 @@ public final class ExactAlarmLifecycle {
 
     private ExactAlarmLifecycle() {}
 
-    /** Shared exact-alarm capability check for all lifecycle-aware features. */
-    public static boolean canScheduleExactAlarms(Context context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-            return true;
-        }
-        AlarmManager manager = (AlarmManager) context
-                .getApplicationContext()
-                .getSystemService(Context.ALARM_SERVICE);
-        return manager != null && manager.canScheduleExactAlarms();
-    }
-
     public static void restoreAll(
             Context context,
             String reason) {
         Context appContext = context.getApplicationContext();
         boolean exactAlarmPermissionGranted =
-                canScheduleExactAlarms(appContext);
+                ExactAlarmRuntime.canScheduleExactAlarms(appContext);
 
         for (String className : adapterClassNames(appContext)) {
             try {

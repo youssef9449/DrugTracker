@@ -57,10 +57,22 @@ public final class ExactAlarmRuntime {
         return store;
     }
 
-    public boolean canScheduleExactAlarms() {
+    /**
+     * Single native source of truth for Android exact-alarm capability.
+     * Feature adapters and lifecycle/bridge code must delegate here rather
+     * than reimplementing the platform check.
+     */
+    public static boolean canScheduleExactAlarms(Context context) {
+        if (context == null) return false;
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true;
-        AlarmManager manager = alarmManager();
+        AlarmManager manager = (AlarmManager) context
+                .getApplicationContext()
+                .getSystemService(Context.ALARM_SERVICE);
         return manager != null && manager.canScheduleExactAlarms();
+    }
+
+    public boolean canScheduleExactAlarms() {
+        return canScheduleExactAlarms(appContext);
     }
 
     /** Snapshot of one durable schedule row. The returned object is a defensive copy. */

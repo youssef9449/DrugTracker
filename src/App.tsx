@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Medication,
   ConsumptionLog,
@@ -153,6 +153,15 @@ export default function App() {
   const [doseLifecycleTick, setDoseLifecycleTick] = useState(0);
 
   const [globalAutoDeductEnabled, setGlobalAutoDeductEnabled] = useState<boolean>(true);
+  // Translate business policy into the neutral Dose Reminder capability.
+  const allowManualTakeActionByMedicationId = useMemo(() => {
+    const result = new Map<string, boolean>();
+    for (const medication of medications) {
+      result.set(medication.id, medication.autoDeductEnabled === false);
+    }
+    return result;
+  }, [medications]);
+
 
   const [isPhoneFrame, setIsPhoneFrame] = useState(true);
   // Font size toggle: 'normal' (default) or 'large'. Persisted to
@@ -166,6 +175,7 @@ export default function App() {
 
   const { alarmingMedication, alarmingDoseId, openAlarm, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
     medications,
+    allowManualTakeActionByMedicationId,
   });
 
   // Phase 3A: multi-dose manual consume / restore requires explicit dose selection.
@@ -394,6 +404,7 @@ export default function App() {
   // ─────────────────────────────────────────────────────────────
   useDoseReminderScheduler({
     medications,
+    allowManualTakeActionByMedicationId,
     notificationsEnabled,
     hydrated,
     isFirstRun,
@@ -552,7 +563,7 @@ export default function App() {
 
 
   useNativeActionHandlers({
-    medications,
+    allowManualTakeActionByMedicationId,
     handleTakeDoseFromAlarmById,
     openAlarm,
     soundEnabled,

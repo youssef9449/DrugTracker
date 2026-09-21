@@ -48,9 +48,18 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
  * Manual-alarm suite default: medications have Auto OFF (or empty list) so
  * openAlarm() is allowed. Opt into Auto ON via medication.autoDeductEnabled.
  */
+function capabilityMap(medications: Medication[]): ReadonlyMap<string, boolean> {
+  return new Map(
+    medications.map((med) => [med.id, med.autoDeductEnabled === false])
+  );
+}
+
 function defaultOpts(overrides: Record<string, unknown> = {}) {
+  const medications =
+    (overrides.medications as Medication[] | undefined) ?? [];
   return {
-    medications: [],
+    medications,
+    allowManualTakeActionByMedicationId: capabilityMap(medications),
     ...overrides,
   };
 }
@@ -342,7 +351,7 @@ describe('useDoseReminders', () => {
 
 });
 
-describe('useDoseReminders — medication-level Auto (openAlarm)', () => {
+describe('useDoseReminders — manual Take capability', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
@@ -352,53 +361,23 @@ describe('useDoseReminders — medication-level Auto (openAlarm)', () => {
     cleanup();
   });
 
-  it('Medication Auto ON: openAlarm does not open manual modal', () => {
-    const med = makeMed({ id: 'med-auto-on', autoDeductEnabled: true });
-    const { result } = renderHook(() =>
-      useDoseReminders(defaultOpts({ medications: [med] }))
-    );
-    act(() => {
-      result.current.openAlarm('med-auto-on', 'd1');
-    });
+  it('allowManualTakeAction=false: openAlarm does not open the manual modal', () => {
+    const med = makeMed({ id: 'med-no-manual' });
+    const { result } = renderHook(() => useDoseReminders({
+      medications: [med],
+      allowManualTakeActionByMedicationId: new Map([['med-no-manual', false]]),
+    }));
+    act(() => result.current.openAlarm('med-no-manual', 'd1'));
     expect(result.current.alarmingMedication).toBeNull();
   });
 
-  it('Medication Auto ON (Global would be OFF): still does not open manual modal', () => {
-    // Global is not passed to the hook; only med preference matters.
-    const med = makeMed({ id: 'med-auto-on-2', autoDeductEnabled: true });
-    const { result } = renderHook(() =>
-      useDoseReminders({ medications: [med] })
-    );
-    act(() => {
-      result.current.openAlarm('med-auto-on-2', 'd1');
-    });
-    expect(result.current.alarmingMedication).toBeNull();
-  });
-
-  it('Medication Auto OFF: openAlarm opens the modal', () => {
-    const med = makeMed({ id: 'med-auto-off', autoDeductEnabled: false });
-    const { result } = renderHook(() =>
-      useDoseReminders(defaultOpts({ medications: [med] }))
-    );
-    act(() => {
-      result.current.openAlarm('med-auto-off', 'd1');
-    });
-    expect(result.current.alarmingMedication?.id).toBe('med-auto-off');
-  });
-
-  it('Medication Auto undefined (default ON): openAlarm does not open modal', () => {
-    // makeMed defaults to autoDeductEnabled: false for the manual suite;
-    // this case must exercise the production rule med.autoDeductEnabled !== false
-    // with the property actually absent.
-    const med = makeMed({ id: 'med-default-auto' });
-    delete (med as { autoDeductEnabled?: boolean }).autoDeductEnabled;
-    expect(med.autoDeductEnabled).toBeUndefined();
-    const { result } = renderHook(() =>
-      useDoseReminders({ medications: [med] })
-    );
-    act(() => {
-      result.current.openAlarm('med-default-auto', 'd1');
-    });
-    expect(result.current.alarmingMedication).toBeNull();
+  it('allowManualTakeAction=true: openAlarm opens the manual modal', () => {
+    const med = makeMed({ id: 'med-manual' });
+    const { result } = renderHook(() => useDoseReminders({
+      medications: [med],
+      allowManualTakeActionByMedicationId: new Map([['med-manual', true]]),
+    }));
+    act(() => result.current.openAlarm('med-manual', 'd1'));
+    expect(result.current.alarmingMedication?.id).toBe('med-manual');
   });
 });

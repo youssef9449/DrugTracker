@@ -1,5 +1,4 @@
 import { useEffect, type Dispatch, type SetStateAction } from 'react';
-import type { Medication } from '../types';
 import {
   registerNotificationActionHandler,
   registerDoseReceivedHandler,
@@ -14,7 +13,7 @@ import { playSuccessChime } from '../utils/sound';
  * Semantics match the previous inline effects in App.tsx.
  */
 export function useNativeActionHandlers(opts: {
-  medications: Medication[];
+  allowManualTakeActionByMedicationId: ReadonlyMap<string, boolean>;
   handleTakeDoseFromAlarmById: (medicationId: string, doseId?: string) => void;
   openAlarm: (medId: string, doseId: string) => void;
   soundEnabled: boolean;
@@ -24,7 +23,7 @@ export function useNativeActionHandlers(opts: {
   setExactAlarmPermission: Dispatch<SetStateAction<ExactAlarmPermission | null>>;
 }): void {
   const {
-    medications,
+    allowManualTakeActionByMedicationId,
     handleTakeDoseFromAlarmById,
     openAlarm,
     soundEnabled,
@@ -56,15 +55,14 @@ export function useNativeActionHandlers(opts: {
     registerDoseReceivedHandler((medicationId, doseId) => {
       // Issue #268: interactive alarm requires explicit doseSchedule doseId.
       if (!doseId || !String(doseId).trim()) return;
-      const med = medications.find((m) => m.id === medicationId);
-      if (med && med.autoDeductEnabled !== false) {
+      if (allowManualTakeActionByMedicationId.get(medicationId) === false) {
         return;
       }
       openAlarm(medicationId, String(doseId).trim());
       if (soundEnabled) playSuccessChime();
     });
     return () => registerDoseReceivedHandler(null);
-  }, [openAlarm, soundEnabled, medications]);
+  }, [openAlarm, soundEnabled, allowManualTakeActionByMedicationId]);
 
   // ─────────────────────────────────────────────────────────────
   // App-resume handler: re-check exact-alarm permission when the app

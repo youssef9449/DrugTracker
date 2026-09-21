@@ -137,10 +137,11 @@ export interface ScheduleDoseReminderOptions {
    */
   skipToday?: boolean;
   /**
-   * When true, auto-deduction is active for this dose. The push notification
-   * will NOT show the "تم أخذ الجرعة" action button.
+   * Whether the reminder may expose the manual "تم أخذ الجرعة" action.
+   * The business layer supplies this neutral capability; Dose Reminder does
+   * not know why the value is enabled or disabled.
    */
-  autoDeductEnabled?: boolean;
+  allowManualTakeAction?: boolean;
 }
 
 /**
@@ -181,7 +182,7 @@ export async function scheduleDoseReminder(
       unit,
       id,
       options?.skipToday === true,
-      options?.autoDeductEnabled === true
+      options?.allowManualTakeAction !== false
     );
     return;
   }
@@ -212,7 +213,7 @@ export async function scheduleDoseReminder(
           smallIcon: 'ic_launcher',
           channelId: getDoseReminderChannelId(),
           actionTypeId:
-            options?.autoDeductEnabled ? undefined : 'dose-reminder',
+            options?.allowManualTakeAction === false ? undefined : 'dose-reminder',
           ongoing: false,
           autoCancel: true,
           extra: {

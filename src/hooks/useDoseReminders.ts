@@ -32,6 +32,7 @@ function findDoseRow(med: Medication, doseId: string) {
 
 interface UseDoseRemindersOptions {
   medications: Medication[];
+  allowManualTakeActionByMedicationId: ReadonlyMap<string, boolean>;
 }
 
 /**
@@ -42,6 +43,7 @@ interface UseDoseRemindersOptions {
  */
 export function useDoseReminders({
   medications,
+  allowManualTakeActionByMedicationId,
 }: UseDoseRemindersOptions) {
   const [alarmingMedication, setAlarmingMedication] = useState<Medication | null>(null);
   const [alarmingDoseId, setAlarmingDoseId] = useState<string | null>(null);
@@ -107,7 +109,7 @@ export function useDoseReminders({
       time,
       minutes,
       doseId,
-      medication.autoDeductEnabled !== false
+      allowManualTakeActionByMedicationId.get(medication.id) ?? true
     ).catch(() => void 0);
 
     alarmingIdRef.current = null;
@@ -115,7 +117,7 @@ export function useDoseReminders({
     isTestAlarmRef.current = false;
     setAlarmingMedication(null);
     setAlarmingDoseId(null);
-  }, [alarmingMedication]);
+  }, [alarmingMedication, allowManualTakeActionByMedicationId]);
 
   /**
    * Open the in-app alarm for an explicit doseSchedule occurrence.
@@ -131,8 +133,8 @@ export function useDoseReminders({
     const row = findDoseRow(med, id);
     if (!row) return;
 
-    // Auto-deduction active: no interactive alarm UI for this occurrence.
-    if (med.autoDeductEnabled !== false) return;
+    // The business layer decides whether the manual Take action is allowed.
+    if (allowManualTakeActionByMedicationId.get(med.id) === false) return;
 
     const today = getTodayDateString();
     if (isDoseConsumedOnDate(med, id, today)) return;
@@ -151,7 +153,7 @@ export function useDoseReminders({
     alarmingDoseIdRef.current = id;
     setAlarmingMedication(med);
     setAlarmingDoseId(id);
-  }, []);
+  }, [allowManualTakeActionByMedicationId]);
 
   /**
    * Test alarm UI: prefers first explicit schedule row when present.

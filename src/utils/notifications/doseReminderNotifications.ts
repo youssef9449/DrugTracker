@@ -66,7 +66,7 @@ export async function scheduleSnoozedDoseReminder(
   reminderTime: string | undefined,
   minutes: number,
   doseId: string,
-  autoDeductEnabled?: boolean,
+  allowManualTakeAction: boolean = true,
 ): Promise<void> {
   const id = typeof doseId === 'string' ? doseId.trim() : '';
   if (!id) return;
@@ -86,7 +86,7 @@ export async function scheduleSnoozedDoseReminder(
       reminderTime,
       minutes,
       id,
-      autoDeductEnabled === true
+      allowManualTakeAction === true
     );
     return;
   }
@@ -107,7 +107,7 @@ export async function scheduleSnoozedDoseReminder(
           schedule: { at: fireAt, allowWhileIdle: true },
           smallIcon: 'ic_launcher',
           channelId: getDoseReminderChannelId(),
-          actionTypeId: autoDeductEnabled ? undefined : 'dose-reminder',
+          actionTypeId: allowManualTakeAction ? undefined : 'dose-reminder',
           ongoing: false,
           autoCancel: true,
           extra: { medicationId: medId, doseId: id },

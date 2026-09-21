@@ -343,6 +343,7 @@ Dose Reminder owns:
 - foreground/background delivery-channel policy
 - in-app DoseAlarmModal behavior
 - dose reminder notification actions
+- the business-provided `allowManualTakeAction` capability for the manual Take action
 
 ## 8.2 Exact-alarm responsibilities
 
@@ -384,7 +385,7 @@ The shared Notification Runtime owns:
 - generic notification action routing;
 - foreground/background notification-delivery events.
 
-The feature remains responsible for the notification content and policy it requests.
+The feature remains responsible for the notification content and policy it requests. The manual Take action is controlled by the neutral `allowManualTakeAction` capability supplied by the App/business layer; Dose Reminder does not know which business policy produced that value.
 
 Dose Reminder therefore follows:
 
@@ -423,6 +424,10 @@ Auto Deduction business
 ```
 
 Auto Deduction must not import, call, or require Notification Runtime.
+
+### 8.4.1 Manual Take capability boundary
+
+`allowManualTakeAction` is a neutral Dose Reminder input. The App/business layer translates its own policy into this capability before entering the Dose Reminder boundary. Dose Reminder only uses the boolean capability to decide whether the reminder exposes the manual Take action; it must not read or persist Auto Deduction state.
 
 ## 8.5 Delivery channel
 

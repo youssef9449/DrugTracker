@@ -54,8 +54,8 @@ public final class DoseReminderAlarmFeature
                     "medicationName", "");
             String unit = meta.optString("unit", "قرص");
             double amount = meta.optDouble("amount", 0d);
-            boolean autoDeductEnabled = meta.optBoolean(
-                    "autoDeductEnabled", false);
+            boolean allowManualTakeAction = meta.optBoolean(
+                    "allowManualTakeAction", true);
             String calendarDate = meta.optString(
                     "calendarDate", "");
             String operationVersion = meta.optString(
@@ -82,7 +82,7 @@ public final class DoseReminderAlarmFeature
                             amount,
                             medicationName,
                             unit,
-                            autoDeductEnabled,
+                            allowManualTakeAction,
                             trigger,
                             operationVersion.isEmpty()
                                     ? null

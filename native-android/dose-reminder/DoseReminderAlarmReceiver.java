@@ -47,8 +47,8 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
         String unit = intent.getStringExtra("unit");
         String reminderTime = intent.getStringExtra("reminderTime");
         double amount = intent.getDoubleExtra("amount", 0d);
-        boolean autoDeductEnabled = intent.getBooleanExtra(
-                "autoDeductEnabled", false);
+        boolean allowManualTakeAction = intent.getBooleanExtra(
+                "allowManualTakeAction", true);
         String operationVersion = intent.getStringExtra(
                 app.drugtracker.alarmruntime.ExactAlarmContract.EXTRA_OPERATION_VERSION);
 
@@ -65,7 +65,7 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
         int importance = foreground ? 2 : 4;
 
         NotificationRuntime.Action notificationAction = null;
-        if (!autoDeductEnabled) {
+        if (allowManualTakeAction) {
             notificationAction = new NotificationRuntime.Action(
                     "take_dose",
                     "تم أخذ الجرعة",
@@ -105,7 +105,7 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
                     unit,
                     reminderTime,
                     amount,
-                    autoDeductEnabled,
+                    allowManualTakeAction,
                     operationVersion);
         }
     }
@@ -118,7 +118,7 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
             String unit,
             String reminderTime,
             double amount,
-            boolean autoDeductEnabled,
+            boolean allowManualTakeAction,
             String expectedOperationVersion) {
         if (reminderTime == null || reminderTime.length() < 4) return;
         String[] parts = reminderTime.split(":");
@@ -149,7 +149,7 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
                 amount,
                 medicationName,
                 unit,
-                autoDeductEnabled,
+                allowManualTakeAction,
                 next.getTimeInMillis(),
                 expectedOperationVersion);
     }

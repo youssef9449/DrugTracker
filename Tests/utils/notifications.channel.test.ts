@@ -8,7 +8,18 @@ const mocks = vi.hoisted(() => ({
   checkPermissions: vi.fn(),
   checkExactNotificationSetting: vi.fn(),
   changeExactNotificationSetting: vi.fn(),
-  platform: vi.fn(() => 'android'),
+  nativeSchedule: vi.fn(),
+  nativeCancel: vi.fn(),
+  nativeSnooze: vi.fn(),
+  nativeCancelSnooze: vi.fn(),
+  nativeIsScheduled: vi.fn(),
+  nativeListScheduled: vi.fn(),
+  nativePost: vi.fn(),
+  nativeCheckPermission: vi.fn(),
+  nativeCanExact: vi.fn(),
+  nativeOpenSettings: vi.fn(),
+  nativeAddListener: vi.fn(),
+  platform: vi.fn(() => 'ios'),
 }));
 
 vi.mock('@capacitor/core', () => ({
@@ -16,8 +27,17 @@ vi.mock('@capacitor/core', () => ({
     getPlatform: mocks.platform,
   },
   registerPlugin: () => ({
-    getNextOccurrence: () => Promise.resolve({ valid: false, nextOccurrenceMs: 0 }),
-    clearReArm: () => Promise.resolve({ ok: true }),
+    schedule: mocks.nativeSchedule,
+    cancel: mocks.nativeCancel,
+    scheduleSnooze: mocks.nativeSnooze,
+    cancelSnooze: mocks.nativeCancelSnooze,
+    isScheduled: mocks.nativeIsScheduled,
+    listScheduled: mocks.nativeListScheduled,
+    post: mocks.nativePost,
+    checkPermission: mocks.nativeCheckPermission,
+    canScheduleExactAlarms: mocks.nativeCanExact,
+    openSettings: mocks.nativeOpenSettings,
+    addListener: mocks.nativeAddListener,
   }),
 }));
 
@@ -39,18 +59,48 @@ import {
   isAppInForeground,
   scheduleDoseReminder,
   scheduleSnoozedDoseReminder,
+  sendMedicineAlert,
   cancelDoseReminder,
   doseReminderAlarmIdForDose } from '@/utils/notifications';
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.platform.mockReturnValue('android');
+  mocks.platform.mockReturnValue('ios');
   mocks.checkPermissions.mockResolvedValue({ display: 'granted' });
   mocks.checkExactNotificationSetting.mockResolvedValue({ exact_alarm: 'granted' });
   mocks.schedule.mockResolvedValue(undefined);
   mocks.cancel.mockResolvedValue(undefined);
+  mocks.nativePost.mockResolvedValue({ ok: true });
+  mocks.nativeSchedule.mockResolvedValue({ ok: true });
+  mocks.nativeCancel.mockResolvedValue({ ok: true, status: 'SUCCESS' });
+  mocks.nativeSnooze.mockResolvedValue({ ok: true });
+  mocks.nativeCancelSnooze.mockResolvedValue({ ok: true });
+  mocks.nativeIsScheduled.mockResolvedValue({
+    scheduled: true,
+    triggerAtEpochMs: Date.now() + 60_000,
+  });
   // Reset to default foreground state before each test.
   setAppInForeground(true);
+});
+
+// ---------------------------------------------------------------------------
+// Phase 6. Android immediate notification boundary.
+// ---------------------------------------------------------------------------
+
+describe('Android Phase 6 notification boundary', () => {
+  it('posts through NotificationRuntime instead of LocalNotifications.schedule', async () => {
+    mocks.platform.mockReturnValue('android');
+
+    await sendMedicineAlert('med-notify', 'Test', 3, 3);
+
+    expect(mocks.nativePost).toHaveBeenCalledTimes(1);
+    expect(mocks.schedule).not.toHaveBeenCalled();
+
+    const options = mocks.nativePost.mock.calls[0][0];
+    expect(options.namespace).toBe('low-stock');
+    expect(options.identity).toBe('med-notify');
+    expect(options.channelId).toBe('low-stock');
+  });
 });
 
 // ---------------------------------------------------------------------------

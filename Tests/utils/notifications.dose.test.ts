@@ -6,7 +6,18 @@ const mocks = vi.hoisted(() => ({
   cancel: vi.fn(),
   checkPermissions: vi.fn(),
   checkExactNotificationSetting: vi.fn(),
-  platform: vi.fn(() => 'android'),
+  nativeSchedule: vi.fn(),
+  nativeCancel: vi.fn(),
+  nativeSnooze: vi.fn(),
+  nativeCancelSnooze: vi.fn(),
+  nativeIsScheduled: vi.fn(),
+  nativeListScheduled: vi.fn(),
+  nativePost: vi.fn(),
+  nativeCheckPermission: vi.fn(),
+  nativeCanExact: vi.fn(),
+  nativeOpenSettings: vi.fn(),
+  nativeAddListener: vi.fn(),
+  platform: vi.fn(() => 'ios'),
 }));
 
 vi.mock('@capacitor/core', () => ({
@@ -14,8 +25,17 @@ vi.mock('@capacitor/core', () => ({
     getPlatform: mocks.platform,
   },
   registerPlugin: () => ({
-    getNextOccurrence: () => Promise.resolve({ valid: false, nextOccurrenceMs: 0 }),
-    clearReArm: () => Promise.resolve({ ok: true }),
+    schedule: mocks.nativeSchedule,
+    cancel: mocks.nativeCancel,
+    scheduleSnooze: mocks.nativeSnooze,
+    cancelSnooze: mocks.nativeCancelSnooze,
+    isScheduled: mocks.nativeIsScheduled,
+    listScheduled: mocks.nativeListScheduled,
+    post: mocks.nativePost,
+    checkPermission: mocks.nativeCheckPermission,
+    canScheduleExactAlarms: mocks.nativeCanExact,
+    openSettings: mocks.nativeOpenSettings,
+    addListener: mocks.nativeAddListener,
   }),
 }));
 
@@ -53,7 +73,7 @@ function lastDoseSchedulePayload(): {
     at: n.schedule.at as Date,
     // Phase 2: dose reminders are ONE-SHOT (no Capacitor repeats/every —
     // those use setRepeating with a wrong interval for daily wall-clock
-    // times). Recurrence is handled by TimedNotificationPublisher.
+    // times). Recurrence is handled by DoseReminderAlarmReceiver.
     // rescheduleDoseReminderNextDay + the extra.doseRecurring marker.
     repeats: n.schedule.repeats as boolean | undefined,
     every: n.schedule.every as string | undefined,
@@ -72,14 +92,39 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date(2024, 8, 10, 12, 0, 0)); // 2024-09-10 12:00 local
-  mocks.platform.mockReturnValue('android');
+  mocks.platform.mockReturnValue('ios');
   mocks.checkPermissions.mockResolvedValue({ display: 'granted' });
   mocks.checkExactNotificationSetting.mockResolvedValue({ exact_alarm: 'granted' });
   mocks.schedule.mockResolvedValue({ notifications: [] });
+  mocks.nativeSchedule.mockResolvedValue({ ok: true });
+  mocks.nativeCancel.mockResolvedValue({ ok: true, status: 'SUCCESS' });
+  mocks.nativeSnooze.mockResolvedValue({ ok: true });
+  mocks.nativeCancelSnooze.mockResolvedValue({ ok: true });
+  mocks.nativeIsScheduled.mockResolvedValue({
+    scheduled: true,
+    triggerAtEpochMs: Date.now() + 60_000,
+  });
 });
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe('Android Phase 6 scheduling boundary', () => {
+  it('uses the Dose Reminder exact-alarm bridge and does not call LocalNotifications.schedule', async () => {
+    mocks.platform.mockReturnValue('android');
+    await scheduleDoseReminder('med-android', 'Test', '20:00', 2, 'قرص', 'd1');
+
+    expect(mocks.nativeSchedule).toHaveBeenCalledTimes(1);
+    expect(mocks.schedule).not.toHaveBeenCalled();
+
+    const options = mocks.nativeSchedule.mock.calls[0][0];
+    expect(options.medicationId).toBe('med-android');
+    expect(options.doseId).toBe('d1');
+    expect(options.reminderTime).toBe('20:00');
+    expect(options.amount).toBe(2);
+    expect(options.triggerAtEpochMs).toBeGreaterThan(Date.now());
+  });
 });
 
 describe('scheduleDoseReminder — skipToday (consumed-day suppression)', () => {

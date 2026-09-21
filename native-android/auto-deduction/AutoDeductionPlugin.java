@@ -194,14 +194,6 @@ public class AutoDeductionPlugin extends Plugin {
     }
 
     @PluginMethod
-    public void canScheduleExactAlarms(PluginCall call) {
-        AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
-        JSObject ret = new JSObject();
-        ret.put("granted", scheduler.canScheduleExactAlarms());
-        call.resolve(ret);
-    }
-
-    @PluginMethod
     public void restoreFutureSchedules(PluginCall call) {
         try {
             AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());

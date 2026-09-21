@@ -13,11 +13,9 @@ repositories {
 }
 
 /**
- * Compile against the real production Phase 2 sources under
- * native-android/auto-deduction (excluding Capacitor Plugin bridge)
- * and DoseReminderRecurrenceStore (dose delivery/re-arm evidence).
- * Sources are synced into the standard package path before compile so
- * tests always exercise the repository's Java implementation, not a copy.
+ * Compile against the repository-owned native runtime/feature sources (excluding
+ * Capacitor bridge plugins). Sources are synced into their real package paths so
+ * tests exercise the production Java implementation, not a copy.
  */
 def productionSources = fileTree("../auto-deduction") {
     include(
@@ -32,22 +30,49 @@ def productionSources = fileTree("../auto-deduction") {
 }
 
 def alarmRuntimeSources = fileTree("../alarm-runtime") {
-    include("*.java")
+    include(
+            "ExactAlarmContract.java",
+            "ExactAlarmOperationLock.java",
+            "ExactAlarmStore.java",
+            "ExactAlarmRuntime.java",
+            "ExactAlarmLifecycle.java",
+            "DrugTrackerAlarmSystemReceiver.java",
+            "ExactAlarmFeatureAdapter.java",
+            "CriticalStockAlarmFeature.java",
+            "DoseReminderAlarmFeature.java"
+    )
 }
 
-def doseLocalNotifDir = file("../capacitor-local-notifications")
-def doseRecurrenceSources = fileTree(doseLocalNotifDir) {
+def notificationRuntimeSources = fileTree("../notification-runtime") {
     include(
-            "DoseReminderRecurrenceStore.java",
-            "TimedNotificationPublisher.java",
-            "AppForegroundState.java"
+            "AppForegroundState.java",
+            "NotificationRuntime.java",
+            "NotificationRuntimeActionReceiver.java"
+    )
+}
+
+def doseReminderAlarmSources = fileTree("../dose-reminder") {
+    include(
+            "DoseReminderAlarmAdapter.java",
+            "DoseReminderAlarmReceiver.java"
+    )
+}
+
+def criticalStockAlarmSources = fileTree("../critical-stock") {
+    include(
+            "CriticalStockAlarmAdapter.java",
+            "CriticalStockAlarmReceiver.java"
     )
 }
 
 def syncedMain = layout.buildDirectory.dir("synced-main/app/drugtracker/autodeduction")
 def syncedAlarmRuntime = layout.buildDirectory.dir("synced-main/app/drugtracker/alarmruntime")
-def syncedDoseLocalNotif = layout.buildDirectory.dir(
-        "synced-main/com/capacitorjs/plugins/localnotifications")
+def syncedNotificationRuntime = layout.buildDirectory.dir(
+        "synced-main/app/drugtracker/notificationruntime")
+def syncedDoseReminder = layout.buildDirectory.dir(
+        "synced-main/app/drugtracker/dosereminder")
+def syncedCriticalStock = layout.buildDirectory.dir(
+        "synced-main/app/drugtracker/criticalstock")
 
 tasks.register("syncProductionSources", Copy) {
     from productionSources
@@ -59,9 +84,19 @@ tasks.register("syncAlarmRuntime", Copy) {
     into syncedAlarmRuntime
 }
 
-tasks.register("syncDoseLocalNotifications", Copy) {
-    from doseRecurrenceSources
-    into syncedDoseLocalNotif
+tasks.register("syncNotificationRuntime", Copy) {
+    from notificationRuntimeSources
+    into syncedNotificationRuntime
+}
+
+tasks.register("syncDoseReminderAlarmSources", Copy) {
+    from doseReminderAlarmSources
+    into syncedDoseReminder
+}
+
+tasks.register("syncCriticalStockAlarmSources", Copy) {
+    from criticalStockAlarmSources
+    into syncedCriticalStock
 }
 
 sourceSets {
@@ -77,10 +112,22 @@ sourceSets {
 }
 
 tasks.named("compileJava").configure {
-    dependsOn("syncProductionSources", "syncAlarmRuntime", "syncDoseLocalNotifications")
+    dependsOn(
+            "syncProductionSources",
+            "syncAlarmRuntime",
+            "syncNotificationRuntime",
+            "syncDoseReminderAlarmSources",
+            "syncCriticalStockAlarmSources"
+    )
 }
 tasks.named("processResources").configure {
-    dependsOn("syncProductionSources", "syncAlarmRuntime", "syncDoseLocalNotifications")
+    dependsOn(
+            "syncProductionSources",
+            "syncAlarmRuntime",
+            "syncNotificationRuntime",
+            "syncDoseReminderAlarmSources",
+            "syncCriticalStockAlarmSources"
+    )
 }
 
 configurations {

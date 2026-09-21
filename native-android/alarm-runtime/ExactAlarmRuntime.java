@@ -63,6 +63,83 @@ public final class ExactAlarmRuntime {
         return manager != null && manager.canScheduleExactAlarms();
     }
 
+    /** Snapshot of one durable schedule row. The returned object is a defensive copy. */
+    public JSONObject getScheduleMetadata(String storageKey) {
+        if (storageKey == null || storageKey.isEmpty()) return null;
+        synchronized (ExactAlarmOperationLock.LOCK) {
+            String raw = store.getScheduleRaw(storageKey);
+            if (raw == null || raw.isEmpty()) return null;
+            try {
+                return new JSONObject(raw.toString());
+            } catch (JSONException e) {
+                return null;
+            }
+        }
+    }
+
+    /** Feature-neutral list of durable schedule storage keys. */
+    public java.util.List<String> listScheduledStorageKeys() {
+        synchronized (ExactAlarmOperationLock.LOCK) {
+            return new java.util.ArrayList<>(store.listFeatureStorageKeys());
+        }
+    }
+
+    /**
+     * Remove a one-shot durable schedule only when the delivery still owns the
+     * current operation version. A cancelled/replaced schedule is never removed.
+     */
+    public boolean completeOneShot(
+            String storageKey,
+            String expectedOperationVersion) {
+        if (storageKey == null || storageKey.isEmpty()
+                || expectedOperationVersion == null
+                || expectedOperationVersion.isEmpty()) {
+            return false;
+        }
+        synchronized (ExactAlarmOperationLock.LOCK) {
+            return store.removeScheduleIfOwnedLocked(
+                    storageKey,
+                    expectedOperationVersion);
+        }
+    }
+
+    /**
+     * Returns whether the OS currently has a matching PendingIntent for the
+     * exact-alarm identity. This inspects Android AlarmManager state only;
+     * durable metadata is not treated as proof that the alarm is armed.
+     */
+    public boolean isPending(
+            String identityUri,
+            String action,
+            Class<? extends BroadcastReceiver> receiverClass) {
+        if (!ExactAlarmContract.isValidIdentityUri(identityUri)
+                || action == null
+                || action.isEmpty()
+                || receiverClass == null) {
+            return false;
+        }
+        synchronized (ExactAlarmOperationLock.LOCK) {
+            try {
+                Intent intent = new Intent(appContext, receiverClass);
+                intent.setAction(action);
+                intent.setData(android.net.Uri.parse(identityUri));
+
+                int flags = PendingIntent.FLAG_NO_CREATE;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    flags |= PendingIntent.FLAG_IMMUTABLE;
+                }
+                PendingIntent pendingIntent = PendingIntent.getBroadcast(
+                        appContext,
+                        pendingIntentRequestCode,
+                        intent,
+                        flags);
+                return pendingIntent != null;
+            } catch (Exception e) {
+                return false;
+            }
+        }
+    }
+
     public ScheduleResult schedule(ScheduleRequest request) {
         if (!isValidScheduleRequest(request)) {
             return ScheduleResult.fail("invalid_request");

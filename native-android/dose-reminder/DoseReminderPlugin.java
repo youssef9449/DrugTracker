@@ -1,74 +1,146 @@
 package app.drugtracker.dosereminder;
 
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
-import com.capacitorjs.plugins.localnotifications.DoseReminderRecurrenceStore;
 
 /**
- * JS bridge for temporary dose-reminder delivery/re-arm evidence written by
- * TimedNotificationPublisher after a successful next-day AlarmManager arm.
+ * Capacitor bridge for Dose Reminder's exact-alarm boundary.
  *
- * Does not schedule or cancel alarms — query/clear only. Validity requires
- * the current desired reminderTime so stale config cannot block repair.
+ * <p>This plugin never posts notifications. Exact timing and cancellation are
+ * delegated to DoseReminderAlarmAdapter → ExactAlarmRuntime.</p>
  */
 @CapacitorPlugin(name = "DoseReminder")
-public class DoseReminderPlugin extends Plugin {
+public final class DoseReminderPlugin extends Plugin {
 
-    /**
-     * Options: medicationId (required), doseId (required), reminderTime (required for validity).
-     * Resolves: { valid: boolean, nextOccurrenceMs: number } where
-     * nextOccurrenceMs is -1 when absent. valid is true only when entry matches
-     * current schedule identity and next occurrence is still future.
-     */
     @PluginMethod
-    public void getNextOccurrence(PluginCall call) {
+    public void schedule(PluginCall call) {
         String medicationId = call.getString("medicationId");
         String doseId = call.getString("doseId");
         String reminderTime = call.getString("reminderTime");
-        if (medicationId == null || medicationId.isEmpty()) {
-            call.reject("invalid_medicationId");
+        Double amount = call.getDouble("amount");
+        String medicationName = call.getString("medicationName", "");
+        String unit = call.getString("unit", "قرص");
+        Boolean autoDeductEnabled = call.getBoolean("autoDeductEnabled", false);
+        Long triggerAt = call.getLong("triggerAtEpochMs");
+
+        if (amount == null || triggerAt == null) {
+            call.reject("invalid_schedule");
             return;
         }
-        if (doseId == null || doseId.isEmpty()) {
-            call.reject("invalid_doseId");
-            return;
-        }
-        long next = DoseReminderRecurrenceStore.getNextOccurrenceMs(
-                getContext(), medicationId, doseId);
-        boolean valid = DoseReminderRecurrenceStore.isValidReArm(
-                getContext(),
-                medicationId,
-                doseId,
-                System.currentTimeMillis(),
-                reminderTime);
+
+        DoseReminderAlarmAdapter.ScheduleResult result =
+                new DoseReminderAlarmAdapter(getContext()).scheduleOccurrence(
+                        medicationId,
+                        doseId,
+                        reminderTime,
+                        amount,
+                        medicationName,
+                        unit,
+                        Boolean.TRUE.equals(autoDeductEnabled),
+                        triggerAt,
+                        null);
+
         JSObject ret = new JSObject();
-        ret.put("valid", valid);
-        ret.put("nextOccurrenceMs", next);
+        ret.put("ok", result.ok);
+        if (result.error != null) ret.put("error", result.error);
         call.resolve(ret);
     }
 
-    /**
-     * Clear persisted re-arm evidence for a dose slot (cancel / config change).
-     * Options: medicationId (required), doseId (required).
-     */
     @PluginMethod
-    public void clearReArm(PluginCall call) {
+    public void cancel(PluginCall call) {
         String medicationId = call.getString("medicationId");
         String doseId = call.getString("doseId");
-        if (medicationId == null || medicationId.isEmpty()) {
-            call.reject("invalid_medicationId");
-            return;
-        }
-        if (doseId == null || doseId.isEmpty()) {
-            call.reject("invalid_doseId");
-            return;
-        }
-        DoseReminderRecurrenceStore.clear(getContext(), medicationId, doseId);
+        DoseReminderAlarmAdapter.CancelResult result =
+                new DoseReminderAlarmAdapter(getContext())
+                        .cancelOccurrence(medicationId, doseId);
+
         JSObject ret = new JSObject();
-        ret.put("ok", true);
+        ret.put("ok", result.isOk());
+        ret.put("status", result.status.name());
+        if (result.error != null) ret.put("error", result.error);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void scheduleSnooze(PluginCall call) {
+        String medicationId = call.getString("medicationId");
+        String doseId = call.getString("doseId");
+        String reminderTime = call.getString("reminderTime", "");
+        Double amount = call.getDouble("amount");
+        String medicationName = call.getString("medicationName", "");
+        String unit = call.getString("unit", "قرص");
+        Boolean autoDeductEnabled = call.getBoolean("autoDeductEnabled", false);
+        Long triggerAt = call.getLong("triggerAtEpochMs");
+
+        if (amount == null || triggerAt == null) {
+            call.reject("invalid_snooze");
+            return;
+        }
+
+        boolean ok = new DoseReminderAlarmAdapter(getContext()).scheduleSnooze(
+                medicationId,
+                doseId,
+                reminderTime,
+                amount,
+                medicationName,
+                unit,
+                triggerAt,
+                Boolean.TRUE.equals(autoDeductEnabled));
+
+        JSObject ret = new JSObject();
+        ret.put("ok", ok);
+        if (!ok) ret.put("error", "snooze_schedule_failed");
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void cancelSnooze(PluginCall call) {
+        String medicationId = call.getString("medicationId");
+        String doseId = call.getString("doseId");
+        boolean ok = new DoseReminderAlarmAdapter(getContext())
+                .cancelSnooze(medicationId, doseId);
+        JSObject ret = new JSObject();
+        ret.put("ok", ok);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void isScheduled(PluginCall call) {
+        String medicationId = call.getString("medicationId");
+        String doseId = call.getString("doseId");
+        DoseReminderAlarmAdapter adapter =
+                new DoseReminderAlarmAdapter(getContext());
+        org.json.JSONObject metadata =
+                adapter.getScheduleMetadata(medicationId, doseId);
+
+        JSObject ret = new JSObject();
+        ret.put("scheduled", metadata != null);
+        if (metadata != null) {
+            ret.put(
+                    "triggerAtEpochMs",
+                    metadata.optLong("triggerAtEpochMs", -1L));
+            ret.put(
+                    "operationVersion",
+                    metadata.optString(
+                            app.drugtracker.alarmruntime.ExactAlarmContract
+                                    .FIELD_OPERATION_VERSION,
+                            ""));
+        }
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void listScheduled(PluginCall call) {
+        java.util.List<String> keys =
+                new DoseReminderAlarmAdapter(getContext()).listScheduledKeys();
+        JSArray arr = new JSArray();
+        for (String key : keys) arr.put(key);
+        JSObject ret = new JSObject();
+        ret.put("keys", arr);
         call.resolve(ret);
     }
 }

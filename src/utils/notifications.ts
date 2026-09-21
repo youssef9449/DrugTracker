@@ -3,14 +3,12 @@
  *
  * Two backends are used depending on platform:
  *
- * - **Capacitor (Android/iOS)**: uses @capacitor/local-notifications,
- *   which schedules notifications natively via Android's
- *   NotificationManager. This means notifications fire even when
- *   the app is in the background or killed, and they appear in
- *   the Android notification drawer with the app's icon. On
- *   Android 13+ (API 33+), this plugin also handles the
- *   POST_NOTIFICATIONS runtime permission request automatically
- *   — without this permission, no notification will be shown.
+ * - **Android**: notification presentation is owned by the repository
+ *   Notification Runtime. Exact timing is owned separately by the
+ *   Exact Alarm Runtime.
+ * - **iOS**: this facade keeps the existing @capacitor/local-notifications
+ *   presentation/scheduling fallback.
+ * - **Web**: this facade uses the browser Notification API fallback.
  *
  * - **Web (Chrome / Edge / Firefox / Safari)**: uses the standard
  *   browser `Notification` API. This is the case when running in
@@ -35,73 +33,28 @@
  *    settings page where they can re-enable notifications.
  */
 
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import {
   NOTIFICATION_IMMEDIATE_OFFSET_MS,
   SW_READY_TIMEOUT_MS,
   formatReminderTime12h,
 } from './time';
+import { postNativeNotification } from './notificationRuntime';
 
-/**
- * Native bridge for temporary dose-reminder delivery/re-arm evidence
- * (TimedNotificationPublisher → DoseReminderRecurrenceStore).
- * Validity requires current desired reminderTime so stale config cannot
- * block repair. Web / missing plugin: query helpers no-op as invalid.
- */
-interface DoseReminderNativePlugin {
-  getNextOccurrence(options: {
-    medicationId: string;
-    doseId?: string;
-    /** Current desired HH:MM — required for valid===true. */
-    reminderTime?: string;
-  }): Promise<{ valid: boolean; nextOccurrenceMs: number }>;
-  clearReArm(options: {
-    medicationId: string;
-    doseId?: string;
-  }): Promise<{ ok: boolean }>;
-}
-
-const DoseReminderNative = registerPlugin<DoseReminderNativePlugin>('DoseReminder');
-
-/**
- * The BACKGROUND/KILLED dose-reminder notification channel.
- * Versioned because Android channel sound settings are immutable —
- * bumping the suffix is the only way to change the sound.
- *
- * v3: uses the default system notification sound (no custom sound).
- * v2: used a custom 'dose_reminder.wav' (removed — users found it
- *      unpleasant).
- *
- * The channel is created in native.ts with:
- *   - no custom sound → Android default system notification sound
- *   - importance: HIGH (heads-up + sound)
- *   - visibility: PUBLIC (lock screen)
- *
- * This channel is used when the app is in the BACKGROUND or KILLED.
- * When the app is in the FOREGROUND, {@link DOSE_REMINDER_FOREGROUND_CHANNEL_ID}
- * is used instead (silent — no Android sound) so only the in-app
- * DoseAlarmModal + chime are produced.
- */
-export const DOSE_REMINDER_CHANNEL_ID = 'dose-reminder-v3';
-
-/**
- * The FOREGROUND dose-reminder notification channel — SILENT.
- *
- * Used when the app is in the foreground so the scheduled notification
- * triggers the `localNotificationReceived` event (which opens the
- * DoseAlarmModal + plays the in-app chime) WITHOUT producing an audible
- * Android notification sound.
- *
- * Created in native.ts with:
- *   - no `sound` property → no sound
- *   - importance: LOW (no sound, no heads-up, appears in shade only)
- *   - visibility: PUBLIC (lock screen)
- *
- * Versioned (v1) so the sound config can be changed if ever needed
- * (Android channel sound is immutable after creation).
- */
-export const DOSE_REMINDER_FOREGROUND_CHANNEL_ID = 'dose-reminder-foreground-v1';
+import {
+  scheduleCriticalAlarmNative,
+  cancelCriticalAlarmNative,
+  verifyCriticalAlarmPendingNative,
+} from './criticalAlarmNative';
+import {
+  scheduleDoseReminderNative,
+  cancelDoseReminderNative,
+  scheduleDoseSnoozeNative,
+  cancelDoseSnoozeNative,
+  isDoseReminderScheduledNative,
+  cancelStaleDoseReminderAlarmsNative,
+} from './doseReminderNative';
 
 // ─────────────────────────────────────────────────────────────
 // App foreground/background state tracker.
@@ -111,19 +64,10 @@ export const DOSE_REMINDER_FOREGROUND_CHANNEL_ID = 'dose-reminder-foreground-v1'
 //   foreground → DOSE_REMINDER_FOREGROUND_CHANNEL_ID (silent)
 //   background → DOSE_REMINDER_CHANNEL_ID (system default sound)
 //
-// The scheduler (useDoseReminderScheduler) re-arms all pending dose
-// reminders via idempotent reconciliation (lifecycleTick), so the
-// channel matches the current app state for the common case.
-//
-// IMPORTANT — schedule-time channel is not a hard guarantee under
-// process death: if the app is killed after setAppInForeground(false)
-// but before cancel+reschedule completes, a silent foreground-channel
-// notification could still be pending. The authority for killed-process
-// correctness is the repository-owned TimedNotificationPublisher +
-// AppForegroundState in native-android/ (installed by prepare-android.mjs).
-// Delivery uses process-local MainActivity onResume/onPause state; a fresh
-// process defaults to false → dose-reminder-v3. JS reconciliation remains
-// the fast path for live transitions.
+// The Android scheduler no longer selects the delivery channel. At alarm
+// delivery, the native Dose Reminder receiver reads the shared foreground
+// state and asks Notification Runtime to post on the feature-selected channel.
+// iOS keeps the existing schedule-time channel selection in this facade.
 // ─────────────────────────────────────────────────────────────
 let appInForeground = true;
 
@@ -271,29 +215,10 @@ export async function requestNotificationPermission(): Promise<boolean> {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Exact-alarm permission (Android 12+ / API 31+)
+// Exact-alarm capability (Android 12+ / API 31+)
 //
-// @capacitor/local-notifications v6 schedules notifications via
-// AlarmManager. On Android 12+, exact alarms require the
-// SCHEDULE_EXACT_ALARM permission, which the user must grant via the
-// Android settings screen (ACTION_REQUEST_SCHEDULE_EXACT_ALARM).
-//
-// When exact-alarm permission is GRANTED, the plugin uses
-// AlarmManager.setExactAndAllowWhileIdle → the notification fires at
-// the exact scheduled time.
-//
-// When DENIED, the plugin falls back to setAndAllowWhileIdle (inexact)
-// → the notification may be delayed by minutes or hours. For medication
-// dose reminders this is unacceptable, so we treat exact-alarm as a
-// mandatory capability and surface its state to the UI.
-//
-// The plugin's API:
-//   checkExactNotificationSetting() → { exact_alarm: 'granted' | 'denied' | 'prompt' }
-//   changeExactNotificationSetting() → opens the Android settings screen
-//     (returns 'granted' on Android < 12 where no permission is needed)
-//
-// Note: on Android < 12, checkExactNotificationSetting returns 'granted'
-// because exact alarms don't require a separate permission.
+// The shared Exact Alarm Runtime owns the Android exact-alarm capability check
+// and settings action. Notification Runtime does not own or schedule alarms.
 // ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -313,62 +238,14 @@ export async function requestNotificationPermission(): Promise<boolean> {
  * on Android 12+. Returns 'unsupported' only if the API call itself
  * throws (should not happen with the installed plugin version).
  */
-export async function getExactAlarmPermission(): Promise<
-  'granted' | 'denied' | 'unsupported'
-> {
-  const platform = getNativePlatform();
-  // Web and iOS: exact-alarm is always 'granted' — the concept doesn't apply.
-  // Android's SCHEDULE_EXACT_ALARM has no iOS equivalent; iOS schedules
-  // notifications via UNUserNotificationCenter which handles timing natively.
-  if (platform !== 'android') return 'granted';
-  // Android: check the exact-alarm permission via the plugin.
-  try {
-    const status = await LocalNotifications.checkExactNotificationSetting();
-    if (status.exact_alarm === 'granted') return 'granted';
-    return 'denied';
-  } catch (err) {
-    console.warn('[notifications] checkExactNotificationSetting failed:', err);
-    return 'unsupported';
-  }
-}
-
-/**
- * Open the Android settings screen where the user can grant the
- * SCHEDULE_EXACT_ALARM permission.
- *
- * This is an Android-only API. On iOS and web it returns false without
- * attempting any native call.
- *
- * On Android < 12 the plugin returns 'granted' immediately (no settings
- * screen needed). On Android 12+ it opens the system settings page for
- * the app; the user grants/denies, then returns to the app. The caller
- * must re-check permission via getExactAlarmPermission() after the app
- * resumes (see the appState listener in App.tsx).
- *
- * Returns true if the settings screen was opened, false if not
- * available (web / iOS / error).
- */
-export async function openExactAlarmSettings(): Promise<boolean> {
-  const platform = getNativePlatform();
-  // Exact-alarm settings are Android-only.
-  if (platform !== 'android') return false;
-  try {
-    await LocalNotifications.changeExactNotificationSetting();
-    return true;
-  } catch (err) {
-    console.warn('[notifications] changeExactNotificationSetting failed:', err);
-    return false;
-  }
-}
+export { getExactAlarmPermission, openExactAlarmSettings } from './exactAlarm';
 
 /**
  * Send a "low stock" notification when a medication is about to
  * run out. The notification fires immediately on the device.
  *
- * On Capacitor native: uses LocalNotifications.schedule() with a
- * 1-second offset so it appears as a real Android system
- * notification (icon + drawer entry + sound), even if the app
- * is in the background.
+ * On Android: posts through the repository Notification Runtime.
+ * On iOS: keeps the existing LocalNotifications fallback.
  *
  * On web: uses new Notification(title, body) directly.
  *
@@ -402,6 +279,8 @@ export async function sendMedicineAlert(
 
   await scheduleNotification({
     id: notificationId('lowStock', medId),
+    namespace: 'low-stock',
+    identity: medId,
     title,
     body,
     channelId: 'low-stock',
@@ -463,6 +342,8 @@ export async function sendCriticalStockAlert(
   // platform. Callers (the foreground stock-alert fallback) must only
   // record "sent" state after a successful send.
   return scheduleNotification({
+    namespace: 'critical-stock-immediate',
+    identity: medId,
     // Disjoint id range from sendMedicineAlert's lowStock band so the
     // two notifications don't collide / overwrite each other.
     id: notificationId('critical', medId),
@@ -478,11 +359,13 @@ export async function sendCriticalStockAlert(
  * the app is running on. Falls back to the browser Notification API
  * when Capacitor isn't available.
  *
- * The notification sound is handled entirely by the Android notification
- * channel (bundled native sound). No JS sound playback is involved.
+ * Android notification presentation is handled by Notification Runtime;
+ * JS only supplies the feature's content and policy.
  */
 async function scheduleNotification(opts: {
   id: number;
+  namespace?: string;
+  identity?: string;
   title: string;
   body: string;
   channelId: string;
@@ -491,6 +374,24 @@ async function scheduleNotification(opts: {
   extra?: Record<string, unknown>;
 }): Promise<boolean> {
   if (isNativePlatform()) {
+    // Android presentation is owned by the repository Notification Runtime.
+    // The numeric id remains only for the legacy iOS Local Notifications path;
+    // Android identity is namespace + logical notification identity.
+    if (getNativePlatform() === 'android') {
+      const native = await postNativeNotification({
+        namespace: opts.namespace || 'app-notification',
+        identity: opts.identity || String(opts.id),
+        title: opts.title,
+        body: opts.body,
+        channelId: opts.channelId,
+        channelName: opts.channelId,
+        channelImportance: opts.channelId === DOSE_REMINDER_FOREGROUND_CHANNEL_ID ? 2 : 4,
+        channelVisibility: 1,
+        smallIcon: opts.smallIcon,
+      });
+      return native;
+    }
+
     try {
       const perm = await LocalNotifications.checkPermissions();
       if (perm.display !== 'granted') {
@@ -504,7 +405,9 @@ async function scheduleNotification(opts: {
             id: opts.id,
             title: opts.title,
             body: opts.body,
-            schedule: { at: new Date(Date.now() + NOTIFICATION_IMMEDIATE_OFFSET_MS) },
+            schedule: {
+              at: new Date(Date.now() + NOTIFICATION_IMMEDIATE_OFFSET_MS),
+            },
             smallIcon: opts.smallIcon,
             channelId: opts.channelId,
             actionTypeId: opts.actionTypeId,
@@ -516,11 +419,11 @@ async function scheduleNotification(opts: {
           },
         ],
       });
+      return true;
     } catch (err) {
       console.warn('[notifications] Capacitor schedule failed:', err);
       return scheduleWebNotification(opts.title, opts.body);
     }
-    return true;
   }
 
   return scheduleWebNotification(opts.title, opts.body);
@@ -534,6 +437,8 @@ async function scheduleNotification(opts: {
 export async function sendTestAlertNotification(): Promise<void> {
   await scheduleNotification({
     id: notificationId('test'),
+    namespace: 'test',
+    identity: 'test',
     title: '🔔 إشعار تجريبي: متابع الأدوية',
     body: 'الإشعارات والتنبيهات تعمل بشكل سليم على جهازك!',
     channelId: getDoseReminderChannelId(),
@@ -671,6 +576,39 @@ function notificationId(
   return base + hashToRange(medId ?? '', ID_RANGE_SIZE);
 }
 
+/**
+ * One-time upgrade cleanup for alarms created by the pre-Phase-6
+ * LocalNotifications scheduler. Android may still have those old AlarmManager
+ * entries after an app update, so they must be removed before the new
+ * ExactAlarmRuntime schedules the same logical occurrences.
+ */
+export async function clearLegacyScheduledAlarmNotifications(): Promise<void> {
+  if (getNativePlatform() !== 'android') return;
+  try {
+    const pending = await LocalNotifications.getPending();
+    const legacyBases = [
+      NOTIFICATION_ID_BASE.criticalAlarm,
+      NOTIFICATION_ID_BASE.doseAlarm,
+      NOTIFICATION_ID_BASE.doseSnooze,
+    ];
+    const legacyIds = pending.notifications
+      .map((notification) => notification.id)
+      .filter(
+        (id): id is number =>
+          typeof id === 'number' &&
+          legacyBases.some(
+            (base) => id >= base && id < base + ID_RANGE_SIZE
+          )
+      );
+    if (legacyIds.length === 0) return;
+    await LocalNotifications.cancel({
+      notifications: legacyIds.map((id) => ({ id })),
+    });
+  } catch (err) {
+    console.warn('[notifications] legacy alarm cleanup failed:', err);
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // One-shot critical-stock alarm (AlarmManager-backed).
 //
@@ -724,45 +662,28 @@ function notificationId(
  * Compute the unique notification id for a medication's critical alarm.
  * Stable across calls so cancel + reschedule work.
  */
-export function criticalAlarmId(medId: string): number {
-  return notificationId('criticalAlarm', medId);
-}
-
 /**
- * Cancel any pending one-shot critical alarm for this medication.
+ * Critical Stock future-alarm bridge.
  *
- * On native: calls LocalNotifications.cancel() with the stable id.
- * On web: no persistent alarm to cancel (web notifications are
- * fire-and-forget; the "alarm" is conceptually just a future
- * scheduleNotification call that happens to have a future `at`).
- *
- * Used both by the scheduler's reschedule chains and by its
- * reconciliation: a claim that says "armed" is only bookkeeping — when
- * verification cannot confirm the native alarm, this is called first so
- * the repair never doubles up an alarm under the same stable id.
+ * Android: ExactAlarmRuntime owns the timer and CriticalStockAlarmReceiver
+ * invokes NotificationRuntime at delivery. iOS keeps the existing
+ * LocalNotifications fallback.
  */
 export async function cancelCriticalAlarm(medId: string): Promise<void> {
+  if (getNativePlatform() === 'android') {
+    await cancelCriticalAlarmNative(medId);
+    return;
+  }
   if (!isNativePlatform()) return;
   try {
     await LocalNotifications.cancel({
-      notifications: [{ id: criticalAlarmId(medId) }],
+      notifications: [{ id: notificationId('criticalAlarm', medId) }],
     });
   } catch (err) {
     console.warn('[notifications] cancelCriticalAlarm failed:', err);
   }
 }
 
-/**
- * True when a pending-notification `schedule.at` value refers to the
- * alarm time `alarmTimeMs`.
- *
- * Runtime shapes differ by platform (the TypeScript types say `Date`,
- * but the plugin serializes): Android returns the epoch-milliseconds
- * number it was given; iOS returns an ISO-8601 STRING whose default
- * formatter drops sub-second precision. Numbers must match exactly;
- * strings are parsed and allowed ≤2s of serialization drift. This is
- * round-trip tolerance only — never delivery inference.
- */
 function pendingAtMatchesAlarmTime(at: unknown, alarmTimeMs: number): boolean {
   if (typeof at === 'number') return at === alarmTimeMs;
   if (typeof at === 'string') {
@@ -772,84 +693,29 @@ function pendingAtMatchesAlarmTime(at: unknown, alarmTimeMs: number): boolean {
   return false;
 }
 
-/**
- * Verify that this medication's critical alarm is ACTUALLY pending on
- * the platform right now, at exactly `alarmTimeMs`.
- *
- * Why this exists: the persistent claim records that a schedule SUCCEEDED
- * at some point — it is business dedup state, NOT proof that the native
- * alarm still exists. Android may drop previously-scheduled alarms
- * (SCHEDULE_EXACT_ALARM revoked, force-stop, OEM task killers, the
- * scheduled notification otherwise removed), and the claim would stay
- * armed while nothing ever fires — silently suppressing the episode's
- * notification.
- *
- * What is verified, using the installed @capacitor/local-notifications
- * v6 API only:
- *   1. `checkPermissions()` — display permission still granted. Without
- *      it a pending alarm fires but is never shown.
- *   2. On Android: `checkExactNotificationSetting()` is not 'denied'.
- *      When it flips to denied the OS cancels the app's exact alarms;
- *      the plugin's pending list may still list them, so that state
- *      must never count as "armed".
- *   3. `getPending()` contains this medication's stable critical-alarm
- *      id with schedule.at === alarmTimeMs (see
- *      pendingAtMatchesAlarmTime for platform shapes).
- *
- * PLATFORM LIMITATION (documented honestly, not hidden): on Android
- * `getPending()` reads the plugin's persisted schedule record
- * (SharedPreferences), not live AlarmManager state — no public API can
- * query AlarmManager. The record faithfully follows our own
- * cancel/schedule calls and is removed when an alarm fires, but it
- * cannot see OS-level alarm cancellation that happened while the app
- * was not running (force-stop, some OEM task killers, a
- * SCHEDULE_EXACT_ALARM revocation plus re-grant between our checks).
- * Only the observable permission/exact-setting states above catch
- * those. This is the strongest signal the platform offers; a claim is
- * therefore never treated as proof of native existence — verification
- * failures simply fall through to a cancel + re-schedule repair whose
- * success re-establishes the evidence.
- *
- * Returns true  → treat the armed claim as verified: keep it, no
- *                 re-arm, no duplicate.
- * Returns false → NOT verifiably armed; the caller should repair by
- *                 re-arming (cancel + schedule). Bridge errors count as
- *                 false: an unverifiable alarm must not be trusted, and
- *                 re-arming is idempotent (same stable id, no
- *                 user-facing notification).
- *
- * On web there is no persistent native alarm to verify at all (the
- * plugin's pending list is empty for web-scheduled notifications by
- * design), so this returns false — the repair attempt will then fail on
- * web too and leave the foreground fallback available, which IS the web
- * delivery path.
- */
 export async function verifyCriticalAlarmPending(
   medId: string,
   alarmTimeMs: number
 ): Promise<boolean> {
   if (!isNativePlatform()) return false;
+
   try {
     const perm = await LocalNotifications.checkPermissions();
     if (perm.display !== 'granted') return false;
+
     if (getNativePlatform() === 'android') {
-      try {
-        const exact = await LocalNotifications.checkExactNotificationSetting();
-        if (exact.exact_alarm === 'denied') return false;
-      } catch (err) {
-        console.warn(
-          '[notifications] verifyCriticalAlarmPending: exact-alarm check failed:',
-          err
-        );
-        return false;
-      }
+      return verifyCriticalAlarmPendingNative(medId, alarmTimeMs);
     }
+
     const pending = await LocalNotifications.getPending();
-    const id = criticalAlarmId(medId);
+    const id = notificationId('criticalAlarm', medId);
     return pending.notifications.some(
       (n) =>
         n.id === id &&
-        pendingAtMatchesAlarmTime((n.schedule as { at?: unknown } | undefined)?.at, alarmTimeMs)
+        pendingAtMatchesAlarmTime(
+          (n.schedule as { at?: unknown } | undefined)?.at,
+          alarmTimeMs
+        )
     );
   } catch (err) {
     console.warn('[notifications] verifyCriticalAlarmPending failed:', err);
@@ -857,34 +723,6 @@ export async function verifyCriticalAlarmPending(
   }
 }
 
-/**
- * Schedule a one-shot critical-stock alarm at the given absolute time.
- *
- * This is the single entry point for critical-date scheduling. The
- * caller (useCriticalAlarmScheduler) computes `criticalDateMs` via
- * getCriticalAlarmDate and only ever invokes this with a FUTURE
- * timestamp (getCriticalAlarmDate returns null for already-critical and
- * frozen meds, so no immediate alarms are scheduled). The alarm time is
- * used exactly as given — no past-date rewriting — so the persisted
- * claim's alarmTime always matches the actually-armed alarm.
- *
- * Returns true ONLY when the native scheduled critical notification was
- * actually accepted by LocalNotifications: the native `schedule()` call
- * resolved AND its ScheduleResult actually lists this medication's
- * notification id. Callers must persist claimed=true only after a `true`
- * result. A `false` result — permission failure, bridge failure, native
- * schedule failure, a resolve that does not list our id, or the web
- * fallback path (which has no persistent scheduling) — leaves the
- * notification opportunity open so the foreground fallback can still
- * send one notification. A successful browser/web notification NEVER
- * counts as native future-alarm scheduling success.
- *
- * `unit` is included in the notification body for display.
- *
- * Boot persistence: scheduled notifications are persisted by the
- * @capacitor/local-notifications plugin and re-armed on BOOT_COMPLETED.
- * See the section-header comment above for details.
- */
 export async function scheduleCriticalAlarm(
   medId: string,
   medName: string,
@@ -892,88 +730,68 @@ export async function scheduleCriticalAlarm(
   unit: string = 'قرص'
 ): Promise<boolean> {
   const fireAt = new Date(criticalDateMs);
-
   const title = `🚨 ${medName}: اقترب النفاد الحرج`;
   const body = `مخزون "${medName}" دخل مرحلة النفاد الحرج (${unit}). يرجى التعبئة فوراً!`;
 
-  // On native: schedule via LocalNotifications (one-shot, AlarmManager).
-  // Use the channelId 'low-stock' so it shares the same channel as the
-  // immediate sendCriticalStockAlert (the existing channel is already
-  // configured for urgent alerts).
-  if (isNativePlatform()) {
-    try {
-      const perm = await LocalNotifications.checkPermissions();
-      if (perm.display !== 'granted') {
-        // #95: surface the silent no-op so the caller / devtools can see
-        // the alarm was dropped due to missing permission.
-        console.warn('[notifications] scheduleCriticalAlarm skipped: permission not granted');
-        return false;
-      }
-      const result = await LocalNotifications.schedule({
-        notifications: [
-          {
-            id: criticalAlarmId(medId),
-            title,
-            body,
-            schedule: {
-              at: fireAt,
-              // Allow while idle — critical alerts should fire even
-              // when the device is in Doze. This maps to
-              // AlarmManager.setAndAllowWhileIdle on Android.
-              allowWhileIdle: true,
-            },
-            channelId: 'low-stock',
-            smallIcon: 'ic_launcher',
-            ongoing: false,
-            autoCancel: true,
-            extra: {
-              medicationId: medId,
-            },
-          },
-        ],
-      });
-      // True ONLY when the plugin actually registered the alarm: the
-      // resolved ScheduleResult lists the ids that were really
-      // scheduled. A resolve that omits our stable id (or an empty
-      // list) is not a native future alarm and must be reported as a
-      // failure — the scheduler then leaves the claim open instead of
-      // persisting an armed claim with no alarm behind it.
-      return result.notifications.some((n) => n.id === criticalAlarmId(medId));
-    } catch (err) {
-      console.warn('[notifications] Capacitor scheduleCriticalAlarm failed:', err);
-      // Native failure (permission, bridge, or schedule rejection) →
-      // false. The web fallback is deliberately NOT consulted here: a
-      // browser notification is not a native future critical alarm, and
-      // letting a web-fallback success masquerade as one would persist
-      // an armed claim with no alarm behind it and suppress the
-      // foreground fallback for the episode.
-      return false;
-    }
+  if (getNativePlatform() === 'android') {
+    const permission = await LocalNotifications.checkPermissions();
+    if (permission.display !== 'granted') return false;
+    return scheduleCriticalAlarmNative(
+      medId,
+      medName,
+      criticalDateMs,
+      unit
+    );
   }
 
-  // Web fallback: no persistent scheduling available — fire the
-  // notification immediately (since we can't reliably wake the page
-  // up at a future time). The user will at least see an immediate
-  // alert if they happen to have the tab open. This is a known
-  // limitation; the headline use case is the Android native path.
-  scheduleWebNotification(title, body);
-  return false;
+  if (getNativePlatform() !== 'ios') {
+    scheduleWebNotification(title, body);
+    return false;
+  }
+
+  try {
+    const permission = await LocalNotifications.checkPermissions();
+    if (permission.display !== 'granted') return false;
+    const result = await LocalNotifications.schedule({
+      notifications: [
+        {
+          id: notificationId('criticalAlarm', medId),
+          title,
+          body,
+          schedule: {
+            at: fireAt,
+            allowWhileIdle: true,
+          },
+          channelId: 'low-stock',
+          smallIcon: 'ic_launcher',
+          ongoing: false,
+          autoCancel: true,
+          extra: {
+            medicationId: medId,
+          },
+        },
+      ],
+    });
+    return result.notifications.some(
+      (n) => n.id === notificationId('criticalAlarm', medId)
+    );
+  } catch (err) {
+    console.warn('[notifications] iOS scheduleCriticalAlarm failed:', err);
+    return false;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────
 // Daily dose-reminder alarm (AlarmManager-backed).
 //
-// Architecture (Capacitor local-notifications 6.1.3 Android):
-// - JS schedules a ONE-SHOT exact alarm at the next due `at` time
-//   (stable id = medicationId + doseId). Does NOT use repeats:true
-//   (that path calls AlarmManager.setRepeating with interval=at-now).
-// - TimedNotificationPublisher is the sole recurrence owner: on delivery
-//   it arms exactly one next-day alarm at extra.reminderTime.
-// - useDoseReminderScheduler performs idempotent reconciliation against
-//   LocalNotifications.getPending() — lifecycle must not cancel+reschedule
-//   when the stable id is already pending.
-//
-// Id band doseAlarm (6M) is separate from immediate dose (3M).
+// Android architecture:
+// - JavaScript chooses the next desired occurrence and calls DoseReminder's
+//   exact-alarm adapter.
+// - ExactAlarmRuntime owns AlarmManager timing and durable schedule identity.
+// - DoseReminderAlarmReceiver posts through NotificationRuntime at delivery
+//   and asks ExactAlarmRuntime to arm the next calendar-day occurrence.
+// - useDoseReminderScheduler reconciles against the native exact-alarm state.
+// iOS keeps its existing LocalNotifications fallback path.
 
 // Sentinel lives in a leaf module so pure-logic modules (dateCalculations)
 // can reference it without importing the notification stack.
@@ -984,7 +802,9 @@ export async function scheduleCriticalAlarm(
  * Identity = medicationId + doseId. Requires non-empty doseId.
  * Returns null when doseId is missing — callers must not schedule/cancel.
  *
- * Band: doseAlarm (6_000_000 + hash(...) % 1_000_000).
+ * This helper is retained for the iOS LocalNotifications fallback only.
+ * Android future-alarm identity is the full logical medId::doseId inside
+ * ExactAlarmRuntime.
  */
 export function doseReminderAlarmIdForDose(
   medId: string,
@@ -996,36 +816,27 @@ export function doseReminderAlarmIdForDose(
 }
 
 /**
- * True when Capacitor `LocalNotifications.getPending()` reports a *future*
- * occurrence for this stable dose-alarm id.
+ * True when the logical Dose Reminder occurrence is still armed.
  *
- * Layer contract (post-delivery):
- * - AlarmManager: wall-clock arm (not directly queryable here)
- * - NotificationStorage / getPending(): plugin-visible future `schedule.at`
- * - DoseReminderRecurrenceStore: temporary delivery evidence; valid only when
- *   storage still holds a matching future occurrence for the same notification id
- *
- * Reconciliation checks getPending first, then native re-arm evidence so a
- * brief getPending lag during delivery does not force a duplicate schedule.
- * Recurrence owner remains TimedNotificationPublisher (next calendar day).
- * JS must not use Capacitor repeats/every.
+ * Android queries ExactAlarmRuntime's actual PendingIntent state. iOS uses
+ * the existing LocalNotifications pending list. JS must not use repeats/every
+ * for the Android path.
  */
 export async function isDoseReminderPending(
   medId: string,
   doseId: string
 ): Promise<boolean> {
+  if (getNativePlatform() === 'android') {
+    return isDoseReminderScheduledNative(medId, doseId);
+  }
   if (!isNativePlatform()) return false;
   try {
     const pending = await LocalNotifications.getPending();
-    const id = doseReminderAlarmIdForDose(medId, doseId);
-    if (id == null) return false;
+    const id = notificationId('doseAlarm', `${medId}::${doseId}`);
     const entry = pending.notifications.find((n) => n.id === id);
     if (!entry) return false;
     const at = (entry.schedule as { at?: unknown } | undefined)?.at;
-    if (at == null) {
-      // Present without at: treat as armed (defensive; dose path always sets at).
-      return true;
-    }
+    if (at == null) return true;
     const atMs =
       typeof at === 'number'
         ? at
@@ -1033,7 +844,6 @@ export async function isDoseReminderPending(
           ? at.getTime()
           : Date.parse(String(at));
     if (Number.isNaN(atMs)) return true;
-    // Future (or within 60s tolerance for clock skew) counts as armed.
     return atMs > Date.now() - 60_000;
   } catch (err) {
     console.warn('[notifications] isDoseReminderPending failed:', err);
@@ -1042,89 +852,49 @@ export async function isDoseReminderPending(
 }
 
 /**
- * True when native TimedNotificationPublisher has persisted temporary
- * delivery/re-arm evidence for this medicationId + doseId that still
- * matches the current desired reminderTime and a future next occurrence.
- * Independent of getPending() / React memory. Stale config, expired, or
- * absent → false so JS can repair. Does not prove AlarmManager still holds
- * the alarm.
- *
- * @param reminderTime current desired HH:MM for this dose slot (required)
+ * Compatibility reconciliation helper for the Dose Reminder scheduler.
+ * Android now queries the ExactAlarmRuntime pending state directly.
  */
 export async function isNativeDoseReminderReArmed(
   medId: string,
   doseId: string,
-  reminderTime?: string
+  _reminderTime?: string
 ): Promise<boolean> {
-  if (!isNativePlatform()) return false;
-  const id = typeof doseId === 'string' ? doseId.trim() : '';
-  if (!id) return false;
-  if (!reminderTime || reminderTime.indexOf(':') < 0) return false;
-  try {
-    const opts = { medicationId: medId, doseId: id, reminderTime };
-    const result = await DoseReminderNative.getNextOccurrence(opts);
-    return result?.valid === true;
-  } catch (err) {
-    console.warn('[notifications] isNativeDoseReminderReArmed failed:', err);
-    return false;
-  }
+  if (getNativePlatform() !== 'android') return false;
+  return isDoseReminderScheduledNative(medId, doseId);
 }
 
 /**
- * Clear native re-arm evidence for a dose slot (cancel / signature change).
- * Idempotent. Web no-op.
+ * Legacy compatibility no-op retained for the existing scheduler API.
+ * Delivery evidence is no longer stored in a separate notification plugin store.
  */
 export async function clearNativeDoseReminderReArm(
-  medId: string,
-  doseId: string
+  _medId: string,
+  _doseId: string
 ): Promise<void> {
-  if (!isNativePlatform()) return;
-  const id = typeof doseId === 'string' ? doseId.trim() : '';
-  if (!id) return;
-  try {
-    const opts = { medicationId: medId, doseId: id };
-    await DoseReminderNative.clearReArm(opts);
-  } catch (err) {
-    console.warn('[notifications] clearNativeDoseReminderReArm failed:', err);
-  }
-}
-
-function isDoseAlarmBandId(id: number): boolean {
-  const base = NOTIFICATION_ID_BASE.doseAlarm;
-  return id >= base && id < base + ID_RANGE_SIZE;
+  // No separate delivery-evidence store remains. ExactAlarmRuntime's durable
+  // schedule row is the only scheduling source of truth.
 }
 
 /**
  * Pending notification ids in the doseAlarm band (persisted native truth).
  */
 export async function listPendingDoseReminderAlarmIds(): Promise<number[]> {
-  if (!isNativePlatform()) return [];
-  try {
-    const pending = await LocalNotifications.getPending();
-    return pending.notifications
-      .map((x) => x.id)
-      .filter((id): id is number => typeof id === 'number' && isDoseAlarmBandId(id));
-  } catch (err) {
-    console.warn('[notifications] listPendingDoseReminderAlarmIds failed:', err);
-    return [];
-  }
+  // Deprecated compatibility helper. Alarm identity is now logical
+  // medId + doseId inside ExactAlarmRuntime; no feature numeric-id band exists.
+  return [];
 }
 
 /**
  * Cancel pending doseAlarm-band notifications not in keepIds (stale after
  * process death / dose removal). Does not touch other bands.
  */
-export async function cancelStaleDoseReminderAlarms(keepIds: ReadonlySet<number>): Promise<void> {
-  if (!isNativePlatform()) return;
-  try {
-    const pendingIds = await listPendingDoseReminderAlarmIds();
-    const toCancel = pendingIds.filter((id) => !keepIds.has(id));
-    if (toCancel.length === 0) return;
-    await LocalNotifications.cancel({
-      notifications: toCancel.map((id) => ({ id })),
-    });
-  } catch (err) {
-    console.warn('[notifications] cancelStaleDoseReminderAlarms failed:', err);
+export async function cancelStaleDoseReminderAlarms(
+  keepKeys: ReadonlySet<string>
+): Promise<void> {
+  if (getNativePlatform() === 'android') {
+    await cancelStaleDoseReminderAlarmsNative(keepKeys);
+    return;
   }
 }
 
@@ -1143,15 +913,18 @@ export function snoozeDoseReminderId(medId: string, doseId: string): number | nu
  * Cancel a pending recurring dose-reminder alarm for an explicit dose row.
  * Requires non-empty doseId (Issue #268).
  */
-export async function cancelDoseReminder(medId: string, doseId: string): Promise<void> {
+export async function cancelDoseReminder(
+  medId: string,
+  doseId: string
+): Promise<void> {
+  if (getNativePlatform() === 'android') {
+    await cancelDoseReminderNative(medId, doseId);
+    return;
+  }
   if (!isNativePlatform()) return;
-  const notifId = doseReminderAlarmIdForDose(medId, doseId);
-  if (notifId == null) return;
+  const id = notificationId('doseAlarm', `${medId}::${doseId}`);
   try {
-    await LocalNotifications.cancel({
-      notifications: [{ id: notifId }],
-    });
-    await clearNativeDoseReminderReArm(medId, doseId);
+    await LocalNotifications.cancel({ notifications: [{ id }] });
   } catch (err) {
     console.warn('[notifications] cancelDoseReminder failed:', err);
   }
@@ -1164,17 +937,18 @@ export async function cancelSnoozedDoseReminder(
   medId: string,
   doseId: string
 ): Promise<void> {
+  if (getNativePlatform() === 'android') {
+    await cancelDoseSnoozeNative(medId, doseId);
+    return;
+  }
   if (!isNativePlatform()) return;
-  const id = snoozeDoseReminderId(medId, doseId);
-  if (id == null) return;
+  const id = notificationId('doseSnooze', `${medId}::${doseId}`);
   try {
     await LocalNotifications.cancel({ notifications: [{ id }] });
   } catch (err) {
     console.warn('[notifications] cancelSnoozedDoseReminder failed:', err);
   }
 }
-
-
 
 /**
  * Schedule a ONE-SHOT dose-reminder notification `minutes` in the future.
@@ -1211,55 +985,53 @@ export async function scheduleSnoozedDoseReminder(
 ): Promise<void> {
   const id = typeof doseId === 'string' ? doseId.trim() : '';
   if (!id) return;
-  const notifId = snoozeDoseReminderId(medId, id);
-  if (notifId == null) return;
 
-  const fireAt = new Date(Date.now() + minutes * 60_000);
   const timeHint = reminderTime
     ? ` (موعد الجرعة الأصلي ${formatReminderTime12h(reminderTime)})`
     : '';
   const title = `⏰ تذكير مجدد: ${medName}`;
   const body = `غفوة ${minutes} دقيقة انتهت${timeHint}. جرعتك المقررة: ${doseAmount} ${unit}.`;
 
-  if (isNativePlatform()) {
-    try {
-      if (await getExactAlarmPermission() !== 'granted') {
-        throw new Error('Exact-alarm permission is required for snoozed dose reminders');
-      }
-      const perm = await LocalNotifications.checkPermissions();
-      if (perm.display !== 'granted') {
-        throw new Error('Notification permission is required for snoozed dose reminders');
-      }
-      await LocalNotifications.schedule({
-        notifications: [
-          {
-            id: notifId,
-            title,
-            body,
-            schedule: {
-              at: fireAt,
-              allowWhileIdle: true,
-            },
-            smallIcon: 'ic_launcher',
-            channelId: getDoseReminderChannelId(),
-            actionTypeId: autoDeductEnabled ? undefined : 'dose-reminder',
-            ongoing: false,
-            autoCancel: true,
-            extra: {
-              medicationId: medId,
-              doseId: id,
-            },
-          },
-        ],
-      });
-      return;
-    } catch (err) {
-      console.warn('[notifications] Capacitor scheduleSnoozedDoseReminder failed:', err);
-      throw err;
-    }
+  if (getNativePlatform() === 'android') {
+    await scheduleDoseSnoozeNative(
+      medId,
+      medName,
+      doseAmount,
+      unit,
+      reminderTime,
+      minutes,
+      id,
+      autoDeductEnabled === true
+    );
+    return;
   }
 
-  // Web fallback: fire immediately (can't wake a future time reliably).
+  if (getNativePlatform() === 'ios') {
+    const notifId = notificationId('doseSnooze', `${medId}::${id}`);
+    const fireAt = new Date(Date.now() + minutes * 60_000);
+    const permission = await LocalNotifications.checkPermissions();
+    if (permission.display !== 'granted') {
+      throw new Error('Notification permission is required for snoozed dose reminders');
+    }
+    await LocalNotifications.schedule({
+      notifications: [
+        {
+          id: notifId,
+          title,
+          body,
+          schedule: { at: fireAt, allowWhileIdle: true },
+          smallIcon: 'ic_launcher',
+          channelId: getDoseReminderChannelId(),
+          actionTypeId: autoDeductEnabled ? undefined : 'dose-reminder',
+          ongoing: false,
+          autoCancel: true,
+          extra: { medicationId: medId, doseId: id },
+        },
+      ],
+    });
+    return;
+  }
+
   scheduleWebNotification(title, body);
 }
 
@@ -1296,8 +1068,8 @@ export interface ScheduleDoseReminderOptions {
  *
  * Used by useDoseReminderScheduler when suppressing a consumed dose:
  *   - still ahead → cancel + schedule next with skipToday.
- *   - already past → do not retract a delivered notification; native
- *     TimedNotificationPublisher may already have armed tomorrow.
+ *   - already past → do not retract a delivered notification; the native
+ *     delivery receiver may already have armed the next calendar-day occurrence.
  */
 export function isDoseReminderTimeStillAhead(
   reminderTime: string,
@@ -1319,9 +1091,8 @@ export function isDoseReminderTimeStillAhead(
  * tomorrow when options.skipToday). Uses a stable id
  * (medicationId + doseId) so reschedule replaces, not duplicates.
  *
- * Recurrence: NOT via Capacitor repeats/every (those use setRepeating
- * with a wrong interval for daily wall-clock times). Native
- * TimedNotificationPublisher arms the next day from extra.reminderTime.
+ * Recurrence: NOT via Capacitor repeats/every. The native Dose Reminder
+ * receiver asks the shared exact-alarm runtime to arm the next calendar day.
  *
  * `allowWhileIdle: true` lets the alarm fire in Doze mode.
  * Channel: dose-reminder-v3 / foreground silent variant at delivery.
@@ -1335,84 +1106,72 @@ export async function scheduleDoseReminder(
   doseId: string,
   options?: ScheduleDoseReminderOptions,
 ): Promise<void> {
-  // Validate the HH:MM string and compute the next fire Date.
   const parts = reminderTime.split(':').map((n) => parseInt(n, 10));
   const [hour, minute] = parts;
   if (parts.length < 2 || Number.isNaN(hour) || Number.isNaN(minute)) return;
   if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return;
 
+  const id = typeof doseId === 'string' ? doseId.trim() : '';
+  if (!id || !(Number(doseAmount) > 0)) return;
+
+  if (getNativePlatform() === 'android') {
+    await scheduleDoseReminderNative(
+      medId,
+      medName,
+      reminderTime,
+      Number(doseAmount),
+      unit,
+      id,
+      options?.skipToday === true,
+      options?.autoDeductEnabled === true
+    );
+    return;
+  }
+
   const now = new Date();
   const fireToday = new Date();
   fireToday.setHours(hour, minute, 0, 0);
-  // Move to tomorrow when today's fire time already passed, or when the
-  // caller asked to skip today (today's dose was already consumed).
-  // Exactly ONE increment in either case — never two.
   if (fireToday.getTime() <= now.getTime() || options?.skipToday === true) {
     fireToday.setDate(fireToday.getDate() + 1);
   }
 
-  const id = typeof doseId === 'string' ? doseId.trim() : '';
-  if (!id) return;
-  if (!(Number(doseAmount) > 0)) return;
-  const notifId = doseReminderAlarmIdForDose(medId, id);
-  if (notifId == null) return;
-
   const title = `⏰ حان موعد دواء: ${medName}`;
-  // Display 12h for the user; reminderTime stays 24h for schedule + extra.
   const body = `موعد الجرعة الساعة ${formatReminderTime12h(reminderTime)}. جرعتك المقررة: ${doseAmount} ${unit}.`;
 
-  if (isNativePlatform()) {
-    try {
-      if (await getExactAlarmPermission() !== 'granted') {
-        throw new Error('Exact-alarm permission is required for dose reminders');
-      }
-      const perm = await LocalNotifications.checkPermissions();
-      if (perm.display !== 'granted') {
-        throw new Error('Notification permission is required for dose reminders');
-      }
-      // Dose path: initial ONE-SHOT LocalNotifications.schedule (`at`, no
-      // repeats). Capacitor at+repeats:true uses setRepeating with a wrong
-      // interval for daily wall-clock times — not used. Sole recurrence owner:
-      // TimedNotificationPublisher.rescheduleDoseReminderNextDay (next calendar
-      // day) + DoseReminderRecurrenceStore evidence. Same stable id means
-      // concurrent JS schedule replaces rather than duplicates.
-      await LocalNotifications.schedule({
-        notifications: [
-          {
-            id: notifId,
-            title,
-            body,
-            schedule: {
-              at: fireToday,
-              allowWhileIdle: true,
-            },
-            smallIcon: 'ic_launcher',
-            channelId: getDoseReminderChannelId(),
-            actionTypeId: options?.autoDeductEnabled ? undefined : 'dose-reminder',
-            ongoing: false,
-            autoCancel: true,
-            extra: {
-              medicationId: medId,
-              doseId: id,
-              reminderTime,
-              doseRecurring: true,
-            },
-          },
-        ],
-      });
-      return;
-    } catch (err) {
-      console.warn('[notifications] Capacitor scheduleDoseReminder failed:', err);
-      throw err;
+  if (getNativePlatform() === 'ios') {
+    const notifId = notificationId('doseAlarm', `${medId}::${id}`);
+    const permission = await LocalNotifications.checkPermissions();
+    if (permission.display !== 'granted') {
+      throw new Error('Notification permission is required for dose reminders');
     }
+    await LocalNotifications.schedule({
+      notifications: [
+        {
+          id: notifId,
+          title,
+          body,
+          schedule: { at: fireToday, allowWhileIdle: true },
+          smallIcon: 'ic_launcher',
+          channelId: getDoseReminderChannelId(),
+          actionTypeId:
+            options?.autoDeductEnabled ? undefined : 'dose-reminder',
+          ongoing: false,
+          autoCancel: true,
+          extra: {
+            medicationId: medId,
+            doseId: id,
+            reminderTime,
+            doseRecurring: true,
+          },
+        },
+      ],
+    });
+    return;
   }
 
-  // Web fallback: no persistent recurring scheduling — fire immediately.
-  // With skipToday there is nothing to remind about today (the dose was
-  // already consumed), so the immediate fallback is skipped entirely —
-  // a consumed dose must not produce today's web reminder either.
-  if (options?.skipToday === true) return;
-  scheduleWebNotification(title, body);
+  if (options?.skipToday !== true) {
+    scheduleWebNotification(title, body);
+  }
 }
 
 /**

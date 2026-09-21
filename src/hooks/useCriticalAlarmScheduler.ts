@@ -14,9 +14,9 @@ import {
   getCriticalNotificationClaim,
   setCriticalNotificationClaim,
 } from '../utils/criticalNotificationClaims';
-import { OperationQueue } from '../utils/async/OperationQueue';
 import { GenerationGuard } from '../utils/async/GenerationGuard';
 import type { ExactAlarmPermission } from '../utils/exactAlarm';
+import { enqueueCriticalAlarmOp } from '../utils/criticalAlarmOperations';
 
 /**
  * Options for {@link useCriticalAlarmScheduler}.
@@ -161,8 +161,9 @@ export function useCriticalAlarmScheduler({
   // Meds this session armed (or kept) an alarm for — used to cancel
   // alarms for meds that are deleted or whose projection disappears.
   const scheduledCriticalIdsRef = useRef<Set<string>>(new Set());
-  // Shared per-med operation queue + generation guard; both are in-memory async hygiene only.
-  const operationQueueRef = useRef(new OperationQueue<string>());
+  // Shared feature-owned queue + generation guard; both are in-memory async hygiene only.
+  // The queue is shared with the foreground critical-stock hook so every native
+  // critical-alarm operation for the same medication serializes through one chain.
   const generationGuardRef = useRef(new GenerationGuard<string>());
 
   // Keep the latest medications in a ref so chained async operations can
@@ -255,11 +256,11 @@ export function useCriticalAlarmScheduler({
       ]);
       for (const id of ids) {
         generationGuardRef.current.bump(id);
-        operationQueueRef.current.enqueue(id, async () => {
+        enqueueCriticalAlarmOp(id, async () => {
           await cancelCriticalAlarm(id);
         });
       }
-      operationQueueRef.current.enqueue(
+      enqueueCriticalAlarmOp(
         '__stale_critical_alarm_cleanup__',
         async () => {
           const nativeIds = await listScheduledCriticalMedicationIdsNative();
@@ -364,7 +365,7 @@ export function useCriticalAlarmScheduler({
         const hadAlarm = scheduledCriticalIdsRef.current.has(med.id);
         if (hadAlarm) {
           const medId = med.id;
-          operationQueueRef.current.enqueue(medId, async () => {
+          enqueueCriticalAlarmOp(medId, async () => {
             if (!generationGuardRef.current.isCurrent(medId, gen)) return;
             await cancelCriticalAlarm(medId);
           });
@@ -389,7 +390,7 @@ export function useCriticalAlarmScheduler({
         // verified → keep it (no re-arm, no duplicate); unverifiable or
         // missing → run the repair chain (cancel + re-schedule) whose
         // outcome writes the claim exactly like any fresh schedule.
-        operationQueueRef.current.enqueue(medId, async () => {
+        enqueueCriticalAlarmOp(medId, async () => {
           if (!generationGuardRef.current.isCurrent(medId, gen)) return;
           const verified = await verifyCriticalAlarmPending(medId, criticalDateMs);
           if (verified || !generationGuardRef.current.isCurrent(medId, gen)) return;
@@ -398,7 +399,7 @@ export function useCriticalAlarmScheduler({
         continue;
       }
 
-      operationQueueRef.current.enqueue(medId, () =>
+      enqueueCriticalAlarmOp(medId, () =>
         runScheduleChain(medId, medName, criticalDateMs, unit, gen)
       );
     }
@@ -407,7 +408,7 @@ export function useCriticalAlarmScheduler({
     for (const prevId of scheduledCriticalIdsRef.current) {
       if (!stillScheduled.has(prevId)) {
         generationGuardRef.current.bump(prevId);
-        operationQueueRef.current.enqueue(prevId, async () => {
+        enqueueCriticalAlarmOp(prevId, async () => {
           await cancelCriticalAlarm(prevId);
         });
       }
@@ -417,7 +418,7 @@ export function useCriticalAlarmScheduler({
     // Native durable schedule state is also reconciled so a critical alarm
     // left behind after medication deletion or process death cannot survive
     // merely because its old business claim is absent.
-    operationQueueRef.current.enqueue(
+    enqueueCriticalAlarmOp(
       '__stale_critical_alarm_cleanup__',
       async () => {
         const nativeIds = await listScheduledCriticalMedicationIdsNative();

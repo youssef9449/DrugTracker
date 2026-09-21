@@ -10,8 +10,8 @@ import {
   setCriticalNotificationClaim,
   clearCriticalNotificationClaim,
   claimsEqual,
-  enqueueCriticalAlarmOp,
 } from '../utils/criticalNotificationClaims';
+import { enqueueCriticalAlarmOp } from '../utils/criticalAlarmOperations';
 
 interface UseStockAlertsOptions {
   medications: Medication[];

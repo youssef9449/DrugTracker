@@ -169,6 +169,12 @@ interface AutoDeductionPlugin {
     calendarDate: string;
     amount: number;
   }): Promise<ApplyAutoDeductionStockResult>;
+  adoptAlreadyAppliedOccurrence(options: {
+    medicationId: string;
+    doseId: string;
+    calendarDate: string;
+    amount: number;
+  }): Promise<ApplyAutoDeductionStockResult>;
 }
 
 const AutoDeduction = registerPlugin<AutoDeductionPlugin>('AutoDeduction');
@@ -294,6 +300,61 @@ export async function applyForegroundAutoStockDeltas(
       alreadyApplied: false,
       stocks: [],
       error: e instanceof Error ? e.message : 'foreground_stock_failed',
+    };
+  }
+}
+
+export async function adoptAlreadyAppliedAutoOccurrence(
+  medicationId: string,
+  doseId: string,
+  calendarDate: string,
+  amount: number
+): Promise<ApplyAutoDeductionStockResult> {
+  if (!isNativeAndroid()) {
+    return {
+      ok: true,
+      native: false,
+      applied: false,
+      actualDeducted: 0,
+      currentPills: 0,
+    };
+  }
+  if (
+    typeof medicationId !== 'string' ||
+    !medicationId.trim() ||
+    typeof doseId !== 'string' ||
+    !doseId.trim() ||
+    !Number.isFinite(Number(amount)) ||
+    Number(amount) <= 0
+  ) {
+    return {
+      ok: false,
+      native: true,
+      applied: false,
+      actualDeducted: 0,
+      currentPills: 0,
+      error: 'invalid_auto_adoption_args',
+    };
+  }
+  try {
+    const result = await AutoDeduction.adoptAlreadyAppliedOccurrence({
+      medicationId,
+      doseId,
+      calendarDate,
+      amount: Number(amount),
+    });
+    return {
+      ...result,
+      native: true,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      native: true,
+      applied: false,
+      actualDeducted: 0,
+      currentPills: 0,
+      error: e instanceof Error ? e.message : 'auto_adoption_failed',
     };
   }
 }

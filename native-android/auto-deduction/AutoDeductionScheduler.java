@@ -662,7 +662,8 @@ public final class AutoDeductionScheduler {
      *   <li>Reject if {@code expectedRecurrenceGeneration} is no longer active</li>
      *   <li>Idempotently {@link AutoDeductionEventStore#insertFiredIfAbsent}</li>
      * </ol>
-     * Does not mutate JS stock / WebView state.
+     * Applies the Auto-owned Native stock mutation before recovery returns; JS only
+     * mirrors the resulting Native balance later.
      */
     public FireResult recoverMissedOccurrence(
             String medicationId,
@@ -711,6 +712,7 @@ public final class AutoDeductionScheduler {
                             + " — " + stockResult.error);
                     return new FireResult(FireResult.Status.FAILED, false);
                 }
+                clearIndependentFireRetryEvidenceLocked(key);
             }
 
             Log.i(TAG, "recoverMissed: " + result.status

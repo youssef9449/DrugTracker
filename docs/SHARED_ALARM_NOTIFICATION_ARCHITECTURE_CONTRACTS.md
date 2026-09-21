@@ -526,6 +526,32 @@ The native adapter never creates or advances a Critical episode and never decide
 
 ---
 
+## 9.7 Phase 4 boundary closure
+
+The current Critical Stock implementation keeps the complete Critical business path outside the shared exact-alarm mechanism:
+
+```text
+getCriticalAlarmDate()
+        ↓
+Critical exact scheduler (TypeScript)
+        ↓
+CriticalStockAlarmAdapter
+        ↓
+ExactAlarmRuntime
+        ↓
+AlarmManager
+        ↓
+CriticalStockAlarmReceiver
+        ↓
+NotificationRuntime
+```
+
+Critical-owned semantics remain in the Critical business layer: crossing calculation, episode state, persistent claim, episode generation/stale-async protection, one-shot notification policy, and notification content.
+
+The native adapter is only the feature boundary over `ExactAlarmRuntime`, plus its private delivery/lifecycle-recovery plumbing. It does not contain Critical episode or claim decisions, and it does not depend on Auto Deduction state or mechanics.
+
+There is no Critical-specific store, lifecycle dispatcher, system receiver, or parallel alarm runtime. Any old `CriticalAlarm*` infrastructure is not part of the current tree.
+
 # 10. Feature contract: Auto Deduction
 
 ## 10.1 Business owner

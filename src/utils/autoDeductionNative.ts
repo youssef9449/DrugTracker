@@ -183,12 +183,6 @@ interface AutoDeductionPlugin {
     calendarDate: string;
     amount: number;
   }): Promise<ApplyAutoDeductionStockResult>;
-  adoptAlreadyAppliedOccurrence(options: {
-    medicationId: string;
-    doseId: string;
-    calendarDate: string;
-    amount: number;
-  }): Promise<ApplyAutoDeductionStockResult>;
 }
 
 const AutoDeduction = registerPlugin<AutoDeductionPlugin>('AutoDeduction');

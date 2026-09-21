@@ -7,7 +7,7 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
-/** Capacitor bridge for Critical Stock's exact-alarm boundary. */
+/** Thin Capacitor bridge; scheduling remains entirely in CriticalStockAlarmAdapter. */
 @CapacitorPlugin(name = "CriticalStock")
 public final class CriticalStockPlugin extends Plugin {
 
@@ -16,9 +16,13 @@ public final class CriticalStockPlugin extends Plugin {
         String medicationId = call.getString("medicationId");
         String medicationName = call.getString("medicationName");
         String unit = call.getString("unit");
+        String notificationTitle = call.getString("notificationTitle");
+        String notificationBody = call.getString("notificationBody");
         Long triggerAt = call.getLong("triggerAtEpochMs");
-        if (triggerAt == null) {
-            call.reject("missing_trigger");
+        if (triggerAt == null
+                || notificationTitle == null
+                || notificationBody == null) {
+            call.reject("missing_schedule_fields");
             return;
         }
 
@@ -26,8 +30,10 @@ public final class CriticalStockPlugin extends Plugin {
                 new CriticalStockAlarmAdapter(getContext()).schedule(
                         medicationId,
                         medicationName,
-                        unit,
                         triggerAt,
+                        unit,
+                        notificationTitle,
+                        notificationBody,
                         null);
 
         JSObject ret = new JSObject();

@@ -1194,7 +1194,20 @@ public final class AutoDeductionScheduler {
             AutoDeductionEventStore.InsertFiredResult ir = store.insertFiredIfAbsent(
                     medicationId, doseId, calendarDate, scheduledAt, amount);
             FireResult result = FireResult.fromInsert(ir);
-            if (result.status == FireResult.Status.FAILED
+            if (result.allowsRecurrence()) {
+                // Independent recovery is itself a complete Auto execution boundary.
+                // Do not leave FIRED-only proof behind: apply the same occurrence-
+                // idempotent Native stock mutation used by the live receiver.
+                AutoDeductionStockStore.AutoApplyResult stockResult =
+                        new AutoDeductionStockStore(appContext).applyAutoDeduction(
+                                medicationId, doseId, calendarDate, amount);
+                if (!stockResult.ok) {
+                    Log.e(TAG, "recover independent evidence: native stock apply failed for "
+                            + key + " — " + stockResult.error);
+                    return new FireResult(FireResult.Status.FAILED, false);
+                }
+                clearIndependentFireRetryEvidenceLocked(key);
+            } else if (result.status == FireResult.Status.FAILED
                     && !result.pendingRecorded) {
                 int prior = evidence.optInt("retryCount", 0);
                 int next = Math.min(prior + 1, AutoDeductionContract.MAX_FIRE_RETRIES);

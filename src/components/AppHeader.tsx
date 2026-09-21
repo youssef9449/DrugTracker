@@ -71,18 +71,18 @@ export const AppHeader: FC<AppHeaderProps> = ({
   const header = HEADER_BY_TAB[activeTab] ?? HEADER_BY_TAB.stock;
 
   return (
-    <header className="bg-teal-800 text-white shadow-xs">
+    <header className="bg-white text-slate-900 border-b border-slate-200">
       {/* Top App Bar */}
-      <div className="px-4 py-3 flex items-center justify-between">
+      <div className="min-h-16 px-4 py-2 flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-base font-bold tracking-tight">{header.title}</h1>
-          <p className="text-[11px] text-teal-200/90 font-medium">
+          <h1 className="text-lg font-medium leading-6 tracking-tight">{header.title}</h1>
+          <p className="text-xs text-slate-600 leading-4">
             {header.subtitle}
           </p>
         </div>
 
         {/* Quick Action Icons */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-0.5">
           {/* Settings button */}
           <button
             onClick={onOpenSettings}
@@ -106,16 +106,16 @@ export const AppHeader: FC<AppHeaderProps> = ({
                 : 'تذكيرات مواعيد الجرعات متوقفة — انقر للتفعيل'
             }
             aria-pressed={notificationsEnabled}
-            className={`p-2 rounded-xl transition active:scale-95 relative border ${
+            className={`w-10 h-10 rounded-full transition-colors relative flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 ${
               notificationsEnabled
-                ? 'bg-amber-400/20 text-amber-300 border-amber-400/40 ring-1 ring-amber-400/30 shadow-xs'
-                : 'bg-teal-900/40 text-teal-300/70 hover:text-white hover:bg-teal-700/80 border-teal-700/60'
+                ? 'bg-teal-100 text-teal-900'
+                : 'text-slate-600 hover:bg-slate-100 active:bg-slate-200'
             }`}
           >
             {notificationsEnabled ? (
               <>
                 <Bell className="w-4 h-4 fill-amber-300" />
-                <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-emerald-400 ring-1 ring-teal-900 animate-pulse" />
+                <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-emerald-600 ring-2 ring-white animate-pulse" />
               </>
             ) : (
               <BellOff className="w-4 h-4" />
@@ -138,13 +138,13 @@ export const AppHeader: FC<AppHeaderProps> = ({
             aria-pressed={criticalStockAlertsEnabled}
             className={`p-2 rounded-xl transition active:scale-95 relative border ${
               criticalStockAlertsEnabled
-                ? 'bg-rose-500/25 text-rose-100 border-rose-400/50 ring-1 ring-rose-400/30 shadow-xs'
+                ? 'bg-rose-100 text-rose-800'
                 : 'bg-teal-900/40 text-teal-300/70 hover:text-white hover:bg-teal-700/80 border-teal-700/60'
             }`}
           >
             <AlertTriangle
               className={`w-4 h-4 ${
-                criticalStockAlertsEnabled ? 'fill-rose-300/30 text-rose-200' : 'opacity-70'
+                criticalStockAlertsEnabled ? 'fill-rose-200 text-rose-800' : 'text-slate-600'
               }`}
             />
           </button>
@@ -164,13 +164,13 @@ export const AppHeader: FC<AppHeaderProps> = ({
             onClick={onToggleFontScale}
             title={fontScale === 'large' ? 'إرجاع حجم الخط للطبيعي' : 'تكبير حجم الخط'}
             aria-label={fontScale === 'large' ? 'إرجاع حجم الخط للطبيعي' : 'تكبير حجم الخط'}
-            className={`px-1.5 py-1 rounded-lg transition active:scale-95 font-bold leading-none ${
+            className={`min-w-10 h-10 rounded-full transition-colors flex items-center justify-center font-bold leading-none focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 ${
               fontScale === 'large'
-                ? 'bg-white/20 text-white shadow-xs ring-1 ring-white/30'
-                : 'text-teal-100 hover:text-white hover:bg-teal-700/80'
+                ? 'bg-teal-100 text-teal-900'
+                : 'text-slate-700 hover:bg-slate-100 active:bg-slate-200'
             }`}
           >
-            <span className="font-mono text-[11px]">
+            <span className="font-mono text-xs">
               {fontScale === 'large' ? 'A-' : 'A+'}
             </span>
           </button>
@@ -179,7 +179,7 @@ export const AppHeader: FC<AppHeaderProps> = ({
 
       {/* In Stock Tab: Search and Filters (M3 Search Bar & Filter Chips) */}
       {activeTab === 'stock' && (
-        <div className="px-4 pb-3 space-y-2.5">
+        <div className="px-4 pb-3 space-y-3">
           {/* M3 Search Bar (Full Pill shape with surface container color) */}
           <div className="relative">
             <input
@@ -193,16 +193,16 @@ export const AppHeader: FC<AppHeaderProps> = ({
               onChange={(e) => onSearchChange(e.target.value)}
               onInput={(e) => onSearchChange((e.target as HTMLInputElement).value)}
               placeholder="بحث عن دواء..."
-              className="w-full pl-8 pr-9 py-2 rounded-full bg-teal-900/50 border border-teal-600/70 text-white placeholder-teal-300/70 text-xs focus:outline-none focus:ring-2 focus:ring-teal-300 focus:bg-teal-900/70 transition shadow-inner [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
+              className="w-full h-12 pl-10 pr-10 rounded-full bg-slate-100 border border-transparent text-slate-900 placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600/30 focus:bg-white focus:border-slate-300 transition-colors [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
             />
-            <Search className="w-4 h-4 text-teal-200 absolute right-3 top-2.5 pointer-events-none" />
+            <Search className="w-5 h-5 text-slate-600 absolute right-3.5 top-3.5 pointer-events-none" />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => onSearchChange('')}
                 aria-label="مسح البحث"
                 title="مسح البحث"
-                className="absolute left-2.5 top-2 w-5 h-5 rounded-full flex items-center justify-center text-teal-200 hover:text-white hover:bg-teal-800/80 active:bg-teal-700 transition cursor-pointer"
+                className="absolute left-2.5 top-3.5 w-5 h-5 rounded-full flex items-center justify-center text-slate-600 hover:bg-slate-200 active:bg-slate-300 transition-colors cursor-pointer"
               >
                 <X className="w-3.5 h-3.5 stroke-[2.5]" />
               </button>
@@ -214,10 +214,10 @@ export const AppHeader: FC<AppHeaderProps> = ({
             <button
               type="button"
               onClick={() => onFilterChange('all')}
-              className={`h-8 px-3 rounded-lg font-medium transition whitespace-nowrap flex items-center gap-1.5 active:scale-95 border cursor-pointer ${
+              className={`h-10 px-4 rounded-full font-medium transition-colors whitespace-nowrap flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30 cursor-pointer ${
                 filter === 'all'
-                  ? 'bg-white text-teal-950 font-bold border-white shadow-xs'
-                  : 'bg-teal-700/50 text-teal-100 border-teal-600/50 hover:bg-teal-700/80'
+                  ? 'bg-teal-100 text-teal-950 font-medium'
+                  : 'bg-transparent text-slate-700 border border-slate-400 hover:bg-slate-100 active:bg-slate-200'
               }`}
             >
               {filter === 'all' && <Check className="w-3.5 h-3.5 text-teal-900 stroke-[2.5]" />}
@@ -239,8 +239,8 @@ export const AppHeader: FC<AppHeaderProps> = ({
                 <span
                   className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold transition ${
                     filter === 'alerts'
-                      ? 'bg-rose-100 text-rose-800 border border-rose-200'
-                      : 'bg-rose-700 text-white'
+                      ? 'bg-rose-100 text-rose-800'
+                      : 'bg-rose-600 text-white'
                   }`}
                 >
                   {alertsCount}

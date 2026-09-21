@@ -14,6 +14,8 @@ import type { ConsumptionLog, Medication } from '../types';
 import {
   listFiredAutoDeductionEvents,
   markAutoDeductionEventReconciled,
+  applyAutoDeductionStock,
+  convergeAutoDeductionStock,
   type AutoDeductionEvent,
   type ListFiredEventsResult,
   type MarkReconciledResult,
@@ -88,6 +90,9 @@ export interface RunReconciliationOutput extends ReconcileFiredResult {
   /** True when native FIRED list failed — distinct from empty events; no mutation/ack. */
   nativeListFailed?: boolean;
   nativeListError?: string;
+  /** True when Native Auto stock could not be initialized, repaired, or read. */
+  nativeStockSyncFailed?: boolean;
+  nativeStockSyncError?: string;
 }
 
 /** @internal test-only envelope injectors (shared with Phase 4 manual gate). */
@@ -172,6 +177,27 @@ async function runOnce(
   let baseMeds = input.medications ?? fresh.medications;
   let baseLogs = input.logs ?? fresh.logs;
 
+  // Auto owns the live stock balance in Native. Seed only missing rows and
+  // mirror authoritative Native currentPills into the JS durable snapshot.
+  const initialStockConvergence = await convergeAutoDeductionStock(baseMeds);
+  if (!initialStockConvergence.ok) {
+    return {
+      medications: baseMeds,
+      logs: baseLogs,
+      toAcknowledge: [],
+      details: [],
+      mutated: false,
+      newExactLogs: [],
+      markedCount: 0,
+      recoveredEnvelope: false,
+      partialNativeAck: false,
+      durabilityBlocked: true,
+      nativeStockSyncFailed: true,
+      nativeStockSyncError: initialStockConvergence.error,
+    };
+  }
+  baseMeds = initialStockConvergence.medications;
+
   // Unified Manual + Exact Auto envelope recovery (mutationSeq causal order).
   // Highest seq above lastApplied is recovered first (full snapshot). Lower
   // pending envelopes never overwrite while higher is unresolved. Manual path
@@ -187,6 +213,7 @@ async function runOnce(
         medications: manualEnv.medications,
         logs: manualEnv.logs,
         globalAutoDeductEnabled: manualEnv.globalAutoDeductEnabled,
+        stockDeltas: manualEnv.stockDeltas ?? [],
         clear: () => saveManualStockEnvelope(null),
       });
     }
@@ -222,7 +249,7 @@ async function runOnce(
         return commitDurableAutoStockState(state, { appliedMutationSeq });
       };
 
-      const unified = recoverAllPendingStockEnvelopes(
+      const unified = await recoverAllPendingStockEnvelopes(
         {
           medications: baseMeds,
           logs: baseLogs,
@@ -319,6 +346,9 @@ async function runOnce(
       logs: baseLogs,
       toAcknowledge: [],
       details: [],
+      // Native stock may have changed while JS was unavailable even though
+      // the FIRED ledger is already terminal. The mirrored currentPills above
+      // is therefore the authoritative JS snapshot for this pass.
       mutated: false,
       newExactLogs: [],
       markedCount: 0,
@@ -327,12 +357,73 @@ async function runOnce(
     };
   }
 
+  // Every FIRED occurrence is repaired/verified against the Native stock
+  // authority before JS creates its log/history evidence. This also repairs
+  // occurrences created before Native stock execution was introduced.
+  const repairedEvents: AutoDeductionEvent[] = [];
+  for (const event of events) {
+    const med = baseMeds.find((m) => m.id === event.medicationId);
+    if (!med) {
+      // Keep the existing missing-med terminalization policy; there is no
+      // current stock to mutate for a deleted medication.
+      repairedEvents.push(event);
+      continue;
+    }
+
+    const stockResult = await applyAutoDeductionStock(
+      event.medicationId,
+      event.doseId,
+      event.calendarDate,
+      event.amount
+    );
+    if (!stockResult.ok) {
+      return {
+        medications: baseMeds,
+        logs: baseLogs,
+        toAcknowledge: [],
+        details: [],
+        mutated: false,
+        newExactLogs: [],
+        markedCount: 0,
+        recoveredEnvelope: false,
+        partialNativeAck: false,
+        durabilityBlocked: true,
+        nativeStockSyncFailed: true,
+        nativeStockSyncError: stockResult.error,
+      };
+    }
+    repairedEvents.push({
+      ...event,
+      nativeStockApplied: true,
+      actualDeducted: stockResult.actualDeducted,
+    });
+  }
+
+  const postRepairConvergence = await convergeAutoDeductionStock(baseMeds);
+  if (!postRepairConvergence.ok) {
+    return {
+      medications: baseMeds,
+      logs: baseLogs,
+      toAcknowledge: [],
+      details: [],
+      mutated: false,
+      newExactLogs: [],
+      markedCount: 0,
+      recoveredEnvelope: false,
+      partialNativeAck: false,
+      durabilityBlocked: true,
+      nativeStockSyncFailed: true,
+      nativeStockSyncError: postRepairConvergence.error,
+    };
+  }
+  baseMeds = postRepairConvergence.medications;
+
   // Recovery may have durably changed the global master switch while the
   // original `fresh` snapshot is now stale. Re-read it after envelope recovery
   // and before creating/committing any new Exact-Auto mutation envelope.
   const durableGlobalAutoDeductEnabled = loadDurableGlobalAutoDeductEnabled();
 
-  const result = reconcileFiredEvents(baseMeds, baseLogs, events, {
+  const result = reconcileFiredEvents(baseMeds, baseLogs, repairedEvents, {
     globalAutoDeductEnabled: durableGlobalAutoDeductEnabled,
     now: input.now,
   });

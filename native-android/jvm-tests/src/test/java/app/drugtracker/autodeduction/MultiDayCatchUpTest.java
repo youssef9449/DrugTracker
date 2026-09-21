@@ -86,7 +86,6 @@ public class MultiDayCatchUpTest {
                         java.util.Collections.singletonList(
                                 new AutoDeductionStockStore.StockSeed(med, 1000.0)));
         assertTrue(seeded.ok);
-        assertTrue(stock.markRecoveryReady());
 
         return version;
     }

@@ -15,14 +15,12 @@ import {
   listFiredAutoDeductionEvents,
   markAutoDeductionEventReconciled,
   applyAutoDeductionStock,
-  adoptAlreadyAppliedAutoOccurrence,
   convergeAutoDeductionStock,
   type AutoDeductionEvent,
   type ListFiredEventsResult,
   type MarkReconciledResult,
 } from './autoDeductionNative';
 import {
-  isExactAutoOccurrenceApplied,
   reconcileFiredEvents,
   type ReconcileFiredResult,
 } from './autoDeductionReconciliation';
@@ -222,14 +220,14 @@ async function runOnce(
         medications: manualEnv.medications,
         logs: manualEnv.logs,
         globalAutoDeductEnabled: manualEnv.globalAutoDeductEnabled,
-        stockDeltas: manualEnv.stockDeltas ?? [],
-        occurrenceResolutions: manualEnv.occurrenceResolutions ?? [],
+        stockDeltas: manualEnv.stockDeltas,
+        occurrenceResolutions: manualEnv.occurrenceResolutions,
         clear: () => saveManualStockEnvelope(null),
       });
     }
 
-    // Issue #267: Legacy Exact Auto envelope migration removed. Only
-    // current Phase 4 envelopes (with mutationSeq) are valid.
+    // Only current Phase 4 envelopes are valid; the application has not
+    // shipped any older envelope format.
     const existingExact = loadEnvelope();
     if (existingExact) {
       pending.push({
@@ -397,9 +395,8 @@ async function runOnce(
     };
   }
 
-  // Every FIRED occurrence is repaired/verified against the Native stock
-  // authority before JS creates its log/history evidence. This also repairs
-  // occurrences created before Native stock execution was introduced.
+  // Every FIRED occurrence is applied/verified against the Native stock
+  // authority before JS creates its log/history evidence.
   const repairedEvents: AutoDeductionEvent[] = [];
   for (const event of events) {
     const med = baseMeds.find((m) => m.id === event.medicationId);
@@ -407,44 +404,6 @@ async function runOnce(
       // Keep the existing missing-med terminalization policy; there is no
       // current stock to mutate for a deleted medication.
       repairedEvents.push(event);
-      continue;
-    }
-
-    // Migration boundary: before Native stock authority existed, a FIRED
-    // occurrence could already have been applied by JS while still remaining
-    // FIRED because the native RECONCILED acknowledgement failed. The existing
-    // dose consume/skip markers are durable evidence that the stock mutation
-    // already happened, so adopt the occurrence marker without changing stock.
-    if (isExactAutoOccurrenceApplied(med, event.doseId, event.calendarDate)) {
-      const adoption = await adoptAlreadyAppliedAutoOccurrence(
-        event.medicationId,
-        event.doseId,
-        event.calendarDate,
-        event.amount
-      );
-      if (!adoption.ok) {
-        return {
-          medications: baseMeds,
-          logs: baseLogs,
-          toAcknowledge: [],
-          details: [],
-          mutated: false,
-          newExactLogs: [],
-          markedCount: 0,
-          recoveredEnvelope: false,
-          partialNativeAck: false,
-          durabilityBlocked: true,
-          nativeStockSyncFailed: true,
-          nativeStockSyncError: adoption.error,
-        };
-      }
-      repairedEvents.push({
-        ...event,
-        nativeStockApplied: adoption.native,
-        ...(adoption.native
-          ? { actualDeducted: adoption.actualDeducted }
-          : {}),
-      });
       continue;
     }
 

@@ -7,7 +7,6 @@ import {
   cancelCriticalAlarm,
   verifyCriticalAlarmPending,
 } from '../utils/criticalAlarmScheduling';
-import { listScheduledCriticalMedicationIdsNative } from '../utils/criticalAlarmNative';
 import {
   loadCriticalNotificationClaims,
   saveCriticalNotificationClaims,
@@ -250,16 +249,6 @@ export function useCriticalAlarmScheduler({
           await cancelCriticalAlarm(id);
         });
       }
-      operationQueueRef.current.enqueue(
-        '__stale_critical_alarm_cleanup__',
-        async () => {
-          const nativeIds = await listScheduledCriticalMedicationIdsNative();
-          for (const medId of nativeIds) {
-            generationGuardRef.current.bump(medId);
-            await cancelCriticalAlarm(medId);
-          }
-        }
-      );
       scheduledCriticalIdsRef.current.clear();
       return;
     }
@@ -408,17 +397,6 @@ export function useCriticalAlarmScheduler({
     // Native durable schedule state is also reconciled so a critical alarm
     // left behind after medication deletion or process death cannot survive
     // merely because its old business claim is absent.
-    operationQueueRef.current.enqueue(
-      '__stale_critical_alarm_cleanup__',
-      async () => {
-        const nativeIds = await listScheduledCriticalMedicationIdsNative();
-        for (const medId of nativeIds) {
-          if (stillScheduled.has(medId)) continue;
-          generationGuardRef.current.bump(medId);
-          await cancelCriticalAlarm(medId);
-        }
-      }
-    );
   }, [
     criticalSignature,
     criticalStockAlertsEnabled,

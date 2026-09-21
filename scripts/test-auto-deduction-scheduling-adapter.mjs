@@ -62,6 +62,10 @@ assert(
   'Auto business scheduler must not own the shared alarm store'
 );
 assert(
+  !scheduler.includes('SCHEDULE_KEY_PREFIX'),
+  'Auto business scheduler must not know the shared schedule-key storage format'
+);
+assert(
   !scheduler.includes('FIELD_FIRE_RETRY_COUNT'),
   'Auto shared schedule metadata must not have a fireRetryCount field'
 );

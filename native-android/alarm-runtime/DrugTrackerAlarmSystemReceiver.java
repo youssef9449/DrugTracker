@@ -35,11 +35,11 @@ public final class DrugTrackerAlarmSystemReceiver
 
         if (Intent.ACTION_BOOT_COMPLETED.equals(action)
                 || ACTION_QUICKBOOT_POWERON.equals(action)) {
-            reason = "BOOT";
+            reason = ExactAlarmLifecycle.REASON_BOOT;
         } else if (Intent.ACTION_TIMEZONE_CHANGED.equals(action)) {
-            reason = "TIMEZONE_CHANGED";
+            reason = ExactAlarmLifecycle.REASON_TIMEZONE_CHANGED;
         } else if (ACTION_EXACT_ALARM_PERMISSION.equals(action)) {
-            reason = "EXACT_ALARM_PERMISSION";
+            reason = ExactAlarmLifecycle.REASON_EXACT_ALARM_PERMISSION;
         } else {
             Log.w(TAG,
                     "ignored lifecycle action: " + action);

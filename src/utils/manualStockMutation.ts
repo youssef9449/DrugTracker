@@ -376,6 +376,24 @@ export async function commitWithManualEnvelope(
     return nativeResult.error ?? 'foreground_stock_failed';
   }
 
+  // The Native result is authoritative for currentPills. Merge that snapshot
+  // back into the JS state before writing the durable envelope so a foreground
+  // mutation cannot persist the pre-Auto absolute balance it started from.
+  if (nativeResult.stocks.length > 0) {
+    const nativeById = new Map(
+      nativeResult.stocks.map((stock) => [
+        stock.medicationId,
+        Number(stock.currentPills),
+      ])
+    );
+    durableState.medications = durableState.medications.map((medication) => {
+      const nativePills = nativeById.get(medication.id);
+      return nativePills != null && Number.isFinite(nativePills) && nativePills >= 0
+        ? { ...medication, currentPills: nativePills }
+        : medication;
+    });
+  }
+
   const commitErr = commitDurableAutoStockState(durableState, {
     appliedMutationSeq: mutationSeq,
   });

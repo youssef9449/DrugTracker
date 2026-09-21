@@ -260,21 +260,6 @@ public class AutoDeductionPlugin extends Plugin {
      * from JS. The returned balances are the values JS must mirror into
      * Medication.currentPills.
      */
-    /**
-     * Marks the Native Auto stock recovery boundary ready after JavaScript has
-     * successfully converged/reconciled the current durable application state.
-     */
-    @PluginMethod
-    public void markRecoveryReady(PluginCall call) {
-        boolean ok = new AutoDeductionStockStore(getContext()).markRecoveryReady();
-        JSObject ret = new JSObject();
-        ret.put("ok", ok);
-        if (!ok) {
-            ret.put("error", "recovery_ready_commit_failed");
-        }
-        call.resolve(ret);
-    }
-
     @PluginMethod
     public void initializeStock(PluginCall call) {
         JSArray medications = call.getArray("medications");

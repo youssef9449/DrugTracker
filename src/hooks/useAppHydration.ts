@@ -233,7 +233,7 @@ export function useAppHydration(setters: AppHydrationSetters): void {
       // balances win; localStorage currentPills seeds only medications that
       // have never been initialized in the Native Auto stock store.
       if (!isFirstEverOpen && loadedMedications.length > 0) {
-        const native = await convergeAutoDeductionStock(loadedMedications, loadedLogs);
+        const native = await convergeAutoDeductionStock(loadedMedications);
         if (native.ok) {
           setMedications(native.medications);
           // Keep the JS durable mirror aligned so a later process restart does

@@ -275,8 +275,7 @@ public final class AutoDeductionStockStore {
     ) {
         if (!isValidId(medicationId)
                 || !isValidId(doseId)
-                || calendarDate == null
-                || calendarDate.trim().isEmpty()
+                || !AutoDeductionContract.isValidCalendarDate(calendarDate)
                 || !AutoDeductionContract.isValidAmount(requestedAmount)) {
             return AutoApplyResult.failure("invalid_auto_stock_args");
         }
@@ -292,6 +291,9 @@ public final class AutoDeductionStockStore {
                 try {
                     actual = Double.parseDouble(markerRaw);
                 } catch (NumberFormatException e) {
+                    return AutoApplyResult.failure("invalid_auto_marker");
+                }
+                if (!Double.isFinite(actual) || actual < 0.0) {
                     return AutoApplyResult.failure("invalid_auto_marker");
                 }
                 Double current = readStockLocked(medicationId);

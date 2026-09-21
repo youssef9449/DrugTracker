@@ -292,4 +292,39 @@ public class AutoDeductionStockStoreTest {
         AutoDeductionStockStore.SnapshotResult snapshot = store.readAll();
         assertEquals(11.0, snapshot.stocks.get("med-1"), 0.0001);
     }
+    @Test
+    public void corruptAutoMarker_failsClosedInsteadOfReportingAlreadyApplied() {
+        store.ensureMissingAndRead(java.util.Collections.singletonList(
+                new AutoDeductionStockStore.StockSeed("med-1", 10.0)));
+
+        appContext().getSharedPreferences(
+                "drugtracker_auto_stock_v1",
+                android.content.Context.MODE_PRIVATE)
+                .edit()
+                .putString("auto:med-1\u001fdose-1\u001f2026-09-21", "NaN")
+                .commit();
+
+        AutoDeductionStockStore.AutoApplyResult result =
+                store.applyAutoDeduction("med-1", "dose-1", "2026-09-21", 2.0);
+
+        assertFalse(result.ok);
+        assertEquals("invalid_auto_marker", result.error);
+        AutoDeductionStockStore.SnapshotResult snapshot = store.readAll();
+        assertEquals(10.0, snapshot.stocks.get("med-1"), 0.0001);
+    }
+
+    @Test
+    public void invalidCalendarDate_rejectsNativeAutoExecution() {
+        store.ensureMissingAndRead(java.util.Collections.singletonList(
+                new AutoDeductionStockStore.StockSeed("med-1", 10.0)));
+
+        AutoDeductionStockStore.AutoApplyResult result =
+                store.applyAutoDeduction("med-1", "dose-1", "2026-02-31", 2.0);
+
+        assertFalse(result.ok);
+        assertEquals("invalid_auto_stock_args", result.error);
+        AutoDeductionStockStore.SnapshotResult snapshot = store.readAll();
+        assertEquals(10.0, snapshot.stocks.get("med-1"), 0.0001);
+    }
+
 }

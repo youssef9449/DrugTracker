@@ -3,9 +3,11 @@
  * exact auto-deduction reconciliation.
  *
  * Crash consistency — dedicated Manual JS envelope (NOT Exact Auto envelope):
- *   1. Allocate mutationSeq + write manual_js_ready envelope (meds+logs only)
- *   2. commitDurableAutoStockState with appliedMutationSeq
- *   3. Clear Manual envelope on full success
+ *   1. Allocate mutationSeq + write the complete current envelope, including
+ *      signed Native stock deltas and occurrence resolutions
+ *   2. Apply the Native stock mutation idempotently and commit the JS snapshot
+ *      with appliedMutationSeq
+ *   3. Clear the Manual envelope on full success
  *
  * Shared causal order with Exact Auto via mutationSeq / lastAppliedMutationSeq.
  * Manual envelope never carries toAcknowledge; never calls markReconciled.

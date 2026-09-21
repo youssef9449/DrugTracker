@@ -32,18 +32,12 @@ public final class AutoDeductionLifecycle {
             if (promoted > 0) {
                 Log.i(TAG, reason + ": promoted " + promoted + " pending-fire record(s)");
             }
-            if (!exactAlarmPermissionGranted) {
-                Log.w(TAG, reason
-                        + ": exact alarm permission not granted — skip alarm restore");
-                return;
-            }
-
             AutoDeductionScheduler scheduler =
                     new AutoDeductionScheduler(context);
 
-            // Native FIRED events can outlive the JS process. Before restoring
-            // schedules, make sure their stock side is also durable even when
-            // the WebView remains unavailable during boot/recovery.
+            // Native FIRED events can outlive the JS process. Stock recovery does
+            // not require Exact Alarm permission, so it must happen before the
+            // permission gate used only for restoring future alarms.
             AutoDeductionScheduler.RestoreResult stockRecovery =
                     scheduler.recoverFiredStockPass();
             if (stockRecovery.ok) {
@@ -53,6 +47,12 @@ public final class AutoDeductionLifecycle {
                 Log.e(TAG, reason + ": Native FIRED stock recovery incomplete: "
                         + stockRecovery.error + " recovered="
                         + stockRecovery.restored + " failed=" + stockRecovery.failed);
+            }
+
+            if (!exactAlarmPermissionGranted) {
+                Log.w(TAG, reason
+                        + ": exact alarm permission not granted — skip alarm restore");
+                return;
             }
 
             AutoDeductionScheduler.RestoreResult rr =

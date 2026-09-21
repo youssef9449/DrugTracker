@@ -63,6 +63,34 @@ public final class AutoDeductionSchedulingAdapter {
                 : storageKey;
     }
 
+    static String extractOperationVersion(String raw) {
+        return ExactAlarmContract.extractOperationVersion(raw);
+    }
+
+    static String extractOperationVersion(JSONObject metadata) {
+        return ExactAlarmContract.extractOperationVersion(metadata);
+    }
+
+    static boolean isMetadataOwnedByOperationVersion(
+            String currentJson,
+            String expectedOperationVersion) {
+        return ExactAlarmContract.isMetadataOwnedByOperationVersion(
+                currentJson, expectedOperationVersion);
+    }
+
+    static long[] parseOrdering(String raw) {
+        return ExactAlarmContract.parseOrdering(raw);
+    }
+
+    static boolean isOrderingNewer(
+            long firstMillis,
+            long firstSequence,
+            long secondMillis,
+            long secondSequence) {
+        return ExactAlarmContract.isOrderingNewer(
+                firstMillis, firstSequence, secondMillis, secondSequence);
+    }
+
     public String getScheduleRaw(String storageKey) {
         String key = normalizeStorageKey(storageKey);
         return key == null ? null : alarmRuntime.getScheduleRaw(key);

@@ -411,6 +411,29 @@ Given a persisted schedule snapshot on calendar date `D` for `(medicationId, dos
 
 ---
 
+## Phase 3 native business + adapter boundary (closure)
+
+The Auto Deduction native path is split into two responsibilities:
+
+```text
+AutoDeductionScheduler (business)
+        ↓
+AutoDeductionSchedulingAdapter (translation boundary)
+        ↓
+ExactAlarmRuntime (shared mechanism)
+```
+
+- `AutoDeductionScheduler` owns FIRED/RECONCILED semantics, recurrence authorization, catch-up, retry evidence, deduction/reconciliation policy, amount authority, and fire/cancel business serialization.
+- `AutoDeductionScheduler` may access only Auto-owned durable state for recurrence authorization and independent fire-retry evidence. Shared schedule/cancellation/ordering storage is accessed only through `AutoDeductionSchedulingAdapter`.
+- `AutoDeductionSchedulingAdapter` is the only Auto scheduling class that depends on `ExactAlarmRuntime` and the shared exact-alarm contract. It translates occurrence identity, amount, timing, operation-version expectations, and delivery extras into the neutral runtime request.
+- `recurrenceGeneration` is Auto business authorization carried in delivery data; it is not part of new Shared alarm schedule metadata.
+- `fireRetryCount` is Auto retry state/evidence and delivery data only; it is not part of Shared alarm schedule metadata.
+- No Auto production class depends on `NotificationRuntime`; the fire path is exact-alarm delivery → FIRED event → JS reconciliation/deduction, with notification presentation outside this boundary.
+
+This section describes the implementation boundary; it does not introduce new stock, reminder, or notification behavior.
+
+---
+
 ## Future work (narrow)
 
 Further product-level completion of the Take / Restore × exact-native-auto interaction matrix beyond the occurrence-level compatibility already shared via consumption/skip markers. Notification and scheduling UX remain outside this subsystem’s stock path.

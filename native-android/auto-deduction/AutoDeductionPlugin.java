@@ -256,10 +256,6 @@ public class AutoDeductionPlugin extends Plugin {
 
 
     /**
-     * Phase 4 — atomic occurrence snapshot for Manual Take amount authority.
-     * Runs under SCHEDULE_LOCK on the native side.
-     */
-    /**
      * Initialize Native stock for the currently persisted JS medications.
      * Existing Native balances are authoritative; only missing rows are seeded
      * from JS. The returned balances are the values JS must mirror into
@@ -304,12 +300,13 @@ public class AutoDeductionPlugin extends Plugin {
             call.resolve(ret);
         } catch (Exception e) {
             Log.e(TAG, "initializeStock failed", e);
-            call.resolve(new JSObject()
-                    .put("ok", false)
-                    .put("stocks", new JSArray())
-                    .put("error", e.getMessage() != null
-                            ? e.getMessage()
-                            : "stock_init_failed"));
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("stocks", new JSArray());
+            ret.put("error", e.getMessage() != null
+                    ? e.getMessage()
+                    : "stock_init_failed");
+            call.resolve(ret);
         }
     }
 
@@ -320,7 +317,8 @@ public class AutoDeductionPlugin extends Plugin {
      */
     @PluginMethod
     public void applyForegroundStockDeltas(PluginCall call) {
-        long mutationSeq = call.getLong("mutationSeq", 0L);
+        Long mutationSeqObj = call.getLong("mutationSeq");
+        long mutationSeq = mutationSeqObj != null ? mutationSeqObj : 0L;
         JSArray rawDeltas = call.getArray("deltas");
         List<AutoDeductionStockStore.StockDelta> deltas =
                 new ArrayList<AutoDeductionStockStore.StockDelta>();
@@ -346,12 +344,13 @@ public class AutoDeductionPlugin extends Plugin {
             call.resolve(ret);
         } catch (Exception e) {
             Log.e(TAG, "applyForegroundStockDeltas failed", e);
-            call.resolve(new JSObject()
-                    .put("ok", false)
-                    .put("alreadyApplied", false)
-                    .put("error", e.getMessage() != null
-                            ? e.getMessage()
-                            : "foreground_stock_failed"));
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("alreadyApplied", false);
+            ret.put("error", e.getMessage() != null
+                    ? e.getMessage()
+                    : "foreground_stock_failed");
+            call.resolve(ret);
         }
     }
 
@@ -364,7 +363,8 @@ public class AutoDeductionPlugin extends Plugin {
         String medicationId = call.getString("medicationId");
         String doseId = call.getString("doseId");
         String calendarDate = call.getString("calendarDate");
-        double amount = call.getDouble("amount", Double.NaN);
+        Double amountObj = call.getDouble("amount");
+        double amount = amountObj != null ? amountObj : Double.NaN;
 
         AutoDeductionStockStore.AutoApplyResult result =
                 new AutoDeductionStockStore(getContext()).applyAutoDeduction(

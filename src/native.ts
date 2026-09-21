@@ -34,10 +34,8 @@ import {
   addNotificationActionPerformedListener,
   addNotificationReceivedListener,
 } from './utils/notificationRuntime';
-import {
-  clearLegacyScheduledAlarmNotifications,
-  setAppInForeground,
-} from './utils/notifications';
+import { clearLegacyScheduledAlarmNotifications } from './utils/exactAlarmLegacyCleanup';
+import { setAppInForeground } from './utils/notifications/doseReminderNotifications';
 
 let initialized = false;
 

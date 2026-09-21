@@ -117,5 +117,5 @@ export async function scheduleSnoozedDoseReminder(
     return;
   }
 
-  await scheduleWebNotification(title, body);
+  scheduleWebNotification(title, body);
 }

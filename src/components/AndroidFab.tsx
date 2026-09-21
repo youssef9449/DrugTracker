@@ -21,7 +21,7 @@ export const AndroidFab: FC<AndroidFabProps> = ({ onClick }) => {
         onClick={onClick}
         id="add-medicine-fab"
         aria-label="إضافة دواء جديد"
-        className="h-14 px-5 bg-teal-700 hover:bg-teal-800 active:scale-98 text-white font-medium text-sm rounded-2xl shadow-lg hover:shadow-xl transition-all duration-200 flex items-center gap-2.5 cursor-pointer"
+        className="h-14 px-5 bg-teal-700 hover:bg-teal-800 active:bg-teal-900 text-white font-medium text-sm rounded-2xl shadow-md hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/40 transition-colors duration-200 flex items-center gap-2.5 cursor-pointer"
       >
         <Plus className="w-5 h-5 stroke-[2.25]" />
         <span className="font-semibold tracking-wide">إضافة دواء جديد</span>

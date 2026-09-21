@@ -75,7 +75,9 @@ export async function scheduleCriticalAlarm(
       medId,
       medName,
       criticalDateMs,
-      unit
+      unit,
+      title,
+      body
     );
   }
 
@@ -93,17 +95,12 @@ export async function scheduleCriticalAlarm(
           id: notificationId('criticalAlarm', medId),
           title,
           body,
-          schedule: {
-            at: fireAt,
-            allowWhileIdle: true,
-          },
+          schedule: { at: fireAt, allowWhileIdle: true },
           channelId: 'low-stock',
           smallIcon: 'ic_launcher',
           ongoing: false,
           autoCancel: true,
-          extra: {
-            medicationId: medId,
-          },
+          extra: { medicationId: medId },
         },
       ],
     });

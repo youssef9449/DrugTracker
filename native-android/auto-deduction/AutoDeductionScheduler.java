@@ -1318,11 +1318,8 @@ public final class AutoDeductionScheduler {
             return ScheduleResult.fail("snapshot_stale");
         }
 
-        String evidenceVersion = evidence.optString(
-                AutoDeductionSchedulingAdapter.extractOperationVersion(evidence), "");
-        if (evidenceVersion.isEmpty()) {
-            evidenceVersion = evidence.optString("operationVersion", "");
-        }
+        String evidenceVersion =
+                AutoDeductionSchedulingAdapter.extractOperationVersion(evidence);
         long evidenceGeneration = evidence.optLong("recurrenceGeneration", 0L);
         String evidenceTime = evidence.optString("timeHhmm", "");
         double evidenceAmount = evidence.optDouble("amount", Double.NaN);

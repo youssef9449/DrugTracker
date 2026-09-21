@@ -254,6 +254,10 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 }
                 return;
             }
+            // Both FIRED and Native stock are now durable. Only now may the
+            // independent retry evidence be cleared.
+            scheduler.clearIndependentFireRetryEvidenceAfterStock(
+                    medicationId, doseId, calendarDate);
         }
 
         switch (result.status) {
@@ -332,6 +336,8 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 }
                 return;
             }
+            scheduler.clearIndependentFireRetryEvidenceAfterStock(
+                    medicationId, doseId, calendarDate);
         }
 
         switch (result.status) {

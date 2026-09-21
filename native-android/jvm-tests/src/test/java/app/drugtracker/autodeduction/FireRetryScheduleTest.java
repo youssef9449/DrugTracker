@@ -5,6 +5,8 @@ import static app.drugtracker.autodeduction.Phase2TestSupport.clearAllDurableSta
 import static app.drugtracker.autodeduction.Phase2TestSupport.futureCalendarDate;
 import static app.drugtracker.autodeduction.Phase2TestSupport.futureEpochMs;
 import static app.drugtracker.autodeduction.Phase2TestSupport.newScheduler;
+import static app.drugtracker.autodeduction.Phase2TestSupport.readAuthGeneration;
+import static app.drugtracker.autodeduction.Phase2TestSupport.seedAutoStock;
 import static app.drugtracker.autodeduction.Phase2TestSupport.schedulePrefs;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -307,7 +309,7 @@ public class FireRetryScheduleTest {
         JSONObject meta = readAnyScheduleMetadata();
         assertNotNull(meta);
         String version = meta.optString(ExactAlarmContract.FIELD_OPERATION_VERSION, "");
-        long gen = meta.optLong(AutoDeductionScheduler.FIELD_RECURRENCE_GENERATION, 0L);
+        long gen = readAuthGeneration("med", "dose");
 
         seedAutoStock("med", 10.0);
 
@@ -443,14 +445,14 @@ public class FireRetryScheduleTest {
         String raw1 = schedulePrefs().getString(prefKey, null);
         assertNotNull(raw1);
         JSONObject meta1 = new JSONObject(raw1);
-        String ver1 = meta1.optString(AutoDeductionScheduler.FIELD_SCHEDULE_VERSION, "");
-        long gen1 = meta1.optLong(AutoDeductionScheduler.FIELD_RECURRENCE_GENERATION, 0L);
+        String ver1 = meta1.optString(ExactAlarmContract.FIELD_OPERATION_VERSION, "");
+        long gen1 = readAuthGeneration("med", "dose");
 
         // Replace with newer schedule
         assertTrue(s.scheduleOccurrence("med", "dose", date, "11:00", 3.0, epoch).ok);
         String raw2 = schedulePrefs().getString(prefKey, null);
         JSONObject meta2 = new JSONObject(raw2);
-        String ver2 = meta2.optString(AutoDeductionScheduler.FIELD_SCHEDULE_VERSION, "");
+        String ver2 = meta2.optString(ExactAlarmContract.FIELD_OPERATION_VERSION, "");
         assertFalse(ver1.equals(ver2));
 
         // Stale retry with old ownership tokens must not write evidence

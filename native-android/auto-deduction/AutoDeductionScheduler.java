@@ -12,7 +12,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.TimeZone;
 
-import app.drugtracker.alarmruntime.ExactAlarmContract;
 
 /**
  * Auto Deduction business/recovery service. Exact Alarm Android scheduling
@@ -50,12 +49,12 @@ import app.drugtracker.alarmruntime.ExactAlarmContract;
  *
  * Recurrence authorization (Issue #217):
  *   PREFS_RECURRENCE_AUTH holds a monotonic generation per (medicationId, doseId).
- *   scheduleOccurrence stamps the active generation into metadata + Intent.
+ *   scheduleOccurrence carries the active generation in delivery extras only; new
+ *   Shared schedule metadata contains no Auto recurrence-authorization state.
  *   invalidateRecurrenceAuthorization bumps the generation under SCHEDULE_LOCK and
  *   cancels all future scheduled occurrences for that dose slot so post-fire
  *   scheduleNextOccurrenceIfAbsent cannot create D+1 after disable, and restore
  *   cannot resurrect a pre-disable successor.
- * with the lock, and for any future path that invokes rollback).
  *
  * Does not use polling, WorkManager periodic, or foreground services.
  */
@@ -540,17 +539,19 @@ public final class AutoDeductionScheduler {
      *   <li>Evaluate effective cancellation (tombstone vs schedule ordering)</li>
      *   <li>Require active schedule metadata for this occurrence</li>
      *   <li>Require every delivery to carry a non-empty {@code operationVersion}
-     *       and a positive {@code recurrenceGeneration}. Both values must match
-     *       the active durable schedule metadata exactly. Missing, invalid, or
-     *       mismatched tokens mean the delivery is stale/cancelled. There is no
-     *       pre-token or tokenless compatibility path.</li>
+     *       and a positive {@code recurrenceGeneration}. The operationVersion must
+     *       match the active durable schedule metadata; the recurrenceGeneration
+     *       must match Auto-owned recurrence authorization state for the dose slot.
+     *       Missing, invalid, or mismatched tokens mean the delivery is stale/cancelled.
+     *       There is no pre-token or tokenless compatibility path.</li>
      *   <li>If ownership holds → persist FIRED via insertFiredIfAbsent</li>
      * </ol>
      *
      * @param deliveryOperationVersion {@link AutoDeductionContract#EXTRA_OPERATION_VERSION}
-     *        from the firing Intent; must be present and match active metadata
+     *        from the firing Intent; must be present and match active schedule metadata
      * @param deliveryRecurrenceGeneration {@link AutoDeductionContract#EXTRA_RECURRENCE_GENERATION}
-     *        from the firing Intent; must be positive and match active metadata
+     *        from the firing Intent; must be positive and match Auto-owned recurrence
+     *        authorization state for the medication+dose slot
      */
     public FireResult fireOccurrenceIfNotCancelled(
             String medicationId,
@@ -587,7 +588,7 @@ public final class AutoDeductionScheduler {
             // Missing or mismatched operationVersion / recurrenceGeneration → STALE.
             try {
                 JSONObject meta = new JSONObject(metaRaw);
-                String activeVersion = ExactAlarmContract.extractOperationVersion(meta);
+                String activeVersion = AutoDeductionSchedulingAdapter.extractOperationVersion(meta);
                 long activeGen = getEffectiveRecurrenceGenerationLocked(
                         medicationId, doseId, meta);
                 if (deliveryOperationVersion == null || deliveryOperationVersion.isEmpty()
@@ -632,7 +633,7 @@ public final class AutoDeductionScheduler {
                     JSONObject meta = new JSONObject(metaRaw);
                     timeHhmm = meta.optString("timeHhmm", "");
                     if (operationVersion.isEmpty()) {
-                        operationVersion = ExactAlarmContract.extractOperationVersion(meta);
+                        operationVersion = AutoDeductionSchedulingAdapter.extractOperationVersion(meta);
                     }
                     if (gen <= 0L) {
                         gen = getEffectiveRecurrenceGenerationLocked(
@@ -913,7 +914,7 @@ public final class AutoDeductionScheduler {
      * Package-visible for focused verification.
      */
     static boolean isMetadataOwnedByVersion(String currentJson, String expectedVersion) {
-        return ExactAlarmContract.isMetadataOwnedByOperationVersion(
+        return AutoDeductionSchedulingAdapter.isMetadataOwnedByOperationVersion(
                 currentJson, expectedVersion);
     }
 
@@ -1007,7 +1008,7 @@ public final class AutoDeductionScheduler {
                 try {
                     JSONObject current = new JSONObject(currentRaw);
                     String activeVersion =
-                            ExactAlarmContract.extractOperationVersion(current);
+                            AutoDeductionSchedulingAdapter.extractOperationVersion(current);
                     long activeGen =
                             getEffectiveRecurrenceGenerationLocked(
                                     medicationId, doseId, current);
@@ -1282,10 +1283,9 @@ public final class AutoDeductionScheduler {
     /**
      * Schedule a single occurrence.
      *
-     * Validation runs outside the lock. The scheduling transaction
-     * (metadata commit + AlarmManager install + failure rollback) runs
-     * inside one synchronized(SCHEDULE_LOCK) critical section so concurrent
-     * attempts cannot interleave AlarmManager installs.
+     * Validation runs outside the lock. The Auto business decision plus its
+     * scheduling-adapter call run inside one synchronized(SCHEDULE_LOCK) critical
+     * section so recurrence authorization and schedule intent cannot interleave.
      */
     public ScheduleResult scheduleOccurrence(
             String medicationId,
@@ -1343,7 +1343,7 @@ public final class AutoDeductionScheduler {
     }
 
     /**
-     * Auto-specific scheduling wrapper.
+     * Auto business scheduling wrapper.
      *
      * <p>Recurrence authorization remains feature-owned here. Actual durable
      * schedule persistence, operation ordering, PendingIntent construction,
@@ -1568,17 +1568,17 @@ public final class AutoDeductionScheduler {
     }
 
     private static long[] parseOrderingToken(String raw) {
-        return ExactAlarmContract.parseOrdering(raw);
+        return AutoDeductionSchedulingAdapter.parseOrdering(raw);
     }
 
     private static long[] parseScheduleVersionOrdering(String scheduleRaw) {
-        return ExactAlarmContract.parseOrdering(
-                ExactAlarmContract.extractOperationVersion(scheduleRaw));
+        return AutoDeductionSchedulingAdapter.parseOrdering(
+                AutoDeductionSchedulingAdapter.extractOperationVersion(scheduleRaw));
     }
 
     private static boolean isOrderingNewer(
             long aMillis, long aSeq, long bMillis, long bSeq) {
-        return ExactAlarmContract.isOrderingNewer(
+        return AutoDeductionSchedulingAdapter.isOrderingNewer(
                 aMillis, aSeq, bMillis, bSeq);
     }
 
@@ -1987,7 +1987,7 @@ public final class AutoDeductionScheduler {
                 String observedVersion = "";
                 try {
                     JSONObject tmp = new JSONObject(raw);
-                    observedVersion = ExactAlarmContract.extractOperationVersion(tmp);
+                    observedVersion = AutoDeductionSchedulingAdapter.extractOperationVersion(tmp);
                 } catch (JSONException ignored) {
                 }
                 snapshot.add(new String[]{ e.getKey(), raw, observedVersion });

@@ -340,6 +340,14 @@ public class AutoDeductionPlugin extends Plugin {
             JSObject ret = new JSObject();
             ret.put("ok", result.ok);
             ret.put("alreadyApplied", result.alreadyApplied);
+            JSArray stocks = new JSArray();
+            for (Map.Entry<String, Double> entry : result.stocks.entrySet()) {
+                JSObject stock = new JSObject();
+                stock.put("medicationId", entry.getKey());
+                stock.put("currentPills", entry.getValue());
+                stocks.put(stock);
+            }
+            ret.put("stocks", stocks);
             if (result.error != null) ret.put("error", result.error);
             call.resolve(ret);
         } catch (Exception e) {

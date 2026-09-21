@@ -309,7 +309,11 @@ export async function recoverAllPendingStockEnvelopes(
   applyNativeStockDeltas: (
     mutationSeq: number,
     deltas: Array<{ medicationId: string; delta: number }>
-  ) => Promise<{ ok: boolean; error?: string }> = applyForegroundAutoStockDeltas
+  ) => Promise<{
+    ok: boolean;
+    error?: string;
+    stocks?: Array<{ medicationId: string; currentPills: number }>;
+  }> = applyForegroundAutoStockDeltas
 ): Promise<UnifiedRecoveryResult> {
   let state = fresh;
   let recovered = false;
@@ -395,6 +399,8 @@ export async function recoverAllPendingStockEnvelopes(
       continue;
     }
 
+    let envelopeMedications = env.medications;
+
     if (env.kind === 'manual') {
       const nativeResult = await applyNativeStockDeltas(
         env.mutationSeq,
@@ -405,9 +411,35 @@ export async function recoverAllPendingStockEnvelopes(
         blocked = true;
         break;
       }
+
+      // The Native result is newer than the JS snapshot stored in the envelope.
+      // Merge currentPills from Native before deciding whether the JS snapshot is
+      // already durable; never restore a stale absolute balance over a background
+      // Auto deduction that happened after the envelope was created.
+      if (nativeResult.stocks && nativeResult.stocks.length > 0) {
+        const nativeById = new Map(
+          nativeResult.stocks.map((stock) => [
+            stock.medicationId,
+            Number(stock.currentPills),
+          ])
+        );
+        envelopeMedications = env.medications.map((medication) => {
+          const nativePills = nativeById.get(medication.id);
+          return nativePills != null &&
+              Number.isFinite(nativePills) &&
+              nativePills >= 0
+            ? { ...medication, currentPills: nativePills }
+            : medication;
+        });
+      }
     }
 
-    if (durableMatchesEnvelopeSnapshot(env, state)) {
+    const envelopeForComparison = {
+      ...env,
+      medications: envelopeMedications,
+    };
+
+    if (durableMatchesEnvelopeSnapshot(envelopeForComparison, state)) {
       const finErr = finalizeMutationSeq(env.mutationSeq);
       if (finErr) {
         durabilityBlocked = true;
@@ -426,7 +458,7 @@ export async function recoverAllPendingStockEnvelopes(
 
     const err = commit(
       {
-        medications: env.medications,
+        medications: envelopeMedications,
         logs: env.logs,
         globalAutoDeductEnabled:
           env.globalAutoDeductEnabled ?? state.globalAutoDeductEnabled,
@@ -439,7 +471,7 @@ export async function recoverAllPendingStockEnvelopes(
       break;
     }
     state = {
-      medications: env.medications,
+      medications: envelopeMedications,
       logs: env.logs,
       globalAutoDeductEnabled:
         env.globalAutoDeductEnabled ?? state.globalAutoDeductEnabled,

@@ -43,7 +43,7 @@ export const AndroidBottomNav: FC<AndroidBottomNavProps> = ({
                 isActive ? 'bg-teal-100 text-teal-950 font-bold' : 'bg-transparent text-slate-600'
               }`}
             >
-              <Icon className={`w-5 h-5 ${iconClassName ?? ''}`} />
+              <Icon className={`w-6 h-6 ${iconClassName ?? ''}`} />
               {id === 'shopping' && alertsCount > 0 && (
                 <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-rose-600 text-white font-mono text-[10px] font-bold rounded-full flex items-center justify-center px-1 border-2 border-white animate-pulse">
                   {alertsCount}

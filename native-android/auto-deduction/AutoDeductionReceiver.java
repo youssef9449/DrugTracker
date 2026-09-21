@@ -21,16 +21,9 @@ import android.util.Log;
  * no pending, no next recurrence. If fire linearizes first, FIRED/pending is
  * durable before any concurrent cancel can observe the occurrence as still open.
  *
- * Fire linearization result drives next-occurrence scheduling:
- * <ul>
- *   <li>CREATED / ALREADY_EXISTS / FAILED with pending-fire — ensure next via
- *       {@link AutoDeductionScheduler#scheduleNextOccurrenceIfAbsent} (never
- *       overwrite an already-present successor with this delivery's payload)</li>
- *   <li>CANCELLED — no recurrence</li>
- *   <li>FAILED without pending — do not advance recurrence; schedule a bounded
- *       same-occurrence retry alarm (see
- *       {@link AutoDeductionScheduler#scheduleFireRetry})</li>
- * </ul>
+ * Fire linearization and Native stock execution together authorize
+ * next-occurrence scheduling. FIRED/pending evidence is not sufficient to advance
+ * recurrence until the occurrence-specific Native stock mutation succeeds.
  * The receiver payload for a duplicate D delivery is not authoritative recurrence
  * configuration for an existing D+1.
  */

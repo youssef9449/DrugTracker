@@ -28,6 +28,7 @@ import {
   withAutoStockMutationGate,
   commitDurableAutoStockState,
   loadDurableGlobalAutoDeductEnabled,
+  STORAGE_MEDS_KEY,
   type AutoStockDurableState,
 } from './autoDeductionStockGate';
 import {
@@ -41,7 +42,6 @@ import {
 } from './stockEnvelopeRecovery';
 import { allocateMutationSeq } from './stockMutationOrdering';
 import { persist } from './storage';
-import { STORAGE_MEDS_KEY } from './autoDeductionStockGate';
 
 export interface ExactAutoEnvelope {
   version: 1;

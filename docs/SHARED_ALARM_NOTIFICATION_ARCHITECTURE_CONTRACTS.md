@@ -602,7 +602,7 @@ The repeated async hygiene used by Auto Deduction, Dose Reminder, and Critical S
 - `src/utils/async/OperationQueue.ts` — keyed promise serialization. Each feature chooses its own key granularity.
 - `src/utils/async/GenerationGuard.ts` — keyed in-memory generation counters for stale-operation checks.
 
-The feature hooks use these primitives directly. `criticalNotificationClaims.ts` keeps its existing `enqueueCriticalAlarmOp` feature-facing function, but delegates its queueing to `OperationQueue`.
+The feature hooks use these primitives directly or through a narrow feature-owned async boundary. `criticalAlarmOperations.ts` owns the single Critical Stock queue instance, while `criticalNotificationClaims.ts` owns claim state only.
 
 These utilities contain no medication state machine, recurrence policy, stock logic, notification policy, or other feature-specific business rules. Do not introduce a universal scheduler abstraction such as `UniversalMedicationScheduler<TBusinessState>`.
 

@@ -264,10 +264,15 @@ export function useCriticalAlarmScheduler({
         '__stale_critical_alarm_cleanup__',
         async () => {
           const nativeIds = await listScheduledCriticalMedicationIdsNative();
-          for (const medId of nativeIds) {
-            generationGuardRef.current.bump(medId);
-            await cancelCriticalAlarm(medId);
-          }
+          await Promise.all(
+            nativeIds.map((medId) => {
+              const cleanupGeneration = generationGuardRef.current.current(medId);
+              return enqueueCriticalAlarmOp(medId, async () => {
+                if (!generationGuardRef.current.isCurrent(medId, cleanupGeneration)) return;
+                await cancelCriticalAlarm(medId);
+              });
+            })
+          );
         }
       );
       scheduledCriticalIdsRef.current.clear();
@@ -422,11 +427,17 @@ export function useCriticalAlarmScheduler({
       '__stale_critical_alarm_cleanup__',
       async () => {
         const nativeIds = await listScheduledCriticalMedicationIdsNative();
-        for (const medId of nativeIds) {
-          if (stillScheduled.has(medId)) continue;
-          generationGuardRef.current.bump(medId);
-          await cancelCriticalAlarm(medId);
-        }
+        await Promise.all(
+          nativeIds
+            .filter((medId) => !stillScheduled.has(medId))
+            .map((medId) => {
+              const cleanupGeneration = generationGuardRef.current.current(medId);
+              return enqueueCriticalAlarmOp(medId, async () => {
+                if (!generationGuardRef.current.isCurrent(medId, cleanupGeneration)) return;
+                await cancelCriticalAlarm(medId);
+              });
+            })
+        );
       }
     );
   }, [

@@ -664,8 +664,9 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                     aria-label={`طريقة حساب كمية طلب ${med.name}`}
                   />
 
-                  {/* Unit selector chips (M3 Filter Chips) */}
-                  {availableUnits.length > 1 && (
+                  {/* Unit chips in period mode only; custom mode places each
+                      quantity input under its unit toggle instead. */}
+                  {getQuantityMode(med) === 'period' && availableUnits.length > 1 && (
                     <div className="flex items-center gap-1 shrink-0">
                       {availableUnits.map((u) => {
                         const isActive = selectedUnits.includes(u);
@@ -677,6 +678,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                             key={u}
                             type="button"
                             onClick={() => handleToggleOrderUnit(med, u, suggestedPills)}
+                            aria-pressed={isActive}
                             className={`h-[28px] px-2 rounded-lg text-[10px] font-bold flex items-center gap-1 transition cursor-pointer border ${
                               isActive
                                 ? 'bg-teal-100 text-teal-950 border-teal-300 shadow-2xs'
@@ -728,19 +730,19 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                     })}
                   </div>
                 ) : (
-                  /* Each selected unit keeps its quantity input beside its unit icon/label
-                     so multi-unit custom orders stay readable (input is not orphaned
-                     from the packaging unit the user is ordering). */
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {selectedUnits.map((unit) => {
+                  /* Custom mode: quantity input sits under its unit toggle —
+                     no second row of detached unit icons/labels. */
+                  <div className="flex flex-wrap items-start gap-1.5">
+                    {(availableUnits.length > 1 ? availableUnits : selectedUnits).map((unit) => {
+                      const isActive = selectedUnits.includes(unit);
                       const inputValue = getCustomQuantityInputValue(med, unit, suggestedPills);
                       const icon =
                         unit === 'pills' ? (
-                          <Pill className="w-2.5 h-2.5 shrink-0" />
+                          <Pill className="w-2.5 h-2.5" />
                         ) : unit === 'boxes' ? (
-                          <Box className="w-2.5 h-2.5 shrink-0" />
+                          <Box className="w-2.5 h-2.5" />
                         ) : (
-                          <Layers className="w-2.5 h-2.5 shrink-0" />
+                          <Layers className="w-2.5 h-2.5" />
                         );
                       const boxLabel = med.unit === 'مل' ? 'عبوة' : 'علبة';
                       const label =
@@ -748,23 +750,35 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                       return (
                         <div
                           key={unit}
-                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200/80 bg-slate-50/60 pl-1.5 pr-1 py-1"
+                          className="flex flex-col items-center gap-1 min-w-[4.5rem]"
                         >
-                          <span
-                            className="inline-flex items-center gap-0.5 rounded-md bg-teal-50 text-teal-900 border border-teal-200/80 px-1.5 py-0.5 text-[10px] font-bold"
-                            title={label}
-                          >
-                            {icon}
-                            <span>{label}</span>
-                          </span>
-                          <input
-                            type="number"
-                            min="1"
-                            value={inputValue}
-                            onChange={(event) => handleCustomQuantityChange(med, unit, event.target.value)}
-                            className="w-14 rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-center font-mono font-bold text-xs focus:ring-1 focus:ring-teal-500"
-                            aria-label={`كمية ${med.name} ${label}`}
-                          />
+                          {availableUnits.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleOrderUnit(med, unit, suggestedPills)}
+                              aria-pressed={isActive}
+                              className={`h-[28px] w-full px-2 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition cursor-pointer border ${
+                                isActive
+                                  ? 'bg-teal-100 text-teal-950 border-teal-300 shadow-2xs'
+                                  : 'bg-slate-50/80 text-slate-600 border-slate-200/90 hover:bg-slate-100'
+                              }`}
+                            >
+                              {icon}
+                              <span>{label}</span>
+                            </button>
+                          )}
+                          {isActive && (
+                            <input
+                              type="number"
+                              min="1"
+                              value={inputValue}
+                              onChange={(event) =>
+                                handleCustomQuantityChange(med, unit, event.target.value)
+                              }
+                              className="w-full min-w-[3.5rem] rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-center font-mono font-bold text-xs focus:ring-1 focus:ring-teal-500"
+                              aria-label={`كمية ${med.name} ${label}`}
+                            />
+                          )}
                         </div>
                       );
                     })}

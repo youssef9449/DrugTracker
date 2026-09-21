@@ -45,7 +45,7 @@ import app.drugtracker.alarmruntime.ExactAlarmContract;
  *   reverse — so nesting cannot deadlock.
  *
  * operationVersion is the shared generic ownership guard for rollback (with
- * legacy operationVersion remaining readable during migration). It remains a
+ * legacy scheduleVersion remaining readable during migration). It remains a
  * against concurrent metadata replace). It is NOT a medication-level disable epoch.
  *
  * Recurrence authorization (Issue #217):
@@ -519,7 +519,7 @@ public final class AutoDeductionScheduler {
      *   <li>If ownership holds → persist FIRED via insertFiredIfAbsent</li>
      * </ol>
      *
-     * @param deliveryScheduleVersion {@link AutoDeductionContract#EXTRA_SCHEDULE_VERSION}
+     * @param deliveryOperationVersion {@link AutoDeductionContract#EXTRA_SCHEDULE_VERSION}
      *        from the firing Intent; must be present and match active metadata
      * @param deliveryRecurrenceGeneration {@link AutoDeductionContract#EXTRA_RECURRENCE_GENERATION}
      *        from the firing Intent; must be positive and match active metadata
@@ -1140,7 +1140,7 @@ public final class AutoDeductionScheduler {
                         medicationId, doseId, calendarDate, scheduledAt, amount,
                         evidence.optString("timeHhmm", ""),
                         evidence.optLong("recurrenceGeneration", 0L),
-                        evidence.optString("operationVersion", optString("scheduleVersion", "")),
+                        evidence.optString("operationVersion", evidence.optString("scheduleVersion", "")),
                         next);
             }
             Log.i(TAG, "recover independent evidence: " + result.status
@@ -1202,7 +1202,7 @@ public final class AutoDeductionScheduler {
                         double amount = evidence.optDouble("amount", Double.NaN);
                         String time = evidence.optString("timeHhmm", "");
                         long gen = evidence.optLong("recurrenceGeneration", 0L);
-                        String ver = evidence.optString("operationVersion", "");
+                        String ver = evidence.optString("operationVersion", evidence.optString("scheduleVersion", ""));
                         if (!AutoDeductionContract.isValidAmount(amount)) {
                             failed++;
                             ok = false;

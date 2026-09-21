@@ -1,5 +1,4 @@
-import { scheduleNotification } from './notificationRuntime';
-import { notificationId } from './notificationIds';
+import { scheduleNotification } from '../notificationRuntime';
 
 export async function sendMedicineAlert(
   medId: string,
@@ -23,7 +22,6 @@ export async function sendMedicineAlert(
       : `المتبقي ${currentPills} حبة فقط، تكفي لـ ${daysText}. يرجى الشراء قريباً!`;
 
   await scheduleNotification({
-    id: notificationId('lowStock', medId),
     namespace: 'low-stock',
     identity: medId,
     title,
@@ -47,8 +45,7 @@ export async function sendMedicineAlert(
  * `criticalStockAlertsEnabled` toggle in AppHeader. The caller is
  * responsible for checking the toggle before calling this function.
  *
- * @param medId Stable medication id — used to derive a unique
- *   notification id (avoids collisions with same-named medications).
+ * @param medId Stable medication identity used as the notification identity.
  * @param medicineName The medication name (in the title)
  * @param daysLeft Days of supply remaining (drives the urgency wording)
  * @param currentPills Current pill count (in the body)

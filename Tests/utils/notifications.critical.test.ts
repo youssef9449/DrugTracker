@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { iosCriticalAlarmId } from '@/utils/notifications/notificationIds';
 
 // Use vi.hoisted so the mock fns are accessible inside vi.mock factories
 // (vi.mock is hoisted to the top of the file).
@@ -57,7 +56,18 @@ beforeEach(() => {
   mocks.checkPermissions.mockResolvedValue({ display: 'granted' });
   mocks.checkExactNotificationSetting.mockResolvedValue({ exact_alarm: 'granted' });
   mocks.getPending.mockResolvedValue({ notifications: [] });
+  mocks.schedule.mockResolvedValue({ notifications: [] });
 });
+
+
+async function scheduleIOSNotificationAndGetPlatformId(
+  medId: string,
+  at: number
+): Promise<number> {
+  await scheduleCriticalAlarm(medId, 'Test Med', at, 'قرص');
+  const call = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
+  return call[0].notifications[0].id;
+}
 
 describe('cancelCriticalAlarm (web path)', () => {
   it('is a no-op on web (no persistent alarm to cancel)', async () => {
@@ -223,8 +233,9 @@ describe('verifyCriticalAlarmPending — the claim is not proof the alarm exists
     const t = Date.now() + 7 * 24 * 60 * 60 * 1000;
     // iOS serializes schedule.at as an ISO-8601 string that drops
     // sub-second precision.
+    const scheduledId = await scheduleIOSNotificationAndGetPlatformId('med-1', t);
     mocks.getPending.mockResolvedValue({
-      notifications: [{ id: iosCriticalAlarmId('med-1'), schedule: { at: new Date(t).toISOString() } }],
+      notifications: [{ id: scheduledId, schedule: { at: new Date(t).toISOString() } }],
     });
     await expect(verifyCriticalAlarmPending('med-1', t)).resolves.toBe(true);
   });
@@ -259,8 +270,9 @@ describe('verifyCriticalAlarmPending — the claim is not proof the alarm exists
   it('exact-alarm check is skipped on iOS (Android-only concept)', async () => {
     mocks.platform.mockReturnValue('ios');
     const t = Date.now() + 7 * 24 * 60 * 60 * 1000;
+    const scheduledId = await scheduleIOSNotificationAndGetPlatformId('med-1', t);
     mocks.getPending.mockResolvedValue({
-      notifications: [{ id: iosCriticalAlarmId('med-1'), schedule: { at: new Date(t).toISOString() } }],
+      notifications: [{ id: scheduledId, schedule: { at: new Date(t).toISOString() } }],
     });
     await expect(verifyCriticalAlarmPending('med-1', t)).resolves.toBe(true);
     expect(mocks.checkExactNotificationSetting).not.toHaveBeenCalled();

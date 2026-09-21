@@ -1,7 +1,6 @@
-import { LocalNotifications } from '@capacitor/local-notifications';
 import { scheduleCriticalAlarmNative, cancelCriticalAlarmNative, verifyCriticalAlarmPendingNative } from './criticalAlarmNative';
-import { iosCriticalAlarmId } from './notifications/notificationIds';
 import { getNativePlatform, isNativePlatform } from './notifications/notificationPlatform';
+import { areNotificationsEnabled, cancelNotification, getPendingNotification, scheduleNotification } from './notificationRuntime';
 import { scheduleWebNotification } from './notifications/webNotifications';
 
 export async function cancelCriticalAlarm(medId: string): Promise<void> {
@@ -11,9 +10,7 @@ export async function cancelCriticalAlarm(medId: string): Promise<void> {
   }
   if (!isNativePlatform()) return;
   try {
-    await LocalNotifications.cancel({
-      notifications: [{ id: iosCriticalAlarmId(medId) }],
-    });
+    await cancelNotification('critical-stock', medId);
   } catch (err) {
     console.warn('[notifications] cancelCriticalAlarm failed:', err);
   }
@@ -35,22 +32,16 @@ export async function verifyCriticalAlarmPending(
   if (!isNativePlatform()) return false;
 
   try {
-    const perm = await LocalNotifications.checkPermissions();
-    if (perm.display !== 'granted') return false;
+    if (!(await areNotificationsEnabled())) return false;
 
     if (getNativePlatform() === 'android') {
       return verifyCriticalAlarmPendingNative(medId, alarmTimeMs);
     }
 
-    const pending = await LocalNotifications.getPending();
-    const id = iosCriticalAlarmId(medId);
-    return pending.notifications.some(
-      (n) =>
-        n.id === id &&
-        pendingAtMatchesAlarmTime(
-          (n.schedule as { at?: unknown } | undefined)?.at,
-          alarmTimeMs
-        )
+    const pending = await getPendingNotification('critical-stock', medId);
+    return !!pending && pendingAtMatchesAlarmTime(
+      pending.schedule?.at,
+      alarmTimeMs
     );
   } catch (err) {
     console.warn('[notifications] verifyCriticalAlarmPending failed:', err);
@@ -69,8 +60,7 @@ export async function scheduleCriticalAlarm(
   const body = `مخزون "${medName}" دخل مرحلة النفاد الحرج (${unit}). يرجى التعبئة فوراً!`;
 
   if (getNativePlatform() === 'android') {
-    const permission = await LocalNotifications.checkPermissions();
-    if (permission.display !== 'granted') return false;
+    if (!(await areNotificationsEnabled())) return false;
     return scheduleCriticalAlarmNative(
       medId,
       medName,
@@ -87,26 +77,21 @@ export async function scheduleCriticalAlarm(
   }
 
   try {
-    const permission = await LocalNotifications.checkPermissions();
-    if (permission.display !== 'granted') return false;
-    const result = await LocalNotifications.schedule({
-      notifications: [
-        {
-          id: iosCriticalAlarmId(medId),
-          title,
-          body,
-          schedule: { at: fireAt, allowWhileIdle: true },
-          channelId: 'low-stock',
-          smallIcon: 'ic_launcher',
-          ongoing: false,
-          autoCancel: true,
-          extra: { medicationId: medId },
-        },
-      ],
+    return await scheduleNotification({
+      namespace: 'critical-stock',
+      identity: medId,
+      title,
+      body,
+      channelId: 'low-stock',
+      channelName: 'تنبيهات النفاذ',
+      channelImportance: 4,
+      channelVisibility: 1,
+      smallIcon: 'ic_launcher',
+      autoCancel: true,
+      ongoing: false,
+      at: fireAt,
+      fallbackToWeb: false,
     });
-    return result.notifications.some(
-      (n) => n.id === iosCriticalAlarmId(medId)
-    );
   } catch (err) {
     console.warn('[notifications] iOS scheduleCriticalAlarm failed:', err);
     return false;

@@ -1,4 +1,3 @@
-import { LocalNotifications } from '@capacitor/local-notifications';
 import { formatReminderTime12h } from './time';
 import {
   scheduleDoseReminderNative,
@@ -6,8 +5,8 @@ import {
   isDoseReminderScheduledNative,
   cancelStaleDoseReminderAlarmsNative,
 } from './doseReminderNative';
-import { notificationId } from './notifications/notificationIds';
 import { getNativePlatform, isNativePlatform } from './notifications/notificationPlatform';
+import { cancelNotification, getPendingNotification, scheduleNotification } from './notificationRuntime';
 import { scheduleWebNotification } from './notifications/webNotifications';
 import { getDoseReminderChannelId } from './notifications/doseReminderNotifications';
 
@@ -20,9 +19,7 @@ export async function isDoseReminderPending(
   }
   if (!isNativePlatform()) return false;
   try {
-    const pending = await LocalNotifications.getPending();
-    const id = notificationId('doseAlarm', `${medId}::${doseId}`);
-    const entry = pending.notifications.find((n) => n.id === id);
+    const entry = await getPendingNotification('dose-reminder', `${medId}::${doseId}`);
     if (!entry) return false;
     const at = (entry.schedule as { at?: unknown } | undefined)?.at;
     if (at == null) return true;
@@ -68,9 +65,8 @@ export async function cancelDoseReminder(
     return;
   }
   if (!isNativePlatform()) return;
-  const id = notificationId('doseAlarm', `${medId}::${doseId}`);
   try {
-    await LocalNotifications.cancel({ notifications: [{ id }] });
+    await cancelNotification('dose-reminder', `${medId}::${doseId}`);
   } catch (err) {
     console.warn('[notifications] cancelDoseReminder failed:', err);
   }
@@ -198,36 +194,35 @@ export async function scheduleDoseReminder(
   const body = `موعد الجرعة الساعة ${formatReminderTime12h(reminderTime)}. جرعتك المقررة: ${doseAmount} ${unit}.`;
 
   if (getNativePlatform() === 'ios') {
-    const notifId = notificationId('doseAlarm', `${medId}::${id}`);
-    const permission = await LocalNotifications.checkPermissions();
-    if (permission.display !== 'granted') {
-      throw new Error('Notification permission is required for dose reminders');
-    }
-    await LocalNotifications.schedule({
-      notifications: [
-        {
-          id: notifId,
-          title,
-          body,
-          schedule: { at: fireToday, allowWhileIdle: true },
-          smallIcon: 'ic_launcher',
-          channelId: getDoseReminderChannelId(),
-          actionTypeId:
-            options?.allowManualTakeAction === false ? undefined : 'dose-reminder',
-          ongoing: false,
-          autoCancel: true,
-          extra: {
-            medicationId: medId,
-            doseId: id,
-            reminderTime,
-            doseRecurring: true,
-          },
-        },
-      ],
+    const scheduled = await scheduleNotification({
+      namespace: 'dose-reminder',
+      identity: `${medId}::${id}`,
+      title,
+      body,
+      channelId: getDoseReminderChannelId(),
+      channelName: getDoseReminderChannelId(),
+      channelImportance: getDoseReminderChannelId() === 'dose-reminder-foreground-v1' ? 2 : 4,
+      smallIcon: 'ic_launcher',
+      action:
+        options?.allowManualTakeAction === false
+          ? undefined
+          : { id: 'dose-reminder', title: 'تم أخذ الجرعة', foreground: true },
+      at: fireToday,
+      extra: {
+        medicationId: medId,
+        doseId: id,
+        reminderTime,
+        doseRecurring: true,
+      },
+      fallbackToWeb: false,
+      autoCancel: true,
+      ongoing: false,
     });
+    if (!scheduled) {
+      throw new Error('Notification scheduling failed');
+    }
     return;
   }
-
   if (options?.skipToday !== true) {
     scheduleWebNotification(title, body);
   }

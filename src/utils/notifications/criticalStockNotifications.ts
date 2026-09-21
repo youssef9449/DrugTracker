@@ -1,5 +1,4 @@
-import { scheduleNotification } from './notificationRuntime';
-import { notificationId } from './notificationIds';
+import { scheduleNotification } from '../notificationRuntime';
 
 export async function sendCriticalStockAlert(
   medId: string,
@@ -36,9 +35,6 @@ export async function sendCriticalStockAlert(
   return scheduleNotification({
     namespace: 'critical-stock-immediate',
     identity: medId,
-    // Disjoint id range from sendMedicineAlert's lowStock band so the
-    // two notifications don't collide / overwrite each other.
-    id: notificationId('critical', medId),
     title,
     body,
     channelId: 'low-stock',

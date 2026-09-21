@@ -13,18 +13,12 @@
  *     on the dark teal background.
  *   - Listen for the Android hardware back button and close the
  *     top modal if one is open, or exit the app if none (#21).
- *   - Create two Android notification channels for dose reminders:
- *     `dose-reminder-v3` (background/killed — system default sound) and
- *     `dose-reminder-foreground-v1` (foreground — silent, so only the
- *     in-app DoseAlarmModal + chime are produced).
+ *   - Notification Runtime owns notification channels and Android notification
+ *     delivery; this bridge only maps notification events to app handlers.
  *   - Listen for `appStateChange` to update the foreground/background
  *     state tracker (setAppInForeground) so dose reminders are scheduled
  *     on the correct channel, and to re-check exact-alarm permission
  *     when the app resumes.
- *   - Listen for `localNotificationReceived` to open the in-app
- *     DoseAlarmModal when a dose reminder fires in the foreground.
- *     No sound playback occurs in this listener — the native channel
- *     handles the sound.
  */
 
 import { Capacitor } from '@capacitor/core';
@@ -34,7 +28,6 @@ import {
   addNotificationActionPerformedListener,
   addNotificationReceivedListener,
 } from './utils/notificationRuntime';
-import { clearLegacyScheduledAlarmNotifications } from './utils/exactAlarmLegacyCleanup';
 import { setAppInForeground } from './utils/notifications/doseReminderNotifications';
 
 let initialized = false;
@@ -110,11 +103,6 @@ export async function initNativeBridge(): Promise<void> {
     // Running in a browser or AI Studio preview — no native bridge.
     return;
   }
-
-  // Remove pre-Phase-6 LocalNotifications alarms before the new exact-alarm
-  // runtime can create the same logical occurrences. This is deliberately an
-  // idempotent migration cleanup, not a scheduling dependency.
-  await clearLegacyScheduledAlarmNotifications();
 
   try {
     await StatusBar.setBackgroundColor({ color: '#0f766e' });

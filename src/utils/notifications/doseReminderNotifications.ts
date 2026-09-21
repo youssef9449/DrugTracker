@@ -1,11 +1,9 @@
-import { LocalNotifications } from '@capacitor/local-notifications';
 import { formatReminderTime12h } from '../time';
 import {
   scheduleDoseSnoozeNative,
   cancelDoseSnoozeNative,
 } from '../doseReminderNative';
-import { scheduleNotification } from './notificationRuntime';
-import { notificationId } from './notificationIds';
+import { cancelNotification, scheduleNotification } from '../notificationRuntime';
 import { getNativePlatform, isNativePlatform } from './notificationPlatform';
 import { scheduleWebNotification } from './webNotifications';
 
@@ -30,7 +28,6 @@ export function getDoseReminderChannelId(): string {
 
 export async function sendTestAlertNotification(): Promise<void> {
   await scheduleNotification({
-    id: notificationId('test'),
     namespace: 'test',
     identity: 'test',
     title: '🔔 إشعار تجريبي: متابع الأدوية',
@@ -50,9 +47,8 @@ export async function cancelSnoozedDoseReminder(
     return;
   }
   if (!isNativePlatform()) return;
-  const id = notificationId('doseSnooze', `${medId}::${doseId}`);
   try {
-    await LocalNotifications.cancel({ notifications: [{ id }] });
+    await cancelNotification('dose-reminder-snooze', `${medId}::${doseId}`);
   } catch (err) {
     console.warn('[notifications] cancelSnoozedDoseReminder failed:', err);
   }
@@ -92,30 +88,29 @@ export async function scheduleSnoozedDoseReminder(
   }
 
   if (getNativePlatform() === 'ios') {
-    const notifId = notificationId('doseSnooze', `${medId}::${id}`);
     const fireAt = new Date(Date.now() + minutes * 60_000);
-    const permission = await LocalNotifications.checkPermissions();
-    if (permission.display !== 'granted') {
-      throw new Error('Notification permission is required for snoozed dose reminders');
-    }
-    await LocalNotifications.schedule({
-      notifications: [
-        {
-          id: notifId,
-          title,
-          body,
-          schedule: { at: fireAt, allowWhileIdle: true },
-          smallIcon: 'ic_launcher',
-          channelId: getDoseReminderChannelId(),
-          actionTypeId: allowManualTakeAction ? undefined : 'dose-reminder',
-          ongoing: false,
-          autoCancel: true,
-          extra: { medicationId: medId, doseId: id },
-        },
-      ],
+    const scheduled = await scheduleNotification({
+      namespace: 'dose-reminder-snooze',
+      identity: `${medId}::${id}`,
+      title,
+      body,
+      channelId: getDoseReminderChannelId(),
+      channelName: getDoseReminderChannelId(),
+      channelImportance: appInForeground ? 2 : 4,
+      smallIcon: 'ic_launcher',
+      autoCancel: true,
+      ongoing: false,
+      action: allowManualTakeAction
+        ? undefined
+        : { id: 'dose-reminder', title: 'تذكير الجرعة' },
+      at: fireAt,
+      extra: { medicationId: medId, doseId: id },
+      fallbackToWeb: false,
     });
+    if (!scheduled) {
+      throw new Error('Notification scheduling failed');
+    }
     return;
   }
-
   scheduleWebNotification(title, body);
 }

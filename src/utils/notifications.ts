@@ -1,13 +1,12 @@
 /**
- * Compatibility facade for the pre-Phase-7 notification utility API.
+ * Compatibility facade for the public notification utility API.
  *
  * Implementations now live in small ownership-specific modules:
  * - notificationPermissions: permission/settings behavior
- * - notificationIds: deterministic notification identity
+ * - notificationRuntime: logical notification identity + presentation mechanics
  * - notificationRuntime: shared notification mechanics
  * - stock/critical/dose notification modules: feature-facing presentation
  * - criticalAlarmScheduling / doseReminderScheduling: exact-alarm-side adapters
- * - exactAlarmLegacyCleanup: pre-Phase-6 scheduled-alarm migration cleanup
  *
  * This file intentionally contains no notification implementation.
  */
@@ -36,12 +35,6 @@ export {
 } from './notifications/doseReminderNotifications';
 
 // Existing notification identity policy.
-export {
-  iosCriticalAlarmId,
-  doseReminderAlarmIdForDose,
-  snoozeDoseReminderId,
-} from './notifications/notificationIds';
-
 // Critical exact-alarm-side API.
 export {
   cancelCriticalAlarm,
@@ -59,12 +52,6 @@ export {
   scheduleDoseReminder,
 } from './doseReminderScheduling';
 export type { ScheduleDoseReminderOptions } from './doseReminderScheduling';
-
-// Phase-6 migration cleanup retained only as a thin compatibility export.
-// Runtime alarm ownership remains outside the notification layer.
-export {
-  clearLegacyScheduledAlarmNotifications,
-} from './exactAlarmLegacyCleanup';
 
 // Exact-alarm capability is owned by Exact Alarm Runtime.
 // Keep these legacy re-exports for existing consumers/tests; new production

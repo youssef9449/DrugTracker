@@ -31,28 +31,31 @@
 
 ## ⏱️ الخصم التلقائي الدقيق للجرعات
 
-يستخدم التطبيق بنية هجينة تفصل بين **توقيت الجرعة** و**تعديل المخزون**:
+يستخدم التطبيق Auto نفسه لتنفيذ الجرعة في وقتها، مع **مرجع مخزون Native دائم** يمكنه العمل حتى عندما تكون واجهة التطبيق مغلقة:
 
 ```text
 جدولة الجرعة من JavaScript
         ↓
 Android AlarmManager
         ↓
-تسجيل FIRED بشكل دائم في التخزين الأصلي
+Auto Native Receiver / Recovery
         ↓
-عند تشغيل التطبيق / استئنافه بعد hydration
+FIRED + خصم Native مرة واحدة
         ↓
-JavaScript reconciliation
+عند عودة التطبيق
         ↓
-تعديل المخزون والسجل مرة واحدة فقط
+مزامنة Native currentPills → Medication.currentPills
         ↓
-تسجيل RECONCILED
+تسجيل markers + log
+        ↓
+RECONCILED
 ```
 
 ### مبادئ أساسية
 
-- Android مسؤول عن الوصول إلى **وقت الجرعة الفعلي** وتسجيل حدث إطلاقها بشكل دائم.
-- JavaScript مسؤول عن **المخزون والسجل وعلامات الاستهلاك**.
+- Android/Auto مسؤول عن الوصول إلى **وقت الجرعة الفعلي** وتنفيذ الخصم أثناء غياب JavaScript.
+- JavaScript يحتفظ بنسخة واجهة التطبيق (`Medication.currentPills`) ويزامنها من مرجع Auto Native.
+- Manual Take/Restore/Refill تستخدم نفس مرجع المخزون Native على Android.
 - هوية كل occurrence تعتمد على:
 
 ```text
@@ -63,7 +66,8 @@ medicationId + doseId + calendarDate
 
 - الجرعات المتعددة في اليوم مستقلة عن بعضها؛ تطبيق جرعة لا يؤدي إلى خصم جرعة شقيقة تلقائيًا.
 - توجد آليات idempotency وdurability تمنع الخصم المكرر عند إعادة المحاولة أو فشل تأكيد الحدث الأصلي.
-- `currentPills` هو رصيد المخزون المحفوظ (durable). لا يوجد إسقاط elapsed-days عند القراءة؛ خصم الجرعات التلقائي يأتي فقط من Exact FIRED occurrences.
+- على Android، `AutoDeductionStockStore` هو مرجع المخزون الدائم أثناء غياب JavaScript، بينما `currentPills` هو النسخة المحفوظة في حالة التطبيق والتي تتم مزامنتها معه.
+- لا يوجد إسقاط elapsed-days عند القراءة؛ خصم الجرعات التلقائي يأتي فقط من Exact occurrences.
 
 التفاصيل التقنية الكاملة موجودة في [`docs/AUTO_DEDUCTION_ARCHITECTURE.md`](./docs/AUTO_DEDUCTION_ARCHITECTURE.md).
 

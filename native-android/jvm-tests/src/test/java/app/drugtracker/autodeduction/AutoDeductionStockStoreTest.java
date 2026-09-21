@@ -210,6 +210,68 @@ public class AutoDeductionStockStoreTest {
     }
 
     @Test
+    public void foregroundConsumedResolution_preventsSameOccurrenceAutoDeduction() {
+        store.ensureMissingAndRead(java.util.Collections.singletonList(
+                new AutoDeductionStockStore.StockSeed("med-1", 10.0)));
+
+        AutoDeductionStockStore.ForegroundApplyResult manual =
+                store.applyForegroundDeltas(
+                        10L,
+                        java.util.Collections.singletonList(
+                                new AutoDeductionStockStore.StockDelta("med-1", -2.0)),
+                        java.util.Collections.singletonList(
+                                new AutoDeductionStockStore.OccurrenceResolution(
+                                        "med-1",
+                                        "dose-1",
+                                        "2026-09-21",
+                                        AutoDeductionStockStore.OccurrenceResolution.Type.CONSUMED)));
+
+        assertTrue(manual.ok);
+        assertEquals(8.0, manual.stocks.get("med-1"), 0.0001);
+
+        AutoDeductionStockStore.AutoApplyResult auto =
+                store.applyAutoDeduction("med-1", "dose-1", "2026-09-21", 2.0);
+
+        assertTrue(auto.ok);
+        assertFalse(auto.applied);
+        assertEquals(
+                "manual Take already consumed the exact occurrence",
+                0.0,
+                auto.actualDeducted,
+                0.0001);
+        assertEquals(8.0, auto.currentPills, 0.0001);
+    }
+
+    @Test
+    public void foregroundSkippedResolution_preventsLaterAutoDeduction() {
+        store.ensureMissingAndRead(java.util.Collections.singletonList(
+                new AutoDeductionStockStore.StockSeed("med-1", 10.0)));
+
+        AutoDeductionStockStore.ForegroundApplyResult restore =
+                store.applyForegroundDeltas(
+                        11L,
+                        java.util.Collections.singletonList(
+                                new AutoDeductionStockStore.StockDelta("med-1", 2.0)),
+                        java.util.Collections.singletonList(
+                                new AutoDeductionStockStore.OccurrenceResolution(
+                                        "med-1",
+                                        "dose-1",
+                                        "2026-09-21",
+                                        AutoDeductionStockStore.OccurrenceResolution.Type.SKIPPED)));
+
+        assertTrue(restore.ok);
+        assertEquals(12.0, restore.stocks.get("med-1"), 0.0001);
+
+        AutoDeductionStockStore.AutoApplyResult auto =
+                store.applyAutoDeduction("med-1", "dose-1", "2026-09-21", 2.0);
+
+        assertTrue(auto.ok);
+        assertFalse(auto.applied);
+        assertEquals(0.0, auto.actualDeducted, 0.0001);
+        assertEquals(12.0, auto.currentPills, 0.0001);
+    }
+
+    @Test
     public void zeroDelta_canInitializeNewMedicationStockRow() {
         AutoDeductionStockStore.ForegroundApplyResult result =
                 store.applyForegroundDeltas(

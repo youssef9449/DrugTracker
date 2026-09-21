@@ -473,10 +473,61 @@ public final class AutoDeductionScheduler {
         public final Status status;
         /** True if a pending-fire record was durably written after primary failure. */
         public final boolean pendingRecorded;
+        /** True when the native background stock was durably updated for this occurrence. */
+        public final boolean backgroundStockApplied;
+        /** Native background stock immediately after a successful apply. */
+        public final double backgroundCurrentPills;
+        /** Actual amount removed by native background execution. */
+        public final double backgroundDeductedAmount;
+        /** Monotonic native background execution version. */
+        public final long backgroundStockVersion;
+        /** Non-null when FIRED evidence exists but background stock application failed. */
+        public final String backgroundStockError;
 
         public FireResult(Status status, boolean pendingRecorded) {
+            this(status, pendingRecorded, false, 0.0d, 0.0d, 0L, null);
+        }
+
+        private FireResult(
+                Status status,
+                boolean pendingRecorded,
+                boolean backgroundStockApplied,
+                double backgroundCurrentPills,
+                double backgroundDeductedAmount,
+                long backgroundStockVersion,
+                String backgroundStockError
+        ) {
             this.status = status;
             this.pendingRecorded = pendingRecorded;
+            this.backgroundStockApplied = backgroundStockApplied;
+            this.backgroundCurrentPills = backgroundCurrentPills;
+            this.backgroundDeductedAmount = backgroundDeductedAmount;
+            this.backgroundStockVersion = backgroundStockVersion;
+            this.backgroundStockError = backgroundStockError;
+        }
+
+        public FireResult withBackground(BackgroundStockStore.ApplyResult background) {
+            if (background == null) return this;
+            if (!background.ok) {
+                return new FireResult(
+                        Status.FAILED,
+                        false,
+                        false,
+                        0.0d,
+                        0.0d,
+                        background.backgroundVersion,
+                        background.error != null
+                                ? background.error
+                                : "background_stock_apply_failed");
+            }
+            return new FireResult(
+                    status,
+                    pendingRecorded,
+                    true,
+                    background.currentPills,
+                    background.deductedAmount,
+                    background.backgroundVersion,
+                    null);
         }
 
         public static FireResult cancelled() {
@@ -508,10 +559,75 @@ public final class AutoDeductionScheduler {
          * CANCELLED and FAILED-without-pending must not advance recurrence.
          */
         public boolean allowsRecurrence() {
+            if (backgroundStockError != null) return false;
             return status == Status.CREATED
                     || status == Status.ALREADY_EXISTS
                     || (status == Status.FAILED && pendingRecorded);
         }
+    }
+
+    /**
+     * Apply the exact occurrence to Auto's native background stock whenever
+     * durable FIRED evidence exists and is still unreconciled.
+     *
+     * CREATED / FAILED+pending establish new durable FIRED evidence directly.
+     * ALREADY_EXISTS is handled carefully: only a still-FIRED row is eligible.
+     * A RECONCILED row is never re-applied, which makes duplicate deliveries
+     * safe while still recovering the crash window between FIRED persistence
+     * and background-stock persistence.
+     */
+    private BackgroundStockStore.ApplyResult applyBackgroundStockIfNeeded(
+            AutoDeductionEventStore store,
+            FireResult result,
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            double deliveryAmount
+    ) {
+        double amount = deliveryAmount;
+        boolean shouldApply =
+                result.status == FireResult.Status.CREATED
+                        || (result.status == FireResult.Status.FAILED
+                        && result.pendingRecorded);
+
+        if (result.status == FireResult.Status.ALREADY_EXISTS) {
+            AutoDeductionEventStore.EventLookupResult lookup =
+                    store.getFiredUnreconciledEvent(
+                            medicationId, doseId, calendarDate);
+            if (!lookup.ok) {
+                Log.w(TAG, "background stock recovery lookup failed for "
+                        + medicationId + "/" + doseId + "/" + calendarDate
+                        + ": " + lookup.error);
+                return BackgroundStockStore.ApplyResult.failure(
+                        0.0d,
+                        new BackgroundStockStore(appContext).getVersion(),
+                        lookup.error != null
+                                ? lookup.error
+                                : "background_stock_fired_lookup_failed");
+            }
+            if (lookup.event != null) {
+                amount = lookup.event.optDouble("amount", Double.NaN);
+                if (!AutoDeductionContract.isValidAmount(amount)) {
+                    return BackgroundStockStore.ApplyResult.failure(
+                            0.0d,
+                            new BackgroundStockStore(appContext).getVersion(),
+                            "invalid_fired_amount");
+                }
+                shouldApply = true;
+            }
+        }
+
+        if (!shouldApply) return null;
+
+        BackgroundStockStore.ApplyResult background =
+                new BackgroundStockStore(appContext).applyAutoDeduction(
+                        medicationId, doseId, calendarDate, amount);
+        if (!background.ok) {
+            Log.w(TAG, "background stock apply failed for "
+                    + medicationId + "/" + doseId + "/" + calendarDate
+                    + ": " + background.error);
+        }
+        return background;
     }
 
     /**
@@ -618,6 +734,14 @@ public final class AutoDeductionScheduler {
             AutoDeductionEventStore.InsertFiredResult ir = store.insertFiredIfAbsent(
                     medicationId, doseId, calendarDate, scheduledAtEpochMs, amount);
             FireResult result = FireResult.fromInsert(ir);
+
+            BackgroundStockStore.ApplyResult background =
+                    applyBackgroundStockIfNeeded(
+                            store, result, medicationId, doseId, calendarDate, amount);
+            if (background != null) {
+                result = result.withBackground(background);
+            }
+
             // Any durable fire evidence supersedes the retry marker. Clearing the
             // marker is best-effort; the FIRED/pending evidence remains authoritative.
             if (result.allowsRecurrence()) {
@@ -662,7 +786,7 @@ public final class AutoDeductionScheduler {
      *   <li>Reject if {@code expectedRecurrenceGeneration} is no longer active</li>
      *   <li>Idempotently {@link AutoDeductionEventStore#insertFiredIfAbsent}</li>
      * </ol>
-     * Does not mutate JS stock / WebView state.
+     * Does not write JS localStorage or WebView state; when recovery establishes FIRED evidence it also applies the occurrence to the Auto-owned native background stock ledger.
      */
     public FireResult recoverMissedOccurrence(
             String medicationId,
@@ -698,6 +822,14 @@ public final class AutoDeductionScheduler {
             AutoDeductionEventStore.InsertFiredResult ir = store.insertFiredIfAbsent(
                     medicationId, doseId, calendarDate, scheduledAtEpochMs, amount);
             FireResult result = FireResult.fromInsert(ir);
+
+            BackgroundStockStore.ApplyResult background =
+                    applyBackgroundStockIfNeeded(
+                            store, result, medicationId, doseId, calendarDate, amount);
+            if (background != null) {
+                result = result.withBackground(background);
+            }
+
             Log.i(TAG, "recoverMissed: " + result.status
                     + " pendingRecorded=" + result.pendingRecorded + " for " + key);
             return result;
@@ -1120,9 +1252,52 @@ public final class AutoDeductionScheduler {
 
     /**
      * Recover a previously authorized fire from independent failure evidence.
-     * Does NOT require shared schedule metadata and does NOT schedule recurrence successors.
+     * Does not require shared schedule metadata to recover the FIRED occurrence.
+     * Recurrence continues only when the current schedule row still owns this
+     * occurrence under the same operationVersion + recurrenceGeneration.
      * Lock order: SCHEDULE_LOCK → EventStore.LOCK (via insertFiredIfAbsent).
      */
+    private ScheduleResult scheduleNextOccurrenceIfIndependentEvidenceOwned(
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            String timeHhmm,
+            double amount,
+            long recurrenceGeneration,
+            String operationVersion
+    ) {
+        if (operationVersion == null || operationVersion.isEmpty()
+                || recurrenceGeneration <= 0L) {
+            return ScheduleResult.fail("recurrence_not_authorized");
+        }
+
+        final String currentKey = AutoDeductionContract.occurrenceKey(
+                medicationId, doseId, calendarDate);
+        synchronized (SCHEDULE_LOCK) {
+            String currentRaw = getScheduleRaw(currentKey);
+            if (currentRaw == null || currentRaw.isEmpty()) {
+                return ScheduleResult.fail("recurrence_not_authorized");
+            }
+            try {
+                JSONObject current = new JSONObject(currentRaw);
+                String activeVersion =
+                        AutoDeductionSchedulingAdapter.extractOperationVersion(current);
+                long activeGeneration =
+                        getEffectiveRecurrenceGenerationLocked(
+                                medicationId, doseId, current);
+                if (!operationVersion.equals(activeVersion)
+                        || recurrenceGeneration != activeGeneration) {
+                    return ScheduleResult.fail("recurrence_authorization_invalid");
+                }
+            } catch (JSONException e) {
+                return ScheduleResult.fail("recurrence_not_authorized");
+            }
+            return scheduleNextOccurrenceIfAbsent(
+                    medicationId, doseId, calendarDate, timeHhmm, amount,
+                    recurrenceGeneration);
+        }
+    }
+
     public FireResult recoverFireFromIndependentEvidence(
             String medicationId,
             String doseId,
@@ -1159,9 +1334,49 @@ public final class AutoDeductionScheduler {
             AutoDeductionEventStore.InsertFiredResult ir = store.insertFiredIfAbsent(
                     medicationId, doseId, calendarDate, scheduledAt, amount);
             FireResult result = FireResult.fromInsert(ir);
+
+            BackgroundStockStore.ApplyResult background =
+                    applyBackgroundStockIfNeeded(
+                            store, result, medicationId, doseId, calendarDate, amount);
+            if (background != null) {
+                result = result.withBackground(background);
+            }
+
             if (result.allowsRecurrence()) {
-                // Clear only after durable FIRED or pending proof.
-                clearIndependentFireRetryEvidenceLocked(key);
+                String evidenceTime = evidence.optString("timeHhmm", "");
+                long evidenceGeneration =
+                        evidence.optLong("recurrenceGeneration", 0L);
+                String evidenceVersion =
+                        evidence.optString(
+                                "operationVersion",
+                                evidence.optString("scheduleVersion", ""));
+
+                ScheduleResult successor =
+                        scheduleNextOccurrenceIfIndependentEvidenceOwned(
+                                medicationId, doseId, calendarDate,
+                                evidenceTime, amount,
+                                evidenceGeneration, evidenceVersion);
+
+                if (successor.ok) {
+                    clearIndependentFireRetryEvidenceLocked(key);
+                } else if ("recurrence_not_authorized".equals(successor.error)
+                        || "recurrence_authorization_invalid".equals(successor.error)) {
+                    clearIndependentFireRetryEvidenceLocked(key);
+                } else {
+                    int prior = evidence.optInt("retryCount", 0);
+                    int next = Math.min(
+                            prior + 1,
+                            AutoDeductionContract.MAX_FIRE_RETRIES);
+                    if (next <= AutoDeductionContract.MAX_FIRE_RETRIES) {
+                        boolean retryOk = scheduleFireRetry(
+                                medicationId, doseId, calendarDate, scheduledAt, amount,
+                                evidenceTime, evidenceGeneration, evidenceVersion, next);
+                        if (!retryOk) {
+                            Log.w(TAG, "independent recovery successor scheduling failed for "
+                                    + key + " (" + successor.error + ")");
+                        }
+                    }
+                }
             } else if (result.status == FireResult.Status.FAILED
                     && !result.pendingRecorded) {
                 int prior = evidence.optInt("retryCount", 0);

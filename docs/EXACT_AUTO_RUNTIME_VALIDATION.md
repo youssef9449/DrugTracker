@@ -8,7 +8,7 @@ This is the runtime validation record for the Exact-Time Automatic Dose Deductio
 - that `AutoDeductionReceiver` runs while the process is in the background or after it was killed
 - that the FIRED event is actually persisted durably on fire
 - that JS reconciliation reads FIRED after a cold start
-- that the stock balance decreases exactly once
+- that the stock balance decreases exactly once, including while the WebView/process is unavailable
 - that the event becomes RECONCILED
 - that reboot recovery, exact-alarm permission recovery, and multiple exact occurrences behave as designed on real hardware
 
@@ -16,7 +16,7 @@ This document follows the same honesty conventions as `docs/ANDROID_NOTIFICATION
 
 ## Intended pipeline under validation (do not change)
 
-Native `AlarmManager.setExactAndAllowWhileIdle` one-shot per occurrence (`AutoDeductionScheduler`) → delivery into `AutoDeductionReceiver.onReceive` (background thread via `goAsync()`, bounded same-identity fire-persistence retry) → durable **FIRED** row (`AutoDeductionEventStore.insertFiredIfAbsent`) → JS reconciliation (`src/hooks/useExactAutoDeductionReconciliation.ts` → `src/utils/runAutoDeductionReconciliation.ts` → `src/utils/autoDeductionReconciliation.ts`) → stock mutation through the serialized durable stock gate (`src/utils/autoDeductionStockGate.ts`) → exactly one exact log with deterministic id `exact-auto:<medicationId>:<doseId>:<calendarDate>` → native **FIRED → RECONCILED** acknowledgement (`AutoDeductionPlugin.markReconciled`).
+Native `AlarmManager.setExactAndAllowWhileIdle` one-shot per occurrence (`AutoDeductionScheduler`) → delivery into `AutoDeductionReceiver.onReceive` (background thread via `goAsync()`, bounded same-identity fire-persistence retry) → durable **FIRED** row (`AutoDeductionEventStore.insertFiredIfAbsent`) → immediate idempotent native stock mutation in `BackgroundStockStore` → JS wake-up/reconciliation when available (`src/hooks/useExactAutoDeductionReconciliation.ts` → `src/utils/runAutoDeductionReconciliation.ts` → `src/utils/autoDeductionReconciliation.ts`) → converge `Medication.currentPills` without a second deduction → exactly one exact log with deterministic id `exact-auto:<medicationId>:<doseId>:<calendarDate>` → native **FIRED → RECONCILED** acknowledgement (`AutoDeductionPlugin.markReconciled`).
 
 Occurrence identity: `medicationId + doseId + calendarDate` (`AutoDeductionContract`). Boot / timezone / permission restore: `DrugTrackerAlarmSystemReceiver` + `AutoDeductionScheduler.restoreFutureSchedules`.
 
@@ -111,7 +111,7 @@ Repeat scenario 1, but press **Home** (do not force-stop) before the dose time. 
 3. Wait for the alarm **without** reopening the app; observe `AutoDeductionReceiver` fire in a fresh process via logcat; verify FIRED is persisted durably.
 4. Relaunch the app; verify reconciliation on hydrate, stock decreased **exactly once**, exactly **one** log, event **RECONCILED**.
 
-This is the cold-process FIRED path: AlarmManager delivery → receiver without a live JS runtime → durable FIRED → JS reconciliation on next start. **PASS requires** all seven observations including the post-cold-start reconciliation.
+This is the cold-process path: AlarmManager delivery → receiver without a live JS runtime → durable FIRED + native background stock deduction → JS reconciliation/convergence on next start. **PASS requires** all seven observations including the post-cold-start reconciliation.
 **2026-09-18 attempt:** NOT EXECUTED — blocked at runtime provisioning.
 
 ### Scenario 4 — Multiple exact occurrences

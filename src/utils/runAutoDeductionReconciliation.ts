@@ -38,6 +38,10 @@ import {
   type PendingEnvelopeRef,
 } from './stockEnvelopeRecovery';
 import { allocateMutationSeq } from './stockMutationOrdering';
+import {
+  convergeBackgroundStock,
+  repairBackgroundStockFromFiredEvents,
+} from './backgroundStockNative';
 
 export interface ExactAutoEnvelope {
   version: 1;
@@ -275,6 +279,74 @@ async function runOnce(
       // Manual-only recovery may have completed; fall through to listFired.
     }
   }
+  // Recovery ordering for the native Auto execution shadow:
+  //   1) Converge first so every currently-existing JS medication has a native
+  //      shadow row before FIRED repair attempts to apply stock.
+  //   2) Repair every currently-FIRED occurrence. A process-death gap between
+  //      FIRED persistence and background-stock persistence is therefore closed
+  //      even when the shadow row did not exist before the recovery boundary.
+  //   3) Converge a second time so any stock applied by the repair pass is
+  //      durably reflected in JS before FIRED reconciliation computes logs/
+  //      acknowledgement. Same-generation sync preserves the native balance.
+  //
+  // listFired remains read-only for background stock and is intentionally called
+  // only after this repair/convergence pair.
+  const initialBackgroundSync = await convergeBackgroundStock(baseMeds, baseLogs);
+  if (!initialBackgroundSync.ok) {
+    return {
+      medications: baseMeds,
+      logs: baseLogs,
+      toAcknowledge: [],
+      details: [],
+      mutated: false,
+      newExactLogs: [],
+      markedCount: 0,
+      recoveredEnvelope: false,
+      partialNativeAck: false,
+      durabilityBlocked: true,
+      nativeListFailed: false,
+      nativeListError: initialBackgroundSync.error,
+    };
+  }
+  baseMeds = initialBackgroundSync.medications;
+
+  const backgroundRepair = await repairBackgroundStockFromFiredEvents();
+  if (!backgroundRepair.ok) {
+    return {
+      medications: baseMeds,
+      logs: baseLogs,
+      toAcknowledge: [],
+      details: [],
+      mutated: false,
+      newExactLogs: [],
+      markedCount: 0,
+      recoveredEnvelope: false,
+      partialNativeAck: false,
+      durabilityBlocked: true,
+      nativeListFailed: false,
+      nativeListError: backgroundRepair.error,
+    };
+  }
+
+  const repairedBackgroundSync = await convergeBackgroundStock(baseMeds, baseLogs);
+  if (!repairedBackgroundSync.ok) {
+    return {
+      medications: baseMeds,
+      logs: baseLogs,
+      toAcknowledge: [],
+      details: [],
+      mutated: false,
+      newExactLogs: [],
+      markedCount: 0,
+      recoveredEnvelope: false,
+      partialNativeAck: false,
+      durabilityBlocked: true,
+      nativeListFailed: false,
+      nativeListError: repairedBackgroundSync.error,
+    };
+  }
+  baseMeds = repairedBackgroundSync.medications;
+
   // On read failure: do not mutate stock, do not acknowledge, remain retryable.
   let events: AutoDeductionEvent[] = [];
   let listOk = true;

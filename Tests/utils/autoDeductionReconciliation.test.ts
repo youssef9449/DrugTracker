@@ -183,6 +183,59 @@ describe('stock gate — fresh durable state', () => {
     expect(durable.medications[0].currentPills).toBe(8);
   });
 
+  it('nativeBackgroundBalanceDoesNotOverwriteLaterForegroundStock', () => {
+    const med = baseMed({
+      doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
+      currentPills: 13,
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd',
+      calendarDate: '2026-09-14',
+      amount: 2,
+      backgroundStockApplied: true,
+      backgroundCurrentPills: 8,
+      backgroundDeductedAmount: 2,
+      backgroundStockVersion: 11,
+    });
+
+    const result = applyExactAutoEventToMedication(med, e);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Native already changed the stock at fire time. A later foreground
+    // mutation has already moved JS stock to 13; reconciliation must retain
+    // that later value rather than overwrite it with the old native absolute
+    // balance (8) or subtract the occurrence twice.
+    expect(result.updatedMed.currentPills).toBe(13);
+    expect(result.log.amount).toBe(-2);
+    expect(result.log.id).toBe(exactAutoLogId('med-1', 'd', '2026-09-14'));
+  });
+
+  it('zeroBackgroundDeductionIsStillNativeAndDoesNotDeductLaterRefill', () => {
+    const med = baseMed({
+      doseSchedule: [{ id: 'd', amount: 2, time: '08:00' }],
+      currentPills: 5,
+    });
+    const e = fired({
+      medicationId: 'med-1',
+      doseId: 'd',
+      calendarDate: '2026-09-14',
+      amount: 2,
+      backgroundStockApplied: true,
+      backgroundCurrentPills: 5,
+      backgroundDeductedAmount: 0,
+      backgroundStockVersion: 12,
+    });
+
+    const result = applyExactAutoEventToMedication(med, e);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.updatedMed.currentPills).toBe(5);
+    expect(result.log.amount).toBe(0);
+  });
+
   it('elapsed-day settlementDoesNotBlockFIRED (#265/#267)', async () => {
     // prevent the FIRED deduction.
     durable.medications = [

@@ -408,6 +408,12 @@ public class FireRetryScheduleTest {
             throws Exception {
         String date = "2026-09-10";
         AutoDeductionScheduler s = newScheduler();
+        BackgroundStockStore background = new BackgroundStockStore(appContext());
+        assertTrue(background.syncFromJs(
+                java.util.Collections.singletonList(
+                        new BackgroundStockStore.MedicationState("med", 10.0d, 1L)),
+                1L,
+                java.util.Collections.emptySet()).ok);
         // No sch: row — only independent evidence
         synchronized (getScheduleLock()) {
             assertTrue(s.recordIndependentFireRetryEvidenceLocked(
@@ -469,6 +475,12 @@ public class FireRetryScheduleTest {
             throws Exception {
         String date = "2026-09-11";
         AutoDeductionScheduler s = newScheduler();
+        BackgroundStockStore background = new BackgroundStockStore(appContext());
+        assertTrue(background.syncFromJs(
+                java.util.Collections.singletonList(
+                        new BackgroundStockStore.MedicationState("med", 10.0d, 1L)),
+                1L,
+                java.util.Collections.emptySet()).ok);
         synchronized (getScheduleLock()) {
             assertTrue(s.recordIndependentFireRetryEvidenceLocked(
                     "med", "dose", date, 1000L, 2.0, "08:00", 1L, "v1", 1));
@@ -487,35 +499,76 @@ public class FireRetryScheduleTest {
     }
 
     @Test
-    public void handleIndependentRecovery_created_doesNotScheduleSuccessor() {
-        // Independent recovery CREATED path must not install a next-day alarm.
-        // Use handleFireDelivery with pre-seeded evidence and no sch: metadata.
-        String date = "2026-09-12";
+    public void handleIndependentRecovery_created_schedulesSuccessorWhenOwnershipRemains()
+            throws Exception {
+        String date = futureCalendarDate(2);
+        long epoch = futureEpochMs(date, "08:00");
+        String nextDate = AutoDeductionScheduler.nextCalendarDate(date);
+        assertNotNull(nextDate);
+
         AutoDeductionScheduler s = newScheduler();
-        try {
-            java.lang.reflect.Method m = AutoDeductionScheduler.class
-                    .getDeclaredMethod(
-                            "recordIndependentFireRetryEvidenceLocked",
-                            String.class, String.class, String.class, long.class,
-                            double.class, String.class, long.class, String.class, int.class);
-            m.setAccessible(true);
-        } catch (Exception ignored) {
-            // package-private; same package can call directly
-        }
+        BackgroundStockStore background = new BackgroundStockStore(appContext());
+        assertTrue(background.syncFromJs(
+                java.util.Collections.singletonList(
+                        new BackgroundStockStore.MedicationState("med", 10.0d, 1L)),
+                1L,
+                java.util.Collections.emptySet()).ok);
+
+        assertTrue(s.scheduleOccurrence(
+                "med", "dose", date, "08:00", 1.0, epoch).ok);
+        drainAlarms();
+
+        String key = AutoDeductionContract.occurrenceKey("med", "dose", date);
+        JSONObject meta = new JSONObject(schedulePrefs().getString("sch:" + key, "{}"));
+        String version = meta.optString(ExactAlarmContract.FIELD_OPERATION_VERSION, "");
+        long generation = Phase2TestSupport.readAuthGeneration("med", "dose");
+
         synchronized (getScheduleLock()) {
             assertTrue(s.recordIndependentFireRetryEvidenceLocked(
-                    "med", "dose", date, 1000L, 1.0, "08:00", 1L, "v1", 1));
+                    "med", "dose", date, epoch, 1.0, "08:00",
+                    generation, version, 1));
         }
-        int before = alarmCount();
+
         AutoDeductionReceiver.handleFireDelivery(
-                appContext(), "med", "dose", date, 1000L, 1.0, "08:00",
-                1L, "v1", 1);
-        // No successor alarm from independent recovery
-        assertEquals(
-                "independent recovery must not schedule successor",
-                before, alarmCount());
+                appContext(), "med", "dose", date, epoch, 1.0, "08:00",
+                generation, version, 1);
+
+        String nextKey = AutoDeductionContract.occurrenceKey("med", "dose", nextDate);
+        assertTrue("successful independent retry must continue the active recurrence",
+                schedulePrefs().contains("sch:" + nextKey));
     }
 
+    @Test
+    public void handleIndependentRecovery_withoutCurrentSchedule_doesNotResurrectSuccessor()
+            throws Exception {
+        String date = futureCalendarDate(3);
+        AutoDeductionScheduler s = newScheduler();
+        BackgroundStockStore background = new BackgroundStockStore(appContext());
+        assertTrue(background.syncFromJs(
+                java.util.Collections.singletonList(
+                        new BackgroundStockStore.MedicationState("med", 10.0d, 1L)),
+                1L,
+                java.util.Collections.emptySet()).ok);
+
+        synchronized (getScheduleLock()) {
+            assertTrue(s.recordIndependentFireRetryEvidenceLocked(
+                    "med", "dose", date, futureEpochMs(date, "08:00"),
+                    1.0, "08:00", 1L, "v1", 1));
+        }
+
+        AutoDeductionReceiver.handleFireDelivery(
+                appContext(), "med", "dose", date, futureEpochMs(date, "08:00"),
+                1.0, "08:00", 1L, "v1", 1);
+
+        String nextDate = AutoDeductionScheduler.nextCalendarDate(date);
+        assertNotNull(nextDate);
+        assertFalse(
+                "independent evidence without current recurrence ownership must not create D+1",
+                schedulePrefs().contains(
+                        schKey(AutoDeductionContract.occurrenceKey(
+                                "med", "dose", nextDate))));
+        assertNull(s.getIndependentFireRetryEvidence("med", "dose", date));
+    }
     @Test
     public void maxRetriesUnresolved_restoreOkFalse_evidenceRetained()
             throws Exception {
@@ -556,6 +609,12 @@ public class FireRetryScheduleTest {
             throws Exception {
         String date = "2026-09-16";
         AutoDeductionScheduler s = newScheduler();
+        BackgroundStockStore background = new BackgroundStockStore(appContext());
+        assertTrue(background.syncFromJs(
+                java.util.Collections.singletonList(
+                        new BackgroundStockStore.MedicationState("med", 10.0d, 1L)),
+                1L,
+                java.util.Collections.emptySet()).ok);
         synchronized (getScheduleLock()) {
             assertTrue(s.recordIndependentFireRetryEvidenceLocked(
                     "med", "dose", date, 1000L, 2.0, "08:00", 1L, "v1", 1));

@@ -32,6 +32,7 @@ import {
   getNotificationPermission,
 } from '../utils/notifications/notificationPermissions';
 import { DEFAULT_SNOOZE_MINUTES } from '../utils/time';
+import { syncBackgroundStock } from '../utils/backgroundStockNative';
 
 export interface MedicationHandlersDeps {
   medications: Medication[];
@@ -81,6 +82,17 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     dismissAlarm,
     snoozeAlarm,
   } = deps;
+
+  const syncBackgroundStockBestEffort = (
+    nextMedications: Medication[],
+    nextLogs: ConsumptionLog[]
+  ): void => {
+    void syncBackgroundStock(nextMedications, nextLogs).then((sync) => {
+      if (!sync.ok) {
+        console.warn('[App] background stock sync failed:', sync.error);
+      }
+    });
+  };
 
   const restoreInFlightRef = useRef<Set<string>>(new Set());
   const refillUndoInFlightRef = useRef<Set<string>>(new Set());
@@ -134,6 +146,30 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         setMedications(result.medications);
         medicationsRef.current = result.medications;
         setLogs(logsWithReason);
+
+        // Restore-before-fire must clear the native applied marker as part
+        // of the same generation-aware stock sync. Await it so the operation
+        // cannot return with JS restored while native still blocks the
+        // future exact Auto occurrence.
+        const restoredDoseId = result.log?.doseId;
+        const clearOccurrences =
+          restoredDoseId &&
+          !(result.medications.find((m) => m.id === medicationId)
+            ?.doseSkippedHistory?.[restoredDoseId] ?? []).includes(today)
+            ? [`${medicationId}\u001f${restoredDoseId}\u001f${today}`]
+            : [];
+
+        const backgroundSync = await syncBackgroundStock(
+          result.medications,
+          result.logs,
+          clearOccurrences
+        );
+        if (!backgroundSync.ok) {
+          console.warn(
+            '[App] background stock sync failed after Restore:',
+            backgroundSync.error
+          );
+        }
         if (soundEnabled) playSuccessChime();
         if (displayName) showToast(`تم استرجاع الجرعة — ${displayName}`);
         return {
@@ -145,6 +181,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       // aligned even when Restore itself becomes a no-op after exact recovery.
       if (result.outcome !== 'persist_failed') {
         setMedications(result.medications);
+      syncBackgroundStockBestEffort(result.medications, result.logs);
         medicationsRef.current = result.medications;
         setLogs(result.logs);
       }
@@ -180,6 +217,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       });
       if (result.outcome !== 'persist_failed') {
         setMedications(result.medications);
+      syncBackgroundStockBestEffort(result.medications, result.logs);
         medicationsRef.current = result.medications;
         setLogs(result.logs);
       }
@@ -201,6 +239,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         const result = await runGatedUndoRefill({ medicationId });
         if (result.outcome !== 'persist_failed') {
           setMedications(result.medications);
+      syncBackgroundStockBestEffort(result.medications, result.logs);
           medicationsRef.current = result.medications;
           setLogs(result.logs);
         }
@@ -226,6 +265,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       if (result.outcome !== 'applied') {
         if (result.outcome !== 'persist_failed') {
           setMedications(result.medications);
+      syncBackgroundStockBestEffort(result.medications, result.logs);
           medicationsRef.current = result.medications;
           setLogs(result.logs);
         }
@@ -243,6 +283,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         return;
       }
       setMedications(result.medications);
+      syncBackgroundStockBestEffort(result.medications, result.logs);
       medicationsRef.current = result.medications;
       setLogs(result.logs);
       const name = result.medicationName ?? medicationId;
@@ -267,6 +308,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         globalAutoDeductEnabledRef.current = previous;
         if (result.outcome !== 'persist_failed') {
           setMedications(result.medications);
+      syncBackgroundStockBestEffort(result.medications, result.logs);
           medicationsRef.current = result.medications;
           setLogs(result.logs);
         }
@@ -284,6 +326,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       globalAutoDeductEnabledRef.current = result.enable;
       setGlobalAutoDeductEnabled(result.enable);
       setMedications(result.medications);
+      syncBackgroundStockBestEffort(result.medications, result.logs);
       setLogs(result.logs);
       // Global bulk-sets every existing medication + remains the new-med default.
       if (!result.enable) {
@@ -312,6 +355,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       persist(STORAGE_AUTO_DEDUCT_PROMPTED_KEY, 'true', { json: false });
       setGlobalAutoDeductEnabled(result.enable);
       setMedications(result.medications);
+      syncBackgroundStockBestEffort(result.medications, result.logs);
       medicationsRef.current = result.medications;
       setLogs(result.logs);
       setIsAutoDeductPromptOpen(false);
@@ -340,12 +384,14 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         if (result.outcome !== 'applied') {
           if (result.outcome !== 'persist_failed') {
             setMedications(result.medications);
+      syncBackgroundStockBestEffort(result.medications, result.logs);
             medicationsRef.current = result.medications;
             setLogs(result.logs);
           }
           return;
         }
         setMedications(result.medications);
+      syncBackgroundStockBestEffort(result.medications, result.logs);
         medicationsRef.current = result.medications;
         setLogs(result.logs);
         showToast(
@@ -368,6 +414,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       const result = await runGatedAddMedication({ medication: newMed });
       if (result.outcome !== 'applied') return;
       setMedications(result.medications);
+      syncBackgroundStockBestEffort(result.medications, result.logs);
       medicationsRef.current = result.medications;
       setLogs(result.logs);
       showToast(
@@ -386,6 +433,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       const result = await runGatedDeleteMedication({ medicationId: id });
       if (result.outcome !== 'persist_failed') {
         setMedications(result.medications);
+      syncBackgroundStockBestEffort(result.medications, result.logs);
         medicationsRef.current = result.medications;
         setLogs(result.logs);
       }
@@ -411,6 +459,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     const displayUnit = result.unit ?? fallbackMed?.unit ?? '';
     if (result.outcome !== 'persist_failed') {
       setMedications(result.medications);
+      syncBackgroundStockBestEffort(result.medications, result.logs);
       medicationsRef.current = result.medications;
       setLogs(result.logs);
     }
@@ -473,6 +522,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       const displayUnit = result.unit ?? '';
       if (result.outcome !== 'persist_failed') {
         setMedications(result.medications);
+      syncBackgroundStockBestEffort(result.medications, result.logs);
         medicationsRef.current = result.medications;
         setLogs(result.logs);
       }

@@ -11,6 +11,7 @@ import {
 } from '../utils/notifications/notificationPermissions';
 import { getExactAlarmPermission, type ExactAlarmPermission } from '../utils/exactAlarm';
 import { initNativeBridge } from '../native';
+import { runAutoDeductionReconciliation } from '../utils/runAutoDeductionReconciliation';
 import { loadJson, loadString } from '../utils/storage';
 import {
   STORAGE_MEDS_KEY,
@@ -78,6 +79,7 @@ export function useAppHydration(setters: AppHydrationSetters): void {
     const isFirstEverOpen = savedMedsRaw === null;
     const shouldShowAutoDeductPrompt =
       isFirstEverOpen && autoDeductPromptedRaw === null;
+    let loadedMedications: Medication[] | null = null;
     if (isFirstEverOpen) {
       setIsFirstRun(true);
     } else {
@@ -87,7 +89,10 @@ export function useAppHydration(setters: AppHydrationSetters): void {
       // stays in state, and the hydration-gated persistence effect
       // overwrites the user's "[]" with the seed meds.
       const parsed = loadJson<Medication[] | null>(STORAGE_MEDS_KEY, null);
-      if (Array.isArray(parsed)) setMedications(parsed);
+      if (Array.isArray(parsed)) {
+        loadedMedications = parsed;
+        setMedications(parsed);
+      }
     }
 
     // Logs
@@ -171,7 +176,43 @@ export function useAppHydration(setters: AppHydrationSetters): void {
     // Each task catches its own errors so a single failure cannot
     // prevent the others from completing, and .finally still marks
     // the app ready (matching the previous fault-tolerant policy).
+    // Native initialization must complete before startup Auto recovery so
+    // the Capacitor bridge is ready before FIRED repair/convergence runs.
+    const nativeInit = initNativeBridge().catch((err) => {
+      console.warn('[App] Native bridge init failed:', err);
+    });
+
+    // Startup stock recovery runs before hydrated=true. This gives the
+    // mutation gate the first opportunity to recover pending envelopes,
+    // repair FIRED→native-background stock gaps, and converge JS stock before
+    // the exact-auto scheduler is allowed to create new alarms.
+    const startupStockRecovery =
+      loadedMedications != null
+        ? nativeInit.then(async () => {
+            try {
+              const result = await runAutoDeductionReconciliation({
+                globalAutoDeductEnabled:
+                  loadString(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'true') !== 'false',
+                medications: loadedMedications ?? [],
+                logs: Array.isArray(savedLogs) ? savedLogs : [],
+              });
+              if (!result.nativeListFailed && !result.durabilityBlocked) {
+                setMedications(result.medications);
+                setLogs(result.logs);
+              } else {
+                console.warn(
+                  '[App] startup Auto stock recovery incomplete:',
+                  result.nativeListError || 'recovery_blocked'
+                );
+              }
+            } catch (err) {
+              console.warn('[App] startup Auto stock recovery failed:', err);
+            }
+          })
+        : Promise.resolve();
+
     Promise.all([
+      startupStockRecovery,
       getNotificationPermission()
         .then((perm) => {
           if (localStorage.getItem(NOTIFICATIONS_KEY) === null) {
@@ -217,12 +258,9 @@ export function useAppHydration(setters: AppHydrationSetters): void {
         .catch((err) => {
           console.warn('[App] getExactAlarmPermission failed:', err);
         }),
-      // Native bridge: status bar, back button, notification channels,
-      // and listeners. No-op on web — see src/native.ts. Included in
-      // Promise.all so setHydrated cannot race ahead of channel setup.
-      initNativeBridge().catch((err) => {
-        console.warn('[App] Native bridge init failed:', err);
-      }),
+      // Native bridge promise is also awaited independently for the
+      // existing notification-channel readiness contract.
+      nativeInit,
     ]).finally(() => {
       // hydrated means storage + permissions + native bridge finished —
       // not that onboarding completed.

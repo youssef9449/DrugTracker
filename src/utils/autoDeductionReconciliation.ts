@@ -240,14 +240,46 @@ export function applyExactAutoEventToMedication(
     return { ok: false, reason: 'already_applied' };
   }
 
-  // Stock deduction is exactly event.amount (clamped at zero). No historical
-  // / day-based settlement is folded into this apply — Exact FIRED is the
-  // amount charged for this FIRED occurrence.
+  // New background execution path: when the native receiver already
+  // deducted this occurrence while the WebView was unavailable, its
+  // post-deduction balance is authoritative. Never subtract event.amount
+  // again in JS. The native balance is the result of the exact occurrence
+  // applied against all foreground/background stock changes seen so far.
+  //
+  // Legacy FIRED rows (without these fields) retain the old JS reconciliation
+  // behavior. This is deliberately migration-safe: an upgraded app will not
+  // re-apply an already-reconciled historical FIRED row.
+  const hasBackgroundBalance =
+    event.backgroundStockApplied === true &&
+    typeof event.backgroundCurrentPills === 'number' &&
+    Number.isFinite(event.backgroundCurrentPills);
+
   const settleBase = Math.max(0, med.currentPills);
   const requested = event.amount;
-  // Actual stock change after clamping at zero (may be < requested).
-  const actualDeducted = Math.min(Math.max(0, requested), settleBase);
-  const newPills = settleBase - actualDeducted;
+  const reportedBackgroundDeduction =
+    typeof event.backgroundDeductedAmount === 'number'
+      && Number.isFinite(event.backgroundDeductedAmount)
+      && event.backgroundDeductedAmount >= 0
+      ? event.backgroundDeductedAmount
+      : null;
+  const actualDeducted = hasBackgroundBalance
+    ? Math.min(
+        Math.max(
+          0,
+          reportedBackgroundDeduction ?? (
+            settleBase - Math.max(0, event.backgroundCurrentPills!)
+          )
+        ),
+        Math.max(0, requested)
+      )
+    : Math.min(Math.max(0, requested), settleBase);
+  // Background Auto has already changed the durable native execution
+  // balance. runAutoDeductionReconciliation converges that balance into the
+  // fresh JS snapshot before this function runs, so do not overwrite a later
+  // foreground Take/Refill with the event's historical absolute balance.
+  const newPills = hasBackgroundBalance
+    ? settleBase
+    : settleBase - actualDeducted;
   let nextHistory = med.doseConsumptionHistory;
   let lastConsumedDate = med.lastConsumedDate;
 

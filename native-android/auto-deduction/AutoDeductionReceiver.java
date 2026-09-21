@@ -48,7 +48,7 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
         return result != null
                 && (result.status == AutoDeductionScheduler.FireResult.Status.CREATED
                 || (result.status == AutoDeductionScheduler.FireResult.Status.FAILED
-                && result.pendingRecorded));
+                && (result.pendingRecorded || result.backgroundStockError != null)));
     }
 
     /**
@@ -60,7 +60,7 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
             AutoDeductionScheduler.FireResult result, int fireRetryCount) {
         return result != null
                 && result.status == AutoDeductionScheduler.FireResult.Status.FAILED
-                && !result.pendingRecorded
+                && (!result.pendingRecorded || result.backgroundStockError != null)
                 && fireRetryCount < AutoDeductionContract.MAX_FIRE_RETRIES;
     }
 
@@ -70,7 +70,8 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
             String doseId,
             String calendarDate,
             long scheduledAt,
-            double amount
+            double amount,
+            AutoDeductionScheduler.FireResult result
     ) {
         Intent event = new Intent(AutoDeductionContract.ACTION_AUTO_DEDUCTION_FIRED);
         event.setPackage(context.getPackageName());
@@ -79,6 +80,12 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
         event.putExtra(AutoDeductionContract.EXTRA_CALENDAR_DATE, calendarDate);
         event.putExtra(AutoDeductionContract.EXTRA_SCHEDULED_AT_EPOCH_MS, scheduledAt);
         event.putExtra(AutoDeductionContract.EXTRA_AMOUNT, amount);
+        if (result != null && result.backgroundStockApplied) {
+            event.putExtra("backgroundStockApplied", true);
+            event.putExtra("backgroundCurrentPills", result.backgroundCurrentPills);
+            event.putExtra("backgroundDeductedAmount", result.backgroundDeductedAmount);
+            event.putExtra("backgroundStockVersion", result.backgroundStockVersion);
+        }
         context.sendBroadcast(event);
     }
 
@@ -202,7 +209,8 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 timeHhmm, recurrenceGeneration, operationVersion, fireRetryCount);
     }
 
-    /** Independent evidence recovery: FIRED/pending only — never scheduleNext. */
+    /** Independent evidence recovery; scheduler may continue the recurrence only
+     * when the current schedule ownership still authorizes the next occurrence. */
     private static void handleIndependentRecoveryResult(
             Context context,
             AutoDeductionScheduler scheduler,
@@ -219,7 +227,28 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
     ) {
         if (shouldNotifyJavascript(result)) {
             notifyJavascript(
-                    context, medicationId, doseId, calendarDate, scheduledAt, amount);
+                    context, medicationId, doseId, calendarDate, scheduledAt, amount,
+                    result);
+        }
+
+
+
+        if (result.backgroundStockError != null) {
+            if (shouldScheduleFireRetry(result, fireRetryCount)) {
+                boolean retryScheduled = scheduler.scheduleFireRetry(
+                        medicationId, doseId, calendarDate, scheduledAt, amount,
+                        timeHhmm, recurrenceGeneration, operationVersion,
+                        fireRetryCount + 1);
+                if (!retryScheduled) {
+                    Log.e(TAG, "background stock failed and retry could not be scheduled: "
+                            + medicationId + "/" + doseId + "/" + calendarDate);
+                }
+            } else {
+                Log.e(TAG, "background stock failed after max retries: "
+                        + medicationId + "/" + doseId + "/" + calendarDate
+                        + " error=" + result.backgroundStockError);
+            }
+            return;
         }
         switch (result.status) {
             case CANCELLED:
@@ -274,7 +303,26 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
     ) {
         if (shouldNotifyJavascript(result)) {
             notifyJavascript(
-                    context, medicationId, doseId, calendarDate, scheduledAt, amount);
+                    context, medicationId, doseId, calendarDate, scheduledAt, amount,
+                    result);
+        }
+
+        if (result.backgroundStockError != null) {
+            if (shouldScheduleFireRetry(result, fireRetryCount)) {
+                boolean retryScheduled = scheduler.scheduleFireRetry(
+                        medicationId, doseId, calendarDate, scheduledAt, amount,
+                        timeHhmm, recurrenceGeneration, operationVersion,
+                        fireRetryCount + 1);
+                if (!retryScheduled) {
+                    Log.e(TAG, "background stock failed and retry could not be scheduled: "
+                            + medicationId + "/" + doseId + "/" + calendarDate);
+                }
+            } else {
+                Log.e(TAG, "background stock failed after max retries: "
+                        + medicationId + "/" + doseId + "/" + calendarDate
+                        + " error=" + result.backgroundStockError);
+            }
+            return;
         }
         switch (result.status) {
             case CANCELLED:

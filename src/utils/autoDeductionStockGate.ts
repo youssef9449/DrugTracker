@@ -82,14 +82,16 @@ export interface CommitDurableOptions {
 }
 
 /**
- * Persist meds, logs, and the durable global auto-deduct switch, then
- * lastAppliedMutationSeq (when provided).
+ * Persist meds, logs, and the durable global auto-deduct switch, then the
+ * stock generation, then lastAppliedMutationSeq (when provided).
  *
  * Contract:
  * - meds/logs/global fail → error (recovery evidence must remain)
  * - appliedMutationSeq provided and lastApplied fails → error (pair may be
  *   durable but finalization incomplete; keep envelope)
- * - generation bump is best-effort only after finalization succeeds
+ * - stock-generation persistence is required after finalization; a failed
+ *   generation write returns an error so foreground/native delta ordering
+ *   cannot silently fall back to the old generation.
  */
 export function commitDurableAutoStockState(
   state: AutoStockDurableState,
@@ -108,11 +110,12 @@ export function commitDurableAutoStockState(
           );
       if (globalErr) return globalErr;
     }
+    const generationErr = bumpStockGeneration();
+    if (generationErr) return generationErr;
     if (opts?.appliedMutationSeq != null) {
       const seqErr = persistLastAppliedMutationSeq(opts.appliedMutationSeq);
       if (seqErr) return seqErr;
     }
-    bumpStockGeneration();
     return null;
   }
   const medErr = persist(STORAGE_MEDS_KEY, state.medications, { json: true });
@@ -127,11 +130,12 @@ export function commitDurableAutoStockState(
     );
     if (globalErr) return globalErr;
   }
+  const generationErr = bumpStockGeneration();
+  if (generationErr) return generationErr;
   if (opts?.appliedMutationSeq != null) {
     const seqErr = persistLastAppliedMutationSeq(opts.appliedMutationSeq);
     if (seqErr) return seqErr;
   }
-  bumpStockGeneration();
   return null;
 }
 

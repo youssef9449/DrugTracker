@@ -163,6 +163,7 @@ const autoDeductionDestDir = path.join(
 );
 const autoDeductionFiles = [
   'AutoDeductionContract.java',
+  'BackgroundStockStore.java',
   'AutoDeductionEventStore.java',
   'AutoDeductionScheduler.java',
   'AutoDeductionSchedulingAdapter.java',

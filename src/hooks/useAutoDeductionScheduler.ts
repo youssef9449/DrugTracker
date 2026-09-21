@@ -1,6 +1,7 @@
 /**
- * Phase 2 — JS-side scheduler for native exact-time auto-deduction.
- * Independent of notifications. Does NOT mutate currentPills / logs.
+ * JS-side scheduler for native exact-time Auto Deduction.
+ * Independent of notifications. Scheduling only — stock execution happens
+ * in native BackgroundStockStore, while JS owns foreground convergence/logs.
  */
 
 import { useEffect, useMemo, useRef } from 'react';

@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  *
  * commitDurableAutoStockState must persist in the exact order
  *
- *   medications → logs → global master switch → lastAppliedMutationSeq → stock generation
+ *   medications → logs → global master switch → stock generation → lastAppliedMutationSeq
  *
  * and must stop at the first failed write (fail-closed — a later write may
  * never land while an earlier one failed). This ordering is the current
@@ -83,7 +83,7 @@ describe('commitDurableAutoStockState — durable write order (meds before logs)
     });
   });
 
-  it('persists medications → logs → global → lastAppliedMutationSeq → generation', () => {
+  it('persists medications → logs → global → generation → lastAppliedMutationSeq', () => {
     const err = commitDurableAutoStockState(
       {
         medications: [baseMed()],
@@ -98,8 +98,8 @@ describe('commitDurableAutoStockState — durable write order (meds before logs)
       STORAGE_MEDS_KEY,
       STORAGE_LOGS_KEY,
       STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
-      LAST_APPLIED_MARKER,
       STORAGE_STOCK_GEN_KEY,
+      LAST_APPLIED_MARKER,
     ]);
   });
 
@@ -143,6 +143,29 @@ describe('commitDurableAutoStockState — durable write order (meds before logs)
     expect(mocks.writeOrder).toEqual([STORAGE_MEDS_KEY]);
   });
 
+  it('fails when stock generation persistence fails', () => {
+    mocks.persist.mockImplementation((key: string) => {
+      mocks.writeOrder.push(key);
+      return key === STORAGE_STOCK_GEN_KEY ? 'generation_persist_failed' : null;
+    });
+
+    const err = commitDurableAutoStockState(
+      {
+        medications: [baseMed()],
+        logs: [] as ConsumptionLog[],
+      },
+      { appliedMutationSeq: 5 }
+    );
+
+    expect(err).toBe('generation_persist_failed');
+    expect(mocks.writeOrder).toEqual([
+      STORAGE_MEDS_KEY,
+      STORAGE_LOGS_KEY,
+      STORAGE_STOCK_GEN_KEY,
+      LAST_APPLIED_MARKER,
+    ]);
+  });
+
   it('omits the global write when the state carries no master switch', () => {
     const err = commitDurableAutoStockState(
       {
@@ -156,8 +179,8 @@ describe('commitDurableAutoStockState — durable write order (meds before logs)
     expect(mocks.writeOrder).toEqual([
       STORAGE_MEDS_KEY,
       STORAGE_LOGS_KEY,
-      LAST_APPLIED_MARKER,
       STORAGE_STOCK_GEN_KEY,
+      LAST_APPLIED_MARKER,
     ]);
   });
 });

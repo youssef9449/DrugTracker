@@ -1,6 +1,7 @@
 /**
- * Phase 2 — JS bridge to native exact-time auto-deduction.
- * Safe on web (no-ops). Does NOT reconcile stock (Phase 3).
+ * JS bridge to native exact-time Auto Deduction and its background stock
+ * execution ledger. Safe on web (no-ops); JS reconciliation remains responsible
+ * for localStorage convergence, markers, logs, and native acknowledgement.
  */
 
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
@@ -14,6 +15,14 @@ export interface AutoDeductionEvent {
   status: 'FIRED' | 'RECONCILED' | 'REJECTED' | string;
   createdAtEpochMs: number;
   reconciledAtEpochMs: number | null;
+  /** Native background stock was durably updated before this wake-up/event read. */
+  backgroundStockApplied?: boolean;
+  /** Durable native stock immediately after applying this occurrence. */
+  backgroundCurrentPills?: number;
+  /** Actual stock amount removed after zero-clamping. */
+  backgroundDeductedAmount?: number;
+  /** Monotonic native background stock execution version. */
+  backgroundStockVersion?: number;
 }
 
 export interface MarkReconciledResult {

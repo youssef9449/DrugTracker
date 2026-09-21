@@ -20,6 +20,7 @@ repositories {
 def productionSources = fileTree("../auto-deduction") {
     include(
             "AutoDeductionContract.java",
+            "BackgroundStockStore.java",
             "AutoDeductionEventStore.java",
             "AutoDeductionScheduler.java",
             "AutoDeductionSchedulingAdapter.java",

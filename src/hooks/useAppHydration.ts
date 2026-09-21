@@ -96,6 +96,7 @@ export function useAppHydration(setters: AppHydrationSetters): void {
 
     // Logs
     const savedLogs = loadJson<ConsumptionLog[] | null>(STORAGE_LOGS_KEY, null);
+    const loadedLogs: ConsumptionLog[] = Array.isArray(savedLogs) ? savedLogs : [];
     if (Array.isArray(savedLogs)) setLogs(savedLogs);
 
     // Pharmacy settings — explicit current schema only (no unknown-key pass-through).
@@ -232,7 +233,7 @@ export function useAppHydration(setters: AppHydrationSetters): void {
       // balances win; localStorage currentPills seeds only medications that
       // have never been initialized in the Native Auto stock store.
       if (!isFirstEverOpen && loadedMedications.length > 0) {
-        const native = await convergeAutoDeductionStock(loadedMedications);
+        const native = await convergeAutoDeductionStock(loadedMedications, loadedLogs);
         if (native.ok) {
           setMedications(native.medications);
           // Keep the JS durable mirror aligned so a later process restart does

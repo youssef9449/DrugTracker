@@ -184,14 +184,18 @@ public final class AutoDeductionStockStore {
     }
 
     /**
-     * Seed only missing medication balances, then return the authoritative native
-     * balances for exactly the requested medication IDs.
+     * Seed only missing medication balances and import any already-terminal
+     * foreground occurrence resolutions from the legacy JS model, then return
+     * the authoritative Native balances for the requested medication IDs.
      *
-     * <p>An existing native value is never overwritten by a JS snapshot. That
-     * rule is what prevents a stale localStorage value from erasing an Auto
-     * deduction that happened while JS was unavailable.</p>
+     * <p>An existing Native balance is never overwritten by a JS snapshot. The
+     * legacy occurrence resolutions are only used to suppress a later duplicate
+     * Auto occurrence; they do not mutate stock.</p>
      */
-    public SnapshotResult ensureMissingAndRead(List<StockSeed> seeds) {
+    public SnapshotResult ensureMissingAndRead(
+            List<StockSeed> seeds,
+            List<OccurrenceResolution> resolutions
+    ) {
         synchronized (LOCK) {
             SharedPreferences.Editor editor = prefs.edit();
             boolean changed = false;
@@ -213,10 +217,24 @@ public final class AutoDeductionStockStore {
                 }
             }
 
+            if (resolutions != null) {
+                for (OccurrenceResolution resolution : resolutions) {
+                    if (!isValidResolution(resolution)) {
+                        return SnapshotResult.failure("invalid_occurrence_resolution");
+                    }
+                    editor.putString(
+                            foregroundOccurrenceKey(
+                                    resolution.medicationId,
+                                    resolution.doseId,
+                                    resolution.calendarDate),
+                            resolution.type.name());
+                }
+            }
+
             // Mark the Android Native stock authority initialized only in the
-            // same durable commit as any initial seeding. This prevents lifecycle
-            // recovery from consuming pre-migration FIRED events before JS has
-            // established the Native baseline from the persisted application stock.
+            // same durable commit as the baseline seeding and legacy occurrence
+            // migration. This prevents lifecycle recovery from consuming ambiguous
+            // pre-Native occurrences before JS has established their outcome.
             editor.putBoolean(KEY_STOCK_INITIALIZED, true);
             if (!editor.commit()) {
                 return SnapshotResult.failure(

@@ -39,6 +39,8 @@ export interface ApplyForegroundStockDeltasResult {
 
 export interface ApplyAutoDeductionStockResult {
   ok: boolean;
+  /** True only when the Native Android stock authority executed the operation. */
+  native: boolean;
   applied: boolean;
   actualDeducted: number;
   currentPills: number;
@@ -304,6 +306,7 @@ export async function applyAutoDeductionStock(
   if (!isNativeAndroid()) {
     return {
       ok: true,
+      native: false,
       applied: false,
       actualDeducted: 0,
       currentPills: 0,
@@ -319,6 +322,7 @@ export async function applyAutoDeductionStock(
   ) {
     return {
       ok: false,
+      native: true,
       applied: false,
       actualDeducted: 0,
       currentPills: 0,
@@ -326,15 +330,20 @@ export async function applyAutoDeductionStock(
     };
   }
   try {
-    return await AutoDeduction.applyAutoDeductionStock({
+    const result = await AutoDeduction.applyAutoDeductionStock({
       medicationId,
-      doseId: doseId.trim(),
+      doseId,
       calendarDate,
       amount: Number(amount),
     });
+    return {
+      ...result,
+      native: true,
+    };
   } catch (e) {
     return {
       ok: false,
+      native: true,
       applied: false,
       actualDeducted: 0,
       currentPills: 0,

@@ -28,6 +28,7 @@ public final class AutoDeductionStockStore {
     private static final String KEY_AUTO_PREFIX = "auto:";
     private static final String KEY_LAST_FOREGROUND_SEQ = "lastForegroundMutationSeq";
     private static final String KEY_STOCK_INITIALIZED = "stockInitialized";
+    private static final String KEY_RECOVERY_READY = "recoveryReady";
     private static final char KEY_SEPARATOR = '\u001f';
 
     private static final Object LOCK = new Object();
@@ -209,6 +210,31 @@ public final class AutoDeductionStockStore {
     public boolean isInitialized() {
         synchronized (LOCK) {
             return prefs.getBoolean(KEY_STOCK_INITIALIZED, false);
+        }
+    }
+
+    /**
+     * Returns true only after JavaScript has successfully completed at least one
+     * reconciliation against the Native baseline. Lifecycle FIRED-stock recovery
+     * must not run earlier because legacy FIRED rows may already have been applied
+     * by the pre-Native JS implementation.
+     */
+    public boolean isRecoveryReady() {
+        synchronized (LOCK) {
+            return prefs.getBoolean(KEY_RECOVERY_READY, false);
+        }
+    }
+
+    /**
+     * Marks the migration/recovery boundary complete. This is monotonic and may
+     * safely be retried.
+     */
+    public boolean markRecoveryReady() {
+        synchronized (LOCK) {
+            if (prefs.getBoolean(KEY_RECOVERY_READY, false)) {
+                return true;
+            }
+            return prefs.edit().putBoolean(KEY_RECOVERY_READY, true).commit();
         }
     }
 

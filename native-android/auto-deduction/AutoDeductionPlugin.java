@@ -348,9 +348,38 @@ public class AutoDeductionPlugin extends Plugin {
                 }
             }
 
+            List<AutoDeductionStockStore.OccurrenceResolution> resolutions =
+                    new ArrayList<AutoDeductionStockStore.OccurrenceResolution>();
+            JSArray rawResolutions = call.getArray("occurrenceResolutions");
+            if (rawResolutions != null) {
+                for (int i = 0; i < rawResolutions.length(); i++) {
+                    JSONObject obj = rawResolutions.optJSONObject(i);
+                    if (obj == null) continue;
+                    String type = obj.optString("type", "").trim().toUpperCase();
+                    AutoDeductionStockStore.OccurrenceResolution.Type resolutionType;
+                    try {
+                        resolutionType =
+                                AutoDeductionStockStore.OccurrenceResolution.Type.valueOf(type);
+                    } catch (IllegalArgumentException e) {
+                        JSObject ret = new JSObject();
+                        ret.put("ok", false);
+                        ret.put("alreadyApplied", false);
+                        ret.put("stocks", new JSArray());
+                        ret.put("error", "invalid_occurrence_resolution");
+                        call.resolve(ret);
+                        return;
+                    }
+                    resolutions.add(new AutoDeductionStockStore.OccurrenceResolution(
+                            obj.optString("medicationId", "").trim(),
+                            obj.optString("doseId", "").trim(),
+                            obj.optString("calendarDate", ""),
+                            resolutionType));
+                }
+            }
+
             AutoDeductionStockStore.ForegroundApplyResult result =
                     new AutoDeductionStockStore(getContext()).applyForegroundDeltas(
-                            mutationSeq, deltas);
+                            mutationSeq, deltas, resolutions);
             JSObject ret = new JSObject();
             ret.put("ok", result.ok);
             ret.put("alreadyApplied", result.alreadyApplied);

@@ -33,6 +33,7 @@ export interface InitializeNativeStockResult {
 export interface ApplyForegroundStockDeltasResult {
   ok: boolean;
   alreadyApplied: boolean;
+  stocks: NativeAutoStockMedication[];
   error?: string;
 }
 
@@ -268,10 +269,10 @@ export async function applyForegroundAutoStockDeltas(
   deltas: Array<{ medicationId: string; delta: number }>
 ): Promise<ApplyForegroundStockDeltasResult> {
   if (!isNativeAndroid()) {
-    return { ok: true, alreadyApplied: false };
+    return { ok: true, alreadyApplied: false, stocks: [] };
   }
   if (!(mutationSeq > 0)) {
-    return { ok: false, alreadyApplied: false, error: 'invalid_mutation_seq' };
+    return { ok: false, alreadyApplied: false, stocks: [], error: 'invalid_mutation_seq' };
   }
   try {
     const cleanDeltas = deltas
@@ -281,7 +282,7 @@ export async function applyForegroundAutoStockDeltas(
         delta: Number(d.delta),
       }));
     if (cleanDeltas.some((d) => !Number.isFinite(d.delta))) {
-      return { ok: false, alreadyApplied: false, error: 'invalid_stock_delta' };
+      return { ok: false, alreadyApplied: false, stocks: [], error: 'invalid_stock_delta' };
     }
     return await AutoDeduction.applyForegroundStockDeltas({
       mutationSeq,
@@ -291,6 +292,7 @@ export async function applyForegroundAutoStockDeltas(
     return {
       ok: false,
       alreadyApplied: false,
+      stocks: [],
       error: e instanceof Error ? e.message : 'foreground_stock_failed',
     };
   }

@@ -95,7 +95,7 @@ type NotificationCategory = keyof typeof NOTIFICATION_ID_BASE;
  */
 
 
-function openBrowserNotificationSettings(): void {
+export function openBrowserNotificationSettings(): void {
   // #105: try opening the Chromium chrome://settings URL unconditionally
   // (it only works in Chromium-based browsers anyway). On failure or null
   // return (non-Chromium / sandboxed), fall through to the alert. This

@@ -232,8 +232,11 @@ public class FireRetryScheduleTest {
 
         JSONObject afterFire = readAnyScheduleMetadata();
         assertNotNull(afterFire);
-        assertFalse("successful durable fire must clear retry marker",
-                afterFire.has(AutoDeductionScheduler.FIELD_FIRE_RETRY_COUNT));
+        assertFalse("successful durable fire must leave shared metadata free of retry state",
+                afterFire.has("fireRetryCount"));
+        assertNull(
+                "successful durable fire must clear Auto retry evidence",
+                s.getIndependentFireRetryEvidence("med", "dose", date));
     }
 
     @Test

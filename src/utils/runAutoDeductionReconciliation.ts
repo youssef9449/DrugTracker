@@ -237,6 +237,7 @@ async function runOnce(
         logs: manualEnv.logs,
         globalAutoDeductEnabled: manualEnv.globalAutoDeductEnabled,
         stockDeltas: manualEnv.stockDeltas ?? [],
+        occurrenceResolutions: manualEnv.occurrenceResolutions ?? [],
         clear: () => saveManualStockEnvelope(null),
       });
     }

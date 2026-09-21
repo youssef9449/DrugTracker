@@ -1287,8 +1287,8 @@ public final class AutoDeductionScheduler {
         // baseline for Native stock. Legacy FIRED rows may already have been
         // applied by the old JS-only implementation, so recovery must wait until
         // JS has seeded the Native authority.
-        if (!stock.isInitialized() || !stock.isRecoveryReady()) {
-            Log.i(TAG, "recoverFiredStockPass: Native stock recovery boundary not ready — defer to JS");
+        if (!stock.isInitialized()) {
+            Log.i(TAG, "recoverFiredStockPass: Native stock not initialized — defer to JS hydration");
             return RestoreResult.success(0, 0);
         }
 
@@ -1345,8 +1345,8 @@ public final class AutoDeductionScheduler {
         // represent an occurrence already applied by the old JS-only path.
         // Defer this whole recovery pass until JS has established the Native
         // baseline and completed migration adoption.
-        if (!new AutoDeductionStockStore(appContext()).isRecoveryReady()) {
-            Log.i(TAG, "independent evidence pass: recovery boundary not ready — defer to JS");
+        if (!new AutoDeductionStockStore(appContext()).isInitialized()) {
+            Log.i(TAG, "independent evidence pass: Native stock not initialized — defer to JS hydration");
             return RestoreResult.success(0, 0);
         }
 
@@ -2216,8 +2216,8 @@ public final class AutoDeductionScheduler {
                 // snapshot date forward is recovered as FIRED (no horizon); the first
                 // not-yet-due date becomes the live AlarmManager schedule.
                 if (epoch <= recoveryNowMs()) {
-                    if (!new AutoDeductionStockStore(appContext()).isRecoveryReady()) {
-                        Log.i(TAG, "restore: past occurrence deferred until JS recovery boundary is ready: "
+                    if (!new AutoDeductionStockStore(appContext()).isInitialized()) {
+                        Log.i(TAG, "restore: past occurrence deferred until Native stock is initialized: "
                                 + prefKey);
                         continue;
                     }
@@ -2279,8 +2279,8 @@ public final class AutoDeductionScheduler {
                 }
                 if (recomputed <= recoveryNowMs()) {
                     // After TZ change this occurrence is now in the past: multi-day catch-up.
-                    if (!new AutoDeductionStockStore(appContext()).isRecoveryReady()) {
-                        Log.i(TAG, "restore: TZ past occurrence deferred until JS recovery boundary is ready: "
+                    if (!new AutoDeductionStockStore(appContext()).isInitialized()) {
+                        Log.i(TAG, "restore: TZ past occurrence deferred until Native stock is initialized: "
                                 + prefKey);
                         continue;
                     }

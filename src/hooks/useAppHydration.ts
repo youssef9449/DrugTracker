@@ -11,7 +11,8 @@ import {
 } from '../utils/notifications/notificationPermissions';
 import { getExactAlarmPermission, type ExactAlarmPermission } from '../utils/exactAlarm';
 import { initNativeBridge } from '../native';
-import { loadJson, loadString } from '../utils/storage';
+import { loadJson, loadString, persist } from '../utils/storage';
+import { convergeAutoDeductionStock } from '../utils/autoDeductionNative';
 import {
   STORAGE_MEDS_KEY,
   STORAGE_LOGS_KEY,
@@ -76,6 +77,7 @@ export function useAppHydration(setters: AppHydrationSetters): void {
     // stay gated until the user completes the Auto-Deduct decision.
     // Do NOT open the prompt here — wait until hydrated=true (see finally).
     const isFirstEverOpen = savedMedsRaw === null;
+    let loadedMedications: Medication[] = [];
     const shouldShowAutoDeductPrompt =
       isFirstEverOpen && autoDeductPromptedRaw === null;
     if (isFirstEverOpen) {
@@ -87,7 +89,9 @@ export function useAppHydration(setters: AppHydrationSetters): void {
       // stays in state, and the hydration-gated persistence effect
       // overwrites the user's "[]" with the seed meds.
       const parsed = loadJson<Medication[] | null>(STORAGE_MEDS_KEY, null);
-      if (Array.isArray(parsed)) setMedications(parsed);
+      if (Array.isArray(parsed)) {
+        loadedMedications = parsed;
+      }
     }
 
     // Logs
@@ -223,9 +227,50 @@ export function useAppHydration(setters: AppHydrationSetters): void {
       initNativeBridge().catch((err) => {
         console.warn('[App] Native bridge init failed:', err);
       }),
-    ]).finally(() => {
-      // hydrated means storage + permissions + native bridge finished —
-      // not that onboarding completed.
+    ]).then(async () => {
+      // Native Auto owns the live stock balance on Android. Existing Native
+      // balances win; localStorage currentPills seeds only medications that
+      // have never been initialized in the Native Auto stock store.
+      if (!isFirstEverOpen && loadedMedications.length > 0) {
+        const native = await convergeAutoDeductionStock(loadedMedications);
+        if (native.ok) {
+          setMedications(native.medications);
+          // Keep the JS durable mirror aligned so a later process restart does
+          // not briefly display an older balance before Native convergence.
+          const currentRaw = JSON.stringify(loadedMedications);
+          const nativeRaw = JSON.stringify(native.medications);
+          if (currentRaw !== nativeRaw) {
+            const persistError = persist(
+              STORAGE_MEDS_KEY,
+              native.medications,
+              { json: true }
+            );
+            if (persistError) {
+              console.warn(
+                '[App] Native Auto stock converged but JS stock mirror persist failed:',
+                persistError
+              );
+            }
+          }
+        } else {
+          // Do not block app hydration on a native stock read failure. The
+          // existing exact-auto reconciliation path remains fail-closed and
+          // will retry on startup/resume rather than fabricating a balance.
+          setMedications(loadedMedications);
+          console.warn(
+            '[App] Native Auto stock convergence failed during hydration:',
+            native.error
+          );
+        }
+      }
+    }).catch((err) => {
+      console.warn('[App] Native Auto stock hydration failed:', err);
+      if (!isFirstEverOpen && loadedMedications.length > 0) {
+        setMedications(loadedMedications);
+      }
+    }).finally(() => {
+      // hydrated means storage + permissions + native bridge + initial Native
+      // stock convergence finished — not that onboarding completed.
       setHydrated(true);
       // First-run Auto prompt is eligible only after hydration completes.
       if (shouldShowAutoDeductPrompt) {

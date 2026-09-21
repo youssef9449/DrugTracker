@@ -53,18 +53,9 @@ public final class CriticalStockPlugin extends Plugin {
     public void verify(PluginCall call) {
         String medicationId = call.getString("medicationId");
         Long expectedAt = call.getLong("alarmTimeMs");
-        boolean ok = false;
-        if (expectedAt != null) {
-            CriticalStockAlarmAdapter adapter =
-                    new CriticalStockAlarmAdapter(getContext());
-            org.json.JSONObject meta =
-                    adapter.getScheduleMetadata(medicationId);
-            if (meta != null
-                    && meta.optLong("triggerAtEpochMs", Long.MIN_VALUE)
-                            == expectedAt.longValue()) {
-                ok = adapter.isPending(medicationId);
-            }
-        }
+        boolean ok = expectedAt != null
+                && new CriticalStockAlarmAdapter(getContext())
+                        .verify(medicationId, expectedAt.longValue());
         JSObject ret = new JSObject();
         ret.put("ok", ok);
         call.resolve(ret);

@@ -6,7 +6,7 @@ import {
   scheduleCriticalAlarm,
   cancelCriticalAlarm,
   verifyCriticalAlarmPending,
-} from '../utils/notifications';
+} from '../utils/criticalAlarmScheduling';
 import { listScheduledCriticalMedicationIdsNative } from '../utils/criticalAlarmNative';
 import {
   loadCriticalNotificationClaims,

@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { Medication, calculateMedicationStatus } from '../types';
 import { getCriticalAlarmDate, getTodayDateString } from '../utils/dateCalculations';
-import { sendCriticalStockAlert, cancelCriticalAlarm } from '../utils/notifications';
+import { sendCriticalStockAlert } from '../utils/notifications/criticalStockNotifications';
+import { cancelCriticalAlarm } from '../utils/criticalAlarmScheduling';
 import {
   loadCriticalNotificationClaims,
   saveCriticalNotificationClaims,

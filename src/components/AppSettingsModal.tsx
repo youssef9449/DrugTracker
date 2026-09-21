@@ -31,7 +31,7 @@ import {
 import {
   getNotificationPermission,
   requestNotificationPermission,
-} from '../utils/notifications';
+} from '../utils/notifications/notificationPermissions';
 import { TOAST_MESSAGES } from '../constants/uiStrings';
 
 export interface AppSettingsModalProps {

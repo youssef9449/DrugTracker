@@ -30,7 +30,7 @@ import { STORAGE_AUTO_DEDUCT_PROMPTED_KEY } from '../constants/storageKeys';
 import {
   requestNotificationPermission,
   getNotificationPermission,
-} from '../utils/notifications';
+} from '../utils/notifications/notificationPermissions';
 import { DEFAULT_SNOOZE_MINUTES } from '../utils/time';
 
 export interface MedicationHandlersDeps {

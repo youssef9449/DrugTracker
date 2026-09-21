@@ -102,10 +102,28 @@ for (const relDir of [
 
 // The shared receiver owns system-event entry and delegates only to the shared lifecycle.
 const receiver = read(sharedReceiver);
+for (const action of systemActions) {
+  assert(
+    receiver.includes(action),
+    'Shared system receiver must declare/handle every supported system lifecycle action: ' + action
+  );
+}
 assert(
   receiver.includes('ExactAlarmLifecycle.restoreAll('),
   'Shared system receiver must dispatch restoration through ExactAlarmLifecycle'
 );
+
+// No other native source may invoke the shared restoration dispatcher.
+for (const rel of nativeFiles) {
+  const content = read(rel);
+  if (content.includes('restoreAll(')) {
+    assert(
+      rel === sharedReceiver
+        || rel === 'native-android/alarm-runtime/ExactAlarmLifecycle.java',
+      'ExactAlarmLifecycle.restoreAll() must have no feature-specific native callers: ' + rel
+    );
+  }
+}
 assert(
   !/restore\s*\(/.test(receiver.replace('ExactAlarmLifecycle.restoreAll(', '')),
   'Shared system receiver must not contain feature recovery implementations'

@@ -70,6 +70,10 @@ public class CrossFeatureAlarmIsolationTest {
                 new CriticalStockAlarmAdapter(context());
 
         assertTrue(auto.scheduleOccurrence(
+                AutoDeductionContract.occurrenceKey(
+                        MEDICATION_ID,
+                        DOSE_ID,
+                        DATE),
                 MEDICATION_ID,
                 DOSE_ID,
                 DATE,
@@ -198,6 +202,10 @@ public class CrossFeatureAlarmIsolationTest {
 
     private static void scheduleAllThree() {
         assertTrue(autoAdapter().scheduleOccurrence(
+                AutoDeductionContract.occurrenceKey(
+                        MEDICATION_ID,
+                        DOSE_ID,
+                        DATE),
                 MEDICATION_ID, DOSE_ID, DATE, "08:00", 1.0,
                 TRIGGER_AT, 1L, null).ok);
         assertTrue(doseAdapter().scheduleOccurrence(
@@ -240,6 +248,38 @@ public class CrossFeatureAlarmIsolationTest {
             if (saved != null && saved.getData() != null) {
                 result.add(saved.getData().toString());
             }
+        }
+        return result;
+    }
+
+    private static Set<String> scheduledPendingIntentIdentities() {
+        Set<String> result = new HashSet<>();
+        for (ShadowAlarmManager.ScheduledAlarm alarm : scheduledAlarms()) {
+            if (alarm.operation == null) continue;
+            ShadowPendingIntent pending =
+                    Shadows.shadowOf(alarm.operation);
+            Intent saved = pending.getSavedIntent();
+            assertNotNull("scheduled alarm must retain PendingIntent intent", saved);
+            assertNotNull("scheduled alarm must retain PendingIntent component", saved.getComponent());
+            assertNotNull("scheduled alarm must retain PendingIntent action", saved.getAction());
+            assertNotNull("scheduled alarm must retain PendingIntent data URI", saved.getData());
+            result.add(
+                    pending.getRequestCode()
+                            + "|"
+                            + saved.getAction()
+                            + "|"
+                            + saved.getComponent().getClassName()
+                            + "|"
+                            + saved.getData().toString());
+        }
+        return result;
+    }
+
+    private static Set<Integer> scheduledPendingIntentRequestCodes() {
+        Set<Integer> result = new HashSet<>();
+        for (ShadowAlarmManager.ScheduledAlarm alarm : scheduledAlarms()) {
+            if (alarm.operation == null) continue;
+            result.add(Shadows.shadowOf(alarm.operation).getRequestCode());
         }
         return result;
     }

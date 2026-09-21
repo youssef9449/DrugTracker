@@ -99,7 +99,7 @@ Used consistently for:
 ## Native scheduling and fire path
 
 1. After hydration (and when exact-alarm capability allows), JS requests `scheduleOccurrence` with medication, dose, calendar date, time, and **amount**.
-2. `AutoDeductionSchedulingAdapter` translates the already-validated Auto occurrence identity, amount, recurrence generation, and delivery extras into an `ExactAlarmRuntime.ScheduleRequest`. The shared runtime performs the serialized durable schedule transaction (metadata write → AlarmManager install → ownership-safe rollback on failure). This is not an ACID transaction spanning SharedPreferences and AlarmManager; it is a process-local serialization of those steps.
+2. `AutoDeductionSchedulingAdapter` translates the already-validated Auto occurrence identity and amount into an `ExactAlarmRuntime.ScheduleRequest`; `recurrenceGeneration` is carried only in the delivery extras as Auto-owned authorization state and is not persisted in Shared alarm metadata. The shared runtime performs the serialized durable schedule transaction (metadata write → AlarmManager install → ownership-safe rollback on failure). This is not an ACID transaction spanning SharedPreferences and AlarmManager; it is a process-local serialization of those steps.
 3. `ExactAlarmRuntime`, reached only through `AutoDeductionSchedulingAdapter`, constructs the PendingIntent from action + full occurrence URI + receiver and owns the platform AlarmManager mechanics. Auto Deduction supplies the feature identity/payload through the adapter.
 4. On fire, `AutoDeductionReceiver` performs all durable work on a background thread (`goAsync()` keeps the broadcast alive while synchronous `commit()` disk I/O completes, so the main thread is never blocked). The delivery then calls `insertFiredIfAbsent` — durable **FIRED** row; **no** stock update; may schedule the next one-shot occurrence. If persistence fails **without** a durable pending-fire record, the receiver schedules a bounded **same-identity retry alarm** (same occurrence URI + ownership tokens, `FIRE_RETRY_DELAY_MS` delay, max `MAX_FIRE_RETRIES` attempts) instead of silently consuming the one-shot delivery; retries stay idempotent (`ALREADY_EXISTS`) and stale-protected (ownership tokens).
 5. On boot / quick boot, shared lifecycle dispatch enters the Auto Deduction business/recovery service; its scheduling adapter is the only Auto boundary that invokes the shared exact-alarm runtime for future schedule installation/cancellation. Auto Deduction business/recovery code reads and interprets its durable schedule metadata as needed for catch-up, stale-ownership checks, tombstone semantics, and reconciliation listing; those reads do not move into the scheduling adapter. Past-due recovery, catch-up, FIRED persistence, and recurrence authorization remain Auto-specific. Hydration/resume/local-midnight recovery also invokes the same idempotent native restore before the JS FIRED read, so an unresolved past schedule cannot be destructively canceled before recovery.
@@ -366,7 +366,7 @@ A past schedule entry still present at restore (device was unavailable at fire t
 
 Restore works from a **snapshot** (`prefKey`, payload, `observedVersion`). After a durable fire outcome:
 
-1. Under `SCHEDULE_LOCK`, confirm the snapshot still **owns** the past schedule row (`scheduleVersion == observedVersion`). If the row was replaced or removed, the snapshot is **stale** — do **not** schedule or overwrite D+1 using obsolete `timeHhmm`/`amount`.
+1. Under `SCHEDULE_LOCK`, confirm the snapshot still **owns** the past schedule row (`operationVersion == observedVersion`). If the row was replaced or removed, the snapshot is **stale** — do **not** schedule or overwrite D+1 using obsolete `timeHhmm`/`amount`.
 2. If ownership holds and D+1 metadata is absent, install D+1 via the normal schedule transaction (same dose identity and snapshot amount/time). If D+1 already exists, leave it untouched.
 3. Only when the successor is established, resolve past metadata with ownership-safe `removeScheduleMetadataIfVersion(observedVersion)`.
 
@@ -376,12 +376,12 @@ If successor scheduling fails for a non-stale reason, past metadata is **kept** 
 
 **Policy:** every missed exact-dose occurrence is reconstructed as a durable native `FIRED` event. There is **no catch-up horizon**.
 
-Given a persisted schedule snapshot on calendar date `D` for `(medicationId, doseId)` with `timeHhmm` / `amount` / `recurrenceGeneration`, when restore runs at local time `T` on date `R`:
+Given a persisted schedule snapshot on calendar date `D` for `(medicationId, doseId)` with `timeHhmm` / `amount`, plus Auto-owned recurrence authorization state, when restore runs at local time `T` on date `R`:
 
 1. Walk calendar dates from `D` forward using `nextCalendarDate` / `computeEpochMs` (device default timezone).
 2. For each date whose scheduled epoch is already due (`epoch <= now`, including the scheduled minute):
    - Recover via `recoverMissedOccurrence` under `SCHEDULE_LOCK`: cancellation check, active recurrence-generation authorization, then `insertFiredIfAbsent` (idempotent).
-   - Do **not** require live schedule metadata / `scheduleVersion` ownership for that historical date (unlike a real AlarmManager delivery).
+   - Do **not** require live schedule metadata / `operationVersion` ownership for that historical date (unlike a real AlarmManager delivery).
 3. Stop historical catch-up at the first date whose dose time is still in the future; install **only** that occurrence as the live AlarmManager schedule.
 4. Multi-dose slots are independent: each `doseId` walks its own chain with its own amount/time.
 5. Native still does **not** mutate `currentPills`, localStorage, or WebView state — recovered rows are FIRED only; JS reconciliation applies stock later.
@@ -391,7 +391,7 @@ Given a persisted schedule snapshot on calendar date `D` for `(medicationId, dos
 
 ### Restore / cancel
 
-- `scheduleOccurrenceLocked` holds `SCHEDULE_LOCK` for ownership check + metadata + AlarmManager install (restore uses `requiredVersion`). The authoritative `scheduleVersion` (`{millis}-{seq}-{uuid}`) is allocated **inside** this lock so its ordering token reflects serialized operation order, not the wall-clock time at which a thread waited for the lock.
+- `scheduleOccurrenceLocked` holds `SCHEDULE_LOCK` for ownership check + metadata + AlarmManager install (restore uses `requiredVersion`). The authoritative `operationVersion` (`{millis}-{seq}-{uuid}`) is allocated **inside** this lock so its ordering token reflects serialized operation order, not the wall-clock time at which a thread waited for the lock.
 - The `seq` component is a **durable monotonic counter** in a dedicated SharedPreferences namespace (`PREFS_ORDERING` / `lastAllocatedSequence`). Allocation is read → increment → `commit` under `SCHEDULE_LOCK`. This is not an in-memory `AtomicLong`: after process death the counter resumes from the last persisted value, so a new operation always receives a strictly newer seq than any previously durable token. Skipped sequence numbers after a crash are acceptable; reusing an older durable seq is not. If the counter commit fails, the schedule/cancel operation fails (no volatile fallback).
 - Cancel writes a durable cancellation tombstone (occurrence identity + the same style of ordering token) before AlarmManager.cancel and schedule-metadata removal — also under `SCHEDULE_LOCK`. Same-millisecond schedule vs cancel and post-restart ordering are both distinguished by the durable sequence.
 - **Effective cancellation** is evaluated from durable state only (`isOccurrenceCancelled`):
@@ -399,8 +399,8 @@ Given a persisted schedule snapshot on calendar date `D` for `(medicationId, dos
   - both present → compare ordering tokens by (millis, seq); a strictly newer schedule supersedes the tombstone (active); a strictly newer cancel remains cancelled
   - no tombstone → not cancelled
 - Cancelled occurrences are blocked in **both** lifecycle restore and `AutoDeductionReceiver` fire handling via the same serialized fire transition: no synthetic FIRED, no pending FIRED, no next recurrence when cancel linearizes first. A stale alarm that races with cancel cannot win the fire linearization after the tombstone is durable under `SCHEDULE_LOCK`.
-- A later legitimate `scheduleOccurrence` writes new schedule metadata (lock-ordered `scheduleVersion`) then best-effort clears the tombstone. If tombstone removal fails, version ordering still treats the newer schedule as active so reboot/restore and fire delivery do not suppress it.
-- Past schedule recovery treats a durable fire (FIRED or pending-fire) as a consumed occurrence for recurrence: the successor is scheduled before ownership-safe removal of the past metadata. Metadata is removed only when cancel linearized first, or when durable fire recovery succeeded **and** successor scheduling succeeded — and **only if** the current `scheduleVersion` still matches the restore snapshot’s `observedVersion`. A newer legitimate reschedule that replaced the snapshot row must not be deleted. If successor scheduling fails, past metadata is kept for retry. Missing metadata is treated as already gone (no recreate).
+- A later legitimate `scheduleOccurrence` writes new schedule metadata (lock-ordered `operationVersion`) then best-effort clears the tombstone. If tombstone removal fails, version ordering still treats the newer schedule as active so reboot/restore and fire delivery do not suppress it.
+- Past schedule recovery treats a durable fire (FIRED or pending-fire) as a consumed occurrence for recurrence: the successor is scheduled before ownership-safe removal of the past metadata. Metadata is removed only when cancel linearized first, or when durable fire recovery succeeded **and** successor scheduling succeeded — and **only if** the current `operationVersion` still matches the restore snapshot’s `observedVersion`. A newer legitimate reschedule that replaced the snapshot row must not be deleted. If successor scheduling fails, past metadata is kept for retry. Missing metadata is treated as already gone (no recreate).
 
 ### Platform limitations
 

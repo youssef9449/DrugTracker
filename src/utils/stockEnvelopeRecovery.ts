@@ -115,6 +115,13 @@ export interface ManualStockEnvelope {
   mutationSeq: number;
   /** Native Auto-owned stock deltas applied with this foreground mutation. */
   stockDeltas?: Array<{ medicationId: string; delta: number }>;
+  /** Manual Take/Restore occurrence resolutions committed atomically in Native. */
+  occurrenceResolutions?: Array<{
+    medicationId: string;
+    doseId: string;
+    calendarDate: string;
+    type: 'CONSUMED' | 'SKIPPED';
+  }>;
 }
 
 export interface PendingEnvelopeRef {
@@ -132,6 +139,13 @@ export interface PendingEnvelopeRef {
   }>;
   /** Manual only — durable foreground stock deltas, replayed idempotently in Native. */
   stockDeltas?: Array<{ medicationId: string; delta: number }>;
+  /** Manual only — occurrence resolutions committed atomically in Native. */
+  occurrenceResolutions?: Array<{
+    medicationId: string;
+    doseId: string;
+    calendarDate: string;
+    type: 'CONSUMED' | 'SKIPPED';
+  }>;
   clear: () => string | null;
 }
 
@@ -308,7 +322,13 @@ export async function recoverAllPendingStockEnvelopes(
   ) => string | null,
   applyNativeStockDeltas: (
     mutationSeq: number,
-    deltas: Array<{ medicationId: string; delta: number }>
+    deltas: Array<{ medicationId: string; delta: number }>,
+    occurrenceResolutions: Array<{
+      medicationId: string;
+      doseId: string;
+      calendarDate: string;
+      type: 'CONSUMED' | 'SKIPPED';
+    }>
   ) => Promise<{
     ok: boolean;
     error?: string;
@@ -404,7 +424,8 @@ export async function recoverAllPendingStockEnvelopes(
     if (env.kind === 'manual') {
       const nativeResult = await applyNativeStockDeltas(
         env.mutationSeq,
-        env.stockDeltas ?? []
+        env.stockDeltas ?? [],
+        env.occurrenceResolutions ?? []
       );
       if (!nativeResult.ok) {
         durabilityBlocked = true;

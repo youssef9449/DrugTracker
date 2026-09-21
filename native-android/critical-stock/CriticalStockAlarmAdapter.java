@@ -9,7 +9,6 @@ import org.json.JSONObject;
 import java.util.Calendar;
 import java.util.List;
 import java.util.ArrayList;
-import java.util.List;
 
 import app.drugtracker.alarmruntime.ExactAlarmContract;
 import app.drugtracker.alarmruntime.ExactAlarmFeatureAdapter;
@@ -199,18 +198,31 @@ public final class CriticalStockAlarmAdapter
         return CancelResult.success();
     }
 
-    public boolean isPending(String medicationId) {
+    public boolean verify(
+            String medicationId,
+            long expectedAlarmTimeMs) {
+        JSONObject metadata = getScheduleMetadata(medicationId);
+        if (metadata == null
+                || metadata.optLong(
+                        ExactAlarmContract.FIELD_TRIGGER_AT_EPOCH_MS,
+                        Long.MIN_VALUE) != expectedAlarmTimeMs) {
+            return false;
+        }
+        return isPending(medicationId);
+    }
+
+    boolean isPending(String medicationId) {
         return runtime.isPending(
                 occurrenceUri(medicationId),
                 ACTION_CRITICAL_STOCK,
                 CriticalStockAlarmReceiver.class);
     }
 
-    public JSONObject getScheduleMetadata(String medicationId) {
+    JSONObject getScheduleMetadata(String medicationId) {
         return runtime.getScheduleMetadata(occurrenceKey(medicationId));
     }
 
-    public List<String> listScheduledMedicationIds() {
+    List<String> listScheduledMedicationIds() {
         List<String> keys = runtime.listScheduledStorageKeys();
         List<String> result = new ArrayList<>();
         for (String key : keys) {
@@ -221,7 +233,7 @@ public final class CriticalStockAlarmAdapter
         return result;
     }
 
-    public boolean completeOneShot(String medicationId, String operationVersion) {
+    boolean completeOneShot(String medicationId, String operationVersion) {
         return runtime.completeOneShot(
                 occurrenceKey(medicationId),
                 operationVersion);

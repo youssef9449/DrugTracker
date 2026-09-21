@@ -220,8 +220,8 @@ async function runOnce(
         medications: manualEnv.medications,
         logs: manualEnv.logs,
         globalAutoDeductEnabled: manualEnv.globalAutoDeductEnabled,
-        stockDeltas: manualEnv.stockDeltas,
-        occurrenceResolutions: manualEnv.occurrenceResolutions,
+        stockDeltas: manualEnv.stockDeltas ?? [],
+        occurrenceResolutions: manualEnv.occurrenceResolutions ?? [],
         clear: () => saveManualStockEnvelope(null),
       });
     }

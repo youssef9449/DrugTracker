@@ -1287,8 +1287,8 @@ public final class AutoDeductionScheduler {
         // baseline for Native stock. Legacy FIRED rows may already have been
         // applied by the old JS-only implementation, so recovery must wait until
         // JS has seeded the Native authority.
-        if (!stock.isInitialized()) {
-            Log.i(TAG, "recoverFiredStockPass: Native stock not initialized — defer to JS hydration");
+        if (!stock.isInitialized() || !stock.isRecoveryReady()) {
+            Log.i(TAG, "recoverFiredStockPass: Native stock recovery boundary not ready — defer to JS");
             return RestoreResult.success(0, 0);
         }
 

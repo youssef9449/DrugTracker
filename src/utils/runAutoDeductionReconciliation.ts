@@ -269,6 +269,28 @@ async function runOnce(
       baseMeds = unified.state.medications;
       baseLogs = unified.state.logs;
 
+      // A recovered foreground envelope may contain a snapshot captured before
+      // a later Native Auto deduction. Re-read Native stock after replay so the
+      // returned JS mirror can never overwrite a newer background deduction.
+      const postEnvelopeConvergence = await convergeAutoDeductionStock(baseMeds);
+      if (!postEnvelopeConvergence.ok) {
+        return {
+          medications: baseMeds,
+          logs: baseLogs,
+          toAcknowledge: [],
+          details: [],
+          mutated: unified.recovered,
+          newExactLogs: [],
+          markedCount: 0,
+          recoveredEnvelope: unified.recovered,
+          partialNativeAck: false,
+          durabilityBlocked: true,
+          nativeStockSyncFailed: true,
+          nativeStockSyncError: postEnvelopeConvergence.error,
+        };
+      }
+      baseMeds = postEnvelopeConvergence.medications;
+
       if (unified.exactToAcknowledge.length > 0) {
         const { markedCount, failed } = await markAll(unified.exactToAcknowledge, mark);
         return {

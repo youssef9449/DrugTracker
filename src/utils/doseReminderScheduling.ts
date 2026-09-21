@@ -9,6 +9,7 @@ import {
 import { notificationId } from './notifications/notificationIds';
 import { getNativePlatform, isNativePlatform } from './notifications/notificationPlatform';
 import { scheduleWebNotification } from './notifications/webNotifications';
+import { getDoseReminderChannelId } from './notifications/doseReminderNotifications';
 
 export async function isDoseReminderPending(
   medId: string,

@@ -1,7 +1,6 @@
 /**
- * Phase 2 — JS bridge to native exact-time auto-deduction.
- * Safe on web (no-ops). Does NOT reconcile stock (Phase 3).
- */
+ * JS bridge to the Exact Auto native scheduler and Native stock authority.
+ * Safe on web (native stock operations are no-ops there).
 
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 import type { Medication } from '../types';

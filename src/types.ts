@@ -26,11 +26,12 @@ export interface Medication {
   id: string;
   name: string;
   /**
-   * Authoritative durable live stock (Issue #266).
-   * UI and status must use this value directly — there is no second
-   * projected/effective balance. Exact Auto, Manual Take/Restore, and
-   * Refill mutate this field.
-   */
+   * Durable application-facing live stock balance (Issue #266).
+   * On Android, the value is mirrored from the Auto-owned Native stock
+   * authority, which can mutate while the WebView is unavailable. UI and
+   * status use this value directly; there is no second projected/effective
+   * balance. Exact Auto, Manual Take/Restore, and Refill mutate this field
+   * through the shared stock domain.
   currentPills: number;
   dailyDose: number; // Consumption rate per day
   unit: string; // e.g., 'قرص', 'كبسولة', 'مل'

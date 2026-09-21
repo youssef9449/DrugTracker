@@ -351,7 +351,8 @@ export function useAutoDeductionScheduler({
       // trackedRef alone). After restart trackedRef is empty; native may still
       // hold stale schedules for disabled/deleted meds — cancel those first.
       // System boot / permission re-grant restore is handled by
-      // AutoDeductionSystemReceiver, not this normal desired-state pass.
+      // Shared system lifecycle recovery is handled natively; this normal desired-state pass
+      // remains limited to reconciling the current desired schedule state.
       // Issue #242: native list is authoritative for durable-schedule discovery.
       // Distinguish success+empty from read failure — never treat failure as [].
       const listResult = await listScheduledAutoDeductionOccurrences();

@@ -17,6 +17,7 @@ import {
   applyAutoDeductionStock,
   adoptAlreadyAppliedAutoOccurrence,
   convergeAutoDeductionStock,
+  markAutoDeductionRecoveryReady,
   type AutoDeductionEvent,
   type ListFiredEventsResult,
   type MarkReconciledResult,
@@ -136,6 +137,19 @@ export function runAutoDeductionReconciliation(
     );
   }
   return withAutoStockMutationGate((fresh) => runOnce(input, fresh));
+}
+
+async function markRecoveryReadyBestEffort(): Promise<void> {
+  const result = await markAutoDeductionRecoveryReady();
+  if (!result.ok) {
+    // Stock correctness is already durable. Failure to flip the migration
+    // readiness bit only defers lifecycle FIRED repair until the next successful
+    // JS reconciliation; it must not fabricate or overwrite stock.
+    console.warn(
+      '[App] Native Auto recovery-ready marker could not be persisted:',
+      result.error || 'recovery_ready_failed'
+    );
+  }
 }
 
 async function markAll(
@@ -383,6 +397,7 @@ async function runOnce(
         );
       }
     }
+    await markRecoveryReadyBestEffort();
     return {
       medications: baseMeds,
       logs: baseLogs,
@@ -527,6 +542,7 @@ async function runOnce(
   // the normal application persistence path will store it in localStorage.
   if (!result.mutated) {
     const { markedCount, failed } = await markAll(result.toAcknowledge, mark);
+    await markRecoveryReadyBestEffort();
     return {
       ...result,
       mutated: nativeStockMirrorChanged,
@@ -620,6 +636,7 @@ async function runOnce(
   // Remaining FIRED + markers + deterministic logs recover on next run.
   saveEnvelope(null);
 
+  await markRecoveryReadyBestEffort();
   return {
     ...result,
     markedCount,

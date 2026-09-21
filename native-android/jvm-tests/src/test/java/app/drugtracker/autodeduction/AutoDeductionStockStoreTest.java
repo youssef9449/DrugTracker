@@ -44,6 +44,7 @@ public class AutoDeductionStockStoreTest {
         AutoDeductionStockStore.SnapshotResult first = store.ensureMissingAndRead(seeds);
 
         assertTrue(first.ok);
+        assertTrue(store.isInitialized());
         assertEquals(20.0, first.stocks.get("med-1"), 0.0001);
 
         AutoDeductionStockStore.AutoApplyResult applied =
@@ -88,6 +89,41 @@ public class AutoDeductionStockStoreTest {
     }
 
     @Test
+    public void adoptAlreadyAppliedOccurrence_marksWithoutChangingStock() {
+        store.ensureMissingAndRead(java.util.Collections.singletonList(
+                new AutoDeductionStockStore.StockSeed("med-1", 8.0)));
+
+        AutoDeductionStockStore.AutoApplyResult adopted =
+                store.adoptAlreadyAppliedOccurrence(
+                        "med-1", "dose-1", "2026-09-21", 2.0);
+
+        assertTrue(adopted.ok);
+        assertTrue(adopted.applied);
+        assertEquals(
+                "adoption must not subtract a legacy JS-applied occurrence again",
+                8.0,
+                adopted.currentPills,
+                0.0001);
+
+        AutoDeductionStockStore.AutoApplyResult replay =
+                store.applyAutoDeduction("med-1", "dose-1", "2026-09-21", 2.0);
+        assertTrue(replay.ok);
+        assertFalse(replay.applied);
+        assertEquals(8.0, replay.currentPills, 0.0001);
+    }
+
+    @Test
+    public void uninitializedStore_doesNotExposeBaselineAsReady() {
+        assertFalse(store.isInitialized());
+
+        assertEquals(
+                "uninitialized store must not adopt a legacy occurrence",
+                "stock_not_initialized",
+                store.adoptAlreadyAppliedOccurrence(
+                        "med-1", "dose-1", "2026-09-21", 2.0).error);
+    }
+
+    @Test
     public void autoOccurrence_doesNotNeedJsOrMedicationSnapshotAtFireTime() {
         store.ensureMissingAndRead(java.util.Collections.singletonList(
                 new AutoDeductionStockStore.StockSeed("med-1", 10.0)));
@@ -128,7 +164,9 @@ public class AutoDeductionStockStoreTest {
 
         assertTrue(first.ok);
         assertFalse(first.alreadyApplied);
+        assertEquals(13.0, first.stocks.get("med-1"), 0.0001);
         assertTrue(second.ok);
+        assertEquals(13.0, second.stocks.get("med-1"), 0.0001);
         assertTrue(second.alreadyApplied);
 
         AutoDeductionStockStore.SnapshotResult snapshot = store.readAll();

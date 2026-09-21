@@ -4,12 +4,12 @@ import { getTodayDateString } from '../utils/dateCalculations';
 import {
   scheduleDoseReminder,
   cancelDoseReminder,
-  cancelSnoozedDoseReminder,
   isDoseReminderPending,
   isNativeDoseReminderReArmed,
   isDoseReminderTimeStillAhead,
   cancelStaleDoseReminderAlarms,
-} from '../utils/notifications';
+} from '../utils/doseReminderScheduling';
+import { cancelSnoozedDoseReminder } from '../utils/notifications/doseReminderNotifications';
 import { clearSnoozedDose } from '../utils/doseReminderStorage';
 import { isValidDoseTime } from '../utils/doseSchedule';
 import { isDoseConsumedOnDate } from '../utils/dateCalculations';

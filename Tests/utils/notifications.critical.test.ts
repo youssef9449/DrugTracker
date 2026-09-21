@@ -148,7 +148,7 @@ describe('scheduleCriticalAlarm — native path (android)', () => {
     await expect(
       scheduleCriticalAlarm('med-1', 'Test Med', future, 'قرص')
     ).resolves.toBe(false);
-    expect(mocks.schedule).toHaveBeenCalledTimes(1);
+    expect(mocks.criticalSchedule).toHaveBeenCalledTimes(1);
   });
 
   it('BLOCKER: a resolve listing a DIFFERENT id is not success either', async () => {
@@ -177,7 +177,7 @@ describe('scheduleCriticalAlarm — native path (android)', () => {
     await expect(
       scheduleCriticalAlarm('med-1', 'Test Med', Date.now() + 1000)
     ).resolves.toBe(false);
-    expect(mocks.schedule).not.toHaveBeenCalled();
+    expect(mocks.criticalSchedule).not.toHaveBeenCalled();
   });
 
   it('cancelCriticalAlarm uses the native Critical identity on Android', async () => {
@@ -254,20 +254,18 @@ describe('verifyCriticalAlarmPending — the claim is not proof the alarm exists
   it('BLOCKER: exact-alarm setting denied on Android 12+ → NOT verified (the OS cancels exact alarms; the pending record may still list them)', async () => {
     mocks.platform.mockReturnValue('android');
     const t = Date.now() + 7 * 24 * 60 * 60 * 1000;
-    // The plugin's pending record STILL lists the alarm — but with the
-    // exact setting revoked the OS has dropped the actual alarm, so the
-    // claim must not be treated as armed.
-    mocks.criticalVerify.mockResolvedValue({ ok: true });
-    mocks.checkExactNotificationSetting.mockResolvedValue({ exact_alarm: 'denied' });
+    mocks.criticalVerify.mockResolvedValue({ ok: false });
     await expect(verifyCriticalAlarmPending('med-1', t)).resolves.toBe(false);
-    expect(mocks.criticalVerify).not.toHaveBeenCalled();
+    expect(mocks.criticalVerify).toHaveBeenCalledWith({
+      medicationId: 'med-1',
+      alarmTimeMs: t,
+    });
   });
 
-  it("'prompt' exact-alarm setting does not by itself break verification", async () => {
+  it('android: successful native verification is accepted regardless of notification pending-list IDs', async () => {
     mocks.platform.mockReturnValue('android');
     const t = Date.now() + 7 * 24 * 60 * 60 * 1000;
     mocks.criticalVerify.mockResolvedValue({ ok: true });
-    mocks.checkExactNotificationSetting.mockResolvedValue({ exact_alarm: 'prompt' });
     await expect(verifyCriticalAlarmPending('med-1', t)).resolves.toBe(true);
   });
 
@@ -281,7 +279,7 @@ describe('verifyCriticalAlarmPending — the claim is not proof the alarm exists
     expect(mocks.checkExactNotificationSetting).not.toHaveBeenCalled();
   });
 
-  it('bridge failure (getPending rejects) → NOT verified: an unverifiable alarm must not be trusted', async () => {
+  it('bridge failure (native verify rejects) → NOT verified: an unverifiable alarm must not be trusted', async () => {
     mocks.platform.mockReturnValue('android');
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mocks.criticalVerify.mockRejectedValue(new Error('bridge down'));

@@ -353,7 +353,13 @@ function buildNativeStockDeltas(
 export async function commitWithManualEnvelope(
   state: AutoStockDurableState,
   baseMedications: Medication[],
-  globalOverride?: boolean
+  globalOverride?: boolean,
+  occurrenceResolutions: Array<{
+    medicationId: string;
+    doseId: string;
+    calendarDate: string;
+    type: 'CONSUMED' | 'SKIPPED';
+  }> = []
 ): Promise<string | null> {
   const durableState: AutoStockDurableState = {
     ...state,
@@ -379,7 +385,11 @@ export async function commitWithManualEnvelope(
   const envErr = saveManualStockEnvelope(envelope);
   if (envErr) return envErr;
 
-  const nativeResult = await applyForegroundAutoStockDeltas(mutationSeq, stockDeltas);
+  const nativeResult = await applyForegroundAutoStockDeltas(
+    mutationSeq,
+    stockDeltas,
+    occurrenceResolutions
+  );
   if (!nativeResult.ok) {
     return nativeResult.error ?? 'foreground_stock_failed';
   }
@@ -585,7 +595,17 @@ export function runGatedManualConsume(opts: {
       m.id === med.id ? result.updatedMed! : m
     );
     const logs = [result.log, ...fresh.logs];
-    const err = await commitWithManualEnvelope({ medications, logs }, fresh.medications);
+    const err = await commitWithManualEnvelope(
+      { medications, logs },
+      fresh.medications,
+      undefined,
+      [{
+        medicationId: med.id,
+        doseId: resolvedDoseId,
+        calendarDate: todayStr,
+        type: 'CONSUMED',
+      }]
+    );
     if (err) {
       return {
         outcome: 'persist_failed' as const,
@@ -780,7 +800,19 @@ export function runGatedManualRestore(opts: {
       ),
     ];
 
-    const err = await commitWithManualEnvelope({ medications, logs }, fresh.medications);
+    const err = await commitWithManualEnvelope(
+      { medications, logs },
+      fresh.medications,
+      undefined,
+      result.doseId
+        ? [{
+            medicationId: med.id,
+            doseId: result.doseId,
+            calendarDate: todayStr,
+            type: 'SKIPPED',
+          }]
+        : []
+    );
     if (err) {
       return {
         outcome: 'persist_failed' as const,

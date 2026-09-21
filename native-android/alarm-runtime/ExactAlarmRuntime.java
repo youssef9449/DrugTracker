@@ -233,7 +233,7 @@ public final class ExactAlarmRuntime {
 
         synchronized (ExactAlarmOperationLock.LOCK) {
             if (request.expectedExistingOperationVersion != null
-                    && !ExactAlarmStore.isMetadataOwnedByOperationVersion(
+                    && !ExactAlarmContract.isMetadataOwnedByOperationVersion(
                             store.getScheduleRaw(
                                     request.storageKey),
                             request.expectedExistingOperationVersion)) {

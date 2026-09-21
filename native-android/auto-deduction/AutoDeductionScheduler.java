@@ -1341,10 +1341,8 @@ public final class AutoDeductionScheduler {
      * evidence row, even when shared schedule metadata is missing.
      */
     RestoreResult recoverIndependentFireRetryEvidencePass() {
-        // During the first post-upgrade boundary, independent retry evidence may
-        // represent an occurrence already applied by the old JS-only path.
-        // Defer this whole recovery pass until JS has established the Native
-        // baseline and completed migration adoption.
+        // Retry evidence can only be recovered once the Native stock baseline
+        // exists; otherwise there is no authoritative balance to apply against.
         if (!new AutoDeductionStockStore(appContext()).isInitialized()) {
             Log.i(TAG, "independent evidence pass: Native stock not initialized — defer to JS hydration");
             return RestoreResult.success(0, 0);

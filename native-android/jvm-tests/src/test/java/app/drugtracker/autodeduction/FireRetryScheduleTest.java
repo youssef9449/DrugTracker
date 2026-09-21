@@ -173,6 +173,13 @@ public class FireRetryScheduleTest {
         assertEquals("med", saved.getStringExtra(AutoDeductionContract.EXTRA_MEDICATION_ID));
         assertEquals("dose", saved.getStringExtra(AutoDeductionContract.EXTRA_DOSE_ID));
         assertEquals(date, saved.getStringExtra(AutoDeductionContract.EXTRA_CALENDAR_DATE));
+        assertEquals(
+                "retry delivery must use the generic operationVersion token",
+                vg[0],
+                saved.getStringExtra(AutoDeductionContract.EXTRA_OPERATION_VERSION));
+        assertNull(
+                "retry delivery must not create a new legacy scheduleVersion token",
+                saved.getStringExtra(AutoDeductionContract.EXTRA_SCHEDULE_VERSION));
 
         Uri identity = saved.getData();
         assertNotNull("retry must target the exact occurrence identity",

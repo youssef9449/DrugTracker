@@ -318,7 +318,7 @@ public final class AutoDeductionScheduler {
                 String date = metadata.optString("calendarDate", "");
                 if (!AutoDeductionContract.isValidCalendarDate(date)) {
                     if (!quarantineMalformedScheduleMetadata(
-                            prefKey, (String) e.getValue(), "malformed_calendar_date")) {
+                            storageKey, (String) e.getValue(), "malformed_calendar_date")) {
                         return CancelResult.fail("schedule_metadata_removal_failed");
                     }
                     continue;
@@ -334,7 +334,7 @@ public final class AutoDeductionScheduler {
                 if (!result.isOk()) return CancelResult.fail(result.error);
             } catch (JSONException ex) {
                 if (!quarantineMalformedScheduleMetadata(
-                        prefKey, (String) e.getValue(), "invalid_json")) {
+                        storageKey, (String) e.getValue(), "invalid_json")) {
                     return CancelResult.fail("schedule_metadata_removal_failed");
                 }
             }
@@ -2229,7 +2229,7 @@ public final class AutoDeductionScheduler {
     }
 
     /**
-     * Parse the canonical occurrence identity encoded in a durable sch: key.
+     * Parse the canonical Auto occurrence identity encoded in the durable storage key.
      * Returns null when the key cannot identify exactly one occurrence.
      */
     private static ScheduleStorageIdentity parseScheduleStorageKey(String storageKey) {

@@ -262,6 +262,22 @@ export async function initializeAutoDeductionStock(
   }
 }
 
+function isStrictCalendarDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const [year, month, day] = value.split('-').map(Number);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return false;
+  }
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
 function buildLegacyOccurrenceResolutions(
   medications: Medication[]
 ): NativeAutoOccurrenceResolution[] {
@@ -272,7 +288,7 @@ function buildLegacyOccurrenceResolutions(
       medication.doseConsumptionHistory ?? {}
     )) {
       for (const calendarDate of dates ?? []) {
-        if (typeof calendarDate === 'string' && calendarDate.length === 10) {
+        if (isStrictCalendarDate(calendarDate) && doseId.trim()) {
           resolutions.push({
             medicationId: medication.id,
             doseId,
@@ -287,7 +303,7 @@ function buildLegacyOccurrenceResolutions(
       medication.doseSkippedHistory ?? {}
     )) {
       for (const calendarDate of dates ?? []) {
-        if (typeof calendarDate === 'string' && calendarDate.length === 10) {
+        if (isStrictCalendarDate(calendarDate) && doseId.trim()) {
           resolutions.push({
             medicationId: medication.id,
             doseId,

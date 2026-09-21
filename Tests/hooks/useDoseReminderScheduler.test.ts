@@ -1716,7 +1716,7 @@ describe('stale native pending cleanup', () => {
 
 describe('delivery/reconciliation race', () => {
   it('repairs when pending=false and no native re-arm evidence (case C)', async () => {
-    // Truly missing alarm: neither getPending nor DoseReminderRecurrenceStore.
+    // Truly missing alarm: neither getPending nor shared ExactAlarmRuntime.
     mocks.isPending.mockResolvedValue(false);
     mocks.isNativeReArmed.mockResolvedValue(false);
     const med = makeMed({
@@ -1756,11 +1756,11 @@ describe('delivery/reconciliation race', () => {
 
   it('post-delivery, no-open/no-action state (observable equivalent of shade dismiss): pending=false + D+1 evidence → zero schedule for D', async () => {
     // State transition (not a literal shade swipe):
-    //   D delivered by TimedNotificationPublisher.onReceive
+    //   D delivered by DoseReminderAlarmReceiver.onReceive
     //   → native arms exactly one successor D+1 for same medicationId+doseId+reminderTime
     //   → localNotificationActionPerformed / Take / Snooze / open never ran
     //   → tray entry may leave getPending(); pending becomes false for "current" view
-    //   → DoseReminderRecurrenceStore still reports valid re-arm for this occurrence identity
+    //   → shared ExactAlarmRuntime still reports valid re-arm for this occurrence identity
     // Reconciliation must not scheduleDoseReminder for same-day D.
     const medicationId = 'med-1';
     const doseId = 'd1';
@@ -1832,7 +1832,7 @@ describe('delivery/reconciliation race', () => {
 
   it('no-op when pending=false but native re-arm state is valid (case B — real delivery race)', async () => {
     // Delivery transition: getPending may still report false while
-    // TimedNotificationPublisher has already written DoseReminderRecurrenceStore
+    // DoseReminderAlarmReceiver has already written shared ExactAlarmRuntime
     // after successful AlarmManager next-day arm. JS must not schedule a second path.
     mocks.isPending.mockResolvedValue(false);
     mocks.isNativeReArmed.mockResolvedValue(false);

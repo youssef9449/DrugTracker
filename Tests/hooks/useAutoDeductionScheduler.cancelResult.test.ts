@@ -76,7 +76,7 @@ describe('useAutoDeductionScheduler CancelResult handling', () => {
           globalAutoDeductEnabled: props.enabled,
           hydrated: true,
           isFirstRun: false,
-          exactAlarmEnabled: true,
+          exactAlarmPermission: 'granted',
         }),
       { initialProps: { meds: [med], enabled: true } }
     );
@@ -107,7 +107,7 @@ describe('useAutoDeductionScheduler CancelResult handling', () => {
           globalAutoDeductEnabled: props.enabled,
           hydrated: true,
           isFirstRun: false,
-          exactAlarmEnabled: true,
+          exactAlarmPermission: 'granted',
         }),
       { initialProps: { meds: [med], enabled: true } }
     );
@@ -178,7 +178,7 @@ describe('Exact Auto scheduler signature ignores dailyDose/reminder fields', () 
           globalAutoDeductEnabled: true,
           hydrated: true,
           isFirstRun: false,
-          exactAlarmEnabled: true,
+          exactAlarmPermission: 'granted',
         }),
       { initialProps: { meds: [med] } }
     );
@@ -202,7 +202,7 @@ describe('Exact Auto scheduler signature ignores dailyDose/reminder fields', () 
           globalAutoDeductEnabled: true,
           hydrated: true,
           isFirstRun: false,
-          exactAlarmEnabled: true,
+          exactAlarmPermission: 'granted',
         }),
       { initialProps: { meds: [med] } }
     );
@@ -234,7 +234,7 @@ describe('Exact Auto scheduler signature ignores dailyDose/reminder fields', () 
           globalAutoDeductEnabled: true,
           hydrated: true,
           isFirstRun: false,
-          exactAlarmEnabled: true,
+          exactAlarmPermission: 'granted',
         }),
       { initialProps: { meds: [med] } }
     );

@@ -5,6 +5,7 @@
 
 import { useEffect, useMemo, useRef } from 'react';
 import type { Medication } from '../types';
+import type { ExactAlarmPermission } from '../utils/exactAlarm';
 import { getTodayDateString } from '../utils/dateCalculations';
 import { isValidDoseTime, normalizeTimeString } from '../utils/doseSchedule';
 import {
@@ -27,7 +28,7 @@ export interface UseAutoDeductionSchedulerOptions {
   globalAutoDeductEnabled: boolean;
   hydrated: boolean;
   isFirstRun: boolean;
-  exactAlarmEnabled: boolean | null;
+  exactAlarmPermission: ExactAlarmPermission | null;
   resumeTick?: number;
   /** Increments at each local-midnight rollover while the app stays open. */
   midnightTick?: number;
@@ -239,7 +240,7 @@ export function useAutoDeductionScheduler({
   globalAutoDeductEnabled,
   hydrated,
   isFirstRun,
-  exactAlarmEnabled,
+  exactAlarmPermission,
   resumeTick = 0,
   midnightTick = 0,
 }: UseAutoDeductionSchedulerOptions): void {
@@ -252,7 +253,7 @@ export function useAutoDeductionScheduler({
     () =>
       [
         globalAutoDeductEnabled ? '1' : '0',
-        exactAlarmEnabled === true ? '1' : exactAlarmEnabled === false ? '0' : 'x',
+        exactAlarmPermission === 'granted' ? '1' : exactAlarmPermission === 'denied' ? '0' : 'u',
         medications
           .map((m) => {
             const schedulePart =
@@ -272,13 +273,13 @@ export function useAutoDeductionScheduler({
           .sort()
           .join('\n'),
       ].join('#'),
-    [medications, globalAutoDeductEnabled, exactAlarmEnabled]
+    [medications, globalAutoDeductEnabled, exactAlarmPermission]
   );
 
   useEffect(() => {
     if (!hydrated || isFirstRun) return;
-    if (exactAlarmEnabled !== true) {
-      if (exactAlarmEnabled === false) {
+    if (exactAlarmPermission === null || exactAlarmPermission === 'denied') {
+      if (exactAlarmPermission === 'denied') {
         const gen = generationGuardRef.current.bump('auto-deduction');
         const toCancel = Array.from(trackedRef.current);
         operationQueueRef.current.enqueue('auto-deduction', async () => {
@@ -440,7 +441,7 @@ export function useAutoDeductionScheduler({
     signature,
     hydrated,
     isFirstRun,
-    exactAlarmEnabled,
+    exactAlarmPermission,
     globalAutoDeductEnabled,
     medications,
     resumeTick,

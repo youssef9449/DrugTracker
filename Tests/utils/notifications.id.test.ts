@@ -217,17 +217,17 @@ describe('getExactAlarmPermission — platform-aware', () => {
     mocks.nativeOpenSettings.mockResolvedValue({ opened: true });
   });
 
-  it('returns "granted" on web (no exact-alarm concept)', async () => {
+  it('returns "unsupported" on web (no Android exact-alarm concept)', async () => {
     mocks.platform.mockReturnValue('web');
     const result = await getExactAlarmPermission();
-    expect(result).toBe('granted');
+    expect(result).toBe('unsupported');
     expect(mocks.nativeCanExact).not.toHaveBeenCalled();
   });
 
-  it('returns "granted" on iOS (no SCHEDULE_EXACT_ALARM concept)', async () => {
+  it('returns "unsupported" on iOS (no SCHEDULE_EXACT_ALARM concept)', async () => {
     mocks.platform.mockReturnValue('ios');
     const result = await getExactAlarmPermission();
-    expect(result).toBe('granted');
+    expect(result).toBe('unsupported');
     expect(mocks.checkExactNotificationSetting).not.toHaveBeenCalled();
   });
 
@@ -246,11 +246,11 @@ describe('getExactAlarmPermission — platform-aware', () => {
     expect(result).toBe('denied');
   });
 
-  it('returns "unsupported" on Android when the API throws', async () => {
+  it('returns "denied" on Android when the API throws', async () => {
     mocks.platform.mockReturnValue('android');
     mocks.nativeCanExact.mockRejectedValue(new Error('API unavailable'));
     const result = await getExactAlarmPermission();
-    expect(result).toBe('unsupported');
+    expect(result).toBe('denied');
   });
 });
 

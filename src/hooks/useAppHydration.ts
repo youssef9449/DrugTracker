@@ -9,7 +9,7 @@ import {
   requestNotificationPermission,
   getNotificationPermission,
 } from '../utils/notifications/notificationPermissions';
-import { getExactAlarmPermission } from '../utils/exactAlarm';
+import { getExactAlarmPermission, type ExactAlarmPermission } from '../utils/exactAlarm';
 import { initNativeBridge } from '../native';
 import { loadJson, loadString } from '../utils/storage';
 import {
@@ -35,7 +35,7 @@ export interface AppHydrationSetters {
   setSoundEnabled: Dispatch<SetStateAction<boolean>>;
   setNotificationsEnabled: Dispatch<SetStateAction<boolean>>;
   setCriticalStockAlertsEnabled: Dispatch<SetStateAction<boolean>>;
-  setExactAlarmEnabled: Dispatch<SetStateAction<boolean | null>>;
+  setExactAlarmPermission: Dispatch<SetStateAction<ExactAlarmPermission | null>>;
   setGlobalAutoDeductEnabled: Dispatch<SetStateAction<boolean>>;
   setFontScale: Dispatch<SetStateAction<'normal' | 'large'>>;
   setIsCompactView: Dispatch<SetStateAction<boolean>>;
@@ -60,7 +60,7 @@ export function useAppHydration(setters: AppHydrationSetters): void {
     setSoundEnabled,
     setNotificationsEnabled,
     setCriticalStockAlertsEnabled,
-    setExactAlarmEnabled,
+    setExactAlarmPermission,
     setGlobalAutoDeductEnabled,
     setFontScale,
     setIsCompactView,
@@ -212,7 +212,7 @@ export function useAppHydration(setters: AppHydrationSetters): void {
         }),
       getExactAlarmPermission()
         .then((state) => {
-          setExactAlarmEnabled(state === 'granted');
+          setExactAlarmPermission(state);
         })
         .catch((err) => {
           console.warn('[App] getExactAlarmPermission failed:', err);
@@ -242,7 +242,7 @@ export function useAppHydration(setters: AppHydrationSetters): void {
     setSoundEnabled,
     setNotificationsEnabled,
     setCriticalStockAlertsEnabled,
-    setExactAlarmEnabled,
+    setExactAlarmPermission,
     setGlobalAutoDeductEnabled,
     setFontScale,
     setIsCompactView,

@@ -96,7 +96,7 @@ describe('useAutoDeductionScheduler invalidate-before-cancel (Issue #217)', () =
           globalAutoDeductEnabled: props.enabled,
           hydrated: true,
           isFirstRun: false,
-          exactAlarmEnabled: true,
+          exactAlarmPermission: 'granted',
         }),
       { initialProps: { meds: [med], enabled: true } }
     );
@@ -187,7 +187,7 @@ describe('useAutoDeductionScheduler invalidate-before-cancel (Issue #217)', () =
           globalAutoDeductEnabled: props.enabled,
           hydrated: true,
           isFirstRun: false,
-          exactAlarmEnabled: true,
+          exactAlarmPermission: 'granted',
         }),
       { initialProps: { meds: [med], enabled: true } }
     );

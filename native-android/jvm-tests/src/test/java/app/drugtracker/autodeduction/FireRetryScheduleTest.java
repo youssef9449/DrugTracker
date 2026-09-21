@@ -317,6 +317,15 @@ public class FireRetryScheduleTest {
                 appContext(), "med", "dose", date, epoch, 1.0, "12:00",
                 gen, version, 0);
 
+        AutoDeductionStockStore.SnapshotResult stock =
+                new AutoDeductionStockStore(appContext()).readAll();
+        assertTrue(stock.ok);
+        assertEquals(
+                "live fire must finish Native stock before the receiver returns",
+                9.0,
+                stock.stocks.get("med"),
+                0.0001);
+
         assertEquals(1, alarmCount());
         ShadowAlarmManager.ScheduledAlarm alarm = firstAlarm();
         assertNotNull(alarm.operation);
@@ -324,6 +333,32 @@ public class FireRetryScheduleTest {
         assertNotNull(saved);
         assertEquals("normal delivery carries no retry counter", 0,
                 saved.getIntExtra(AutoDeductionContract.EXTRA_FIRE_RETRY_COUNT, 0));
+    }
+
+    @Test
+    public void recoverFiredStockPass_uninitializedDefersWithoutCreatingBaseline() {
+        AutoDeductionScheduler s = newScheduler();
+
+        AutoDeductionEventStore store = new AutoDeductionEventStore(appContext());
+        AutoDeductionEventStore.InsertFiredResult inserted =
+                store.insertFiredIfAbsent(
+                        "med",
+                        "dose",
+                        "2026-09-15",
+                        1000L,
+                        2.0);
+        assertEquals(
+                AutoDeductionEventStore.InsertFiredStatus.CREATED,
+                inserted.status);
+
+        AutoDeductionScheduler.RestoreResult result = s.recoverFiredStockPass();
+        assertTrue(result.ok);
+
+        AutoDeductionStockStore.SnapshotResult stock =
+                new AutoDeductionStockStore(appContext()).readAll();
+        assertTrue(stock.ok);
+        assertTrue("no Native baseline must be created from an ambiguous legacy FIRED row",
+                stock.stocks.isEmpty());
     }
 
     @Test

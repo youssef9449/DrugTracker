@@ -53,9 +53,6 @@ public final class ExactAlarmRuntime {
         this.pendingIntentRequestCode = pendingIntentRequestCode;
     }
 
-    public ExactAlarmStore store() {
-        return store;
-    }
 
     /**
      * Single native source of truth for Android exact-alarm capability.
@@ -69,6 +66,75 @@ public final class ExactAlarmRuntime {
                 .getApplicationContext()
                 .getSystemService(Context.ALARM_SERVICE);
         return manager != null && manager.canScheduleExactAlarms();
+    }
+
+    /** Raw durable schedule metadata snapshot for a feature adapter. */
+    public String getScheduleRaw(String storageKey) {
+        if (storageKey == null || storageKey.isEmpty()) return null;
+        synchronized (ExactAlarmOperationLock.LOCK) {
+            return store.getScheduleRaw(storageKey);
+        }
+    }
+
+    /** Feature-neutral snapshot of all durable schedule metadata. */
+    public java.util.Map<String, String> listScheduleMetadata() {
+        synchronized (ExactAlarmOperationLock.LOCK) {
+            java.util.Map<String, String> result = new java.util.LinkedHashMap<>();
+            for (java.util.Map.Entry<String, ?> entry : store.getAllScheduleMetadata().entrySet()) {
+                if (entry.getKey() == null || !(entry.getValue() instanceof String)) continue;
+                result.put(entry.getKey(), (String) entry.getValue());
+            }
+            return result;
+        }
+    }
+
+    public boolean hasSchedule(String storageKey) {
+        if (storageKey == null || storageKey.isEmpty()) return false;
+        synchronized (ExactAlarmOperationLock.LOCK) {
+            return store.hasSchedule(storageKey);
+        }
+    }
+
+    public boolean removeScheduleIfOwned(
+            String storageKey,
+            String expectedOperationVersion) {
+        if (storageKey == null || storageKey.isEmpty()
+                || expectedOperationVersion == null
+                || expectedOperationVersion.isEmpty()) {
+            return false;
+        }
+        synchronized (ExactAlarmOperationLock.LOCK) {
+            return store.removeScheduleIfOwnedLocked(
+                    storageKey, expectedOperationVersion);
+        }
+    }
+
+    public boolean removeSchedule(String storageKey) {
+        if (storageKey == null || storageKey.isEmpty()) return false;
+        synchronized (ExactAlarmOperationLock.LOCK) {
+            return store.removeScheduleLocked(storageKey);
+        }
+    }
+
+    public boolean hasCancellationTombstone(String storageKey) {
+        if (storageKey == null || storageKey.isEmpty()) return false;
+        synchronized (ExactAlarmOperationLock.LOCK) {
+            return store.hasCancellationTombstoneLocked(storageKey);
+        }
+    }
+
+    public boolean isEffectivelyCancelled(String storageKey) {
+        if (storageKey == null || storageKey.isEmpty()) return false;
+        synchronized (ExactAlarmOperationLock.LOCK) {
+            return store.isEffectivelyCancelledLocked(storageKey);
+        }
+    }
+
+    public boolean clearCancellationTombstone(String storageKey) {
+        if (storageKey == null || storageKey.isEmpty()) return true;
+        synchronized (ExactAlarmOperationLock.LOCK) {
+            return store.removeCancellationTombstoneLocked(storageKey);
+        }
     }
 
     public boolean canScheduleExactAlarms() {

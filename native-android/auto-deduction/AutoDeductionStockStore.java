@@ -27,6 +27,7 @@ public final class AutoDeductionStockStore {
     private static final String KEY_STOCK_PREFIX = "stock:";
     private static final String KEY_AUTO_PREFIX = "auto:";
     private static final String KEY_LAST_FOREGROUND_SEQ = "lastForegroundMutationSeq";
+    private static final String KEY_STOCK_INITIALIZED = "stockInitialized";
     private static final char KEY_SEPARATOR = '\u001f';
 
     private static final Object LOCK = new Object();
@@ -181,8 +182,14 @@ public final class AutoDeductionStockStore {
                 }
             }
 
-            if (changed && !editor.commit()) {
-                return SnapshotResult.failure("stock_seed_commit_failed");
+            // Mark the Android Native stock authority initialized only in the
+            // same durable commit as any initial seeding. This prevents lifecycle
+            // recovery from consuming pre-migration FIRED events before JS has
+            // established the Native baseline from the persisted application stock.
+            editor.putBoolean(KEY_STOCK_INITIALIZED, true);
+            if (!editor.commit()) {
+                return SnapshotResult.failure(
+                        changed ? "stock_seed_commit_failed" : "stock_init_commit_failed");
             }
 
             Map<String, Double> out = new LinkedHashMap<String, Double>();
@@ -196,6 +203,68 @@ public final class AutoDeductionStockStore {
                 }
             }
             return SnapshotResult.success(out);
+        }
+    }
+
+    public boolean isInitialized() {
+        synchronized (LOCK) {
+            return prefs.getBoolean(KEY_STOCK_INITIALIZED, false);
+        }
+    }
+
+    /**
+     * Adopt an occurrence whose stock was already reflected by the JavaScript
+     * application before Native stock authority was introduced. This writes only
+     * the occurrence marker; it deliberately does not change the current balance.
+     *
+     * <p>After adoption, lifecycle recovery sees the marker and cannot subtract
+     * that legacy occurrence a second time.</p>
+     */
+    public AutoApplyResult adoptAlreadyAppliedOccurrence(
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            double amount
+    ) {
+        if (!isValidId(medicationId)
+                || !isValidId(doseId)
+                || calendarDate == null
+                || calendarDate.trim().isEmpty()
+                || !AutoDeductionContract.isValidAmount(amount)) {
+            return AutoApplyResult.failure("invalid_adoption_args");
+        }
+
+        final String occurrenceKey =
+                medicationId + KEY_SEPARATOR + doseId + KEY_SEPARATOR + calendarDate;
+        final String autoKey = KEY_AUTO_PREFIX + occurrenceKey;
+
+        synchronized (LOCK) {
+            if (!prefs.getBoolean(KEY_STOCK_INITIALIZED, false)) {
+                return AutoApplyResult.failure("stock_not_initialized");
+            }
+            String markerRaw = prefs.getString(autoKey, null);
+            if (markerRaw != null) {
+                try {
+                    double actual = Double.parseDouble(markerRaw);
+                    Double current = readStockLocked(medicationId);
+                    if (current == null) {
+                        return AutoApplyResult.failure("stock_not_initialized");
+                    }
+                    return AutoApplyResult.alreadyApplied(actual, current);
+                } catch (NumberFormatException e) {
+                    return AutoApplyResult.failure("invalid_auto_marker");
+                }
+            }
+
+            Double current = readStockLocked(medicationId);
+            if (current == null) {
+                return AutoApplyResult.failure("stock_not_initialized");
+            }
+
+            if (!prefs.edit().putString(autoKey, encode(amount)).commit()) {
+                return AutoApplyResult.failure("auto_adoption_commit_failed");
+            }
+            return AutoApplyResult.applied(amount, current);
         }
     }
 

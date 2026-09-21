@@ -31,7 +31,7 @@ function hashToRange(str: string, rangeSize: number): number {
  *   different categories never collide (disjoint bands).
  */
 
-function notificationId(
+export function notificationId(
   category: NotificationCategory,
   medId?: string
 ): number {

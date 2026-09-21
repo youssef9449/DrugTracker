@@ -4,7 +4,6 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
 
-import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
@@ -91,7 +90,7 @@ final class ExactAlarmStore {
     boolean removeScheduleIfOwnedLocked(
             String featureStorageKey,
             String expectedOperationVersion) {
-        if (!isMetadataOwnedByOperationVersion(
+        if (!ExactAlarmContract.isMetadataOwnedByOperationVersion(
                 getScheduleRaw(featureStorageKey),
                 expectedOperationVersion)) {
             return false;
@@ -144,11 +143,11 @@ final class ExactAlarmStore {
         if (cancellation == null) return;
 
         long[] scheduleOrder =
-                parseOrdering(scheduleOperationVersion);
+                ExactAlarmContract.parseOrdering(scheduleOperationVersion);
         long[] cancellationOrder =
-                parseOrdering(cancellation);
+                ExactAlarmContract.parseOrdering(cancellation);
 
-        if (isOrderingNewer(
+        if (ExactAlarmContract.isOrderingNewer(
                 scheduleOrder[0], scheduleOrder[1],
                 cancellationOrder[0], cancellationOrder[1])) {
             if (!removeCancellationTombstoneLocked(featureStorageKey)) {
@@ -172,13 +171,13 @@ final class ExactAlarmStore {
         String schedule = getScheduleRaw(featureStorageKey);
         if (schedule == null || schedule.isEmpty()) return true;
 
-        long[] cancellationOrder = parseOrdering(cancellation);
-        long[] scheduleOrder = parseOrdering(
-                extractOperationVersion(schedule));
+        long[] cancellationOrder = ExactAlarmContract.parseOrdering(cancellation);
+        long[] scheduleOrder = ExactAlarmContract.parseOrdering(
+                ExactAlarmContract.extractOperationVersion(schedule));
 
         return scheduleOrder[0] >= 0L
                 && cancellationOrder[0] >= 0L
-                && isOrderingNewer(
+                && ExactAlarmContract.isOrderingNewer(
                         scheduleOrder[0],
                         scheduleOrder[1],
                         cancellationOrder[0],
@@ -202,64 +201,5 @@ final class ExactAlarmStore {
         return result;
     }
 
-    static String extractOperationVersion(String raw) {
-        if (raw == null || raw.isEmpty()) return "";
-        try {
-            return extractOperationVersion(new JSONObject(raw));
-        } catch (JSONException e) {
-            return "";
-        }
-    }
 
-    public static String extractOperationVersion(JSONObject metadata) {
-        if (metadata == null) return "";
-        String current = metadata.optString(
-                ExactAlarmContract.FIELD_OPERATION_VERSION, "");
-        return current.isEmpty()
-                ? metadata.optString(
-                        ExactAlarmContract.LEGACY_FIELD_SCHEDULE_VERSION,
-                        "")
-                : current;
-    }
-
-    static boolean isMetadataOwnedByOperationVersion(
-            String currentJson,
-            String expectedOperationVersion) {
-        return expectedOperationVersion != null
-                && !expectedOperationVersion.isEmpty()
-                && expectedOperationVersion.equals(
-                        extractOperationVersion(currentJson));
-    }
-
-    static long[] parseOrdering(String raw) {
-        long[] result = new long[] {-1L, 0L};
-        if (raw == null || raw.trim().isEmpty()) return result;
-        try {
-            String value = raw.trim();
-            int firstDash = value.indexOf('-');
-            if (firstDash <= 0) return result;
-            int secondDash =
-                    value.indexOf('-', firstDash + 1);
-            String sequencePart =
-                    secondDash > firstDash
-                            ? value.substring(
-                                    firstDash + 1, secondDash)
-                            : value.substring(firstDash + 1);
-            result[0] = Long.parseLong(
-                    value.substring(0, firstDash));
-            result[1] = Long.parseLong(sequencePart);
-        } catch (NumberFormatException ignored) {
-        }
-        return result;
-    }
-
-    static boolean isOrderingNewer(
-            long firstMillis,
-            long firstSequence,
-            long secondMillis,
-            long secondSequence) {
-        return firstMillis != secondMillis
-                ? firstMillis > secondMillis
-                : firstSequence > secondSequence;
-    }
 }

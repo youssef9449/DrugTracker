@@ -2,6 +2,7 @@ package app.drugtracker.alarmruntime;
 
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -27,7 +28,7 @@ public final class ExactAlarmPlugin extends Plugin {
 
     @PluginMethod
     public void openSettings(PluginCall call) {
-        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             JSObject ret = new JSObject();
             ret.put("opened", false);
             call.resolve(ret);

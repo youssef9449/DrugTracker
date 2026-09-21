@@ -422,7 +422,6 @@ public class FireRetryScheduleTest {
                     "med", "dose", date, 1000L, 2.0, "08:00", 1L, "v1", 1));
         }
         seedAutoStock("med", 10.0);
-        seedAutoStock("med", 10.0);
         AutoDeductionScheduler.FireResult fr =
                 s.recoverFireFromIndependentEvidence("med", "dose", date);
         assertTrue(fr.status == AutoDeductionScheduler.FireResult.Status.CREATED
@@ -486,6 +485,7 @@ public class FireRetryScheduleTest {
         }
         // Later cancellation tombstone (config mutation after failed fire)
         s.cancelOccurrence("med", "dose", date);
+        seedAutoStock("med", 10.0);
         AutoDeductionScheduler.FireResult fr =
                 s.recoverFireFromIndependentEvidence("med", "dose", date);
         assertTrue(

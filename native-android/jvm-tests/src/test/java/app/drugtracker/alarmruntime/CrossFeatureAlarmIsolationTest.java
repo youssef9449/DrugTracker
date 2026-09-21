@@ -70,6 +70,10 @@ public class CrossFeatureAlarmIsolationTest {
                 new CriticalStockAlarmAdapter(context());
 
         assertTrue(auto.scheduleOccurrence(
+                AutoDeductionContract.occurrenceKey(
+                        MEDICATION_ID,
+                        DOSE_ID,
+                        DATE),
                 MEDICATION_ID,
                 DOSE_ID,
                 DATE,
@@ -186,6 +190,10 @@ public class CrossFeatureAlarmIsolationTest {
 
     private static void scheduleAllThree() {
         assertTrue(autoAdapter().scheduleOccurrence(
+                AutoDeductionContract.occurrenceKey(
+                        MEDICATION_ID,
+                        DOSE_ID,
+                        DATE),
                 MEDICATION_ID, DOSE_ID, DATE, "08:00", 1.0,
                 TRIGGER_AT, 1L, null).ok);
         assertTrue(doseAdapter().scheduleOccurrence(

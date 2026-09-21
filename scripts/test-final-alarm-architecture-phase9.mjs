@@ -100,24 +100,29 @@ assert(
   'Direct AlarmManager.canScheduleExactAlarms() usage must exist only in ExactAlarmRuntime'
 );
 
-const alarmApiImplementationFiles = javaFiles.filter((rel) => {
+const alarmPendingIntentImplementationFiles = javaFiles.filter((rel) =>
+  read(rel).includes('PendingIntent.getBroadcast(')
+);
+assert(
+  alarmPendingIntentImplementationFiles.length === 2
+    && alarmPendingIntentImplementationFiles.includes(runtime)
+    && alarmPendingIntentImplementationFiles.includes(notificationRuntime),
+  'Alarm/notification PendingIntent.getBroadcast implementations must remain limited to ExactAlarmRuntime and NotificationRuntime'
+);
+
+const directAlarmCancellationFiles = javaFiles.filter((rel) => {
   const content = read(rel);
-  return content.includes('AlarmManager.cancel(')
-    || content.includes('PendingIntent.getBroadcast(');
+  return /\bmanager\.cancel\s*\(\s*pendingIntent\s*\)/.test(content)
+    || content.includes('AlarmManager.cancel(');
 });
 assert(
-  alarmApiImplementationFiles.every(
-    (rel) => rel === runtime || rel === notificationRuntime
-  ),
-  'AlarmManager.cancel / PendingIntent.getBroadcast may exist only in ExactAlarmRuntime, with NotificationRuntime allowed for notification-action PendingIntent delivery'
+  directAlarmCancellationFiles.length === 1
+    && directAlarmCancellationFiles[0] === runtime,
+  'Direct AlarmManager PendingIntent cancellation must remain unique to ExactAlarmRuntime'
 );
 assert(
-  alarmApiImplementationFiles.includes(runtime),
-  'ExactAlarmRuntime must remain the concrete alarm API implementation'
-);
-assert(
-  alarmApiImplementationFiles.includes(notificationRuntime),
-  'NotificationRuntime must remain the only separate notification-action PendingIntent implementation'
+  /\bmanager\.cancel\s*\(\s*pendingIntent\s*\)/.test(read(runtime)),
+  'ExactAlarmRuntime must contain the concrete manager.cancel(pendingIntent) alarm cancellation call'
 );
 assert(
   !javaFiles.some((rel) =>

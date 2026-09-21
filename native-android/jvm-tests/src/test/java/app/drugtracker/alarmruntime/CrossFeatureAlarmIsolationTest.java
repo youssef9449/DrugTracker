@@ -103,6 +103,18 @@ public class CrossFeatureAlarmIsolationTest {
 
         Set<String> identities = scheduledIdentities();
         assertEquals("three independent full identities must be armed", 3, identities.size());
+
+        Set<String> pendingIntentIdentities = scheduledPendingIntentIdentities();
+        assertEquals(
+                "three independent PendingIntent identity tuples must be armed",
+                3,
+                pendingIntentIdentities.size());
+
+        Set<Integer> requestCodes = scheduledPendingIntentRequestCodes();
+        assertEquals(
+                "the three feature alarm request-code namespaces must remain distinct",
+                3,
+                requestCodes.size());
         assertTrue(identities.contains(
                 AutoDeductionContract.occurrenceUri(
                         MEDICATION_ID, DOSE_ID, DATE).toString()));

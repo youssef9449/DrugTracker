@@ -212,6 +212,22 @@ export { formatLogTime };
  * Uses `pluralizeArabic` for correct Arabic noun forms per count
  * (singular / dual / few 3-10 / many 11+).
  */
+/**
+ * Normalize a packaging remainder for display.
+ * Whole numbers (incl. float noise near integers) stay integers.
+ * Genuine fractional quantities are preserved without Math.round inflation
+ * (e.g. 0.5 must not become 1) and without binary float garbage.
+ */
+export function normalizeDisplayQuantity(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  const nearest = Math.round(value);
+  if (Math.abs(value - nearest) < 1e-9) return nearest;
+  // Trim binary floating-point noise for user-facing decimals.
+  const trimmed = Math.round(value * 1e6) / 1e6;
+  // Drop trailing zeros via Number (1.500000 → 1.5).
+  return Number(trimmed.toString());
+}
+
 export function describeStockInStrips(
   pills: number,
   pillsPerStrip?: number,
@@ -223,7 +239,9 @@ export function describeStockInStrips(
   if (!pillsPerStrip || pillsPerStrip <= 0 || pills <= 0) return null;
 
   const totalStrips = Math.floor(pills / pillsPerStrip);
-  const remainingPills = Math.round(pills % pillsPerStrip);
+  // Preserve fractional remainders (0.5, 1.5, …). Only collapse float noise
+  // near whole integers — never Math.round genuine fractions into the next int.
+  const remainingPills = normalizeDisplayQuantity(pills - totalStrips * pillsPerStrip);
 
   const pillWord = pluralizeArabic(remainingPills, unit);
 

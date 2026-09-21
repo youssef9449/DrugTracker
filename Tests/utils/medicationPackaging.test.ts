@@ -75,3 +75,96 @@ describe('getMedSizes (#73)', () => {
     expect(sizes.stripSize).toBe(15);
   });
 });
+
+import {
+  formatScheduledDoseBreakdown,
+} from '@/utils/medicationPackaging';
+import { describeStockInStrips, normalizeDisplayQuantity } from '@/types';
+
+describe('normalizeDisplayQuantity', () => {
+  it('preserves genuine fractions', () => {
+    expect(normalizeDisplayQuantity(0.5)).toBe(0.5);
+    expect(normalizeDisplayQuantity(1.5)).toBe(1.5);
+    expect(normalizeDisplayQuantity(2.25)).toBe(2.25);
+  });
+
+  it('collapses float noise near integers', () => {
+    expect(normalizeDisplayQuantity(3 + 1e-12)).toBe(3);
+    expect(normalizeDisplayQuantity(10 - 1e-12)).toBe(10);
+  });
+
+  it('trims binary float garbage', () => {
+    expect(normalizeDisplayQuantity(0.1 + 0.2)).toBe(0.3);
+  });
+});
+
+describe('describeStockInStrips — fractional remainders', () => {
+  it('Case A: 0.5 does not round to 1', () => {
+    const s = describeStockInStrips(0.5, 10, 3, 'قرص');
+    expect(s).toBeTruthy();
+    expect(s!).toContain('0.5');
+    expect(s!).not.toMatch(/^قرص واحد$/);
+    expect(s!).not.toContain('1 ');
+  });
+
+  it('Case B: 1.5 preserves 1.5', () => {
+    const s = describeStockInStrips(1.5, 10, 3, 'قرص');
+    expect(s).toBeTruthy();
+    expect(s!).toContain('1.5');
+  });
+
+  it('Case C: 2.25 preserves 2.25 without float garbage', () => {
+    const s = describeStockInStrips(2.25, 10, 3, 'قرص');
+    expect(s).toBeTruthy();
+    expect(s!).toContain('2.25');
+    expect(s!).not.toContain('000000');
+  });
+
+  it('Case D: whole-number strip packaging unchanged (30 = 1 box)', () => {
+    const s = describeStockInStrips(30, 10, 3, 'قرص');
+    expect(s).toBe(describeStockInStrips(30, 10, 3, 'قرص'));
+    // 30 pills / 10 per strip / 3 strips per box → 1 box
+    expect(s).toMatch(/علبة/);
+  });
+
+  it('Case E: whole-number without strip packaging path via formatScheduledDoseBreakdown', () => {
+    const med = makeMed({
+      unit: 'قرص',
+      packageSize: 30,
+      pillsPerStrip: undefined,
+      stripsPerBox: undefined,
+      doseSchedule: [
+        { id: 'd1', time: '08:00', amount: 1 },
+      ],
+    });
+    // daily 1 → "قرص واحد" style integer path
+    const text = formatScheduledDoseBreakdown(med, true);
+    expect(text.length).toBeGreaterThan(0);
+    expect(text).not.toContain('0.000');
+  });
+});
+
+describe('formatScheduledDoseBreakdown — fractional daily dose', () => {
+  it('preserves half-unit daily dose in display', () => {
+    const med = makeMed({
+      unit: 'قرص',
+      pillsPerStrip: 10,
+      stripsPerBox: 3,
+      doseSchedule: [{ id: 'd1', time: '08:00', amount: 0.5 }],
+    });
+    const text = formatScheduledDoseBreakdown(med, true);
+    expect(text).toContain('0.5');
+    expect(text).not.toMatch(/قرص واحد/);
+  });
+
+  it('preserves 1.5 daily dose', () => {
+    const med = makeMed({
+      unit: 'قرص',
+      pillsPerStrip: 10,
+      stripsPerBox: 3,
+      doseSchedule: [{ id: 'd1', time: '08:00', amount: 1.5 }],
+    });
+    const text = formatScheduledDoseBreakdown(med, true);
+    expect(text).toContain('1.5');
+  });
+});

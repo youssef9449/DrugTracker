@@ -1,5 +1,5 @@
 import type { FC } from 'react';
-import { History, X, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { History, X, ArrowUpRight, ArrowDownLeft, Minus } from 'lucide-react';
 import type { ConsumptionLog, Medication } from '../types';
 import { formatArabicDate, formatLogTime } from '../utils/dateCalculations';
 import { Modal } from './ui/Modal';
@@ -11,6 +11,39 @@ interface MedicationHistoryModalProps {
   onClose: () => void;
 }
 
+/**
+ * History identity is medicationId only. Names are not unique and must
+ * never decide which medication owns a log entry.
+ */
+export function filterLogsForMedication(
+  logs: ConsumptionLog[],
+  medicationId: string
+): ConsumptionLog[] {
+  return logs.filter((log) => log.medicationId === medicationId);
+}
+
+/**
+ * Presentation class for a history amount:
+ * - positive → increase (green)
+ * - negative → deduction (rose)
+ * - exact_auto with amount 0 → neutral (zero stock available; still a real occurrence)
+ */
+export function historyAmountPresentation(
+  log: Pick<ConsumptionLog, 'type' | 'amount'>
+): 'in' | 'out' | 'neutral' {
+  const amount = Number(log.amount);
+  if (log.type === 'exact_auto' && amount === 0) return 'neutral';
+  if (amount > 0) return 'in';
+  return 'out';
+}
+
+/** Format the signed amount text without producing "-0". */
+export function formatHistoryAmountText(amount: number, unit: string): string {
+  if (amount === 0) return `0 ${unit}`;
+  if (amount > 0) return `+${amount} ${unit}`;
+  return `${amount} ${unit}`;
+}
+
 export const MedicationHistoryModal: FC<MedicationHistoryModalProps> = ({
   isOpen,
   medication,
@@ -19,10 +52,7 @@ export const MedicationHistoryModal: FC<MedicationHistoryModalProps> = ({
 }) => {
   if (!medication) return null;
 
-  // Filter logs for this specific medication
-  const medLogs = logs.filter(
-    (log) => log.medicationId === medication.id || log.medicationName === medication.name
-  );
+  const medLogs = filterLogsForMedication(logs, medication.id);
 
   return (
     <Modal
@@ -73,7 +103,8 @@ export const MedicationHistoryModal: FC<MedicationHistoryModalProps> = ({
             </div>
           ) : (
             medLogs.map((log) => {
-              const isIn = Number(log.amount) > 0;
+              const presentation = historyAmountPresentation(log);
+              const amountNum = Number(log.amount);
               return (
                 <div
                   key={log.id}
@@ -81,13 +112,17 @@ export const MedicationHistoryModal: FC<MedicationHistoryModalProps> = ({
                 >
                   <div
                     className={`mt-0.5 w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
-                      isIn
+                      presentation === 'in'
                         ? 'bg-emerald-100/70 text-emerald-700'
+                        : presentation === 'neutral'
+                        ? 'bg-slate-200/80 text-slate-600'
                         : 'bg-rose-100/70 text-rose-700'
                     }`}
                   >
-                    {isIn ? (
+                    {presentation === 'in' ? (
                       <ArrowDownLeft className="w-3.5 h-3.5" />
+                    ) : presentation === 'neutral' ? (
+                      <Minus className="w-3.5 h-3.5" />
                     ) : (
                       <ArrowUpRight className="w-3.5 h-3.5" />
                     )}
@@ -99,11 +134,14 @@ export const MedicationHistoryModal: FC<MedicationHistoryModalProps> = ({
                       </span>
                       <span
                         className={`text-xs font-black tabular-nums shrink-0 font-mono ${
-                          isIn ? 'text-emerald-700' : 'text-rose-700'
+                          presentation === 'in'
+                            ? 'text-emerald-700'
+                            : presentation === 'neutral'
+                            ? 'text-slate-600'
+                            : 'text-rose-700'
                         }`}
                       >
-                        {isIn ? '+' : ''}
-                        {log.amount} {medication.unit}
+                        {formatHistoryAmountText(amountNum, medication.unit)}
                       </span>
                     </div>
                     <p className="text-[10px] text-slate-400 mt-1 font-medium">

@@ -114,9 +114,9 @@ export interface ManualStockEnvelope {
   baseGeneration: number;
   mutationSeq: number;
   /** Native Auto-owned stock deltas applied with this foreground mutation. */
-  stockDeltas?: Array<{ medicationId: string; delta: number }>;
+  stockDeltas: Array<{ medicationId: string; delta: number }>;
   /** Manual Take/Restore occurrence resolutions committed atomically in Native. */
-  occurrenceResolutions?: Array<{
+  occurrenceResolutions: Array<{
     medicationId: string;
     doseId: string;
     calendarDate: string;
@@ -170,6 +170,9 @@ export function loadManualStockEnvelope(): ManualStockEnvelope | null {
   );
   if (!raw || raw.version !== 1 || raw.status !== 'manual_js_ready') return null;
   if (!Array.isArray(raw.medications) || !Array.isArray(raw.logs)) return null;
+  if (!Array.isArray(raw.stockDeltas) || !Array.isArray(raw.occurrenceResolutions)) {
+    return null;
+  }
   return raw;
 }
 
@@ -563,7 +566,8 @@ export async function recoverManualEnvelopeInto(
       medications: manual.medications,
       logs: manual.logs,
       globalAutoDeductEnabled: manual.globalAutoDeductEnabled,
-      stockDeltas: manual.stockDeltas ?? [],
+      stockDeltas: manual.stockDeltas,
+      occurrenceResolutions: manual.occurrenceResolutions,
       clear: () => saveManualStockEnvelope(null),
     });
   }

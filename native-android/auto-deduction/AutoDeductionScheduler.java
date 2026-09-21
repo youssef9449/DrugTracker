@@ -180,6 +180,37 @@ public final class AutoDeductionScheduler {
         return expectedGeneration > 0L && expectedGeneration == active;
     }
 
+    /**
+     * Return the Auto-owned recurrence authorization generation.
+     *
+     * New schedules read the value only from Auto-owned recurrence authorization
+     * state. A legacy scheduled row may still carry the generation from the
+     * pre-Phase-2 format; when present and no Auto-owned value exists yet, migrate
+     * that value into the Auto-owned authorization store under SCHEDULE_LOCK.
+     */
+    private long getEffectiveRecurrenceGenerationLocked(
+            String medicationId,
+            String doseId,
+            JSONObject legacyMetadata) {
+        long active = getRecurrenceGenerationLocked(medicationId, doseId);
+        if (active > 0L) {
+            return active;
+        }
+        if (legacyMetadata == null) {
+            return 0L;
+        }
+        long legacy = legacyMetadata.optLong(FIELD_RECURRENCE_GENERATION, 0L);
+        if (legacy <= 0L) {
+            return 0L;
+        }
+        String key = recurrenceAuthKey(medicationId, doseId);
+        if (!recurrenceAuthPrefs.edit().putLong(key, legacy).commit()) {
+            Log.e(TAG, "legacy recurrence generation migration failed for " + key);
+            return 0L;
+        }
+        return legacy;
+    }
+
 
 
     /**
@@ -560,7 +591,8 @@ public final class AutoDeductionScheduler {
             try {
                 JSONObject meta = new JSONObject(metaRaw);
                 String activeVersion = ExactAlarmContract.extractOperationVersion(meta);
-                long activeGen = meta.optLong(FIELD_RECURRENCE_GENERATION, 0L);
+                long activeGen = getEffectiveRecurrenceGenerationLocked(
+                        medicationId, doseId, meta);
                 if (deliveryOperationVersion == null || deliveryOperationVersion.isEmpty()
                         || deliveryRecurrenceGeneration <= 0L) {
                     Log.i(TAG, "fire linearization: STALE (delivery partially missing version/generation) for "
@@ -606,7 +638,8 @@ public final class AutoDeductionScheduler {
                         operationVersion = ExactAlarmContract.extractOperationVersion(meta);
                     }
                     if (gen <= 0L) {
-                        gen = meta.optLong(FIELD_RECURRENCE_GENERATION, 0L);
+                        gen = getEffectiveRecurrenceGenerationLocked(
+                                medicationId, doseId, meta);
                     }
                 } catch (JSONException ignored) {
                 }
@@ -981,7 +1014,8 @@ public final class AutoDeductionScheduler {
                     String activeVersion =
                             ExactAlarmContract.extractOperationVersion(current);
                     long activeGen =
-                            current.optLong(FIELD_RECURRENCE_GENERATION, 0L);
+                            getEffectiveRecurrenceGenerationLocked(
+                                    medicationId, doseId, current);
                     if (operationVersion == null || operationVersion.isEmpty()
                             || recurrenceGeneration <= 0L
                             || !operationVersion.equals(activeVersion)
@@ -1894,7 +1928,10 @@ public final class AutoDeductionScheduler {
             long snapGen = 0L;
             try {
                 if (currentPast != null) {
-                    snapGen = new JSONObject(currentPast).optLong(FIELD_RECURRENCE_GENERATION, 0L);
+                    snapGen = getEffectiveRecurrenceGenerationLocked(
+                            medicationId,
+                            doseId,
+                            new JSONObject(currentPast));
                 }
             } catch (JSONException ignored) { /* treat as 0 */ }
             if (!isRecurrenceGenerationAuthorizedLocked(medicationId, doseId, snapGen)) {
@@ -2041,7 +2078,11 @@ public final class AutoDeductionScheduler {
                 // snapshot date forward is recovered as FIRED (no horizon); the first
                 // not-yet-due date becomes the live AlarmManager schedule.
                 if (epoch <= recoveryNowMs()) {
-                    long snapGen = o.optLong(FIELD_RECURRENCE_GENERATION, 0L);
+                    long snapGen;
+                    synchronized (SCHEDULE_LOCK) {
+                        snapGen = getEffectiveRecurrenceGenerationLocked(
+                                medId, doseId, o);
+                    }
                     CatchUpResult catchUp = catchUpMissedOccurrencesAndScheduleNext(
                             medId, doseId, date, time, amount, snapGen,
                             prefKey, observedVersion);
@@ -2095,7 +2136,11 @@ public final class AutoDeductionScheduler {
                 }
                 if (recomputed <= recoveryNowMs()) {
                     // After TZ change this occurrence is now in the past: multi-day catch-up.
-                    long snapGenTz = o.optLong(FIELD_RECURRENCE_GENERATION, 0L);
+                    long snapGenTz;
+                    synchronized (SCHEDULE_LOCK) {
+                        snapGenTz = getEffectiveRecurrenceGenerationLocked(
+                                medId, doseId, o);
+                    }
                     CatchUpResult catchUp = catchUpMissedOccurrencesAndScheduleNext(
                             medId, doseId, date, time, amount, snapGenTz,
                             prefKey, observedVersion);
@@ -2131,7 +2176,8 @@ public final class AutoDeductionScheduler {
                 }
                 synchronized (SCHEDULE_LOCK) {
                     // Issue #217: drop future schedules whose generation was invalidated.
-                    long metaGen = o.optLong(FIELD_RECURRENCE_GENERATION, 0L);
+                    long metaGen = getEffectiveRecurrenceGenerationLocked(
+                            medId, doseId, o);
                     if (metaGen > 0L
                             && !isRecurrenceGenerationAuthorizedLocked(medId, doseId, metaGen)) {
                         Log.i(TAG, "restore skip (recurrence generation invalid): " + prefKey);

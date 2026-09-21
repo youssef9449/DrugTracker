@@ -23,13 +23,6 @@ function read(rel) {
   return fs.readFileSync(path.join(root, rel), 'utf8');
 }
 
-function listJavaFiles(relDir) {
-  return fs
-    .readdirSync(path.join(root, relDir))
-    .filter((name) => name.endsWith('.java'))
-    .map((name) => path.join(relDir, name));
-}
-
 function listFilesRecursive(relDir) {
   const out = [];
   function walk(absDir, relDirCurrent) {
@@ -58,11 +51,28 @@ const sharedReceiver =
   'native-android/alarm-runtime/DrugTrackerAlarmSystemReceiver.java';
 
 const systemActions = [
-  'android.intent.action.BOOT_COMPLETED',
-  'android.intent.action.QUICKBOOT_POWERON',
-  'android.intent.action.TIMEZONE_CHANGED',
-  'android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED',
+  {
+    value: 'android.intent.action.BOOT_COMPLETED',
+    javaForms: ['Intent.ACTION_BOOT_COMPLETED', 'android.content.Intent.ACTION_BOOT_COMPLETED'],
+  },
+  {
+    value: 'android.intent.action.QUICKBOOT_POWERON',
+    javaForms: [],
+  },
+  {
+    value: 'android.intent.action.TIMEZONE_CHANGED',
+    javaForms: ['Intent.ACTION_TIMEZONE_CHANGED', 'android.content.Intent.ACTION_TIMEZONE_CHANGED'],
+  },
+  {
+    value: 'android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED',
+    javaForms: [],
+  },
 ];
+
+function containsSystemAction(content, action) {
+  return content.includes(action.value)
+    || action.javaForms.some((javaForm) => content.includes(javaForm));
+}
 
 const nativeFiles = listFilesRecursive('native-android')
   .filter((rel) => rel.endsWith('.java'));
@@ -70,13 +80,13 @@ const nativeFiles = listFilesRecursive('native-android')
 for (const rel of nativeFiles) {
   const content = read(rel);
   for (const action of systemActions) {
-    if (content.includes(action)) {
+    if (containsSystemAction(content, action)) {
       assert(
         rel === sharedReceiver,
         'Android system lifecycle action must exist only in the shared system receiver: '
           + rel
           + ' contains '
-          + action
+          + action.value
       );
     }
   }
@@ -104,8 +114,8 @@ for (const relDir of [
 const receiver = read(sharedReceiver);
 for (const action of systemActions) {
   assert(
-    receiver.includes(action),
-    'Shared system receiver must declare/handle every supported system lifecycle action: ' + action
+    containsSystemAction(receiver, action),
+    'Shared system receiver must declare/handle every supported system lifecycle action: ' + action.value
   );
 }
 assert(
@@ -250,11 +260,11 @@ for (const rel of [
   const content = read(rel);
   for (const action of systemActions) {
     assert(
-      !content.includes(action),
+      !containsSystemAction(content, action),
       'Feature delivery receiver must not handle Android system lifecycle action: '
         + rel
         + ' contains '
-        + action
+        + action.value
     );
   }
 }

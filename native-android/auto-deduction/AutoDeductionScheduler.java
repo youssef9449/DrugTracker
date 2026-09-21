@@ -1281,6 +1281,17 @@ public final class AutoDeductionScheduler {
      * reconciliation and the final RECONCILED acknowledgement.</p>
      */
     RestoreResult recoverFiredStockPass() {
+        AutoDeductionStockStore stock = new AutoDeductionStockStore(appContext);
+
+        // Before the first JS hydration after install/upgrade there is no safe
+        // baseline for Native stock. Legacy FIRED rows may already have been
+        // applied by the old JS-only implementation, so recovery must wait until
+        // JS has seeded the Native authority.
+        if (!stock.isInitialized()) {
+            Log.i(TAG, "recoverFiredStockPass: Native stock not initialized — defer to JS hydration");
+            return RestoreResult.success(0, 0);
+        }
+
         AutoDeductionEventStore store = new AutoDeductionEventStore(appContext);
         AutoDeductionEventStore.FiredEventsResult listed = store.listFiredEventsResult();
         if (!listed.ok) {
@@ -1291,7 +1302,6 @@ public final class AutoDeductionScheduler {
 
         int recovered = 0;
         int failed = 0;
-        AutoDeductionStockStore stock = new AutoDeductionStockStore(appContext);
 
         for (JSONObject event : listed.events) {
             String medicationId = event.optString("medicationId", "").trim();

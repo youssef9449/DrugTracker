@@ -36,7 +36,7 @@ public final class AutoDeductionContract {
      * Recurrence authorization generation stamped into the PendingIntent when the
      * occurrence was scheduled. Receiver must pass this to successor creation so
      * disable/cancel (which bumps the active generation) can refuse D+1.
-     * Distinct from per-occurrence scheduleVersion (ownership/rollback).
+     * Distinct from the per-occurrence generic operationVersion ownership token.
      */
     public static final String EXTRA_RECURRENCE_GENERATION = "recurrenceGeneration";
     /**
@@ -98,7 +98,7 @@ public final class AutoDeductionContract {
      * Keyed by {@link #scheduleIdentityKey(String, String)}; value is a monotonic
      * long generation. Disable/cancel bumps the generation under SCHEDULE_LOCK so
      * post-fire successor creation for a stale generation cannot install D+1.
-     * Independent of per-occurrence scheduleVersion ownership tokens.
+     * Independent of per-occurrence operationVersion ownership tokens.
      */
     public static final String PREFS_RECURRENCE_AUTH =
             "drugtracker_auto_deduction_recurrence_auth_v1";

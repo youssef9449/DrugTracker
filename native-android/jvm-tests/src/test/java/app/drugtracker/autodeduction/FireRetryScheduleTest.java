@@ -464,6 +464,37 @@ public class FireRetryScheduleTest {
     }
 
     @Test
+    public void recoverFiredStockPass_repairsFiredWithoutJsAndLeavesAckForJs() {
+        String date = "2026-09-14";
+        AutoDeductionScheduler scheduler = newScheduler();
+        seedAutoStock("med", 10.0);
+
+        AutoDeductionEventStore.InsertFiredResult inserted =
+                new AutoDeductionEventStore(appContext()).insertFiredIfAbsent(
+                        "med", "dose", date, 1000L, 2.0);
+        assertEquals(
+                AutoDeductionEventStore.InsertFiredStatus.CREATED,
+                inserted.status);
+
+        AutoDeductionScheduler.RestoreResult recovery =
+                scheduler.recoverFiredStockPass();
+
+        assertTrue(recovery.ok);
+        assertEquals(1, recovery.restored);
+        assertEquals(0, recovery.failed);
+
+        AutoDeductionStockStore.SnapshotResult stock =
+                new AutoDeductionStockStore(appContext()).readAll();
+        assertEquals(8.0, stock.stocks.get("med"), 0.0001);
+
+        AutoDeductionEventStore.EventLookupResult event =
+                new AutoDeductionEventStore(appContext())
+                        .getFiredUnreconciledEvent("med", "dose", date);
+        assertTrue("JS still owns the final RECONCILED acknowledgement", event.ok);
+        assertNotNull("FIRED evidence must remain for JS reconciliation", event.event);
+    }
+
+    @Test
     public void restoreFutureSchedules_allValid_okTrue() {
         AutoDeductionScheduler s = newScheduler();
         String date = futureCalendarDate(5);

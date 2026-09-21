@@ -22,6 +22,7 @@ import { GenerationGuard } from '../utils/async/GenerationGuard';
  */
 export interface UseDoseReminderSchedulerOptions {
   medications: Medication[];
+  allowManualTakeActionByMedicationId: ReadonlyMap<string, boolean>;
   notificationsEnabled: boolean;
   hydrated: boolean;
   isFirstRun: boolean;
@@ -121,8 +122,8 @@ export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
  * ordering, timezone/boot recovery, and exact-alarm permission are owned by
  * the shared ExactAlarmRuntime through the native Dose Reminder adapter.
  * Dose Reminder owns the feature policy: consumption suppression,
- * `skipToday`, daily recurrence, and foreground/background notification
- * channel selection.
+ * `skipToday`, daily recurrence, foreground/background notification channel
+ * selection, and the business-provided `allowManualTakeAction` capability.
  *
  * Generation counter + per-key serialization chain prevent races when
  * config changes quickly or resume reconciliation overlaps a schedule op.
@@ -136,6 +137,7 @@ export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
  */
 export function useDoseReminderScheduler({
   medications,
+  allowManualTakeActionByMedicationId,
   notificationsEnabled,
   hydrated,
   isFirstRun,
@@ -153,7 +155,7 @@ export function useDoseReminderScheduler({
   /** Shared per-key promise queue so cancel→schedule for one slot never interleaves. */
   const operationQueueRef = useRef(new OperationQueue<string>());
   /**
-   * Last applied schedule signature per dose key (time|amount|name|skip|auto).
+   * Last applied schedule signature per dose key (time|amount|name|skip|manual-action).
    * When equal and the native pending id is present, reconciliation is a no-op.
    */
   const appliedSignatureRef = useRef<Map<string, string>>(new Map());
@@ -176,12 +178,12 @@ export function useDoseReminderScheduler({
             schedulePart,
             m.name,
             m.unit ?? '',
-            m.autoDeductEnabled !== false ? '1' : '0',
+            (allowManualTakeActionByMedicationId.get(m.id) ?? true) ? '1' : '0',
           ].join('|');
         })
         .sort()
         .join('\n'),
-    [medications]
+    [medications, allowManualTakeActionByMedicationId]
   );
 
 
@@ -227,7 +229,7 @@ export function useDoseReminderScheduler({
       name: string;
       unit: string;
       slotConsumedToday: boolean;
-      isAutoActive: boolean;
+      allowManualTakeAction: boolean;
       sig: string;
     };
     const desired: DesiredSlot[] = [];
@@ -241,14 +243,14 @@ export function useDoseReminderScheduler({
       for (const slot of slots) {
         const key = doseScheduleKey(slot.medId, slot.doseId);
         const slotConsumedToday = isDoseConsumedOnDate(med, slot.doseId, today);
-        const isAutoActive = med.autoDeductEnabled !== false;
+        const allowManualTakeAction = allowManualTakeActionByMedicationId.get(med.id) ?? true;
         const sig = [
           slot.time,
           String(slot.amount),
           slot.name,
           slot.unit,
           slotConsumedToday ? '1' : '0',
-          isAutoActive ? '1' : '0',
+          allowManualTakeAction ? '1' : '0',
         ].join('|');
         stillScheduled.add(key);
         keepNativeIds.add(key);
@@ -261,7 +263,7 @@ export function useDoseReminderScheduler({
           name: slot.name,
           unit: slot.unit,
           slotConsumedToday,
-          isAutoActive,
+          allowManualTakeAction,
           sig,
         });
       }
@@ -285,7 +287,7 @@ export function useDoseReminderScheduler({
         name,
         unit,
         slotConsumedToday,
-        isAutoActive,
+        allowManualTakeAction,
         sig,
       } = slot;
       const prevSig = appliedSignatureRef.current.get(key);
@@ -314,7 +316,7 @@ export function useDoseReminderScheduler({
           if (nativeReArmed) return;
           const opts = {
             ...(slotConsumedToday ? { skipToday: true as const } : {}),
-            ...(isAutoActive ? { autoDeductEnabled: true } : {}),
+            allowManualTakeAction,
           };
           await scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts);
           if (!generationGuardRef.current.isCurrent(key, gen)) {
@@ -332,7 +334,7 @@ export function useDoseReminderScheduler({
           if (!generationGuardRef.current.isCurrent(key, gen)) return;
           const opts = {
             ...(slotConsumedToday ? { skipToday: true as const } : {}),
-            ...(isAutoActive ? { autoDeductEnabled: true } : {}),
+            allowManualTakeAction,
           };
           await scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts);
           if (!generationGuardRef.current.isCurrent(key, gen)) {
@@ -446,10 +448,10 @@ export function useDoseReminderScheduler({
               if (!isDoseReminderTimeStillAhead(time)) return;
               return cancelDoseReminder(medId, doseId).then(() => {
                 if (!generationGuardRef.current.isCurrent(key, gen)) return;
-                const isAutoActive = med.autoDeductEnabled !== false;
+                const allowManualTakeAction = allowManualTakeActionByMedicationId.get(med.id) ?? true;
                 const opts = {
                   skipToday: true as const,
-                  ...(isAutoActive ? { autoDeductEnabled: true } : {}),
+                  allowManualTakeAction,
                 };
                 return scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts).then(
                   () => {
@@ -472,9 +474,9 @@ export function useDoseReminderScheduler({
           operationQueueRef.current.enqueue(key, () =>
             cancelDoseReminder(medId, doseId).then(() => {
               if (!generationGuardRef.current.isCurrent(key, gen)) return;
-              const isAutoActive = med.autoDeductEnabled !== false;
+              const allowManualTakeAction = allowManualTakeActionByMedicationId.get(med.id) ?? true;
               const opts = {
-                ...(isAutoActive ? { autoDeductEnabled: true } : {}),
+                allowManualTakeAction,
               };
               return scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts).then(() => {
                 if (!generationGuardRef.current.isCurrent(key, gen)) {
@@ -495,5 +497,6 @@ export function useDoseReminderScheduler({
     exactAlarmPermission,
     hydrated,
     isFirstRun,
+    allowManualTakeActionByMedicationId,
   ]);
 }

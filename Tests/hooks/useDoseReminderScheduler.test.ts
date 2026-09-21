@@ -73,9 +73,18 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
   };
 }
 
+function capabilityMap(medications: Medication[]): ReadonlyMap<string, boolean> {
+  return new Map(
+    medications.map((med) => [med.id, med.autoDeductEnabled === false])
+  );
+}
+
 function defaultOpts(overrides: Record<string, unknown> = {}) {
+  const medications =
+    (overrides.medications as Medication[] | undefined) ?? [];
   return {
-    medications: [] as Medication[],
+    medications,
+    allowManualTakeActionByMedicationId: capabilityMap(medications),
     notificationsEnabled: true,
     hydrated: true,
     isFirstRun: false,
@@ -2015,109 +2024,50 @@ describe('delivery/reconciliation race', () => {
   });
 });
 
-describe('useDoseReminderScheduler — medication-level Auto policy', () => {
-  it('Medication Auto ON: schedules with autoDeductEnabled option', async () => {
-    const med = makeMed({
-      id: 'med-auto-on',
-      reminderTime: '20:00',
-      autoDeductEnabled: true,
-    });
-    renderHook(() =>
-      useDoseReminderScheduler(defaultOpts({ medications: [med] }))
-    );
+describe('useDoseReminderScheduler — manual Take capability', () => {
+  it('allowManualTakeAction=false schedules without a manual Take action', async () => {
+    const med = makeMed({ id: 'med-no-manual', reminderTime: '20:00' });
+    renderHook(() => useDoseReminderScheduler(defaultOpts({
+      medications: [med],
+      allowManualTakeActionByMedicationId: new Map([['med-no-manual', false]]),
+    })));
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-    // Last arg is opts when present; Auto ON must pass autoDeductEnabled: true.
-    const withOpts = mocks.schedule.mock.calls.find(
-      (c) => c[5] && typeof c[5] === 'object' && c[5].autoDeductEnabled === true
-    );
-    expect(withOpts).toBeTruthy();
-    expect(withOpts![0]).toBe('med-auto-on');
+    expect(mocks.schedule.mock.calls.some(
+      (c) => c[5]?.allowManualTakeAction === false
+    )).toBe(true);
   });
 
-  it('flipping medication autoDeductEnabled causes cancel + reschedule with new policy', async () => {
-    const medOn = makeMed({
-      id: 'med-flip',
-      reminderTime: '20:00',
-      autoDeductEnabled: true,
-    });
+  it('allowManualTakeAction=true schedules a manually actionable reminder', async () => {
+    const med = makeMed({ id: 'med-manual', reminderTime: '20:00' });
+    renderHook(() => useDoseReminderScheduler(defaultOpts({
+      medications: [med],
+      allowManualTakeActionByMedicationId: new Map([['med-manual', true]]),
+    })));
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    expect(mocks.schedule.mock.calls.some(
+      (c) => c[5]?.allowManualTakeAction === true
+    )).toBe(true);
+  });
+
+  it('changing the neutral capability cancels and reschedules with the new capability', async () => {
+    const med = makeMed({ id: 'med-flip', reminderTime: '20:00' });
     const { rerender } = renderHook(
-      ({ medications }) =>
-        useDoseReminderScheduler(defaultOpts({ medications })),
-      { initialProps: { medications: [medOn] } }
+      ({ allowManualTakeAction }: { allowManualTakeAction: boolean }) =>
+        useDoseReminderScheduler(defaultOpts({
+          medications: [med],
+          allowManualTakeActionByMedicationId: new Map([[med.id, allowManualTakeAction]]),
+        })),
+      { initialProps: { allowManualTakeAction: false } }
     );
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-    const autoOnCall = mocks.schedule.mock.calls.find(
-      (c) => c[5]?.autoDeductEnabled === true
-    );
-    expect(autoOnCall).toBeTruthy();
-
     mocks.schedule.mockClear();
     mocks.cancel.mockClear();
-
-    const medOff = { ...medOn, autoDeductEnabled: false };
-    rerender({ medications: [medOff] });
+    rerender({ allowManualTakeAction: true });
     await flushUntil(() => mocks.cancel.mock.calls.length >= 1);
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-
-    expect(mocks.cancel).toHaveBeenCalled();
-    // After Auto OFF, schedule opts must not request autoDeductEnabled: true.
-    const afterFlip = mocks.schedule.mock.calls;
-    expect(afterFlip.length).toBeGreaterThan(0);
-    for (const c of afterFlip) {
-      if (c[5] && typeof c[5] === 'object') {
-        expect(c[5].autoDeductEnabled).not.toBe(true);
-      }
-    }
-  });
-
-  it('hook options do not include globalAutoDeductEnabled (no Global input)', () => {
-    // Production API: Global is not an option. Passing only med-level fields is enough.
-    const med = makeMed({ autoDeductEnabled: true, reminderTime: '20:00' });
-    expect(() =>
-      renderHook(() =>
-        useDoseReminderScheduler(
-          defaultOpts({
-            medications: [med],
-            // Intentionally no globalAutoDeductEnabled — not part of the API.
-          })
-        )
-      )
-    ).not.toThrow();
-  });
-
-  // Matrix: Global is bulk-only (not an input here). Runtime follows medication only.
-  it('med Auto OFF → schedule without autoDeductEnabled:true (manual reminder)', async () => {
-    const med = makeMed({
-      id: 'med-off',
-      reminderTime: '20:00',
-      autoDeductEnabled: false,
-    });
-    renderHook(() =>
-      useDoseReminderScheduler(defaultOpts({ medications: [med] }))
-    );
-    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-    const autoOn = mocks.schedule.mock.calls.find(
-      (c) => c[5]?.autoDeductEnabled === true
-    );
-    expect(autoOn).toBeUndefined();
-    // Reminder is still scheduled (manual path); only Auto flag differs.
-    expect(mocks.schedule).toHaveBeenCalled();
-  });
-
-  it('med Auto ON after bulk Global OFF scenario → still schedules with autoDeductEnabled:true', async () => {
-    // Simulates: Global was bulk-OFF, user re-enabled only this med on the card.
-    const med = makeMed({
-      id: 'med-individual-on',
-      reminderTime: '20:00',
-      autoDeductEnabled: true,
-    });
-    renderHook(() =>
-      useDoseReminderScheduler(defaultOpts({ medications: [med] }))
-    );
-    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-    const withAuto = mocks.schedule.mock.calls.find(
-      (c) => c[0] === 'med-individual-on' && c[5]?.autoDeductEnabled === true
-    );
-    expect(withAuto).toBeTruthy();
+    expect(mocks.cancel).toHaveBeenCalledWith('med-flip', 'd1');
+    expect(mocks.schedule.mock.calls.some(
+      (c) => c[5]?.allowManualTakeAction === true
+    )).toBe(true);
   });
 });

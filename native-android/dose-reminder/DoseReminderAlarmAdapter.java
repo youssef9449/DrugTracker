@@ -54,7 +54,7 @@ public final class DoseReminderAlarmAdapter {
             double amount,
             String medicationName,
             String unit,
-            boolean autoDeductEnabled,
+            boolean allowManualTakeAction,
             long triggerAtEpochMs,
             String expectedOperationVersion) {
         if (medicationId == null || medicationId.isEmpty()
@@ -85,7 +85,7 @@ public final class DoseReminderAlarmAdapter {
             metadata.put("amount", amount);
             metadata.put("medicationName", medicationName == null ? "" : medicationName);
             metadata.put("unit", unit == null ? "" : unit);
-            metadata.put("autoDeductEnabled", autoDeductEnabled);
+            metadata.put("allowManualTakeAction", allowManualTakeAction);
         } catch (JSONException e) {
             return ScheduleResult.failure("metadata_build_failed");
         }
@@ -97,7 +97,7 @@ public final class DoseReminderAlarmAdapter {
         extras.putDouble("amount", amount);
         extras.putString("medicationName", medicationName == null ? "" : medicationName);
         extras.putString("unit", unit == null ? "" : unit);
-        extras.putBoolean("autoDeductEnabled", autoDeductEnabled);
+        extras.putBoolean("allowManualTakeAction", allowManualTakeAction);
 
         ExactAlarmRuntime.ScheduleResult result = runtime.schedule(
                 new ExactAlarmRuntime.ScheduleRequest(
@@ -140,7 +140,7 @@ public final class DoseReminderAlarmAdapter {
             String medicationName,
             String unit,
             long triggerAtEpochMs,
-            boolean autoDeductEnabled) {
+            boolean allowManualTakeAction) {
         Bundle extras = new Bundle();
         extras.putString("medicationId", medicationId);
         extras.putString("doseId", doseId);
@@ -148,7 +148,7 @@ public final class DoseReminderAlarmAdapter {
         extras.putDouble("amount", amount);
         extras.putString("medicationName", medicationName == null ? "" : medicationName);
         extras.putString("unit", unit == null ? "" : unit);
-        extras.putBoolean("autoDeductEnabled", autoDeductEnabled);
+        extras.putBoolean("allowManualTakeAction", allowManualTakeAction);
 
         return runtime.scheduleOneShot(
                 snoozeUri(medicationId, doseId),

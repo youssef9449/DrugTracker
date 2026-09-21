@@ -24,7 +24,7 @@ public final class DoseReminderPlugin extends Plugin {
         Double amount = call.getDouble("amount");
         String medicationName = call.getString("medicationName", "");
         String unit = call.getString("unit", "قرص");
-        Boolean autoDeductEnabled = call.getBoolean("autoDeductEnabled", false);
+        Boolean allowManualTakeAction = call.getBoolean("allowManualTakeAction", true);
         Long triggerAt = call.getLong("triggerAtEpochMs");
 
         if (amount == null || triggerAt == null) {
@@ -40,7 +40,7 @@ public final class DoseReminderPlugin extends Plugin {
                         amount,
                         medicationName,
                         unit,
-                        Boolean.TRUE.equals(autoDeductEnabled),
+                        Boolean.TRUE.equals(allowManualTakeAction),
                         triggerAt,
                         null);
 
@@ -73,7 +73,7 @@ public final class DoseReminderPlugin extends Plugin {
         Double amount = call.getDouble("amount");
         String medicationName = call.getString("medicationName", "");
         String unit = call.getString("unit", "قرص");
-        Boolean autoDeductEnabled = call.getBoolean("autoDeductEnabled", false);
+        Boolean allowManualTakeAction = call.getBoolean("allowManualTakeAction", true);
         Long triggerAt = call.getLong("triggerAtEpochMs");
 
         if (amount == null || triggerAt == null) {
@@ -89,7 +89,7 @@ public final class DoseReminderPlugin extends Plugin {
                 medicationName,
                 unit,
                 triggerAt,
-                Boolean.TRUE.equals(autoDeductEnabled));
+                Boolean.TRUE.equals(allowManualTakeAction));
 
         JSObject ret = new JSObject();
         ret.put("ok", ok);

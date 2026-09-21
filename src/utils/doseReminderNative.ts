@@ -9,7 +9,7 @@ interface DoseReminderPlugin {
     amount: number;
     medicationName: string;
     unit: string;
-    autoDeductEnabled?: boolean;
+    allowManualTakeAction?: boolean;
     triggerAtEpochMs: number;
   }): Promise<{ ok: boolean; error?: string }>;
   cancel(options: {
@@ -27,7 +27,7 @@ interface DoseReminderPlugin {
     amount: number;
     medicationName: string;
     unit: string;
-    autoDeductEnabled?: boolean;
+    allowManualTakeAction?: boolean;
     triggerAtEpochMs: number;
   }): Promise<{ ok: boolean; error?: string }>;
   cancelSnooze(options: {
@@ -88,7 +88,7 @@ export async function scheduleDoseReminderNative(
   unit: string,
   doseId: string,
   skipToday: boolean,
-  autoDeductEnabled: boolean
+  allowManualTakeAction: boolean = true
 ): Promise<void> {
   if (!isAndroid()) return;
 
@@ -102,7 +102,7 @@ export async function scheduleDoseReminderNative(
     amount: Number(doseAmount),
     medicationName: medName,
     unit,
-    autoDeductEnabled,
+    allowManualTakeAction,
     triggerAtEpochMs: fire.getTime(),
   });
   if (!result?.ok) {
@@ -132,7 +132,7 @@ export async function scheduleDoseSnoozeNative(
   reminderTime: string | undefined,
   minutes: number,
   doseId: string,
-  autoDeductEnabled: boolean
+  allowManualTakeAction: boolean = true
 ): Promise<void> {
   if (!isAndroid()) return;
   const result = await DoseReminder.scheduleSnooze({
@@ -142,7 +142,7 @@ export async function scheduleDoseSnoozeNative(
     amount: Number(doseAmount),
     medicationName: medName,
     unit,
-    autoDeductEnabled,
+    allowManualTakeAction,
     triggerAtEpochMs: Date.now() + minutes * 60_000,
   });
   if (!result?.ok) {

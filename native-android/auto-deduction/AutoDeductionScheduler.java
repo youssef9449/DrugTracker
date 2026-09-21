@@ -62,9 +62,6 @@ import app.drugtracker.alarmruntime.ExactAlarmContract;
 public final class AutoDeductionScheduler {
 
     private static final String TAG = "AutoDeductionScheduler";
-    private static final String SCHEDULE_KEY_PREFIX = "sch:";
-    /** Prefs key prefix for durable cancellation tombstones (occurrence identity). */
-    private static final String CANCEL_KEY_PREFIX = "cancel:";
     /** JSON/Intent field: medication+dose recurrence authorization generation. */
     public static final String FIELD_RECURRENCE_GENERATION = "recurrenceGeneration";
 
@@ -309,8 +306,8 @@ public final class AutoDeductionScheduler {
 
         syncAlarmRuntimeTestControls();
         for (Map.Entry<String, ?> e : all.entrySet()) {
-            String prefKey = e.getKey();
-            if (prefKey == null || !prefKey.startsWith(SCHEDULE_KEY_PREFIX)) continue;
+            String storageKey = e.getKey();
+            if (storageKey == null || storageKey.isEmpty()) continue;
             if (!(e.getValue() instanceof String)) continue;
 
             try {
@@ -580,7 +577,7 @@ public final class AutoDeductionScheduler {
             }
 
             // Issue #240: delivery must own the *current* schedule row.
-            final String prefKey = SCHEDULE_KEY_PREFIX + key;
+            final String prefKey = key;
             final String metaRaw = getScheduleRaw(prefKey);
             if (metaRaw == null || metaRaw.isEmpty()) {
                 Log.i(TAG, "fire linearization: STALE (no active schedule metadata) for " + key);
@@ -848,7 +845,7 @@ public final class AutoDeductionScheduler {
     ) {
         final String futureKey = AutoDeductionContract.occurrenceKey(
                 medicationId, doseId, calendarDate);
-        final String futurePrefKey = SCHEDULE_KEY_PREFIX + futureKey;
+        final String futurePrefKey = futureKey;
         synchronized (SCHEDULE_LOCK) {
             if (!isRecurrenceGenerationAuthorizedLocked(
                     medicationId, doseId, expectedRecurrenceGeneration)) {
@@ -988,7 +985,7 @@ public final class AutoDeductionScheduler {
 
         final String key = AutoDeductionContract.occurrenceKey(
                 medicationId, doseId, calendarDate);
-        final String prefKey = SCHEDULE_KEY_PREFIX + key;
+        final String prefKey = key;
 
         synchronized (SCHEDULE_LOCK) {
             if (isOccurrenceCancelledKey(key)) {
@@ -1337,7 +1334,7 @@ public final class AutoDeductionScheduler {
 
         synchronized (SCHEDULE_LOCK) {
             return scheduleOccurrenceLocked(
-                    SCHEDULE_KEY_PREFIX + key,
+                    key,
                     key,
                     payload,
                     triggerAt,
@@ -1419,11 +1416,18 @@ public final class AutoDeductionScheduler {
         return ScheduleResult.success(key);
     }
 
-    private String normalizeFeatureStorageKey(String keyOrPrefKey) {
-        if (keyOrPrefKey == null || keyOrPrefKey.isEmpty()) return null;
-        return keyOrPrefKey.startsWith(SCHEDULE_KEY_PREFIX)
-                ? keyOrPrefKey.substring(SCHEDULE_KEY_PREFIX.length())
-                : keyOrPrefKey;
+    private String getScheduleRaw(String storageKey) {
+        return schedulingAdapter.getScheduleRaw(storageKey);
+    }
+
+    private boolean hasSchedule(String storageKey) {
+        return storageKey != null
+                && !storageKey.isEmpty()
+                && schedulingAdapter.hasSchedule(storageKey);
+    }
+
+    private Map<String, ?> getAllScheduleMetadata() {
+        return schedulingAdapter.listScheduleMetadata();
     }
 
     private String getScheduleRaw(String keyOrPrefKey) {
@@ -1445,21 +1449,19 @@ public final class AutoDeductionScheduler {
     }
 
     private boolean removeScheduleIfOwned(
-            String keyOrPrefKey,
+            String storageKey,
             String expectedOperationVersion) {
-        String featureStorageKey = normalizeFeatureStorageKey(keyOrPrefKey);
-        return featureStorageKey != null
-                && !featureStorageKey.isEmpty()
+        return storageKey != null
+                && !storageKey.isEmpty()
                 && schedulingAdapter.removeScheduleIfOwned(
-                        featureStorageKey,
+                        storageKey,
                         expectedOperationVersion);
     }
 
-    private boolean removeSchedule(String keyOrPrefKey) {
-        String featureStorageKey = normalizeFeatureStorageKey(keyOrPrefKey);
-        return featureStorageKey != null
-                && !featureStorageKey.isEmpty()
-                && schedulingAdapter.removeSchedule(featureStorageKey);
+    private boolean removeSchedule(String storageKey) {
+        return storageKey != null
+                && !storageKey.isEmpty()
+                && schedulingAdapter.removeSchedule(storageKey);
     }
 
     private boolean hasCancellationTombstoneStored(String occurrenceKey) {
@@ -1483,13 +1485,8 @@ public final class AutoDeductionScheduler {
      * Conditional rollback — caller MUST already hold {@link #SCHEDULE_LOCK}.
      */
     private boolean removeScheduleMetadataIfVersionLocked(
-            String prefKey, String expectedVersion) {
-        String featureStorageKey = prefKey != null
-                && prefKey.startsWith(SCHEDULE_KEY_PREFIX)
-                ? prefKey.substring(SCHEDULE_KEY_PREFIX.length())
-                : prefKey;
-        return removeScheduleIfOwned(
-                featureStorageKey, expectedVersion);
+            String storageKey, String expectedVersion) {
+        return removeScheduleIfOwned(storageKey, expectedVersion);
     }
 
     /**
@@ -1506,12 +1503,8 @@ public final class AutoDeductionScheduler {
      * Unconditional remove — intentional cancel / malformed restore cleanup.
      * Caller must hold SCHEDULE_LOCK, or use the public cancel path.
      */
-    private void removeScheduleMetadataLocked(String prefKey) {
-        String featureStorageKey = prefKey != null
-                && prefKey.startsWith(SCHEDULE_KEY_PREFIX)
-                ? prefKey.substring(SCHEDULE_KEY_PREFIX.length())
-                : prefKey;
-        removeSchedule(featureStorageKey);
+    private void removeScheduleMetadataLocked(String storageKey) {
+        removeSchedule(storageKey);
     }
 
     private void removeScheduleMetadata(String prefKey) {
@@ -1705,7 +1698,7 @@ public final class AutoDeductionScheduler {
         final long triggerAt = epoch;
         final String nextKey = AutoDeductionContract.occurrenceKey(
                 medicationId, doseId, resolvedNextDate);
-        final String nextPrefKey = SCHEDULE_KEY_PREFIX + nextKey;
+        final String nextPrefKey = nextKey;
 
         if (!canScheduleExactAlarms()) {
             synchronized (SCHEDULE_LOCK) {
@@ -1890,7 +1883,7 @@ public final class AutoDeductionScheduler {
                 }
                 String nextKey = AutoDeductionContract.occurrenceKey(
                         medicationId, doseId, nextDate);
-                if (hasSchedule(SCHEDULE_KEY_PREFIX + nextKey)) {
+                if (hasSchedule(nextKey)) {
                     return ScheduleResult.success(nextKey);
                 }
             }
@@ -1901,7 +1894,7 @@ public final class AutoDeductionScheduler {
         final long triggerAt = epoch;
         final String nextKey = AutoDeductionContract.occurrenceKey(
                 medicationId, doseId, resolvedNextDate);
-        final String nextPrefKey = SCHEDULE_KEY_PREFIX + nextKey;
+        final String nextPrefKey = nextKey;
 
         JSONObject payload = new JSONObject();
         try {
@@ -2006,7 +1999,6 @@ public final class AutoDeductionScheduler {
         synchronized (SCHEDULE_LOCK) {
             Map<String, ?> all = getAllScheduleMetadata();
             for (Map.Entry<String, ?> e : all.entrySet()) {
-                if (!e.getKey().startsWith(SCHEDULE_KEY_PREFIX)) continue;
                 Object v = e.getValue();
                 if (!(v instanceof String)) continue;
                 String raw = (String) v;
@@ -2240,11 +2232,11 @@ public final class AutoDeductionScheduler {
      * Parse the canonical occurrence identity encoded in a durable sch: key.
      * Returns null when the key cannot identify exactly one occurrence.
      */
-    private static ScheduleStorageIdentity parseScheduleStorageKey(String prefKey) {
-        if (prefKey == null || !prefKey.startsWith(SCHEDULE_KEY_PREFIX)) {
+    private static ScheduleStorageIdentity parseScheduleStorageKey(String storageKey) {
+        if (storageKey == null || storageKey.isEmpty()) {
             return null;
         }
-        String encoded = prefKey.substring(SCHEDULE_KEY_PREFIX.length());
+        String encoded = storageKey;
         final char separator = '\u001f';
         int first = encoded.indexOf(separator);
         int second = first >= 0
@@ -2323,7 +2315,6 @@ public final class AutoDeductionScheduler {
         synchronized (SCHEDULE_LOCK) {
             Map<String, ?> all = getAllScheduleMetadata();
             for (Map.Entry<String, ?> e : all.entrySet()) {
-                if (!e.getKey().startsWith(SCHEDULE_KEY_PREFIX)) continue;
                 Object v = e.getValue();
                 if (!(v instanceof String)) continue;
                 String prefKey = e.getKey();
@@ -2520,7 +2511,7 @@ public final class AutoDeductionScheduler {
             if (isOccurrenceCancelledKey(key)) {
                 return new OccurrenceSnapshot(OccurrenceSnapshot.Status.CANCELLED, null);
             }
-            final String prefKey = SCHEDULE_KEY_PREFIX + key;
+            final String prefKey = key;
             String metaRaw = getScheduleRaw(prefKey);
             if (metaRaw != null && !metaRaw.isEmpty()) {
                 try {

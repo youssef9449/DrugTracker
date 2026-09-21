@@ -20,6 +20,7 @@ import {
   persistLastAppliedMutationSeq,
 } from './stockMutationOrdering';
 import { loadJson, persist } from './storage';
+import { applyForegroundAutoStockDeltas } from './autoDeductionNative';
 
 export const STORAGE_MANUAL_ENVELOPE_KEY =
   'android_med_tracker_manual_stock_envelope_v1';
@@ -43,6 +44,8 @@ export interface ExactAutoEnvelopeStored {
   createdAt: string;
   /** Required causal order with Manual envelopes. mutationSeq is required. */
   mutationSeq: number;
+  /** Native Auto-owned stock deltas applied with this foreground mutation. */
+  stockDeltas: Array<{ medicationId: string; delta: number }>;
 }
 
 let testLoadExact: (() => ExactAutoEnvelopeStored | null) | null = null;
@@ -127,6 +130,8 @@ export interface PendingEnvelopeRef {
     doseId: string;
     calendarDate: string;
   }>;
+  /** Manual only — durable foreground stock deltas, replayed idempotently in Native. */
+  stockDeltas?: Array<{ medicationId: string; delta: number }>;
   clear: () => string | null;
 }
 
@@ -292,14 +297,18 @@ export interface UnifiedRecoveryResult {
  * Highest seq above lastApplied is applied/finalized first; lower pending
  * envelopes are cleared only after lastApplied covers them.
  */
-export function recoverAllPendingStockEnvelopes(
+export async function recoverAllPendingStockEnvelopes(
   fresh: AutoStockDurableState,
   pending: PendingEnvelopeRef[],
   commit: (
     state: AutoStockDurableState,
     appliedMutationSeq: number
-  ) => string | null
-): UnifiedRecoveryResult {
+  ) => string | null,
+  applyNativeStockDeltas: (
+    mutationSeq: number,
+    deltas: Array<{ medicationId: string; delta: number }>
+  ) => Promise<{ ok: boolean; error?: string }> = applyForegroundAutoStockDeltas
+): Promise<UnifiedRecoveryResult> {
   let state = fresh;
   let recovered = false;
   let durabilityBlocked = false;
@@ -384,6 +393,18 @@ export function recoverAllPendingStockEnvelopes(
       continue;
     }
 
+    if (env.kind === 'manual') {
+      const nativeResult = await applyNativeStockDeltas(
+        env.mutationSeq,
+        env.stockDeltas ?? []
+      );
+      if (!nativeResult.ok) {
+        durabilityBlocked = true;
+        blocked = true;
+        break;
+      }
+    }
+
     if (durableMatchesEnvelopeSnapshot(env, state)) {
       const finErr = finalizeMutationSeq(env.mutationSeq);
       if (finErr) {
@@ -463,7 +484,7 @@ export function recoverAllPendingStockEnvelopes(
  * envelopes share mutationSeq ordering. Exact Auto toAcknowledge is collected
  * but NOT natively ACKed here — callers that own reconciliation may ACK.
  */
-export function recoverManualEnvelopeInto(
+export async function recoverManualEnvelopeInto(
   fresh: AutoStockDurableState,
   opts?: {
     persistMeds?: (meds: Medication[]) => string | null;
@@ -487,6 +508,7 @@ export function recoverManualEnvelopeInto(
       medications: manual.medications,
       logs: manual.logs,
       globalAutoDeductEnabled: manual.globalAutoDeductEnabled,
+      stockDeltas: manual.stockDeltas ?? [],
       clear: () => saveManualStockEnvelope(null),
     });
   }
@@ -526,7 +548,7 @@ export function recoverManualEnvelopeInto(
     return commitDurableAutoStockState(state, { appliedMutationSeq });
   };
 
-  const result = recoverAllPendingStockEnvelopes(fresh, pending, commit);
+  const result = await recoverAllPendingStockEnvelopes(fresh, pending, commit);
   if (result.blocked) {
     return {
       ok: false,

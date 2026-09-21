@@ -234,8 +234,12 @@ public class FireRetryScheduleTest {
         assertNotNull(afterFire);
         assertFalse("successful durable fire must leave shared metadata free of retry state",
                 afterFire.has("fireRetryCount"));
+        assertNotNull(
+                "FIRED alone must not clear retry evidence before Native stock succeeds",
+                s.getIndependentFireRetryEvidence("med", "dose", date));
+        s.clearIndependentFireRetryEvidenceAfterStock("med", "dose", date);
         assertNull(
-                "successful durable fire must clear Auto retry evidence",
+                "retry evidence clears only after Native stock succeeds",
                 s.getIndependentFireRetryEvidence("med", "dose", date));
     }
 
@@ -418,8 +422,8 @@ public class FireRetryScheduleTest {
         assertTrue(fr.status == AutoDeductionScheduler.FireResult.Status.CREATED
                 || fr.status == AutoDeductionScheduler.FireResult.Status.ALREADY_EXISTS
                 || fr.pendingRecorded);
-        // Evidence cleared after durable fire proof
-        assertNull(s.getIndependentFireRetryEvidence("med", "dose", date));
+        // FIRED persistence alone is not stock-execution proof.
+        assertNotNull(s.getIndependentFireRetryEvidence("med", "dose", date));
     }
 
     @Test
@@ -482,8 +486,8 @@ public class FireRetryScheduleTest {
                 fr.status == AutoDeductionScheduler.FireResult.Status.CREATED
                         || fr.status == AutoDeductionScheduler.FireResult.Status.ALREADY_EXISTS
                         || fr.pendingRecorded);
-        // Evidence cleared only after durable proof
-        assertNull(s.getIndependentFireRetryEvidence("med", "dose", date));
+        // FIRED persistence alone is not stock-execution proof.
+        assertNotNull(s.getIndependentFireRetryEvidence("med", "dose", date));
     }
 
     @Test

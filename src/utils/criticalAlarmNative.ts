@@ -1,6 +1,6 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 
-interface CriticalStockPlugin {
+interface CriticalStockAlarmAdapterBridge {
   schedule(options: {
     medicationId: string;
     localDate: string;
@@ -30,7 +30,7 @@ interface CriticalStockPlugin {
   }>;
 }
 
-const CriticalStock = registerPlugin<CriticalStockPlugin>('CriticalStock');
+const CriticalStock = registerPlugin<CriticalStockAlarmAdapterBridge>('CriticalStock');
 
 function isAndroid(): boolean {
   try {

@@ -9,7 +9,6 @@ import { notificationId } from './notificationIds';
 import {
   getNativePlatform,
   isNativePlatform,
-  isWebNotificationSupported,
 } from './notificationPlatform';
 import { scheduleWebNotification } from './webNotifications';
 

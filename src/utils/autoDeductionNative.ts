@@ -24,6 +24,13 @@ export interface NativeAutoStockMedication {
   currentPills: number;
 }
 
+export interface NativeAutoOccurrenceResolution {
+  medicationId: string;
+  doseId: string;
+  calendarDate: string;
+  type: 'CONSUMED' | 'SKIPPED';
+}
+
 export interface InitializeNativeStockResult {
   ok: boolean;
   stocks: NativeAutoStockMedication[];
@@ -158,6 +165,7 @@ interface AutoDeductionPlugin {
   listScheduledOccurrences(): Promise<{ schedules: ScheduledOccurrence[] }>;
   initializeStock(options: {
     medications: NativeAutoStockMedication[];
+    occurrenceResolutions?: NativeAutoOccurrenceResolution[];
   }): Promise<InitializeNativeStockResult>;
   applyForegroundStockDeltas(options: {
     mutationSeq: number;
@@ -203,7 +211,8 @@ export function autoDeductionOccurrenceKey(
 }
 
 export async function initializeAutoDeductionStock(
-  medications: Array<{ medicationId: string; currentPills: number }>
+  medications: Array<{ medicationId: string; currentPills: number }>,
+  occurrenceResolutions: NativeAutoOccurrenceResolution[] = []
 ): Promise<{ ok: true; medications: typeof medications } | { ok: false; error: string; medications: typeof medications }> {
   if (!isNativeAndroid()) {
     return { ok: true, medications };
@@ -220,7 +229,10 @@ export async function initializeAutoDeductionStock(
         medicationId: m.medicationId.trim(),
         currentPills: Number(m.currentPills),
       }));
-    const result = await AutoDeduction.initializeStock({ medications: cleaned });
+    const result = await AutoDeduction.initializeStock({
+      medications: cleaned,
+      occurrenceResolutions,
+    });
     if (!result || result.ok === false) {
       return {
         ok: false,
@@ -250,6 +262,46 @@ export async function initializeAutoDeductionStock(
   }
 }
 
+function buildLegacyOccurrenceResolutions(
+  medications: Medication[]
+): NativeAutoOccurrenceResolution[] {
+  const resolutions: NativeAutoOccurrenceResolution[] = [];
+
+  for (const medication of medications) {
+    for (const [doseId, dates] of Object.entries(
+      medication.doseConsumptionHistory ?? {}
+    )) {
+      for (const calendarDate of dates ?? []) {
+        if (typeof calendarDate === 'string' && calendarDate.length === 10) {
+          resolutions.push({
+            medicationId: medication.id,
+            doseId,
+            calendarDate,
+            type: 'CONSUMED',
+          });
+        }
+      }
+    }
+
+    for (const [doseId, dates] of Object.entries(
+      medication.doseSkippedHistory ?? {}
+    )) {
+      for (const calendarDate of dates ?? []) {
+        if (typeof calendarDate === 'string' && calendarDate.length === 10) {
+          resolutions.push({
+            medicationId: medication.id,
+            doseId,
+            calendarDate,
+            type: 'SKIPPED',
+          });
+        }
+      }
+    }
+  }
+
+  return resolutions;
+}
+
 export async function convergeAutoDeductionStock(
   medications: Medication[]
 ): Promise<{ ok: true; medications: Medication[] } | { ok: false; medications: Medication[]; error: string }> {
@@ -257,7 +309,8 @@ export async function convergeAutoDeductionStock(
     medications.map((m) => ({
       medicationId: m.id,
       currentPills: m.currentPills,
-    }))
+    })),
+    buildLegacyOccurrenceResolutions(medications)
   );
   if (!result.ok) {
     return {

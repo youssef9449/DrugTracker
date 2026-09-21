@@ -669,7 +669,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                   </div>
 
                   {availableUnits.length > 1 ? (
-                    <div className="flex items-start gap-1 shrink-0 justify-self-start">
+                    <div className="flex items-start gap-1 shrink-0 justify-self-end">
                       {availableUnits.map((u) => {
                         const isActive = selectedUnits.includes(u);
                         const icon =

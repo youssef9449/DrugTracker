@@ -974,7 +974,6 @@ public final class AutoDeductionScheduler {
 
 
     /**
-     * Pure ownership check used by conditional rollback.    /**
      * Pure ownership check used by conditional rollback.
      * Package-visible for focused verification.
      */

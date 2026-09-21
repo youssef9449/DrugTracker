@@ -719,8 +719,14 @@ export default function App() {
 
                   {/* View mode toggle: compact vs detailed cards */}
                   <div className="mx-4 mt-3 flex items-center justify-between bg-white px-3 py-2 rounded-2xl border border-slate-200/80 shadow-2xs">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
                       <span className="text-xs font-bold text-slate-800">قائمة الأدوية</span>
+                      <MedicationSortControl
+                        field={medicationSortField}
+                        direction={medicationSortDirection}
+                        onFieldChange={setMedicationSortField}
+                        onDirectionChange={setMedicationSortDirection}
+                      />
                     </div>
 
                     {/* View mode toggle: compact vs detailed cards (M3 Segmented Button) */}

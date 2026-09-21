@@ -1225,6 +1225,61 @@ public final class AutoDeductionScheduler {
     }
 
     /**
+     * Restore-boundary pass: ensure every durable FIRED occurrence has also reached
+     * the Auto Native stock authority. This is deliberately independent of JavaScript
+     * so a FIRED row left behind after a transient stock failure is recoverable on
+     * boot/timezone/exact-permission lifecycle events even while the WebView is dead.
+     *
+     * <p>This pass never acknowledges the FIRED row. JS still owns marker/log
+     * reconciliation and the final RECONCILED acknowledgement.</p>
+     */
+    RestoreResult recoverFiredStockPass() {
+        AutoDeductionEventStore store = new AutoDeductionEventStore(appContext);
+        AutoDeductionEventStore.FiredEventsResult listed = store.listFiredEventsResult();
+        if (!listed.ok) {
+            return RestoreResult.failure(
+                    0, 1,
+                    listed.error != null ? listed.error : "fired_stock_list_failed");
+        }
+
+        int recovered = 0;
+        int failed = 0;
+        AutoDeductionStockStore stock = new AutoDeductionStockStore(appContext);
+
+        for (JSONObject event : listed.events) {
+            String medicationId = event.optString("medicationId", "").trim();
+            String doseId = event.optString("doseId", "").trim();
+            String calendarDate = event.optString("calendarDate", "");
+            double amount = event.optDouble("amount", Double.NaN);
+
+            if (medicationId.isEmpty()
+                    || doseId.isEmpty()
+                    || !AutoDeductionContract.isValidCalendarDate(calendarDate)
+                    || !AutoDeductionContract.isValidAmount(amount)) {
+                failed++;
+                continue;
+            }
+
+            AutoDeductionStockStore.AutoApplyResult stockResult =
+                    stock.applyAutoDeduction(
+                            medicationId, doseId, calendarDate, amount);
+            if (stockResult.ok) {
+                recovered++;
+            } else {
+                failed++;
+                Log.e(TAG, "recoverFiredStockPass: native stock apply failed for "
+                        + medicationId + "/" + doseId + "/" + calendarDate
+                        + " — " + stockResult.error);
+            }
+        }
+
+        if (failed > 0) {
+            return RestoreResult.failure(recovered, failed, "fired_stock_pass_failed");
+        }
+        return RestoreResult.success(recovered, 0);
+    }
+
+    /**
      * Restore-boundary pass: attempt recovery for every independent fire-retry
      * evidence row, even when shared schedule metadata is missing.
      */

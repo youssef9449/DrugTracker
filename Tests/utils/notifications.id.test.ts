@@ -55,7 +55,6 @@ import {
   sendMedicineAlert,
   sendCriticalStockAlert,
   sendTestAlertNotification,
-  cancelCriticalAlarm,
   scheduleCriticalAlarm,
   scheduleDoseReminder,
   snoozeDoseReminderId,

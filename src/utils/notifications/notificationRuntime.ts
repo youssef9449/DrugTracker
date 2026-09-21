@@ -12,7 +12,8 @@ export async function scheduleNotification(opts: {
   body: string;
   channelId: string;
   smallIcon: string;
-  channelImportance?: number;
+  /** Android notification-channel importance (1=min … 5=max), mirroring NotificationRuntime. */
+  channelImportance?: 1 | 2 | 3 | 4 | 5;
   actionTypeId?: string;
   extra?: Record<string, unknown>;
 }): Promise<boolean> {

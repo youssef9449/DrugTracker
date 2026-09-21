@@ -356,4 +356,50 @@ export async function markAutoDeductionEventReconciled(
   }
 }
 
+/**
+ * Issue #242 contract: surface the native future-schedule restore result
+ * without conflating failure with "nothing to restore". Web / non-Android
+ * has no native AlarmManager ledger — a successful no-op (not a failure).
+ */
+export async function restoreFutureAutoDeductionSchedules(): Promise<RestoreFutureSchedulesResult> {
+  if (!isNativeAndroid()) {
+    return { ok: true, restored: 0, failed: 0 };
+  }
+  try {
+    const res = await AutoDeduction.restoreFutureSchedules();
+    const ok = res != null && res.ok !== false;
+    return {
+      ok,
+      restored: Number(res?.restored) || 0,
+      failed: Number(res?.failed) || 0,
+      error: res?.error,
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'restore_failed';
+    return { ok: false, restored: 0, failed: 0, error: msg };
+  }
+}
+
+/**
+ * Issue #242 contract: explicit result for native schedule listing.
+ * Successful empty list: { ok: true, schedules: [] }
+ * Native read failure:  { ok: false, schedules: [], error }
+ * Web / non-Android: no native AlarmManager — successful empty set (not a failure).
+ */
+export async function listScheduledAutoDeductionOccurrences(): Promise<ListScheduledOccurrencesResult> {
+  if (!isNativeAndroid()) {
+    return { ok: true, schedules: [] };
+  }
+  try {
+    const res = await AutoDeduction.listScheduledOccurrences();
+    return { ok: true, schedules: res.schedules ?? [] };
+  } catch (e) {
+    return {
+      ok: false,
+      schedules: [],
+      error: e instanceof Error ? e.message : 'list_schedules_failed',
+    };
+  }
+}
+
 

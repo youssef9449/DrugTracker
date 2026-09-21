@@ -234,7 +234,7 @@ describe('native.ts — localNotificationReceived dose isolation', () => {
   async function captureReceivedListener(): Promise<(n: { extra?: { medicationId?: string; doseId?: string } }) => void> {
     vi.resetModules();
     const { LocalNotifications } = await import('@capacitor/local-notifications');
-    const { initNativeBridge, registerDoseReceivedHandler } = await import('@/native');
+    const { initNativeBridge } = await import('@/native');
     const { cleanupNativeListeners } = await import('@/native');
     await cleanupNativeListeners();
     vi.mocked(LocalNotifications.addListener).mockImplementation((event, cb) => {

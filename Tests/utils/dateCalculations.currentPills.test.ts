@@ -126,7 +126,7 @@ describe('Issue #266 — durable currentPills is sole live stock', () => {
       dailyDose: 10,
       autoDeductEnabled: true,
       doseSchedule: [{ id: 'd1', amount: 10, time: '08:00' }],
-    } as const;
+    };
     const med5 = makeMed({ ...shared, id: 'med-t5', warningThresholdDays: 5 });
     const med8 = makeMed({ ...shared, id: 'med-t8', warningThresholdDays: 8 });
     const today = getTodayDateString();
@@ -145,7 +145,7 @@ describe('Issue #266 — durable currentPills is sole live stock', () => {
       dailyDose: 10,
       autoDeductEnabled: true,
       doseSchedule: [{ id: 'd1', amount: 10, time: '08:00' }],
-    } as const;
+    };
     const medA = makeMed({ ...shared, id: 'med-a', warningThresholdDays: 5 });
     const medB5 = makeMed({ ...shared, id: 'med-b', warningThresholdDays: 5 });
     const medB8 = makeMed({ ...shared, id: 'med-b', warningThresholdDays: 8 });

@@ -99,6 +99,9 @@ function useBothHooks(props: {
     criticalStockAlertsEnabled: props.criticalStockAlertsEnabled ?? true,
     hydrated: true,
     isFirstRun: false,
+    // Web-mocked platform: exact-alarm capability is not applicable, which
+    // lets the scheduler proceed (only null / 'denied' gate scheduling).
+    exactAlarmPermission: 'unsupported',
     resumeTick: props.resumeTick ?? 0,
   });
 }

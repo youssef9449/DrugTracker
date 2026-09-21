@@ -1,4 +1,4 @@
-import { Medication, isSolidUnit, describeStockInStrips, normalizeDisplayQuantity } from '../types';
+import { Medication, isSolidUnit, describeStockInStrips, normalizeDisplayQuantity, formatUnitQuantity } from '../types';
 import { DEFAULT_LIQUID_PACK_SIZE, DEFAULT_SOLID_PACK_SIZE, DAYS_PER_MONTH } from './time';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { dailyScheduleAmount } from './dateCalculations';
@@ -101,13 +101,13 @@ export function formatScheduledDoseBreakdown(
       const rem = normalizeDisplayQuantity(totalUnits % med.packageSize);
       const parts: string[] = [];
       if (boxes > 0) parts.push(pluralizeArabic(boxes, 'علبة'));
-      if (rem > 0) parts.push(pluralizeArabic(rem, unit));
+      if (rem > 0) parts.push(formatUnitQuantity(rem, unit));
       if (parts.length > 0) {
         return parts.join(' و ');
       }
     }
 
-    return pluralizeArabic(totalUnits, unit);
+    return formatUnitQuantity(totalUnits, unit);
   }
 
   // Sachet (كيس):
@@ -117,8 +117,8 @@ export function formatScheduledDoseBreakdown(
     const rem = normalizeDisplayQuantity(totalUnits % pkgSize);
     const parts: string[] = [];
     if (boxes > 0) parts.push(pluralizeArabic(boxes, 'علبة'));
-    if (rem > 0) parts.push(pluralizeArabic(rem, 'كيس'));
-    return parts.length > 0 ? parts.join(' و ') : pluralizeArabic(totalUnits, 'كيس');
+    if (rem > 0) parts.push(formatUnitQuantity(rem, 'كيس'));
+    return parts.length > 0 ? parts.join(' و ') : formatUnitQuantity(totalUnits, 'كيس');
   }
 
   // Dose (جرعة):
@@ -128,8 +128,8 @@ export function formatScheduledDoseBreakdown(
     const rem = normalizeDisplayQuantity(totalUnits % pkgSize);
     const parts: string[] = [];
     if (boxes > 0) parts.push(pluralizeArabic(boxes, 'علبة'));
-    if (rem > 0) parts.push(pluralizeArabic(rem, 'جرعة'));
-    return parts.length > 0 ? parts.join(' و ') : pluralizeArabic(totalUnits, 'جرعة');
+    if (rem > 0) parts.push(formatUnitQuantity(rem, 'جرعة'));
+    return parts.length > 0 ? parts.join(' و ') : formatUnitQuantity(totalUnits, 'جرعة');
   }
 
   // Liquid (مل):
@@ -139,8 +139,8 @@ export function formatScheduledDoseBreakdown(
     const rem = normalizeDisplayQuantity(totalUnits % pkgSize);
     const parts: string[] = [];
     if (bottles > 0) parts.push(pluralizeArabic(bottles, 'عبوة'));
-    if (rem > 0) parts.push(pluralizeArabic(rem, 'مل'));
-    return parts.length > 0 ? parts.join(' و ') : pluralizeArabic(totalUnits, 'مل');
+    if (rem > 0) parts.push(formatUnitQuantity(rem, 'مل'));
+    return parts.length > 0 ? parts.join(' و ') : formatUnitQuantity(totalUnits, 'مل');
   }
 
   // Any other unit:
@@ -149,10 +149,10 @@ export function formatScheduledDoseBreakdown(
     const rem = normalizeDisplayQuantity(totalUnits % med.packageSize);
     const parts: string[] = [];
     if (boxes > 0) parts.push(pluralizeArabic(boxes, 'علبة'));
-    if (rem > 0) parts.push(pluralizeArabic(rem, unit));
+    if (rem > 0) parts.push(formatUnitQuantity(rem, unit));
     if (parts.length > 0) return parts.join(' و ');
   }
 
-  return pluralizeArabic(totalUnits, unit);
+  return formatUnitQuantity(totalUnits, unit);
 }
 

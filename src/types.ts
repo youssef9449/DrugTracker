@@ -228,6 +228,20 @@ export function normalizeDisplayQuantity(value: number): number {
   return Number(trimmed.toString());
 }
 
+/**
+ * User-facing unit quantity phrase for packaging/display paths.
+ * Whole numbers (after normalizeDisplayQuantity) use existing Arabic
+ * pluralization; genuine fractional quantities use `${n} ${unit}` and
+ * never enter pluralizeArabic (which is integer-grammar only).
+ */
+export function formatUnitQuantity(value: number, unit: string): string {
+  const n = normalizeDisplayQuantity(value);
+  if (Number.isInteger(n)) {
+    return pluralizeArabic(n, unit);
+  }
+  return `${n} ${unit}`;
+}
+
 export function describeStockInStrips(
   pills: number,
   pillsPerStrip?: number,
@@ -243,7 +257,7 @@ export function describeStockInStrips(
   // near whole integers — never Math.round genuine fractions into the next int.
   const remainingPills = normalizeDisplayQuantity(pills - totalStrips * pillsPerStrip);
 
-  const pillWord = pluralizeArabic(remainingPills, unit);
+  const pillWord = formatUnitQuantity(remainingPills, unit);
 
   // If strips per box is defined, break down into boxes + strips + pills
   if (stripsPerBox && stripsPerBox > 0) {

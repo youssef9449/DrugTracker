@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { ConsumptionLog, Medication } from '@/types';
+import type { ConsumptionLog } from '@/types';
 import {
   filterLogsForMedication,
   historyAmountPresentation,
@@ -12,7 +12,7 @@ function makeLog(overrides: Partial<ConsumptionLog> & Pick<ConsumptionLog, 'id' 
     type: 'dose_taken',
     amount: -1,
     date: '2026-01-01',
-    timestamp: Date.now(),
+    timestamp: '2026-01-01T08:00:00.000Z',
     description: 'test',
     ...overrides,
   };

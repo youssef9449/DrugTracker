@@ -79,7 +79,7 @@ describe('getMedSizes (#73)', () => {
 import {
   formatScheduledDoseBreakdown,
 } from '@/utils/medicationPackaging';
-import { describeStockInStrips, normalizeDisplayQuantity } from '@/types';
+import { describeStockInStrips, normalizeDisplayQuantity, formatUnitQuantity } from '@/types';
 
 describe('normalizeDisplayQuantity', () => {
   it('preserves genuine fractions', () => {
@@ -98,36 +98,49 @@ describe('normalizeDisplayQuantity', () => {
   });
 });
 
+describe('formatUnitQuantity', () => {
+  it('whole numbers use Arabic pluralization', () => {
+    expect(formatUnitQuantity(1, 'قرص')).toBe('قرص واحد');
+    expect(formatUnitQuantity(2, 'قرص')).toBe('قرصين');
+    expect(formatUnitQuantity(3, 'قرص')).toBe('3 أقراص');
+  });
+
+  it('fractions use numeric quantity + unit, not pluralizeArabic', () => {
+    expect(formatUnitQuantity(0.5, 'قرص')).toBe('0.5 قرص');
+    expect(formatUnitQuantity(1.5, 'قرص')).toBe('1.5 قرص');
+    expect(formatUnitQuantity(2.25, 'قرص')).toBe('2.25 قرص');
+  });
+
+  it('float noise near integers still uses integer Arabic forms', () => {
+    expect(formatUnitQuantity(3 + 1e-12, 'قرص')).toBe('3 أقراص');
+  });
+});
+
 describe('describeStockInStrips — fractional remainders', () => {
-  it('Case A: 0.5 does not round to 1', () => {
+  it('Case A: 0.5 قرص exact fractional presentation', () => {
     const s = describeStockInStrips(0.5, 10, 3, 'قرص');
-    expect(s).toBeTruthy();
-    expect(s!).toContain('0.5');
-    expect(s!).not.toMatch(/^قرص واحد$/);
-    expect(s!).not.toContain('1 ');
+    expect(s).toBe('0.5 قرص');
+    expect(s).not.toContain('قرص واحد');
   });
 
-  it('Case B: 1.5 preserves 1.5', () => {
+  it('Case B: 1.5 قرص exact, not rounded to 2', () => {
     const s = describeStockInStrips(1.5, 10, 3, 'قرص');
-    expect(s).toBeTruthy();
-    expect(s!).toContain('1.5');
+    expect(s).toBe('1.5 قرص');
+    expect(s).not.toMatch(/2 /);
   });
 
-  it('Case C: 2.25 preserves 2.25 without float garbage', () => {
+  it('Case C: 2.25 قرص without float garbage', () => {
     const s = describeStockInStrips(2.25, 10, 3, 'قرص');
-    expect(s).toBeTruthy();
-    expect(s!).toContain('2.25');
-    expect(s!).not.toContain('000000');
+    expect(s).toBe('2.25 قرص');
+    expect(s).not.toContain('000000');
   });
 
-  it('Case D: whole-number strip packaging unchanged (30 = 1 box)', () => {
-    const s = describeStockInStrips(30, 10, 3, 'قرص');
-    expect(s).toBe(describeStockInStrips(30, 10, 3, 'قرص'));
-    // 30 pills / 10 per strip / 3 strips per box → 1 box
-    expect(s).toMatch(/علبة/);
+  it('Case D: whole-number strip packaging is علبة واحدة', () => {
+    // 30 pills / 10 per strip / 3 strips per box → exactly 1 box
+    expect(describeStockInStrips(30, 10, 3, 'قرص')).toBe('علبة واحدة');
   });
 
-  it('Case E: whole-number without strip packaging path via formatScheduledDoseBreakdown', () => {
+  it('Case E: whole-number without strip packaging uses integer Arabic form', () => {
     const med = makeMed({
       unit: 'قرص',
       packageSize: 30,
@@ -137,15 +150,13 @@ describe('describeStockInStrips — fractional remainders', () => {
         { id: 'd1', time: '08:00', amount: 1 },
       ],
     });
-    // daily 1 → "قرص واحد" style integer path
     const text = formatScheduledDoseBreakdown(med, true);
-    expect(text.length).toBeGreaterThan(0);
-    expect(text).not.toContain('0.000');
+    expect(text).toBe('قرص واحد');
   });
 });
 
 describe('formatScheduledDoseBreakdown — fractional daily dose', () => {
-  it('preserves half-unit daily dose in display', () => {
+  it('0.5 daily dose is exact fractional presentation', () => {
     const med = makeMed({
       unit: 'قرص',
       pillsPerStrip: 10,
@@ -153,11 +164,11 @@ describe('formatScheduledDoseBreakdown — fractional daily dose', () => {
       doseSchedule: [{ id: 'd1', time: '08:00', amount: 0.5 }],
     });
     const text = formatScheduledDoseBreakdown(med, true);
-    expect(text).toContain('0.5');
-    expect(text).not.toMatch(/قرص واحد/);
+    expect(text).toBe('0.5 قرص');
+    expect(text).not.toContain('قرص واحد');
   });
 
-  it('preserves 1.5 daily dose', () => {
+  it('1.5 daily dose is exact fractional presentation', () => {
     const med = makeMed({
       unit: 'قرص',
       pillsPerStrip: 10,
@@ -165,6 +176,6 @@ describe('formatScheduledDoseBreakdown — fractional daily dose', () => {
       doseSchedule: [{ id: 'd1', time: '08:00', amount: 1.5 }],
     });
     const text = formatScheduledDoseBreakdown(med, true);
-    expect(text).toContain('1.5');
+    expect(text).toBe('1.5 قرص');
   });
 });

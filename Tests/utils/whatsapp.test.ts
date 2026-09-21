@@ -3,6 +3,7 @@ import {
   normalizeArabicDigits,
   cleanPhoneNumber,
   generatePharmacyOrderMessage,
+  describeOrderQuantityBreakdown,
   calculateMedicationOrderQuantity } from '@/utils/whatsapp';
 import type { Medication } from '@/types';
 
@@ -124,7 +125,36 @@ describe('generatePharmacyOrderMessage', () => {
     expect(msg).toContain('30 قرص');
   });
 
+  it('keeps an explicit mixed box + strip selection instead of recomputing from total pills', () => {
+    const msg = generatePharmacyOrderMessage([
+      {
+        name: 'بنادول',
+        quantity: 50,
+        unit: 'قرص',
+        stripsPerBox: 3,
+        pillsPerStrip: 10,
+        packageSize: 30,
+        orderBreakdown: [
+          { unit: 'boxes', quantity: 1 },
+          { unit: 'strips', quantity: 2 },
+        ],
+      },
+    ]);
 
+    expect(msg).toContain('1. بنادول - المطلوب: علبة واحدة و شريطان');
+  });
+
+  it('formats a mixed box + sachet selection with the medication unit', () => {
+    expect(
+      describeOrderQuantityBreakdown(
+        [
+          { unit: 'boxes', quantity: 1 },
+          { unit: 'pills', quantity: 2 },
+        ],
+        'كيس'
+      )
+    ).toBe('علبة واحدة و كيسان');
+  });
 
   it('orders one full package when monthly consumption fits in one package', () => {
     // dailyDose 1 → 30/month; packageSize 30 → exactly one package

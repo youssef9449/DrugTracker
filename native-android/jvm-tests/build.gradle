@@ -59,7 +59,8 @@ def doseReminderAlarmSources = fileTree("../dose-reminder") {
 
 def criticalStockAlarmSources = fileTree("../critical-stock") {
     include(
-            "CriticalStockAlarmAdapter.java"
+            "CriticalStockAlarmAdapter.java",
+            "CriticalStockAlarmReceiver.java"
     )
 }
 

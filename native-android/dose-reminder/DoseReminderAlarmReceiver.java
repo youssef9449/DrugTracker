@@ -109,6 +109,7 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
                     doseId,
                     medicationName,
                     unit,
+                    doseDescription,
                     reminderTime,
                     amount,
                     allowManualTakeAction,
@@ -122,6 +123,7 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
             String doseId,
             String medicationName,
             String unit,
+            String doseDescription,
             String reminderTime,
             double amount,
             boolean allowManualTakeAction,
@@ -155,6 +157,7 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
                 amount,
                 medicationName,
                 unit,
+                doseDescription,
                 allowManualTakeAction,
                 next.getTimeInMillis(),
                 expectedOperationVersion);

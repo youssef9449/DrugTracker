@@ -19,6 +19,29 @@ export function getTodayDateString(): string {
   return `${year}-${month}-${day}`;
 }
 
+export function addCalendarDays(dateStr: string, days: number): string {
+  const parsed = parseUtcDate(dateStr);
+  if (!parsed || !Number.isFinite(days)) return dateStr;
+  const target = new Date(parsed.getTime() + days * MS_PER_DAY);
+  return formatUtcDateString(target);
+}
+
+export function tomorrowDateString(dateStr: string = getTodayDateString()): string {
+  return addCalendarDays(dateStr, 1);
+}
+
+export function localEpochMs(calendarDate: string, timeHhmm: string): number | null {
+  if (!calendarDate || !timeHhmm) return null;
+  const parts = calendarDate.split('-').map((n) => parseInt(n, 10));
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return null;
+  const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(timeHhmm);
+  if (!match) return null;
+  const [y, m, d] = parts;
+  const dt = new Date(y, m - 1, d, Number(match[1]), Number(match[2]), 0, 0);
+  const ms = dt.getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
 /**
  * Parse a "YYYY-MM-DD" string into a UTC midnight Date.
  *

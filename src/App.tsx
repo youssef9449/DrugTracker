@@ -718,7 +718,7 @@ export default function App() {
               <div
                 className={
                   isCompactView && filter === 'all'
-                    ? 'p-2 grid grid-cols-2 gap-2'
+                    ? 'p-2 grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-2'
                     : 'p-3 space-y-2'
                 }
               >

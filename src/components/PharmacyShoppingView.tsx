@@ -10,9 +10,12 @@ import {
   X,
   MessageSquare,
 } from 'lucide-react';
-import { Medication, PharmacySettings, calculateMedicationStatus, describeOrderInBoxes, isSolidUnit } from '../types';
+import type { Medication, PharmacySettings } from '../types';
+import { calculateMedicationStatus } from '../utils/medicationStatus';
+import { describeOrderInBoxes, isSolidUnit } from '../utils/medicationPackaging';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { getDepletionDate } from '../utils/dateCalculations';
+import { formatDepletionDate } from '../utils/medicationPresentation';
 import {
   cleanPhoneNumber,
   generatePharmacyOrderMessage,

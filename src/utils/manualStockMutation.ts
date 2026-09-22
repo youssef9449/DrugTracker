@@ -1721,6 +1721,11 @@ export function runGatedMedicationUpdate(opts: {
         opts.medData.autoDeductEnabled !== undefined
           ? opts.medData.autoDeductEnabled
           : stockBase.autoDeductEnabled,
+      isChronic: opts.medData.isChronic,
+      durationDays:
+        opts.medData.isChronic
+          ? undefined
+          : opts.medData.durationDays,
       // Explicitly take pruned history (not stockBase) so removed dose IDs stay gone.
       doseConsumptionHistory: pruned.doseConsumptionHistory,
       doseSkippedHistory:

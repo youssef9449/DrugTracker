@@ -157,18 +157,25 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   const tag = colorTagClasses(medication.colorTag);
 
   // Maximum visual scale for the stock progress bar.
-  // Prefer one full package worth of days so a just-refilled box reads
-  // near 100% and partial stock (e.g. 22 days left on a 30-day pack)
-  // maps to a proportional fill instead of always clamping to full.
+  // If the medication has an explicit temporary treatment duration (not chronic),
+  // the visual range is determined by its duration of use.
+  // If it is chronic (or default), the visual range remains month-based (≈ 30 days).
+  const isTemporaryCourse =
+    medication.isChronic === false &&
+    typeof medication.durationDays === 'number' &&
+    medication.durationDays > 0;
+
   const packageDays =
     medication.packageSize && medication.packageSize > 0 && medication.dailyDose > 0
       ? medication.packageSize / medication.dailyDose
       : DAYS_PER_MONTH;
-  const maxVisualRange = Math.max(
-    packageDays,
-    medication.warningThresholdDays * VISUAL_RANGE_MULTIPLIER,
-    MIN_VISUAL_RANGE_DAYS
-  );
+  const maxVisualRange = isTemporaryCourse
+    ? medication.durationDays!
+    : Math.max(
+        packageDays,
+        medication.warningThresholdDays * VISUAL_RANGE_MULTIPLIER,
+        MIN_VISUAL_RANGE_DAYS
+      );
   const percentLeft = Math.min(
     100,
     Math.max(0, Math.round((statusInfo.daysLeft / maxVisualRange) * 100))
@@ -237,6 +244,15 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 {medication.category}
               </span>
             )}
+            {medication.isChronic === false && medication.durationDays ? (
+              <span className="font-medium px-1.5 py-0.2 rounded text-[10px] shrink-0 bg-blue-50 text-blue-800 border border-blue-200">
+                كورس {medication.durationDays} يوم
+              </span>
+            ) : medication.isChronic ? (
+              <span className="font-medium px-1.5 py-0.2 rounded text-[10px] shrink-0 bg-slate-100 text-slate-600 border border-slate-200">
+                مزمن
+              </span>
+            ) : null}
             <span>معدل الخصم: {medication.dailyDose} {medication.unit}/يوم</span>
             {hasStrips && (
               <StripsBadge medication={medication} className="text-[10px] text-teal-800 bg-white/90 border border-teal-200 px-1.5 py-0.5 rounded shrink-0" />
@@ -641,7 +657,14 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         </div>
 
         {/* Row 3: progress only */}
-        <div className="mt-1 w-full h-1 bg-slate-200/70 rounded-full overflow-hidden">
+        <div
+          className="mt-1 w-full h-1 bg-slate-200/70 rounded-full overflow-hidden"
+          title={
+            isTemporaryCourse
+              ? `كورس علاجي (${medication.durationDays} يوم): متبقي ${statusInfo.daysLeft} يوماً (${percentLeft}%)`
+              : `دواء مزمن (مقياس شهري): متبقي ${statusInfo.daysLeft} يوماً (${percentLeft}%)`
+          }
+        >
           <div
             className={`h-full rounded-full transition-all duration-300 ${getProgressColor()}`}
             style={{ width: `${percentLeft}%` }}
@@ -697,6 +720,15 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               {medication.category}
             </span>
           )}
+          {medication.isChronic === false && medication.durationDays ? (
+            <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-blue-50 text-blue-800 border border-blue-200">
+              كورس {medication.durationDays} يوم
+            </span>
+          ) : medication.isChronic ? (
+            <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-slate-100 text-slate-600 border border-slate-200">
+              مزمن
+            </span>
+          ) : null}
           <AutoDeductStatusBadge
             isAutoActive={isAutoActive}
             onToggle={() => onToggleAutoDeduct(medication.id)}
@@ -851,7 +883,14 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         </div>
 
         {/* Mini Visual Stock Progress Bar */}
-        <div className="mt-2 w-full h-1 bg-slate-200/70 rounded-full overflow-hidden">
+        <div
+          className="mt-2 w-full h-1 bg-slate-200/70 rounded-full overflow-hidden"
+          title={
+            isTemporaryCourse
+              ? `كورس علاجي (${medication.durationDays} يوم): متبقي ${statusInfo.daysLeft} يوماً (${percentLeft}%)`
+              : `دواء مزمن (مقياس شهري): متبقي ${statusInfo.daysLeft} يوماً (${percentLeft}%)`
+          }
+        >
           <div
             className={`h-full rounded-full transition-all duration-500 ${getProgressColor()}`}
             style={{ width: `${percentLeft}%` }}

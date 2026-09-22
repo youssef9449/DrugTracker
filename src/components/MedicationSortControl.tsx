@@ -9,11 +9,30 @@ interface MedicationSortControlProps {
   onDirectionChange: (direction: MedicationSortDirection) => void;
 }
 
-const OPTIONS = [
-  { value: 'name' as const, label: 'الاسم' },
-  { value: 'quantity' as const, label: 'الكمية المتاحة' },
-  { value: 'category' as const, label: 'التصنيف' },
+const OPTIONS: { value: MedicationSortField; label: string }[] = [
+  { value: 'name', label: 'الاسم' },
+  { value: 'quantity', label: 'الكمية المتاحة' },
+  { value: 'category', label: 'التصنيف' },
+  { value: 'duration', label: 'فترة الاستخدام' },
 ];
+
+function getDirectionDescription(field: MedicationSortField, direction: MedicationSortDirection, short = false): string {
+  if (field === 'name') {
+    if (short) return direction === 'asc' ? 'A-Z / أ-ي' : 'Z-A / ي-أ';
+    return direction === 'asc' ? 'تصاعدي (A-Z ثم أ-ي)' : 'تنازلي (ي-أ ثم Z-A)';
+  }
+  if (field === 'quantity') {
+    if (short) return direction === 'asc' ? 'الأقل أولاً' : 'الأكثر أولاً';
+    return direction === 'asc' ? 'تصاعدي (من الأقل للأكثر)' : 'تنازلي (من الأكثر للأقل)';
+  }
+  if (field === 'duration') {
+    if (short) return direction === 'asc' ? 'الأقصر أولاً' : 'الأطول والمستمر أولاً';
+    return direction === 'asc' ? 'تصاعدي (الكورس الأقصر ثم المزمن)' : 'تنازلي (المزمن ثم الكورس الأطول)';
+  }
+  // category
+  if (short) return direction === 'asc' ? 'أ-ي' : 'ي-أ';
+  return direction === 'asc' ? 'تصاعدي (أ-ي)' : 'تنازلي (ي-أ)';
+}
 
 export function MedicationSortControl({ field, direction, onFieldChange, onDirectionChange }: MedicationSortControlProps) {
   const [open, setOpen] = useState(false);
@@ -26,26 +45,30 @@ export function MedicationSortControl({ field, direction, onFieldChange, onDirec
     document.addEventListener('keydown', escape);
     return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); };
   }, [open]);
+
   const label = OPTIONS.find((o) => o.value === field)?.label ?? 'الاسم';
+  const shortDesc = getDirectionDescription(field, direction, true);
+  const fullDesc = getDirectionDescription(field, direction, false);
   const DirectionIcon = direction === 'asc' ? ArrowUp : ArrowDown;
+
   return (
     <div ref={rootRef} className="relative shrink-0">
       <button
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`ترتيب الأدوية حسب ${label} — ${direction === 'asc' ? 'تصاعدي' : 'تنازلي'}`}
+        aria-label={`ترتيب الأدوية حسب ${label} — ${fullDesc}`}
         onClick={() => setOpen((v) => !v)}
         className="h-[30px] inline-flex items-center gap-1.5 rounded-full border border-slate-300/90 bg-white hover:bg-slate-50 active:bg-slate-100 px-2.5 text-xs font-medium text-slate-700 transition-colors cursor-pointer shadow-2xs focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/30"
       >
         <ArrowUpDown className="h-3.5 w-3.5 text-teal-700 shrink-0" aria-hidden="true" />
-        <span>ترتيب</span>
+        <span>ترتيب: {label} ({shortDesc})</span>
       </button>
       {open && (
         <div
           role="menu"
           aria-label="ترتيب الأدوية"
-          className="absolute right-0 top-[calc(100%+4px)] z-50 w-48 overflow-hidden rounded-2xl bg-white p-1.5 shadow-xl border border-slate-200/90 animate-in fade-in zoom-in-95 duration-150"
+          className="absolute right-0 top-[calc(100%+4px)] z-50 w-56 overflow-hidden rounded-2xl bg-white p-1.5 shadow-xl border border-slate-200/90 animate-in fade-in zoom-in-95 duration-150"
         >
           <div className="px-2.5 py-1 text-[11px] font-semibold text-slate-400">ترتيب حسب</div>
           {OPTIONS.map((o) => {
@@ -79,11 +102,13 @@ export function MedicationSortControl({ field, direction, onFieldChange, onDirec
             role="menuitem"
             aria-label="تغيير اتجاه الترتيب"
             onClick={() => onDirectionChange(direction === 'asc' ? 'desc' : 'asc')}
-            className="flex h-8.5 w-full items-center gap-2 rounded-xl px-2.5 text-right text-xs font-medium text-slate-700 hover:bg-slate-100 active:bg-slate-200/70 transition-colors cursor-pointer"
+            className="flex h-auto min-h-8.5 py-1.5 w-full items-center gap-2 rounded-xl px-2.5 text-right text-xs font-medium text-slate-700 hover:bg-slate-100 active:bg-slate-200/70 transition-colors cursor-pointer"
           >
             <DirectionIcon className="h-3.5 w-3.5 text-teal-700 shrink-0" aria-hidden="true" />
-            <span className="flex-1">{direction === 'asc' ? 'تصاعدي' : 'تنازلي'}</span>
-            <span className="text-[10px] font-normal text-slate-400">تبديل</span>
+            <span className="flex-1 text-[11px] leading-tight">
+              {fullDesc}
+            </span>
+            <span className="text-[10px] font-normal text-slate-400 shrink-0">تبديل</span>
           </button>
         </div>
       )}

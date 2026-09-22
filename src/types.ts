@@ -41,6 +41,16 @@ export interface Medication {
   notes?: string;
   createdAt: string;
   autoDeductEnabled?: boolean; // Default true
+  /**
+   * هل الدواء لعلاج مزمن (استخدام دائم ومستمر).
+   * إذا كان true، يعتمد شريط التقدم على مقياس شهري (30 يوماً).
+   */
+  isChronic?: boolean;
+  /**
+   * مدة استعمال الدواء بالأيام إذا كان محدداً (كورس علاجي).
+   * يتأثر شريط التقدم بهذه المدة.
+   */
+  durationDays?: number;
   packageSize?: number; // Size of standard package when bought (e.g. 30)
   stripsPerBox?: number; // عدد الأشرطة في العلبة (مثال: 3 أشرطة)
   pillsPerStrip?: number; // عدد الأقراص في الشريط الواحد (مثال: 10 أقراص)

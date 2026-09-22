@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, type FC, type FormEvent } from 'react';
-import { X, Pill, ShieldAlert, Check, Zap, Layers, Box, Calculator, Clock } from 'lucide-react';
+import { X, Pill, ShieldAlert, Check, Zap, Layers, Box, Calculator, Clock, Calendar } from 'lucide-react';
 import { Medication, MedicationDose, describeStockInStrips, formatTimeArabic, isSolidUnit } from '../types';
 import {
   MAX_DOSES_PER_DAY,
@@ -94,6 +94,8 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
 
   const [reminderEnabled, setReminderEnabled] = useState<boolean>(false);
   const [autoDeductEnabled, setAutoDeductEnabled] = useState<boolean>(true);
+  const [isChronic, setIsChronic] = useState<boolean>(true);
+  const [durationDaysStr, setDurationDaysStr] = useState<string>('');
   // Toggle for medications that come as loose pills in a box without
   // strips (e.g., Coffiram — 15 pills per box, no blister strips).
   // When enabled, the strip fields are hidden and the user just
@@ -150,6 +152,16 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       }
       setReminderEnabled(Boolean(initialData.reminderEnabled));
       setAutoDeductEnabled(initialData.autoDeductEnabled !== false);
+      if (initialData.isChronic !== undefined) {
+        setIsChronic(Boolean(initialData.isChronic));
+        setDurationDaysStr(initialData.durationDays ? String(initialData.durationDays) : '');
+      } else if (initialData.durationDays && initialData.durationDays > 0) {
+        setIsChronic(false);
+        setDurationDaysStr(String(initialData.durationDays));
+      } else {
+        setIsChronic(true);
+        setDurationDaysStr('');
+      }
     } else {
       setName('');
       setCurrentPills(30);
@@ -171,6 +183,8 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       setHelperLoose('0');
       setReminderEnabled(false);
       setAutoDeductEnabled(defaultAutoDeductEnabled !== false);
+      setIsChronic(true);
+      setDurationDaysStr('');
     }
     setShowStockHelper(false);
     setError('');
@@ -315,6 +329,16 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
     const parsedThreshold = parseInt(warningThresholdDays, 10);
     const savedWarningThreshold = !Number.isNaN(parsedThreshold) && parsedThreshold >= 1 ? parsedThreshold : 5;
 
+    let finalDurationDays: number | undefined = undefined;
+    if (!isChronic) {
+      const dur = parseInt(durationDaysStr, 10);
+      if (isNaN(dur) || dur <= 0) {
+        setError('يرجى تحديد مدة استعمال الدواء بالأيام أو اختياره كدواء مزمن');
+        return;
+      }
+      finalDurationDays = dur;
+    }
+
     onSave(
       {
         name: name.trim(),
@@ -326,6 +350,8 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
         notes: initialData?.notes || '',
         colorTag,
         autoDeductEnabled,
+        isChronic,
+        durationDays: finalDurationDays,
         stripsPerBox: stripsPerBoxNum,
         pillsPerStrip: pillsPerStripNum,
         packageSize: calculatedPkgSize,
@@ -792,6 +818,87 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                 ))}
               </div>
             </div>
+          </div>
+
+          {/* طبيعة استعمال الدواء (مزمن vs مدة محددة) */}
+          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-teal-100 text-teal-800 flex items-center justify-center shrink-0">
+                <Calendar className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <span className="block text-xs font-bold text-slate-800">
+                  طبيعة استعمال الدواء
+                </span>
+                <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                  {isChronic
+                    ? 'دواء مزمن (استخدام مستمر بدون مدة محددة)'
+                    : 'كورس علاجي محدد المدة'}
+                </p>
+              </div>
+            </div>
+
+            {/* خيار مدة الاستعمال كـ Toggle / أزرار اختيار بالأخضر التيل مثل باقي التطبيق */}
+            <div className="grid grid-cols-2 gap-2 p-1 bg-slate-200/70 rounded-xl">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsChronic(true);
+                  setError('');
+                }}
+                className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  isChronic
+                    ? 'bg-teal-700 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <span>دواء مزمن</span>
+                <span className={`text-[10px] font-normal ${isChronic ? 'text-teal-100' : 'text-slate-400'}`}>(مستمر)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsChronic(false);
+                  setError('');
+                }}
+                className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  !isChronic
+                    ? 'bg-teal-700 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <span>مدة محددة</span>
+                <span className={`text-[10px] font-normal ${!isChronic ? 'text-teal-100' : 'text-slate-400'}`}>(كورس علاجي)</span>
+              </button>
+            </div>
+
+            {!isChronic && (
+              <div className="space-y-2 pt-0.5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    مدة الاستعمال (بالأيام) <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min="1"
+                      max="3650"
+                      inputMode="numeric"
+                      value={durationDaysStr}
+                      onChange={(e) => {
+                        setDurationDaysStr(e.target.value);
+                        setError('');
+                      }}
+                      placeholder="مثال: 5، 7، 10، 14 يوماً..."
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+                    />
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-medium">
+                      أيام
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="space-y-3">

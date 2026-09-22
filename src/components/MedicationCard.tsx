@@ -671,9 +671,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               {currentPills}
             </span>
             <span className="text-[8px] text-slate-500 truncate">{medication.unit || 'قرص'}</span>
-            {nonSolidPackageDesc && (
-              <span className="text-[8px] text-slate-500 truncate">({nonSolidPackageDesc})</span>
-            )}
           </div>
 
           <div className="flex items-center gap-1 shrink-0">

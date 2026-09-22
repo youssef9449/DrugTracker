@@ -1501,7 +1501,7 @@ public final class AutoDeductionScheduler {
                         double amount = evidence.optDouble("amount", Double.NaN);
                         String time = evidence.optString("timeHhmm", "");
                         long gen = evidence.optLong("recurrenceGeneration", 0L);
-                        String ver = evidence.optString("operationVersion", evidence.optString("scheduleVersion", ""));
+                        String ver = evidence.optString("operationVersion", "");
                         if (!AutoDeductionContract.isValidAmount(amount)) {
                             failed++;
                             ok = false;

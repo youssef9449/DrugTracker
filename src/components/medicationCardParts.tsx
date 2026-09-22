@@ -112,6 +112,11 @@ interface MedicationNotificationStatusBadgeProps {
   medicationId?: string;
 }
 
+/**
+ * Per-medication notification control rendered as an icon-only pill button.
+ * The full state remains available through aria-label/title; visible text is
+ * intentionally omitted so the controls stay compact on phone-width cards.
+ */
 export const MedicationNotificationStatusBadge: FC<MedicationNotificationStatusBadgeProps> = ({
   enabled,
   onToggle,
@@ -123,11 +128,11 @@ export const MedicationNotificationStatusBadge: FC<MedicationNotificationStatusB
   const isDose = type === 'dose';
   const label = isDose
     ? enabled
-      ? 'إشعار الجرعة: مفعّل'
-      : 'إشعار الجرعة: متوقف'
+      ? 'إشعار موعد الجرعة مفعّل'
+      : 'إشعار موعد الجرعة متوقف'
     : enabled
-      ? 'مخزون حرج: مفعّل'
-      : 'مخزون حرج: متوقف';
+      ? 'إشعار المخزون الحرج مفعّل'
+      : 'إشعار المخزون الحرج متوقف';
   const title = enabled
     ? `${isDose ? 'إشعار موعد الجرعة' : 'إشعار المخزون الحرج'} مفعّل (انقر للتعطيل)`
     : `${isDose ? 'إشعار موعد الجرعة' : 'إشعار المخزون الحرج'} متوقف (انقر للتفعيل)`;
@@ -147,8 +152,8 @@ export const MedicationNotificationStatusBadge: FC<MedicationNotificationStatusB
           ? `${isDose ? 'dose-reminder-badge' : 'critical-stock-alert-badge'}-${medicationId}`
           : undefined
       }
-      className={`font-medium rounded-full inline-flex items-center shrink-0 transition-all cursor-pointer active:scale-95 border select-none ${
-        isXs ? 'text-[8px] px-1.5 py-0.5' : 'text-[9px] px-2 py-0.5'
+      className={`font-medium rounded-full inline-flex items-center justify-center shrink-0 transition-all cursor-pointer active:scale-95 border select-none ${
+        isXs ? 'w-5 h-5' : 'w-6 h-6'
       } ${
         enabled
           ? isDose
@@ -158,17 +163,15 @@ export const MedicationNotificationStatusBadge: FC<MedicationNotificationStatusB
       }`}
     >
       {isDose ? (
-        enabled ? <Bell className="w-3 h-3" aria-hidden /> : <BellOff className="w-3 h-3" aria-hidden />
+        enabled
+          ? <Bell className="w-3 h-3" aria-hidden />
+          : <BellOff className="w-3 h-3" aria-hidden />
       ) : (
         <AlertTriangle className="w-3 h-3" aria-hidden />
       )}
-      <span className="whitespace-nowrap mr-0.5">{label}</span>
     </button>
   );
 };
-
-
-
 export interface UndoRefillBannerProps {
   lastRefillQuantity: number;
   unit: string;

@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { Medication } from '../types';
 import type { ExactAlarmPermission } from '../utils/exactAlarm';
-import { getTodayDateString } from '../utils/dateCalculations';
+import { getTodayDateString, tomorrowDateString, localEpochMs } from '../utils/dateCalculations';
 import {
   getMedicationTreatmentEndDate,
   isMedicationTreatmentActiveOnDate,
@@ -171,31 +171,6 @@ async function cancelUndesiredExactOccurrence(
       error: result.ok ? undefined : (result.error ?? 'cancel_failed'),
     };
   });
-}
-
-export function tomorrowDateString(today: string = getTodayDateString()): string {
-  const [y, m, d] = today.split('-').map((n) => parseInt(n, 10));
-  const dt = new Date(y, m - 1, d);
-  dt.setDate(dt.getDate() + 1);
-  const yy = dt.getFullYear();
-  const mm = String(dt.getMonth() + 1).padStart(2, '0');
-  const dd = String(dt.getDate()).padStart(2, '0');
-  return `${yy}-${mm}-${dd}`;
-}
-
-export function localEpochMs(calendarDate: string, timeHhmm: string): number | null {
-  if (!calendarDate || !timeHhmm) return null;
-  const parts = calendarDate.split('-').map((n) => parseInt(n, 10));
-  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return null;
-  const colon = timeHhmm.indexOf(':');
-  if (colon < 1) return null;
-  const h = parseInt(timeHhmm.slice(0, colon), 10);
-  const mi = parseInt(timeHhmm.slice(colon + 1), 10);
-  if (!Number.isFinite(h) || !Number.isFinite(mi)) return null;
-  const [y, m, d] = parts;
-  const dt = new Date(y, m - 1, d, h, mi, 0, 0);
-  const ms = dt.getTime();
-  return Number.isFinite(ms) ? ms : null;
 }
 
 /**

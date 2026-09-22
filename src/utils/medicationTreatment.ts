@@ -35,8 +35,7 @@ function addCalendarDays(calendarDate: string, days: number): string | null {
  * Legacy records without an explicit treatment flag are chronic by default.
  * A bounded course must explicitly set isChronic=false.
  *
- * Temporary records created by the first treatment-duration implementation
- * may not have treatmentStartDate yet; createdAt is the deterministic fallback.
+ * Temporary treatment boundaries require an explicit durable treatmentStartDate.
  */
 export function isMedicationChronic(medication: Medication): boolean {
   return medication.isChronic !== false;
@@ -48,11 +47,7 @@ export function getMedicationTreatmentStartDate(
   if (isMedicationChronic(medication)) return null;
 
   const configured = normalizeCalendarDate(medication.treatmentStartDate);
-  if (configured) return configured;
-
-  const createdAt = new Date(medication.createdAt);
-  if (!Number.isFinite(createdAt.getTime())) return null;
-  return formatLocalCalendarDate(createdAt);
+  return configured;
 }
 
 export function getMedicationTreatmentEndDate(

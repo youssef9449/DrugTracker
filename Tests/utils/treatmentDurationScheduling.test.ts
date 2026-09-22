@@ -39,6 +39,19 @@ describe('treatment duration scheduling', () => {
     expect(isMedicationTreatmentActiveOnDate(medication, '2026-09-27')).toBe(false);
   });
 
+  it('does not derive a temporary treatment start date from createdAt', () => {
+    const medication = med({
+      isChronic: false,
+      durationDays: 7,
+      treatmentStartDate: undefined,
+      createdAt: '2026-09-01T10:00:00.000Z',
+    });
+
+    expect(getMedicationTreatmentStartDate(medication)).toBeNull();
+    expect(getMedicationTreatmentEndDate(medication)).toBeNull();
+    expect(isMedicationTreatmentActiveOnDate(medication, '2026-09-22')).toBe(false);
+  });
+
   it('stops Exact Auto desired slots after the course ends', () => {
     const medication = med({
       isChronic: false,

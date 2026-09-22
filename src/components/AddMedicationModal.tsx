@@ -158,9 +158,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       if (initialData.isChronic === false) {
         setIsChronic(false);
         setDurationDaysStr(initialData.durationDays ? String(initialData.durationDays) : '');
-        setTreatmentStartDateStr(
-          getMedicationTreatmentStartDate(initialData) ?? getTodayDateString()
-        );
+        setTreatmentStartDateStr(initialData.treatmentStartDate ?? '');
       } else {
         // Legacy records and explicit chronic records are chronic by default.
         setIsChronic(true);
@@ -346,8 +344,12 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
     }
 
     const finalTreatmentStartDate = !isChronic
-      ? (treatmentStartDateStr || getTodayDateString())
+      ? (treatmentStartDateStr || initialData?.treatmentStartDate || '')
       : undefined;
+    if (!isChronic && !finalTreatmentStartDate) {
+      setError('تاريخ بداية الكورس غير محدد. اختر مدة محددة مرة أخرى لتعيين بداية العلاج.');
+      return;
+    }
 
     onSave(
       {

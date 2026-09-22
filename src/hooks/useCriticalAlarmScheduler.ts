@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { Medication } from '../types';
-import { calculateMedicationStatus } from '../types';
+import { calculateMedicationStatus } from '../utils/medicationStatus';
 import { getTodayDateString, getCriticalAlarmDate, dailyScheduleAmount } from '../utils/dateCalculations';
 import {
   scheduleCriticalAlarm,

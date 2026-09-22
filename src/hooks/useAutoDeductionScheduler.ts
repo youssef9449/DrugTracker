@@ -1,5 +1,5 @@
 /**
- * Phase 2 — JS-side scheduler for native exact-time auto-deduction.
+ * JS-side scheduler for native exact-time auto-deduction.
  * Independent of notifications. Does NOT mutate currentPills / logs.
  */
 

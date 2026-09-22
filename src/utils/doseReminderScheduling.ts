@@ -8,7 +8,10 @@ import {
 import { getNativePlatform, isNativePlatform } from './notifications/notificationPlatform';
 import { cancelNotification, getPendingNotification, scheduleNotification } from './notificationRuntime';
 import { scheduleWebNotification } from './notifications/webNotifications';
-import { getDoseReminderChannelId } from './notifications/doseReminderNotifications';
+import {
+  getDoseReminderChannelId,
+  DOSE_REMINDER_TAKE_ACTION,
+} from './notifications/doseReminderNotifications';
 
 export async function isDoseReminderPending(
   medId: string,
@@ -190,7 +193,7 @@ export async function scheduleDoseReminder(
     fireToday.setDate(fireToday.getDate() + 1);
   }
 
-  const title = `⏰ حان موعد دواء: ${medName}`;
+  const title = `حان موعد دواء: ${medName}`;
   const body = `موعد الجرعة الساعة ${formatReminderTime12h(reminderTime)}. جرعتك المقررة: ${doseAmount} ${unit}.`;
 
   if (getNativePlatform() === 'ios') {
@@ -206,7 +209,7 @@ export async function scheduleDoseReminder(
       action:
         options?.allowManualTakeAction === false
           ? undefined
-          : { id: 'dose-reminder', title: 'تم أخذ الجرعة', foreground: true },
+          : DOSE_REMINDER_TAKE_ACTION,
       at: fireToday,
       extra: {
         medicationId: medId,

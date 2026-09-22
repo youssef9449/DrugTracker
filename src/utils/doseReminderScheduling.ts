@@ -135,6 +135,8 @@ export interface ScheduleDoseReminderOptions {
    * this suppression.
    */
   skipToday?: boolean;
+  /** Optional per-dose user instruction from MedicationDose.description. */
+  doseDescription?: string;
   /**
    * Whether the reminder may expose the manual "تم أخذ الجرعة" action.
    * The business layer supplies this neutral capability; Dose Reminder does
@@ -181,7 +183,8 @@ export async function scheduleDoseReminder(
       unit,
       id,
       options?.skipToday === true,
-      options?.allowManualTakeAction !== false
+      options?.allowManualTakeAction !== false,
+      options?.doseDescription
     );
     return;
   }
@@ -194,7 +197,8 @@ export async function scheduleDoseReminder(
   }
 
   const title = `حان موعد دواء: ${medName}`;
-  const body = `موعد الجرعة الساعة ${formatReminderTime12h(reminderTime)}. جرعتك المقررة: ${doseAmount} ${unit}.`;
+  const description = options?.doseDescription?.trim();
+  const body = `موعد الجرعة الساعة ${formatReminderTime12h(reminderTime)}. جرعتك المقررة: ${doseAmount} ${unit}${description ? `. طريقة تناول الجرعة: ${description}` : ''}.`;
 
   if (getNativePlatform() === 'ios') {
     const scheduled = await scheduleNotification({

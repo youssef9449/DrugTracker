@@ -177,39 +177,6 @@ public final class AutoDeductionScheduler {
     }
 
     /**
-     * Return the Auto-owned recurrence authorization generation.
-     *
-     * New schedules read the value only from Auto-owned recurrence authorization
-     * state. A legacy scheduled row may still carry the generation from the
-     * pre-Phase-2 format; when present and no Auto-owned value exists yet, migrate
-     * that value into the Auto-owned authorization store under SCHEDULE_LOCK.
-     */
-    private long getEffectiveRecurrenceGenerationLocked(
-            String medicationId,
-            String doseId,
-            JSONObject legacyMetadata) {
-        long active = getRecurrenceGenerationLocked(medicationId, doseId);
-        if (active > 0L) {
-            return active;
-        }
-        if (legacyMetadata == null) {
-            return 0L;
-        }
-        long legacy = legacyMetadata.optLong(FIELD_RECURRENCE_GENERATION, 0L);
-        if (legacy <= 0L) {
-            return 0L;
-        }
-        String key = recurrenceAuthKey(medicationId, doseId);
-        if (!recurrenceAuthPrefs.edit().putLong(key, legacy).commit()) {
-            Log.e(TAG, "legacy recurrence generation migration failed for " + key);
-            return 0L;
-        }
-        return legacy;
-    }
-
-
-
-    /**
      * Ensure a non-zero active generation exists for the dose slot (first schedule).
      * Caller must hold {@link #SCHEDULE_LOCK}.
      */

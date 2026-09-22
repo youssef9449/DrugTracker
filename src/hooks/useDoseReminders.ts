@@ -98,6 +98,9 @@ export function useDoseReminders({
 
     const amount = Number(row.amount);
     const time = row.time;
+    const description = typeof row.description === 'string' && row.description.trim()
+      ? row.description.trim()
+      : undefined;
 
     setSnoozeUntil(medication.id, Date.now() + minutes * MS_PER_MINUTE, doseId);
 
@@ -109,7 +112,8 @@ export function useDoseReminders({
       time,
       minutes,
       doseId,
-      allowManualTakeActionByMedicationId.get(medication.id) ?? true
+      allowManualTakeActionByMedicationId.get(medication.id) ?? true,
+      description
     ).catch(() => void 0);
 
     alarmingIdRef.current = null;

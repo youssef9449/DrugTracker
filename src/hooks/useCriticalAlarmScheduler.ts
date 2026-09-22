@@ -225,6 +225,7 @@ export function useCriticalAlarmScheduler({
           dailyScheduleAmount(m),
           m.warningThresholdDays,
           m.autoDeductEnabled === false ? 0 : 1,
+          m.criticalStockAlertsEnabled === false ? 0 : 1,
           m.name,
           m.unit ?? '',
           schedulePart,
@@ -356,6 +357,14 @@ export function useCriticalAlarmScheduler({
       const { status } = calculateMedicationStatus(med);
       const isCriticalish = status === 'critical' || status === 'out_of_stock';
       const criticalDateMs = getCriticalAlarmDate(med, today);
+      const medicationCriticalAlertsEnabled =
+        med.criticalStockAlertsEnabled !== false;
+
+      if (!medicationCriticalAlertsEnabled) {
+        // Local opt-out: do not arm a new critical alarm for this medication.
+        // The stale native-alarm cleanup below cancels any previous schedule.
+        continue;
+      }
 
       if (isCriticalish || criticalDateMs === null) {
         // Already critical → the foreground owns the episode's

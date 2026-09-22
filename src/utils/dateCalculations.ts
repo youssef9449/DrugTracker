@@ -26,6 +26,13 @@ export function addCalendarDays(dateStr: string, days: number): string {
   return formatUtcDateString(target);
 }
 
+export function calendarDayDifference(fromDate: string, toDate: string): number | null {
+  const from = parseUtcDate(fromDate);
+  const to = parseUtcDate(toDate);
+  if (!from || !to) return null;
+  return Math.round((to.getTime() - from.getTime()) / MS_PER_DAY);
+}
+
 export function tomorrowDateString(dateStr: string = getTodayDateString()): string {
   return addCalendarDays(dateStr, 1);
 }

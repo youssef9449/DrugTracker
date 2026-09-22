@@ -894,7 +894,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               </span>
             )}
             {stripsDesc && (
-            {stripsDesc && (
               <span className="text-[9px] text-teal-800 bg-teal-50 px-1.5 py-0.5 rounded-full border border-teal-100 font-medium truncate">
                 ({stripsDesc})
               </span>

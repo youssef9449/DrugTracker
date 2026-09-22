@@ -1,7 +1,7 @@
 import type { FC } from 'react';
 import { History, X, ArrowUpRight, ArrowDownLeft, Minus } from 'lucide-react';
 import type { ConsumptionLog, Medication } from '../types';
-import { formatArabicDate, formatLogTime } from '../utils/dateCalculations';
+import { formatArabicDate, formatLogTime } from '../utils/medicationPresentation';
 import { Modal } from './ui/Modal';
 
 interface MedicationHistoryModalProps {

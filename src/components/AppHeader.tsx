@@ -114,8 +114,8 @@ export const AppHeader: FC<AppHeaderProps> = ({
             aria-pressed={globalAutoDeductEnabled}
             className={`w-10 h-10 rounded-full transition-all active:scale-95 flex items-center justify-center cursor-pointer ${
               globalAutoDeductEnabled
-                ? 'bg-teal-400/20 text-teal-200 ring-1 ring-teal-300/30 shadow-xs'
-                : 'bg-amber-400/20 text-amber-200 ring-1 ring-amber-300/30 shadow-xs'
+                ? 'bg-teal-400/20 text-teal-200'
+                : 'bg-amber-400/20 text-amber-200'
             }`}
           >
             {globalAutoDeductEnabled ? (

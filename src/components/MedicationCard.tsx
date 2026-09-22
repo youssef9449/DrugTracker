@@ -641,6 +641,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 </span>
               ) : null
             ) : null}
+            <div className="flex items-center gap-1 shrink-0">
             <button
               type="button"
               onClick={() => onOpenRefill(medication)}
@@ -659,13 +660,13 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               onToggleMedicationReminder={onToggleMedicationReminder}
               onToggleMedicationCriticalStockAlerts={onToggleMedicationCriticalStockAlerts}
               onOpenHistory={onOpenHistory}
-              size="xs"
             />
+            </div>
         </div>
 
         {/* Row 3: stock · dose · depletion — surface container */}
-        <div className="mt-1.5 p-1 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between gap-1 text-[9px] min-w-0">
-          <div className="flex items-baseline gap-0.5 min-w-0">
+        <div className="mt-1.5 p-1 bg-slate-50 rounded-xl border border-slate-100 grid grid-cols-2 gap-1 text-[9px] min-w-0">
+          <div className="flex min-w-0 items-baseline gap-0.5">
             <span className="text-[8px] text-slate-500">المتبقي:</span>
             <span className={`font-mono font-extrabold text-[11px] leading-none ${currentPills === 0 ? 'text-red-600' : 'text-slate-900'}`}>
               {currentPills}
@@ -673,12 +674,12 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             <span className="text-[8px] text-slate-500 truncate">{medication.unit || 'قرص'}</span>
           </div>
 
-          <div className="flex items-center gap-1 shrink-0">
-            <div className="flex items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 font-mono text-teal-800 font-bold" title={`الجرعة: ${medication.dailyDose}/يوم`}>
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
+            <div className="flex shrink-0 items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 font-mono text-teal-800 font-bold" title={`الجرعة: ${medication.dailyDose}/يوم`}>
               <Clock className="w-2 h-2 text-teal-600" />
               <span>{medication.dailyDose}/ي</span>
             </div>
-            <div className="flex items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 text-slate-600 truncate max-w-[70px]" title={`النفاذ: ${depletion.formattedArabic}`}>
+            <div className="flex min-w-0 max-w-full items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 text-slate-600" title={`النفاذ: ${depletion.formattedArabic}`}>
               <Calendar className="w-2 h-2 text-slate-400 shrink-0" />
               <span className="truncate">{shortDepletionLabel(depletion, isOut)}</span>
             </div>
@@ -844,6 +845,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               ) : null
             ) : null}
 
+            <div className="flex items-center gap-1 shrink-0">
             <button
               type="button"
               onClick={() => onOpenRefill(medication)}
@@ -865,6 +867,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               onOpenHistory={onOpenHistory}
               size="sm"
             />
+            </div>
         </div>
 
         {/* Second line: Crucial details — surface container */}

@@ -109,7 +109,7 @@ export interface ManualStockEnvelope {
   medications: Medication[];
   logs: ConsumptionLog[];
   /** Phase 4 durable global master switch. */
-  globalAutoDeductEnabled?: boolean;
+  globalAutoDeductEnabled: boolean;
   createdAt: string;
   baseGeneration: number;
   mutationSeq: number;
@@ -173,6 +173,7 @@ export function loadManualStockEnvelope(): ManualStockEnvelope | null {
   if (!Array.isArray(raw.stockDeltas) || !Array.isArray(raw.occurrenceResolutions)) {
     return null;
   }
+  if (typeof raw.globalAutoDeductEnabled !== 'boolean') return null;
   return raw;
 }
 

@@ -34,6 +34,10 @@ import {
 import { pruneDoseConsumption } from './pruneDoseConsumption';
 import { isValidDoseTime, normalizeTimeString } from './doseSchedule';
 import {
+  getMedicationTreatmentEndDate,
+  isMedicationTreatmentActiveOnDate,
+} from './medicationTreatment';
+import {
   withAutoStockMutationGate,
   commitDurableAutoStockState,
   loadStockGeneration,
@@ -137,6 +141,9 @@ function autoDeductionDefinitionSignature(med: {
   reminderEnabled?: boolean;
   reminderTime?: string;
   dailyDose: number;
+  isChronic?: boolean;
+  durationDays?: number;
+  treatmentStartDate?: string;
   doseSchedule?: Medication['doseSchedule'];
 }): string {
   const schedulePart =
@@ -150,6 +157,9 @@ function autoDeductionDefinitionSignature(med: {
     med.reminderEnabled === true ? '1' : '0',
     med.reminderTime ?? '',
     med.dailyDose,
+    med.isChronic === false ? 'temporary' : 'chronic',
+    med.durationDays ?? '',
+    med.treatmentStartDate ?? '',
     schedulePart,
   ].join('|');
 }
@@ -228,11 +238,14 @@ async function restoreInvalidatedRecurrences(
   const today = getTodayDateString();
   const tomorrow = nextCalendarDateString(today);
   if (!tomorrow) return { ok: false, error: 'invalid_next_date' };
+  const treatmentEndDate = getMedicationTreatmentEndDate(med);
 
   for (const doseId of doseIds) {
     const def = recurrenceDefinition(med, doseId);
     if (!def) continue;
     for (const calendarDate of [today, tomorrow]) {
+      if (!isMedicationTreatmentActiveOnDate(med, calendarDate)) continue;
+      if (treatmentEndDate && calendarDate > treatmentEndDate) continue;
       const epoch = localEpochMs(calendarDate, def.time);
       if (epoch == null || epoch <= now.getTime() - 2000) continue;
       const result = await scheduleAutoDeduction({
@@ -242,6 +255,7 @@ async function restoreInvalidatedRecurrences(
         timeHhmm: def.time,
         amount: def.amount,
         scheduledAtEpochMs: epoch,
+        treatmentEndDate: treatmentEndDate ?? undefined,
       });
       if (!result.ok && result.error !== 'not_android') {
         return { ok: false, error: result.error ?? 'schedule_failed' };

@@ -51,6 +51,8 @@ export interface Medication {
    * يتأثر شريط التقدم بهذه المدة.
    */
   durationDays?: number;
+  /** Local YYYY-MM-DD date on which a temporary treatment course starts. */
+  treatmentStartDate?: string;
   packageSize?: number; // Size of standard package when bought (e.g. 30)
   stripsPerBox?: number; // عدد الأشرطة في العلبة (مثال: 3 أشرطة)
   pillsPerStrip?: number; // عدد الأقراص في الشريط الواحد (مثال: 10 أقراص)

@@ -25,6 +25,7 @@ public final class DoseReminderPlugin extends Plugin {
         String medicationName = call.getString("medicationName", "");
         String unit = call.getString("unit", "قرص");
         String doseDescription = call.getString("doseDescription", "");
+        String treatmentEndDate = call.getString("treatmentEndDate", "");
         Boolean allowManualTakeAction = call.getBoolean("allowManualTakeAction", true);
         Long triggerAt = call.getLong("triggerAtEpochMs");
 
@@ -44,7 +45,8 @@ public final class DoseReminderPlugin extends Plugin {
                         doseDescription,
                         Boolean.TRUE.equals(allowManualTakeAction),
                         triggerAt,
-                        null);
+                        null,
+                        treatmentEndDate.isEmpty() ? null : treatmentEndDate);
 
         JSObject ret = new JSObject();
         ret.put("ok", result.ok);

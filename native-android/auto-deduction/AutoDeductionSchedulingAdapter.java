@@ -183,6 +183,30 @@ public final class AutoDeductionSchedulingAdapter {
             long triggerAtEpochMs,
             long recurrenceGeneration,
             String expectedOperationVersion) {
+        return scheduleOccurrence(
+                occurrenceKey,
+                medicationId,
+                doseId,
+                calendarDate,
+                timeHhmm,
+                amount,
+                triggerAtEpochMs,
+                null,
+                recurrenceGeneration,
+                expectedOperationVersion);
+    }
+
+    public ScheduleResult scheduleOccurrence(
+            String occurrenceKey,
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            String timeHhmm,
+            double amount,
+            long triggerAtEpochMs,
+            String treatmentEndDate,
+            long recurrenceGeneration,
+            String expectedOperationVersion) {
         JSONObject featureMetadata = new JSONObject();
         try {
             featureMetadata.put("medicationId", medicationId);
@@ -191,6 +215,11 @@ public final class AutoDeductionSchedulingAdapter {
             featureMetadata.put("timeHhmm", timeHhmm);
             featureMetadata.put("amount", amount);
             featureMetadata.put("scheduledAtEpochMs", triggerAtEpochMs);
+            if (treatmentEndDate != null && !treatmentEndDate.isEmpty()) {
+                featureMetadata.put(
+                        AutoDeductionContract.EXTRA_TREATMENT_END_DATE,
+                        treatmentEndDate);
+            }
             // Only identity/timing/amount payload is handed to Shared metadata.
             // Auto recurrence authorization remains delivery-only business state.
             // No FIRED/RECONCILED/retry/claim/consumption state is persisted here.

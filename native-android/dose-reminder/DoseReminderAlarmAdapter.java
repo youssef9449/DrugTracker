@@ -54,11 +54,42 @@ public final class DoseReminderAlarmAdapter {
             boolean allowManualTakeAction,
             long triggerAtEpochMs,
             String expectedOperationVersion) {
+        return scheduleOccurrence(
+                medicationId,
+                doseId,
+                reminderTime,
+                amount,
+                medicationName,
+                unit,
+                doseDescription,
+                allowManualTakeAction,
+                triggerAtEpochMs,
+                expectedOperationVersion,
+                null);
+    }
+
+    public ScheduleResult scheduleOccurrence(
+            String medicationId,
+            String doseId,
+            String reminderTime,
+            double amount,
+            String medicationName,
+            String unit,
+            String doseDescription,
+            boolean allowManualTakeAction,
+            long triggerAtEpochMs,
+            String expectedOperationVersion,
+            String treatmentEndDate) {
         if (medicationId == null || medicationId.isEmpty()
                 || doseId == null || doseId.isEmpty()
                 || reminderTime == null || reminderTime.isEmpty()
                 || triggerAtEpochMs <= 0L) {
             return ScheduleResult.failure("invalid_request");
+        }
+        if (treatmentEndDate != null && !treatmentEndDate.isEmpty()
+                && !app.drugtracker.alarmruntime.ExactAlarmContract
+                        .isValidCalendarDate(treatmentEndDate)) {
+            return ScheduleResult.failure("invalid_treatment_end_date");
         }
 
         String storageKey = occurrenceKey(medicationId, doseId);
@@ -80,6 +111,9 @@ public final class DoseReminderAlarmAdapter {
                             scheduled.get(java.util.Calendar.MONTH) + 1,
                             scheduled.get(java.util.Calendar.DAY_OF_MONTH)));
             metadata.put("amount", amount);
+            if (treatmentEndDate != null && !treatmentEndDate.isEmpty()) {
+                metadata.put("treatmentEndDate", treatmentEndDate);
+            }
             metadata.put("medicationName", medicationName == null ? "" : medicationName);
             metadata.put("unit", unit == null ? "" : unit);
             metadata.put("doseDescription", doseDescription == null ? "" : doseDescription.trim());

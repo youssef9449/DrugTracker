@@ -137,6 +137,8 @@ export interface ScheduleDoseReminderOptions {
   skipToday?: boolean;
   /** Optional per-dose user instruction from MedicationDose.description. */
   doseDescription?: string;
+  /** Inclusive YYYY-MM-DD end date for a temporary treatment course. */
+  treatmentEndDate?: string;
   /**
    * Whether the reminder may expose the manual "تم أخذ الجرعة" action.
    * The business layer supplies this neutral capability; Dose Reminder does
@@ -184,7 +186,8 @@ export async function scheduleDoseReminder(
       id,
       options?.skipToday === true,
       options?.allowManualTakeAction !== false,
-      options?.doseDescription
+      options?.doseDescription,
+      options?.treatmentEndDate
     );
     return;
   }
@@ -194,6 +197,17 @@ export async function scheduleDoseReminder(
   fireToday.setHours(hour, minute, 0, 0);
   if (fireToday.getTime() <= now.getTime() || options?.skipToday === true) {
     fireToday.setDate(fireToday.getDate() + 1);
+  }
+
+  if (options?.treatmentEndDate) {
+    const fireDate = [
+      String(fireToday.getFullYear()).padStart(4, '0'),
+      String(fireToday.getMonth() + 1).padStart(2, '0'),
+      String(fireToday.getDate()).padStart(2, '0'),
+    ].join('-');
+    if (fireDate > options.treatmentEndDate) {
+      return;
+    }
   }
 
   const title = `حان موعد دواء: ${medName}`;

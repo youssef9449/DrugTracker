@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, type FC, type FormEvent } from 'react';
 import { X, Pill, ShieldAlert, Check, Zap, Layers, Box, Calculator, Clock, Calendar } from 'lucide-react';
 import { Medication, MedicationDose, describeStockInStrips, formatTimeArabic, isSolidUnit } from '../types';
+import { getTodayDateString } from '../utils/dateCalculations';
 import {
   MAX_DOSES_PER_DAY,
   getDoseScheduleForUI,
@@ -96,6 +97,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
   const [autoDeductEnabled, setAutoDeductEnabled] = useState<boolean>(true);
   const [isChronic, setIsChronic] = useState<boolean>(true);
   const [durationDaysStr, setDurationDaysStr] = useState<string>('');
+  const [treatmentStartDateStr, setTreatmentStartDateStr] = useState<string>('');
   // Toggle for medications that come as loose pills in a box without
   // strips (e.g., Coffiram — 15 pills per box, no blister strips).
   // When enabled, the strip fields are hidden and the user just
@@ -152,15 +154,15 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       }
       setReminderEnabled(Boolean(initialData.reminderEnabled));
       setAutoDeductEnabled(initialData.autoDeductEnabled !== false);
-      if (initialData.isChronic !== undefined) {
-        setIsChronic(Boolean(initialData.isChronic));
-        setDurationDaysStr(initialData.durationDays ? String(initialData.durationDays) : '');
-      } else if (initialData.durationDays && initialData.durationDays > 0) {
+      if (initialData.isChronic === false) {
         setIsChronic(false);
-        setDurationDaysStr(String(initialData.durationDays));
+        setDurationDaysStr(initialData.durationDays ? String(initialData.durationDays) : '');
+        setTreatmentStartDateStr(initialData.treatmentStartDate ?? '');
       } else {
+        // Legacy records and explicit chronic records are chronic by default.
         setIsChronic(true);
         setDurationDaysStr('');
+        setTreatmentStartDateStr('');
       }
     } else {
       setName('');
@@ -185,6 +187,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       setAutoDeductEnabled(defaultAutoDeductEnabled !== false);
       setIsChronic(true);
       setDurationDaysStr('');
+      setTreatmentStartDateStr('');
     }
     setShowStockHelper(false);
     setError('');
@@ -332,11 +335,19 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
     let finalDurationDays: number | undefined = undefined;
     if (!isChronic) {
       const dur = parseInt(durationDaysStr, 10);
-      if (isNaN(dur) || dur <= 0) {
-        setError('يرجى تحديد مدة استعمال الدواء بالأيام أو اختياره كدواء مزمن');
+      if (!Number.isInteger(dur) || dur <= 0 || dur > 3650) {
+        setError('مدة الاستعمال يجب أن تكون من 1 إلى 3650 يوماً');
         return;
       }
       finalDurationDays = dur;
+    }
+
+    const finalTreatmentStartDate = !isChronic
+      ? (treatmentStartDateStr || initialData?.treatmentStartDate || '')
+      : undefined;
+    if (!isChronic && !finalTreatmentStartDate) {
+      setError('تاريخ بداية الكورس غير محدد. اختر مدة محددة مرة أخرى لتعيين بداية العلاج.');
+      return;
     }
 
     onSave(
@@ -352,6 +363,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
         autoDeductEnabled,
         isChronic,
         durationDays: finalDurationDays,
+        treatmentStartDate: finalTreatmentStartDate,
         stripsPerBox: stripsPerBoxNum,
         pillsPerStrip: pillsPerStripNum,
         packageSize: calculatedPkgSize,
@@ -859,6 +871,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                 type="button"
                 onClick={() => {
                   setIsChronic(false);
+                  setTreatmentStartDateStr((prev) => prev || getTodayDateString());
                   setError('');
                 }}
                 className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${

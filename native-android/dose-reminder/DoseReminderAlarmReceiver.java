@@ -60,6 +60,25 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
         }
 
         boolean snooze = DoseReminderAlarmAdapter.ACTION_DOSE_SNOOZE.equals(action);
+        if (!snooze) {
+            org.json.JSONObject metadata =
+                    new DoseReminderAlarmAdapter(context).getScheduleMetadata(
+                            medicationId, doseId);
+            String treatmentEndDate = metadata == null
+                    ? ""
+                    : metadata.optString("treatmentEndDate", "");
+            String scheduledCalendarDate = metadata == null
+                    ? ""
+                    : metadata.optString("calendarDate", "");
+            if (!treatmentEndDate.isEmpty()
+                    && (!app.drugtracker.alarmruntime.ExactAlarmContract
+                            .isValidCalendarDate(treatmentEndDate)
+                    || !app.drugtracker.alarmruntime.ExactAlarmContract
+                            .isValidCalendarDate(scheduledCalendarDate)
+                    || scheduledCalendarDate.compareTo(treatmentEndDate) > 0)) {
+                return;
+            }
+        }
         boolean foreground = app.drugtracker.notificationruntime.AppForegroundState.isForeground();
         String channelId = foreground ? FG_CHANNEL_ID : BG_CHANNEL_ID;
         String channelName = foreground ? FG_CHANNEL_NAME : BG_CHANNEL_NAME;
@@ -150,6 +169,23 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
 
         DoseReminderAlarmAdapter adapter =
                 new DoseReminderAlarmAdapter(context);
+        org.json.JSONObject metadata =
+                adapter.getScheduleMetadata(medicationId, doseId);
+        String treatmentEndDate = metadata == null
+                ? ""
+                : metadata.optString("treatmentEndDate", "");
+        String nextDate = String.format(
+                java.util.Locale.US,
+                "%04d-%02d-%02d",
+                next.get(java.util.Calendar.YEAR),
+                next.get(java.util.Calendar.MONTH) + 1,
+                next.get(java.util.Calendar.DAY_OF_MONTH));
+        if (!treatmentEndDate.isEmpty()
+                && (!app.drugtracker.alarmruntime.ExactAlarmContract
+                        .isValidCalendarDate(treatmentEndDate)
+                || nextDate.compareTo(treatmentEndDate) > 0)) {
+            return;
+        }
         adapter.scheduleOccurrence(
                 medicationId,
                 doseId,
@@ -160,6 +196,7 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
                 doseDescription,
                 allowManualTakeAction,
                 next.getTimeInMillis(),
-                expectedOperationVersion);
+                expectedOperationVersion,
+                treatmentEndDate.isEmpty() ? null : treatmentEndDate);
     }
 }

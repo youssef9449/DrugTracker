@@ -54,6 +54,7 @@ public final class DoseReminderAlarmFeature
                     "medicationName", "");
             String unit = meta.optString("unit", "قرص");
             String doseDescription = meta.optString("doseDescription", "");
+            String treatmentEndDate = meta.optString("treatmentEndDate", "");
             double amount = meta.optDouble("amount", 0d);
             boolean allowManualTakeAction = meta.optBoolean(
                     "allowManualTakeAction", true);
@@ -74,6 +75,30 @@ public final class DoseReminderAlarmFeature
             if (trigger <= now || amount <= 0d) {
                 continue;
             }
+            if (!treatmentEndDate.isEmpty()
+                    && !ExactAlarmContract.isValidCalendarDate(treatmentEndDate)) {
+                continue;
+            }
+            if (!treatmentEndDate.isEmpty()) {
+                java.util.Calendar triggerCalendar =
+                        java.util.Calendar.getInstance();
+                triggerCalendar.setTimeInMillis(trigger);
+                String triggerCalendarDate = String.format(
+                        java.util.Locale.US,
+                        "%04d-%02d-%02d",
+                        triggerCalendar.get(java.util.Calendar.YEAR),
+                        triggerCalendar.get(java.util.Calendar.MONTH) + 1,
+                        triggerCalendar.get(java.util.Calendar.DAY_OF_MONTH));
+                if (triggerCalendarDate.compareTo(treatmentEndDate) > 0) {
+                    DoseReminderAlarmAdapter.CancelResult cancel =
+                            adapter.cancelOccurrence(medicationId, doseId);
+                    if (!cancel.isOk()) {
+                        Log.w(TAG, reason + ": failed to cancel expired " + key
+                                + " (" + cancel.error + ")");
+                    }
+                    continue;
+                }
+            }
 
             DoseReminderAlarmAdapter.ScheduleResult result =
                     adapter.scheduleOccurrence(
@@ -88,7 +113,8 @@ public final class DoseReminderAlarmFeature
                             trigger,
                             operationVersion.isEmpty()
                                     ? null
-                                    : operationVersion);
+                                    : operationVersion,
+                            treatmentEndDate.isEmpty() ? null : treatmentEndDate);
             if (!result.ok) {
                 Log.w(
                         TAG,

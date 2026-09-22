@@ -3,6 +3,10 @@ import type { Medication } from '../types';
 import type { ExactAlarmPermission } from '../utils/exactAlarm';
 import { getTodayDateString } from '../utils/dateCalculations';
 import {
+  getMedicationTreatmentEndDate,
+  isMedicationTreatmentActiveOnDate,
+} from '../utils/medicationTreatment';
+import {
   scheduleDoseReminder,
   cancelDoseReminder,
   isDoseReminderPending,
@@ -179,6 +183,9 @@ export function useDoseReminderScheduler({
           return [
             m.id,
             m.reminderEnabled === true ? '1' : '0',
+            m.isChronic === false ? 'temporary' : 'chronic',
+            getMedicationTreatmentEndDate(m) ?? '',
+            m.treatmentStartDate ?? '',
             schedulePart,
             m.name,
             m.unit ?? '',
@@ -235,6 +242,7 @@ export function useDoseReminderScheduler({
       description?: string;
       slotConsumedToday: boolean;
       allowManualTakeAction: boolean;
+      treatmentEndDate?: string;
       sig: string;
     };
     const desired: DesiredSlot[] = [];
@@ -242,6 +250,8 @@ export function useDoseReminderScheduler({
     // Build desired set from medication data (source of config truth).
     for (const med of medicationsRef.current) {
       if (!med.reminderEnabled) continue;
+      if (!isMedicationTreatmentActiveOnDate(med, today)) continue;
+      const treatmentEndDate = getMedicationTreatmentEndDate(med);
       const slots = getDoseReminderSlots(med);
       if (slots.length === 0) continue;
 
@@ -257,6 +267,7 @@ export function useDoseReminderScheduler({
           slot.description ?? '',
           slotConsumedToday ? '1' : '0',
           allowManualTakeAction ? '1' : '0',
+          treatmentEndDate ?? '',
         ].join('|');
         stillScheduled.add(key);
         keepNativeIds.add(key);
@@ -271,6 +282,7 @@ export function useDoseReminderScheduler({
           description: slot.description,
           slotConsumedToday,
           allowManualTakeAction,
+          treatmentEndDate,
           sig,
         });
       }
@@ -296,6 +308,7 @@ export function useDoseReminderScheduler({
         description,
         slotConsumedToday,
         allowManualTakeAction,
+        treatmentEndDate,
         sig,
       } = slot;
       const prevSig = appliedSignatureRef.current.get(key);
@@ -326,6 +339,7 @@ export function useDoseReminderScheduler({
             ...(slotConsumedToday ? { skipToday: true as const } : {}),
             allowManualTakeAction,
             ...(description ? { doseDescription: description } : {}),
+            ...(treatmentEndDate ? { treatmentEndDate } : {}),
           };
           await scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts);
           if (!generationGuardRef.current.isCurrent(key, gen)) {
@@ -345,6 +359,7 @@ export function useDoseReminderScheduler({
             ...(slotConsumedToday ? { skipToday: true as const } : {}),
             allowManualTakeAction,
             ...(description ? { doseDescription: description } : {}),
+            ...(treatmentEndDate ? { treatmentEndDate } : {}),
           };
           await scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts);
           if (!generationGuardRef.current.isCurrent(key, gen)) {
@@ -428,6 +443,8 @@ export function useDoseReminderScheduler({
 
     for (const med of medicationsRef.current) {
       if (!med.reminderEnabled) continue;
+      if (!isMedicationTreatmentActiveOnDate(med, today)) continue;
+      const treatmentEndDate = getMedicationTreatmentEndDate(med);
 
       const slots = getDoseReminderSlots(med);
       if (slots.length === 0) continue;
@@ -463,6 +480,7 @@ export function useDoseReminderScheduler({
                   skipToday: true as const,
                   allowManualTakeAction,
                   ...(description ? { doseDescription: description } : {}),
+                  ...(treatmentEndDate ? { treatmentEndDate } : {}),
                 };
                 return scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts).then(
                   () => {
@@ -489,6 +507,7 @@ export function useDoseReminderScheduler({
               const opts = {
                 allowManualTakeAction,
                 ...(description ? { doseDescription: description } : {}),
+                ...(treatmentEndDate ? { treatmentEndDate } : {}),
               };
               return scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts).then(() => {
                 if (!generationGuardRef.current.isCurrent(key, gen)) {

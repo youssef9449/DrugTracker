@@ -56,6 +56,39 @@ public class ScheduleNextIfAbsentTest {
     }
 
     @Test
+    public void treatmentEndDate_preventsSuccessorAfterCourseEnds() throws Exception {
+        String d = futureCalendarDate(5);
+        String d1 = AutoDeductionScheduler.nextCalendarDate(d);
+        assertNotNull(d1);
+
+        AutoDeductionScheduler s = newScheduler();
+        assertTrue(s.scheduleOccurrence(
+                "med",
+                "dose",
+                d,
+                "09:00",
+                1.0,
+                futureEpochMs(d, "09:00"),
+                d).ok);
+
+        AutoDeductionScheduler.ScheduleResult r =
+                s.scheduleNextOccurrenceIfAbsent(
+                        "med",
+                        "dose",
+                        d,
+                        "09:00",
+                        1.0,
+                        readAuthGeneration("med", "dose"));
+
+        assertTrue(r.ok);
+        assertEquals("treatment_ended", r.error);
+
+        String d1Key = AutoDeductionContract.occurrenceKey("med", "dose", d1);
+        assertFalse("course end must not create D+1",
+                schedulePrefs().contains(schKey(d1Key)));
+    }
+
+    @Test
     public void existingSuccessor_notOverwrittenByStalePayload() throws Exception {
         String d = futureCalendarDate(6);
         String d1 = AutoDeductionScheduler.nextCalendarDate(d);

@@ -248,7 +248,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               <span className="font-medium px-1.5 py-0.2 rounded text-[10px] shrink-0 bg-blue-50 text-blue-800 border border-blue-200">
                 كورس {medication.durationDays} يوم
               </span>
-            ) : medication.isChronic ? (
+            ) : medication.isChronic !== false ? (
               <span className="font-medium px-1.5 py-0.2 rounded text-[10px] shrink-0 bg-slate-100 text-slate-600 border border-slate-200">
                 مزمن
               </span>
@@ -724,7 +724,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-blue-50 text-blue-800 border border-blue-200">
               كورس {medication.durationDays} يوم
             </span>
-          ) : medication.isChronic ? (
+          ) : medication.isChronic !== false ? (
             <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-slate-100 text-slate-600 border border-slate-200">
               مزمن
             </span>

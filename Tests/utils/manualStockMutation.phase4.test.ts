@@ -34,6 +34,7 @@ import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
 import { isDoseConsumedOnDate, isDoseSkippedOnDate } from '../../src/utils/dateCalculations';
 import { exactAutoLogId } from '../../src/utils/autoDeductionReconciliation';
 import * as preSettleModule from '../../src/utils/reconcileExactBeforeManualMutation';
+import * as autoNative from '../../src/utils/autoDeductionNative';
 // findPending used indirectly via runGatedManualConsume
 import {
   findActiveDeductionForOccurrence,
@@ -3709,3 +3710,94 @@ describe('Phase 4 — durable global preference and add-medication ordering', ()
   });
 });
 
+
+
+describe('Phase 4 — treatment-boundary-safe recurrence compensation', () => {
+  let durable: AutoStockDurableState;
+  const scheduleCalls: Array<{
+    calendarDate: string;
+    treatmentEndDate?: string;
+  }> = [];
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-22T07:00:00'));
+    scheduleCalls.length = 0;
+
+    const temporary = med({
+      isChronic: false,
+      durationDays: 5,
+      treatmentStartDate: '2026-09-23',
+      doseSchedule: [{ id: 'd1', amount: 1, time: '20:00' }],
+      dosesPerDay: 1,
+    });
+    durable = { medications: [temporary], logs: [] };
+
+    __setManualEnvelopeTestHooks({
+      load: () => null,
+      save: () => null,
+    });
+    __setAutoStockGateTestHooks({
+      load: () => ({
+        medications: durable.medications.map((m) => ({ ...m })),
+        logs: durable.logs.map((l) => ({ ...l })),
+      }),
+      commit: () => 'persist_failed',
+    });
+
+    vi.spyOn(
+      preSettleModule,
+      'reconcileExactBeforeManualMutation'
+    ).mockImplementation(async (opts) => ({
+      state: opts.fresh,
+      reconciliation: null,
+      nativeListFailed: false,
+      durabilityBlocked: false,
+    }));
+
+    __setManualRecurrenceInvalidationTestHook(async () => ({ ok: true }));
+
+    vi.spyOn(autoNative, 'scheduleAutoDeduction').mockImplementation(async (args) => {
+      scheduleCalls.push({
+        calendarDate: args.calendarDate,
+        treatmentEndDate: args.treatmentEndDate,
+      });
+      return { ok: true };
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    __setAutoStockGateTestHooks(null);
+    __setManualEnvelopeTestHooks(null);
+    __setManualRecurrenceInvalidationTestHook(null);
+    vi.useRealTimers();
+  });
+
+  it('does not compensate an occurrence before the treatment start date', async () => {
+    const current = durable.medications[0];
+    const {
+      id,
+      createdAt,
+      ...medData
+    } = current;
+    expect(id).toBe(current.id);
+    expect(createdAt).toBe(current.createdAt);
+
+    const result = await runGatedMedicationUpdate({
+      editId: current.id,
+      medData: {
+        ...medData,
+        durationDays: 6,
+      },
+    });
+
+    expect(result.outcome).toBe('persist_failed');
+    expect(scheduleCalls).toEqual([
+      {
+        calendarDate: '2026-09-23',
+        treatmentEndDate: '2026-09-27',
+      },
+    ]);
+  });
+});

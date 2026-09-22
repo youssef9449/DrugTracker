@@ -137,6 +137,8 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   onEdit,
   onDelete,
   onToggleAutoDeduct,
+  onToggleMedicationReminder,
+  onToggleMedicationCriticalStockAlerts,
   onNavigateToShopping,
   onConsumeDose,
   onRestoreDose,

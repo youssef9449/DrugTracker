@@ -4,11 +4,9 @@
  *
  * A failed scheduling attempt may remove schedule metadata only when the
  * currently stored operationVersion still matches the attempt's own version.
- * Legacy scheduleVersion remains readable during migration.
  */
 
 export const FIELD_OPERATION_VERSION = 'operationVersion';
-export const FIELD_SCHEDULE_VERSION = 'scheduleVersion';
 
 export interface ScheduleMetadataLike {
   medicationId?: string;
@@ -18,7 +16,6 @@ export interface ScheduleMetadataLike {
   amount?: number;
   scheduledAtEpochMs?: number;
   operationVersion?: string;
-  scheduleVersion?: string;
   [key: string]: unknown;
 }
 
@@ -36,7 +33,7 @@ export function isMetadataOwnedByVersion(
     const o = JSON.parse(currentJson) as ScheduleMetadataLike;
     const current = typeof o.operationVersion === 'string'
       ? o.operationVersion
-      : (typeof o.scheduleVersion === 'string' ? o.scheduleVersion : '');
+      : '';
     return expectedVersion === current;
   } catch {
     return false;

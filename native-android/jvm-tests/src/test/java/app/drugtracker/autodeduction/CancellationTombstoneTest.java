@@ -80,7 +80,7 @@ public class CancellationTombstoneTest {
         assertTrue(s.cancelOccurrence("med", "dose", date).isOk());
         assertTrue(s.isOccurrenceCancelled("med", "dose", date));
 
-        // Legitimate reschedule installs newer scheduleVersion and clears/supersedes tombstone.
+        // Legitimate reschedule installs newer operationVersion and clears/supersedes tombstone.
         assertTrue(s.scheduleOccurrence(
                 "med", "dose", date, "11:00", 2.0, futureEpochMs(date, "11:00")).ok);
         assertFalse(s.isOccurrenceCancelled("med", "dose", date));
@@ -91,7 +91,7 @@ public class CancellationTombstoneTest {
         String key = AutoDeductionContract.occurrenceKey("m", "d", "2026-09-20");
         cancelPrefs().edit().putString(cancelKey(key), "1000-1-cancel").commit();
         JSONObject meta = new JSONObject();
-        meta.put("scheduleVersion", "1000-2-sched");
+        meta.put("operationVersion", "1000-2-sched");
         meta.put("amount", 1.0);
         schedulePrefs().edit().putString(schKey(key), meta.toString()).commit();
 
@@ -116,19 +116,19 @@ public class CancellationTombstoneTest {
         // cancel seq 2, schedule seq 1 → cancelled
         cancelPrefs().edit().putString(cancelKey(key), "5000-2-c").commit();
         JSONObject older = new JSONObject();
-        older.put("scheduleVersion", "5000-1-s");
+        older.put("operationVersion", "5000-1-s");
         schedulePrefs().edit().putString(schKey(key), older.toString()).commit();
         assertTrue(newScheduler().isOccurrenceCancelledKey(key));
 
         // schedule seq 3 supersedes cancel seq 2 → active
         JSONObject newer = new JSONObject();
-        newer.put("scheduleVersion", "5000-3-s");
+        newer.put("operationVersion", "5000-3-s");
         schedulePrefs().edit().putString(schKey(key), newer.toString()).commit();
         assertFalse(newScheduler().isOccurrenceCancelledKey(key));
     }
 
     @Test
-    public void operationVersionIsUsedForOrderingAndLegacyIsStillReadable() throws Exception {
+    public void operationVersionIsUsedForOrderingAndLegacyIsRejected() throws Exception {
         String key = AutoDeductionContract.occurrenceKey("m", "d", "2026-09-25");
         cancelPrefs().edit().putString(cancelKey(key), "5000-2-c").commit();
         JSONObject meta = new JSONObject();

@@ -44,7 +44,7 @@ import java.util.TimeZone;
  *   reverse — so nesting cannot deadlock.
  *
  * operationVersion is the shared generic ownership guard for rollback (with
- * legacy scheduleVersion remaining readable during migration). It guards
+ * only the current operationVersion contract). It guards
  * concurrent metadata replacement and is NOT a medication-level disable epoch.
  *
  * Recurrence authorization (Issue #217):
@@ -1329,7 +1329,7 @@ public final class AutoDeductionScheduler {
                         medicationId, doseId, calendarDate, scheduledAt, amount,
                         evidence.optString("timeHhmm", ""),
                         evidence.optLong("recurrenceGeneration", 0L),
-                        evidence.optString("operationVersion", evidence.optString("scheduleVersion", "")),
+                        evidence.optString("operationVersion", ""),
                         next);
             }
             Log.i(TAG, "recover independent evidence: " + result.status

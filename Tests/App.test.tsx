@@ -60,7 +60,7 @@ import App from '@/App';
 import { getTodayDateString } from '@/utils/dateCalculations';
 import { runAutoDeductionReconciliation } from '@/utils/runAutoDeductionReconciliation';
 
-import { getInitialMedications } from '@/data/initialData';
+import { getInitialMedications } from '@/fixtures/initialData';
 import {
   scheduleCriticalAlarm,
   cancelCriticalAlarm } from '@/utils/notifications';

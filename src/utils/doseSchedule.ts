@@ -54,6 +54,13 @@ export const DEFAULT_DOSE_TIMES = [
 
 const TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
 
+/** Normalize an optional persisted dose description without trusting runtime shape. */
+function normalizeDoseDescription(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed === '' ? undefined : trimmed;
+}
+
 /** True if the string is a valid 24h HH:mm (or H:mm). */
 export function isValidDoseTime(time: string): boolean {
   if (!time || typeof time !== 'string') return false;
@@ -103,8 +110,8 @@ export function getDoseScheduleForUI(
         id: d.id || generateId('dose'),
         amount: Number(d.amount),
         time: normalizeTimeString(d.time),
-        ...(d.description !== undefined && d.description.trim() !== ''
-          ? { description: d.description.trim() }
+        ...(normalizeDoseDescription(d.description) !== undefined
+          ? { description: normalizeDoseDescription(d.description) }
           : {}),
       }))
   );
@@ -256,8 +263,8 @@ export function validateAndNormalizeDoseSchedule(
       id: row.id || generateId('dose'),
       amount,
       time,
-      ...(row.description !== undefined && row.description.trim() !== ''
-        ? { description: row.description.trim() }
+      ...(normalizeDoseDescription(row.description) !== undefined
+        ? { description: normalizeDoseDescription(row.description) }
         : {}),
     });
   }

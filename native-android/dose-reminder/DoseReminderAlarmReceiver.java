@@ -73,8 +73,8 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
         }
 
         String title = snooze
-                ? "⏰ تذكير مجدد: " + medicationName
-                : "⏰ حان موعد دواء: " + medicationName;
+                ? "تذكير مجدد: " + medicationName
+                : "حان موعد دواء: " + medicationName;
         String body = snooze
                 ? "جرعتك المقررة: " + amount + " " + (unit == null ? "قرص" : unit) + "."
                 : "موعد الجرعة الساعة " + (reminderTime == null ? "" : reminderTime)

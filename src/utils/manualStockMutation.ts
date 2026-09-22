@@ -33,6 +33,7 @@ import {
 } from './dateCalculations';
 import { pruneDoseConsumption } from './pruneDoseConsumption';
 import { isValidDoseTime, normalizeTimeString } from './doseSchedule';
+import { getMedicationTreatmentEndDate } from './medicationTreatment';
 import {
   withAutoStockMutationGate,
   commitDurableAutoStockState,
@@ -234,11 +235,13 @@ async function restoreInvalidatedRecurrences(
   const today = getTodayDateString();
   const tomorrow = nextCalendarDateString(today);
   if (!tomorrow) return { ok: false, error: 'invalid_next_date' };
+  const treatmentEndDate = getMedicationTreatmentEndDate(med);
 
   for (const doseId of doseIds) {
     const def = recurrenceDefinition(med, doseId);
     if (!def) continue;
     for (const calendarDate of [today, tomorrow]) {
+      if (treatmentEndDate && calendarDate > treatmentEndDate) continue;
       const epoch = localEpochMs(calendarDate, def.time);
       if (epoch == null || epoch <= now.getTime() - 2000) continue;
       const result = await scheduleAutoDeduction({
@@ -248,6 +251,7 @@ async function restoreInvalidatedRecurrences(
         timeHhmm: def.time,
         amount: def.amount,
         scheduledAtEpochMs: epoch,
+        treatmentEndDate: treatmentEndDate ?? undefined,
       });
       if (!result.ok && result.error !== 'not_android') {
         return { ok: false, error: result.error ?? 'schedule_failed' };

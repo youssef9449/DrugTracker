@@ -12,11 +12,14 @@ import {
   ListChecks,
 } from 'lucide-react';
 import type { ConsumptionLog } from '../types';
-import { Medication, calculateMedicationStatus, describeStockInStrips, isSolidUnit } from '../types';
+import type { Medication } from '../types';
+import { calculateMedicationStatus } from '../utils/medicationStatus';
+import { describeStockInStrips, isSolidUnit } from '../utils/medicationPackaging';
 import {
   getDepletionDate,
   getTodayDateString,
 } from '../utils/dateCalculations';
+import { formatDepletionDate } from '../utils/medicationPresentation';
 import {
   getCardDoseToggleTarget,
   isMedicationAutoDeductActive,

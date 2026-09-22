@@ -901,9 +901,12 @@ export function runGatedAddMedication(opts: {
       loadDurableGlobalAutoDeductEnabled();
     const medication: Medication = {
       ...opts.medication,
-      // New medications inherit the durable global master switch. A stale
-      // React value must never override the committed global preference.
-      autoDeductEnabled: durableGlobal,
+      // The durable global value is the default for new medications, but an
+      // explicit per-med choice from the creation form is authoritative.
+      autoDeductEnabled:
+        opts.medication.autoDeductEnabled !== undefined
+          ? opts.medication.autoDeductEnabled
+          : durableGlobal,
     };
     const medications = [medication, ...pre.state.medications];
     const logs = pre.state.logs;

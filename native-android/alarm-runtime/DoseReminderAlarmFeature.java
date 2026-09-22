@@ -53,6 +53,7 @@ public final class DoseReminderAlarmFeature
             String medicationName = meta.optString(
                     "medicationName", "");
             String unit = meta.optString("unit", "قرص");
+            String doseDescription = meta.optString("doseDescription", "");
             double amount = meta.optDouble("amount", 0d);
             boolean allowManualTakeAction = meta.optBoolean(
                     "allowManualTakeAction", true);
@@ -82,6 +83,7 @@ public final class DoseReminderAlarmFeature
                             amount,
                             medicationName,
                             unit,
+                            doseDescription,
                             allowManualTakeAction,
                             trigger,
                             operationVersion.isEmpty()

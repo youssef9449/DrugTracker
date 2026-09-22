@@ -112,11 +112,7 @@ export const AppHeader: FC<AppHeaderProps> = ({
                 : 'الخصم التلقائي لجميع الأدوية متوقف — انقر للتفعيل'
             }
             aria-pressed={globalAutoDeductEnabled}
-            className={`w-10 h-10 rounded-full transition-all active:scale-95 flex items-center justify-center cursor-pointer ${
-              globalAutoDeductEnabled
-                ? 'bg-teal-400/20 text-teal-200'
-                : 'bg-amber-400/20 text-amber-200'
-            }`}
+            className="w-10 h-10 rounded-full transition-all active:scale-95 flex items-center justify-center cursor-pointer text-teal-200"
           >
             {globalAutoDeductEnabled ? (
               <Zap className="w-5 h-5" />

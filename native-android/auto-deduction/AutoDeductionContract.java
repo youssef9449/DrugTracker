@@ -32,6 +32,7 @@ public final class AutoDeductionContract {
     public static final String EXTRA_SCHEDULED_AT_EPOCH_MS = "scheduledAtEpochMs";
     public static final String EXTRA_AMOUNT = "amount";
     public static final String EXTRA_TIME_HHMM = "timeHhmm";
+    public static final String EXTRA_TREATMENT_END_DATE = "treatmentEndDate";
     /**
      * Recurrence authorization generation stamped into the PendingIntent when the
      * occurrence was scheduled. Receiver must pass this to successor creation so

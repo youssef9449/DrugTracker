@@ -42,7 +42,8 @@ function compareName(a: Medication, b: Medication): number {
 
 function getDurationValue(med: Medication): number {
   // Chronic medications are continuous (infinite / long term)
-  if (med.isChronic) return 999999;
+  // Legacy records without the new flag are chronic by default.
+  if (med.isChronic !== false) return 999999;
   if (typeof med.durationDays === 'number' && Number.isFinite(med.durationDays) && med.durationDays > 0) {
     return med.durationDays;
   }

@@ -588,6 +588,14 @@ public final class AutoDeductionScheduler {
             // Missing or mismatched operationVersion / recurrenceGeneration → STALE.
             try {
                 JSONObject meta = new JSONObject(metaRaw);
+                String treatmentEndDate = meta.optString(
+                        AutoDeductionContract.EXTRA_TREATMENT_END_DATE, "");
+                if (!treatmentEndDate.isEmpty()
+                        && (!AutoDeductionContract.isValidCalendarDate(treatmentEndDate)
+                        || calendarDate.compareTo(treatmentEndDate) > 0)) {
+                    Log.i(TAG, "fire linearization: treatment expired for " + key);
+                    return FireResult.cancelled();
+                }
                 String activeVersion = AutoDeductionSchedulingAdapter.extractOperationVersion(meta);
                 long activeGen = getEffectiveRecurrenceGenerationLocked(
                         medicationId, doseId, meta);
@@ -801,12 +809,33 @@ public final class AutoDeductionScheduler {
         }
 
         final long nowMs = recoveryNowMs();
+        String treatmentEndDate = "";
+        synchronized (SCHEDULE_LOCK) {
+            String raw = getScheduleRaw(pastPrefKey);
+            if (raw != null && !raw.isEmpty()) {
+                try {
+                    treatmentEndDate = new JSONObject(raw).optString(
+                            AutoDeductionContract.EXTRA_TREATMENT_END_DATE, "");
+                } catch (JSONException e) {
+                    return new CatchUpResult(0, false, true);
+                }
+            }
+        }
+        if (!treatmentEndDate.isEmpty()
+                && !AutoDeductionContract.isValidCalendarDate(treatmentEndDate)) {
+            return new CatchUpResult(0, false, true);
+        }
+
         String walkDate = fromCalendarDate;
         int created = 0;
         boolean futureInstalled = false;
         boolean preserveSnapshotForRetry = false;
 
         while (walkDate != null) {
+            if (!treatmentEndDate.isEmpty()
+                    && walkDate.compareTo(treatmentEndDate) > 0) {
+                break;
+            }
             Long epoch = computeEpochMs(walkDate, timeHhmm);
             if (epoch == null) {
                 preserveSnapshotForRetry = true;
@@ -925,6 +954,25 @@ public final class AutoDeductionScheduler {
                     return ScheduleResult.fail("snapshot_stale");
                 }
             }
+            String treatmentEndDate = "";
+            String currentPast = getScheduleRaw(pastPrefKey);
+            if (currentPast != null && !currentPast.isEmpty()) {
+                try {
+                    treatmentEndDate = new JSONObject(currentPast).optString(
+                            AutoDeductionContract.EXTRA_TREATMENT_END_DATE, "");
+                } catch (JSONException e) {
+                    return ScheduleResult.fail("snapshot_stale");
+                }
+            }
+            if (!treatmentEndDate.isEmpty()) {
+                if (!AutoDeductionContract.isValidCalendarDate(treatmentEndDate)) {
+                    return ScheduleResult.fail("invalid_treatment_end_date");
+                }
+                if (calendarDate.compareTo(treatmentEndDate) > 0) {
+                    return new ScheduleResult(true, "treatment_ended", futureKey);
+                }
+            }
+
             // If future already exists under same identity, do not replace.
             // EXCEPTION — same-key recovery: when the first not-yet-due occurrence
             // IS the past snapshot's own date (fromCalendarDate == calendarDate,
@@ -958,6 +1006,11 @@ public final class AutoDeductionScheduler {
                 payload.put("timeHhmm", timeHhmm);
                 payload.put("amount", amount);
                 payload.put("scheduledAtEpochMs", triggerAt);
+                if (!treatmentEndDate.isEmpty()) {
+                    payload.put(
+                            AutoDeductionContract.EXTRA_TREATMENT_END_DATE,
+                            treatmentEndDate);
+                }
             } catch (JSONException e) {
                 return ScheduleResult.fail("payload_build_failed");
             }
@@ -1544,6 +1597,25 @@ public final class AutoDeductionScheduler {
             double amount,
             long scheduledAtEpochMs
     ) {
+        return scheduleOccurrence(
+                medicationId,
+                doseId,
+                calendarDate,
+                timeHhmm,
+                amount,
+                scheduledAtEpochMs,
+                null);
+    }
+
+    public ScheduleResult scheduleOccurrence(
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            String timeHhmm,
+            double amount,
+            long scheduledAtEpochMs,
+            String treatmentEndDate
+    ) {
         if (medicationId == null || medicationId.isEmpty())
             return ScheduleResult.fail("missing_medicationId");
         if (doseId == null || doseId.isEmpty())
@@ -1554,6 +1626,15 @@ public final class AutoDeductionScheduler {
             return ScheduleResult.fail("invalid_time");
         if (!AutoDeductionContract.isValidAmount(amount))
             return ScheduleResult.fail("invalid_amount");
+
+        if (treatmentEndDate != null && !treatmentEndDate.isEmpty()) {
+            if (!AutoDeductionContract.isValidCalendarDate(treatmentEndDate)) {
+                return ScheduleResult.fail("invalid_treatment_end_date");
+            }
+            if (calendarDate.compareTo(treatmentEndDate) > 0) {
+                return ScheduleResult.fail("treatment_ended");
+            }
+        }
 
         long triggerAt = scheduledAtEpochMs;
         if (triggerAt <= 0L) {
@@ -1576,6 +1657,11 @@ public final class AutoDeductionScheduler {
             payload.put("timeHhmm", timeHhmm);
             payload.put("amount", amount);
             payload.put("scheduledAtEpochMs", triggerAt);
+            if (treatmentEndDate != null && !treatmentEndDate.isEmpty()) {
+                payload.put(
+                        AutoDeductionContract.EXTRA_TREATMENT_END_DATE,
+                        treatmentEndDate);
+            }
         } catch (JSONException e) {
             Log.e(TAG, "schedule payload build failed", e);
             return ScheduleResult.fail("payload_build_failed");
@@ -1628,6 +1714,13 @@ public final class AutoDeductionScheduler {
         final String calendarDate = payload.optString("calendarDate", "");
         final String timeHhmm = payload.optString("timeHhmm", "");
         final double amount = payload.optDouble("amount", Double.NaN);
+        final String treatmentEndDate =
+                payload.optString(AutoDeductionContract.EXTRA_TREATMENT_END_DATE, "");
+        if (!treatmentEndDate.isEmpty()
+                && (!AutoDeductionContract.isValidCalendarDate(treatmentEndDate)
+                || calendarDate.compareTo(treatmentEndDate) > 0)) {
+            return ScheduleResult.fail("treatment_ended");
+        }
 
         final long recurrenceGeneration;
         if (requiredRecurrenceGeneration != null) {
@@ -1657,6 +1750,7 @@ public final class AutoDeductionScheduler {
                         timeHhmm,
                         amount,
                         triggerAt,
+                        treatmentEndDate.isEmpty() ? null : treatmentEndDate,
                         recurrenceGeneration,
                         requiredVersion);
         if (!result.ok) {
@@ -1960,6 +2054,34 @@ public final class AutoDeductionScheduler {
         }
 
         synchronized (SCHEDULE_LOCK) {
+            String treatmentEndDate = "";
+            String currentRaw = getScheduleRaw(
+                    AutoDeductionContract.occurrenceKey(
+                            medicationId, doseId, fromCalendarDate));
+            if (currentRaw != null && !currentRaw.isEmpty()) {
+                try {
+                    treatmentEndDate = new JSONObject(currentRaw).optString(
+                            AutoDeductionContract.EXTRA_TREATMENT_END_DATE, "");
+                } catch (JSONException e) {
+                    return ScheduleResult.fail("malformed_current_schedule");
+                }
+            }
+            if (!treatmentEndDate.isEmpty()) {
+                if (!AutoDeductionContract.isValidCalendarDate(treatmentEndDate)) {
+                    return ScheduleResult.fail("invalid_treatment_end_date");
+                }
+                if (resolvedNextDate.compareTo(treatmentEndDate) > 0) {
+                    return new ScheduleResult(true, "treatment_ended", nextKey);
+                }
+                try {
+                    payload.put(
+                            AutoDeductionContract.EXTRA_TREATMENT_END_DATE,
+                            treatmentEndDate);
+                } catch (JSONException e) {
+                    return ScheduleResult.fail("payload_failed");
+                }
+            }
+
             // Issue #217: refuse successor if disable/cancel invalidated this chain.
             if (!isRecurrenceGenerationAuthorizedLocked(
                     medicationId, doseId, expectedRecurrenceGeneration)) {
@@ -2127,19 +2249,6 @@ public final class AutoDeductionScheduler {
                 medicationId, doseId, resolvedNextDate);
         final String nextPrefKey = nextKey;
 
-        JSONObject payload = new JSONObject();
-        try {
-            payload.put("medicationId", medicationId);
-            payload.put("doseId", doseId);
-            payload.put("calendarDate", resolvedNextDate);
-            payload.put("timeHhmm", timeHhmm);
-            payload.put("amount", amount);
-            payload.put("scheduledAtEpochMs", triggerAt);
-        } catch (org.json.JSONException e) {
-            Log.e(TAG, "scheduleNextOccurrenceIfSnapshotOwnsPast payload failed", e);
-            return ScheduleResult.fail("payload_failed");
-        }
-
         synchronized (SCHEDULE_LOCK) {
             // Snapshot must still own past D — otherwise amount/time are obsolete.
             String currentPast = getScheduleRaw(pastPrefKey);
@@ -2161,6 +2270,45 @@ public final class AutoDeductionScheduler {
                         + medicationId + "/" + doseId);
                 return ScheduleResult.fail("recurrence_authorization_invalid");
             }
+            String treatmentEndDate = "";
+            if (currentPast != null && !currentPast.isEmpty()) {
+                try {
+                    treatmentEndDate = new JSONObject(currentPast).optString(
+                            AutoDeductionContract.EXTRA_TREATMENT_END_DATE, "");
+                } catch (JSONException e) {
+                    return ScheduleResult.fail("snapshot_stale");
+                }
+            }
+            if (!treatmentEndDate.isEmpty()) {
+                if (!AutoDeductionContract.isValidCalendarDate(treatmentEndDate)) {
+                    return ScheduleResult.fail("invalid_treatment_end_date");
+                }
+                if (resolvedNextDate.compareTo(treatmentEndDate) > 0) {
+                    return new ScheduleResult(
+                            true,
+                            "treatment_ended",
+                            nextKey);
+                }
+            }
+
+            JSONObject payload = new JSONObject();
+            try {
+                payload.put("medicationId", medicationId);
+                payload.put("doseId", doseId);
+                payload.put("calendarDate", resolvedNextDate);
+                payload.put("timeHhmm", timeHhmm);
+                payload.put("amount", amount);
+                payload.put("scheduledAtEpochMs", triggerAt);
+                if (!treatmentEndDate.isEmpty()) {
+                    payload.put(
+                            AutoDeductionContract.EXTRA_TREATMENT_END_DATE,
+                            treatmentEndDate);
+                }
+            } catch (JSONException e) {
+                Log.e(TAG, "scheduleNextOccurrenceIfSnapshotOwnsPast payload failed", e);
+                return ScheduleResult.fail("payload_failed");
+            }
+
             // Never overwrite an existing successor with recovery snapshot params.
             if (hasSchedule(nextPrefKey)) {
                 Log.i(TAG, "restore past: successor already present — not overwriting "
@@ -2255,13 +2403,19 @@ public final class AutoDeductionScheduler {
                 String time = o.optString("timeHhmm", "");
                 double amount = o.optDouble("amount", Double.NaN);
                 long epoch = o.optLong("scheduledAtEpochMs", 0L);
+                String treatmentEndDate = o.optString(
+                        AutoDeductionContract.EXTRA_TREATMENT_END_DATE, "");
+                boolean validTreatmentEndDate =
+                        treatmentEndDate.isEmpty()
+                                || AutoDeductionContract.isValidCalendarDate(treatmentEndDate);
                 ScheduleStorageIdentity keyIdentity = parseScheduleStorageKey(prefKey);
                 boolean validPayload =
                         !medId.isEmpty()
                         && !doseId.isEmpty()
                         && AutoDeductionContract.isValidCalendarDate(date)
                         && AutoDeductionContract.isValidTimeHhmm(time)
-                        && AutoDeductionContract.isValidAmount(amount);
+                        && AutoDeductionContract.isValidAmount(amount)
+                        && validTreatmentEndDate;
                 boolean keyMatchesPayload =
                         keyIdentity != null
                         && keyIdentity.medicationId.equals(medId)
@@ -2281,6 +2435,23 @@ public final class AutoDeductionScheduler {
                 }
 
                 String occurrenceKey = AutoDeductionContract.occurrenceKey(medId, doseId, date);
+
+                if (!treatmentEndDate.isEmpty()
+                        && date.compareTo(treatmentEndDate) > 0) {
+                    synchronized (SCHEDULE_LOCK) {
+                        if (!isMetadataOwnedByVersion(
+                                getScheduleRaw(prefKey), observedVersion)) {
+                            continue;
+                        }
+                        AutoDeductionSchedulingAdapter.CancelResult cancel =
+                                schedulingAdapter.cancelOccurrence(medId, doseId, date);
+                        if (!cancel.isOk()) {
+                            failed++;
+                            boundaryOk = false;
+                        }
+                    }
+                    continue;
+                }
 
                 if (epoch <= 0) {
                     Long computed = computeEpochMs(date, time);

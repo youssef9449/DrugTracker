@@ -76,6 +76,7 @@ export interface ScheduleOccurrenceParams {
   timeHhmm: string;
   amount: number;
   scheduledAtEpochMs?: number;
+  treatmentEndDate?: string;
   /** Auto-owned retry evidence surfaced by the native schedule listing. */
   fireRetryCount?: number;
 }

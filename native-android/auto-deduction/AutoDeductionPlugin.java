@@ -89,6 +89,7 @@ public class AutoDeductionPlugin extends Plugin {
         String timeHhmm = call.getString("timeHhmm");
         Double amountObj = call.getDouble("amount");
         Long scheduledAt = call.getLong("scheduledAtEpochMs");
+        String treatmentEndDate = call.getString("treatmentEndDate", "");
 
         if (amountObj == null) {
             call.reject("invalid_amount");
@@ -99,7 +100,13 @@ public class AutoDeductionPlugin extends Plugin {
 
         AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
         AutoDeductionScheduler.ScheduleResult result = scheduler.scheduleOccurrence(
-                medicationId, doseId, calendarDate, timeHhmm, amount, epoch);
+                medicationId,
+                doseId,
+                calendarDate,
+                timeHhmm,
+                amount,
+                epoch,
+                treatmentEndDate);
 
         JSObject ret = new JSObject();
         ret.put("ok", result.ok);

@@ -137,6 +137,9 @@ function autoDeductionDefinitionSignature(med: {
   reminderEnabled?: boolean;
   reminderTime?: string;
   dailyDose: number;
+  isChronic?: boolean;
+  durationDays?: number;
+  treatmentStartDate?: string;
   doseSchedule?: Medication['doseSchedule'];
 }): string {
   const schedulePart =
@@ -150,6 +153,9 @@ function autoDeductionDefinitionSignature(med: {
     med.reminderEnabled === true ? '1' : '0',
     med.reminderTime ?? '',
     med.dailyDose,
+    med.isChronic === false ? 'temporary' : 'chronic',
+    med.durationDays ?? '',
+    med.treatmentStartDate ?? '',
     schedulePart,
   ].join('|');
 }

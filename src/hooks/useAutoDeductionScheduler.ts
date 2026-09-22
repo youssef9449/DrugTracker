@@ -7,6 +7,10 @@ import { useEffect, useMemo, useRef } from 'react';
 import type { Medication } from '../types';
 import type { ExactAlarmPermission } from '../utils/exactAlarm';
 import { getTodayDateString } from '../utils/dateCalculations';
+import {
+  getMedicationTreatmentEndDate,
+  isMedicationTreatmentActiveOnDate,
+} from '../utils/medicationTreatment';
 import { isValidDoseTime, normalizeTimeString } from '../utils/doseSchedule';
 import {
   cancelAutoDeduction,
@@ -40,6 +44,7 @@ export interface AutoDeductionSlot {
   time: string;
   amount: number;
   calendarDate: string;
+  treatmentEndDate?: string;
 }
 
 export function autoDeductionScheduleKey(
@@ -55,6 +60,8 @@ export function getAutoDeductionSlotsForDate(
   calendarDate: string
 ): AutoDeductionSlot[] {
   if (med.autoDeductEnabled === false) return [];
+  if (!isMedicationTreatmentActiveOnDate(med, calendarDate)) return [];
+  const treatmentEndDate = getMedicationTreatmentEndDate(med);
 
   // Issue #268: Exact slots come only from explicit doseSchedule rows.
   if (!Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0) {
@@ -74,6 +81,7 @@ export function getAutoDeductionSlotsForDate(
       time: normalizeTimeString(d.time),
       amount: Number(d.amount),
       calendarDate,
+      treatmentEndDate: treatmentEndDate ?? undefined,
     });
   }
   return slots;
@@ -117,6 +125,7 @@ async function scheduleExactOccurrenceFromDurable(slot: AutoDeductionSlot) {
       timeHhmm: current.time,
       amount: current.amount,
       scheduledAtEpochMs: epoch,
+      treatmentEndDate: current.treatmentEndDate,
     });
   });
 }
@@ -268,6 +277,9 @@ export function useAutoDeductionScheduler({
             return [
               m.id,
               m.autoDeductEnabled === false ? '0' : '1',
+              m.isChronic === false ? 'temporary' : 'chronic',
+              getMedicationTreatmentEndDate(m) ?? '',
+              m.treatmentStartDate ?? '',
               schedulePart,
             ].join('|');
           })

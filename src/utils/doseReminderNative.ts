@@ -12,6 +12,7 @@ interface DoseReminderPlugin {
     doseDescription?: string;
     allowManualTakeAction?: boolean;
     triggerAtEpochMs: number;
+    treatmentEndDate?: string;
   }): Promise<{ ok: boolean; error?: string }>;
   cancel(options: {
     medicationId: string;
@@ -91,7 +92,8 @@ export async function scheduleDoseReminderNative(
   doseId: string,
   skipToday: boolean,
   allowManualTakeAction: boolean = true,
-  doseDescription?: string
+  doseDescription?: string,
+  treatmentEndDate?: string
 ): Promise<void> {
   if (!isAndroid()) return;
 
@@ -108,6 +110,7 @@ export async function scheduleDoseReminderNative(
     allowManualTakeAction,
     triggerAtEpochMs: fire.getTime(),
     doseDescription: doseDescription?.trim() || undefined,
+    treatmentEndDate: treatmentEndDate?.trim() || undefined,
   });
   if (!result?.ok) {
     throw new Error(result?.error || 'dose_reminder_schedule_failed');

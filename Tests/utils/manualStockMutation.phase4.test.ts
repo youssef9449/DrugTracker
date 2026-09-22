@@ -3777,10 +3777,12 @@ describe('Phase 4 — treatment-boundary-safe recurrence compensation', () => {
   it('does not compensate an occurrence before the treatment start date', async () => {
     const current = durable.medications[0];
     const {
-      id: _id,
-      createdAt: _createdAt,
+      id,
+      createdAt,
       ...medData
     } = current;
+    expect(id).toBe(current.id);
+    expect(createdAt).toBe(current.createdAt);
 
     const result = await runGatedMedicationUpdate({
       editId: current.id,

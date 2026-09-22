@@ -154,7 +154,7 @@ export const MedicationNotificationStatusBadge: FC<MedicationNotificationStatusB
           ? isDose
             ? 'bg-teal-50 text-teal-800 border-teal-200/90 hover:bg-teal-100 hover:border-teal-300'
             : 'bg-rose-50 text-rose-800 border-rose-200/90 hover:bg-rose-100 hover:border-rose-300'
-          : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100 hover:border-slate-300'
+          : 'bg-amber-50 text-amber-800 border-amber-200/90 hover:bg-amber-100 hover:border-amber-300'
       }`}
     >
       {isDose ? (

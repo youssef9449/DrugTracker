@@ -163,6 +163,19 @@ export const MedicationCard: FC<MedicationCardProps> = ({
       )
     : null;
 
+  // For non-solid medications, show only the number of complete packages
+  // when at least one full package exists. Partial packages stay unlabelled.
+  const nonSolidPackageCount =
+    !isSolid &&
+    medication.packageSize &&
+    medication.packageSize > 0
+      ? Math.floor(currentPills / medication.packageSize)
+      : 0;
+  const nonSolidPackageDesc =
+    nonSolidPackageCount > 0
+      ? pluralizeArabic(nonSolidPackageCount, medication.unit === 'مل' ? 'عبوة' : 'علبة')
+      : null;
+
   // The user-selected colorTag drives the icon box background, accent border, and category badge
   const tag = colorTagClasses(medication.colorTag);
 
@@ -872,6 +885,11 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             <span className="text-[10px] text-slate-600 font-medium">
               {medication.unit || 'قرص'}
             </span>
+            {nonSolidPackageDesc && (
+              <span className="text-[9px] text-teal-800 bg-teal-50 px-1.5 py-0.5 rounded-full border border-teal-100 font-medium truncate">
+                ({nonSolidPackageDesc})
+              </span>
+            )}
             {stripsDesc && (
               <span className="text-[9px] text-teal-800 bg-teal-50 px-1.5 py-0.5 rounded-full border border-teal-100 font-medium truncate">
                 ({stripsDesc})

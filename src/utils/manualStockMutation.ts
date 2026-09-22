@@ -1,5 +1,5 @@
 /**
- * Phase 4 — Manual Take / Restore through the same durable stock gate as
+ * Manual Take / Restore use the same durable stock gate as
  * exact auto-deduction reconciliation.
  *
  * Crash consistency — dedicated Manual JS envelope (NOT Exact Auto envelope):

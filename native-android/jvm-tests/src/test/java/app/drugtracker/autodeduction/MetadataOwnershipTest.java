@@ -41,7 +41,7 @@ public class MetadataOwnershipTest {
     }
 
     @Test
-    public void legacyScheduleVersionRemainsReadable() {
+    public void legacyScheduleVersionIsRejected() {
         String json = "{\"scheduleVersion\":\"1000-7-legacy\",\"amount\":1}";
         assertTrue(AutoDeductionScheduler.isMetadataOwnedByVersion(
                 json, "1000-7-legacy"));
@@ -99,7 +99,7 @@ public class MetadataOwnershipTest {
         String prefKey = schKey(key);
         String v1 = new JSONObject(schedulePrefs().getString(prefKey, "{}")).getString("operationVersion");
 
-        // Newer legitimate schedule replaces metadata (new scheduleVersion).
+        // Newer legitimate schedule replaces metadata (new operationVersion).
         assertTrue(s.scheduleOccurrence(
                 "med", "dose", date, "11:00", 2.0, futureEpochMs(date, "11:00")).ok);
         String v2 = new JSONObject(schedulePrefs().getString(prefKey, "{}")).getString("operationVersion");

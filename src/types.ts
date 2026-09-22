@@ -57,8 +57,13 @@ export interface Medication {
   stripsPerBox?: number; // عدد الأشرطة في العلبة (مثال: 3 أشرطة)
   pillsPerStrip?: number; // عدد الأقراص في الشريط الواحد (مثال: 10 أقراص)
   targetOrderQuantity?: number; // Custom target order quantity specified for pharmacy order
-  reminderEnabled?: boolean; // هل تم تفعيل تذكير يومي بموعد محدد
-  reminderTime?: string; // وقت التذكير بصيغة 24 ساعة (مثال: "09:00" أو "21:30")
+  reminderEnabled?: boolean; // هل تم تفعيل تذكير الجرعات لهذا الدواء
+  reminderTime?: string; // وقت التذكير القديم/المساعد (صيغة 24 ساعة)
+  /**
+   * Per-medication critical-stock notification preference.
+   * undefined keeps the existing behavior when the global master switch is enabled.
+   */
+  criticalStockAlertsEnabled?: boolean;
   /**
    * Number of individual dose events per day.
    * When present, should equal doseSchedule.length.

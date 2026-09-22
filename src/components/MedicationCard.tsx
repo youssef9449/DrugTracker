@@ -26,7 +26,13 @@ import { pluralizeArabic } from '../lib/arabicPlural';
 import { VISUAL_RANGE_MULTIPLIER, MIN_VISUAL_RANGE_DAYS, DAYS_PER_MONTH } from '../utils/time';
 import { MedicationMenu } from './MedicationMenu';
 import { ReminderBadge } from './ReminderBadge';
-import { StripsBadge, PackageSizeBadge, AutoDeductPausedNote, AutoDeductStatusBadge } from './medicationCardParts';
+import {
+  StripsBadge,
+  PackageSizeBadge,
+  AutoDeductPausedNote,
+  AutoDeductStatusBadge,
+  MedicationNotificationStatusBadge,
+} from './medicationCardParts';
 
 /**
  * Map a medication's `colorTag` (the user-selected card color from the
@@ -109,6 +115,8 @@ interface MedicationCardProps {
   onEdit: (medication: Medication) => void;
   onDelete: (id: string) => void;
   onToggleAutoDeduct: (id: string) => void;
+  onToggleMedicationReminder?: (id: string) => void;
+  onToggleMedicationCriticalStockAlerts?: (id: string) => void;
   onNavigateToShopping?: () => void;
   onTriggerAlarm?: (medication: Medication) => void;
   onConsumeDose?: (medicationId: string, doseId?: string) => void;
@@ -129,6 +137,8 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   onEdit,
   onDelete,
   onToggleAutoDeduct,
+  onToggleMedicationReminder,
+  onToggleMedicationCriticalStockAlerts,
   onNavigateToShopping,
   onConsumeDose,
   onRestoreDose,
@@ -524,9 +534,32 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               {medication.category}
             </span>
           )}
+          {medication.isChronic === false && medication.durationDays ? (
+            <span className="text-[8px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-blue-50 text-blue-800 border border-blue-200">
+              كورس {medication.durationDays} يوم
+            </span>
+          ) : medication.isChronic !== false ? (
+            <span className="text-[8px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-slate-100 text-slate-600 border border-slate-200">
+              مزمن
+            </span>
+          ) : null}
           <AutoDeductStatusBadge
             isAutoActive={isAutoActive}
             onToggle={() => onToggleAutoDeduct(medication.id)}
+            size="xs"
+            medicationId={medication.id}
+          />
+          <MedicationNotificationStatusBadge
+            enabled={medication.reminderEnabled === true}
+            onToggle={() => onToggleMedicationReminder?.(medication.id)}
+            type="dose"
+            size="xs"
+            medicationId={medication.id}
+          />
+          <MedicationNotificationStatusBadge
+            enabled={medication.criticalStockAlertsEnabled !== false}
+            onToggle={() => onToggleMedicationCriticalStockAlerts?.(medication.id)}
+            type="critical"
             size="xs"
             medicationId={medication.id}
           />
@@ -732,6 +765,20 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           <AutoDeductStatusBadge
             isAutoActive={isAutoActive}
             onToggle={() => onToggleAutoDeduct(medication.id)}
+            size="sm"
+            medicationId={medication.id}
+          />
+          <MedicationNotificationStatusBadge
+            enabled={medication.reminderEnabled === true}
+            onToggle={() => onToggleMedicationReminder?.(medication.id)}
+            type="dose"
+            size="sm"
+            medicationId={medication.id}
+          />
+          <MedicationNotificationStatusBadge
+            enabled={medication.criticalStockAlertsEnabled !== false}
+            onToggle={() => onToggleMedicationCriticalStockAlerts?.(medication.id)}
+            type="critical"
             size="sm"
             medicationId={medication.id}
           />

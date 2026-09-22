@@ -18,6 +18,7 @@ import {
   runGatedAutoDeductToggle,
   runGatedGlobalAutoDeductToggle,
   runGatedMedicationUpdate,
+  runGatedMedicationNotificationToggle,
   runGatedDeleteMedication,
   shouldDismissAlarmAfterManualTake,
   type GatedManualRestoreResult,
@@ -366,6 +367,10 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         medData.autoDeductEnabled !== undefined
           ? medData.autoDeductEnabled
           : globalAutoDeductEnabledRef.current,
+      // New medications start with their per-med critical notification
+      // preference enabled; the global critical-stock switch remains the master gate.
+      criticalStockAlertsEnabled:
+        medData.criticalStockAlertsEnabled !== false,
     };
     void (async () => {
       const result = await runGatedAddMedication({ medication: newMed });
@@ -590,6 +595,45 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     }
   };
 
+  const handleToggleMedicationNotification = useCallback(
+    (medicationId: string, field: 'reminderEnabled' | 'criticalStockAlertsEnabled') => {
+      void (async () => {
+        const result = await runGatedMedicationNotificationToggle({
+          medicationId,
+          field,
+        });
+
+        if (result.outcome === 'applied') {
+          setMedications(result.medications);
+          medicationsRef.current = result.medications;
+          setLogs(result.logs);
+
+          const label =
+            field === 'reminderEnabled'
+              ? 'تذكير موعد الجرعة'
+              : 'تنبيه المخزون الحرج';
+          showToast(
+            result.enabled
+              ? `تم تفعيل ${label} لدواء "${result.medicationName ?? medicationId}"`
+              : `تم إيقاف ${label} لدواء "${result.medicationName ?? medicationId}"`
+          );
+          if (soundEnabled) playSuccessChime();
+          return;
+        }
+
+        if (result.outcome === 'missing_med') {
+          showToast('تعذر العثور على الدواء المطلوب.');
+        } else if (
+          result.outcome === 'persist_failed' ||
+          result.outcome === 'native_list_failed'
+        ) {
+          showToast(STORAGE_ERRORS.generic);
+        }
+      })();
+    },
+    [setMedications, setLogs, showToast, soundEnabled]
+  );
+
   // #79: extracted from two byte-identical inline handlers passed to
   // AppHeader and AppSettingsModal. useCallback so both props get the
   // same stable reference.
@@ -650,5 +694,9 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     handleCardRestoreDose,
     handleSelectDoseFromModal,
     handleToggleCriticalStockAlerts,
+    handleToggleMedicationReminder: (medicationId: string) =>
+      handleToggleMedicationNotification(medicationId, 'reminderEnabled'),
+    handleToggleMedicationCriticalStockAlerts: (medicationId: string) =>
+      handleToggleMedicationNotification(medicationId, 'criticalStockAlertsEnabled'),
   };
 }

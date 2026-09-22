@@ -1,5 +1,5 @@
 import type { FC } from 'react';
-import { Layers, Box, PauseCircle } from 'lucide-react';
+import { Layers, Box, PauseCircle, Bell, BellOff, AlertTriangle } from 'lucide-react';
 import { Medication } from '../types';
 import { AUTO_DEDUCT_PAUSED_NOTE } from '../lib/styles';
 
@@ -99,6 +99,75 @@ export const AutoDeductStatusBadge: FC<AutoDeductStatusBadgeProps> = ({
     </button>
   );
 };
+/**
+ * Small per-medication notification toggle with the same geometry and visual
+ * language as AutoDeductStatusBadge. The feature-specific color identifies
+ * the notification type while the disabled state becomes neutral.
+ */
+interface MedicationNotificationStatusBadgeProps {
+  enabled: boolean;
+  onToggle?: () => void;
+  type: 'dose' | 'critical';
+  size?: 'xs' | 'sm';
+  medicationId?: string;
+}
+
+export const MedicationNotificationStatusBadge: FC<MedicationNotificationStatusBadgeProps> = ({
+  enabled,
+  onToggle,
+  type,
+  size = 'sm',
+  medicationId,
+}) => {
+  const isXs = size === 'xs';
+  const isDose = type === 'dose';
+  const label = isDose
+    ? enabled
+      ? 'إشعار الجرعة: مفعّل'
+      : 'إشعار الجرعة: متوقف'
+    : enabled
+      ? 'مخزون حرج: مفعّل'
+      : 'مخزون حرج: متوقف';
+  const title = enabled
+    ? `${isDose ? 'إشعار موعد الجرعة' : 'إشعار المخزون الحرج'} مفعّل (انقر للتعطيل)`
+    : `${isDose ? 'إشعار موعد الجرعة' : 'إشعار المخزون الحرج'} متوقف (انقر للتفعيل)`;
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle?.();
+      }}
+      title={title}
+      aria-label={label}
+      aria-pressed={enabled}
+      data-testid={
+        medicationId
+          ? `${isDose ? 'dose-reminder-badge' : 'critical-stock-alert-badge'}-${medicationId}`
+          : undefined
+      }
+      className={`font-medium rounded-full inline-flex items-center shrink-0 transition-all cursor-pointer active:scale-95 border select-none ${
+        isXs ? 'text-[8px] px-1.5 py-0.5' : 'text-[9px] px-2 py-0.5'
+      } ${
+        enabled
+          ? isDose
+            ? 'bg-teal-50 text-teal-800 border-teal-200/90 hover:bg-teal-100 hover:border-teal-300'
+            : 'bg-rose-50 text-rose-800 border-rose-200/90 hover:bg-rose-100 hover:border-rose-300'
+          : 'bg-amber-50 text-amber-800 border-amber-200/90 hover:bg-amber-100 hover:border-amber-300'
+      }`}
+    >
+      {isDose ? (
+        enabled ? <Bell className="w-3 h-3" aria-hidden /> : <BellOff className="w-3 h-3" aria-hidden />
+      ) : (
+        <AlertTriangle className="w-3 h-3" aria-hidden />
+      )}
+      <span className="whitespace-nowrap mr-0.5">{label}</span>
+    </button>
+  );
+};
+
+
 
 export interface UndoRefillBannerProps {
   lastRefillQuantity: number;

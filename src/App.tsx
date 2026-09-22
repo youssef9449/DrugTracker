@@ -465,6 +465,8 @@ export default function App() {
     handleCardRestoreDose,
     handleSelectDoseFromModal,
     handleToggleCriticalStockAlerts,
+    handleToggleMedicationReminder,
+    handleToggleMedicationCriticalStockAlerts,
   } = useMedicationHandlers({
     medications,
     logs,
@@ -774,7 +776,7 @@ export default function App() {
               <div
                 className={
                   isCompactView && filter === 'all'
-                    ? 'p-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3'
+                    ? 'p-2 grid grid-cols-2 gap-2'
                     : 'p-3 space-y-2'
                 }
               >
@@ -803,6 +805,8 @@ export default function App() {
                       }}
                       onDelete={handleDeleteMedication}
                       onToggleAutoDeduct={handleToggleAutoDeduct}
+                      onToggleMedicationReminder={handleToggleMedicationReminder}
+                      onToggleMedicationCriticalStockAlerts={handleToggleMedicationCriticalStockAlerts}
                       onNavigateToShopping={() => setActiveTab('shopping')}
                       onTriggerAlarm={testAlarm}
                       onConsumeDose={handleConsumeDose}

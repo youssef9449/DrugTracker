@@ -1,4 +1,5 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import { NativeBoundaryError, classifyNativeError } from './nativeErrors';
 
 
 interface DoseReminderPlugin {
@@ -113,7 +114,8 @@ export async function scheduleDoseReminderNative(
     treatmentEndDate: treatmentEndDate?.trim() || undefined,
   });
   if (!result?.ok) {
-    throw new Error(result?.error || 'dose_reminder_schedule_failed');
+    const message = result?.error || 'dose_reminder_schedule_failed';
+    throw new NativeBoundaryError(classifyNativeError(message), message);
   }
 }
 
@@ -127,7 +129,8 @@ export async function cancelDoseReminderNative(
     doseId: doseId.trim(),
   });
   if (result?.ok !== true) {
-    throw new Error(result?.error || 'dose_reminder_cancel_failed');
+    const message = result?.error || 'dose_reminder_cancel_failed';
+    throw new NativeBoundaryError(classifyNativeError(message), message);
   }
 }
 
@@ -155,7 +158,8 @@ export async function scheduleDoseSnoozeNative(
     doseDescription: doseDescription?.trim() || undefined,
   });
   if (!result?.ok) {
-    throw new Error(result?.error || 'dose_snooze_schedule_failed');
+    const message = result?.error || 'dose_snooze_schedule_failed';
+    throw new NativeBoundaryError(classifyNativeError(message), message);
   }
 }
 
@@ -169,7 +173,7 @@ export async function cancelDoseSnoozeNative(
     doseId: doseId.trim(),
   });
   if (result?.ok !== true) {
-    throw new Error('dose_snooze_cancel_failed');
+    throw new NativeBoundaryError('platform_failure', 'dose_snooze_cancel_failed');
   }
 }
 

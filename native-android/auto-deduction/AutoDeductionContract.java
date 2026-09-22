@@ -40,14 +40,6 @@ public final class AutoDeductionContract {
      * Distinct from the per-occurrence generic operationVersion ownership token.
      */
     public static final String EXTRA_RECURRENCE_GENERATION = "recurrenceGeneration";
-    /**
-     * Legacy per-schedule ownership token key. New alarms use the generic
-     * shared-runtime operationVersion extra; the receiver accepts this legacy
-     * key only for pre-migration alarms.
-     */
-    @Deprecated
-    public static final String EXTRA_SCHEDULE_VERSION = "scheduleVersion";
-
     /** Generic shared-runtime ownership token carried by new alarm PendingIntents. */
     public static final String EXTRA_OPERATION_VERSION =
             ExactAlarmContract.EXTRA_OPERATION_VERSION;

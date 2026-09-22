@@ -3,6 +3,7 @@ import {
   getTodayDateString,
   getDepletionDate } from '@/utils/dateCalculations';
 import { NEVER_DEPLETES_DAYS } from '@/utils/time';
+import { formatDepletionDate } from '@/utils/medicationPresentation';
 import type { Medication } from '@/types';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
@@ -45,19 +46,19 @@ describe('getDepletionDate', () => {
   it('returns "ينفد اليوم" when daysLeft is 0', () => {
     const r = getDepletionDate(makeMed({ currentPills: 0, dailyDose: 1 }));
     expect(r.daysLeft).toBe(0);
-    expect(r.formattedArabic).toBe('نفد المخزون بالكامل');
+    expect(formatDepletionDate(r.dateStr, r.daysLeft, 0)).toBe('نفد المخزون بالكامل');
   });
 
   it('returns "غداً" when daysLeft is 1', () => {
     const r = getDepletionDate(makeMed({ currentPills: 1, dailyDose: 1 }));
     expect(r.daysLeft).toBe(1);
-    expect(r.formattedArabic).toBe('غداً');
+    expect(formatDepletionDate(r.dateStr, r.daysLeft, 1)).toBe('غداً');
   });
 
   it('returns "بعد غد" when daysLeft is 2', () => {
     const r = getDepletionDate(makeMed({ currentPills: 2, dailyDose: 1 }));
     expect(r.daysLeft).toBe(2);
-    expect(r.formattedArabic).toBe('بعد غد');
+    expect(formatDepletionDate(r.dateStr, r.daysLeft, 2)).toBe('بعد غد');
   });
 
   it('returns a dateStr 7 days out for 7 daysLeft', () => {

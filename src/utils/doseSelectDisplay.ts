@@ -1,5 +1,5 @@
 import type { MedicationDose } from '../types';
-import { getTodayDateString } from './dateCalculations';
+import { getTodayDateString, calendarDayDifference } from './dateCalculations';
 import { timeToMinutes } from './time';
 
 /** One selectable dose row with the calendar day it belongs to. */
@@ -20,16 +20,12 @@ export function relativeDoseDayLabel(
 ): string {
   if (eventDateStr === todayStr) return 'اليوم';
   try {
-    const [ty, tm, td] = todayStr.split('-').map(Number);
-    const [ey, em, ed] = eventDateStr.split('-').map(Number);
-    if (
-      [ty, tm, td, ey, em, ed].every((n) => typeof n === 'number' && !Number.isNaN(n))
-    ) {
-      const todayUtc = Date.UTC(ty, tm - 1, td);
-      const eventUtc = Date.UTC(ey, em - 1, ed);
-      const dayDiff = Math.round((eventUtc - todayUtc) / 86_400_000);
-      if (dayDiff === 1) return 'غدًا';
-      const weekday = new Date(eventUtc).toLocaleDateString('ar-EG', {
+    const dayDiff = calendarDayDifference(todayStr, eventDateStr);
+    if (dayDiff === 1) return 'غدًا';
+    if (dayDiff != null) {
+      const [ey, em, ed] = eventDateStr.split('-').map(Number);
+      const eventUtc = new Date(Date.UTC(ey, em - 1, ed));
+      const weekday = eventUtc.toLocaleDateString('ar-EG', {
         weekday: 'long',
         timeZone: 'UTC',
       });

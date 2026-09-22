@@ -1,8 +1,8 @@
 import { useState, useEffect, type FC, type FormEvent } from 'react';
 import { X, PlusCircle, Check, Layers, Box, Pill } from 'lucide-react';
-import { Medication, describeStockInStrips, isSolidUnit } from '../types';
+import type { Medication } from '../types';
+import { describeStockInStrips, isSolidUnit, getMedSizes } from '../utils/medicationPackaging';
 import { pluralizeArabic } from '../lib/arabicPlural';
-import { getMedSizes } from '../utils/medicationPackaging';
 import { Modal } from './ui/Modal';
 
 interface RefillModalProps {

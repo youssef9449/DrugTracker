@@ -10,7 +10,7 @@ import org.junit.Test;
 public class ExactAlarmStoreTest {
 
     @Test
-    public void extractOperationVersion_prefersGenericAndReadsLegacy() throws Exception {
+    public void extractOperationVersion_readsOnlyCurrentField() throws Exception {
         JSONObject generic = new JSONObject();
         generic.put("operationVersion", "1000-2-new");
         generic.put("scheduleVersion", "1000-1-old");
@@ -24,7 +24,7 @@ public class ExactAlarmStoreTest {
     }
 
     @Test
-    public void ownership_acceptsGenericAndLegacyMetadata() {
+    public void ownership_acceptsOnlyCurrentMetadata() {
         assertTrue(ExactAlarmContract.isMetadataOwnedByOperationVersion(
                 "{\"operationVersion\":\"2000-3-new\"}",
                 "2000-3-new"));

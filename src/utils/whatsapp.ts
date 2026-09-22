@@ -1,4 +1,5 @@
-import { Medication, describeOrderInBoxes, isSolidUnit } from '../types';
+import type { Medication } from '../types';
+import { describeOrderInBoxes, isSolidUnit } from './medicationPackaging';
 import { pluralizeArabic } from '../lib/arabicPlural';
 
 export function normalizeArabicDigits(input: string): string {

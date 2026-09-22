@@ -101,7 +101,7 @@ public class OccurrenceSnapshotPersistFailureTest {
         JSONObject meta = new JSONObject();
         meta.put("amount", 3.0);
         meta.put("timeHhmm", "09:00");
-        meta.put("scheduleVersion", "1-0");
+        meta.put("operationVersion", "1-0");
         schedulePrefs().edit().putString(schKey(key), meta.toString()).commit();
 
         AutoDeductionEventStore.__setTestForceCommitResult(false);

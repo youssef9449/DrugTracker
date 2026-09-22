@@ -1,4 +1,5 @@
 import { formatReminderTime12h } from './time';
+import { getTodayDateString, tomorrowDateString, localEpochMs } from './dateCalculations';
 import {
   scheduleDoseReminderNative,
   cancelDoseReminderNative,
@@ -193,23 +194,19 @@ export async function scheduleDoseReminder(
   }
 
   const now = new Date();
-  const fireToday = new Date();
-  fireToday.setHours(hour, minute, 0, 0);
-  if (fireToday.getTime() <= now.getTime() || options?.skipToday === true) {
-    fireToday.setDate(fireToday.getDate() + 1);
-  }
+  const today = getTodayDateString();
+  const todayEpoch = localEpochMs(today, reminderTime);
+  const fireDate =
+    options?.skipToday === true || todayEpoch == null || todayEpoch <= now.getTime()
+      ? tomorrowDateString(today)
+      : today;
+  const fireEpoch = localEpochMs(fireDate, reminderTime);
+  if (fireEpoch == null) return;
+  const fireToday = new Date(fireEpoch);
 
-  if (options?.treatmentEndDate) {
-    const fireDate = [
-      String(fireToday.getFullYear()).padStart(4, '0'),
-      String(fireToday.getMonth() + 1).padStart(2, '0'),
-      String(fireToday.getDate()).padStart(2, '0'),
-    ].join('-');
-    if (fireDate > options.treatmentEndDate) {
-      return;
-    }
+  if (options?.treatmentEndDate && fireDate > options.treatmentEndDate) {
+    return;
   }
-
   const title = `حان موعد دواء: ${medName}`;
   const description = options?.doseDescription?.trim();
   const body = `موعد الجرعة الساعة ${formatReminderTime12h(reminderTime)}. جرعتك المقررة: ${doseAmount} ${unit}${description ? `. طريقة تناول الجرعة: ${description}` : ''}.`;

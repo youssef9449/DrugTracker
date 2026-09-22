@@ -44,7 +44,7 @@ import java.util.TimeZone;
  *   reverse — so nesting cannot deadlock.
  *
  * operationVersion is the shared generic ownership guard for rollback (with
- * legacy scheduleVersion remaining readable during migration). It guards
+ * only the current operationVersion contract). It guards
  * concurrent metadata replacement and is NOT a medication-level disable epoch.
  *
  * Recurrence authorization (Issue #217):
@@ -175,39 +175,6 @@ public final class AutoDeductionScheduler {
         long active = getRecurrenceGenerationLocked(medicationId, doseId);
         return expectedGeneration > 0L && expectedGeneration == active;
     }
-
-    /**
-     * Return the Auto-owned recurrence authorization generation.
-     *
-     * New schedules read the value only from Auto-owned recurrence authorization
-     * state. A legacy scheduled row may still carry the generation from the
-     * pre-Phase-2 format; when present and no Auto-owned value exists yet, migrate
-     * that value into the Auto-owned authorization store under SCHEDULE_LOCK.
-     */
-    private long getEffectiveRecurrenceGenerationLocked(
-            String medicationId,
-            String doseId,
-            JSONObject legacyMetadata) {
-        long active = getRecurrenceGenerationLocked(medicationId, doseId);
-        if (active > 0L) {
-            return active;
-        }
-        if (legacyMetadata == null) {
-            return 0L;
-        }
-        long legacy = legacyMetadata.optLong(FIELD_RECURRENCE_GENERATION, 0L);
-        if (legacy <= 0L) {
-            return 0L;
-        }
-        String key = recurrenceAuthKey(medicationId, doseId);
-        if (!recurrenceAuthPrefs.edit().putLong(key, legacy).commit()) {
-            Log.e(TAG, "legacy recurrence generation migration failed for " + key);
-            return 0L;
-        }
-        return legacy;
-    }
-
-
 
     /**
      * Ensure a non-zero active generation exists for the dose slot (first schedule).
@@ -597,8 +564,7 @@ public final class AutoDeductionScheduler {
                     return FireResult.cancelled();
                 }
                 String activeVersion = AutoDeductionSchedulingAdapter.extractOperationVersion(meta);
-                long activeGen = getEffectiveRecurrenceGenerationLocked(
-                        medicationId, doseId, meta);
+                long activeGen = getRecurrenceGenerationLocked(medicationId, doseId);
                 if (deliveryOperationVersion == null || deliveryOperationVersion.isEmpty()
                         || deliveryRecurrenceGeneration <= 0L) {
                     Log.i(TAG, "fire linearization: STALE (delivery partially missing version/generation) for "
@@ -653,8 +619,7 @@ public final class AutoDeductionScheduler {
                                     AutoDeductionSchedulingAdapter.extractOperationVersion(meta);
                         }
                         if (gen <= 0L) {
-                            gen = getEffectiveRecurrenceGenerationLocked(
-                                    medicationId, doseId, meta);
+                            gen = getRecurrenceGenerationLocked(medicationId, doseId);
                         }
                     } catch (JSONException ignored) {
                     }
@@ -690,8 +655,7 @@ public final class AutoDeductionScheduler {
                                 AutoDeductionSchedulingAdapter.extractOperationVersion(meta);
                     }
                     if (gen <= 0L) {
-                        gen = getEffectiveRecurrenceGenerationLocked(
-                                medicationId, doseId, meta);
+                        gen = getRecurrenceGenerationLocked(medicationId, doseId);
                     }
                 } catch (JSONException ignored) {
                 }
@@ -1127,8 +1091,7 @@ public final class AutoDeductionScheduler {
                     String activeVersion =
                             AutoDeductionSchedulingAdapter.extractOperationVersion(current);
                     long activeGen =
-                            getEffectiveRecurrenceGenerationLocked(
-                                    medicationId, doseId, current);
+                            getRecurrenceGenerationLocked(medicationId, doseId);
                     if (operationVersion == null || operationVersion.isEmpty()
                             || recurrenceGeneration <= 0L
                             || !operationVersion.equals(activeVersion)
@@ -1329,7 +1292,7 @@ public final class AutoDeductionScheduler {
                         medicationId, doseId, calendarDate, scheduledAt, amount,
                         evidence.optString("timeHhmm", ""),
                         evidence.optLong("recurrenceGeneration", 0L),
-                        evidence.optString("operationVersion", evidence.optString("scheduleVersion", "")),
+                        evidence.optString("operationVersion", ""),
                         next);
             }
             Log.i(TAG, "recover independent evidence: " + result.status
@@ -1382,7 +1345,7 @@ public final class AutoDeductionScheduler {
             String activeVersion =
                     AutoDeductionSchedulingAdapter.extractOperationVersion(current);
             long activeGeneration =
-                    getEffectiveRecurrenceGenerationLocked(medicationId, doseId, current);
+                    getRecurrenceGenerationLocked(medicationId, doseId);
             String activeTime = current.optString("timeHhmm", "");
             double activeAmount = current.optDouble("amount", Double.NaN);
 
@@ -1534,7 +1497,7 @@ public final class AutoDeductionScheduler {
                         double amount = evidence.optDouble("amount", Double.NaN);
                         String time = evidence.optString("timeHhmm", "");
                         long gen = evidence.optLong("recurrenceGeneration", 0L);
-                        String ver = evidence.optString("operationVersion", evidence.optString("scheduleVersion", ""));
+                        String ver = evidence.optString("operationVersion", "");
                         if (!AutoDeductionContract.isValidAmount(amount)) {
                             failed++;
                             ok = false;
@@ -2259,10 +2222,7 @@ public final class AutoDeductionScheduler {
             long snapGen = 0L;
             try {
                 if (currentPast != null) {
-                    snapGen = getEffectiveRecurrenceGenerationLocked(
-                            medicationId,
-                            doseId,
-                            new JSONObject(currentPast));
+                    snapGen = getRecurrenceGenerationLocked(medicationId, doseId);
                 }
             } catch (JSONException ignored) { /* treat as 0 */ }
             if (!isRecurrenceGenerationAuthorizedLocked(medicationId, doseId, snapGen)) {
@@ -2477,8 +2437,7 @@ public final class AutoDeductionScheduler {
                     }
                     long snapGen;
                     synchronized (SCHEDULE_LOCK) {
-                        snapGen = getEffectiveRecurrenceGenerationLocked(
-                                medId, doseId, o);
+                        snapGen = getRecurrenceGenerationLocked(medId, doseId);
                     }
                     CatchUpResult catchUp = catchUpMissedOccurrencesAndScheduleNext(
                             medId, doseId, date, time, amount, snapGen,
@@ -2540,8 +2499,7 @@ public final class AutoDeductionScheduler {
                     }
                     long snapGenTz;
                     synchronized (SCHEDULE_LOCK) {
-                        snapGenTz = getEffectiveRecurrenceGenerationLocked(
-                                medId, doseId, o);
+                        snapGenTz = getRecurrenceGenerationLocked(medId, doseId);
                     }
                     CatchUpResult catchUp = catchUpMissedOccurrencesAndScheduleNext(
                             medId, doseId, date, time, amount, snapGenTz,
@@ -2583,8 +2541,7 @@ public final class AutoDeductionScheduler {
                 }
                 synchronized (SCHEDULE_LOCK) {
                     // Issue #217: drop future schedules whose generation was invalidated.
-                    long metaGen = getEffectiveRecurrenceGenerationLocked(
-                            medId, doseId, o);
+                    long metaGen = getRecurrenceGenerationLocked(medId, doseId);
                     if (metaGen > 0L
                             && !isRecurrenceGenerationAuthorizedLocked(medId, doseId, metaGen)) {
                         Log.i(TAG, "restore skip (recurrence generation invalid): " + prefKey);

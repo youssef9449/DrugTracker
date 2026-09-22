@@ -1,4 +1,5 @@
-import { Medication, getCriticalThresholdDays } from '../types';
+import type { Medication } from '../types';
+import { getCriticalThresholdDays } from './medicationDomain';
 import { MS_PER_DAY, NEVER_DEPLETES_DAYS } from './time';
 
 /**
@@ -16,6 +17,39 @@ export function getTodayDateString(): string {
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+export function addCalendarDays(dateStr: string, days: number): string {
+  const parsed = parseUtcDate(dateStr);
+  if (!parsed || !Number.isFinite(days)) return dateStr;
+  const target = new Date(parsed.getTime() + days * MS_PER_DAY);
+  return formatUtcDateString(target);
+}
+
+export function calendarDayDifference(fromDate: string, toDate: string): number | null {
+  const from = parseUtcDate(fromDate);
+  const to = parseUtcDate(toDate);
+  if (!from || !to) return null;
+  return Math.round((to.getTime() - from.getTime()) / MS_PER_DAY);
+}
+
+export function tomorrowDateString(dateStr: string = getTodayDateString()): string {
+  return addCalendarDays(dateStr, 1);
+}
+
+export function localEpochMs(calendarDate: string, timeHhmm: string): number | null {
+  if (!calendarDate || !timeHhmm) return null;
+  const parts = calendarDate.split('-').map((n) => parseInt(n, 10));
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return null;
+  const match = /^(\d{1,2}):(\d{1,2})$/.exec(timeHhmm);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  const [y, m, d] = parts;
+  const dt = new Date(y, m - 1, d, hour, minute, 0, 0);
+  const ms = dt.getTime();
+  return Number.isFinite(ms) ? ms : null;
 }
 
 /**
@@ -210,84 +244,19 @@ export function daysLeftFromCurrentStock(med: Medication): number {
   return floorRatioSafely(pills, dayAmt);
 }
 
-export function formatArabicDate(dateStr: string, includeWeekday: boolean = true): string {
-  try {
-    const d = parseUtcDate(dateStr);
-    if (!d) return dateStr;
-    const options: Intl.DateTimeFormatOptions = {
-      weekday: includeWeekday ? 'long' : undefined,
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    };
-    return d.toLocaleDateString('ar-EG', { ...options, timeZone: 'UTC' });
-  } catch {
-    return dateStr;
-  }
-}
-
-/**
- * Format an ISO timestamp string or epoch into Arabic 12-hour time format.
- */
-export function formatLogTime(timestamp?: string | number): string {
-  if (!timestamp) return '';
-  const str = String(timestamp).trim();
-  if (!str.includes('T') && !str.includes(':') && !/^\d{10,}$/.test(str)) {
-    return '';
-  }
-  try {
-    const d = /^\d{10,}$/.test(str) ? new Date(Number(str)) : new Date(str);
-    if (Number.isNaN(d.getTime())) return '';
-    const h = d.getHours();
-    const m = d.getMinutes();
-    const isPM = h >= 12;
-    const hour12 = h % 12 === 0 ? 12 : h % 12;
-    const minutePadded = m < 10 ? `0${m}` : `${m}`;
-    return `${hour12}:${minutePadded} ${isPM ? 'م' : 'ص'}`;
-  } catch {
-    return '';
-  }
-}
-
-
 /**
  * Depletion date from durable `Medication.currentPills` and the current
  * schedule rate only (Issue #266).
  */
 export function getDepletionDate(med: Medication): {
   dateStr: string;
-  formattedArabic: string;
   daysLeft: number;
 } {
-  const currentPills = Number(med.currentPills) || 0;
   const daysLeft = daysLeftFromCurrentStock(med);
-
   const todayUtc = parseUtcDate(getTodayDateString()) ?? new Date(Date.UTC(1970, 0, 1));
   const targetUtc = new Date(todayUtc.getTime() + daysLeft * MS_PER_DAY);
-  const dateStr = formatUtcDateString(targetUtc);
-
-  let formattedArabic: string;
-  if (currentPills <= 0) {
-    formattedArabic = 'نفد المخزون بالكامل';
-  } else if (daysLeft === 0) {
-    formattedArabic = 'ينفد اليوم';
-  } else if (daysLeft === 1) {
-    formattedArabic = 'غداً';
-  } else if (daysLeft === 2) {
-    formattedArabic = 'بعد غد';
-  } else {
-    const options: Intl.DateTimeFormatOptions = {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      timeZone: 'UTC',
-    };
-    formattedArabic = targetUtc.toLocaleDateString('ar-EG', options);
-  }
-
   return {
-    dateStr,
-    formattedArabic,
+    dateStr: formatUtcDateString(targetUtc),
     daysLeft,
   };
 }

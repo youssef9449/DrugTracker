@@ -1,5 +1,5 @@
 /**
- * Multi-dose schedule helpers (Phase 1).
+ * Multi-dose schedule helpers.
  *
  * These helpers prepare and validate doseSchedule / dosesPerDay without
  * changing auto-deduction or notification scheduling. The existing

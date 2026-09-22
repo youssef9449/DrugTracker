@@ -1,5 +1,5 @@
 /**
- * Phase 3 — JS reconciliation of native exact-time auto-deduction FIRED events.
+ * JS reconciliation of native exact-time auto-deduction FIRED events.
  *
  * Idempotency:
  * - Per-dose consume/skip markers (same as Take)
@@ -103,10 +103,9 @@ export function normalizeExactDoseId(doseId: string | undefined | null): string 
 
 /**
  * Deterministic log id for one exact auto occurrence (retry-safe).
- * `syncAutoDailyDeductions` that produced them was removed in Issue #268 /
- * PR #271).
+ * The obsolete day-based settlement path is not part of current reconciliation.
  *
- * Issue #268 / PR #271: this id MUST never be built with an empty doseId.
+ * Issue current occurrence-identity contract: this id MUST never be built with an empty doseId.
  * `applyExactAutoEventToMedication` rejects any event whose `doseId` is empty
  * (malformed identity → terminal ACK at the runner level, before apply).
  * A FIRED Exact occurrence that already fired is durable: its identity is

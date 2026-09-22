@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { Medication, ConsumptionLog } from '../types';
-import { calculateMedicationStatus } from '../types';
+import { calculateMedicationStatus } from '../utils/medicationStatus';
 import { sortMedications, type MedicationSortDirection, type MedicationSortField } from '../utils/medicationSorting';
 /**
  * Derived medication lists and counts used by the inventory UI.

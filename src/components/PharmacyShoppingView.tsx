@@ -10,9 +10,12 @@ import {
   X,
   MessageSquare,
 } from 'lucide-react';
-import { Medication, PharmacySettings, calculateMedicationStatus, describeOrderInBoxes, isSolidUnit } from '../types';
+import type { Medication, PharmacySettings } from '../types';
+import { calculateMedicationStatus } from '../utils/medicationStatus';
+import { describeOrderInBoxes, isSolidUnit } from '../utils/medicationPackaging';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { getDepletionDate } from '../utils/dateCalculations';
+import { formatDepletionDate } from '../utils/medicationPresentation';
 import {
   cleanPhoneNumber,
   generatePharmacyOrderMessage,
@@ -633,7 +636,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                       </span>
                     </div>
                     <div className="text-[11px] text-slate-500 mt-0.5 leading-tight">
-                      المتبقي: <strong className="font-mono text-slate-700">{med.currentPills}</strong> • ينفد {depletion.formattedArabic}
+                      المتبقي: <strong className="font-mono text-slate-700">{med.currentPills}</strong> • ينفد {formatDepletionDate(depletion.dateStr, depletion.daysLeft, Number(med.currentPills) || 0)}
                     </div>
                   </div>
                 </div>

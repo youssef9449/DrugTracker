@@ -1,5 +1,5 @@
 /**
- * Phase 4 — Manual Take / Restore through the same durable stock gate as
+ * Manual Take / Restore use the same durable stock gate as
  * exact auto-deduction reconciliation.
  *
  * Crash consistency — dedicated Manual JS envelope (NOT Exact Auto envelope):
@@ -30,9 +30,12 @@ import {
 import {
   isDoseSkippedOnDate,
   getTodayDateString,
+  tomorrowDateString,
+  localEpochMs,
 } from './dateCalculations';
 import { pruneDoseConsumption } from './pruneDoseConsumption';
 import { isValidDoseTime, normalizeTimeString } from './doseSchedule';
+import { generateId } from './id';
 import {
   getMedicationTreatmentEndDate,
   isMedicationTreatmentActiveOnDate,
@@ -187,31 +190,6 @@ export function __setManualRecurrenceInvalidationTestHook(
   manualRecurrenceInvalidationTestHook = hook;
 }
 
-function nextCalendarDateString(calendarDate: string): string | null {
-  const [y, m, d] = calendarDate.split('-').map((n) => Number(n));
-  if (![y, m, d].every(Number.isFinite)) return null;
-  const dt = new Date(y, m - 1, d);
-  dt.setDate(dt.getDate() + 1);
-  return [
-    String(dt.getFullYear()).padStart(4, '0'),
-    String(dt.getMonth() + 1).padStart(2, '0'),
-    String(dt.getDate()).padStart(2, '0'),
-  ].join('-');
-}
-
-function localEpochMs(calendarDate: string, timeHhmm: string): number | null {
-  const [y, m, d] = calendarDate.split('-').map((n) => Number(n));
-  if (![y, m, d].every(Number.isFinite)) return null;
-  const colon = timeHhmm.indexOf(':');
-  if (colon < 1) return null;
-  const hour = Number(timeHhmm.slice(0, colon));
-  const minute = Number(timeHhmm.slice(colon + 1));
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
-  const dt = new Date(y, m - 1, d, hour, minute, 0, 0);
-  const epoch = dt.getTime();
-  return Number.isFinite(epoch) ? epoch : null;
-}
-
 function recurrenceDefinition(
   med: Medication,
   doseId: string
@@ -236,7 +214,7 @@ async function restoreInvalidatedRecurrences(
   now: Date
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const today = getTodayDateString();
-  const tomorrow = nextCalendarDateString(today);
+  const tomorrow = tomorrowDateString(today);
   if (!tomorrow) return { ok: false, error: 'invalid_next_date' };
   const treatmentEndDate = getMedicationTreatmentEndDate(med);
 
@@ -790,7 +768,7 @@ export function runGatedManualRestore(opts: {
     // log to it via `relatedLogId`. This mirrors the refill/refill_undo
     // reversal pattern already used by handleUndoRefill. Without this, a
     // later Restore for the same occurrence would find the already-reversed
-    // historical deduction (e.g. the original Auto after Auto → Restore →
+    // prior deduction evidence (for example an Auto deduction after Auto → Restore →
     // Take) and re-reverse it — inflating stock. With it, findActiveDeduction-
     // ForOccurrence skips reversed logs and finds the NEXT active deduction
     // (the Take), so Auto → Restore → Take → Restore reverses exactly the
@@ -798,7 +776,7 @@ export function runGatedManualRestore(opts: {
     const reverseTimestamp = new Date(now).toISOString();
     const reversedLogId = result.reversedLogId;
     const log: ConsumptionLog = {
-      id: opts.makeLogId ? opts.makeLogId() : `restore-${Date.now()}`,
+      id: opts.makeLogId ? opts.makeLogId() : generateId('restore'),
       medicationId: med.id,
       medicationName: med.name,
       type: 'skipped_day',
@@ -1054,7 +1032,7 @@ export function runGatedRefill(opts: {
       m.id === opts.medicationId ? updatedMed : m
     );
     const log: ConsumptionLog = {
-      id: opts.makeLogId ? opts.makeLogId() : `refill-${Date.now()}`,
+      id: opts.makeLogId ? opts.makeLogId() : generateId('refill'),
       medicationId: med.id,
       medicationName: med.name,
       type: 'refill',
@@ -1198,7 +1176,7 @@ export function runGatedUndoRefill(opts: {
       m.id === opts.medicationId ? updatedMed : m
     );
     const undoLog: ConsumptionLog = {
-      id: opts.makeLogId ? opts.makeLogId() : `refill-undo-${Date.now()}`,
+      id: opts.makeLogId ? opts.makeLogId() : generateId('refill-undo'),
       medicationId: med.id,
       medicationName: med.name,
       type: 'refill_undo',

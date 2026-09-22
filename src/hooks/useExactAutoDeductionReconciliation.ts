@@ -1,5 +1,5 @@
 /**
- * Phase 3/4 — reconcile native FIRED events after hydrate/resume and immediately
+ * Reconcile native FIRED events after hydrate/resume and immediately
  * when the native exact-alarm receiver reports a newly durable FIRED event.
  *
  * The native EventStore remains the source of truth. The event listener is only

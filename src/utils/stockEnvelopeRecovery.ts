@@ -25,7 +25,7 @@ import { applyForegroundAutoStockDeltas } from './autoDeductionNative';
 export const STORAGE_MANUAL_ENVELOPE_KEY =
   'android_med_tracker_manual_stock_envelope_v1';
 
-/** Same key as Phase 3 Exact Auto envelope (shared recovery). */
+/** Same key as the Exact Auto envelope (shared recovery). */
 export const STORAGE_EXACT_AUTO_ENVELOPE_KEY =
   'android_med_tracker_exact_auto_envelope_v1';
 
@@ -34,7 +34,7 @@ export interface ExactAutoEnvelopeStored {
   status: 'js_ready';
   medications: Medication[];
   logs: ConsumptionLog[];
-  /** Phase 4 durable global master switch (required on current envelopes). */
+  /** Durable global master switch (required on current envelopes). */
   globalAutoDeductEnabled: boolean;
   toAcknowledge: Array<{
     medicationId: string;
@@ -108,8 +108,8 @@ export interface ManualStockEnvelope {
   status: 'manual_js_ready';
   medications: Medication[];
   logs: ConsumptionLog[];
-  /** Phase 4 durable global master switch. */
-  globalAutoDeductEnabled?: boolean;
+  /** Durable global master switch. */
+  globalAutoDeductEnabled: boolean;
   createdAt: string;
   baseGeneration: number;
   mutationSeq: number;
@@ -129,7 +129,7 @@ export interface PendingEnvelopeRef {
   mutationSeq: number;
   medications: Medication[];
   logs: ConsumptionLog[];
-  /** Durable global master switch captured with Phase 4 snapshots. */
+  /** Durable global master switch captured with durable snapshots. */
   globalAutoDeductEnabled?: boolean;
   /** Exact Auto only — native ACK ownership stays with Exact Auto path. */
   toAcknowledge?: Array<{
@@ -173,6 +173,7 @@ export function loadManualStockEnvelope(): ManualStockEnvelope | null {
   if (!Array.isArray(raw.stockDeltas) || !Array.isArray(raw.occurrenceResolutions)) {
     return null;
   }
+  if (typeof raw.globalAutoDeductEnabled !== 'boolean') return null;
   return raw;
 }
 
@@ -233,7 +234,7 @@ export function durableMatchesEnvelopeSnapshot(
   },
   durable: AutoStockDurableState
 ): boolean {
-  // Global master switch is part of Phase 4 durable snapshots. If absent,
+  // Global master switch is part of the durable snapshot contract. If absent,
   // only the medication/log snapshot is compared.
   if (
     envelope.globalAutoDeductEnabled !== undefined &&
@@ -571,7 +572,7 @@ export async function recoverManualEnvelopeInto(
       clear: () => saveManualStockEnvelope(null),
     });
   }
-  // Only current Phase 4 envelopes (with mutationSeq) are valid.
+  // Only current envelopes with mutationSeq are valid.
   const exact = loadExactAutoStockEnvelope();
   if (exact) {
     pending.push({

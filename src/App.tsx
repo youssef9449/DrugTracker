@@ -177,7 +177,7 @@ export default function App() {
     allowManualTakeActionByMedicationId,
   });
 
-  // Phase 3A: multi-dose manual consume / restore requires explicit dose selection.
+  // Multi-dose manual consume / restore requires explicit dose selection.
   const [selectDoseMed, setSelectDoseMed] = useState<Medication | null>(null);
   const [selectDoseMode, setSelectDoseMode] = useState<'take' | 'restore' | 'manage'>('take');
   const [historyMedication, setHistoryMedication] = useState<Medication | null>(null);
@@ -191,7 +191,7 @@ export default function App() {
     registerBackButtonHandler(() => {
       // Top-most interactive overlay first.
       if (alarmingMedication) { dismissAlarm(); return true; }
-      // Phase 3A: explicit dose selector must dismiss on Android Back
+      // Explicit dose selector must dismiss on Android Back
       // without exiting the app.
       if (selectDoseMed) {
         setSelectDoseMed(null);
@@ -423,7 +423,7 @@ export default function App() {
   // calendar-day boundary (not only on resume).
   const autoDeductMidnightTick = useMidnightTick();
 
-  // Phase 2: exact-time auto-deduction alarms (independent of notifications).
+  // Exact-time auto-deduction alarms are independent of notifications.
   // Records durable native FIRED events only — no stock mutation here.
   useAutoDeductionScheduler({
     medications,
@@ -435,7 +435,7 @@ export default function App() {
     midnightTick: autoDeductMidnightTick,
   });
 
-  // Phase 3/4: reconcile native FIRED exact auto-deduction events into JS stock.
+  // Reconcile native FIRED exact auto-deduction events into JS stock.
   // Runs once after hydration/on resume for recovery, then immediately on the
   // native exact-auto FIRED event; serialized; crash-safe persist-then-mark.
   useExactAutoDeductionReconciliation({

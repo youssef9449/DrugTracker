@@ -205,7 +205,7 @@ export function useDoseReminderScheduler({
       const key = doseScheduleKey(medId, doseId);
       generationGuardRef.current.bump(key);
       appliedSignatureRef.current.delete(key);
-      // Phase 4: clear dose-scoped snooze storage + cancel that slot's
+      // Clear dose-scoped snooze storage + cancel that slot's
       // recurring alarm and one-shot snooze (not sibling doses).
       clearSnoozedDose(medId, doseId);
       operationQueueRef.current.enqueue(key, () =>

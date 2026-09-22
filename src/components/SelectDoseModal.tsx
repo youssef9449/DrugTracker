@@ -1,7 +1,7 @@
 import type { FC } from 'react';
 import { Check, Pill, RotateCcw, X } from 'lucide-react';
 import type { ConsumptionLog, Medication, MedicationDose } from '../types';
-import { formatTimeArabic } from '../types';
+import { formatTimeArabic } from '../utils/medicationPresentation';
 import {
   getTodayDateString,
   isDoseConsumedOnDate,

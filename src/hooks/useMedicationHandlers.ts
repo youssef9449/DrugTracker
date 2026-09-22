@@ -217,7 +217,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
   };
 
   const handleToggleAutoDeduct = (medicationId: string) => {
-    // Phase 4: durable gate — settlement from React snapshot is forbidden.
+    // Durable gate: settlement from React snapshot is forbidden.
     // Exact FIRED reconciliation runs inside the gate before the current toggle mutation.
     void (async () => {
       const result = await runGatedAutoDeductToggle({
@@ -331,7 +331,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
 
   const handleSaveMedication = (medData: Omit<Medication, 'id' | 'createdAt'>, editId?: string) => {
     if (editId) {
-      // Phase 4: durable gate — stock/settlement from fresh durable med, not React.
+      // Durable gate: stock/settlement uses fresh durable medication state, not React.
       void (async () => {
         const result = await runGatedMedicationUpdate({
           editId,
@@ -361,7 +361,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     }
     const newMed: Medication = {
       ...medData,
-      id: 'med-' + Date.now(),
+      id: generateId('med'),
       createdAt: new Date().toISOString(),
       autoDeductEnabled:
         medData.autoDeductEnabled !== undefined

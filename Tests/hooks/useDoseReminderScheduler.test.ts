@@ -2024,6 +2024,73 @@ describe('delivery/reconciliation race', () => {
   });
 });
 
+describe('useDoseReminderScheduler — per-dose instruction', () => {
+  it('passes the dose-specific instruction to scheduling and reschedules when it changes', async () => {
+    const med = makeMed({
+      id: 'med-description',
+      reminderTime: '20:00',
+      doseSchedule: [
+        {
+          id: 'd1',
+          amount: 1,
+          time: '20:00',
+          description: 'بعد الإفطار',
+        },
+      ],
+    });
+
+    const { rerender } = renderHook(
+      ({ medication }: { medication: Medication }) =>
+        useDoseReminderScheduler(
+          defaultOpts({ medications: [medication] })
+        ),
+      { initialProps: { medication: med } }
+    );
+
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    expect(mocks.schedule.mock.calls[0][6]?.doseDescription).toBe('بعد الإفطار');
+
+    mocks.schedule.mockClear();
+    mocks.cancel.mockClear();
+
+    const updated = {
+      ...med,
+      doseSchedule: [
+        {
+          ...med.doseSchedule![0],
+          description: 'قبل النوم',
+        },
+      ],
+    };
+    rerender({ medication: updated });
+
+    await flushUntil(() => mocks.cancel.mock.calls.length >= 1);
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+
+    const last = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
+    expect(last[6]?.doseDescription).toBe('قبل النوم');
+  });
+
+  it('does not add an instruction option when the per-dose description is empty', async () => {
+    const med = makeMed({
+      id: 'med-empty-description',
+      doseSchedule: [
+        {
+          id: 'd1',
+          amount: 1,
+          time: '20:00',
+          description: '   ',
+        },
+      ],
+    });
+
+    renderHook(() => useDoseReminderScheduler(defaultOpts({ medications: [med] })));
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+
+    expect(mocks.schedule.mock.calls[0][6]?.doseDescription).toBeUndefined();
+  });
+});
+
 describe('useDoseReminderScheduler — manual Take capability', () => {
   it('allowManualTakeAction=false schedules without a manual Take action', async () => {
     const med = makeMed({ id: 'med-no-manual', reminderTime: '20:00' });

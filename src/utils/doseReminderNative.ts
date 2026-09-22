@@ -9,6 +9,7 @@ interface DoseReminderPlugin {
     amount: number;
     medicationName: string;
     unit: string;
+    doseDescription?: string;
     allowManualTakeAction?: boolean;
     triggerAtEpochMs: number;
   }): Promise<{ ok: boolean; error?: string }>;
@@ -29,6 +30,7 @@ interface DoseReminderPlugin {
     unit: string;
     allowManualTakeAction?: boolean;
     triggerAtEpochMs: number;
+    doseDescription?: string;
   }): Promise<{ ok: boolean; error?: string }>;
   cancelSnooze(options: {
     medicationId: string;
@@ -88,7 +90,8 @@ export async function scheduleDoseReminderNative(
   unit: string,
   doseId: string,
   skipToday: boolean,
-  allowManualTakeAction: boolean = true
+  allowManualTakeAction: boolean = true,
+  doseDescription?: string
 ): Promise<void> {
   if (!isAndroid()) return;
 
@@ -104,6 +107,7 @@ export async function scheduleDoseReminderNative(
     unit,
     allowManualTakeAction,
     triggerAtEpochMs: fire.getTime(),
+    doseDescription: doseDescription?.trim() || undefined,
   });
   if (!result?.ok) {
     throw new Error(result?.error || 'dose_reminder_schedule_failed');
@@ -132,7 +136,8 @@ export async function scheduleDoseSnoozeNative(
   reminderTime: string | undefined,
   minutes: number,
   doseId: string,
-  allowManualTakeAction: boolean = true
+  allowManualTakeAction: boolean = true,
+  doseDescription?: string
 ): Promise<void> {
   if (!isAndroid()) return;
   const result = await DoseReminder.scheduleSnooze({
@@ -144,6 +149,7 @@ export async function scheduleDoseSnoozeNative(
     unit,
     allowManualTakeAction,
     triggerAtEpochMs: Date.now() + minutes * 60_000,
+    doseDescription: doseDescription?.trim() || undefined,
   });
   if (!result?.ok) {
     throw new Error(result?.error || 'dose_snooze_schedule_failed');

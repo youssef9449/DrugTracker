@@ -8,7 +8,10 @@ import {
 import { getNativePlatform, isNativePlatform } from './notifications/notificationPlatform';
 import { cancelNotification, getPendingNotification, scheduleNotification } from './notificationRuntime';
 import { scheduleWebNotification } from './notifications/webNotifications';
-import { getDoseReminderChannelId } from './notifications/doseReminderNotifications';
+import {
+  getDoseReminderChannelId,
+  DOSE_REMINDER_TAKE_ACTION,
+} from './notifications/doseReminderNotifications';
 
 export async function isDoseReminderPending(
   medId: string,
@@ -132,6 +135,8 @@ export interface ScheduleDoseReminderOptions {
    * this suppression.
    */
   skipToday?: boolean;
+  /** Optional per-dose user instruction from MedicationDose.description. */
+  doseDescription?: string;
   /**
    * Whether the reminder may expose the manual "تم أخذ الجرعة" action.
    * The business layer supplies this neutral capability; Dose Reminder does
@@ -178,7 +183,8 @@ export async function scheduleDoseReminder(
       unit,
       id,
       options?.skipToday === true,
-      options?.allowManualTakeAction !== false
+      options?.allowManualTakeAction !== false,
+      options?.doseDescription
     );
     return;
   }
@@ -190,8 +196,9 @@ export async function scheduleDoseReminder(
     fireToday.setDate(fireToday.getDate() + 1);
   }
 
-  const title = `⏰ حان موعد دواء: ${medName}`;
-  const body = `موعد الجرعة الساعة ${formatReminderTime12h(reminderTime)}. جرعتك المقررة: ${doseAmount} ${unit}.`;
+  const title = `حان موعد دواء: ${medName}`;
+  const description = options?.doseDescription?.trim();
+  const body = `موعد الجرعة الساعة ${formatReminderTime12h(reminderTime)}. جرعتك المقررة: ${doseAmount} ${unit}${description ? `. طريقة تناول الجرعة: ${description}` : ''}.`;
 
   if (getNativePlatform() === 'ios') {
     const scheduled = await scheduleNotification({
@@ -206,7 +213,7 @@ export async function scheduleDoseReminder(
       action:
         options?.allowManualTakeAction === false
           ? undefined
-          : { id: 'dose-reminder', title: 'تم أخذ الجرعة', foreground: true },
+          : DOSE_REMINDER_TAKE_ACTION,
       at: fireToday,
       extra: {
         medicationId: medId,

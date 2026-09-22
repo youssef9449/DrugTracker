@@ -50,6 +50,7 @@ public final class DoseReminderAlarmAdapter {
             double amount,
             String medicationName,
             String unit,
+            String doseDescription,
             boolean allowManualTakeAction,
             long triggerAtEpochMs,
             String expectedOperationVersion) {
@@ -81,6 +82,7 @@ public final class DoseReminderAlarmAdapter {
             metadata.put("amount", amount);
             metadata.put("medicationName", medicationName == null ? "" : medicationName);
             metadata.put("unit", unit == null ? "" : unit);
+            metadata.put("doseDescription", doseDescription == null ? "" : doseDescription.trim());
             metadata.put("allowManualTakeAction", allowManualTakeAction);
         } catch (JSONException e) {
             return ScheduleResult.failure("metadata_build_failed");
@@ -93,6 +95,7 @@ public final class DoseReminderAlarmAdapter {
         extras.putDouble("amount", amount);
         extras.putString("medicationName", medicationName == null ? "" : medicationName);
         extras.putString("unit", unit == null ? "" : unit);
+        extras.putString("doseDescription", doseDescription == null ? "" : doseDescription.trim());
         extras.putBoolean("allowManualTakeAction", allowManualTakeAction);
 
         ExactAlarmRuntime.ScheduleResult result = runtime.schedule(
@@ -136,7 +139,8 @@ public final class DoseReminderAlarmAdapter {
             String medicationName,
             String unit,
             long triggerAtEpochMs,
-            boolean allowManualTakeAction) {
+            boolean allowManualTakeAction,
+            String doseDescription) {
         Bundle extras = new Bundle();
         extras.putString("medicationId", medicationId);
         extras.putString("doseId", doseId);
@@ -144,6 +148,7 @@ public final class DoseReminderAlarmAdapter {
         extras.putDouble("amount", amount);
         extras.putString("medicationName", medicationName == null ? "" : medicationName);
         extras.putString("unit", unit == null ? "" : unit);
+        extras.putString("doseDescription", doseDescription == null ? "" : doseDescription.trim());
         extras.putBoolean("allowManualTakeAction", allowManualTakeAction);
 
         return runtime.scheduleOneShot(

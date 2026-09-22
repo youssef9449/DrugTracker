@@ -18,6 +18,8 @@ interface AddMedicationModalProps {
   onClose: () => void;
   onSave: (medData: Omit<Medication, 'id' | 'createdAt'>, editId?: string) => void;
   initialData?: Medication | null;
+  /** Default Auto-Deduction state for a newly created medication. */
+  defaultAutoDeductEnabled?: boolean;
 }
 
 const COLOR_TAGS = [
@@ -33,6 +35,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
   onClose,
   onSave,
   initialData,
+  defaultAutoDeductEnabled = true,
 }) => {
   const [name, setName] = useState('');
   // Number inputs use a STRING state so the user can clear the field
@@ -167,7 +170,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       setHelperStrips('0');
       setHelperLoose('0');
       setReminderEnabled(false);
-      setAutoDeductEnabled(true);
+      setAutoDeductEnabled(defaultAutoDeductEnabled !== false);
     }
     setShowStockHelper(false);
     setError('');

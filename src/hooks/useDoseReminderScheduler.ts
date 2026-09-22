@@ -267,6 +267,7 @@ export function useDoseReminderScheduler({
           slot.description ?? '',
           slotConsumedToday ? '1' : '0',
           allowManualTakeAction ? '1' : '0',
+          treatmentEndDate ?? '',
         ].join('|');
         stillScheduled.add(key);
         keepNativeIds.add(key);
@@ -358,6 +359,7 @@ export function useDoseReminderScheduler({
             ...(slotConsumedToday ? { skipToday: true as const } : {}),
             allowManualTakeAction,
             ...(description ? { doseDescription: description } : {}),
+            ...(treatmentEndDate ? { treatmentEndDate } : {}),
           };
           await scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts);
           if (!generationGuardRef.current.isCurrent(key, gen)) {

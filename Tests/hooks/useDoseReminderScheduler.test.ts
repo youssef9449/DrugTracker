@@ -341,6 +341,37 @@ describe('useDoseReminderScheduler — doseSignature (no unnecessary reschedule)
     expect(mocks.schedule.mock.calls.length).toBe(callsAfterFirst);
   });
 
+  it('DOES reschedule with the new treatment end date when only duration changes', async () => {
+    const med = makeMed({
+      id: 'med-treatment-end',
+      reminderTime: '20:00',
+      isChronic: false,
+      durationDays: 5,
+      treatmentStartDate: '2024-09-10',
+      doseSchedule: [{ id: 'd1', amount: 1, time: '20:00' }],
+    });
+    const { rerender } = renderHook(
+      ({ medications }) => useDoseReminderScheduler(defaultOpts({ medications })),
+      { initialProps: { medications: [med] } }
+    );
+
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    expect(mocks.schedule.mock.calls[0][6]).toEqual({
+      treatmentEndDate: '2024-09-14',
+    });
+
+    const shortened = {
+      ...med,
+      durationDays: 2,
+    };
+    rerender({ medications: [shortened] });
+
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
+    expect(mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1][6]).toEqual({
+      treatmentEndDate: '2024-09-11',
+    });
+  });
+
   it('DOES reschedule when schedule row time changes', async () => {
     const med = makeMed({
       id: 'med-time',

@@ -367,6 +367,10 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         medData.autoDeductEnabled !== undefined
           ? medData.autoDeductEnabled
           : globalAutoDeductEnabledRef.current,
+      // New medications start with their per-med critical notification
+      // preference enabled; the global critical-stock switch remains the master gate.
+      criticalStockAlertsEnabled:
+        medData.criticalStockAlertsEnabled !== false,
     };
     void (async () => {
       const result = await runGatedAddMedication({ medication: newMed });

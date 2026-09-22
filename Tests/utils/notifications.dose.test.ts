@@ -124,6 +124,32 @@ describe('Android Phase 6 scheduling boundary', () => {
     expect(options.amount).toBe(2);
     expect(options.triggerAtEpochMs).toBeGreaterThan(Date.now());
   });
+
+  it('passes the per-dose instruction to the native reminder payload', async () => {
+    mocks.platform.mockReturnValue('android');
+    await scheduleDoseReminder('med-android-description', 'Test', '20:00', 2, 'قرص', 'd1', {
+      doseDescription: 'بعد الإفطار',
+    });
+
+    const options = mocks.nativeSchedule.mock.calls[0][0];
+    expect(options.doseDescription).toBe('بعد الإفطار');
+  });
+
+
+  it('uses the Dose Reminder exact-alarm bridge and does not call LocalNotifications.schedule', async () => {
+    mocks.platform.mockReturnValue('android');
+    await scheduleDoseReminder('med-android', 'Test', '20:00', 2, 'قرص', 'd1');
+
+    expect(mocks.nativeSchedule).toHaveBeenCalledTimes(1);
+    expect(mocks.schedule).not.toHaveBeenCalled();
+
+    const options = mocks.nativeSchedule.mock.calls[0][0];
+    expect(options.medicationId).toBe('med-android');
+    expect(options.doseId).toBe('d1');
+    expect(options.reminderTime).toBe('20:00');
+    expect(options.amount).toBe(2);
+    expect(options.triggerAtEpochMs).toBeGreaterThan(Date.now());
+  });
 });
 
 describe('scheduleDoseReminder — skipToday (consumed-day suppression)', () => {
@@ -282,6 +308,23 @@ describe('Dose Reminder notification action and presentation', () => {
     expect(notif.actionTypeId).toBe('take_dose');
     expect(notif.title).toBe('تذكير مجدد: Test');
     expect(notif.title).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
+  });
+
+  it('includes the per-dose instruction in the iOS snooze notification body when provided', async () => {
+    await scheduleSnoozedDoseReminder(
+      'med-snooze-description',
+      'Test',
+      1,
+      'قرص',
+      '20:00',
+      10,
+      'd1',
+      true,
+      'قبل النوم',
+    );
+
+    const notif = mocks.schedule.mock.calls[0][0].notifications[0];
+    expect(notif.body).toContain('طريقة تناول الجرعة: قبل النوم');
   });
 
   it('does not add a Take action when manual Take is disabled for the snooze', async () => {

@@ -4,7 +4,7 @@ import {
   getCriticalAlarmDate,
   getDepletionDate,
   getTodayDateString } from '@/utils/dateCalculations';
-import { calculateMedicationStatus } from '@/types';
+import { calculateMedicationStatus } from '@/utils/medicationStatus';
 import { NEVER_DEPLETES_DAYS } from '@/utils/time';
 import { formatDepletionDate } from '@/utils/medicationPresentation';
 import type { Medication } from '@/types';

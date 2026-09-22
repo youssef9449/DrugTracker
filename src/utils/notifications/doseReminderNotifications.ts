@@ -68,6 +68,7 @@ export async function scheduleSnoozedDoseReminder(
   minutes: number,
   doseId: string,
   allowManualTakeAction: boolean = true,
+  doseDescription?: string,
 ): Promise<void> {
   const id = typeof doseId === 'string' ? doseId.trim() : '';
   if (!id) return;
@@ -76,7 +77,8 @@ export async function scheduleSnoozedDoseReminder(
     ? ` (موعد الجرعة الأصلي ${formatReminderTime12h(reminderTime)})`
     : '';
   const title = `تذكير مجدد: ${medName}`;
-  const body = `غفوة ${minutes} دقيقة انتهت${timeHint}. جرعتك المقررة: ${doseAmount} ${unit}.`;
+  const description = doseDescription?.trim();
+  const body = `غفوة ${minutes} دقيقة انتهت${timeHint}. جرعتك المقررة: ${doseAmount} ${unit}${description ? `. طريقة تناول الجرعة: ${description}` : ''}.`;
 
   if (getNativePlatform() === 'android') {
     await scheduleDoseSnoozeNative(
@@ -87,7 +89,8 @@ export async function scheduleSnoozedDoseReminder(
       reminderTime,
       minutes,
       id,
-      allowManualTakeAction === true
+      allowManualTakeAction === true,
+      description
     );
     return;
   }

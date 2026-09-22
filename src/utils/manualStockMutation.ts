@@ -33,7 +33,10 @@ import {
 } from './dateCalculations';
 import { pruneDoseConsumption } from './pruneDoseConsumption';
 import { isValidDoseTime, normalizeTimeString } from './doseSchedule';
-import { getMedicationTreatmentEndDate } from './medicationTreatment';
+import {
+  getMedicationTreatmentEndDate,
+  isMedicationTreatmentActiveOnDate,
+} from './medicationTreatment';
 import {
   withAutoStockMutationGate,
   commitDurableAutoStockState,
@@ -241,6 +244,7 @@ async function restoreInvalidatedRecurrences(
     const def = recurrenceDefinition(med, doseId);
     if (!def) continue;
     for (const calendarDate of [today, tomorrow]) {
+      if (!isMedicationTreatmentActiveOnDate(med, calendarDate)) continue;
       if (treatmentEndDate && calendarDate > treatmentEndDate) continue;
       const epoch = localEpochMs(calendarDate, def.time);
       if (epoch == null || epoch <= now.getTime() - 2000) continue;

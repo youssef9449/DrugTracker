@@ -3664,7 +3664,7 @@ describe('Phase 4 — durable global preference and add-medication ordering', ()
     expect(manualEnvelope?.globalAutoDeductEnabled).toBe(false);
   });
 
-  it('new medication is committed against fresh durable state instead of React snapshot', async () => {
+  it('new medication preserves an explicit per-med Auto-Deduction choice over the global default', async () => {
     durable = {
       medications: [med({ id: 'existing', currentPills: 7 })],
       logs: [],
@@ -3675,7 +3675,6 @@ describe('Phase 4 — durable global preference and add-medication ordering', ()
       id: 'new-med',
       name: 'NewMed',
       currentPills: 20,
-      // Deliberately stale/conflicting input — durable global=false must win.
       autoDeductEnabled: true,
     });
 
@@ -3684,6 +3683,27 @@ describe('Phase 4 — durable global preference and add-medication ordering', ()
     expect(result.outcome).toBe('applied');
     expect(durable.medications.map((m) => m.id)).toEqual(['new-med', 'existing']);
     expect(durable.medications.find((m) => m.id === 'existing')?.currentPills).toBe(7);
+    expect(durable.medications.find((m) => m.id === 'new-med')?.autoDeductEnabled).toBe(true);
+    expect(durable.globalAutoDeductEnabled).toBe(false);
+  });
+
+  it('new medication inherits the durable global default when no per-med choice is supplied', async () => {
+    durable = {
+      medications: [med({ id: 'existing', currentPills: 7 })],
+      logs: [],
+      globalAutoDeductEnabled: false,
+    };
+
+    const newMedication = med({
+      id: 'new-med',
+      name: 'NewMed',
+      currentPills: 20,
+    });
+    delete newMedication.autoDeductEnabled;
+
+    const result = await runGatedAddMedication({ medication: newMedication });
+
+    expect(result.outcome).toBe('applied');
     expect(durable.medications.find((m) => m.id === 'new-med')?.autoDeductEnabled).toBe(false);
     expect(durable.globalAutoDeductEnabled).toBe(false);
   });

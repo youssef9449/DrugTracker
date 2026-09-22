@@ -2570,6 +2570,11 @@ public final class AutoDeductionScheduler {
                     payload.put("timeHhmm", time);
                     payload.put("amount", amount);
                     payload.put("scheduledAtEpochMs", epoch);
+                    if (!treatmentEndDate.isEmpty()) {
+                        payload.put(
+                                AutoDeductionContract.EXTRA_TREATMENT_END_DATE,
+                                treatmentEndDate);
+                    }
                 } catch (JSONException e) {
                     Log.e(TAG, "restore payload build failed", e);
                     failed++;

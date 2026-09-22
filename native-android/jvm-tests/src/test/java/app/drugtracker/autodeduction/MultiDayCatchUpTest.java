@@ -334,6 +334,33 @@ public class MultiDayCatchUpTest {
     }
 
     @Test
+    public void restoreFutureSchedules_preservesTreatmentEndDate() throws Exception {
+        AutoDeductionScheduler s = newScheduler();
+        String med = "med-restore-boundary";
+        String dose = "d1";
+        String futureDate = "2026-09-30";
+        String treatmentEndDate = "2026-09-30";
+
+        // Restore from a future durable snapshot while the course is still active.
+        s.recoveryNowOverrideForTest = epoch("2026-09-29", "12:00");
+        assertTrue(s.scheduleOccurrence(
+                med,
+                dose,
+                futureDate,
+                "08:00",
+                1.0,
+                epoch(futureDate, "08:00"),
+                treatmentEndDate).ok);
+
+        assertTrue(s.restoreFutureSchedules().ok);
+
+        JSONObject restored = new JSONObject(schedulePrefs().getString(
+                schKey(AutoDeductionContract.occurrenceKey(med, dose, futureDate)), "{}"));
+        assertEquals(treatmentEndDate,
+                restored.getString(AutoDeductionContract.EXTRA_TREATMENT_END_DATE));
+    }
+
+    @Test
     public void restoreFutureSchedules_countsFutureAlarmsNotFiredRows() throws Exception {
         AutoDeductionScheduler s = newScheduler();
         s.recoveryNowOverrideForTest = epoch("2026-09-30", "12:00");

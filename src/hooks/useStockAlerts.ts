@@ -132,13 +132,11 @@ export function useStockAlerts({
       }
     }
 
-    // App preference for critical-stock alerts only (independent of dose reminders).
-  // OS permission is enforced inside the notification utility on send.
-  const canNotify = criticalStockAlertsEnabled;
-
     for (const med of medications) {
       const { status, daysLeft } = calculateMedicationStatus(med);
       const isCriticalish = status === 'critical' || status === 'out_of_stock';
+      const canNotify =
+        criticalStockAlertsEnabled && med.criticalStockAlertsEnabled !== false;
 
       if (!isCriticalish) {
         // ── Sufficient: this hook ends the business episode, here and

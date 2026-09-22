@@ -653,10 +653,10 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                 {/* Toolbar: keep the quantity-mode switch on the right and
                     the unit controls in a fixed left column. In custom mode,
                     each quantity input is rendered directly under its unit toggle. */}
-                <div className="grid grid-cols-[auto_1fr] items-start gap-1.5">
-                  <div className="shrink-0 justify-self-end">
+                <div className="flex items-start justify-between gap-1.5">
+                  <div className="shrink-0">
                     <SegmentedButton<'period' | 'custom'>
-                      className="w-[150px] shrink-0"
+                      className="w-[180px] shrink-0"
                       size="sm"
                       value={getQuantityMode(med)}
                       onChange={(val) => handleToggleQuantityMode(med, val, suggestedPills)}
@@ -669,7 +669,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                   </div>
 
                   {availableUnits.length > 1 ? (
-                    <div className="flex items-start gap-1 shrink-0 justify-self-end">
+                    <div className="flex items-start gap-1 shrink-0">
                       {availableUnits.map((u) => {
                         const isActive = selectedUnits.includes(u);
                         const icon =
@@ -686,20 +686,20 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                         return (
                           <div
                             key={u}
-                            className="flex flex-col items-stretch gap-1 min-w-[3.75rem]"
+                            className="flex flex-col items-stretch gap-1 w-[3.75rem] shrink-0"
                           >
                             <button
                               type="button"
                               onClick={() => handleToggleOrderUnit(med, u, suggestedPills)}
                               aria-pressed={isActive}
-                              className={`h-[28px] px-2 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition cursor-pointer border ${
+                              className={`w-full h-[28px] px-1.5 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition cursor-pointer border select-none ${
                                 isActive
                                   ? 'bg-teal-100 text-teal-950 border-teal-300 shadow-2xs'
                                   : 'bg-slate-50/80 text-slate-600 border-slate-200/90 hover:bg-slate-100'
                               }`}
                             >
                               {icon}
-                              <span>{label}</span>
+                              <span className="whitespace-nowrap">{label}</span>
                             </button>
                             {getQuantityMode(med) === 'custom' && isActive && (
                               <input
@@ -709,7 +709,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                                 onChange={(event) =>
                                   handleCustomQuantityChange(med, u, event.target.value)
                                 }
-                                className="w-full rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-center font-mono font-bold text-xs focus:ring-1 focus:ring-teal-500"
+                                className="w-full min-w-0 box-border rounded-md border border-slate-300 bg-white px-1 py-0.5 text-center font-mono font-bold text-xs focus:ring-1 focus:ring-teal-500"
                                 aria-label={`كمية ${med.name} ${label}`}
                               />
                             )}
@@ -741,7 +741,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                           onChange={(event) =>
                             handleCustomQuantityChange(med, unit, event.target.value)
                           }
-                          className="w-14 shrink-0 rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-center font-mono font-bold text-xs focus:ring-1 focus:ring-teal-500"
+                          className="w-[3.75rem] shrink-0 box-border rounded-md border border-slate-300 bg-white px-1 py-0.5 text-center font-mono font-bold text-xs focus:ring-1 focus:ring-teal-500"
                           aria-label={`كمية ${med.name} ${label}`}
                         />
                       );

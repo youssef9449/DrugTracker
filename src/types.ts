@@ -87,6 +87,8 @@ export interface MedicationDose {
   amount: number;
   /** Local time of the dose in 24-hour HH:mm. */
   time: string;
+  /** Optional clarification / instruction for this dose (e.g. "بعد الإفطار", "قبل النوم"). */
+  description?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────

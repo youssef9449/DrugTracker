@@ -362,7 +362,10 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       ...medData,
       id: 'med-' + Date.now(),
       createdAt: new Date().toISOString(),
-      autoDeductEnabled: globalAutoDeductEnabledRef.current,
+      autoDeductEnabled:
+        medData.autoDeductEnabled !== undefined
+          ? medData.autoDeductEnabled
+          : globalAutoDeductEnabledRef.current,
     };
     void (async () => {
       const result = await runGatedAddMedication({ medication: newMed });
@@ -373,7 +376,9 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       showToast(
         newMed.reminderEnabled
           ? `تمت إضافة "${newMed.name}" مع تنبيه الساعة ${newMed.reminderTime}`
-          : `تمت إضافة "${newMed.name}"، وسيحسب استهلاكه تلقائياً`
+          : newMed.autoDeductEnabled
+            ? `تمت إضافة "${newMed.name}"، وستخصم كل جرعة تلقائياً في موعدها`
+            : `تمت إضافة "${newMed.name}" بنجاح`
       );
       if (soundEnabled) playSuccessChime();
       setEditingMedication(null);

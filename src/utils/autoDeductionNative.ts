@@ -1,6 +1,7 @@
 /**
  * JS bridge to the Exact Auto native scheduler and Native stock authority.
  * Safe on web (native stock operations are no-ops there).
+ */
 
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 import type { Medication } from '../types';

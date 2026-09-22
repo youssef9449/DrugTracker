@@ -98,7 +98,7 @@ export const EmptyState: FC<EmptyStateProps> = ({
       </div>
       <h3 className="text-base font-bold text-slate-800">لا توجد أدوية مسجلة حالياً</h3>
       <p className="text-xs text-slate-500 mt-1 max-w-xs leading-relaxed">
-        أضف أدويتك اليومية مع عدد الحبوب ومعدل استهلاكك لنقوم بحساب وقت النفاذ وتنبيهك تلقائياً بمرور الأيام.
+        أضف أدويتك ومواعيد جرعاتك لنقوم بخصمها تلقائياً فور حلول موعد كل جرعة وحساب وقت النفاذ وتنبيهك.
       </p>
       <button
         onClick={onOpenAddModal}

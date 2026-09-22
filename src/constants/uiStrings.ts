@@ -15,7 +15,7 @@
 export const TOAST_MESSAGES = {
   // Dose actions
   doseTaken: (name: string, amount: number, unit: string) =>
-    `تم تسجيل جرعة "${name}" (-${amount} ${unit}). لن يتم الخصم التلقائي اليوم.`,
+    `تم تسجيل جرعة "${name}" (-${amount} ${unit}).`,
   doseAlreadyTaken: (name: string) =>
     `تم تناول جرعة "${name}" اليوم بالفعل.`,
 
@@ -42,7 +42,7 @@ export const TOAST_MESSAGES = {
 
   // Auto-deduct
   autoDeductSummary: (totalPills: number) =>
-    `تم الخصم التلقائي للاستهلاك: خصم ${totalPills} قرص لمرور الأيام.`,
+    `تم الخصم التلقائي للاستهلاك: خصم ${totalPills} قرص لمواعيد الجرعات المستحقة.`,
 
   // Font scale
   fontScaledUp: 'تم تكبير حجم الخط',

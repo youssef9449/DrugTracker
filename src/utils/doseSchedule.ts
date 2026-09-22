@@ -30,7 +30,7 @@ export function isMedicationAutoDeductActive(
 }
 
 /** Sensible UI maximum for doses per day (compact mobile form). */
-export const MAX_DOSES_PER_DAY = 6;
+export const MAX_DOSES_PER_DAY = 12;
 
 /**
  * Default times used when expanding the schedule (HH:mm).
@@ -39,11 +39,17 @@ export const MAX_DOSES_PER_DAY = 6;
  */
 export const DEFAULT_DOSE_TIMES = [
   '08:00',
+  '10:00',
   '12:00',
   '14:00',
+  '16:00',
   '18:00',
+  '20:00',
   '21:00',
   '22:00',
+  '22:30',
+  '23:00',
+  '23:30',
 ] as const;
 
 const TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
@@ -97,6 +103,9 @@ export function getDoseScheduleForUI(
         id: d.id || generateId('dose'),
         amount: Number(d.amount),
         time: normalizeTimeString(d.time),
+        ...(d.description !== undefined && d.description.trim() !== ''
+          ? { description: d.description.trim() }
+          : {}),
       }))
   );
 }
@@ -120,7 +129,7 @@ export function resizeDoseSchedule(
     return current.slice(0, n);
   }
 
-  const next = current.map((d) => d); // shallow copy; keep same row objects
+  const next = current.map((d) => ({ ...d })); // shallow copy; keep same row data
   const usedTimes = new Set(
     next.map((d) => normalizeTimeString(d.time)).filter((t) => isValidDoseTime(t))
   );
@@ -196,7 +205,7 @@ export function validateAndNormalizeDoseSchedule(
     return {
       ok: false,
       error: 'invalid_count',
-      message: 'عدد مرات تناول الدواء يومياً يجب أن يكون بين 1 و 6',
+      message: `عدد مرات تناول الدواء يومياً يجب أن يكون بين 1 و ${MAX_DOSES_PER_DAY}`,
     };
   }
   if (!Array.isArray(schedule) || schedule.length === 0) {
@@ -247,6 +256,9 @@ export function validateAndNormalizeDoseSchedule(
       id: row.id || generateId('dose'),
       amount,
       time,
+      ...(row.description !== undefined && row.description.trim() !== ''
+        ? { description: row.description.trim() }
+        : {}),
     });
   }
 

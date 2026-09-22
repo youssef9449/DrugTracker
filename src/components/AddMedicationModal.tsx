@@ -90,6 +90,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
   const [error, setError] = useState('');
 
   const [reminderEnabled, setReminderEnabled] = useState<boolean>(false);
+  const [autoDeductEnabled, setAutoDeductEnabled] = useState<boolean>(true);
   // Toggle for medications that come as loose pills in a box without
   // strips (e.g., Coffiram — 15 pills per box, no blister strips).
   // When enabled, the strip fields are hidden and the user just
@@ -145,6 +146,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
         setPackageSizeStr(String(pkg));
       }
       setReminderEnabled(Boolean(initialData.reminderEnabled));
+      setAutoDeductEnabled(initialData.autoDeductEnabled !== false);
     } else {
       setName('');
       setCurrentPills(30);
@@ -165,6 +167,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       setHelperStrips('0');
       setHelperLoose('0');
       setReminderEnabled(false);
+      setAutoDeductEnabled(true);
     }
     setShowStockHelper(false);
     setError('');
@@ -319,7 +322,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
         category: category.trim(),
         notes: initialData?.notes || '',
         colorTag,
-        autoDeductEnabled: initialData?.autoDeductEnabled ?? true,
+        autoDeductEnabled,
         stripsPerBox: stripsPerBoxNum,
         pillsPerStrip: pillsPerStripNum,
         packageSize: calculatedPkgSize,
@@ -376,9 +379,37 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
             </div>
           )}
 
-          <div className="p-2.5 bg-teal-50 border border-teal-100 rounded-xl text-xs text-teal-900 flex items-center gap-2">
-            <Zap className="w-4 h-4 text-teal-600 shrink-0" />
-            <span>سيتولى التطبيق خصم الاستهلاك تلقائياً بمرور الأيام دون الحاجة لتسجيل يومي يدوي!</span>
+          {/* الخصم التلقائي للمخزون (Auto-deduct Toggle) */}
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <div
+                  className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+                    autoDeductEnabled
+                      ? 'bg-teal-100 text-teal-800'
+                      : 'bg-slate-200 text-slate-500'
+                  }`}
+                >
+                  <Zap className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <span className="block text-xs font-bold text-slate-800">
+                    الخصم التلقائي للمخزون
+                  </span>
+                  <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                    {autoDeductEnabled
+                      ? 'خصم كل جرعة تلقائياً فور حلول موعدها المحدد'
+                      : 'إيقاف الخصم التلقائي (تسجيل تناول الجرعات يدوياً)'}
+                  </p>
+                </div>
+              </div>
+              <Toggle
+                checked={autoDeductEnabled}
+                onChange={() => setAutoDeductEnabled(!autoDeductEnabled)}
+                label="تفعيل الخصم التلقائي لهذا الدواء"
+                size="md"
+              />
+            </div>
           </div>
 
           <div>
@@ -778,7 +809,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
             {doseSchedule.map((dose, index) => (
               <div
                 key={dose.id}
-                className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 space-y-2"
+                className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 space-y-2.5"
               >
                 <div className="text-xs font-bold text-slate-700">الجرعة {index + 1}</div>
                 <div className="grid grid-cols-2 gap-2 items-start">
@@ -826,6 +857,24 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
                       {formatTimeArabic(dose.time) || 'اختر الوقت'}
                     </div>
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                    توضيح للجرعة (اختياري)
+                  </label>
+                  <input
+                    type="text"
+                    value={dose.description || ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setDoseSchedule((prev) =>
+                        prev.map((d, i) => (i === index ? { ...d, description: val } : d))
+                      );
+                    }}
+                    placeholder="مثال: بعد الإفطار، قبل النوم، مع الغداء..."
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+                  />
                 </div>
               </div>
             ))}

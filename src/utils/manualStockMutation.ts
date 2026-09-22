@@ -1714,7 +1714,10 @@ export function runGatedMedicationUpdate(opts: {
       createdAt: freshMed.createdAt,
       currentPills: stockBase.currentPills,
       lastConsumedDate: stockBase.lastConsumedDate,
-      autoDeductEnabled: stockBase.autoDeductEnabled,
+      autoDeductEnabled:
+        opts.medData.autoDeductEnabled !== undefined
+          ? opts.medData.autoDeductEnabled
+          : stockBase.autoDeductEnabled,
       // Explicitly take pruned history (not stockBase) so removed dose IDs stay gone.
       doseConsumptionHistory: pruned.doseConsumptionHistory,
       doseSkippedHistory:

@@ -64,8 +64,8 @@ export const SegmentedButton = <T extends string = string>({
             onClick={() => {
               if (!isSelected) onChange(option.value);
             }}
-            className={`flex-1 inline-flex items-center justify-center gap-1.5 h-full transition-all duration-200 cursor-pointer ${
-              isSm ? 'px-2.5 text-[11px]' : 'px-3.5 text-xs'
+            className={`flex-1 basis-0 min-w-0 inline-flex items-center justify-center h-full transition-all duration-200 cursor-pointer ${
+              isSm ? 'px-1.5 text-[11px] gap-1' : 'px-3 text-xs gap-1.5'
             } ${
               isSelected
                 ? 'bg-teal-100 text-teal-950 font-bold shadow-2xs'

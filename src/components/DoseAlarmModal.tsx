@@ -84,6 +84,7 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
             {dose ? (
               <div className="text-[11px] font-bold text-teal-700 pt-0.5">
                 جرعة الساعة {formatTimeArabic(dose.time)}
+                {dose.description ? ` (${dose.description})` : ''}
               </div>
             ) : null}
 

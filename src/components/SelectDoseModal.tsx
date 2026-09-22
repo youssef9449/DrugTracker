@@ -187,7 +187,9 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
               // Issue #267: pure-projection restore removed.
               const timeLabel = formatTimeArabic(dose.time);
               const dayLabel = relativeDoseDayLabel(eventDate, today);
-              const whenLabel = `${dayLabel} • ${timeLabel}`;
+              const whenLabel = dose.description
+                ? `${dayLabel} • ${timeLabel} (${dose.description})`
+                : `${dayLabel} • ${timeLabel}`;
 
               if (isManage) {
                 // Effective Auto-Deduction state = isAutoActive (single source:

@@ -19,7 +19,6 @@ public final class ExactAlarmContract {
     private ExactAlarmContract() {}
 
     public static final String FIELD_OPERATION_VERSION = "operationVersion";
-    public static final String LEGACY_FIELD_SCHEDULE_VERSION = "scheduleVersion";
     public static final String FIELD_IDENTITY_URI = "identityUri";
     public static final String FIELD_STORAGE_KEY = "storageKey";
     public static final String FIELD_ACTION = "action";
@@ -43,11 +42,7 @@ public final class ExactAlarmContract {
         if (metadata == null) return "";
         String current = metadata.optString(
                 FIELD_OPERATION_VERSION, "");
-        return current.isEmpty()
-                ? metadata.optString(
-                        LEGACY_FIELD_SCHEDULE_VERSION,
-                        "")
-                : current;
+        return current;
     }
 
     public static boolean isMetadataOwnedByOperationVersion(

@@ -2,7 +2,7 @@ import { useState, type FC } from 'react';
 import { Clock, ArrowUpRight, ArrowDownLeft, ChevronRight, ChevronLeft } from 'lucide-react';
 import { Medication, ConsumptionLog } from '../types';
 import { SegmentedButton } from './ui/SegmentedButton';
-import { formatArabicDate, formatLogTime } from '../utils/dateCalculations';
+import { formatArabicDate, formatLogTime } from '../utils/medicationPresentation';
 import { DAYS_PER_MONTH } from '../utils/time';
 import { formatScheduledDoseBreakdown } from '../utils/medicationPackaging';
 

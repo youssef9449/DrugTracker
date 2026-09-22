@@ -26,7 +26,7 @@ function getDirectionDescription(field: MedicationSortField, direction: Medicati
     return direction === 'asc' ? 'تصاعدي (من الأقل للأكثر)' : 'تنازلي (من الأكثر للأقل)';
   }
   if (field === 'duration') {
-    if (short) return direction === 'asc' ? 'الأقصر أولاً' : 'الأطول والمستمر أولاً';
+    if (short) return direction === 'asc' ? 'الأقصر أولاً' : 'الأطول أولا';
     return direction === 'asc' ? 'تصاعدي (الكورس الأقصر ثم المزمن)' : 'تنازلي (المزمن ثم الكورس الأطول)';
   }
   // category

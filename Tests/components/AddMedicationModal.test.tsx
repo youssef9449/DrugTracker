@@ -236,9 +236,57 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     expect(screen.queryByText('الجرعة 2')).not.toBeInTheDocument();
   });
 
+  it('uses the global Auto-Deduction default for new medication and allows an explicit override', () => {
+    const onSave = vi.fn();
+    render(
+      <AddMedicationModal
+        {...baseProps({ onSave, defaultAutoDeductEnabled: false })}
+      />
+    );
+
+    const toggle = screen.getByRole('switch', {
+      name: 'تفعيل الخصم التلقائي لهذا الدواء',
+    });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.change(screen.getByPlaceholderText(/بانادول|كونكور/), {
+      target: { value: 'OverrideMed' },
+    });
+    fireEvent.click(screen.getByText('إضافة الدواء'));
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave.mock.calls[0][0].autoDeductEnabled).toBe(true);
+  });
+
+  it('ignores malformed persisted dose description instead of throwing', () => {
+    const malformedDescriptionMed = makeMed({
+      doseSchedule: [
+        {
+          id: 'd1',
+          amount: 1,
+          time: '08:00',
+          description: 123 as unknown as string,
+        },
+      ],
+      dosesPerDay: 1,
+    });
+
+    render(
+      <AddMedicationModal
+        {...baseProps({ initialData: malformedDescriptionMed })}
+      />
+    );
+
+    expect(screen.getByText('الجرعة 1')).toBeInTheDocument();
+    expect(screen.getByLabelText('توضيح للجرعة (اختياري)')).toHaveValue('');
+  });
+
   it('changing dosesPerDay from 1 → 3 creates three rows', () => {
     render(<AddMedicationModal {...baseProps()} />);
-    // dosesPerDay is the only <select> whose options are 1..6
+    // dosesPerDay is the only <select> whose options are 1..12
     const selects = screen.getAllByRole('combobox') as HTMLSelectElement[];
     const doseCountSelect = selects.find((s) =>
       Array.from(s.options).some((o) => o.value === '6')

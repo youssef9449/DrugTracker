@@ -50,7 +50,9 @@ vi.mock('@capacitor/local-notifications', () => ({
 
 import {
   scheduleDoseReminder,
-  isDoseReminderTimeStillAhead } from '@/utils/notifications';
+  scheduleSnoozedDoseReminder,
+  isDoseReminderTimeStillAhead,
+} from '@/utils/notifications';
 
 /**
  * Extract the scheduled payload (id + schedule) of the LAST
@@ -221,6 +223,62 @@ describe('isDoseReminderTimeStillAhead — suppression boundary', () => {
     expect(isDoseReminderTimeStillAhead('')).toBe(false);
     expect(isDoseReminderTimeStillAhead('99:99')).toBe(false);
     expect(isDoseReminderTimeStillAhead('ab:cd')).toBe(false);
+  });
+});
+
+describe('Dose Reminder notification action and presentation', () => {
+  it('includes the Take action on iOS when manual Take is allowed', async () => {
+    await scheduleDoseReminder('med-action', 'Test', '20:00', 1, 'قرص', 'd1', {
+      allowManualTakeAction: true,
+    });
+
+    const notif = mocks.schedule.mock.calls[0][0].notifications[0];
+    expect(notif.actionTypeId).toBe('take_dose');
+    expect(notif.title).toBe('حان موعد دواء: Test');
+    expect(notif.title).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
+  });
+
+  it('omits the Take action when manual Take is not allowed', async () => {
+    await scheduleDoseReminder('med-action-disabled', 'Test', '20:00', 1, 'قرص', 'd1', {
+      allowManualTakeAction: false,
+    });
+
+    const notif = mocks.schedule.mock.calls[0][0].notifications[0];
+    expect(notif.actionTypeId).toBeUndefined();
+  });
+
+  it('includes the Take action on an iOS snooze notification when manual Take is allowed', async () => {
+    await scheduleSnoozedDoseReminder(
+      'med-snooze',
+      'Test',
+      1,
+      'قرص',
+      '20:00',
+      10,
+      'd1',
+      true,
+    );
+
+    const notif = mocks.schedule.mock.calls[0][0].notifications[0];
+    expect(notif.actionTypeId).toBe('take_dose');
+    expect(notif.title).toBe('تذكير مجدد: Test');
+    expect(notif.title).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
+  });
+
+  it('does not add a Take action when manual Take is disabled for the snooze', async () => {
+    await scheduleSnoozedDoseReminder(
+      'med-snooze-disabled',
+      'Test',
+      1,
+      'قرص',
+      '20:00',
+      10,
+      'd1',
+      false,
+    );
+
+    const notif = mocks.schedule.mock.calls[0][0].notifications[0];
+    expect(notif.actionTypeId).toBeUndefined();
   });
 });
 

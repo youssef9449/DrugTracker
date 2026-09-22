@@ -1,8 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import {
-  calculateMedicationStatus,
-  getCriticalThresholdDays,
-  type Medication } from '@/types';
+import type { Medication } from '@/types';
+import { calculateMedicationStatus, getCriticalThresholdDays } from '@/utils/medicationStatus';
 import { NEVER_DEPLETES_DAYS } from '@/utils/time';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {

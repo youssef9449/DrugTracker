@@ -581,7 +581,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         </div>
 
         {/* Actions row (independent of Category/Status) */}
-        <div className="flex items-center justify-end gap-1 shrink-0">
+        <div className="flex flex-wrap items-center justify-end gap-1 shrink-0">
             {Array.isArray(medication.doseSchedule) &&
             medication.doseSchedule.length > 1 &&
             onConsumeDose ? (
@@ -783,7 +783,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         </div>
 
         {/* Actions row (independent of Category/Status) */}
-        <div className="flex items-center justify-end gap-1 shrink-0 mt-1">
+        <div className="flex flex-wrap items-center justify-end gap-1 shrink-0 mt-1">
             {Array.isArray(medication.doseSchedule) &&
             medication.doseSchedule.length > 1 &&
             onConsumeDose ? (

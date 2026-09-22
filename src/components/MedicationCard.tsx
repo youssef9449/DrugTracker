@@ -326,7 +326,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           <div className="text-left">
             <span className="text-[11px] text-slate-500 block">تاريخ النفاذ التقديري:</span>
             <span className="font-bold text-slate-900 block mt-0.5 text-xs">
-              {depletion.formattedArabic}
+              {formatDepletionDate(depletion.dateStr, depletion.daysLeft, currentPills)}
             </span>
             <span className="text-[10px] text-slate-500 font-mono">
               {isOut

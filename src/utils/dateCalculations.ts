@@ -1,5 +1,5 @@
 import type { Medication } from '../types';
-import { getCriticalThresholdDays } from './medicationStatus';
+import { getCriticalThresholdDays } from './medicationDomain';
 import { MS_PER_DAY, NEVER_DEPLETES_DAYS } from './time';
 
 /**

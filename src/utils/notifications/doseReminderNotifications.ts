@@ -9,6 +9,11 @@ import { scheduleWebNotification } from './webNotifications';
 
 export const DOSE_REMINDER_CHANNEL_ID = 'dose-reminder-v3';
 export const DOSE_REMINDER_FOREGROUND_CHANNEL_ID = 'dose-reminder-foreground-v1';
+export const DOSE_REMINDER_TAKE_ACTION = {
+  id: 'take_dose',
+  title: 'تم أخذ الجرعة',
+  foreground: true,
+} as const;
 
 let appInForeground = true;
 
@@ -30,7 +35,7 @@ export async function sendTestAlertNotification(): Promise<void> {
   await scheduleNotification({
     namespace: 'test',
     identity: 'test',
-    title: '🔔 إشعار تجريبي: متابع الأدوية',
+    title: 'إشعار تجريبي: متابع الأدوية',
     body: 'الإشعارات والتنبيهات تعمل بشكل سليم على جهازك!',
     channelId: getDoseReminderChannelId(),
     smallIcon: 'ic_launcher',
@@ -70,7 +75,7 @@ export async function scheduleSnoozedDoseReminder(
   const timeHint = reminderTime
     ? ` (موعد الجرعة الأصلي ${formatReminderTime12h(reminderTime)})`
     : '';
-  const title = `⏰ تذكير مجدد: ${medName}`;
+  const title = `تذكير مجدد: ${medName}`;
   const body = `غفوة ${minutes} دقيقة انتهت${timeHint}. جرعتك المقررة: ${doseAmount} ${unit}.`;
 
   if (getNativePlatform() === 'android') {
@@ -100,9 +105,7 @@ export async function scheduleSnoozedDoseReminder(
       smallIcon: 'ic_launcher',
       autoCancel: true,
       ongoing: false,
-      action: allowManualTakeAction
-        ? undefined
-        : { id: 'dose-reminder', title: 'تذكير الجرعة' },
+      action: allowManualTakeAction ? DOSE_REMINDER_TAKE_ACTION : undefined,
       at: fireAt,
       extra: { medicationId: medId, doseId: id },
       fallbackToWeb: false,

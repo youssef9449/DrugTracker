@@ -33,6 +33,7 @@ import {
 } from './dateCalculations';
 import { pruneDoseConsumption } from './pruneDoseConsumption';
 import { isValidDoseTime, normalizeTimeString } from './doseSchedule';
+import { generateId } from './id';
 import {
   getMedicationTreatmentEndDate,
   isMedicationTreatmentActiveOnDate,
@@ -798,7 +799,7 @@ export function runGatedManualRestore(opts: {
     const reverseTimestamp = new Date(now).toISOString();
     const reversedLogId = result.reversedLogId;
     const log: ConsumptionLog = {
-      id: opts.makeLogId ? opts.makeLogId() : `restore-${Date.now()}`,
+      id: opts.makeLogId ? opts.makeLogId() : generateId('restore'),
       medicationId: med.id,
       medicationName: med.name,
       type: 'skipped_day',
@@ -1054,7 +1055,7 @@ export function runGatedRefill(opts: {
       m.id === opts.medicationId ? updatedMed : m
     );
     const log: ConsumptionLog = {
-      id: opts.makeLogId ? opts.makeLogId() : `refill-${Date.now()}`,
+      id: opts.makeLogId ? opts.makeLogId() : generateId('refill'),
       medicationId: med.id,
       medicationName: med.name,
       type: 'refill',
@@ -1198,7 +1199,7 @@ export function runGatedUndoRefill(opts: {
       m.id === opts.medicationId ? updatedMed : m
     );
     const undoLog: ConsumptionLog = {
-      id: opts.makeLogId ? opts.makeLogId() : `refill-undo-${Date.now()}`,
+      id: opts.makeLogId ? opts.makeLogId() : generateId('refill-undo'),
       medicationId: med.id,
       medicationName: med.name,
       type: 'refill_undo',

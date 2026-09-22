@@ -72,7 +72,6 @@ import {
   COMPACT_VIEW_KEY,
 } from './constants/storageKeys';
 import { TOAST_DURATION_MS, PHARMACY_PERSIST_DEBOUNCE_MS } from './utils/time';
-import { Zap, ZapOff } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(getInitialTab);
@@ -634,6 +633,8 @@ export default function App() {
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           alertsCount={alertsCount}
+          globalAutoDeductEnabled={globalAutoDeductEnabled}
+          onToggleGlobalAutoDeduct={handleToggleGlobalAutoDeduct}
           notificationsEnabled={notificationsEnabled}
           onToggleNotifications={handleToggleNotifications}
           criticalStockAlertsEnabled={criticalStockAlertsEnabled}
@@ -657,65 +658,6 @@ export default function App() {
             <div>
               {filter === 'all' && (
                 <div>
-                  <div
-                    className={`mx-4 mt-2 px-3 py-2 rounded-xl shadow-2xs border transition-all duration-200 ${
-                      globalAutoDeductEnabled
-                        ? 'bg-teal-50/90 border-teal-200/90'
-                        : 'bg-amber-50/90 border-amber-200/90'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <div
-                        className={`w-6 h-6 rounded-lg text-white flex items-center justify-center shrink-0 ${
-                          globalAutoDeductEnabled ? 'bg-teal-600' : 'bg-amber-500'
-                        }`}
-                      >
-                        {globalAutoDeductEnabled ? (
-                          <Zap className="w-3.5 h-3.5" />
-                        ) : (
-                          <ZapOff className="w-3.5 h-3.5" />
-                        )}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-bold text-slate-900 block text-[11px] leading-tight">
-                            الخصم التلقائي لجميع الأدوية
-                          </span>
-                          <span
-                            className={`text-[9.5px] px-1.5 py-0.2 rounded-full font-bold ${
-                              globalAutoDeductEnabled
-                                ? 'bg-teal-100 text-teal-800'
-                                : 'bg-amber-100 text-amber-800'
-                            }`}
-                          >
-                            {globalAutoDeductEnabled ? 'مفعّل' : 'متوقف'}
-                          </span>
-                        </div>
-                        <p
-                          className={`text-[9.5px] leading-tight mt-0.5 truncate ${
-                            globalAutoDeductEnabled ? 'text-teal-800' : 'text-amber-800'
-                          }`}
-                        >
-                          {globalAutoDeductEnabled
-                            ? 'يضبط كل الأدوية الحالية والجديدة — يمكن تعديل دواء منفردًا من الكارت.'
-                            : 'يوقف كل الأدوية الحالية — يمكن تفعيل دواء منفردًا من الكارت.'}
-                        </p>
-                      </div>
-                      <label
-                        htmlFor="toggle-global-auto-deduct"
-                        className="flex items-center gap-2 cursor-pointer select-none shrink-0"
-                      >
-                        <Toggle
-                          id="toggle-global-auto-deduct"
-                          checked={globalAutoDeductEnabled}
-                          onChange={handleToggleGlobalAutoDeduct}
-                          label="تبديل الخصم التلقائي لجميع الأدوية"
-                          size="sm"
-                          color="teal"
-                        />
-                      </label>
-                    </div>
-                  </div>
                   <div className="mx-4 mt-2 grid grid-cols-2 items-stretch gap-2 text-center text-xs">
                     <div className="bg-white px-2.5 py-1.5 rounded-xl border border-slate-200/80 shadow-2xs h-full flex flex-col justify-center">
                       <span className="text-[9.5px] text-slate-500 block leading-tight">إجمالي الأدوية</span>

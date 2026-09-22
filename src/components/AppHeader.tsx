@@ -1,5 +1,5 @@
 import { type FC } from 'react';
-import { Bell, BellOff, Search, Smartphone, Monitor, Settings, AlertTriangle, Check, X } from 'lucide-react';
+import { Bell, BellOff, Search, Smartphone, Monitor, Settings, AlertTriangle, Check, X, Zap, ZapOff } from 'lucide-react';
 import { ActiveTab } from './AndroidBottomNav';
 import { ICON_BUTTON_CLASS } from '../lib/styles';
 
@@ -43,6 +43,8 @@ interface AppHeaderProps {
   isPhoneFrame: boolean;
   onTogglePhoneFrame: () => void;
   onOpenSettings: () => void;
+  globalAutoDeductEnabled: boolean;
+  onToggleGlobalAutoDeduct: () => void;
   fontScale: 'normal' | 'large';
   onToggleFontScale: () => void;
 }
@@ -61,6 +63,8 @@ export const AppHeader: FC<AppHeaderProps> = ({
   isPhoneFrame,
   onTogglePhoneFrame,
   onOpenSettings,
+  globalAutoDeductEnabled,
+  onToggleGlobalAutoDeduct,
   fontScale,
   onToggleFontScale,
 }) => {
@@ -91,6 +95,34 @@ export const AppHeader: FC<AppHeaderProps> = ({
             aria-label="الإعدادات"
           >
             <Settings className="w-5 h-5" />
+          </button>
+
+          {/* Global Auto-Deduct toggle */}
+          <button
+            type="button"
+            onClick={onToggleGlobalAutoDeduct}
+            title={
+              globalAutoDeductEnabled
+                ? 'الخصم التلقائي لجميع الأدوية مفعّل (انقر للإيقاف)'
+                : 'الخصم التلقائي لجميع الأدوية متوقف (انقر للتفعيل)'
+            }
+            aria-label={
+              globalAutoDeductEnabled
+                ? 'الخصم التلقائي لجميع الأدوية مفعّل — انقر للإيقاف'
+                : 'الخصم التلقائي لجميع الأدوية متوقف — انقر للتفعيل'
+            }
+            aria-pressed={globalAutoDeductEnabled}
+            className={`w-10 h-10 rounded-full transition-all active:scale-95 flex items-center justify-center cursor-pointer ${
+              globalAutoDeductEnabled
+                ? 'bg-teal-400/20 text-teal-200 ring-1 ring-teal-300/30 shadow-xs'
+                : 'bg-amber-400/20 text-amber-200 ring-1 ring-amber-300/30 shadow-xs'
+            }`}
+          >
+            {globalAutoDeductEnabled ? (
+              <Zap className="w-5 h-5" />
+            ) : (
+              <ZapOff className="w-5 h-5" />
+            )}
           </button>
 
           {/* Browser / In-App Notification toggle */}

@@ -68,6 +68,7 @@ export interface DoseReminderSlot {
   amount: number;
   name: string;
   unit: string;
+  description?: string;
 }
 
 /** Tracker key: medId::doseId — independent cancel/schedule identity. */
@@ -106,6 +107,9 @@ export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
       amount: Number(d.amount),
       name,
       unit,
+      description: typeof d.description === 'string' && d.description.trim()
+        ? d.description.trim()
+        : undefined,
     });
   }
   return slots;
@@ -167,7 +171,7 @@ export function useDoseReminderScheduler({
           const schedulePart =
             Array.isArray(m.doseSchedule) && m.doseSchedule.length > 0
               ? m.doseSchedule
-                  .map((d) => `${d.id}@${d.time}@${d.amount}`)
+                  .map((d) => `${d.id}@${d.time}@${d.amount}@${typeof d.description === 'string' ? d.description.trim() : ''}`)
                   .join(',')
               : '';
           // Reminder slots from explicit doseSchedule only.
@@ -228,6 +232,7 @@ export function useDoseReminderScheduler({
       amount: number;
       name: string;
       unit: string;
+      description?: string;
       slotConsumedToday: boolean;
       allowManualTakeAction: boolean;
       sig: string;
@@ -249,6 +254,7 @@ export function useDoseReminderScheduler({
           String(slot.amount),
           slot.name,
           slot.unit,
+          slot.description ?? '',
           slotConsumedToday ? '1' : '0',
           allowManualTakeAction ? '1' : '0',
         ].join('|');
@@ -262,6 +268,7 @@ export function useDoseReminderScheduler({
           amount: slot.amount,
           name: slot.name,
           unit: slot.unit,
+          description: slot.description,
           slotConsumedToday,
           allowManualTakeAction,
           sig,
@@ -286,6 +293,7 @@ export function useDoseReminderScheduler({
         amount,
         name,
         unit,
+        description,
         slotConsumedToday,
         allowManualTakeAction,
         sig,
@@ -317,6 +325,7 @@ export function useDoseReminderScheduler({
           const opts = {
             ...(slotConsumedToday ? { skipToday: true as const } : {}),
             allowManualTakeAction,
+            ...(description ? { doseDescription: description } : {}),
           };
           await scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts);
           if (!generationGuardRef.current.isCurrent(key, gen)) {
@@ -425,7 +434,7 @@ export function useDoseReminderScheduler({
       for (const slot of slots) {
         const slotConsumedToday = isDoseConsumedOnDate(med, slot.doseId, today);
         const key = doseScheduleKey(slot.medId, slot.doseId);
-        const { medId, doseId, time, amount, name, unit } = slot;
+        const { medId, doseId, time, amount, name, unit, description } = slot;
         const wasConsumed = prevConsumedKeysRef.current.has(key);
 
         if (slotConsumedToday) {
@@ -452,6 +461,7 @@ export function useDoseReminderScheduler({
                 const opts = {
                   skipToday: true as const,
                   allowManualTakeAction,
+                  ...(description ? { doseDescription: description } : {}),
                 };
                 return scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts).then(
                   () => {
@@ -477,6 +487,7 @@ export function useDoseReminderScheduler({
               const allowManualTakeAction = allowManualTakeActionByMedicationId.get(med.id) ?? true;
               const opts = {
                 allowManualTakeAction,
+                ...(description ? { doseDescription: description } : {}),
               };
               return scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts).then(() => {
                 if (!generationGuardRef.current.isCurrent(key, gen)) {

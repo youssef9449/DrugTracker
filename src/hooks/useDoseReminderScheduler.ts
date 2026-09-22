@@ -344,6 +344,7 @@ export function useDoseReminderScheduler({
           const opts = {
             ...(slotConsumedToday ? { skipToday: true as const } : {}),
             allowManualTakeAction,
+            ...(description ? { doseDescription: description } : {}),
           };
           await scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts);
           if (!generationGuardRef.current.isCurrent(key, gen)) {

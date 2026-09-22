@@ -361,7 +361,7 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     }
     const newMed: Medication = {
       ...medData,
-      id: 'med-' + Date.now(),
+      id: generateId('med'),
       createdAt: new Date().toISOString(),
       autoDeductEnabled:
         medData.autoDeductEnabled !== undefined

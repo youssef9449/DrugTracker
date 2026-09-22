@@ -543,7 +543,8 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               مزمن
             </span>
           ) : null}
-          <div className="flex items-center gap-1 shrink-0">
+
+          <div className="mt-1 flex items-center gap-1 shrink-0">
             <AutoDeductStatusBadge
               isAutoActive={isAutoActive}
               onToggle={() => onToggleAutoDeduct(medication.id)}
@@ -764,7 +765,8 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               مزمن
             </span>
           ) : null}
-          <div className="flex items-center gap-1 shrink-0">
+
+          <div className="mt-1 flex items-center gap-1 shrink-0">
             <AutoDeductStatusBadge
               isAutoActive={isAutoActive}
               onToggle={() => onToggleAutoDeduct(medication.id)}

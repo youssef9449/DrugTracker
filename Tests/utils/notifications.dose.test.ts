@@ -227,6 +227,25 @@ describe('isDoseReminderTimeStillAhead — suppression boundary', () => {
 });
 
 describe('Dose Reminder notification action and presentation', () => {
+  it('includes the per-dose instruction in the iOS notification body when provided', async () => {
+    await scheduleDoseReminder('med-description', 'Test', '20:00', 1, 'قرص', 'd1', {
+      doseDescription: 'بعد الإفطار',
+    });
+
+    const notif = mocks.schedule.mock.calls[0][0].notifications[0];
+    expect(notif.body).toContain('طريقة تناول الجرعة: بعد الإفطار');
+  });
+
+  it('does not include an instruction label when the per-dose description is empty', async () => {
+    await scheduleDoseReminder('med-no-description', 'Test', '20:00', 1, 'قرص', 'd1', {
+      doseDescription: '   ',
+    });
+
+    const notif = mocks.schedule.mock.calls[0][0].notifications[0];
+    expect(notif.body).toBe('موعد الجرعة الساعة 08:00 م. جرعتك المقررة: 1 قرص.');
+    expect(notif.body).not.toContain('طريقة تناول الجرعة:');
+  });
+
   it('includes the Take action on iOS when manual Take is allowed', async () => {
     await scheduleDoseReminder('med-action', 'Test', '20:00', 1, 'قرص', 'd1', {
       allowManualTakeAction: true,

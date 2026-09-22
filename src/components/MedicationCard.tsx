@@ -543,26 +543,28 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               مزمن
             </span>
           ) : null}
-          <AutoDeductStatusBadge
-            isAutoActive={isAutoActive}
-            onToggle={() => onToggleAutoDeduct(medication.id)}
-            size="xs"
-            medicationId={medication.id}
-          />
-          <MedicationNotificationStatusBadge
-            enabled={medication.reminderEnabled === true}
-            onToggle={() => onToggleMedicationReminder?.(medication.id)}
-            type="dose"
-            size="xs"
-            medicationId={medication.id}
-          />
-          <MedicationNotificationStatusBadge
-            enabled={medication.criticalStockAlertsEnabled !== false}
-            onToggle={() => onToggleMedicationCriticalStockAlerts?.(medication.id)}
-            type="critical"
-            size="xs"
-            medicationId={medication.id}
-          />
+          <div className="flex items-center gap-1 shrink-0">
+            <AutoDeductStatusBadge
+              isAutoActive={isAutoActive}
+              onToggle={() => onToggleAutoDeduct(medication.id)}
+              size="xs"
+              medicationId={medication.id}
+            />
+            <MedicationNotificationStatusBadge
+              enabled={medication.reminderEnabled === true}
+              onToggle={() => onToggleMedicationReminder?.(medication.id)}
+              type="dose"
+              size="xs"
+              medicationId={medication.id}
+            />
+            <MedicationNotificationStatusBadge
+              enabled={medication.criticalStockAlertsEnabled !== false}
+              onToggle={() => onToggleMedicationCriticalStockAlerts?.(medication.id)}
+              type="critical"
+              size="xs"
+              medicationId={medication.id}
+            />
+          </div>
           {isOut ? (
             <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 flex items-center gap-0.5 shrink-0 w-fit">
               <AlertCircle className="w-2 h-2" />
@@ -762,26 +764,28 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               مزمن
             </span>
           ) : null}
-          <AutoDeductStatusBadge
-            isAutoActive={isAutoActive}
-            onToggle={() => onToggleAutoDeduct(medication.id)}
-            size="sm"
-            medicationId={medication.id}
-          />
-          <MedicationNotificationStatusBadge
-            enabled={medication.reminderEnabled === true}
-            onToggle={() => onToggleMedicationReminder?.(medication.id)}
-            type="dose"
-            size="sm"
-            medicationId={medication.id}
-          />
-          <MedicationNotificationStatusBadge
-            enabled={medication.criticalStockAlertsEnabled !== false}
-            onToggle={() => onToggleMedicationCriticalStockAlerts?.(medication.id)}
-            type="critical"
-            size="sm"
-            medicationId={medication.id}
-          />
+          <div className="flex items-center gap-1 shrink-0">
+            <AutoDeductStatusBadge
+              isAutoActive={isAutoActive}
+              onToggle={() => onToggleAutoDeduct(medication.id)}
+              size="sm"
+              medicationId={medication.id}
+            />
+            <MedicationNotificationStatusBadge
+              enabled={medication.reminderEnabled === true}
+              onToggle={() => onToggleMedicationReminder?.(medication.id)}
+              type="dose"
+              size="sm"
+              medicationId={medication.id}
+            />
+            <MedicationNotificationStatusBadge
+              enabled={medication.criticalStockAlertsEnabled !== false}
+              onToggle={() => onToggleMedicationCriticalStockAlerts?.(medication.id)}
+              type="critical"
+              size="sm"
+              medicationId={medication.id}
+            />
+          </div>
           {isOut ? (
             <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 flex items-center gap-0.5 shrink-0">
               <AlertCircle className="w-2.5 h-2.5" />

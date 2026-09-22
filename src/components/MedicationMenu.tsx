@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Medication } from '../types';
 import './MedicationCardMaterial.css';
+import { MedicationNotificationStatusBadge } from './medicationCardParts';
 
 interface MedicationMenuProps {
   medication: Medication;
@@ -22,6 +23,8 @@ interface MedicationMenuProps {
   onEdit: (medication: Medication) => void;
   onDelete: (id: string) => void;
   onToggleAutoDeduct: (id: string) => void;
+  onToggleMedicationReminder?: (id: string) => void;
+  onToggleMedicationCriticalStockAlerts?: (id: string) => void;
   onOpenHistory?: (medication: Medication) => void;
   size?: 'xs' | 'sm' | 'md';
   showTypeIcon?: boolean;
@@ -48,6 +51,8 @@ export function MedicationMenu({
   onEdit,
   onDelete,
   onToggleAutoDeduct,
+  onToggleMedicationReminder,
+  onToggleMedicationCriticalStockAlerts,
   onOpenHistory,
   size = 'sm',
   showTypeIcon = false,
@@ -213,6 +218,26 @@ export function MedicationMenu({
           aria-hidden="true"
         />
       </button>
+
+      {onToggleMedicationReminder && (
+        <MedicationNotificationStatusBadge
+          enabled={medication.reminderEnabled === true}
+          onToggle={() => onToggleMedicationReminder(medication.id)}
+          type="dose"
+          size={size === 'xs' ? 'xs' : 'sm'}
+          medicationId={medication.id}
+        />
+      )}
+
+      {onToggleMedicationCriticalStockAlerts && (
+        <MedicationNotificationStatusBadge
+          enabled={medication.criticalStockAlertsEnabled !== false}
+          onToggle={() => onToggleMedicationCriticalStockAlerts(medication.id)}
+          type="critical"
+          size={size === 'xs' ? 'xs' : 'sm'}
+          medicationId={medication.id}
+        />
+      )}
 
       <button
         type="button"

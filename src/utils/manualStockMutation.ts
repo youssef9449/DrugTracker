@@ -1635,6 +1635,98 @@ export interface GatedMedicationUpdateResult {
  * Medication edit inside the stock gate.
  * Uses durable medication for settlement; form data cannot overwrite stock-owned fields.
  */
+/**
+ * Toggle a per-medication notification preference against FRESH durable
+ * medication state. The current value is read inside the stock gate so
+ * repeated/rapid card clicks cannot overwrite a newer durable snapshot.
+ *
+ * criticalStockAlertsEnabled treats undefined as enabled for existing data;
+ * reminderEnabled treats undefined as disabled, matching the scheduler.
+ */
+export function runGatedMedicationNotificationToggle(opts: {
+  medicationId: string;
+  field: 'reminderEnabled' | 'criticalStockAlertsEnabled';
+  now?: Date;
+}): Promise<{
+  outcome: 'applied' | 'missing_med' | 'persist_failed' | 'native_list_failed';
+  medications: Medication[];
+  logs: ConsumptionLog[];
+  medicationName?: string;
+  enabled?: boolean;
+}> {
+  return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
+    const now = opts.now ?? new Date();
+
+    const recovered = await recoverManualEnvelopeInto(freshIn);
+    if (!recovered.ok) {
+      return {
+        outcome: 'persist_failed' as const,
+        medications: recovered.state.medications,
+        logs: recovered.state.logs,
+      };
+    }
+    await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
+
+    const pre = await reconcileExactBeforeManualMutation({
+      fresh: recovered.state,
+      globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
+      now,
+    });
+    if (pre.nativeListFailed || pre.durabilityBlocked === true) {
+      return {
+        outcome: 'native_list_failed' as const,
+        medications: pre.state.medications,
+        logs: pre.state.logs,
+      };
+    }
+
+    const fresh = pre.state;
+    const med = fresh.medications.find((m) => m.id === opts.medicationId);
+    if (!med) {
+      return {
+        outcome: 'missing_med' as const,
+        medications: fresh.medications,
+        logs: fresh.logs,
+      };
+    }
+
+    const currentEnabled =
+      opts.field === 'criticalStockAlertsEnabled'
+        ? med.criticalStockAlertsEnabled !== false
+        : med.reminderEnabled === true;
+    const enabled = !currentEnabled;
+
+    const updatedMed: Medication = {
+      ...med,
+      [opts.field]: enabled,
+    };
+    const medications = fresh.medications.map((m) =>
+      m.id === opts.medicationId ? updatedMed : m
+    );
+
+    const err = await commitWithManualEnvelope(
+      { medications, logs: fresh.logs },
+      fresh.medications
+    );
+    if (err) {
+      return {
+        outcome: 'persist_failed' as const,
+        medications: fresh.medications,
+        logs: fresh.logs,
+        medicationName: med.name,
+      };
+    }
+
+    return {
+      outcome: 'applied' as const,
+      medications,
+      logs: fresh.logs,
+      medicationName: med.name,
+      enabled,
+    };
+  });
+}
+
 export function runGatedMedicationUpdate(opts: {
   editId: string;
   medData: Omit<Medication, 'id' | 'createdAt'>;

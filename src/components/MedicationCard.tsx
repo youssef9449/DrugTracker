@@ -10,10 +10,6 @@ import {
   ShoppingCart,
   Clock,
   ListChecks,
-  Bell,
-  BellOff,
-  AlertTriangle,
-  CalendarClock,
 } from 'lucide-react';
 import type { ConsumptionLog } from '../types';
 import { Medication, calculateMedicationStatus, describeStockInStrips, isSolidUnit } from '../types';
@@ -31,10 +27,12 @@ import { VISUAL_RANGE_MULTIPLIER, MIN_VISUAL_RANGE_DAYS, DAYS_PER_MONTH } from '
 import { MedicationMenu } from './MedicationMenu';
 import { ReminderBadge } from './ReminderBadge';
 import {
-  getMedicationTreatmentEndDate,
-  getMedicationTreatmentStartDate,
-} from '../utils/medicationTreatment';
-import { StripsBadge, PackageSizeBadge, AutoDeductPausedNote, AutoDeductStatusBadge } from './medicationCardParts';
+  StripsBadge,
+  PackageSizeBadge,
+  AutoDeductPausedNote,
+  AutoDeductStatusBadge,
+  MedicationNotificationStatusBadge,
+} from './medicationCardParts';
 
 /**
  * Map a medication's `colorTag` (the user-selected card color from the
@@ -107,170 +105,6 @@ function shortDepletionLabel(
     month: 'long',
     timeZone: 'UTC',
   });
-}
-
-function formatTreatmentDate(calendarDate: string | null): string {
-  if (!calendarDate) return 'غير محدد';
-  const target = new Date(calendarDate + 'T00:00:00Z');
-  if (Number.isNaN(target.getTime())) return 'غير محدد';
-  return target.toLocaleDateString('ar-EG', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    timeZone: 'UTC',
-  });
-}
-
-interface TreatmentDurationCardProps {
-  medication: Medication;
-  compact?: boolean;
-}
-
-function TreatmentDurationCard({
-  medication,
-  compact = false,
-}: TreatmentDurationCardProps) {
-  const isChronic = medication.isChronic !== false;
-  const startDate = getMedicationTreatmentStartDate(medication);
-  const endDate = getMedicationTreatmentEndDate(medication);
-  const durationDays =
-    Number.isInteger(medication.durationDays) && (medication.durationDays ?? 0) > 0
-      ? medication.durationDays
-      : null;
-
-  return (
-    <div
-      className={`rounded-xl border bg-white flex items-center gap-2 shadow-2xs ${
-        compact
-          ? 'mt-1.5 px-2 py-1.5 border-slate-200'
-          : 'mt-2 px-2.5 py-2 border-blue-100'
-      }`}
-    >
-      <div
-        className={`shrink-0 rounded-lg flex items-center justify-center ${
-          compact
-            ? 'w-6 h-6 bg-blue-50 text-blue-700'
-            : 'w-7 h-7 bg-blue-50 text-blue-700'
-        }`}
-      >
-        <CalendarClock className={compact ? 'w-3.5 h-3.5' : 'w-4 h-4'} aria-hidden />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className={`font-bold text-slate-700 ${compact ? 'text-[8px]' : 'text-[9px]'}`}>
-          مدة العلاج
-        </div>
-        <div className={`font-extrabold text-slate-900 leading-tight ${compact ? 'text-[10px]' : 'text-[11px]'}`}>
-          {isChronic
-            ? 'مستمر — مزمن'
-            : durationDays
-              ? `${durationDays} يوم`
-              : 'مدة محددة'}
-        </div>
-        {!isChronic && startDate && endDate && (
-          <div
-            className={`text-slate-500 truncate ${compact ? 'text-[8px]' : 'text-[9px]'}`}
-            title={`من ${formatTreatmentDate(startDate)} إلى ${formatTreatmentDate(endDate)}`}
-          >
-            من {formatTreatmentDate(startDate)} إلى {formatTreatmentDate(endDate)}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-interface MedicationNotificationControlsProps {
-  medication: Medication;
-  compact?: boolean;
-  onToggleMedicationReminder?: (id: string) => void;
-  onToggleMedicationCriticalStockAlerts?: (id: string) => void;
-}
-
-function MedicationNotificationControls({
-  medication,
-  compact = false,
-  onToggleMedicationReminder,
-  onToggleMedicationCriticalStockAlerts,
-}: MedicationNotificationControlsProps) {
-  const reminderEnabled = medication.reminderEnabled === true;
-  const criticalEnabled = medication.criticalStockAlertsEnabled !== false;
-  const commonButton = compact
-    ? 'h-8 rounded-xl border px-2 flex items-center justify-between gap-1 min-w-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/80 cursor-pointer'
-    : 'h-9 rounded-xl border px-2.5 flex items-center justify-between gap-1.5 min-w-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/80 cursor-pointer';
-
-  return (
-    <div
-      className={
-        compact
-          ? 'mt-1.5 grid grid-cols-2 gap-1'
-          : 'mt-2 grid grid-cols-2 gap-1.5'
-      }
-    >
-      <button
-        type="button"
-        onClick={() => onToggleMedicationReminder?.(medication.id)}
-        aria-label={
-          reminderEnabled
-            ? `إشعار موعد الجرعة مفعّل لدواء ${medication.name} — انقر للإيقاف`
-            : `إشعار موعد الجرعة متوقف لدواء ${medication.name} — انقر للتفعيل`
-        }
-        aria-pressed={reminderEnabled}
-        className={`${commonButton} ${
-          reminderEnabled
-            ? 'bg-teal-50 border-teal-200 text-teal-800'
-            : 'bg-slate-50 border-slate-200 text-slate-500'
-        }`}
-      >
-        <span className="flex items-center gap-1 min-w-0">
-          {reminderEnabled ? (
-            <Bell className={compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} aria-hidden />
-          ) : (
-            <BellOff className={compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} aria-hidden />
-          )}
-          <span className="truncate font-bold">{compact ? 'الجرعة' : 'موعد الجرعة'}</span>
-        </span>
-        <span
-          className={`shrink-0 rounded-full w-7 h-4 flex items-center justify-center text-[8px] font-bold border ${
-            reminderEnabled
-              ? 'bg-teal-600 border-teal-600 text-white'
-              : 'bg-white border-slate-300 text-slate-400'
-          }`}
-        >
-          {reminderEnabled ? '✓' : '—'}
-        </span>
-      </button>
-
-      <button
-        type="button"
-        onClick={() => onToggleMedicationCriticalStockAlerts?.(medication.id)}
-        aria-label={
-          criticalEnabled
-            ? `إشعار المخزون الحرج مفعّل لدواء ${medication.name} — انقر للإيقاف`
-            : `إشعار المخزون الحرج متوقف لدواء ${medication.name} — انقر للتفعيل`
-        }
-        aria-pressed={criticalEnabled}
-        className={`${commonButton} ${
-          criticalEnabled
-            ? 'bg-rose-50 border-rose-200 text-rose-800'
-            : 'bg-slate-50 border-slate-200 text-slate-500'
-        }`}
-      >
-        <span className="flex items-center gap-1 min-w-0">
-          <AlertTriangle className={compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} aria-hidden />
-          <span className="truncate font-bold">{compact ? 'المخزون' : 'المخزون الحرج'}</span>
-        </span>
-        <span
-          className={`shrink-0 rounded-full w-7 h-4 flex items-center justify-center text-[8px] font-bold border ${
-            criticalEnabled
-              ? 'bg-rose-600 border-rose-600 text-white'
-              : 'bg-white border-slate-300 text-slate-400'
-          }`}
-        >
-          {criticalEnabled ? '✓' : '—'}
-        </span>
-      </button>
-    </div>
-  );
 }
 
 interface MedicationCardProps {
@@ -698,9 +532,32 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               {medication.category}
             </span>
           )}
+          {medication.isChronic === false && medication.durationDays ? (
+            <span className="text-[8px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-blue-50 text-blue-800 border border-blue-200">
+              كورس {medication.durationDays} يوم
+            </span>
+          ) : medication.isChronic !== false ? (
+            <span className="text-[8px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-slate-100 text-slate-600 border border-slate-200">
+              مزمن
+            </span>
+          ) : null}
           <AutoDeductStatusBadge
             isAutoActive={isAutoActive}
             onToggle={() => onToggleAutoDeduct(medication.id)}
+            size="xs"
+            medicationId={medication.id}
+          />
+          <MedicationNotificationStatusBadge
+            enabled={medication.reminderEnabled === true}
+            onToggle={() => onToggleMedicationReminder?.(medication.id)}
+            type="dose"
+            size="xs"
+            medicationId={medication.id}
+          />
+          <MedicationNotificationStatusBadge
+            enabled={medication.criticalStockAlertsEnabled !== false}
+            onToggle={() => onToggleMedicationCriticalStockAlerts?.(medication.id)}
+            type="critical"
             size="xs"
             medicationId={medication.id}
           />
@@ -808,15 +665,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             />
         </div>
 
-        <MedicationNotificationControls
-          medication={medication}
-          compact
-          onToggleMedicationReminder={onToggleMedicationReminder}
-          onToggleMedicationCriticalStockAlerts={onToggleMedicationCriticalStockAlerts}
-        />
-
-        <TreatmentDurationCard medication={medication} compact />
-
         {/* Row 3: stock · dose · depletion — surface container */}
         <div className="mt-1.5 p-1 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between gap-1 text-[9px] min-w-0">
           <div className="flex items-baseline gap-0.5 min-w-0">
@@ -915,6 +763,20 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           <AutoDeductStatusBadge
             isAutoActive={isAutoActive}
             onToggle={() => onToggleAutoDeduct(medication.id)}
+            size="sm"
+            medicationId={medication.id}
+          />
+          <MedicationNotificationStatusBadge
+            enabled={medication.reminderEnabled === true}
+            onToggle={() => onToggleMedicationReminder?.(medication.id)}
+            type="dose"
+            size="sm"
+            medicationId={medication.id}
+          />
+          <MedicationNotificationStatusBadge
+            enabled={medication.criticalStockAlertsEnabled !== false}
+            onToggle={() => onToggleMedicationCriticalStockAlerts?.(medication.id)}
+            type="critical"
             size="sm"
             medicationId={medication.id}
           />
@@ -1023,14 +885,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               size="sm"
             />
         </div>
-
-        <MedicationNotificationControls
-          medication={medication}
-          onToggleMedicationReminder={onToggleMedicationReminder}
-          onToggleMedicationCriticalStockAlerts={onToggleMedicationCriticalStockAlerts}
-        />
-
-        <TreatmentDurationCard medication={medication} />
 
         {/* Second line: Crucial details — surface container */}
         <div className="mt-2 p-1.5 px-2 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between gap-2 text-[11px] flex-wrap">

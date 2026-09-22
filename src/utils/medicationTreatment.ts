@@ -1,4 +1,5 @@
 import type { Medication } from '../types';
+import { addCalendarDays } from './dateCalculations';
 
 const CALENDAR_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -13,22 +14,6 @@ function normalizeCalendarDate(value: unknown): string | null {
     date.getDate() !== day
   ) return null;
   return value;
-}
-
-function formatLocalCalendarDate(date: Date): string {
-  return [
-    String(date.getFullYear()).padStart(4, '0'),
-    String(date.getMonth() + 1).padStart(2, '0'),
-    String(date.getDate()).padStart(2, '0'),
-  ].join('-');
-}
-
-function addCalendarDays(calendarDate: string, days: number): string | null {
-  const [year, month, day] = calendarDate.split('-').map(Number);
-  const date = new Date(year, month - 1, day);
-  if (!Number.isFinite(date.getTime())) return null;
-  date.setDate(date.getDate() + days);
-  return formatLocalCalendarDate(date);
 }
 
 /**

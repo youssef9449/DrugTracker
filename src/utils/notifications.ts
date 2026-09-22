@@ -26,6 +26,7 @@ export { sendCriticalStockAlert } from './notifications/criticalStockNotificatio
 export {
   DOSE_REMINDER_CHANNEL_ID,
   DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
+  DOSE_REMINDER_TAKE_ACTION,
   setAppInForeground,
   isAppInForeground,
   getDoseReminderChannelId,

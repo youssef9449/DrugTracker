@@ -45,6 +45,7 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
         String doseId = intent.getStringExtra("doseId");
         String medicationName = intent.getStringExtra("medicationName");
         String unit = intent.getStringExtra("unit");
+        String doseDescription = intent.getStringExtra("doseDescription");
         String reminderTime = intent.getStringExtra("reminderTime");
         double amount = intent.getDoubleExtra("amount", 0d);
         boolean allowManualTakeAction = intent.getBooleanExtra(
@@ -75,11 +76,16 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
         String title = snooze
                 ? "تذكير مجدد: " + medicationName
                 : "حان موعد دواء: " + medicationName;
+        String description = doseDescription == null ? "" : doseDescription.trim();
         String body = snooze
-                ? "جرعتك المقررة: " + amount + " " + (unit == null ? "قرص" : unit) + "."
+                ? "جرعتك المقررة: " + amount + " " + (unit == null ? "قرص" : unit)
                 : "موعد الجرعة الساعة " + (reminderTime == null ? "" : reminderTime)
                         + ". جرعتك المقررة: " + amount + " "
-                        + (unit == null ? "قرص" : unit) + ".";
+                        + (unit == null ? "قرص" : unit);
+        if (!description.isEmpty()) {
+            body += ". طريقة تناول الجرعة: " + description;
+        }
+        body += ".";
 
         new NotificationRuntime(context).post(
                 new NotificationRuntime.Request(

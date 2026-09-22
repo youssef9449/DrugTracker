@@ -30,6 +30,8 @@ import {
 import {
   isDoseSkippedOnDate,
   getTodayDateString,
+  tomorrowDateString,
+  localEpochMs,
 } from './dateCalculations';
 import { pruneDoseConsumption } from './pruneDoseConsumption';
 import { isValidDoseTime, normalizeTimeString } from './doseSchedule';
@@ -188,31 +190,6 @@ export function __setManualRecurrenceInvalidationTestHook(
   manualRecurrenceInvalidationTestHook = hook;
 }
 
-function nextCalendarDateString(calendarDate: string): string | null {
-  const [y, m, d] = calendarDate.split('-').map((n) => Number(n));
-  if (![y, m, d].every(Number.isFinite)) return null;
-  const dt = new Date(y, m - 1, d);
-  dt.setDate(dt.getDate() + 1);
-  return [
-    String(dt.getFullYear()).padStart(4, '0'),
-    String(dt.getMonth() + 1).padStart(2, '0'),
-    String(dt.getDate()).padStart(2, '0'),
-  ].join('-');
-}
-
-function localEpochMs(calendarDate: string, timeHhmm: string): number | null {
-  const [y, m, d] = calendarDate.split('-').map((n) => Number(n));
-  if (![y, m, d].every(Number.isFinite)) return null;
-  const colon = timeHhmm.indexOf(':');
-  if (colon < 1) return null;
-  const hour = Number(timeHhmm.slice(0, colon));
-  const minute = Number(timeHhmm.slice(colon + 1));
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
-  const dt = new Date(y, m - 1, d, hour, minute, 0, 0);
-  const epoch = dt.getTime();
-  return Number.isFinite(epoch) ? epoch : null;
-}
-
 function recurrenceDefinition(
   med: Medication,
   doseId: string
@@ -237,7 +214,7 @@ async function restoreInvalidatedRecurrences(
   now: Date
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const today = getTodayDateString();
-  const tomorrow = nextCalendarDateString(today);
+  const tomorrow = tomorrowDateString(today);
   if (!tomorrow) return { ok: false, error: 'invalid_next_date' };
   const treatmentEndDate = getMedicationTreatmentEndDate(med);
 

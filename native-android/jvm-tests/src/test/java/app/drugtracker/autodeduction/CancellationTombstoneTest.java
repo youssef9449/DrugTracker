@@ -104,7 +104,7 @@ public class CancellationTombstoneTest {
         String key = AutoDeductionContract.occurrenceKey("m", "d", "2026-09-21");
         cancelPrefs().edit().putString(cancelKey(key), "2000-1-cancel").commit();
         JSONObject meta = new JSONObject();
-        meta.put("scheduleVersion", "1000-5-sched");
+        meta.put("operationVersion", "1000-5-sched");
         schedulePrefs().edit().putString(schKey(key), meta.toString()).commit();
 
         assertTrue(newScheduler().isOccurrenceCancelledKey(key));

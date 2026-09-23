@@ -1,4 +1,4 @@
-import { useState, type FC, type FormEvent } from 'react';
+import { useEffect, useState, type FC, type FormEvent } from 'react';
 import { Check, Pencil, Plus, Store, Trash2, X } from 'lucide-react';
 import type { Pharmacy } from '../types';
 import { cleanPhoneNumber } from '../utils/whatsapp';
@@ -10,12 +10,17 @@ interface PharmacyManagementViewProps {
   onSave: (pharmacy: Pharmacy) => void;
   onDelete: (id: string) => void;
   showToast: (message: string) => void;
+  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void;
 }
 
-export const PharmacyManagementView: FC<PharmacyManagementViewProps> = ({ pharmacies, onSave, onDelete, showToast }) => {
+export const PharmacyManagementView: FC<PharmacyManagementViewProps> = ({ pharmacies, onSave, onDelete, showToast, onRegisterBackHandler }) => {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editing, setEditing] = useState<Pharmacy | null>(null);
   const [form, setForm] = useState({ name: '', phone: '', customerCode: '' });
+  useEffect(() => {
+    if (!isFormOpen || !onRegisterBackHandler) return;
+    return onRegisterBackHandler('pharmacy-form', () => setIsFormOpen(false), 90);
+  }, [isFormOpen, onRegisterBackHandler]);
 
   const openForm = (pharmacy?: Pharmacy) => {
     setEditing(pharmacy || null);

@@ -7,6 +7,7 @@ interface MedicationSortControlProps {
   direction: MedicationSortDirection;
   onFieldChange: (field: MedicationSortField) => void;
   onDirectionChange: (direction: MedicationSortDirection) => void;
+  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void;
 }
 
 const OPTIONS: { value: MedicationSortField; label: string }[] = [
@@ -34,9 +35,13 @@ function getDirectionDescription(field: MedicationSortField, direction: Medicati
   return direction === 'asc' ? 'تصاعدي (أ-ي)' : 'تنازلي (ي-أ)';
 }
 
-export function MedicationSortControl({ field, direction, onFieldChange, onDirectionChange }: MedicationSortControlProps) {
+export function MedicationSortControl({ field, direction, onFieldChange, onDirectionChange, onRegisterBackHandler }: MedicationSortControlProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open || !onRegisterBackHandler) return;
+    return onRegisterBackHandler('medication-sort', () => setOpen(false), 80);
+  }, [open, onRegisterBackHandler]);
   useEffect(() => {
     if (!open) return;
     const outside = (e: PointerEvent) => { if (!rootRef.current?.contains(e.target as Node)) setOpen(false); };

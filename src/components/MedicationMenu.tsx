@@ -27,6 +27,7 @@ export interface MedicationMenuProps {
   onToggleMedicationReminder?: (id: string) => void;
   onToggleMedicationCriticalStockAlerts?: (id: string) => void;
   onOpenHistory?: (medication: Medication) => void;
+  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void;
   size?: 'xs' | 'sm' | 'md';
   showTypeIcon?: boolean;
   showOverflow?: boolean;
@@ -52,6 +53,7 @@ export interface MedicationOverflowMenuProps {
   onEdit: (medication: Medication) => void;
   onDelete: (id: string) => void;
   onOpenHistory?: (medication: Medication) => void;
+  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void;
   size?: 'xs' | 'sm' | 'md';
   className?: string;
 }
@@ -61,6 +63,7 @@ export function MedicationOverflowMenu({
   onEdit,
   onDelete,
   onOpenHistory,
+  onRegisterBackHandler,
   size = 'sm',
   className = '',
 }: MedicationOverflowMenuProps) {
@@ -68,7 +71,19 @@ export function MedicationOverflowMenu({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
-
+  useEffect(() => {
+    if (!onRegisterBackHandler) return;
+    const unregister = overflowOpen
+      ? onRegisterBackHandler(`medication-overflow:${medication.id}`, () => setOverflowOpen(false), 100)
+      : undefined;
+    const unregisterDelete = deleteConfirmOpen
+      ? onRegisterBackHandler(`medication-delete-confirm:${medication.id}`, () => setDeleteConfirmOpen(false), 110)
+      : undefined;
+    return () => {
+      unregister?.();
+      unregisterDelete?.();
+    };
+  }, [overflowOpen, deleteConfirmOpen, onRegisterBackHandler]);
   useEffect(() => {
     if (!overflowOpen || !triggerRef.current) {
       setCoords(null);
@@ -418,6 +433,7 @@ export function MedicationMenu({
           onEdit={onEdit}
           onDelete={onDelete}
           onOpenHistory={onOpenHistory}
+          onRegisterBackHandler={onRegisterBackHandler}
           size={size}
         />
       )}

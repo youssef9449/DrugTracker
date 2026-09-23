@@ -5,68 +5,36 @@ import {
   PharmacySettings,
   DEFAULT_PHARMACY_SETTINGS,
 } from './types';
-import { AndroidBottomNav, ActiveTab } from './components/AndroidBottomNav';
 import { AppHeader } from './components/AppHeader';
-import { LowStockBanner } from './components/LowStockBanner';
-import { MedicationCard } from './components/MedicationCard';
-import { PharmacyShoppingView } from './components/PharmacyShoppingView';
-import { PharmacyManagementView } from './components/PharmacyManagementView';
-import { UserDataManagementView } from './components/UserDataManagementView';
-import { ConsumptionLogView } from './components/ConsumptionLogView';
+import { AppTabContent } from './components/AppTabContent';
+import { AndroidBottomNav } from './components/AndroidBottomNav';
+import type { ActiveTab } from './components/AndroidBottomNav';
 import { AddMedicationModal } from './components/AddMedicationModal';
 import { RefillModal } from './components/RefillModal';
 import { AppSettingsModal } from './components/AppSettingsModal';
 import { AndroidFab } from './components/AndroidFab';
-import { EmptyState } from './components/EmptyState';
 import { DoseAlarmModal } from './components/DoseAlarmModal';
 import { SelectDoseModal } from './components/SelectDoseModal';
 import { MedicationHistoryModal } from './components/MedicationHistoryModal';
 import { AutoDeductPromptModal } from './components/AutoDeductPromptModal';
 import { UpdatePrompt } from './components/UpdatePrompt';
-import { Toggle } from './components/ui/Toggle';
-import { MedicationSortControl } from './components/MedicationSortControl';
-import type { MedicationSortField, MedicationSortDirection } from './utils/medicationSorting';
-import {
-  requestNotificationPermission,
-  getNotificationPermission,
-} from './utils/notifications/notificationPermissions';
-import { sendTestAlertNotification } from './utils/notifications/doseReminderNotifications';
-import { openExactAlarmSettings, type ExactAlarmPermission } from './utils/exactAlarm';
 import { OrderItem } from './utils/whatsapp';
-import { playSuccessChime } from './utils/sound';
+import type { ExactAlarmPermission } from './utils/exactAlarm';
+import type { MedicationSortField, MedicationSortDirection } from './utils/medicationSorting';
+import { TOAST_DURATION_MS } from './utils/time';
+
 import { useDoseReminders } from './hooks/useDoseReminders';
-import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
-import { useDoseReminderScheduler } from './hooks/useDoseReminderScheduler';
-import { useAutoDeductionScheduler } from './hooks/useAutoDeductionScheduler';
-import { useExactAutoDeductionReconciliation } from './hooks/useExactAutoDeductionReconciliation';
-import { useMidnightTick } from './hooks/useMidnightTick';
-import { usePersistentEffect } from './hooks/usePersistentEffect';
-import { useStockAlerts } from './hooks/useStockAlerts';
-import { useAppHydration } from './hooks/useAppHydration';
-import { useStartupAutoDeduction } from './hooks/useStartupAutoDeduction';
-import { useMedicationHandlers } from './hooks/useMedicationHandlers';
-import { usePharmacyUserHandlers } from './hooks/usePharmacyUserHandlers';
-import { useNativeActionHandlers } from './hooks/useNativeActionHandlers';
+import { useAppRuntime } from './hooks/useAppRuntime';
+import { useAppBackNavigation } from './hooks/useAppBackNavigation';
 import { useDerivedMedications } from './hooks/useDerivedMedications';
 import {
-  registerBackButtonHandler,
   cleanupNativeListeners,
 } from './native';
 import { getInitialTab } from './lib/initialTab';
-import { persist } from './utils/storage';
-import { TOAST_MESSAGES, PERSIST_FAILURE_MESSAGES } from './constants/uiStrings';
-import {
-  STORAGE_PHARMACY_KEY,
-  SOUND_KEY,
-  NOTIFICATIONS_KEY,
-  FONT_SIZE_KEY,
-  CRITICAL_STOCK_ALERTS_KEY,
-  COMPACT_VIEW_KEY,
-} from './constants/storageKeys';
-import { TOAST_DURATION_MS, PHARMACY_PERSIST_DEBOUNCE_MS } from './utils/time';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(getInitialTab);
+  const { navigateToTab, selectTab, registerBackOverlay } = useAppBackNavigation(activeTab, setActiveTab);
 
   // Start from empty in-memory state and hydrate persisted application data
   // after mount. Runtime schedulers and alerts are gated on `hydrated` so
@@ -159,38 +127,53 @@ export default function App() {
   const [selectDoseMode, setSelectDoseMode] = useState<'take' | 'restore' | 'manage'>('take');
   const [historyMedication, setHistoryMedication] = useState<Medication | null>(null);
 
-  // Register a back-button handler that closes the top modal
-  // instead of exiting the app. The handler returns true (modal was
-  // closed, don't exit) or false (no modal open, exit). Re-registers
-  // whenever any modal state changes so the handler always reads the
-  // latest values.
+  // All Android Back behavior is registered with one authoritative dispatcher.
+  // App-owned overlays use explicit priorities; child-owned overlays register
+  // through the same dispatcher and therefore never install native listeners.
   useEffect(() => {
-    registerBackButtonHandler(() => {
-      // Top-most interactive overlay first.
-      if (alarmingMedication) { dismissAlarm(); return true; }
-      // Explicit dose selector must dismiss on Android Back
-      // without exiting the app.
-      if (selectDoseMed) {
-        setSelectDoseMed(null);
-        setSelectDoseMode('take');
-        return true;
-      }
-      if (historyMedication) {
-        setHistoryMedication(null);
-        return true;
-      }
-      if (isAutoDeductPromptOpen) {
-        // Same durable decision path as choosing "لا" — never mark prompted
-        // without a successful global Auto policy mutation.
-        handleConfirmAutoDeductPromptRef.current(false);
-        return true;
-      }
-      if (isAddModalOpen) { setIsAddModalOpen(false); setEditingMedication(null); return true; }
-      if (refillMedication) { setRefillMedication(null); return true; }
-      if (isSettingsModalOpen) { setIsSettingsModalOpen(false); return true; }
-      return false;
-    });
-  }, [alarmingMedication, selectDoseMed, historyMedication, isAutoDeductPromptOpen, isAddModalOpen, refillMedication, isSettingsModalOpen, dismissAlarm]);
+    const registrations = [
+      alarmingMedication
+        ? registerBackOverlay('dose-alarm', dismissAlarm, 100)
+        : undefined,
+      selectDoseMed
+        ? registerBackOverlay('select-dose', () => {
+            setSelectDoseMed(null);
+            setSelectDoseMode('take');
+          }, 90)
+        : undefined,
+      historyMedication
+        ? registerBackOverlay('medication-history', () => setHistoryMedication(null), 80)
+        : undefined,
+      isAutoDeductPromptOpen
+        ? registerBackOverlay('auto-deduct-prompt', () => {
+            handleConfirmAutoDeductPromptRef.current(false);
+          }, 70)
+        : undefined,
+      isAddModalOpen
+        ? registerBackOverlay('add-medication', () => {
+            setIsAddModalOpen(false);
+            setEditingMedication(null);
+          }, 60)
+        : undefined,
+      refillMedication
+        ? registerBackOverlay('refill', () => setRefillMedication(null), 50)
+        : undefined,
+      isSettingsModalOpen
+        ? registerBackOverlay('settings', () => setIsSettingsModalOpen(false), 40)
+        : undefined,
+    ];
+    return () => registrations.forEach((unregister) => unregister?.());
+  }, [
+    alarmingMedication,
+    dismissAlarm,
+    selectDoseMed,
+    historyMedication,
+    isAutoDeductPromptOpen,
+    isAddModalOpen,
+    refillMedication,
+    isSettingsModalOpen,
+    registerBackOverlay,
+  ]);
 
   // Remove native listeners on unmount so duplicate handlers cannot accumulate.
   // Clear any pending toast auto-dismiss timer.
@@ -204,22 +187,6 @@ export default function App() {
     };
   }, []);
 
-  useAppHydration({
-    setMedications,
-    setLogs,
-    setPharmacySettings,
-    setHydrated,
-    setIsFirstRun,
-    setIsAutoDeductPromptOpen,
-    setSoundEnabled,
-    setNotificationsEnabled,
-    setCriticalStockAlertsEnabled,
-    setExactAlarmPermission,
-    setGlobalAutoDeductEnabled,
-    setFontScale,
-    setIsCompactView,
-  });
-
   // Track the toast auto-dismiss timer so it can be cleared on
   // unmount (prevents a setToast-after-unmount warning / leak).
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -229,8 +196,10 @@ export default function App() {
   // every catch was empty and a quota-exceeded write silently dropped
   // data). Stabilizing it via useCallback also keeps the persistence
   // effects from re-subscribing on every render.
+  const toastIdRef = useRef(0);
+
   const showToast = useCallback((message: string) => {
-    const id = Date.now();
+    const id = ++toastIdRef.current;
     setToast({ id, message });
     if (toastTimerRef.current) {
       clearTimeout(toastTimerRef.current);
@@ -240,190 +209,6 @@ export default function App() {
       toastTimerRef.current = null;
     }, TOAST_DURATION_MS);
   }, []);
-
-  // ─────────────────────────────────────────────────────────────
-  // Medication stock + consumption logs are persisted ONLY by the durable
-  // stock mutation gate. Keeping a React-state persistence effect here would
-  // create a second writer that could replay an older React snapshot after a
-  // gated mutation and overwrite the committed durable state.
-  //
-  // Hydration remains responsible for the initial read; every post-hydration
-  // mutation path (add/edit/delete/take/restore/refill/undo/exact)
-  // commits through the same gate.
-
-  // M12: pharmacy settings are written via a 400ms debounce so rapid
-  // toggles of the 30/60-day duration (which calls onUpdateSettings on
-  // every click) don't fire a localStorage write per click. The last
-  // value within the debounce window wins.
-  usePersistentEffect({
-    storageKey: STORAGE_PHARMACY_KEY,
-    value: pharmacySettings,
-    enabled: hydrated,
-    debounceMs: PHARMACY_PERSIST_DEBOUNCE_MS,
-    failureMessage: PERSIST_FAILURE_MESSAGES.pharmacy,
-    showToast,
-  });
-
-  usePersistentEffect({
-    storageKey: SOUND_KEY,
-    value: String(soundEnabled),
-    json: false,
-    enabled: hydrated,
-    failureMessage: PERSIST_FAILURE_MESSAGES.sound,
-    showToast,
-  });
-
-  usePersistentEffect({
-    storageKey: NOTIFICATIONS_KEY,
-    value: String(notificationsEnabled),
-    json: false,
-    enabled: hydrated,
-    failureMessage: PERSIST_FAILURE_MESSAGES.notifications,
-    showToast,
-  });
-
-  // Persist font size preference so it survives app relaunch, and toggle root scaling.
-  // This effect stays inline (not collapsed into usePersistentEffect) because it
-  // has a CSS-class side effect that must run BEFORE the hydrated gate (so the
-  // class is applied on first render even before hydration completes), and it
-  // uses console.warn (not toast) on failure.
-  useEffect(() => {
-    if (typeof document !== 'undefined') {
-      document.documentElement.classList.toggle('font-scale-large', fontScale === 'large');
-    }
-    if (!hydrated) return;
-    const err = persist(FONT_SIZE_KEY, fontScale, { json: false });
-    if (err) {
-      console.warn('[App] failed to persist font size:', err);
-    }
-  }, [fontScale, hydrated]);
-
-  usePersistentEffect({
-    storageKey: CRITICAL_STOCK_ALERTS_KEY,
-    value: String(criticalStockAlertsEnabled),
-    json: false,
-    enabled: hydrated,
-    failureMessage: PERSIST_FAILURE_MESSAGES.critical,
-    showToast,
-  });
-
-  // Global auto-deduct is part of the durable stock mutation state. It is
-  // intentionally NOT persisted from React state; toggles commit the master
-  // switch together with medications/logs through the stock gate.
-
-  usePersistentEffect({
-    storageKey: COMPACT_VIEW_KEY,
-    value: String(isCompactView),
-    json: false,
-    enabled: hydrated,
-    failureMessage: 'تعذر حفظ خيار العرض',
-    showToast,
-  });
-
-
-  useStartupAutoDeduction({
-    hydrated,
-    isFirstRun,
-    setMedications,
-    setLogs,
-    setGlobalAutoDeductEnabled,
-    showToast,
-  });
-
-  // ─────────────────────────────────────────────────────────────
-  // Foreground critical-stock fallback: for each medication, during one
-  // continuous Critical/Out-of-Stock episode, sends AT MOST ONE critical
-  // notification. The persistent notification claim
-  // (utils/criticalNotificationClaims.ts) is the business source of
-  // truth: claimed=true ⇒ quiet, claimed=false ⇒ send once.
-  //
-  // Kept in a focused hook so claim/delivery behavior is independently testable.
-  useStockAlerts({
-    medications,
-    criticalStockAlertsEnabled,
-    hydrated,
-    isFirstRun,
-  });
-
-  // ─────────────────────────────────────────────────────────────
-  // One-shot critical-alarm scheduling — the native EXECUTOR for the
-  // critical notification claim. Extracted into a hook for testability
-  // + race protection. See useCriticalAlarmScheduler.ts for the full
-  // doc (boot persistence, reschedule triggers, per-med operation
-  // queue + generation guard). The hook handles:
-  //   - scheduling a one-shot alarm at each sufficient med's projected
-  //     critical date and persisting claim=true only after success
-  //   - cancel + reschedule when any of the 6 trigger fields change
-  //   - cancel for deleted meds
-  //   - cancel all when the user opts out of critical-stock alerts (re-opening
-  //     claims whose future alarm was cancelled before firing)
-  //   - per-med operation queue + generation guard so a stale async
-  //     operation can never overwrite newer claim state
-  // ─────────────────────────────────────────────────────────────
-  useCriticalAlarmScheduler({
-    medications,
-    criticalStockAlertsEnabled,
-    hydrated,
-    isFirstRun,
-    exactAlarmPermission,
-    resumeTick: criticalAlarmResumeTick,
-  });
-
-  // ─────────────────────────────────────────────────────────────
-  // NATIVE recurring daily dose-reminder scheduling.
-  //
-  // Schedules one recurring native notification per explicit doseSchedule
-  // row (AlarmManager-backed), gated by reminderEnabled. Each occurrence
-  // is identified by medId + doseId; reminderTime/dailyDose are not
-  // occurrence identity sources. Fires daily at the schedule-row time even
-  // when the app is killed, the device is in Doze, or the user never opens
-  // the app.
-  //
-  // Complements event-driven in-app dose reminders while foregrounded.
-  // See useDoseReminderScheduler.ts for race-protection + boot persistence.
-  // ─────────────────────────────────────────────────────────────
-  useDoseReminderScheduler({
-    medications,
-    allowManualTakeActionByMedicationId,
-    notificationsEnabled,
-    hydrated,
-    isFirstRun,
-    exactAlarmPermission,
-    resumeTick: doseAlarmResumeTick,
-    lifecycleTick: doseLifecycleTick,
-  });
-
-  // Local-midnight rollover while the app stays open: today/tomorrow are
-  // computed from the wall clock at effect-run time, so the desired-state
-  // scheduler and the exact-auto reconciliation must re-run once at the
-  // calendar-day boundary (not only on resume).
-  const autoDeductMidnightTick = useMidnightTick();
-
-  // Exact-time auto-deduction alarms are independent of notifications.
-  // Records durable native FIRED events only — no stock mutation here.
-  useAutoDeductionScheduler({
-    medications,
-    globalAutoDeductEnabled,
-    hydrated,
-    isFirstRun,
-    exactAlarmPermission,
-    resumeTick: doseAlarmResumeTick,
-    midnightTick: autoDeductMidnightTick,
-  });
-
-  // Reconcile native FIRED exact auto-deduction events into JS stock.
-  // Runs once after hydration/on resume for recovery, then immediately on the
-  // native exact-auto FIRED event; serialized; crash-safe persist-then-mark.
-  useExactAutoDeductionReconciliation({
-    setMedications,
-    setLogs,
-    setGlobalAutoDeductEnabled,
-    globalAutoDeductEnabled,
-    hydrated,
-    isFirstRun,
-    resumeTick: doseAlarmResumeTick,
-    midnightTick: autoDeductMidnightTick,
-  });
 
   const {
     handleConfirmRefill,
@@ -442,33 +227,6 @@ export default function App() {
     handleToggleCriticalStockAlerts,
     handleToggleMedicationReminder,
     handleToggleMedicationCriticalStockAlerts,
-  } = useMedicationHandlers({
-    medications,
-    logs,
-    soundEnabled,
-    globalAutoDeductEnabled,
-    notificationsEnabled,
-    criticalStockAlertsEnabled,
-    selectDoseMode,
-    setMedications,
-    setLogs,
-    setGlobalAutoDeductEnabled,
-    setIsAutoDeductPromptOpen,
-    setIsFirstRun,
-    setNotificationsEnabled,
-    setCriticalStockAlertsEnabled,
-    setSelectDoseMed,
-    setSelectDoseMode,
-    setEditingMedication,
-    showToast,
-    dismissAlarm,
-    snoozeAlarm,
-  });
-
-  handleConfirmAutoDeductPromptRef.current = handleConfirmAutoDeductPrompt;
-
-
-  const {
     handleSavePharmacySettings,
     handleSavePharmacy,
     handleDeletePharmacy,
@@ -478,101 +236,54 @@ export default function App() {
     handleDeleteUserAddress,
     userContacts,
     userAddresses,
-  } = usePharmacyUserHandlers({
-    soundEnabled,
-    settingsModalMode,
+    handleToggleNotifications,
+    handleSendTestNotification,
+    handleOpenExactAlarmSettings,
+  } = useAppRuntime({
+    medications,
+    logs,
     pharmacySettings,
-    setPharmacySettings,
-    showToast,
-  });
-
-  const handleToggleNotifications = async () => {
-    if (!notificationsEnabled) {
-      // Turning ON: must obtain notification permission first.
-      // If the user denies, do NOT activate the toggle — show a failure
-      // message so the user knows the permission wasn't granted.
-      let pushAllowed = false;
-      try {
-        const currentPerm = await getNotificationPermission();
-        if (currentPerm === 'granted') {
-          pushAllowed = true;
-        } else if (currentPerm === 'default') {
-          pushAllowed = await requestNotificationPermission();
-        }
-        // If currentPerm === 'denied', the OS won't re-show the prompt —
-        // pushAllowed stays false and the toggle does NOT activate.
-      } catch (err) {
-        console.warn('[App] Notification permission error:', err);
-      }
-
-      if (!pushAllowed) {
-        // Permission denied (or error) → do NOT activate the toggle.
-        // Show a clear failure message instead of falsely claiming
-        // notifications are on.
-        showToast(TOAST_MESSAGES.notificationsPermissionDenied);
-        return;
-      }
-
-      // Permission granted → activate the toggle. No test notification
-      // is sent here — the user only asked to toggle notifications on,
-      // not to test them. The test notification is available separately
-      // in the AppSettingsModal ('تجربة إشعار وتنبيه صوتي الآن').
-      setNotificationsEnabled(true);
-      if (soundEnabled) {
-        playSuccessChime();
-      }
-      showToast(TOAST_MESSAGES.notificationsOn);
-    } else {
-      // Turning OFF.
-      setNotificationsEnabled(false);
-      showToast(TOAST_MESSAGES.notificationsOff);
-    }
-  };
-
-  const handleSendTestNotification = async () => {
-    if (soundEnabled) {
-      playSuccessChime();
-    }
-    try {
-      await sendTestAlertNotification();
-      showToast(TOAST_MESSAGES.testNotificationSent);
-    } catch (err) {
-      console.warn('[App] Failed to send test alert notification:', err);
-      showToast('تعذّر إرسال الإشعار التجريبي');
-    }
-  };
-
-
-
-  useNativeActionHandlers({
-    allowManualTakeActionByMedicationId,
-    handleTakeDoseFromAlarmById,
-    openAlarm,
+    hydrated,
+    isFirstRun,
     soundEnabled,
+    fontScale,
+    isCompactView,
+    notificationsEnabled,
+    criticalStockAlertsEnabled,
+    exactAlarmPermission,
+    criticalAlarmResumeTick,
+    doseAlarmResumeTick,
+    doseLifecycleTick,
+    globalAutoDeductEnabled,
+    selectDoseMode,
+    settingsModalMode,
+    allowManualTakeActionByMedicationId,
+    setMedications,
+    setLogs,
+    setPharmacySettings,
+    setHydrated,
+    setIsFirstRun,
+    setIsAutoDeductPromptOpen,
+    setSoundEnabled,
+    setNotificationsEnabled,
+    setCriticalStockAlertsEnabled,
+    setExactAlarmPermission,
+    setGlobalAutoDeductEnabled,
+    setFontScale,
+    setIsCompactView,
+    setSelectDoseMed,
+    setSelectDoseMode,
+    setEditingMedication,
     setDoseLifecycleTick,
     setCriticalAlarmResumeTick,
     setDoseAlarmResumeTick,
-    setExactAlarmPermission,
-    setNotificationsEnabled,
+    showToast,
+    dismissAlarm,
+    snoozeAlarm,
+    openAlarm,
   });
 
-  const handleOpenExactAlarmSettings = () => {
-    openExactAlarmSettings()
-      .then((result) => {
-        if (!result.ok) {
-          console.warn(
-            '[App] exact alarm settings failed:',
-            result.error,
-            result.errorCode
-          );
-          showToast('إعدادات المنبهات الدقيقة غير متاحة على هذا الجهاز');
-        }
-      })
-      .catch((err) => {
-        console.warn('[App] exact alarm settings failed:', err);
-      });
-  };
-
+  handleConfirmAutoDeductPromptRef.current = handleConfirmAutoDeductPrompt;
   // Consume-pill feature: manually consume a selected explicit dose from the card.
   // Subtracts that dose's schedule amount from currentPills; marks the dose occurrence as consumed
 
@@ -637,161 +348,56 @@ export default function App() {
           }}
         />
 
-        <main className="flex-1 overflow-y-auto pb-24 relative">
-          {activeTab === 'stock' && (
-            <div>
-              {filter === 'all' && (
-                <div>
-                  <div className="mx-4 mt-2 grid grid-cols-2 items-stretch gap-2 text-center text-xs">
-                    <div className="bg-white px-2.5 py-1.5 rounded-xl border border-slate-200/80 shadow-2xs h-full flex flex-col justify-center">
-                      <span className="text-[9.5px] text-slate-500 block leading-tight">إجمالي الأدوية</span>
-                      <div className="h-5 flex items-center justify-center mt-0.5">
-                        <span className="text-sm font-bold font-mono text-slate-800 leading-none">{medications.length}</span>
-                      </div>
-                    </div>
-                    <div className="bg-white px-2.5 py-1.5 rounded-xl border border-slate-200/80 shadow-2xs h-full flex flex-col justify-center">
-                      <span className="text-[9.5px] text-slate-500 block leading-tight">حالة المخزون</span>
-                      <div className="h-5 flex items-center justify-center gap-1.5 mt-0.5 text-[10.5px] leading-none font-mono font-bold">
-                        <span className="text-emerald-700">{sufficientCount} آمن</span>
-                        <span className="text-slate-300">•</span>
-                        <span className={alertsCount > 0 ? 'text-rose-600' : 'text-slate-500'}>
-                          {alertsCount} ناقص
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* View mode toggle: compact vs detailed cards */}
-                  <div className="mx-4 mt-3 flex items-center justify-between gap-2 bg-white px-3 py-2 rounded-2xl border border-slate-200/80 shadow-2xs">
-                    <div className="flex items-center min-w-0">
-                      <MedicationSortControl
-                        field={medicationSortField}
-                        direction={medicationSortDirection}
-                        onFieldChange={setMedicationSortField}
-                        onDirectionChange={setMedicationSortDirection}
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-xs font-medium text-slate-600">
-                        {isCompactView ? 'العرض المختصر' : 'العرض الطبيعي'}
-                      </span>
-                      <Toggle
-                        id="card-view-mode-toggle"
-                        size="sm"
-                        checked={isCompactView}
-                        onChange={() => {
-                          const next = !isCompactView;
-                          setIsCompactView(next);
-                          showToast(
-                            next ? 'تم تفعيل العرض المختصر' : 'تم إرجاع العرض الطبيعي'
-                          );
-                          if (soundEnabled) playSuccessChime();
-                        }}
-                        label="تبديل العرض بين المختصر والعرض الطبيعي"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {filter === 'alerts' && (
-                <LowStockBanner medicationsWithStatus={medicationsWithStatus} onNavigateToShopping={() => setActiveTab('shopping')} />
-              )}
-
-              <div
-                className={
-                  isCompactView && filter === 'all'
-                    ? 'p-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3'
-                    : 'p-3 space-y-2'
-                }
-              >
-                {filteredMedications.length === 0 ? (
-                  <div className="col-span-full">
-                  <EmptyState
-                    hasSearch={Boolean(searchQuery.trim())}
-                    onClearSearch={() => setSearchQuery('')}
-                    filter={filter}
-                    onFilterChange={setFilter}
-                    onOpenAddModal={openAdd}
-                  />
-                  </div>
-                ) : (
-                  filteredMedications.map((med) => (
-                    <MedicationCard
-                      key={med.id}
-                      medication={med}
-                      viewFilter={filter}
-                      isCompact={isCompactView}
-                      logs={logs}
-                      onOpenRefill={setRefillMedication}
-                      onEdit={(m) => {
-                        setEditingMedication(m);
-                        setIsAddModalOpen(true);
-                      }}
-                      onDelete={handleDeleteMedication}
-                      onToggleAutoDeduct={handleToggleAutoDeduct}
-                      onToggleMedicationReminder={handleToggleMedicationReminder}
-                      onToggleMedicationCriticalStockAlerts={handleToggleMedicationCriticalStockAlerts}
-                      onNavigateToShopping={() => setActiveTab('shopping')}
-                      onTriggerAlarm={testAlarm}
-                      onConsumeDose={handleConsumeDose}
-                      onRestoreDose={handleCardRestoreDose}
-                      onOpenHistory={(m) => setHistoryMedication(m)}
-                      lastRefillQuantity={(() => {
-                        const lastRefill = lastRefillByMed.get(med.id);
-                        return lastRefill && lastRefill.amount > 0 ? lastRefill.amount : undefined;
-                      })()}
-                      onUndoRefill={() => handleUndoRefill(med.id)}
-                    />
-                  ))
-                )}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'shopping' && (
-            <PharmacyShoppingView
-              medications={medications}
-              settings={pharmacySettings}
-              onUpdateSettings={setPharmacySettings}
-              showToast={showToast}
-              onOpenUserContactsSettings={() => setActiveTab('user-data')}
-            />
-          )}
-
-          {activeTab === 'pharmacies' && (
-            <PharmacyManagementView
-              pharmacies={pharmacySettings.pharmacies || []}
-              onSave={handleSavePharmacy}
-              onDelete={handleDeletePharmacy}
-              showToast={showToast}
-            />
-          )}
-
-          {activeTab === 'user-data' && (
-            <UserDataManagementView
-              contacts={userContacts}
-              addresses={userAddresses}
-              onSaveContact={handleSaveUserContact}
-              onDeleteContact={handleDeleteUserContact}
-              onSaveAddress={handleSaveUserAddress}
-              onDeleteAddress={handleDeleteUserAddress}
-              showToast={showToast}
-            />
-          )}
-
-          {activeTab === 'logs' && (
-            <ConsumptionLogView
-              medications={medications}
-              logs={logs}
-              showToast={showToast}
-            />
-          )}
-        </main>
+        <AppTabContent
+          activeTab={activeTab}
+          filter={filter}
+          searchQuery={searchQuery}
+          medications={medications}
+          logs={logs}
+          pharmacySettings={pharmacySettings}
+          isCompactView={isCompactView}
+          medicationSortField={medicationSortField}
+          medicationSortDirection={medicationSortDirection}
+          soundEnabled={soundEnabled}
+          medicationsWithStatus={medicationsWithStatus}
+          filteredMedications={filteredMedications}
+          alertsCount={alertsCount}
+          sufficientCount={sufficientCount}
+          lastRefillByMed={lastRefillByMed}
+          userContacts={userContacts}
+          userAddresses={userAddresses}
+          showToast={showToast}
+          setFilter={setFilter}
+          setSearchQuery={setSearchQuery}
+          setMedicationSortField={setMedicationSortField}
+          setMedicationSortDirection={setMedicationSortDirection}
+          setIsCompactView={setIsCompactView}
+          setPharmacySettings={setPharmacySettings}
+          setEditingMedication={setEditingMedication}
+          setIsAddModalOpen={setIsAddModalOpen}
+          setRefillMedication={setRefillMedication}
+          setHistoryMedication={setHistoryMedication}
+          navigateToTab={navigateToTab}
+          registerBackOverlay={registerBackOverlay}
+          openAdd={openAdd}
+          handleDeleteMedication={handleDeleteMedication}
+          handleToggleAutoDeduct={handleToggleAutoDeduct}
+          handleToggleMedicationReminder={handleToggleMedicationReminder}
+          handleToggleMedicationCriticalStockAlerts={handleToggleMedicationCriticalStockAlerts}
+          handleConsumeDose={handleConsumeDose}
+          handleCardRestoreDose={handleCardRestoreDose}
+          handleUndoRefill={handleUndoRefill}
+          testAlarm={testAlarm}
+          handleSavePharmacy={handleSavePharmacy}
+          handleDeletePharmacy={handleDeletePharmacy}
+          handleSaveUserContact={handleSaveUserContact}
+          handleDeleteUserContact={handleDeleteUserContact}
+          handleSaveUserAddress={handleSaveUserAddress}
+          handleDeleteUserAddress={handleDeleteUserAddress}
+        />
 
         {activeTab === 'stock' && <AndroidFab onClick={openAdd} />}
-        <AndroidBottomNav activeTab={activeTab} onTabChange={setActiveTab} alertsCount={alertsCount} />
+        <AndroidBottomNav activeTab={activeTab} onTabChange={selectTab} alertsCount={alertsCount} />
 
         {toast && (
           <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[60] max-w-[90%] px-4 py-2.5 bg-slate-900 text-white text-xs font-bold rounded-2xl shadow-xl text-center">

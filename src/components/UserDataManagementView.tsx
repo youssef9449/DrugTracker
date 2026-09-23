@@ -1,4 +1,4 @@
-import { useState, type FC, type FormEvent } from 'react';
+import { useEffect, useState, type FC, type FormEvent } from 'react';
 import { Check, MapPin, Pencil, Phone, Plus, Trash2, X } from 'lucide-react';
 import type { UserAddress, UserContact } from '../types';
 import { generateId } from '../utils/id';
@@ -12,6 +12,7 @@ interface UserDataManagementViewProps {
   onSaveAddress: (address: UserAddress) => void;
   onDeleteAddress: (id: string) => void;
   showToast: (message: string) => void;
+  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void;
 }
 
 type EditingItem =
@@ -26,9 +27,14 @@ export const UserDataManagementView: FC<UserDataManagementViewProps> = ({
   onSaveAddress,
   onDeleteAddress,
   showToast,
+  onRegisterBackHandler,
 }) => {
   const [editing, setEditing] = useState<EditingItem | null>(null);
   const [form, setForm] = useState({ label: '', value: '' });
+  useEffect(() => {
+    if (!editing || !onRegisterBackHandler) return;
+    return onRegisterBackHandler('user-data-form', () => setEditing(null), 90);
+  }, [editing, onRegisterBackHandler]);
 
   const openContactForm = (contact?: UserContact) => {
     setEditing({ kind: 'contact', item: contact || null });

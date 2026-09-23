@@ -3,7 +3,7 @@ import android.net.Uri;
 import app.drugtracker.alarmruntime.ExactAlarmContract;
 /**
  * Shared constants and canonical occurrence-key helpers for exact-time
- * automatic dose deduction ().
+ * automatic dose deduction.
  *
  * Occurrence identity (hard requirement):
  *   medicationId + doseId + calendarDate (YYYY-MM-DD)
@@ -70,7 +70,7 @@ public final class AutoDeductionContract {
      */
     public static final String PREFS_ORDERING = "drugtracker_auto_deduction_ordering_v1";
     /**
-     * Medication+dose schedule recurrence authorization ().
+     * Medication+dose schedule recurrence authorization.
      * Keyed by {@link #scheduleIdentityKey(String, String)}; value is a monotonic
      * long generation. Disable/cancel bumps the generation under SCHEDULE_LOCK so
      * post-fire successor creation for a stale generation cannot install D+1.
@@ -107,7 +107,7 @@ public final class AutoDeductionContract {
     private static final char SEP = '\u001f';
     /**
      * Deterministic canonical key for one automatic occurrence.
-     * Must match the identity used by JS reconciliation ().
+     * Must match the identity used by JS reconciliation.
      */
     public static String occurrenceKey(String medicationId, String doseId, String calendarDate) {
         if (medicationId == null) medicationId = "";

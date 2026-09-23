@@ -27,6 +27,7 @@ export interface MedicationMenuProps {
   onToggleMedicationReminder?: (id: string) => void;
   onToggleMedicationCriticalStockAlerts?: (id: string) => void;
   onOpenHistory?: (medication: Medication) => void;
+  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void;
   size?: 'xs' | 'sm' | 'md';
   showTypeIcon?: boolean;
   showOverflow?: boolean;
@@ -61,6 +62,7 @@ export function MedicationOverflowMenu({
   onEdit,
   onDelete,
   onOpenHistory,
+  onRegisterBackHandler,
   size = 'sm',
   className = '',
 }: MedicationOverflowMenuProps) {
@@ -68,6 +70,19 @@ export function MedicationOverflowMenu({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+  useEffect(() => {
+    if (!onRegisterBackHandler) return;
+    const unregisterOverflow = overflowOpen
+      ? onRegisterBackHandler('medication-overflow', () => setOverflowOpen(false), 100)
+      : undefined;
+    const unregisterDelete = deleteConfirmOpen
+      ? onRegisterBackHandler('medication-delete-confirm', () => setDeleteConfirmOpen(false), 110)
+      : undefined;
+    return () => {
+      unregisterOverflow?.();
+      unregisterDelete?.();
+    };
+  }, [overflowOpen, deleteConfirmOpen, onRegisterBackHandler]);
 
   useEffect(() => {
     if (!overflowOpen || !triggerRef.current) {

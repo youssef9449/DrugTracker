@@ -1,4 +1,4 @@
-import { OperationQueue } from './async/OperationQueue';
+import { ScheduledOperationCoordinator } from './scheduling/ScheduledOperationCoordinator';
 
 /**
  * Shared Critical Stock async-operation boundary.
@@ -11,13 +11,33 @@ import { OperationQueue } from './async/OperationQueue';
  * Business ownership, claim state, and generation checks remain in the calling
  * Critical Stock code.
  */
-const criticalAlarmOperationQueue = new OperationQueue<string>();
+const criticalAlarmCoordinator = new ScheduledOperationCoordinator<string>();
+
+export function bumpCriticalAlarmGeneration(medId: string): number {
+  return criticalAlarmCoordinator.bump(medId);
+}
+
+export function currentCriticalAlarmGeneration(medId: string): number {
+  return criticalAlarmCoordinator.current(medId);
+}
+
+export function isCurrentCriticalAlarmGeneration(
+  medId: string,
+  generation: number
+): boolean {
+  return criticalAlarmCoordinator.isCurrent(medId, generation);
+}
 
 export function enqueueCriticalAlarmOp(
   medId: string,
+  generation: number,
   operation: () => Promise<unknown>
 ): Promise<void> {
-  return criticalAlarmOperationQueue.enqueue(medId, async () => {
-    await operation();
-  });
+  return criticalAlarmCoordinator.enqueue(
+    medId,
+    generation,
+    async () => {
+      await operation();
+    }
+  );
 }

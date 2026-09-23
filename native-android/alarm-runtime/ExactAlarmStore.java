@@ -12,8 +12,8 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Durable mechanism store. The feature supplies storageKey so existing storage
- * schemas can be migrated without conflating storage identity with PendingIntent identity.
+ * Durable mechanism store. The feature supplies a storageKey so durable state
+ * identity stays distinct from the Android PendingIntent identity.
  */
 final class ExactAlarmStore {
     private static final String TAG = "ExactAlarmStore";

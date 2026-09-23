@@ -1,5 +1,35 @@
 plugins {
     id 'java'
+    id 'com.github.spotbugs' version '6.5.11'
+}
+
+def spotbugsClassLoader = plugins['com.github.spotbugs'].class.classLoader
+def SpotBugsEffort = spotbugsClassLoader.loadClass('com.github.spotbugs.snom.Effort')
+def SpotBugsConfidence = spotbugsClassLoader.loadClass('com.github.spotbugs.snom.Confidence')
+
+spotbugs {
+    // The JVM module compiles the repository-owned production native runtime.
+    // Restrict analysis to that production package; test/Capacitor compile stubs
+    // are deliberately outside the static-analysis target.
+    onlyAnalyze = ['app.drugtracker.*']
+
+    // Start with high-confidence findings so the gate is actionable rather
+    // than becoming a wall of low-confidence noise. Any intentional exception
+    // must be represented by an explicit SpotBugs filter/baseline in a later
+    // change; failures are never silently ignored.
+    effort = SpotBugsEffort.valueOf('MAX')
+    reportLevel = SpotBugsConfidence.valueOf('HIGH')
+    ignoreFailures = false
+    runOnCheck = true
+    showProgress = true
+    showStackTraces = true
+}
+
+spotbugsMain {
+    reports {
+        xml.required = true
+        html.required = true
+    }
 }
 
 java {

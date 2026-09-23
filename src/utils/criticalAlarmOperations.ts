@@ -15,7 +15,9 @@ const criticalAlarmOperationQueue = new OperationQueue<string>();
 
 export function enqueueCriticalAlarmOp(
   medId: string,
-  operation: () => Promise<void>
+  operation: () => Promise<unknown>
 ): Promise<void> {
-  return criticalAlarmOperationQueue.enqueue(medId, operation);
+  return criticalAlarmOperationQueue.enqueue(medId, async () => {
+    await operation();
+  });
 }

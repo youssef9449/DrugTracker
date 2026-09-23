@@ -6,7 +6,7 @@ import { getTodayDateString, getCriticalAlarmDate } from '@/utils/dateCalculatio
 import { CRITICAL_CLAIMS_STORAGE_KEY } from '@/utils/criticalNotificationClaims';
 import { useStockAlerts } from '@/hooks/useStockAlerts';
 import { useCriticalAlarmScheduler } from '@/hooks/useCriticalAlarmScheduler';
-import { cancelCriticalAlarm, scheduleCriticalAlarm, verifyCriticalAlarmPending } from '@/utils/criticalAlarmScheduling';
+import type { CriticalAlarmOperationResult } from '@/utils/criticalAlarmScheduling';
 
 // Integration tests: both hooks mounted together, exactly like App.tsx
 // wires them (useStockAlerts first, then useCriticalAlarmScheduler).
@@ -228,10 +228,10 @@ describe('critical notification flow — both hooks integrated', () => {
   it('scheduler/foreground race: a med that crosses while its schedule is in flight produces at most one notification', async () => {
     // Simulate the race window: the scheduler's schedule call resolves
     // AFTER the medications array already shows the med critical.
-    let resolveSchedule: (v: boolean) => void = () => undefined;
+    let resolveSchedule: (v: CriticalAlarmOperationResult) => void = () => undefined;
     scheduleMock.mockImplementationOnce(
       () =>
-        new Promise<Awaited<ReturnType<typeof scheduleCriticalAlarm>>>((resolve) => {
+        new Promise<CriticalAlarmOperationResult>((resolve) => {
           resolveSchedule = resolve;
         })
     );

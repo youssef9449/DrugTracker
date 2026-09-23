@@ -1,5 +1,5 @@
 import type { FC } from 'react';
-import { MessageCircle, ExternalLink, X } from 'lucide-react';
+import { MessageCircle, MessageSquare, ExternalLink, X } from 'lucide-react';
 import type { Pharmacy, PharmacySettings } from '../types';
 import { describeOrderInBoxes, isSolidUnit } from '../utils/medicationPackaging';
 import { pluralizeArabic } from '../lib/arabicPlural';

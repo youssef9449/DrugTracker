@@ -192,6 +192,25 @@ export function useDoseReminderScheduler({
     retryTimersRef.current.clear();
     retryAttemptsRef.current.clear();
   };
+
+  const cancelSnoozeSlot = (medId: string, doseId: string): void => {
+    const scheduleKey = doseScheduleKey(medId, doseId);
+    const operationKey = doseReminderSnoozeKey(medId, doseId);
+    const generation =
+      bumpDoseReminderSnoozeGeneration(operationKey);
+    enqueueRetryable(
+      'snooze:' + scheduleKey,
+      operationKey,
+      generation,
+      enqueueDoseReminderSnoozeOpGuarded,
+      isCurrentDoseReminderSnoozeGeneration,
+      async () => {
+        await cancelSnoozedDoseReminder(medId, doseId);
+        clearSnoozedDose(medId, doseId);
+      }
+    );
+  };
+
   const doseSignature = useMemo(
     () =>
       medications
@@ -222,24 +241,6 @@ export function useDoseReminderScheduler({
   );
   useEffect(() => {
     if (!hydrated || isFirstRun) return;
-    const cancelSnoozeSlot = (medId: string, doseId: string): void => {
-      const scheduleKey = doseScheduleKey(medId, doseId);
-      const operationKey = doseReminderSnoozeKey(medId, doseId);
-      const generation =
-        bumpDoseReminderSnoozeGeneration(operationKey);
-      enqueueRetryable(
-        'snooze:' + scheduleKey,
-        operationKey,
-        generation,
-        enqueueDoseReminderSnoozeOpGuarded,
-        isCurrentDoseReminderSnoozeGeneration,
-        async () => {
-          await cancelSnoozedDoseReminder(medId, doseId);
-          clearSnoozedDose(medId, doseId);
-        }
-      );
-    };
-
     const cancelSlot = (medId: string, doseId: string): void => {
       const key = doseScheduleKey(medId, doseId);
       const gen = bumpDoseReminderScheduleGeneration(key);

@@ -401,7 +401,7 @@ export function runGatedManualConsume(opts: {
   todayStr?: string;
   now?: Date;
   /**
-   * Test inject for native occurrence snapshot (production uses getOccurrenceSnapshot).
+   * Test inject for native occurrence snapshot.
    * Must not convert infrastructure failure into fake ABSENT.
    */
   getOccurrenceSnapshot?: (
@@ -1668,7 +1668,7 @@ export function runGatedMedicationUpdate(opts: {
     };
     const pruned = pruneDoseConsumption(forPrune, stockBase);
     // Build final med: user-editable fields from medData/pruned; stock/history from
-    // stockBase then pruned schedule (pruned doseConsumptionHistory wins over stockBase).
+    // stockBase then pruned schedule.
     const finalMed: Medication = {
       ...freshMed,
       ...pruned,

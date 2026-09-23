@@ -70,7 +70,7 @@ describe('RefillModal', () => {
         medication={med}
         isOpen={true}
         onClose={() => {}}
-        onConfirmRefill={() => {}}
+        onConfirmRefill={() => Promise.resolve(true)}
       />
     );
 

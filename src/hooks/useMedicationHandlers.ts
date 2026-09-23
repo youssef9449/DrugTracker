@@ -423,7 +423,8 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       showToast('لم يتم تسجيل الجرعة: تعذر تحديد الدواء أو الجرعة المطلوبة.');
     }
     if (shouldDismissAlarmAfterManualTake(result.outcome)) {
-      dismissAlarm();
+      const dismissed = dismissAlarm();
+      if (!dismissed) showToast(STORAGE_ERRORS.generic);
     }
   }, [dismissAlarm, soundEnabled, setMedications, setLogs, showToast]);
   const handleTakeDoseFromAlarm = useCallback((med: Medication, doseId?: string) => {

@@ -1,5 +1,6 @@
 package app.drugtracker.autodeduction;
 
+import android.util.Log;
 import java.util.Map;
 import app.drugtracker.autodeduction.AutoDeductionScheduler.CancelResult;
 

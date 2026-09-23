@@ -17,14 +17,14 @@ export function getTodayDateString(): string {
   return getLocalDateString();
 }
 export function addCalendarDays(dateStr: string, days: number): string {
-  const parsed = parseUtcDate(dateStr);
+  const parsed = parseCalendarDate(dateStr);
   if (!parsed || !Number.isFinite(days)) return dateStr;
   const target = new Date(parsed.getTime() + days * MS_PER_DAY);
   return formatUtcDateString(target);
 }
 export function calendarDayDifference(fromDate: string, toDate: string): number | null {
-  const from = parseUtcDate(fromDate);
-  const to = parseUtcDate(toDate);
+  const from = parseCalendarDate(fromDate);
+  const to = parseCalendarDate(toDate);
   if (!from || !to) return null;
   return Math.round((to.getTime() - from.getTime()) / MS_PER_DAY);
 }
@@ -50,7 +50,7 @@ export function localEpochMs(calendarDate: string, timeHhmm: string): number | n
   const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(timeHhmm);
   if (!match) return null;
   const [year, month, day] = calendarDate.split('-').map(Number);
-  const utcDate = parseUtcDate(calendarDate);
+  const utcDate = parseCalendarDate(calendarDate);
   if (
     !utcDate ||
     utcDate.getUTCFullYear() !== year ||
@@ -72,23 +72,26 @@ export function localEpochMs(calendarDate: string, timeHhmm: string): number | n
   return Number.isFinite(ms) ? ms : null;
 }
 /**
- * Parse a "YYYY-MM-DD" string into a UTC midnight Date.
- *
- * Why UTC: `new Date(2024, m, d)` interprets the components in the
- * LOCAL timezone, and `setDate`/`getTime` math then crosses DST
- * boundaries with 23- or 25-hour days — producing off-by-one errors
- * around DST transitions. Treating YYYY-MM-DD as a UTC calendar date
- * makes day arithmetic exact (1 day = 86400000 ms, always).
+ * Parse a valid `YYYY-MM-DD` local calendar date as UTC midnight.
+ * Invalid calendar dates are rejected instead of being normalized.
  */
-function parseUtcDate(dateStr: string): Date | null {
-  const parts = dateStr.split('-');
-  if (parts.length !== 3) return null;
-  const y = Number(parts[0]);
-  const m = Number(parts[1]);
-  const d = Number(parts[2]);
-  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
-  // Date.UTC month is 0-indexed.
-  return new Date(Date.UTC(y, m - 1, d));
+export function parseCalendarDate(dateStr: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
+  const [year, month, day] = dateStr.split('-').map(Number);
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day)
+  ) {
+    return null;
+  }
+
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+    ? date
+    : null;
 }
 /** Format a Date (interpreted as UTC) back to "YYYY-MM-DD". */
 function formatUtcDateString(d: Date): string {
@@ -256,7 +259,7 @@ export function getDepletionDate(med: Medication): {
   daysLeft: number;
 } {
   const daysLeft = daysLeftFromCurrentStock(med);
-  const todayUtc = parseUtcDate(getTodayDateString()) ?? new Date(Date.UTC(1970, 0, 1));
+  const todayUtc = parseCalendarDate(getTodayDateString()) ?? new Date(Date.UTC(1970, 0, 1));
   const targetUtc = new Date(todayUtc.getTime() + daysLeft * MS_PER_DAY);
   return {
     dateStr: formatUtcDateString(targetUtc),
@@ -317,7 +320,7 @@ export function getCriticalAlarmDate(
     if (pills <= 0) return true;
     return floorRatioSafely(pills, dayAmt) <= criticalThresholdDays;
   };
-  const todayUtc = parseUtcDate(todayStr);
+  const todayUtc = parseCalendarDate(todayStr);
   if (!todayUtc) return null;
   const localPartsFromUtcDate = (dateUtc: Date) => ({
     y: dateUtc.getUTCFullYear(),
@@ -387,7 +390,7 @@ export function getCriticalAlarmDate(
   while (!isCritical(pills)) {
     const nextExceptionStr =
       exceptionIdx < sortedExceptions.length ? sortedExceptions[exceptionIdx] : null;
-    const nextExceptionUtc = nextExceptionStr ? parseUtcDate(nextExceptionStr) : null;
+    const nextExceptionUtc = nextExceptionStr ? parseCalendarDate(nextExceptionStr) : null;
     // Days from cursor (inclusive) until the day before next exception (or unbounded).
     // If next exception is before cursor, skip it.
     if (nextExceptionUtc && nextExceptionStr && nextExceptionStr < formatUtcDateString(cursorUtc)) {

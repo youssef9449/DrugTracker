@@ -104,7 +104,7 @@ export function useStockAlerts({
       // Do NOT cancel the future alarm before foreground delivery succeeds:
       // it is the recovery fallback if delivery fails (#419).
       void (async () => {
-        const acquired = await tryClaimCriticalNotification(med.id);
+        const acquired = await tryClaimCriticalNotification(med.id, true);
         if (!acquired) return;
 
         let sent = false;

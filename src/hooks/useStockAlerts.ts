@@ -137,14 +137,10 @@ export function useStockAlerts({
         // protected by the native operation-version/tombstone boundary and
         // will be retried by reconciliation.
         bumpCriticalAlarmGeneration(med.id);
-        const cancellation = await enqueueCriticalAlarmOp(
+        await enqueueCriticalAlarmOp(
           med.id,
           () => cancelCriticalAlarm(med.id)
         );
-        if (cancellation === undefined) {
-          // OperationQueue results are intentionally not required by callers.
-          // Native cancellation remains failure-aware at its own boundary.
-        }
       })();
     }
   }, [medications, criticalStockAlertsEnabled, hydrated, isFirstRun]);

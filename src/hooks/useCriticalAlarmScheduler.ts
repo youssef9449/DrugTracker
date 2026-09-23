@@ -262,9 +262,13 @@ export function useCriticalAlarmScheduler({
       enqueueCriticalAlarmOp(
         '__stale_critical_alarm_cleanup__',
         async () => {
-          const nativeIds = await listScheduledCriticalMedicationIdsNative();
+          const listed = await listScheduledCriticalMedicationIdsNative();
+          if (!listed.ok) {
+            console.warn('[critical-alarm] native schedule listing failed:', listed.error, listed.errorCode);
+            return;
+          }
           await Promise.all(
-            nativeIds.map((medId) => {
+            listed.ids.map((medId) => {
               const cleanupGeneration = generationGuardRef.current.current(medId);
               return enqueueCriticalAlarmOp(medId, async () => {
                 if (!generationGuardRef.current.isCurrent(medId, cleanupGeneration)) return;
@@ -299,8 +303,11 @@ export function useCriticalAlarmScheduler({
 
       let scheduled = false;
       try {
-        scheduled =
-          (await scheduleCriticalAlarm(medId, medName, chainCriticalDateMs, unit)) === true;
+        const scheduleResult = await scheduleCriticalAlarm(medId, medName, chainCriticalDateMs, unit);
+        if (!scheduleResult.ok) {
+          console.warn('[critical-alarm] schedule failed:', scheduleResult.error, scheduleResult.errorCode);
+        }
+        scheduled = scheduleResult.ok;
       } catch (err) {
         console.warn('[critical-alarm] schedule failed:', err);
         scheduled = false;
@@ -404,8 +411,18 @@ export function useCriticalAlarmScheduler({
         // outcome writes the claim exactly like any fresh schedule.
         enqueueCriticalAlarmOp(medId, async () => {
           if (!generationGuardRef.current.isCurrent(medId, gen)) return;
-          const verified = await verifyCriticalAlarmPending(medId, criticalDateMs);
-          if (verified || !generationGuardRef.current.isCurrent(medId, gen)) return;
+          const verification = await verifyCriticalAlarmPending(medId, criticalDateMs);
+          if (
+            (verification.ok && verification.pending) ||
+            !generationGuardRef.current.isCurrent(medId, gen)
+          ) return;
+          if (!verification.ok) {
+            console.warn(
+              '[critical-alarm] verify failed:',
+              verification.error,
+              verification.errorCode
+            );
+          }
           await runScheduleChain(medId, medName, criticalDateMs, unit, gen);
         });
         continue;

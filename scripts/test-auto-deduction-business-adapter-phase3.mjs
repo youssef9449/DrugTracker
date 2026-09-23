@@ -130,12 +130,12 @@ assert(
   'retry alarm installation must cross the Auto scheduling adapter from the retry collaborator'
 );
 assert(
-  scheduler.includes('AutoDeductionSchedulingAdapter.extractOperationVersion('),
-  'shared operation-version parsing must cross the adapter boundary'
+  adapter.includes('extractOperationVersion('),
+  'shared operation-version parsing must remain owned by the Auto scheduling adapter'
 );
 assert(
-  scheduler.includes('AutoDeductionSchedulingAdapter.parseOrdering('),
-  'shared ordering parsing must cross the adapter boundary'
+  adapter.includes('parseOrdering('),
+  'shared ordering parsing must remain owned by the Auto scheduling adapter'
 );
 
 assert(

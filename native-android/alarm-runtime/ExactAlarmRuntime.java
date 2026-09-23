@@ -288,6 +288,9 @@ public final class ExactAlarmRuntime {
         }
 
         synchronized (ExactAlarmOperationLock.LOCK) {
+            String previousScheduleRaw =
+                    store.getScheduleRaw(request.storageKey);
+
             if (request.expectedExistingOperationVersion != null
                     && !ExactAlarmContract.isMetadataOwnedByOperationVersion(
                             store.getScheduleRaw(
@@ -602,13 +605,30 @@ public final class ExactAlarmRuntime {
      */
     private void rollbackScheduleLocked(
             String storageKey,
-            String expectedOperationVersion) {
-        if (!store.removeScheduleIfOwnedLocked(
-                storageKey,
+            String expectedOperationVersion,
+            String previousScheduleRaw) {
+        if (!ExactAlarmContract.isMetadataOwnedByOperationVersion(
+                store.getScheduleRaw(storageKey),
                 expectedOperationVersion)) {
-            Log.w(TAG,
-                    "ownership-safe rollback skipped: "
-                            + storageKey);
+            Log.w(
+                    TAG,
+                    "ownership-safe rollback skipped: " + storageKey);
+            return;
+        }
+
+        boolean restored;
+        if (previousScheduleRaw == null || previousScheduleRaw.isEmpty()) {
+            restored = store.removeScheduleLocked(storageKey);
+        } else {
+            restored = store.writeScheduleRawLocked(
+                    storageKey,
+                    previousScheduleRaw);
+        }
+
+        if (!restored) {
+            Log.e(
+                    TAG,
+                    "schedule rollback persistence failed: " + storageKey);
         }
     }
 

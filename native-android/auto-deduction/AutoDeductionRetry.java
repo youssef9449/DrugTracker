@@ -179,6 +179,33 @@ public FireResult recoverFireFromIndependentEvidence(
                 return new FireResult(FireResult.Status.FAILED, false);
             }
 
+            // Independent retry evidence may survive longer than the one-shot
+            // delivery. It is not an authorization token by itself: before any
+            // FIRED record or Native stock mutation is allowed, prove that the
+            // evidence still belongs to the currently authorized schedule.
+            // A missing/replaced schedule means the old retry must never resurrect
+            // an occurrence after disable/edit/replacement.
+            if (scheduler.isOccurrenceCancelledKey(key)) {
+                clearIndependentFireRetryEvidenceLocked(key);
+                return FireResult.cancelled();
+            }
+            AutoDeductionPersistenceModels.ScheduleRecord current =
+                    scheduler.schedulingAdapter().getScheduleRecord(key);
+            long activeGeneration = scheduler.getRecurrenceGenerationLocked(
+                    medicationId, doseId);
+            if (current == null
+                    || evidence.recurrenceGeneration != activeGeneration
+                    || !evidence.operationVersion.equals(current.operationVersion)
+                    || !evidence.timeHhmm.equals(current.timeHhmm)
+                    || Double.compare(evidence.amount, current.amount) != 0
+                    || !evidence.treatmentEndDate.equals(current.treatmentEndDate)) {
+                // This evidence no longer owns the current schedule. Retire the
+                // obsolete retry source before returning so later recovery passes
+                // cannot keep rediscovering the same stale obligation.
+                clearIndependentFireRetryEvidenceLocked(key);
+                return FireResult.cancelled();
+            }
+
             AutoDeductionEventStore.InsertFiredResult ir =
                     scheduler.eventStore().insertFiredIfAbsent(
                             medicationId,
@@ -207,18 +234,12 @@ public FireResult recoverFireFromIndependentEvidence(
                 return result;
             }
 
-            AutoDeductionPersistenceModels.ScheduleRecord current =
-                    scheduler.schedulingAdapter().getScheduleRecord(key);
-            String obligationTime = evidence.timeHhmm;
-            String obligationEndDate = evidence.treatmentEndDate;
-            String obligationVersion = evidence.operationVersion;
-            if (current != null) {
-                obligationTime = current.timeHhmm;
-                obligationEndDate = current.treatmentEndDate;
-                if (!current.operationVersion.isEmpty()) {
-                    obligationVersion = current.operationVersion;
-                }
-            }
+            // The ownership check above proved this is the current schedule.
+            // Reuse its definition rather than letting stale evidence override the
+            // live configuration while rebuilding the successor obligation.
+            String obligationTime = current.timeHhmm;
+            String obligationEndDate = current.treatmentEndDate;
+            String obligationVersion = current.operationVersion;
 
             if (!scheduler.persistSuccessorObligation(
                     medicationId,

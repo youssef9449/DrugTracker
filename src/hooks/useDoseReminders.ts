@@ -93,7 +93,7 @@ export function useDoseReminders({
         generation,
         async () => {
           await cancelSnoozedDoseReminder(current, doseId);
-          clearSnoozedDose(current, doseId);
+          if (!clearSnoozedDose(current, doseId)) throw new Error('snooze_clear_persistence_failed');
         }
       );
 

@@ -647,6 +647,54 @@ public class Group2AutoReliabilityTest {
     }
 
     @Test
+    public void terminalStateCompaction_retainsRecentMarkers_butCompactsOlderTerminalState()
+            throws Exception {
+        String med = "med-410-retention";
+        String dose = "dose-410-retention";
+        String recentDate = localDateOffset(-AutoDeductionContract.TERMINAL_OCCURRENCE_MAX_AGE_DAYS);
+        String oldDate = localDateOffset(-AutoDeductionContract.TERMINAL_OCCURRENCE_MAX_AGE_DAYS - 1);
+        String time = "08:00";
+        String recentKey = occurrenceKey(med, dose, recentDate);
+        String oldKey = occurrenceKey(med, dose, oldDate);
+
+        AutoDeductionStockStore stock = new AutoDeductionStockStore(appContext());
+        assertTrue(stock.ensureMissingAndRead(
+                java.util.Collections.singletonList(
+                        new AutoDeductionStockStore.StockSeed(med, 20.0))).ok);
+
+        AutoDeductionEventStore events = new AutoDeductionEventStore(appContext());
+        assertTrue(events.insertFiredIfAbsent(
+                med, dose, recentDate, epoch(recentDate, time), 1.0).isCreated());
+        assertTrue(stock.applyAutoDeduction(med, dose, recentDate, 1.0).ok);
+        assertTrue(events.markReconciled(med, dose, recentDate).ok);
+
+        assertTrue(events.insertFiredIfAbsent(
+                med, dose, oldDate, epoch(oldDate, time), 1.0).isCreated());
+        assertTrue(stock.applyAutoDeduction(med, dose, oldDate, 1.0).ok);
+        assertTrue(events.markReconciled(med, dose, oldDate).ok);
+
+        SharedPreferences stockPrefs =
+                appContext().getSharedPreferences("drugtracker_auto_stock_v1", 0);
+        String recentMarker = "auto:" + recentKey;
+        String oldMarker = "auto:" + oldKey;
+        assertTrue(stockPrefs.contains(recentMarker));
+        assertTrue(stockPrefs.contains(oldMarker));
+        assertTrue(eventPrefs().contains(evtKey(recentKey)));
+        assertTrue(eventPrefs().contains(evtKey(oldKey)));
+
+        assertTrue(Phase2TestSupport.newScheduler().compactTerminalState());
+
+        assertTrue("occurrence at max configured age must remain idempotent-safe",
+                stockPrefs.contains(recentMarker));
+        assertTrue("event at max configured age must remain retained",
+                eventPrefs().contains(evtKey(recentKey)));
+        assertFalse("older terminal occurrence marker must be compacted",
+                stockPrefs.contains(oldMarker));
+        assertFalse("older terminal event must be compacted",
+                eventPrefs().contains(evtKey(oldKey)));
+    }
+
+    @Test
     public void successorAlreadyInstalled_obligationRecoveryIsIdempotent()
             throws Exception {
         String med = "med-408-installed";

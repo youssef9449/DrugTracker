@@ -184,7 +184,7 @@ public class CrossFeatureAlarmIsolationTest {
                 DoseReminderAlarmAdapter.PREFS_SCHEDULES,
                 DoseReminderAlarmAdapter.PREFS_CANCELLED,
                 DoseReminderAlarmAdapter.PREFS_ORDERING,
-                DoseReminderAlarmAdapter.REQUEST_CODE_BASE);
+                DoseReminderAlarmAdapter.PENDING_INTENT_REQUEST_CODE);
 
         ExactAlarmRuntime.PendingStateResult result = runtime.getPendingState(
                 "",
@@ -192,6 +192,87 @@ public class CrossFeatureAlarmIsolationTest {
                 DoseReminderAlarmReceiver.class);
 
         assertTrue(result.status == ExactAlarmRuntime.PendingStateResult.Status.FAILED);
+    }
+
+    @Test
+    public void cancelledSnoozeLosesDeliveryOwnership() {
+        DoseReminderAlarmAdapter dose = doseAdapter();
+        assertTrue(dose.scheduleSnooze(
+                MEDICATION_ID,
+                DOSE_ID,
+                "08:00",
+                1.0,
+                "Phase 9 Medicine",
+                "قرص",
+                TRIGGER_AT,
+                true,
+                null).ok);
+
+        String version = dose.getSnoozeMetadata(
+                MEDICATION_ID,
+                DOSE_ID).optString(
+                        ExactAlarmContract.FIELD_OPERATION_VERSION,
+                        "");
+        assertTrue(!version.isEmpty());
+        assertTrue(dose.ownsActiveSnooze(
+                MEDICATION_ID,
+                DOSE_ID,
+                version));
+
+        assertTrue(dose.cancelSnooze(
+                MEDICATION_ID,
+                DOSE_ID).isOk());
+
+        assertTrue(!dose.ownsActiveSnooze(
+                MEDICATION_ID,
+                DOSE_ID,
+                version));
+    }
+
+    @Test
+    public void replacedSnoozeMakesOldDeliveryOwnershipStale() {
+        DoseReminderAlarmAdapter dose = doseAdapter();
+        assertTrue(dose.scheduleSnooze(
+                MEDICATION_ID,
+                DOSE_ID,
+                "08:00",
+                1.0,
+                "Phase 9 Medicine",
+                "قرص",
+                TRIGGER_AT,
+                true,
+                null).ok);
+        String oldVersion = dose.getSnoozeMetadata(
+                MEDICATION_ID,
+                DOSE_ID).optString(
+                        ExactAlarmContract.FIELD_OPERATION_VERSION,
+                        "");
+
+        assertTrue(dose.scheduleSnooze(
+                MEDICATION_ID,
+                DOSE_ID,
+                "08:00",
+                1.0,
+                "Phase 9 Medicine",
+                "قرص",
+                TRIGGER_AT + 60_000L,
+                true,
+                null).ok);
+        String newVersion = dose.getSnoozeMetadata(
+                MEDICATION_ID,
+                DOSE_ID).optString(
+                        ExactAlarmContract.FIELD_OPERATION_VERSION,
+                        "");
+
+        assertTrue(!oldVersion.equals(newVersion));
+        assertTrue(!dose.ownsActiveSnooze(
+                MEDICATION_ID,
+                DOSE_ID,
+                oldVersion));
+        assertTrue(dose.ownsActiveSnooze(
+                MEDICATION_ID,
+                DOSE_ID,
+                newVersion));
     }
 
     @Test

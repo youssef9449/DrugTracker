@@ -46,15 +46,9 @@ public final class CriticalStockAlarmReceiver extends BroadcastReceiver {
                 // Delivery ownership is checked BEFORE any user-facing side
                 // effect. A cancelled/replaced/tombstoned operation can never
                 // leak a stale notification.
-                if (!new app.drugtracker.alarmruntime.ExactAlarmRuntime(
-                        appContext,
-                        "drugtracker_critical_stock_alarm_schedules_v1",
-                        "drugtracker_critical_stock_alarm_cancelled_v1",
-                        "drugtracker_critical_stock_alarm_ordering_v1",
-                        0xC71C001)
-                        .ownsActiveSchedule(
-                                CriticalStockAlarmAdapter.occurrenceKey(medicationId),
-                                operationVersion)) {
+                if (!adapter.ownsActiveSchedule(
+                        medicationId,
+                        operationVersion)) {
                     return;
                 }
 

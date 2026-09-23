@@ -1,6 +1,6 @@
 import { scheduleCriticalAlarmNative, cancelCriticalAlarmNative, verifyCriticalAlarmPendingNative } from './criticalAlarmNative';
 import { getNativePlatform, isNativePlatform } from './notifications/notificationPlatform';
-import { areNotificationsEnabled, cancelNotification, getPendingNotification, scheduleNotification } from './notificationRuntime';
+import { cancelNotification, getPendingNotification, scheduleNotification } from './notificationRuntime';
 import { scheduleWebNotification } from './notifications/webNotifications';
 import { classifyNativeError, type NativeErrorCode } from './nativeErrors';
 

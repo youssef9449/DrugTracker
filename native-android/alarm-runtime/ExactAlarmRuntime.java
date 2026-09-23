@@ -212,11 +212,13 @@ public final class ExactAlarmRuntime {
     }
 
     /**
-     * Returns whether the OS currently has a matching PendingIntent for the
-     * exact-alarm identity. This inspects Android AlarmManager state only;
-     * durable metadata is not treated as proof that the alarm is armed.
+     * Query the real AlarmManager PendingIntent state.
+     *
+     * <p>ABSENT means the OS has no matching alarm. FAILED means the state
+     * could not be determined; callers must never treat FAILED as ABSENT for
+     * destructive reconciliation.</p>
      */
-    public boolean isPending(
+    public PendingStateResult getPendingState(
             String identityUri,
             String action,
             Class<? extends BroadcastReceiver> receiverClass) {
@@ -224,7 +226,7 @@ public final class ExactAlarmRuntime {
                 || action == null
                 || action.isEmpty()
                 || receiverClass == null) {
-            return false;
+            return PendingStateResult.failed("invalid_pending_request");
         }
         synchronized (ExactAlarmOperationLock.LOCK) {
             try {
@@ -241,10 +243,34 @@ public final class ExactAlarmRuntime {
                         pendingIntentRequestCode,
                         intent,
                         flags);
-                return pendingIntent != null;
+                return pendingIntent == null
+                        ? PendingStateResult.absent()
+                        : PendingStateResult.pending();
             } catch (Exception e) {
-                return false;
+                Log.e(TAG, "pending-state lookup failed", e);
+                return PendingStateResult.failed("pending_state_lookup_failed");
             }
+        }
+    }
+
+    /**
+     * Atomically checks whether a fired delivery still owns an active durable
+     * schedule. This is the delivery linearization point: a cancellation or
+     * replacement that acquires the shared lock first makes this false.
+     */
+    public boolean ownsActiveSchedule(
+            String storageKey,
+            String expectedOperationVersion) {
+        if (storageKey == null || storageKey.isEmpty()
+                || expectedOperationVersion == null
+                || expectedOperationVersion.isEmpty()) {
+            return false;
+        }
+        synchronized (ExactAlarmOperationLock.LOCK) {
+            return ExactAlarmContract.isMetadataOwnedByOperationVersion(
+                    store.getScheduleRaw(storageKey),
+                    expectedOperationVersion)
+                    && !store.isEffectivelyCancelledLocked(storageKey);
         }
     }
 
@@ -684,6 +710,42 @@ public final class ExactAlarmRuntime {
             this.deliveryExtras = deliveryExtras;
             this.expectedExistingOperationVersion =
                     expectedExistingOperationVersion;
+        }
+    }
+
+    public static final class PendingStateResult {
+        public enum Status {
+            PENDING,
+            ABSENT,
+            FAILED
+        }
+
+        public final Status status;
+        public final String error;
+
+        private PendingStateResult(Status status, String error) {
+            this.status = status;
+            this.error = error;
+        }
+
+        static PendingStateResult pending() {
+            return new PendingStateResult(Status.PENDING, null);
+        }
+
+        static PendingStateResult absent() {
+            return new PendingStateResult(Status.ABSENT, null);
+        }
+
+        static PendingStateResult failed(String error) {
+            return new PendingStateResult(Status.FAILED, error);
+        }
+
+        public boolean isPending() {
+            return status == Status.PENDING;
+        }
+
+        public boolean isOk() {
+            return status != Status.FAILED;
         }
     }
 

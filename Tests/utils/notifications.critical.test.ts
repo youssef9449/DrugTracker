@@ -168,7 +168,10 @@ describe('scheduleCriticalAlarm — native path (android)', () => {
     const future = Date.now() + 7 * 24 * 60 * 60 * 1000;
     await expect(
       scheduleCriticalAlarm('med-1', 'Test Med', future, 'قرص')
-    ).resolves.toBe(false);
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'permission_denied',
+    });
     warnSpy.mockRestore();
   });
 
@@ -268,7 +271,10 @@ describe('verifyCriticalAlarmPending — the claim is not proof the alarm exists
     mocks.platform.mockReturnValue('android');
     const t = Date.now() + 7 * 24 * 60 * 60 * 1000;
     mocks.criticalVerify.mockResolvedValue({ ok: false });
-    await expect(verifyCriticalAlarmPending('med-1', t)).resolves.toBe(false);
+    await expect(verifyCriticalAlarmPending('med-1', t)).resolves.toMatchObject({
+      ok: true,
+      pending: false,
+    });
     expect(mocks.criticalVerify).toHaveBeenCalledWith({
       medicationId: 'med-1',
       alarmTimeMs: t,
@@ -292,7 +298,10 @@ describe('verifyCriticalAlarmPending — the claim is not proof the alarm exists
     mocks.getPending.mockResolvedValue({
       notifications: [{ id: scheduledId, schedule: { at: new Date(t).toISOString() } }],
     });
-    await expect(verifyCriticalAlarmPending('med-1', t)).resolves.toBe(true);
+    await expect(verifyCriticalAlarmPending('med-1', t)).resolves.toMatchObject({
+      ok: true,
+      pending: true,
+    });
     expect(mocks.checkExactNotificationSetting).not.toHaveBeenCalled();
   });
 

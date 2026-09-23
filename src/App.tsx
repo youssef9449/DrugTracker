@@ -25,6 +25,7 @@ import { AutoDeductPromptModal } from './components/AutoDeductPromptModal';
 import { UpdatePrompt } from './components/UpdatePrompt';
 import { Toggle } from './components/ui/Toggle';
 import { MedicationSortControl } from './components/MedicationSortControl';
+import { AppTabContent } from './components/AppTabContent';
 import type { MedicationSortField, MedicationSortDirection } from './utils/medicationSorting';
 import {
   requestNotificationPermission,
@@ -380,163 +381,53 @@ export default function App() {
           }}
         />
 
-        <main className="flex-1 overflow-y-auto pb-24 relative">
-          {activeTab === 'stock' && (
-            <div>
-              {filter === 'all' && (
-                <div>
-                  <div className="mx-4 mt-2 grid grid-cols-2 items-stretch gap-2 text-center text-xs">
-                    <div className="bg-white px-2.5 py-1.5 rounded-xl border border-slate-200/80 shadow-2xs h-full flex flex-col justify-center">
-                      <span className="text-[9.5px] text-slate-500 block leading-tight">إجمالي الأدوية</span>
-                      <div className="h-5 flex items-center justify-center mt-0.5">
-                        <span className="text-sm font-bold font-mono text-slate-800 leading-none">{medications.length}</span>
-                      </div>
-                    </div>
-                    <div className="bg-white px-2.5 py-1.5 rounded-xl border border-slate-200/80 shadow-2xs h-full flex flex-col justify-center">
-                      <span className="text-[9.5px] text-slate-500 block leading-tight">حالة المخزون</span>
-                      <div className="h-5 flex items-center justify-center gap-1.5 mt-0.5 text-[10.5px] leading-none font-mono font-bold">
-                        <span className="text-emerald-700">{sufficientCount} آمن</span>
-                        <span className="text-slate-300">•</span>
-                        <span className={alertsCount > 0 ? 'text-rose-600' : 'text-slate-500'}>
-                          {alertsCount} ناقص
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* View mode toggle: compact vs detailed cards */}
-                  <div className="mx-4 mt-3 flex items-center justify-between gap-2 bg-white px-3 py-2 rounded-2xl border border-slate-200/80 shadow-2xs">
-                    <div className="flex items-center min-w-0">
-                      <MedicationSortControl
-                        field={medicationSortField}
-                        direction={medicationSortDirection}
-                        onFieldChange={setMedicationSortField}
-                        onDirectionChange={setMedicationSortDirection}
-                        onRegisterBackHandler={registerBackOverlay}
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-xs font-medium text-slate-600">
-                        {isCompactView ? 'العرض المختصر' : 'العرض الطبيعي'}
-                      </span>
-                      <Toggle
-                        id="card-view-mode-toggle"
-                        size="sm"
-                        checked={isCompactView}
-                        onChange={() => {
-                          const next = !isCompactView;
-                          setIsCompactView(next);
-                          showToast(
-                            next ? 'تم تفعيل العرض المختصر' : 'تم إرجاع العرض الطبيعي'
-                          );
-                          if (soundEnabled) playSuccessChime();
-                        }}
-                        label="تبديل العرض بين المختصر والعرض الطبيعي"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {filter === 'alerts' && (
-                <LowStockBanner medicationsWithStatus={medicationsWithStatus} onNavigateToShopping={() => navigateToTab('shopping')} />
-              )}
-
-              <div
-                className={
-                  isCompactView && filter === 'all'
-                    ? 'p-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3'
-                    : 'p-3 space-y-2'
-                }
-              >
-                {filteredMedications.length === 0 ? (
-                  <div className="col-span-full">
-                  <EmptyState
-                    hasSearch={Boolean(searchQuery.trim())}
-                    onClearSearch={() => setSearchQuery('')}
-                    filter={filter}
-                    onFilterChange={setFilter}
-                    onOpenAddModal={openAdd}
-                  />
-                  </div>
-                ) : (
-                  filteredMedications.map((med) => (
-                    <MedicationCard
-                      key={med.id}
-                      medication={med}
-                      viewFilter={filter}
-                      isCompact={isCompactView}
-                      logs={logs}
-                      onOpenRefill={setRefillMedication}
-                      onEdit={(m) => {
-                        setEditingMedication(m);
-                        setIsAddModalOpen(true);
-                      }}
-                      onDelete={handleDeleteMedication}
-                      onToggleAutoDeduct={handleToggleAutoDeduct}
-                      onToggleMedicationReminder={handleToggleMedicationReminder}
-                      onToggleMedicationCriticalStockAlerts={handleToggleMedicationCriticalStockAlerts}
-                      onNavigateToShopping={() => navigateToTab('shopping')}
-                      onRegisterBackHandler={registerBackOverlay}
-                      onTriggerAlarm={testAlarm}
-                      onConsumeDose={handleConsumeDose}
-                      onRestoreDose={handleCardRestoreDose}
-                      onOpenHistory={(m) => setHistoryMedication(m)}
-                      lastRefillQuantity={(() => {
-                        const lastRefill = lastRefillByMed.get(med.id);
-                        return lastRefill && lastRefill.amount > 0 ? lastRefill.amount : undefined;
-                      })()}
-                      onUndoRefill={() => handleUndoRefill(med.id)}
-                    />
-                  ))
-                )}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'shopping' && (
-            <PharmacyShoppingView
-              medications={medications}
-              settings={pharmacySettings}
-              onUpdateSettings={setPharmacySettings}
-              showToast={showToast}
-              onOpenUserContactsSettings={() => navigateToTab('user-data')}
-              onRegisterBackHandler={registerBackOverlay}
-            />
-          )}
-
-          {activeTab === 'pharmacies' && (
-            <PharmacyManagementView
-              pharmacies={pharmacySettings.pharmacies || []}
-              onSave={handleSavePharmacy}
-              onDelete={handleDeletePharmacy}
-              showToast={showToast}
-              onRegisterBackHandler={registerBackOverlay}
-            />
-          )}
-
-          {activeTab === 'user-data' && (
-            <UserDataManagementView
-              contacts={userContacts}
-              addresses={userAddresses}
-              onSaveContact={handleSaveUserContact}
-              onDeleteContact={handleDeleteUserContact}
-              onSaveAddress={handleSaveUserAddress}
-              onDeleteAddress={handleDeleteUserAddress}
-              showToast={showToast}
-              onRegisterBackHandler={registerBackOverlay}
-            />
-          )}
-
-          {activeTab === 'logs' && (
-            <ConsumptionLogView
-              medications={medications}
-              logs={logs}
-              showToast={showToast}
-            />
-          )}
-        </main>
+        <AppTabContent
+          activeTab={activeTab}
+          filter={filter}
+          searchQuery={searchQuery}
+          medications={medications}
+          logs={logs}
+          pharmacySettings={pharmacySettings}
+          isCompactView={isCompactView}
+          medicationSortField={medicationSortField}
+          medicationSortDirection={medicationSortDirection}
+          soundEnabled={soundEnabled}
+          medicationsWithStatus={medicationsWithStatus}
+          filteredMedications={filteredMedications}
+          alertsCount={alertsCount}
+          sufficientCount={sufficientCount}
+          lastRefillByMed={lastRefillByMed}
+          userContacts={userContacts}
+          userAddresses={userAddresses}
+          showToast={showToast}
+          setFilter={setFilter}
+          setSearchQuery={setSearchQuery}
+          setMedicationSortField={setMedicationSortField}
+          setMedicationSortDirection={setMedicationSortDirection}
+          setIsCompactView={setIsCompactView}
+          setPharmacySettings={setPharmacySettings}
+          setEditingMedication={setEditingMedication}
+          setIsAddModalOpen={setIsAddModalOpen}
+          setRefillMedication={setRefillMedication}
+          setHistoryMedication={setHistoryMedication}
+          navigateToTab={navigateToTab}
+          registerBackOverlay={registerBackOverlay}
+          openAdd={openAdd}
+          handleDeleteMedication={handleDeleteMedication}
+          handleToggleAutoDeduct={handleToggleAutoDeduct}
+          handleToggleMedicationReminder={handleToggleMedicationReminder}
+          handleToggleMedicationCriticalStockAlerts={handleToggleMedicationCriticalStockAlerts}
+          handleConsumeDose={handleConsumeDose}
+          handleCardRestoreDose={handleCardRestoreDose}
+          handleUndoRefill={handleUndoRefill}
+          testAlarm={testAlarm}
+          handleSavePharmacy={handleSavePharmacy}
+          handleDeletePharmacy={handleDeletePharmacy}
+          handleSaveUserContact={handleSaveUserContact}
+          handleDeleteUserContact={handleDeleteUserContact}
+          handleSaveUserAddress={handleSaveUserAddress}
+          handleDeleteUserAddress={handleDeleteUserAddress}
+        />
 
         {activeTab === 'stock' && <AndroidFab onClick={openAdd} />}
         <AndroidBottomNav activeTab={activeTab} onTabChange={navigateToTab} alertsCount={alertsCount} />

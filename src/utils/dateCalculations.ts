@@ -206,7 +206,7 @@ export function dailyScheduleAmount(med: Medication): number {
 
 /**
  * Days of stock remaining from durable `currentPills` and the current
- * schedule rate only (Issue #266). Does not invent deductions from elapsed
+ * schedule rate only. Does not invent deductions from elapsed
  * calendar days.
  */
 /**
@@ -243,7 +243,7 @@ export function daysLeftFromCurrentStock(med: Medication): number {
 
 /**
  * Depletion date from durable `Medication.currentPills` and the current
- * schedule rate only (Issue #266).
+ * schedule rate only.
  */
 export function getDepletionDate(med: Medication): {
   dateStr: string;

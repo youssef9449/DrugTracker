@@ -1,23 +1,12 @@
-import {
-  __setAutoStockGateTestHooks,
-} from './autoStockTestHooks';
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { Medication, ConsumptionLog } from '../../src/types';
+
 import { makeMedication as baseMed, makeAutoDeductionEvent as fired } from '../fixtures/testFixtures';
-import {
-  isValidExactOccurrenceIdentity,
-  normalizeExactDoseId,
-  reconcileFiredEvents,
-  isExactAutoOccurrenceApplied,
-  exactAutoLogId,
-  applyExactAutoEventToMedication } from '../../src/utils/autoDeductionReconciliation';
-import { autoDeductionOccurrenceKey } from '../../src/utils/autoDeductionNativeIdentity';
+import { exactAutoLogId, applyExactAutoEventToMedication } from '../../src/utils/autoDeductionReconciliation';
+
 import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNativeTypes';
 import { runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
-import {
-  withAutoStockMutationGate,
-  commitDurableAutoStockState,
-type AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
+
 
 
 

@@ -90,7 +90,7 @@ export async function scheduleCriticalAlarm(
   medName: string,
   criticalDateMs: number,
   unit: string = 'قرص'
-): Promise<boolean> {
+): Promise<CriticalAlarmOperationResult> {
   const fireAt = new Date(criticalDateMs);
   const title = `🚨 ${medName}: اقترب النفاد الحرج`;
   const body = `مخزون "${medName}" دخل مرحلة النفاد الحرج (${unit}). يرجى التعبئة فوراً!`;

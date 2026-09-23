@@ -31,6 +31,20 @@ export function calendarDayDifference(fromDate: string, toDate: string): number 
 export function tomorrowDateString(dateStr: string = getTodayDateString()): string {
   return addCalendarDays(dateStr, 1);
 }
+export function nextLocalMidnightEpochMs(now: Date = new Date()): number | null {
+  if (!Number.isFinite(now.getTime())) return null;
+  const nextMidnight = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() + 1,
+    0,
+    0,
+    0,
+    0
+  );
+  const epochMs = nextMidnight.getTime();
+  return Number.isFinite(epochMs) ? epochMs : null;
+}
 export function localEpochMs(calendarDate: string, timeHhmm: string): number | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(calendarDate)) return null;
   const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(timeHhmm);

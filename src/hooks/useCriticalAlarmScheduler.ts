@@ -19,7 +19,7 @@ import {
   bumpCriticalAlarmGeneration,
   currentCriticalAlarmGeneration,
   isCurrentCriticalAlarmGeneration,
-  enqueueCriticalAlarmOp,
+  enqueueCriticalAlarmOpGuarded,
 } from '../utils/criticalAlarmOperations';
 
 /**
@@ -257,14 +257,14 @@ export function useCriticalAlarmScheduler({
       ]);
       for (const id of ids) {
         const generation = bumpCriticalAlarmGeneration(id);
-        enqueueCriticalAlarmOp(id, generation, async () => {
+        enqueueCriticalAlarmOpGuarded(id, generation, async () => {
           await cancelCriticalAlarm(id);
         });
       }
       const staleGeneration = bumpCriticalAlarmGeneration(
         '__stale_critical_alarm_cleanup__'
       );
-      enqueueCriticalAlarmOp(
+      enqueueCriticalAlarmOpGuarded(
         '__stale_critical_alarm_cleanup__',
         staleGeneration,
         async () => {
@@ -276,7 +276,7 @@ export function useCriticalAlarmScheduler({
           await Promise.all(
             listed.ids.map((medId) => {
               const cleanupGeneration = currentCriticalAlarmGeneration(medId);
-              return enqueueCriticalAlarmOp(
+              return enqueueCriticalAlarmOpGuarded(
                 medId,
                 cleanupGeneration,
                 async () => {
@@ -393,7 +393,7 @@ export function useCriticalAlarmScheduler({
         const hadAlarm = scheduledCriticalIdsRef.current.has(med.id);
         if (hadAlarm) {
           const medId = med.id;
-          enqueueCriticalAlarmOp(medId, gen, async () => {
+          enqueueCriticalAlarmOpGuarded(medId, gen, async () => {
             if (!isCurrentCriticalAlarmGeneration(medId, gen)) return;
             await cancelCriticalAlarm(medId);
           });
@@ -418,7 +418,7 @@ export function useCriticalAlarmScheduler({
         // verified → keep it (no re-arm, no duplicate); unverifiable or
         // missing → run the repair chain (cancel + re-schedule) whose
         // outcome writes the claim exactly like any fresh schedule.
-        enqueueCriticalAlarmOp(medId, gen, async () => {
+        enqueueCriticalAlarmOpGuarded(medId, gen, async () => {
           if (!isCurrentCriticalAlarmGeneration(medId, gen)) return;
           const verification = await verifyCriticalAlarmPending(medId, criticalDateMs);
           if (
@@ -437,7 +437,7 @@ export function useCriticalAlarmScheduler({
         continue;
       }
 
-      enqueueCriticalAlarmOp(medId, gen, () =>
+      enqueueCriticalAlarmOpGuarded(medId, gen, () =>
         runScheduleChain(medId, medName, criticalDateMs, unit, gen)
       );
     }
@@ -446,7 +446,7 @@ export function useCriticalAlarmScheduler({
     for (const prevId of scheduledCriticalIdsRef.current) {
       if (!stillScheduled.has(prevId)) {
         const generation = bumpCriticalAlarmGeneration(prevId);
-        enqueueCriticalAlarmOp(prevId, generation, async () => {
+        enqueueCriticalAlarmOpGuarded(prevId, generation, async () => {
           await cancelCriticalAlarm(prevId);
         });
       }
@@ -459,7 +459,7 @@ export function useCriticalAlarmScheduler({
     const staleGeneration = bumpCriticalAlarmGeneration(
       '__stale_critical_alarm_cleanup__'
     );
-    enqueueCriticalAlarmOp(
+    enqueueCriticalAlarmOpGuarded(
       '__stale_critical_alarm_cleanup__',
       staleGeneration,
       async () => {
@@ -477,7 +477,7 @@ export function useCriticalAlarmScheduler({
             .filter((medId) => !stillScheduled.has(medId))
             .map((medId) => {
               const cleanupGeneration = currentCriticalAlarmGeneration(medId);
-              return enqueueCriticalAlarmOp(
+              return enqueueCriticalAlarmOpGuarded(
                 medId,
                 cleanupGeneration,
                 async () => {

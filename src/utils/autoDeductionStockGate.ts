@@ -3,7 +3,10 @@
  * Manual Take/Restore). Serializes async work so two reconciliations never
  * interleave durable reads/writes.
  *
- * Not a multi-tab distributed lock.
+ * Cross-document correctness is provided by the Web Locks API. The in-memory
+ * Promise chain remains the fast same-document queue; the Web Lock surrounds
+ * the complete durable mutation so two same-origin tabs cannot both commit
+ * from the same stale snapshot.
  */
 
 import type { ConsumptionLog, Medication } from '../types';
@@ -18,11 +21,20 @@ export const STORAGE_STOCK_GEN_KEY = 'android_med_tracker_stock_generation_v1';
 export interface AutoStockDurableState {
   medications: Medication[];
   logs: ConsumptionLog[];
-  /** Durable global master switch. Optional for backward-compatible test/recovery inputs. */
   globalAutoDeductEnabled?: boolean;
 }
 
+const STOCK_MUTATION_LOCK = 'drugtracker:durable-stock-mutation';
 let chain: Promise<unknown> = Promise.resolve();
+
+async function withCrossDocumentStockLock<T>(fn: () => T | Promise<T>): Promise<T> {
+  if (typeof navigator === 'undefined') return fn();
+  const locks = navigator.locks;
+  if (!locks?.request) {
+    throw new Error('cross_tab_stock_lock_unavailable');
+  }
+  return locks.request(STOCK_MUTATION_LOCK, { mode: 'exclusive' }, fn);
+}
 
 export function loadStockGeneration(): number {
   const raw = loadString(STORAGE_STOCK_GEN_KEY, '0');
@@ -95,14 +107,8 @@ export function withAutoStockMutationGate<T>(
   fn: (fresh: AutoStockDurableState) => T | Promise<T>
 ): Promise<T> {
   const run = chain.then(
-    () => {
-      const fresh = loadDurableAutoStockState();
-      return fn(fresh);
-    },
-    () => {
-      const fresh = loadDurableAutoStockState();
-      return fn(fresh);
-    }
+    () => withCrossDocumentStockLock(async () => fn(loadDurableAutoStockState())),
+    () => withCrossDocumentStockLock(async () => fn(loadDurableAutoStockState()))
   );
   chain = run.then(
     () => undefined,

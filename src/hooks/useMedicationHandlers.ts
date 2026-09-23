@@ -33,6 +33,7 @@ import {
   getNotificationPermission,
 } from '../utils/notifications/notificationPermissions';
 import { DEFAULT_SNOOZE_MINUTES } from '../utils/time';
+import { cancelNotification } from '../utils/notificationRuntime';
 export interface MedicationHandlersDeps {
   medications: Medication[];
   logs: ConsumptionLog[];
@@ -404,6 +405,10 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       setLogs(result.logs);
     }
     if (result.outcome === 'applied' && result.log) {
+      void cancelNotification(
+        'dose-reminder',
+        medicationId + '::' + (doseId ?? '')
+      );
       if (displayName) {
         showToast(TOAST_MESSAGES.doseTaken(displayName, result.doseAmount, displayUnit));
       }

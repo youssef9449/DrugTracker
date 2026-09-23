@@ -194,27 +194,12 @@ def staticAnalysisAlarmRuntimeSources = fileTree("../alarm-runtime") {
             "ExactAlarmRuntime.java",
     )
 }
-def staticAnalysisNotificationSources = fileTree("../notification-runtime") {
-    include(
-            "AppForegroundState.java",
-            "NotificationRuntime.java",
-            "NotificationRuntimeActionReceiver.java"
-    )
-}
-
 def syncedStaticAnalysis = layout.buildDirectory.dir("synced-static-analysis")
 def syncedStaticAlarmRuntime = layout.buildDirectory.dir(
         "synced-static-analysis/app/drugtracker/alarmruntime")
-def syncedStaticNotification = layout.buildDirectory.dir(
-        "synced-static-analysis/app/drugtracker/notificationruntime")
-
 tasks.register("syncStaticAnalysisAlarmRuntime", Copy) {
     from staticAnalysisAlarmRuntimeSources
     into syncedStaticAlarmRuntime
-}
-tasks.register("syncStaticAnalysisNotificationRuntime", Copy) {
-    from staticAnalysisNotificationSources
-    into syncedStaticNotification
 }
 
 sourceSets {
@@ -234,9 +219,7 @@ configurations {
 
 tasks.named("compileStaticAnalysisJava").configure {
     dependsOn(
-            "syncStaticAnalysisAlarmRuntime",
-            "syncStaticAnalysisNotificationRuntime"
-    )
+            "syncStaticAnalysisAlarmRuntime"    )
 }
 
 spotbugsStaticAnalysis {
@@ -246,8 +229,7 @@ spotbugsStaticAnalysis {
     showProgress = true
     showStackTraces = true
     onlyAnalyze = [
-            'app.drugtracker.alarmruntime.*',
-            'app.drugtracker.notificationruntime.*'
+            'app.drugtracker.alarmruntime.*'
     ]
     reports {
         xml.required = true

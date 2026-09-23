@@ -93,7 +93,7 @@ assert(
 );
 
 const getSharedPrefsCount =
-  (scheduler.match(/getSharedPreferences\\(/g) || []).length;
+  (scheduler.match(/getSharedPreferences\(/g) || []).length;
 assert(
   getSharedPrefsCount === 0,
   'Auto business scheduler facade must not own SharedPreferences stores after collaborator decomposition'
@@ -104,12 +104,12 @@ const retryEvidenceStore =
   read('native-android/auto-deduction/AutoDeductionRetryEvidenceStore.java');
 
 assert(
-  (recurrence.match(/getSharedPreferences\\(/g) || []).length === 1
+  (recurrence.match(/getSharedPreferences\(/g) || []).length === 1
     && recurrence.includes('AutoDeductionContract.PREFS_RECURRENCE_AUTH'),
   'recurrence authorization persistence must be owned by AutoDeductionRecurrence'
 );
 assert(
-  (retryEvidenceStore.match(/getSharedPreferences\\(/g) || []).length === 1
+  (retryEvidenceStore.match(/getSharedPreferences\(/g) || []).length === 1
     && retryEvidenceStore.includes('AutoDeductionContract.PREFS_FIRE_RETRY'),
   'fire-retry persistence must be owned by AutoDeductionRetryEvidenceStore'
 );

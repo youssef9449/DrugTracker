@@ -1,5 +1,6 @@
 import type { FC } from 'react';
 import { Box, Layers } from 'lucide-react';
+import { Checkbox } from './ui/Checkbox';
 import { isSolidUnit } from '../utils/medicationPackaging';
 
 interface Props {
@@ -32,8 +33,7 @@ export const AddMedicationPackagingSection: FC<Props> = ({
           <h4 className="text-xs font-bold text-slate-800">مواصفات العلبة</h4>
         </div>
         <label className="flex items-center gap-2 cursor-pointer select-none">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={noStrips}
             onChange={(e) => setNoStrips(e.target.checked)}
             aria-label="بدون أشرطة (أقراص فرط في العلبة)"

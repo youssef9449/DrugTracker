@@ -58,6 +58,27 @@ async function showScheduledNotification(entry: WebScheduledEntry): Promise<bool
   }
 }
 
+async function armPersistentNotification(entry: WebScheduledEntry): Promise<boolean> {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return false;
+  const Trigger = (globalThis as typeof globalThis & {
+    TimestampTrigger?: new (timestamp: number) => unknown;
+  }).TimestampTrigger;
+  if (typeof Trigger !== 'function') return false;
+
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    await reg.showNotification(entry.title, {
+      body: entry.body,
+      icon: '/assets/icons/icon.svg',
+      tag: storageKey(entry.namespace, entry.identity),
+      showTrigger: new Trigger(entry.fireAt),
+    } as NotificationOptions & { showTrigger: unknown });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function armTimer(entry: WebScheduledEntry): void {
   const key = storageKey(entry.namespace, entry.identity);
   const existing = timers.get(key);
@@ -96,7 +117,9 @@ export async function scheduleWebNotification(
   const existing = entries[key];
 
   if (existing && existing.fireAt > Date.now() + 1000) {
-    armTimer(existing);
+    void armPersistentNotification(existing).then((persisted) => {
+      if (!persisted) armTimer(existing);
+    });
     return true;
   }
 
@@ -122,7 +145,23 @@ export async function scheduleWebNotification(
     return showScheduledNotification(entry);
   }
 
-  armTimer(entry);
+  void armPersistentNotification(entry).then((persisted) => {
+    if (persisted) {
+      const current = readEntries()[key];
+      if (current?.fireAt === entry.fireAt) {
+        const entries = readEntries();
+        delete entries[key];
+        writeEntries(entries);
+      }
+      const timer = timers.get(key);
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timers.delete(key);
+      }
+    } else {
+      armTimer(entry);
+    }
+  });
   return true;
 }
 

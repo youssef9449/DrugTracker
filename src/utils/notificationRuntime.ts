@@ -1,5 +1,6 @@
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import { classifyNativeError, toNativeBoundaryError, type NativeBoundaryFailure } from './nativeErrors';
 
 export interface NotificationRuntimePostOptions {
   namespace: string;
@@ -79,7 +80,7 @@ export function isAndroidNotificationRuntime(): boolean {
 export async function scheduleNotification(
   options: NotificationRuntimePostOptions
 ): Promise<boolean> {
-  if (isAndroidNotificationRuntime()) return postNativeNotification(options);
+  if (isAndroidNotificationRuntime()) return (await postNativeNotification(options)).ok;
   if (isIOS()) {
     try {
       const permission = await LocalNotifications.checkPermissions();
@@ -119,8 +120,10 @@ export async function scheduleNotification(
 
 export async function postNativeNotification(
   options: NotificationRuntimePostOptions
-): Promise<boolean> {
-  if (!isAndroidNotificationRuntime()) return false;
+): Promise<{ ok: true } | NativeBoundaryFailure> {
+  if (!isAndroidNotificationRuntime()) {
+    return { ok: false, error: 'not_android', errorCode: 'not_android' };
+  }
   try {
     const { action, ...base } = options;
     delete base.at;
@@ -134,24 +137,47 @@ export async function postNativeNotification(
         actionForeground: action.foreground === true,
       } : {}),
     });
-    return result?.ok === true;
+    if (result?.ok === true) return { ok: true };
+    const message = result?.error || 'notification_post_failed';
+    return {
+      ok: false,
+      error: message,
+      errorCode: classifyNativeError(message),
+    };
   } catch (error) {
-    console.warn('[notification-runtime] post failed:', error);
-    return false;
+    const boundaryError = toNativeBoundaryError(error, 'platform_failure');
+    console.warn('[notification-runtime] post failed:', boundaryError.message);
+    return {
+      ok: false,
+      error: boundaryError.message,
+      errorCode: boundaryError.code,
+    };
   }
 }
 
 export async function cancelNativeNotification(
   namespace: string,
   identity: string
-): Promise<boolean> {
-  if (!isAndroidNotificationRuntime()) return false;
+): Promise<{ ok: true } | NativeBoundaryFailure> {
+  if (!isAndroidNotificationRuntime()) {
+    return { ok: false, error: 'not_android', errorCode: 'not_android' };
+  }
   try {
     const result = await NotificationRuntime.cancel({ namespace, identity });
-    return result?.ok === true;
+    if (result?.ok === true) return { ok: true };
+    return {
+      ok: false,
+      error: 'notification_cancel_failed',
+      errorCode: 'platform_failure',
+    };
   } catch (error) {
-    console.warn('[notification-runtime] cancel failed:', error);
-    return false;
+    const boundaryError = toNativeBoundaryError(error, 'platform_failure');
+    console.warn('[notification-runtime] cancel failed:', boundaryError.message);
+    return {
+      ok: false,
+      error: boundaryError.message,
+      errorCode: boundaryError.code,
+    };
   }
 }
 
@@ -159,7 +185,7 @@ export async function cancelNotification(
   namespace: string,
   identity: string
 ): Promise<boolean> {
-  if (isAndroidNotificationRuntime()) return cancelNativeNotification(namespace, identity);
+  if (isAndroidNotificationRuntime()) return (await cancelNativeNotification(namespace, identity)).ok;
   if (isIOS()) {
     try {
       await LocalNotifications.cancel({

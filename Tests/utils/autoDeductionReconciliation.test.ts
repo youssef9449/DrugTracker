@@ -3,6 +3,7 @@ import {
 } from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Medication, ConsumptionLog } from '../../src/types';
+import { makeMedication as baseMed, makeAutoDeductionEvent as fired } from '../fixtures/testFixtures';
 import {
   isValidExactOccurrenceIdentity,
   normalizeExactDoseId,
@@ -18,33 +19,6 @@ import {
   commitDurableAutoStockState,
 type AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
 
-function baseMed(over: Partial<Medication> = {}): Medication {
-  return {
-    id: 'med-1',
-    name: 'TestMed',
-    currentPills: 30,
-    dailyDose: 2,
-    unit: 'قرص',
-    warningThresholdDays: 5,
-    colorTag: 'teal',
-    createdAt: '2026-01-01T00:00:00.000Z',
-    autoDeductEnabled: true,
-    ...over,
-  };
-}
-
-function fired(
-  over: Partial<AutoDeductionEvent> &
-    Pick<AutoDeductionEvent, 'medicationId' | 'doseId' | 'calendarDate' | 'amount'>
-): AutoDeductionEvent {
-  return {
-    scheduledAtEpochMs: 1,
-    status: 'FIRED',
-    createdAtEpochMs: 1,
-    reconciledAtEpochMs: null,
-    ...over,
-  };
-}
 
 describe('isValidExactOccurrenceIdentity — triple identity (#268)', () => {
   it('requires non-empty medicationId, doseId, and YYYY-MM-DD calendarDate', () => {

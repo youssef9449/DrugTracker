@@ -1,4 +1,3 @@
-import type { ConsumptionLog, Medication } from '../types';
 import {
   withAutoStockMutationGate,
   type AutoStockDurableState,
@@ -106,5 +105,3 @@ export function runManualStockTransaction<T>(
     });
   });
 }
-
-export type { ConsumptionLog, Medication };

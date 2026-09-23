@@ -12,7 +12,10 @@ import {
   clearCriticalNotificationClaim,
   claimsEqual,
 } from '../utils/criticalNotificationClaims';
-import { enqueueCriticalAlarmOp } from '../utils/criticalAlarmOperations';
+import {
+  bumpCriticalAlarmGeneration,
+  enqueueCriticalAlarmOp,
+} from '../utils/criticalAlarmOperations';
 
 interface UseStockAlertsOptions {
   medications: Medication[];
@@ -171,7 +174,11 @@ export function useStockAlerts({
             // natively. The op writes NOTHING; the claim is already
             // cleared above, and no async result may recreate it.
             if (claim.claimed && claim.alarmTime !== null && claim.alarmTime > Date.now()) {
-              void enqueueCriticalAlarmOp(med.id, () => cancelCriticalAlarm(med.id));
+              void enqueueCriticalAlarmOp(
+                med.id,
+                bumpCriticalAlarmGeneration(med.id),
+                () => cancelCriticalAlarm(med.id)
+              );
             }
           }
         }
@@ -195,7 +202,11 @@ export function useStockAlerts({
       // stale armed alarm (if any) and send the one foreground
       // notification for this episode.
       if (claim?.claimed && claim.alarmTime !== null) {
-        void enqueueCriticalAlarmOp(med.id, () => cancelCriticalAlarm(med.id));
+        void enqueueCriticalAlarmOp(
+          med.id,
+          bumpCriticalAlarmGeneration(med.id),
+          () => cancelCriticalAlarm(med.id)
+        );
       }
 
       // Mark the episode's opportunity as claimed NOW, synchronously, so

@@ -223,6 +223,87 @@ public class Group2AutoReliabilityTest {
     }
 
     @Test
+    public void staleRetryEvidence_afterScheduleReplacement_cannotMutateStock()
+            throws Exception {
+        String med = "med-retry-stale-replacement";
+        String dose = "dose-retry-stale-replacement";
+        String date = localDateOffset(-1);
+        String time = "08:00";
+        long generation = 1L;
+        seedGeneration(med, dose, generation);
+        putSchedule(med, dose, date, time, 2.0, "retry-old-version", generation);
+
+        AutoDeductionStockStore stock = new AutoDeductionStockStore(appContext());
+        assertTrue(stock.ensureMissingAndRead(
+                java.util.Collections.singletonList(
+                        new AutoDeductionStockStore.StockSeed(med, 100.0))).ok);
+
+        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        synchronized (scheduler.scheduleLock()) {
+            assertTrue(scheduler.recordIndependentFireRetryEvidenceLocked(
+                    med, dose, date, epoch(date, time), 2.0, time, "",
+                    generation, "retry-old-version", 1));
+        }
+
+        // Replace the live schedule without changing the recurrence generation.
+        // The retry evidence must still be rejected because its operationVersion
+        // belongs to the obsolete schedule definition.
+        putSchedule(med, dose, date, time, 3.0, "retry-new-version", generation);
+
+        AutoDeductionScheduler.FireResult result =
+                scheduler.recoverFireFromIndependentEvidence(med, dose, date);
+
+        assertEquals(
+                "stale retry evidence must not recover an obsolete occurrence",
+                AutoDeductionScheduler.FireResult.Status.CANCELLED,
+                result.status);
+        assertFalse(eventPrefs().contains(evtKey(occurrenceKey(med, dose, date))));
+        assertEquals(100.0, stock.readAll().stocks.get(med), 0.001);
+        assertNull(
+                "obsolete retry evidence should be retired after ownership loss",
+                scheduler.getIndependentFireRetryEvidence(med, dose, date));
+    }
+
+    @Test
+    public void staleRetryEvidence_afterRecurrenceDisable_cannotMutateStock()
+            throws Exception {
+        String med = "med-retry-stale-disable";
+        String dose = "dose-retry-stale-disable";
+        String date = localDateOffset(-1);
+        String time = "09:00";
+        long generation = 1L;
+        seedGeneration(med, dose, generation);
+        putSchedule(med, dose, date, time, 2.0, "retry-disable-version", generation);
+
+        AutoDeductionStockStore stock = new AutoDeductionStockStore(appContext());
+        assertTrue(stock.ensureMissingAndRead(
+                java.util.Collections.singletonList(
+                        new AutoDeductionStockStore.StockSeed(med, 100.0))).ok);
+
+        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        synchronized (scheduler.scheduleLock()) {
+            assertTrue(scheduler.recordIndependentFireRetryEvidenceLocked(
+                    med, dose, date, epoch(date, time), 2.0, time, "",
+                    generation, "retry-disable-version", 1));
+        }
+
+        assertTrue(scheduler.invalidateRecurrenceAuthorization(med, dose).ok);
+
+        AutoDeductionScheduler.FireResult result =
+                scheduler.recoverFireFromIndependentEvidence(med, dose, date);
+
+        assertEquals(
+                "retry evidence from a disabled generation must not recover an occurrence",
+                AutoDeductionScheduler.FireResult.Status.CANCELLED,
+                result.status);
+        assertFalse(eventPrefs().contains(evtKey(occurrenceKey(med, dose, date))));
+        assertEquals(100.0, stock.readAll().stocks.get(med), 0.001);
+        assertNull(
+                "disabled retry evidence should be retired after ownership loss",
+                scheduler.getIndependentFireRetryEvidence(med, dose, date));
+    }
+
+    @Test
     public void compensationWithNewerGeneration_cannotResurrectOldOccurrence()
             throws Exception {
         String med = "med-409-stale";

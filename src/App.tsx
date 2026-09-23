@@ -31,9 +31,10 @@ import {
   getNotificationPermission,
 } from './utils/notifications/notificationPermissions';
 import { sendTestAlertNotification } from './utils/notifications/doseReminderNotifications';
-import { openExactAlarmSettings, type ExactAlarmPermission } from './utils/exactAlarm';
+
 import { OrderItem } from './utils/whatsapp';
-import { playSuccessChime } from './utils/sound';
+import type { ExactAlarmPermission } from './utils/exactAlarm';
+
 import { useDoseReminders } from './hooks/useDoseReminders';
 import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
 import { useDoseReminderScheduler } from './hooks/useDoseReminderScheduler';
@@ -43,7 +44,7 @@ import { useMidnightTick } from './hooks/useMidnightTick';
 import { usePersistentEffect } from './hooks/usePersistentEffect';
 import { useStockAlerts } from './hooks/useStockAlerts';
 import { useAppHydration } from './hooks/useAppHydration';
-import { useStartupAutoDeduction } from './hooks/useStartupAutoDeduction';
+import { useAppRuntime } from './hooks/useAppRuntime';
 import { useAppBackNavigation } from './hooks/useAppBackNavigation';
 import { useMedicationHandlers } from './hooks/useMedicationHandlers';
 import { usePharmacyUserHandlers } from './hooks/usePharmacyUserHandlers';
@@ -220,22 +221,6 @@ export default function App() {
     };
   }, []);
 
-  useAppHydration({
-    setMedications,
-    setLogs,
-    setPharmacySettings,
-    setHydrated,
-    setIsFirstRun,
-    setIsAutoDeductPromptOpen,
-    setSoundEnabled,
-    setNotificationsEnabled,
-    setCriticalStockAlertsEnabled,
-    setExactAlarmPermission,
-    setGlobalAutoDeductEnabled,
-    setFontScale,
-    setIsCompactView,
-  });
-
   // Track the toast auto-dismiss timer so it can be cleared on
   // unmount (prevents a setToast-after-unmount warning / leak).
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -259,190 +244,6 @@ export default function App() {
     }, TOAST_DURATION_MS);
   }, []);
 
-  // ─────────────────────────────────────────────────────────────
-  // Medication stock + consumption logs are persisted ONLY by the durable
-  // stock mutation gate. Keeping a React-state persistence effect here would
-  // create a second writer that could replay an older React snapshot after a
-  // gated mutation and overwrite the committed durable state.
-  //
-  // Hydration remains responsible for the initial read; every post-hydration
-  // mutation path (add/edit/delete/take/restore/refill/undo/exact)
-  // commits through the same gate.
-
-  // M12: pharmacy settings are written via a 400ms debounce so rapid
-  // toggles of the 30/60-day duration (which calls onUpdateSettings on
-  // every click) don't fire a localStorage write per click. The last
-  // value within the debounce window wins.
-  usePersistentEffect({
-    storageKey: STORAGE_PHARMACY_KEY,
-    value: pharmacySettings,
-    enabled: hydrated,
-    debounceMs: PHARMACY_PERSIST_DEBOUNCE_MS,
-    failureMessage: PERSIST_FAILURE_MESSAGES.pharmacy,
-    showToast,
-  });
-
-  usePersistentEffect({
-    storageKey: SOUND_KEY,
-    value: String(soundEnabled),
-    json: false,
-    enabled: hydrated,
-    failureMessage: PERSIST_FAILURE_MESSAGES.sound,
-    showToast,
-  });
-
-  usePersistentEffect({
-    storageKey: NOTIFICATIONS_KEY,
-    value: String(notificationsEnabled),
-    json: false,
-    enabled: hydrated,
-    failureMessage: PERSIST_FAILURE_MESSAGES.notifications,
-    showToast,
-  });
-
-  // Persist font size preference so it survives app relaunch, and toggle root scaling.
-  // This effect stays inline (not collapsed into usePersistentEffect) because it
-  // has a CSS-class side effect that must run BEFORE the hydrated gate (so the
-  // class is applied on first render even before hydration completes), and it
-  // uses console.warn (not toast) on failure.
-  useEffect(() => {
-    if (typeof document !== 'undefined') {
-      document.documentElement.classList.toggle('font-scale-large', fontScale === 'large');
-    }
-    if (!hydrated) return;
-    const err = persist(FONT_SIZE_KEY, fontScale, { json: false });
-    if (err) {
-      console.warn('[App] failed to persist font size:', err);
-    }
-  }, [fontScale, hydrated]);
-
-  usePersistentEffect({
-    storageKey: CRITICAL_STOCK_ALERTS_KEY,
-    value: String(criticalStockAlertsEnabled),
-    json: false,
-    enabled: hydrated,
-    failureMessage: PERSIST_FAILURE_MESSAGES.critical,
-    showToast,
-  });
-
-  // Global auto-deduct is part of the durable stock mutation state. It is
-  // intentionally NOT persisted from React state; toggles commit the master
-  // switch together with medications/logs through the stock gate.
-
-  usePersistentEffect({
-    storageKey: COMPACT_VIEW_KEY,
-    value: String(isCompactView),
-    json: false,
-    enabled: hydrated,
-    failureMessage: 'تعذر حفظ خيار العرض',
-    showToast,
-  });
-
-
-  useStartupAutoDeduction({
-    hydrated,
-    isFirstRun,
-    setMedications,
-    setLogs,
-    setGlobalAutoDeductEnabled,
-    showToast,
-  });
-
-  // ─────────────────────────────────────────────────────────────
-  // Foreground critical-stock fallback: for each medication, during one
-  // continuous Critical/Out-of-Stock episode, sends AT MOST ONE critical
-  // notification. The persistent notification claim
-  // (utils/criticalNotificationClaims.ts) is the business source of
-  // truth: claimed=true ⇒ quiet, claimed=false ⇒ send once.
-  //
-  // Kept in a focused hook so claim/delivery behavior is independently testable.
-  useStockAlerts({
-    medications,
-    criticalStockAlertsEnabled,
-    hydrated,
-    isFirstRun,
-  });
-
-  // ─────────────────────────────────────────────────────────────
-  // One-shot critical-alarm scheduling — the native EXECUTOR for the
-  // critical notification claim. Extracted into a hook for testability
-  // + race protection. See useCriticalAlarmScheduler.ts for the full
-  // doc (boot persistence, reschedule triggers, per-med operation
-  // queue + generation guard). The hook handles:
-  //   - scheduling a one-shot alarm at each sufficient med's projected
-  //     critical date and persisting claim=true only after success
-  //   - cancel + reschedule when any of the 6 trigger fields change
-  //   - cancel for deleted meds
-  //   - cancel all when the user opts out of critical-stock alerts (re-opening
-  //     claims whose future alarm was cancelled before firing)
-  //   - per-med operation queue + generation guard so a stale async
-  //     operation can never overwrite newer claim state
-  // ─────────────────────────────────────────────────────────────
-  useCriticalAlarmScheduler({
-    medications,
-    criticalStockAlertsEnabled,
-    hydrated,
-    isFirstRun,
-    exactAlarmPermission,
-    resumeTick: criticalAlarmResumeTick,
-  });
-
-  // ─────────────────────────────────────────────────────────────
-  // NATIVE recurring daily dose-reminder scheduling.
-  //
-  // Schedules one recurring native notification per explicit doseSchedule
-  // row (AlarmManager-backed), gated by reminderEnabled. Each occurrence
-  // is identified by medId + doseId; reminderTime/dailyDose are not
-  // occurrence identity sources. Fires daily at the schedule-row time even
-  // when the app is killed, the device is in Doze, or the user never opens
-  // the app.
-  //
-  // Complements event-driven in-app dose reminders while foregrounded.
-  // See useDoseReminderScheduler.ts for race-protection + boot persistence.
-  // ─────────────────────────────────────────────────────────────
-  useDoseReminderScheduler({
-    medications,
-    allowManualTakeActionByMedicationId,
-    notificationsEnabled,
-    hydrated,
-    isFirstRun,
-    exactAlarmPermission,
-    resumeTick: doseAlarmResumeTick,
-    lifecycleTick: doseLifecycleTick,
-  });
-
-  // Local-midnight rollover while the app stays open: today/tomorrow are
-  // computed from the wall clock at effect-run time, so the desired-state
-  // scheduler and the exact-auto reconciliation must re-run once at the
-  // calendar-day boundary (not only on resume).
-  const autoDeductMidnightTick = useMidnightTick();
-
-  // Exact-time auto-deduction alarms are independent of notifications.
-  // Records durable native FIRED events only — no stock mutation here.
-  useAutoDeductionScheduler({
-    medications,
-    globalAutoDeductEnabled,
-    hydrated,
-    isFirstRun,
-    exactAlarmPermission,
-    resumeTick: doseAlarmResumeTick,
-    midnightTick: autoDeductMidnightTick,
-  });
-
-  // Reconcile native FIRED exact auto-deduction events into JS stock.
-  // Runs once after hydration/on resume for recovery, then immediately on the
-  // native exact-auto FIRED event; serialized; crash-safe persist-then-mark.
-  useExactAutoDeductionReconciliation({
-    setMedications,
-    setLogs,
-    setGlobalAutoDeductEnabled,
-    globalAutoDeductEnabled,
-    hydrated,
-    isFirstRun,
-    resumeTick: doseAlarmResumeTick,
-    midnightTick: autoDeductMidnightTick,
-  });
-
   const {
     handleConfirmRefill,
     handleUndoRefill,
@@ -460,33 +261,6 @@ export default function App() {
     handleToggleCriticalStockAlerts,
     handleToggleMedicationReminder,
     handleToggleMedicationCriticalStockAlerts,
-  } = useMedicationHandlers({
-    medications,
-    logs,
-    soundEnabled,
-    globalAutoDeductEnabled,
-    notificationsEnabled,
-    criticalStockAlertsEnabled,
-    selectDoseMode,
-    setMedications,
-    setLogs,
-    setGlobalAutoDeductEnabled,
-    setIsAutoDeductPromptOpen,
-    setIsFirstRun,
-    setNotificationsEnabled,
-    setCriticalStockAlertsEnabled,
-    setSelectDoseMed,
-    setSelectDoseMode,
-    setEditingMedication,
-    showToast,
-    dismissAlarm,
-    snoozeAlarm,
-  });
-
-  handleConfirmAutoDeductPromptRef.current = handleConfirmAutoDeductPrompt;
-
-
-  const {
     handleSavePharmacySettings,
     handleSavePharmacy,
     handleDeletePharmacy,
@@ -496,101 +270,52 @@ export default function App() {
     handleDeleteUserAddress,
     userContacts,
     userAddresses,
-  } = usePharmacyUserHandlers({
-    soundEnabled,
-    settingsModalMode,
+    handleToggleNotifications,
+    handleSendTestNotification,
+    handleOpenExactAlarmSettings,
+  } = useAppRuntime({
+    medications,
+    logs,
     pharmacySettings,
-    setPharmacySettings,
-    showToast,
-  });
-
-  const handleToggleNotifications = async () => {
-    if (!notificationsEnabled) {
-      // Turning ON: must obtain notification permission first.
-      // If the user denies, do NOT activate the toggle — show a failure
-      // message so the user knows the permission wasn't granted.
-      let pushAllowed = false;
-      try {
-        const currentPerm = await getNotificationPermission();
-        if (currentPerm === 'granted') {
-          pushAllowed = true;
-        } else if (currentPerm === 'default') {
-          pushAllowed = await requestNotificationPermission();
-        }
-        // If currentPerm === 'denied', the OS won't re-show the prompt —
-        // pushAllowed stays false and the toggle does NOT activate.
-      } catch (err) {
-        console.warn('[App] Notification permission error:', err);
-      }
-
-      if (!pushAllowed) {
-        // Permission denied (or error) → do NOT activate the toggle.
-        // Show a clear failure message instead of falsely claiming
-        // notifications are on.
-        showToast(TOAST_MESSAGES.notificationsPermissionDenied);
-        return;
-      }
-
-      // Permission granted → activate the toggle. No test notification
-      // is sent here — the user only asked to toggle notifications on,
-      // not to test them. The test notification is available separately
-      // in the AppSettingsModal ('تجربة إشعار وتنبيه صوتي الآن').
-      setNotificationsEnabled(true);
-      if (soundEnabled) {
-        playSuccessChime();
-      }
-      showToast(TOAST_MESSAGES.notificationsOn);
-    } else {
-      // Turning OFF.
-      setNotificationsEnabled(false);
-      showToast(TOAST_MESSAGES.notificationsOff);
-    }
-  };
-
-  const handleSendTestNotification = async () => {
-    if (soundEnabled) {
-      playSuccessChime();
-    }
-    try {
-      await sendTestAlertNotification();
-      showToast(TOAST_MESSAGES.testNotificationSent);
-    } catch (err) {
-      console.warn('[App] Failed to send test alert notification:', err);
-      showToast('تعذّر إرسال الإشعار التجريبي');
-    }
-  };
-
-
-
-  useNativeActionHandlers({
-    allowManualTakeActionByMedicationId,
-    handleTakeDoseFromAlarmById,
-    openAlarm,
+    hydrated,
+    isFirstRun,
     soundEnabled,
+    notificationsEnabled,
+    criticalStockAlertsEnabled,
+    exactAlarmPermission,
+    criticalAlarmResumeTick,
+    doseAlarmResumeTick,
+    doseLifecycleTick,
+    globalAutoDeductEnabled,
+    selectDoseMode,
+    settingsModalMode,
+    allowManualTakeActionByMedicationId,
+    setMedications,
+    setLogs,
+    setPharmacySettings,
+    setHydrated,
+    setIsFirstRun,
+    setIsAutoDeductPromptOpen,
+    setSoundEnabled,
+    setNotificationsEnabled,
+    setCriticalStockAlertsEnabled,
+    setExactAlarmPermission,
+    setGlobalAutoDeductEnabled,
+    setFontScale,
+    setIsCompactView,
+    setSelectDoseMed,
+    setSelectDoseMode,
+    setEditingMedication,
     setDoseLifecycleTick,
     setCriticalAlarmResumeTick,
     setDoseAlarmResumeTick,
-    setExactAlarmPermission,
-    setNotificationsEnabled,
+    showToast,
+    dismissAlarm,
+    snoozeAlarm,
+    openAlarm,
   });
 
-  const handleOpenExactAlarmSettings = () => {
-    openExactAlarmSettings()
-      .then((result) => {
-        if (!result.ok) {
-          console.warn(
-            '[App] exact alarm settings failed:',
-            result.error,
-            result.errorCode
-          );
-          showToast('إعدادات المنبهات الدقيقة غير متاحة على هذا الجهاز');
-        }
-      })
-      .catch((err) => {
-        console.warn('[App] exact alarm settings failed:', err);
-      });
-  };
-
+  handleConfirmAutoDeductPromptRef.current = handleConfirmAutoDeductPrompt;
   // Consume-pill feature: manually consume a selected explicit dose from the card.
   // Subtracts that dose's schedule amount from currentPills; marks the dose occurrence as consumed
 

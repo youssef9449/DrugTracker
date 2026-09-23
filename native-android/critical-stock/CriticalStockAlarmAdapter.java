@@ -72,8 +72,7 @@ public final class CriticalStockAlarmAdapter
             String date = metadata.optString("alarmDate", "");
             String time = metadata.optString("alarmTime", "");
             String operationVersion = metadata.optString(
-                    ExactAlarmContract.FIELD_OPERATION_VERSION,
-                    ExactAlarmContract.LEGACY_FIELD_SCHEDULE_VERSION);
+                    ExactAlarmContract.FIELD_OPERATION_VERSION, "");
 
             long triggerAt = ExactAlarmContract.resolveLocalDateTimeEpochMs(date, time, false);
             long now = System.currentTimeMillis();

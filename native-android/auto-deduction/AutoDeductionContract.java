@@ -1,12 +1,9 @@
 package app.drugtracker.autodeduction;
-
 import android.net.Uri;
-
 import app.drugtracker.alarmruntime.ExactAlarmContract;
-
 /**
  * Shared constants and canonical occurrence-key helpers for exact-time
- * automatic dose deduction (Phase 2).
+ * automatic dose deduction ().
  *
  * Occurrence identity (hard requirement):
  *   medicationId + doseId + calendarDate (YYYY-MM-DD)
@@ -15,17 +12,12 @@ import app.drugtracker.alarmruntime.ExactAlarmContract;
  * the full occurrence identity — never from a 32-bit hash alone.
  */
 public final class AutoDeductionContract {
-
     private AutoDeductionContract() {}
-
     public static final String ACTION_AUTO_DEDUCTION =
             "app.drugtracker.action.AUTO_DEDUCTION";
-
     /** In-process event bridge from the exact-alarm receiver to the Capacitor plugin. */
     public static final String ACTION_AUTO_DEDUCTION_FIRED =
             "app.drugtracker.action.AUTO_DEDUCTION_FIRED";
-
-
     public static final String EXTRA_MEDICATION_ID = "medicationId";
     public static final String EXTRA_DOSE_ID = "doseId";
     public static final String EXTRA_CALENDAR_DATE = "calendarDate";
@@ -43,7 +35,6 @@ public final class AutoDeductionContract {
     /** Generic shared-runtime ownership token carried by new alarm PendingIntents. */
     public static final String EXTRA_OPERATION_VERSION =
             ExactAlarmContract.EXTRA_OPERATION_VERSION;
-
     /**
      * Bounded fire-persistence retry counter carried on a retry delivery (0 on
      * the original alarm). See {@link #FIRE_RETRY_DELAY_MS} /
@@ -51,13 +42,10 @@ public final class AutoDeductionContract {
      * {@code AutoDeductionScheduler#scheduleFireRetry}.
      */
     public static final String EXTRA_FIRE_RETRY_COUNT = "fireRetryCount";
-
     /** Delay before a fire-persistence retry alarm re-delivers the same occurrence. */
     public static final long FIRE_RETRY_DELAY_MS = 60_000L;
-
     /** Maximum number of fire-persistence retry alarms per occurrence (bounded). */
     public static final int MAX_FIRE_RETRIES = 3;
-
     public static final String PREFS_EVENTS = "drugtracker_auto_deduction_events_v1";
     public static final String PREFS_SCHEDULES = "drugtracker_auto_deduction_schedules_v1";
     /** Independent prefs for pending-fire recovery when primary FIRED commit fails. */
@@ -75,16 +63,14 @@ public final class AutoDeductionContract {
      * A later schedule with newer operationVersion supersedes the tombstone.
      */
     public static final String PREFS_CANCELLED = "drugtracker_auto_deduction_cancelled_v1";
-
     /**
      * Durable monotonic ordering sequence for generic operationVersion / cancellation tokens.
      * Survives process death so (millis, seq) comparisons remain reconstructible
      * after reboot. The shared runtime contract owns the ordering-key name.
      */
     public static final String PREFS_ORDERING = "drugtracker_auto_deduction_ordering_v1";
-
     /**
-     * Medication+dose schedule recurrence authorization (Issue #217).
+     * Medication+dose schedule recurrence authorization ().
      * Keyed by {@link #scheduleIdentityKey(String, String)}; value is a monotonic
      * long generation. Disable/cancel bumps the generation under SCHEDULE_LOCK so
      * post-fire successor creation for a stale generation cannot install D+1.
@@ -92,10 +78,8 @@ public final class AutoDeductionContract {
      */
     public static final String PREFS_RECURRENCE_AUTH =
             "drugtracker_auto_deduction_recurrence_auth_v1";
-
     /** Prefs key prefix for active recurrence generation (medicationId + doseId). */
     public static final String RECURRENCE_AUTH_KEY_PREFIX = "rgen:";
-
     /**
      * Durable schedule-chain identity (medication + dose slot), NOT including
      * calendarDate. Used only for recurrence authorization generation.
@@ -105,12 +89,10 @@ public final class AutoDeductionContract {
         if (doseId == null) doseId = "";
         return medicationId + SEP + doseId;
     }
-
     public static final String STATUS_FIRED = "FIRED";
     public static final String STATUS_RECONCILED = "RECONCILED";
     /** Terminal: irreparably malformed FIRED record (invalid identity/date/amount). */
     public static final String STATUS_REJECTED = "REJECTED";
-
     /**
      * Shared request-code namespace for auto-deduction PendingIntents.
      * NOT a unique identity: uniqueness comes from Intent action + data URI
@@ -118,17 +100,14 @@ public final class AutoDeductionContract {
      * match on the same request-code + data pair.
      */
     public static final int PENDING_INTENT_REQUEST_CODE = 0xAD00DED;
-
     /** Content-authority style path for auto-deduction occurrence URIs. */
     private static final String URI_SCHEME = "content";
     private static final String URI_AUTHORITY = "app.drugtracker.autodeduction";
     private static final String URI_PATH_PREFIX = "occurrence";
-
     private static final char SEP = '\u001f';
-
     /**
      * Deterministic canonical key for one automatic occurrence.
-     * Must match the identity used by JS reconciliation (Phase 3).
+     * Must match the identity used by JS reconciliation ().
      */
     public static String occurrenceKey(String medicationId, String doseId, String calendarDate) {
         if (medicationId == null) medicationId = "";
@@ -136,7 +115,6 @@ public final class AutoDeductionContract {
         if (calendarDate == null) calendarDate = "";
         return medicationId + SEP + doseId + SEP + calendarDate;
     }
-
     /**
      * Deterministic Intent data URI for PendingIntent matching.
      * Full occurrence identity participates — two different
@@ -157,11 +135,9 @@ public final class AutoDeductionContract {
                 doseId,
                 calendarDate);
     }
-
     public static boolean isValidAmount(double amount) {
         return !Double.isNaN(amount) && !Double.isInfinite(amount) && amount > 0;
     }
-
     /**
      * Strict YYYY-MM-DD validation. Rejects structurally valid but impossible dates
      * (e.g. 2026-02-31, 2026-13-01) without relying on Calendar lenient normalization.
@@ -205,14 +181,12 @@ public final class AutoDeductionContract {
         }
         return day <= maxDay;
     }
-
     /** Gregorian leap-year rule (proleptic). */
     static boolean isGregorianLeapYear(int year) {
         if (year % 4 != 0) return false;
         if (year % 100 != 0) return true;
         return year % 400 == 0;
     }
-
     public static boolean isValidTimeHhmm(String time) {
         if (time == null) return false;
         if (time.length() < 4 || time.length() > 5) return false;

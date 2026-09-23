@@ -12,7 +12,10 @@ import {
   clearCriticalNotificationClaim,
   claimsEqual,
 } from '../utils/criticalNotificationClaims';
-import { enqueueCriticalAlarmOp } from '../utils/criticalAlarmOperations';
+import {
+  bumpCriticalAlarmGeneration,
+  enqueueCriticalAlarmOp,
+} from '../utils/criticalAlarmOperations';
 
 interface UseStockAlertsOptions {
   medications: Medication[];
@@ -170,7 +173,12 @@ export function useStockAlerts({
             // notifications were disabled) is now stale — cancel it
             // natively. The op writes NOTHING; the claim is already
             // cleared above, and no async result may recreate it.
-            if (claim.claimed && claim.alarmTime !== null && claim.alarmTime > Date.now()) {
+            if (
+              claim.claimed
+              && claim.alarmTime !== null
+              && claim.alarmTime > Date.now()
+            ) {
+              bumpCriticalAlarmGeneration(med.id);
               void enqueueCriticalAlarmOp(
                 med.id,
                 () => cancelCriticalAlarm(med.id)
@@ -198,6 +206,7 @@ export function useStockAlerts({
       // stale armed alarm (if any) and send the one foreground
       // notification for this episode.
       if (claim?.claimed && claim.alarmTime !== null) {
+        bumpCriticalAlarmGeneration(med.id);
         void enqueueCriticalAlarmOp(
           med.id,
           () => cancelCriticalAlarm(med.id)
@@ -219,6 +228,10 @@ export function useStockAlerts({
         .catch(() => false)
         .then((sent) => {
           if (sent) {
+            // The foreground consumed the episode's notification. Invalidate
+            // any scheduler operation that was still working for this episode
+            // before serializing the final native cancellation.
+            bumpCriticalAlarmGeneration(med.id);
             // The foreground consumed the episode's notification — make
             // sure no armed critical alarm for this med survives as a
             // second user-facing notification. Serialized through the

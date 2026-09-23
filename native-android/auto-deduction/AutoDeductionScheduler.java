@@ -1384,10 +1384,9 @@ public final class AutoDeductionScheduler {
     RestoreResult recoverFiredStockPass() {
         AutoDeductionStockStore stock = new AutoDeductionStockStore(appContext);
 
-        // Before the first JS hydration after install/upgrade there is no safe
-        // baseline for Native stock. Legacy FIRED rows may already have been
-        // applied by the old JS-only implementation, so recovery must wait until
-        // JS has seeded the Native authority.
+        // Native stock has no safe baseline until the current JS state has
+        // seeded the Native authority. Defer recovery until that initialization
+        // boundary is complete.
         if (!stock.isInitialized()) {
             Log.i(TAG, "recoverFiredStockPass: Native stock not initialized — defer to JS hydration");
             return RestoreResult.success(0, 0);

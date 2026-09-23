@@ -604,8 +604,8 @@ public final class ExactAlarmRuntime {
     }
 
     /**
-     * Reinstall a durable row after lifecycle recovery. The caller supplies the
-     * current local-date-derived epoch and the expected ownership token.
+     * Roll back a failed schedule installation without discarding a previous
+     * durable schedule that was owned before this operation began.
      */
     private void rollbackScheduleLocked(
             String storageKey,

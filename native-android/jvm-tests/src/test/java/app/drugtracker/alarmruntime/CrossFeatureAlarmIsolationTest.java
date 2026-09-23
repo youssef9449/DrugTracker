@@ -162,8 +162,9 @@ public class CrossFeatureAlarmIsolationTest {
 
         assertTrue(pending.isPending());
 
-        ShadowAlarmManager.ScheduledAlarm scheduled = scheduledAlarms().get(0);
-        alarmManager().cancel(scheduled.operation);
+        assertTrue(dose.cancelOccurrence(
+                MEDICATION_ID,
+                DOSE_ID).isOk());
 
         ExactAlarmRuntime.PendingStateResult absent = runtime.getPendingState(
                 DoseReminderAlarmAdapter.occurrenceUri(
@@ -172,9 +173,11 @@ public class CrossFeatureAlarmIsolationTest {
                 DoseReminderAlarmAdapter.ACTION_DOSE_REMINDER,
                 DoseReminderAlarmReceiver.class);
 
-        assertTrue(absent.status == ExactAlarmRuntime.PendingStateResult.Status.ABSENT);
         assertTrue(
-                dose.getScheduleMetadata(MEDICATION_ID, DOSE_ID) != null);
+                absent.status
+                        == ExactAlarmRuntime.PendingStateResult.Status.ABSENT);
+        assertTrue(
+                dose.getScheduleMetadata(MEDICATION_ID, DOSE_ID) == null);
     }
 
     @Test

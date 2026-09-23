@@ -7,10 +7,12 @@ import {
 } from './types';
 import { AppHeader } from './components/AppHeader';
 import { AppTabContent } from './components/AppTabContent';
+import { AndroidBottomNav } from './components/AndroidBottomNav';
 import type { ActiveTab } from './components/AndroidBottomNav';
 import { AddMedicationModal } from './components/AddMedicationModal';
 import { RefillModal } from './components/RefillModal';
 import { AppSettingsModal } from './components/AppSettingsModal';
+import { AndroidFab } from './components/AndroidFab';
 import { DoseAlarmModal } from './components/DoseAlarmModal';
 import { SelectDoseModal } from './components/SelectDoseModal';
 import { MedicationHistoryModal } from './components/MedicationHistoryModal';

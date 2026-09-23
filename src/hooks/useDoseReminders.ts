@@ -63,6 +63,23 @@ export function useDoseReminders({
       const today = getTodayDateString();
       fired[firedKey(current, today, doseId)] = true;
       saveJson(FIRED_KEY, fired);
+
+      // Dismissal supersedes any in-flight snooze scheduling for this exact
+      // dose. The shared generation prevents that request from publishing a
+      // durable snooze marker after dismissal; the native cancel removes a
+      // realization that may already have reached the platform.
+      const operationKey = doseReminderSnoozeKey(current, doseId);
+      const generation =
+        bumpDoseReminderSnoozeGeneration(operationKey);
+      void enqueueDoseReminderSnoozeOpGuarded(
+        operationKey,
+        generation,
+        async () => {
+          await cancelSnoozedDoseReminder(current, doseId);
+          clearSnoozedDose(current, doseId);
+        }
+      );
+
       clearSnoozedDose(current, doseId);
     }
     stopAllSounds();

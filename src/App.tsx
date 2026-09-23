@@ -763,7 +763,6 @@ export default function App() {
                         return lastRefill && lastRefill.amount > 0 ? lastRefill.amount : undefined;
                       })()}
                       onUndoRefill={() => handleUndoRefill(med.id)}
-                      onRegisterBackHandler={registerBackOverlay}
                     />
                   ))
                 )}

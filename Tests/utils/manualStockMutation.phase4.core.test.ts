@@ -7,7 +7,7 @@ import {
 } from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Medication, ConsumptionLog } from '../../src/types';
-import { makeMedication as med, makeAutoDeductionEvent as fired } from '../fixtures/testFixtures';
+import { makeScheduledMedication as med, makeAutoDeductionEvent as fired } from '../fixtures/testFixtures';
 import {
   runGatedManualConsume,
   runGatedManualRestore,

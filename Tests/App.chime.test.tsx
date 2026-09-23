@@ -67,6 +67,7 @@ import { getTodayDateString } from '@/utils/dateCalculations';
 import { runAutoDeductionReconciliation } from '@/utils/runAutoDeductionReconciliation';
 
 import { getInitialMedications } from './fixtures/initialData';
+import { seedTestMedication as seedMed, readDurableMedication as getDurableMed, readDurableLogs as getDurableLogs } from './fixtures/testFixtures';
 import {
   scheduleCriticalAlarm,
   cancelCriticalAlarm } from '@/utils/notifications';
@@ -99,7 +100,7 @@ describe('Success chime on toggle actions', () => {
     cleanup();
   });
 
-  function seedMed(overrides: Record<string, unknown> = {}): void {
+): void {
     localStorage.setItem(
       'android_med_tracker_items_v2',
       JSON.stringify([

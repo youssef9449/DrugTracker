@@ -151,7 +151,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   onUndoRefill,
 }) => {
   const isAutoActive = isMedicationAutoDeductActive(medication);
-  // Issue #266: durable currentPills is the sole live stock balance.
+  // Durable currentPills is the sole live stock balance.
   const statusInfo = calculateMedicationStatus(medication);
   const depletion = getDepletionDate(medication);
   const isSolid = isSolidUnit(medication.unit);

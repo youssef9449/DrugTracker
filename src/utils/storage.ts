@@ -11,7 +11,8 @@
  *
  * This module consolidates all of them:
  * - `loadJson` / `loadString`: silent readers (return fallback on error).
- * - `saveJson` / `saveString`: silent writers (return void).
+ * - `saveJson` / `saveString`: failure-aware writers (return null on success or an error message on failure).
+ * - `saveJsonBestEffort` / `saveStringBestEffort`: explicitly silent writers for non-critical preferences only.
  * - `persist`: error-surfacing writer (returns null on success or an
  *   Arabic error message on failure — used by the persistence effects in
  *   App.tsx so they can toast the user on quota exhaustion).
@@ -46,22 +47,34 @@ export function loadString(key: string, fallback: string): string {
  * JSON.stringify + write to localStorage. Silently swallows errors (use
  * `persist` if you need to surface quota failures to the user).
  */
-export function saveJson(key: string, value: unknown): void {
+export function saveJson(key: string, value: unknown): string | null {
   try {
     localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // ignore — callers that need to surface failures use persist()
+    return null;
+  } catch (err) {
+    return err instanceof DOMException && err.name === 'QuotaExceededError'
+      ? STORAGE_ERRORS.quotaExceeded
+      : STORAGE_ERRORS.generic;
   }
+}
+export function saveJsonBestEffort(key: string, value: unknown): void {
+  void saveJson(key, value);
 }
 /**
  * Write a raw string to localStorage. Silently swallows errors.
  */
-export function saveString(key: string, value: string): void {
+export function saveString(key: string, value: string): string | null {
   try {
     localStorage.setItem(key, value);
-  } catch {
-    // ignore
+    return null;
+  } catch (err) {
+    return err instanceof DOMException && err.name === 'QuotaExceededError'
+      ? STORAGE_ERRORS.quotaExceeded
+      : STORAGE_ERRORS.generic;
   }
+}
+export function saveStringBestEffort(key: string, value: string): void {
+  void saveString(key, value);
 }
 /**
  * Persist a value to localStorage, returning a descriptive Arabic error

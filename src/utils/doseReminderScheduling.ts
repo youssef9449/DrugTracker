@@ -7,49 +7,72 @@ import {
   cancelStaleDoseReminderAlarmsNative,
 } from './doseReminderNative';
 import { getNativePlatform, isNativePlatform } from './notifications/notificationPlatform';
-import { cancelNotification, getPendingNotification, scheduleNotification } from './notificationRuntime';
+import { cancelNotification, getPendingNotificationResult, scheduleNotification } from './notificationRuntime';
+import { classifyNativeError, type NativeBoundaryFailure } from './nativeErrors';
 import { scheduleWebNotification } from './notifications/webNotifications';
 import {
   getDoseReminderChannelId,
   DOSE_REMINDER_TAKE_ACTION,
 } from './notifications/doseReminderNotifications';
+export type DoseReminderPendingResult =
+  | { ok: true; pending: boolean }
+  | NativeBoundaryFailure;
+
 export async function isDoseReminderPending(
   medId: string,
   doseId: string
-): Promise<boolean> {
+): Promise<DoseReminderPendingResult> {
   if (getNativePlatform() === 'android') {
-    return isDoseReminderScheduledNative(medId, doseId);
+    const result = await isDoseReminderScheduledNative(medId, doseId);
+    return result.ok
+      ? { ok: true, pending: result.scheduled }
+      : result;
   }
-  if (!isNativePlatform()) return false;
+  if (!isNativePlatform()) return { ok: true, pending: false };
   try {
-    const entry = await getPendingNotification('dose-reminder', `${medId}::${doseId}`);
-    if (!entry) return false;
+    const pendingResult = await getPendingNotificationResult(
+      'dose-reminder',
+      `${medId}::${doseId}`
+    );
+    if (!pendingResult.ok) return pendingResult;
+    const entry = pendingResult.pending;
+    if (!entry) return { ok: true, pending: false };
     const at = (entry.schedule as { at?: unknown } | undefined)?.at;
-    if (at == null) return true;
+    if (at == null) return { ok: true, pending: true };
     const atMs =
       typeof at === 'number'
         ? at
         : at instanceof Date
           ? at.getTime()
           : Date.parse(String(at));
-    if (Number.isNaN(atMs)) return true;
-    return atMs > Date.now() - 60_000;
+    if (Number.isNaN(atMs)) return { ok: true, pending: true };
+    return { ok: true, pending: atMs > Date.now() - 60_000 };
   } catch (err) {
-    console.warn('[notifications] isDoseReminderPending failed:', err);
-    return false;
+    const message = err instanceof Error ? err.message : 'dose_pending_lookup_failed';
+    return {
+      ok: false,
+      error: message,
+      errorCode: classifyNativeError(message),
+    };
   }
 }
 /**
- * Compatibility reconciliation helper for the Dose Reminder scheduler.
- * Android now queries the ExactAlarmRuntime pending state directly.
+ * Reconciliation helper for the Dose Reminder scheduler.
+ * Android queries the ExactAlarmRuntime pending state directly.
  */
 export async function isNativeDoseReminderReArmed(
   medId: string,
   doseId: string,
   _reminderTime?: string
-): Promise<boolean> {
-  if (getNativePlatform() !== 'android') return false;
-  return isDoseReminderScheduledNative(medId, doseId);
+): Promise<
+  | { ok: true; scheduled: boolean }
+  | NativeBoundaryFailure
+> {
+  if (getNativePlatform() !== 'android') return { ok: true, scheduled: false };
+  const result = await isDoseReminderScheduledNative(medId, doseId);
+  return result.ok
+    ? { ok: true, scheduled: result.scheduled }
+    : result;
 }
 /**
  * Check the native scheduler's current one-shot state for this dose.

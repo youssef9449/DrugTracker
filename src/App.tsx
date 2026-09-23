@@ -6,6 +6,8 @@ import {
   DEFAULT_PHARMACY_SETTINGS,
 } from './types';
 import { AppHeader } from './components/AppHeader';
+import { AppTabContent } from './components/AppTabContent';
+import type { ActiveTab } from './components/AndroidBottomNav';
 import { AddMedicationModal } from './components/AddMedicationModal';
 import { RefillModal } from './components/RefillModal';
 import { AppSettingsModal } from './components/AppSettingsModal';

@@ -28,6 +28,7 @@ export interface Medication {
    * status use this value directly; there is no second projected/effective
    * balance. Exact Auto, Manual Take/Restore, and Refill mutate this field
    * through the shared stock domain.
+   */
   currentPills: number;
   dailyDose: number; // Consumption rate per day
   unit: string; // e.g., 'قرص', 'كبسولة', 'مل'

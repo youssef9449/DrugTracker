@@ -27,6 +27,13 @@ export class ScheduledOperationCoordinator<Key> {
     return this.generationGuard.isCurrent(key, generation);
   }
 
+  enqueueSerialized(
+    key: Key,
+    operation: () => Promise<void>
+  ): Promise<void> {
+    return this.operationQueue.enqueue(key, operation);
+  }
+
   enqueue(
     key: Key,
     generation: number,

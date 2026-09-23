@@ -129,8 +129,8 @@ export interface PendingEnvelopeRef {
   mutationSeq: number;
   medications: Medication[];
   logs: ConsumptionLog[];
-  /** Durable global master switch captured with Phase 4 snapshots. */
-  globalAutoDeductEnabled?: boolean;
+  /** Durable global master switch captured with the current snapshot. */
+  globalAutoDeductEnabled: boolean;
   /** Exact Auto only — native ACK ownership stays with Exact Auto path. */
   toAcknowledge?: Array<{
     medicationId: string;

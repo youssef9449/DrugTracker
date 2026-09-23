@@ -16,10 +16,14 @@ import {
 } from '../utils/doseReminderScheduling';
 import { cancelSnoozedDoseReminder } from '../utils/notifications/doseReminderNotifications';
 import { clearSnoozedDose } from '../utils/doseReminderStorage';
-import { isValidDoseTime } from '../utils/doseSchedule';
 import { isDoseConsumedOnDate } from '../utils/dateCalculations';
-import { OperationQueue } from '../utils/async/OperationQueue';
-import { GenerationGuard } from '../utils/async/GenerationGuard';
+import { ScheduledOperationCoordinator } from '../utils/scheduling/ScheduledOperationCoordinator';
+import {
+  doseScheduleKey,
+  parseDoseScheduleKey,
+  getDoseReminderSlots,
+  type DoseReminderSlot,
+} from '../utils/doseReminderDefinitions';
 /**
  * Options for {@link useDoseReminderScheduler}.
  */
@@ -60,12 +64,7 @@ export interface UseDoseReminderSchedulerOptions {
    */
   lifecycleTick?: number;
 }
-import {
-  doseScheduleKey,
-  parseDoseScheduleKey,
-  getDoseReminderSlots,
-  type DoseReminderSlot,
-} from '../utils/doseReminderDefinitions';
+
 
 /**
  * Native Dose Reminder scheduler.
@@ -105,10 +104,10 @@ export function useDoseReminderScheduler({
   medicationsRef.current = medications;
   /** Keys currently believed scheduled: `${medId}::${doseId}`. */
   const scheduledDoseIdsRef = useRef<Set<string>>(new Set());
-  /** Per-key generation counters — stale async ops no-op when gen mismatches. */
-  const generationGuardRef = useRef(new GenerationGuard<string>());
-  /** Shared per-key promise queue so cancel→schedule for one slot never interleaves. */
-  const operationQueueRef = useRef(new OperationQueue<string>());
+  /** Shared queue + generation coordinator; business policy remains here. */
+  const operationCoordinatorRef = useRef(
+    new ScheduledOperationCoordinator<string>()
+  );
   /**
    * Last applied schedule signature per dose key (time|amount|name|skip|manual-action).
    * When equal and the native pending id is present, reconciliation is a no-op.
@@ -134,12 +133,12 @@ export function useDoseReminderScheduler({
   ): void => {
     clearRetry(key);
     const run = async (attempt: number): Promise<void> => {
-      if (!generationGuardRef.current.isCurrent(key, gen)) return;
+      if (!operationCoordinatorRef.current.isCurrent(key, gen)) return;
       try {
         await operation();
         clearRetry(key);
       } catch (error) {
-        if (!generationGuardRef.current.isCurrent(key, gen)) return;
+        if (!operationCoordinatorRef.current.isCurrent(key, gen)) return;
         const nextAttempt = attempt + 1;
         if (nextAttempt > 3) {
           console.warn('[dose-reminder] bounded retry exhausted:', key, error);
@@ -148,7 +147,7 @@ export function useDoseReminderScheduler({
         const delays = [1000, 4000, 16000] as const;
         const timer = setTimeout(() => {
           retryTimersRef.current.delete(key);
-          if (!generationGuardRef.current.isCurrent(key, gen)) return;
+          if (!operationCoordinatorRef.current.isCurrent(key, gen)) return;
           void run(nextAttempt);
         }, delays[attempt]);
         retryTimersRef.current.set(key, timer);
@@ -156,7 +155,7 @@ export function useDoseReminderScheduler({
       }
     };
 
-    operationQueueRef.current.enqueue(key, () => run(0));
+    void run(0);
   };
 
   const clearAllRetries = (): void => {
@@ -198,7 +197,7 @@ export function useDoseReminderScheduler({
     if (!hydrated || isFirstRun) return;
     const cancelSlot = (medId: string, doseId: string): void => {
       const key = doseScheduleKey(medId, doseId);
-      const gen = generationGuardRef.current.bump(key);
+      const gen = operationCoordinatorRef.current.bump(key);
       appliedSignatureRef.current.delete(key);
       clearRetry(key);
       // Native cancellation is authoritative. Clear the JS snooze marker only
@@ -244,10 +243,7 @@ export function useDoseReminderScheduler({
           timer
         );
       };
-      operationQueueRef.current.enqueue(
-        '__stale_dose_alarm_cleanup__',
-        () => retryStaleCleanup(0)
-      );
+      void retryStaleCleanup(0);
 
       scheduledDoseIdsRef.current.clear();
       appliedSignatureRef.current.clear();
@@ -339,10 +335,7 @@ export function useDoseReminderScheduler({
         timer
       );
     };
-    operationQueueRef.current.enqueue(
-      '__stale_dose_alarm_cleanup__',
-      () => retryStaleCleanup(0)
-    );
+      void retryStaleCleanup(0);
     // Reconcile each desired slot. Same signature + pending → no-op.
     // Missing pending → schedule one-shot (native owns next-day recurrence).
     // Signature change → cancel + one replacement.
@@ -363,9 +356,9 @@ export function useDoseReminderScheduler({
       } = slot;
       const prevSig = appliedSignatureRef.current.get(key);
       if (prevSig === sig) {
-        const gen = generationGuardRef.current.bump(key);
+        const gen = operationCoordinatorRef.current.bump(key);
         enqueueRetryable(key, gen, async () => {
-          if (!generationGuardRef.current.isCurrent(key, gen)) return;
+          if (!operationCoordinatorRef.current.isCurrent(key, gen)) return;
           // Reconciliation when signature is unchanged:
           //   A) pending=true → no-op
           //   B) pending=false + native delivery transition already re-armed the
@@ -376,7 +369,7 @@ export function useDoseReminderScheduler({
           // The native pending state is the scheduling authority; there is no
           // separate recurrence-evidence store.
           const pendingResult = await isDoseReminderPending(medId, doseId);
-          if (!generationGuardRef.current.isCurrent(key, gen)) return;
+          if (!operationCoordinatorRef.current.isCurrent(key, gen)) return;
           if (!pendingResult.ok) {
             console.warn(
               '[dose-reminder] pending-state lookup failed:',
@@ -391,7 +384,7 @@ export function useDoseReminderScheduler({
             doseId,
             time
           );
-          if (!generationGuardRef.current.isCurrent(key, gen)) return;
+          if (!operationCoordinatorRef.current.isCurrent(key, gen)) return;
           if (!nativeReArmed.ok) {
             console.warn(
               '[dose-reminder] native re-arm lookup failed:',
@@ -408,7 +401,7 @@ export function useDoseReminderScheduler({
             ...(treatmentEndDate ? { treatmentEndDate } : {}),
           };
           await scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts);
-          if (!generationGuardRef.current.isCurrent(key, gen)) {
+          if (!operationCoordinatorRef.current.isCurrent(key, gen)) {
             await cancelDoseReminder(medId, doseId);
             return;
           }
@@ -416,11 +409,11 @@ export function useDoseReminderScheduler({
         });
         continue;
       }
-      const gen = generationGuardRef.current.bump(key);
+      const gen = operationCoordinatorRef.current.bump(key);
       enqueueRetryable(key, gen, async () => {
-        if (!generationGuardRef.current.isCurrent(key, gen)) return;
+        if (!operationCoordinatorRef.current.isCurrent(key, gen)) return;
         await cancelDoseReminder(medId, doseId);
-        if (!generationGuardRef.current.isCurrent(key, gen)) return;
+        if (!operationCoordinatorRef.current.isCurrent(key, gen)) return;
         const opts = {
           ...(slotConsumedToday ? { skipToday: true as const } : {}),
           allowManualTakeAction,
@@ -428,7 +421,7 @@ export function useDoseReminderScheduler({
           ...(treatmentEndDate ? { treatmentEndDate } : {}),
         };
         await scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts);
-        if (!generationGuardRef.current.isCurrent(key, gen)) {
+        if (!operationCoordinatorRef.current.isCurrent(key, gen)) {
           await cancelDoseReminder(medId, doseId);
           return;
         }
@@ -524,7 +517,7 @@ export function useDoseReminderScheduler({
           if (!newlyConsumed && !resumeChanged) {
             continue;
           }
-          const gen = generationGuardRef.current.bump(key);
+          const gen = operationCoordinatorRef.current.bump(key);
           enqueueRetryable(key, gen, async () => {
             await cancelSnoozedDoseReminder(medId, doseId);
             // After today's reminder time the recurring alarm has already
@@ -535,9 +528,9 @@ export function useDoseReminderScheduler({
               clearSnoozedDose(medId, doseId);
               return;
             }
-            if (!generationGuardRef.current.isCurrent(key, gen)) return;
+            if (!operationCoordinatorRef.current.isCurrent(key, gen)) return;
             await cancelDoseReminder(medId, doseId);
-            if (!generationGuardRef.current.isCurrent(key, gen)) return;
+            if (!operationCoordinatorRef.current.isCurrent(key, gen)) return;
             const allowManualTakeAction = allowManualTakeActionByMedicationId.get(med.id) ?? true;
             const opts = {
               skipToday: true as const,
@@ -546,7 +539,7 @@ export function useDoseReminderScheduler({
               ...(treatmentEndDate ? { treatmentEndDate } : {}),
             };
             await scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts);
-            if (!generationGuardRef.current.isCurrent(key, gen)) {
+            if (!operationCoordinatorRef.current.isCurrent(key, gen)) {
               await cancelDoseReminder(medId, doseId);
               return;
             }
@@ -559,10 +552,10 @@ export function useDoseReminderScheduler({
           // Past-due restored slots are intentionally skipped (no fabricated
           // past reminder). Cold start / never-consumed slots are left to
           // the main config effect.
-          const gen = generationGuardRef.current.bump(key);
+          const gen = operationCoordinatorRef.current.bump(key);
           enqueueRetryable(key, gen, async () => {
             await cancelDoseReminder(medId, doseId);
-            if (!generationGuardRef.current.isCurrent(key, gen)) return;
+            if (!operationCoordinatorRef.current.isCurrent(key, gen)) return;
             const allowManualTakeAction = allowManualTakeActionByMedicationId.get(med.id) ?? true;
             const opts = {
               allowManualTakeAction,
@@ -570,7 +563,7 @@ export function useDoseReminderScheduler({
               ...(treatmentEndDate ? { treatmentEndDate } : {}),
             };
             await scheduleDoseReminder(medId, name, time, amount, unit, doseId, opts);
-            if (!generationGuardRef.current.isCurrent(key, gen)) {
+            if (!operationCoordinatorRef.current.isCurrent(key, gen)) {
               await cancelDoseReminder(medId, doseId);
             }
           });

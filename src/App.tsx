@@ -5,14 +5,6 @@ import {
   PharmacySettings,
   DEFAULT_PHARMACY_SETTINGS,
 } from './types';
-// NOTE: the app previously seeded 3 demo medications + 2 consumption
-// logs on a fresh install (src/data/initialData.ts). That seed data
-// showed up the moment the app was installed, which the user did not
-// want — a fresh install should start with an empty inventory and let
-// the user add their own medications. The seed functions are kept in
-// initialData.ts only for the existing regression test that asserts
-// they DON'T appear on a fresh run; they are no longer used as the
-// initial state here.
 import { AndroidBottomNav, ActiveTab } from './components/AndroidBottomNav';
 import { AppHeader } from './components/AppHeader';
 import { LowStockBanner } from './components/LowStockBanner';

@@ -8,7 +8,6 @@
  * mutation operates on the post-Exact durable state. Manual mutations use
  * durable `currentPills` directly; no elapsed-day settlement is performed.
  */
-
 import {
   loadDurableGlobalAutoDeductEnabled,
   type AutoStockDurableState,
@@ -17,7 +16,6 @@ import {
   runAutoDeductionReconciliation,
   type RunReconciliationOutput,
 } from './runAutoDeductionReconciliation';
-
 export interface PreMutationResult {
   state: AutoStockDurableState;
   reconciliation: RunReconciliationOutput | null;
@@ -26,7 +24,6 @@ export interface PreMutationResult {
   /** True when Exact stock is not durably finalized; callers must not mutate stock afterward. */
   durabilityBlocked: boolean;
 }
-
 /**
  * Must be called inside withAutoStockMutationGate (alreadyInGate).
  * Returns the post-reconciliation durable state for the subsequent manual mutation.
@@ -46,12 +43,10 @@ export async function reconcileExactBeforeManualMutation(opts: {
     durableState: opts.fresh,
     now: opts.now,
   });
-
   // Envelope recovery/reconciliation may have durably changed the global
   // master switch. Do not return the pre-gate snapshot as the post-recovery
   // authority; re-read the durable value while the caller still holds the gate.
   const durableGlobalAutoDeductEnabled = loadDurableGlobalAutoDeductEnabled();
-
   return {
     state: {
       medications: recon.medications,

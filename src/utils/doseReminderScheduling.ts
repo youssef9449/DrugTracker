@@ -5,6 +5,7 @@ import {
   cancelDoseReminderNative,
   isDoseReminderScheduledNative,
   cancelStaleDoseReminderAlarmsNative,
+  type CancelStaleDoseReminderResult,
 } from './doseReminderNative';
 import { getNativePlatform, isNativePlatform } from './notifications/notificationPlatform';
 import { cancelNotification, getPendingNotificationResult, scheduleNotification } from './notificationRuntime';
@@ -98,11 +99,11 @@ export async function cancelDoseReminder(
  */
 export async function cancelStaleDoseReminderAlarms(
   keepKeys: ReadonlySet<string>
-): Promise<void> {
+): Promise<CancelStaleDoseReminderResult> {
   if (getNativePlatform() === 'android') {
-    await cancelStaleDoseReminderAlarmsNative(keepKeys);
-    return;
+    return cancelStaleDoseReminderAlarmsNative(keepKeys);
   }
+  return { ok: true };
 }
 /**
  * One-shot snooze notification id for an explicit dose row.

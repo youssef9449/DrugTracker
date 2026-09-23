@@ -160,27 +160,21 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       restoreInFlightRef.current.delete(restoreKey);
     }
   };
-  const handleConfirmRefill = (medicationId: string, addedPills: number) => {
-    // Input validation only — no React medication lookup. Settlement, stock,
-    // and log creation all happen inside runGatedRefill on fresh durable state.
-    if (!(addedPills > 0)) return;
-    // A new refill creates a fresh undoable log entry, so clear the
-    // dedup guard that blocked rapid double-undo of the previous refill.
+  const handleConfirmRefill = async (medicationId: string, addedPills: number): Promise<boolean> => {
+    if (!(addedPills > 0)) return false;
     refillUndoInFlightRef.current.delete(medicationId);
-    void (async () => {
-      const result = await runGatedRefill({
-        medicationId,
-        addedPills,
-      });
-      if (result.outcome !== 'persist_failed') {
-        setMedications(result.medications);
-        medicationsRef.current = result.medications;
-        setLogs(result.logs);
-      }
-      if (result.outcome === 'applied' && result.log) {
-        if (soundEnabled) playSuccessChime();
-      }
-    })();
+    const result = await runGatedRefill({ medicationId, addedPills });
+    if (result.outcome !== 'persist_failed') {
+      setMedications(result.medications);
+      medicationsRef.current = result.medications;
+      setLogs(result.logs);
+    }
+    if (result.outcome === 'applied' && result.log) {
+      if (soundEnabled) playSuccessChime();
+      return true;
+    }
+    showToast(STORAGE_ERRORS.generic);
+    return false;
   };
   const handleUndoRefill = (medicationId: string) => {
     // In-flight guard only. Medication existence, refill selection, and
@@ -200,6 +194,8 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
           const name = result.medicationName ?? result.log.medicationName ?? '';
           if (name) showToast(TOAST_MESSAGES.refillUndone(name));
           if (soundEnabled) playSuccessChime();
+        } else if (result.outcome === 'persist_failed') {
+          showToast(STORAGE_ERRORS.generic);
         }
       } finally {
         refillUndoInFlightRef.current.delete(medicationId);
@@ -313,35 +309,33 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       );
     })();
   };
-  const handleSaveMedication = (medData: Omit<Medication, 'id' | 'createdAt'>, editId?: string) => {
+  const handleSaveMedication = async (medData: Omit<Medication, 'id' | 'createdAt'>, editId?: string): Promise<boolean> => {
     if (editId) {
-      // Durable gate: stock/settlement uses fresh durable medication state, not React.
-      void (async () => {
-        const result = await runGatedMedicationUpdate({
-          editId,
-          medData,
-          globalAutoDeductEnabled: globalAutoDeductEnabledRef.current,
-        });
-        if (result.outcome !== 'applied') {
-          if (result.outcome !== 'persist_failed') {
-            setMedications(result.medications);
-            medicationsRef.current = result.medications;
-            setLogs(result.logs);
-          }
-          return;
+      const result = await runGatedMedicationUpdate({
+        editId,
+        medData,
+        globalAutoDeductEnabled: globalAutoDeductEnabledRef.current,
+      });
+      if (result.outcome !== 'applied') {
+        if (result.outcome !== 'persist_failed') {
+          setMedications(result.medications);
+          medicationsRef.current = result.medications;
+          setLogs(result.logs);
         }
-        setMedications(result.medications);
-        medicationsRef.current = result.medications;
-        setLogs(result.logs);
-        showToast(
-          medData.reminderEnabled
-            ? `تم حفظ "${medData.name}" مع تذكير يومي الساعة ${medData.reminderTime}`
-            : `تم تعديل بيانات "${medData.name}" بنجاح`
-        );
-        if (soundEnabled) playSuccessChime();
-        setEditingMedication(null);
-      })();
-      return;
+        showToast(STORAGE_ERRORS.generic);
+        return false;
+      }
+      setMedications(result.medications);
+      medicationsRef.current = result.medications;
+      setLogs(result.logs);
+      showToast(
+        medData.reminderEnabled
+          ? 'تم حفظ "' + medData.name + '" مع تذكير يومي الساعة ' + medData.reminderTime
+          : 'تم تعديل بيانات "' + medData.name + '" بنجاح'
+      );
+      if (soundEnabled) playSuccessChime();
+      setEditingMedication(null);
+      return true;
     }
     const newMed: Medication = {
       ...medData,
@@ -351,27 +345,26 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         medData.autoDeductEnabled !== undefined
           ? medData.autoDeductEnabled
           : globalAutoDeductEnabledRef.current,
-      // New medications start with their per-med critical notification
-      // preference enabled; the global critical-stock switch remains the master gate.
-      criticalStockAlertsEnabled:
-        medData.criticalStockAlertsEnabled !== false,
+      criticalStockAlertsEnabled: medData.criticalStockAlertsEnabled !== false,
     };
-    void (async () => {
-      const result = await runGatedAddMedication({ medication: newMed });
-      if (result.outcome !== 'applied') return;
-      setMedications(result.medications);
-      medicationsRef.current = result.medications;
-      setLogs(result.logs);
-      showToast(
-        newMed.reminderEnabled
-          ? `تمت إضافة "${newMed.name}" مع تنبيه الساعة ${newMed.reminderTime}`
-          : newMed.autoDeductEnabled
-            ? `تمت إضافة "${newMed.name}"، وستخصم كل جرعة تلقائياً في موعدها`
-            : `تمت إضافة "${newMed.name}" بنجاح`
-      );
-      if (soundEnabled) playSuccessChime();
-      setEditingMedication(null);
-    })();
+    const result = await runGatedAddMedication({ medication: newMed });
+    if (result.outcome !== 'applied') {
+      showToast(STORAGE_ERRORS.generic);
+      return false;
+    }
+    setMedications(result.medications);
+    medicationsRef.current = result.medications;
+    setLogs(result.logs);
+    showToast(
+      newMed.reminderEnabled
+        ? 'تمت إضافة "' + newMed.name + '" مع تنبيه الساعة ' + newMed.reminderTime
+        : newMed.autoDeductEnabled
+          ? 'تمت إضافة "' + newMed.name + '"، وستخصم كل جرعة تلقائياً في موعدها'
+          : 'تمت إضافة "' + newMed.name + '" بنجاح'
+    );
+    if (soundEnabled) playSuccessChime();
+    setEditingMedication(null);
+    return true;
   };
   const handleDeleteMedication = (id: string) => {
     void (async () => {
@@ -383,7 +376,9 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       }
       if (result.outcome === 'applied') {
         const name = result.medicationName ?? id;
-        showToast(`تم حذف "${name}" من القائمة`);
+        showToast('تم حذف "' + name + '" من القائمة');
+      } else {
+        showToast(STORAGE_ERRORS.generic);
       }
     })();
   };

@@ -356,6 +356,8 @@ const systemActions = [
   'android.intent.action.BOOT_COMPLETED',
   'android.intent.action.QUICKBOOT_POWERON',
   'android.intent.action.TIMEZONE_CHANGED',
+  'android.intent.action.TIME_SET',
+  'android.intent.action.TIMEZONE_OFFSET_CHANGED',
   'android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED',
 ];
 

@@ -1,6 +1,11 @@
 plugins {
     id 'java'
+    id 'com.github.spotbugs' version '6.5.11'
 }
+
+def spotbugsClassLoader = plugins['com.github.spotbugs'].class.classLoader
+def SpotBugsEffort = spotbugsClassLoader.loadClass('com.github.spotbugs.snom.Effort')
+def SpotBugsConfidence = spotbugsClassLoader.loadClass('com.github.spotbugs.snom.Confidence')
 
 java {
     sourceCompatibility = JavaVersion.VERSION_17
@@ -18,51 +23,28 @@ repositories {
  * tests exercise the production Java implementation, not a copy.
  */
 def productionSources = fileTree("../auto-deduction") {
-    include(
-            "AutoDeductionContract.java",
-            "AutoDeductionEventStore.java",
-            "AutoDeductionScheduler.java",
-            "AutoDeductionSchedulingAdapter.java",
-            "AutoDeductionReceiver.java",
-            "AutoDeductionStockStore.java",
-            "AutoDeductionLifecycle.java",
-            "AutoDeductionAlarmFeature.java"
-    )
+    include("*.java")
+    exclude("*Plugin.java")
 }
 
 def alarmRuntimeSources = fileTree("../alarm-runtime") {
-    include(
-            "ExactAlarmContract.java",
-            "ExactAlarmOperationLock.java",
-            "ExactAlarmStore.java",
-            "ExactAlarmRuntime.java",
-            "ExactAlarmLifecycle.java",
-            "DrugTrackerAlarmSystemReceiver.java",
-            "ExactAlarmFeatureAdapter.java",
-            "DoseReminderAlarmFeature.java"
-    )
+    include("*.java")
+    exclude("*Plugin.java")
 }
 
 def notificationRuntimeSources = fileTree("../notification-runtime") {
-    include(
-            "AppForegroundState.java",
-            "NotificationRuntime.java",
-            "NotificationRuntimeActionReceiver.java"
-    )
+    include("*.java")
+    exclude("*Plugin.java")
 }
 
 def doseReminderAlarmSources = fileTree("../dose-reminder") {
-    include(
-            "DoseReminderAlarmAdapter.java",
-            "DoseReminderAlarmReceiver.java"
-    )
+    include("*.java")
+    exclude("*Plugin.java")
 }
 
 def criticalStockAlarmSources = fileTree("../critical-stock") {
-    include(
-            "CriticalStockAlarmAdapter.java",
-            "CriticalStockAlarmReceiver.java"
-    )
+    include("*.java")
+    exclude("*Plugin.java")
 }
 
 def syncedMain = layout.buildDirectory.dir("synced-main/app/drugtracker/autodeduction")
@@ -170,6 +152,7 @@ dependencies {
     // recurse into jars).
     testCompileOnly fileTree(extractedAarClasses)
 }
+
 
 tasks.register("extractMonitorClasses") {
     outputs.dir(extractedAarClasses)

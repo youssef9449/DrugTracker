@@ -18,7 +18,7 @@ import androidx.core.app.NotificationManagerCompat;
  *
  * <p>This class owns notification presentation only:
  * channels, posting, cancellation, stable notification tags, and generic
- * action delivery. It never schedules AlarmManager alarms and contains no
+ * action delivery. It never schedules platform alarms and contains no
  * Dose Reminder / Critical Stock / Auto Deduction business policy.</p>
  */
 public final class NotificationRuntime {

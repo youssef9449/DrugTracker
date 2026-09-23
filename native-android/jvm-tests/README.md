@@ -38,6 +38,23 @@ this harness does **not** validate real-device behavior:
 
 Do not treat a green `./gradlew test` as device or OEM validation.
 
+## Static analysis
+
+The JVM module also owns the repository's native Java static-analysis gate.
+SpotBugs analyzes the synced production runtime classes under `app.drugtracker.*`
+with maximum analysis effort and a high-confidence report threshold across the production sources synchronized into the JVM test main source set. The gate
+fails on reported findings; test/Capacitor compile stubs are excluded by the
+analysis scope. Run it with:
+
+```bash
+cd native-android/jvm-tests
+./gradlew spotbugsMain
+```
+
+Do not add broad suppressions just to make the gate green. If an existing,
+intentional finding is discovered, document the exact exception in an explicit
+SpotBugs baseline/filter rather than disabling the quality gate.
+
 ## Run
 
 Requires JDK 17+ and network access to resolve Maven dependencies on first run.

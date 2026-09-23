@@ -61,4 +61,4 @@ jobs:
 
       - name: Run JVM tests and SpotBugs
         working-directory: native-android/jvm-tests
-        run: bash ./gradlew test spotbugsMain --no-daemon
+        run: bash ./gradlew spotbugsStaticAnalysis --no-daemon

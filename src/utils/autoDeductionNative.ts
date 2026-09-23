@@ -90,6 +90,7 @@ export interface ScheduleOccurrenceParams {
 export interface ScheduleOccurrenceResult {
   ok: boolean;
   error?: string;
+  errorCode?: NativeErrorCode;
   occurrenceKey?: string;
 }
 
@@ -136,6 +137,7 @@ export interface RestoreFutureSchedulesResult {
   restored: number;
   failed?: number;
   error?: string;
+  errorCode?: NativeErrorCode;
 }
 
 interface AutoDeductionPlugin {

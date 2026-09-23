@@ -71,6 +71,15 @@ public final class CriticalStockAlarmAdapter
             String time = metadata.optString("alarmTime", "");
             String operationVersion = metadata.optString(
                     ExactAlarmContract.FIELD_OPERATION_VERSION, "");
+            if ("accepted".equals(metadata.optString("deliveryState", ""))
+                    && !operationVersion.isEmpty()) {
+                if (!adapter.completeOneShot(medicationId, operationVersion)) {
+                    android.util.Log.w(
+                            "CriticalStockAlarmAdapter",
+                            reason + ": completion retry failed " + medicationId);
+                }
+                continue;
+            }
             long triggerAt = ExactAlarmContract.resolveLocalDateTimeEpochMs(date, time, false);
             long now = System.currentTimeMillis();
             if (triggerAt <= 0L) continue;

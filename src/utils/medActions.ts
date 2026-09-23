@@ -11,25 +11,20 @@ import {
 import { isDoseTimeElapsedToday } from './doseSchedule';
 import { generateId } from './id';
 import { exactAutoLogId } from './autoDeductionReconciliation';
-
 /**
- * Shared medication-action helpers (Issue #267).
- *
+ * Shared medication-action helpers ().
  * Manual stock mutations use `applyDurableStockDelta` — a simple helper that
  * applies a signed delta to `med.currentPills` with a zero clamp. There is NO
  * elapsed-day settlement and NO read-time stock projection inside manual
  * mutations. The durable `currentPills` is the single source of truth for
  * manual stock changes.
  */
-
 /**
  * Apply a signed stock delta to a medication's durable `currentPills`.
- *
  * - base = `Math.max(0, med.currentPills)` (never negative).
  * - positive delta increases the balance; negative delta decreases it.
  * - result clamped at zero.
- * - No elapsed-day settlement is performed as part of the manual mutation (Issue #267).
- *
+ * - No elapsed-day settlement is performed as part of the manual mutation ().
  * @param med The medication to adjust.
  * @param delta The signed pill delta (positive for restore/refill, negative
  *   for consume).
@@ -42,15 +37,13 @@ export function applyDurableStockDelta(
   const newPills = Math.max(0, base + delta);
   return { ...med, currentPills: newPills };
 }
-
 /**
  * Resolve the doseId for a restore operation. Only identity is resolved —
  * the restore amount comes from durable deduction evidence, NOT the current
  * schedule.
- *
  * - Multi-dose (doseSchedule with >1 slot): explicit doseId required.
  * - Single-slot schedule: omitted doseId resolves to that slot's id.
- * - No doseSchedule: reject (no Legacy single-dose fallback — Issue #268).
+ * - No doseSchedule: reject (no Legacy single-dose fallback — ).
  */
 export function resolveRestoreDoseId(
   med: Medication,
@@ -60,7 +53,7 @@ export function resolveRestoreDoseId(
   | { ok: false; reason: 'missing_dose_id' | 'invalid_dose_id' | 'no_dose' } {
   const schedule = med.doseSchedule;
   if (!Array.isArray(schedule) || schedule.length === 0) {
-    // No doseSchedule: cannot restore an occurrence (Issue #268/#267).
+    // No doseSchedule: cannot restore an occurrence ().
     // A stale explicit doseId is invalid_dose_id; otherwise no_dose.
     if (doseId != null && doseId !== '') {
       return { ok: false, reason: 'invalid_dose_id' };
@@ -77,7 +70,6 @@ export function resolveRestoreDoseId(
   if (!slot) return { ok: false, reason: 'invalid_dose_id' };
   return { ok: true, doseId: slot.id };
 }
-
 export type RestoreDoseResult =
   | {
       ok: true;
@@ -106,17 +98,14 @@ export type RestoreDoseResult =
         | 'already_restored'
         | 'missing_deduction_evidence';
     };
-
 /**
  * Find the ACTIVE (un-reversed) deduction log for one occurrence
  * (medicationId + doseId + calendarDate). "Active" = the deduction whose
  * stock effect is still in place and can be reversed by a Restore.
- *
  * A deduction log is active when it has NO `reversedAt` marker. Once a
  * Restore reverses a deduction, that deduction log is marked `reversedAt`
  * and is skipped here so a later Restore finds the NEXT active deduction.
- *
- * Issue #269 / #276: accepted deduction types for an occurrence:
+ * accepted deduction types for an occurrence:
  *   - dose_taken: manual deduction (existing doseId checks)
  *   - exact_auto: current Exact Auto, ONLY when log.id is the deterministic
  *     Exact occurrence id (`exact-auto:<medicationId>:<doseId>:<calendarDate>`)
@@ -131,7 +120,7 @@ export function findActiveDeductionForOccurrence(
   doseId: string,
   calendarDate: string
 ): ConsumptionLog | null {
-  // Issue #267: doseId is required (no legacy/missing/empty/whitespace/sentinel).
+  // doseId is required (no legacy/missing/empty/whitespace/sentinel).
   // Trim before matching so '   ' rejects and ' d1 ' normalizes to 'd1'.
   const normalizedDoseId =
     doseId == null ? '' : String(doseId).trim();
@@ -147,7 +136,7 @@ export function findActiveDeductionForOccurrence(
   for (const l of logs) {
     if (l.medicationId !== medicationId) continue;
     if (l.date !== calendarDate) continue;
-    // Issue #269/#276: dose_taken is manual evidence. exact_auto and
+    // dose_taken is manual evidence. exact_auto and
     const isManualDeduction = l.type === 'dose_taken';
     const isExactOccurrenceEvidence =
       (l.type === 'exact_auto') &&
@@ -158,7 +147,7 @@ export function findActiveDeductionForOccurrence(
       l.doseId != null && String(l.doseId).trim() !== ''
         ? String(l.doseId).trim()
         : null;
-    // Issue #267: require explicit non-empty doseId on the log — no
+    // require explicit non-empty doseId on the log — no
     // legacy/missing/empty/whitespace/sentinel matching.
     if (logDoseRaw !== normalizedDoseId) continue;
     const parsed = Date.parse(l.timestamp ?? '');
@@ -176,7 +165,6 @@ export function findActiveDeductionForOccurrence(
   }
   return best;
 }
-
 /**
  * UI-only: historical Restore amount for display from exact active deduction
  * evidence (medicationId + doseId + calendarDate). Returns null when no active
@@ -201,15 +189,12 @@ export function getHistoricalRestoreDisplayAmount(
   const n = Math.abs(Number(active.amount) || 0);
   return n > 0 ? n : null;
 }
-
 /**
  * Whether a log represents Exact Auto deduction evidence for the requested
- * occurrence (Issue #269 / #276).
- *
+ * occurrence ().
  * Decision table:
  *   exact_auto  → valid only when log.id === exactAutoLogId(...)
  *   other types → invalid
- *
  * Malformed exact_auto records with arbitrary ids are NOT evidence.
  */
 export function isExactAutoDeductionEvidence(
@@ -227,7 +212,6 @@ export function isExactAutoDeductionEvidence(
     exactAutoLogId(medicationId, normalizedDoseId, calendarDate)
   );
 }
-
 /**
  * UI-only: Auto historical Restore (consumed + Exact Auto evidence + valid amount).
  * Accepts current `exact_auto` logs with deterministic occurrence id.
@@ -254,7 +238,6 @@ export function isUiAutoHistoricalRestoreEligible(
     )
   );
 }
-
 /**
  * UI-only: Manual (or any) consumed Restore with exact active deduction evidence.
  */
@@ -265,7 +248,6 @@ export function isUiConsumedRestoreEligible(
 ): boolean {
   return consumed && !skipped && historicalAmount != null;
 }
-
 export function findActualDeductedAmountForOccurrence(
   logs: ConsumptionLog[],
   medicationId: string,
@@ -276,21 +258,16 @@ export function findActualDeductedAmountForOccurrence(
   const active = findActiveDeductionForOccurrence(logs, medicationId, doseId, calendarDate);
   return active ? Math.abs(Number(active.amount) || 0) : null;
 }
-
 /**
  * Production restore for one dose slot — exact occurrence restore only.
- *
- * Issue #267: Restore reverses a durable deduction log for the occurrence
+ * Restore reverses a durable deduction log for the occurrence
  * (medicationId + doseId + calendarDate). The restore amount is
  * `abs(log.amount)` from the active deduction log (dose_taken or exact_auto).
  * If no active deduction log exists → reject `missing_deduction_evidence`.
- *
  * There is NO pure-projection Restore (elapsed time without a durable
  * deduction does NOT add stock). There is NO `dailyDose` fallback, NO
  * `computeDueDoseBreakdown`, NO elapsed-day settlement settlement.
- *
  * elapsed-day settlement is NOT changed by restore.
- *
  * Skip marker logic is preserved: when the restore date is past-due, a
  * durable skip is recorded so the same occurrence is not re-deducted by
  * Exact Auto.
@@ -307,14 +284,11 @@ export function restoreDose(
   if (!resolved.ok) {
     return { ok: false, reason: resolved.reason };
   }
-
   const resolvedDoseId = resolved.doseId;
   const wasActuallyConsumed = isDoseConsumedOnDate(med, resolvedDoseId, todayStr);
-
   if (med.autoDeductEnabled === false && !wasActuallyConsumed) {
     return { ok: false, reason: 'auto_deduct_off' };
   }
-
   // Find the ACTIVE (un-reversed) deduction for this exact occurrence.
   const activeDeduction = findActiveDeductionForOccurrence(
     logs,
@@ -322,8 +296,7 @@ export function restoreDose(
     resolvedDoseId,
     todayStr
   );
-
-  // Issue #267: Restore requires durable deduction evidence. No
+  // Restore requires durable deduction evidence. No
   // pure-projection restore — elapsed time without a durable deduction
   // does NOT add stock.
   if (activeDeduction == null) {
@@ -335,13 +308,11 @@ export function restoreDose(
     // Not consumed and no deduction: nothing to restore.
     return { ok: false, reason: 'missing_deduction_evidence' };
   }
-
   const restoredAmount = Math.abs(Number(activeDeduction.amount) || 0);
   if (!(restoredAmount > 0)) {
     return { ok: false, reason: 'missing_deduction_evidence' };
   }
   const reversedLogId = activeDeduction.id;
-
   // --- Multi-dose / scheduled slot ---
   if (hasDoseSchedule(med) && resolvedDoseId) {
     // Clear consumption for this doseId + date (if any).
@@ -354,7 +325,6 @@ export function restoreDose(
         delete nextHistory[resolvedDoseId];
       }
     }
-
     const slot = med.doseSchedule!.find((d) => d.id === resolvedDoseId);
     // Past-due relative to `now`: prior calendar day, or today after slot time.
     const nowLocalDate = getLocalDateString(now);
@@ -362,7 +332,6 @@ export function restoreDose(
     const timeElapsedToday =
       slot != null && isDoseTimeElapsedToday(slot.time, now);
     const isPastDueForSkip = restoreDateIsPastDay || timeElapsedToday;
-
     // Restore after Auto/Manual Take: when the scheduled time has already
     // passed, leave a durable skip marker so Exact Auto cannot re-trigger a
     // second deduction for this occurrence after Restore. When the scheduled
@@ -390,7 +359,6 @@ export function restoreDose(
         todayStr
       ).doseSkippedHistory;
     }
-
     const allStillConsumed =
       Array.isArray(med.doseSchedule) &&
       med.doseSchedule.every((d) =>
@@ -405,8 +373,7 @@ export function restoreDose(
               todayStr
             )
       );
-
-    // Issue #267: apply the restored amount to durable currentPills only.
+    // apply the restored amount to durable currentPills only.
     // No settlement, no elapsed-day settlement change.
     const updatedMed: Medication = applyDurableStockDelta(med, restoredAmount);
     const result: Medication = {
@@ -415,7 +382,6 @@ export function restoreDose(
       doseSkippedHistory,
       lastConsumedDate: allStillConsumed ? todayStr : undefined,
     };
-
     return {
       ok: true,
       updatedMed: result,
@@ -425,30 +391,23 @@ export function restoreDose(
       reversedLogId,
     };
   }
-
-  // No explicit doseSchedule: cannot restore (Issue #268/#267).
+  // No explicit doseSchedule: cannot restore ().
   return { ok: false, reason: 'no_dose' };
 }
-
 /**
  * Consume one daily dose from a medication.
- *
- * Issue #267: the stock deduction is `currentPills → currentPills - doseAmount`
+ * the stock deduction is `currentPills → currentPills - doseAmount`
  * (clamped at zero). No read-time projection and no elapsed-day settlement.
  * The durable `currentPills` is the sole base.
- *
  * Amount authority:
  * - `amountOverride` (Exact Auto FIRED event amount) when provided.
  * - Otherwise the current durable schedule slot amount.
  * - No `dailyDose` fallback when there is no doseSchedule (reject).
- *
  * Identity:
  * - Multi-dose → explicit doseId required (or single-slot auto-resolve).
  * - No doseSchedule → reject `missing_dose_id` (no Legacy single-dose path).
- *
  * Metadata preserved: doseConsumptionHistory,
  * doseSkippedHistory, lastConsumedDate, dose_taken log.
- *
  * elapsed-day settlement is NOT changed.
  */
 export function consumeDose(
@@ -467,8 +426,7 @@ export function consumeDose(
   const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
   const multi = schedule.length > 0;
   const amountOverride = options?.amountOverride;
-
-  // No doseSchedule: reject (no Legacy single-dose fallback — Issue #267).
+  // No doseSchedule: reject (no Legacy single-dose fallback — ).
   if (!multi) {
     if (doseId != null && doseId !== '') {
       return {
@@ -485,16 +443,13 @@ export function consumeDose(
       reason: 'missing_dose_id',
     };
   }
-
   // Resolve which dose slot is being consumed.
   let targetDoseId = doseId;
   let targetAmount = 0;
-
   let target =
     targetDoseId != null && targetDoseId !== ''
       ? schedule.find((d) => d.id === targetDoseId)
       : undefined;
-
   if (!target) {
     if (targetDoseId != null && targetDoseId !== '') {
       return {
@@ -515,7 +470,6 @@ export function consumeDose(
       };
     }
   }
-
   if (isDoseConsumedOnDate(med, target.id, todayStr)) {
     return {
       updatedMed: null,
@@ -549,8 +503,7 @@ export function consumeDose(
       reason: 'no_dose',
     };
   }
-
-  // Issue #267: stock deduction from durable currentPills only.
+  // stock deduction from durable currentPills only.
   // No settlement, no elapsed-day settlement change.
   const settleBase = Math.max(0, med.currentPills);
   const doseAmount = Math.min(targetAmount, settleBase);
@@ -572,7 +525,6 @@ export function consumeDose(
     );
     doseSkippedHistory = cleared.doseSkippedHistory;
   }
-
   const allSlotsConsumedToday =
     !!med.doseSchedule &&
     med.doseSchedule.every((d) =>
@@ -585,10 +537,8 @@ export function consumeDose(
         todayStr
       )
     );
-
   const lastConsumedDate = allSlotsConsumedToday ? todayStr : med.lastConsumedDate;
-
-  // Issue #267: elapsed-day settlement is NOT changed by consume.
+  // elapsed-day settlement is NOT changed by consume.
   const updatedMed: Medication = {
     ...med,
     currentPills: newSnapshot,

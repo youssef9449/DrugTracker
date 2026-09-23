@@ -35,6 +35,33 @@ async function withClaimLock<T>(
   return locks.request(lockName(medId), work);
 }
 
+export async function runWithCriticalNotificationClaim<T>(
+  medId: string,
+  allowExistingScheduledClaim: boolean,
+  work: () => T | Promise<T>
+): Promise<{ acquired: boolean; result?: T }> {
+  return withClaimLock(medId, async () => {
+    const claims = loadCriticalNotificationClaims();
+    const current = getCriticalNotificationClaim(claims, medId);
+    if (
+      current?.claimed &&
+      !(allowExistingScheduledClaim && current.alarmTime !== null)
+    ) {
+      return { acquired: false };
+    }
+
+    setCriticalNotificationClaim(claims, medId, {
+      claimed: true,
+      alarmTime: null,
+    });
+    if (!saveCriticalNotificationClaims(claims)) {
+      return { acquired: false };
+    }
+
+    return { acquired: true, result: await work() };
+  });
+}
+
 export async function tryClaimCriticalNotification(
   medId: string,
   allowExistingScheduledClaim = false

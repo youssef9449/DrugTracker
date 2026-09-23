@@ -5,6 +5,12 @@ import {
   registerAppResumeHandler,
 } from '../native';
 import { getExactAlarmPermission, type ExactAlarmPermission } from '../utils/exactAlarm';
+import { getNotificationPermission } from '../utils/notifications/notificationPermissions';
+import { isNotificationChannelEnabled } from '../utils/notificationRuntime';
+import {
+  DOSE_REMINDER_CHANNEL_ID,
+  DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
+} from '../utils/notifications/doseReminderNotifications';
 import { playSuccessChime } from '../utils/sound';
 /**
  * Registers native notification-action, dose-received, and app-resume
@@ -20,6 +26,7 @@ export function useNativeActionHandlers(opts: {
   setCriticalAlarmResumeTick: Dispatch<SetStateAction<number>>;
   setDoseAlarmResumeTick: Dispatch<SetStateAction<number>>;
   setExactAlarmPermission: Dispatch<SetStateAction<ExactAlarmPermission | null>>;
+  setNotificationsEnabled: Dispatch<SetStateAction<boolean>>;
 }): void {
   const {
     allowManualTakeActionByMedicationId,
@@ -30,6 +37,7 @@ export function useNativeActionHandlers(opts: {
     setCriticalAlarmResumeTick,
     setDoseAlarmResumeTick,
     setExactAlarmPermission,
+    setNotificationsEnabled,
   } = opts;
   useEffect(() => {
     registerNotificationActionHandler((actionId, medicationId, doseId) => {
@@ -100,6 +108,25 @@ export function useNativeActionHandlers(opts: {
           .catch((err) => {
             console.warn('[App] Resume exact-alarm re-check failed:', err);
           });
+        Promise.all([
+          getNotificationPermission(),
+          isNotificationChannelEnabled(DOSE_REMINDER_CHANNEL_ID),
+          isNotificationChannelEnabled(DOSE_REMINDER_FOREGROUND_CHANNEL_ID),
+        ])
+          .then(([permission, backgroundChannel, foregroundChannel]) => {
+            const storedPreference = localStorage.getItem('notificationsEnabled');
+            const desired = storedPreference === null || storedPreference === 'true';
+            setNotificationsEnabled(
+              desired
+                && permission === 'granted'
+                && backgroundChannel
+                && foregroundChannel
+            );
+            setDoseLifecycleTick((tick) => tick + 1);
+          })
+          .catch((err) => {
+            console.warn('[App] Resume notification capability re-check failed:', err);
+          });
       }
     });
     return () => registerAppResumeHandler(null);
@@ -108,5 +135,6 @@ export function useNativeActionHandlers(opts: {
     setCriticalAlarmResumeTick,
     setDoseAlarmResumeTick,
     setExactAlarmPermission,
+    setNotificationsEnabled,
   ]);
 }

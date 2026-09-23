@@ -132,28 +132,30 @@ export function useDoseReminderScheduler({
     operation: () => Promise<void>
   ): void => {
     clearRetry(key);
-    const run = async (attempt: number): Promise<void> => {
-      if (!operationCoordinatorRef.current.isCurrent(key, gen)) return;
-      try {
-        await operation();
-        clearRetry(key);
-      } catch (error) {
+
+    const run = (attempt: number): Promise<void> =>
+      operationCoordinatorRef.current.enqueue(key, gen, async () => {
         if (!operationCoordinatorRef.current.isCurrent(key, gen)) return;
-        const nextAttempt = attempt + 1;
-        if (nextAttempt > 3) {
-          console.warn('[dose-reminder] bounded retry exhausted:', key, error);
-          return;
-        }
-        const delays = [1000, 4000, 16000] as const;
-        const timer = setTimeout(() => {
-          retryTimersRef.current.delete(key);
+        try {
+          await operation();
+          clearRetry(key);
+        } catch (error) {
           if (!operationCoordinatorRef.current.isCurrent(key, gen)) return;
-          void run(nextAttempt);
-        }, delays[attempt]);
-        retryTimersRef.current.set(key, timer);
-        retryAttemptsRef.current.set(key, nextAttempt);
-      }
-    };
+          const nextAttempt = attempt + 1;
+          if (nextAttempt > 3) {
+            console.warn('[dose-reminder] bounded retry exhausted:', key, error);
+            return;
+          }
+          const delays = [1000, 4000, 16000] as const;
+          const timer = setTimeout(() => {
+            retryTimersRef.current.delete(key);
+            if (!operationCoordinatorRef.current.isCurrent(key, gen)) return;
+            void run(nextAttempt);
+          }, delays[attempt]);
+          retryTimersRef.current.set(key, timer);
+          retryAttemptsRef.current.set(key, nextAttempt);
+        }
+      });
 
     void run(0);
   };

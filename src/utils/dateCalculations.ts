@@ -46,23 +46,15 @@ export function nextLocalMidnightEpochMs(now: Date = new Date()): number | null 
   return Number.isFinite(epochMs) ? epochMs : null;
 }
 export function localEpochMs(calendarDate: string, timeHhmm: string): number | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(calendarDate)) return null;
+  const calendarDateValue = parseCalendarDate(calendarDate);
+  if (!calendarDateValue) return null;
   const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(timeHhmm);
   if (!match) return null;
-  const [year, month, day] = calendarDate.split('-').map(Number);
-  const utcDate = parseCalendarDate(calendarDate);
-  if (
-    !utcDate ||
-    utcDate.getUTCFullYear() !== year ||
-    utcDate.getUTCMonth() !== month - 1 ||
-    utcDate.getUTCDate() !== day
-  ) {
-    return null;
-  }
+
   const dt = new Date(
-    year,
-    month - 1,
-    day,
+    calendarDateValue.getUTCFullYear(),
+    calendarDateValue.getUTCMonth(),
+    calendarDateValue.getUTCDate(),
     Number(match[1]),
     Number(match[2]),
     0,

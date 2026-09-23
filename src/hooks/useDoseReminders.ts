@@ -180,7 +180,11 @@ export function useDoseReminders({
           return;
         }
 
-        setSnoozeUntil(medication.id, snoozeUntil, doseId);
+        const persisted = setSnoozeUntil(medication.id, snoozeUntil, doseId);
+        if (!persisted) {
+          await cancelSnoozedDoseReminder(medication.id, doseId);
+          throw new Error('snooze_persistence_failed');
+        }
         const next = dequeueNextValidAlarm();
         if (next) {
           const nextMed = medicationsRef.current.find((m) => m.id === next.medicationId)!;

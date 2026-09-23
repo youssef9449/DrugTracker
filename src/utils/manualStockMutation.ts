@@ -253,8 +253,7 @@ async function restoreInvalidatedDoseReminders(
 
     for (const slot of getDoseReminderSlots(med)) {
       const shouldSkipToday =
-        isDoseConsumedOnDate(med, slot.doseId, today)
-        || isDoseSkippedOnDate(med, slot.doseId, today);
+        isDoseConsumedOnDate(med, slot.doseId, today);
 
       await scheduleDoseReminder(
         med.id,
@@ -1319,6 +1318,29 @@ export function runGatedAutoDeductToggle(opts: {
         unit: med.unit,
       };
     }
+    const doseInvalidation = await invalidateMedicationDoseReminders(med);
+    if (!doseInvalidation.ok) {
+      let compensationError: string | undefined;
+      if (invalidation.invalidated.length > 0) {
+        const compensation = await restoreInvalidatedRecurrences(
+          med,
+          invalidation.invalidated
+        );
+        if (!compensation.ok) compensationError = compensation.error;
+      }
+      return {
+        outcome: 'native_invalidation_failed' as const,
+        medications: fresh.medications,
+        logs: fresh.logs,
+        newState,
+        settleLog: null,
+        reason: compensationError
+          ? doseInvalidation.error + ';compensation:' + compensationError
+          : doseInvalidation.error,
+        medicationName: med.name,
+        unit: med.unit,
+      };
+    }
     const err = await commitWithManualEnvelope({ medications, logs }, fresh.medications);
     if (err) {
       // Native invalidation already linearized the old schedule chain. Restore
@@ -1333,6 +1355,10 @@ export function runGatedAutoDeductToggle(opts: {
         if (!compensation.ok) {
           compensationError = compensation.error;
         }
+      }
+      const doseCompensation = await restoreInvalidatedDoseReminders(med);
+      if (!doseCompensation.ok && compensationError == null) {
+        compensationError = doseCompensation.error ?? 'dose_reminder_restore_failed';
       }
       return {
         outcome: 'persist_failed' as const,
@@ -1637,7 +1663,12 @@ export function runGatedMedicationNotificationToggle(opts: {
   field: 'reminderEnabled' | 'criticalStockAlertsEnabled';
   now?: Date;
 }): Promise<{
-  outcome: 'applied' | 'missing_med' | 'persist_failed' | 'native_list_failed';
+  outcome:
+    | 'applied'
+    | 'missing_med'
+    | 'persist_failed'
+    | 'native_list_failed'
+    | 'native_invalidation_failed';
   medications: Medication[];
   logs: ConsumptionLog[];
   medicationName?: string;
@@ -1687,16 +1718,39 @@ export function runGatedMedicationNotificationToggle(opts: {
     const medications = fresh.medications.map((m) =>
       m.id === opts.medicationId ? updatedMed : m
     );
+
+    const doseInvalidation =
+      opts.field === 'reminderEnabled'
+        ? await invalidateMedicationDoseReminders(med)
+        : { ok: true as const };
+    if (!doseInvalidation.ok) {
+      return {
+        outcome: 'native_invalidation_failed' as const,
+        medications: fresh.medications,
+        logs: fresh.logs,
+        medicationName: med.name,
+        reason: doseInvalidation.error,
+      };
+    }
+
     const err = await commitWithManualEnvelope(
       { medications, logs: fresh.logs },
       fresh.medications
     );
     if (err) {
+      let compensationError: string | undefined;
+      if (opts.field === 'reminderEnabled') {
+        const compensation = await restoreInvalidatedDoseReminders(med);
+        if (!compensation.ok) compensationError = compensation.error;
+      }
       return {
         outcome: 'persist_failed' as const,
         medications: fresh.medications,
         logs: fresh.logs,
         medicationName: med.name,
+        reason: compensationError
+          ? 'persist_failed;compensation:' + compensationError
+          : 'persist_failed',
       };
     }
     return {

@@ -212,11 +212,13 @@ public final class ExactAlarmRuntime {
     }
 
     /**
-     * Returns whether the OS currently has a matching PendingIntent for the
-     * exact-alarm identity. This inspects Android AlarmManager state only;
-     * durable metadata is not treated as proof that the alarm is armed.
+     * Query the real AlarmManager PendingIntent state.
+     *
+     * <p>ABSENT means the OS has no matching alarm. FAILED means the state
+     * could not be determined; callers must never treat FAILED as ABSENT for
+     * destructive reconciliation.</p>
      */
-    public boolean isPending(
+    public PendingStateResult getPendingState(
             String identityUri,
             String action,
             Class<? extends BroadcastReceiver> receiverClass) {
@@ -224,7 +226,7 @@ public final class ExactAlarmRuntime {
                 || action == null
                 || action.isEmpty()
                 || receiverClass == null) {
-            return false;
+            return PendingStateResult.failed("invalid_pending_request");
         }
         synchronized (ExactAlarmOperationLock.LOCK) {
             try {
@@ -241,10 +243,34 @@ public final class ExactAlarmRuntime {
                         pendingIntentRequestCode,
                         intent,
                         flags);
-                return pendingIntent != null;
+                return pendingIntent == null
+                        ? PendingStateResult.absent()
+                        : PendingStateResult.pending();
             } catch (Exception e) {
-                return false;
+                Log.e(TAG, "pending-state lookup failed", e);
+                return PendingStateResult.failed("pending_state_lookup_failed");
             }
+        }
+    }
+
+    /**
+     * Atomically checks whether a fired delivery still owns an active durable
+     * schedule. This is the delivery linearization point: a cancellation or
+     * replacement that acquires the shared lock first makes this false.
+     */
+    public boolean ownsActiveSchedule(
+            String storageKey,
+            String expectedOperationVersion) {
+        if (storageKey == null || storageKey.isEmpty()
+                || expectedOperationVersion == null
+                || expectedOperationVersion.isEmpty()) {
+            return false;
+        }
+        synchronized (ExactAlarmOperationLock.LOCK) {
+            return ExactAlarmContract.isMetadataOwnedByOperationVersion(
+                    store.getScheduleRaw(storageKey),
+                    expectedOperationVersion)
+                    && !store.isEffectivelyCancelledLocked(storageKey);
         }
     }
 
@@ -262,11 +288,24 @@ public final class ExactAlarmRuntime {
         }
 
         synchronized (ExactAlarmOperationLock.LOCK) {
+            String previousScheduleRaw =
+                    store.getScheduleRaw(request.storageKey);
+
             if (request.expectedExistingOperationVersion != null
                     && !ExactAlarmContract.isMetadataOwnedByOperationVersion(
                             store.getScheduleRaw(
                                     request.storageKey),
                             request.expectedExistingOperationVersion)) {
+                return ScheduleResult.fail("ownership_lost");
+            }
+
+            // Recovery/re-arm requests are allowed to replace only the exact
+            // schedule version they read. If a newer cancellation tombstone
+            // appeared after the caller's pre-check, do not let recovery
+            // allocate a fresh version that would supersede that cancellation.
+            if (request.expectedExistingOperationVersion != null
+                    && !request.expectedExistingOperationVersion.isEmpty()
+                    && store.isEffectivelyCancelledLocked(request.storageKey)) {
                 return ScheduleResult.fail("ownership_lost");
             }
 
@@ -315,7 +354,8 @@ public final class ExactAlarmRuntime {
             if (manager == null) {
                 rollbackScheduleLocked(
                         request.storageKey,
-                        operationVersion);
+                        operationVersion,
+                        previousScheduleRaw);
                 return ScheduleResult.fail(
                         "alarm_manager_unavailable");
             }
@@ -331,7 +371,8 @@ public final class ExactAlarmRuntime {
                 if (pendingIntent == null) {
                     rollbackScheduleLocked(
                             request.storageKey,
-                            operationVersion);
+                            operationVersion,
+                            previousScheduleRaw);
                     return ScheduleResult.fail(
                             "pending_intent_build_failed");
                 }
@@ -351,14 +392,16 @@ public final class ExactAlarmRuntime {
                 Log.w(TAG, "exact alarm install denied", e);
                 rollbackScheduleLocked(
                         request.storageKey,
-                        operationVersion);
+                        operationVersion,
+                        previousScheduleRaw);
                 return ScheduleResult.fail(
                         "exact_alarm_permission_denied");
             } catch (Exception e) {
                 Log.e(TAG, "exact alarm install failed", e);
                 rollbackScheduleLocked(
                         request.storageKey,
-                        operationVersion);
+                        operationVersion,
+                        previousScheduleRaw);
                 return ScheduleResult.fail("schedule_failed");
             }
 
@@ -561,18 +604,35 @@ public final class ExactAlarmRuntime {
     }
 
     /**
-     * Reinstall a durable row after lifecycle recovery. The caller supplies the
-     * current local-date-derived epoch and the expected ownership token.
+     * Roll back a failed schedule installation without discarding a previous
+     * durable schedule that was owned before this operation began.
      */
     private void rollbackScheduleLocked(
             String storageKey,
-            String expectedOperationVersion) {
-        if (!store.removeScheduleIfOwnedLocked(
-                storageKey,
+            String expectedOperationVersion,
+            String previousScheduleRaw) {
+        if (!ExactAlarmContract.isMetadataOwnedByOperationVersion(
+                store.getScheduleRaw(storageKey),
                 expectedOperationVersion)) {
-            Log.w(TAG,
-                    "ownership-safe rollback skipped: "
-                            + storageKey);
+            Log.w(
+                    TAG,
+                    "ownership-safe rollback skipped: " + storageKey);
+            return;
+        }
+
+        boolean restored;
+        if (previousScheduleRaw == null || previousScheduleRaw.isEmpty()) {
+            restored = store.removeScheduleLocked(storageKey);
+        } else {
+            restored = store.writeScheduleRawLocked(
+                    storageKey,
+                    previousScheduleRaw);
+        }
+
+        if (!restored) {
+            Log.e(
+                    TAG,
+                    "schedule rollback persistence failed: " + storageKey);
         }
     }
 
@@ -684,6 +744,42 @@ public final class ExactAlarmRuntime {
             this.deliveryExtras = deliveryExtras;
             this.expectedExistingOperationVersion =
                     expectedExistingOperationVersion;
+        }
+    }
+
+    public static final class PendingStateResult {
+        public enum Status {
+            PENDING,
+            ABSENT,
+            FAILED
+        }
+
+        public final Status status;
+        public final String error;
+
+        private PendingStateResult(Status status, String error) {
+            this.status = status;
+            this.error = error;
+        }
+
+        static PendingStateResult pending() {
+            return new PendingStateResult(Status.PENDING, null);
+        }
+
+        static PendingStateResult absent() {
+            return new PendingStateResult(Status.ABSENT, null);
+        }
+
+        static PendingStateResult failed(String error) {
+            return new PendingStateResult(Status.FAILED, error);
+        }
+
+        public boolean isPending() {
+            return status == Status.PENDING;
+        }
+
+        public boolean isOk() {
+            return status != Status.FAILED;
         }
     }
 

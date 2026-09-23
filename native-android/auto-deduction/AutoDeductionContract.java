@@ -65,7 +65,7 @@ public final class AutoDeductionContract {
     public static final String PREFS_CANCELLED = "drugtracker_auto_deduction_cancelled_v1";
     /**
      * Durable monotonic ordering sequence for generic operationVersion / cancellation tokens.
-     * Survives process death so (millis, seq) comparisons remain reconstructible
+     * Survives process death so sequence-first comparisons remain reconstructible;
      * after reboot. The shared runtime contract owns the ordering-key name.
      */
     public static final String PREFS_ORDERING = "drugtracker_auto_deduction_ordering_v1";

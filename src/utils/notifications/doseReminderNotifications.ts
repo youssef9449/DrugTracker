@@ -53,9 +53,17 @@ export async function cancelSnoozedDoseReminder(
   }
   if (!isNativePlatform()) return;
   try {
-    await cancelNotification('dose-reminder-snooze', `${medId}::${doseId}`);
+    const cancelled = await cancelNotification(
+      'dose-reminder-snooze',
+      `${medId}::${doseId}`
+    );
+    if (!cancelled) {
+      throw new Error('dose_reminder_snooze_cancel_failed');
+    }
   } catch (err) {
-    console.warn('[notifications] cancelSnoozedDoseReminder failed:', err);
+    throw err instanceof Error
+      ? err
+      : new Error('dose_reminder_snooze_cancel_failed');
   }
 }
 

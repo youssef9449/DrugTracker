@@ -34,6 +34,7 @@ import {
 } from './autoDeductionNativeScheduling';
 import {
   isDoseSkippedOnDate,
+  isDoseConsumedOnDate,
   getTodayDateString,
   tomorrowDateString,
   localEpochMs,
@@ -58,6 +59,20 @@ import {
   type ManualStockEnvelope,
 } from './stockEnvelopeRecovery';
 import { reconcileExactBeforeManualMutation } from './reconcileExactBeforeManualMutation';
+import {
+  cancelDoseReminderNative,
+  cancelDoseSnoozeNative,
+} from './doseReminderNative';
+import {
+  scheduleDoseReminder,
+  getDoseReminderSlots,
+} from './doseReminderScheduling';
+import { scheduleSnoozedDoseReminder } from './notifications/doseReminderNotifications';
+import {
+  getSnoozeUntil,
+  isSnoozeActive,
+} from './doseReminderStorage';
+import { doseReminderDefinitionChanged } from './doseReminderDefinitions';
 export type {
   ManualStockEnvelope,
 } from './stockEnvelopeRecovery';
@@ -183,6 +198,107 @@ async function restoreInvalidatedRecurrences(
   }
   return { ok: true };
 }
+interface DoseReminderInvalidationResult {
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * Invalidate the native Dose Reminder schedules represented by the current
+ * durable medication before the durable medication mutation commits.
+ *
+ * This is the JS/native ordering barrier for reminder-defining edits. Native
+ * tombstones are written by the shared ExactAlarmRuntime, so a later lifecycle
+ * restore cannot resurrect the old schedule after process death.
+ */
+async function invalidateMedicationDoseReminders(
+  med: Medication
+): Promise<DoseReminderInvalidationResult> {
+  try {
+    for (const slot of getDoseReminderSlots(med)) {
+      await cancelDoseReminderNative(med.id, slot.doseId);
+      await cancelDoseSnoozeNative(med.id, slot.doseId);
+    }
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error
+        ? error.message
+        : 'dose_reminder_invalidation_failed',
+    };
+  }
+}
+
+/**
+ * Compensation for a failed durable medication commit after Dose Reminder
+ * invalidation. Rebuilds exactly the reminder state represented by the old
+ * durable medication, including an active snooze when one was persisted.
+ */
+async function restoreInvalidatedDoseReminders(
+  med: Medication
+): Promise<DoseReminderInvalidationResult> {
+  try {
+    if (!med.reminderEnabled) {
+      return { ok: true };
+    }
+
+    const today = getTodayDateString();
+    if (!isMedicationTreatmentActiveOnDate(med, today)) {
+      return { ok: true };
+    }
+
+    const treatmentEndDate = getMedicationTreatmentEndDate(med);
+    const allowManualTakeAction = med.autoDeductEnabled === false;
+
+    for (const slot of getDoseReminderSlots(med)) {
+      const shouldSkipToday =
+        isDoseConsumedOnDate(med, slot.doseId, today);
+
+      await scheduleDoseReminder(
+        med.id,
+        med.name,
+        slot.time,
+        slot.amount,
+        slot.unit,
+        slot.doseId,
+        {
+          ...(shouldSkipToday ? { skipToday: true as const } : {}),
+          allowManualTakeAction,
+          ...(slot.description ? { doseDescription: slot.description } : {}),
+          ...(treatmentEndDate ? { treatmentEndDate } : {}),
+        }
+      );
+
+      const snoozeUntil = getSnoozeUntil(med.id, slot.doseId);
+      if (snoozeUntil != null && snoozeUntil > Date.now() && isSnoozeActive(med.id, slot.doseId)) {
+        const remainingMinutes =
+          Math.max(0.001, (snoozeUntil - Date.now()) / 60_000);
+        await scheduleSnoozedDoseReminder(
+          med.id,
+          med.name,
+          slot.amount,
+          slot.unit,
+          slot.time,
+          remainingMinutes,
+          slot.doseId,
+          allowManualTakeAction,
+          slot.description
+        );
+      }
+    }
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error
+        ? error.message
+        : 'dose_reminder_restore_failed',
+    };
+  }
+}
+
 interface RecurrenceInvalidationResult {
   ok: boolean;
   error?: string;
@@ -1202,6 +1318,29 @@ export function runGatedAutoDeductToggle(opts: {
         unit: med.unit,
       };
     }
+    const doseInvalidation = await invalidateMedicationDoseReminders(med);
+    if (!doseInvalidation.ok) {
+      let compensationError: string | undefined;
+      if (invalidation.invalidated.length > 0) {
+        const compensation = await restoreInvalidatedRecurrences(
+          med,
+          invalidation.invalidated
+        );
+        if (!compensation.ok) compensationError = compensation.error;
+      }
+      return {
+        outcome: 'native_invalidation_failed' as const,
+        medications: fresh.medications,
+        logs: fresh.logs,
+        newState,
+        settleLog: null,
+        reason: compensationError
+          ? doseInvalidation.error + ';compensation:' + compensationError
+          : doseInvalidation.error,
+        medicationName: med.name,
+        unit: med.unit,
+      };
+    }
     const err = await commitWithManualEnvelope({ medications, logs }, fresh.medications);
     if (err) {
       // Native invalidation already linearized the old schedule chain. Restore
@@ -1216,6 +1355,10 @@ export function runGatedAutoDeductToggle(opts: {
         if (!compensation.ok) {
           compensationError = compensation.error;
         }
+      }
+      const doseCompensation = await restoreInvalidatedDoseReminders(med);
+      if (!doseCompensation.ok && compensationError == null) {
+        compensationError = doseCompensation.error ?? 'dose_reminder_restore_failed';
       }
       return {
         outcome: 'persist_failed' as const,
@@ -1296,31 +1439,40 @@ export function runGatedGlobalAutoDeductToggle(opts: {
     // default for newly added ones. Flip autoDeductEnabled only — do not
     // settle stock, invent consumption logs, or mutate currentPills here.
     // Schedulers/reminders react to the resulting medication-level flags.
-    // Global OFF: invalidate ALL native recurrences BEFORE the durable bulk
-    // commit (same ordering barrier as per-med toggle) so a near-fire
-    // occurrence cannot FIRE after OFF is durable but before the scheduler
-    // cleans up. Global ON does not invalidate.
+    // Any global Auto change also changes the neutral manual-Take capability
+    // carried by Dose Reminder payloads. Both Auto and Dose Reminder native
+    // state are invalidated before the durable bulk commit.
     const invalidatedMeds: Array<{
       med: Medication;
       doseIds: string[];
       invalidated: Array<{ doseId: string; generation: number }>;
     }> = [];
-    if (opts.enable === false) {
-      for (const med of fresh.medications) {
+    const invalidatedDoseMeds: Medication[] = [];
+
+    for (const med of fresh.medications) {
+      if (med.autoDeductEnabled === opts.enable) continue;
+
+      let autoInvalidation:
+        | RecurrenceInvalidationResult
+        | null = null;
+
+      if (opts.enable === false) {
         const invalidation = await invalidateMedicationRecurrences(med);
+        autoInvalidation = invalidation;
         if (!invalidation.ok) {
           let compensationError: string | null = null;
+
           for (const completed of invalidatedMeds) {
-            if (completed.invalidated.length > 0) {
-              const compensation = await restoreInvalidatedRecurrences(
-                completed.med,
-                completed.invalidated
-              );
-              if (!compensation.ok && compensationError == null) {
-                compensationError = compensation.error;
-              }
+            if (completed.invalidated.length === 0) continue;
+            const compensation = await restoreInvalidatedRecurrences(
+              completed.med,
+              completed.invalidated
+            );
+            if (!compensation.ok && compensationError == null) {
+              compensationError = compensation.error;
             }
           }
+
           return {
             outcome: 'native_invalidation_failed' as const,
             medications: fresh.medications,
@@ -1332,12 +1484,73 @@ export function runGatedGlobalAutoDeductToggle(opts: {
               : invalidation.error,
           };
         }
+
         invalidatedMeds.push({
           med,
           doseIds: invalidation.invalidatedDoseIds,
           invalidated: invalidation.invalidated,
         });
       }
+
+      const doseInvalidation = await invalidateMedicationDoseReminders(med);
+      if (!doseInvalidation.ok) {
+        let compensationError: string | null = null;
+
+        if (
+          opts.enable === false
+          && autoInvalidation
+          && autoInvalidation.invalidated.length > 0
+        ) {
+          const compensation = await restoreInvalidatedRecurrences(
+            med,
+            autoInvalidation.invalidated
+          );
+          if (!compensation.ok) {
+            compensationError = compensation.error;
+          }
+        }
+
+        for (const completed of invalidatedMeds) {
+          if (completed.invalidated.length === 0) continue;
+          const compensation = await restoreInvalidatedRecurrences(
+            completed.med,
+            completed.invalidated
+          );
+          if (!compensation.ok && compensationError == null) {
+            compensationError = compensation.error;
+          }
+        }
+
+        for (const completed of invalidatedDoseMeds) {
+          const compensation = await restoreInvalidatedDoseReminders(
+            completed
+          );
+          if (!compensation.ok && compensationError == null) {
+            compensationError = compensation.error;
+          }
+        }
+
+        // The current medication's Dose Reminder invalidation may have
+        // partially completed before reporting failure. Compensate it too.
+        const currentDoseCompensation =
+          await restoreInvalidatedDoseReminders(med);
+        if (!currentDoseCompensation.ok && compensationError == null) {
+          compensationError = currentDoseCompensation.error;
+        }
+
+        return {
+          outcome: 'native_invalidation_failed' as const,
+          medications: fresh.medications,
+          logs: fresh.logs,
+          enable: opts.enable,
+          settleLogs: [],
+          reason: compensationError
+            ? doseInvalidation.error + ';compensation:' + compensationError
+            : doseInvalidation.error,
+        };
+      }
+
+      invalidatedDoseMeds.push(med);
     }
     const medications = fresh.medications.map((med) =>
       med.autoDeductEnabled === opts.enable
@@ -1360,6 +1573,14 @@ export function runGatedGlobalAutoDeductToggle(opts: {
           if (!compensation.ok && compensationError == null) {
             compensationError = compensation.error;
           }
+        }
+      }
+      for (const completed of invalidatedDoseMeds) {
+        const compensation = await restoreInvalidatedDoseReminders(
+          completed
+        );
+        if (!compensation.ok && compensationError == null) {
+          compensationError = compensation.error;
         }
       }
       return {
@@ -1453,6 +1674,31 @@ export function runGatedDeleteMedication(opts: {
         unit: med.unit,
       };
     }
+    const doseInvalidation = await invalidateMedicationDoseReminders(med);
+    if (!doseInvalidation.ok) {
+      let compensationError: string | undefined;
+      if (invalidation.invalidated.length > 0) {
+        const compensation = await restoreInvalidatedRecurrences(
+          med,
+          invalidation.invalidated
+        );
+        if (!compensation.ok) compensationError = compensation.error;
+      }
+      const doseCompensation = await restoreInvalidatedDoseReminders(med);
+      if (!doseCompensation.ok && compensationError == null) {
+        compensationError = doseCompensation.error;
+      }
+      return {
+        outcome: 'native_invalidation_failed' as const,
+        medications: pre.state.medications,
+        logs: pre.state.logs,
+        reason: compensationError
+          ? doseInvalidation.error + ';compensation:' + compensationError
+          : doseInvalidation.error,
+        medicationName: med.name,
+        unit: med.unit,
+      };
+    }
     const medications = pre.state.medications.filter((m) => m.id !== opts.medicationId);
     const err = await commitWithManualEnvelope({
       medications,
@@ -1468,6 +1714,10 @@ export function runGatedDeleteMedication(opts: {
         if (!compensation.ok) {
           compensationError = compensation.error;
         }
+      }
+      const doseCompensation = await restoreInvalidatedDoseReminders(med);
+      if (!doseCompensation.ok && compensationError == null) {
+        compensationError = doseCompensation.error;
       }
       return {
         outcome: 'persist_failed' as const,
@@ -1520,7 +1770,12 @@ export function runGatedMedicationNotificationToggle(opts: {
   field: 'reminderEnabled' | 'criticalStockAlertsEnabled';
   now?: Date;
 }): Promise<{
-  outcome: 'applied' | 'missing_med' | 'persist_failed' | 'native_list_failed';
+  outcome:
+    | 'applied'
+    | 'missing_med'
+    | 'persist_failed'
+    | 'native_list_failed'
+    | 'native_invalidation_failed';
   medications: Medication[];
   logs: ConsumptionLog[];
   medicationName?: string;
@@ -1570,16 +1825,39 @@ export function runGatedMedicationNotificationToggle(opts: {
     const medications = fresh.medications.map((m) =>
       m.id === opts.medicationId ? updatedMed : m
     );
+
+    const doseInvalidation =
+      opts.field === 'reminderEnabled'
+        ? await invalidateMedicationDoseReminders(med)
+        : { ok: true as const };
+    if (!doseInvalidation.ok) {
+      return {
+        outcome: 'native_invalidation_failed' as const,
+        medications: fresh.medications,
+        logs: fresh.logs,
+        medicationName: med.name,
+        reason: doseInvalidation.error,
+      };
+    }
+
     const err = await commitWithManualEnvelope(
       { medications, logs: fresh.logs },
       fresh.medications
     );
     if (err) {
+      let compensationError: string | undefined;
+      if (opts.field === 'reminderEnabled') {
+        const compensation = await restoreInvalidatedDoseReminders(med);
+        if (!compensation.ok) compensationError = compensation.error;
+      }
       return {
         outcome: 'persist_failed' as const,
         medications: fresh.medications,
         logs: fresh.logs,
         medicationName: med.name,
+        reason: compensationError
+          ? 'persist_failed;compensation:' + compensationError
+          : 'persist_failed',
       };
     }
     return {
@@ -1643,9 +1921,15 @@ export function runGatedMedicationUpdate(opts: {
       invalidatedDoseIds: [],
       invalidated: [],
     };
-    if (autoDeductionDefinitionChanged(freshMed, opts.medData)) {
-      // Invalidate the old native chain before committing new amount/time,
-      // reminder, schedule-id, or per-med auto-deduction configuration.
+    let doseInvalidation: DoseReminderInvalidationResult = { ok: true };
+    const autoChanged = autoDeductionDefinitionChanged(freshMed, opts.medData);
+    const doseChanged = doseReminderDefinitionChanged(
+      freshMed,
+      opts.medData
+    );
+    if (autoChanged) {
+      // Invalidate the old Auto chain before committing its defining
+      // medication configuration.
       invalidation = await invalidateMedicationRecurrences(freshMed);
       if (!invalidation.ok) {
         return {
@@ -1654,6 +1938,39 @@ export function runGatedMedicationUpdate(opts: {
           logs: fresh.logs,
           settleLog: null,
           reason: invalidation.error,
+          medicationName: freshMed.name,
+          unit: freshMed.unit,
+        };
+      }
+    }
+    if (doseChanged) {
+      // Invalidate the old Dose Reminder chain before committing its defining
+      // medication configuration. Native cancellation is the linearization
+      // barrier that prevents an old alarm from firing against the new state.
+      doseInvalidation =
+        await invalidateMedicationDoseReminders(freshMed);
+      if (!doseInvalidation.ok) {
+        let compensationError: string | undefined;
+        if (autoChanged && invalidation.invalidated.length > 0) {
+          const compensation = await restoreInvalidatedRecurrences(
+            freshMed,
+            invalidation.invalidated
+          );
+          if (!compensation.ok) compensationError = compensation.error;
+        }
+        const doseCompensation =
+          await restoreInvalidatedDoseReminders(freshMed);
+        if (!doseCompensation.ok && compensationError == null) {
+          compensationError = doseCompensation.error;
+        }
+        return {
+          outcome: 'native_invalidation_failed' as const,
+          medications: fresh.medications,
+          logs: fresh.logs,
+          settleLog: null,
+          reason: compensationError
+            ? doseInvalidation.error + ';compensation:' + compensationError
+            : doseInvalidation.error,
           medicationName: freshMed.name,
           unit: freshMed.unit,
         };
@@ -1704,16 +2021,20 @@ export function runGatedMedicationUpdate(opts: {
       // Only configuration-changing edits invalidate native recurrences.
       // Restore the old chain when the new JS state could not be committed.
       let compensationError: string | null = null;
-      if (
-        autoDeductionDefinitionChanged(freshMed, opts.medData) &&
-        invalidation.invalidated.length > 0
-      ) {
+      if (autoChanged && invalidation.invalidated.length > 0) {
         const compensation = await restoreInvalidatedRecurrences(
           freshMed,
           invalidation.invalidated
         );
         if (!compensation.ok) {
           compensationError = compensation.error;
+        }
+      }
+      if (doseChanged) {
+        const doseCompensation =
+          await restoreInvalidatedDoseReminders(freshMed);
+        if (!doseCompensation.ok && compensationError == null) {
+          compensationError = doseCompensation.error;
         }
       }
       return {

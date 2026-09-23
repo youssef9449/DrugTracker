@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { enqueueCriticalAlarmOp } from '@/utils/criticalAlarmOperations';
+import {
+  bumpCriticalAlarmGeneration,
+  enqueueCriticalAlarmOp,
+  enqueueCriticalAlarmOpGuarded,
+} from '@/utils/criticalAlarmOperations';
 
 describe('criticalAlarmOperations', () => {
   it('serializes native alarm operations across all Critical Stock callers for one medication', async () => {
@@ -30,14 +34,38 @@ describe('criticalAlarmOperations', () => {
   it('keeps different medication keys independent', async () => {
     const events: string[] = [];
 
-    const first = enqueueCriticalAlarmOp('med-1', async () => {
-      events.push('med-1');
-    });
-    const second = enqueueCriticalAlarmOp('med-2', async () => {
-      events.push('med-2');
-    });
+    const first = enqueueCriticalAlarmOp(
+      'med-1',
+      async () => {
+        events.push('med-1');
+      }
+    );
+    const second = enqueueCriticalAlarmOp(
+      'med-2',
+      async () => {
+        events.push('med-2');
+      }
+    );
 
     await Promise.all([first, second]);
     expect(events.sort()).toEqual(['med-1', 'med-2']);
+  });
+
+  it('drops queued stale work when a newer generation supersedes it', async () => {
+    const events: string[] = [];
+    const firstGeneration = bumpCriticalAlarmGeneration('med-stale');
+
+    const first = enqueueCriticalAlarmOpGuarded(
+      'med-stale',
+      firstGeneration,
+      async () => {
+        events.push('stale');
+      }
+    );
+
+    bumpCriticalAlarmGeneration('med-stale');
+    await first;
+
+    expect(events).toEqual([]);
   });
 });

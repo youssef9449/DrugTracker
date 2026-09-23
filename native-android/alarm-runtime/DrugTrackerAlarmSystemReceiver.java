@@ -3,6 +3,7 @@ package app.drugtracker.alarmruntime;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Build;
 import android.util.Log;
 
 /**
@@ -21,6 +22,8 @@ public final class DrugTrackerAlarmSystemReceiver
             "android.intent.action.QUICKBOOT_POWERON";
     private static final String ACTION_EXACT_ALARM_PERMISSION =
             "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED";
+    private static final String ACTION_TIMEZONE_OFFSET_CHANGED =
+            "android.intent.action.TIMEZONE_OFFSET_CHANGED";
 
     @Override
     public void onReceive(
@@ -38,6 +41,11 @@ public final class DrugTrackerAlarmSystemReceiver
             reason = ExactAlarmLifecycle.REASON_BOOT;
         } else if (Intent.ACTION_TIMEZONE_CHANGED.equals(action)) {
             reason = ExactAlarmLifecycle.REASON_TIMEZONE_CHANGED;
+        } else if (Intent.ACTION_TIME_CHANGED.equals(action)) {
+            reason = ExactAlarmLifecycle.REASON_TIME_CHANGED;
+        } else if (Build.VERSION.SDK_INT >= 37
+                && ACTION_TIMEZONE_OFFSET_CHANGED.equals(action)) {
+            reason = ExactAlarmLifecycle.REASON_TIMEZONE_OFFSET_CHANGED;
         } else if (ACTION_EXACT_ALARM_PERMISSION.equals(action)) {
             reason = ExactAlarmLifecycle.REASON_EXACT_ALARM_PERMISSION;
         } else {

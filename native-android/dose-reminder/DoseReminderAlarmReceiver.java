@@ -55,21 +55,61 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
 
         if (medicationId == null || medicationId.isEmpty()
                 || doseId == null || doseId.isEmpty()
-                || amount <= 0d) {
+                || amount <= 0d
+                || operationVersion == null
+                || operationVersion.isEmpty()) {
             return;
         }
 
-        boolean snooze = DoseReminderAlarmAdapter.ACTION_DOSE_SNOOZE.equals(action);
-        if (!snooze) {
+        DoseReminderAlarmAdapter adapter =
+                new DoseReminderAlarmAdapter(context);
+        boolean snooze =
+                DoseReminderAlarmAdapter.ACTION_DOSE_SNOOZE.equals(action);
+
+        // Ownership check is the delivery linearization point. A cancellation
+        // or replacement that acquires the shared lock first invalidates this
+        // delivery before notification side effects are allowed.
+        if (snooze) {
+            if (!adapter.ownsActiveSnooze(
+                    medicationId,
+                    doseId,
+                    operationVersion)) {
+                return;
+            }
+
+            // Consume the durable one-shot before posting. This closes the
+            // reboot/process-death replay window: a delivered snooze has no
+            // durable row left to restore.
+            if (!adapter.completeSnooze(
+                    medicationId,
+                    doseId,
+                    operationVersion)) {
+                return;
+            }
+        } else {
+            if (!adapter.ownsActiveOccurrence(
+                    medicationId,
+                    doseId,
+                    operationVersion)) {
+                return;
+            }
+
             org.json.JSONObject metadata =
-                    new DoseReminderAlarmAdapter(context).getScheduleMetadata(
-                            medicationId, doseId);
-            String treatmentEndDate = metadata == null
-                    ? ""
-                    : metadata.optString("treatmentEndDate", "");
-            String scheduledCalendarDate = metadata == null
-                    ? ""
-                    : metadata.optString("calendarDate", "");
+                    adapter.getScheduleMetadata(
+                            medicationId,
+                            doseId);
+            if (metadata == null
+                    || !app.drugtracker.alarmruntime.ExactAlarmContract
+                            .isMetadataOwnedByOperationVersion(
+                                    metadata,
+                                    operationVersion)) {
+                return;
+            }
+
+            String treatmentEndDate =
+                    metadata.optString("treatmentEndDate", "");
+            String scheduledCalendarDate =
+                    metadata.optString("calendarDate", "");
             if (!treatmentEndDate.isEmpty()
                     && (!app.drugtracker.alarmruntime.ExactAlarmContract
                             .isValidCalendarDate(treatmentEndDate)
@@ -78,7 +118,25 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
                     || scheduledCalendarDate.compareTo(treatmentEndDate) > 0)) {
                 return;
             }
+
+            // Arm D+1 before posting D. If the process is killed after the
+            // notification is posted, the successor is already durable and
+            // pending. A failed successor installation leaves the current
+            // durable row retryable; the current notification can still be
+            // delivered.
+            scheduleNextDay(
+                    context,
+                    medicationId,
+                    doseId,
+                    medicationName,
+                    unit,
+                    doseDescription,
+                    reminderTime,
+                    amount,
+                    allowManualTakeAction,
+                    operationVersion);
         }
+
         boolean foreground = app.drugtracker.notificationruntime.AppForegroundState.isForeground();
         String channelId = foreground ? FG_CHANNEL_ID : BG_CHANNEL_ID;
         String channelName = foreground ? FG_CHANNEL_NAME : BG_CHANNEL_NAME;
@@ -120,20 +178,6 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
                         true,
                         false,
                         notificationAction));
-
-        if (!snooze) {
-            scheduleNextDay(
-                    context,
-                    medicationId,
-                    doseId,
-                    medicationName,
-                    unit,
-                    doseDescription,
-                    reminderTime,
-                    amount,
-                    allowManualTakeAction,
-                    operationVersion);
-        }
     }
 
     private void scheduleNextDay(

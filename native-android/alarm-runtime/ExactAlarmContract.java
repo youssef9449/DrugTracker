@@ -45,6 +45,13 @@ public final class ExactAlarmContract {
                 && expectedOperationVersion.equals(
                         extractOperationVersion(currentJson));
     }
+    /**
+     * Parse the monotonic operation token as [sequence, wallClockMillis].
+     *
+     * <p>The sequence is the only chronological authority. The wall-clock
+     * component is diagnostic metadata and intentionally cannot override a
+     * later durable operation when the device clock moves.</p>
+     */
     public static long[] parseOrdering(String raw) {
         long[] result = new long[] {-1L, 0L};
         if (raw == null || raw.trim().isEmpty()) return result;
@@ -53,23 +60,25 @@ public final class ExactAlarmContract {
             int firstDash = value.indexOf('-');
             if (firstDash <= 0) return result;
             int secondDash = value.indexOf('-', firstDash + 1);
-            String sequencePart = secondDash > firstDash
+            String millisPart = secondDash > firstDash
                     ? value.substring(firstDash + 1, secondDash)
                     : value.substring(firstDash + 1);
             result[0] = Long.parseLong(value.substring(0, firstDash));
-            result[1] = Long.parseLong(sequencePart);
+            result[1] = Long.parseLong(millisPart);
         } catch (NumberFormatException ignored) {
         }
         return result;
     }
+
     public static boolean isOrderingNewer(
-            long firstMillis,
             long firstSequence,
-            long secondMillis,
-            long secondSequence) {
-        return firstMillis != secondMillis
-                ? firstMillis > secondMillis
-                : firstSequence > secondSequence;
+            long firstMillis,
+            long secondSequence,
+            long secondMillis) {
+        if (firstSequence != secondSequence) {
+            return firstSequence > secondSequence;
+        }
+        return firstMillis > secondMillis;
     }
     private static final String SCHEME = "content";
     /**

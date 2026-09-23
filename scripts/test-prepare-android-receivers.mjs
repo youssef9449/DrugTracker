@@ -52,6 +52,8 @@ const SYSTEM = `        <receiver
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_OFFSET_CHANGED" />
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>`;
@@ -192,6 +194,8 @@ assert(manifest.includes('com.other.ReceiverA'), 'A after idempotent pass');
 assert(manifest.includes('com.other.ReceiverB'), 'B after idempotent pass');
 assert(manifest.includes('android.intent.action.QUICKBOOT_POWERON'), 'shared receiver handles QUICKBOOT');
 assert(manifest.includes('android.intent.action.TIMEZONE_CHANGED'), 'shared receiver handles TIMEZONE_CHANGED');
+assert(manifest.includes('android.intent.action.TIME_SET'), 'shared receiver handles TIME_SET');
+assert(manifest.includes('android.intent.action.TIMEZONE_OFFSET_CHANGED'), 'shared receiver handles TIMEZONE_OFFSET_CHANGED');
 assert(manifest.includes('android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED'), 'shared receiver handles exact permission');
 manifest = upsertApplicationMetaData(
   manifest,

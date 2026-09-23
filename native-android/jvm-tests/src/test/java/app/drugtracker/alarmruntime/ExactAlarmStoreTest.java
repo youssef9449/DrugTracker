@@ -12,9 +12,9 @@ public class ExactAlarmStoreTest {
     @Test
     public void extractOperationVersion_readsOnlyCurrentField() throws Exception {
         JSONObject current = new JSONObject();
-        current.put("operationVersion", "1000-2-new");
+        current.put("operationVersion", "2-1000-new");
         current.put("scheduleVersion", "1000-1-old");
-        assertTrue("1000-2-new".equals(
+        assertTrue("2-1000-new".equals(
                 ExactAlarmContract.extractOperationVersion(current)));
 
         JSONObject legacy = new JSONObject();
@@ -26,28 +26,38 @@ public class ExactAlarmStoreTest {
     @Test
     public void ownership_acceptsOnlyCurrentMetadata() {
         assertTrue(ExactAlarmContract.isMetadataOwnedByOperationVersion(
-                "{\"operationVersion\":\"2000-3-new\"}",
-                "2000-3-new"));
+                "{\"operationVersion\":\"3-2000-new\"}",
+                "3-2000-new"));
         assertFalse(ExactAlarmContract.isMetadataOwnedByOperationVersion(
-                "{\"scheduleVersion\":\"2000-2-old\"}",
-                "2000-2-old"));
+                "{\"scheduleVersion\":\"2-2000-old\"}",
+                "2-2000-old"));
         assertFalse(ExactAlarmContract.isMetadataOwnedByOperationVersion(
-                "{\"operationVersion\":\"2000-3-new\"}",
-                "2000-2-old"));
+                "{\"operationVersion\":\"3-2000-new\"}",
+                "2-2000-old"));
     }
 
     @Test
     public void sameMillisecondSequenceOrdersOperations() {
         assertTrue(ExactAlarmContract.isOrderingNewer(
-                5000L, 3L, 5000L, 2L));
+                3L, 5000L, 2L, 5000L));
         assertFalse(ExactAlarmContract.isOrderingNewer(
-                5000L, 2L, 5000L, 3L));
+                2L, 5000L, 3L, 5000L));
     }
 
     @Test
-    public void parseOrdering_rejectsUnversionedOrMalformedValue() {
-        assertTrue(ExactAlarmContract.parseOrdering("5000-3-token")[0] == 5000L);
-        assertTrue(ExactAlarmContract.parseOrdering("5000-3-token")[1] == 3L);
+    public void sequenceRemainsNewerAcrossSystemClockRollback() {
+        assertTrue(ExactAlarmContract.isOrderingNewer(
+                8L, 1_000L, 7L, 9_999_999L));
+        assertFalse(ExactAlarmContract.isOrderingNewer(
+                7L, 9_999_999L, 8L, 1_000L));
+    }
+
+    @Test
+    public void parseOrdering_readsSequenceBeforeDiagnosticWallClock() {
+        long[] parsed = ExactAlarmContract.parseOrdering("5-5000-token");
+        assertTrue(parsed[0] == 5L);
+        assertTrue(parsed[1] == 5000L);
+
         assertTrue(ExactAlarmContract.parseOrdering("5000")[0] < 0L);
         assertTrue(ExactAlarmContract.parseOrdering("not-a-token")[0] < 0L);
     }

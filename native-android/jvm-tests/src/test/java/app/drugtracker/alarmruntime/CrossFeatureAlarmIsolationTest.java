@@ -27,6 +27,7 @@ import app.drugtracker.autodeduction.AutoDeductionContract;
 import app.drugtracker.autodeduction.AutoDeductionSchedulingAdapter;
 import app.drugtracker.criticalstock.CriticalStockAlarmAdapter;
 import app.drugtracker.dosereminder.DoseReminderAlarmAdapter;
+import app.drugtracker.dosereminder.DoseReminderAlarmReceiver;
 
 /**
  * Phase 9 runtime coexistence proof for the three native exact-alarm features.
@@ -128,6 +129,251 @@ public class CrossFeatureAlarmIsolationTest {
         assertTrue(identities.contains(
                 CriticalStockAlarmAdapter.occurrenceUri(
                         MEDICATION_ID)));
+    }
+
+    @Test
+    public void pendingStateReflectsAlarmManagerAndNotDurableMetadataPresence() {
+        DoseReminderAlarmAdapter dose = doseAdapter();
+
+        assertTrue(dose.scheduleOccurrence(
+                MEDICATION_ID,
+                DOSE_ID,
+                "08:00",
+                1.0,
+                "Phase 9 Medicine",
+                "قرص",
+                true,
+                TRIGGER_AT,
+                null).ok);
+
+        ExactAlarmRuntime runtime = new ExactAlarmRuntime(
+                context(),
+                DoseReminderAlarmAdapter.PREFS_SCHEDULES,
+                DoseReminderAlarmAdapter.PREFS_CANCELLED,
+                DoseReminderAlarmAdapter.PREFS_ORDERING,
+                DoseReminderAlarmAdapter.PENDING_INTENT_REQUEST_CODE);
+
+        ExactAlarmRuntime.PendingStateResult pending = runtime.getPendingState(
+                DoseReminderAlarmAdapter.occurrenceUri(
+                        MEDICATION_ID,
+                        DOSE_ID).toString(),
+                DoseReminderAlarmAdapter.ACTION_DOSE_REMINDER,
+                DoseReminderAlarmReceiver.class);
+
+        assertTrue(pending.isPending());
+
+        assertTrue(dose.cancelOccurrence(
+                MEDICATION_ID,
+                DOSE_ID).isOk());
+
+        ExactAlarmRuntime.PendingStateResult absent = runtime.getPendingState(
+                DoseReminderAlarmAdapter.occurrenceUri(
+                        MEDICATION_ID,
+                        DOSE_ID).toString(),
+                DoseReminderAlarmAdapter.ACTION_DOSE_REMINDER,
+                DoseReminderAlarmReceiver.class);
+
+        assertTrue(
+                absent.status
+                        == ExactAlarmRuntime.PendingStateResult.Status.ABSENT);
+        assertTrue(
+                dose.getScheduleMetadata(MEDICATION_ID, DOSE_ID) == null);
+    }
+
+    @Test
+    public void pendingStateRejectsInvalidRequestAsFailure() {
+        ExactAlarmRuntime runtime = new ExactAlarmRuntime(
+                context(),
+                DoseReminderAlarmAdapter.PREFS_SCHEDULES,
+                DoseReminderAlarmAdapter.PREFS_CANCELLED,
+                DoseReminderAlarmAdapter.PREFS_ORDERING,
+                DoseReminderAlarmAdapter.PENDING_INTENT_REQUEST_CODE);
+
+        ExactAlarmRuntime.PendingStateResult result = runtime.getPendingState(
+                "",
+                DoseReminderAlarmAdapter.ACTION_DOSE_REMINDER,
+                DoseReminderAlarmReceiver.class);
+
+        assertTrue(result.status == ExactAlarmRuntime.PendingStateResult.Status.FAILED);
+    }
+
+    @Test
+    public void restoreCannotSupersedeNewerCancellationTombstone() {
+        DoseReminderAlarmAdapter dose = doseAdapter();
+        assertTrue(dose.scheduleOccurrence(
+                MEDICATION_ID,
+                DOSE_ID,
+                "08:00",
+                1.0,
+                "Phase 9 Medicine",
+                "قرص",
+                null,
+                true,
+                TRIGGER_AT,
+                null).ok);
+
+        String oldVersion = dose.getScheduleMetadata(
+                MEDICATION_ID,
+                DOSE_ID).optString(
+                        ExactAlarmContract.FIELD_OPERATION_VERSION,
+                        "");
+        assertTrue(!oldVersion.isEmpty());
+
+        String cancellationVersion = "99-1-restore-test";
+        context().getSharedPreferences(
+                DoseReminderAlarmAdapter.PREFS_CANCELLED,
+                Context.MODE_PRIVATE)
+                .edit()
+                .putString(
+                        ExactAlarmContract.CANCEL_KEY_PREFIX
+                                + DoseReminderAlarmAdapter.occurrenceKey(
+                                        MEDICATION_ID,
+                                        DOSE_ID),
+                        cancellationVersion)
+                .commit();
+
+        ExactAlarmRuntime runtime = new ExactAlarmRuntime(
+                context(),
+                DoseReminderAlarmAdapter.PREFS_SCHEDULES,
+                DoseReminderAlarmAdapter.PREFS_CANCELLED,
+                DoseReminderAlarmAdapter.PREFS_ORDERING,
+                DoseReminderAlarmAdapter.PENDING_INTENT_REQUEST_CODE);
+
+        ExactAlarmRuntime.ScheduleResult result = runtime.schedule(
+                new ExactAlarmRuntime.ScheduleRequest(
+                        DoseReminderAlarmAdapter.occurrenceUri(
+                                MEDICATION_ID,
+                                DOSE_ID),
+                        DoseReminderAlarmAdapter.occurrenceKey(
+                                MEDICATION_ID,
+                                DOSE_ID),
+                        DoseReminderAlarmAdapter.ACTION_DOSE_REMINDER,
+                        DoseReminderAlarmReceiver.class,
+                        TRIGGER_AT + 60_000L,
+                        dose.getScheduleMetadata(
+                                MEDICATION_ID,
+                                DOSE_ID),
+                        new android.os.Bundle(),
+                        oldVersion));
+        assertTrue(!result.ok);
+        assertTrue("ownership_lost".equals(result.error));
+    }
+
+    @Test
+    public void newScheduleCanLegitimatelySupersedeCancellationTombstone() {
+        String key = DoseReminderAlarmAdapter.occurrenceKey(
+                MEDICATION_ID,
+                DOSE_ID);
+        context().getSharedPreferences(
+                DoseReminderAlarmAdapter.PREFS_CANCELLED,
+                Context.MODE_PRIVATE)
+                .edit()
+                .putString(
+                        ExactAlarmContract.CANCEL_KEY_PREFIX + key,
+                        "10-1-cancel")
+                .commit();
+
+        assertTrue(doseAdapter().scheduleOccurrence(
+                MEDICATION_ID,
+                DOSE_ID,
+                "08:00",
+                1.0,
+                "Phase 9 Medicine",
+                "قرص",
+                null,
+                true,
+                TRIGGER_AT,
+                null).ok);
+
+        assertTrue(doseAdapter().ownsActiveOccurrence(
+                MEDICATION_ID,
+                DOSE_ID,
+                doseAdapter().getScheduleMetadata(
+                        MEDICATION_ID,
+                        DOSE_ID).optString(
+                                ExactAlarmContract.FIELD_OPERATION_VERSION,
+                                "")));
+    }
+
+    @Test
+    public void cancelledSnoozeLosesDeliveryOwnership() {
+        DoseReminderAlarmAdapter dose = doseAdapter();
+        assertTrue(dose.scheduleSnooze(
+                MEDICATION_ID,
+                DOSE_ID,
+                "08:00",
+                1.0,
+                "Phase 9 Medicine",
+                "قرص",
+                TRIGGER_AT,
+                true,
+                null).ok);
+
+        String version = dose.getSnoozeMetadata(
+                MEDICATION_ID,
+                DOSE_ID).optString(
+                        ExactAlarmContract.FIELD_OPERATION_VERSION,
+                        "");
+        assertTrue(!version.isEmpty());
+        assertTrue(dose.ownsActiveSnooze(
+                MEDICATION_ID,
+                DOSE_ID,
+                version));
+
+        assertTrue(dose.cancelSnooze(
+                MEDICATION_ID,
+                DOSE_ID).isOk());
+
+        assertTrue(!dose.ownsActiveSnooze(
+                MEDICATION_ID,
+                DOSE_ID,
+                version));
+    }
+
+    @Test
+    public void replacedSnoozeMakesOldDeliveryOwnershipStale() {
+        DoseReminderAlarmAdapter dose = doseAdapter();
+        assertTrue(dose.scheduleSnooze(
+                MEDICATION_ID,
+                DOSE_ID,
+                "08:00",
+                1.0,
+                "Phase 9 Medicine",
+                "قرص",
+                TRIGGER_AT,
+                true,
+                null).ok);
+        String oldVersion = dose.getSnoozeMetadata(
+                MEDICATION_ID,
+                DOSE_ID).optString(
+                        ExactAlarmContract.FIELD_OPERATION_VERSION,
+                        "");
+
+        assertTrue(dose.scheduleSnooze(
+                MEDICATION_ID,
+                DOSE_ID,
+                "08:00",
+                1.0,
+                "Phase 9 Medicine",
+                "قرص",
+                TRIGGER_AT + 60_000L,
+                true,
+                null).ok);
+        String newVersion = dose.getSnoozeMetadata(
+                MEDICATION_ID,
+                DOSE_ID).optString(
+                        ExactAlarmContract.FIELD_OPERATION_VERSION,
+                        "");
+
+        assertTrue(!oldVersion.equals(newVersion));
+        assertTrue(!dose.ownsActiveSnooze(
+                MEDICATION_ID,
+                DOSE_ID,
+                oldVersion));
+        assertTrue(dose.ownsActiveSnooze(
+                MEDICATION_ID,
+                DOSE_ID,
+                newVersion));
     }
 
     @Test

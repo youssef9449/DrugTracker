@@ -356,6 +356,8 @@ const systemActions = [
   'android.intent.action.BOOT_COMPLETED',
   'android.intent.action.QUICKBOOT_POWERON',
   'android.intent.action.TIMEZONE_CHANGED',
+  'android.intent.action.TIME_SET',
+  'android.intent.action.TIMEZONE_OFFSET_CHANGED',
   'android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED',
 ];
 
@@ -365,7 +367,9 @@ for (const action of systemActions) {
       || (action === 'android.intent.action.BOOT_COMPLETED'
         && systemReceiverContent.includes('Intent.ACTION_BOOT_COMPLETED'))
       || (action === 'android.intent.action.TIMEZONE_CHANGED'
-        && systemReceiverContent.includes('Intent.ACTION_TIMEZONE_CHANGED')),
+        && systemReceiverContent.includes('Intent.ACTION_TIMEZONE_CHANGED'))
+      || (action === 'android.intent.action.TIME_SET'
+        && systemReceiverContent.includes('Intent.ACTION_TIME_CHANGED')),
     'Shared system receiver must cover lifecycle action: ' + action
   );
 }

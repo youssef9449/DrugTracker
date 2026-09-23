@@ -12,8 +12,8 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Durable mechanism store. The feature supplies storageKey so existing storage
- * schemas can be migrated without conflating storage identity with PendingIntent identity.
+ * Durable mechanism store. The feature supplies a storageKey so durable state
+ * identity stays distinct from the Android PendingIntent identity.
  */
 final class ExactAlarmStore {
     private static final String TAG = "ExactAlarmStore";
@@ -81,6 +81,23 @@ final class ExactAlarmStore {
                 .commit();
     }
 
+    boolean writeScheduleRawLocked(
+            String featureStorageKey,
+            String rawMetadata) {
+        if (featureStorageKey == null
+                || featureStorageKey.isEmpty()
+                || rawMetadata == null
+                || rawMetadata.isEmpty()) {
+            return false;
+        }
+        return schedules.edit()
+                .putString(
+                        storageKey(featureStorageKey),
+                        rawMetadata)
+                .commit();
+    }
+
+
     boolean removeScheduleLocked(String featureStorageKey) {
         return schedules.edit()
                 .remove(storageKey(featureStorageKey))
@@ -128,9 +145,9 @@ final class ExactAlarmStore {
             Log.e(TAG, "durable ordering sequence commit failed");
             return null;
         }
-        return System.currentTimeMillis()
+        return next
                 + "-"
-                + next
+                + System.currentTimeMillis()
                 + "-"
                 + UUID.randomUUID();
     }

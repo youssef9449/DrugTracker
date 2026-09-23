@@ -167,13 +167,12 @@ public final class CriticalStockAlarmAdapter
                         Long.MIN_VALUE) != expectedAlarmTimeMs) {
             return false;
         }
-        return isPending(medicationId);
-    }
-    boolean isPending(String medicationId) {
-        return runtime.isPending(
-                occurrenceUri(medicationId),
-                ACTION_CRITICAL_STOCK,
-                CriticalStockAlarmReceiver.class);
+        ExactAlarmRuntime.PendingStateResult pending =
+                runtime.getPendingState(
+                        occurrenceUri(medicationId),
+                        ACTION_CRITICAL_STOCK,
+                        CriticalStockAlarmReceiver.class);
+        return pending.isPending();
     }
     JSONObject getScheduleMetadata(String medicationId) {
         return runtime.getScheduleMetadata(occurrenceKey(medicationId));

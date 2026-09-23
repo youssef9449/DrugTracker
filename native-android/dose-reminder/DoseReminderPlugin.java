@@ -6,6 +6,7 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import app.drugtracker.alarmruntime.ExactAlarmRuntime;
 
 /**
  * Capacitor bridge for Dose Reminder's exact-alarm boundary.
@@ -86,20 +87,24 @@ public final class DoseReminderPlugin extends Plugin {
             return;
         }
 
-        boolean ok = new DoseReminderAlarmAdapter(getContext()).scheduleSnooze(
-                medicationId,
-                doseId,
-                reminderTime,
-                amount,
-                medicationName,
-                unit,
-                triggerAt,
-                Boolean.TRUE.equals(allowManualTakeAction),
-                doseDescription);
+        DoseReminderAlarmAdapter.ScheduleResult result =
+                new DoseReminderAlarmAdapter(getContext()).scheduleSnooze(
+                        medicationId,
+                        doseId,
+                        reminderTime,
+                        amount,
+                        medicationName,
+                        unit,
+                        triggerAt,
+                        Boolean.TRUE.equals(allowManualTakeAction),
+                        doseDescription);
 
         JSObject ret = new JSObject();
-        ret.put("ok", ok);
-        if (!ok) ret.put("error", "snooze_schedule_failed");
+        ret.put("ok", result.ok);
+        if (result.operationVersion != null) {
+            ret.put("operationVersion", result.operationVersion);
+        }
+        if (result.error != null) ret.put("error", result.error);
         call.resolve(ret);
     }
 
@@ -107,10 +112,13 @@ public final class DoseReminderPlugin extends Plugin {
     public void cancelSnooze(PluginCall call) {
         String medicationId = call.getString("medicationId");
         String doseId = call.getString("doseId");
-        boolean ok = new DoseReminderAlarmAdapter(getContext())
-                .cancelSnooze(medicationId, doseId);
+        DoseReminderAlarmAdapter.CancelResult result =
+                new DoseReminderAlarmAdapter(getContext())
+                        .cancelSnooze(medicationId, doseId);
         JSObject ret = new JSObject();
-        ret.put("ok", ok);
+        ret.put("ok", result.isOk());
+        ret.put("status", result.status.name());
+        if (result.error != null) ret.put("error", result.error);
         call.resolve(ret);
     }
 
@@ -120,15 +128,26 @@ public final class DoseReminderPlugin extends Plugin {
         String doseId = call.getString("doseId");
         DoseReminderAlarmAdapter adapter =
                 new DoseReminderAlarmAdapter(getContext());
-        org.json.JSONObject metadata =
-                adapter.getScheduleMetadata(medicationId, doseId);
+        ExactAlarmRuntime.PendingStateResult pending =
+                adapter.getPendingState(medicationId, doseId);
 
         JSObject ret = new JSObject();
-        ret.put("scheduled", metadata != null);
+        if (!pending.isOk()) {
+            call.reject(pending.error == null
+                    ? "dose_reminder_pending_state_failed"
+                    : pending.error);
+            return;
+        }
+        ret.put("scheduled", pending.isPending());
+        org.json.JSONObject metadata =
+                adapter.getScheduleMetadata(medicationId, doseId);
         if (metadata != null) {
             ret.put(
                     "triggerAtEpochMs",
-                    metadata.optLong("triggerAtEpochMs", -1L));
+                    metadata.optLong(
+                            app.drugtracker.alarmruntime.ExactAlarmContract
+                                    .FIELD_TRIGGER_AT_EPOCH_MS,
+                            -1L));
             ret.put(
                     "operationVersion",
                     metadata.optString(

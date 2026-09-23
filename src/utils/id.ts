@@ -9,7 +9,7 @@
  * This is the single source of truth for log/record ID generation across
  * the app — replacing the 3+ ad-hoc `prefix + Date.now() + Math.random()`
  * patterns that were copy-pasted across dateCalculations.ts and App.tsx
- * (audit issues #64 / #71).
+ *.
  *
  * @param prefix Short semantic prefix (e.g. 'log', 'refill', 'consume',
  *   'restore', 'refill-undo'). A hyphen separator is inserted automatically.

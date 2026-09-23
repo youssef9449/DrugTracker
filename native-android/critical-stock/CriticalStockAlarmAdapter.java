@@ -1,19 +1,14 @@
 package app.drugtracker.criticalstock;
-
 import android.content.Context;
 import android.os.Bundle;
-
 import org.json.JSONException;
 import org.json.JSONObject;
-
 import java.util.Calendar;
 import java.util.List;
 import java.util.ArrayList;
-
 import app.drugtracker.alarmruntime.ExactAlarmContract;
 import app.drugtracker.alarmruntime.ExactAlarmFeatureAdapter;
 import app.drugtracker.alarmruntime.ExactAlarmRuntime;
-
 /** Critical Stock boundary over the shared exact-alarm runtime. */
 public final class CriticalStockAlarmAdapter
         implements ExactAlarmFeatureAdapter {
@@ -24,17 +19,13 @@ public final class CriticalStockAlarmAdapter
     private static final String PREFS_ORDERING =
             "drugtracker_critical_stock_alarm_ordering_v1";
     private static final int PENDING_INTENT_REQUEST_CODE = 0xC71C001;
-
     public static final String ACTION_CRITICAL_STOCK =
             "app.drugtracker.action.CRITICAL_STOCK_ALARM";
-
     private final ExactAlarmRuntime runtime;
-
     /** Required by ExactAlarmLifecycle for manifest-driven recovery dispatch. */
     public CriticalStockAlarmAdapter() {
         runtime = null;
     }
-
     public CriticalStockAlarmAdapter(Context context) {
         runtime = new ExactAlarmRuntime(
                 context,
@@ -43,7 +34,6 @@ public final class CriticalStockAlarmAdapter
                 PREFS_ORDERING,
                 PENDING_INTENT_REQUEST_CODE);
     }
-
     /**
      * Shared lifecycle recovery entry point. Only durable Critical Stock
      * schedules are restored here; episode/claim policy remains in TypeScript.
@@ -54,15 +44,12 @@ public final class CriticalStockAlarmAdapter
             String reason,
             boolean exactAlarmPermissionGranted) {
         if (!exactAlarmPermissionGranted) return;
-
         CriticalStockAlarmAdapter adapter =
                 new CriticalStockAlarmAdapter(context);
-
         for (String medicationId : adapter.listScheduledMedicationIds()) {
             JSONObject metadata =
                     adapter.getScheduleMetadata(medicationId);
             if (metadata == null) continue;
-
             String medicationName = metadata.optString("medicationName", "");
             String unit = metadata.optString("unit", "قرص");
             String notificationTitle =
@@ -73,15 +60,12 @@ public final class CriticalStockAlarmAdapter
             String time = metadata.optString("alarmTime", "");
             String operationVersion = metadata.optString(
                     ExactAlarmContract.FIELD_OPERATION_VERSION, "");
-
             long triggerAt = ExactAlarmContract.resolveLocalDateTimeEpochMs(date, time, false);
             long now = System.currentTimeMillis();
             if (triggerAt <= 0L) continue;
-
             if (triggerAt <= now) {
                 triggerAt = now + 15_000L;
             }
-
             ScheduleResult result = adapter.schedule(
                     medicationId,
                     medicationName,
@@ -92,7 +76,6 @@ public final class CriticalStockAlarmAdapter
                     operationVersion.isEmpty()
                             ? null
                             : operationVersion);
-
             if (!result.ok) {
                 android.util.Log.w(
                         "CriticalStockAlarmAdapter",
@@ -101,7 +84,6 @@ public final class CriticalStockAlarmAdapter
             }
         }
     }
-
     public ScheduleResult schedule(
             String medicationId,
             String medicationName,
@@ -116,7 +98,6 @@ public final class CriticalStockAlarmAdapter
                 || notificationBody == null) {
             return ScheduleResult.failure("invalid_request");
         }
-
         JSONObject metadata = new JSONObject();
         try {
             Calendar cal = Calendar.getInstance();
@@ -132,7 +113,6 @@ public final class CriticalStockAlarmAdapter
                     "%02d:%02d",
                     cal.get(Calendar.HOUR_OF_DAY),
                     cal.get(Calendar.MINUTE));
-
             metadata.put("medicationId", medicationId);
             metadata.put("medicationName", medicationName == null ? "" : medicationName);
             metadata.put("unit", unit == null ? "" : unit);
@@ -143,12 +123,10 @@ public final class CriticalStockAlarmAdapter
         } catch (JSONException e) {
             return ScheduleResult.failure("metadata_build_failed");
         }
-
         Bundle extras = new Bundle();
         extras.putString("medicationId", medicationId);
         extras.putString("notificationTitle", notificationTitle);
         extras.putString("notificationBody", notificationBody);
-
         String storageKey = occurrenceKey(medicationId);
         ExactAlarmRuntime.ScheduleResult result = runtime.schedule(
                 new ExactAlarmRuntime.ScheduleRequest(
@@ -165,7 +143,6 @@ public final class CriticalStockAlarmAdapter
         }
         return ScheduleResult.success(result.operationVersion);
     }
-
     public CancelResult cancel(String medicationId) {
         ExactAlarmRuntime.CancelResult result = runtime.cancel(
                 occurrenceUri(medicationId),
@@ -180,7 +157,6 @@ public final class CriticalStockAlarmAdapter
         }
         return CancelResult.success();
     }
-
     public boolean verify(
             String medicationId,
             long expectedAlarmTimeMs) {
@@ -193,18 +169,15 @@ public final class CriticalStockAlarmAdapter
         }
         return isPending(medicationId);
     }
-
     boolean isPending(String medicationId) {
         return runtime.isPending(
                 occurrenceUri(medicationId),
                 ACTION_CRITICAL_STOCK,
                 CriticalStockAlarmReceiver.class);
     }
-
     JSONObject getScheduleMetadata(String medicationId) {
         return runtime.getScheduleMetadata(occurrenceKey(medicationId));
     }
-
     List<String> listScheduledMedicationIds() {
         List<String> keys = runtime.listScheduledStorageKeys();
         List<String> result = new ArrayList<>();
@@ -215,17 +188,14 @@ public final class CriticalStockAlarmAdapter
         }
         return result;
     }
-
     boolean completeOneShot(String medicationId, String operationVersion) {
         return runtime.completeOneShot(
                 occurrenceKey(medicationId),
                 operationVersion);
     }
-
     public static String occurrenceKey(String medicationId) {
         return "critical:" + (medicationId == null ? "" : medicationId);
     }
-
     public static String occurrenceUri(String medicationId) {
         return ExactAlarmContract.buildIdentityUri(
                 "content",
@@ -234,50 +204,39 @@ public final class CriticalStockAlarmAdapter
                 "critical-stock",
                 medicationId == null ? "" : medicationId).toString();
     }
-
     public static final class ScheduleResult {
         public final boolean ok;
         public final String error;
         public final String operationVersion;
-
         private ScheduleResult(String error, String operationVersion, boolean ok) {
             this.ok = ok;
             this.error = error;
             this.operationVersion = operationVersion;
         }
-
         static ScheduleResult success(String operationVersion) {
             return new ScheduleResult(null, operationVersion, true);
         }
-
         static ScheduleResult failure(String error) {
             return new ScheduleResult(error, null, false);
         }
     }
-
     public static final class CancelResult {
         public enum Status { SUCCESS, ALREADY_ABSENT, FAILED }
-
         public final Status status;
         public final String error;
-
         private CancelResult(Status status, String error) {
             this.status = status;
             this.error = error;
         }
-
         static CancelResult success() {
             return new CancelResult(Status.SUCCESS, null);
         }
-
         static CancelResult alreadyAbsent() {
             return new CancelResult(Status.ALREADY_ABSENT, null);
         }
-
         static CancelResult failure(String error) {
             return new CancelResult(Status.FAILED, error);
         }
-
         public boolean isOk() {
             return status != Status.FAILED;
         }

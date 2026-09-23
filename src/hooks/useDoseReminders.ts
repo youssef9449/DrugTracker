@@ -56,6 +56,22 @@ export function useDoseReminders({
   useEffect(() => {
     medicationsRef.current = medications;
   }, [medications]);
+  const dequeueNextValidAlarm = useCallback((): { medicationId: string; doseId: string } | null => {
+    const today = getTodayDateString();
+    const fired = loadJson<Record<string, boolean>>(FIRED_KEY, {});
+    while (queuedAlarmRef.current.length > 0) {
+      const next = queuedAlarmRef.current.shift()!;
+      const med = medicationsRef.current.find((m) => m.id === next.medicationId);
+      if (!med || !findDoseRow(med, next.doseId)) continue;
+      if (isDoseConsumedOnDate(med, next.doseId, today)) continue;
+      if (fired[firedKey(next.medicationId, today, next.doseId)]) continue;
+      if (isSnoozeActive(next.medicationId, next.doseId)) continue;
+      if (allowManualTakeActionByMedicationId.get(next.medicationId) === false) continue;
+      return next;
+    }
+    return null;
+  }, [allowManualTakeActionByMedicationId]);
+
   const dismissAlarm = useCallback(() => {
     const current = alarmingIdRef.current;
     const doseId = alarmingDoseIdRef.current;

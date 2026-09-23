@@ -7,6 +7,7 @@ import {
 } from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Medication, ConsumptionLog } from '../../src/types';
+import { makeMedication as med, makeAutoDeductionEvent as fired } from '../fixtures/testFixtures';
 import {
   runGatedManualConsume,
   runGatedManualRestore,
@@ -68,40 +69,6 @@ import {
 
 const TODAY = '2026-09-16';
 
-function med(over: Partial<Medication> = {}): Medication {
-  return {
-    id: 'med-1',
-    name: 'TestMed',
-    currentPills: 10,
-    dailyDose: 2,
-    unit: 'قرص',
-    warningThresholdDays: 5,
-    colorTag: 'teal',
-    createdAt: '2026-01-01T00:00:00.000Z',
-    autoDeductEnabled: true,
-    doseSchedule: [
-      { id: 'd1', amount: 1, time: '08:00' },
-      { id: 'd2', amount: 1, time: '14:00' },
-      { id: 'd3', amount: 2, time: '22:00' },
-    ],
-    dosesPerDay: 3,
-    ...over,
-  };
-}
-
-function fired(
-  over: Partial<AutoDeductionEvent> &
-    Pick<AutoDeductionEvent, 'doseId' | 'calendarDate' | 'amount'>
-): AutoDeductionEvent {
-  return {
-    medicationId: 'med-1',
-    scheduledAtEpochMs: 1,
-    status: 'FIRED',
-    createdAtEpochMs: 1,
-    reconciledAtEpochMs: null,
-    ...over,
-  };
-}
 
 describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
   let durable: AutoStockDurableState;

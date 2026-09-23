@@ -51,6 +51,8 @@ vi.mock('@capacitor/local-notifications', () => ({
   },
 }));
 
+import { getPendingNotificationResult } from '@/utils/notificationRuntime';
+
 import {
   DOSE_REMINDER_CHANNEL_ID,
   DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
@@ -412,6 +414,99 @@ describe('lifecycle transition race — channel selector is synchronous', () => 
 //   → DoseReminderAlarmReceiver resolves dose-reminder-v3
 //   MainActivity onResume/onPause owns the live foreground flag.
 // ---------------------------------------------------------------------------
+
+describe('Web/PWA future Dose Reminder delivery', () => {
+  const shown: Array<{ title: string; options: NotificationOptions }> = [];
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2024-09-10T12:00:00'));
+    shown.length = 0;
+    class MockNotification {
+      static permission = 'granted';
+      constructor(title: string, options: NotificationOptions) {
+        shown.push({ title, options });
+      }
+    }
+    vi.stubGlobal('Notification', MockNotification);
+    mocks.platform.mockReturnValue('web');
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('delivers a future reminder at its scheduled wall-clock time, not immediately', async () => {
+    await scheduleDoseReminder('web-future', 'Test', '20:00', 1, 'قرص', 'd1');
+
+    expect(shown).toHaveLength(0);
+    const pending = await getPendingNotificationResult('dose-reminder', 'web-future::d1');
+    expect(pending).toEqual({
+      ok: true,
+      pending: { schedule: { at: new Date('2024-09-10T20:00:00').getTime() } },
+    });
+
+    await vi.advanceTimersByTimeAsync(7 * 60 * 60 * 1000 - 1);
+    expect(shown).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(shown).toHaveLength(1);
+    expect(shown[0].title).toContain('Test');
+  });
+
+  it('uses the next calendar occurrence when the configured time has already passed', async () => {
+    vi.setSystemTime(new Date('2024-09-10T21:00:00'));
+
+    await scheduleDoseReminder('web-next-day', 'Test', '20:00', 1, 'قرص', 'd1');
+
+    expect(shown).toHaveLength(0);
+    const pending = await getPendingNotificationResult('dose-reminder', 'web-next-day::d1');
+    expect(pending).toEqual({
+      ok: true,
+      pending: { schedule: { at: new Date('2024-09-11T20:00:00').getTime() } },
+    });
+  });
+
+  it('delivers Web/PWA snooze only after the requested delay', async () => {
+    await scheduleSnoozedDoseReminder(
+      'web-snooze', 'Test', 1, 'قرص', '20:00', 10, 'd1', true
+    );
+
+    expect(shown).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(10 * 60 * 1000 - 1);
+    expect(shown).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(shown).toHaveLength(1);
+  });
+
+  it('keeps one logical future reminder across duplicate scheduling/reconciliation', async () => {
+    await scheduleDoseReminder('web-duplicate', 'Test', '20:00', 1, 'قرص', 'd1');
+    await scheduleDoseReminder('web-duplicate', 'Test', '20:00', 1, 'قرص', 'd1');
+
+    const pending = await getPendingNotificationResult('dose-reminder', 'web-duplicate::d1');
+    expect(pending).toEqual({
+      ok: true,
+      pending: { schedule: { at: new Date('2024-09-10T20:00:00').getTime() } },
+    });
+
+    await vi.advanceTimersByTimeAsync(8 * 60 * 60 * 1000);
+    expect(shown).toHaveLength(1);
+  });
+
+  it('re-arms a persisted future reminder when pending state is queried after timer loss', async () => {
+    await scheduleDoseReminder('web-reload', 'Test', '20:00', 1, 'قرص', 'd1');
+    vi.clearAllTimers();
+
+    const pending = await getPendingNotificationResult('dose-reminder', 'web-reload::d1');
+    expect(pending).toEqual({
+      ok: true,
+      pending: { schedule: { at: new Date('2024-09-10T20:00:00').getTime() } },
+    });
+
+    await vi.advanceTimersByTimeAsync(8 * 60 * 60 * 1000);
+    expect(shown).toHaveLength(1);
+  });
+});
 
 describe('lifecycle race — rapid transitions converge on latest state', () => {
   it('rapid foreground↔background transitions: last schedule uses latest channel', async () => {

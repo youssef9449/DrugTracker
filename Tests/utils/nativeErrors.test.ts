@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { NativeBoundaryError, classifyNativeError, toNativeBoundaryError } from '@/utils/nativeErrors';
+import {
+  NativeBoundaryError,
+  classifyNativeError,
+  toNativeBoundaryError,
+  toNativeBoundaryFailure,
+} from '@/utils/nativeErrors';
 
 describe('native boundary error taxonomy', () => {
   it('classifies important machine-readable failure classes', () => {
@@ -17,3 +22,12 @@ describe('native boundary error taxonomy', () => {
     expect(error.message).toBe('permission_denied');
   });
 });
+
+
+  it('converts thrown failures into a stable boundary result', () => {
+    expect(toNativeBoundaryFailure(new Error('persist_failed'))).toEqual({
+      ok: false,
+      error: 'persist_failed',
+      errorCode: 'persistence_failed',
+    });
+  });

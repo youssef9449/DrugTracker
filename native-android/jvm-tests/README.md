@@ -48,7 +48,7 @@ analysis scope. Run it with:
 
 ```bash
 cd native-android/jvm-tests
-./gradlew spotbugsMain
+./gradlew spotbugsStaticAnalysis
 ```
 
 Do not add broad suppressions just to make the gate green. If an existing,

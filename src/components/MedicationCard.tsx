@@ -657,6 +657,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               onToggleMedicationReminder={onToggleMedicationReminder}
               onToggleMedicationCriticalStockAlerts={onToggleMedicationCriticalStockAlerts}
               onOpenHistory={onOpenHistory}
+              onRegisterBackHandler={onRegisterBackHandler}
             />
             </div>
         </div>
@@ -861,6 +862,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               onToggleMedicationReminder={onToggleMedicationReminder}
               onToggleMedicationCriticalStockAlerts={onToggleMedicationCriticalStockAlerts}
               onOpenHistory={onOpenHistory}
+              onRegisterBackHandler={onRegisterBackHandler}
               size="sm"
             />
             </div>

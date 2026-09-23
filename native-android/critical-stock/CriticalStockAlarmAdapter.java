@@ -204,6 +204,12 @@ public final class CriticalStockAlarmAdapter
                 operationVersion);
     }
 
+    boolean ownsActiveSchedule(String medicationId, String operationVersion) {
+        return runtime.ownsActiveSchedule(
+                occurrenceKey(medicationId),
+                operationVersion);
+    }
+
     boolean markOneShotDelivered(String medicationId, String operationVersion) {
         return runtime.markOneShotDelivered(
                 occurrenceKey(medicationId),

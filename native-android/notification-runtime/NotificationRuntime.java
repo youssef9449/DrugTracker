@@ -7,6 +7,8 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
+
+import androidx.core.app.NotificationManagerCompat;
 /**
  * Shared Android notification-delivery runtime.
  *
@@ -31,11 +33,17 @@ public final class NotificationRuntime {
     }
 
     public boolean areNotificationsEnabled() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
-            return true;
-        }
+        return NotificationManagerCompat.from(appContext).areNotificationsEnabled();
+    }
+
+    public boolean isChannelEnabled(String channelId) {
+        if (channelId == null || channelId.isEmpty()) return false;
+        if (!areNotificationsEnabled()) return false;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true;
         NotificationManager manager = notificationManager();
-        return manager != null && manager.areNotificationsEnabled();
+        if (manager == null) return false;
+        NotificationChannel channel = manager.getNotificationChannel(channelId);
+        return channel != null && channel.getImportance() != NotificationManager.IMPORTANCE_NONE;
     }
 
     public PostResult post(Request request) {
@@ -139,7 +147,12 @@ public final class NotificationRuntime {
                         .setContentText(request.body)
                         .setAutoCancel(request.autoCancel)
                         .setOngoing(request.ongoing)
-                        .setDefaults(Notification.DEFAULT_ALL)
+                        .setDefaults(request.channelImportance <= 2
+                                ? Notification.DEFAULT_VIBRATE
+                                : Notification.DEFAULT_ALL)
+                        .setPriority(request.channelImportance <= 2
+                                ? Notification.PRIORITY_LOW
+                                : Notification.PRIORITY_HIGH)
                         .setContentIntent(contentIntent);
 
         if (request.action != null) {

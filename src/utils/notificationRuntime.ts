@@ -35,7 +35,7 @@ interface NotificationRuntimePlugin {
       actionForeground?: boolean;
     }
   ): Promise<{ ok: boolean; error?: string }>;
-  cancel(options: { namespace: string; identity: string }): Promise<{ ok: boolean }>;
+  cancel(options: { namespace: string; identity: string }): Promise<{ ok: boolean; error?: string }>;
   checkPermission(): Promise<{ enabled: boolean }>;
   addListener(
     eventName: 'notificationReceived' | 'notificationActionPerformed',
@@ -165,10 +165,11 @@ export async function cancelNativeNotification(
   try {
     const result = await NotificationRuntime.cancel({ namespace, identity });
     if (result?.ok === true) return { ok: true };
+    const message = result?.error || 'notification_cancel_failed';
     return {
       ok: false,
-      error: 'notification_cancel_failed',
-      errorCode: 'platform_failure',
+      error: message,
+      errorCode: classifyNativeError(message),
     };
   } catch (error) {
     const boundaryError = toNativeBoundaryError(error, 'platform_failure');

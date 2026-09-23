@@ -11,16 +11,16 @@ public class ExactAlarmStoreTest {
 
     @Test
     public void extractOperationVersion_readsOnlyCurrentField() throws Exception {
-        JSONObject generic = new JSONObject();
-        generic.put("operationVersion", "1000-2-new");
-        generic.put("scheduleVersion", "1000-1-old");
+        JSONObject current = new JSONObject();
+        current.put("operationVersion", "1000-2-new");
+        current.put("scheduleVersion", "1000-1-old");
         assertTrue("1000-2-new".equals(
-                ExactAlarmContract.extractOperationVersion(generic)));
+                ExactAlarmContract.extractOperationVersion(current)));
 
         JSONObject legacy = new JSONObject();
         legacy.put("scheduleVersion", "1000-1-old");
-        assertTrue("1000-1-old".equals(
-                ExactAlarmStore.extractOperationVersion(legacy)));
+        assertTrue("".equals(
+                ExactAlarmContract.extractOperationVersion(legacy)));
     }
 
     @Test
@@ -28,10 +28,10 @@ public class ExactAlarmStoreTest {
         assertTrue(ExactAlarmContract.isMetadataOwnedByOperationVersion(
                 "{\"operationVersion\":\"2000-3-new\"}",
                 "2000-3-new"));
-        assertTrue(ExactAlarmStore.isMetadataOwnedByOperationVersion(
+        assertFalse(ExactAlarmContract.isMetadataOwnedByOperationVersion(
                 "{\"scheduleVersion\":\"2000-2-old\"}",
                 "2000-2-old"));
-        assertFalse(ExactAlarmStore.isMetadataOwnedByOperationVersion(
+        assertFalse(ExactAlarmContract.isMetadataOwnedByOperationVersion(
                 "{\"operationVersion\":\"2000-3-new\"}",
                 "2000-2-old"));
     }
@@ -40,15 +40,15 @@ public class ExactAlarmStoreTest {
     public void sameMillisecondSequenceOrdersOperations() {
         assertTrue(ExactAlarmContract.isOrderingNewer(
                 5000L, 3L, 5000L, 2L));
-        assertFalse(ExactAlarmStore.isOrderingNewer(
+        assertFalse(ExactAlarmContract.isOrderingNewer(
                 5000L, 2L, 5000L, 3L));
     }
 
     @Test
     public void parseOrdering_rejectsUnversionedOrMalformedValue() {
         assertTrue(ExactAlarmContract.parseOrdering("5000-3-token")[0] == 5000L);
-        assertTrue(ExactAlarmStore.parseOrdering("5000-3-token")[1] == 3L);
-        assertTrue(ExactAlarmStore.parseOrdering("5000")[0] < 0L);
-        assertTrue(ExactAlarmStore.parseOrdering("not-a-token")[0] < 0L);
+        assertTrue(ExactAlarmContract.parseOrdering("5000-3-token")[1] == 3L);
+        assertTrue(ExactAlarmContract.parseOrdering("5000")[0] < 0L);
+        assertTrue(ExactAlarmContract.parseOrdering("not-a-token")[0] < 0L);
     }
 }

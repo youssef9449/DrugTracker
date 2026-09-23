@@ -7,7 +7,7 @@ import {
 import { getExactAlarmPermission, type ExactAlarmPermission } from '../utils/exactAlarm';
 import { getNotificationPermission } from '../utils/notifications/notificationPermissions';
 import { NOTIFICATIONS_KEY } from '../constants/storageKeys';
-import { isNotificationChannelEnabled } from '../utils/notificationRuntime';
+import { isNotificationChannelEnabled, retryPersistedNotificationDeliveries } from '../utils/notificationRuntime';
 import {
   DOSE_REMINDER_CHANNEL_ID,
   DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
@@ -100,6 +100,7 @@ export function useNativeActionHandlers(opts: {
       // the right channel when the scheduler re-schedules.
       setDoseLifecycleTick((tick) => tick + 1);
       if (isActive) {
+        void retryPersistedNotificationDeliveries();
         setCriticalAlarmResumeTick((tick) => tick + 1);
         setDoseAlarmResumeTick((tick) => tick + 1);
         getExactAlarmPermission()

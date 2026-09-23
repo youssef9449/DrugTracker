@@ -22,6 +22,7 @@ export function useAppBackNavigation(
   setActiveTab: Dispatch<SetStateAction<ActiveTab>>
 ): {
   navigateToTab: (tab: ActiveTab) => void;
+  selectTab: (tab: ActiveTab) => void;
   registerBackOverlay: BackOverlayRegistration;
 } {
   const overlaysRef = useRef(new Map<string, OverlayEntry>());
@@ -34,6 +35,15 @@ export function useAppBackNavigation(
     const current = activeTabRef.current;
     if (current === tab) return;
     historyRef.current = [...historyRef.current, current].slice(-MAX_NAVIGATION_HISTORY);
+    activeTabRef.current = tab;
+    setActiveTab(tab);
+  }, [setActiveTab]);
+
+  // Bottom-tab selection is direct navigation, not contextual navigation.
+  // Clearing contextual history prevents Android Back from replaying arbitrary
+  // bottom-tab taps after the user intentionally selected a new root destination.
+  const selectTab = useCallback((tab: ActiveTab) => {
+    historyRef.current = [];
     activeTabRef.current = tab;
     setActiveTab(tab);
   }, [setActiveTab]);
@@ -72,5 +82,5 @@ export function useAppBackNavigation(
     });
   }, [setActiveTab]);
 
-  return { navigateToTab, registerBackOverlay };
+  return { navigateToTab, selectTab, registerBackOverlay };
 }

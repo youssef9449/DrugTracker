@@ -42,7 +42,13 @@ export function loadCriticalNotificationClaims(): Record<string, CriticalNotific
 }
 
 export function saveCriticalNotificationClaims(claims: Record<string, CriticalNotificationClaim>): boolean {
-  return persist(CRITICAL_CLAIMS_STORAGE_KEY, claims) === null;
+  if (persist(CRITICAL_CLAIMS_STORAGE_KEY, claims) !== null) return false;
+  try {
+    if (typeof localStorage === 'undefined') return false;
+    return localStorage.getItem(CRITICAL_CLAIMS_STORAGE_KEY) === JSON.stringify(claims);
+  } catch {
+    return false;
+  }
 }
 
 /** Read one medication's claim from a loaded map (null when absent). */

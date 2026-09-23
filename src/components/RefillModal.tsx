@@ -10,7 +10,7 @@ interface RefillModalProps {
   medication: Medication | null;
   isOpen: boolean;
   onClose: () => void;
-  onConfirmRefill: (medicationId: string, addedPills: number) => void;
+  onConfirmRefill: (medicationId: string, addedPills: number) => Promise<boolean>;
 }
 
 type RefillUnit = 'pills' | 'boxes' | 'strips';
@@ -102,11 +102,11 @@ export const RefillModal: FC<RefillModalProps> = ({
     }
   }
 
-  const handleSave = (e: FormEvent) => {
+  const handleSave = async (e: FormEvent) => {
     e.preventDefault();
     if (addedCount <= 0) return;
-    onConfirmRefill(medication.id, addedCount);
-    onClose();
+    const saved = await onConfirmRefill(medication.id, addedCount);
+    if (saved) onClose();
   };
 
   // Use the DYNAMIC balance as the base for the "current" display and

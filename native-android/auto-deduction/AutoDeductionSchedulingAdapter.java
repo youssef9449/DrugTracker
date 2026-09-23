@@ -91,12 +91,12 @@ public final class AutoDeductionSchedulingAdapter {
     }
 
     static boolean isOrderingNewer(
-            long firstMillis,
             long firstSequence,
-            long secondMillis,
-            long secondSequence) {
+            long firstMillis,
+            long secondSequence,
+            long secondMillis) {
         return ExactAlarmContract.isOrderingNewer(
-                firstMillis, firstSequence, secondMillis, secondSequence);
+                firstSequence, firstMillis, secondSequence, secondMillis);
     }
 
     String getScheduleRaw(String storageKey) {

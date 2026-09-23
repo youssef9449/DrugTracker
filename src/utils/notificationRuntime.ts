@@ -232,14 +232,6 @@ export async function getPendingNotificationResult(
   }
 }
 
-export async function getPendingNotification(
-  namespace: string,
-  identity: string
-): Promise<{ schedule?: { at?: unknown } } | null> {
-  const result = await getPendingNotificationResult(namespace, identity);
-  return result.ok ? result.pending : null;
-}
-
 export type NotificationPermissionResult =
   | { ok: true; enabled: boolean }
   | NativeBoundaryFailure;
@@ -279,15 +271,6 @@ export async function getNotificationPermissionResult(): Promise<NotificationPer
     }
   }
   return { ok: true, enabled: false };
-}
-
-export async function areNotificationsEnabled(): Promise<boolean> {
-  const result = await getNotificationPermissionResult();
-  return result.ok ? result.enabled : false;
-}
-
-export async function areNativeNotificationsEnabled(): Promise<boolean> {
-  return areNotificationsEnabled();
 }
 
 export function addNotificationReceivedListener(

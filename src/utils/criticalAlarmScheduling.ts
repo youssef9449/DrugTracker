@@ -61,7 +61,9 @@ export async function verifyCriticalAlarmPending(
   }
 
   try {
-    if (!(await areNotificationsEnabled())) {
+    const permission = await getNotificationPermissionResult();
+    if (!permission.ok) return permission;
+    if (!permission.enabled) {
       return { ok: false, error: 'notification_permission_denied', errorCode: 'permission_denied' };
     }
 
@@ -96,7 +98,9 @@ export async function scheduleCriticalAlarm(
   const body = `مخزون "${medName}" دخل مرحلة النفاد الحرج (${unit}). يرجى التعبئة فوراً!`;
 
   if (getNativePlatform() === 'android') {
-    if (!(await areNotificationsEnabled())) {
+    const permission = await getNotificationPermissionResult();
+    if (!permission.ok) return permission;
+    if (!permission.enabled) {
       return { ok: false, error: 'notification_permission_denied', errorCode: 'permission_denied' };
     }
     return scheduleCriticalAlarmNative(

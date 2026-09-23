@@ -256,7 +256,7 @@ describe('useDoseReminders', () => {
   });
 
   describe('snooze', () => {
-    it('snoozeAlarm clears the current alarm without marking it fired', () => {
+    it('snoozeAlarm clears the current alarm without marking it fired', async () => {
       const med = makeMed({ id: 'med-snooze', reminderTime: '09:00' });
       const { result } = renderHook(() =>
         useDoseReminders(defaultOpts({ medications: [med] }))
@@ -268,7 +268,7 @@ describe('useDoseReminders', () => {
         expect.objectContaining({ id: 'med-snooze' })
       );
 
-      act(() => {
+      await act(async () => {
         result.current.snoozeAlarm(10);
       });
       expect(result.current.alarmingMedication).toBeNull();
@@ -279,7 +279,7 @@ describe('useDoseReminders', () => {
       expect(fired['med-snooze']).toBeUndefined();
     });
 
-    it('snoozeAlarm schedules a one-shot native notification to re-fire after X minutes', () => {
+    it('snoozeAlarm schedules a one-shot native notification to re-fire after X minutes', async () => {
       const med = makeMed({ id: 'med-snooze-sched', reminderTime: '09:00' });
       const { result } = renderHook(() =>
         useDoseReminders(defaultOpts({ medications: [med] }))
@@ -287,7 +287,7 @@ describe('useDoseReminders', () => {
       act(() => {
         result.current.openAlarm('med-snooze-sched', 'd1');
       });
-      act(() => {
+      await act(async () => {
         result.current.snoozeAlarm(15);
       });
 
@@ -303,7 +303,34 @@ describe('useDoseReminders', () => {
       );
     });
 
-    it('legitimate snooze flow is intact: fire → snooze → dose NOT taken → re-fire opens the modal again', () => {
+    it('keeps the alarm open and does not persist a snooze marker when native snooze scheduling fails', async () => {
+      const med = makeMed({ id: 'med-snooze-failure' });
+      const { result } = renderHook(() =>
+        useDoseReminders(defaultOpts({ medications: [med] }))
+      );
+
+      act(() => {
+        result.current.openAlarm('med-snooze-failure', 'd1');
+      });
+
+      vi.mocked(scheduleSnoozedDoseReminder).mockRejectedValueOnce(
+        new Error('native snooze schedule failed')
+      );
+
+      await act(async () => {
+        result.current.snoozeAlarm(10);
+      });
+
+      expect(result.current.alarmingMedication).toEqual(
+        expect.objectContaining({ id: 'med-snooze-failure' })
+      );
+      const snoozeState = JSON.parse(
+        localStorage.getItem('android_med_tracker_snooze_v1') || '{}'
+      ) as Record<string, number>;
+      expect(snoozeState['med-snooze-failure::d1']).toBeUndefined();
+    });
+
+    it('legitimate snooze flow is intact: fire → snooze → dose NOT taken → re-fire opens the modal again', async () => {
       const med = makeMed({ id: 'med-snooze-legit', reminderTime: '09:00' });
       const { result } = renderHook(() =>
         useDoseReminders(defaultOpts({ medications: [med] }))
@@ -316,7 +343,7 @@ describe('useDoseReminders', () => {
         expect.objectContaining({ id: 'med-snooze-legit' })
       );
 
-      act(() => {
+      await act(async () => {
         result.current.snoozeAlarm(10);
       });
       expect(result.current.alarmingMedication).toBeNull();

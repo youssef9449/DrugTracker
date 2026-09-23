@@ -272,9 +272,16 @@ export function useDoseReminderScheduler({
       }
     }
     // Persisted native pending is authority for stale cleanup after process death.
-    operationQueueRef.current.enqueue('__stale_dose_alarm_cleanup__', () =>
-      cancelStaleDoseReminderAlarms(keepNativeIds)
-    );
+    operationQueueRef.current.enqueue('__stale_dose_alarm_cleanup__', async () => {
+      const result = await cancelStaleDoseReminderAlarms(keepNativeIds);
+      if (!result.ok) {
+        console.warn(
+          '[dose-reminder] stale-alarm cleanup failed:',
+          result.error,
+          result.errorCode
+        );
+      }
+    });
     // Reconcile each desired slot. Same signature + pending → no-op.
     // Missing pending → schedule one-shot (native owns next-day recurrence).
     // Signature change → cancel + one replacement.
@@ -307,16 +314,32 @@ export function useDoseReminderScheduler({
           //      and repaired
           // The native pending state is the scheduling authority; there is no
           // separate recurrence-evidence store.
-          const pending = await isDoseReminderPending(medId, doseId);
+          const pendingResult = await isDoseReminderPending(medId, doseId);
           if (!generationGuardRef.current.isCurrent(key, gen)) return;
-          if (pending) return;
+          if (!pendingResult.ok) {
+            console.warn(
+              '[dose-reminder] pending-state lookup failed:',
+              pendingResult.error,
+              pendingResult.errorCode
+            );
+            return;
+          }
+          if (pendingResult.pending) return;
           const nativeReArmed = await isNativeDoseReminderReArmed(
             medId,
             doseId,
             time
           );
           if (!generationGuardRef.current.isCurrent(key, gen)) return;
-          if (nativeReArmed) return;
+          if (!nativeReArmed.ok) {
+            console.warn(
+              '[dose-reminder] native re-arm lookup failed:',
+              nativeReArmed.error,
+              nativeReArmed.errorCode
+            );
+            return;
+          }
+          if (nativeReArmed.scheduled) return;
           const opts = {
             ...(slotConsumedToday ? { skipToday: true as const } : {}),
             allowManualTakeAction,

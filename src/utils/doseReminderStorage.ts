@@ -1,25 +1,27 @@
-/**
- * Persistent storage for the dose-reminder snooze marker map.
- *
- * Storage shape:
- *   { [`${medicationId}::${doseId}`]: snoozeUntilEpochMs }
- *
- * doseId is required — no medication-level snooze identity.
- */
+/** Persistent per-dose snooze marker with failure-aware accessors. */
 import { loadJson, saveJson } from './storage';
+
 export const SNOOZE_KEY = 'android_med_tracker_snooze_v1';
-/**
- * Stable storage key for a dose-scoped snooze marker.
- * Requires non-empty doseId; returns null when missing.
- */
+
 export function snoozeStorageKey(medId: string, doseId: string): string | null {
   const id = typeof doseId === 'string' ? doseId.trim() : '';
   if (!id) return null;
   return `${medId}::${id}`;
 }
-/**
- * Clear the persisted snooze marker for an explicit dose row.
- */
+
+export function getSnoozeUntil(
+  medId: string,
+  doseId: string
+): number | null {
+  const key = snoozeStorageKey(medId, doseId);
+  if (!key) return null;
+  const snooze = loadJson<Record<string, number>>(SNOOZE_KEY, {});
+  const until = snooze[key];
+  return typeof until === 'number' && Number.isFinite(until)
+    ? until
+    : null;
+}
+
 export function clearSnoozedDose(medId: string, doseId: string): void {
   const key = snoozeStorageKey(medId, doseId);
   if (!key) return;
@@ -29,21 +31,16 @@ export function clearSnoozedDose(medId: string, doseId: string): void {
     saveJson(SNOOZE_KEY, snooze);
   }
 }
-/**
- * True when the explicit dose row is under an active snooze window.
- */
+
 export function isSnoozeActive(
   medId: string,
   doseId: string,
   nowMs: number = Date.now()
 ): boolean {
-  const key = snoozeStorageKey(medId, doseId);
-  if (!key) return false;
-  const snooze = loadJson<Record<string, number>>(SNOOZE_KEY, {});
-  const until = snooze[key];
-  return typeof until === 'number' && nowMs < until;
+  const until = getSnoozeUntil(medId, doseId);
+  return until != null && nowMs < until;
 }
-/** Persist a snooze-until marker for an explicit dose row. */
+
 export function setSnoozeUntil(
   medId: string,
   untilMs: number,

@@ -76,6 +76,7 @@ public final class NotificationRuntime {
             Notification notification = buildNotification(request);
             NotificationManager manager = notificationManager();
             if (manager == null) {
+                persistRetry(request);
                 return PostResult.failed("notification_manager_unavailable");
             }
 

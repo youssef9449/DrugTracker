@@ -21,12 +21,12 @@ describe('native boundary error taxonomy', () => {
     expect(error.code).toBe('permission_denied');
     expect(error.message).toBe('permission_denied');
   });
-})
 
-it('converts thrown failures into a stable boundary result', () => {
+  it('converts thrown failures into a stable boundary result', () => {
     expect(toNativeBoundaryFailure(new Error('persist_failed'))).toEqual({
       ok: false,
       error: 'persist_failed',
       errorCode: 'persistence_failed',
     });
   });
+});

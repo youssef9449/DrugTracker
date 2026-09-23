@@ -138,11 +138,6 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
                     scheduledCalendarDate);
         }
 
-        boolean foreground = app.drugtracker.notificationruntime.AppForegroundState.isForeground();
-        String channelId = foreground ? FG_CHANNEL_ID : BG_CHANNEL_ID;
-        String channelName = foreground ? FG_CHANNEL_NAME : BG_CHANNEL_NAME;
-        int importance = foreground ? 2 : 4;
-
         NotificationRuntime.Action notificationAction = null;
         if (allowManualTakeAction) {
             notificationAction = new NotificationRuntime.Action(
@@ -164,6 +159,12 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
             body += ". طريقة تناول الجرعة: " + description;
         }
         body += ".";
+
+        // Decide foreground/background policy immediately before final notification construction.
+        boolean foreground = app.drugtracker.notificationruntime.AppForegroundState.isForeground();
+        String channelId = foreground ? FG_CHANNEL_ID : BG_CHANNEL_ID;
+        String channelName = foreground ? FG_CHANNEL_NAME : BG_CHANNEL_NAME;
+        int importance = foreground ? 2 : 4;
 
         NotificationRuntime.Request request =
                 new NotificationRuntime.Request(

@@ -20,7 +20,6 @@ import { isValidDoseTime } from '../utils/doseSchedule';
 import { isDoseConsumedOnDate } from '../utils/dateCalculations';
 import { OperationQueue } from '../utils/async/OperationQueue';
 import { GenerationGuard } from '../utils/async/GenerationGuard';
-
 /**
  * Options for {@link useDoseReminderScheduler}.
  */
@@ -61,7 +60,6 @@ export interface UseDoseReminderSchedulerOptions {
    */
   lifecycleTick?: number;
 }
-
 /**
  * One schedulable dose slot derived from explicit `doseSchedule` row.
  */
@@ -74,18 +72,15 @@ export interface DoseReminderSlot {
   unit: string;
   description?: string;
 }
-
 /** Tracker key: medId::doseId — independent cancel/schedule identity. */
 export function doseScheduleKey(medId: string, doseId: string): string {
   return `${medId}::${doseId}`;
 }
-
 export function parseDoseScheduleKey(key: string): { medId: string; doseId: string } {
   const idx = key.indexOf('::');
   if (idx < 0) return { medId: key, doseId: '' };
   return { medId: key.slice(0, idx), doseId: key.slice(idx + 2) };
 }
-
 /**
  * Build dose reminder slots from explicit `doseSchedule` only.
  * Missing/empty schedule → []. No dailyDose/reminderTime synthetic slot.
@@ -118,7 +113,6 @@ export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
   }
   return slots;
 }
-
 /**
  * Native Dose Reminder scheduler.
  *
@@ -140,7 +134,7 @@ export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
  * signatures with a still-pending native alarm are left untouched. When a
  * delivery occurs, DoseReminderAlarmReceiver owns the feature-specific
  * next-calendar-day re-arm through the shared ExactAlarmRuntime.
- * Stale native pending alarms (process death) are cancelled against the
+ * Stale native pending alarms are cancelled against the
  * desired set.
  */
 export function useDoseReminderScheduler({
@@ -155,7 +149,6 @@ export function useDoseReminderScheduler({
 }: UseDoseReminderSchedulerOptions): void {
   const medicationsRef = useRef(medications);
   medicationsRef.current = medications;
-
   /** Keys currently believed scheduled: `${medId}::${doseId}`. */
   const scheduledDoseIdsRef = useRef<Set<string>>(new Set());
   /** Per-key generation counters — stale async ops no-op when gen mismatches. */
@@ -167,7 +160,6 @@ export function useDoseReminderScheduler({
    * When equal and the native pending id is present, reconciliation is a no-op.
    */
   const appliedSignatureRef = useRef<Map<string, string>>(new Map());
-
   const doseSignature = useMemo(
     () =>
       medications
@@ -196,16 +188,13 @@ export function useDoseReminderScheduler({
         .join('\n'),
     [medications, allowManualTakeActionByMedicationId]
   );
-
-
   useEffect(() => {
     if (!hydrated || isFirstRun) return;
-
     const cancelSlot = (medId: string, doseId: string): void => {
       const key = doseScheduleKey(medId, doseId);
       generationGuardRef.current.bump(key);
       appliedSignatureRef.current.delete(key);
-      // Phase 4: clear dose-scoped snooze storage + cancel that slot's
+      // clear dose-scoped snooze storage + cancel that slot's
       // recurring alarm and one-shot snooze (not sibling doses).
       clearSnoozedDose(medId, doseId);
       operationQueueRef.current.enqueue(key, () =>
@@ -214,7 +203,6 @@ export function useDoseReminderScheduler({
         )
       );
     };
-
     // User disabled notifications OR exact-alarm permission is missing →
     // cancel all previously-scheduled dose reminders and clear the tracker.
     if (!notificationsEnabled || exactAlarmPermission === null || exactAlarmPermission === 'denied') {
@@ -226,11 +214,9 @@ export function useDoseReminderScheduler({
       appliedSignatureRef.current.clear();
       return;
     }
-
     const stillScheduled = new Set<string>();
     const keepNativeIds = new Set<string>();
     const today = getTodayDateString();
-
     type DesiredSlot = {
       key: string;
       medId: string;
@@ -246,7 +232,6 @@ export function useDoseReminderScheduler({
       sig: string;
     };
     const desired: DesiredSlot[] = [];
-
     // Build desired set from medication data (source of config truth).
     for (const med of medicationsRef.current) {
       if (!med.reminderEnabled) continue;
@@ -254,7 +239,6 @@ export function useDoseReminderScheduler({
       const treatmentEndDate = getMedicationTreatmentEndDate(med);
       const slots = getDoseReminderSlots(med);
       if (slots.length === 0) continue;
-
       for (const slot of slots) {
         const key = doseScheduleKey(slot.medId, slot.doseId);
         const slotConsumedToday = isDoseConsumedOnDate(med, slot.doseId, today);
@@ -287,12 +271,17 @@ export function useDoseReminderScheduler({
         });
       }
     }
-
     // Persisted native pending is authority for stale cleanup after process death.
-    operationQueueRef.current.enqueue('__stale_dose_alarm_cleanup__', () =>
-      cancelStaleDoseReminderAlarms(keepNativeIds)
-    );
-
+    operationQueueRef.current.enqueue('__stale_dose_alarm_cleanup__', async () => {
+      const result = await cancelStaleDoseReminderAlarms(keepNativeIds);
+      if (!result.ok) {
+        console.warn(
+          '[dose-reminder] stale-alarm cleanup failed:',
+          result.error,
+          result.errorCode
+        );
+      }
+    });
     // Reconcile each desired slot. Same signature + pending → no-op.
     // Missing pending → schedule one-shot (native owns next-day recurrence).
     // Signature change → cancel + one replacement.
@@ -325,16 +314,32 @@ export function useDoseReminderScheduler({
           //      and repaired
           // The native pending state is the scheduling authority; there is no
           // separate recurrence-evidence store.
-          const pending = await isDoseReminderPending(medId, doseId);
+          const pendingResult = await isDoseReminderPending(medId, doseId);
           if (!generationGuardRef.current.isCurrent(key, gen)) return;
-          if (pending) return;
+          if (!pendingResult.ok) {
+            console.warn(
+              '[dose-reminder] pending-state lookup failed:',
+              pendingResult.error,
+              pendingResult.errorCode
+            );
+            return;
+          }
+          if (pendingResult.pending) return;
           const nativeReArmed = await isNativeDoseReminderReArmed(
             medId,
             doseId,
             time
           );
           if (!generationGuardRef.current.isCurrent(key, gen)) return;
-          if (nativeReArmed) return;
+          if (!nativeReArmed.ok) {
+            console.warn(
+              '[dose-reminder] native re-arm lookup failed:',
+              nativeReArmed.error,
+              nativeReArmed.errorCode
+            );
+            return;
+          }
+          if (nativeReArmed.scheduled) return;
           const opts = {
             ...(slotConsumedToday ? { skipToday: true as const } : {}),
             allowManualTakeAction,
@@ -350,7 +355,6 @@ export function useDoseReminderScheduler({
         });
         continue;
       }
-
       const gen = generationGuardRef.current.bump(key);
       operationQueueRef.current.enqueue(key, () =>
         cancelDoseReminder(medId, doseId).then(async () => {
@@ -370,7 +374,6 @@ export function useDoseReminderScheduler({
         })
       );
     }
-
     for (const prevKey of scheduledDoseIdsRef.current) {
       if (!stillScheduled.has(prevKey)) {
         const { medId, doseId } = parseDoseScheduleKey(prevKey);
@@ -386,7 +389,6 @@ export function useDoseReminderScheduler({
     isFirstRun,
     lifecycleTick,
   ]);
-
   // ─────────────────────────────────────────────────────────────
   // Consumption / restore reconciliation effect.
   //
@@ -419,18 +421,14 @@ export function useDoseReminderScheduler({
         .join('\n'),
     [medications]
   );
-
   /** Keys (medId::doseId) that were consumed on the last reconciliation. */
   const prevConsumedKeysRef = useRef<Set<string>>(new Set());
   /** Previous resumeTick — resume forces full re-suppress of still-consumed slots. */
   const prevResumeTickRef = useRef<number | null>(null);
-
   const resumeTickValue = resumeTick ?? 0;
-
   useEffect(() => {
     if (!hydrated || isFirstRun) return;
     if (!notificationsEnabled || exactAlarmPermission === null || exactAlarmPermission === 'denied') return;
-
     const today = getTodayDateString();
     const nextConsumedKeys = new Set<string>();
     // Resume (or first observation of resumeTick) re-applies suppression for
@@ -440,21 +438,17 @@ export function useDoseReminderScheduler({
       prevResumeTickRef.current === null ||
       prevResumeTickRef.current !== resumeTickValue;
     prevResumeTickRef.current = resumeTickValue;
-
     for (const med of medicationsRef.current) {
       if (!med.reminderEnabled) continue;
       if (!isMedicationTreatmentActiveOnDate(med, today)) continue;
       const treatmentEndDate = getMedicationTreatmentEndDate(med);
-
       const slots = getDoseReminderSlots(med);
       if (slots.length === 0) continue;
-
       for (const slot of slots) {
         const slotConsumedToday = isDoseConsumedOnDate(med, slot.doseId, today);
         const key = doseScheduleKey(slot.medId, slot.doseId);
         const { medId, doseId, time, amount, name, unit, description } = slot;
         const wasConsumed = prevConsumedKeysRef.current.has(key);
-
         if (slotConsumedToday) {
           nextConsumedKeys.add(key);
           // Suppress only when newly consumed, or when resume forces a full
@@ -519,7 +513,6 @@ export function useDoseReminderScheduler({
         }
       }
     }
-
     prevConsumedKeysRef.current = nextConsumedKeys;
   }, [
     consumedSignature,

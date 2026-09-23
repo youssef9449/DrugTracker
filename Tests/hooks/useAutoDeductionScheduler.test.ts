@@ -385,11 +385,11 @@ describe('schedule metadata ownership / conditional rollback', () => {
     expect(isMetadataOwnedByVersion(null, 'v1')).toBe(false);
     expect(isMetadataOwnedByVersion('{"scheduleVersion":"v1"}', '')).toBe(false);
     expect(isMetadataOwnedByVersion('{"scheduleVersion":"v1"}', 'v2')).toBe(false);
-    expect(isMetadataOwnedByVersion('{"scheduleVersion":"v1"}', 'v1')).toBe(true);
+    expect(isMetadataOwnedByVersion('{"scheduleVersion":"v1"}', 'v1')).toBe(false);
   });
 
-  it('metadata without scheduleVersion is never owned by a versioned attempt', () => {
-    // Metadata without scheduleVersion is never owned by a versioned attempt.
+  it('metadata without operationVersion is never owned by a versioned attempt', () => {
+    // Metadata without operationVersion is never owned by a versioned attempt.
     expect(isMetadataOwnedByVersion('{"medicationId":"m"}', 'v-any')).toBe(false);
   });
 });

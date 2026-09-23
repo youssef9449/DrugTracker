@@ -1,6 +1,6 @@
-import { Medication, describeOrderInBoxes, isSolidUnit } from '../types';
+import type { Medication } from '../types';
+import { describeOrderInBoxes, isSolidUnit } from './medicationPackaging';
 import { pluralizeArabic } from '../lib/arabicPlural';
-
 export function normalizeArabicDigits(input: string): string {
   if (!input) return '';
   const arabicEasternDigits = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
@@ -12,23 +12,19 @@ export function normalizeArabicDigits(input: string): string {
   }
   return res;
 }
-
 /**
  * Clean a user-entered phone number into the international E.164-ish
  * format `wa.me` expects (country code + number, no `+`, no spaces).
- *
  * The app is targeted at Egyptian users, so Egyptian local numbers are
  * auto-prefixed with the country code `20`:
  *   - 01xxxxxxxxx  (11-digit Egyptian mobile)  → 201xxxxxxxxx
  *   - 0[2-9]xxxxxxx (Egyptian landline)       → 202xxxxxxx…
- *
  * Numbers already in international format (with a leading `+` or `00`
  * or a 1–3 digit country code other than `20`) are preserved as-is, so
  * non-Egyptian users who enter their full international number (e.g.
  * `+9665xxxxxxxx`, `009715xxxxxxxx`) are NOT mangled into an Egyptian
  * number. The caller should encourage international users to include
  * the country code.
- *
  * Returns '' for empty input. Non-digits are stripped (spaces, dashes,
  * parentheses, leading `+`).
  */
@@ -39,53 +35,43 @@ export function cleanPhoneNumber(rawPhone: string): string {
   // dots, slashes, colons etc. also leak through and produce invalid
   // wa.me URLs). The 00 international prefix is handled below.
   let cleaned = normalizeArabicDigits(rawPhone).replace(/\D/g, '');
-
   // Strip leading 00 (international prefix) → the rest is already the
   // country code + number, keep it verbatim.
   if (cleaned.startsWith('00')) {
     cleaned = cleaned.substring(2);
   }
-
   // Egyptian mobile with extra 0 after 20 (e.g. +20010..., 20010...) → 201xxxxxxxxx
   if (/^2001[0125][0-9]{8}$/.test(cleaned)) {
     return '20' + cleaned.substring(3);
   }
-
   // Egyptian mobile format: 01xxxxxxxxx (11 digits starting with 010/011/012/015)
   // → 201xxxxxxxxx
   if (/^01[0125][0-9]{8}$/.test(cleaned)) {
     return '20' + cleaned.substring(1);
   }
-
   // Egyptian mobile without leading 0: 1[0125]xxxxxxxx (10 digits)
   // → 201xxxxxxxxx
   if (/^1[0125][0-9]{8}$/.test(cleaned)) {
     return '20' + cleaned;
   }
-
   // Egyptian landlines with extra 0 after 20: 2002xxxxxxx → 202xxxxxxx
   if (/^200[2-9][0-9]{7,8}$/.test(cleaned)) {
     return '20' + cleaned.substring(3);
   }
-
   // Egyptian landlines / area codes (e.g. 02xxxxxxx, 03xxxxxxx) → 202xxxxxxx
   if (/^0[2-9][0-9]{7,8}$/.test(cleaned)) {
     return '20' + cleaned.substring(1);
   }
-
   // Anything else (already-international numbers without a leading 00,
   // or a leading country code) is returned as-is. wa.me accepts a bare
   // country-code + number.
   return cleaned;
 }
-
 export type OrderQuantityUnit = 'pills' | 'boxes' | 'strips';
-
 export interface OrderQuantitySelection {
   unit: OrderQuantityUnit;
   quantity: number;
 }
-
 export interface OrderItem {
   name: string;
   quantity: number;
@@ -96,13 +82,11 @@ export interface OrderItem {
   packageSize?: number;
   orderBreakdown?: OrderQuantitySelection[];
 }
-
 export function describeOrderQuantityBreakdown(
   breakdown: OrderQuantitySelection[],
   medicationUnit: string
 ): string {
   const boxLabel = medicationUnit === 'مل' ? 'عبوة' : 'علبة';
-
   return breakdown
     .filter((item) => item.quantity > 0)
     .map((item) => {
@@ -116,7 +100,6 @@ export function describeOrderQuantityBreakdown(
     })
     .join(' و ');
 }
-
 export function generatePharmacyOrderMessage(
   items: OrderItem[],
   customerCode: string = '',
@@ -126,16 +109,13 @@ export function generatePharmacyOrderMessage(
   additionalContactPhones: string[] = []
 ): string {
   if (items.length === 0) return '';
-
   let text = `السلام عليكم ورحمة الله،\nمن فضلك عايز الأدوية دي:\n\n`;
-
   items.forEach((item, idx) => {
     if (item.orderBreakdown && item.orderBreakdown.length > 0) {
       const breakdownDesc = describeOrderQuantityBreakdown(item.orderBreakdown, item.unit);
       text += (idx + 1) + '. ' + item.name + ' - المطلوب: ' + breakdownDesc + '\n';
       return;
     }
-
     const packagingDesc = describeOrderInBoxes(
       item.quantity,
       item.stripsPerBox,
@@ -143,7 +123,6 @@ export function generatePharmacyOrderMessage(
       item.packageSize,
       item.unit
     );
-
     if (packagingDesc && (!isSolidUnit(item.unit) || (!packagingDesc.includes('قرص') && !packagingDesc.includes('أقراص') && !packagingDesc.includes('كبسول')))) {
       text += `${idx + 1}. ${item.name} - المطلوب: ${packagingDesc}\n`;
     } else if (isSolidUnit(item.unit)) {
@@ -153,7 +132,6 @@ export function generatePharmacyOrderMessage(
       text += `${idx + 1}. ${item.name} - المطلوب: ${packagingDesc || `${item.quantity} ${item.unit}`}\n`;
     }
   });
-
   // Only include "كود العميل" if the user actually entered a code.
   // The user explicitly asked for this: "خلي الجزء بتاع كود العميل
   // اختياري يعني لو مش مكتوب في الصندوق حاجة ميكتبهوش في الرسالة".
@@ -161,7 +139,6 @@ export function generatePharmacyOrderMessage(
   if (code) {
     text += `\nكود العميل ${code}`;
   }
-
   // Append address if provided (same logic — optional, only show
   // if non-empty).
   if (address && address.trim()) {
@@ -170,7 +147,6 @@ export function generatePharmacyOrderMessage(
   additionalAddresses.forEach((value) => {
     if (value.trim()) text += `\nالعنوان: ${value.trim()}`;
   });
-
   // Append contact phone if provided
   if (contactPhone && contactPhone.trim()) {
     text += `\nرقم التواصل: ${contactPhone.trim()}`;
@@ -178,18 +154,14 @@ export function generatePharmacyOrderMessage(
   additionalContactPhones.forEach((value) => {
     if (value.trim()) text += `\nرقم التواصل: ${value.trim()}`;
   });
-
   return text;
 }
-
 /**
  * Build a WhatsApp deep-link URL in the given format.
- *
  * Consolidates the previous 4 near-identical builders
  * (buildWhatsAppUrl / buildWhatsAppApiUrl / buildWhatsAppAppUrl /
- * buildWhatsAppWebUrl) which differed only in host/scheme (audit #80).
+ * buildWhatsAppWebUrl) which differed only in host/scheme.
  * `buildWhatsAppWebUrl` had zero callers and is dropped.
- *
  * @param phone Phone number (will be cleaned via cleanPhoneNumber).
  * @param message Pre-filled message text.
  * @param target URL flavor:
@@ -204,7 +176,6 @@ export function buildWhatsAppUrl(
 ): string {
   const clean = cleanPhoneNumber(phone);
   const encodedText = encodeURIComponent(message);
-
   if (target === 'api') {
     return clean
       ? `https://api.whatsapp.com/send?phone=${clean}&text=${encodedText}`
@@ -220,10 +191,8 @@ export function buildWhatsAppUrl(
     ? `https://wa.me/${clean}?text=${encodedText}`
     : `https://wa.me/?text=${encodedText}`;
 }
-
 /**
  * Open a WhatsApp deep-link in a new tab or the WhatsApp app.
- *
  * Robust multi-tier strategy:
  * 1. Direct window.open (works when called synchronously in click handlers)
  * 2. Fallback to synthetic anchor appended to document.body and clicked
@@ -232,7 +201,6 @@ export function buildWhatsAppUrl(
 export function openWhatsAppLink(phone: string, message: string): boolean {
   const url = buildWhatsAppUrl(phone, message);
   let opened = false;
-
   // Tier 1: Try window.open first (standard browser API for user-initiated gestures)
   try {
     const win = window.open(url, '_blank', 'noopener,noreferrer');
@@ -242,7 +210,6 @@ export function openWhatsAppLink(phone: string, message: string): boolean {
   } catch {
     // window.open blocked by sandbox or browser popup settings
   }
-
   // Tier 2: Synthetic anchor click (Firefox & Safari user-gesture fallback)
   try {
     const link = document.createElement('a');
@@ -256,24 +223,19 @@ export function openWhatsAppLink(phone: string, message: string): boolean {
   } catch {
     // anchor click blocked
   }
-
   return opened;
 }
-
 export interface CalculatedOrderQuantity {
   quantity: number;
   isCustom: boolean;
   baseMonthlyQuantity: number;
   monthsMultiplier: number;
 }
-
 /**
  * Calculates medication order quantity according to coverage duration.
- *
  * Solid medications are rounded up to a whole strip when strip packaging
  * is configured. Liquids and loose medications are rounded up to a whole
  * package so the requested quantity never falls short of consumption.
- *
  * - If the user set a custom quantity: use that (×2 for 60 days).
  * - If dailyDose > 0 and monthly consumption exceeds one package:
  *   order the exact pill count (e.g., 30 pills for 1/day × 30 days).
@@ -292,7 +254,6 @@ export function calculateMedicationOrderQuantity(
       : med.packageSize && med.packageSize > 0
       ? med.packageSize
       : 30;
-
   // Calculate the actual consumption for the selected number of days.
   let quantity: number;
   if (med.dailyDose > 0) {
@@ -304,7 +265,6 @@ export function calculateMedicationOrderQuantity(
   } else {
     quantity = packSize;
   }
-
   return {
     quantity,
     isCustom: false,
@@ -312,5 +272,3 @@ export function calculateMedicationOrderQuantity(
     monthsMultiplier,
   };
 }
-
-

@@ -2,6 +2,7 @@ import { useState, type FC, type FormEvent } from 'react';
 import { Check, Pencil, Plus, Store, Trash2, X } from 'lucide-react';
 import type { Pharmacy } from '../types';
 import { cleanPhoneNumber } from '../utils/whatsapp';
+import { generateId } from '../utils/id';
 import { Modal } from './ui/Modal';
 
 interface PharmacyManagementViewProps {
@@ -30,7 +31,7 @@ export const PharmacyManagementView: FC<PharmacyManagementViewProps> = ({ pharma
       showToast('اكتب اسم الصيدلية ورقم واتساب صحيحًا.');
       return;
     }
-    onSave({ id: editing?.id || `pharmacy-${Date.now()}`, name, phone, customerCode: form.customerCode.trim() });
+    onSave({ id: editing?.id || generateId('pharmacy'), name, phone, customerCode: form.customerCode.trim() });
     setIsFormOpen(false);
     showToast(editing ? 'تم تحديث بيانات الصيدلية.' : 'تمت إضافة الصيدلية.');
   };

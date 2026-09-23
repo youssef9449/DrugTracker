@@ -27,14 +27,11 @@ import {
   OrderItem,
   buildWhatsAppUrl,
 } from '../utils/whatsapp';
-
-
 import {
   getNotificationPermission,
   requestNotificationPermission,
 } from '../utils/notifications/notificationPermissions';
 import { TOAST_MESSAGES } from '../constants/uiStrings';
-
 export interface AppSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -71,7 +68,6 @@ export interface AppSettingsModalProps {
    */
   showToast?: (message: string) => void;
 }
-
 export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   isOpen,
   onClose,
@@ -109,13 +105,11 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
     (settings.whatsappAddresses ?? [])[0];
   const address = selectedAddress?.address ?? '';
   const contactPhone = selectedContact?.phone ?? '';
-
   // App preference drafts — committed only on حفظ الإعدادات.
   const [draftSound, setDraftSound] = useState(soundEnabled);
   const [draftNotifications, setDraftNotifications] = useState(notificationsEnabled);
   const [draftCritical, setDraftCritical] = useState(criticalStockAlertsEnabled);
   const [draftAutoDeduct, setDraftAutoDeduct] = useState(autoDeductEnabled);
-
   /**
    * OFF → ON for phone notifications: require OS notification permission
    * (same flow as App.handleToggleNotifications). Do not flip draft to true
@@ -143,7 +137,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
     }
     setDraftNotifications(true);
   };
-
   /**
    * OFF → ON for critical-stock alerts: require OS notification permission.
    * Independent of dose-reminder draft — never flips draftNotifications.
@@ -173,12 +166,11 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
     }
     setDraftCritical(true);
   };
-
   // Synchronize state whenever modal opens. Intentionally only dep [isOpen]
   // — if the parent passes a new settings object reference while the modal
   // is already open, we must NOT reset the form (that would blow away
   // in-progress edits). The latest settings is read from the closure at
-  // the moment the modal opens (audit #93).
+  // the moment the modal opens.
   useEffect(() => {
     if (isOpen) {
       // Reset preference drafts from committed parent state on open.
@@ -189,9 +181,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
-
   const formattedPhone = cleanPhoneNumber(pharmacyPhone);
-
   // #111: extracted from an inline IIFE — the WhatsApp order-message
   // preview computations. Memoized so they don't recompute on every
   // keystroke in unrelated form fields. Must be before the `if (!isOpen)`
@@ -214,14 +204,12 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
               packageSize: m.packageSize,
             };
           });
-
     const msg = generatePharmacyOrderMessage(
       orderItemsForMessage,
       customerCode,
       address,
       contactPhone
     );
-
     return {
       previewMsg: msg,
       waUrl: buildWhatsAppUrl(pharmacyPhone, msg),
@@ -236,9 +224,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
     contactPhone,
     pharmacyPhone,
   ]);
-
   if (!isOpen) return null;
-
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
     onSaveSettings({
@@ -261,7 +247,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
     }
     onClose();
   };
-
   return (
     <Modal
       isOpen={isOpen}
@@ -302,7 +287,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
             <X className="w-5 h-5" />
           </button>
         </div>
-
         {/* Form Body */}
         <form onSubmit={handleSave} className="p-5 overflow-y-auto space-y-4 flex-1">
           {!isPharmacyOnly && (
@@ -346,7 +330,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     : 'عند الإيقاف يتوقف الخصم التلقائي ويبقى الرصيد ثابتاً.'}
                 </p>
               </div>
-
               {/* Notifications & Alerts Management Section */}
               <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 space-y-3">
                 <div className="flex items-center justify-between">
@@ -388,9 +371,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     color="amber"
                   />
                 </div>
-
                 <hr className="border-slate-200" />
-
                 {/* Critical Stock Alerts Toggle */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -433,7 +414,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     color="rose"
                   />
                 </div>
-
                 {/* Test Notification Button */}
                 {onSendTestNotification && (
                   <button
@@ -445,7 +425,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     <span>تجربة إشعار وتنبيه صوتي الآن (اختبار فوري)</span>
                   </button>
                 )}
-
                 {/* Exact-alarm permission warning (Android 12+) */}
                 {draftNotifications && exactAlarmPermission === 'denied' && onOpenExactAlarmSettings && (
                   <div className="bg-rose-50 border border-rose-300/80 rounded-2xl p-3.5 space-y-2">
@@ -469,7 +448,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     </button>
                   </div>
                 )}
-
                 {/* Exact-alarm granted indicator */}
                 {draftNotifications && exactAlarmPermission === 'granted' && (
                   <div className="flex items-center gap-1.5 text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-1.5">
@@ -478,7 +456,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                   </div>
                 )}
               </div>
-
               {/* Sound management section */}
               <div className="bg-teal-50/70 border border-teal-200/80 rounded-2xl p-3.5 space-y-3">
                 <div className="flex items-center justify-between">
@@ -499,7 +476,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
               </div>
             </>
           )}
-
           {/* Pharmacy and WhatsApp Configuration Section */}
           {isPharmacyOnly && <div className="space-y-3 pt-1">
             {/* Pharmacy Phone Number */}
@@ -524,7 +500,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                 )}
               </div>
             </div>
-
             {/* Customer Code & Pharmacy Name */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {/* Customer Code */}
@@ -550,7 +525,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                   </span>
                 )}
               </div>
-
               {/* Pharmacy Name */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
@@ -567,7 +541,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                   لتنظيم اسم الجهة في التطبيق
                 </span>
               </div>
-
               {/* Delivery Address */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
@@ -584,7 +557,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                   يظهر في رسالة الواتساب {customerCode.trim() ? 'تحت كود العميل' : 'في نهاية الرسالة'}
                 </span>
               </div>
-
               {/* Contact Phone */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
@@ -603,7 +575,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                 </span>
               </div>
             </div>
-
             {/* Live Preview of WhatsApp Message */}
             <div className="bg-white text-slate-700 rounded-2xl p-3.5 text-xs space-y-2 font-mono border border-slate-200 shadow-sm">
               <div className="flex items-center justify-between text-[11px] text-teal-800 font-bold">
@@ -620,7 +591,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
               <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-[11px] text-slate-700 leading-relaxed whitespace-pre-line select-text max-h-44 overflow-y-auto">
                 {previewMsg}
               </div>
-
               {/* Test / Send WhatsApp Link Button */}
               {pharmacyPhone.trim() && (
                 <div className="flex items-center gap-2 pt-1">
@@ -644,7 +614,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
               )}
             </div>
           </div>}
-
           {/* Submit Button */}
           <div className="pt-2">
             <button

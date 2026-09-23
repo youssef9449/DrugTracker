@@ -1,34 +1,11 @@
 import type { Medication } from '../types';
+import { addCalendarDays, parseCalendarDate } from './dateCalculations';
 
 const CALENDAR_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function normalizeCalendarDate(value: unknown): string | null {
-  if (typeof value !== 'string' || !CALENDAR_DATE_RE.test(value)) return null;
-  const [year, month, day] = value.split('-').map(Number);
-  if (![year, month, day].every(Number.isInteger)) return null;
-  const date = new Date(year, month - 1, day);
-  if (
-    date.getFullYear() !== year ||
-    date.getMonth() !== month - 1 ||
-    date.getDate() !== day
-  ) return null;
-  return value;
-}
-
-function formatLocalCalendarDate(date: Date): string {
-  return [
-    String(date.getFullYear()).padStart(4, '0'),
-    String(date.getMonth() + 1).padStart(2, '0'),
-    String(date.getDate()).padStart(2, '0'),
-  ].join('-');
-}
-
-function addCalendarDays(calendarDate: string, days: number): string | null {
-  const [year, month, day] = calendarDate.split('-').map(Number);
-  const date = new Date(year, month - 1, day);
-  if (!Number.isFinite(date.getTime())) return null;
-  date.setDate(date.getDate() + days);
-  return formatLocalCalendarDate(date);
+  if (typeof value !== 'string') return null;
+  return parseCalendarDate(value) ? value : null;
 }
 
 /**

@@ -1,12 +1,11 @@
 /**
- * Phase 2 — JS-side scheduler for native exact-time auto-deduction.
+ * JS-side scheduler for native exact-time auto-deduction.
  * Independent of notifications. Does NOT mutate currentPills / logs.
  */
-
 import { useEffect, useMemo, useRef } from 'react';
 import type { Medication } from '../types';
 import type { ExactAlarmPermission } from '../utils/exactAlarm';
-import { getTodayDateString } from '../utils/dateCalculations';
+import { getTodayDateString, tomorrowDateString, localEpochMs } from '../utils/dateCalculations';
 import {
   getMedicationTreatmentEndDate,
   isMedicationTreatmentActiveOnDate,
@@ -26,7 +25,6 @@ import {
 import { withAutoStockMutationGate } from '../utils/autoDeductionStockGate';
 import { OperationQueue } from '../utils/async/OperationQueue';
 import { GenerationGuard } from '../utils/async/GenerationGuard';
-
 export interface UseAutoDeductionSchedulerOptions {
   medications: Medication[];
   globalAutoDeductEnabled: boolean;
@@ -37,7 +35,6 @@ export interface UseAutoDeductionSchedulerOptions {
   /** Increments at each local-midnight rollover while the app stays open. */
   midnightTick?: number;
 }
-
 export interface AutoDeductionSlot {
   medId: string;
   doseId: string;
@@ -46,7 +43,6 @@ export interface AutoDeductionSlot {
   calendarDate: string;
   treatmentEndDate?: string;
 }
-
 export function autoDeductionScheduleKey(
   medId: string,
   doseId: string,
@@ -54,7 +50,6 @@ export function autoDeductionScheduleKey(
 ): string {
   return `${medId}::${doseId}::${calendarDate}`;
 }
-
 export function getAutoDeductionSlotsForDate(
   med: Medication,
   calendarDate: string
@@ -62,8 +57,7 @@ export function getAutoDeductionSlotsForDate(
   if (med.autoDeductEnabled === false) return [];
   if (!isMedicationTreatmentActiveOnDate(med, calendarDate)) return [];
   const treatmentEndDate = getMedicationTreatmentEndDate(med);
-
-  // Issue #268: Exact slots come only from explicit doseSchedule rows.
+  // Exact slots come only from explicit doseSchedule rows.
   if (!Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0) {
     return [];
   }
@@ -86,13 +80,11 @@ export function getAutoDeductionSlotsForDate(
   }
   return slots;
 }
-
 type GuardedCancelResult = {
   ok: boolean;
   skipped?: boolean;
   error?: string;
 };
-
 /**
  * Native exact-schedule writes must serialize with stock/config mutations.
  * The request may have been built from an older React render, so the durable
@@ -106,17 +98,14 @@ async function scheduleExactOccurrenceFromDurable(slot: AutoDeductionSlot) {
     // Medication-level Auto is authoritative (Global bulk-sets med flags; not a runtime kill switch).
     const med = fresh.medications.find((m) => m.id === slot.medId);
     if (!med) return { ok: true, skipped: true } as const;
-
     const current = getAutoDeductionSlotsForDate(med, slot.calendarDate).find(
       (candidate) => candidate.doseId === slot.doseId
     );
     if (!current) return { ok: true, skipped: true } as const;
-
     const epoch = localEpochMs(current.calendarDate, current.time);
     if (epoch == null || epoch <= Date.now() - 2000) {
       return { ok: true, skipped: true } as const;
     }
-
     // IMPORTANT: use the durable slot, not the stale React snapshot.
     return scheduleAutoDeduction({
       medicationId: current.medId,
@@ -129,7 +118,6 @@ async function scheduleExactOccurrenceFromDurable(slot: AutoDeductionSlot) {
     });
   });
 }
-
 /**
  * Cancel a stale native exact occurrence under the same durable gate used by
  * stock/config mutations. For normal reconciliation cleanup, cancellation
@@ -157,14 +145,12 @@ async function cancelUndesiredExactOccurrence(
     if (!force && stillDesired) {
       return { ok: true, skipped: true } as const;
     }
-
     if (!force) {
       const invalidation = await invalidateAutoDeductionRecurrence(medId, doseId);
       if (!invalidation.ok && invalidation.error !== 'not_android') {
         return { ok: false, error: invalidation.error ?? 'invalidate_failed' };
       }
     }
-
     const result = await cancelAutoDeduction(medId, doseId, calendarDate);
     return {
       ok: result.ok,
@@ -172,32 +158,6 @@ async function cancelUndesiredExactOccurrence(
     };
   });
 }
-
-export function tomorrowDateString(today: string = getTodayDateString()): string {
-  const [y, m, d] = today.split('-').map((n) => parseInt(n, 10));
-  const dt = new Date(y, m - 1, d);
-  dt.setDate(dt.getDate() + 1);
-  const yy = dt.getFullYear();
-  const mm = String(dt.getMonth() + 1).padStart(2, '0');
-  const dd = String(dt.getDate()).padStart(2, '0');
-  return `${yy}-${mm}-${dd}`;
-}
-
-export function localEpochMs(calendarDate: string, timeHhmm: string): number | null {
-  if (!calendarDate || !timeHhmm) return null;
-  const parts = calendarDate.split('-').map((n) => parseInt(n, 10));
-  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return null;
-  const colon = timeHhmm.indexOf(':');
-  if (colon < 1) return null;
-  const h = parseInt(timeHhmm.slice(0, colon), 10);
-  const mi = parseInt(timeHhmm.slice(colon + 1), 10);
-  if (!Number.isFinite(h) || !Number.isFinite(mi)) return null;
-  const [y, m, d] = parts;
-  const dt = new Date(y, m - 1, d, h, mi, 0, 0);
-  const ms = dt.getTime();
-  return Number.isFinite(ms) ? ms : null;
-}
-
 /**
  * Protect past-due schedules that carry durable fire-retry evidence.
  * fireRetryCount is Auto-owned retry evidence surfaced by the native schedule
@@ -217,7 +177,6 @@ export function isFireRetryRecoveryPending(
     return false;
   }
   void globalAutoDeductEnabled;
-
   // Prefer native scheduledAtEpochMs; fall back to timeHhmm or med schedule.
   let scheduledAt: number | null = null;
   if (
@@ -236,7 +195,6 @@ export function isFireRetryRecoveryPending(
       scheduledAt = localEpochMs(schedule.calendarDate, configuredSlot.time);
     }
   }
-
   // Without a due timestamp we still protect the row when fireRetryCount > 0:
   // stale React med/global state must not cancel durable failed-fire evidence.
   if (scheduledAt == null) {
@@ -244,7 +202,6 @@ export function isFireRetryRecoveryPending(
   }
   return scheduledAt <= now + 2_000;
 }
-
 export function useAutoDeductionScheduler({
   medications,
   globalAutoDeductEnabled,
@@ -258,7 +215,6 @@ export function useAutoDeductionScheduler({
   const generationGuardRef = useRef(new GenerationGuard<string>());
   const operationQueueRef = useRef(new OperationQueue<string>());
   const recoveryBoundaryRef = useRef<string | null>(null);
-
   const signature = useMemo(
     () =>
       [
@@ -288,7 +244,6 @@ export function useAutoDeductionScheduler({
       ].join('#'),
     [medications, globalAutoDeductEnabled, exactAlarmPermission]
   );
-
   useEffect(() => {
     if (!hydrated || isFirstRun) return;
     if (exactAlarmPermission === null || exactAlarmPermission === 'denied') {
@@ -316,14 +271,11 @@ export function useAutoDeductionScheduler({
       }
       return;
     }
-
     const gen = generationGuardRef.current.bump('auto-deduction');
     const today = getTodayDateString();
     const tomorrow = tomorrowDateString(today);
     const now = Date.now();
-
     const desired = new Map<string, AutoDeductionSlot>();
-
     // Per-medication Auto only (getAutoDeductionSlotsForDate returns [] when OFF).
     for (const med of medications) {
       for (const date of [today, tomorrow]) {
@@ -336,10 +288,8 @@ export function useAutoDeductionScheduler({
         }
       }
     }
-
     operationQueueRef.current.enqueue('auto-deduction', async () => {
       if (!generationGuardRef.current.isCurrent('auto-deduction', gen)) return;
-
       // Recovery boundary: rebuild/promo any past native schedule entries before
       // the destructive desired-state comparison. This makes missed fires
       // recoverable after app restart/resume/midnight without foreground polling.
@@ -358,14 +308,13 @@ export function useAutoDeductionScheduler({
         recoveryBoundaryRef.current = recoveryBoundary;
         if (!generationGuardRef.current.isCurrent('auto-deduction', gen)) return;
       }
-
       // Reconcile against durable native schedule metadata (not process-local
       // trackedRef alone). After restart trackedRef is empty; native may still
       // hold stale schedules for disabled/deleted meds — cancel those first.
       // System boot / permission re-grant restore is handled by
       // Shared system lifecycle recovery is handled natively; this normal desired-state pass
       // remains limited to reconciling the current desired schedule state.
-      // Issue #242: native list is authoritative for durable-schedule discovery.
+      // The native list is authoritative for durable-schedule discovery.
       // Distinguish success+empty from read failure — never treat failure as [].
       const listResult = await listScheduledAutoDeductionOccurrences();
       if (listResult.ok) {
@@ -380,7 +329,6 @@ export function useAutoDeductionScheduler({
             s.calendarDate
           );
           listedKeys.add(key);
-
           if (!desired.has(key)) {
             const durableMed = medications.find((m) => m.id === s.medicationId);
             if (isFireRetryRecoveryPending(
@@ -395,8 +343,7 @@ export function useAutoDeductionScheduler({
               trackedRef.current.delete(key);
               continue;
             }
-
-            // Issue #217: durable generation bump MUST succeed before any
+            // The durable generation bump MUST succeed before any
             // occurrence cancel. Cancel-without-invalidate leaves the old
             // generation active so a concurrent receiver can still create D+1.
             const res = await cancelUndesiredExactOccurrence(
@@ -416,9 +363,7 @@ export function useAutoDeductionScheduler({
             trackedRef.current.add(key);
           }
         }
-
         if (!generationGuardRef.current.isCurrent('auto-deduction', gen)) return;
-
         // The successful native list is authoritative. A tracked key that
         // disappeared from the native snapshot is already absent natively;
         // delete only the process-local tracking entry. Do NOT invalidate the
@@ -430,13 +375,11 @@ export function useAutoDeductionScheduler({
           }
         }
       } else {
-        // Fail closed (Issue #242): list failure ≠ empty native set.
+        // Fail closed: a native list failure is never treated as an empty set.
         // No invalidate/cancel from native absence or trackedRef in this pass.
         // trackedRef is left unchanged for a later successful reconciliation.
       }
-
       if (!generationGuardRef.current.isCurrent('auto-deduction', gen)) return;
-
       for (const [key, slot] of desired) {
         if (!generationGuardRef.current.isCurrent('auto-deduction', gen)) return;
         const result = await scheduleExactOccurrenceFromDurable(slot);

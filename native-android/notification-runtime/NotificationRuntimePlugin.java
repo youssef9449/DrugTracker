@@ -130,10 +130,13 @@ public final class NotificationRuntimePlugin extends Plugin {
     public void cancel(PluginCall call) {
         String namespace = call.getString("namespace");
         String identity = call.getString("identity");
-        boolean ok = new NotificationRuntime(getContext())
+        NotificationRuntime.CancelResult result = new NotificationRuntime(getContext())
                 .cancel(namespace, identity);
         JSObject ret = new JSObject();
-        ret.put("ok", ok);
+        ret.put("ok", result.accepted);
+        if (result.error != null) {
+            ret.put("error", result.error);
+        }
         call.resolve(ret);
     }
 

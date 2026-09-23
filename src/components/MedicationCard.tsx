@@ -12,11 +12,14 @@ import {
   ListChecks,
 } from 'lucide-react';
 import type { ConsumptionLog } from '../types';
-import { Medication, calculateMedicationStatus, describeStockInStrips, isSolidUnit } from '../types';
+import type { Medication } from '../types';
+import { calculateMedicationStatus } from '../utils/medicationStatus';
+import { describeStockInStrips, isSolidUnit } from '../utils/medicationPackaging';
 import {
   getDepletionDate,
   getTodayDateString,
 } from '../utils/dateCalculations';
+import { formatDepletionDate } from '../utils/medicationPresentation';
 import {
   getCardDoseToggleTarget,
   isMedicationAutoDeductActive,
@@ -33,7 +36,6 @@ import {
   AutoDeductStatusBadge,
   MedicationNotificationStatusBadge,
 } from './medicationCardParts';
-
 /**
  * Map a medication's `colorTag` (the user-selected card color from the
  * AddMedicationModal color picker) to Tailwind classes used for the card's
@@ -80,15 +82,10 @@ function colorTagClasses(colorTag: string | undefined): { bg: string; border: st
       };
   }
 }
-
 /**
- * A SHORT depletion label for the tight "جميع الأدوية" card rows
- * (compact + detailed). `getDepletionDate().formattedArabic` includes
- * the full weekday name for far-future dates (e.g. "الأربعاء، ٣٠
- * سبتمبر"), which is too long for the small pill in these rows and
- * overlaps neighboring content. Here we drop the weekday and only
- * keep "يوم شهر" (e.g. "٣٠ سبتمبر"), while keeping the near-term
- * wording ("اليوم"/"غداً"/"بعد غد"/"نفد المخزون") unchanged.
+ * A short depletion label for the tight "جميع الأدوية" card rows.
+ * Far-future dates omit the weekday so the label stays compact, while
+ * near-term states keep their dedicated wording.
  */
 function shortDepletionLabel(
   depletion: { dateStr: string; daysLeft: number },
@@ -106,7 +103,6 @@ function shortDepletionLabel(
     timeZone: 'UTC',
   });
 }
-
 interface MedicationCardProps {
   medication: Medication;
   viewFilter?: 'all' | 'alerts' | 'sufficient';
@@ -128,7 +124,6 @@ interface MedicationCardProps {
   lastRefillQuantity?: number;
   onUndoRefill?: () => void;
 }
-
 export const MedicationCard: FC<MedicationCardProps> = ({
   medication,
   viewFilter = 'all',
@@ -148,7 +143,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   onUndoRefill,
 }) => {
   const isAutoActive = isMedicationAutoDeductActive(medication);
-  // Issue #266: durable currentPills is the sole live stock balance.
+  // Durable currentPills is the sole live stock balance.
   const statusInfo = calculateMedicationStatus(medication);
   const depletion = getDepletionDate(medication);
   const isSolid = isSolidUnit(medication.unit);
@@ -162,7 +157,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         medication.unit
       )
     : null;
-
   // For non-solid medications, show only the number of complete packages
   // when at least one full package exists. Partial packages stay unlabelled.
   const nonSolidPackageCount =
@@ -175,10 +169,8 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     nonSolidPackageCount > 0
       ? pluralizeArabic(nonSolidPackageCount, medication.unit === 'مل' ? 'عبوة' : 'علبة')
       : null;
-
   // The user-selected colorTag drives the icon box background, accent border, and category badge
   const tag = colorTagClasses(medication.colorTag);
-
   // Maximum visual scale for the stock progress bar.
   // If the medication has an explicit temporary treatment duration (not chronic),
   // the visual range is determined by its duration of use.
@@ -187,7 +179,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     medication.isChronic === false &&
     typeof medication.durationDays === 'number' &&
     medication.durationDays > 0;
-
   const packageDays =
     medication.packageSize && medication.packageSize > 0 && medication.dailyDose > 0
       ? medication.packageSize / medication.dailyDose
@@ -203,7 +194,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     100,
     Math.max(0, Math.round((statusInfo.daysLeft / maxVisualRange) * 100))
   );
-
   const getProgressColor = () => {
     switch (statusInfo.status) {
       case 'out_of_stock':
@@ -216,18 +206,15 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         return 'bg-teal-600';
     }
   };
-
   // Retained for future use (per user instruction, not rendered inside cards):
   void lastRefillQuantity;
   void onUndoRefill;
-
   // -------------------------------------------------------------
   // VIEW 1: "قارب على النفاذ" (ALERTS) - Focus on Urgency & Refill
   // -------------------------------------------------------------
   if (viewFilter === 'alerts') {
     const isOut = statusInfo.status === 'out_of_stock';
     const isCrit = statusInfo.status === 'critical';
-
     return (
       <div
         id={`med-card-${medication.id}`}
@@ -243,7 +230,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         <h3 className="text-base font-bold text-slate-900 leading-snug tracking-tight truncate mb-1.5 block w-full" title={medication.name}>
           {medication.name}
         </h3>
-
         {/* Row 2: Badges (Status, Category, Strips) + Quick Menu */}
         <div className="flex items-center justify-between gap-2 min-w-0">
           <div className="flex items-center gap-1.5 text-xs text-slate-500 flex-wrap min-w-0">
@@ -284,7 +270,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               <PackageSizeBadge medication={medication} className="text-[10px] text-teal-800 bg-white/90 border border-teal-200 px-1.5 py-0.5 rounded shrink-0" />
             )}
           </div>
-
           {/* Quick Menu (extracted — see MedicationMenu.tsx) */}
           <MedicationMenu
             medication={medication}
@@ -296,7 +281,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             onOpenHistory={onOpenHistory}
           />
         </div>
-
         {/* Urgency Highlight Card: Days left countdown + Exact depletion date */}
         <div className="mt-3 p-3 bg-white rounded-xl border border-slate-200/90 flex items-center justify-between gap-3 text-xs">
           <div>
@@ -319,11 +303,10 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               </span>
             )}
           </div>
-
           <div className="text-left">
             <span className="text-[11px] text-slate-500 block">تاريخ النفاذ التقديري:</span>
             <span className="font-bold text-slate-900 block mt-0.5 text-xs">
-              {depletion.formattedArabic}
+              {formatDepletionDate(depletion.dateStr, depletion.daysLeft, currentPills)}
             </span>
             <span className="text-[10px] text-slate-500 font-mono">
               {isOut
@@ -338,7 +321,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             </span>
           </div>
         </div>
-
         {/* Scheduled Reminder Badge (extracted — see ReminderBadge.tsx) */}
         <ReminderBadge
           medication={medication}
@@ -346,7 +328,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           textClass="text-amber-950"
           badgeClass="text-amber-900 bg-amber-100"
         />
-
         {/* Quick Action: Immediate Refill + Shopping List CTA */}
         <div className="mt-3 flex items-center gap-2">
           <button
@@ -356,7 +337,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             <Plus className="w-4 h-4" />
             <span>تعبئة رصيد</span>
           </button>
-
           {onNavigateToShopping && (
             <button
               onClick={onNavigateToShopping}
@@ -368,21 +348,18 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             </button>
           )}
         </div>
-
         {/* Auto-deduct paused note — shown on every view when the
             auto-deduction is disabled, with the dose-taken status. */}
         {!isAutoActive && <AutoDeductPausedNote />}
       </div>
     );
   }
-
   // -------------------------------------------------------------
   // VIEW 2: "المخزون الكافي" (SUFFICIENT) - Focus on Safety & Duration
   // -------------------------------------------------------------
   if (viewFilter === 'sufficient') {
     const safeDays = statusInfo.daysLeft;
     const monthlyUsage = medication.dailyDose * DAYS_PER_MONTH;
-
     return (
       <div
         id={`med-card-${medication.id}`}
@@ -392,7 +369,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         <h3 className="text-base font-bold text-slate-900 leading-snug tracking-tight truncate mb-1.5 block w-full" title={medication.name}>
           {medication.name}
         </h3>
-
         {/* Row 2: Badges (Safety, Category, Strips) + Options Menu */}
         <div className="flex items-center justify-between gap-2 min-w-0">
           <div className="flex items-center gap-1.5 text-xs text-slate-500 flex-wrap min-w-0">
@@ -417,7 +393,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               </span>
             )}
           </div>
-
           {/* Options Menu (extracted — see MedicationMenu.tsx) */}
           <MedicationMenu
             medication={medication}
@@ -429,7 +404,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             onOpenHistory={onOpenHistory}
           />
         </div>
-
         {/* Coverage & Stability metrics */}
         <div className="mt-3 p-2.5 bg-emerald-50/40 rounded-xl border border-emerald-100/80 grid grid-cols-3 gap-2 text-xs">
           <div>
@@ -448,7 +422,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               </span>
             )}
           </div>
-
           <div>
             <span className="text-[10px] text-slate-500 block">الاستهلاك اليومي</span>
             <div className="flex items-baseline gap-1 mt-0.5">
@@ -460,7 +433,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               </span>
             </div>
           </div>
-
           <div>
             <span className="text-[10px] text-slate-500 block">الاستهلاك الشهري</span>
             <div className="flex items-baseline gap-1 mt-0.5">
@@ -473,7 +445,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             </div>
           </div>
         </div>
-
         {/* Coverage Guarantee Statement */}
         <div className="mt-2.5 p-2 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between text-xs">
           <div className="flex items-center gap-1.5 text-slate-600">
@@ -484,7 +455,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             {depletion.formattedArabic} ({safeDays} يوم أمان)
           </span>
         </div>
-
         {/* Scheduled Reminder Badge (extracted — see ReminderBadge.tsx) */}
         <ReminderBadge
           medication={medication}
@@ -492,17 +462,14 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           textClass="text-emerald-950"
           badgeClass="text-emerald-900 bg-emerald-100"
         />
-
         {/* Auto-deduct paused note */}
         {!isAutoActive && <AutoDeductPausedNote />}
       </div>
     );
   }
-
   // -------------------------------------------------------------
   // VIEW 3: "جميع الأدوية" (ALL) - Comprehensive Inventory Management
   // -------------------------------------------------------------
-
   // -------------------------------------------------------------
   // COMPACT VIEW: "جميع الأدوية" (ALL - COMPACT MODE)
   // Dense layout: reduces height by ~70% while keeping all critical
@@ -527,7 +494,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     );
     // Take uses current schedule slot amount from the manual toggle target.
     const takeAmount = doseToggle.amount;
-
     return (
       <div
         id={`med-card-${medication.id}`}
@@ -539,7 +505,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         <h3 className="block w-full text-[11px] font-bold text-slate-900 leading-tight tracking-tight truncate mb-1" title={medication.name}>
           {medication.name}
         </h3>
-
         {/* Row 2: Category + Auto-Deduct Status + Stock Status (independent of name and actions) */}
         <div className="flex items-center gap-1 flex-wrap min-w-0 mb-1">
           {medication.category && (
@@ -556,7 +521,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               مزمن
             </span>
           ) : null}
-
           {isOut ? (
             <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 flex items-center gap-0.5 shrink-0 w-fit">
               <AlertCircle className="w-2 h-2" />
@@ -579,7 +543,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             </span>
           )}
         </div>
-
         {/* Actions row (independent of Category/Status) */}
         <div className="w-full min-w-0 flex flex-wrap items-center justify-end gap-1">
             {Array.isArray(medication.doseSchedule) &&
@@ -663,7 +626,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             />
             </div>
         </div>
-
         {/* Row 3: stock · dose · depletion — surface container */}
         <div className="mt-1.5 p-1 bg-slate-50 rounded-xl border border-slate-100 grid grid-cols-2 gap-1 text-[9px] min-w-0">
           <div className="flex min-w-0 items-baseline gap-0.5">
@@ -673,7 +635,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             </span>
             <span className="text-[8px] text-slate-500 truncate">{medication.unit || 'قرص'}</span>
           </div>
-
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
             <div className="flex shrink-0 items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 font-mono text-teal-800 font-bold" title={`الجرعة: ${medication.dailyDose}/يوم`}>
               <Clock className="w-2 h-2 text-teal-600" />
@@ -685,7 +646,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             </div>
           </div>
         </div>
-
         {/* Row 3: progress only */}
         <div
           className="mt-1 w-full h-1 bg-slate-200/70 rounded-full overflow-hidden"
@@ -703,12 +663,10 @@ export const MedicationCard: FC<MedicationCardProps> = ({
       </div>
     );
   }
-
   // -------------------------------------------------------------
   // DETAILED VIEW for "all": former compact card (medium density)
   // -------------------------------------------------------------
   if (viewFilter === 'all') {
-
     const isOut = statusInfo.status === 'out_of_stock';
     const isCrit = statusInfo.status === 'critical';
     const isWarn = statusInfo.status === 'warning';
@@ -724,7 +682,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     );
     // Take uses current schedule slot amount from the manual toggle target.
     const takeAmount = doseToggle.amount;
-
     return (
       <div
         id={`med-card-${medication.id}`}
@@ -742,7 +699,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         <h3 className="text-xs font-bold text-slate-900 leading-tight tracking-tight truncate" title={medication.name}>
           {medication.name}
         </h3>
-
         {/* Row 2: Category + Auto-Deduct Status + Stock Status (independent of name and actions) */}
         <div className="flex items-center gap-1.5 flex-wrap min-w-0 mt-1">
           {medication.category && (
@@ -759,7 +715,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               مزمن
             </span>
           ) : null}
-
           {isOut ? (
             <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 flex items-center gap-0.5 shrink-0">
               <AlertCircle className="w-2.5 h-2.5" />
@@ -782,7 +737,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             </span>
           )}
         </div>
-
         {/* Actions row (independent of Category/Status) */}
         <div className="w-full min-w-0 flex flex-wrap items-center justify-end gap-1 mt-1">
             {Array.isArray(medication.doseSchedule) &&
@@ -844,7 +798,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
                 </span>
               ) : null
             ) : null}
-
             <div className="flex items-center gap-1 shrink-0">
             <button
               type="button"
@@ -854,7 +807,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             >
               <Plus className="w-3.5 h-3.5" />
             </button>
-
             <MedicationMenu
               medication={medication}
               isAutoActive={isAutoActive}
@@ -869,7 +821,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             />
             </div>
         </div>
-
         {/* Second line: Crucial details — surface container */}
         <div className="mt-2 p-1.5 px-2 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between gap-2 text-[11px] flex-wrap">
           <div className="flex items-center gap-1 min-w-0">
@@ -899,7 +850,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               </span>
             )}
           </div>
-
           <div className="flex items-center gap-1.5 text-[10px] text-slate-600">
             <div className="flex items-center gap-1 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 font-medium">
               <Clock className="w-2.5 h-2.5 text-teal-600" />
@@ -907,7 +857,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
               <span className="font-mono font-bold text-teal-800">{medication.dailyDose}</span>
               <span className="text-slate-400">/يوم</span>
             </div>
-
             <div className="flex items-center gap-1 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 font-medium min-w-0">
               <Calendar className="w-2.5 h-2.5 text-slate-400 shrink-0" />
               <span className="text-slate-400 shrink-0">النفاذ:</span>
@@ -915,7 +864,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             </div>
           </div>
         </div>
-
         {/* Mini Visual Stock Progress Bar */}
         <div
           className="mt-2 w-full h-1 bg-slate-200/70 rounded-full overflow-hidden"
@@ -933,6 +881,4 @@ export const MedicationCard: FC<MedicationCardProps> = ({
       </div>
     );
   }
-
-
 };

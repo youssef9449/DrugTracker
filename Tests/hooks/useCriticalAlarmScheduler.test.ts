@@ -50,7 +50,7 @@ vi.mock('@/utils/notifications', async () => {
   };
 });
 
-import { scheduleCriticalAlarm, cancelCriticalAlarm } from '@/utils/notifications';
+import { scheduleCriticalAlarm, cancelCriticalAlarm, verifyCriticalAlarmPending } from '@/utils/notifications';
 
 const scheduleMock = vi.mocked(scheduleCriticalAlarm);
 const cancelMock = vi.mocked(cancelCriticalAlarm);
@@ -123,13 +123,13 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
   platformMock.mockReturnValue('web');
   scheduleMock.mockReset();
-  scheduleMock.mockResolvedValue(true);
+  scheduleMock.mockResolvedValue({ ok: true });
   cancelMock.mockReset();
-  cancelMock.mockResolvedValue(undefined);
+  cancelMock.mockResolvedValue({ ok: true });
   // Default: verification finds nothing (web semantics — there is no
   // native alarm on web). Native tests override this per case.
   verifyMock.mockReset();
-  verifyMock.mockResolvedValue(false);
+  verifyMock.mockResolvedValue({ ok: true, pending: false });
 });
 
 afterEach(() => {
@@ -160,7 +160,7 @@ describe('useCriticalAlarmScheduler — scheduling and the persistent claim', ()
     const expectedT = getCriticalAlarmDate(med, getTodayDateString());
     expect(expectedT).not.toBeNull();
 
-    const gate = deferred<boolean>();
+    const gate = deferred<Awaited<ReturnType<typeof scheduleCriticalAlarm>>>();
     scheduleMock.mockReturnValueOnce(gate.promise);
 
     renderHook((props) => useCriticalAlarmScheduler(props), {
@@ -173,7 +173,7 @@ describe('useCriticalAlarmScheduler — scheduling and the persistent claim', ()
     expect(scheduleMock).toHaveBeenCalledWith('med-1', 'Test Med', expectedT, 'قرص');
     expect(readClaims()['med-1']).toBeUndefined();
 
-    gate.resolve(true);
+    gate.resolve({ ok: true });
     await flush();
 
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: expectedT });
@@ -202,7 +202,7 @@ describe('useCriticalAlarmScheduler — scheduling and the persistent claim', ()
   });
 
   it('failed scheduling leaves the claim open (foreground fallback stays available)', async () => {
-    scheduleMock.mockResolvedValue(false);
+    scheduleMock.mockResolvedValue({ ok: false, error: 'schedule_failed', errorCode: 'platform_failure' });
     const med = makeMed();
 
     renderHook((props) => useCriticalAlarmScheduler(props), {
@@ -234,7 +234,7 @@ describe('useCriticalAlarmScheduler — verified fast path (native alarm reconci
     // Case 2: { claimed: true, alarmTime: T } + the native pending alarm
     // actually exists at T → the claim is trusted WITHOUT re-arming.
     platformMock.mockReturnValue('android');
-    verifyMock.mockResolvedValue(true);
+    verifyMock.mockResolvedValue({ ok: true, pending: true });
     const med = makeMed();
     const expectedT = getCriticalAlarmDate(med, getTodayDateString()) as number;
     writeClaims({ 'med-1': { claimed: true, alarmTime: expectedT } });
@@ -257,7 +257,7 @@ describe('useCriticalAlarmScheduler — verified fast path (native alarm reconci
     // the native alarm (it was dropped by the OS) → cancel + re-schedule
     // at the SAME T; a successful repair keeps the claim armed at T.
     platformMock.mockReturnValue('android');
-    verifyMock.mockResolvedValue(false);
+    verifyMock.mockResolvedValue({ ok: true, pending: false });
     const med = makeMed();
     const expectedT = getCriticalAlarmDate(med, getTodayDateString()) as number;
     writeClaims({ 'med-1': { claimed: true, alarmTime: expectedT } });
@@ -280,8 +280,8 @@ describe('useCriticalAlarmScheduler — verified fast path (native alarm reconci
     // re-armed must NOT stay recorded as armed — the episode's
     // notification opportunity stays open for the foreground.
     platformMock.mockReturnValue('android');
-    verifyMock.mockResolvedValue(false);
-    scheduleMock.mockResolvedValue(false);
+    verifyMock.mockResolvedValue({ ok: true, pending: false });
+    scheduleMock.mockResolvedValue({ ok: false, error: 'schedule_failed', errorCode: 'platform_failure' });
     const med = makeMed();
     const expectedT = getCriticalAlarmDate(med, getTodayDateString()) as number;
     writeClaims({ 'med-1': { claimed: true, alarmTime: expectedT } });
@@ -299,7 +299,7 @@ describe('useCriticalAlarmScheduler — verified fast path (native alarm reconci
     // The repair only touches native alarms + claim bookkeeping: no
     // notification is shown merely because reconciliation happened.
     platformMock.mockReturnValue('android');
-    verifyMock.mockResolvedValue(false);
+    verifyMock.mockResolvedValue({ ok: true, pending: false });
     const med = makeMed();
     const expectedT = getCriticalAlarmDate(med, getTodayDateString()) as number;
     writeClaims({ 'med-1': { claimed: true, alarmTime: expectedT } });
@@ -323,7 +323,7 @@ describe('useCriticalAlarmScheduler — verified fast path (native alarm reconci
     const med = makeMed();
     const expectedT = getCriticalAlarmDate(med, getTodayDateString()) as number;
     writeClaims({ 'med-1': { claimed: true, alarmTime: expectedT } });
-    scheduleMock.mockResolvedValue(false); // real web scheduleCriticalAlarm always fails
+    scheduleMock.mockResolvedValue({ ok: false, error: 'schedule_failed', errorCode: 'platform_failure' }); // real web scheduleCriticalAlarm always fails
 
     renderHook((props) => useCriticalAlarmScheduler(props), {
       initialProps: defaultOpts({ medications: [med] }),
@@ -350,7 +350,7 @@ describe('useCriticalAlarmScheduler — verified fast path (native alarm reconci
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: expectedT });
 
     // The alarm disappeared while the app was backgrounded.
-    verifyMock.mockResolvedValue(false);
+    verifyMock.mockResolvedValue({ ok: true, pending: false });
 
     // Resume: App.tsx bumps the tick → the effect re-runs → the claim
     // is verified (and fails) → repaired at the same T.
@@ -366,7 +366,7 @@ describe('useCriticalAlarmScheduler — verified fast path (native alarm reconci
 
   it('app resume with the alarm still verified present does NOT re-arm (no duplicate alarm, no churn)', async () => {
     platformMock.mockReturnValue('android');
-    verifyMock.mockResolvedValue(true);
+    verifyMock.mockResolvedValue({ ok: true, pending: true });
     const med = makeMed();
     const expectedT = getCriticalAlarmDate(med, getTodayDateString()) as number;
 
@@ -398,7 +398,7 @@ describe('useCriticalAlarmScheduler — verified fast path (native alarm reconci
     const t1 = getCriticalAlarmDate(medA, getTodayDateString()) as number;
     writeClaims({ 'med-1': { claimed: true, alarmTime: t1 } });
 
-    const gate = deferred<boolean>();
+    const gate = deferred<Awaited<ReturnType<typeof verifyCriticalAlarmPending>>>();
     verifyMock.mockReturnValueOnce(gate.promise); // reconciliation verify is gated
 
     const { rerender } = renderHook((props) => useCriticalAlarmScheduler(props), {
@@ -414,7 +414,7 @@ describe('useCriticalAlarmScheduler — verified fast path (native alarm reconci
 
     // The stale verify resolves "missing" → its repair runs — but it is
     // superseded: it must not arm anything or write any claim.
-    gate.resolve(false);
+    gate.resolve({ ok: true, pending: false });
     await flush();
 
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: t2 });
@@ -574,9 +574,9 @@ describe('useCriticalAlarmScheduler — stale-async safety', () => {
     const medA = makeMed({ currentPills: 30 });
 
     // Gate the first schedule so it is still pending when the newer run starts.
-    const gate = deferred<boolean>();
+    const gate = deferred<Awaited<ReturnType<typeof scheduleCriticalAlarm>>>();
     scheduleMock.mockReturnValueOnce(gate.promise);
-    scheduleMock.mockResolvedValueOnce(true);
+    scheduleMock.mockResolvedValueOnce({ ok: true });
 
     const { rerender } = renderHook((props) => useCriticalAlarmScheduler(props), {
       initialProps: defaultOpts({ medications: [medA] }),
@@ -590,7 +590,7 @@ describe('useCriticalAlarmScheduler — stale-async safety', () => {
     rerender(defaultOpts({ medications: [medB] }));
 
     // Run 1's schedule now resolves successfully — but it is stale.
-    gate.resolve(true);
+    gate.resolve({ ok: true });
     await flush();
 
     // Run 1 compensated by cancelling the alarm it armed; run 2 re-armed
@@ -603,7 +603,7 @@ describe('useCriticalAlarmScheduler — stale-async safety', () => {
   it('a medication that crosses while its schedule is in flight aborts the claim write and cancels the just-armed alarm', async () => {
     const medA = makeMed({ currentPills: 30 });
 
-    const gate = deferred<boolean>();
+    const gate = deferred<Awaited<ReturnType<typeof scheduleCriticalAlarm>>>();
     scheduleMock.mockReturnValueOnce(gate.promise);
 
     const { rerender } = renderHook((props) => useCriticalAlarmScheduler(props), {
@@ -622,7 +622,7 @@ describe('useCriticalAlarmScheduler — stale-async safety', () => {
     // The in-flight schedule resolves now — stale: the foreground owns
     // the active episode, so the scheduler must cancel its own alarm
     // and write nothing.
-    gate.resolve(true);
+    gate.resolve({ ok: true });
     await flush();
 
     // cancel called for the pre-schedule cancel AND the compensation.
@@ -633,7 +633,7 @@ describe('useCriticalAlarmScheduler — stale-async safety', () => {
 
   it('a medication deleted while its schedule is in flight leaves no claim', async () => {
     const medA = makeMed({ currentPills: 30 });
-    const gate = deferred<boolean>();
+    const gate = deferred<Awaited<ReturnType<typeof scheduleCriticalAlarm>>>();
     scheduleMock.mockReturnValueOnce(gate.promise);
 
     const { rerender } = renderHook((props) => useCriticalAlarmScheduler(props), {
@@ -643,7 +643,7 @@ describe('useCriticalAlarmScheduler — stale-async safety', () => {
     expect(scheduleMock).toHaveBeenCalledTimes(1);
 
     rerender(defaultOpts({ medications: [] }));
-    gate.resolve(true);
+    gate.resolve({ ok: true });
     await flush();
 
     expect(readClaims()['med-1']).toBeUndefined();

@@ -4,8 +4,9 @@ import {
   getCriticalAlarmDate,
   getDepletionDate,
   getTodayDateString } from '@/utils/dateCalculations';
-import { calculateMedicationStatus } from '@/types';
+import { calculateMedicationStatus } from '@/utils/medicationStatus';
 import { NEVER_DEPLETES_DAYS } from '@/utils/time';
+import { formatDepletionDate } from '@/utils/medicationPresentation';
 import type { Medication } from '@/types';
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
@@ -102,7 +103,8 @@ describe('Issue #266 — durable currentPills is sole live stock', () => {
     const med = makeMed({ currentPills: 0, dailyDose: 2 });
     expect(daysLeftFromCurrentStock(med)).toBe(0);
     expect(calculateMedicationStatus(med).status).toBe('out_of_stock');
-    expect(getDepletionDate(med).formattedArabic).toBe('نفد المخزون بالكامل');
+    const depletion = getDepletionDate(med);
+    expect(formatDepletionDate(depletion.dateStr, depletion.daysLeft, Number(med.currentPills))).toBe('نفد المخزون بالكامل');
   });
 
   it('zero consumption rate yields never-depletes sentinel', () => {

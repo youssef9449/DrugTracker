@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { nextLocalMidnightEpochMs } from '../utils/dateCalculations';
 
 /**
  * Returns a counter that increments once per local calendar-day rollover
@@ -31,16 +32,11 @@ export function useMidnightTick(): number {
     const armNextMidnight = () => {
       if (cancelled) return;
       const now = new Date();
-      const nextMidnight = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        now.getDate() + 1,
-        0,
-        0,
-        0,
-        0
+      const nextMidnightEpochMs = nextLocalMidnightEpochMs(now);
+      const delay = Math.max(
+        1_000,
+        (nextMidnightEpochMs ?? now.getTime() + 1_000) - now.getTime()
       );
-      const delay = Math.max(1_000, nextMidnight.getTime() - now.getTime());
       timer = setTimeout(() => {
         if (cancelled) return;
         setTick((t) => t + 1);

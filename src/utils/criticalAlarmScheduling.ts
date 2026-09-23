@@ -1,18 +1,45 @@
 import { scheduleCriticalAlarmNative, cancelCriticalAlarmNative, verifyCriticalAlarmPendingNative } from './criticalAlarmNative';
 import { getNativePlatform, isNativePlatform } from './notifications/notificationPlatform';
-import { areNotificationsEnabled, cancelNotification, getPendingNotification, scheduleNotification } from './notificationRuntime';
+import { cancelNotification, getNotificationPermissionResult, getPendingNotificationResult, scheduleNotification } from './notificationRuntime';
 import { scheduleWebNotification } from './notifications/webNotifications';
+import { classifyNativeError, type NativeErrorCode } from './nativeErrors';
 
-export async function cancelCriticalAlarm(medId: string): Promise<void> {
+export interface CriticalAlarmOperationResult {
+  ok: boolean;
+  error?: string;
+  errorCode?: NativeErrorCode;
+}
+
+export interface CriticalAlarmVerifyResult {
+  ok: true;
+  pending: boolean;
+}
+
+export type CriticalAlarmVerifyOutcome =
+  | CriticalAlarmVerifyResult
+  | {
+      ok: false;
+      error: string;
+      errorCode: NativeErrorCode;
+    };
+
+export async function cancelCriticalAlarm(
+  medId: string
+): Promise<CriticalAlarmOperationResult> {
   if (getNativePlatform() === 'android') {
-    await cancelCriticalAlarmNative(medId);
-    return;
+    return cancelCriticalAlarmNative(medId);
   }
-  if (!isNativePlatform()) return;
+  if (!isNativePlatform()) {
+    return { ok: false, error: 'unsupported_platform', errorCode: 'platform_failure' };
+  }
   try {
-    await cancelNotification('critical-stock', medId);
+    const ok = await cancelNotification('critical-stock', medId);
+    return ok
+      ? { ok: true }
+      : { ok: false, error: 'critical_cancel_failed', errorCode: 'platform_failure' };
   } catch (err) {
-    console.warn('[notifications] cancelCriticalAlarm failed:', err);
+    const message = err instanceof Error ? err.message : 'critical_cancel_failed';
+    return { ok: false, error: message, errorCode: classifyNativeError(message) };
   }
 }
 
@@ -28,24 +55,36 @@ function pendingAtMatchesAlarmTime(at: unknown, alarmTimeMs: number): boolean {
 export async function verifyCriticalAlarmPending(
   medId: string,
   alarmTimeMs: number
-): Promise<boolean> {
-  if (!isNativePlatform()) return false;
+): Promise<CriticalAlarmVerifyOutcome> {
+  if (!isNativePlatform()) {
+    return { ok: false, error: 'unsupported_platform', errorCode: 'platform_failure' };
+  }
 
   try {
-    if (!(await areNotificationsEnabled())) return false;
-
-    if (getNativePlatform() === 'android') {
-      return verifyCriticalAlarmPendingNative(medId, alarmTimeMs);
+    const permission = await getNotificationPermissionResult();
+    if (!permission.ok) return permission;
+    if (!permission.enabled) {
+      return { ok: false, error: 'notification_permission_denied', errorCode: 'permission_denied' };
     }
 
-    const pending = await getPendingNotification('critical-stock', medId);
-    return !!pending && pendingAtMatchesAlarmTime(
-      pending.schedule?.at,
-      alarmTimeMs
-    );
+    if (getNativePlatform() === 'android') {
+      const result = await verifyCriticalAlarmPendingNative(medId, alarmTimeMs);
+      if (!result.ok) return result;
+      return { ok: true, pending: result.pending };
+    }
+
+    const pendingResult = await getPendingNotificationResult('critical-stock', medId);
+    if (!pendingResult.ok) return pendingResult;
+    return {
+      ok: true,
+      pending: !!pendingResult.pending && pendingAtMatchesAlarmTime(
+        pendingResult.pending.schedule?.at,
+        alarmTimeMs
+      ),
+    };
   } catch (err) {
-    console.warn('[notifications] verifyCriticalAlarmPending failed:', err);
-    return false;
+    const message = err instanceof Error ? err.message : 'critical_verify_failed';
+    return { ok: false, error: message, errorCode: classifyNativeError(message) };
   }
 }
 
@@ -54,13 +93,17 @@ export async function scheduleCriticalAlarm(
   medName: string,
   criticalDateMs: number,
   unit: string = 'قرص'
-): Promise<boolean> {
+): Promise<CriticalAlarmOperationResult> {
   const fireAt = new Date(criticalDateMs);
   const title = `🚨 ${medName}: اقترب النفاد الحرج`;
   const body = `مخزون "${medName}" دخل مرحلة النفاد الحرج (${unit}). يرجى التعبئة فوراً!`;
 
   if (getNativePlatform() === 'android') {
-    if (!(await areNotificationsEnabled())) return false;
+    const permission = await getNotificationPermissionResult();
+    if (!permission.ok) return permission;
+    if (!permission.enabled) {
+      return { ok: false, error: 'notification_permission_denied', errorCode: 'permission_denied' };
+    }
     return scheduleCriticalAlarmNative(
       medId,
       medName,
@@ -73,11 +116,11 @@ export async function scheduleCriticalAlarm(
 
   if (getNativePlatform() !== 'ios') {
     scheduleWebNotification(title, body);
-    return false;
+    return { ok: false, error: 'unsupported_platform', errorCode: 'platform_failure' };
   }
 
   try {
-    return await scheduleNotification({
+    const scheduled = await scheduleNotification({
       namespace: 'critical-stock',
       identity: medId,
       title,
@@ -92,8 +135,12 @@ export async function scheduleCriticalAlarm(
       at: fireAt,
       fallbackToWeb: false,
     });
+    return scheduled
+      ? { ok: true }
+      : { ok: false, error: 'critical_schedule_failed', errorCode: 'platform_failure' };
   } catch (err) {
-    console.warn('[notifications] iOS scheduleCriticalAlarm failed:', err);
-    return false;
+    const message = err instanceof Error ? err.message : 'critical_schedule_failed';
+    console.warn('[notifications] iOS scheduleCriticalAlarm failed:', message);
+    return { ok: false, error: message, errorCode: classifyNativeError(message) };
   }
 }

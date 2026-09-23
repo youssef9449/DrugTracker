@@ -5,14 +5,6 @@ import {
   PharmacySettings,
   DEFAULT_PHARMACY_SETTINGS,
 } from './types';
-// NOTE: the app previously seeded 3 demo medications + 2 consumption
-// logs on a fresh install (src/data/initialData.ts). That seed data
-// showed up the moment the app was installed, which the user did not
-// want — a fresh install should start with an empty inventory and let
-// the user add their own medications. The seed functions are kept in
-// initialData.ts only for the existing regression test that asserts
-// they DON'T appear on a fresh run; they are no longer used as the
-// initial state here.
 import { AndroidBottomNav, ActiveTab } from './components/AndroidBottomNav';
 import { AppHeader } from './components/AppHeader';
 import { LowStockBanner } from './components/LowStockBanner';
@@ -76,24 +68,9 @@ import { TOAST_DURATION_MS, PHARMACY_PERSIST_DEBOUNCE_MS } from './utils/time';
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(getInitialTab);
 
-  // Deterministic-first render: we start from the seed defaults (no
-  // localStorage / IndexedDB access during the initial render) and
-  // hydrate from storage in a useEffect after mount. This is a Vite
-  // client SPA (no SSR), so the real goal here is simply to avoid a
-  // flash of stale seed data and to keep localStorage/IDB access out
-  // of the module-evaluation path. `hydrated` flips true once the
-  // hydration effect finishes, which gates the auto-deduction + alert
-  // effects so they operate on the user's REAL saved state (not the
-  // seed defaults) — see H8 in the audit fix.
-  //
-  // A fresh install starts with an EMPTY inventory — no seed/demo
-  // medications or logs. The user adds their own medications via the
-  // "إضافة دواء" button. (Previously the app seeded 3 demo meds + 2
-  // logs from src/data/initialData.ts on first run; that behavior was
-  // removed because users saw demo drugs they never entered.) Once the
-  // user saves anything, state is persisted to localStorage and this
-  // initial value is irrelevant (the hydration effect overwrites it
-  // with the saved value before any side-effect runs).
+  // Start from empty in-memory state and hydrate persisted application data
+  // after mount. Runtime schedulers and alerts are gated on `hydrated` so
+  // they never act on pre-hydration state.
   const [medications, setMedications] = useState<Medication[]>([]);
   const [logs, setLogs] = useState<ConsumptionLog[]>([]);
   const [pharmacySettings, setPharmacySettings] =
@@ -177,12 +154,12 @@ export default function App() {
     allowManualTakeActionByMedicationId,
   });
 
-  // Phase 3A: multi-dose manual consume / restore requires explicit dose selection.
+  // Multi-dose manual consume / restore requires explicit dose selection.
   const [selectDoseMed, setSelectDoseMed] = useState<Medication | null>(null);
   const [selectDoseMode, setSelectDoseMode] = useState<'take' | 'restore' | 'manage'>('take');
   const [historyMedication, setHistoryMedication] = useState<Medication | null>(null);
 
-  // #21: register a back-button handler that closes the top modal
+  // Register a back-button handler that closes the top modal
   // instead of exiting the app. The handler returns true (modal was
   // closed, don't exit) or false (no modal open, exit). Re-registers
   // whenever any modal state changes so the handler always reads the
@@ -191,7 +168,7 @@ export default function App() {
     registerBackButtonHandler(() => {
       // Top-most interactive overlay first.
       if (alarmingMedication) { dismissAlarm(); return true; }
-      // Phase 3A: explicit dose selector must dismiss on Android Back
+      // Explicit dose selector must dismiss on Android Back
       // without exiting the app.
       if (selectDoseMed) {
         setSelectDoseMed(null);
@@ -215,9 +192,8 @@ export default function App() {
     });
   }, [alarmingMedication, selectDoseMed, historyMedication, isAutoDeductPromptOpen, isAddModalOpen, refillMedication, isSettingsModalOpen, dismissAlarm]);
 
-  // #38: on unmount, remove all Capacitor listeners so duplicate
-  // listeners don't accumulate across HMR re-initializations. Also
-  // #113: clear any pending toast auto-dismiss timer.
+  // Remove native listeners on unmount so duplicate handlers cannot accumulate.
+  // Clear any pending toast auto-dismiss timer.
   useEffect(() => {
     return () => {
       cleanupNativeListeners()?.catch?.(() => {});
@@ -244,7 +220,7 @@ export default function App() {
     setIsCompactView,
   });
 
-  // #113: track the toast auto-dismiss timer so it can be cleared on
+  // Track the toast auto-dismiss timer so it can be cleared on
   // unmount (prevents a setToast-after-unmount warning / leak).
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -361,7 +337,7 @@ export default function App() {
   // (utils/criticalNotificationClaims.ts) is the business source of
   // truth: claimed=true ⇒ quiet, claimed=false ⇒ send once.
   //
-  // Extracted into useStockAlerts for testability (#87).
+  // Kept in a focused hook so claim/delivery behavior is independently testable.
   useStockAlerts({
     medications,
     criticalStockAlertsEnabled,
@@ -423,7 +399,7 @@ export default function App() {
   // calendar-day boundary (not only on resume).
   const autoDeductMidnightTick = useMidnightTick();
 
-  // Phase 2: exact-time auto-deduction alarms (independent of notifications).
+  // Exact-time auto-deduction alarms are independent of notifications.
   // Records durable native FIRED events only — no stock mutation here.
   useAutoDeductionScheduler({
     medications,
@@ -435,7 +411,7 @@ export default function App() {
     midnightTick: autoDeductMidnightTick,
   });
 
-  // Phase 3/4: reconcile native FIRED exact auto-deduction events into JS stock.
+  // Reconcile native FIRED exact auto-deduction events into JS stock.
   // Runs once after hydration/on resume for recovery, then immediately on the
   // native exact-auto FIRED event; serialized; crash-safe persist-then-mark.
   useExactAutoDeductionReconciliation({
@@ -581,12 +557,19 @@ export default function App() {
 
   const handleOpenExactAlarmSettings = () => {
     openExactAlarmSettings()
-      .then((opened) => {
-        if (!opened) {
+      .then((result) => {
+        if (!result.ok) {
+          console.warn(
+            '[App] exact alarm settings failed:',
+            result.error,
+            result.errorCode
+          );
           showToast('إعدادات المنبهات الدقيقة غير متاحة على هذا الجهاز');
         }
       })
-      .catch(() => void 0);
+      .catch((err) => {
+        console.warn('[App] exact alarm settings failed:', err);
+      });
   };
 
   // Consume-pill feature: manually consume a selected explicit dose from the card.

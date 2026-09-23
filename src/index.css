@@ -1,30 +1,15 @@
 /*
- * Global stylesheet for Drug Tracker..
+ * Global stylesheet for Drug Tracker.
  *
- * Imports Tailwind CSS v4 via its Vite plugin (@tailwindcss/vite, see
- * vite.config.ts). Tailwind v4 uses the new `@import "tailwindcss"`
- * syntax — there is no @tailwind directives / @tailwindcss/postcss
- * config file needed anymore.
- *
- * This file is imported once by src/main.tsx so the styles are
- * available across the entire React tree. Vite's CSS pipeline handles
- * the Tailwind processing during `vite build` and `vite dev`.
- *
- * NOTE: if AI Studio's preview shows an error like
- *     Failed to resolve import "./index.css" from "src/main.tsx"
- * it is a stale-cache issue in AI Studio's preview server, not a real
- * bug — this file is tracked in the repo (verified via
- * `git ls-files src/index.css`). A hard reload (Ctrl+Shift+R) clears
- * the cache and resolves the error.
+ * Imports Tailwind CSS v4 via its Vite plugin and provides the shared
+ * Material Design 3 tokens and application-specific utility styles.
  */
 @import "tailwindcss";
-
 /* #39: tailwindcss-animate provides the animate-in / slide-in-from-bottom
  * / duration-200 classes used by RefillModal and AppSettingsModal (PharmacySettingsModal)
  * for their entrance animation. Without this plugin Tailwind v4 silently
  * ignores the unknown classes (the modals appear instantly). */
 @plugin "tailwindcss-animate";
-
 /*
  * Material Design 3 (M3) Design System Tokens
  * Defines color roles, elevation, shapes, and motion consistent with Google's M3 specs.
@@ -35,25 +20,21 @@
   --md-sys-color-on-primary: #ffffff;
   --md-sys-color-primary-container: #72f8e8;
   --md-sys-color-on-primary-container: #00201d;
-
   /* M3 Secondary */
   --md-sys-color-secondary: #4a635f;
   --md-sys-color-on-secondary: #ffffff;
   --md-sys-color-secondary-container: #cce8e3;
   --md-sys-color-on-secondary-container: #05201c;
-
   /* M3 Tertiary */
   --md-sys-color-tertiary: #456179;
   --md-sys-color-on-tertiary: #ffffff;
   --md-sys-color-tertiary-container: #cde5ff;
   --md-sys-color-on-tertiary-container: #001e31;
-
   /* M3 Error */
   --md-sys-color-error: #ba1a1a;
   --md-sys-color-on-error: #ffffff;
   --md-sys-color-error-container: #ffdad6;
   --md-sys-color-on-error-container: #410002;
-
   /* M3 Surface & Containers */
   --md-sys-color-surface: #f8faf9;
   --md-sys-color-on-surface: #191c1b;
@@ -64,18 +45,15 @@
   --md-sys-color-surface-container: #ecefee;
   --md-sys-color-surface-container-high: #e6e9e8;
   --md-sys-color-surface-container-highest: #e0e3e2;
-
   /* M3 Outlines */
   --md-sys-color-outline: #6f7976;
   --md-sys-color-outline-variant: #bec9c5;
-
   /* M3 Elevation Shadows */
   --md-sys-elevation-1: 0px 1px 3px 1px rgba(0, 0, 0, 0.07), 0px 1px 2px 0px rgba(0, 0, 0, 0.05);
   --md-sys-elevation-2: 0px 2px 6px 2px rgba(0, 0, 0, 0.08), 0px 1px 2px 0px rgba(0, 0, 0, 0.06);
   --md-sys-elevation-3: 0px 4px 8px 3px rgba(0, 0, 0, 0.1), 0px 1px 3px 0px rgba(0, 0, 0, 0.08);
   --md-sys-elevation-4: 0px 6px 10px 4px rgba(0, 0, 0, 0.12), 0px 2px 3px 0px rgba(0, 0, 0, 0.09);
 }
-
 /*
  * System Arabic-capable font stack (L9).
  */
@@ -83,7 +61,6 @@
   --font-arabic-sans: "Cairo", "Segoe UI", -apple-system, BlinkMacSystemFont,
     "Helvetica Neue", Tahoma, "Arial Unicode MS", sans-serif;
 }
-
 /* Hide scrollbars on horizontal chip rows (used by AppHeader filter chips).
  * The `no-scrollbar` class is referenced in JSX but Tailwind v4 doesn't
  * ship it by default, so we define it here. */
@@ -94,7 +71,6 @@
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
-
 /* Hide default browser search cancel and decoration buttons so custom M3 clear icon doesn't duplicate */
 input[type="search"]::-webkit-search-cancel-button,
 input[type="search"]::-webkit-search-decoration,
@@ -104,7 +80,6 @@ input[type="search"]::-webkit-search-results-decoration {
   appearance: none !important;
   display: none !important;
 }
-
 /* Accessible Large Font Mode (fontScale === 'large')
  * Scales root rem units gracefully so all Tailwind text classes
  * (text-xs, text-sm, text-base, text-lg, etc.) enlarge proportionally,
@@ -113,17 +88,14 @@ input[type="search"]::-webkit-search-results-decoration {
 html.font-scale-large {
   font-size: 116%;
 }
-
 .font-scale-large .text-\[10px\] {
   font-size: 0.75rem !important;
   line-height: 1.15rem !important;
 }
-
 .font-scale-large .text-\[11px\] {
   font-size: 0.8125rem !important;
   line-height: 1.25rem !important;
 }
-
 .font-scale-large .text-\[12px\] {
   font-size: 0.875rem !important;
   line-height: 1.35rem !important;

@@ -10,14 +10,11 @@ import {
   setSnoozeUntil,
   clearSnoozedDose,
 } from '../utils/doseReminderStorage';
-
 const FIRED_KEY = 'android_med_tracker_fired_reminders_v1';
-
-/** Fired-dedup key: medicationId + doseId + calendarDate (Issue #268). */
+/** Fired-dedup key: medicationId + doseId + calendarDate. */
 function firedKey(medId: string, dateStr: string, doseId: string) {
   return `${medId}:${doseId}:${dateStr}`;
 }
-
 function findDoseRow(med: Medication, doseId: string) {
   if (!Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0) {
     return null;
@@ -29,17 +26,15 @@ function findDoseRow(med: Medication, doseId: string) {
   if (!(Number(row.amount) > 0)) return null;
   return row;
 }
-
 interface UseDoseRemindersOptions {
   medications: Medication[];
   allowManualTakeActionByMedicationId: ReadonlyMap<string, boolean>;
 }
-
 /**
  * In-app dose-reminder alarm UI controller.
  *
  * Occurrence identity is always medicationId + doseId + calendarDate.
- * doseSchedule is the sole source of amount/time (Issue #268).
+ * doseSchedule is the sole source of amount/time.
  */
 export function useDoseReminders({
   medications,
@@ -50,12 +45,10 @@ export function useDoseReminders({
   const alarmingIdRef = useRef<string | null>(null);
   const alarmingDoseIdRef = useRef<string | null>(null);
   const isTestAlarmRef = useRef(false);
-
   const medicationsRef = useRef(medications);
   useEffect(() => {
     medicationsRef.current = medications;
   }, [medications]);
-
   const dismissAlarm = useCallback(() => {
     const current = alarmingIdRef.current;
     const doseId = alarmingDoseIdRef.current;
@@ -73,7 +66,6 @@ export function useDoseReminders({
     setAlarmingMedication(null);
     setAlarmingDoseId(null);
   }, []);
-
   const snoozeAlarm = useCallback((minutes: number = DEFAULT_SNOOZE_MINUTES) => {
     const medication = alarmingMedication;
     const doseId = alarmingDoseIdRef.current;
@@ -85,7 +77,6 @@ export function useDoseReminders({
       setAlarmingDoseId(null);
       return;
     }
-
     const row = findDoseRow(medication, doseId);
     if (!row) {
       alarmingIdRef.current = null;
@@ -95,15 +86,12 @@ export function useDoseReminders({
       setAlarmingDoseId(null);
       return;
     }
-
     const amount = Number(row.amount);
     const time = row.time;
     const description = typeof row.description === 'string' && row.description.trim()
       ? row.description.trim()
       : undefined;
-
     setSnoozeUntil(medication.id, Date.now() + minutes * MS_PER_MINUTE, doseId);
-
     scheduleSnoozedDoseReminder(
       medication.id,
       medication.name,
@@ -115,14 +103,12 @@ export function useDoseReminders({
       allowManualTakeActionByMedicationId.get(medication.id) ?? true,
       description
     ).catch(() => void 0);
-
     alarmingIdRef.current = null;
     alarmingDoseIdRef.current = null;
     isTestAlarmRef.current = false;
     setAlarmingMedication(null);
     setAlarmingDoseId(null);
   }, [alarmingMedication, allowManualTakeActionByMedicationId]);
-
   /**
    * Open the in-app alarm for an explicit doseSchedule occurrence.
    * Requires non-empty doseId present on med.doseSchedule.
@@ -130,38 +116,29 @@ export function useDoseReminders({
   const openAlarm = useCallback((medId: string, doseId: string) => {
     const id = typeof doseId === 'string' ? doseId.trim() : '';
     if (!id) return;
-
     const med = medicationsRef.current.find((m) => m.id === medId);
     if (!med) return;
-
     const row = findDoseRow(med, id);
     if (!row) return;
-
     // The business layer decides whether the manual Take action is allowed.
     if (allowManualTakeActionByMedicationId.get(med.id) === false) return;
-
     const today = getTodayDateString();
     if (isDoseConsumedOnDate(med, id, today)) return;
-
     if (alarmingIdRef.current === med.id && alarmingDoseIdRef.current === id) {
       return;
     }
-
     const fired = loadJson<Record<string, boolean>>(FIRED_KEY, {});
     if (fired[firedKey(med.id, today, id)]) return;
-
     if (isSnoozeActive(med.id, id)) return;
-
     isTestAlarmRef.current = false;
     alarmingIdRef.current = med.id;
     alarmingDoseIdRef.current = id;
     setAlarmingMedication(med);
     setAlarmingDoseId(id);
   }, [allowManualTakeActionByMedicationId]);
-
   /**
    * Test alarm UI: prefers first explicit schedule row when present.
-   * Without doseSchedule, no-op (Issue #268).
+   * Without doseSchedule, no-op.
    */
   const testAlarm = useCallback((med: Medication) => {
     const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
@@ -176,7 +153,6 @@ export function useDoseReminders({
     setAlarmingMedication(med);
     setAlarmingDoseId(id);
   }, []);
-
   return {
     alarmingMedication,
     alarmingDoseId,

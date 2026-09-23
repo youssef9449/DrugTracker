@@ -1,7 +1,3 @@
-import { pluralizeArabic } from './lib/arabicPlural';
-import { dailyScheduleAmount, daysLeftFromCurrentStock, formatLogTime } from './utils/dateCalculations';
-import { NEVER_DEPLETES_DAYS } from './utils/time';
-
 export interface ConsumptionLog {
   id: string;
   medicationId: string;
@@ -17,21 +13,21 @@ export interface ConsumptionLog {
   relatedLogId?: string;
   /**
    * Stable MedicationDose.id when this log is for a specific dose slot
-   * (Phase 3). Older dose_taken logs may omit it.
+   * Stable MedicationDose.id. Older dose_taken logs may omit it.
    */
   doseId?: string;
 }
-
 export interface Medication {
   id: string;
   name: string;
   /**
-   * Durable application-facing live stock balance (Issue #266).
+   * Durable application-facing live stock balance.
    * On Android, the value is mirrored from the Auto-owned Native stock
    * authority, which can mutate while the WebView is unavailable. UI and
    * status use this value directly; there is no second projected/effective
    * balance. Exact Auto, Manual Take/Restore, and Refill mutate this field
    * through the shared stock domain.
+   */
   currentPills: number;
   dailyDose: number; // Consumption rate per day
   unit: string; // e.g., 'قرص', 'كبسولة', 'مل'
@@ -96,8 +92,7 @@ export interface Medication {
    */
   doseSkippedHistory?: Record<string, string[]>;
 }
-
-/** One individual dose event within a day (Phase 1 multi-dose model). */
+/** One individual dose event within a day (multi-dose model). */
 export interface MedicationDose {
   id: string;
   /** Amount taken at this dose event (must be > 0). */
@@ -107,17 +102,13 @@ export interface MedicationDose {
   /** Optional clarification / instruction for this dose (e.g. "بعد الإفطار", "قبل النوم"). */
   description?: string;
 }
-
 // ─────────────────────────────────────────────────────────────────────
 // Critical-stock notification claim (the ONE business state model).
-//
 // For each medication, during one continuous Critical/Out-of-Stock
 // episode, the user receives AT MOST ONE critical-stock notification.
 // This tiny persistent record answers exactly one question:
-//
 //     "Has this medication's current critical episode already claimed
 //      its critical notification?"
-//
 // Episode semantics:
 //   - Sufficient → Critical/OutOfStock starts an episode.
 //   - Critical → Critical / → OutOfStock is the SAME episode (a day
@@ -127,7 +118,6 @@ export interface MedicationDose {
 //   - Critical → Sufficient ends it (useStockAlerts clears the claim
 //     synchronously on that render → a later critical episode gets a
 //     fresh notification opportunity).
-//
 // `claimed === true` means the episode's single notification
 // opportunity has been consumed:
 //   - `alarmTime: number` — a native one-shot alarm was successfully
@@ -138,14 +128,12 @@ export interface MedicationDose {
 //     state after the fact).
 //   - `alarmTime: null` — the foreground fallback sent the notification
 //     directly.
-//
 // A failed schedule or a failed foreground send leaves
 // `claimed === false`, so the remaining path (scheduled alarm or
 // foreground fallback) stays available. Disabling notifications never
 // consumes the opportunity: while disabled nothing is sent and nothing
 // is marked claimed.
 // ─────────────────────────────────────────────────────────────────────
-
 export interface CriticalNotificationClaim {
   /**
    * True once this episode's notification opportunity has been taken:
@@ -165,267 +153,34 @@ export interface CriticalNotificationClaim {
    */
   alarmTime: number | null;
 }
-
 /**
  * The user-configured stock notification threshold (in days).
- *
  * This is the ONLY threshold. There is no derived "critical" sub-threshold.
  * The user sets `warningThresholdDays` from the Medication Card, and that
  * value is used directly:
- *
  *   daysLeft >  warningThresholdDays  → 'sufficient' (no notification)
  *   daysLeft <= warningThresholdDays  → 'critical'   (ONE notification)
  *   effPills  <= 0                    → 'out_of_stock' (ONE notification)
- *
  * A single state transition (sufficient→critical, or sufficient→out_of_stock)
  * produces exactly ONE notification. The same critical state persisting
  * across app restarts / re-renders / days does NOT produce duplicates.
  */
-export function getCriticalThresholdDays(med: Medication): number {
-  const val = Number(med.warningThresholdDays);
-  return !Number.isNaN(val) && val >= 1 ? Math.floor(val) : 5;
-}
-
-/**
- * Returns true when the unit represents a solid medication (pill or
- * capsule) — i.e. one that is packaged in strips/boxes. Liquid units
- * (e.g. 'مل') and anything else return false.
- *
- * Centralizes the `unit === 'قرص' || unit === 'كبسولة'` predicate that
- * was duplicated 12× across the codebase (audit #72).
- */
-export function isSolidUnit(unit: string): boolean {
-  return unit === 'قرص' || unit === 'كبسولة';
-}
-
-/**
- * Formats 24-hour time "HH:mm" into friendly Arabic 12-hour format,
- * e.g. "9:00 ص" or "9:30 م".
- *
- * Strictly validates the input shape `^H?H:MM$` with hour 0–23 and
- * minute 0–59. Returns the raw string unchanged if invalid so callers
- * can detect a malformed `reminderTime` (the reminder scheduler's own
- * `timeToMinutes` validator would then reject it too, skipping the
- * alarm rather than firing it for a garbage time).
- */
-export function formatTimeArabic(timeStr?: string): string {
-  if (!timeStr) return '';
-  // Strict shape: one or two digit hour, colon, exactly two digit minute.
-  const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(timeStr);
-  if (!match) return timeStr;
-  const h = parseInt(match[1], 10);
-  const m = parseInt(match[2], 10);
-  if (Number.isNaN(h) || Number.isNaN(m)) return timeStr;
-  const isPM = h >= 12;
-  const hour12 = h % 12 === 0 ? 12 : h % 12;
-  const minutePadded = m < 10 ? `0${m}` : `${m}`;
-  return `${hour12}:${minutePadded} ${isPM ? 'م' : 'ص'}`;
-}
-
-export { formatLogTime };
-
-/**
- * Returns human-readable strip and pill breakdown of current inventory.
- * e.g., 35 pills with 10 pills/strip and 3 strips/box -> "علبة واحدة و 5 أقراص"
- * or 25 pills with 10 pills/strip -> "شريطان و 5 أقراص"
- *
- * Uses `pluralizeArabic` for correct Arabic noun forms per count
- * (singular / dual / few 3-10 / many 11+).
- */
-/**
- * Normalize a packaging remainder for display.
- *
- * - Near-integer IEEE noise → integer (magnitude-scaled Number.EPSILON only;
- *   no fixed absolute 1e-9 cutoff that would erase genuine tiny fractions).
- * - Binary float residue (e.g. 0.1 + 0.2 → 0.3000…04) → short decimal only
- *   when within a few ULPs of that decimal.
- * - Genuine fractions (including tiny and high-precision) are returned
- *   unchanged — no fixed 6-decimal or N-significant-digit rounding.
- */
-export function normalizeDisplayQuantity(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-
-  const nearest = Math.round(value);
-  // Only collapse differences that are within a small, magnitude-scaled
-  // multiple of the value's IEEE-754 spacing. Genuine fractions, including
-  // tiny non-zero values, remain untouched.
-  const scale = Math.max(Math.abs(value), Math.abs(nearest), 1);
-  const intEps = Number.EPSILON * scale * 8;
-  if (Math.abs(value - nearest) <= intEps) return nearest;
-
-  const abs = Math.abs(value);
-  if (abs === 0) return 0;
-
-  // Clean a decimal artifact only when the rounded decimal is exactly within
-  // one ULP of the original value. Genuine high-precision values are kept.
-  const exp2 = Math.floor(Math.log2(abs));
-  const ulp = Math.pow(2, exp2 - 52);
-  for (let places = 1; places <= 17; places++) {
-    const factor = 10 ** places;
-    const candidate = Math.round(value * factor) / factor;
-    if (Math.abs(value - candidate) <= ulp) {
-      return candidate;
-    }
-  }
-  return value;
-}
-
-/**
- * User-facing unit quantity phrase for packaging/display paths.
- * Whole numbers (after normalizeDisplayQuantity) use existing Arabic
- * pluralization; genuine fractional quantities use `${n} ${unit}` and
- * never enter pluralizeArabic (which is integer-grammar only).
- */
-export function formatUnitQuantity(value: number, unit: string): string {
-  const n = normalizeDisplayQuantity(value);
-  if (Number.isInteger(n)) {
-    return pluralizeArabic(n, unit);
-  }
-  return `${n} ${unit}`;
-}
-
-export function describeStockInStrips(
-  pills: number,
-  pillsPerStrip?: number,
-  stripsPerBox?: number,
-  unit: string = 'قرص'
-): string | null {
-  // Strips only apply to solid medications (pills/capsules)
-  if (!isSolidUnit(unit)) return null;
-  if (!pillsPerStrip || pillsPerStrip <= 0 || pills <= 0) return null;
-
-  const totalStrips = Math.floor(pills / pillsPerStrip);
-  // Preserve fractional remainders (0.5, 1.5, …). Only collapse float noise
-  // near whole integers — never Math.round genuine fractions into the next int.
-  const remainingPills = normalizeDisplayQuantity(pills - totalStrips * pillsPerStrip);
-
-  const pillWord = formatUnitQuantity(remainingPills, unit);
-
-  // If strips per box is defined, break down into boxes + strips + pills
-  if (stripsPerBox && stripsPerBox > 0) {
-    const boxes = Math.floor(totalStrips / stripsPerBox);
-    const strips = totalStrips % stripsPerBox;
-
-    const boxWord = pluralizeArabic(boxes, 'علبة');
-    const stripWord = pluralizeArabic(strips, 'شريط');
-
-    const parts: string[] = [];
-    if (boxes > 0) parts.push(boxWord);
-    if (strips > 0) parts.push(stripWord);
-    if (remainingPills > 0) parts.push(pillWord);
-
-    if (parts.length > 0) {
-      return parts.join(' و ');
-    }
-    return null;
-  }
-
-  // If only pillsPerStrip is known
-  const stripWord = pluralizeArabic(totalStrips, 'شريط');
-
-  if (totalStrips > 0 && remainingPills > 0) {
-    return `${stripWord} و ${pillWord}`;
-  } else if (totalStrips > 0) {
-    return stripWord;
-  } else if (remainingPills > 0) {
-    return pillWord;
-  }
-  return null;
-}
-
-/**
- * Returns packaging breakdown for pharmacy ordering (e.g., "2 علبة (60 قرص)" or "1 علبة و 1 شريط").
- *
- * Uses `pluralizeArabic` for correct Arabic noun forms.
- */
-export function describeOrderInBoxes(
-  targetPills: number,
-  stripsPerBox?: number,
-  pillsPerStrip?: number,
-  packageSize?: number,
-  unit: string = 'قرص'
-): string {
-  const isSolid = isSolidUnit(unit);
-  const effectiveStripsPerBox = isSolid ? stripsPerBox : undefined;
-  const effectivePillsPerStrip = isSolid ? pillsPerStrip : undefined;
-  const boxWordLabel = unit === 'مل' ? 'عبوة' : 'علبة';
-
-  const boxSize =
-    effectiveStripsPerBox && effectivePillsPerStrip && effectiveStripsPerBox > 0 && effectivePillsPerStrip > 0
-      ? effectiveStripsPerBox * effectivePillsPerStrip
-      : packageSize && packageSize > 0
-      ? packageSize
-      : unit === 'مل' ? 100 : 30;
-
-  const stripSize = effectivePillsPerStrip && effectivePillsPerStrip > 0 ? effectivePillsPerStrip : null;
-
-  const boxes = Math.floor(targetPills / boxSize);
-  const remainderAfterBoxes = targetPills % boxSize;
-
-  const pillTotalWord = pluralizeArabic(targetPills, unit);
-
-  // Exact match — full boxes only.
-  if (boxes > 0 && remainderAfterBoxes === 0) {
-    return pluralizeArabic(boxes, boxWordLabel);
-  }
-
-  // Boxes + strips (and possibly loose pills) for solid medications.
-  if (boxes > 0 && stripSize && remainderAfterBoxes > 0) {
-    const strips = Math.floor(remainderAfterBoxes / stripSize);
-    const loosePills = remainderAfterBoxes % stripSize;
-    const boxWord = pluralizeArabic(boxes, boxWordLabel);
-    const parts: string[] = [boxWord];
-    if (strips > 0) parts.push(pluralizeArabic(strips, 'شريط'));
-    if (loosePills > 0) parts.push(pluralizeArabic(Math.ceil(loosePills / stripSize), 'شريط'));
-    return parts.join(' و ');
-  }
-
-  // Boxes + remainder with no strips (e.g. liquid bottles or loose units)
-  if (boxes > 0 && !stripSize && remainderAfterBoxes > 0) {
-    if (isSolid) {
-      return pluralizeArabic(boxes + 1, boxWordLabel);
-    }
-    const boxWord = pluralizeArabic(boxes, boxWordLabel);
-    const looseWord = pluralizeArabic(remainderAfterBoxes, unit);
-    return `${boxWord} و ${looseWord}`;
-  }
-
-  // Strips only (no boxes), possibly + loose pills.
-  if (boxes === 0 && stripSize && remainderAfterBoxes > 0) {
-    const strips = Math.ceil(remainderAfterBoxes / stripSize);
-    if (strips > 0) {
-      return pluralizeArabic(strips, 'شريط');
-    }
-  }
-
-  // Solid with no strips but targetPills > 0
-  if (boxes === 0 && !stripSize && isSolid && targetPills > 0) {
-    return pluralizeArabic(1, boxWordLabel);
-  }
-
-  // No boxes, no strips — just the total count in unit.
-  return pillTotalWord;
-}
-
 export interface Pharmacy {
   id: string;
   name: string;
   phone: string;
   customerCode: string;
 }
-
 export interface UserContact {
   id: string;
   label: string;
   phone: string;
 }
-
 export interface UserAddress {
   id: string;
   label: string;
   address: string;
 }
-
 export interface PharmacySettings {
   defaultDurationDays: 30 | 60;
   pharmacies: Pharmacy[];
@@ -435,7 +190,6 @@ export interface PharmacySettings {
   selectedWhatsappContactIds?: string[];
   selectedWhatsappAddressIds?: string[];
 }
-
 export const DEFAULT_PHARMACY_SETTINGS: PharmacySettings = {
   defaultDurationDays: 30,
   pharmacies: [],
@@ -445,85 +199,12 @@ export const DEFAULT_PHARMACY_SETTINGS: PharmacySettings = {
   selectedWhatsappContactIds: [],
   selectedWhatsappAddressIds: [],
 };
-
 export type MedicationStatus = 'out_of_stock' | 'critical' | 'warning' | 'sufficient';
-
-/** The return shape of calculateMedicationStatus — extracted so it can be
- *  referenced by name in shared types (audit #97/#88). */
 export interface MedicationStatusInfo {
   daysLeft: number;
   status: MedicationStatus;
-  statusLabel: string;
-  statusColorClass: string;
-  badgeBg: string;
-  badgeText: string;
 }
-
-/** A medication paired with its pre-computed status — produced once by the
- *  medicationsWithStatus memo in App.tsx and consumed by LowStockBanner,
- *  filteredMedications, alertsCount, sufficientCount (audit #88/#97). */
 export interface MedicationWithStatus {
   med: Medication;
   statusInfo: MedicationStatusInfo;
-}
-
-export function calculateMedicationStatus(med: Medication): MedicationStatusInfo {
-  // Issue #266: durable currentPills is the sole live stock balance.
-  const currentPills = Number(med.currentPills) || 0;
-  const daysLeft = daysLeftFromCurrentStock(med);
-
-  if (currentPills <= 0) {
-    return {
-      daysLeft: 0,
-      status: 'out_of_stock',
-      statusLabel: 'نفد تماماً',
-      statusColorClass: 'text-red-600',
-      badgeBg: 'bg-red-50 text-red-700 border-red-200',
-      badgeText: '⚠️ نفد المخزون',
-    };
-  }
-
-  if (dailyScheduleAmount(med) <= 0) {
-    return {
-      daysLeft: NEVER_DEPLETES_DAYS,
-      status: 'sufficient',
-      statusLabel: 'غير محدد',
-      statusColorClass: 'text-slate-600',
-      badgeBg: 'bg-slate-100 text-slate-700 border-slate-200',
-      badgeText: 'استهلاك غير محدد',
-    };
-  }
-
-  // The user-configured threshold is the ONLY threshold.
-  // daysLeft <= warningThresholdDays → critical.
-  // No derived sub-threshold, no hidden "warning" tier.
-  const thresholdDays = getCriticalThresholdDays(med);
-
-  if (daysLeft <= thresholdDays) {
-    const daysWord =
-      daysLeft === 1
-        ? 'يوم واحد'
-        : daysLeft === 2
-        ? 'يومين'
-        : daysLeft <= 10
-        ? `${daysLeft} أيام`
-        : `${daysLeft} يوماً`;
-    return {
-      daysLeft,
-      status: 'critical',
-      statusLabel: `حرج (${daysWord})`,
-      statusColorClass: 'text-rose-600',
-      badgeBg: 'bg-rose-50 text-rose-700 border-rose-200',
-      badgeText: `🚨 باقي ${daysLeft === 1 ? 'يوم فقط' : daysWord}`,
-    };
-  }
-
-  return {
-    daysLeft,
-    status: 'sufficient',
-    statusLabel: `كافٍ (${daysLeft} يوماً)`,
-    statusColorClass: 'text-emerald-600',
-    badgeBg: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    badgeText: `✅ يكفي لـ ${daysLeft} يوماً`,
-  };
 }

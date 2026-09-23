@@ -88,7 +88,10 @@ describe('scheduleCriticalAlarm (web path)', () => {
     // armed claim is persisted without a native alarm behind it.
     await expect(
       scheduleCriticalAlarm('med-1', 'Test Med', Date.now() + 1000)
-    ).resolves.toBe(false);
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'platform_failure',
+    });
   });
 });
 
@@ -132,7 +135,7 @@ describe('scheduleCriticalAlarm — native path (android)', () => {
     const future = Date.now() + 7 * 24 * 60 * 60 * 1000;
     await expect(
       scheduleCriticalAlarm('med-1', 'Test Med', future, 'قرص')
-    ).resolves.toBe(true);
+    ).resolves.toMatchObject({ ok: true });
   });
 
   it('BLOCKER: a resolve that omits our id is NOT native scheduling success', async () => {
@@ -144,7 +147,7 @@ describe('scheduleCriticalAlarm — native path (android)', () => {
     const future = Date.now() + 7 * 24 * 60 * 60 * 1000;
     await expect(
       scheduleCriticalAlarm('med-1', 'Test Med', future, 'قرص')
-    ).resolves.toBe(false);
+    ).resolves.toMatchObject({ ok: false, errorCode: 'platform_failure' });
     expect(mocks.criticalSchedule).toHaveBeenCalledTimes(1);
   });
 
@@ -153,7 +156,7 @@ describe('scheduleCriticalAlarm — native path (android)', () => {
     const future = Date.now() + 7 * 24 * 60 * 60 * 1000;
     await expect(
       scheduleCriticalAlarm('med-1', 'Test Med', future, 'قرص')
-    ).resolves.toBe(false);
+    ).resolves.toMatchObject({ ok: false, errorCode: 'platform_failure' });
   });
 
   it('BLOCKER: a native schedule rejection returns false — the web fallback must not rescue it', async () => {
@@ -165,7 +168,10 @@ describe('scheduleCriticalAlarm — native path (android)', () => {
     const future = Date.now() + 7 * 24 * 60 * 60 * 1000;
     await expect(
       scheduleCriticalAlarm('med-1', 'Test Med', future, 'قرص')
-    ).resolves.toBe(false);
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'permission_denied',
+    });
     warnSpy.mockRestore();
   });
 
@@ -173,7 +179,7 @@ describe('scheduleCriticalAlarm — native path (android)', () => {
     mocks.checkPermissions.mockResolvedValue({ display: 'denied' });
     await expect(
       scheduleCriticalAlarm('med-1', 'Test Med', Date.now() + 1000)
-    ).resolves.toBe(false);
+    ).resolves.toMatchObject({ ok: false, errorCode: 'permission_denied' });
     expect(mocks.criticalSchedule).not.toHaveBeenCalled();
   });
 
@@ -202,7 +208,10 @@ describe('scheduleCriticalAlarm — native path (android)', () => {
 
 describe('verifyCriticalAlarmPending — the claim is not proof the alarm exists', () => {
   it('on web there is nothing to verify: false, no plugin calls', async () => {
-    await expect(verifyCriticalAlarmPending('med-1', Date.now() + 5000)).resolves.toBe(false);
+    await expect(verifyCriticalAlarmPending('med-1', Date.now() + 5000)).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'platform_failure',
+    });
     expect(mocks.checkPermissions).not.toHaveBeenCalled();
     expect(mocks.getPending).not.toHaveBeenCalled();
   });
@@ -211,7 +220,10 @@ describe('verifyCriticalAlarmPending — the claim is not proof the alarm exists
     mocks.platform.mockReturnValue('android');
     mocks.criticalVerify.mockResolvedValue({ ok: true });
     const t = Date.now() + 7 * 24 * 60 * 60 * 1000;
-    await expect(verifyCriticalAlarmPending('med-1', t)).resolves.toBe(true);
+    await expect(verifyCriticalAlarmPending('med-1', t)).resolves.toMatchObject({
+      ok: true,
+      pending: true,
+    });
     expect(mocks.criticalVerify).toHaveBeenCalledWith({
       medicationId: 'med-1',
       alarmTimeMs: t,
@@ -224,7 +236,7 @@ describe('verifyCriticalAlarmPending — the claim is not proof the alarm exists
     mocks.criticalVerify.mockResolvedValue({ ok: false });
     await expect(
       verifyCriticalAlarmPending('med-1', Date.now() + 7 * 24 * 60 * 60 * 1000)
-    ).resolves.toBe(false);
+    ).resolves.toMatchObject({ ok: true, pending: false });
   });
 
 
@@ -237,7 +249,10 @@ describe('verifyCriticalAlarmPending — the claim is not proof the alarm exists
     mocks.getPending.mockResolvedValue({
       notifications: [{ id: scheduledId, schedule: { at: new Date(t).toISOString() } }],
     });
-    await expect(verifyCriticalAlarmPending('med-1', t)).resolves.toBe(true);
+    await expect(verifyCriticalAlarmPending('med-1', t)).resolves.toMatchObject({
+      ok: true,
+      pending: true,
+    });
   });
 
   it('display permission lost → NOT verified (an alarm that cannot display must not stay armed)', async () => {
@@ -245,7 +260,10 @@ describe('verifyCriticalAlarmPending — the claim is not proof the alarm exists
     mocks.checkPermissions.mockResolvedValue({ display: 'denied' });
     const t = Date.now() + 7 * 24 * 60 * 60 * 1000;
     mocks.criticalVerify.mockResolvedValue({ ok: true });
-    await expect(verifyCriticalAlarmPending('med-1', t)).resolves.toBe(false);
+    await expect(verifyCriticalAlarmPending('med-1', t)).resolves.toMatchObject({
+      ok: true,
+      pending: false,
+    });
     expect(mocks.criticalVerify).not.toHaveBeenCalled();
   });
 
@@ -253,7 +271,10 @@ describe('verifyCriticalAlarmPending — the claim is not proof the alarm exists
     mocks.platform.mockReturnValue('android');
     const t = Date.now() + 7 * 24 * 60 * 60 * 1000;
     mocks.criticalVerify.mockResolvedValue({ ok: false });
-    await expect(verifyCriticalAlarmPending('med-1', t)).resolves.toBe(false);
+    await expect(verifyCriticalAlarmPending('med-1', t)).resolves.toMatchObject({
+      ok: true,
+      pending: false,
+    });
     expect(mocks.criticalVerify).toHaveBeenCalledWith({
       medicationId: 'med-1',
       alarmTimeMs: t,
@@ -264,7 +285,10 @@ describe('verifyCriticalAlarmPending — the claim is not proof the alarm exists
     mocks.platform.mockReturnValue('android');
     const t = Date.now() + 7 * 24 * 60 * 60 * 1000;
     mocks.criticalVerify.mockResolvedValue({ ok: true });
-    await expect(verifyCriticalAlarmPending('med-1', t)).resolves.toBe(true);
+    await expect(verifyCriticalAlarmPending('med-1', t)).resolves.toMatchObject({
+      ok: true,
+      pending: true,
+    });
   });
 
   it('exact-alarm check is skipped on iOS (Android-only concept)', async () => {
@@ -274,7 +298,10 @@ describe('verifyCriticalAlarmPending — the claim is not proof the alarm exists
     mocks.getPending.mockResolvedValue({
       notifications: [{ id: scheduledId, schedule: { at: new Date(t).toISOString() } }],
     });
-    await expect(verifyCriticalAlarmPending('med-1', t)).resolves.toBe(true);
+    await expect(verifyCriticalAlarmPending('med-1', t)).resolves.toMatchObject({
+      ok: true,
+      pending: true,
+    });
     expect(mocks.checkExactNotificationSetting).not.toHaveBeenCalled();
   });
 
@@ -284,7 +311,10 @@ describe('verifyCriticalAlarmPending — the claim is not proof the alarm exists
     mocks.criticalVerify.mockRejectedValue(new Error('bridge down'));
     await expect(
       verifyCriticalAlarmPending('med-1', Date.now() + 7 * 24 * 60 * 60 * 1000)
-    ).resolves.toBe(false);
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'platform_failure',
+    });
     warnSpy.mockRestore();
   });
 });

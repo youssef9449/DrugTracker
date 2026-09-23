@@ -82,18 +82,22 @@ public final class NotificationRuntime {
         }
     }
 
-    public boolean cancel(String namespace, String identity) {
+    public CancelResult cancel(String namespace, String identity) {
         if (namespace == null || namespace.isEmpty()
                 || identity == null || identity.isEmpty()) {
-            return false;
+            return CancelResult.failed("invalid_request");
         }
         try {
             NotificationManager manager = notificationManager();
-            if (manager == null) return false;
+            if (manager == null) {
+                return CancelResult.failed("notification_manager_unavailable");
+            }
             manager.cancel(tagFor(namespace, identity), NOTIFICATION_ID);
-            return true;
+            return CancelResult.accepted();
+        } catch (SecurityException e) {
+            return CancelResult.failed("notification_security_exception");
         } catch (Exception e) {
-            return false;
+            return CancelResult.failed("notification_cancel_failed");
         }
     }
 
@@ -300,6 +304,24 @@ public final class NotificationRuntime {
             this.id = id;
             this.title = title;
             this.foreground = foreground;
+        }
+    }
+
+    public static final class CancelResult {
+        public final boolean accepted;
+        public final String error;
+
+        private CancelResult(boolean accepted, String error) {
+            this.accepted = accepted;
+            this.error = error;
+        }
+
+        public static CancelResult accepted() {
+            return new CancelResult(true, null);
+        }
+
+        public static CancelResult failed(String error) {
+            return new CancelResult(false, error);
         }
     }
 

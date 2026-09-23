@@ -72,7 +72,7 @@ public class MultiDayCatchUpTest {
         o.put("timeHhmm", time);
         o.put("amount", amount);
         o.put("scheduledAtEpochMs", epoch(date, time));
-        o.put("scheduleVersion", version);
+        o.put("operationVersion", version);
         o.put("recurrenceGeneration", gen);
         schedulePrefs().edit().putString(prefKey, o.toString()).commit();
         seedGen(med, dose, gen);

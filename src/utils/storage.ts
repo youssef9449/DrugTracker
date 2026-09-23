@@ -1,5 +1,5 @@
 /**
- * Shared localStorage helpers (audit #75, #85).
+ * Shared localStorage helpers.
  *
  * Previously:
  * - `loadJson`/`saveJson` were private to useDoseReminders.ts (silent
@@ -16,9 +16,7 @@
  *   Arabic error message on failure — used by the persistence effects in
  *   App.tsx so they can toast the user on quota exhaustion).
  */
-
 import { STORAGE_ERRORS } from '../constants/uiStrings';
-
 /**
  * Read and JSON.parse a localStorage value. Returns `fallback` if the key
  * is absent or parsing fails. Never throws.
@@ -32,7 +30,6 @@ export function loadJson<T>(key: string, fallback: T): T {
     return fallback;
   }
 }
-
 /**
  * Read a raw string from localStorage. Returns `fallback` if the key is
  * absent or reading fails. Never throws.
@@ -45,7 +42,6 @@ export function loadString(key: string, fallback: string): string {
     return fallback;
   }
 }
-
 /**
  * JSON.stringify + write to localStorage. Silently swallows errors (use
  * `persist` if you need to surface quota failures to the user).
@@ -57,7 +53,6 @@ export function saveJson(key: string, value: unknown): void {
     // ignore — callers that need to surface failures use persist()
   }
 }
-
 /**
  * Write a raw string to localStorage. Silently swallows errors.
  */
@@ -68,7 +63,6 @@ export function saveString(key: string, value: string): void {
     // ignore
   }
 }
-
 /**
  * Persist a value to localStorage, returning a descriptive Arabic error
  * message on failure (or null on success). When `json` is true (default),
@@ -77,7 +71,7 @@ export function saveString(key: string, value: string): void {
  * Used by the App.tsx persistence effects so they can toast the user on
  * quota exhaustion instead of silently dropping data.
  *
- * Replaces the previous `persistJson` + `persistString` pair (audit #75).
+ * Replaces the previous `persistJson` + `persistString` pair.
  */
 export function persist(
   key: string,

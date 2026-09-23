@@ -1,5 +1,5 @@
 /**
- * Central Arabic UI string table (audit #100).
+ * Central Arabic UI string table.
  *
  * Collects the hardcoded Arabic strings that were scattered across
  * components. Switching to English or fixing a typo previously meant
@@ -10,7 +10,6 @@
  * co-located with their icons/classes (Wave 9 #84/#83) and stay there.
  * The strings here are the ones NOT bundled with icon/class config.
  */
-
 /** Toast messages shown in response to user actions. */
 export const TOAST_MESSAGES = {
   // Dose actions
@@ -18,44 +17,35 @@ export const TOAST_MESSAGES = {
     `تم تسجيل جرعة "${name}" (-${amount} ${unit}).`,
   doseAlreadyTaken: (name: string) =>
     `تم تناول جرعة "${name}" اليوم بالفعل.`,
-
   // Refill actions
   refillUndone: (name: string) => `تم التراجع عن تعبئة "${name}".`,
   autoDeductOff: (name: string) =>
     `الخصم التلقائي متوقف لدواء "${name}"؛ لا توجد جرعة مستحقة للاسترجاع.`,
   doseAlreadyRestored: (name: string) =>
     `تم استرجاع جرعة "${name}" اليوم بالفعل.`,
-
   // Critical-stock toggle
   criticalAlertsOn: 'تم تفعيل تنبيهات النفاذ الحرج (إشعار فوري عند اقتراب نفاد أي دواء أو نفاذه — حسب إعداد كل دواء)',
   criticalAlertsOff: 'تم إيقاف تنبيهات النفاذ الحرج',
-
   // Notification permission outcomes
   notificationsOn:
     'تم تفعيل تذكيرات مواعيد الجرعات',
   notificationsPermissionDenied:
     'تعذّر الحصول على إذن الإشعارات — يرجى السماح بالإشعارات من إعدادات الجهاز ثم إعادة المحاولة',
   notificationsOff: 'تم إيقاف تذكيرات مواعيد الجرعات',
-
   // Test notification
   testNotificationSent: 'تم إرسال إشعار تجريبي وتشغيل صوت التنبيه بنجاح!',
-
   // Auto-deduct
   autoDeductSummary: (totalPills: number) =>
     `تم الخصم التلقائي للاستهلاك: خصم ${totalPills} قرص لمواعيد الجرعات المستحقة.`,
-
   // Font scale
   fontScaledUp: 'تم تكبير حجم الخط',
   fontScaledDown: 'تم إرجاع حجم الخط للطبيعي',
-
   // Shopping duration
   duration60: 'تم التبديل لتغطية شهرين',
   duration30: 'تم التبديل لتغطية شهر',
-
   // Dose snooze
   doseSnoozed: (name: string) => `تم تأجيل تنبيه "${name}" عشر دقائق`,
 } as const;
-
 /** Persistence failure messages (used by usePersistentEffect). */
 export const PERSIST_FAILURE_MESSAGES = {
   meds: 'قد لا يتم حفظ تعديلاتك على الأدوية.',
@@ -66,7 +56,6 @@ export const PERSIST_FAILURE_MESSAGES = {
   critical: 'قد لا يتم حفظ تفضيل تنبيه النفاذ الحرج.',
   autoDeduct: 'قد لا يتم حفظ تفضيل الخصم التلقائي.',
 } as const;
-
 /** Storage error reasons (used by persist() in storage.ts). */
 export const STORAGE_ERRORS = {
   quotaExceeded: 'مساحة التخزين ممتلئة',

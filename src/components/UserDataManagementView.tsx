@@ -1,6 +1,7 @@
 import { useState, type FC, type FormEvent } from 'react';
 import { Check, MapPin, Pencil, Phone, Plus, Trash2, X } from 'lucide-react';
 import type { UserAddress, UserContact } from '../types';
+import { generateId } from '../utils/id';
 import { Modal } from './ui/Modal';
 
 interface UserDataManagementViewProps {
@@ -55,7 +56,7 @@ export const UserDataManagementView: FC<UserDataManagementViewProps> = ({
         showToast('اكتب رقم تليفون صحيحًا.');
         return;
       }
-      onSaveContact({ id: editing.item?.id || `contact-${Date.now()}`, label, phone });
+      onSaveContact({ id: editing.item?.id || generateId('contact'), label, phone });
       showToast(editing.item ? 'تم تعديل رقم التليفون.' : 'تمت إضافة رقم التليفون.');
     } else {
       const address = form.value.trim();
@@ -63,7 +64,7 @@ export const UserDataManagementView: FC<UserDataManagementViewProps> = ({
         showToast('اكتب العنوان بالتفصيل.');
         return;
       }
-      onSaveAddress({ id: editing.item?.id || `address-${Date.now()}`, label, address });
+      onSaveAddress({ id: editing.item?.id || generateId('address'), label, address });
       showToast(editing.item ? 'تم تعديل العنوان.' : 'تمت إضافة العنوان.');
     }
     closeForm();

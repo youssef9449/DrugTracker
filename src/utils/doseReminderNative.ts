@@ -1,4 +1,11 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import {
+  NativeBoundaryError,
+  classifyNativeError,
+  toNativeBoundaryError,
+  type NativeBoundaryFailure,
+} from './nativeErrors';
+import { getTodayDateString, tomorrowDateString, localEpochMs } from './dateCalculations';
 
 
 interface DoseReminderPlugin {
@@ -60,27 +67,17 @@ function nextOccurrence(
   reminderTime: string,
   skipToday: boolean
 ): Date | null {
-  const [hour, minute] = reminderTime.split(':').map((value) =>
-    Number.parseInt(value, 10)
-  );
-  if (
-    !Number.isInteger(hour) ||
-    !Number.isInteger(minute) ||
-    hour < 0 ||
-    hour > 23 ||
-    minute < 0 ||
-    minute > 59
-  ) {
-    return null;
-  }
+  const today = getTodayDateString();
+  const todayEpoch = localEpochMs(today, reminderTime);
+  if (todayEpoch == null) return null;
 
   const now = new Date();
-  const fire = new Date(now);
-  fire.setHours(hour, minute, 0, 0);
-  if (skipToday || fire.getTime() <= now.getTime()) {
-    fire.setDate(fire.getDate() + 1);
-  }
-  return fire;
+  const fireEpoch =
+    !skipToday && todayEpoch > now.getTime()
+      ? todayEpoch
+      : localEpochMs(tomorrowDateString(today), reminderTime);
+
+  return fireEpoch == null ? null : new Date(fireEpoch);
 }
 
 export async function scheduleDoseReminderNative(
@@ -113,7 +110,8 @@ export async function scheduleDoseReminderNative(
     treatmentEndDate: treatmentEndDate?.trim() || undefined,
   });
   if (!result?.ok) {
-    throw new Error(result?.error || 'dose_reminder_schedule_failed');
+    const message = result?.error || 'dose_reminder_schedule_failed';
+    throw new NativeBoundaryError(classifyNativeError(message), message);
   }
 }
 
@@ -127,7 +125,8 @@ export async function cancelDoseReminderNative(
     doseId: doseId.trim(),
   });
   if (result?.ok !== true) {
-    throw new Error(result?.error || 'dose_reminder_cancel_failed');
+    const message = result?.error || 'dose_reminder_cancel_failed';
+    throw new NativeBoundaryError(classifyNativeError(message), message);
   }
 }
 
@@ -155,7 +154,8 @@ export async function scheduleDoseSnoozeNative(
     doseDescription: doseDescription?.trim() || undefined,
   });
   if (!result?.ok) {
-    throw new Error(result?.error || 'dose_snooze_schedule_failed');
+    const message = result?.error || 'dose_snooze_schedule_failed';
+    throw new NativeBoundaryError(classifyNativeError(message), message);
   }
 }
 
@@ -169,52 +169,107 @@ export async function cancelDoseSnoozeNative(
     doseId: doseId.trim(),
   });
   if (result?.ok !== true) {
-    throw new Error('dose_snooze_cancel_failed');
+    throw new NativeBoundaryError('platform_failure', 'dose_snooze_cancel_failed');
   }
 }
+
+export type DoseReminderScheduledResult =
+  | {
+      ok: true;
+      scheduled: boolean;
+      triggerAtEpochMs?: number;
+    }
+  | NativeBoundaryFailure;
+
+export type DoseReminderScheduledKeysResult =
+  | { ok: true; keys: string[] }
+  | NativeBoundaryFailure;
 
 export async function isDoseReminderScheduledNative(
   medId: string,
   doseId: string
-): Promise<boolean> {
-  if (!isAndroid()) return false;
+): Promise<DoseReminderScheduledResult> {
+  if (!isAndroid()) return { ok: true, scheduled: false };
   try {
     const result = await DoseReminder.isScheduled({
       medicationId: medId,
       doseId: doseId.trim(),
     });
-    return (
-      result?.scheduled === true &&
+    if (!result || typeof result.scheduled !== 'boolean') {
+      return {
+        ok: false,
+        error: 'dose_reminder_schedule_state_invalid',
+        errorCode: 'platform_failure',
+      };
+    }
+    const scheduled =
+      result.scheduled === true &&
       (result.triggerAtEpochMs == null ||
-        result.triggerAtEpochMs > Date.now() - 60_000)
-    );
-  } catch {
-    return false;
+        result.triggerAtEpochMs > Date.now() - 60_000);
+    return {
+      ok: true,
+      scheduled,
+      triggerAtEpochMs: result.triggerAtEpochMs,
+    };
+  } catch (error) {
+    const boundaryError = toNativeBoundaryError(error, 'platform_failure');
+    return {
+      ok: false,
+      error: boundaryError.message,
+      errorCode: boundaryError.code,
+    };
   }
 }
 
-export async function listDoseReminderScheduledKeysNative(): Promise<string[]> {
-  if (!isAndroid()) return [];
+export async function listDoseReminderScheduledKeysNative(): Promise<DoseReminderScheduledKeysResult> {
+  if (!isAndroid()) return { ok: true, keys: [] };
   try {
     const result = await DoseReminder.listScheduled();
-    return Array.isArray(result?.keys) ? result.keys : [];
-  } catch {
-    return [];
+    if (!Array.isArray(result?.keys)) {
+      return {
+        ok: false,
+        error: 'dose_reminder_list_invalid',
+        errorCode: 'platform_failure',
+      };
+    }
+    return { ok: true, keys: result.keys };
+  } catch (error) {
+    const boundaryError = toNativeBoundaryError(error, 'platform_failure');
+    return {
+      ok: false,
+      error: boundaryError.message,
+      errorCode: boundaryError.code,
+    };
   }
 }
+
+export type CancelStaleDoseReminderResult =
+  | { ok: true }
+  | NativeBoundaryFailure;
 
 export async function cancelStaleDoseReminderAlarmsNative(
   keepKeys: ReadonlySet<string>
-): Promise<void> {
-  if (!isAndroid()) return;
-  const scheduled = await listDoseReminderScheduledKeysNative();
-  for (const key of scheduled) {
-    if (!keepKeys.has(key)) {
-      const separator = key.indexOf('::');
-      if (separator <= 0) continue;
-      const medId = key.slice(0, separator);
-      const doseId = key.slice(separator + 2);
-      await cancelDoseReminderNative(medId, doseId);
+): Promise<CancelStaleDoseReminderResult> {
+  if (!isAndroid()) return { ok: true };
+  const scheduledResult = await listDoseReminderScheduledKeysNative();
+  if (!scheduledResult.ok) return scheduledResult;
+  try {
+    for (const key of scheduledResult.keys) {
+      if (!keepKeys.has(key)) {
+        const separator = key.indexOf('::');
+        if (separator <= 0) continue;
+        const medId = key.slice(0, separator);
+        const doseId = key.slice(separator + 2);
+        await cancelDoseReminderNative(medId, doseId);
+      }
     }
+    return { ok: true };
+  } catch (error) {
+    const boundaryError = toNativeBoundaryError(error, 'platform_failure');
+    return {
+      ok: false,
+      error: boundaryError.message,
+      errorCode: boundaryError.code,
+    };
   }
 }

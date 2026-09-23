@@ -6,7 +6,6 @@ import {
 } from '../native';
 import { getExactAlarmPermission, type ExactAlarmPermission } from '../utils/exactAlarm';
 import { playSuccessChime } from '../utils/sound';
-
 /**
  * Registers native notification-action, dose-received, and app-resume
  * handlers. Cleanup unregisters on unmount / dependency change.
@@ -32,7 +31,6 @@ export function useNativeActionHandlers(opts: {
     setDoseAlarmResumeTick,
     setExactAlarmPermission,
   } = opts;
-
   useEffect(() => {
     registerNotificationActionHandler((actionId, medicationId, doseId) => {
       if (actionId !== 'take_dose') return;
@@ -42,7 +40,6 @@ export function useNativeActionHandlers(opts: {
     });
     return () => registerNotificationActionHandler(null);
   }, [handleTakeDoseFromAlarmById]);
-
   // Register the dose-received handler: when a native dose-reminder
   // notification fires while the app is in the foreground, the
   // localNotificationReceived listener in native.ts calls this handler
@@ -53,7 +50,7 @@ export function useNativeActionHandlers(opts: {
   // existing soundEnabled setting, exactly like all other UI feedback.
   useEffect(() => {
     registerDoseReceivedHandler((medicationId, doseId) => {
-      // Issue #268: interactive alarm requires explicit doseSchedule doseId.
+      // interactive alarm requires explicit doseSchedule doseId.
       if (!doseId || !String(doseId).trim()) return;
       if (allowManualTakeActionByMedicationId.get(medicationId) === false) {
         return;
@@ -63,7 +60,6 @@ export function useNativeActionHandlers(opts: {
     });
     return () => registerDoseReceivedHandler(null);
   }, [openAlarm, soundEnabled, allowManualTakeActionByMedicationId]);
-
   // ─────────────────────────────────────────────────────────────
   // App-resume handler: re-check exact-alarm permission when the app
   // returns to the foreground. The user may have just granted/denied
@@ -113,5 +109,4 @@ export function useNativeActionHandlers(opts: {
     setDoseAlarmResumeTick,
     setExactAlarmPermission,
   ]);
-
 }

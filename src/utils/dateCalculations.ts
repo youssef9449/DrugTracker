@@ -1,43 +1,90 @@
-import { Medication, getCriticalThresholdDays } from '../types';
+import type { Medication } from '../types';
+import { getCriticalThresholdDays } from './medicationDomain';
 import { MS_PER_DAY, NEVER_DEPLETES_DAYS } from './time';
-
 /**
  * Returns today's date as a deterministic YYYY-MM-DD string, using
  * the client's local timezone.
  *
- * This is a client-side Vite SPA (no SSR), so there is no server/client
- * hydration concern. The function is kept pure (no window/localStorage
- * access) simply so it can be safely called during module init and
- * from the seed-data file without side effects.
+ * Pure calendar-date formatting helper.
  */
-export function getTodayDateString(): string {
-  const d = new Date();
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
+export function getLocalDateString(date: Date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
-
-/**
- * Parse a "YYYY-MM-DD" string into a UTC midnight Date.
- *
- * Why UTC: `new Date(2024, m, d)` interprets the components in the
- * LOCAL timezone, and `setDate`/`getTime` math then crosses DST
- * boundaries with 23- or 25-hour days — producing off-by-one errors
- * around DST transitions. Treating YYYY-MM-DD as a UTC calendar date
- * makes day arithmetic exact (1 day = 86400000 ms, always).
- */
-function parseUtcDate(dateStr: string): Date | null {
-  const parts = dateStr.split('-');
-  if (parts.length !== 3) return null;
-  const y = Number(parts[0]);
-  const m = Number(parts[1]);
-  const d = Number(parts[2]);
-  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
-  // Date.UTC month is 0-indexed.
-  return new Date(Date.UTC(y, m - 1, d));
+export function getTodayDateString(): string {
+  return getLocalDateString();
 }
+export function addCalendarDays(dateStr: string, days: number): string {
+  const parsed = parseCalendarDate(dateStr);
+  if (!parsed || !Number.isFinite(days)) return dateStr;
+  const target = new Date(parsed.getTime() + days * MS_PER_DAY);
+  return formatUtcDateString(target);
+}
+export function calendarDayDifference(fromDate: string, toDate: string): number | null {
+  const from = parseCalendarDate(fromDate);
+  const to = parseCalendarDate(toDate);
+  if (!from || !to) return null;
+  return Math.round((to.getTime() - from.getTime()) / MS_PER_DAY);
+}
+export function tomorrowDateString(dateStr: string = getTodayDateString()): string {
+  return addCalendarDays(dateStr, 1);
+}
+export function nextLocalMidnightEpochMs(now: Date = new Date()): number | null {
+  if (!Number.isFinite(now.getTime())) return null;
+  const nextMidnight = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() + 1,
+    0,
+    0,
+    0,
+    0
+  );
+  const epochMs = nextMidnight.getTime();
+  return Number.isFinite(epochMs) ? epochMs : null;
+}
+export function localEpochMs(calendarDate: string, timeHhmm: string): number | null {
+  const calendarDateValue = parseCalendarDate(calendarDate);
+  if (!calendarDateValue) return null;
+  const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(timeHhmm);
+  if (!match) return null;
 
+  const dt = new Date(
+    calendarDateValue.getUTCFullYear(),
+    calendarDateValue.getUTCMonth(),
+    calendarDateValue.getUTCDate(),
+    Number(match[1]),
+    Number(match[2]),
+    0,
+    0
+  );
+  const ms = dt.getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+/**
+ * Parse a valid `YYYY-MM-DD` local calendar date as UTC midnight.
+ * Invalid calendar dates are rejected instead of being normalized.
+ */
+export function parseCalendarDate(dateStr: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
+  const [year, month, day] = dateStr.split('-').map(Number);
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day)
+  ) {
+    return null;
+  }
+
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+    ? date
+    : null;
+}
 /** Format a Date (interpreted as UTC) back to "YYYY-MM-DD". */
 function formatUtcDateString(d: Date): string {
   const yyyy = d.getUTCFullYear();
@@ -45,12 +92,10 @@ function formatUtcDateString(d: Date): string {
   const dd = String(d.getUTCDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
 }
-
 /** True when the med has a non-empty dose schedule. */
 export function hasDoseSchedule(med: Medication): boolean {
   return Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0;
 }
-
 /**
  * Dates on which `doseId` was consumed, from `doseConsumptionHistory` only.
  * Missing or empty history → no consumed dates.
@@ -70,7 +115,6 @@ function getDoseConsumedDates(med: Medication, doseId: string): string[] {
   }
   return out;
 }
-
 /**
  * Whether a specific dose slot was consumed on `dateStr`.
  * Uses only `doseConsumptionHistory` (no medication-level lastConsumedDate fallback).
@@ -82,7 +126,6 @@ export function isDoseConsumedOnDate(
 ): boolean {
   return getDoseConsumedDates(med, doseId).includes(dateStr);
 }
-
 /**
  * Record a manual consumption of `doseId` on `dateStr`.
  * Appends to `doseConsumptionHistory` (no duplicate dates).
@@ -105,7 +148,6 @@ export function recordDoseConsumed(
   }
   return { doseConsumptionHistory };
 }
-
 /**
  * Whether a specific dose slot was restored/skipped on `dateStr`
  * (Auto-Deduct → Restore bookkeeping). Skipped slots are not auto-due
@@ -119,7 +161,6 @@ export function isDoseSkippedOnDate(
   const hist = med.doseSkippedHistory?.[doseId];
   return Array.isArray(hist) && hist.includes(dateStr);
 }
-
 /**
  * Record that `doseId` was restored/skipped on `dateStr` so the same
  * occurrence is not treated as still due for Exact Auto deduction.
@@ -141,7 +182,6 @@ export function recordDoseSkipped(
   }
   return { doseSkippedHistory };
 }
-
 /**
  * Clear a skip mark for `doseId` on `dateStr` (e.g. after manual Take
  * following Restore). Does not touch other dates or doseIds.
@@ -163,8 +203,6 @@ export function clearDoseSkippedOnDate(
   }
   return { doseSkippedHistory };
 }
-
-
 /** Sum of per-dose amounts, or dailyDose when no schedule. */
 export function dailyScheduleAmount(med: Medication): number {
   if (hasDoseSchedule(med)) {
@@ -172,10 +210,9 @@ export function dailyScheduleAmount(med: Medication): number {
   }
   return Number(med.dailyDose) || 0;
 }
-
 /**
  * Days of stock remaining from durable `currentPills` and the current
- * schedule rate only (Issue #266). Does not invent deductions from elapsed
+ * schedule rate only. Does not invent deductions from elapsed
  * calendar days.
  */
 /**
@@ -186,22 +223,18 @@ export function dailyScheduleAmount(med: Medication): number {
 function floorRatioSafely(numerator: number, denominator: number): number {
   const ratio = numerator / denominator;
   if (!Number.isFinite(ratio)) return Math.floor(ratio);
-
   const absRatio = Math.abs(ratio);
   const exponent = absRatio > 0 ? Math.floor(Math.log2(absRatio)) : 0;
   const ulp = absRatio > 0 ? 2 ** (exponent - 52) : Number.EPSILON;
   const nearestInteger = Math.round(ratio);
-
   if (
     ratio < nearestInteger &&
     nearestInteger - ratio <= ulp
   ) {
     return nearestInteger;
   }
-
   return Math.floor(ratio);
 }
-
 export function daysLeftFromCurrentStock(med: Medication): number {
   const dayAmt = dailyScheduleAmount(med);
   if (dayAmt <= 0) return NEVER_DEPLETES_DAYS;
@@ -209,89 +242,22 @@ export function daysLeftFromCurrentStock(med: Medication): number {
   if (pills <= 0) return 0;
   return floorRatioSafely(pills, dayAmt);
 }
-
-export function formatArabicDate(dateStr: string, includeWeekday: boolean = true): string {
-  try {
-    const d = parseUtcDate(dateStr);
-    if (!d) return dateStr;
-    const options: Intl.DateTimeFormatOptions = {
-      weekday: includeWeekday ? 'long' : undefined,
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    };
-    return d.toLocaleDateString('ar-EG', { ...options, timeZone: 'UTC' });
-  } catch {
-    return dateStr;
-  }
-}
-
-/**
- * Format an ISO timestamp string or epoch into Arabic 12-hour time format.
- */
-export function formatLogTime(timestamp?: string | number): string {
-  if (!timestamp) return '';
-  const str = String(timestamp).trim();
-  if (!str.includes('T') && !str.includes(':') && !/^\d{10,}$/.test(str)) {
-    return '';
-  }
-  try {
-    const d = /^\d{10,}$/.test(str) ? new Date(Number(str)) : new Date(str);
-    if (Number.isNaN(d.getTime())) return '';
-    const h = d.getHours();
-    const m = d.getMinutes();
-    const isPM = h >= 12;
-    const hour12 = h % 12 === 0 ? 12 : h % 12;
-    const minutePadded = m < 10 ? `0${m}` : `${m}`;
-    return `${hour12}:${minutePadded} ${isPM ? 'م' : 'ص'}`;
-  } catch {
-    return '';
-  }
-}
-
-
 /**
  * Depletion date from durable `Medication.currentPills` and the current
- * schedule rate only (Issue #266).
+ * schedule rate only.
  */
 export function getDepletionDate(med: Medication): {
   dateStr: string;
-  formattedArabic: string;
   daysLeft: number;
 } {
-  const currentPills = Number(med.currentPills) || 0;
   const daysLeft = daysLeftFromCurrentStock(med);
-
-  const todayUtc = parseUtcDate(getTodayDateString()) ?? new Date(Date.UTC(1970, 0, 1));
+  const todayUtc = parseCalendarDate(getTodayDateString()) ?? new Date(Date.UTC(1970, 0, 1));
   const targetUtc = new Date(todayUtc.getTime() + daysLeft * MS_PER_DAY);
-  const dateStr = formatUtcDateString(targetUtc);
-
-  let formattedArabic: string;
-  if (currentPills <= 0) {
-    formattedArabic = 'نفد المخزون بالكامل';
-  } else if (daysLeft === 0) {
-    formattedArabic = 'ينفد اليوم';
-  } else if (daysLeft === 1) {
-    formattedArabic = 'غداً';
-  } else if (daysLeft === 2) {
-    formattedArabic = 'بعد غد';
-  } else {
-    const options: Intl.DateTimeFormatOptions = {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      timeZone: 'UTC',
-    };
-    formattedArabic = targetUtc.toLocaleDateString('ar-EG', options);
-  }
-
   return {
-    dateStr,
-    formattedArabic,
+    dateStr: formatUtcDateString(targetUtc),
     daysLeft,
   };
 }
-
 /**
  * Future critical-threshold crossing from durable `currentPills` and the
  * medication's explicit `doseSchedule` times.
@@ -313,21 +279,16 @@ export function getCriticalAlarmDate(
 ): number | null {
   const dayAmt = dailyScheduleAmount(med);
   if (dayAmt <= 0) return null;
-
   const criticalThresholdDays = getCriticalThresholdDays(med);
   const startingPills = Number(med.currentPills) || 0;
   if (startingPills <= 0) return null;
-
   const startingDaysLeft = floorRatioSafely(startingPills, dayAmt);
   if (startingDaysLeft <= criticalThresholdDays) return null;
-
   // Auto OFF: stock does not auto-decline → no future crossing.
   if (med.autoDeductEnabled === false) return null;
-
   if (!hasDoseSchedule(med) || !med.doseSchedule || med.doseSchedule.length === 0) {
     return null;
   }
-
   // Sorted by local clock time within a day (HH:mm).
   const slots = [...med.doseSchedule]
     .map((d) => {
@@ -345,30 +306,23 @@ export function getCriticalAlarmDate(
     })
     .filter((s): s is NonNullable<typeof s> => s != null)
     .sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute));
-
   if (slots.length === 0) return null;
-
   const doseIdSet = new Set(slots.map((s) => s.id));
-
   const isCritical = (pills: number): boolean => {
     if (pills <= 0) return true;
     return floorRatioSafely(pills, dayAmt) <= criticalThresholdDays;
   };
-
-  const todayUtc = parseUtcDate(todayStr);
+  const todayUtc = parseCalendarDate(todayStr);
   if (!todayUtc) return null;
-
   const localPartsFromUtcDate = (dateUtc: Date) => ({
     y: dateUtc.getUTCFullYear(),
     m: dateUtc.getUTCMonth(),
     d: dateUtc.getUTCDate(),
   });
-
   const occurrenceMsAt = (dateUtc: Date, hour: number, minute: number): number => {
     const { y, m, d } = localPartsFromUtcDate(dateUtc);
     return new Date(y, m, d, hour, minute, 0, 0).getTime();
   };
-
   /**
    * Process one calendar day slot-by-slot.
    * When `filterPast` is true (today only), skip occurrences <= nowMs.
@@ -394,7 +348,6 @@ export function getCriticalAlarmDate(
     }
     return { crossedAt: null, pillsOut: pills };
   };
-
   // ── Today: only remaining future slots ──
   let pills = startingPills;
   const todayResult = processDay(pills, todayUtc, todayStr, true);
@@ -404,7 +357,6 @@ export function getCriticalAlarmDate(
     // Should have been caught by early return; stock already critical.
     return null;
   }
-
   // ── Future exception dates: any consume/skip marker after today for schedule dose ids ──
   const exceptionDates = new Set<string>();
   const collectExceptions = (hist: Record<string, string[]> | undefined) => {
@@ -421,37 +373,30 @@ export function getCriticalAlarmDate(
   };
   collectExceptions(med.doseConsumptionHistory);
   collectExceptions(med.doseSkippedHistory);
-
   const sortedExceptions = [...exceptionDates].sort();
-
   // Cursor starts at tomorrow (UTC calendar day after today).
   let cursorUtc = new Date(todayUtc.getTime() + MS_PER_DAY);
   let exceptionIdx = 0;
-
   // Safety: enough stock-driven progress without per-day loops.
   // We only iterate exception dates + at most one normal crossing day.
   while (!isCritical(pills)) {
     const nextExceptionStr =
       exceptionIdx < sortedExceptions.length ? sortedExceptions[exceptionIdx] : null;
-    const nextExceptionUtc = nextExceptionStr ? parseUtcDate(nextExceptionStr) : null;
-
+    const nextExceptionUtc = nextExceptionStr ? parseCalendarDate(nextExceptionStr) : null;
     // Days from cursor (inclusive) until the day before next exception (or unbounded).
     // If next exception is before cursor, skip it.
     if (nextExceptionUtc && nextExceptionStr && nextExceptionStr < formatUtcDateString(cursorUtc)) {
       exceptionIdx += 1;
       continue;
     }
-
     // Complete normal days until end-of-day stock would be Critical, then
     // process that day slot-by-slot for the exact crossing timestamp.
     const fullDaysNeeded =
       floorRatioSafely(pills, dayAmt) - criticalThresholdDays;
-
     if (fullDaysNeeded <= 0) {
       // Already Critical without further deduction — should not happen.
       return null;
     }
-
     if (nextExceptionUtc && nextExceptionStr) {
       // Number of full normal days strictly before the exception date.
       const daysUntilException = Math.round(
@@ -491,7 +436,6 @@ export function getCriticalAlarmDate(
       cursorUtc = new Date(nextExceptionUtc.getTime() + MS_PER_DAY);
       continue;
     }
-
     // No further exceptions: jump straight to the mathematical crossing day.
     const daysBeforeCrossingDay = fullDaysNeeded - 1;
     if (daysBeforeCrossingDay > 0) {
@@ -504,6 +448,5 @@ export function getCriticalAlarmDate(
     // No crossing found (should be rare); stop to avoid infinite loop.
     return null;
   }
-
   return null;
 }

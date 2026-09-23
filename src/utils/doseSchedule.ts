@@ -1,5 +1,5 @@
 /**
- * Multi-dose schedule helpers (Phase 1).
+ * Multi-dose schedule helpers.
  *
  * These helpers prepare and validate doseSchedule / dosesPerDay without
  * changing auto-deduction or notification scheduling. The existing
@@ -16,9 +16,6 @@ import type { Medication, MedicationDose } from '../types';
 import { generateId } from './id';
 import { timeToMinutes } from './time';
 import { isDoseConsumedOnDate, isDoseSkippedOnDate, getTodayDateString } from './dateCalculations';
-
-
-
 /**
  * Auto-Deduction active for a medication based solely on its own preference.
  * Runtime Auto follows medication.autoDeductEnabled (undefined defaults ON).
@@ -28,10 +25,8 @@ export function isMedicationAutoDeductActive(
 ): boolean {
   return medication.autoDeductEnabled !== false;
 }
-
 /** Sensible UI maximum for doses per day (compact mobile form). */
 export const MAX_DOSES_PER_DAY = 12;
-
 /**
  * Default times used when expanding the schedule (HH:mm).
  * Must already be chronological so empty/resized schedules display in order
@@ -51,30 +46,25 @@ export const DEFAULT_DOSE_TIMES = [
   '23:00',
   '23:30',
 ] as const;
-
 const TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
-
 /** Normalize an optional persisted dose description without trusting runtime shape. */
 function normalizeDoseDescription(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed === '' ? undefined : trimmed;
 }
-
 /** True if the string is a valid 24h HH:mm (or H:mm). */
 export function isValidDoseTime(time: string): boolean {
   if (!time || typeof time !== 'string') return false;
   if (!TIME_RE.test(time)) return false;
   return timeToMinutes(time) >= 0;
 }
-
 /** Normalize to zero-padded HH:mm when valid; otherwise return original. */
 export function normalizeTimeString(time: string): string {
   if (!isValidDoseTime(time)) return time;
   const [h, m] = time.split(':').map((n) => parseInt(n, 10));
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
-
 /** Sort schedule chronologically; stable for equal times. */
 export function sortDoseSchedule(schedule: MedicationDose[]): MedicationDose[] {
   return [...schedule].sort((a, b) => {
@@ -84,12 +74,10 @@ export function sortDoseSchedule(schedule: MedicationDose[]): MedicationDose[] {
     return a.id.localeCompare(b.id);
   });
 }
-
 /** Sum of dose amounts (total daily consumption). */
 export function totalDailyAmount(schedule: MedicationDose[]): number {
   return schedule.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
 }
-
 /**
  * Map a medication to a UI-ready schedule from explicit `doseSchedule` only.
  *
@@ -116,7 +104,6 @@ export function getDoseScheduleForUI(
       }))
   );
 }
-
 /**
  * Build / resize a working schedule when the user changes dosesPerDay.
  *
@@ -135,12 +122,10 @@ export function resizeDoseSchedule(
   if (current.length > n) {
     return current.slice(0, n);
   }
-
   const next = current.map((d) => ({ ...d })); // shallow copy; keep same row data
   const usedTimes = new Set(
     next.map((d) => normalizeTimeString(d.time)).filter((t) => isValidDoseTime(t))
   );
-
   for (let i = next.length; i < n; i++) {
     let time: string | undefined = DEFAULT_DOSE_TIMES.find((t) => !usedTimes.has(t));
     if (!time) {
@@ -172,12 +157,10 @@ export function resizeDoseSchedule(
       time,
     });
   }
-
   // Keep in-memory schedule chronological after growth (IDs/amounts/times of
   // existing rows are unchanged; only order may change).
   return sortDoseSchedule(next);
 }
-
 export type DoseScheduleValidationError =
   | 'invalid_count'
   | 'empty_schedule'
@@ -185,7 +168,6 @@ export type DoseScheduleValidationError =
   | 'invalid_amount'
   | 'invalid_time'
   | 'duplicate_time';
-
 export interface DoseScheduleValidationResult {
   ok: boolean;
   error?: DoseScheduleValidationError;
@@ -197,7 +179,6 @@ export interface DoseScheduleValidationResult {
   /** Earliest time — kept as reminderTime for Phase-1 single-reminder compat. */
   reminderTime?: string;
 }
-
 /**
  * Validate and normalize a working schedule before save.
  * Rejects zero/negative amounts, invalid times, and duplicate times.
@@ -229,10 +210,8 @@ export function validateAndNormalizeDoseSchedule(
       message: 'عدد صفوف الجرعات يجب أن يساوي عدد المرات اليومية',
     };
   }
-
   const normalized: MedicationDose[] = [];
   const seenTimes = new Set<string>();
-
   for (let i = 0; i < schedule.length; i++) {
     const row = schedule[i];
     const amount = Number(row.amount);
@@ -268,7 +247,6 @@ export function validateAndNormalizeDoseSchedule(
         : {}),
     });
   }
-
   const sorted = sortDoseSchedule(normalized);
   const dailyDose = totalDailyAmount(sorted);
   return {
@@ -279,7 +257,6 @@ export function validateAndNormalizeDoseSchedule(
     reminderTime: sorted[0]?.time ?? '09:00',
   };
 }
-
 /**
  * Returns true if the dose time has already passed today based on local wall clock.
  */
@@ -292,7 +269,6 @@ export function isDoseTimeElapsedToday(
   const nowMin = now.getHours() * 60 + now.getMinutes();
   return nowMin >= tMin;
 }
-
 /**
  * Returns true if a dose slot is completed today (either manually consumed or auto-deducted because its time elapsed).
  *
@@ -326,7 +302,6 @@ export function isDoseCompletedToday(
   }
   return false;
 }
-
 /**
  * Finds the next scheduled dose that the user is supposed to take right now.
  * 1. Prioritizes the earliest upcoming dose today that is neither consumed nor elapsed (auto-deducted).
@@ -341,7 +316,6 @@ export function getNextScheduledDose(
     return null;
   }
   const schedule = sortDoseSchedule(med.doseSchedule);
-
   // 1. Next upcoming available dose (not consumed and not auto-deducted)
   const nextAvailable = schedule.find(
     (d) => !isDoseCompletedToday(med, d, todayStr, now)
@@ -349,7 +323,6 @@ export function getNextScheduledDose(
   if (nextAvailable) {
     return nextAvailable;
   }
-
   // 2. Fallback: earliest unconsumed dose (if any)
   const unconsumed = schedule.find(
     (d) => !isDoseConsumedOnDate(med, d.id, todayStr)
@@ -357,11 +330,9 @@ export function getNextScheduledDose(
   if (unconsumed) {
     return unconsumed;
   }
-
   // 3. If all doses consumed/done, return the first schedule row as nominal fallback
   return schedule[0] || null;
 }
-
 /**
  * Returns the dose amount for the next upcoming dose.
  * Without an explicit doseSchedule, returns 0.
@@ -381,8 +352,6 @@ export function getNextDoseAmount(
   }
   return Number(med.doseSchedule[0]?.amount) || 0;
 }
-
-
 /**
  * Resolve the MedicationCard Take/Restore toggle target for one dose slot.
  *
@@ -420,9 +389,7 @@ export function getCardDoseToggleTarget(
   if (schedule.length === 0) {
     return { amount: 0, canTake: false, canRestore: false };
   }
-
   const sorted = sortDoseSchedule(schedule);
-
   // 1) Manual consume today → Restore that doseId (chronological first).
   //    Independent of whether later slots are still incomplete.
   for (const d of sorted) {
@@ -436,7 +403,6 @@ export function getCardDoseToggleTarget(
       };
     }
   }
-
   // 2) No restorable manual mark → first incomplete slot for Take.
   //    Uses medication-level auto state for elapsed completion.
   for (const d of sorted) {
@@ -450,7 +416,6 @@ export function getCardDoseToggleTarget(
       };
     }
   }
-
   // 3) All completed via auto-deduct only — no fake restore
   const nominal = sorted[0];
   return {
@@ -460,4 +425,3 @@ export function getCardDoseToggleTarget(
     canRestore: false,
   };
 }
-

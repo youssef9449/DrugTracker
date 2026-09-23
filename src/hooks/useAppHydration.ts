@@ -179,7 +179,16 @@ export function useAppHydration(setters: AppHydrationSetters): void {
     Promise.all([
       getNotificationPermission()
         .then((perm) => {
-          if (localStorage.getItem(NOTIFICATIONS_KEY) === null) {
+          const savedPreference = localStorage.getItem(NOTIFICATIONS_KEY);
+          if (savedPreference === 'true' && perm !== 'granted') {
+            setNotificationsEnabled(false);
+            return;
+          }
+          if (savedPreference === 'true') {
+            setNotificationsEnabled(true);
+            return;
+          }
+          if (savedPreference === null) {
             setNotificationsEnabled(perm === 'granted');
 
             // Auto-request notification permission on the FIRST app open

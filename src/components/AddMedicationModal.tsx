@@ -2,10 +2,7 @@ import { useState, useEffect, useMemo, type FC, type FormEvent } from 'react';
 import { X, Pill, ShieldAlert, Check } from 'lucide-react';
 import type { Medication, MedicationDose } from '../types';
 import { isSolidUnit } from '../utils/medicationPackaging';
-import { formatTimeArabic } from '../utils/medicationPresentation';
-import { getTodayDateString } from '../utils/dateCalculations';
 import {
-  MAX_DOSES_PER_DAY,
   getDoseScheduleForUI,
   resizeDoseSchedule,
   totalDailyAmount,
@@ -26,13 +23,6 @@ interface AddMedicationModalProps {
   /** Default Auto-Deduction state for a newly created medication. */
   defaultAutoDeductEnabled?: boolean;
 }
-const COLOR_TAGS = [
-  { id: 'teal', label: 'تيل', className: 'bg-teal-500' },
-  { id: 'rose', label: 'وردي', className: 'bg-rose-500' },
-  { id: 'amber', label: 'ذهبي', className: 'bg-amber-500' },
-  { id: 'sky', label: 'سماوي', className: 'bg-sky-500' },
-  { id: 'violet', label: 'بنفسجي', className: 'bg-violet-500' },
-];
 export const AddMedicationModal: FC<AddMedicationModalProps> = ({
   isOpen,
   onClose,

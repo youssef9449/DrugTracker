@@ -61,6 +61,7 @@ export async function cleanupNativeListeners(): Promise<void> {
   await cleanupBackButtonListener();
   await cleanupNotificationListeners();
   await cleanupAppStateListener();
+  initialized = false;
 }
 
 //**

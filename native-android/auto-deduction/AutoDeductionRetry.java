@@ -75,6 +75,7 @@ boolean scheduleFireRetry(
                         || recurrenceGeneration != activeGen
                         || operationVersion == null
                         || !operationVersion.equals(existingEvidence.operationVersion)
+                        || timeHhmm == null
                         || !timeHhmm.equals(existingEvidence.timeHhmm)
                         || Double.compare(amount, existingEvidence.amount) != 0) {
                     return false;

@@ -252,9 +252,11 @@ export async function scheduleDoseReminder(
     }
     return;
   }
-  if (options?.skipToday !== true) {
-    scheduleWebNotification(title, body);
-  }
+  await scheduleWebNotification(title, body, {
+    namespace: 'dose-reminder',
+    identity: `${medId}::${id}`,
+    at: fireToday,
+  });
 }
 /**
  * Open the OS / browser notification settings page where the user

@@ -1,48 +1,37 @@
 package app.drugtracker.autodeduction;
-
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.util.Log;
-
 import androidx.core.content.ContextCompat;
-
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
-
 import org.json.JSONObject;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-
 /**
  * Capacitor bridge for Exact Auto scheduling, Native stock execution, and
  * JavaScript/UI convergence.
  */
 @CapacitorPlugin(name = "AutoDeduction")
 public class AutoDeductionPlugin extends Plugin {
-
     private static final String TAG = "AutoDeductionPlugin";
-
     private BroadcastReceiver exactAutoFiredReceiver;
-
     @Override
     public void load() {
         super.load();
-
         exactAutoFiredReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
                 if (!AutoDeductionContract.ACTION_AUTO_DEDUCTION_FIRED.equals(intent.getAction())) {
                     return;
                 }
-
                 JSObject event = new JSObject();
                 event.put("medicationId", intent.getStringExtra(
                         AutoDeductionContract.EXTRA_MEDICATION_ID));
@@ -54,11 +43,9 @@ public class AutoDeductionPlugin extends Plugin {
                         AutoDeductionContract.EXTRA_SCHEDULED_AT_EPOCH_MS, 0L));
                 event.put("amount", intent.getDoubleExtra(
                         AutoDeductionContract.EXTRA_AMOUNT, Double.NaN));
-
                 notifyListeners("exactAutoDeductionFired", event);
             }
         };
-
         IntentFilter filter = new IntentFilter(
                 AutoDeductionContract.ACTION_AUTO_DEDUCTION_FIRED);
         ContextCompat.registerReceiver(
@@ -67,7 +54,6 @@ public class AutoDeductionPlugin extends Plugin {
                 filter,
                 ContextCompat.RECEIVER_NOT_EXPORTED);
     }
-
     @Override
     protected void handleOnDestroy() {
         if (exactAutoFiredReceiver != null) {
@@ -80,7 +66,6 @@ public class AutoDeductionPlugin extends Plugin {
         }
         super.handleOnDestroy();
     }
-
     @PluginMethod
     public void scheduleOccurrence(PluginCall call) {
         String medicationId = call.getString("medicationId");
@@ -90,14 +75,12 @@ public class AutoDeductionPlugin extends Plugin {
         Double amountObj = call.getDouble("amount");
         Long scheduledAt = call.getLong("scheduledAtEpochMs");
         String treatmentEndDate = call.getString("treatmentEndDate", "");
-
         if (amountObj == null) {
             call.reject("invalid_amount");
             return;
         }
         double amount = amountObj;
         long epoch = scheduledAt != null ? scheduledAt : 0L;
-
         AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
         AutoDeductionScheduler.ScheduleResult result = scheduler.scheduleOccurrence(
                 medicationId,
@@ -107,14 +90,12 @@ public class AutoDeductionPlugin extends Plugin {
                 amount,
                 epoch,
                 treatmentEndDate);
-
         JSObject ret = new JSObject();
         ret.put("ok", result.ok);
         if (result.error != null) ret.put("error", result.error);
         if (result.occurrenceKey != null) ret.put("occurrenceKey", result.occurrenceKey);
         call.resolve(ret);
     }
-
     @PluginMethod
     public void cancelOccurrence(PluginCall call) {
         String medicationId = call.getString("medicationId");
@@ -129,9 +110,8 @@ public class AutoDeductionPlugin extends Plugin {
         if (result.error != null) ret.put("error", result.error);
         call.resolve(ret);
     }
-
     /**
-     * Issue #217: medication+dose recurrence disable — bumps durable generation under
+     * medication+dose recurrence disable — bumps durable generation under
      * SCHEDULE_LOCK and cancels all future scheduled occurrences for that dose slot.
      */
     @PluginMethod
@@ -152,7 +132,6 @@ public class AutoDeductionPlugin extends Plugin {
         if (result.ok) ret.put("generation", result.generation);
         call.resolve(ret);
     }
-
     @PluginMethod
     public void listFiredEvents(PluginCall call) {
         AutoDeductionEventStore store = new AutoDeductionEventStore(getContext());
@@ -171,7 +150,6 @@ public class AutoDeductionPlugin extends Plugin {
         if (result.error != null) ret.put("error", result.error);
         call.resolve(ret);
     }
-
     @PluginMethod
     public void listEvents(PluginCall call) {
         AutoDeductionEventStore store = new AutoDeductionEventStore(getContext());
@@ -188,7 +166,6 @@ public class AutoDeductionPlugin extends Plugin {
         ret.put("events", arr);
         call.resolve(ret);
     }
-
     @PluginMethod
     public void markReconciled(PluginCall call) {
         String medicationId = call.getString("medicationId");
@@ -201,7 +178,6 @@ public class AutoDeductionPlugin extends Plugin {
         ret.put("changed", result.changed);
         call.resolve(ret);
     }
-
     @PluginMethod
     public void restoreFutureSchedules(PluginCall call) {
         try {
@@ -225,7 +201,6 @@ public class AutoDeductionPlugin extends Plugin {
             call.resolve(ret);
         }
     }
-
     /**
      * List durable schedule metadata so JS can cancel stale occurrences
      * after process restart (trackedRef is empty).
@@ -259,8 +234,6 @@ public class AutoDeductionPlugin extends Plugin {
                     : "list_schedules_failed");
         }
     }
-
-
     /**
      * Initialize Native stock for the currently persisted JS medications.
      * Existing Native balances are authoritative; only missing rows are seeded
@@ -272,7 +245,6 @@ public class AutoDeductionPlugin extends Plugin {
         JSArray medications = call.getArray("medications");
         List<AutoDeductionStockStore.StockSeed> seeds =
                 new ArrayList<AutoDeductionStockStore.StockSeed>();
-
         try {
             if (medications != null) {
                 for (int i = 0; i < medications.length(); i++) {
@@ -289,7 +261,6 @@ public class AutoDeductionPlugin extends Plugin {
                             medicationId, currentPills));
                 }
             }
-
             AutoDeductionStockStore.SnapshotResult result =
                     new AutoDeductionStockStore(getContext()).ensureMissingAndRead(seeds);
             JSObject ret = new JSObject();
@@ -315,7 +286,6 @@ public class AutoDeductionPlugin extends Plugin {
             call.resolve(ret);
         }
     }
-
     /**
      * Apply foreground signed stock deltas idempotently by mutationSeq.
      * Manual/Refill/Restore JS mutations use this path after computing their
@@ -328,7 +298,6 @@ public class AutoDeductionPlugin extends Plugin {
         JSArray rawDeltas = call.getArray("deltas");
         List<AutoDeductionStockStore.StockDelta> deltas =
                 new ArrayList<AutoDeductionStockStore.StockDelta>();
-
         try {
             if (rawDeltas != null) {
                 for (int i = 0; i < rawDeltas.length(); i++) {
@@ -339,7 +308,6 @@ public class AutoDeductionPlugin extends Plugin {
                             obj.optDouble("delta", Double.NaN)));
                 }
             }
-
             List<AutoDeductionStockStore.OccurrenceResolution> resolutions =
                     new ArrayList<AutoDeductionStockStore.OccurrenceResolution>();
             JSArray rawResolutions = call.getArray("occurrenceResolutions");
@@ -368,7 +336,6 @@ public class AutoDeductionPlugin extends Plugin {
                             resolutionType));
                 }
             }
-
             AutoDeductionStockStore.ForegroundApplyResult result =
                     new AutoDeductionStockStore(getContext()).applyForegroundDeltas(
                             mutationSeq, deltas, resolutions);
@@ -396,7 +363,6 @@ public class AutoDeductionPlugin extends Plugin {
             call.resolve(ret);
         }
     }
-
     /**
      * Repair/apply one exact Auto occurrence on the Native stock authority.
      * The operation is occurrence-idempotent.
@@ -408,7 +374,6 @@ public class AutoDeductionPlugin extends Plugin {
         String calendarDate = call.getString("calendarDate");
         Double amountObj = call.getDouble("amount");
         double amount = amountObj != null ? amountObj : Double.NaN;
-
         AutoDeductionStockStore.AutoApplyResult result =
                 new AutoDeductionStockStore(getContext()).applyAutoDeduction(
                         medicationId, doseId, calendarDate, amount);
@@ -420,7 +385,6 @@ public class AutoDeductionPlugin extends Plugin {
         if (result.error != null) ret.put("error", result.error);
         call.resolve(ret);
     }
-
     @PluginMethod
     public void getOccurrenceSnapshot(PluginCall call) {
         String medicationId = call.getString("medicationId");
@@ -452,7 +416,6 @@ public class AutoDeductionPlugin extends Plugin {
             call.reject(e.getMessage() != null ? e.getMessage() : "snapshot_failed");
         }
     }
-
     private static JSObject toJSObject(JSONObject o) {
         JSObject js = new JSObject();
         js.put("medicationId", o.optString("medicationId", ""));

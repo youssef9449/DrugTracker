@@ -1,14 +1,10 @@
 package app.drugtracker.alarmruntime;
-
 import android.net.Uri;
-
 import org.json.JSONException;
 import org.json.JSONObject;
-
 import java.util.Calendar;
 import java.util.Locale;
 import java.util.TimeZone;
-
 /**
  * Feature-neutral contract for one-shot exact alarms.
  *
@@ -17,7 +13,6 @@ import java.util.TimeZone;
  */
 public final class ExactAlarmContract {
     private ExactAlarmContract() {}
-
     public static final String FIELD_OPERATION_VERSION = "operationVersion";
     public static final String FIELD_IDENTITY_URI = "identityUri";
     public static final String FIELD_STORAGE_KEY = "storageKey";
@@ -28,7 +23,6 @@ public final class ExactAlarmContract {
     public static final String SCHEDULE_KEY_PREFIX = "sch:";
     public static final String CANCEL_KEY_PREFIX = "cancel:";
     public static final String ORDERING_SEQUENCE_KEY = "lastAllocatedSequence";
-
     public static String extractOperationVersion(String raw) {
         if (raw == null || raw.isEmpty()) return "";
         try {
@@ -37,14 +31,12 @@ public final class ExactAlarmContract {
             return "";
         }
     }
-
     public static String extractOperationVersion(JSONObject metadata) {
         if (metadata == null) return "";
         String current = metadata.optString(
                 FIELD_OPERATION_VERSION, "");
         return current;
     }
-
     public static boolean isMetadataOwnedByOperationVersion(
             String currentJson,
             String expectedOperationVersion) {
@@ -53,7 +45,6 @@ public final class ExactAlarmContract {
                 && expectedOperationVersion.equals(
                         extractOperationVersion(currentJson));
     }
-
     public static long[] parseOrdering(String raw) {
         long[] result = new long[] {-1L, 0L};
         if (raw == null || raw.trim().isEmpty()) return result;
@@ -71,7 +62,6 @@ public final class ExactAlarmContract {
         }
         return result;
     }
-
     public static boolean isOrderingNewer(
             long firstMillis,
             long firstSequence,
@@ -81,9 +71,7 @@ public final class ExactAlarmContract {
                 ? firstMillis > secondMillis
                 : firstSequence > secondSequence;
     }
-
     private static final String SCHEME = "content";
-
     /**
      * Single generic native identity encoder.
      *
@@ -101,7 +89,6 @@ public final class ExactAlarmContract {
         if (authority == null || authority.trim().isEmpty()) {
             throw new IllegalArgumentException("authority");
         }
-
         Uri.Builder builder = new Uri.Builder()
                 .scheme(scheme)
                 .authority(authority);
@@ -115,7 +102,6 @@ public final class ExactAlarmContract {
         }
         return builder.build();
     }
-
     /**
      * Resolve a local calendar date + wall-clock time to epoch milliseconds in
      * the device's current timezone. This is the shared generic conversion;
@@ -157,7 +143,6 @@ public final class ExactAlarmContract {
             int day = Integer.parseInt(calendarDate.substring(8, 10));
             int hour = Integer.parseInt(timeHhmm.substring(0, colon));
             int minute = Integer.parseInt(timeHhmm.substring(colon + 1));
-
             Calendar calendar = Calendar.getInstance(TimeZone.getDefault(), Locale.US);
             calendar.clear();
             calendar.setLenient(lenient);
@@ -167,7 +152,6 @@ public final class ExactAlarmContract {
             return -1L;
         }
     }
-
     /** Full URI is authoritative identity; no hash is used. */
     public static boolean isValidIdentityUri(String identityUri) {
         if (identityUri == null || identityUri.trim().isEmpty()) {

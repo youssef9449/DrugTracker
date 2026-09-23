@@ -105,6 +105,28 @@ describe('scheduleCriticalAlarm (web path)', () => {
     });
   });
 
+  it('reports Web claim persistence failure instead of consuming the notification opportunity', async () => {
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota', 'QuotaExceededError');
+    });
+
+    const future = Date.now() + 60_000;
+    await expect(
+      scheduleCriticalAlarm('med-claim-failure', 'Test Med', future, 'قرص')
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'platform_failure',
+    });
+
+    expect(
+      JSON.parse(
+        localStorage.getItem('drugtracker_web_scheduled_notifications_v1') || '{}'
+      )['critical-stock::med-claim-failure']
+    ).toBeUndefined();
+
+    setItemSpy.mockRestore();
+  });
+
   it('reports Web scheduling failure when durable storage rejects the schedule', async () => {
     const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('quota', 'QuotaExceededError');

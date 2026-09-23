@@ -77,21 +77,48 @@ describe('cancelCriticalAlarm (web path)', () => {
 });
 
 describe('scheduleCriticalAlarm (web path)', () => {
-  it('fires the web fallback immediately (no persistent scheduling on web)', async () => {
-    await scheduleCriticalAlarm('med-1', 'Test Med', Date.now() + 1000);
-    expect(mocks.criticalSchedule).not.toHaveBeenCalled();
+  beforeEach(() => {
+    const WebNotification = class {
+      static permission = 'granted';
+      constructor() {}
+    };
+    Object.defineProperty(window, 'Notification', {
+      configurable: true,
+      writable: true,
+      value: WebNotification,
+    });
   });
 
-  it('BLOCKER: the web fallback can never make scheduleCriticalAlarm return true', async () => {
-    // Even if the browser notification "succeeds", a web notification is
-    // not a native future alarm — the return value must stay false so no
-    // armed claim is persisted without a native alarm behind it.
+  it('persists a future web schedule at the exact crossing time', async () => {
+    const future = Date.now() + 60_000;
     await expect(
-      scheduleCriticalAlarm('med-1', 'Test Med', Date.now() + 1000)
+      scheduleCriticalAlarm('med-1', 'Test Med', future, 'قرص')
+    ).resolves.toMatchObject({ ok: true });
+
+    const stored = JSON.parse(
+      localStorage.getItem('drugtracker_web_scheduled_notifications_v1') || '{}'
+    );
+    expect(stored['critical-stock::med-1']).toMatchObject({
+      namespace: 'critical-stock',
+      identity: 'med-1',
+      fireAt: future,
+    });
+  });
+
+  it('reports Web scheduling failure when durable storage rejects the schedule', async () => {
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota', 'QuotaExceededError');
+    });
+
+    const future = Date.now() + 60_000;
+    await expect(
+      scheduleCriticalAlarm('med-1', 'Test Med', future, 'قرص')
     ).resolves.toMatchObject({
       ok: false,
       errorCode: 'platform_failure',
     });
+
+    setItemSpy.mockRestore();
   });
 });
 

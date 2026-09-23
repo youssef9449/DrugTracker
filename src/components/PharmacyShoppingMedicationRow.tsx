@@ -52,7 +52,7 @@ export const PharmacyShoppingMedicationRow: FC<Props> = ({
     <div className="flex items-start gap-2 min-w-0">
       <button
         type="button"
-        onClick={() => handleToggleSelect(med.id)}
+        onClick={() => onToggleSelect(med.id)}
         className="mt-0.5 text-teal-700 shrink-0 transition hover:scale-105 active:scale-95"
       >
         {isSelected ? <CheckSquare className="w-4.5 h-4.5 text-teal-700" /> : <Square className="w-4.5 h-4.5 text-slate-300" />}
@@ -81,7 +81,7 @@ export const PharmacyShoppingMedicationRow: FC<Props> = ({
     </div>
     <button
       type="button"
-      onClick={() => handleRemoveFromShopping(med.id)}
+      onClick={() => onRemoveFromShopping(med.id)}
       aria-label={`إزالة ${med.name} من قائمة الشراء`}
       title="إزالة من قائمة الشراء"
       className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 active:scale-95"
@@ -100,7 +100,7 @@ export const PharmacyShoppingMedicationRow: FC<Props> = ({
           className="w-[180px] shrink-0"
           size="sm"
           value={getQuantityMode(med)}
-          onChange={(val) => handleToggleQuantityMode(med, val, suggestedPills)}
+          onChange={(val) => onToggleQuantityMode(med, val, suggestedPills)}
           options={[
             { value: 'period', label: 'حسب الفترة' },
             { value: 'custom', label: 'كمية محددة' },

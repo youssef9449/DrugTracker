@@ -25,11 +25,12 @@ function readEntries(): Record<string, WebScheduledEntry> {
   }
 }
 
-function writeEntries(entries: Record<string, WebScheduledEntry>): void {
+function writeEntries(entries: Record<string, WebScheduledEntry>): boolean {
   try {
     localStorage.setItem(WEB_SCHEDULE_KEY, JSON.stringify(entries));
+    return true;
   } catch {
-    // Scheduling still works for the current page when storage is unavailable.
+    return false;
   }
 }
 
@@ -108,11 +109,16 @@ export async function scheduleWebNotification(
   };
 
   entries[key] = entry;
-  writeEntries(entries);
+  if (!writeEntries(entries)) {
+    delete entries[key];
+    return false;
+  }
 
   if (fireAt <= Date.now()) {
     delete entries[key];
-    writeEntries(entries);
+    if (!writeEntries(entries)) {
+      return false;
+    }
     return showScheduledNotification(entry);
   }
 
@@ -150,7 +156,7 @@ export async function cancelScheduledWebNotification(
   const entries = readEntries();
   const existed = Boolean(entries[key]);
   delete entries[key];
-  writeEntries(entries);
+  const persisted = writeEntries(entries);
 
   if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     try {
@@ -165,7 +171,7 @@ export async function cancelScheduledWebNotification(
       // No browser-level cancellation API is guaranteed.
     }
   }
-  return existed;
+  return persisted && existed;
 }
 
 export function openBrowserNotificationSettings(): void {

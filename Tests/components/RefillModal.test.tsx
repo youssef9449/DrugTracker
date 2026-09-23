@@ -1,6 +1,6 @@
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { RefillModal } from '@/components/RefillModal';
 import type { Medication } from '@/types';
 
@@ -70,7 +70,7 @@ describe('RefillModal', () => {
         medication={med}
         isOpen={true}
         onClose={() => {}}
-        onConfirmRefill={() => {}}
+        onConfirmRefill={() => Promise.resolve(true)}
       />
     );
 
@@ -106,5 +106,28 @@ describe('RefillModal — quantity input allows empty mid-edit', () => {
     expect(input.value).toBe('');
     fireEvent.change(input, { target: { value: '2' } });
     expect(input.value).toBe('2');
+  });
+});
+
+
+describe('RefillModal — durable failure stays retryable', () => {
+  afterEach(() => cleanup());
+
+  it('does not close after a failed durable refill', async () => {
+    const onClose = vi.fn();
+    const onConfirmRefill = vi.fn().mockResolvedValue(false);
+    render(
+      <RefillModal
+        medication={makeMed()}
+        isOpen={true}
+        onClose={onClose}
+        onConfirmRefill={onConfirmRefill}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /تأكيد إضافة المخزون/i }));
+
+    await waitFor(() => expect(onConfirmRefill).toHaveBeenCalledTimes(1));
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

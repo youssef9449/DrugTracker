@@ -4,6 +4,7 @@ import { renderHook, act, cleanup } from '@testing-library/react';
 import { useDoseReminders } from '@/hooks/useDoseReminders';
 import type { Medication } from '@/types';
 import { getTodayDateString } from '@/utils/dateCalculations';
+import * as storage from '@/utils/storage';
 
 // Mock the sound module — only stopAllSounds remains (used by dismiss/snooze).
 vi.mock('@/utils/sound', () => ({
@@ -185,6 +186,29 @@ describe('useDoseReminders', () => {
 
       expect(result.current.alarmingMedication).toEqual(
         expect.objectContaining({ id: 'med-consumed-yesterday' })
+      );
+    });
+
+    it('keeps the alarm open when the FIRED marker cannot be persisted', () => {
+      const med = makeMed({ id: 'med-dismiss-storage-failure' });
+      const { result } = renderHook(() =>
+        useDoseReminders(defaultOpts({ medications: [med] }))
+      );
+
+      act(() => {
+        result.current.openAlarm('med-dismiss-storage-failure', 'd1');
+      });
+
+      vi.spyOn(storage, 'saveJson').mockReturnValue('storage_write_failed');
+
+      let dismissed = true;
+      act(() => {
+        dismissed = result.current.dismissAlarm();
+      });
+
+      expect(dismissed).toBe(false);
+      expect(result.current.alarmingMedication).toEqual(
+        expect.objectContaining({ id: 'med-dismiss-storage-failure' })
       );
     });
 

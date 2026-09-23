@@ -206,7 +206,7 @@ export function useDoseReminderScheduler({
       isCurrentDoseReminderSnoozeGeneration,
       async () => {
         await cancelSnoozedDoseReminder(medId, doseId);
-        clearSnoozedDose(medId, doseId);
+        if (!clearSnoozedDose(medId, doseId)) throw new Error('snooze_clear_persistence_failed');
       }
     );
   };

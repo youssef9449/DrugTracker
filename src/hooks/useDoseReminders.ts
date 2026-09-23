@@ -72,14 +72,15 @@ export function useDoseReminders({
     return null;
   }, [allowManualTakeActionByMedicationId]);
 
-  const dismissAlarm = useCallback(() => {
+  const dismissAlarm = useCallback((): boolean => {
     const current = alarmingIdRef.current;
     const doseId = alarmingDoseIdRef.current;
     if (current && doseId && !isTestAlarmRef.current) {
       const fired = loadJson<Record<string, boolean>>(FIRED_KEY, {});
       const today = getTodayDateString();
       fired[firedKey(current, today, doseId)] = true;
-      saveJson(FIRED_KEY, fired);
+      const persisted = saveJson(FIRED_KEY, fired);
+      if (persisted !== null) return false;
 
       // Dismissal supersedes any in-flight snooze scheduling for this exact
       // dose. The shared generation prevents that request from publishing a
@@ -93,7 +94,7 @@ export function useDoseReminders({
         generation,
         async () => {
           await cancelSnoozedDoseReminder(current, doseId);
-          clearSnoozedDose(current, doseId);
+          if (!clearSnoozedDose(current, doseId)) throw new Error('snooze_clear_persistence_failed');
         }
       );
 
@@ -114,6 +115,7 @@ export function useDoseReminders({
       setAlarmingMedication(null);
       setAlarmingDoseId(null);
     }
+    return true;
   }, [dequeueNextValidAlarm]);
   const snoozeAlarm = useCallback((minutes: number = DEFAULT_SNOOZE_MINUTES) => {
     const medication = alarmingMedication;
@@ -180,7 +182,11 @@ export function useDoseReminders({
           return;
         }
 
-        setSnoozeUntil(medication.id, snoozeUntil, doseId);
+        const persisted = setSnoozeUntil(medication.id, snoozeUntil, doseId);
+        if (!persisted) {
+          await cancelSnoozedDoseReminder(medication.id, doseId);
+          throw new Error('snooze_persistence_failed');
+        }
         const next = dequeueNextValidAlarm();
         if (next) {
           const nextMed = medicationsRef.current.find((m) => m.id === next.medicationId)!;

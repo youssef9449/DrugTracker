@@ -22,14 +22,15 @@ export function getSnoozeUntil(
     : null;
 }
 
-export function clearSnoozedDose(medId: string, doseId: string): void {
+export function clearSnoozedDose(medId: string, doseId: string): boolean {
   const key = snoozeStorageKey(medId, doseId);
-  if (!key) return;
+  if (!key) return false;
   const snooze = loadJson<Record<string, number>>(SNOOZE_KEY, {});
   if (snooze[key] !== undefined) {
     delete snooze[key];
-    saveJson(SNOOZE_KEY, snooze);
+    return saveJson(SNOOZE_KEY, snooze) === null;
   }
+  return true;
 }
 
 export function isSnoozeActive(
@@ -45,10 +46,10 @@ export function setSnoozeUntil(
   medId: string,
   untilMs: number,
   doseId: string
-): void {
+): boolean {
   const key = snoozeStorageKey(medId, doseId);
-  if (!key) return;
+  if (!key) return false;
   const snooze = loadJson<Record<string, number>>(SNOOZE_KEY, {});
   snooze[key] = untilMs;
-  saveJson(SNOOZE_KEY, snooze);
+  return saveJson(SNOOZE_KEY, snooze) === null;
 }

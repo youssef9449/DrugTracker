@@ -1,4 +1,5 @@
 import type { FC } from 'react';
+import type { MedicationDose } from '../types';
 import { MAX_DOSES_PER_DAY } from '../utils/doseSchedule';
 
 const COLOR_TAGS = [
@@ -12,7 +13,8 @@ const COLOR_TAGS = [
 interface Props {
   dosesPerDay: number;
   setDosesPerDay: (value: number) => void;
-  setDoseSchedule: React.Dispatch<React.SetStateAction<any[]>>;
+  setDoseSchedule: React.Dispatch<React.SetStateAction<MedicationDose[]>>;
+  resizeDoseSchedule: (schedule: MedicationDose[], count: number) => MedicationDose[];
   warningThresholdDays: string;
   setWarningThresholdDays: (value: string) => void;
   category: string;
@@ -23,7 +25,7 @@ interface Props {
 
 export const AddMedicationDetailsSection: FC<Props> = ({
   dosesPerDay, setDosesPerDay, setDoseSchedule, warningThresholdDays, setWarningThresholdDays,
-  category, setCategory, colorTag, setColorTag,
+  category, setCategory, colorTag, setColorTag, resizeDoseSchedule,
 }) => (
   <>
     <div className="grid grid-cols-2 gap-3 items-end">
@@ -36,11 +38,7 @@ export const AddMedicationDetailsSection: FC<Props> = ({
           onChange={(e) => {
             const n = Math.max(1, Math.min(MAX_DOSES_PER_DAY, parseInt(e.target.value, 10) || 1));
             setDosesPerDay(n);
-            setDoseSchedule((prev) => {
-              const next = [...prev];
-              while (next.length < n) next.push({ id: `dose-${next.length + 1}`, time: '09:00', amount: 1 });
-              return next.slice(0, n);
-            });
+            setDoseSchedule((prev) => resizeDoseSchedule(prev, n));
           }}
           className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
         >

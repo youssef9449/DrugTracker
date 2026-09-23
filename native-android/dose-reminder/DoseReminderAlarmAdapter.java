@@ -175,6 +175,30 @@ public final class DoseReminderAlarmAdapter {
             long triggerAtEpochMs,
             boolean allowManualTakeAction,
             String doseDescription) {
+        return scheduleSnooze(
+                medicationId,
+                doseId,
+                reminderTime,
+                amount,
+                medicationName,
+                unit,
+                triggerAtEpochMs,
+                allowManualTakeAction,
+                doseDescription,
+                null);
+    }
+
+    public ScheduleResult scheduleSnooze(
+            String medicationId,
+            String doseId,
+            String reminderTime,
+            double amount,
+            String medicationName,
+            String unit,
+            long triggerAtEpochMs,
+            boolean allowManualTakeAction,
+            String doseDescription,
+            String expectedOperationVersion) {
         if (medicationId == null || medicationId.isEmpty()
                 || doseId == null || doseId.isEmpty()
                 || triggerAtEpochMs <= 0L
@@ -215,7 +239,7 @@ public final class DoseReminderAlarmAdapter {
                         triggerAtEpochMs,
                         metadata,
                         extras,
-                        null));
+                        expectedOperationVersion));
         return result.ok
                 ? ScheduleResult.success(result.operationVersion)
                 : ScheduleResult.failure(result.error);
@@ -252,6 +276,13 @@ public final class DoseReminderAlarmAdapter {
         return runtime.ownsActiveSchedule(
                 occurrenceKey(medicationId, doseId),
                 operationVersion);
+    }
+
+    public boolean isOccurrenceEffectivelyCancelled(
+            String medicationId,
+            String doseId) {
+        return runtime.isEffectivelyCancelled(
+                occurrenceKey(medicationId, doseId));
     }
 
     public List<String> listScheduledKeys() {
@@ -319,6 +350,13 @@ public final class DoseReminderAlarmAdapter {
         return runtime.ownsActiveSchedule(
                 snoozeKey(medicationId, doseId),
                 operationVersion);
+    }
+
+    public boolean isSnoozeEffectivelyCancelled(
+            String medicationId,
+            String doseId) {
+        return runtime.isEffectivelyCancelled(
+                snoozeKey(medicationId, doseId));
     }
 
     public boolean completeSnooze(

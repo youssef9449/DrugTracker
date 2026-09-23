@@ -257,6 +257,8 @@ export default function App() {
     hydrated,
     isFirstRun,
     soundEnabled,
+    fontScale,
+    isCompactView,
     notificationsEnabled,
     criticalStockAlertsEnabled,
     exactAlarmPermission,

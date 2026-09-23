@@ -30,7 +30,7 @@ import {
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Medication, ConsumptionLog } from '../../src/types';
-import { makeMedication as med, makeAutoDeductionEvent as fired, makeDoseTakenLog, makeExactAutoLog, makeRefillLog } from '../fixtures/testFixtures';
+import { makeScheduledMedication as med, makeAutoDeductionEvent as fired, makeDoseTakenLog, makeExactAutoLog, makeRefillLog } from '../fixtures/testFixtures';
 import { exactAutoLogId } from '../../src/utils/autoDeductionReconciliation';
 import {
   consumeDose,

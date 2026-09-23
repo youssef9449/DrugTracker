@@ -51,6 +51,7 @@ export function useDoseReminders({
   const alarmingIdRef = useRef<string | null>(null);
   const alarmingDoseIdRef = useRef<string | null>(null);
   const isTestAlarmRef = useRef(false);
+  const queuedAlarmRef = useRef<Array<{ medicationId: string; doseId: string }>>([]);
   const medicationsRef = useRef(medications);
   useEffect(() => {
     medicationsRef.current = medications;

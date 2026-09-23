@@ -1,3 +1,9 @@
+import {
+  __setStockMutationOrderingTestHooks,
+  __resetStockMutationOrderingForTests,
+  __setManualEnvelopeTestHooks,
+  __setAutoStockGateTestHooks,
+} from '../utils/autoStockTestHooks';
 /**
  * Phase 4 — handler-level stale React snapshot races.
  *
@@ -10,12 +16,7 @@ import { renderHook, act, waitFor } from '@testing-library/react';
 import type { Medication, ConsumptionLog } from '../../src/types';
 import { useMedicationHandlers } from '../../src/hooks/useMedicationHandlers';
 import {
-  __setAutoStockGateTestHooks,
-  type AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
-import { __setManualEnvelopeTestHooks } from '../../src/utils/stockEnvelopeRecovery';
-import {
-  __setStockMutationOrderingTestHooks,
-  __resetStockMutationOrderingForTests } from '../../src/utils/stockMutationOrdering';
+type AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
 import { isDoseConsumedOnDate } from '../../src/utils/dateCalculations';
 
 const TODAY = '2026-09-16';

@@ -233,26 +233,37 @@ public class DisableVsRecurrenceTest {
 
         // Also install a successor candidate metadata path: schedule next day slot
         // is not required — we only need generation + authorization semantics.
-        scheduler.forceRecurrenceAuthCommitFailureForTest = true;
+        AutoDeductionFailurePolicy failGenerationCommit =
+                new AutoDeductionFailurePolicy() {
+                    @Override
+                    public boolean allowRecurrenceAuthCommit() {
+                        return false;
+                    }
+                };
         AutoDeductionScheduler.InvalidateResult failed =
-                scheduler.invalidateRecurrenceAuthorization(med, dose);
-        scheduler.forceRecurrenceAuthCommitFailureForTest = false;
+                new AutoDeductionScheduler(
+                        Phase2TestSupport.appContext(),
+                        failGenerationCommit)
+                        .invalidateRecurrenceAuthorization(med, dose);
 
         assertFalse("commit failure must not return ok", failed.ok);
         assertEquals("recurrence_generation_commit_failed", failed.error);
         assertEquals("generation must remain unchanged on failed commit",
                 genBefore, readGen(med, dose));
+        assertFalse(
+                "cancel-first invalidation must remove the old schedule before the failed generation write",
+                hasSchedule(med, dose, d));
 
-        // Old generation is still authorized — successor creation is still allowed
-        // (disable did not take effect). That is intentional fail-closed for disable,
-        // not for scheduleNext.
-        AutoDeductionScheduler.ScheduleResult stillAuthorized =
-                scheduler.scheduleNextOccurrenceIfAbsent(med, dose, d, time, 1.0, genBefore);
+        // Because the durable generation was not advanced, a subsequent explicit
+        // desired-state schedule may safely reuse that generation.
         assertTrue(
-                "without a successful bump, expectedGen still matches active",
-                stillAuthorized.ok);
+                "the unchanged generation remains the active authorization token",
+                scheduler.scheduleOccurrence(med, dose, d, time, 1.0, 0L).ok);
+        DeliveryTokens restoredTokens = tokensFromMeta(med, dose, d);
+        assertEquals(genBefore, restoredTokens.recurrenceGeneration);
 
-        // Retry succeeds: generation bumps and old gen is no longer authorized.
+        // Retry succeeds: generation bumps and the newly restored old generation
+        // can no longer create successors.
         AutoDeductionScheduler.InvalidateResult ok =
                 scheduler.invalidateRecurrenceAuthorization(med, dose);
         assertTrue(ok.ok);

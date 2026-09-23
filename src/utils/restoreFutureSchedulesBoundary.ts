@@ -5,8 +5,8 @@
  */
 import {
   restoreFutureAutoDeductionSchedules,
-  type RestoreFutureSchedulesResult,
-} from './autoDeductionNative';
+} from './autoDeductionNativeRecovery';
+import type { RestoreFutureSchedulesResult } from './autoDeductionNativeTypes';
 
 let inFlightKey: string | null = null;
 let inFlight: Promise<RestoreFutureSchedulesResult> | null = null;
@@ -59,10 +59,3 @@ export function restoreFutureSchedulesOnce(
   return inFlight;
 }
 
-/** @internal test-only */
-export function __resetRestoreFutureSchedulesBoundaryForTests(): void {
-  inFlight = null;
-  inFlightKey = null;
-  lastSuccessfulBoundary = null;
-  lastSuccessfulResult = null;
-}

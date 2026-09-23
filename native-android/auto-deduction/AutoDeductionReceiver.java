@@ -321,7 +321,14 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
         AutoDeductionScheduler scheduler = new AutoDeductionScheduler(context);
         AutoDeductionScheduler.ScheduleResult next = scheduler.scheduleNextOccurrenceIfAbsent(
                 medicationId, doseId, calendarDate, timeHhmm, amount, recurrenceGeneration);
-        if (!next.ok) {
+        if (next.ok) {
+            boolean cleared = scheduler.clearSuccessorObligation(
+                    medicationId, doseId, calendarDate);
+            if (!cleared) {
+                Log.w(TAG, TAG + ": successor installed but obligation clear failed for "
+                        + medicationId + "/" + doseId + "/" + calendarDate);
+            }
+        } else {
             Log.w(TAG, "next occurrence not scheduled: " + next.error);
         }
     }

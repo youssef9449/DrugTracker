@@ -16,9 +16,7 @@ import { useEffect, useRef } from 'react';
 import type { ConsumptionLog, Medication } from '../types';
 import { runAutoDeductionReconciliation } from '../utils/runAutoDeductionReconciliation';
 import { loadDurableGlobalAutoDeductEnabled } from '../utils/autoDeductionStockGate';
-import {
-  addExactAutoDeductionFiredListener,
-} from '../utils/autoDeductionNative';
+import { addExactAutoDeductionFiredListener } from '../utils/autoDeductionNativeEvents';
 import {
   recoveryBoundaryKey,
   restoreFutureSchedulesOnce,

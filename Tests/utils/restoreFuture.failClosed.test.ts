@@ -1,27 +1,24 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { RestoreFutureSchedulesResult } from '../../src/utils/autoDeductionNative';
+import type { RestoreFutureSchedulesResult } from '../../src/utils/autoDeductionNativeTypes';
 import {
   recoveryBoundaryKey,
-  restoreFutureSchedulesOnce,
-  __resetRestoreFutureSchedulesBoundaryForTests } from '../../src/utils/restoreFutureSchedulesBoundary';
+  restoreFutureSchedulesOnce } from '../../src/utils/restoreFutureSchedulesBoundary';
 
-vi.mock('../../src/utils/autoDeductionNative', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/utils/autoDeductionNative')>();
+vi.mock('../../src/utils/autoDeductionNativeRecovery', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/utils/autoDeductionNativeRecovery')>();
   return {
     ...actual,
     restoreFutureAutoDeductionSchedules: vi.fn(),
   };
 });
 
-import { restoreFutureAutoDeductionSchedules } from '../../src/utils/autoDeductionNative';
+import { restoreFutureAutoDeductionSchedules } from '../../src/utils/autoDeductionNativeRecovery';
 
 describe('restoreFuture fail-closed + boundary-aware owner', () => {
   beforeEach(() => {
-    __resetRestoreFutureSchedulesBoundaryForTests();
     vi.mocked(restoreFutureAutoDeductionSchedules).mockReset();
   });
   afterEach(() => {
-    __resetRestoreFutureSchedulesBoundaryForTests();
     vi.restoreAllMocks();
   });
 

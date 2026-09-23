@@ -12,7 +12,7 @@ import {
 import { getExactAlarmPermission, type ExactAlarmPermission } from '../utils/exactAlarm';
 import { initNativeBridge } from '../native';
 import { loadJson, loadString, persist } from '../utils/storage';
-import { convergeAutoDeductionStock } from '../utils/autoDeductionNative';
+import { convergeAutoDeductionStock } from '../utils/autoDeductionNativeStock';
 import {
   STORAGE_MEDS_KEY,
   STORAGE_LOGS_KEY,

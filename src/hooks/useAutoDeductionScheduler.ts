@@ -11,13 +11,14 @@ import {
   isMedicationTreatmentActiveOnDate,
 } from '../utils/medicationTreatment';
 import { isValidDoseTime, normalizeTimeString } from '../utils/doseSchedule';
+import { getAutoDeductionDefinitionSignature } from '../utils/autoDeductionDefinition';
 import {
   cancelAutoDeduction,
   invalidateAutoDeductionRecurrence,
   scheduleAutoDeduction,
-  listScheduledAutoDeductionOccurrences,
-  type ScheduledOccurrence,
-} from '../utils/autoDeductionNative';
+} from '../utils/autoDeductionNativeScheduling';
+import { listScheduledAutoDeductionOccurrences } from '../utils/autoDeductionNativeRecovery';
+import type { ScheduledOccurrence } from '../utils/autoDeductionNativeTypes';
 import {
   recoveryBoundaryKey,
   restoreFutureSchedulesOnce,
@@ -221,24 +222,7 @@ export function useAutoDeductionScheduler({
         globalAutoDeductEnabled ? '1' : '0',
         exactAlarmPermission === 'granted' ? '1' : exactAlarmPermission === 'denied' ? '0' : 'u',
         medications
-          .map((m) => {
-            const schedulePart =
-              Array.isArray(m.doseSchedule) && m.doseSchedule.length > 0
-                ? m.doseSchedule
-                    .map((d) => `${d.id}@${d.time}@${d.amount}`)
-                    .join(',')
-                : '';
-            // Exact Auto desired slots come only from explicit doseSchedule.
-            // reminderEnabled/reminderTime/dailyDose do not define Exact occurrences.
-            return [
-              m.id,
-              m.autoDeductEnabled === false ? '0' : '1',
-              m.isChronic === false ? 'temporary' : 'chronic',
-              getMedicationTreatmentEndDate(m) ?? '',
-              m.treatmentStartDate ?? '',
-              schedulePart,
-            ].join('|');
-          })
+          .map((m) => [m.id, getAutoDeductionDefinitionSignature(m)].join('|'))
           .sort()
           .join('\n'),
       ].join('#'),

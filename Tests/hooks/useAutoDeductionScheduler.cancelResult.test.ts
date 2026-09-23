@@ -14,18 +14,16 @@ const scheduleMock = vi.fn();
 const invalidateMock = vi.fn();
 const listScheduledMock = vi.fn();
 
-vi.mock('../../src/utils/autoDeductionNative', () => ({
+vi.mock('../../src/utils/autoDeductionNativeScheduling', () => ({
   cancelAutoDeduction: (...args: unknown[]) => cancelMock(...args),
   scheduleAutoDeduction: (...args: unknown[]) => scheduleMock(...args),
-  // Issue #241: the scheduler now gates every occurrence cancel through a
-  // durable recurrence-invalidation call (invalidateAutoDeductionRecurrence)
-  // and reconciles against native-side scheduled occurrences
-  // (listScheduledAutoDeductionOccurrences) before touching trackedRef.
   invalidateAutoDeductionRecurrence: (...args: unknown[]) =>
     invalidateMock(...args),
+}));
+
+vi.mock('../../src/utils/autoDeductionNativeRecovery', () => ({
   listScheduledAutoDeductionOccurrences: (...args: unknown[]) =>
     listScheduledMock(...args),
-  autoDeductionOccurrenceKey: (m: string, d: string, c: string) => `${m}\u001f${d}\u001f${c}`,
 }));
 
 // Import after mock

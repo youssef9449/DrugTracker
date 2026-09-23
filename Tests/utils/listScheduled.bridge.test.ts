@@ -24,7 +24,7 @@ vi.mock('@capacitor/core', () => ({
   }),
 }));
 
-import { listScheduledAutoDeductionOccurrences } from '../../src/utils/autoDeductionNative';
+import { listScheduledAutoDeductionOccurrences } from '../../src/utils/autoDeductionNativeRecovery';
 
 describe('listScheduledAutoDeductionOccurrences bridge (Issue #242)', () => {
   beforeEach(() => {

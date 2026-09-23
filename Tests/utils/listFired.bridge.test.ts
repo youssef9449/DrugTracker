@@ -1,8 +1,9 @@
+import {
+  __setAutoStockGateTestHooks,
+} from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
 import type { Medication } from '../../src/types';
-import {
-  __setAutoStockGateTestHooks } from '../../src/utils/autoDeductionStockGate';
 
 function baseMed(over: Partial<Medication> = {}): Medication {
   return {

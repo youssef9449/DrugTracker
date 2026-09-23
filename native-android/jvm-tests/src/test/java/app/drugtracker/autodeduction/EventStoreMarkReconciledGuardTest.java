@@ -30,12 +30,10 @@ public class EventStoreMarkReconciledGuardTest {
     @Before
     public void setUp() {
         clearAllDurableState();
-        AutoDeductionEventStore.__setTestForceCommitResult(null);
     }
 
     @After
     public void tearDown() {
-        AutoDeductionEventStore.__setTestForceCommitResult(null);
     }
 
     private static JSONObject firedRow(String med, String dose, String date, double amount)
@@ -188,10 +186,9 @@ public class EventStoreMarkReconciledGuardTest {
     public void identityMismatchTerminalization_commitFailure_isRetryable() throws Exception {
         String key = AutoDeductionContract.occurrenceKey("med-A", "dose-1", "2026-09-15");
         writeRow(evtKey(key), firedRow("med-B", "dose-2", "2026-09-15", 1.0));
-        AutoDeductionEventStore.__setTestForceCommitResult(false);
 
         AutoDeductionEventStore.MarkResult r =
-                newEventStore().markReconciled("med-A", "dose-1", "2026-09-15");
+                newEventStore(Phase2TestSupport.denyEventCommit()).markReconciled("med-A", "dose-1", "2026-09-15");
 
         assertFalse("failed terminalization must remain retryable", r.ok);
         assertFalse(r.changed);

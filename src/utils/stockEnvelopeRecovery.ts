@@ -20,7 +20,7 @@ import {
   persistLastAppliedMutationSeq,
 } from './stockMutationOrdering';
 import { loadJson, persist } from './storage';
-import { applyForegroundAutoStockDeltas } from './autoDeductionNative';
+import { applyForegroundAutoStockDeltas } from './autoDeductionNativeStock';
 
 export const STORAGE_MANUAL_ENVELOPE_KEY =
   'android_med_tracker_manual_stock_envelope_v1';
@@ -46,19 +46,6 @@ export interface ExactAutoEnvelopeStored {
   mutationSeq: number;
 }
 
-let testLoadExact: (() => ExactAutoEnvelopeStored | null) | null = null;
-let testSaveExact: ((env: ExactAutoEnvelopeStored | null) => string | null) | null =
-  null;
-
-/** @internal test-only */
-export function __setExactAutoEnvelopeStorageTestHooks(hooks: {
-  load?: () => ExactAutoEnvelopeStored | null;
-  save?: (env: ExactAutoEnvelopeStored | null) => string | null;
-} | null): void {
-  testLoadExact = hooks?.load ?? null;
-  testSaveExact = hooks?.save ?? null;
-}
-
 function isValidExactAutoEnvelope(
   raw: ExactAutoEnvelopeStored | null | undefined
 ): raw is ExactAutoEnvelopeStored {
@@ -80,9 +67,7 @@ function isValidExactAutoEnvelope(
 }
 
 export function loadExactAutoStockEnvelope(): ExactAutoEnvelopeStored | null {
-  const raw = testLoadExact
-    ? testLoadExact()
-    : loadJson<ExactAutoEnvelopeStored | null>(STORAGE_EXACT_AUTO_ENVELOPE_KEY, null);
+  const raw = loadJson<ExactAutoEnvelopeStored | null>(STORAGE_EXACT_AUTO_ENVELOPE_KEY, null);
   if (!isValidExactAutoEnvelope(raw)) return null
   return raw;
 }
@@ -90,7 +75,6 @@ export function loadExactAutoStockEnvelope(): ExactAutoEnvelopeStored | null {
 export function saveExactAutoStockEnvelope(
   env: ExactAutoEnvelopeStored | null
 ): string | null {
-  if (testSaveExact) return testSaveExact(env);
   if (env == null) {
     if (typeof localStorage === 'undefined') return null;
     try {
@@ -149,21 +133,7 @@ export interface PendingEnvelopeRef {
   clear: () => string | null;
 }
 
-let testLoadManual: (() => ManualStockEnvelope | null) | null = null;
-let testSaveManual: ((env: ManualStockEnvelope | null) => string | null) | null =
-  null;
-
-/** @internal test-only */
-export function __setManualEnvelopeTestHooks(hooks: {
-  load?: () => ManualStockEnvelope | null;
-  save?: (env: ManualStockEnvelope | null) => string | null;
-} | null): void {
-  testLoadManual = hooks?.load ?? null;
-  testSaveManual = hooks?.save ?? null;
-}
-
 export function loadManualStockEnvelope(): ManualStockEnvelope | null {
-  if (testLoadManual) return testLoadManual();
   const raw = loadJson<ManualStockEnvelope | null>(
     STORAGE_MANUAL_ENVELOPE_KEY,
     null
@@ -180,7 +150,6 @@ export function loadManualStockEnvelope(): ManualStockEnvelope | null {
 export function saveManualStockEnvelope(
   env: ManualStockEnvelope | null
 ): string | null {
-  if (testSaveManual) return testSaveManual(env);
   if (env == null) {
     if (typeof localStorage === 'undefined') return null;
     try {

@@ -12,12 +12,15 @@ import type { ConsumptionLog, Medication } from '../types';
 import {
   listFiredAutoDeductionEvents,
   markAutoDeductionEventReconciled,
-  applyAutoDeductionStock,
-  convergeAutoDeductionStock,
-  type AutoDeductionEvent,
   type ListFiredEventsResult,
   type MarkReconciledResult,
-} from './autoDeductionNative';
+} from './autoDeductionNativeEvents';
+import {
+  applyAutoDeductionStock,
+  convergeAutoDeductionStock,
+  recoverAutoDeductionStock,
+} from './autoDeductionNativeStock';
+import type { AutoDeductionEvent } from './autoDeductionNativeTypes';
 import {
   reconcileFiredEvents,
   type ReconcileFiredResult,
@@ -91,24 +94,10 @@ export interface RunReconciliationOutput extends ReconcileFiredResult {
   nativeStockSyncFailed?: boolean;
   nativeStockSyncError?: string;
 }
-/** @internal test-only envelope injectors. */
-let testLoadEnvelope: (() => ExactAutoEnvelope | null) | null = null;
-let testSaveEnvelope: ((env: ExactAutoEnvelope | null) => string | null) | null =
-  null;
-/** @internal test-only */
-export function __setExactAutoEnvelopeTestHooks(hooks: {
-  load?: () => ExactAutoEnvelope | null;
-  save?: (env: ExactAutoEnvelope | null) => string | null;
-} | null): void {
-  testLoadEnvelope = hooks?.load ?? null;
-  testSaveEnvelope = hooks?.save ?? null;
-}
 export function defaultLoadEnvelope(): ExactAutoEnvelope | null {
-  if (testLoadEnvelope) return testLoadEnvelope();
   return loadExactAutoStockEnvelope() as ExactAutoEnvelope | null;
 }
 export function defaultSaveEnvelope(env: ExactAutoEnvelope | null): string | null {
-  if (testSaveEnvelope) return testSaveEnvelope(env);
   return saveExactAutoStockEnvelope(env);
 }
 export function runAutoDeductionReconciliation(
@@ -382,7 +371,7 @@ async function runOnce(
       repairedEvents.push(event);
       continue;
     }
-    const stockResult = await applyAutoDeductionStock(
+    const stockResult = await recoverAutoDeductionStock(
       event.medicationId,
       event.doseId,
       event.calendarDate,

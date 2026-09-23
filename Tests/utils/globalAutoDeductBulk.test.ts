@@ -1,14 +1,29 @@
+import {
+  __setManualEnvelopeTestHooks,
+  __setAutoStockGateTestHooks,
+} from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Medication } from '@/types';
+import { runGatedGlobalAutoDeductToggle } from '@/utils/manualStockMutation';
 import {
-  runGatedGlobalAutoDeductToggle,
-  __setManualRecurrenceInvalidationTestHook } from '@/utils/manualStockMutation';
-import { __setManualEnvelopeTestHooks } from '@/utils/stockEnvelopeRecovery';
-import {
-  __setAutoStockGateTestHooks,
-  type AutoStockDurableState } from '@/utils/autoDeductionStockGate';
+type AutoStockDurableState } from '@/utils/autoDeductionStockGate';
 import * as preSettleModule from '@/utils/reconcileExactBeforeManualMutation';
-import * as autoNative from '@/utils/autoDeductionNative';
+
+const autoSchedulingMocks = vi.hoisted(() => ({
+  invalidateAutoDeductionRecurrence: vi.fn(),
+  scheduleAutoDeduction: vi.fn(),
+  recoverAutoDeductionOccurrence: vi.fn(),
+}));
+
+vi.mock('@/utils/autoDeductionNativeScheduling', async () => {
+  const actual = await vi.importActual<typeof import('@/utils/autoDeductionNativeScheduling')>(
+    '@/utils/autoDeductionNativeScheduling'
+  );
+  return {
+    ...actual,
+    ...autoSchedulingMocks,
+  };
+});
 
 function med(over: Partial<Medication> = {}): Medication {
   return {
@@ -89,21 +104,25 @@ describe('runGatedGlobalAutoDeductToggle — bulk + Global OFF invalidation orde
       durabilityBlocked: false,
     }));
 
-    __setManualRecurrenceInvalidationTestHook(async (medicationId, doseId) => {
-      invalidationCalls.push({ medId: medicationId, doseId });
-      return { ok: true };
-    });
-
-    vi.spyOn(autoNative, 'scheduleAutoDeduction').mockImplementation(async (args) => {
+    autoSchedulingMocks.invalidateAutoDeductionRecurrence.mockImplementation(
+      async (medicationId, doseId) => {
+        invalidationCalls.push({ medId: medicationId, doseId });
+        return { ok: true, generation: 1 };
+      }
+    );
+    autoSchedulingMocks.scheduleAutoDeduction.mockImplementation(async (args) => {
       scheduleCalls.push({ medId: args.medicationId, doseId: args.doseId });
       return { ok: true };
     });
+
   });
 
   afterEach(() => {
     __setAutoStockGateTestHooks(null);
     __setManualEnvelopeTestHooks(null);
-    __setManualRecurrenceInvalidationTestHook(null);
+    autoSchedulingMocks.invalidateAutoDeductionRecurrence.mockReset();
+    autoSchedulingMocks.scheduleAutoDeduction.mockReset();
+    autoSchedulingMocks.recoverAutoDeductionOccurrence.mockReset();
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
@@ -164,13 +183,15 @@ describe('runGatedGlobalAutoDeductToggle — bulk + Global OFF invalidation orde
   });
 
   it('Global OFF: native invalidation failure does not bulk-commit OFF', async () => {
-    __setManualRecurrenceInvalidationTestHook(async (medicationId, doseId) => {
-      invalidationCalls.push({ medId: medicationId, doseId });
-      if (medicationId === 'c') {
-        return { ok: false, error: 'native_fail_test' };
+    autoSchedulingMocks.invalidateAutoDeductionRecurrence.mockImplementation(
+      async (medicationId, doseId) => {
+        invalidationCalls.push({ medId: medicationId, doseId });
+        if (medicationId === 'c') {
+          return { ok: false, error: 'native_fail_test' };
+        }
+        return { ok: true, generation: 1 };
       }
-      return { ok: true };
-    });
+    );
 
     const result = await runGatedGlobalAutoDeductToggle({
       enable: false,
@@ -189,14 +210,16 @@ describe('runGatedGlobalAutoDeductToggle — bulk + Global OFF invalidation orde
   });
 
   it('Global OFF: partial invalidation restores successfully invalidated recurrences', async () => {
-    __setManualRecurrenceInvalidationTestHook(async (medicationId, doseId) => {
-      invalidationCalls.push({ medId: medicationId, doseId });
-      // Fail after med a fully invalidated (all its doses succeed first).
-      if (medicationId === 'b') {
-        return { ok: false, error: 'partial_fail' };
+    autoSchedulingMocks.invalidateAutoDeductionRecurrence.mockImplementation(
+      async (medicationId, doseId) => {
+        invalidationCalls.push({ medId: medicationId, doseId });
+        // Fail after med a fully invalidated (all its doses succeed first).
+        if (medicationId === 'b') {
+          return { ok: false, error: 'partial_fail' };
+        }
+        return { ok: true, generation: 1 };
       }
-      return { ok: true };
-    });
+    );
 
     const result = await runGatedGlobalAutoDeductToggle({
       enable: false,

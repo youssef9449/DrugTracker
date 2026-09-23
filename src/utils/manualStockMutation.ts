@@ -10,6 +10,11 @@
  * Shared causal order with Exact Auto via mutationSeq / lastAppliedMutationSeq.
  * Manual envelope never carries toAcknowledge; never calls markReconciled.
  */
+import {
+  autoDeductionDefinitionChanged,
+  recurrenceDefinition,
+  recurrenceDoseIds,
+} from './autoDeductionDefinition';
 import type { ConsumptionLog, Medication } from '../types';
 import {
   consumeDose,
@@ -18,12 +23,15 @@ import {
 } from './medActions';
 import {
   markAutoDeductionEventReconciled,
-  applyForegroundAutoStockDeltas,
   getOccurrenceSnapshot,
+  type OccurrenceSnapshotResult,
+} from './autoDeductionNativeEvents';
+import { applyForegroundAutoStockDeltas } from './autoDeductionNativeStock';
+import {
   invalidateAutoDeductionRecurrence,
   scheduleAutoDeduction,
-  type OccurrenceSnapshotResult,
-} from './autoDeductionNative';
+  recoverAutoDeductionOccurrenceForCompensation,
+} from './autoDeductionNativeScheduling';
 import {
   isDoseSkippedOnDate,
   getTodayDateString,
@@ -31,7 +39,6 @@ import {
   localEpochMs,
 } from './dateCalculations';
 import { pruneDoseConsumption } from './pruneDoseConsumption';
-import { isValidDoseTime, normalizeTimeString } from './doseSchedule';
 import { generateId } from './id';
 import {
   getMedicationTreatmentEndDate,
@@ -59,7 +66,6 @@ export {
   loadManualStockEnvelope,
   saveManualStockEnvelope,
   STORAGE_MANUAL_ENVELOPE_KEY,
-  __setManualEnvelopeTestHooks,
 } from './stockEnvelopeRecovery';
 export type GatedManualOutcome =
   | 'applied'
@@ -116,98 +122,51 @@ function preSettlementBlockReason(pre: {
   if (pre.nativeListFailed) return 'native_list_failed';
   return null;
 }
-/** Native recurrence chains affected by an auto-deduction configuration change. */
-function recurrenceDoseIds(med: Medication): string[] {
-  const ids = new Set<string>();
-  if (Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) {
-    for (const d of med.doseSchedule) {
-      const id = typeof d?.id === 'string' ? d.id.trim() : '';
-      if (id) ids.add(id);
-    }
-  }
-  return [...ids];
-}
-function autoDeductionDefinitionSignature(med: {
-  autoDeductEnabled?: boolean;
-  reminderEnabled?: boolean;
-  reminderTime?: string;
-  dailyDose: number;
-  isChronic?: boolean;
-  durationDays?: number;
-  treatmentStartDate?: string;
-  doseSchedule?: Medication['doseSchedule'];
-}): string {
-  const schedulePart =
-    Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0
-      ? med.doseSchedule
-          .map((d) => String(d.id) + '@' + String(d.time) + '@' + String(d.amount))
-          .join(',')
-      : '';
-  return [
-    med.autoDeductEnabled === false ? '0' : '1',
-    med.reminderEnabled === true ? '1' : '0',
-    med.reminderTime ?? '',
-    med.dailyDose,
-    med.isChronic === false ? 'temporary' : 'chronic',
-    med.durationDays ?? '',
-    med.treatmentStartDate ?? '',
-    schedulePart,
-  ].join('|');
-}
-function autoDeductionDefinitionChanged(
-  oldMed: Medication,
-  nextMed: Omit<Medication, 'id' | 'createdAt'>
-): boolean {
-  return autoDeductionDefinitionSignature(oldMed) !==
-    autoDeductionDefinitionSignature(nextMed);
-}
 /**
  * Invalidate every native recurrence chain belonging to one medication.
  * On web `not_android` is a successful no-op. Real native failure blocks
  * the JS configuration commit so an old authorized alarm cannot survive it.
  */
-let manualRecurrenceInvalidationTestHook:
-  ((medicationId: string, doseId: string) => Promise<{ ok: boolean; error?: string }>) | null = null;
-/** @internal test-only */
-export function __setManualRecurrenceInvalidationTestHook(
-  hook: typeof manualRecurrenceInvalidationTestHook
-): void {
-  manualRecurrenceInvalidationTestHook = hook;
-}
-function recurrenceDefinition(
-  med: Medication,
-  doseId: string
-): { doseId: string; time: string; amount: number } | null {
-  if (med.autoDeductEnabled === false) return null;
-  const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
-  if (schedule.length === 0) return null;
-  const dose = schedule.find((d) => d?.id === doseId);
-  if (!dose || !isValidDoseTime(dose.time) || !(Number(dose.amount) > 0)) {
-    return null;
-  }
-  return {
-    doseId: String(dose.id),
-    time: normalizeTimeString(dose.time),
-    amount: Number(dose.amount),
-  };
-}
 async function restoreInvalidatedRecurrences(
   med: Medication,
-  doseIds: string[],
-  now: Date
+  invalidated: Array<{ doseId: string; generation: number }>
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const today = getTodayDateString();
   const tomorrow = tomorrowDateString(today);
   if (!tomorrow) return { ok: false, error: 'invalid_next_date' };
   const treatmentEndDate = getMedicationTreatmentEndDate(med);
-  for (const doseId of doseIds) {
+  for (const entry of invalidated) {
+    const doseId = entry.doseId;
     const def = recurrenceDefinition(med, doseId);
     if (!def) continue;
     for (const calendarDate of [today, tomorrow]) {
       if (!isMedicationTreatmentActiveOnDate(med, calendarDate)) continue;
       if (treatmentEndDate && calendarDate > treatmentEndDate) continue;
       const epoch = localEpochMs(calendarDate, def.time);
-      if (epoch == null || epoch <= now.getTime() - 2000) continue;
+      if (epoch == null) {
+        return { ok: false, error: 'invalid_occurrence_datetime' };
+      }
+      if (epoch <= Date.now() - 2000) {
+        // The old schedule was already due when compensation started.
+        // Reuse native Auto catch-up/stock idempotency instead of silently skipping it.
+        if (entry.generation <= 0) {
+          return { ok: false, error: 'missing_compensation_generation' };
+        }
+        const recovery = await recoverAutoDeductionOccurrenceForCompensation(
+          med.id,
+          def.doseId,
+          calendarDate,
+          epoch,
+          def.amount,
+          entry.generation,
+          treatmentEndDate ?? undefined,
+          def.time
+        );
+        if (!recovery.ok && recovery.error !== 'not_android') {
+          return { ok: false, error: recovery.error ?? 'recovery_failed' };
+        }
+        continue;
+      }
       const result = await scheduleAutoDeduction({
         medicationId: med.id,
         doseId: def.doseId,
@@ -228,39 +187,51 @@ interface RecurrenceInvalidationResult {
   ok: boolean;
   error?: string;
   invalidatedDoseIds: string[];
+  invalidated: Array<{ doseId: string; generation: number }>;
 }
 async function invalidateMedicationRecurrences(
   med: Medication
 ): Promise<RecurrenceInvalidationResult> {
   const invalidatedDoseIds: string[] = [];
+  const invalidated: Array<{ doseId: string; generation: number }> = [];
   for (const doseId of recurrenceDoseIds(med)) {
-    const result = manualRecurrenceInvalidationTestHook
-      ? await manualRecurrenceInvalidationTestHook(med.id, doseId)
-      : await invalidateAutoDeductionRecurrence(med.id, doseId);
+    const result = await invalidateAutoDeductionRecurrence(med.id, doseId);
     if (!result.ok && result.error !== 'not_android') {
-      if (invalidatedDoseIds.length > 0) {
+      // A cancel-first invalidation can fail after successfully canceling this
+      // dose's native schedules (generation persistence failed). Include that
+      // dose in compensation so the old JS state can be restored completely.
+      if (result.schedulesCancelled && result.generation > 0) {
+        invalidatedDoseIds.push(doseId);
+        invalidated.push({
+          doseId,
+          generation: result.generation,
+        });
+      }
+      let compensationError: string | undefined;
+      if (invalidated.length > 0) {
         const compensation = await restoreInvalidatedRecurrences(
           med,
-          invalidatedDoseIds,
-          new Date()
+          invalidated
         );
         if (!compensation.ok) {
-          return {
-            ok: false,
-            error: `${result.error ?? 'native_invalidation_failed'};compensation:${compensation.error}`,
-            invalidatedDoseIds,
-          };
+          compensationError = compensation.error;
         }
       }
       return {
         ok: false,
-        error: result.error ?? 'native_invalidation_failed',
+        error: compensationError
+          ? `${result.error ?? 'native_invalidation_failed'};compensation:${compensationError}`
+          : result.error ?? 'native_invalidation_failed',
         invalidatedDoseIds,
+        invalidated,
       };
     }
-    if (result.ok) invalidatedDoseIds.push(doseId);
+    if (result.ok) {
+      invalidatedDoseIds.push(doseId);
+      invalidated.push({ doseId, generation: result.generation ?? 0 });
+    }
   }
-  return { ok: true, invalidatedDoseIds };
+  return { ok: true, invalidatedDoseIds, invalidated };
 }
 /**
  * Hand Exact Auto toAcknowledge to the existing native ACK path.
@@ -1236,8 +1207,15 @@ export function runGatedAutoDeductToggle(opts: {
       // Native invalidation already linearized the old schedule chain. Restore
       // it when the JS commit fails so a failed mutation does not leave the
       // medication without its previously authorized exact schedule.
-      if (invalidation.invalidatedDoseIds.length > 0) {
-        await restoreInvalidatedRecurrences(med, invalidation.invalidatedDoseIds, now);
+      let compensationError: string | null = null;
+      if (invalidation.invalidated.length > 0) {
+        const compensation = await restoreInvalidatedRecurrences(
+          med,
+          invalidation.invalidated
+        );
+        if (!compensation.ok) {
+          compensationError = compensation.error;
+        }
       }
       return {
         outcome: 'persist_failed' as const,
@@ -1245,7 +1223,9 @@ export function runGatedAutoDeductToggle(opts: {
         logs: fresh.logs,
         newState,
         settleLog: null,
-        reason: 'persist_failed',
+        reason: compensationError
+          ? 'persist_failed;compensation:' + compensationError
+          : 'persist_failed',
         medicationName: med.name,
         unit: med.unit,
       };
@@ -1320,18 +1300,25 @@ export function runGatedGlobalAutoDeductToggle(opts: {
     // commit (same ordering barrier as per-med toggle) so a near-fire
     // occurrence cannot FIRE after OFF is durable but before the scheduler
     // cleans up. Global ON does not invalidate.
-    const invalidatedMeds: Array<{ med: Medication; doseIds: string[] }> = [];
+    const invalidatedMeds: Array<{
+      med: Medication;
+      doseIds: string[];
+      invalidated: Array<{ doseId: string; generation: number }>;
+    }> = [];
     if (opts.enable === false) {
       for (const med of fresh.medications) {
         const invalidation = await invalidateMedicationRecurrences(med);
         if (!invalidation.ok) {
+          let compensationError: string | null = null;
           for (const completed of invalidatedMeds) {
-            if (completed.doseIds.length > 0) {
-              await restoreInvalidatedRecurrences(
+            if (completed.invalidated.length > 0) {
+              const compensation = await restoreInvalidatedRecurrences(
                 completed.med,
-                completed.doseIds,
-                now
+                completed.invalidated
               );
+              if (!compensation.ok && compensationError == null) {
+                compensationError = compensation.error;
+              }
             }
           }
           return {
@@ -1340,12 +1327,15 @@ export function runGatedGlobalAutoDeductToggle(opts: {
             logs: fresh.logs,
             enable: opts.enable,
             settleLogs: [],
-            reason: invalidation.error,
+            reason: compensationError
+              ? invalidation.error + ';compensation:' + compensationError
+              : invalidation.error,
           };
         }
         invalidatedMeds.push({
           med,
           doseIds: invalidation.invalidatedDoseIds,
+          invalidated: invalidation.invalidated,
         });
       }
     }
@@ -1360,13 +1350,16 @@ export function runGatedGlobalAutoDeductToggle(opts: {
       globalAutoDeductEnabled: opts.enable,
     }, fresh.medications);
     if (err) {
+      let compensationError: string | null = null;
       for (const completed of invalidatedMeds) {
-        if (completed.doseIds.length > 0) {
-          await restoreInvalidatedRecurrences(
+        if (completed.invalidated.length > 0) {
+          const compensation = await restoreInvalidatedRecurrences(
             completed.med,
-            completed.doseIds,
-            now
+            completed.invalidated
           );
+          if (!compensation.ok && compensationError == null) {
+            compensationError = compensation.error;
+          }
         }
       }
       return {
@@ -1375,7 +1368,9 @@ export function runGatedGlobalAutoDeductToggle(opts: {
         logs: fresh.logs,
         enable: opts.enable,
         settleLogs: [],
-        reason: 'persist_failed',
+        reason: compensationError
+          ? 'persist_failed;compensation:' + compensationError
+          : 'persist_failed',
       };
     }
     return {
@@ -1464,14 +1459,23 @@ export function runGatedDeleteMedication(opts: {
       logs: pre.state.logs,
     }, pre.state.medications);
     if (err) {
-      if (invalidation.invalidatedDoseIds.length > 0) {
-        await restoreInvalidatedRecurrences(med, invalidation.invalidatedDoseIds, new Date());
+      let compensationError: string | null = null;
+      if (invalidation.invalidated.length > 0) {
+        const compensation = await restoreInvalidatedRecurrences(
+          med,
+          invalidation.invalidated
+        );
+        if (!compensation.ok) {
+          compensationError = compensation.error;
+        }
       }
       return {
         outcome: 'persist_failed' as const,
         medications: pre.state.medications,
         logs: pre.state.logs,
-        reason: 'persist_failed',
+        reason: compensationError
+          ? 'persist_failed;compensation:' + compensationError
+          : 'persist_failed',
         medicationName: med.name,
         unit: med.unit,
       };
@@ -1637,6 +1641,7 @@ export function runGatedMedicationUpdate(opts: {
     let invalidation: RecurrenceInvalidationResult = {
       ok: true,
       invalidatedDoseIds: [],
+      invalidated: [],
     };
     if (autoDeductionDefinitionChanged(freshMed, opts.medData)) {
       // Invalidate the old native chain before committing new amount/time,
@@ -1698,22 +1703,27 @@ export function runGatedMedicationUpdate(opts: {
     if (err) {
       // Only configuration-changing edits invalidate native recurrences.
       // Restore the old chain when the new JS state could not be committed.
+      let compensationError: string | null = null;
       if (
         autoDeductionDefinitionChanged(freshMed, opts.medData) &&
-        invalidation.invalidatedDoseIds.length > 0
+        invalidation.invalidated.length > 0
       ) {
-        await restoreInvalidatedRecurrences(
+        const compensation = await restoreInvalidatedRecurrences(
           freshMed,
-          invalidation.invalidatedDoseIds,
-          now
+          invalidation.invalidated
         );
+        if (!compensation.ok) {
+          compensationError = compensation.error;
+        }
       }
       return {
         outcome: 'persist_failed' as const,
         medications: fresh.medications,
         logs: fresh.logs,
         settleLog: null,
-        reason: 'persist_failed',
+        reason: compensationError
+          ? 'persist_failed;compensation:' + compensationError
+          : 'persist_failed',
         medicationName: freshMed.name,
         unit: freshMed.unit,
       };

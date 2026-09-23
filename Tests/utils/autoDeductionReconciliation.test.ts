@@ -1,3 +1,6 @@
+import {
+  __setAutoStockGateTestHooks,
+} from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Medication, ConsumptionLog } from '../../src/types';
 import {
@@ -7,14 +10,13 @@ import {
   isExactAutoOccurrenceApplied,
   exactAutoLogId,
   applyExactAutoEventToMedication } from '../../src/utils/autoDeductionReconciliation';
-import { autoDeductionOccurrenceKey } from '../../src/utils/autoDeductionNative';
-import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
+import { autoDeductionOccurrenceKey } from '../../src/utils/autoDeductionNativeIdentity';
+import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNativeTypes';
 import { runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
 import {
   withAutoStockMutationGate,
   commitDurableAutoStockState,
-  __setAutoStockGateTestHooks,
-  type AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
+type AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
 
 function baseMed(over: Partial<Medication> = {}): Medication {
   return {
@@ -1480,14 +1482,14 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
 
   it('native markReconciled web contract: empty doseId returns ok:false (not a valid occurrence)', async () => {
     // Direct contract assertion for the JS-level guard in
-    // markAutoDeductionEventReconciled (autoDeductionNative.ts): on a non-Android
+    // markAutoDeductionEventReconciled (autoDeductionNativeEvents.ts): on a non-Android
     // platform it refuses to bless an empty doseId as a valid occurrence. The
     // native Android path terminalizes the corrupt row to REJECTED instead
     // (covered by EventStoreMarkReconciledGuardTest). This guard is what
     // prevents JS from passing an empty doseId to native markReconciled as a
     // valid occurrence on web.
     const { markAutoDeductionEventReconciled } = await import(
-      '../../src/utils/autoDeductionNative'
+      '../../src/utils/autoDeductionNativeEvents'
     );
     const r = await markAutoDeductionEventReconciled('med-1', '', '2026-09-14');
     expect(r.ok).toBe(false);

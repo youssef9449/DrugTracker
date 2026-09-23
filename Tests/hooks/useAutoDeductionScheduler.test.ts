@@ -12,7 +12,7 @@ import {
   localEpochMs,
   tomorrowDateString,
   isFireRetryRecoveryPending } from '../../src/hooks/useAutoDeductionScheduler';
-import { autoDeductionOccurrenceKey } from '../../src/utils/autoDeductionNative';
+import { autoDeductionOccurrenceKey } from '../../src/utils/autoDeductionNativeIdentity';
 
 function baseMed(over: Partial<Medication> = {}): Medication {
   return {

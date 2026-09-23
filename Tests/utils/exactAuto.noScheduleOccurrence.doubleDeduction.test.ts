@@ -29,7 +29,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { Medication } from '../../src/types';
-import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
+import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNativeTypes';
 import {
   reconcileFiredEvents,
   exactAutoLogId,

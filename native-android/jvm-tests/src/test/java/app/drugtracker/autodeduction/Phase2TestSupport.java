@@ -39,6 +39,7 @@ final class Phase2TestSupport {
         clearPrefs(ctx, AutoDeductionContract.PREFS_ORDERING);
         clearPrefs(ctx, AutoDeductionContract.PREFS_RECURRENCE_AUTH);
         clearPrefs(ctx, AutoDeductionContract.PREFS_FIRE_RETRY);
+        clearPrefs(ctx, AutoDeductionContract.PREFS_SUCCESSOR_OBLIGATIONS);
         clearPrefs(ctx, "drugtracker_auto_stock_v1");
     }
 
@@ -114,6 +115,54 @@ final class Phase2TestSupport {
         return new AutoDeductionScheduler(appContext());
     }
 
+    static AutoDeductionScheduler newScheduler(
+            AutoDeductionFailurePolicy failurePolicy) {
+        return new AutoDeductionScheduler(appContext(), failurePolicy);
+    }
+
+    static AutoDeductionScheduler newSchedulerAt(long recoveryNowMs) {
+        return new AutoDeductionScheduler(
+                appContext(),
+                new AutoDeductionFailurePolicy() {
+                    @Override
+                    public Long recoveryNowOverrideMs() {
+                        return recoveryNowMs;
+                    }
+                });
+    }
+
+    static AutoDeductionFailurePolicy denyEventCommit() {
+        return new AutoDeductionFailurePolicy() {
+            @Override
+            public boolean allowEventCommit() {
+                return false;
+            }
+        };
+    }
+
+    static AutoDeductionFailurePolicy denyTerminalCompactionCommit() {
+        return new AutoDeductionFailurePolicy() {
+            @Override
+            public boolean allowTerminalStateCompactionCommit() {
+                return false;
+            }
+        };
+    }
+
+    static AutoDeductionFailurePolicy failScheduleMetadataRemovalAfter(
+            int successfulRemovals) {
+        final java.util.concurrent.atomic.AtomicInteger remaining =
+                new java.util.concurrent.atomic.AtomicInteger(
+                        Math.max(0, successfulRemovals));
+        return new AutoDeductionFailurePolicy() {
+            @Override
+            public boolean allowScheduleMetadataRemoval() {
+                return remaining.getAndDecrement() > 0;
+            }
+        };
+    }
+
+
     /**
      * Read the current durable recurrence-generation auth token for a med+dose slot.
      * Returns 0 when never scheduled/invalidated. Use this to pass the CURRENT
@@ -142,5 +191,10 @@ final class Phase2TestSupport {
 
     static AutoDeductionEventStore newEventStore() {
         return new AutoDeductionEventStore(appContext());
+    }
+
+    static AutoDeductionEventStore newEventStore(
+            AutoDeductionFailurePolicy failurePolicy) {
+        return new AutoDeductionEventStore(appContext(), failurePolicy);
     }
 }

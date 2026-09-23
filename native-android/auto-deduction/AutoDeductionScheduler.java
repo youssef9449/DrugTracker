@@ -1,22 +1,16 @@
 package app.drugtracker.autodeduction;
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.util.Log;
-import org.json.JSONException;
-import org.json.JSONObject;
-import java.util.Calendar;
-import java.util.Locale;
 import java.util.Map;
-import java.util.TimeZone;
 /**
- * Auto Deduction business/recovery service. Exact Alarm Android scheduling
- * mechanics live behind AutoDeductionSchedulingAdapter → ExactAlarmRuntime;
- * this class owns recurrence authorization, FIRED/recovery, catch-up,
- * cancellation policy, retry evidence, amount authority, and recovery snapshots.
+ * Auto Deduction facade/orchestrator. Feature business responsibilities are
+ * implemented by focused collaborators; exact Alarm Android mechanics remain
+ * behind AutoDeductionSchedulingAdapter → ExactAlarmRuntime.
  *
- * Auto business state:
- *   recurrence authorization, FIRED/RECONCILED semantics, catch-up, fire retry,
- *   amount authority, and cancellation policy remain here.
+ * The facade owns only shared serialization, collaborator wiring, boundary
+ * delegates, and small cross-feature result contracts. Recurrence, fire,
+ * cancellation, retry, recovery, occurrence state, and persistence logic do not
+ * live here.
  *
  * Fire/cancel linearization:
  *   SCHEDULE_LOCK remains the common serialization boundary between Auto's
@@ -46,10 +40,13 @@ import java.util.TimeZone;
  *   PREFS_RECURRENCE_AUTH holds a monotonic generation per (medicationId, doseId).
  *   scheduleOccurrence carries the active generation in delivery extras only; new
  *   Shared schedule metadata contains no Auto recurrence-authorization state.
- *   invalidateRecurrenceAuthorization bumps the generation under SCHEDULE_LOCK and
- *   cancels all future scheduled occurrences for that dose slot so post-fire
- *   scheduleNextOccurrenceIfAbsent cannot create D+1 after disable, and restore
- *   cannot resurrect a pre-disable successor.
+ *   invalidateRecurrenceAuthorization cancels all future scheduled occurrences
+ *   first under SCHEDULE_LOCK, then bumps the generation only after cancellation
+ *   is durable. A cancellation failure therefore leaves both the prior generation
+ *   and prior native schedules intact for safe retry; a generation-write failure
+ *   after cancellation leaves schedules absent and is surfaced to the caller.
+ *   Post-fire scheduleNextOccurrenceIfAbsent cannot create D+1 after a successful
+ *   invalidation, and restore cannot resurrect a pre-disable successor.
  *
  * Does not use polling, WorkManager periodic, or foreground services.
  */
@@ -60,228 +57,84 @@ public final class AutoDeductionScheduler {
     /** Auto-owned serialization boundary for business/recovery mutations. */
     private static final Object SCHEDULE_LOCK = new Object();
     private final Context appContext;
-    /** Active recurrence generation per (medicationId, doseId) — . */
-    private final SharedPreferences recurrenceAuthPrefs;
-    /**
-     * Independent fire-failure / retry evidence (not schedule metadata).
-     * Survives config mutation that removes shared schedule rows.
-     */
-    private final SharedPreferences fireRetryPrefs;
     /** Single Auto-specific scheduling boundary over the shared exact-alarm runtime. */
     private final AutoDeductionSchedulingAdapter schedulingAdapter;
-    /**
-     * Test-only: when true, {@link #invalidateRecurrenceAuthorization} treats the
-     * generation commit as failed (fail-closed). Production code never sets this.
-     */
-    volatile boolean forceRecurrenceAuthCommitFailureForTest = false;
-    /**
-     * Test-only: when true, the cancellation tombstone write commit is forced to
-     * fail (no tombstone written) to exercise fail-closed behavior.
-     */
-    volatile boolean forceTombstoneCommitFailureForTest = false;
-    /**
-     * Test-only: when true, schedule metadata removal commit is forced to fail
-     * to exercise fail-closed behavior (the tombstone remains as the
-     * durable stale-fire guard until retry completes cleanup).
-     */
-    volatile boolean forceScheduleMetadataRemovalFailureForTest = false;
-    /** Test-only: force restoreFutureSchedules to report ok=false. */
-    volatile boolean forceRestoreFutureFailureForTest = false;
-    /**
-     * Test-only: force failure of independent fire-retry evidence commit.
-     */
-    volatile boolean forceFireRetryEvidenceCommitFailureForTest = false;
-    /**
-     * Test-only: when true, the shared runtime's durable operation-version
-     * allocation is forced to fail
-     * (simulating a durable ordering-token allocation failure) to exercise the
-     * fail-closed path. Production never sets this; the durable
-     * ordering-token semantics are unchanged when it is false.
-     */
-    volatile boolean forceOrderingTokenAllocationFailureForTest = false;
-    /**
-     * Test-only: when non-null, multi-day catch-up treats this as wall-clock "now"
-     * (determinism). Production leaves null → System.currentTimeMillis().
-     */
-    volatile Long recoveryNowOverrideForTest = null;
-    /** Wall-clock "now" for recovery; overridable in tests. */
+    private final AutoDeductionRecurrence recurrenceService;
+    private final AutoDeductionCancellation cancellationService;
+    private final AutoDeductionFireService fireService;
+    private final AutoDeductionRetry retryService;
+    private final AutoDeductionRecovery recoveryService;
+    private final AutoSuccessorObligationStore successorObligationStore;
+    private final AutoDeductionOccurrenceState occurrenceState;
+    private final AutoDeductionRetryEvidenceStore retryEvidenceStore;
+    private final AutoDeductionFailurePolicy failurePolicy;
+
     private long recoveryNowMs() {
-        Long o = recoveryNowOverrideForTest;
-        return o != null ? o.longValue() : System.currentTimeMillis();
+        Long override = failurePolicy.recoveryNowOverrideMs();
+        return override != null ? override.longValue() : System.currentTimeMillis();
     }
-    /**
-     * Test-only: CountDownLatch pair to interleave invalidate between generation
-     * authorization and locked successor install. Production leaves null.
-     */
-    volatile java.util.concurrent.CountDownLatch recoveryBeforeSuccessorInstallLatchForTest = null;
-    volatile java.util.concurrent.CountDownLatch recoveryResumeSuccessorInstallLatchForTest = null;
-    public AutoDeductionScheduler(Context context) {
-        this.appContext = context.getApplicationContext();
-        this.recurrenceAuthPrefs = appContext.getSharedPreferences(
-                AutoDeductionContract.PREFS_RECURRENCE_AUTH, Context.MODE_PRIVATE);
-        this.fireRetryPrefs = appContext.getSharedPreferences(
-                AutoDeductionContract.PREFS_FIRE_RETRY, Context.MODE_PRIVATE);
-        this.schedulingAdapter = new AutoDeductionSchedulingAdapter(appContext);
-    }
-    private void syncAlarmRuntimeTestControls() {
-        schedulingAdapter.forceOrderingTokenAllocationFailureForTest =
-                forceOrderingTokenAllocationFailureForTest;
-        schedulingAdapter.forceTombstoneCommitFailureForTest =
-                forceTombstoneCommitFailureForTest;
-        schedulingAdapter.forceScheduleMetadataRemovalFailureForTest =
-                forceScheduleMetadataRemovalFailureForTest;
-        schedulingAdapter.syncTestControls();
-    }
-    // ── Recurrence authorization ─────────────────────────────
-    private static String recurrenceAuthKey(String medicationId, String doseId) {
-        return AutoDeductionContract.RECURRENCE_AUTH_KEY_PREFIX
-                + AutoDeductionContract.scheduleIdentityKey(medicationId, doseId);
-    }
-    /**
-     * Read active recurrence generation for a dose slot. Caller must hold
-     * {@link #SCHEDULE_LOCK}. Returns 0 when never scheduled/invalidated.
-     */
-    long getRecurrenceGenerationLocked(String medicationId, String doseId) {
-        return recurrenceAuthPrefs.getLong(recurrenceAuthKey(medicationId, doseId), 0L);
-    }
-    /**
-     * Under {@link #SCHEDULE_LOCK}: whether successor creation is still authorized.
-     * Requires {@code expectedGeneration > 0} and equality with the durable active
-     * recurrence generation for this medicationId + doseId.
-     */
-    private boolean isRecurrenceGenerationAuthorizedLocked(
+    boolean persistSuccessorObligation(
             String medicationId,
             String doseId,
-            long expectedGeneration
-    ) {
-        long active = getRecurrenceGenerationLocked(medicationId, doseId);
-        return expectedGeneration > 0L && expectedGeneration == active;
+            String calendarDate,
+            String timeHhmm,
+            double amount,
+            String treatmentEndDate,
+            String operationVersion,
+            long recurrenceGeneration) {
+        return recurrenceService.persistSuccessorObligation(
+                medicationId,
+                doseId,
+                calendarDate,
+                timeHhmm,
+                amount,
+                treatmentEndDate,
+                operationVersion,
+                recurrenceGeneration);
     }
-    /**
-     * Ensure a non-zero active generation exists for the dose slot (first schedule).
-     * Caller must hold {@link #SCHEDULE_LOCK}.
-     */
-    long ensureRecurrenceGenerationLocked(String medicationId, String doseId) {
-        String key = recurrenceAuthKey(medicationId, doseId);
-        long g = recurrenceAuthPrefs.getLong(key, 0L);
-        if (g > 0L) {
-            return g;
-        }
-        g = 1L;
-        if (!recurrenceAuthPrefs.edit().putLong(key, g).commit()) {
-            Log.e(TAG, "ensureRecurrenceGenerationLocked: commit failed for " + key);
-            return 0L;
-        }
-        return g;
+
+    Context appContext() { return appContext; }
+    AutoDeductionSchedulingAdapter schedulingAdapter() { return schedulingAdapter; }
+    AutoSuccessorObligationStore successorObligationStore() { return successorObligationStore; }
+    AutoDeductionRetryEvidenceStore retryEvidenceStore() { return retryEvidenceStore; }
+    AutoDeductionFailurePolicy failurePolicy() { return failurePolicy; }
+    AutoDeductionEventStore eventStore() {
+        return new AutoDeductionEventStore(appContext, failurePolicy);
     }
-    /**
-     * Bump active recurrence generation under {@link #SCHEDULE_LOCK} and cancel every
-     * durable scheduled occurrence for this medication+dose slot (alarms + metadata).
-     *
-     * <p>Linearizes before any concurrent {@link #scheduleNextOccurrenceIfAbsent}:
-     * after this returns, a receiver holding a pre-bump generation cannot create D+1,
-     * and already-installed successors are cancelled so lifecycle restore cannot
-     * resurrect them (their stamped generation is no longer active).
-     */
-    /**
-     * Bump active recurrence generation under {@link #SCHEDULE_LOCK} and, only on
-     * durable commit success, cancel every scheduled occurrence for this dose slot.
-     *
-     * <p><b>Fail-closed:</b> if the generation {@code commit()} fails, this method
-     * returns {@code ok=false}, does <em>not</em> treat the chain as invalidated,
-     * and does <em>not</em> cancel futures (a concurrent receiver with the old
-     * generation could otherwise still create D+1 while callers believed disable
-     * succeeded). Callers must retry until {@code ok=true}.
-     */
-    public InvalidateResult invalidateRecurrenceAuthorization(
-            String medicationId,
-            String doseId
-    ) {
-        if (medicationId == null || medicationId.isEmpty()
-                || doseId == null || doseId.isEmpty()) {
-            return InvalidateResult.fail("invalid_args");
-        }
-        synchronized (SCHEDULE_LOCK) {
-            String authKey = recurrenceAuthKey(medicationId, doseId);
-            long prev = recurrenceAuthPrefs.getLong(authKey, 0L);
-            long next = prev <= 0L ? 1L : prev + 1L;
-            boolean committed = !forceRecurrenceAuthCommitFailureForTest
-                    && recurrenceAuthPrefs.edit().putLong(authKey, next).commit();
-            if (!committed) {
-                Log.e(TAG, "invalidateRecurrenceAuthorization: generation commit failed for "
-                        + medicationId + "/" + doseId
-                        + " — fail-closed (no cancel, generation unchanged=" + prev + ")");
-                return InvalidateResult.fail("recurrence_generation_commit_failed");
-            }
-            Log.i(TAG, "invalidateRecurrenceAuthorization: generation "
-                    + prev + " -> " + next + " for " + medicationId + "/" + doseId);
-            // Only after durable bump: cancel futures so restore cannot resurrect them.
-            // Fail-closed: if any durable cancellation step fails, report
-            // ok=false WITHOUT rolling back the generation — the bump is durable and
-            // must stay monotonic (rollback itself can fail and create authorization
-            // ambiguity). The caller retries; retry is idempotent (existing tombstones
-            // and already-absent metadata are handled safely).
-            CancelResult cancel = cancelAllSchedulesForDoseLocked(medicationId, doseId);
-            if (!cancel.isOk()) {
-                Log.e(TAG, "invalidateRecurrenceAuthorization: cancellation failed for "
-                        + medicationId + "/" + doseId + " — generation " + next
-                        + " remains committed (no rollback); error=" + cancel.error);
-                return InvalidateResult.fail(cancel.error);
-            }
-            return InvalidateResult.success(next);
-        }
+    boolean clearSuccessorObligation(String medicationId, String doseId, String calendarDate) {
+        return successorObligationStore.clear(medicationId, doseId, calendarDate);
     }
-    /**
-     * Cancel each occurrence through the shared exact-alarm runtime; Auto Deduction
- * keeps ownership of which occurrences belong to the dose chain. of
-     * this medication+dose. Caller must hold {@link #SCHEDULE_LOCK}.
-     * Also writes occurrence cancellation tombstones so fire cannot promote them.
-     *
-     * <p><b>Fail-closed:</b> returns {@link CancelResult#fail} when any
-     * durable cancellation step fails (ordering-token allocation, tombstone write
-     * commit, metadata removal commit, or AlarmManager unavailable). The caller
-     * ({@link #invalidateRecurrenceAuthorization}) must NOT report disable success
-     * until this returns ok. The generation bump stays committed on failure (no
-     * rollback). Retry is idempotent: occurrences already carrying a tombstone skip
-     * the tombstone rewrite, and occurrences with no metadata skip removal.
-     */
-    private CancelResult cancelAllSchedulesForDoseLocked(String medicationId, String doseId) {
-        Map<String, ?> all = getAllScheduleMetadata();
-        if (all == null || all.isEmpty()) return CancelResult.success();
-        syncAlarmRuntimeTestControls();
-        for (Map.Entry<String, ?> e : all.entrySet()) {
-            String storageKey = e.getKey();
-            if (storageKey == null || storageKey.isEmpty()) continue;
-            if (!(e.getValue() instanceof String)) continue;
-            try {
-                JSONObject metadata = new JSONObject((String) e.getValue());
-                if (!medicationId.equals(metadata.optString("medicationId", ""))
-                        || !doseId.equals(metadata.optString("doseId", ""))) continue;
-                String date = metadata.optString("calendarDate", "");
-                if (!AutoDeductionContract.isValidCalendarDate(date)) {
-                    if (!quarantineMalformedScheduleMetadata(
-                            storageKey, (String) e.getValue(), "malformed_calendar_date")) {
-                        return CancelResult.fail("schedule_metadata_removal_failed");
-                    }
-                    continue;
-                }
-                String occurrenceKey = AutoDeductionContract.occurrenceKey(
-                        medicationId, doseId, date);
-                AutoDeductionSchedulingAdapter.CancelResult result =
-                        schedulingAdapter.cancelOccurrence(
-                                medicationId,
-                                doseId,
-                                date);
-                if (!result.isOk()) return CancelResult.fail(result.error);
-            } catch (JSONException ex) {
-                if (!quarantineMalformedScheduleMetadata(
-                        storageKey, (String) e.getValue(), "invalid_json")) {
-                    return CancelResult.fail("schedule_metadata_removal_failed");
-                }
-            }
-        }
-        return CancelResult.success();
+    boolean markSuccessorObligationStockApplied(
+            String medicationId, String doseId, String calendarDate) {
+        return successorObligationStore.markStockApplied(
+                medicationId, doseId, calendarDate);
     }
+    Object scheduleLock() { return SCHEDULE_LOCK; }
+    long recoveryNowForService() { return recoveryNowMs(); }
+
+    public AutoDeductionScheduler(Context context) {
+        this(context, AutoDeductionFailurePolicy.ALLOW_ALL);
+    }
+
+    AutoDeductionScheduler(Context context, AutoDeductionFailurePolicy failurePolicy) {
+        this.appContext = context.getApplicationContext();
+        this.failurePolicy = failurePolicy == null
+                ? AutoDeductionFailurePolicy.ALLOW_ALL
+                : failurePolicy;
+        this.schedulingAdapter = new AutoDeductionSchedulingAdapter(
+                appContext, this.failurePolicy);
+        this.recurrenceService = new AutoDeductionRecurrence(this);
+        this.cancellationService = new AutoDeductionCancellation(this);
+        this.fireService = new AutoDeductionFireService(this);
+        this.retryService = new AutoDeductionRetry(this);
+        this.recoveryService = new AutoDeductionRecovery(this);
+        this.occurrenceState = new AutoDeductionOccurrenceState(this);
+        this.successorObligationStore = new AutoSuccessorObligationStore(appContext);
+        this.retryEvidenceStore = new AutoDeductionRetryEvidenceStore(appContext);
+    }
+    // Collaborator implementations own recurrence, fire, recovery, retry, cancellation,
+    // occurrence state, and the feature-to-shared exact-alarm scheduling boundary.
+
     /** Result of multi-day catch-up. FIRED count ≠ future alarms installed. */
     static final class CatchUpResult {
         final int firedCreated;
@@ -325,18 +178,34 @@ public final class AutoDeductionScheduler {
     public static final class InvalidateResult {
         public final boolean ok;
         public final String error;
-        /** Active generation after a successful bump; 0 when failed / not bumped. */
+        /** Active generation after a successful bump, or the prior generation on a post-cancel commit failure. */
         public final long generation;
-        public InvalidateResult(boolean ok, String error, long generation) {
+        /** True when the cancellation phase completed before a later generation commit failed. */
+        public final boolean schedulesCancelled;
+        public InvalidateResult(
+                boolean ok,
+                String error,
+                long generation,
+                boolean schedulesCancelled) {
             this.ok = ok;
             this.error = error;
             this.generation = generation;
+            this.schedulesCancelled = schedulesCancelled;
         }
         public static InvalidateResult success(long generation) {
-            return new InvalidateResult(true, null, generation);
+            return new InvalidateResult(true, null, generation, true);
         }
         public static InvalidateResult fail(String error) {
-            return new InvalidateResult(false, error, 0L);
+            return new InvalidateResult(false, error, 0L, false);
+        }
+        public static InvalidateResult failAfterCancellation(
+                String error,
+                long previousGeneration) {
+            return new InvalidateResult(
+                    false,
+                    error,
+                    previousGeneration,
+                    true);
         }
     }
     /**
@@ -358,9 +227,18 @@ public final class AutoDeductionScheduler {
         }
         public final Status status;
         public final String error;
+        /** True when this result follows one or more successful cancellations in a batch. */
+        public final boolean schedulesCancelled;
         public CancelResult(Status status, String error) {
+            this(status, error, false);
+        }
+        private CancelResult(
+                Status status,
+                String error,
+                boolean schedulesCancelled) {
             this.status = status;
             this.error = error;
+            this.schedulesCancelled = schedulesCancelled;
         }
         public boolean isOk() {
             return status == Status.SUCCESS || status == Status.ALREADY_ABSENT;
@@ -372,7 +250,10 @@ public final class AutoDeductionScheduler {
             return new CancelResult(Status.ALREADY_ABSENT, null);
         }
         public static CancelResult fail(String error) {
-            return new CancelResult(Status.FAILED, error);
+            return new CancelResult(Status.FAILED, error, false);
+        }
+        public static CancelResult failAfterPartialCancellation(String error) {
+            return new CancelResult(Status.FAILED, error, true);
         }
     }
     /**
@@ -430,507 +311,6 @@ public final class AutoDeductionScheduler {
                     || (status == Status.FAILED && pendingRecorded);
         }
     }
-    /**
-     * Authoritative fire transition serialized with cancellation on {@link #SCHEDULE_LOCK}.
-     *
-     * <p>Under one continuous critical section:
-     * <ol>
-     *   <li>Evaluate effective cancellation (tombstone vs schedule ordering)</li>
-     *   <li>If cancelled → return {@link FireResult.Status#CANCELLED} (no FIRED, no pending)</li>
-     *   <li>Otherwise persist FIRED via {@link AutoDeductionEventStore#insertFiredIfAbsent}
-     *       (including pending-fire fallback on primary commit failure)</li>
-     * </ol>
-     *
-     * <p>Because {@link #cancelOccurrence} writes its tombstone under the same lock,
-     * the TOCTOU window (check not-cancelled → cancel → insert FIRED) cannot occur.
-     * EventStore.LOCK is nested only while SCHEDULE_LOCK is already held; no path
-     * acquires EventStore.LOCK then SCHEDULE_LOCK.
-     */
-    /**
-     * Authoritative fire transition serialized with cancellation and schedule
-     * ownership validation on {@link #SCHEDULE_LOCK}.
-     *
-     * <p>Under one continuous critical section:
-     * <ol>
-     *   <li>Evaluate effective cancellation (tombstone vs schedule ordering)</li>
-     *   <li>Require active schedule metadata for this occurrence</li>
-     *   <li>Require every delivery to carry a non-empty {@code operationVersion}
-     *       and a positive {@code recurrenceGeneration}. The operationVersion must
-     *       match the active durable schedule metadata; the recurrenceGeneration
-     *       must match Auto-owned recurrence authorization state for the dose slot.
-     *       Missing, invalid, or mismatched tokens mean the delivery is stale/cancelled.
-     *       There is no pre-token or tokenless compatibility path.</li>
-     *   <li>If ownership holds → persist FIRED via insertFiredIfAbsent</li>
-     * </ol>
-     *
-     * @param deliveryOperationVersion {@link AutoDeductionContract#EXTRA_OPERATION_VERSION}
-     *        from the firing Intent; must be present and match active schedule metadata
-     * @param deliveryRecurrenceGeneration {@link AutoDeductionContract#EXTRA_RECURRENCE_GENERATION}
-     *        from the firing Intent; must be positive and match Auto-owned recurrence
-     *        authorization state for the medication+dose slot
-     */
-    public FireResult fireOccurrenceIfNotCancelled(
-            String medicationId,
-            String doseId,
-            String calendarDate,
-            long scheduledAtEpochMs,
-            double amount,
-            String deliveryOperationVersion,
-            long deliveryRecurrenceGeneration
-    ) {
-        if (medicationId == null || medicationId.isEmpty()
-                || doseId == null || doseId.isEmpty()
-                || !AutoDeductionContract.isValidCalendarDate(calendarDate)
-                || !AutoDeductionContract.isValidAmount(amount)) {
-            Log.w(TAG, "fireOccurrenceIfNotCancelled: invalid payload");
-            return new FireResult(FireResult.Status.FAILED, false);
-        }
-        final String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
-        synchronized (SCHEDULE_LOCK) {
-            // Re-entrant: isOccurrenceCancelledKey also synchronizes on SCHEDULE_LOCK.
-            if (isOccurrenceCancelledKey(key)) {
-                Log.i(TAG, "fire linearization: CANCELLED wins for " + key);
-                return FireResult.cancelled();
-            }
-            // delivery must own the *current* schedule row.
-            final String prefKey = key;
-            final String metaRaw = getScheduleRaw(prefKey);
-            if (metaRaw == null || metaRaw.isEmpty()) {
-                Log.i(TAG, "fire linearization: STALE (no active schedule metadata) for " + key);
-                return FireResult.cancelled();
-            }
-            // Tokenized delivery must own the current schedule row exactly.
-            // Missing or mismatched operationVersion / recurrenceGeneration → STALE.
-            try {
-                JSONObject meta = new JSONObject(metaRaw);
-                String treatmentEndDate = meta.optString(
-                        AutoDeductionContract.EXTRA_TREATMENT_END_DATE, "");
-                if (!treatmentEndDate.isEmpty()
-                        && (!AutoDeductionContract.isValidCalendarDate(treatmentEndDate)
-                        || calendarDate.compareTo(treatmentEndDate) > 0)) {
-                    Log.i(TAG, "fire linearization: treatment expired for " + key);
-                    return FireResult.cancelled();
-                }
-                String activeVersion = AutoDeductionSchedulingAdapter.extractOperationVersion(meta);
-                long activeGen = getRecurrenceGenerationLocked(medicationId, doseId);
-                if (deliveryOperationVersion == null || deliveryOperationVersion.isEmpty()
-                        || deliveryRecurrenceGeneration <= 0L) {
-                    Log.i(TAG, "fire linearization: STALE (delivery partially missing version/generation) for "
-                            + key);
-                    return FireResult.cancelled();
-                }
-                if (!deliveryOperationVersion.equals(activeVersion)) {
-                    Log.i(TAG, "fire linearization: STALE operationVersion for " + key
-                            + " delivery=" + deliveryOperationVersion
-                            + " active=" + activeVersion);
-                    return FireResult.cancelled();
-                }
-                if (deliveryRecurrenceGeneration != activeGen) {
-                    Log.i(TAG, "fire linearization: STALE recurrenceGeneration for " + key
-                            + " delivery=" + deliveryRecurrenceGeneration
-                            + " active=" + activeGen);
-                    return FireResult.cancelled();
-                }
-            } catch (JSONException e) {
-                Log.e(TAG, "fire linearization: malformed schedule metadata for " + key, e);
-                return FireResult.cancelled();
-            }
-            AutoDeductionEventStore store = new AutoDeductionEventStore(appContext);
-            AutoDeductionEventStore.InsertFiredResult ir = store.insertFiredIfAbsent(
-                    medicationId, doseId, calendarDate, scheduledAtEpochMs, amount);
-            FireResult result = FireResult.fromInsert(ir);
-            // FIRED evidence and Native stock are one Auto business boundary.
-            // A live delivery is not considered recurrence-safe until the same
-            // occurrence has also been applied to the Native stock authority.
-            if (result.allowsRecurrence()) {
-                AutoDeductionStockStore.AutoApplyResult stockResult =
-                        new AutoDeductionStockStore(appContext).applyAutoDeduction(
-                                medicationId, doseId, calendarDate, amount);
-                if (!stockResult.ok) {
-                    Log.e(TAG, "fire linearization: Native stock apply failed for "
-                            + key + " — " + stockResult.error);
-                    // Keep independent retry evidence for a stock-only failure.
-                    // It is self-contained so a later config mutation/removal of
-                    // the schedule row cannot erase the recovery proof.
-                    String timeHhmm = "";
-                    String operationVersion = deliveryOperationVersion != null
-                            ? deliveryOperationVersion : "";
-                    long gen = deliveryRecurrenceGeneration;
-                    try {
-                        JSONObject meta = new JSONObject(metaRaw);
-                        timeHhmm = meta.optString("timeHhmm", "");
-                        if (operationVersion.isEmpty()) {
-                            operationVersion =
-                                    AutoDeductionSchedulingAdapter.extractOperationVersion(meta);
-                        }
-                        if (gen <= 0L) {
-                            gen = getRecurrenceGenerationLocked(medicationId, doseId);
-                        }
-                    } catch (JSONException ignored) {
-                    }
-                    recordIndependentFireRetryEvidenceLocked(
-                            medicationId, doseId, calendarDate, scheduledAtEpochMs,
-                            amount, timeHhmm, gen, operationVersion,
-                            /*nextRetryCount=*/1);
-                    // Do not return CREATED/ALREADY_EXISTS/FIRED-pending to the
-                    // receiver because stock is not complete yet. The receiver
-                    // must enter the bounded same-occurrence retry path.
-                    return new FireResult(FireResult.Status.FAILED, false);
-                }
-                // Any old retry proof is no longer needed once this occurrence's
-                // Native stock has completed successfully.
-                clearIndependentFireRetryEvidenceLocked(key);
-            } else if (result.status == FireResult.Status.FAILED
-                    && !result.pendingRecorded) {
-                // FIRED persistence itself failed without an independent pending
-                // record: keep retry evidence so the exact occurrence can be
-                // reconstructed even if schedule metadata disappears.
-                String timeHhmm = "";
-                String operationVersion = deliveryOperationVersion != null
-                        ? deliveryOperationVersion : "";
-                long gen = deliveryRecurrenceGeneration;
-                try {
-                    JSONObject meta = new JSONObject(metaRaw);
-                    timeHhmm = meta.optString("timeHhmm", "");
-                    if (operationVersion.isEmpty()) {
-                        operationVersion =
-                                AutoDeductionSchedulingAdapter.extractOperationVersion(meta);
-                    }
-                    if (gen <= 0L) {
-                        gen = getRecurrenceGenerationLocked(medicationId, doseId);
-                    }
-                } catch (JSONException ignored) {
-                }
-                recordIndependentFireRetryEvidenceLocked(
-                        medicationId, doseId, calendarDate, scheduledAtEpochMs,
-                        amount, timeHhmm, gen, operationVersion, /*nextRetryCount=*/1);
-            }
-            Log.i(TAG, "fire linearization: " + result.status
-                    + " pendingRecorded=" + result.pendingRecorded + " for " + key);
-            return result;
-        }
-    }
-    /**
-     * recover a historical missed occurrence as durable FIRED without
-     * requiring live schedule metadata for that calendar date (unlike a real
-     * AlarmManager delivery which must match operationVersion ownership).
-     *
-     * <p>Under {@link #SCHEDULE_LOCK}:
-     * <ol>
-     *   <li>Reject if the occurrence is effectively cancelled</li>
-     *   <li>Reject if {@code expectedRecurrenceGeneration} is no longer active</li>
-     *   <li>Idempotently {@link AutoDeductionEventStore#insertFiredIfAbsent}</li>
-     * </ol>
-     * Applies the Auto-owned Native stock mutation before recovery returns; JS only
-     * mirrors the resulting Native balance later.
-     */
-    public FireResult recoverMissedOccurrence(
-            String medicationId,
-            String doseId,
-            String calendarDate,
-            long scheduledAtEpochMs,
-            double amount,
-            long expectedRecurrenceGeneration
-    ) {
-        if (medicationId == null || medicationId.isEmpty()
-                || doseId == null || doseId.isEmpty()
-                || !AutoDeductionContract.isValidCalendarDate(calendarDate)
-                || !AutoDeductionContract.isValidAmount(amount)) {
-            Log.w(TAG, "recoverMissedOccurrence: invalid payload");
-            return new FireResult(FireResult.Status.FAILED, false);
-        }
-        final String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
-        synchronized (SCHEDULE_LOCK) {
-            if (isOccurrenceCancelledKey(key)) {
-                Log.i(TAG, "recoverMissed: CANCELLED occurrence " + key);
-                return FireResult.cancelled();
-            }
-            // Always apply the same generation contract as live recurrence:
-            // expected > 0 → active must equal expected;
-            // expected <= 0 → active must still be 0 (post-invalidate active > 0 rejects).
-            if (!isRecurrenceGenerationAuthorizedLocked(
-                    medicationId, doseId, expectedRecurrenceGeneration)) {
-                Log.i(TAG, "recoverMissed: generation not authorized for " + key
-                        + " expectedGen=" + expectedRecurrenceGeneration);
-                return FireResult.cancelled();
-            }
-            AutoDeductionEventStore store = new AutoDeductionEventStore(appContext);
-            AutoDeductionEventStore.InsertFiredResult ir = store.insertFiredIfAbsent(
-                    medicationId, doseId, calendarDate, scheduledAtEpochMs, amount);
-            FireResult result = FireResult.fromInsert(ir);
-            // The Auto alarm/recovery path owns the stock mutation itself. The
-            // native stock marker is occurrence-idempotent, so both CREATED and
-            // ALREADY_EXISTS can safely pass through this same operation.
-            if (result.allowsRecurrence()) {
-                AutoDeductionStockStore.AutoApplyResult stockResult =
-                        new AutoDeductionStockStore(appContext).applyAutoDeduction(
-                                medicationId, doseId, calendarDate, amount);
-                if (!stockResult.ok) {
-                    Log.e(TAG, "recoverMissed: native stock apply failed for " + key
-                            + " — " + stockResult.error);
-                    return new FireResult(FireResult.Status.FAILED, false);
-                }
-                clearIndependentFireRetryEvidenceLocked(key);
-            }
-            Log.i(TAG, "recoverMissed: " + result.status
-                    + " pendingRecorded=" + result.pendingRecorded + " for " + key);
-            return result;
-        }
-    }
-    /**
-     * walk calendar dates from {@code fromCalendarDate} forward with no
-     * horizon: every due occurrence is recovered as FIRED; the first not-yet-due
-     * date becomes the sole live AlarmManager schedule for this dose slot.
-     *
-     * @return number of newly {@code CREATED} FIRED events in this invocation
-     */
-    CatchUpResult catchUpMissedOccurrencesAndScheduleNext(
-            String medicationId,
-            String doseId,
-            String fromCalendarDate,
-            String timeHhmm,
-            double amount,
-            long expectedRecurrenceGeneration,
-            String pastPrefKey,
-            String observedVersion
-    ) {
-        if (medicationId == null || doseId == null || fromCalendarDate == null
-                || timeHhmm == null) {
-            return new CatchUpResult(0, false);
-        }
-        synchronized (SCHEDULE_LOCK) {
-            if (!isRecurrenceGenerationAuthorizedLocked(
-                    medicationId, doseId, expectedRecurrenceGeneration)) {
-                Log.i(TAG, "catchUp: generation unauthorized — dropping snapshot "
-                        + pastPrefKey);
-                removeScheduleMetadataIfVersionLocked(pastPrefKey, observedVersion);
-                return new CatchUpResult(0, false);
-            }
-        }
-        final long nowMs = recoveryNowMs();
-        String treatmentEndDate = "";
-        synchronized (SCHEDULE_LOCK) {
-            String raw = getScheduleRaw(pastPrefKey);
-            if (raw != null && !raw.isEmpty()) {
-                try {
-                    treatmentEndDate = new JSONObject(raw).optString(
-                            AutoDeductionContract.EXTRA_TREATMENT_END_DATE, "");
-                } catch (JSONException e) {
-                    return new CatchUpResult(0, false, true);
-                }
-            }
-        }
-        if (!treatmentEndDate.isEmpty()
-                && !AutoDeductionContract.isValidCalendarDate(treatmentEndDate)) {
-            return new CatchUpResult(0, false, true);
-        }
-        String walkDate = fromCalendarDate;
-        int created = 0;
-        boolean futureInstalled = false;
-        boolean preserveSnapshotForRetry = false;
-        while (walkDate != null) {
-            if (!treatmentEndDate.isEmpty()
-                    && walkDate.compareTo(treatmentEndDate) > 0) {
-                break;
-            }
-            Long epoch = computeEpochMs(walkDate, timeHhmm);
-            if (epoch == null) {
-                preserveSnapshotForRetry = true;
-                break;
-            }
-            if (epoch > nowMs) {
-                // First future occurrence — gen check + install under one SCHEDULE_LOCK.
-                // Test seam: optional latches only fire between outer gen probe and
-                // the locked install block when set (still re-checked under lock).
-                if (recoveryBeforeSuccessorInstallLatchForTest != null) {
-                    recoveryBeforeSuccessorInstallLatchForTest.countDown();
-                    try {
-                        if (recoveryResumeSuccessorInstallLatchForTest != null) {
-                            recoveryResumeSuccessorInstallLatchForTest.await(
-                                    5, java.util.concurrent.TimeUnit.SECONDS);
-                        }
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        preserveSnapshotForRetry = true;
-                        break;
-                    }
-                }
-                ScheduleResult sr = installFutureSuccessorIfGenerationHolds(
-                        medicationId, doseId, walkDate, timeHhmm, amount,
-                        epoch, expectedRecurrenceGeneration,
-                        pastPrefKey, observedVersion);
-                if (!sr.ok) {
-                    if ("recurrence_generation_unauthorized".equals(sr.error)
-                            || "snapshot_stale".equals(sr.error)) {
-                        Log.i(TAG, "catchUp: future install rejected (" + sr.error + ")");
-                    } else {
-                        Log.w(TAG, "catchUp: future schedule failed (" + sr.error
-                                + ") for " + medicationId + "/" + doseId + "/" + walkDate);
-                        preserveSnapshotForRetry = true;
-                    }
-                } else if (sr.error == null) {
-                    // Newly installed AlarmManager schedule for the first future date.
-                    futureInstalled = true;
-                    Log.i(TAG, "catchUp: scheduled next future "
-                            + medicationId + "/" + doseId + "/" + walkDate);
-                } else {
-                    Log.i(TAG, "catchUp: future successor skipped (" + sr.error + ") for "
-                            + medicationId + "/" + doseId + "/" + walkDate);
-                }
-                break;
-            }
-            FireResult fr = recoverMissedOccurrence(
-                    medicationId, doseId, walkDate, epoch, amount,
-                    expectedRecurrenceGeneration);
-            if (fr.isCancelled()) {
-                synchronized (SCHEDULE_LOCK) {
-                    if (!isRecurrenceGenerationAuthorizedLocked(
-                            medicationId, doseId, expectedRecurrenceGeneration)) {
-                        Log.i(TAG, "catchUp: generation invalidated mid-walk — stop");
-                        removeScheduleMetadataIfVersionLocked(pastPrefKey, observedVersion);
-                        return new CatchUpResult(created, false);
-                    }
-                }
-                walkDate = nextCalendarDate(walkDate);
-                continue;
-            }
-            if (fr.status == FireResult.Status.CREATED) {
-                created++;
-            }
-            if (!fr.allowsRecurrence()) {
-                Log.e(TAG, "catchUp: FIRED persistence failed for "
-                        + medicationId + "/" + doseId + "/" + walkDate
-                        + " — preserving snapshot for retry");
-                preserveSnapshotForRetry = true;
-                break;
-            }
-            walkDate = nextCalendarDate(walkDate);
-        }
-        if (!preserveSnapshotForRetry) {
-            if (!removeScheduleMetadataIfVersion(pastPrefKey, observedVersion)) {
-                Log.i(TAG, "catchUp: past metadata already gone/replaced: " + pastPrefKey);
-            }
-        }
-        return new CatchUpResult(created, futureInstalled, preserveSnapshotForRetry);
-    }
-    /**
-     * under one continuous {@link #SCHEDULE_LOCK} section:
-     * re-validate expected recurrence generation, confirm past snapshot ownership
-     * when still present, and install the future successor via
-     * {@link #scheduleOccurrenceLocked} stamping that same generation.
-     * A concurrent invalidate either wins entirely or loses entirely; there is no
-     * window where G1 recovery installs a G2 successor.
-     */
-    private ScheduleResult installFutureSuccessorIfGenerationHolds(
-            String medicationId,
-            String doseId,
-            String calendarDate,
-            String timeHhmm,
-            double amount,
-            long triggerAt,
-            long expectedRecurrenceGeneration,
-            String pastPrefKey,
-            String observedVersion
-    ) {
-        final String futureKey = AutoDeductionContract.occurrenceKey(
-                medicationId, doseId, calendarDate);
-        final String futurePrefKey = futureKey;
-        synchronized (SCHEDULE_LOCK) {
-            if (!isRecurrenceGenerationAuthorizedLocked(
-                    medicationId, doseId, expectedRecurrenceGeneration)) {
-                removeScheduleMetadataIfVersionLocked(pastPrefKey, observedVersion);
-                return ScheduleResult.fail("recurrence_generation_unauthorized");
-            }
-            // Past snapshot must still be the one we are recovering from (if present).
-            if (pastPrefKey != null && observedVersion != null && !observedVersion.isEmpty()) {
-                String cur = getScheduleRaw(pastPrefKey);
-                if (cur != null && !isMetadataOwnedByVersion(cur, observedVersion)) {
-                    return ScheduleResult.fail("snapshot_stale");
-                }
-            }
-            String treatmentEndDate = "";
-            String currentPast = getScheduleRaw(pastPrefKey);
-            if (currentPast != null && !currentPast.isEmpty()) {
-                try {
-                    treatmentEndDate = new JSONObject(currentPast).optString(
-                            AutoDeductionContract.EXTRA_TREATMENT_END_DATE, "");
-                } catch (JSONException e) {
-                    return ScheduleResult.fail("snapshot_stale");
-                }
-            }
-            if (!treatmentEndDate.isEmpty()) {
-                if (!AutoDeductionContract.isValidCalendarDate(treatmentEndDate)) {
-                    return ScheduleResult.fail("invalid_treatment_end_date");
-                }
-                if (calendarDate.compareTo(treatmentEndDate) > 0) {
-                    return new ScheduleResult(true, "treatment_ended", futureKey);
-                }
-            }
-            // If future already exists under same identity, do not replace.
-            // EXCEPTION — same-key recovery: when the first not-yet-due occurrence
-            // IS the past snapshot's own date (fromCalendarDate == calendarDate,
-            // i.e. a today-occurrence whose time is still ahead), the "existing"
-            // metadata is the very snapshot being recovered, not a separate live
-            // schedule. It must be re-armed under a fresh ordering token here;
-            // otherwise the trailing snapshot removal in catchUp (version match)
-            // deletes the only schedule row for the still-pending occurrence and
-            // it silently disappears (no FIRED, no SCHEDULED, no alarm).
-            boolean sameKeyRecovery =
-                    pastPrefKey != null && pastPrefKey.equals(futurePrefKey);
-            String existing = sameKeyRecovery
-                    ? null
-                    : getScheduleRaw(futurePrefKey);
-            if (existing != null && !existing.isEmpty()) {
-                return new ScheduleResult(true, "already_present", futureKey);
-            }
-            // Effective cancellation (tombstone) must not be cleared by recovery:
-            // scheduleOccurrenceLocked would clearCancellationTombstoneLocked.
-            if (isOccurrenceCancelledKey(futureKey)) {
-                Log.i(TAG, "catchUp: future successor cancelled — leave tombstone, no reinstall "
-                        + futureKey);
-                return new ScheduleResult(true, "cancelled_skip", futureKey);
-            }
-            JSONObject payload = new JSONObject();
-            try {
-                payload.put("medicationId", medicationId);
-                payload.put("doseId", doseId);
-                payload.put("calendarDate", calendarDate);
-                payload.put("timeHhmm", timeHhmm);
-                payload.put("amount", amount);
-                payload.put("scheduledAtEpochMs", triggerAt);
-                if (!treatmentEndDate.isEmpty()) {
-                    payload.put(
-                            AutoDeductionContract.EXTRA_TREATMENT_END_DATE,
-                            treatmentEndDate);
-                }
-            } catch (JSONException e) {
-                return ScheduleResult.fail("payload_build_failed");
-            }
-            // Pass expected generation so the shared runtime cannot stamp a newer gen.
-            return scheduleOccurrenceLocked(
-                    futurePrefKey,
-                    futureKey,
-                    payload,
-                    triggerAt,
-                    null,
-                    expectedRecurrenceGeneration);
-        }
-    }
-    /**
-     * Pure ownership check used by conditional rollback.
-     * Package-visible for focused verification.
-     */
-    static boolean isMetadataOwnedByVersion(String currentJson, String expectedVersion) {
-        return AutoDeductionSchedulingAdapter.isMetadataOwnedByOperationVersion(
-                currentJson, expectedVersion);
-    }
-    /**
-     * Whether past-schedule metadata may be deleted after an insertFiredIfAbsent
-     * attempt during restore. Metadata must survive when neither the main FIRED
-     * ledger nor a pending-fire record was durably established.
-     *
-     * Package-visible for focused verification of the recovery matrix.
-     */
     static boolean shouldRemovePastScheduleMetadata(
             AutoDeductionEventStore.InsertFiredResult ir) {
         if (ir == null) return false;
@@ -967,249 +347,27 @@ public final class AutoDeductionScheduler {
      * @return true only when Auto retry evidence was durably recorded and AlarmManager
      *         accepted the retry alarm. Evidence-write failure returns false without scheduling.
      */
-    boolean scheduleFireRetry(
-            String medicationId,
-            String doseId,
-            String calendarDate,
-            long scheduledAtEpochMs,
-            double amount,
-            String timeHhmm,
-            long recurrenceGeneration,
-            String operationVersion,
-            int nextRetryCount
-    ) {
-        if (medicationId == null || medicationId.isEmpty()
-                || doseId == null || doseId.isEmpty()
-                || !AutoDeductionContract.isValidCalendarDate(calendarDate)
-                || !AutoDeductionContract.isValidAmount(amount)
-                || nextRetryCount <= 0
-                || nextRetryCount > AutoDeductionContract.MAX_FIRE_RETRIES) {
-            return false;
-        }
-        final String key = AutoDeductionContract.occurrenceKey(
-                medicationId, doseId, calendarDate);
-        final String prefKey = key;
-        synchronized (SCHEDULE_LOCK) {
-            if (isOccurrenceCancelledKey(key)) {
-                return false;
-            }
-            String currentRaw = getScheduleRaw(prefKey);
-            JSONObject existingEvidence =
-                    getIndependentFireRetryEvidence(
-                            medicationId, doseId, calendarDate);
-            int priorRetryCount = existingEvidence == null
-                    ? 0
-                    : existingEvidence.optInt("retryCount", 0);
-            int persistedRetryCount = Math.max(
-                    priorRetryCount,
-                    nextRetryCount);
-            if (currentRaw != null && !currentRaw.isEmpty()) {
-                try {
-                    JSONObject current = new JSONObject(currentRaw);
-                    String activeVersion =
-                            AutoDeductionSchedulingAdapter.extractOperationVersion(current);
-                    long activeGen =
-                            getRecurrenceGenerationLocked(medicationId, doseId);
-                    if (operationVersion == null || operationVersion.isEmpty()
-                            || recurrenceGeneration <= 0L
-                            || !operationVersion.equals(activeVersion)
-                            || recurrenceGeneration != activeGen) {
-                        return false;
-                    }
-                } catch (JSONException e) {
-                    return false;
-                }
-            } else if (existingEvidence == null) {
-                return false;
-            }
-            if (!recordIndependentFireRetryEvidenceLocked(
-                    medicationId, doseId, calendarDate,
-                    scheduledAtEpochMs, amount, timeHhmm,
-                    recurrenceGeneration, operationVersion,
-                    persistedRetryCount)) {
-                return false;
-            }
-            return schedulingAdapter.scheduleFireRetry(
-                    medicationId,
-                    doseId,
-                    calendarDate,
-                    scheduledAtEpochMs,
-                    amount,
-                    timeHhmm,
-                    recurrenceGeneration,
-                    operationVersion,
-                    persistedRetryCount);
-        }
-    }
-    private static final String FIRE_RETRY_KEY_PREFIX = "fretry:";
+
     /**
      * Persist independent fire-failure evidence for an occurrence.
      * Caller MUST hold SCHEDULE_LOCK. Idempotent: same occurrence increments
      * retryCount to max(existing, nextRetryCount) without duplicating rows.
      */
-    boolean recordIndependentFireRetryEvidenceLocked(
-            String medicationId,
-            String doseId,
-            String calendarDate,
-            long scheduledAtEpochMs,
-            double amount,
-            String timeHhmm,
-            long recurrenceGeneration,
-            String operationVersion,
-            int nextRetryCount
-    ) {
-        final String key = AutoDeductionContract.occurrenceKey(
-                medicationId, doseId, calendarDate);
-        final String prefKey = FIRE_RETRY_KEY_PREFIX + key;
-        try {
-            int prior = 0;
-            String existing = fireRetryPrefs.getString(prefKey, null);
-            if (existing != null && !existing.isEmpty()) {
-                try {
-                    prior = new JSONObject(existing).optInt("retryCount", 0);
-                } catch (JSONException ignored) {
-                }
-            }
-            int count = Math.max(prior, Math.max(1, nextRetryCount));
-            if (count > AutoDeductionContract.MAX_FIRE_RETRIES) {
-                count = AutoDeductionContract.MAX_FIRE_RETRIES;
-            }
-            JSONObject obj = new JSONObject();
-            obj.put("medicationId", medicationId);
-            obj.put("doseId", doseId);
-            obj.put("calendarDate", calendarDate);
-            obj.put("scheduledAtEpochMs", scheduledAtEpochMs);
-            obj.put("amount", amount);
-            obj.put("timeHhmm", timeHhmm != null ? timeHhmm : "");
-            obj.put("recurrenceGeneration", recurrenceGeneration);
-            obj.put("operationVersion", operationVersion != null ? operationVersion : "");
-            obj.put("retryCount", count);
-            obj.put("updatedAtEpochMs", System.currentTimeMillis());
-            boolean ok = !forceFireRetryEvidenceCommitFailureForTest
-                    && fireRetryPrefs.edit().putString(prefKey, obj.toString()).commit();
-            if (!ok) {
-                Log.e(TAG, "independent fire-retry evidence commit failed for " + key);
-            } else {
-                Log.i(TAG, "independent fire-retry evidence recorded for " + key
-                        + " retryCount=" + count);
-            }
-            return ok;
-        } catch (JSONException e) {
-            Log.e(TAG, "independent fire-retry evidence build failed for " + key, e);
-            return false;
-        }
-    }
+
     /** Clear independent fire-retry evidence. Caller MUST hold SCHEDULE_LOCK. */
-    boolean clearIndependentFireRetryEvidenceLocked(String occurrenceKey) {
-        if (occurrenceKey == null || occurrenceKey.isEmpty()) return true;
-        final String prefKey = FIRE_RETRY_KEY_PREFIX + occurrenceKey;
-        if (!fireRetryPrefs.contains(prefKey)) return true;
-        boolean ok = fireRetryPrefs.edit().remove(prefKey).commit();
-        if (!ok) {
-            Log.w(TAG, "independent fire-retry evidence clear failed for " + occurrenceKey);
-        }
-        return ok;
-    }
+
     /**
      * Clear independent fire-retry evidence only after the corresponding Native
      * stock mutation has been confirmed. This is deliberately separate from FIRED
      * persistence because FIRED and stock execution are two durable steps.
      */
-    void clearIndependentFireRetryEvidenceAfterStock(
-            String medicationId,
-            String doseId,
-            String calendarDate
-    ) {
-        if (medicationId == null || doseId == null || calendarDate == null) return;
-        String key = AutoDeductionContract.occurrenceKey(
-                medicationId, doseId, calendarDate);
-        synchronized (SCHEDULE_LOCK) {
-            clearIndependentFireRetryEvidenceLocked(key);
-        }
-    }
+
     /**
      * Recover a previously authorized fire from independent failure evidence.
      * Does NOT require shared schedule metadata and does NOT schedule recurrence successors.
      * Lock order: SCHEDULE_LOCK → EventStore.LOCK (via insertFiredIfAbsent).
      */
-    public FireResult recoverFireFromIndependentEvidence(
-            String medicationId,
-            String doseId,
-            String calendarDate
-    ) {
-        if (medicationId == null || medicationId.isEmpty()
-                || doseId == null || doseId.isEmpty()
-                || !AutoDeductionContract.isValidCalendarDate(calendarDate)) {
-            return new FireResult(FireResult.Status.FAILED, false);
-        }
-        final String key = AutoDeductionContract.occurrenceKey(
-                medicationId, doseId, calendarDate);
-        synchronized (SCHEDULE_LOCK) {
-            // Independent fire evidence proves an already-authorized fire began
-            // persistence before any later config mutation/cancellation. Later
-            // tombstones must NOT erase recovery of that prior fire.
-            JSONObject evidence = getIndependentFireRetryEvidence(
-                    medicationId, doseId, calendarDate);
-            if (evidence == null) {
-                // No prior failed-fire evidence — cancellation applies to live path.
-                if (isOccurrenceCancelledKey(key)) {
-                    Log.i(TAG, "recover independent evidence: no evidence + CANCELLED " + key);
-                    return FireResult.cancelled();
-                }
-                return new FireResult(FireResult.Status.FAILED, false);
-            }
-            double amount = evidence.optDouble("amount", Double.NaN);
-            long scheduledAt = evidence.optLong("scheduledAtEpochMs", 0L);
-            if (!AutoDeductionContract.isValidAmount(amount)) {
-                Log.e(TAG, "recover independent evidence: invalid amount for " + key);
-                return new FireResult(FireResult.Status.FAILED, false);
-            }
-            AutoDeductionEventStore store = new AutoDeductionEventStore(appContext);
-            AutoDeductionEventStore.InsertFiredResult ir = store.insertFiredIfAbsent(
-                    medicationId, doseId, calendarDate, scheduledAt, amount);
-            FireResult result = FireResult.fromInsert(ir);
-            if (result.allowsRecurrence()) {
-                // Independent recovery is itself a complete Auto execution boundary.
-                // Do not leave FIRED-only proof behind: apply the same occurrence-
-                // idempotent Native stock mutation used by the live receiver.
-                AutoDeductionStockStore.AutoApplyResult stockResult =
-                        new AutoDeductionStockStore(appContext).applyAutoDeduction(
-                                medicationId, doseId, calendarDate, amount);
-                if (!stockResult.ok) {
-                    Log.e(TAG, "recover independent evidence: native stock apply failed for "
-                            + key + " — " + stockResult.error);
-                    return new FireResult(FireResult.Status.FAILED, false);
-                }
-                // The retry has now completed the same durable Auto occurrence that
-                // originally failed. If the original schedule row is still the active
-                // owner of this occurrence, continue the recurrence chain immediately.
-                // The ownership check is deliberately strict so a later reschedule or
-                // disable cannot recreate D+1 from stale retry evidence. When D is no
-                // longer present/owned, the independent evidence must not invent a new
-                // schedule; the normal scheduler/recovery path remains authoritative.
-                ScheduleResult successor = scheduleNextOccurrenceFromIndependentEvidenceLocked(
-                        medicationId, doseId, calendarDate, evidence);
-                if (!successor.ok) {
-                    Log.i(TAG, "recover independent evidence: successor not scheduled from "
-                            + "retry evidence (" + successor.error + ") for " + key);
-                }
-                clearIndependentFireRetryEvidenceLocked(key);
-            } else if (result.status == FireResult.Status.FAILED
-                    && !result.pendingRecorded) {
-                int prior = evidence.optInt("retryCount", 0);
-                int next = Math.min(prior + 1, AutoDeductionContract.MAX_FIRE_RETRIES);
-                recordIndependentFireRetryEvidenceLocked(
-                        medicationId, doseId, calendarDate, scheduledAt, amount,
-                        evidence.optString("timeHhmm", ""),
-                        evidence.optLong("recurrenceGeneration", 0L),
-                        evidence.optString("operationVersion", ""),
-                        next);
-            }
-            Log.i(TAG, "recover independent evidence: " + result.status
-                    + " pending=" + result.pendingRecorded + " for " + key);
-            return result;
-        }
-    }
+
     /**
      * Continue recurrence after a successful independent-fire recovery only when
      * the still-present D schedule metadata proves that the retry evidence owns it.
@@ -1223,58 +381,7 @@ public final class AutoDeductionScheduler {
      *
      * Caller MUST hold SCHEDULE_LOCK.
      */
-    private ScheduleResult scheduleNextOccurrenceFromIndependentEvidenceLocked(
-            String medicationId,
-            String doseId,
-            String calendarDate,
-            JSONObject evidence
-    ) {
-        if (evidence == null
-                || medicationId == null || medicationId.isEmpty()
-                || doseId == null || doseId.isEmpty()
-                || !AutoDeductionContract.isValidCalendarDate(calendarDate)) {
-            return ScheduleResult.fail("snapshot_stale");
-        }
-        String prefKey = AutoDeductionContract.occurrenceKey(
-                medicationId, doseId, calendarDate);
-        String currentRaw = getScheduleRaw(prefKey);
-        if (currentRaw == null || currentRaw.isEmpty()) {
-            return ScheduleResult.fail("snapshot_stale");
-        }
-        String evidenceVersion =
-                AutoDeductionSchedulingAdapter.extractOperationVersion(evidence);
-        long evidenceGeneration = evidence.optLong("recurrenceGeneration", 0L);
-        String evidenceTime = evidence.optString("timeHhmm", "");
-        double evidenceAmount = evidence.optDouble("amount", Double.NaN);
-        try {
-            JSONObject current = new JSONObject(currentRaw);
-            String activeVersion =
-                    AutoDeductionSchedulingAdapter.extractOperationVersion(current);
-            long activeGeneration =
-                    getRecurrenceGenerationLocked(medicationId, doseId);
-            String activeTime = current.optString("timeHhmm", "");
-            double activeAmount = current.optDouble("amount", Double.NaN);
-            if (evidenceVersion.isEmpty()
-                    || evidenceGeneration <= 0L
-                    || !AutoDeductionContract.isValidTimeHhmm(evidenceTime)
-                    || !AutoDeductionContract.isValidAmount(evidenceAmount)
-                    || !evidenceVersion.equals(activeVersion)
-                    || evidenceGeneration != activeGeneration
-                    || !evidenceTime.equals(activeTime)
-                    || Double.compare(evidenceAmount, activeAmount) != 0) {
-                return ScheduleResult.fail("snapshot_stale");
-            }
-            return scheduleNextOccurrenceIfAbsent(
-                    medicationId,
-                    doseId,
-                    calendarDate,
-                    evidenceTime,
-                    evidenceAmount,
-                    evidenceGeneration);
-        } catch (JSONException e) {
-            return ScheduleResult.fail("snapshot_stale");
-        }
-    }
+
     /**
      * Restore-boundary pass: ensure every durable FIRED occurrence has also reached
      * the Auto Native stock authority. This is deliberately independent of JavaScript
@@ -1284,182 +391,28 @@ public final class AutoDeductionScheduler {
      * <p>This pass never acknowledges the FIRED row. JS still owns marker/log
      * reconciliation and the final RECONCILED acknowledgement.</p>
      */
-    RestoreResult recoverFiredStockPass() {
-        AutoDeductionStockStore stock = new AutoDeductionStockStore(appContext);
-        // Native stock has no safe baseline until the current JS state has
-        // seeded the Native authority. Defer recovery until that initialization
-        // boundary is complete.
-        if (!stock.isInitialized()) {
-            Log.i(TAG, "recoverFiredStockPass: Native stock not initialized — defer to JS hydration");
-            return RestoreResult.success(0, 0);
-        }
-        AutoDeductionEventStore store = new AutoDeductionEventStore(appContext);
-        AutoDeductionEventStore.FiredEventsResult listed = store.listFiredEventsResult();
-        if (!listed.ok) {
-            return RestoreResult.failure(
-                    0, 1,
-                    listed.error != null ? listed.error : "fired_stock_list_failed");
-        }
-        int recovered = 0;
-        int failed = 0;
-        for (JSONObject event : listed.events) {
-            String medicationId = event.optString("medicationId", "").trim();
-            String doseId = event.optString("doseId", "").trim();
-            String calendarDate = event.optString("calendarDate", "");
-            double amount = event.optDouble("amount", Double.NaN);
-            if (medicationId.isEmpty()
-                    || doseId.isEmpty()
-                    || !AutoDeductionContract.isValidCalendarDate(calendarDate)
-                    || !AutoDeductionContract.isValidAmount(amount)) {
-                failed++;
-                continue;
-            }
-            AutoDeductionStockStore.AutoApplyResult stockResult =
-                    stock.applyAutoDeduction(
-                            medicationId, doseId, calendarDate, amount);
-            if (stockResult.ok) {
-                recovered++;
-            } else {
-                failed++;
-                Log.e(TAG, "recoverFiredStockPass: native stock apply failed for "
-                        + medicationId + "/" + doseId + "/" + calendarDate
-                        + " — " + stockResult.error);
-            }
-        }
-        if (failed > 0) {
-            return RestoreResult.failure(recovered, failed, "fired_stock_pass_failed");
-        }
-        return RestoreResult.success(recovered, 0);
-    }
+
     /**
      * Restore-boundary pass: attempt recovery for every independent fire-retry
      * evidence row, even when shared schedule metadata is missing.
      */
-    RestoreResult recoverIndependentFireRetryEvidencePass() {
-        // Retry evidence can only be recovered once the Native stock baseline
-        // exists; otherwise there is no authoritative balance to apply against.
-        if (!new AutoDeductionStockStore(appContext()).isInitialized()) {
-            Log.i(TAG, "independent evidence pass: Native stock not initialized — defer to JS hydration");
-            return RestoreResult.success(0, 0);
-        }
-        int recovered = 0;
-        int failed = 0;
-        boolean ok = true;
-        java.util.List<String[]> rows = new java.util.ArrayList<>();
-        synchronized (SCHEDULE_LOCK) {
-            Map<String, ?> all = fireRetryPrefs.getAll();
-            for (Map.Entry<String, ?> e : all.entrySet()) {
-                if (!e.getKey().startsWith(FIRE_RETRY_KEY_PREFIX)) continue;
-                if (!(e.getValue() instanceof String)) continue;
-                rows.add(new String[]{ e.getKey(), (String) e.getValue() });
-            }
-        }
-        for (String[] row : rows) {
-            try {
-                JSONObject evidence = new JSONObject(row[1]);
-                String medId = evidence.optString("medicationId", "");
-                String doseId = evidence.optString("doseId", "");
-                String date = evidence.optString("calendarDate", "");
-                if (medId.isEmpty() || doseId.isEmpty()
-                        || !AutoDeductionContract.isValidCalendarDate(date)) {
-                    failed++;
-                    ok = false;
-                    Log.e(TAG, "independent evidence row malformed: " + row[0]);
-                    continue;
-                }
-                FireResult fr = recoverFireFromIndependentEvidence(medId, doseId, date);
-                if (fr.allowsRecurrence()) {
-                    recovered++;
-                } else if (fr.status == FireResult.Status.CANCELLED) {
-                    // cancelled: evidence cleared; not a boundary failure
-                } else {
-                    // Still FAILED — evidence retained for later retry.
-                    int count = evidence.optInt("retryCount", 0);
-                    if (count >= AutoDeductionContract.MAX_FIRE_RETRIES) {
-                        // Unresolved fire: evidence remains but no durable FIRED/pending
-                        // and no further bounded retry is allowed. Recovery boundary is
-                        // incomplete — must not report ok=true (would success-cache and
-                        // skip later boundaries while the exact deduction never lands).
-                        failed++;
-                        ok = false;
-                        Log.e(TAG, "independent evidence unresolved after MAX_FIRE_RETRIES for "
-                                + medId + "/" + doseId + "/" + date
-                                + " — evidence retained, no further retry");
-                    } else {
-                        long scheduledAt = evidence.optLong("scheduledAtEpochMs", 0L);
-                        double amount = evidence.optDouble("amount", Double.NaN);
-                        String time = evidence.optString("timeHhmm", "");
-                        long gen = evidence.optLong("recurrenceGeneration", 0L);
-                        String ver = evidence.optString("operationVersion", "");
-                        if (!AutoDeductionContract.isValidAmount(amount)) {
-                            failed++;
-                            ok = false;
-                            Log.e(TAG, "independent evidence invalid amount: " + row[0]);
-                        } else {
-                            boolean retryOk = scheduleFireRetry(
-                                    medId, doseId, date, scheduledAt, amount,
-                                    time, gen, ver, Math.min(count + 1,
-                                            AutoDeductionContract.MAX_FIRE_RETRIES));
-                            if (!retryOk) {
-                                failed++;
-                                ok = false;
-                                Log.e(TAG, "independent evidence retry schedule failed for "
-                                        + medId + "/" + doseId + "/" + date);
-                            }
-                        }
-                    }
-                }
-            } catch (JSONException e) {
-                failed++;
-                ok = false;
-                Log.e(TAG, "independent evidence parse failed: " + row[0], e);
-            }
-        }
-        if (!ok || failed > 0) {
-            return RestoreResult.failure(recovered, failed, "independent_evidence_pass_failed");
-        }
-        return RestoreResult.success(recovered, failed);
-    }
+
     /**
      * Read independent fire-retry evidence for an occurrence, or null.
      * Safe without SCHEDULE_LOCK for diagnostics; mutations must use lock.
      */
-    public JSONObject getIndependentFireRetryEvidence(
-            String medicationId, String doseId, String calendarDate) {
-        final String key = AutoDeductionContract.occurrenceKey(
-                medicationId, doseId, calendarDate);
-        String raw = fireRetryPrefs.getString(FIRE_RETRY_KEY_PREFIX + key, null);
-        if (raw == null || raw.isEmpty()) return null;
-        try {
-            return new JSONObject(raw);
-        } catch (JSONException e) {
-            return null;
-        }
-    }
-    /**
-     * Schedule a single occurrence.
-     *
-     * Validation runs outside the lock. The Auto business decision plus its
-     * scheduling-adapter call run inside one synchronized(SCHEDULE_LOCK) critical
-     * section so recurrence authorization and schedule intent cannot interleave.
-     */
+
     public ScheduleResult scheduleOccurrence(
             String medicationId,
             String doseId,
             String calendarDate,
             String timeHhmm,
             double amount,
-            long scheduledAtEpochMs
-    ) {
-        return scheduleOccurrence(
-                medicationId,
-                doseId,
-                calendarDate,
-                timeHhmm,
-                amount,
-                scheduledAtEpochMs,
-                null);
+            long scheduledAtEpochMs) {
+        return recurrenceService.scheduleOccurrence(
+                medicationId, doseId, calendarDate, timeHhmm, amount, scheduledAtEpochMs);
     }
+
     public ScheduleResult scheduleOccurrence(
             String medicationId,
             String doseId,
@@ -1467,151 +420,23 @@ public final class AutoDeductionScheduler {
             String timeHhmm,
             double amount,
             long scheduledAtEpochMs,
-            String treatmentEndDate
-    ) {
-        if (medicationId == null || medicationId.isEmpty())
-            return ScheduleResult.fail("missing_medicationId");
-        if (doseId == null || doseId.isEmpty())
-            return ScheduleResult.fail("missing_doseId");
-        if (!AutoDeductionContract.isValidCalendarDate(calendarDate))
-            return ScheduleResult.fail("invalid_calendarDate");
-        if (!AutoDeductionContract.isValidTimeHhmm(timeHhmm))
-            return ScheduleResult.fail("invalid_time");
-        if (!AutoDeductionContract.isValidAmount(amount))
-            return ScheduleResult.fail("invalid_amount");
-        if (treatmentEndDate != null && !treatmentEndDate.isEmpty()) {
-            if (!AutoDeductionContract.isValidCalendarDate(treatmentEndDate)) {
-                return ScheduleResult.fail("invalid_treatment_end_date");
-            }
-            if (calendarDate.compareTo(treatmentEndDate) > 0) {
-                return ScheduleResult.fail("treatment_ended");
-            }
-        }
-        long triggerAt = scheduledAtEpochMs;
-        if (triggerAt <= 0L) {
-            Long computed = computeEpochMs(calendarDate, timeHhmm);
-            if (computed == null) return ScheduleResult.fail("invalid_datetime");
-            triggerAt = computed;
-        }
-        if (triggerAt <= System.currentTimeMillis() - 2000L)
-            return ScheduleResult.fail("trigger_in_past");
-        if (!canScheduleExactAlarms())
-            return ScheduleResult.fail("exact_alarm_permission_denied");
-        String key = AutoDeductionContract.occurrenceKey(
-                medicationId, doseId, calendarDate);
-        JSONObject payload = new JSONObject();
-        try {
-            payload.put("medicationId", medicationId);
-            payload.put("doseId", doseId);
-            payload.put("calendarDate", calendarDate);
-            payload.put("timeHhmm", timeHhmm);
-            payload.put("amount", amount);
-            payload.put("scheduledAtEpochMs", triggerAt);
-            if (treatmentEndDate != null && !treatmentEndDate.isEmpty()) {
-                payload.put(
-                        AutoDeductionContract.EXTRA_TREATMENT_END_DATE,
-                        treatmentEndDate);
-            }
-        } catch (JSONException e) {
-            Log.e(TAG, "schedule payload build failed", e);
-            return ScheduleResult.fail("payload_build_failed");
-        }
-        synchronized (SCHEDULE_LOCK) {
-            return scheduleOccurrenceLocked(
-                    key,
-                    key,
-                    payload,
-                    triggerAt,
-                    null);
-        }
+            String treatmentEndDate) {
+        return recurrenceService.scheduleOccurrence(
+                medicationId,
+                doseId,
+                calendarDate,
+                timeHhmm,
+                amount,
+                scheduledAtEpochMs,
+                treatmentEndDate);
     }
-    /**
-     * Auto business scheduling wrapper.
-     *
-     * <p>Recurrence authorization remains feature-owned here. Actual durable
-     * schedule persistence, operation ordering, PendingIntent construction,
-     * AlarmManager installation, and ownership-safe rollback are delegated to
-     * {@link AutoDeductionSchedulingAdapter}.</p>
-     */
-    private ScheduleResult scheduleOccurrenceLocked(
-            String prefKey,
-            String key,
-            JSONObject payload,
-            long triggerAt,
-            String requiredVersion
-    ) {
-        return scheduleOccurrenceLocked(
-                prefKey,
-                key,
-                payload,
-                triggerAt,
-                requiredVersion,
-                null);
-    }
-    private ScheduleResult scheduleOccurrenceLocked(
-            String prefKey,
-            String key,
-            JSONObject payload,
-            long triggerAt,
-            String requiredVersion,
-            Long requiredRecurrenceGeneration
-    ) {
-        final String medicationId = payload.optString("medicationId", "");
-        final String doseId = payload.optString("doseId", "");
-        final String calendarDate = payload.optString("calendarDate", "");
-        final String timeHhmm = payload.optString("timeHhmm", "");
-        final double amount = payload.optDouble("amount", Double.NaN);
-        final String treatmentEndDate =
-                payload.optString(AutoDeductionContract.EXTRA_TREATMENT_END_DATE, "");
-        if (!treatmentEndDate.isEmpty()
-                && (!AutoDeductionContract.isValidCalendarDate(treatmentEndDate)
-                || calendarDate.compareTo(treatmentEndDate) > 0)) {
-            return ScheduleResult.fail("treatment_ended");
-        }
-        final long recurrenceGeneration;
-        if (requiredRecurrenceGeneration != null) {
-            if (!isRecurrenceGenerationAuthorizedLocked(
-                    medicationId,
-                    doseId,
-                    requiredRecurrenceGeneration)) {
-                return ScheduleResult.fail("recurrence_generation_unauthorized");
-            }
-            recurrenceGeneration = requiredRecurrenceGeneration;
-        } else {
-            long ensured = ensureRecurrenceGenerationLocked(
-                    medicationId,
-                    doseId);
-            if (ensured <= 0L) {
-                return ScheduleResult.fail("recurrence_generation_write_failed");
-            }
-            recurrenceGeneration = ensured;
-        }
-        AutoDeductionSchedulingAdapter.ScheduleResult result =
-                schedulingAdapter.scheduleOccurrence(
-                        key,
-                        medicationId,
-                        doseId,
-                        calendarDate,
-                        timeHhmm,
-                        amount,
-                        triggerAt,
-                        treatmentEndDate.isEmpty() ? null : treatmentEndDate,
-                        recurrenceGeneration,
-                        requiredVersion);
-        if (!result.ok) {
-            return ScheduleResult.fail(result.error);
-        }
-        return ScheduleResult.success(key);
-    }
-    private String getScheduleRaw(String storageKey) {
-        return schedulingAdapter.getScheduleRaw(storageKey);
-    }
-    private boolean hasSchedule(String storageKey) {
+
+    boolean hasSchedule(String storageKey) {
         return storageKey != null
                 && !storageKey.isEmpty()
                 && schedulingAdapter.hasSchedule(storageKey);
     }
-    private Map<String, ?> getAllScheduleMetadata() {
+    Map<String, String> getAllScheduleMetadata() {
         return schedulingAdapter.listScheduleMetadata();
     }
     private boolean removeScheduleIfOwned(
@@ -1623,29 +448,29 @@ public final class AutoDeductionScheduler {
                         storageKey,
                         expectedOperationVersion);
     }
-    private boolean removeSchedule(String storageKey) {
+    boolean removeSchedule(String storageKey) {
         return storageKey != null
                 && !storageKey.isEmpty()
                 && schedulingAdapter.removeSchedule(storageKey);
     }
-    private boolean hasCancellationTombstoneStored(String occurrenceKey) {
+    boolean hasCancellationTombstoneStored(String occurrenceKey) {
         return occurrenceKey != null
                 && !occurrenceKey.isEmpty()
                 && schedulingAdapter.hasCancellationTombstone(occurrenceKey);
     }
-    private boolean isEffectivelyCancelledStored(String occurrenceKey) {
+    boolean isEffectivelyCancelledStored(String occurrenceKey) {
         return occurrenceKey != null
                 && !occurrenceKey.isEmpty()
                 && schedulingAdapter.isEffectivelyCancelled(occurrenceKey);
     }
-    private boolean clearCancellationTombstoneStored(String occurrenceKey) {
+    boolean clearCancellationTombstoneStored(String occurrenceKey) {
         if (occurrenceKey == null || occurrenceKey.isEmpty()) return true;
         return schedulingAdapter.clearCancellationTombstone(occurrenceKey);
     }
     /**
      * Conditional rollback — caller MUST already hold {@link #SCHEDULE_LOCK}.
      */
-    private boolean removeScheduleMetadataIfVersionLocked(
+    boolean removeScheduleMetadataIfVersionLocked(
             String storageKey, String expectedVersion) {
         return removeScheduleIfOwned(storageKey, expectedVersion);
     }
@@ -1662,10 +487,10 @@ public final class AutoDeductionScheduler {
      * Unconditional remove — intentional cancel / malformed restore cleanup.
      * Caller must hold SCHEDULE_LOCK, or use the public cancel path.
      */
-    private void removeScheduleMetadataLocked(String storageKey) {
+    void removeScheduleMetadataLocked(String storageKey) {
         removeSchedule(storageKey);
     }
-    private void removeScheduleMetadata(String prefKey) {
+    void removeScheduleMetadata(String prefKey) {
         synchronized (SCHEDULE_LOCK) {
             removeScheduleMetadataLocked(prefKey);
         }
@@ -1686,84 +511,13 @@ public final class AutoDeductionScheduler {
      * write fails, or metadata remove commit fails (stale metadata must not
      * be reported as success when cancellation intent is not durable).
      */
-    public CancelResult cancelOccurrence(
-            String medicationId,
-            String doseId,
-            String calendarDate) {
-        if (medicationId == null || medicationId.isEmpty()
-                || doseId == null || doseId.isEmpty()
-                || !AutoDeductionContract.isValidCalendarDate(calendarDate)) {
-            return CancelResult.fail("invalid_args");
-        }
-        String key = AutoDeductionContract.occurrenceKey(
-                medicationId, doseId, calendarDate);
-        synchronized (SCHEDULE_LOCK) {
-            syncAlarmRuntimeTestControls();
-            AutoDeductionSchedulingAdapter.CancelResult result =
-                    schedulingAdapter.cancelOccurrence(
-                            medicationId,
-                            doseId,
-                            calendarDate);
-            if (!result.isOk()) return CancelResult.fail(result.error);
-            return result.status
-                    == AutoDeductionSchedulingAdapter.CancelResult.Status.ALREADY_ABSENT
-                    ? CancelResult.alreadyAbsent()
-                    : CancelResult.success();
-        }
-    }
+
     /** True if a durable cancellation tombstone entry exists (raw presence). */
-    boolean hasCancellationTombstone(String occurrenceKey) {
-        if (occurrenceKey == null || occurrenceKey.isEmpty()) return false;
-        synchronized (SCHEDULE_LOCK) {
-            return hasCancellationTombstoneStored(occurrenceKey);
-        }
-    }
-    public boolean isOccurrenceCancelled(
-            String medicationId,
-            String doseId,
-            String calendarDate) {
-        if (medicationId == null || medicationId.isEmpty()
-                || doseId == null || doseId.isEmpty()
-                || !AutoDeductionContract.isValidCalendarDate(calendarDate)) {
-            return false;
-        }
-        return isOccurrenceCancelledKey(
-                AutoDeductionContract.occurrenceKey(
-                        medicationId, doseId, calendarDate));
-    }
-    boolean isOccurrenceCancelledKey(String occurrenceKey) {
-        if (occurrenceKey == null || occurrenceKey.isEmpty()) return false;
-        synchronized (SCHEDULE_LOCK) {
-            return isEffectivelyCancelledStored(occurrenceKey);
-        }
-    }
-    private boolean clearCancellationTombstoneLocked(String occurrenceKey) {
-        if (occurrenceKey == null || occurrenceKey.isEmpty()) return true;
-        return clearCancellationTombstoneStored(occurrenceKey);
-    }
-    public ScheduleResult scheduleNextOccurrence(
-            String medicationId,
-            String doseId,
-            String fromCalendarDate,
-            String timeHhmm,
-            double amount
-    ) {
-        String nextDate = nextCalendarDate(fromCalendarDate);
-        if (nextDate == null) {
-            return ScheduleResult.fail("invalid_next_date");
-        }
-        Long epoch = computeEpochMs(nextDate, timeHhmm);
-        if (epoch == null) {
-            return ScheduleResult.fail("invalid_next_datetime");
-        }
-        if (epoch <= System.currentTimeMillis()) {
-            nextDate = nextCalendarDate(nextDate);
-            if (nextDate == null) return ScheduleResult.fail("invalid_next_date");
-            epoch = computeEpochMs(nextDate, timeHhmm);
-            if (epoch == null) return ScheduleResult.fail("invalid_next_datetime");
-        }
-        return scheduleOccurrence(medicationId, doseId, nextDate, timeHhmm, amount, epoch);
-    }
+
+
+
+
+
     /**
      * Schedule the next calendar-date occurrence only if it is absent and not
      * effectively cancelled.
@@ -1790,119 +544,7 @@ public final class AutoDeductionScheduler {
      *        Intent. Must be {@code > 0} and match the durable active generation;
      *        otherwise successor creation is refused.
      */
-    public ScheduleResult scheduleNextOccurrenceIfAbsent(
-            String medicationId,
-            String doseId,
-            String fromCalendarDate,
-            String timeHhmm,
-            double amount,
-            long expectedRecurrenceGeneration
-    ) {
-        if (medicationId == null || medicationId.isEmpty()
-                || doseId == null || doseId.isEmpty()
-                || !AutoDeductionContract.isValidCalendarDate(fromCalendarDate)
-                || !AutoDeductionContract.isValidTimeHhmm(timeHhmm)
-                || !AutoDeductionContract.isValidAmount(amount)) {
-            return ScheduleResult.fail("invalid_args");
-        }
-        String nextDate = nextCalendarDate(fromCalendarDate);
-        if (nextDate == null) {
-            return ScheduleResult.fail("invalid_next_date");
-        }
-        Long epoch = computeEpochMs(nextDate, timeHhmm);
-        if (epoch == null) {
-            return ScheduleResult.fail("invalid_next_datetime");
-        }
-        if (epoch <= System.currentTimeMillis()) {
-            nextDate = nextCalendarDate(nextDate);
-            if (nextDate == null) return ScheduleResult.fail("invalid_next_date");
-            epoch = computeEpochMs(nextDate, timeHhmm);
-            if (epoch == null) return ScheduleResult.fail("invalid_next_datetime");
-        }
-        final String resolvedNextDate = nextDate;
-        final long triggerAt = epoch;
-        final String nextKey = AutoDeductionContract.occurrenceKey(
-                medicationId, doseId, resolvedNextDate);
-        final String nextPrefKey = nextKey;
-        if (!canScheduleExactAlarms()) {
-            synchronized (SCHEDULE_LOCK) {
-                if (hasSchedule(nextPrefKey)) {
-                    return ScheduleResult.success(nextKey);
-                }
-                // Absent + cancelled: do not report permission denial as a need to create.
-                if (isOccurrenceCancelledKey(nextKey)) {
-                    Log.i(TAG, "scheduleNextOccurrenceIfAbsent: successor cancelled — "
-                            + "not recreating " + nextKey);
-                    return ScheduleResult.success(nextKey);
-                }
-            }
-            return ScheduleResult.fail("exact_alarm_permission_denied");
-        }
-        JSONObject payload = new JSONObject();
-        try {
-            payload.put("medicationId", medicationId);
-            payload.put("doseId", doseId);
-            payload.put("calendarDate", resolvedNextDate);
-            payload.put("timeHhmm", timeHhmm);
-            payload.put("amount", amount);
-            payload.put("scheduledAtEpochMs", triggerAt);
-        } catch (JSONException e) {
-            Log.e(TAG, "scheduleNextOccurrenceIfAbsent payload failed", e);
-            return ScheduleResult.fail("payload_failed");
-        }
-        synchronized (SCHEDULE_LOCK) {
-            String treatmentEndDate = "";
-            String currentRaw = getScheduleRaw(
-                    AutoDeductionContract.occurrenceKey(
-                            medicationId, doseId, fromCalendarDate));
-            if (currentRaw != null && !currentRaw.isEmpty()) {
-                try {
-                    treatmentEndDate = new JSONObject(currentRaw).optString(
-                            AutoDeductionContract.EXTRA_TREATMENT_END_DATE, "");
-                } catch (JSONException e) {
-                    return ScheduleResult.fail("malformed_current_schedule");
-                }
-            }
-            if (!treatmentEndDate.isEmpty()) {
-                if (!AutoDeductionContract.isValidCalendarDate(treatmentEndDate)) {
-                    return ScheduleResult.fail("invalid_treatment_end_date");
-                }
-                if (resolvedNextDate.compareTo(treatmentEndDate) > 0) {
-                    return new ScheduleResult(true, "treatment_ended", nextKey);
-                }
-                try {
-                    payload.put(
-                            AutoDeductionContract.EXTRA_TREATMENT_END_DATE,
-                            treatmentEndDate);
-                } catch (JSONException e) {
-                    return ScheduleResult.fail("payload_failed");
-                }
-            }
-            // refuse successor if disable/cancel invalidated this chain.
-            if (!isRecurrenceGenerationAuthorizedLocked(
-                    medicationId, doseId, expectedRecurrenceGeneration)) {
-                Log.i(TAG, "scheduleNextOccurrenceIfAbsent: recurrence generation invalid — "
-                        + "not creating successor for " + medicationId + "/" + doseId
-                        + " expectedGen=" + expectedRecurrenceGeneration);
-                return ScheduleResult.fail("recurrence_authorization_invalid");
-            }
-            if (hasSchedule(nextPrefKey)) {
-                Log.i(TAG, "scheduleNextOccurrenceIfAbsent: successor already present — "
-                        + "not overwriting " + nextPrefKey);
-                return ScheduleResult.success(nextKey);
-            }
-            // Metadata absent but cancellation tombstone still effective: must not
-            // call scheduleOccurrenceLocked (it would clear the tombstone and
-            // resurrect the cancelled D+1 from a stale/duplicate D delivery).
-            if (isOccurrenceCancelledKey(nextKey)) {
-                Log.i(TAG, "scheduleNextOccurrenceIfAbsent: successor cancelled — "
-                        + "not recreating " + nextKey);
-                return ScheduleResult.success(nextKey);
-            }
-            return scheduleOccurrenceLocked(
-                    nextPrefKey, nextKey, payload, triggerAt, /*requiredVersion*/ null);
-        }
-    }
+
     /**
      * After a past occurrence is recovered as a durable fire, continue the
      * recurrence chain and only then resolve snapshot-owned schedule metadata.
@@ -1922,54 +564,7 @@ public final class AutoDeductionScheduler {
      * not schedule/overwrite D+1 with obsolete parameters. If D+1 already exists,
      * leave it untouched (do not replace with snapshot params).
      */
-    private void continueRecurrenceAfterPastRecovery(
-            String medicationId,
-            String doseId,
-            String calendarDate,
-            String timeHhmm,
-            double amount,
-            FireResult fr,
-            String prefKey,
-            String observedVersion
-    ) {
-        if (fr == null) {
-            return;
-        }
-        if (fr.isCancelled()) {
-            if (!removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
-                Log.i(TAG, "restore past cancel cleanup skipped (ownership lost): " + prefKey);
-            }
-            return;
-        }
-        if (!fr.allowsRecurrence()) {
-            // FAILED with no durable fire/pending — keep schedule metadata.
-            Log.e(TAG, "restore past: FIRED and pending both failed for "
-                    + medicationId + "/" + doseId + "/" + calendarDate
-                    + " — preserving schedule metadata as recovery source");
-            return;
-        }
-        // Durable fire accepted → establish successor only if snapshot still owns D.
-        ScheduleResult next = scheduleNextOccurrenceIfSnapshotOwnsPast(
-                medicationId, doseId, calendarDate, timeHhmm, amount, prefKey, observedVersion);
-        if (!next.ok) {
-            if ("snapshot_stale".equals(next.error)) {
-                Log.i(TAG, "restore past: snapshot stale — not scheduling successor from "
-                        + "obsolete params: " + medicationId + "/" + doseId + "/" + calendarDate);
-                // Do not remove newer D metadata; do not overwrite D+1.
-                return;
-            }
-            Log.w(TAG, "restore past: successor not scheduled (" + next.error
-                    + ") — keeping past metadata for retry: "
-                    + medicationId + "/" + doseId + "/" + calendarDate);
-            return;
-        }
-        Log.i(TAG, "restore past: recurrence continued to next occurrence for "
-                + medicationId + "/" + doseId + "/" + calendarDate
-                + " (fire=" + fr.status + ", pendingRecorded=" + fr.pendingRecorded + ")");
-        if (!removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
-            Log.i(TAG, "restore past metadata keep (ownership lost / already gone): " + prefKey);
-        }
-    }
+
     /**
      * Schedule D+1 from a past-recovery snapshot only while that snapshot still
      * owns the past schedule row. Caller may not hold {@link #SCHEDULE_LOCK}.
@@ -1982,126 +577,7 @@ public final class AutoDeductionScheduler {
      *   <li>Otherwise install D+1 via {@link #scheduleOccurrenceLocked}</li>
      * </ol>
      */
-    private ScheduleResult scheduleNextOccurrenceIfSnapshotOwnsPast(
-            String medicationId,
-            String doseId,
-            String fromCalendarDate,
-            String timeHhmm,
-            double amount,
-            String pastPrefKey,
-            String observedVersion
-    ) {
-        if (medicationId == null || medicationId.isEmpty()
-                || doseId == null || doseId.isEmpty()
-                || !AutoDeductionContract.isValidCalendarDate(fromCalendarDate)
-                || !AutoDeductionContract.isValidTimeHhmm(timeHhmm)
-                || !AutoDeductionContract.isValidAmount(amount)) {
-            return ScheduleResult.fail("invalid_args");
-        }
-        if (pastPrefKey == null || pastPrefKey.isEmpty()
-                || observedVersion == null || observedVersion.isEmpty()) {
-            // Without a durable ownership token the snapshot cannot authorize D+1.
-            return ScheduleResult.fail("snapshot_stale");
-        }
-        String nextDate = nextCalendarDate(fromCalendarDate);
-        if (nextDate == null) {
-            return ScheduleResult.fail("invalid_next_date");
-        }
-        Long epoch = computeEpochMs(nextDate, timeHhmm);
-        if (epoch == null) {
-            return ScheduleResult.fail("invalid_next_datetime");
-        }
-        if (epoch <= System.currentTimeMillis()) {
-            nextDate = nextCalendarDate(nextDate);
-            if (nextDate == null) return ScheduleResult.fail("invalid_next_date");
-            epoch = computeEpochMs(nextDate, timeHhmm);
-            if (epoch == null) return ScheduleResult.fail("invalid_next_datetime");
-        }
-        if (!canScheduleExactAlarms()) {
-            // D+1 may already exist — check under lock; otherwise cannot install.
-            synchronized (SCHEDULE_LOCK) {
-                if (!isMetadataOwnedByVersion(
-                        getScheduleRaw(pastPrefKey), observedVersion)) {
-                    return ScheduleResult.fail("snapshot_stale");
-                }
-                String nextKey = AutoDeductionContract.occurrenceKey(
-                        medicationId, doseId, nextDate);
-                if (hasSchedule(nextKey)) {
-                    return ScheduleResult.success(nextKey);
-                }
-            }
-            return ScheduleResult.fail("exact_alarm_permission_denied");
-        }
-        final String resolvedNextDate = nextDate;
-        final long triggerAt = epoch;
-        final String nextKey = AutoDeductionContract.occurrenceKey(
-                medicationId, doseId, resolvedNextDate);
-        final String nextPrefKey = nextKey;
-        synchronized (SCHEDULE_LOCK) {
-            // Snapshot must still own past D — otherwise amount/time are obsolete.
-            String currentPast = getScheduleRaw(pastPrefKey);
-            if (!isMetadataOwnedByVersion(currentPast, observedVersion)) {
-                return ScheduleResult.fail("snapshot_stale");
-            }
-            // do not continue recurrence for an invalidated generation.
-            long snapGen = 0L;
-            try {
-                if (currentPast != null) {
-                    snapGen = getRecurrenceGenerationLocked(medicationId, doseId);
-                }
-            } catch (JSONException ignored) { /* treat as 0 */ }
-            if (!isRecurrenceGenerationAuthorizedLocked(medicationId, doseId, snapGen)) {
-                Log.i(TAG, "restore past: recurrence generation invalid — no successor for "
-                        + medicationId + "/" + doseId);
-                return ScheduleResult.fail("recurrence_authorization_invalid");
-            }
-            String treatmentEndDate = "";
-            if (currentPast != null && !currentPast.isEmpty()) {
-                try {
-                    treatmentEndDate = new JSONObject(currentPast).optString(
-                            AutoDeductionContract.EXTRA_TREATMENT_END_DATE, "");
-                } catch (JSONException e) {
-                    return ScheduleResult.fail("snapshot_stale");
-                }
-            }
-            if (!treatmentEndDate.isEmpty()) {
-                if (!AutoDeductionContract.isValidCalendarDate(treatmentEndDate)) {
-                    return ScheduleResult.fail("invalid_treatment_end_date");
-                }
-                if (resolvedNextDate.compareTo(treatmentEndDate) > 0) {
-                    return new ScheduleResult(
-                            true,
-                            "treatment_ended",
-                            nextKey);
-                }
-            }
-            JSONObject payload = new JSONObject();
-            try {
-                payload.put("medicationId", medicationId);
-                payload.put("doseId", doseId);
-                payload.put("calendarDate", resolvedNextDate);
-                payload.put("timeHhmm", timeHhmm);
-                payload.put("amount", amount);
-                payload.put("scheduledAtEpochMs", triggerAt);
-                if (!treatmentEndDate.isEmpty()) {
-                    payload.put(
-                            AutoDeductionContract.EXTRA_TREATMENT_END_DATE,
-                            treatmentEndDate);
-                }
-            } catch (JSONException e) {
-                Log.e(TAG, "scheduleNextOccurrenceIfSnapshotOwnsPast payload failed", e);
-                return ScheduleResult.fail("payload_failed");
-            }
-            // Never overwrite an existing successor with recovery snapshot params.
-            if (hasSchedule(nextPrefKey)) {
-                Log.i(TAG, "restore past: successor already present — not overwriting "
-                        + nextPrefKey);
-                return ScheduleResult.success(nextKey);
-            }
-            return scheduleOccurrenceLocked(
-                    nextPrefKey, nextKey, payload, triggerAt, /*requiredVersion*/ null);
-        }
-    }
+
     /**
      * Restore future alarms from persisted schedule payloads (reboot).
      *
@@ -2140,298 +616,8 @@ public final class AutoDeductionScheduler {
             return new RestoreResult(false, restored, failed, error);
         }
     }
-    public RestoreResult restoreFutureSchedules() {
-        if (!canScheduleExactAlarms()) {
-            Log.w(TAG, "restoreFutureSchedules: exact alarm permission denied");
-            // Still attempt past-schedule promotion to FIRED.
-        }
-        int restored = 0;
-        int failed = 0;
-        boolean boundaryOk = true;
-        if (forceRestoreFutureFailureForTest) {
-            return RestoreResult.failure(0, 0, "forced_restore_failure");
-        }
-        java.util.List<String[]> snapshot = new java.util.ArrayList<>();
-        synchronized (SCHEDULE_LOCK) {
-            Map<String, ?> all = getAllScheduleMetadata();
-            for (Map.Entry<String, ?> e : all.entrySet()) {
-                Object v = e.getValue();
-                if (!(v instanceof String)) continue;
-                String raw = (String) v;
-                String observedVersion = "";
-                try {
-                    JSONObject tmp = new JSONObject(raw);
-                    observedVersion = AutoDeductionSchedulingAdapter.extractOperationVersion(tmp);
-                } catch (JSONException ignored) {
-                }
-                snapshot.add(new String[]{ e.getKey(), raw, observedVersion });
-            }
-        }
-        for (String[] entry : snapshot) {
-            String prefKey = entry[0];
-            String raw = entry[1];
-            String observedVersion = entry[2];
-            try {
-                JSONObject o = new JSONObject(raw);
-                String medId = o.optString("medicationId", "");
-                String doseId = o.optString("doseId", "");
-                String date = o.optString("calendarDate", "");
-                String time = o.optString("timeHhmm", "");
-                double amount = o.optDouble("amount", Double.NaN);
-                long epoch = o.optLong("scheduledAtEpochMs", 0L);
-                String treatmentEndDate = o.optString(
-                        AutoDeductionContract.EXTRA_TREATMENT_END_DATE, "");
-                boolean validTreatmentEndDate =
-                        treatmentEndDate.isEmpty()
-                                || AutoDeductionContract.isValidCalendarDate(treatmentEndDate);
-                ScheduleStorageIdentity keyIdentity = parseScheduleStorageKey(prefKey);
-                boolean validPayload =
-                        !medId.isEmpty()
-                        && !doseId.isEmpty()
-                        && AutoDeductionContract.isValidCalendarDate(date)
-                        && AutoDeductionContract.isValidTimeHhmm(time)
-                        && AutoDeductionContract.isValidAmount(amount)
-                        && validTreatmentEndDate;
-                boolean keyMatchesPayload =
-                        keyIdentity != null
-                        && keyIdentity.medicationId.equals(medId)
-                        && keyIdentity.doseId.equals(doseId)
-                        && keyIdentity.calendarDate.equals(date);
-                if (!validPayload || !keyMatchesPayload) {
-                    String reason = !validPayload
-                            ? "malformed_fields"
-                            : "identity_mismatch";
-                    if (!quarantineMalformedScheduleMetadata(prefKey, raw, reason)) {
-                        Log.e(TAG, "restore: malformed schedule quarantine failed for " + prefKey);
-                        failed++;
-                        boundaryOk = false;
-                    }
-                    // quarantine success OR fail-closed: do not treat unproven cleanup as ok
-                    continue;
-                }
-                String occurrenceKey = AutoDeductionContract.occurrenceKey(medId, doseId, date);
-                if (!treatmentEndDate.isEmpty()
-                        && date.compareTo(treatmentEndDate) > 0) {
-                    synchronized (SCHEDULE_LOCK) {
-                        if (!isMetadataOwnedByVersion(
-                                getScheduleRaw(prefKey), observedVersion)) {
-                            continue;
-                        }
-                        AutoDeductionSchedulingAdapter.CancelResult cancel =
-                                schedulingAdapter.cancelOccurrence(medId, doseId, date);
-                        if (!cancel.isOk()) {
-                            failed++;
-                            boundaryOk = false;
-                        }
-                    }
-                    continue;
-                }
-                if (epoch <= 0) {
-                    Long computed = computeEpochMs(date, time);
-                    if (computed == null) {
-                        // Unrecoverable epoch — cleanup; ownership_lost is not failure.
-                        if (!removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
-                            Log.i(TAG, "restore: epoch-null cleanup ownership_lost/gone: " + prefKey);
-                        }
-                        // Cannot prove recovery of a valid schedule — leave as resolved via drop.
-                        continue;
-                    }
-                    epoch = computed;
-                }
-                // multi-day catch-up — every due occurrence from this
-                // snapshot date forward is recovered as FIRED (no horizon); the first
-                // not-yet-due date becomes the live AlarmManager schedule.
-                if (epoch <= recoveryNowMs()) {
-                    if (!new AutoDeductionStockStore(appContext()).isInitialized()) {
-                        Log.i(TAG, "restore: past occurrence deferred until Native stock is initialized: "
-                                + prefKey);
-                        continue;
-                    }
-                    long snapGen;
-                    synchronized (SCHEDULE_LOCK) {
-                        snapGen = getRecurrenceGenerationLocked(medId, doseId);
-                    }
-                    CatchUpResult catchUp = catchUpMissedOccurrencesAndScheduleNext(
-                            medId, doseId, date, time, amount, snapGen,
-                            prefKey, observedVersion);
-                    // restored counts future AlarmManager installs only (not FIRED rows).
-                    if (catchUp.futureInstalled) {
-                        restored++;
-                    }
-                    if (catchUp.incomplete) {
-                        Log.e(TAG, "restore: catch-up incomplete for " + prefKey);
-                        failed++;
-                        boundaryOk = false;
-                    }
-                    continue;
-                }
-                // Future: effectively cancelled → never reinstall; drop stale metadata.
-                // A newer schedule metadata supersedes a leftover tombstone so legitimate
-                // reschedule is not suppressed.
-                if (isOccurrenceCancelledKey(occurrenceKey)) {
-                    Log.i(TAG, "restore skip (cancelled): " + medId + "/" + doseId + "/" + date);
-                    // Prior cancellation is expected; ownership_lost on cleanup is not failure.
-                    if (!removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
-                        Log.i(TAG, "restore future cancel cleanup skipped (ownership lost): "
-                                + prefKey);
-                    }
-                    continue;
-                }
-                // Leftover tombstone under a superseding schedule: best-effort cleanup.
-                if (hasCancellationTombstone(occurrenceKey)) {
-                    synchronized (SCHEDULE_LOCK) {
-                        clearCancellationTombstoneLocked(occurrenceKey);
-                    }
-                }
-                if (!canScheduleExactAlarms()) {
-                    // Future schedule requires AlarmManager — cannot complete recovery.
-                    Log.w(TAG, "restore: exact alarm permission denied for future " + prefKey);
-                    failed++;
-                    boundaryOk = false;
-                    continue;
-                }
-                // Rebuild epoch from calendarDate + timeHhmm in the *current* default
-                // timezone so a TIMEZONE_CHANGED restore does not reinstall a stale epoch.
-                Long recomputed = computeEpochMs(date, time);
-                if (recomputed == null) {
-                    if (!removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
-                        Log.i(TAG, "restore: recompute-null cleanup ownership_lost: " + prefKey);
-                    }
-                    continue;
-                }
-                if (recomputed <= recoveryNowMs()) {
-                    // After TZ change this occurrence is now in the past: multi-day catch-up.
-                    if (!new AutoDeductionStockStore(appContext()).isInitialized()) {
-                        Log.i(TAG, "restore: TZ past occurrence deferred until Native stock is initialized: "
-                                + prefKey);
-                        continue;
-                    }
-                    long snapGenTz;
-                    synchronized (SCHEDULE_LOCK) {
-                        snapGenTz = getRecurrenceGenerationLocked(medId, doseId);
-                    }
-                    CatchUpResult catchUp = catchUpMissedOccurrencesAndScheduleNext(
-                            medId, doseId, date, time, amount, snapGenTz,
-                            prefKey, observedVersion);
-                    if (catchUp.futureInstalled) {
-                        restored++;
-                    }
-                    if (catchUp.incomplete) {
-                        Log.e(TAG, "restore: TZ catch-up incomplete for " + prefKey);
-                        failed++;
-                        boundaryOk = false;
-                    }
-                    continue;
-                }
-                epoch = recomputed;
-                // Future: atomic ownership check + schedule under one lock.
-                // operationVersion is assigned inside scheduleOccurrenceLocked (under
-                // SCHEDULE_LOCK) so ordering vs concurrent cancel is correct.
-                String key = occurrenceKey;
-                JSONObject payload = new JSONObject();
-                try {
-                    payload.put("medicationId", medId);
-                    payload.put("doseId", doseId);
-                    payload.put("calendarDate", date);
-                    payload.put("timeHhmm", time);
-                    payload.put("amount", amount);
-                    payload.put("scheduledAtEpochMs", epoch);
-                    if (!treatmentEndDate.isEmpty()) {
-                        payload.put(
-                                AutoDeductionContract.EXTRA_TREATMENT_END_DATE,
-                                treatmentEndDate);
-                    }
-                } catch (JSONException e) {
-                    Log.e(TAG, "restore payload build failed", e);
-                    failed++;
-                    boundaryOk = false;
-                    continue;
-                }
-                synchronized (SCHEDULE_LOCK) {
-                    // drop future schedules whose generation was invalidated.
-                    long metaGen = getRecurrenceGenerationLocked(medId, doseId);
-                    if (metaGen > 0L
-                            && !isRecurrenceGenerationAuthorizedLocked(medId, doseId, metaGen)) {
-                        Log.i(TAG, "restore skip (recurrence generation invalid): " + prefKey);
-                        // Dropping invalidated generation is expected; ownership_lost ok.
-                        removeScheduleMetadataIfVersionLocked(prefKey, observedVersion);
-                        continue;
-                    }
-                    ScheduleResult r = scheduleOccurrenceLocked(
-                            prefKey, key, payload, epoch, observedVersion);
-                    if (r.ok) {
-                        restored++;
-                    } else if ("ownership_lost".equals(r.error)) {
-                        // Canceled or replaced after snapshot — expected concurrent outcome.
-                        Log.i(TAG, "restore skip (ownership lost): " + prefKey);
-                    } else {
-                        Log.w(TAG, "restore schedule failed for " + prefKey + ": " + r.error);
-                        failed++;
-                        boundaryOk = false;
-                    }
-                }
-            } catch (JSONException ignored) {
-                // Malformed snapshot payload: quarantine only if the exact snapshot is
-                // still current; otherwise leave a newer replacement untouched.
-                if (!quarantineMalformedScheduleMetadata(prefKey, raw, "invalid_json")) {
-                    Log.e(TAG, "restore: invalid JSON schedule quarantine failed for " + prefKey);
-                    failed++;
-                    boundaryOk = false;
-                }
-            }
-        }
-        // Also recover independent fire-retry evidence (may exist without shared schedule rows).
-        RestoreResult retryPass = recoverIndependentFireRetryEvidencePass();
-        restored += retryPass.restored;
-        failed += retryPass.failed;
-        if (!retryPass.ok) {
-            boundaryOk = false;
-        }
-        if (!boundaryOk || failed > 0) {
-            return RestoreResult.failure(restored, failed,
-                    failed > 0 ? "restore_boundary_incomplete" : "restore_boundary_incomplete");
-        }
-        return RestoreResult.success(restored, failed);
-    }
+
     /** Parsed medicationId + doseId + calendarDate from an Auto occurrence storage key. */
-    private static final class ScheduleStorageIdentity {
-        final String medicationId;
-        final String doseId;
-        final String calendarDate;
-        ScheduleStorageIdentity(String medicationId, String doseId, String calendarDate) {
-            this.medicationId = medicationId;
-            this.doseId = doseId;
-            this.calendarDate = calendarDate;
-        }
-    }
-    /**
-     * Parse the canonical Auto occurrence identity encoded in the durable storage key.
-     * Returns null when the key cannot identify exactly one occurrence.
-     */
-    private static ScheduleStorageIdentity parseScheduleStorageKey(String storageKey) {
-        if (storageKey == null || storageKey.isEmpty()) {
-            return null;
-        }
-        String encoded = storageKey;
-        final char separator = '\u001f';
-        int first = encoded.indexOf(separator);
-        int second = first >= 0
-                ? encoded.indexOf(separator, first + 1)
-                : -1;
-        if (first <= 0 || second <= first + 1 || second >= encoded.length() - 1) {
-            return null;
-        }
-        if (encoded.indexOf(separator, second + 1) >= 0) {
-            return null;
-        }
-        String medicationId = encoded.substring(0, first);
-        String doseId = encoded.substring(first + 1, second);
-        String calendarDate = encoded.substring(second + 1);
-        if (!AutoDeductionContract.isValidCalendarDate(calendarDate)) {
-            return null;
-        }
-        return new ScheduleStorageIdentity(medicationId, doseId, calendarDate);
-    }
     /**
      * Quarantine malformed schedule metadata without trusting its payload identity.
      *
@@ -2444,33 +630,7 @@ public final class AutoDeductionScheduler {
      * <p>If {@code expectedRaw} no longer matches the current row, the snapshot became
      * stale; leave the newer row untouched and report success/no-op.
      */
-    private boolean quarantineMalformedScheduleMetadata(
-            String prefKey,
-            String expectedRaw,
-            String reason
-    ) {
-        synchronized (SCHEDULE_LOCK) {
-            String currentRaw = getScheduleRaw(prefKey);
-            if (currentRaw == null) return true;
-            if (expectedRaw != null && !expectedRaw.equals(currentRaw)) return true;
-            ScheduleStorageIdentity identity = parseScheduleStorageKey(prefKey);
-            if (identity == null) return false;
-            String occurrenceKey = AutoDeductionContract.occurrenceKey(
-                    identity.medicationId,
-                    identity.doseId,
-                    identity.calendarDate);
-            syncAlarmRuntimeTestControls();
-            AutoDeductionSchedulingAdapter.CancelResult result =
-                    schedulingAdapter.cancelOccurrence(
-                            identity.medicationId,
-                            identity.doseId,
-                            identity.calendarDate);
-            if (!result.isOk()) return false;
-            Log.w(TAG, "quarantined malformed schedule metadata: " + prefKey
-                    + " reason=" + reason);
-            return true;
-        }
-    }
+
     /**
      * List durable schedule metadata entries (not AlarmManager state).
      * Used by JS to reconcile desired set against native after process restart
@@ -2481,104 +641,20 @@ public final class AutoDeductionScheduler {
      * removed). When the key itself is unsafe, this method throws so the JS bridge
      * reports a listing failure instead of treating the malformed row as absence.
      */
-    public java.util.List<JSONObject> listScheduledOccurrences() {
-        java.util.List<JSONObject> out = new java.util.ArrayList<>();
-        synchronized (SCHEDULE_LOCK) {
-            Map<String, ?> all = getAllScheduleMetadata();
-            for (Map.Entry<String, ?> e : all.entrySet()) {
-                Object v = e.getValue();
-                if (!(v instanceof String)) continue;
-                String prefKey = e.getKey();
-                String raw = (String) v;
-                try {
-                    JSONObject o = new JSONObject(raw);
-                    String medId = o.optString("medicationId", "").trim();
-                    String doseId = o.optString("doseId", "").trim();
-                    String date = o.optString("calendarDate", "").trim();
-                    String time = o.optString("timeHhmm", "").trim();
-                    double amount = o.optDouble("amount", Double.NaN);
-                    ScheduleStorageIdentity keyIdentity = parseScheduleStorageKey(prefKey);
-                    boolean validPayload =
-                            !medId.isEmpty()
-                            && !doseId.isEmpty()
-                            && AutoDeductionContract.isValidCalendarDate(date)
-                            && AutoDeductionContract.isValidTimeHhmm(time)
-                            && AutoDeductionContract.isValidAmount(amount);
-                    boolean keyMatchesPayload =
-                            keyIdentity != null
-                            && keyIdentity.medicationId.equals(medId)
-                            && keyIdentity.doseId.equals(doseId)
-                            && keyIdentity.calendarDate.equals(date);
-                    if (!validPayload || !keyMatchesPayload) {
-                        String reason = !validPayload
-                                ? "malformed_fields"
-                                : "identity_mismatch";
-                        if (!quarantineMalformedScheduleMetadata(prefKey, raw, reason)) {
-                            throw new IllegalStateException(
-                                    "malformed_schedule_metadata_cleanup_failed");
-                        }
-                        continue;
-                    }
-                    JSONObject retryEvidence =
-                            getIndependentFireRetryEvidence(
-                                    medId, doseId, date);
-                    if (retryEvidence != null) {
-                        int retryCount =
-                                retryEvidence.optInt("retryCount", 0);
-                        if (retryCount > 0) {
-                            o.put("fireRetryCount", retryCount);
-                        }
-                    }
-                    out.add(o);
-                } catch (JSONException ex) {
-                    if (!quarantineMalformedScheduleMetadata(
-                            prefKey, raw, "invalid_json")) {
-                        throw new IllegalStateException(
-                                "malformed_schedule_metadata_cleanup_failed");
-                    }
-                }
-            }
-        }
-        return out;
+
+    boolean compactTerminalState() {
+        return occurrenceState.compactTerminalState();
     }
+
     public boolean canScheduleExactAlarms() {
         return schedulingAdapter.canScheduleExactAlarms();
     }
     public static Long computeEpochMs(String calendarDate, String timeHhmm) {
-        if (!AutoDeductionContract.isValidCalendarDate(calendarDate)
-                || !AutoDeductionContract.isValidTimeHhmm(timeHhmm)) {
-            return null;
-        }
-        Long resolved = AutoDeductionSchedulingAdapter.resolveLocalDateTimeEpochMs(
-                calendarDate,
-                timeHhmm,
-                true);
-        return resolved == null || resolved.longValue() < 0L
-                ? null
-                : resolved;
+        return AutoDeductionDateTime.computeEpochMs(calendarDate, timeHhmm);
     }
+
     public static String nextCalendarDate(String calendarDate) {
-        if (!AutoDeductionContract.isValidCalendarDate(calendarDate)) return null;
-        try {
-            int y = Integer.parseInt(calendarDate.substring(0, 4));
-            int mo = Integer.parseInt(calendarDate.substring(5, 7));
-            int d = Integer.parseInt(calendarDate.substring(8, 10));
-            Calendar cal = Calendar.getInstance(TimeZone.getDefault(), Locale.getDefault());
-            cal.clear();
-            cal.set(Calendar.YEAR, y);
-            cal.set(Calendar.MONTH, mo - 1);
-            cal.set(Calendar.DAY_OF_MONTH, d);
-            cal.add(Calendar.DAY_OF_MONTH, 1);
-            return String.format(
-                    Locale.US,
-                    "%04d-%02d-%02d",
-                    cal.get(Calendar.YEAR),
-                    cal.get(Calendar.MONTH) + 1,
-                    cal.get(Calendar.DAY_OF_MONTH)
-            );
-        } catch (Exception e) {
-            return null;
-        }
+        return AutoDeductionDateTime.nextCalendarDate(calendarDate);
     }
     /**
      * Atomic occurrence state snapshot under {@link #SCHEDULE_LOCK} for Manual Take
@@ -2626,56 +702,138 @@ public final class AutoDeductionScheduler {
         }
     }
     public OccurrenceSnapshot getOccurrenceSnapshot(
-            String medicationId, String doseId, String calendarDate) {
-        if (medicationId == null || medicationId.isEmpty()
-                || doseId == null || doseId.isEmpty()
-                || !AutoDeductionContract.isValidCalendarDate(calendarDate)) {
-            return new OccurrenceSnapshot(OccurrenceSnapshot.Status.ABSENT, null);
-        }
-        final String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
-        synchronized (SCHEDULE_LOCK) {
-            AutoDeductionEventStore store = new AutoDeductionEventStore(appContext);
-            // Promote pending under EventStore.LOCK (nested after SCHEDULE_LOCK).
-            AutoDeductionEventStore.EventLookupResult firedLookup =
-                    store.getFiredUnreconciledEvent(medicationId, doseId, calendarDate);
-            if (!firedLookup.ok) {
-                // Fail-closed: a FIRED row that could not be durably terminalized
-                // is NOT equivalent to ABSENT/SCHEDULED. Manual Take must not
-                // fall back to the JS schedule amount in this situation.
-                return OccurrenceSnapshot.failure(firedLookup.error);
-            }
-            JSONObject fired = firedLookup.event;
-            if (fired != null) {
-                double amt = fired.optDouble("amount", Double.NaN);
-                if (AutoDeductionContract.isValidAmount(amt)) {
-                    return new OccurrenceSnapshot(OccurrenceSnapshot.Status.FIRED, amt);
-                }
-                // Defensive invariant guard. EventStore currently rejects malformed
-                // FIRED rows before returning them, so this should be unreachable.
-                return OccurrenceSnapshot.failure("invalid_fired_amount");
-            }
-            // Effective cancellation (ordering-token aware) must beat stale schedule
-            // metadata when a tombstone exists but metadata removal failed.
-            if (isOccurrenceCancelledKey(key)) {
-                return new OccurrenceSnapshot(OccurrenceSnapshot.Status.CANCELLED, null);
-            }
-            final String prefKey = key;
-            String metaRaw = getScheduleRaw(prefKey);
-            if (metaRaw != null && !metaRaw.isEmpty()) {
-                try {
-                    JSONObject meta = new JSONObject(metaRaw);
-                    double amt = meta.optDouble("amount", Double.NaN);
-                    if (AutoDeductionContract.isValidAmount(amt)) {
-                        return new OccurrenceSnapshot(
-                                OccurrenceSnapshot.Status.SCHEDULED, amt);
-                    }
-                    return new OccurrenceSnapshot(OccurrenceSnapshot.Status.SCHEDULED, null);
-                } catch (JSONException e) {
-                    Log.w(TAG, "getOccurrenceSnapshot schedule parse failed for " + key, e);
-                    return new OccurrenceSnapshot(OccurrenceSnapshot.Status.SCHEDULED, null);
-                }
-            }
-            return new OccurrenceSnapshot(OccurrenceSnapshot.Status.ABSENT, null);
-        }
+            String medicationId,
+            String doseId,
+            String calendarDate) {
+        return occurrenceState.getOccurrenceSnapshot(
+                medicationId, doseId, calendarDate);
     }
+    CancelResult cancelAllSchedulesForDoseLocked(String medicationId, String doseId) { return cancellationService.cancelAllSchedulesForDoseLocked(medicationId, doseId); }
+    long getRecurrenceGenerationLocked(String medicationId, String doseId) { return recurrenceService.getRecurrenceGenerationLocked(medicationId, doseId); }
+    boolean isRecurrenceGenerationAuthorizedLocked(String medicationId, String doseId, long expected) { return recurrenceService.isRecurrenceGenerationAuthorizedLocked(medicationId, doseId, expected); }
+    long ensureRecurrenceGenerationLocked(String medicationId, String doseId) { return recurrenceService.ensureRecurrenceGenerationLocked(medicationId, doseId); }
+    public InvalidateResult invalidateRecurrenceAuthorization(String medicationId, String doseId) { return recurrenceService.invalidateRecurrenceAuthorization(medicationId, doseId); }
+    ScheduleResult installFutureSuccessorIfGenerationHolds(
+            String medicationId,
+            String doseId,
+            String futureDate,
+            String timeHhmm,
+            double amount,
+            long triggerAt,
+            long expectedGen,
+            String pastPrefKey,
+            String observedVersion,
+            String treatmentEndDateOverride) {
+        return recurrenceService.installFutureSuccessorIfGenerationHolds(
+                medicationId,
+                doseId,
+                futureDate,
+                timeHhmm,
+                amount,
+                triggerAt,
+                expectedGen,
+                pastPrefKey,
+                observedVersion,
+                treatmentEndDateOverride);
+    }
+    public ScheduleResult scheduleNextOccurrence(String medicationId,String doseId,String fromDate,String timeHhmm,double amount) { return recurrenceService.scheduleNextOccurrence(medicationId,doseId,fromDate,timeHhmm,amount); }
+    public ScheduleResult scheduleNextOccurrenceIfAbsent(String medicationId,String doseId,String fromDate,String timeHhmm,double amount,long expectedGen) { return recurrenceService.scheduleNextOccurrenceIfAbsent(medicationId,doseId,fromDate,timeHhmm,amount,expectedGen); }
+    boolean recoverSuccessorObligations() { return recurrenceService.recoverSuccessorObligations(); }
+    ScheduleResult scheduleNextOccurrenceFromIndependentEvidenceLocked(
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            AutoDeductionPersistenceModels.RetryEvidenceRecord evidence) {
+        return recurrenceService.scheduleNextOccurrenceFromIndependentEvidenceLocked(
+                medicationId, doseId, calendarDate, evidence);
+    }
+    ScheduleResult scheduleNextOccurrenceIfSnapshotOwnsPast(String medicationId,String doseId,String fromDate,String timeHhmm,double amount,String pastPrefKey,String observedVersion) { return recurrenceService.scheduleNextOccurrenceIfSnapshotOwnsPast(medicationId,doseId,fromDate,timeHhmm,amount,pastPrefKey,observedVersion); }
+    public CancelResult cancelOccurrence(String medicationId,String doseId,String calendarDate) { return cancellationService.cancelOccurrence(medicationId,doseId,calendarDate); }
+    boolean hasCancellationTombstone(String occurrenceKey) { return cancellationService.hasCancellationTombstone(occurrenceKey); }
+    public boolean isOccurrenceCancelled(String medicationId,String doseId,String calendarDate) { return cancellationService.isOccurrenceCancelled(medicationId,doseId,calendarDate); }
+    boolean isOccurrenceCancelledKey(String occurrenceKey) { return cancellationService.isOccurrenceCancelledKey(occurrenceKey); }
+    boolean clearCancellationTombstoneLocked(String occurrenceKey) { return cancellationService.clearCancellationTombstoneLocked(occurrenceKey); }
+    public FireResult fireOccurrenceIfNotCancelled(String medicationId,String doseId,String calendarDate,long scheduledAt,double amount,String operationVersion,long generation) { return fireService.fireOccurrenceIfNotCancelled(medicationId,doseId,calendarDate,scheduledAt,amount,operationVersion,generation); }
+    public FireResult recoverMissedOccurrence(String medicationId,String doseId,String calendarDate,long scheduledAt,double amount,long generation) { return fireService.recoverMissedOccurrence(medicationId,doseId,calendarDate,scheduledAt,amount,generation); }
+    public FireResult recoverMissedOccurrence(
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            long scheduledAt,
+            double amount,
+            long generation,
+            String treatmentEndDate,
+            String fallbackTimeHhmm) {
+        return fireService.recoverMissedOccurrence(
+                medicationId,
+                doseId,
+                calendarDate,
+                scheduledAt,
+                amount,
+                generation,
+                treatmentEndDate,
+                fallbackTimeHhmm);
+    }
+    public FireResult recoverMissedOccurrenceForCompensation(
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            long scheduledAt,
+            double amount,
+            long generation,
+            String treatmentEndDate,
+            String fallbackTimeHhmm) {
+        return fireService.recoverMissedOccurrenceForCompensation(
+                medicationId,
+                doseId,
+                calendarDate,
+                scheduledAt,
+                amount,
+                generation,
+                treatmentEndDate,
+                fallbackTimeHhmm);
+    }
+    boolean scheduleFireRetry(String medicationId,String doseId,String calendarDate,long scheduledAt,double amount,String timeHhmm,long generation,String operationVersion,int nextRetryCount) { return retryService.scheduleFireRetry(medicationId,doseId,calendarDate,scheduledAt,amount,timeHhmm,generation,operationVersion,nextRetryCount); }
+    boolean recordIndependentFireRetryEvidenceLocked(
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            long scheduledAt,
+            double amount,
+            String timeHhmm,
+            String treatmentEndDate,
+            long generation,
+            String operationVersion,
+            int nextRetryCount) {
+        return retryService.recordIndependentFireRetryEvidenceLocked(
+                medicationId,
+                doseId,
+                calendarDate,
+                scheduledAt,
+                amount,
+                timeHhmm,
+                treatmentEndDate,
+                generation,
+                operationVersion,
+                nextRetryCount);
+    }
+    boolean clearIndependentFireRetryEvidenceLocked(String occurrenceKey) { return retryService.clearIndependentFireRetryEvidenceLocked(occurrenceKey); }
+    void clearIndependentFireRetryEvidenceAfterStock(String medicationId,String doseId,String calendarDate) { retryService.clearIndependentFireRetryEvidenceAfterStock(medicationId,doseId,calendarDate); }
+    public FireResult recoverFireFromIndependentEvidence(String medicationId,String doseId,String calendarDate) { return retryService.recoverFireFromIndependentEvidence(medicationId,doseId,calendarDate); }
+    AutoDeductionPersistenceModels.RetryEvidenceRecord getIndependentFireRetryEvidence(
+            String medicationId, String doseId, String calendarDate) {
+        return retryService.getIndependentFireRetryEvidence(
+                medicationId, doseId, calendarDate);
+    }
+    CatchUpResult catchUpMissedOccurrencesAndScheduleNext(String medicationId,String doseId,String fromDate,String timeHhmm,double amount,long generation,String pastPrefKey,String observedVersion) { return recoveryService.catchUpMissedOccurrencesAndScheduleNext(medicationId,doseId,fromDate,timeHhmm,amount,generation,pastPrefKey,observedVersion); }
+    void continueRecurrenceAfterPastRecovery(String medicationId,String doseId,String calendarDate,String timeHhmm,double amount,FireResult fr,String prefKey,String observedVersion) { recoveryService.continueRecurrenceAfterPastRecovery(medicationId,doseId,calendarDate,timeHhmm,amount,fr,prefKey,observedVersion); }
+    RestoreResult recoverFiredStockPass() { return recoveryService.recoverFiredStockPass(); }
+    RestoreResult recoverIndependentFireRetryEvidencePass() { return recoveryService.recoverIndependentFireRetryEvidencePass(); }
+    public RestoreResult restoreFutureSchedules() { return recoveryService.restoreFutureSchedules(); }
+    boolean quarantineMalformedScheduleMetadata(String prefKey,String expectedRaw,String reason) { return recoveryService.quarantineMalformedScheduleMetadata(prefKey,expectedRaw,reason); }
+    public java.util.List<AutoDeductionPersistenceModels.ScheduledOccurrenceRecord>
+        listScheduledOccurrences() {
+        return recoveryService.listScheduledOccurrences();
+    }
+
 }

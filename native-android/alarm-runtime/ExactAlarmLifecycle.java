@@ -23,6 +23,9 @@ public final class ExactAlarmLifecycle {
 
     public static final String REASON_BOOT = "BOOT";
     public static final String REASON_TIMEZONE_CHANGED = "TIMEZONE_CHANGED";
+    public static final String REASON_TIME_CHANGED = "TIME_CHANGED";
+    public static final String REASON_TIMEZONE_OFFSET_CHANGED =
+            "TIMEZONE_OFFSET_CHANGED";
     public static final String REASON_EXACT_ALARM_PERMISSION =
             "EXACT_ALARM_PERMISSION";
 

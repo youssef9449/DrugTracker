@@ -50,7 +50,7 @@ vi.mock('@/utils/notifications', async () => {
   };
 });
 
-import { scheduleCriticalAlarm, cancelCriticalAlarm } from '@/utils/notifications';
+import { scheduleCriticalAlarm, cancelCriticalAlarm, verifyCriticalAlarmPending } from '@/utils/notifications';
 
 const scheduleMock = vi.mocked(scheduleCriticalAlarm);
 const cancelMock = vi.mocked(cancelCriticalAlarm);
@@ -398,7 +398,7 @@ describe('useCriticalAlarmScheduler — verified fast path (native alarm reconci
     const t1 = getCriticalAlarmDate(medA, getTodayDateString()) as number;
     writeClaims({ 'med-1': { claimed: true, alarmTime: t1 } });
 
-    const gate = deferred<boolean>();
+    const gate = deferred<Awaited<ReturnType<typeof verifyCriticalAlarmPending>>>();
     verifyMock.mockReturnValueOnce(gate.promise); // reconciliation verify is gated
 
     const { rerender } = renderHook((props) => useCriticalAlarmScheduler(props), {

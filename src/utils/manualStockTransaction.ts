@@ -5,6 +5,7 @@ import {
   loadDurableGlobalAutoDeductEnabled,
   type AutoStockDurableState,
 } from './autoDeductionStockGate';
+import type { Medication } from '../types';
 import {
   recoverManualEnvelopeInto,
   saveManualStockEnvelope,

@@ -282,7 +282,7 @@ describe('critical notification flow — both hooks integrated', () => {
     let resolveSchedule: (v: CriticalAlarmOperationResult) => void = () => undefined;
     scheduleMock.mockImplementationOnce(
       () =>
-        new Promise<Awaited<ReturnType<typeof scheduleCriticalAlarm>>>((resolve) => {
+        new Promise<CriticalAlarmOperationResult>((resolve) => {
           resolveSchedule = resolve;
         })
     );
@@ -334,7 +334,7 @@ describe('critical notification flow — both hooks integrated', () => {
     let resolveCancel: () => void = () => undefined;
     cancelMock.mockImplementationOnce(
       () =>
-        new Promise<Awaited<ReturnType<typeof cancelCriticalAlarm>>>((resolve) => {
+        new Promise<CriticalAlarmOperationResult>((resolve) => {
           resolveCancel = () => resolve({ ok: true });
         })
     );

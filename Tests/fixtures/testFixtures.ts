@@ -14,6 +14,12 @@ export function makeMedication(overrides: Partial<Medication> = {}): Medication 
     colorTag: 'teal',
     createdAt: '2026-01-01T00:00:00.000Z',
     autoDeductEnabled: true,
+    ...overrides,
+  };
+}
+
+export function makeScheduledMedication(overrides: Partial<Medication> = {}): Medication {
+  return makeMedication({
     doseSchedule: [
       { id: 'd1', amount: 1, time: '08:00' },
       { id: 'd2', amount: 1, time: '14:00' },
@@ -21,7 +27,7 @@ export function makeMedication(overrides: Partial<Medication> = {}): Medication 
     ],
     dosesPerDay: 3,
     ...overrides,
-  };
+  });
 }
 
 export function makeAutoDeductionEvent(

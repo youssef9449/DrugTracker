@@ -2,6 +2,7 @@ import { isWebNotificationSupported } from './notificationPlatform';
 
 const WEB_SCHEDULE_KEY = 'drugtracker_web_scheduled_notifications_v1';
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
+const persistentTriggerOperations = new Map<string, Promise<boolean>>();
 
 type WebScheduledEntry = {
   namespace: string;
@@ -117,8 +118,13 @@ export async function scheduleWebNotification(
   const existing = entries[key];
 
   if (existing && existing.fireAt > Date.now() + 1000) {
-    void armPersistentNotification(existing).then((persisted) => {
+    const operation = armPersistentNotification(existing);
+    persistentTriggerOperations.set(key, operation);
+    void operation.then((persisted) => {
       if (!persisted) armTimer(existing);
+      if (persistentTriggerOperations.get(key) === operation) {
+        persistentTriggerOperations.delete(key);
+      }
     });
     return true;
   }
@@ -161,6 +167,9 @@ export async function scheduleWebNotification(
     } else {
       armTimer(entry);
     }
+    if (persistentTriggerOperations.get(key) === operation) {
+      persistentTriggerOperations.delete(key);
+    }
   });
   return true;
 }
@@ -192,6 +201,9 @@ export async function cancelScheduledWebNotification(
     clearTimeout(timer);
     timers.delete(key);
   }
+  const pendingTrigger = persistentTriggerOperations.get(key);
+  if (pendingTrigger) await pendingTrigger;
+
   const entries = readEntries();
   const existed = Boolean(entries[key]);
   delete entries[key];

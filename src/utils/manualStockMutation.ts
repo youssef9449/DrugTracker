@@ -1448,9 +1448,20 @@ export function runGatedGlobalAutoDeductToggle(opts: {
       doseIds: string[];
       invalidated: Array<{ doseId: string; generation: number }>;
     }> = [];
-    if (opts.enable === false) {
-      for (const med of fresh.medications) {
+    const invalidatedDoseMeds: Medication[] = [];
+
+    for (const med of fresh.medications) {
+      const autoStateChanging = med.autoDeductEnabled !== opts.enable;
+      if (!autoStateChanging) continue;
+
+      let autoInvalidation:
+        | RecurrenceInvalidationResult
+        | null = null;
+
+      if (opts.enable === false) {
         const invalidation = await invalidateMedicationRecurrences(med);
+        autoInvalidation = invalidation;
+        if (!invalidation.ok) {
         if (!invalidation.ok) {
           let compensationError: string | null = null;
           for (const completed of invalidatedMeds) {
@@ -1481,7 +1492,67 @@ export function runGatedGlobalAutoDeductToggle(opts: {
           invalidated: invalidation.invalidated,
         });
       }
+
+      const doseInvalidation = await invalidateMedicationDoseReminders(med);
+      if (!doseInvalidation.ok) {
+        let compensationError: string | null = null;
+
+        if (
+          opts.enable === false
+          && autoInvalidation
+          && autoInvalidation.invalidated.length > 0
+        ) {
+          const compensation = await restoreInvalidatedRecurrences(
+            med,
+            autoInvalidation.invalidated
+          );
+          if (!compensation.ok) compensationError = compensation.error;
+        }
+
+        for (const completed of invalidatedMeds) {
+          if (completed.invalidated.length === 0) continue;
+          const compensation = await restoreInvalidatedRecurrences(
+            completed.med,
+            completed.invalidated
+          );
+          if (!compensation.ok && compensationError == null) {
+            compensationError = compensation.error;
+          }
+        }
+
+        for (const completed of invalidatedDoseMeds) {
+          const compensation = await restoreInvalidatedDoseReminders(
+            completed
+          );
+          if (!compensation.ok && compensationError == null) {
+            compensationError = compensation.error;
+          }
+        }
+
+        const currentDoseCompensation =
+          await restoreInvalidatedDoseReminders(med);
+        if (
+          !currentDoseCompensation.ok
+          && compensationError == null
+        ) {
+          compensationError = currentDoseCompensation.error;
+        }
+
+        return {
+          outcome: 'native_invalidation_failed' as const,
+          medications: fresh.medications,
+          logs: fresh.logs,
+          enable: opts.enable,
+          settleLogs: [],
+          reason: compensationError
+            ? doseInvalidation.error + ';compensation:' + compensationError
+            : doseInvalidation.error,
+        };
+      }
+
+      invalidatedDoseMeds.push(med);
     }
+
     const medications = fresh.medications.map((med) =>
       med.autoDeductEnabled === opts.enable
         ? med
@@ -1503,6 +1574,14 @@ export function runGatedGlobalAutoDeductToggle(opts: {
           if (!compensation.ok && compensationError == null) {
             compensationError = compensation.error;
           }
+        }
+      }
+      for (const completed of invalidatedDoseMeds) {
+        const compensation = await restoreInvalidatedDoseReminders(
+          completed
+        );
+        if (!compensation.ok && compensationError == null) {
+          compensationError = compensation.error;
         }
       }
       return {

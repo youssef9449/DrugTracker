@@ -85,6 +85,13 @@ export async function cancelDoseReminder(
 ): Promise<void> {
   if (getNativePlatform() === 'android') {
     await cancelDoseReminderNative(medId, doseId);
+    const notificationCancelled = await cancelNotification(
+      'dose-reminder',
+      `${medId}::${doseId}`
+    );
+    if (!notificationCancelled) {
+      throw new Error('dose_reminder_notification_cancel_failed');
+    }
     return;
   }
   if (!isNativePlatform()) return;

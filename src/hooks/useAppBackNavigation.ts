@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import type { ActiveTab } from '../components/AndroidBottomNav';
 import { registerBackButtonHandler } from '../native';
 
@@ -19,7 +19,7 @@ const MAX_NAVIGATION_HISTORY = 30;
 
 export function useAppBackNavigation(
   activeTab: ActiveTab,
-  setActiveTab: React.Dispatch<React.SetStateAction<ActiveTab>>
+  setActiveTab: Dispatch<SetStateAction<ActiveTab>>
 ): {
   navigateToTab: (tab: ActiveTab) => void;
   registerBackOverlay: BackOverlayRegistration;

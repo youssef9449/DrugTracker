@@ -13,7 +13,6 @@ import {
   getDoseReminderChannelId,
   DOSE_REMINDER_TAKE_ACTION,
 } from './notifications/doseReminderNotifications';
-
 export async function isDoseReminderPending(
   medId: string,
   doseId: string
@@ -40,12 +39,10 @@ export async function isDoseReminderPending(
     return false;
   }
 }
-
 /**
  * Compatibility reconciliation helper for the Dose Reminder scheduler.
  * Android now queries the ExactAlarmRuntime pending state directly.
  */
-
 export async function isNativeDoseReminderReArmed(
   medId: string,
   doseId: string,
@@ -54,12 +51,10 @@ export async function isNativeDoseReminderReArmed(
   if (getNativePlatform() !== 'android') return false;
   return isDoseReminderScheduledNative(medId, doseId);
 }
-
 /**
  * Check the native scheduler's current one-shot state for this dose.
  * The scheduler uses this as its repair/reconciliation evidence.
  */
-
 export async function cancelDoseReminder(
   medId: string,
   doseId: string
@@ -75,11 +70,9 @@ export async function cancelDoseReminder(
     console.warn('[notifications] cancelDoseReminder failed:', err);
   }
 }
-
 /**
- * Cancel pending one-shot snooze for an explicit dose row (Issue #268).
+ * Cancel pending one-shot snooze for an explicit dose row ().
  */
-
 export async function cancelStaleDoseReminderAlarms(
   keepKeys: ReadonlySet<string>
 ): Promise<void> {
@@ -88,12 +81,10 @@ export async function cancelStaleDoseReminderAlarms(
     return;
   }
 }
-
 /**
- * One-shot snooze notification id for an explicit dose row (Issue #268).
+ * One-shot snooze notification id for an explicit dose row ().
  * Requires non-empty doseId. Returns null when missing.
  */
-
 export function isDoseReminderTimeStillAhead(
   reminderTime: string,
   now: Date = new Date()
@@ -102,32 +93,25 @@ export function isDoseReminderTimeStillAhead(
   const todayEpoch = localEpochMs(today, reminderTime);
   return todayEpoch != null && todayEpoch > now.getTime();
 }
-
 /**
  * Schedule the next one-shot dose-reminder alarm at the given HH:MM.
- *
  * Next fire: today at HH:MM if still ahead, else tomorrow (or forced
  * tomorrow when options.skipToday). Uses a stable id
  * (medicationId + doseId) so reschedule replaces, not duplicates.
- *
  * Recurrence: NOT via Capacitor repeats/every. The native Dose Reminder
  * receiver asks the shared exact-alarm runtime to arm the next calendar day.
- *
  * `allowWhileIdle: true` lets the alarm fire in Doze mode.
  * Channel: dose-reminder-v3 / foreground silent variant at delivery.
  */
-
 export interface ScheduleDoseReminderOptions {
   /**
    * Start the recurring schedule from TOMORROW even when today's HH:MM
    * is still in the future.
-   *
    * Used when today's occurrence for this dose slot has already been
    * consumed (per-dose markers: doseConsumptionHistory).
    * The pending alarm is cancelled and re-armed from tomorrow so the
    * already-taken occurrence cannot produce today's reminder. Tomorrow
    * and later days fire normally at the schedule-row time.
-   *
    * Medication-level lastConsumedDate is not the source of truth for
    * this suppression.
    */
@@ -143,19 +127,16 @@ export interface ScheduleDoseReminderOptions {
    */
   allowManualTakeAction?: boolean;
 }
-
 /**
  * Whether today's occurrence of the given HH:MM reminder time is still
  * in the future. Uses the SAME boundary as {@link scheduleDoseReminder}
  * (HH:MM:00.000 strictly after `now`), so "still ahead" means exactly
  * "today's one-shot would still fire today".
- *
  * Used by useDoseReminderScheduler when suppressing a consumed dose:
  *   - still ahead → cancel + schedule next with skipToday.
  *   - already past → do not retract a delivered notification; the native
  *     delivery receiver may already have armed the next calendar-day occurrence.
  */
-
 export async function scheduleDoseReminder(
   medId: string,
   medName: string,
@@ -169,10 +150,8 @@ export async function scheduleDoseReminder(
   const [hour, minute] = parts;
   if (parts.length < 2 || Number.isNaN(hour) || Number.isNaN(minute)) return;
   if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return;
-
   const id = typeof doseId === 'string' ? doseId.trim() : '';
   if (!id || !(Number(doseAmount) > 0)) return;
-
   if (getNativePlatform() === 'android') {
     await scheduleDoseReminderNative(
       medId,
@@ -188,7 +167,6 @@ export async function scheduleDoseReminder(
     );
     return;
   }
-
   const now = new Date();
   const today = getTodayDateString();
   const todayEpoch = localEpochMs(today, reminderTime);
@@ -199,14 +177,12 @@ export async function scheduleDoseReminder(
   const fireEpoch = localEpochMs(fireDate, reminderTime);
   if (fireEpoch == null) return;
   const fireToday = new Date(fireEpoch);
-
   if (options?.treatmentEndDate && fireDate > options.treatmentEndDate) {
     return;
   }
   const title = `حان موعد دواء: ${medName}`;
   const description = options?.doseDescription?.trim();
   const body = `موعد الجرعة الساعة ${formatReminderTime12h(reminderTime)}. جرعتك المقررة: ${doseAmount} ${unit}${description ? `. طريقة تناول الجرعة: ${description}` : ''}.`;
-
   if (getNativePlatform() === 'ios') {
     const scheduled = await scheduleNotification({
       namespace: 'dose-reminder',
@@ -241,11 +217,9 @@ export async function scheduleDoseReminder(
     scheduleWebNotification(title, body);
   }
 }
-
 /**
  * Open the OS / browser notification settings page where the user
  * can toggle notification permissions per-app.
- *
  * - **Capacitor native (Android/iOS)**: dynamically imports ../native
  *   and calls openAppSettings() which uses @capacitor/app's
  *   App.openAppSettings() to open the OS app info page.

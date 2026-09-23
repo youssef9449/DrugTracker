@@ -4,9 +4,8 @@ import { renderHook, cleanup } from '@testing-library/react';
 import type { Medication } from '@/types';
 import { makeDoseReminderMedication as makeMed, makeDoseReminderCapabilityMap as capabilityMap, makeDoseReminderOptions as defaultOpts, flushTestMicrotasks as flushUntil } from '../fixtures/testFixtures';
 import { getTodayDateString } from '@/utils/dateCalculations';
-import { useDoseReminderScheduler, getDoseReminderSlots } from '@/hooks/useDoseReminderScheduler';
-import {
-  doseReminderAlarmIdForDose } from '@/utils/notifications';
+import { useDoseReminderScheduler } from '@/hooks/useDoseReminderScheduler';
+
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import type { ExactAlarmPermission } from '@/utils/exactAlarm';

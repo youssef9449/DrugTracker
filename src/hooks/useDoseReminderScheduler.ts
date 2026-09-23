@@ -570,7 +570,6 @@ export function useDoseReminderScheduler({
           if (!newlyConsumed && !resumeChanged) {
             continue;
           }
-          clearSnoozedDose(med.id, doseId);
           const gen = generationGuardRef.current.bump(key);
           enqueueRetryable(key, gen, async () => {
             await cancelSnoozedDoseReminder(medId, doseId);

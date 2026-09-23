@@ -99,12 +99,22 @@ export function useDoseReminders({
 
     }
     stopAllSounds();
-    alarmingIdRef.current = null;
-    alarmingDoseIdRef.current = null;
-    isTestAlarmRef.current = false;
-    setAlarmingMedication(null);
-    setAlarmingDoseId(null);
-  }, []);
+    const next = dequeueNextValidAlarm();
+    if (next) {
+      const nextMed = medicationsRef.current.find((m) => m.id === next.medicationId)!;
+      alarmingIdRef.current = next.medicationId;
+      alarmingDoseIdRef.current = next.doseId;
+      isTestAlarmRef.current = false;
+      setAlarmingMedication(nextMed);
+      setAlarmingDoseId(next.doseId);
+    } else {
+      alarmingIdRef.current = null;
+      alarmingDoseIdRef.current = null;
+      isTestAlarmRef.current = false;
+      setAlarmingMedication(null);
+      setAlarmingDoseId(null);
+    }
+  }, [dequeueNextValidAlarm]);
   const snoozeAlarm = useCallback((minutes: number = DEFAULT_SNOOZE_MINUTES) => {
     const medication = alarmingMedication;
     const doseId = alarmingDoseIdRef.current;

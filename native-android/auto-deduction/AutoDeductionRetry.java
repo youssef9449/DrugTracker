@@ -64,8 +64,21 @@ boolean scheduleFireRetry(
                         || recurrenceGeneration != activeGen) {
                     return false;
                 }
-            } else if (existingEvidence == null) {
-                return false;
+            } else {
+                // A missing schedule is allowed only for an already-durable historical
+                // retry source. The evidence itself must still belong to the active
+                // recurrence generation and the requested retry payload must match it.
+                long activeGen = scheduler.getRecurrenceGenerationLocked(
+                        medicationId, doseId);
+                if (existingEvidence == null
+                        || existingEvidence.recurrenceGeneration != activeGen
+                        || recurrenceGeneration != activeGen
+                        || operationVersion == null
+                        || !operationVersion.equals(existingEvidence.operationVersion)
+                        || !timeHhmm.equals(existingEvidence.timeHhmm)
+                        || Double.compare(amount, existingEvidence.amount) != 0) {
+                    return false;
+                }
             }
             if (!recordIndependentFireRetryEvidenceLocked(
                     medicationId, doseId, calendarDate,

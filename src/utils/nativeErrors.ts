@@ -40,3 +40,22 @@ export function toNativeBoundaryError(
   const message = error instanceof Error ? error.message : String(error ?? 'native operation failed');
   return new NativeBoundaryError(classifyNativeError(message, fallback), message);
 }
+
+
+export interface NativeBoundaryFailure {
+  ok: false;
+  error: string;
+  errorCode: NativeErrorCode;
+}
+
+export function toNativeBoundaryFailure(
+  error: unknown,
+  fallback: NativeErrorCode = 'platform_failure'
+): NativeBoundaryFailure {
+  const boundaryError = toNativeBoundaryError(error, fallback);
+  return {
+    ok: false,
+    error: boundaryError.message,
+    errorCode: boundaryError.code,
+  };
+}

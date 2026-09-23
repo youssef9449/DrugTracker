@@ -148,7 +148,7 @@ public final class NotificationRuntime {
                         .setAutoCancel(request.autoCancel)
                         .setOngoing(request.ongoing)
                         .setDefaults(request.channelImportance <= 2
-                                ? Notification.DEFAULT_VIBRATE
+                                ? 0
                                 : Notification.DEFAULT_ALL)
                         .setPriority(request.channelImportance <= 2
                                 ? Notification.PRIORITY_LOW

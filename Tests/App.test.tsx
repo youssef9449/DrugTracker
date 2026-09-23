@@ -1,3 +1,9 @@
+import {
+  __setStockMutationOrderingTestHooks,
+  __setManualEnvelopeTestHooks,
+  __setAutoStockGateTestHooks,
+  __setExactAutoEnvelopeTestHooks,
+} from '../utils/autoStockTestHooks';
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
@@ -314,10 +320,10 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
     // durable storage, called by commitWithManualEnvelope inside the
     // gated handler. It is NOT a UI callback or React render.
     let toggleCommitCount = 0;
-    const { __setAutoStockGateTestHooks } = await import('@/utils/autoDeductionStockGate');
-    const { __setManualEnvelopeTestHooks } = await import('@/utils/manualStockMutation');
-    const { __setExactAutoEnvelopeTestHooks } = await import('@/utils/runAutoDeductionReconciliation');
-    const { __setStockMutationOrderingTestHooks } = await import('@/utils/stockMutationOrdering');
+    const { __setAutoStockGateTestHooks } = await import('../utils/autoStockTestHooks');
+    const { __setManualEnvelopeTestHooks } = await import('../utils/autoStockTestHooks');
+    const { __setExactAutoEnvelopeTestHooks } = await import('../utils/autoStockTestHooks');
+    const { __setStockMutationOrderingTestHooks } = await import('../utils/autoStockTestHooks');
 
     // Install gate hooks: load from real localStorage, commit to real
     // localStorage (so the app reads the updated state), but also count

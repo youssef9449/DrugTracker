@@ -45,7 +45,6 @@ public class OccurrenceSnapshotPersistFailureTest {
     @Before
     public void setUp() {
         clearAllDurableState();
-        AutoDeductionEventStore.__setTestForceCommitResult(null);
     }
 
     /** Plant a malformed FIRED row (invalid amount) under a valid occurrence key. */
@@ -68,10 +67,11 @@ public class OccurrenceSnapshotPersistFailureTest {
         String date = "2026-09-11";
         plantMalformedFiredRow(date);
 
-        AutoDeductionEventStore.__setTestForceCommitResult(false);
         try {
             AutoDeductionScheduler.OccurrenceSnapshot snap =
-                    newScheduler().getOccurrenceSnapshot("med", "dose", date);
+                    new AutoDeductionScheduler(
+                            Phase2TestSupport.appContext(),
+                            Phase2TestSupport.denyEventCommit()).getOccurrenceSnapshot("med", "dose", date);
             assertFalse(
                     "persistence failure must surface as an explicit failure",
                     snap.ok);
@@ -84,8 +84,6 @@ public class OccurrenceSnapshotPersistFailureTest {
             assertTrue(raw != null
                     && AutoDeductionContract.STATUS_FIRED.equals(
                             new JSONObject(raw).optString("status")));
-        } finally {
-            AutoDeductionEventStore.__setTestForceCommitResult(null);
         }
     }
 
@@ -104,16 +102,15 @@ public class OccurrenceSnapshotPersistFailureTest {
         meta.put("operationVersion", "1-0");
         schedulePrefs().edit().putString(schKey(key), meta.toString()).commit();
 
-        AutoDeductionEventStore.__setTestForceCommitResult(false);
         try {
             AutoDeductionScheduler.OccurrenceSnapshot snap =
-                    newScheduler().getOccurrenceSnapshot("med", "dose", date);
+                    new AutoDeductionScheduler(
+                            Phase2TestSupport.appContext(),
+                            Phase2TestSupport.denyEventCommit()).getOccurrenceSnapshot("med", "dose", date);
             assertFalse(
                     "schedule metadata must not mask a ledger persistence failure",
                     snap.ok);
             assertEquals("rejected_persist_failed", snap.error);
-        } finally {
-            AutoDeductionEventStore.__setTestForceCommitResult(null);
         }
     }
 
@@ -128,16 +125,15 @@ public class OccurrenceSnapshotPersistFailureTest {
         String key = AutoDeductionContract.occurrenceKey("med", "dose", date);
         cancelPrefs().edit().putString(cancelKey(key), "1-0").commit();
 
-        AutoDeductionEventStore.__setTestForceCommitResult(false);
         try {
             AutoDeductionScheduler.OccurrenceSnapshot snap =
-                    newScheduler().getOccurrenceSnapshot("med", "dose", date);
+                    new AutoDeductionScheduler(
+                            Phase2TestSupport.appContext(),
+                            Phase2TestSupport.denyEventCommit()).getOccurrenceSnapshot("med", "dose", date);
             assertFalse(
                     "cancellation must not mask a ledger persistence failure",
                     snap.ok);
             assertEquals("rejected_persist_failed", snap.error);
-        } finally {
-            AutoDeductionEventStore.__setTestForceCommitResult(null);
         }
     }
 
@@ -148,20 +144,21 @@ public class OccurrenceSnapshotPersistFailureTest {
         plantMalformedFiredRow(date);
 
         // First evaluation under forced failure → fail-closed.
-        AutoDeductionEventStore.__setTestForceCommitResult(false);
         try {
             AutoDeductionScheduler.OccurrenceSnapshot snap =
-                    newScheduler().getOccurrenceSnapshot("med", "dose", date);
+                    new AutoDeductionScheduler(
+                            Phase2TestSupport.appContext(),
+                            Phase2TestSupport.denyEventCommit()).getOccurrenceSnapshot("med", "dose", date);
             assertFalse(snap.ok);
             assertEquals("rejected_persist_failed", snap.error);
-        } finally {
-            AutoDeductionEventStore.__setTestForceCommitResult(null);
         }
 
         // Once persistence works again, the row terminalizes to REJECTED and
         // the snapshot reports an ordinary safe ABSENT (no schedule present).
         AutoDeductionScheduler.OccurrenceSnapshot snap =
-                newScheduler().getOccurrenceSnapshot("med", "dose", date);
+                new AutoDeductionScheduler(
+                        Phase2TestSupport.appContext())
+                        .getOccurrenceSnapshot("med", "dose", date);
         assertTrue(snap.ok);
         assertEquals(
                 AutoDeductionScheduler.OccurrenceSnapshot.Status.ABSENT,

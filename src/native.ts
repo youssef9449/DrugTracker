@@ -64,7 +64,7 @@ export async function cleanupNativeListeners(): Promise<void> {
   initialized = false;
 }
 
-//**
+/**
  * Open the OS-level app settings page where the user can toggle
  * notification permissions for the app.
  *

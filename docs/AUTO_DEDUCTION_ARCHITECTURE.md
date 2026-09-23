@@ -6,7 +6,7 @@ Current-state technical specification for DrugTracker’s exact-time automatic d
 
 | Concern | Primary location |
 |---------|------------------|
-| JS → native schedule / list / mark bridge | `src/utils/autoDeductionNative.ts` |
+| JS → native schedule / list / mark bridge | `src/utils/autoDeductionNativePlugin.ts` + focused Auto Native API modules |
 | JS schedule requests (post-hydration) | `src/hooks/useAutoDeductionScheduler.ts` |
 | Native occurrence contract and feature payload | `native-android/auto-deduction/AutoDeductionContract.java` |
 | Durable native event store | `AutoDeductionEventStore.java` |

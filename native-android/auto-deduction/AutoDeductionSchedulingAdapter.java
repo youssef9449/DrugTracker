@@ -29,31 +29,38 @@ public final class AutoDeductionSchedulingAdapter {
     private final Context appContext;
     private final ExactAlarmRuntime alarmRuntime;
 
-    public volatile boolean forceOrderingTokenAllocationFailureForTest;
-    public volatile boolean forceTombstoneCommitFailureForTest;
-    public volatile boolean forceScheduleMetadataRemovalFailureForTest;
-
     public AutoDeductionSchedulingAdapter(Context context) {
+        this(context, AutoDeductionFailurePolicy.ALLOW_ALL);
+    }
+
+    AutoDeductionSchedulingAdapter(
+            Context context,
+            AutoDeductionFailurePolicy failurePolicy) {
         appContext = context.getApplicationContext();
+        final AutoDeductionFailurePolicy policy =
+                failurePolicy == null ? AutoDeductionFailurePolicy.ALLOW_ALL : failurePolicy;
         alarmRuntime = new ExactAlarmRuntime(
                 appContext,
                 AutoDeductionContract.PREFS_SCHEDULES,
                 AutoDeductionContract.PREFS_CANCELLED,
                 AutoDeductionContract.PREFS_ORDERING,
-                AutoDeductionContract.PENDING_INTENT_REQUEST_CODE);
-    }
+                AutoDeductionContract.PENDING_INTENT_REQUEST_CODE,
+                new ExactAlarmRuntime.FailurePolicy() {
+                    @Override
+                    public boolean allowOrderingTokenAllocation() {
+                        return policy.allowOrderingTokenAllocation();
+                    }
 
-    /**
-     * Synchronize test-only runtime failure switches.
-     * Production code leaves all switches false.
-     */
-    public void syncTestControls() {
-        alarmRuntime.forceOrderingTokenAllocationFailureForTest =
-                forceOrderingTokenAllocationFailureForTest;
-        alarmRuntime.forceTombstoneCommitFailureForTest =
-                forceTombstoneCommitFailureForTest;
-        alarmRuntime.forceScheduleMetadataRemovalFailureForTest =
-                forceScheduleMetadataRemovalFailureForTest;
+                    @Override
+                    public boolean allowTombstoneCommit() {
+                        return policy.allowTombstoneCommit();
+                    }
+
+                    @Override
+                    public boolean allowScheduleMetadataRemoval() {
+                        return policy.allowScheduleMetadataRemoval();
+                    }
+                });
     }
 
     private static String normalizeStorageKey(String storageKey) {
@@ -61,21 +68,6 @@ public final class AutoDeductionSchedulingAdapter {
         return storageKey.startsWith(ExactAlarmContract.SCHEDULE_KEY_PREFIX)
                 ? storageKey.substring(ExactAlarmContract.SCHEDULE_KEY_PREFIX.length())
                 : storageKey;
-    }
-
-    static String extractOperationVersion(String raw) {
-        return ExactAlarmContract.extractOperationVersion(raw);
-    }
-
-    static String extractOperationVersion(JSONObject metadata) {
-        return ExactAlarmContract.extractOperationVersion(metadata);
-    }
-
-    static boolean isMetadataOwnedByOperationVersion(
-            String currentJson,
-            String expectedOperationVersion) {
-        return ExactAlarmContract.isMetadataOwnedByOperationVersion(
-                currentJson, expectedOperationVersion);
     }
 
     /**
@@ -107,9 +99,54 @@ public final class AutoDeductionSchedulingAdapter {
                 firstMillis, firstSequence, secondMillis, secondSequence);
     }
 
-    public String getScheduleRaw(String storageKey) {
+    String getScheduleRaw(String storageKey) {
         String key = normalizeStorageKey(storageKey);
         return key == null ? null : alarmRuntime.getScheduleRaw(key);
+    }
+
+    AutoDeductionPersistenceModels.ScheduleRecord getScheduleRecord(
+            String storageKey) {
+        String raw = getScheduleRaw(storageKey);
+        if (raw == null) return null;
+        try {
+            return AutoDeductionPersistenceCodec.decodeSchedule(raw);
+        } catch (JSONException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Typed ownership check for Auto business/recovery callers.
+     * Raw schedule serialization never crosses this adapter boundary.
+     */
+    boolean isScheduleOwnedByOperationVersion(
+            String storageKey,
+            String expectedOperationVersion) {
+        if (storageKey == null || storageKey.isEmpty()
+                || expectedOperationVersion == null
+                || expectedOperationVersion.isEmpty()) {
+            return false;
+        }
+        AutoDeductionPersistenceModels.ScheduleRecord record =
+                getScheduleRecord(storageKey);
+        return record != null
+                && expectedOperationVersion.equals(record.operationVersion);
+    }
+
+    Map<String, AutoDeductionPersistenceModels.ScheduleRecord> listScheduleRecords() {
+        Map<String, AutoDeductionPersistenceModels.ScheduleRecord> out =
+                new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : alarmRuntime.listScheduleMetadata().entrySet()) {
+            try {
+                AutoDeductionPersistenceModels.ScheduleRecord record =
+                        AutoDeductionPersistenceCodec.decodeSchedule(entry.getValue());
+                out.put(normalizeStorageKey(entry.getKey()), record);
+            } catch (JSONException e) {
+                // Malformed rows remain visible through listScheduleMetadata() so
+                // recovery can quarantine them by their raw storage key.
+            }
+        }
+        return out;
     }
 
     public Map<String, String> listScheduleMetadata() {
@@ -250,8 +287,6 @@ public final class AutoDeductionSchedulingAdapter {
         deliveryExtras.putLong(
                 AutoDeductionContract.EXTRA_RECURRENCE_GENERATION,
                 recurrenceGeneration);
-
-        syncTestControls();
         ExactAlarmRuntime.ScheduleResult result = alarmRuntime.schedule(
                 new ExactAlarmRuntime.ScheduleRequest(
                         AutoDeductionContract.occurrenceUri(
@@ -280,7 +315,6 @@ public final class AutoDeductionSchedulingAdapter {
             String medicationId,
             String doseId,
             String calendarDate) {
-        syncTestControls();
         ExactAlarmRuntime.CancelResult result = alarmRuntime.cancel(
                 AutoDeductionContract.occurrenceUri(
                         medicationId,
@@ -345,8 +379,6 @@ public final class AutoDeductionSchedulingAdapter {
                     AutoDeductionContract.EXTRA_OPERATION_VERSION,
                     operationVersion);
         }
-
-        syncTestControls();
         return alarmRuntime.scheduleOneShot(
                 AutoDeductionContract.occurrenceUri(
                         medicationId,

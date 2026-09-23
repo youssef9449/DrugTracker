@@ -177,7 +177,7 @@ const notificationJava = read('native-android/notification-runtime/NotificationR
 assert(notificationJava.includes('notificationTag(namespace, identity)'),
   'Android Notification Runtime must use namespace + identity as logical notification authority');
 
-const autoNative = read('src/utils/autoDeductionNative.ts');
+const autoNative = read('src/utils/autoDeductionNativePlugin.ts');
 assert(!autoNative.includes('notificationRuntime') && !autoNative.includes('NotificationRuntime')
   && !autoNative.includes('notificationId('),
   'Auto native TypeScript bridge must remain outside notification identity/presentation infrastructure');

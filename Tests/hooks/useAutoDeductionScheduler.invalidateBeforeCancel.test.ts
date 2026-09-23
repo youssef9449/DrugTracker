@@ -16,14 +16,15 @@ const scheduleMock = vi.fn();
 const invalidateMock = vi.fn();
 const listScheduledMock = vi.fn();
 
-vi.mock('../../src/utils/autoDeductionNative', () => ({
+vi.mock('../../src/utils/autoDeductionNativeScheduling', () => ({
   cancelAutoDeduction: (...args: unknown[]) => cancelMock(...args),
   scheduleAutoDeduction: (...args: unknown[]) => scheduleMock(...args),
   invalidateAutoDeductionRecurrence: (...args: unknown[]) => invalidateMock(...args),
+}));
+
+vi.mock('../../src/utils/autoDeductionNativeRecovery', () => ({
   listScheduledAutoDeductionOccurrences: (...args: unknown[]) =>
     listScheduledMock(...args),
-  autoDeductionOccurrenceKey: (m: string, d: string, c: string) =>
-    `${m}\u001f${d}\u001f${c}`,
 }));
 
 import { useAutoDeductionScheduler } from '../../src/hooks/useAutoDeductionScheduler';

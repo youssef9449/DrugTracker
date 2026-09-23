@@ -24,36 +24,13 @@ export interface AutoStockDurableState {
 
 let chain: Promise<unknown> = Promise.resolve();
 
-let testLoad: (() => AutoStockDurableState) | null = null;
-let testCommit: ((state: AutoStockDurableState) => string | null) | null = null;
-let testLoadGeneration: (() => number) | null = null;
-let testBumpGeneration: (() => string | null) | null = null;
-let testPersistGlobal: ((value: boolean) => string | null) | null = null;
-
-/** @internal test-only */
-export function __setAutoStockGateTestHooks(hooks: {
-  load?: () => AutoStockDurableState;
-  commit?: (state: AutoStockDurableState) => string | null;
-  loadGeneration?: () => number;
-  bumpGeneration?: () => string | null;
-  persistGlobal?: (value: boolean) => string | null;
-} | null): void {
-  testLoad = hooks?.load ?? null;
-  testCommit = hooks?.commit ?? null;
-  testLoadGeneration = hooks?.loadGeneration ?? null;
-  testBumpGeneration = hooks?.bumpGeneration ?? null;
-  testPersistGlobal = hooks?.persistGlobal ?? null;
-}
-
 export function loadStockGeneration(): number {
-  if (testLoadGeneration) return testLoadGeneration();
   const raw = loadString(STORAGE_STOCK_GEN_KEY, '0');
   const n = Number(raw);
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
 }
 
 export function bumpStockGeneration(): string | null {
-  if (testBumpGeneration) return testBumpGeneration();
   const next = loadStockGeneration() + 1;
   return persist(STORAGE_STOCK_GEN_KEY, String(next), { json: false });
 }
@@ -63,7 +40,6 @@ export function loadDurableGlobalAutoDeductEnabled(): boolean {
 }
 
 export function loadDurableAutoStockState(): AutoStockDurableState {
-  if (testLoad) return testLoad();
   const meds = loadJson<Medication[] | null>(STORAGE_MEDS_KEY, null);
   const logs = loadJson<ConsumptionLog[] | null>(STORAGE_LOGS_KEY, null);
   return {
@@ -95,26 +71,6 @@ export function commitDurableAutoStockState(
   state: AutoStockDurableState,
   opts?: CommitDurableOptions
 ): string | null {
-  if (testCommit) {
-    const err = testCommit(state);
-    if (err) return err;
-    if (state.globalAutoDeductEnabled != null) {
-      const globalErr = testPersistGlobal
-        ? testPersistGlobal(state.globalAutoDeductEnabled)
-        : persist(
-            STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
-            String(state.globalAutoDeductEnabled),
-            { json: false }
-          );
-      if (globalErr) return globalErr;
-    }
-    if (opts?.appliedMutationSeq != null) {
-      const seqErr = persistLastAppliedMutationSeq(opts.appliedMutationSeq);
-      if (seqErr) return seqErr;
-    }
-    bumpStockGeneration();
-    return null;
-  }
   const medErr = persist(STORAGE_MEDS_KEY, state.medications, { json: true });
   if (medErr) return medErr;
   const logErr = persist(STORAGE_LOGS_KEY, state.logs, { json: true });

@@ -33,10 +33,14 @@ public final class ExactAlarmRuntime {
     private final Context appContext;
     private final ExactAlarmStore store;
     private final int pendingIntentRequestCode;
+    private final FailurePolicy failurePolicy;
 
-    public volatile boolean forceOrderingTokenAllocationFailureForTest;
-    public volatile boolean forceTombstoneCommitFailureForTest;
-    public volatile boolean forceScheduleMetadataRemovalFailureForTest;
+    public interface FailurePolicy {
+        FailurePolicy ALLOW_ALL = new FailurePolicy() {};
+        default boolean allowOrderingTokenAllocation() { return true; }
+        default boolean allowTombstoneCommit() { return true; }
+        default boolean allowScheduleMetadataRemoval() { return true; }
+    }
 
     public ExactAlarmRuntime(
             Context context,
@@ -44,6 +48,22 @@ public final class ExactAlarmRuntime {
             String cancellationsPrefsName,
             String orderingPrefsName,
             int pendingIntentRequestCode) {
+        this(
+                context,
+                schedulesPrefsName,
+                cancellationsPrefsName,
+                orderingPrefsName,
+                pendingIntentRequestCode,
+                FailurePolicy.ALLOW_ALL);
+    }
+
+    public ExactAlarmRuntime(
+            Context context,
+            String schedulesPrefsName,
+            String cancellationsPrefsName,
+            String orderingPrefsName,
+            int pendingIntentRequestCode,
+            FailurePolicy failurePolicy) {
         appContext = context.getApplicationContext();
         store = new ExactAlarmStore(
                 appContext,
@@ -51,6 +71,9 @@ public final class ExactAlarmRuntime {
                 cancellationsPrefsName,
                 orderingPrefsName);
         this.pendingIntentRequestCode = pendingIntentRequestCode;
+        this.failurePolicy = failurePolicy == null
+                ? FailurePolicy.ALLOW_ALL
+                : failurePolicy;
     }
 
 
@@ -385,8 +408,7 @@ public final class ExactAlarmRuntime {
                     return CancelResult.fail(
                             "ordering_sequence_write_failed");
                 }
-                if (forceTombstoneCommitFailureForTest
-                        || !store.writeCancellationTombstoneLocked(
+                if (!failurePolicy.allowTombstoneCommit() || !store.writeCancellationTombstoneLocked(
                                 storageKey,
                                 cancelToken)) {
                     return CancelResult.fail(
@@ -425,8 +447,7 @@ public final class ExactAlarmRuntime {
                         : CancelResult.success();
             }
 
-            if (forceScheduleMetadataRemovalFailureForTest
-                    || !store.removeScheduleLocked(
+            if (!failurePolicy.allowScheduleMetadataRemoval() || !store.removeScheduleLocked(
                             storageKey)) {
                 Log.e(TAG, "schedule metadata removal failed: "
                         + storageKey);
@@ -556,7 +577,7 @@ public final class ExactAlarmRuntime {
     }
 
     private String allocateOperationVersionLocked() {
-        if (forceOrderingTokenAllocationFailureForTest) {
+        if (!failurePolicy.allowOrderingTokenAllocation()) {
             return null;
         }
         return store.allocateOperationVersionLocked();

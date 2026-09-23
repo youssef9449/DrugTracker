@@ -1,3 +1,10 @@
+import {
+  __setStockMutationOrderingTestHooks,
+  __resetStockMutationOrderingForTests,
+  __setManualEnvelopeTestHooks,
+  __setExactAutoEnvelopeStorageTestHooks,
+  __setAutoStockGateTestHooks,
+} from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Medication, ConsumptionLog } from '../../src/types';
 import {
@@ -13,28 +20,46 @@ import {
   shouldDismissAlarmAfterManualTake,
   type ManualStockEnvelope } from '../../src/utils/manualStockMutation';
 import {
-  __setManualEnvelopeTestHooks,
-  __setExactAutoEnvelopeStorageTestHooks,
-  loadExactAutoStockEnvelope,
+loadExactAutoStockEnvelope,
   durableMatchesEnvelopeSnapshot } from '../../src/utils/stockEnvelopeRecovery';
 import {
-  __setStockMutationOrderingTestHooks,
-  __resetStockMutationOrderingForTests,
-  allocateMutationSeq,
+allocateMutationSeq,
   persistLastAppliedMutationSeq,
   loadLastAppliedMutationSeq } from '../../src/utils/stockMutationOrdering';
 import {
   runAutoDeductionReconciliation,
   type ExactAutoEnvelope } from '../../src/utils/runAutoDeductionReconciliation';
 import {
-  __setAutoStockGateTestHooks,
-  type AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
-import { __setManualRecurrenceInvalidationTestHook } from '../../src/utils/manualStockMutation';
-import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
+type AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
+import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNativeTypes';
 import { isDoseConsumedOnDate, isDoseSkippedOnDate } from '../../src/utils/dateCalculations';
 import { exactAutoLogId } from '../../src/utils/autoDeductionReconciliation';
 import * as preSettleModule from '../../src/utils/reconcileExactBeforeManualMutation';
-import * as autoNative from '../../src/utils/autoDeductionNative';
+
+const autoSchedulingMocks = vi.hoisted(() => ({
+  invalidateAutoDeductionRecurrence: vi.fn(),
+  scheduleAutoDeduction: vi.fn(),
+  recoverAutoDeductionOccurrenceForCompensation: vi.fn(),
+}));
+
+vi.mock('../../src/utils/autoDeductionNativeScheduling', async () => {
+  const actual = await vi.importActual<typeof import('../../src/utils/autoDeductionNativeScheduling')>(
+    '../../src/utils/autoDeductionNativeScheduling'
+  );
+  return {
+    ...actual,
+    ...autoSchedulingMocks,
+  };
+});
+
+beforeEach(() => {
+  autoSchedulingMocks.invalidateAutoDeductionRecurrence.mockResolvedValue({
+    ok: true,
+    generation: 1,
+  });
+  autoSchedulingMocks.scheduleAutoDeduction.mockResolvedValue({ ok: true });
+  autoSchedulingMocks.recoverAutoDeductionOccurrence.mockResolvedValue({ ok: true });
+});
 // findPending used indirectly via runGatedManualConsume
 import {
   findActiveDeductionForOccurrence,
@@ -2907,7 +2932,7 @@ describe('Phase 4 — durable deletion', () => {
       },
     });
     __setManualEnvelopeTestHooks({ load: () => null, save: () => null });
-    __setManualRecurrenceInvalidationTestHook(async () => ({ ok: true }));
+    autoSchedulingMocks.invalidateAutoDeductionRecurrence.mockResolvedValue({ ok: true, generation: 1 });
     __setStockMutationOrderingTestHooks({
       allocate: (() => {
         let seq = 0;
@@ -2922,7 +2947,7 @@ describe('Phase 4 — durable deletion', () => {
     vi.useRealTimers();
     __setAutoStockGateTestHooks(null);
     __setManualEnvelopeTestHooks(null);
-    __setManualRecurrenceInvalidationTestHook(null);
+    
     __resetStockMutationOrderingForTests();
   });
 
@@ -2956,10 +2981,12 @@ describe('Phase 4 — native recurrence invalidation is the config-change orderi
     });
     __setManualEnvelopeTestHooks({ load: () => null, save: () => null });
     invalidated.length = 0;
-    __setManualRecurrenceInvalidationTestHook(async (medicationId, doseId) => {
-      invalidated.push(`${medicationId}|${doseId}`);
-      return { ok: true };
-    });
+    autoSchedulingMocks.invalidateAutoDeductionRecurrence.mockImplementation(
+      async (medicationId, doseId) => {
+        invalidated.push(`${medicationId}|${doseId}`);
+        return { ok: true, generation: 1 };
+      }
+    );
     __setStockMutationOrderingTestHooks({
       allocate: (() => {
         let seq = 0;
@@ -2974,7 +3001,7 @@ describe('Phase 4 — native recurrence invalidation is the config-change orderi
     vi.useRealTimers();
     __setAutoStockGateTestHooks(null);
     __setManualEnvelopeTestHooks(null);
-    __setManualRecurrenceInvalidationTestHook(null);
+    
     __resetStockMutationOrderingForTests();
   });
 
@@ -3011,10 +3038,10 @@ describe('Phase 4 — native recurrence invalidation is the config-change orderi
   });
 
   it('native invalidation failure blocks the JS configuration mutation', async () => {
-    __setManualRecurrenceInvalidationTestHook(async () => ({
+    autoSchedulingMocks.invalidateAutoDeductionRecurrence.mockResolvedValue({
       ok: false,
       error: 'native_invalidation_failed',
-    }));
+    });
     const before = durable.medications[0];
     const r = await runGatedAutoDeductToggle({
       medicationId: 'med-1',
@@ -3023,6 +3050,26 @@ describe('Phase 4 — native recurrence invalidation is the config-change orderi
     });
     expect(r.outcome).toBe('native_invalidation_failed');
     expect(durable.medications[0]).toEqual(before);
+  });
+
+  it('partial cancellation failure compensates the current dose chain before returning failure', async () => {
+    autoSchedulingMocks.invalidateAutoDeductionRecurrence.mockResolvedValue({
+      ok: false,
+      error: 'recurrence_generation_commit_failed',
+      generation: 1,
+      schedulesCancelled: true,
+    });
+
+    const before = durable.medications[0];
+    const result = await runGatedAutoDeductToggle({
+      medicationId: 'med-1',
+      globalAutoDeductEnabled: true,
+      todayStr: '2026-09-16',
+    });
+
+    expect(result.outcome).toBe('native_invalidation_failed');
+    expect(durable.medications[0]).toEqual(before);
+    expect(autoSchedulingMocks.scheduleAutoDeduction).toHaveBeenCalled();
   });
 });
 
@@ -3755,9 +3802,9 @@ describe('Phase 4 — treatment-boundary-safe recurrence compensation', () => {
       durabilityBlocked: false,
     }));
 
-    __setManualRecurrenceInvalidationTestHook(async () => ({ ok: true }));
+    autoSchedulingMocks.invalidateAutoDeductionRecurrence.mockResolvedValue({ ok: true, generation: 1 });
 
-    vi.spyOn(autoNative, 'scheduleAutoDeduction').mockImplementation(async (args) => {
+    autoSchedulingMocks.scheduleAutoDeduction.mockImplementation(async (args) => {
       scheduleCalls.push({
         calendarDate: args.calendarDate,
         treatmentEndDate: args.treatmentEndDate,
@@ -3770,8 +3817,50 @@ describe('Phase 4 — treatment-boundary-safe recurrence compensation', () => {
     vi.restoreAllMocks();
     __setAutoStockGateTestHooks(null);
     __setManualEnvelopeTestHooks(null);
-    __setManualRecurrenceInvalidationTestHook(null);
+    
     vi.useRealTimers();
+  });
+
+  it('rechecks the clock during compensation when an occurrence crosses from future to past', async () => {
+    __setAutoStockGateTestHooks({
+      load: () => ({
+        medications: durable.medications.map((m) => ({ ...m })),
+        logs: durable.logs.map((l) => ({ ...l })),
+      }),
+      commit: () => {
+        // The mutation starts at Sep 22 07:00; make the Sep 23 20:00
+        // occurrence become overdue before rollback compensation begins.
+        vi.setSystemTime(new Date('2026-09-23T21:00:00'));
+        return 'persist_failed';
+      },
+    });
+
+    const current = durable.medications[0];
+    const { id, createdAt, ...medData } = current;
+    const result = await runGatedMedicationUpdate({
+      editId: id,
+      medData: {
+        ...medData,
+        durationDays: 6,
+      },
+    });
+
+    expect(result.outcome).toBe('persist_failed');
+    expect(autoSchedulingMocks.recoverAutoDeductionOccurrence).toHaveBeenCalledWith(
+      id,
+      'd1',
+      '2026-09-23',
+      expect.any(Number),
+      1,
+      1
+    );
+    expect(scheduleCalls).toEqual([
+      {
+        calendarDate: '2026-09-24',
+        treatmentEndDate: '2026-09-28',
+      },
+    ]);
+    expect(createdAt).toBe(current.createdAt);
   });
 
   it('does not compensate an occurrence before the treatment start date', async () => {

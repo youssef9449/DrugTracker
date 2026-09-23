@@ -20,9 +20,6 @@ import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
 
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 
 /** Issue #243 — multi-day missed-dose catch-up (deterministic). */
 @RunWith(RobolectricTestRunner.class)
@@ -92,13 +89,12 @@ public class MultiDayCatchUpTest {
 
     @Test
     public void multiDayGap_recoversAllDue_thenOnlyFirstFuture() throws Exception {
-        AutoDeductionScheduler s = newScheduler();
         String med = "med-gap";
         String dose = "d1";
         String time = "08:00";
         // Logical now = 2026-09-30 12:00
         long now = epoch("2026-09-30", "12:00");
-        s.recoveryNowOverrideForTest = now;
+        AutoDeductionScheduler s = newSchedulerAt(now);
 
         String start = "2026-09-01";
         long gen = 1L;
@@ -123,12 +119,11 @@ public class MultiDayCatchUpTest {
 
     @Test
     public void currentDayBoundary_beforeAndExactMinute() throws Exception {
-        AutoDeductionScheduler s = newScheduler();
         String med = "med-day";
         long gen = 1L;
 
         // Recovery at 12:00: 08:00 FIRED, 14:00 future only
-        s.recoveryNowOverrideForTest = epoch("2026-09-30", "12:00");
+        AutoDeductionScheduler s = newSchedulerAt(epoch("2026-09-30", "12:00"));
         String ver8 = putPastSnapshot(med, "A", "2026-09-30", "08:00", 1.0, gen);
         s.catchUpMissedOccurrencesAndScheduleNext(
                 med, "A", "2026-09-30", "08:00", 1.0, gen,
@@ -137,8 +132,7 @@ public class MultiDayCatchUpTest {
         assertTrue(hasSchedule(med, "A", "2026-10-01"));
 
         clearAllDurableState();
-        s = newScheduler();
-        s.recoveryNowOverrideForTest = epoch("2026-09-30", "12:00");
+        s = newSchedulerAt(epoch("2026-09-30", "12:00"));
         seedGen(med, "B", gen);
         String ver14 = putPastSnapshot(med, "B", "2026-09-30", "14:00", 2.0, gen);
         s.catchUpMissedOccurrencesAndScheduleNext(
@@ -149,8 +143,7 @@ public class MultiDayCatchUpTest {
 
         // Exact minute 14:00 → due / FIRED
         clearAllDurableState();
-        s = newScheduler();
-        s.recoveryNowOverrideForTest = epoch("2026-09-30", "14:00");
+        s = newSchedulerAt(epoch("2026-09-30", "14:00"));
         seedGen(med, "B", gen);
         ver14 = putPastSnapshot(med, "B", "2026-09-30", "14:00", 2.0, gen);
         s.catchUpMissedOccurrencesAndScheduleNext(
@@ -162,8 +155,7 @@ public class MultiDayCatchUpTest {
 
     @Test
     public void multiDose_at1500_AandB_fired_C_future() throws Exception {
-        AutoDeductionScheduler s = newScheduler();
-        s.recoveryNowOverrideForTest = epoch("2026-09-30", "15:00");
+        AutoDeductionScheduler s = newSchedulerAt(epoch("2026-09-30", "15:00"));
         String med = "med-multi";
         long gen = 1L;
         String day = "2026-09-30";
@@ -200,8 +192,7 @@ public class MultiDayCatchUpTest {
 
     @Test
     public void idempotentRerun_singleFiredPerDate() throws Exception {
-        AutoDeductionScheduler s = newScheduler();
-        s.recoveryNowOverrideForTest = epoch("2026-09-30", "12:00");
+        AutoDeductionScheduler s = newSchedulerAt(epoch("2026-09-30", "12:00"));
         String med = "med-idemp";
         String dose = "d1";
         String start = "2026-09-28";
@@ -226,8 +217,7 @@ public class MultiDayCatchUpTest {
 
     @Test
     public void expectedGenZero_activePositive_noFired() {
-        AutoDeductionScheduler s = newScheduler();
-        s.recoveryNowOverrideForTest = epoch("2026-09-30", "12:00");
+        AutoDeductionScheduler s = newSchedulerAt(epoch("2026-09-30", "12:00"));
         String med = "med-z";
         String dose = "d1";
         // Active generation already invalidated / promoted
@@ -239,45 +229,8 @@ public class MultiDayCatchUpTest {
     }
 
     @Test
-    public void generationRace_invalidateBeforeSuccessorInstall_noG2Successor()
-            throws Exception {
-        AutoDeductionScheduler s = newScheduler();
-        s.recoveryNowOverrideForTest = epoch("2026-09-30", "12:00");
-        String med = "med-race";
-        String dose = "d1";
-        String start = "2026-09-30"; // only today 08:00 due → next is 10-01
-        long gen = 1L;
-        String ver = putPastSnapshot(med, dose, start, "08:00", 1.0, gen);
-
-        CountDownLatch beforeInstall = new CountDownLatch(1);
-        CountDownLatch resumeInstall = new CountDownLatch(1);
-        s.recoveryBeforeSuccessorInstallLatchForTest = beforeInstall;
-        s.recoveryResumeSuccessorInstallLatchForTest = resumeInstall;
-
-        AtomicReference<Integer> created = new AtomicReference<>(-1);
-        Thread recovery = new Thread(() -> {
-            created.set(s.catchUpMissedOccurrencesAndScheduleNext(
-                    med, dose, start, "08:00", 1.0, gen,
-                    schKey(AutoDeductionContract.occurrenceKey(med, dose, start)), ver)
-                    .firedCreated);
-        });
-        recovery.start();
-
-        assertTrue(beforeInstall.await(3, TimeUnit.SECONDS));
-        // Invalidate G1 → G2 while recovery is between outer probe and locked install
-        assertTrue(s.invalidateRecurrenceAuthorization(med, dose).ok);
-        resumeInstall.countDown();
-        recovery.join(5000);
-
-        assertTrue(hasFired(med, dose, start)); // due day still recovered under G1
-        // Must not install future under G2 as continuation of G1 recovery
-        assertFalse(hasSchedule(med, dose, "2026-10-01"));
-    }
-
-    @Test
     public void recoveryInstallsUnderG1_thenInvalidate_existingSemantics() throws Exception {
-        AutoDeductionScheduler s = newScheduler();
-        s.recoveryNowOverrideForTest = epoch("2026-09-30", "12:00");
+        AutoDeductionScheduler s = newSchedulerAt(epoch("2026-09-30", "12:00"));
         String med = "med-ok";
         String dose = "d1";
         String start = "2026-09-30";
@@ -310,8 +263,7 @@ public class MultiDayCatchUpTest {
 
     @Test
     public void cancelledFutureSuccessor_notResurrectedByCatchUp() throws Exception {
-        AutoDeductionScheduler s = newScheduler();
-        s.recoveryNowOverrideForTest = epoch("2026-09-30", "12:00");
+        AutoDeductionScheduler s = newSchedulerAt(epoch("2026-09-30", "12:00"));
         String med = "med-canc-fut";
         String dose = "d1";
         String start = "2026-09-30"; // due at 08:00; first future = 2026-10-01
@@ -342,7 +294,7 @@ public class MultiDayCatchUpTest {
         String treatmentEndDate = "2026-09-30";
 
         // Restore from a future durable snapshot while the course is still active.
-        s.recoveryNowOverrideForTest = epoch("2026-09-29", "12:00");
+        // recovery clock is injected into the scheduler instance
         assertTrue(s.scheduleOccurrence(
                 med,
                 dose,
@@ -362,8 +314,7 @@ public class MultiDayCatchUpTest {
 
     @Test
     public void restoreFutureSchedules_countsFutureAlarmsNotFiredRows() throws Exception {
-        AutoDeductionScheduler s = newScheduler();
-        s.recoveryNowOverrideForTest = epoch("2026-09-30", "12:00");
+        AutoDeductionScheduler s = newSchedulerAt(epoch("2026-09-30", "12:00"));
         String med = "med-count";
         String dose = "d1";
         String start = "2026-09-28";

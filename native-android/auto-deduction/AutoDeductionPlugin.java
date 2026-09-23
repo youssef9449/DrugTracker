@@ -110,6 +110,55 @@ public class AutoDeductionPlugin extends Plugin {
         if (result.error != null) ret.put("error", result.error);
         call.resolve(ret);
     }
+    @PluginMethod
+    public void recoverMissedOccurrence(PluginCall call) {
+        recoverMissedOccurrenceInternal(call, false);
+    }
+
+    @PluginMethod
+    public void recoverMissedOccurrenceForCompensation(PluginCall call) {
+        recoverMissedOccurrenceInternal(call, true);
+    }
+
+    private void recoverMissedOccurrenceInternal(
+            PluginCall call,
+            boolean compensation) {
+        String medicationId = call.getString("medicationId");
+        String doseId = call.getString("doseId");
+        String calendarDate = call.getString("calendarDate");
+        Double amountObj = call.getDouble("amount");
+        Long scheduledAtObj = call.getLong("scheduledAtEpochMs");
+        Long generationObj = call.getLong("expectedRecurrenceGeneration");
+        double amount = amountObj != null ? amountObj : Double.NaN;
+        long scheduledAt = scheduledAtObj != null ? scheduledAtObj : -1L;
+        long generation = generationObj != null ? generationObj : 0L;
+        try {
+            AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
+            AutoDeductionScheduler.FireResult result = compensation
+                    ? scheduler.recoverMissedOccurrenceForCompensation(
+                            medicationId, doseId, calendarDate,
+                            scheduledAt, amount, generation)
+                    : scheduler.recoverMissedOccurrence(
+                            medicationId, doseId, calendarDate,
+                            scheduledAt, amount, generation);
+            JSObject ret = new JSObject();
+            ret.put("ok", result.allowsRecurrence());
+            ret.put("status", result.status.name());
+            if (result.status != AutoDeductionScheduler.FireResult.Status.CANCELLED
+                    && result.status != AutoDeductionScheduler.FireResult.Status.CREATED
+                    && result.status != AutoDeductionScheduler.FireResult.Status.ALREADY_EXISTS) {
+                ret.put("ok", false);
+            }
+            call.resolve(ret);
+        } catch (Exception e) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("status", "FAILED");
+            ret.put("error", e.getMessage() != null ? e.getMessage() : "recovery_failed");
+            call.resolve(ret);
+        }
+    }
+
     /**
      * medication+dose recurrence disable — bumps durable generation under
      * SCHEDULE_LOCK and cancels all future scheduled occurrences for that dose slot.
@@ -129,7 +178,10 @@ public class AutoDeductionPlugin extends Plugin {
         JSObject ret = new JSObject();
         ret.put("ok", result.ok);
         if (result.error != null) ret.put("error", result.error);
-        if (result.ok) ret.put("generation", result.generation);
+        if (result.ok || result.schedulesCancelled) {
+            ret.put("generation", result.generation);
+        }
+        ret.put("schedulesCancelled", result.schedulesCancelled);
         call.resolve(ret);
     }
     @PluginMethod
@@ -137,9 +189,9 @@ public class AutoDeductionPlugin extends Plugin {
         AutoDeductionEventStore store = new AutoDeductionEventStore(getContext());
         AutoDeductionEventStore.FiredEventsResult result = store.listFiredEventsResult();
         JSArray arr = new JSArray();
-        for (JSONObject o : result.events) {
+        for (AutoDeductionPersistenceModels.EventRecord record : result.records) {
             try {
-                arr.put(toJSObject(o));
+                arr.put(toJSObject(AutoDeductionPersistenceCodec.encodeEvent(record)));
             } catch (Exception e) {
                 Log.w(TAG, "skip event", e);
             }
@@ -150,22 +202,7 @@ public class AutoDeductionPlugin extends Plugin {
         if (result.error != null) ret.put("error", result.error);
         call.resolve(ret);
     }
-    @PluginMethod
-    public void listEvents(PluginCall call) {
-        AutoDeductionEventStore store = new AutoDeductionEventStore(getContext());
-        List<JSONObject> events = store.listEvents();
-        JSArray arr = new JSArray();
-        for (JSONObject o : events) {
-            try {
-                arr.put(toJSObject(o));
-            } catch (Exception e) {
-                Log.w(TAG, "skip event", e);
-            }
-        }
-        JSObject ret = new JSObject();
-        ret.put("events", arr);
-        call.resolve(ret);
-    }
+
     @PluginMethod
     public void markReconciled(PluginCall call) {
         String medicationId = call.getString("medicationId");
@@ -173,6 +210,7 @@ public class AutoDeductionPlugin extends Plugin {
         String calendarDate = call.getString("calendarDate");
         AutoDeductionEventStore store = new AutoDeductionEventStore(getContext());
         AutoDeductionEventStore.MarkResult result = store.markReconciled(medicationId, doseId, calendarDate);
+        new AutoDeductionScheduler(getContext()).compactTerminalState();
         JSObject ret = new JSObject();
         ret.put("ok", result.ok);
         ret.put("changed", result.changed);
@@ -209,18 +247,20 @@ public class AutoDeductionPlugin extends Plugin {
     public void listScheduledOccurrences(PluginCall call) {
         try {
             AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
-            java.util.List<JSONObject> rows = scheduler.listScheduledOccurrences();
+            java.util.List<AutoDeductionPersistenceModels.ScheduledOccurrenceRecord> rows =
+                    scheduler.listScheduledOccurrences();
             JSArray arr = new JSArray();
-            for (JSONObject o : rows) {
+            for (AutoDeductionPersistenceModels.ScheduledOccurrenceRecord row : rows) {
+                AutoDeductionPersistenceModels.ScheduleRecord o = row.schedule;
                 JSObject js = new JSObject();
-                js.put("medicationId", o.optString("medicationId", ""));
-                js.put("doseId", o.optString("doseId", ""));
-                js.put("calendarDate", o.optString("calendarDate", ""));
-                js.put("timeHhmm", o.optString("timeHhmm", ""));
-                js.put("amount", o.optDouble("amount", 0));
-                js.put("scheduledAtEpochMs", o.optLong("scheduledAtEpochMs", 0L));
-                if (o.has("fireRetryCount")) {
-                    js.put("fireRetryCount", o.optInt("fireRetryCount", 0));
+                js.put("medicationId", o.occurrence.medicationId);
+                js.put("doseId", o.occurrence.doseId);
+                js.put("calendarDate", o.occurrence.calendarDate);
+                js.put("timeHhmm", o.timeHhmm);
+                js.put("amount", o.amount);
+                js.put("scheduledAtEpochMs", o.scheduledAtEpochMs);
+                if (row.fireRetryCount > 0) {
+                    js.put("fireRetryCount", row.fireRetryCount);
                 }
                 arr.put(js);
             }
@@ -339,6 +379,7 @@ public class AutoDeductionPlugin extends Plugin {
             AutoDeductionStockStore.ForegroundApplyResult result =
                     new AutoDeductionStockStore(getContext()).applyForegroundDeltas(
                             mutationSeq, deltas, resolutions);
+            new AutoDeductionScheduler(getContext()).compactTerminalState();
             JSObject ret = new JSObject();
             ret.put("ok", result.ok);
             ret.put("alreadyApplied", result.alreadyApplied);
@@ -369,14 +410,31 @@ public class AutoDeductionPlugin extends Plugin {
      */
     @PluginMethod
     public void applyAutoDeductionStock(PluginCall call) {
+        resolveAutoDeductionStock(call, false);
+    }
+
+    /**
+     * Explicit recovery path for reconciliation of durable FIRED evidence.
+     * Historical dates are allowed only through this authorized path.
+     */
+    @PluginMethod
+    public void recoverAutoDeductionStock(PluginCall call) {
+        resolveAutoDeductionStock(call, true);
+    }
+
+    private void resolveAutoDeductionStock(PluginCall call, boolean recovery) {
         String medicationId = call.getString("medicationId");
         String doseId = call.getString("doseId");
         String calendarDate = call.getString("calendarDate");
         Double amountObj = call.getDouble("amount");
         double amount = amountObj != null ? amountObj : Double.NaN;
+        AutoDeductionStockStore store = new AutoDeductionStockStore(getContext());
         AutoDeductionStockStore.AutoApplyResult result =
-                new AutoDeductionStockStore(getContext()).applyAutoDeduction(
-                        medicationId, doseId, calendarDate, amount);
+                recovery
+                        ? store.applyAutoDeductionForRecovery(
+                                medicationId, doseId, calendarDate, amount)
+                        : store.applyAutoDeduction(
+                                medicationId, doseId, calendarDate, amount);
         JSObject ret = new JSObject();
         ret.put("ok", result.ok);
         ret.put("applied", result.applied);

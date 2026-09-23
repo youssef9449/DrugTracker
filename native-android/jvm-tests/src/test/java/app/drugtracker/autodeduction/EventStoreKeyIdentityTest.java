@@ -16,7 +16,6 @@ import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
 
-import java.util.List;
 
 /**
  * Phase 4 regression — storage key identity vs payload identity.
@@ -35,7 +34,6 @@ public class EventStoreKeyIdentityTest {
     @Before
     public void setUp() {
         clearAllDurableState();
-        AutoDeductionEventStore.__setTestForceCommitResult(null);
     }
 
     /** storage key = occurrence A (med-A/dose-1); payload = occurrence B (med-B/dose-2). */
@@ -61,8 +59,9 @@ public class EventStoreKeyIdentityTest {
 
         // Not surfaced as FIRED (payload fields are all individually valid —
         // only the storage-key comparison can detect this corruption).
-        List<JSONObject> fired = store.listFiredEvents();
-        assertTrue(fired.isEmpty());
+        AutoDeductionEventStore.FiredEventsResult fired = store.listFiredEventsResult();
+        assertTrue(fired.ok);
+        assertTrue(fired.records.isEmpty());
 
         // Terminalized to REJECTED with an explicit identity-mismatch reason.
         String keyA = AutoDeductionContract.occurrenceKey("med-A", "dose-1", "2026-09-15");
@@ -79,8 +78,8 @@ public class EventStoreKeyIdentityTest {
             throws Exception {
         plantMismatchedRow();
         AutoDeductionEventStore store = newEventStore();
-        assertTrue(store.listFiredEvents().isEmpty());
-        assertTrue(store.listFiredEvents().isEmpty());
+        assertTrue(store.listFiredEventsResult().records.isEmpty());
+        assertTrue(store.listFiredEventsResult().records.isEmpty());
 
         String keyA = AutoDeductionContract.occurrenceKey("med-A", "dose-1", "2026-09-15");
         JSONObject row = new JSONObject(eventPrefs().getString(evtKey(keyA), null));
@@ -98,7 +97,7 @@ public class EventStoreKeyIdentityTest {
         AutoDeductionEventStore.EventLookupResult lookupA =
                 store.getFiredUnreconciledEvent("med-A", "dose-1", "2026-09-15");
         assertTrue(lookupA.ok);
-        assertNull(lookupA.event);
+        assertNull(lookupA.record);
 
         // Looking up occurrence B (the payload identity) also finds nothing:
         // the payload was never durable under its own key, so a later
@@ -106,7 +105,7 @@ public class EventStoreKeyIdentityTest {
         AutoDeductionEventStore.EventLookupResult lookupB =
                 store.getFiredUnreconciledEvent("med-B", "dose-2", "2026-09-15");
         assertTrue(lookupB.ok);
-        assertNull(lookupB.event);
+        assertNull(lookupB.record);
 
         // The row stays terminal under its own key — no FIRED row remains for
         // markReconciled to miss.
@@ -132,7 +131,7 @@ public class EventStoreKeyIdentityTest {
         eventPrefs().edit().putString(evtKey(keyA), payload.toString()).commit();
 
         AutoDeductionEventStore store = newEventStore();
-        assertTrue(store.listFiredEvents().isEmpty());
+        assertTrue(store.listFiredEventsResult().records.isEmpty());
         JSONObject row = new JSONObject(
                 eventPrefs().getString(evtKey(keyA), null));
         assertEquals(AutoDeductionContract.STATUS_REJECTED, row.optString("status"));
@@ -148,11 +147,12 @@ public class EventStoreKeyIdentityTest {
                         .status);
 
         // Positive control: matching key/payload identity keeps surfacing.
-        List<JSONObject> fired = store.listFiredEvents();
-        assertEquals(1, fired.size());
-        assertEquals("med-A", fired.get(0).optString("medicationId"));
-        assertEquals("dose-1", fired.get(0).optString("doseId"));
-        assertEquals("2026-09-15", fired.get(0).optString("calendarDate"));
-        assertEquals(AutoDeductionContract.STATUS_FIRED, fired.get(0).optString("status"));
+        AutoDeductionEventStore.FiredEventsResult fired = store.listFiredEventsResult();
+        assertTrue(fired.ok);
+        assertEquals(1, fired.records.size());
+        assertEquals("med-A", fired.records.get(0).occurrence.medicationId);
+        assertEquals("dose-1", fired.records.get(0).occurrence.doseId);
+        assertEquals("2026-09-15", fired.records.get(0).occurrence.calendarDate);
+        assertEquals(AutoDeductionContract.STATUS_FIRED, fired.records.get(0).status);
     }
 }

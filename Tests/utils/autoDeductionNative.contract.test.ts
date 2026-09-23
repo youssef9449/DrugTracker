@@ -8,7 +8,8 @@ import type {
   CancelOccurrenceStatus,
   ExactAutoDeductionFiredEvent,
   ListScheduledOccurrencesResult,
-  ScheduleOccurrenceResult } from '../../src/utils/autoDeductionNative';
+  ScheduleOccurrenceResult,
+} from '../../src/utils/autoDeductionNativeTypes';
 
 describe('CancelOccurrenceResult contract', () => {
   it('SUCCESS is ok', () => {

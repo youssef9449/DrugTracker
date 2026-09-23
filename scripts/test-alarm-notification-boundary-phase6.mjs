@@ -44,7 +44,7 @@ const autoTsFiles = [
   'src/hooks/useAutoDeductionScheduler.ts',
   'src/hooks/useExactAutoDeductionReconciliation.ts',
   'src/hooks/useStartupAutoDeduction.ts',
-  'src/utils/autoDeductionNative.ts',
+  'src/utils/autoDeductionNativePlugin.ts',
   'src/utils/autoDeductionReconciliation.ts',
   'src/utils/autoDeductionScheduleOwnership.ts',
   'src/utils/autoDeductionStockGate.ts',
@@ -203,7 +203,7 @@ assert(
   'Notification identity registry must contain no Auto Deduction category or identity'
 );
 
-const autoNativeBridge = read('src/utils/autoDeductionNative.ts');
+const autoNativeBridge = read('src/utils/autoDeductionNativePlugin.ts');
 assert(
   !/notifications\/|notificationRuntime|NotificationRuntime|notificationId\s*\(/i.test(autoNativeBridge),
   'Auto native TypeScript bridge must not import or address notification infrastructure'

@@ -1,3 +1,9 @@
+import {
+  __setStockMutationOrderingTestHooks,
+  __setManualEnvelopeTestHooks,
+  __setAutoStockGateTestHooks,
+  __setExactAutoEnvelopeTestHooks,
+} from './autoStockTestHooks';
 /**
  * Regression: durable native FIRED amount must win over current schedule amount
  * when exact reconciliation runs before any gated mutation path.
@@ -5,7 +11,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Medication, ConsumptionLog } from '../../src/types';
-import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
+import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNativeTypes';
 import { runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
 import {
   reconcileFiredEvents,
@@ -14,10 +20,7 @@ import {
   runGatedAutoDeductToggle,
   runGatedGlobalAutoDeductToggle,
   runGatedMedicationUpdate,
-  __setManualEnvelopeTestHooks } from '../../src/utils/manualStockMutation';
-import { __setAutoStockGateTestHooks } from '../../src/utils/autoDeductionStockGate';
-import { __setExactAutoEnvelopeTestHooks } from '../../src/utils/runAutoDeductionReconciliation';
-import { __setStockMutationOrderingTestHooks } from '../../src/utils/stockMutationOrdering';
+} from '../../src/utils/manualStockMutation';
 import * as preSettleModule from '../../src/utils/reconcileExactBeforeManualMutation';
 
 function baseMed(over: Partial<Medication> = {}): Medication {

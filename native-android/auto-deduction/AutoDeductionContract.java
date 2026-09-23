@@ -78,6 +78,18 @@ public final class AutoDeductionContract {
      */
     public static final String PREFS_RECURRENCE_AUTH =
             "drugtracker_auto_deduction_recurrence_auth_v1";
+    /** Durable obligation that a completed occurrence must have a successor resolved. */
+    public static final String PREFS_SUCCESSOR_OBLIGATIONS =
+            "drugtracker_auto_deduction_successor_obligations_v1";
+    public static final String SUCCESSOR_OBLIGATION_KEY_PREFIX = "succ:";
+    /** Retain terminal REJECTED diagnostics for this many days before compaction. */
+    public static final int REJECTED_TERMINAL_RETENTION_DAYS = 30;
+    /** Maximum calendar age for terminal occurrence markers retained for duplicate-delivery idempotency. */
+    public static final int TERMINAL_OCCURRENCE_MAX_AGE_DAYS = 2;
+    /** Direct JS/native Auto stock calls older than this are rejected unless routed through recovery. */
+    public static final int DIRECT_AUTO_STOCK_MAX_AGE_DAYS = 30;
+    /** Non-active diagnostic prefix for malformed successor-obligation rows. */
+    public static final String SUCCESSOR_OBLIGATION_QUARANTINE_KEY_PREFIX = "quarantine:succ:";
     /** Prefs key prefix for active recurrence generation (medicationId + doseId). */
     public static final String RECURRENCE_AUTH_KEY_PREFIX = "rgen:";
     /**

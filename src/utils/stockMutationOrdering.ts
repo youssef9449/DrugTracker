@@ -14,30 +14,7 @@ export const STORAGE_LAST_APPLIED_SEQ_KEY =
 export const STORAGE_NEXT_SEQ_KEY =
   'android_med_tracker_stock_mutation_seq_next_v1';
 
-let testHooks: {
-  loadLastApplied?: () => number;
-  persistLastApplied?: (seq: number) => string | null;
-  allocate?: () => { ok: true; seq: number } | { ok: false; error: string };
-} | null = null;
-
-/** @internal test-only */
-export function __setStockMutationOrderingTestHooks(
-  hooks: {
-    loadLastApplied?: () => number;
-    persistLastApplied?: (seq: number) => string | null;
-    allocate?: () => { ok: true; seq: number } | { ok: false; error: string };
-  } | null
-): void {
-  testHooks = hooks;
-}
-
-/** @internal test-only */
-export function __resetStockMutationOrderingForTests(): void {
-  testHooks = null;
-}
-
 export function loadLastAppliedMutationSeq(): number {
-  if (testHooks?.loadLastApplied) return testHooks.loadLastApplied();
   const raw = loadString(STORAGE_LAST_APPLIED_SEQ_KEY, '0');
   const n = Number(raw);
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
@@ -55,7 +32,6 @@ export function persistLastAppliedMutationSeq(seq: number): string | null {
     // Already at or ahead of requested seq — success without downgrade.
     return null;
   }
-  if (testHooks?.persistLastApplied) return testHooks.persistLastApplied(seq);
   return persist(STORAGE_LAST_APPLIED_SEQ_KEY, String(seq), { json: false });
 }
 
@@ -68,7 +44,6 @@ export type AllocateMutationSeqResult =
  * On persistence failure, returns error — callers must not open an envelope.
  */
 export function allocateMutationSeq(): AllocateMutationSeqResult {
-  if (testHooks?.allocate) return testHooks.allocate();
   const raw = loadString(STORAGE_NEXT_SEQ_KEY, '0');
   const cur = Number(raw);
   const storedNext = Number.isFinite(cur) && cur >= 0 ? Math.floor(cur) : 0;

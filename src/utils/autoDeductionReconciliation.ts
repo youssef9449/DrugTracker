@@ -9,8 +9,8 @@
  * duplicate ConsumptionLog rows.
  */
 import type { ConsumptionLog, Medication } from '../types';
-import type { AutoDeductionEvent } from './autoDeductionNative';
-import { autoDeductionOccurrenceKey } from './autoDeductionNative';
+import type { AutoDeductionEvent } from './autoDeductionNativeTypes';
+import { autoDeductionOccurrenceKey } from './autoDeductionNativeIdentity';
 import {
   isDoseConsumedOnDate,
   isDoseSkippedOnDate,

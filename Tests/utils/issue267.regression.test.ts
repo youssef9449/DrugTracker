@@ -1,3 +1,9 @@
+import {
+  __setStockMutationOrderingTestHooks,
+  __resetStockMutationOrderingForTests,
+  __setManualEnvelopeTestHooks,
+  __setAutoStockGateTestHooks,
+} from './autoStockTestHooks';
 /**
  * Issue #267 regression tests — manual stock mutations have no
  * historical/day-based settlement.
@@ -37,18 +43,36 @@ import {
   runGatedAutoDeductToggle,
   runGatedMedicationUpdate } from '../../src/utils/manualStockMutation';
 import {
-  __setAutoStockGateTestHooks,
-  type AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
-import {
-  __setManualEnvelopeTestHooks } from '../../src/utils/stockEnvelopeRecovery';
-import {
-  __setStockMutationOrderingTestHooks,
-  __resetStockMutationOrderingForTests } from '../../src/utils/stockMutationOrdering';
-import {
-  __setManualRecurrenceInvalidationTestHook } from '../../src/utils/manualStockMutation';
+type AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
 import {
   runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
-import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNative';
+import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNativeTypes';
+
+const autoSchedulingMocks = vi.hoisted(() => ({
+  invalidateAutoDeductionRecurrence: vi.fn(),
+  scheduleAutoDeduction: vi.fn(),
+  recoverAutoDeductionOccurrence: vi.fn(),
+}));
+
+vi.mock('../../src/utils/autoDeductionNativeScheduling', async () => {
+  const actual = await vi.importActual<typeof import('../../src/utils/autoDeductionNativeScheduling')>(
+    '../../src/utils/autoDeductionNativeScheduling'
+  );
+  return {
+    ...actual,
+    ...autoSchedulingMocks,
+  };
+});
+
+beforeEach(() => {
+  autoSchedulingMocks.invalidateAutoDeductionRecurrence.mockResolvedValue({
+    ok: true,
+    generation: 1,
+  });
+  autoSchedulingMocks.scheduleAutoDeduction.mockResolvedValue({ ok: true });
+  autoSchedulingMocks.recoverAutoDeductionOccurrence.mockResolvedValue({ ok: true });
+});
+
 import { isDoseConsumedOnDate } from '../../src/utils/dateCalculations';
 
 const TODAY = '2026-09-16';
@@ -171,7 +195,6 @@ function installDurableState(state: AutoStockDurableState) {
     },
   });
   __setManualEnvelopeTestHooks({ load: () => null, save: () => null });
-  __setManualRecurrenceInvalidationTestHook(async () => ({ ok: true }));
   __setStockMutationOrderingTestHooks({
     allocate: (() => {
       let seq = 0;
@@ -191,7 +214,6 @@ afterEach(() => {
   vi.useRealTimers();
   __setAutoStockGateTestHooks(null);
   __setManualEnvelopeTestHooks(null);
-  __setManualRecurrenceInvalidationTestHook(null);
   __resetStockMutationOrderingForTests();
 });
 

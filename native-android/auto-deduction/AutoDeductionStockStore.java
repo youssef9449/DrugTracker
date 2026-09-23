@@ -33,10 +33,20 @@ public final class AutoDeductionStockStore {
     private static final Object LOCK = new Object();
 
     private final SharedPreferences prefs;
+    private final AutoDeductionFailurePolicy failurePolicy;
 
     public AutoDeductionStockStore(Context context) {
+        this(context, AutoDeductionFailurePolicy.ALLOW_ALL);
+    }
+
+    AutoDeductionStockStore(
+            Context context,
+            AutoDeductionFailurePolicy failurePolicy) {
         this.prefs = context.getApplicationContext()
                 .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        this.failurePolicy = failurePolicy == null
+                ? AutoDeductionFailurePolicy.ALLOW_ALL
+                : failurePolicy;
     }
 
     public static final class StockSeed {
@@ -267,11 +277,40 @@ public final class AutoDeductionStockStore {
      * one SharedPreferences transaction. Re-delivery therefore returns the
      * original actualDeducted amount without subtracting again.</p>
      */
+    /**
+     * Safe default for direct/non-recovery callers. Old occurrences are rejected
+     * unless an existing marker/resolution already proves idempotent completion.
+     */
     public AutoApplyResult applyAutoDeduction(
             String medicationId,
             String doseId,
             String calendarDate,
             double requestedAmount
+    ) {
+        return applyAutoDeductionInternal(
+                medicationId, doseId, calendarDate, requestedAmount, true);
+    }
+
+    /**
+     * Explicitly authorized historical recovery path for durable FIRED evidence.
+     * Only native recovery/reconciliation code should use this entry point.
+     */
+    public AutoApplyResult applyAutoDeductionForRecovery(
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            double requestedAmount
+    ) {
+        return applyAutoDeductionInternal(
+                medicationId, doseId, calendarDate, requestedAmount, false);
+    }
+
+    private AutoApplyResult applyAutoDeductionInternal(
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            double requestedAmount,
+            boolean rejectStaleDirectApply
     ) {
         if (!isValidId(medicationId)
                 || !isValidId(doseId)
@@ -316,6 +355,13 @@ public final class AutoDeductionStockStore {
                     return AutoApplyResult.failure("stock_not_initialized");
                 }
                 return AutoApplyResult.alreadyApplied(0.0, current);
+            }
+
+            if (rejectStaleDirectApply
+                    && AutoDeductionDateTime.isOlderThanLocalDays(
+                            calendarDate,
+                            AutoDeductionContract.DIRECT_AUTO_STOCK_MAX_AGE_DAYS)) {
+                return AutoApplyResult.failure("stale_auto_occurrence");
             }
 
             Double currentObj = readStockLocked(medicationId);
@@ -436,6 +482,84 @@ public final class AutoDeductionStockStore {
     ) {
         return KEY_FOREGROUND_OCCURRENCE_PREFIX
                 + medicationId + KEY_SEPARATOR + doseId + KEY_SEPARATOR + calendarDate;
+    }
+
+    public static final class CompactionResult {
+        public final boolean ok;
+        public final int removed;
+        public final String error;
+
+        private CompactionResult(boolean ok, int removed, String error) {
+            this.ok = ok;
+            this.removed = removed;
+            this.error = error;
+        }
+
+        static CompactionResult success(int removed) {
+            return new CompactionResult(true, removed, null);
+        }
+
+        static CompactionResult failure(String error, int removed) {
+            return new CompactionResult(
+                    false,
+                    removed,
+                    error != null && !error.isEmpty()
+                            ? error
+                            : "terminal_marker_compaction_failed");
+        }
+    }
+
+    /**
+     * Compact occurrence markers older than the current local day when there is
+     * no active schedule for that occurrence. Active schedules stay protected so
+     * a delayed duplicate delivery can still be rejected idempotently. The result
+     * distinguishes successful zero-row work from a failed persistence commit.
+     */
+    public CompactionResult compactTerminalOccurrenceMarkers(
+            String cutoffCalendarDate,
+            java.util.Set<String> protectedOccurrenceKeys) {
+        if (!AutoDeductionContract.isValidCalendarDate(cutoffCalendarDate)) {
+            return CompactionResult.failure("invalid_cutoff", 0);
+        }
+        synchronized (LOCK) {
+            SharedPreferences.Editor editor = null;
+            int removed = 0;
+            for (Map.Entry<String, ?> entry : prefs.getAll().entrySet()) {
+                String key = entry.getKey();
+                if (key == null || !(entry.getValue() instanceof String)) continue;
+                String occurrenceKey = null;
+                if (key.startsWith(KEY_AUTO_PREFIX)) {
+                    occurrenceKey = key.substring(KEY_AUTO_PREFIX.length());
+                } else if (key.startsWith(KEY_FOREGROUND_OCCURRENCE_PREFIX)) {
+                    occurrenceKey = key.substring(KEY_FOREGROUND_OCCURRENCE_PREFIX.length());
+                }
+                if (occurrenceKey == null || occurrenceKey.isEmpty()
+                        || (protectedOccurrenceKeys != null
+                        && protectedOccurrenceKeys.contains(occurrenceKey))) {
+                    continue;
+                }
+                int sep = occurrenceKey.lastIndexOf(
+                        KEY_SEPARATOR);
+                if (sep <= 0 || sep >= occurrenceKey.length() - 1) continue;
+                String calendarDate = occurrenceKey.substring(sep + 1);
+                if (!AutoDeductionContract.isValidCalendarDate(calendarDate)
+                        || calendarDate.compareTo(cutoffCalendarDate) >= 0) {
+                    continue;
+                }
+                if (editor == null) editor = prefs.edit();
+                editor.remove(key);
+                removed++;
+            }
+            if (editor != null) {
+                if (!failurePolicy.allowTerminalStateCompactionCommit()
+                        || !editor.commit()) {
+                    return CompactionResult.failure(
+                            "terminal_marker_compaction_commit_failed",
+                            removed);
+                }
+            }
+            return CompactionResult.success(removed);
+        }
     }
 
     private Map<String, Double> readAllStocksLocked() {

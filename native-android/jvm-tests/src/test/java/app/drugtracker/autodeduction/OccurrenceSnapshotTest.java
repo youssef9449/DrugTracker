@@ -192,10 +192,11 @@ public class OccurrenceSnapshotTest {
                 .putString(Phase2TestSupport.evtKey(key), obj.toString())
                 .commit();
 
-        AutoDeductionEventStore.__setTestForceCommitResult(false);
         try {
             AutoDeductionScheduler.OccurrenceSnapshot snap =
-                    newScheduler().getOccurrenceSnapshot("med", "dose", date);
+                    new AutoDeductionScheduler(
+                            Phase2TestSupport.appContext(),
+                            Phase2TestSupport.denyEventCommit()).getOccurrenceSnapshot("med", "dose", date);
             assertFalse(snap.ok);
             assertEquals("rejected_persist_failed", snap.error);
             assertNull(snap.amount);
@@ -204,8 +205,6 @@ public class OccurrenceSnapshotTest {
             assertEquals(
                     AutoDeductionScheduler.OccurrenceSnapshot.Status.ABSENT,
                     snap.status);
-        } finally {
-            AutoDeductionEventStore.__setTestForceCommitResult(null);
         }
     }
 

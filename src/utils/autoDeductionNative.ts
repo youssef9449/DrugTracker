@@ -91,7 +91,7 @@ export interface ScheduledOccurrence {
   fireRetryCount?: number;
 }
 /**
- * Explicit result for native schedule listing ().
+ * Explicit result for native schedule listing.
  * Successful empty list: { ok: true, schedules: [] }
  * Native read failure:  { ok: false, schedules: [], error }
  * Never conflate the two — callers must check ok before treating schedules

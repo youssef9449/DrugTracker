@@ -5,9 +5,8 @@
  *
  * Guarantees: exact event.amount is applied before the manual mutation
  * (Take / Restore / Refill / dose-edit / auto-toggle) runs, so the manual
- * mutation operates on the post-Exact durable state. (
- * no legacy day-based settlement after reconciliation — manual mutations
- * use durable `currentPills` directly.)
+ * mutation operates on the post-Exact durable state. Manual mutations use
+ * durable `currentPills` directly; no elapsed-day settlement is performed.
  */
 
 import {

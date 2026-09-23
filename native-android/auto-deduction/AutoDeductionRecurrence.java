@@ -62,7 +62,11 @@ long ensureRecurrenceGenerationLocked(String medicationId, String doseId) {
             String treatmentEndDate,
             String operationVersion,
             long recurrenceGeneration) {
-        if (operationVersion == null || operationVersion.isEmpty()) return false;
+        // Historical/overdue occurrences may have no live schedule row because
+        // their one-shot alarm has already been consumed. In that case the durable
+        // successor obligation is authorized by recurrenceGeneration; active/future
+        // obligations retain operationVersion ownership for replacement safety.
+        if (operationVersion == null) return false;
         try {
             return scheduler.successorObligationStore().save(
                     new AutoDeductionPersistenceModels.SuccessorObligationRecord(

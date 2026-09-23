@@ -38,7 +38,6 @@ interface NotificationRuntimePlugin {
   cancel(options: { namespace: string; identity: string }): Promise<{ ok: boolean; error?: string }>;
   checkPermission(): Promise<{ enabled: boolean }>;
   checkChannel(options: { channelId: string }): Promise<{ enabled: boolean }>;
-  checkDoseOccurrenceOwnership(options: { medicationId: string; doseId: string; operationVersion: string }): Promise<{ owned: boolean }>;
   retryPersistedNotificationDeliveries(): Promise<{ retried: number }>;
   addListener(
     eventName: 'notificationReceived' | 'notificationActionPerformed',
@@ -245,24 +244,6 @@ export async function getPendingNotificationResult(
       error: boundaryError.message,
       errorCode: boundaryError.code,
     };
-  }
-}
-
-export async function isDoseNotificationOccurrenceOwned(
-  medicationId: string,
-  doseId: string,
-  operationVersion: string
-): Promise<boolean> {
-  if (!isAndroidNotificationRuntime() || !operationVersion) return false;
-  try {
-    const result = await NotificationRuntime.checkDoseOccurrenceOwnership({
-      medicationId,
-      doseId,
-      operationVersion,
-    });
-    return result?.owned === true;
-  } catch {
-    return false;
   }
 }
 

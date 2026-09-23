@@ -60,59 +60,13 @@ export interface UseDoseReminderSchedulerOptions {
    */
   lifecycleTick?: number;
 }
-/**
- * One schedulable dose slot derived from explicit `doseSchedule` row.
- */
-export interface DoseReminderSlot {
-  medId: string;
-  doseId: string;
-  time: string;
-  amount: number;
-  name: string;
-  unit: string;
-  description?: string;
-}
-/** Tracker key: medId::doseId — independent cancel/schedule identity. */
-export function doseScheduleKey(medId: string, doseId: string): string {
-  return `${medId}::${doseId}`;
-}
-export function parseDoseScheduleKey(key: string): { medId: string; doseId: string } {
-  const idx = key.indexOf('::');
-  if (idx < 0) return { medId: key, doseId: '' };
-  return { medId: key.slice(0, idx), doseId: key.slice(idx + 2) };
-}
-/**
- * Build dose reminder slots from explicit `doseSchedule` only.
- * Missing/empty schedule → []. No dailyDose/reminderTime synthetic slot.
- */
-export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
-  const name = med.name;
-  const unit = med.unit || 'قرص';
-  if (!Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0) {
-    return [];
-  }
-  const seen = new Set<string>();
-  const slots: DoseReminderSlot[] = [];
-  for (const d of med.doseSchedule) {
-    if (!d || !isValidDoseTime(d.time) || !(Number(d.amount) > 0)) continue;
-    const doseId = typeof d.id === 'string' ? d.id.trim() : '';
-    if (!doseId) continue;
-    if (seen.has(doseId)) continue;
-    seen.add(doseId);
-    slots.push({
-      medId: med.id,
-      doseId,
-      time: d.time,
-      amount: Number(d.amount),
-      name,
-      unit,
-      description: typeof d.description === 'string' && d.description.trim()
-        ? d.description.trim()
-        : undefined,
-    });
-  }
-  return slots;
-}
+import {
+  doseScheduleKey,
+  parseDoseScheduleKey,
+  getDoseReminderSlots,
+  type DoseReminderSlot,
+} from '../utils/doseReminderDefinitions';
+
 /**
  * Native Dose Reminder scheduler.
  *

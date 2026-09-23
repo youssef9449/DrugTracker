@@ -1,9 +1,4 @@
-import {
-  __setStockMutationOrderingTestHooks,
-  __resetStockMutationOrderingForTests,
-  __setManualEnvelopeTestHooks,
-  __setAutoStockGateTestHooks,
-} from './autoStockTestHooks';
+import { __setStockMutationOrderingTestHooks, __resetStockMutationOrderingForTests, __setManualEnvelopeTestHooks, __setAutoStockGateTestHooks } from './autoStockTestHooks';
 /**
  * Issue #267 regression tests — manual stock mutations have no
  * historical/day-based settlement.
@@ -29,25 +24,14 @@ import {
  *     doesn't add stock.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { Medication, ConsumptionLog } from '../../src/types';
-import { makeScheduledMedication as med, makeAutoDeductionEvent as fired, makeDoseTakenLog, makeExactAutoLog, makeRefillLog } from '../fixtures/testFixtures';
-import { exactAutoLogId } from '../../src/utils/autoDeductionReconciliation';
-import {
-  consumeDose,
-  restoreDose,
-  applyDurableStockDelta } from '../../src/utils/medActions';
-import {
-  runGatedManualConsume,
-  runGatedManualRestore,
-  runGatedRefill,
-  runGatedUndoRefill,
-  runGatedAutoDeductToggle,
-  runGatedMedicationUpdate } from '../../src/utils/manualStockMutation';
-import {
-type AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
-import {
-  runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
-import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNativeTypes';
+import type { Medication } from '../../src/types';
+import { makeScheduledMedication as med, makeExactAutoLog, makeRefillLog } from '../fixtures/testFixtures';
+
+import { consumeDose, applyDurableStockDelta } from '../../src/utils/medActions';
+import { runGatedManualConsume, runGatedRefill, runGatedUndoRefill, runGatedAutoDeductToggle, runGatedMedicationUpdate } from '../../src/utils/manualStockMutation';
+
+
+
 
 const autoSchedulingMocks = vi.hoisted(() => ({
   invalidateAutoDeductionRecurrence: vi.fn(),
@@ -74,7 +58,7 @@ beforeEach(() => {
   autoSchedulingMocks.recoverAutoDeductionOccurrence.mockResolvedValue({ ok: true });
 });
 
-import { isDoseConsumedOnDate } from '../../src/utils/dateCalculations';
+
 
 const TODAY = '2026-09-16';
 

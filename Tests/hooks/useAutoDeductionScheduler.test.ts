@@ -13,6 +13,7 @@ import {
   tomorrowDateString,
   isFireRetryRecoveryPending } from '../../src/hooks/useAutoDeductionScheduler';
 import { autoDeductionOccurrenceKey } from '../../src/utils/autoDeductionNativeIdentity';
+import { getAutoDeductionDefinitionForDate } from '../../src/utils/autoDeductionDefinition';
 
 function baseMed(over: Partial<Medication> = {}): Medication {
   return {
@@ -67,6 +68,26 @@ describe('auto-deduction occurrence identity (full key, not hash)', () => {
     const kB = autoDeductionScheduleKey('M', 'dose-b', date);
     const kC = autoDeductionScheduleKey('M', 'dose-c', date);
     expect(new Set([kA, kB, kC]).size).toBe(3);
+  });
+});
+
+describe('canonical Auto definition ownership', () => {
+  it('scheduler slots are a direct projection of the canonical dated definition', () => {
+    const med = baseMed({
+      autoDeductEnabled: true,
+      doseSchedule: [
+        { id: ' dose-a ', amount: 1.5, time: '08:05' },
+        { id: 'dose-b', amount: 2, time: '20:00' },
+        { id: 'dose-a', amount: 99, time: '21:00' },
+        { id: '', amount: 4, time: '22:00' },
+        { id: 'bad-time', amount: 3, time: '25:00' },
+      ],
+    });
+
+    const canonical = getAutoDeductionDefinitionForDate(med, '2026-09-14');
+    expect(getAutoDeductionSlotsForDate(med, '2026-09-14')).toEqual(
+      canonical.map((slot) => ({ ...slot }))
+    );
   });
 });
 

@@ -56,8 +56,8 @@ export async function isNativeDoseReminderReArmed(
 }
 
 /**
- * Legacy compatibility no-op retained for the existing scheduler API.
- * Delivery evidence is no longer stored in a separate notification plugin store.
+ * Check the native scheduler's current one-shot state for this dose.
+ * The scheduler uses this as its repair/reconciliation evidence.
  */
 
 export async function cancelDoseReminder(
@@ -98,13 +98,9 @@ export function isDoseReminderTimeStillAhead(
   reminderTime: string,
   now: Date = new Date()
 ): boolean {
-  const parts = reminderTime.split(':').map((n) => parseInt(n, 10));
-  const [hour, minute] = parts;
-  if (parts.length < 2 || Number.isNaN(hour) || Number.isNaN(minute)) return false;
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return false;
-  const todayAt = new Date(now);
-  todayAt.setHours(hour, minute, 0, 0);
-  return todayAt.getTime() > now.getTime();
+  const today = getTodayDateString(now);
+  const todayEpoch = localEpochMs(today, reminderTime);
+  return todayEpoch != null && todayEpoch > now.getTime();
 }
 
 /**

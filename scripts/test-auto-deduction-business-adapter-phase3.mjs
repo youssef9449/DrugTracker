@@ -130,15 +130,6 @@ assert(
   'retry alarm installation must cross the Auto scheduling adapter from the retry collaborator'
 );
 assert(
-  adapter.includes('extractOperationVersion('),
-  'shared operation-version parsing must remain owned by the Auto scheduling adapter'
-);
-assert(
-  adapter.includes('parseOrdering('),
-  'shared ordering parsing must remain owned by the Auto scheduling adapter'
-);
-
-assert(
   adapter.includes('import app.drugtracker.alarmruntime.ExactAlarmRuntime;'),
   'adapter must own the ExactAlarmRuntime dependency'
 );

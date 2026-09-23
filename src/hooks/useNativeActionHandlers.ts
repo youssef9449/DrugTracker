@@ -6,6 +6,7 @@ import {
 } from '../native';
 import { getExactAlarmPermission, type ExactAlarmPermission } from '../utils/exactAlarm';
 import { getNotificationPermission } from '../utils/notifications/notificationPermissions';
+import { NOTIFICATIONS_KEY } from '../constants/storageKeys';
 import { isNotificationChannelEnabled } from '../utils/notificationRuntime';
 import {
   DOSE_REMINDER_CHANNEL_ID,
@@ -114,7 +115,7 @@ export function useNativeActionHandlers(opts: {
           isNotificationChannelEnabled(DOSE_REMINDER_FOREGROUND_CHANNEL_ID),
         ])
           .then(([permission, backgroundChannel, foregroundChannel]) => {
-            const storedPreference = localStorage.getItem('notificationsEnabled');
+            const storedPreference = localStorage.getItem(NOTIFICATIONS_KEY);
             const desired = storedPreference === null || storedPreference === 'true';
             setNotificationsEnabled(
               desired

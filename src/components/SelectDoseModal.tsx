@@ -102,7 +102,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
       if (!isRestore) {
         return isDoseCompletedToday(medication, d, today, now, isAutoActive);
       }
-      // Issue #267: pure-projection restore removed; restore requires durable evidence.
+      // Restore requires durable evidence; a pure projection is never presented as restorable.
       const skipped = isDoseSkippedOnDate(medication, d.id, today);
       const consumed = isDoseConsumedOnDate(medication, d.id, today);
       const evidence = getHistoricalRestoreDisplayAmount(
@@ -172,7 +172,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                 today
               );
               // Auto historical Restore requires Exact Auto evidence + valid amount.
-              // Issue #269: exact_auto (current).
+              // Exact auto-deduction entries use durable occurrence evidence.
               const isAutoConsumed = isUiAutoHistoricalRestoreEligible(
                 consumed,
                 skipped,
@@ -184,7 +184,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
               );
               const scheduleAmount = Number(dose.amount) || 0;
               const elapsed = isDoseTimeElapsedToday(dose.time, now);
-              // Issue #267: pure-projection restore removed.
+              // Pure projection is never treated as restorable.
               const timeLabel = formatTimeArabic(dose.time);
               const dayLabel = relativeDoseDayLabel(eventDate, today);
               const whenLabel = dose.description
@@ -330,7 +330,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                   ? `${historicalAmount} ${unit}`
                   : unit
                 : `${scheduleAmount} ${unit}`;
-              // Issue #267: Restore is selectable only when there is a
+              // Restore is selectable only when there is a
               // consumed/manual state AND exact active durable deduction
               // evidence for this doseId. No pure-projection restore.
               const isSelectable = isRestore

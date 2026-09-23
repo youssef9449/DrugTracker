@@ -1596,6 +1596,31 @@ export function runGatedDeleteMedication(opts: {
         unit: med.unit,
       };
     }
+    const doseInvalidation = await invalidateMedicationDoseReminders(med);
+    if (!doseInvalidation.ok) {
+      let compensationError: string | undefined;
+      if (invalidation.invalidated.length > 0) {
+        const compensation = await restoreInvalidatedRecurrences(
+          med,
+          invalidation.invalidated
+        );
+        if (!compensation.ok) compensationError = compensation.error;
+      }
+      const doseCompensation = await restoreInvalidatedDoseReminders(med);
+      if (!doseCompensation.ok && compensationError == null) {
+        compensationError = doseCompensation.error;
+      }
+      return {
+        outcome: 'native_invalidation_failed' as const,
+        medications: pre.state.medications,
+        logs: pre.state.logs,
+        reason: compensationError
+          ? doseInvalidation.error + ';compensation:' + compensationError
+          : doseInvalidation.error,
+        medicationName: med.name,
+        unit: med.unit,
+      };
+    }
     const medications = pre.state.medications.filter((m) => m.id !== opts.medicationId);
     const err = await commitWithManualEnvelope({
       medications,
@@ -1611,6 +1636,10 @@ export function runGatedDeleteMedication(opts: {
         if (!compensation.ok) {
           compensationError = compensation.error;
         }
+      }
+      const doseCompensation = await restoreInvalidatedDoseReminders(med);
+      if (!doseCompensation.ok && compensationError == null) {
+        compensationError = doseCompensation.error;
       }
       return {
         outcome: 'persist_failed' as const,
@@ -1814,9 +1843,15 @@ export function runGatedMedicationUpdate(opts: {
       invalidatedDoseIds: [],
       invalidated: [],
     };
-    if (autoDeductionDefinitionChanged(freshMed, opts.medData)) {
-      // Invalidate the old native chain before committing new amount/time,
-      // reminder, schedule-id, or per-med auto-deduction configuration.
+    let doseInvalidation: DoseReminderInvalidationResult = { ok: true };
+    const autoChanged = autoDeductionDefinitionChanged(freshMed, opts.medData);
+    const doseChanged = doseReminderDefinitionChanged(
+      freshMed,
+      opts.medData
+    );
+    if (autoChanged) {
+      // Invalidate the old Auto chain before committing its defining
+      // medication configuration.
       invalidation = await invalidateMedicationRecurrences(freshMed);
       if (!invalidation.ok) {
         return {
@@ -1825,6 +1860,39 @@ export function runGatedMedicationUpdate(opts: {
           logs: fresh.logs,
           settleLog: null,
           reason: invalidation.error,
+          medicationName: freshMed.name,
+          unit: freshMed.unit,
+        };
+      }
+    }
+    if (doseChanged) {
+      // Invalidate the old Dose Reminder chain before committing its defining
+      // medication configuration. Native cancellation is the linearization
+      // barrier that prevents an old alarm from firing against the new state.
+      doseInvalidation =
+        await invalidateMedicationDoseReminders(freshMed);
+      if (!doseInvalidation.ok) {
+        let compensationError: string | undefined;
+        if (autoChanged && invalidation.invalidated.length > 0) {
+          const compensation = await restoreInvalidatedRecurrences(
+            freshMed,
+            invalidation.invalidated
+          );
+          if (!compensation.ok) compensationError = compensation.error;
+        }
+        const doseCompensation =
+          await restoreInvalidatedDoseReminders(freshMed);
+        if (!doseCompensation.ok && compensationError == null) {
+          compensationError = doseCompensation.error;
+        }
+        return {
+          outcome: 'native_invalidation_failed' as const,
+          medications: fresh.medications,
+          logs: fresh.logs,
+          settleLog: null,
+          reason: compensationError
+            ? doseInvalidation.error + ';compensation:' + compensationError
+            : doseInvalidation.error,
           medicationName: freshMed.name,
           unit: freshMed.unit,
         };
@@ -1875,16 +1943,20 @@ export function runGatedMedicationUpdate(opts: {
       // Only configuration-changing edits invalidate native recurrences.
       // Restore the old chain when the new JS state could not be committed.
       let compensationError: string | null = null;
-      if (
-        autoDeductionDefinitionChanged(freshMed, opts.medData) &&
-        invalidation.invalidated.length > 0
-      ) {
+      if (autoChanged && invalidation.invalidated.length > 0) {
         const compensation = await restoreInvalidatedRecurrences(
           freshMed,
           invalidation.invalidated
         );
         if (!compensation.ok) {
           compensationError = compensation.error;
+        }
+      }
+      if (doseChanged) {
+        const doseCompensation =
+          await restoreInvalidatedDoseReminders(freshMed);
+        if (!doseCompensation.ok && compensationError == null) {
+          compensationError = doseCompensation.error;
         }
       }
       return {

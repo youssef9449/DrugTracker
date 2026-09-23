@@ -9,33 +9,16 @@ describe('criticalAlarmOperations', () => {
     const events: string[] = [];
     let releaseFirst!: () => void;
 
-    const firstGeneration = bumpCriticalAlarmGeneration('med-1');
-    const first = enqueueCriticalAlarmOp('med-1', firstGeneration, async () => {
+    const generation = bumpCriticalAlarmGeneration('med-1');
+    const first = enqueueCriticalAlarmOp('med-1', generation, async () => {
       events.push('first:start');
       await new Promise<void>((resolve) => {
         releaseFirst = resolve;
-        it('drops stale work when a newer generation supersedes it', async () => {
-    const events: string[] = [];
-    const firstGeneration = bumpCriticalAlarmGeneration('med-stale');
-    const first = enqueueCriticalAlarmOp(
-      'med-stale',
-      firstGeneration,
-      async () => {
-        events.push('stale');
-      }
-    );
-
-    bumpCriticalAlarmGeneration('med-stale');
-    await first;
-
-    expect(events).toEqual([]);
-  });
-});
+      });
       events.push('first:end');
     });
 
-    const secondGeneration = bumpCriticalAlarmGeneration('med-1');
-    const second = enqueueCriticalAlarmOp('med-1', secondGeneration, async () => {
+    const second = enqueueCriticalAlarmOp('med-1', generation, async () => {
       events.push('second');
     });
 
@@ -52,15 +35,41 @@ describe('criticalAlarmOperations', () => {
     const events: string[] = [];
 
     const firstGeneration = bumpCriticalAlarmGeneration('med-1');
-    const first = enqueueCriticalAlarmOp('med-1', firstGeneration, async () => {
-      events.push('med-1');
-    });
+    const first = enqueueCriticalAlarmOp(
+      'med-1',
+      firstGeneration,
+      async () => {
+        events.push('med-1');
+      }
+    );
     const secondGeneration = bumpCriticalAlarmGeneration('med-2');
-    const second = enqueueCriticalAlarmOp('med-2', secondGeneration, async () => {
-      events.push('med-2');
-    });
+    const second = enqueueCriticalAlarmOp(
+      'med-2',
+      secondGeneration,
+      async () => {
+        events.push('med-2');
+      }
+    );
 
     await Promise.all([first, second]);
     expect(events.sort()).toEqual(['med-1', 'med-2']);
+  });
+
+  it('drops queued stale work when a newer generation supersedes it', async () => {
+    const events: string[] = [];
+    const firstGeneration = bumpCriticalAlarmGeneration('med-stale');
+
+    const first = enqueueCriticalAlarmOp(
+      'med-stale',
+      firstGeneration,
+      async () => {
+        events.push('stale');
+      }
+    );
+
+    bumpCriticalAlarmGeneration('med-stale');
+    await first;
+
+    expect(events).toEqual([]);
   });
 });

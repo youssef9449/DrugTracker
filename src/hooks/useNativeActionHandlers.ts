@@ -7,7 +7,7 @@ import {
 import { getExactAlarmPermission, type ExactAlarmPermission } from '../utils/exactAlarm';
 import { getNotificationPermission } from '../utils/notifications/notificationPermissions';
 import { NOTIFICATIONS_KEY } from '../constants/storageKeys';
-import { isNotificationChannelEnabled, retryPersistedNotificationDeliveries } from '../utils/notificationRuntime';
+import { isNotificationChannelEnabled, retryPersistedNotificationDeliveries, isDoseNotificationOccurrenceOwned } from '../utils/notificationRuntime';
 import {
   DOSE_REMINDER_CHANNEL_ID,
   DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
@@ -42,7 +42,23 @@ export function useNativeActionHandlers(opts: {
   } = opts;
   useEffect(() => {
     registerNotificationActionHandler((actionId, medicationId, doseId) => {
-      if (actionId !== 'take_dose') return;
+      const separator = actionId.indexOf('|');
+      const baseActionId = separator >= 0 ? actionId.slice(0, separator) : actionId;
+      const operationVersion = separator >= 0 ? actionId.slice(separator + 1) : '';
+      if (baseActionId !== 'take_dose') return;
+      // Android Dose Reminder actions carry the exact operation version that
+      // created the displayed occurrence. Reject stale actions after a
+      // schedule replacement/cancellation before any durable Take mutation.
+      if (operationVersion) {
+        void isDoseNotificationOccurrenceOwned(
+          medicationId,
+          doseId ?? '',
+          operationVersion
+        ).then((owned) => {
+          if (owned) handleTakeDoseFromAlarmById(medicationId, doseId);
+        });
+        return;
+      }
       // Notification actions carry durable identity. Never require the React
       // medication list to be present/correct before starting the gated Take.
       handleTakeDoseFromAlarmById(medicationId, doseId);

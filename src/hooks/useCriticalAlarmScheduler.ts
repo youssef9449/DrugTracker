@@ -12,9 +12,9 @@ import {
   loadCriticalNotificationClaims,
   saveCriticalNotificationClaims,
   getCriticalNotificationClaim,
-  setCriticalNotificationClaim,
 } from '../utils/criticalNotificationClaims';
 import type { ExactAlarmPermission } from '../utils/exactAlarm';
+import { updateCriticalNotificationClaim } from '../utils/criticalNotificationClaimCoordinator';
 import {
   bumpCriticalAlarmGeneration,
   currentCriticalAlarmGeneration,
@@ -245,7 +245,7 @@ export function useCriticalAlarmScheduler({
     // service reports denied. `unsupported` means the Android permission model
     // is not applicable (for example iOS/web), so those platforms keep their
     // existing notification scheduling behavior.
-    if (exactAlarmPermission === null || exactAlarmPermission === 'denied') return;
+    if (exactAlarmPermission === null) return;
 
     // ── Flags disabled: cancel every possibly-armed alarm ──
     // ── (claim writes belong to the foreground hook) ──
@@ -353,19 +353,37 @@ export function useCriticalAlarmScheduler({
         return;
       }
 
-      const claims = loadCriticalNotificationClaims();
-      if (scheduled) {
-        // Persist the claim ONLY after the native schedule succeeded.
-        setCriticalNotificationClaim(claims, medId, {
-          claimed: true,
-          alarmTime: chainCriticalDateMs,
-        });
-      } else {
-        // Failed schedule → claim stays open so the foreground
-        // fallback can still send one notification for this episode.
-        setCriticalNotificationClaim(claims, medId, { claimed: false, alarmTime: null });
+      // Claim persistence is serialized across same-origin tabs. A
+      // foreground in-flight claim ({ claimed: true, alarmTime: null })
+      // owns the notification opportunity and must never be overwritten by
+      // this scheduler.
+      const claimUpdate = await updateCriticalNotificationClaim(
+        medId,
+        (current) => {
+          if (current?.claimed && current.alarmTime === null) return current;
+          return scheduled
+            ? { claimed: true, alarmTime: chainCriticalDateMs }
+            : { claimed: false, alarmTime: null };
+        }
+      );
+
+      if (!claimUpdate.ok) {
+        console.warn('[critical-alarm] claim persistence failed');
+        if (scheduled) await cancelCriticalAlarm(medId);
+        return;
       }
-      saveCriticalNotificationClaims(claims);
+
+      if (
+        scheduled &&
+        !(
+          claimUpdate.claim?.claimed === true &&
+          claimUpdate.claim.alarmTime === chainCriticalDateMs
+        )
+      ) {
+        // Another tab/foreground owner won while this schedule was in flight.
+        // Do not leave an unowned native alarm behind.
+        await cancelCriticalAlarm(medId);
+      }
     };
 
     for (const med of medicationsRef.current) {
@@ -408,6 +426,12 @@ export function useCriticalAlarmScheduler({
       const medId = med.id;
       const medName = med.name;
       const unit = med.unit || 'قرص';
+
+      if (claim?.claimed && claim.alarmTime === null) {
+        // Foreground Critical Stock delivery owns this opportunity while the
+        // send is in flight. Never arm a competing future fallback.
+        continue;
+      }
 
       if (claim?.claimed && claim.alarmTime === criticalDateMs) {
         // The claim says the alarm is armed exactly here. A claim is

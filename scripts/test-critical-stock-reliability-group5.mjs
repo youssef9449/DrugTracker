@@ -36,6 +36,12 @@ assert(
   'restore must not re-arm an already accepted one-shot delivery'
 );
 assert(
+  receiver.includes('synchronized (ExactAlarmOperationLock.LOCK)')
+    && receiver.indexOf('synchronized (ExactAlarmOperationLock.LOCK)')
+      < receiver.indexOf('new NotificationRuntime(appContext).post('),
+  'Critical Stock delivery must be linearized against cancellation'
+);
+assert(
   receiver.indexOf('adapter.ownsActiveSchedule(') < receiver.indexOf('new NotificationRuntime(appContext).post('),
   'stale Critical Stock delivery must be rejected before notification posting'
 );

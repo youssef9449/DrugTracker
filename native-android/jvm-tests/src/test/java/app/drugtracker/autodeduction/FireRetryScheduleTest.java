@@ -190,8 +190,8 @@ public class FireRetryScheduleTest {
                 vg[0],
                 saved.getStringExtra(AutoDeductionContract.EXTRA_OPERATION_VERSION));
         assertNull(
-                "retry delivery must not create a new legacy scheduleVersion token",
-                saved.getStringExtra(AutoDeductionContract.EXTRA_SCHEDULE_VERSION));
+                "retry delivery must not create a legacy scheduleVersion token",
+                saved.getStringExtra("scheduleVersion"));
 
         Uri identity = saved.getData();
         assertNotNull("retry must target the exact occurrence identity",

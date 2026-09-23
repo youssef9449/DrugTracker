@@ -18,7 +18,7 @@ import { Checkbox } from './ui/Checkbox';
 interface AddMedicationModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (medData: Omit<Medication, 'id' | 'createdAt'>, editId?: string) => void;
+  onSave: (medData: Omit<Medication, 'id' | 'createdAt'>, editId?: string) => Promise<boolean>;
   initialData?: Medication | null;
   /** Default Auto-Deduction state for a newly created medication. */
   defaultAutoDeductEnabled?: boolean;
@@ -262,7 +262,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
     setCurrentPillsStr(String(clamped));
     setShowStockHelper(false);
   };
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
       setError('يرجى إدخال اسم الدواء');
@@ -333,7 +333,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       setError('تاريخ بداية الكورس غير محدد. اختر مدة محددة مرة أخرى لتعيين بداية العلاج.');
       return;
     }
-    onSave(
+    const saved = await onSave(
       {
         name: name.trim(),
         currentPills: savedCurrentPills,
@@ -359,7 +359,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       },
       initialData ? initialData.id : undefined
     );
-    onClose();
+    if (saved) onClose();
   };
   // Preview days from total daily consumption (sum of schedule amounts).
   const previewDoseNum = totalDailyAmount(doseSchedule);

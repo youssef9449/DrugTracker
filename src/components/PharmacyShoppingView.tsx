@@ -176,7 +176,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     // compute both next states, then call both setters sequentially. The
     // previous version called setDeselectedIds from inside the
     // setSelectedMedIds updater — unsafe under React 18+ concurrent
-    // rendering / StrictMode because updaters must be pure ().
+    // rendering / StrictMode because updaters must be pure.
     const nextSelected = new Set(selectedMedIds);
     const nextDeselected = new Set(deselectedIds);
     if (nextSelected.has(id)) {

@@ -1439,10 +1439,9 @@ export function runGatedGlobalAutoDeductToggle(opts: {
     // default for newly added ones. Flip autoDeductEnabled only — do not
     // settle stock, invent consumption logs, or mutate currentPills here.
     // Schedulers/reminders react to the resulting medication-level flags.
-    // Global OFF: invalidate ALL native recurrences BEFORE the durable bulk
-    // commit (same ordering barrier as per-med toggle) so a near-fire
-    // occurrence cannot FIRE after OFF is durable but before the scheduler
-    // cleans up. Global ON does not invalidate.
+    // Any global Auto change also changes the neutral manual-Take capability
+    // carried by Dose Reminder payloads. Both Auto and Dose Reminder native
+    // state are invalidated before the durable bulk commit.
     const invalidatedMeds: Array<{
       med: Medication;
       doseIds: string[];
@@ -1451,8 +1450,7 @@ export function runGatedGlobalAutoDeductToggle(opts: {
     const invalidatedDoseMeds: Medication[] = [];
 
     for (const med of fresh.medications) {
-      const autoStateChanging = med.autoDeductEnabled !== opts.enable;
-      if (!autoStateChanging) continue;
+      if (med.autoDeductEnabled === opts.enable) continue;
 
       let autoInvalidation:
         | RecurrenceInvalidationResult
@@ -1462,19 +1460,19 @@ export function runGatedGlobalAutoDeductToggle(opts: {
         const invalidation = await invalidateMedicationRecurrences(med);
         autoInvalidation = invalidation;
         if (!invalidation.ok) {
-        if (!invalidation.ok) {
           let compensationError: string | null = null;
+
           for (const completed of invalidatedMeds) {
-            if (completed.invalidated.length > 0) {
-              const compensation = await restoreInvalidatedRecurrences(
-                completed.med,
-                completed.invalidated
-              );
-              if (!compensation.ok && compensationError == null) {
-                compensationError = compensation.error;
-              }
+            if (completed.invalidated.length === 0) continue;
+            const compensation = await restoreInvalidatedRecurrences(
+              completed.med,
+              completed.invalidated
+            );
+            if (!compensation.ok && compensationError == null) {
+              compensationError = compensation.error;
             }
           }
+
           return {
             outcome: 'native_invalidation_failed' as const,
             medications: fresh.medications,
@@ -1486,6 +1484,7 @@ export function runGatedGlobalAutoDeductToggle(opts: {
               : invalidation.error,
           };
         }
+
         invalidatedMeds.push({
           med,
           doseIds: invalidation.invalidatedDoseIds,
@@ -1506,7 +1505,9 @@ export function runGatedGlobalAutoDeductToggle(opts: {
             med,
             autoInvalidation.invalidated
           );
-          if (!compensation.ok) compensationError = compensation.error;
+          if (!compensation.ok) {
+            compensationError = compensation.error;
+          }
         }
 
         for (const completed of invalidatedMeds) {
@@ -1529,12 +1530,11 @@ export function runGatedGlobalAutoDeductToggle(opts: {
           }
         }
 
+        // The current medication's Dose Reminder invalidation may have
+        // partially completed before reporting failure. Compensate it too.
         const currentDoseCompensation =
           await restoreInvalidatedDoseReminders(med);
-        if (
-          !currentDoseCompensation.ok
-          && compensationError == null
-        ) {
+        if (!currentDoseCompensation.ok && compensationError == null) {
           compensationError = currentDoseCompensation.error;
         }
 
@@ -1552,7 +1552,6 @@ export function runGatedGlobalAutoDeductToggle(opts: {
 
       invalidatedDoseMeds.push(med);
     }
-
     const medications = fresh.medications.map((med) =>
       med.autoDeductEnabled === opts.enable
         ? med

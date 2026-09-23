@@ -34,7 +34,7 @@ export interface ExactAutoEnvelopeStored {
   status: 'js_ready';
   medications: Medication[];
   logs: ConsumptionLog[];
-  /** Phase 4 durable global master switch (required on current envelopes). */
+  /** Durable global master switch captured with the current envelope. */
   globalAutoDeductEnabled: boolean;
   toAcknowledge: Array<{
     medicationId: string;
@@ -108,7 +108,7 @@ export interface ManualStockEnvelope {
   status: 'manual_js_ready';
   medications: Medication[];
   logs: ConsumptionLog[];
-  /** Phase 4 durable global master switch. */
+  /** Durable global master switch captured with the current envelope. */
   globalAutoDeductEnabled: boolean;
   createdAt: string;
   baseGeneration: number;
@@ -234,8 +234,7 @@ export function durableMatchesEnvelopeSnapshot(
   },
   durable: AutoStockDurableState
 ): boolean {
-  // Global master switch is part of Phase 4 durable snapshots. If absent,
-  // only the medication/log snapshot is compared.
+  // The global master switch is part of the current durable snapshot contract.
   if (
     envelope.globalAutoDeductEnabled !== undefined &&
     durable.globalAutoDeductEnabled !== undefined &&
@@ -485,8 +484,7 @@ export async function recoverAllPendingStockEnvelopes(
       {
         medications: envelopeMedications,
         logs: env.logs,
-        globalAutoDeductEnabled:
-          env.globalAutoDeductEnabled ?? state.globalAutoDeductEnabled,
+        globalAutoDeductEnabled: env.globalAutoDeductEnabled,
       },
       env.mutationSeq
     );
@@ -498,8 +496,7 @@ export async function recoverAllPendingStockEnvelopes(
     state = {
       medications: envelopeMedications,
       logs: env.logs,
-      globalAutoDeductEnabled:
-        env.globalAutoDeductEnabled ?? state.globalAutoDeductEnabled,
+      globalAutoDeductEnabled: env.globalAutoDeductEnabled,
     };
     if (env.kind === 'exact_auto') {
       collectExactAcks(env.toAcknowledge);
@@ -572,7 +569,7 @@ export async function recoverManualEnvelopeInto(
       clear: () => saveManualStockEnvelope(null),
     });
   }
-  // Only current Phase 4 envelopes (with mutationSeq) are valid.
+  // Only current envelopes with mutationSeq are valid.
   const exact = loadExactAutoStockEnvelope();
   if (exact) {
     pending.push({

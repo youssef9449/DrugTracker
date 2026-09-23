@@ -311,7 +311,10 @@ describe('verifyCriticalAlarmPending — the claim is not proof the alarm exists
     mocks.criticalVerify.mockRejectedValue(new Error('bridge down'));
     await expect(
       verifyCriticalAlarmPending('med-1', Date.now() + 7 * 24 * 60 * 60 * 1000)
-    ).resolves.toBe(false);
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'platform_failure',
+    });
     warnSpy.mockRestore();
   });
 });

@@ -25,7 +25,7 @@ export function classifyNativeError(
   const value = (message ?? '').toLowerCase();
   if (value.includes('invalid_') || value.includes('missing_')) return 'invalid_argument';
   if (value === 'not_android') return 'not_android';
-  if (value.includes('permission')) return 'permission_denied';
+  if (value.includes('permission') || (value.includes('notification') && value.includes('not enabled'))) return 'permission_denied';
   if (value.includes('persist') || value.includes('storage') || value.includes('commit')) return 'persistence_failed';
   if (value.includes('ownership') || value.includes('stale') || value.includes('cancelled')) return 'ownership_lost';
   if (value.includes('recover') || value.includes('reconcile')) return 'recovery_required';

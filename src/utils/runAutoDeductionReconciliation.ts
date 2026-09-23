@@ -1,5 +1,5 @@
 /**
- * Phase 3 orchestrator — runs inside withAutoStockMutationGate so it always
+ * Reconciliation orchestrator — runs inside withAutoStockMutationGate so it always
  * mutates FRESH durable state (not a React snapshot captured before the gate).
  *
  * Durability (Option B for partial native ack):

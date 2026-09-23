@@ -1,4 +1,4 @@
-import type { FC } from 'react';
+import type { FC, Dispatch, SetStateAction } from 'react';
 import type { MedicationDose } from '../types';
 import { MAX_DOSES_PER_DAY } from '../utils/doseSchedule';
 
@@ -13,7 +13,7 @@ const COLOR_TAGS = [
 interface Props {
   dosesPerDay: number;
   setDosesPerDay: (value: number) => void;
-  setDoseSchedule: React.Dispatch<React.SetStateAction<MedicationDose[]>>;
+  setDoseSchedule: Dispatch<SetStateAction<MedicationDose[]>>;
   resizeDoseSchedule: (schedule: MedicationDose[], count: number) => MedicationDose[];
   warningThresholdDays: string;
   setWarningThresholdDays: (value: string) => void;

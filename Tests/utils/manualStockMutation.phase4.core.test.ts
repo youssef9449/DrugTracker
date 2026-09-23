@@ -1,39 +1,14 @@
-import {
-  __setStockMutationOrderingTestHooks,
-  __resetStockMutationOrderingForTests,
-  __setManualEnvelopeTestHooks,
-  __setExactAutoEnvelopeStorageTestHooks,
-  __setAutoStockGateTestHooks,
-} from './autoStockTestHooks';
+import { __setStockMutationOrderingTestHooks, __resetStockMutationOrderingForTests, __setManualEnvelopeTestHooks, __setAutoStockGateTestHooks } from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { Medication, ConsumptionLog } from '../../src/types';
+import type { ConsumptionLog } from '../../src/types';
 import { makeScheduledMedication as med, makeAutoDeductionEvent as fired } from '../fixtures/testFixtures';
-import {
-  runGatedManualConsume,
-  runGatedManualRestore,
-  runGatedAddMedication,
-  runGatedRefill,
-  runGatedUndoRefill,
-  runGatedAutoDeductToggle,
-  runGatedGlobalAutoDeductToggle,
-  runGatedMedicationUpdate,
-  runGatedDeleteMedication,
-  shouldDismissAlarmAfterManualTake,
-  type ManualStockEnvelope } from '../../src/utils/manualStockMutation';
-import {
-loadExactAutoStockEnvelope,
-  durableMatchesEnvelopeSnapshot } from '../../src/utils/stockEnvelopeRecovery';
-import {
-allocateMutationSeq,
-  persistLastAppliedMutationSeq,
-  loadLastAppliedMutationSeq } from '../../src/utils/stockMutationOrdering';
-import {
-  runAutoDeductionReconciliation,
-  type ExactAutoEnvelope } from '../../src/utils/runAutoDeductionReconciliation';
-import {
-type AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
-import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNativeTypes';
-import { isDoseConsumedOnDate, isDoseSkippedOnDate } from '../../src/utils/dateCalculations';
+import { runGatedManualConsume, runGatedManualRestore, runGatedUndoRefill } from '../../src/utils/manualStockMutation';
+
+import { allocateMutationSeq } from '../../src/utils/stockMutationOrdering';
+import { runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
+
+
+import { isDoseConsumedOnDate } from '../../src/utils/dateCalculations';
 import { exactAutoLogId } from '../../src/utils/autoDeductionReconciliation';
 import * as preSettleModule from '../../src/utils/reconcileExactBeforeManualMutation';
 
@@ -62,10 +37,7 @@ beforeEach(() => {
   autoSchedulingMocks.recoverAutoDeductionOccurrence.mockResolvedValue({ ok: true });
 });
 // findPending used indirectly via runGatedManualConsume
-import {
-  findActiveDeductionForOccurrence,
-  consumeDose,
-  restoreDose } from '../../src/utils/medActions';
+import { findActiveDeductionForOccurrence, consumeDose, restoreDose } from '../../src/utils/medActions';
 
 const TODAY = '2026-09-16';
 

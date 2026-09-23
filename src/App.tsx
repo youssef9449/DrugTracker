@@ -18,11 +18,6 @@ import { SelectDoseModal } from './components/SelectDoseModal';
 import { MedicationHistoryModal } from './components/MedicationHistoryModal';
 import { AutoDeductPromptModal } from './components/AutoDeductPromptModal';
 import { UpdatePrompt } from './components/UpdatePrompt';
-import {
-  requestNotificationPermission,
-  getNotificationPermission,
-} from './utils/notifications/notificationPermissions';
-
 import { OrderItem } from './utils/whatsapp';
 import type { ExactAlarmPermission } from './utils/exactAlarm';
 
@@ -34,14 +29,6 @@ import {
   cleanupNativeListeners,
 } from './native';
 import { getInitialTab } from './lib/initialTab';
-import {
-  STORAGE_PHARMACY_KEY,
-  SOUND_KEY,
-  NOTIFICATIONS_KEY,
-  FONT_SIZE_KEY,
-  CRITICAL_STOCK_ALERTS_KEY,
-  COMPACT_VIEW_KEY,
-} from './constants/storageKeys';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(getInitialTab);

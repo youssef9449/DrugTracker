@@ -5,58 +5,31 @@ import {
   PharmacySettings,
   DEFAULT_PHARMACY_SETTINGS,
 } from './types';
-import { AndroidBottomNav, ActiveTab } from './components/AndroidBottomNav';
 import { AppHeader } from './components/AppHeader';
-import { LowStockBanner } from './components/LowStockBanner';
-import { MedicationCard } from './components/MedicationCard';
-import { PharmacyShoppingView } from './components/PharmacyShoppingView';
-import { PharmacyManagementView } from './components/PharmacyManagementView';
-import { UserDataManagementView } from './components/UserDataManagementView';
-import { ConsumptionLogView } from './components/ConsumptionLogView';
 import { AddMedicationModal } from './components/AddMedicationModal';
 import { RefillModal } from './components/RefillModal';
 import { AppSettingsModal } from './components/AppSettingsModal';
-import { AndroidFab } from './components/AndroidFab';
-import { EmptyState } from './components/EmptyState';
 import { DoseAlarmModal } from './components/DoseAlarmModal';
 import { SelectDoseModal } from './components/SelectDoseModal';
 import { MedicationHistoryModal } from './components/MedicationHistoryModal';
 import { AutoDeductPromptModal } from './components/AutoDeductPromptModal';
 import { UpdatePrompt } from './components/UpdatePrompt';
-import { Toggle } from './components/ui/Toggle';
-import { MedicationSortControl } from './components/MedicationSortControl';
-import { AppTabContent } from './components/AppTabContent';
-import type { MedicationSortField, MedicationSortDirection } from './utils/medicationSorting';
 import {
   requestNotificationPermission,
   getNotificationPermission,
 } from './utils/notifications/notificationPermissions';
-import { sendTestAlertNotification } from './utils/notifications/doseReminderNotifications';
 
 import { OrderItem } from './utils/whatsapp';
 import type { ExactAlarmPermission } from './utils/exactAlarm';
 
 import { useDoseReminders } from './hooks/useDoseReminders';
-import { useCriticalAlarmScheduler } from './hooks/useCriticalAlarmScheduler';
-import { useDoseReminderScheduler } from './hooks/useDoseReminderScheduler';
-import { useAutoDeductionScheduler } from './hooks/useAutoDeductionScheduler';
-import { useExactAutoDeductionReconciliation } from './hooks/useExactAutoDeductionReconciliation';
-import { useMidnightTick } from './hooks/useMidnightTick';
-import { usePersistentEffect } from './hooks/usePersistentEffect';
-import { useStockAlerts } from './hooks/useStockAlerts';
-import { useAppHydration } from './hooks/useAppHydration';
 import { useAppRuntime } from './hooks/useAppRuntime';
 import { useAppBackNavigation } from './hooks/useAppBackNavigation';
-import { useMedicationHandlers } from './hooks/useMedicationHandlers';
-import { usePharmacyUserHandlers } from './hooks/usePharmacyUserHandlers';
-import { useNativeActionHandlers } from './hooks/useNativeActionHandlers';
 import { useDerivedMedications } from './hooks/useDerivedMedications';
 import {
   cleanupNativeListeners,
 } from './native';
 import { getInitialTab } from './lib/initialTab';
-import { persist } from './utils/storage';
-import { TOAST_MESSAGES, PERSIST_FAILURE_MESSAGES } from './constants/uiStrings';
 import {
   STORAGE_PHARMACY_KEY,
   SOUND_KEY,
@@ -65,7 +38,6 @@ import {
   CRITICAL_STOCK_ALERTS_KEY,
   COMPACT_VIEW_KEY,
 } from './constants/storageKeys';
-import { TOAST_DURATION_MS, PHARMACY_PERSIST_DEBOUNCE_MS } from './utils/time';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(getInitialTab);

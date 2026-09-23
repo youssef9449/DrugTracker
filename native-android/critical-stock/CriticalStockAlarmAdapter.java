@@ -203,6 +203,16 @@ public final class CriticalStockAlarmAdapter
                 occurrenceKey(medicationId),
                 operationVersion);
     }
+
+    boolean markOneShotDelivered(String medicationId, String operationVersion) {
+        return runtime.markOneShotDelivered(
+                occurrenceKey(medicationId),
+                operationVersion);
+    }
+
+    boolean isOneShotDelivered(String medicationId) {
+        return runtime.isOneShotDelivered(occurrenceKey(medicationId));
+    }
     public static String occurrenceKey(String medicationId) {
         return "critical:" + (medicationId == null ? "" : medicationId);
     }

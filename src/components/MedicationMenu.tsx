@@ -85,20 +85,6 @@ export function MedicationOverflowMenu({
     };
   }, [overflowOpen, deleteConfirmOpen, onRegisterBackHandler]);
   useEffect(() => {
-    if (!onRegisterBackHandler) return;
-    const unregisterOverflow = overflowOpen
-      ? onRegisterBackHandler('medication-overflow', () => setOverflowOpen(false), 100)
-      : undefined;
-    const unregisterDelete = deleteConfirmOpen
-      ? onRegisterBackHandler('medication-delete-confirm', () => setDeleteConfirmOpen(false), 110)
-      : undefined;
-    return () => {
-      unregisterOverflow?.();
-      unregisterDelete?.();
-    };
-  }, [overflowOpen, deleteConfirmOpen, onRegisterBackHandler]);
-
-  useEffect(() => {
     if (!overflowOpen || !triggerRef.current) {
       setCoords(null);
       return;

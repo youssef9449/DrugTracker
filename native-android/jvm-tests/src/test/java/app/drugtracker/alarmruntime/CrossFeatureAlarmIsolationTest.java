@@ -150,7 +150,7 @@ public class CrossFeatureAlarmIsolationTest {
                 DoseReminderAlarmAdapter.PREFS_SCHEDULES,
                 DoseReminderAlarmAdapter.PREFS_CANCELLED,
                 DoseReminderAlarmAdapter.PREFS_ORDERING,
-                DoseReminderAlarmAdapter.REQUEST_CODE_BASE);
+                DoseReminderAlarmAdapter.PENDING_INTENT_REQUEST_CODE);
 
         ExactAlarmRuntime.PendingStateResult pending = runtime.getPendingState(
                 DoseReminderAlarmAdapter.occurrenceUri(

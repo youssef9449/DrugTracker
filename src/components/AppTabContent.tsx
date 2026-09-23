@@ -1,5 +1,6 @@
 import type { FC, Dispatch, SetStateAction } from 'react';
-import type { Medication, ConsumptionLog, PharmacySettings } from '../types';
+import type { Medication, ConsumptionLog, PharmacySettings, Pharmacy, UserContact, UserAddress } from '../types';
+import { calculateMedicationStatus } from '../utils/medicationStatus';
 import type { MedicationSortDirection, MedicationSortField } from '../utils/medicationSorting';
 import type { ActiveTab } from './AndroidBottomNav';
 import { LowStockBanner } from './LowStockBanner';
@@ -24,13 +25,13 @@ interface AppTabContentProps {
   medicationSortField: MedicationSortField;
   medicationSortDirection: MedicationSortDirection;
   soundEnabled: boolean;
-  medicationsWithStatus: ReturnType<any>;
+  medicationsWithStatus: Array<{ med: Medication; statusInfo: ReturnType<typeof calculateMedicationStatus> }>;
   filteredMedications: Medication[];
   alertsCount: number;
   sufficientCount: number;
-  lastRefillByMed: Map<string, { amount: number }>;
-  userContacts: any[];
-  userAddresses: any[];
+  lastRefillByMed: Map<string, ConsumptionLog>;
+  userContacts: UserContact[];
+  userAddresses: UserAddress[];
   showToast: (message: string) => void;
   setFilter: Dispatch<SetStateAction<'all' | 'alerts' | 'sufficient'>>;
   setSearchQuery: Dispatch<SetStateAction<string>>;
@@ -53,11 +54,11 @@ interface AppTabContentProps {
   handleCardRestoreDose: (medicationId: string, doseId?: string) => void;
   handleUndoRefill: (medicationId: string) => void;
   testAlarm: (medication: Medication, doseId?: string) => void;
-  handleSavePharmacy: (pharmacy: any) => void;
+  handleSavePharmacy: (pharmacy: Pharmacy) => void;
   handleDeletePharmacy: (id: string) => void;
-  handleSaveUserContact: (contact: any) => void;
+  handleSaveUserContact: (contact: UserContact) => void;
   handleDeleteUserContact: (id: string) => void;
-  handleSaveUserAddress: (address: any) => void;
+  handleSaveUserAddress: (address: UserAddress) => void;
   handleDeleteUserAddress: (id: string) => void;
 }
 export const AppTabContent: FC<AppTabContentProps> = (props) => {

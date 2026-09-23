@@ -11,7 +11,7 @@ import {
 } from '../utils/notifications/notificationPermissions';
 import { getExactAlarmPermission, type ExactAlarmPermission } from '../utils/exactAlarm';
 import { initNativeBridge } from '../native';
-import { isNotificationChannelEnabled } from '../utils/notificationRuntime';
+import { isNotificationChannelEnabled, retryPersistedNotificationDeliveries } from '../utils/notificationRuntime';
 import {
   DOSE_REMINDER_CHANNEL_ID,
   DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
@@ -241,6 +241,7 @@ export function useAppHydration(setters: AppHydrationSetters): void {
       // Promise.all so setHydrated cannot race ahead of channel setup.
       initNativeBridge()
         .then(async () => {
+          void retryPersistedNotificationDeliveries();
           const [backgroundChannel, foregroundChannel] = await Promise.all([
             isNotificationChannelEnabled(DOSE_REMINDER_CHANNEL_ID),
             isNotificationChannelEnabled(DOSE_REMINDER_FOREGROUND_CHANNEL_ID),

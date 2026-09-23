@@ -55,7 +55,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
   // (select-all → delete) without the old `Math.max(0, parseInt || 0)`
   // snapping it back to 0. Same pattern as packageSizeStr (PR #146).
   const [currentPillsStr, setCurrentPillsStr] = useState<string>('30');
-  // Legacy single-field dailyDose is replaced in the UI by a multi-dose
+  // The UI uses the explicit multi-dose schedule instead of the legacy single-field rate.
   // schedule. dailyDose is still computed as the sum of schedule amounts
   // at save time so the existing auto-deduction engine is unchanged.
   const [dosesPerDay, setDosesPerDay] = useState<number>(1);
@@ -161,7 +161,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
         setDurationDaysStr(initialData.durationDays ? String(initialData.durationDays) : '');
         setTreatmentStartDateStr(initialData.treatmentStartDate ?? '');
       } else {
-        // Legacy records and explicit chronic records are chronic by default.
+        // Records without an explicit bounded-course flag are treated as chronic by default.
         setIsChronic(true);
         setDurationDaysStr('');
         setTreatmentStartDateStr('');

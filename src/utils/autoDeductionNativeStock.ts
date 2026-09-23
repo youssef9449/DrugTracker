@@ -4,7 +4,6 @@ import { AutoDeduction, isNativeAndroid } from './autoDeductionNativePlugin';
 import type {
   ApplyAutoDeductionStockResult,
   ApplyForegroundStockDeltasResult,
-  InitializeNativeStockResult,
 } from './autoDeductionNativeTypes';
 
 export async function initializeAutoDeductionStock(

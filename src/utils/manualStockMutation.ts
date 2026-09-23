@@ -22,7 +22,6 @@ import {
   applyDurableStockDelta,
 } from './medActions';
 import {
-  markAutoDeductionEventReconciled,
   getOccurrenceSnapshot,
   type OccurrenceSnapshotResult,
 } from './autoDeductionNativeEvents';
@@ -46,7 +45,6 @@ import {
   isMedicationTreatmentActiveOnDate,
 } from './medicationTreatment';
 import {
-  withAutoStockMutationGate,
   commitDurableAutoStockState,
   loadStockGeneration,
   loadDurableGlobalAutoDeductEnabled,
@@ -54,11 +52,9 @@ import {
 } from './autoDeductionStockGate';
 import { allocateMutationSeq } from './stockMutationOrdering';
 import {
-  recoverManualEnvelopeInto,
   saveManualStockEnvelope,
   type ManualStockEnvelope,
 } from './stockEnvelopeRecovery';
-import { reconcileExactBeforeManualMutation } from './reconcileExactBeforeManualMutation';
 import {
   cancelDoseReminderNative,
   cancelDoseSnoozeNative,
@@ -73,6 +69,7 @@ import {
   isSnoozeActive,
 } from './doseReminderStorage';
 import { doseReminderDefinitionChanged } from './doseReminderDefinitions';
+import { runManualStockTransaction } from './manualStockTransaction';
 export type {
   ManualStockEnvelope,
 } from './stockEnvelopeRecovery';
@@ -354,26 +351,6 @@ async function invalidateMedicationRecurrences(
  * Manual does not own ACK semantics — only forwards finalized recovery ACKs.
  * Deduplicates by medicationId+doseId+calendarDate. Never called when recovery blocked.
  */
-async function acknowledgeExactAutoEvents(
-  acks: Array<{ medicationId: string; doseId: string; calendarDate: string }>
-): Promise<void> {
-  if (!acks.length) return;
-  const seen = new Set<string>();
-  for (const a of acks) {
-    const key = `${a.medicationId}${a.doseId}${a.calendarDate}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    try {
-      await markAutoDeductionEventReconciled(
-        a.medicationId,
-        a.doseId,
-        a.calendarDate
-      );
-    } catch {
-      // Native ACK failures remain retryable via Exact Auto reconciliation.
-    }
-  }
-}
 /**
  * Shared JS-stock durability: recovery envelope → meds+logs+global → completion marker → clear.
  * Safe to call from an already-held withAutoStockMutationGate, including
@@ -497,41 +474,17 @@ export function runGatedManualConsume(opts: {
     calendarDate: string
   ) => Promise<OccurrenceSnapshotResult>;
 }): Promise<GatedManualConsumeResult> {
-  return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
-    // Capture date/time inside the critical section so a mutation that waited
-    // on the gate still uses the clock at execution time (not call time).
-    const todayStr = opts.todayStr ?? getTodayDateString();
-    const now = opts.now ?? new Date();
-    const recovered = await recoverManualEnvelopeInto(freshIn);
-    if (!recovered.ok) {
-      return {
+  return runManualStockTransaction({
+      todayStr: opts.todayStr, now: opts.now,
+      onFailure: (failure) => ({
         outcome: 'persist_failed' as const,
-        medications: recovered.state.medications,
-        logs: recovered.state.logs,
+        medications: failure.state.medications,
+        logs: failure.state.logs,
         doseAmount: 0,
         log: null,
-        reason: 'persist_failed',
-      };
-    }
-    await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-    // Exact FIRED reconciliation BEFORE any manual mutation.
-    const pre = await reconcileExactBeforeManualMutation({
-      fresh: recovered.state,
-      globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
-      now,
-    });
-    if (pre.nativeListFailed || pre.durabilityBlocked === true) {
-      // Fail-closed: do not run manual mutation when native read failed.
-      return {
-        outcome: 'persist_failed' as const,
-        medications: pre.state.medications,
-        logs: pre.state.logs,
-        doseAmount: 0,
-        log: null,
-        reason: preSettlementBlockReason(pre) ?? 'native_list_failed',
-      };
-    }
-    const fresh = pre.state;
+        reason: failure.reason,
+      }),
+      operation: async ({ fresh, todayStr, now }) => {
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
       return {
@@ -678,40 +631,17 @@ export function runGatedManualRestore(opts: {
   now?: Date;
   makeLogId?: () => string;
 }): Promise<GatedManualRestoreResult> {
-  return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
-    // Capture date/time inside the critical section (not at call time).
-    const todayStr = opts.todayStr ?? getTodayDateString();
-    const now = opts.now ?? new Date();
-    const recovered = await recoverManualEnvelopeInto(freshIn);
-    if (!recovered.ok) {
-      return {
+  return runManualStockTransaction({
+      todayStr: opts.todayStr, now: opts.now,
+      onFailure: (failure) => ({
         outcome: 'persist_failed' as const,
-        medications: recovered.state.medications,
-        logs: recovered.state.logs,
+        medications: failure.state.medications,
+        logs: failure.state.logs,
         restoredAmount: 0,
         log: null,
-        reason: 'persist_failed',
-      };
-    }
-    await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-    // Exact FIRED reconciliation BEFORE any manual mutation.
-    const pre = await reconcileExactBeforeManualMutation({
-      fresh: recovered.state,
-      globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
-      now,
-    });
-    if (pre.nativeListFailed || pre.durabilityBlocked === true) {
-      // Fail-closed: do not run manual mutation when native read failed.
-      return {
-        outcome: 'persist_failed' as const,
-        medications: pre.state.medications,
-        logs: pre.state.logs,
-        restoredAmount: 0,
-        log: null,
-        reason: preSettlementBlockReason(pre) ?? 'native_list_failed',
-      };
-    }
-    const fresh = pre.state;
+        reason: failure.reason,
+      }),
+      operation: async ({ fresh, todayStr, now }) => {
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
       return {
@@ -886,41 +816,25 @@ export interface GatedAddMedicationResult {
 export function runGatedAddMedication(opts: {
   medication: Medication;
 }): Promise<GatedAddMedicationResult> {
-  return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
-    const recovered = await recoverManualEnvelopeInto(freshIn);
-    if (!recovered.ok) {
-      return {
+  return runManualStockTransaction({
+      onFailure: (failure) => ({
         outcome: 'persist_failed' as const,
-        medications: recovered.state.medications,
-        logs: recovered.state.logs,
-        reason: 'persist_failed',
-      };
-    }
-    await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-    const pre = await reconcileExactBeforeManualMutation({
-      fresh: recovered.state,
-      globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
-    });
-    if (pre.nativeListFailed || pre.durabilityBlocked === true) {
-      return {
-        outcome: 'persist_failed' as const,
-        medications: pre.state.medications,
-        logs: pre.state.logs,
-        reason: preSettlementBlockReason(pre) ?? 'native_list_failed',
-      };
-    }
-    if (pre.state.medications.some((m) => m.id === opts.medication.id)) {
+        medications: failure.state.medications,
+        logs: failure.state.logs,
+        reason: failure.reason,
+      }),
+      operation: async ({ fresh, todayStr, now }) => {    if (fresh.medications.some((m) => m.id === opts.medication.id)) {
       return {
         outcome: 'duplicate_med_id' as const,
-        medications: pre.state.medications,
-        logs: pre.state.logs,
+        medications: fresh.medications,
+        logs: fresh.logs,
         medicationName: opts.medication.name,
         unit: opts.medication.unit,
         reason: 'duplicate_med_id',
       };
     }
     const durableGlobal =
-      pre.state.globalAutoDeductEnabled ??
+      fresh.globalAutoDeductEnabled ??
       loadDurableGlobalAutoDeductEnabled();
     const medication: Medication = {
       ...opts.medication,
@@ -931,18 +845,18 @@ export function runGatedAddMedication(opts: {
           ? opts.medication.autoDeductEnabled
           : durableGlobal,
     };
-    const medications = [medication, ...pre.state.medications];
-    const logs = pre.state.logs;
+    const medications = [medication, ...fresh.medications];
+    const logs = fresh.logs;
     const err = await commitWithManualEnvelope({
       medications,
       logs,
-      globalAutoDeductEnabled: pre.state.globalAutoDeductEnabled,
-    }, pre.state.medications);
+      globalAutoDeductEnabled: fresh.globalAutoDeductEnabled,
+    }, fresh.medications);
     if (err) {
       return {
         outcome: 'persist_failed' as const,
-        medications: pre.state.medications,
-        logs: pre.state.logs,
+        medications: fresh.medications,
+        logs: fresh.logs,
         reason: 'persist_failed',
         medicationName: medication.name,
         unit: medication.unit,
@@ -992,40 +906,17 @@ export function runGatedRefill(opts: {
   now?: Date;
   makeLogId?: () => string;
 }): Promise<GatedRefillResult> {
-  return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
-    // Capture date/time inside the critical section (not at call time).
-    const todayStr = opts.todayStr ?? getTodayDateString();
-    const now = opts.now ?? new Date();
-    const recovered = await recoverManualEnvelopeInto(freshIn);
-    if (!recovered.ok) {
-      return {
+  return runManualStockTransaction({
+      todayStr: opts.todayStr, now: opts.now,
+      onFailure: (failure) => ({
         outcome: 'persist_failed' as const,
-        medications: recovered.state.medications,
-        logs: recovered.state.logs,
+        medications: failure.state.medications,
+        logs: failure.state.logs,
         addedPills: 0,
         log: null,
-        reason: 'persist_failed',
-      };
-    }
-    await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-    // Exact FIRED reconciliation BEFORE any manual mutation.
-    const pre = await reconcileExactBeforeManualMutation({
-      fresh: recovered.state,
-      globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
-      now,
-    });
-    if (pre.nativeListFailed || pre.durabilityBlocked === true) {
-      // Fail-closed: do not run manual mutation when native read failed.
-      return {
-        outcome: 'persist_failed' as const,
-        medications: pre.state.medications,
-        logs: pre.state.logs,
-        addedPills: 0,
-        log: null,
-        reason: preSettlementBlockReason(pre) ?? 'native_list_failed',
-      };
-    }
-    const fresh = pre.state;
+        reason: failure.reason,
+      }),
+      operation: async ({ fresh, todayStr, now }) => {
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
       return {
@@ -1100,40 +991,17 @@ export function runGatedUndoRefill(opts: {
   now?: Date;
   makeLogId?: () => string;
 }): Promise<GatedRefillResult> {
-  return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
-    // Capture date/time inside the critical section (not at call time).
-    const todayStr = opts.todayStr ?? getTodayDateString();
-    const now = opts.now ?? new Date();
-    const recovered = await recoverManualEnvelopeInto(freshIn);
-    if (!recovered.ok) {
-      return {
+  return runManualStockTransaction({
+      todayStr: opts.todayStr, now: opts.now,
+      onFailure: (failure) => ({
         outcome: 'persist_failed' as const,
-        medications: recovered.state.medications,
-        logs: recovered.state.logs,
+        medications: failure.state.medications,
+        logs: failure.state.logs,
         addedPills: 0,
         log: null,
-        reason: 'persist_failed',
-      };
-    }
-    await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-    // Exact FIRED reconciliation BEFORE any manual mutation.
-    const pre = await reconcileExactBeforeManualMutation({
-      fresh: recovered.state,
-      globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
-      now,
-    });
-    if (pre.nativeListFailed || pre.durabilityBlocked === true) {
-      // Fail-closed: do not run manual mutation when native read failed.
-      return {
-        outcome: 'persist_failed' as const,
-        medications: pre.state.medications,
-        logs: pre.state.logs,
-        addedPills: 0,
-        log: null,
-        reason: preSettlementBlockReason(pre) ?? 'native_list_failed',
-      };
-    }
-    const fresh = pre.state;
+        reason: failure.reason,
+      }),
+      operation: async ({ fresh, todayStr, now }) => {
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
       return {
@@ -1253,38 +1121,17 @@ export function runGatedAutoDeductToggle(opts: {
   now?: Date;
   globalAutoDeductEnabled?: boolean;
 }): Promise<GatedAutoDeductToggleResult> {
-  return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
-    const now = opts.now ?? new Date();
-    const recovered = await recoverManualEnvelopeInto(freshIn);
-    if (!recovered.ok) {
-      return {
-        outcome: 'persist_failed' as const,
-        medications: recovered.state.medications,
-        logs: recovered.state.logs,
+  return runManualStockTransaction({
+      now: opts.now,
+      onFailure: (failure) => ({
+        outcome: failure.kind === 'reconciliation' ? 'native_list_failed' as const : 'persist_failed' as const,
+        medications: failure.state.medications,
+        logs: failure.state.logs,
         newState: false,
         settleLog: null,
-        reason: 'persist_failed',
-      };
-    }
-    await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-    const pre = await reconcileExactBeforeManualMutation({
-      fresh: recovered.state,
-      // The durable recovered global policy is the authority; React's copy is
-      // only an input hint and may lag after crash/recovery.
-      globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
-      now,
-    });
-    if (pre.nativeListFailed || pre.durabilityBlocked === true) {
-      return {
-        outcome: 'native_list_failed' as const,
-        medications: pre.state.medications,
-        logs: pre.state.logs,
-        newState: false,
-        settleLog: null,
-        reason: preSettlementBlockReason(pre) ?? 'native_list_failed',
-      };
-    }
-    const fresh = pre.state;
+        reason: failure.reason,
+      }),
+      operation: async ({ fresh, todayStr, now }) => {
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
       return {
@@ -1405,36 +1252,17 @@ export function runGatedGlobalAutoDeductToggle(opts: {
   todayStr?: string;
   now?: Date;
 }): Promise<GatedGlobalAutoDeductToggleResult> {
-  return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
-    const now = opts.now ?? new Date();
-    const recovered = await recoverManualEnvelopeInto(freshIn);
-    if (!recovered.ok) {
-      return {
-        outcome: 'persist_failed' as const,
-        medications: recovered.state.medications,
-        logs: recovered.state.logs,
+  return runManualStockTransaction({
+      now: opts.now, globalAutoDeductEnabled: opts.enable,
+      onFailure: (failure) => ({
+        outcome: failure.kind === 'reconciliation' ? 'native_list_failed' as const : 'persist_failed' as const,
+        medications: failure.state.medications,
+        logs: failure.state.logs,
         enable: opts.enable,
         settleLogs: [],
-        reason: 'persist_failed',
-      };
-    }
-    await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-    const pre = await reconcileExactBeforeManualMutation({
-      fresh: recovered.state,
-      globalAutoDeductEnabled: opts.enable,
-      now,
-    });
-    if (pre.nativeListFailed || pre.durabilityBlocked === true) {
-      return {
-        outcome: 'native_list_failed' as const,
-        medications: pre.state.medications,
-        logs: pre.state.logs,
-        enable: opts.enable,
-        settleLogs: [],
-        reason: preSettlementBlockReason(pre) ?? 'native_list_failed',
-      };
-    }
-    const fresh = pre.state;
+        reason: failure.reason,
+      }),
+      operation: async ({ fresh, todayStr, now }) => {
     // Global is a bulk state setter for ALL existing medications AND the
     // default for newly added ones. Flip autoDeductEnabled only — do not
     // settle stock, invent consumption logs, or mutate currentPills here.
@@ -1627,35 +1455,19 @@ export interface GatedDeleteMedicationResult {
 export function runGatedDeleteMedication(opts: {
   medicationId: string;
 }): Promise<GatedDeleteMedicationResult> {
-  return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
-    const recovered = await recoverManualEnvelopeInto(freshIn);
-    if (!recovered.ok) {
-      return {
-        outcome: 'persist_failed' as const,
-        medications: recovered.state.medications,
-        logs: recovered.state.logs,
-        reason: 'persist_failed',
-      };
-    }
-    await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-    const pre = await reconcileExactBeforeManualMutation({
-      fresh: recovered.state,
-      globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
-    });
-    if (pre.nativeListFailed || pre.durabilityBlocked === true) {
-      return {
-        outcome: 'native_list_failed' as const,
-        medications: pre.state.medications,
-        logs: pre.state.logs,
-        reason: preSettlementBlockReason(pre) ?? 'native_list_failed',
-      };
-    }
-    const med = pre.state.medications.find((m) => m.id === opts.medicationId);
+  return runManualStockTransaction({
+      onFailure: (failure) => ({
+        outcome: failure.kind === 'reconciliation' ? 'native_list_failed' as const : 'persist_failed' as const,
+        medications: failure.state.medications,
+        logs: failure.state.logs,
+        reason: failure.reason,
+      }),
+      operation: async ({ fresh, todayStr, now }) => {    const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
       return {
         outcome: 'missing_med' as const,
-        medications: pre.state.medications,
-        logs: pre.state.logs,
+        medications: fresh.medications,
+        logs: fresh.logs,
         reason: 'missing_med',
       };
     }
@@ -1667,8 +1479,8 @@ export function runGatedDeleteMedication(opts: {
     if (!invalidation.ok) {
       return {
         outcome: 'native_invalidation_failed' as const,
-        medications: pre.state.medications,
-        logs: pre.state.logs,
+        medications: fresh.medications,
+        logs: fresh.logs,
         reason: invalidation.error,
         medicationName: med.name,
         unit: med.unit,
@@ -1690,8 +1502,8 @@ export function runGatedDeleteMedication(opts: {
       }
       return {
         outcome: 'native_invalidation_failed' as const,
-        medications: pre.state.medications,
-        logs: pre.state.logs,
+        medications: fresh.medications,
+        logs: fresh.logs,
         reason: compensationError
           ? doseInvalidation.error + ';compensation:' + compensationError
           : doseInvalidation.error,
@@ -1699,11 +1511,11 @@ export function runGatedDeleteMedication(opts: {
         unit: med.unit,
       };
     }
-    const medications = pre.state.medications.filter((m) => m.id !== opts.medicationId);
+    const medications = fresh.medications.filter((m) => m.id !== opts.medicationId);
     const err = await commitWithManualEnvelope({
       medications,
-      logs: pre.state.logs,
-    }, pre.state.medications);
+      logs: fresh.logs,
+    }, fresh.medications);
     if (err) {
       let compensationError: string | null = null;
       if (invalidation.invalidated.length > 0) {
@@ -1721,8 +1533,8 @@ export function runGatedDeleteMedication(opts: {
       }
       return {
         outcome: 'persist_failed' as const,
-        medications: pre.state.medications,
-        logs: pre.state.logs,
+        medications: fresh.medications,
+        logs: fresh.logs,
         reason: compensationError
           ? 'persist_failed;compensation:' + compensationError
           : 'persist_failed',
@@ -1733,7 +1545,7 @@ export function runGatedDeleteMedication(opts: {
     return {
       outcome: 'applied' as const,
       medications,
-      logs: pre.state.logs,
+      logs: fresh.logs,
       medicationName: med.name,
       unit: med.unit,
     };
@@ -1781,30 +1593,14 @@ export function runGatedMedicationNotificationToggle(opts: {
   medicationName?: string;
   enabled?: boolean;
 }> {
-  return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
-    const now = opts.now ?? new Date();
-    const recovered = await recoverManualEnvelopeInto(freshIn);
-    if (!recovered.ok) {
-      return {
-        outcome: 'persist_failed' as const,
-        medications: recovered.state.medications,
-        logs: recovered.state.logs,
-      };
-    }
-    await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-    const pre = await reconcileExactBeforeManualMutation({
-      fresh: recovered.state,
-      globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
-      now,
-    });
-    if (pre.nativeListFailed || pre.durabilityBlocked === true) {
-      return {
-        outcome: 'native_list_failed' as const,
-        medications: pre.state.medications,
-        logs: pre.state.logs,
-      };
-    }
-    const fresh = pre.state;
+  return runManualStockTransaction({
+      now: opts.now,
+      onFailure: (failure) => ({
+        outcome: failure.kind === 'reconciliation' ? 'native_list_failed' as const : 'persist_failed' as const,
+        medications: failure.state.medications,
+        logs: failure.state.logs,
+      }),
+      operation: async ({ fresh, todayStr, now }) => {
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
       return {
@@ -1876,36 +1672,16 @@ export function runGatedMedicationUpdate(opts: {
   now?: Date;
   globalAutoDeductEnabled?: boolean;
 }): Promise<GatedMedicationUpdateResult> {
-  return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
-    const now = opts.now ?? new Date();
-    const recovered = await recoverManualEnvelopeInto(freshIn);
-    if (!recovered.ok) {
-      return {
-        outcome: 'persist_failed' as const,
-        medications: recovered.state.medications,
-        logs: recovered.state.logs,
+  return runManualStockTransaction({
+      todayStr: opts.todayStr, now: opts.now,
+      onFailure: (failure) => ({
+        outcome: failure.kind === 'reconciliation' ? 'native_list_failed' as const : 'persist_failed' as const,
+        medications: failure.state.medications,
+        logs: failure.state.logs,
         settleLog: null,
-        reason: 'persist_failed',
-      };
-    }
-    await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-    const pre = await reconcileExactBeforeManualMutation({
-      fresh: recovered.state,
-      // The durable recovered global policy is authoritative; the React value
-      // may lag after crash/recovery and must not control stock reconciliation.
-      globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
-      now,
-    });
-    if (pre.nativeListFailed || pre.durabilityBlocked === true) {
-      return {
-        outcome: 'native_list_failed' as const,
-        medications: pre.state.medications,
-        logs: pre.state.logs,
-        settleLog: null,
-        reason: preSettlementBlockReason(pre) ?? 'native_list_failed',
-      };
-    }
-    const fresh = pre.state;
+        reason: failure.reason,
+      }),
+      operation: async ({ fresh, todayStr, now }) => {
     const freshMed = fresh.medications.find((m) => m.id === opts.editId);
     if (!freshMed) {
       return {

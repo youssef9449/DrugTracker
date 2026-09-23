@@ -210,6 +210,15 @@ export function useDoseReminders({
     if (alarmingIdRef.current === med.id && alarmingDoseIdRef.current === id) {
       return;
     }
+    if (alarmingIdRef.current) {
+      const alreadyQueued = queuedAlarmRef.current.some(
+        (queued) => queued.medicationId === med.id && queued.doseId === id
+      );
+      if (!alreadyQueued) {
+        queuedAlarmRef.current.push({ medicationId: med.id, doseId: id });
+      }
+      return;
+    }
     const fired = loadJson<Record<string, boolean>>(FIRED_KEY, {});
     if (fired[firedKey(med.id, today, id)]) return;
     if (isSnoozeActive(med.id, id)) return;

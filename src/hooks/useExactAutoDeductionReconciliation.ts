@@ -1,5 +1,5 @@
 /**
- * Phase 3/4 — reconcile native FIRED events after hydrate/resume and immediately
+ * /4 — reconcile native FIRED events after hydrate/resume and immediately
  * when the native exact-alarm receiver reports a newly durable FIRED event.
  *
  * The native EventStore remains the source of truth. The event listener is only
@@ -12,7 +12,6 @@
  * and the local-midnight rollover while the app stays open (midnightTick) each
  * perform one recovery reconciliation.
  */
-
 import { useEffect, useRef } from 'react';
 import type { ConsumptionLog, Medication } from '../types';
 import { runAutoDeductionReconciliation } from '../utils/runAutoDeductionReconciliation';
@@ -24,7 +23,6 @@ import {
   recoveryBoundaryKey,
   restoreFutureSchedulesOnce,
 } from '../utils/restoreFutureSchedulesBoundary';
-
 export interface UseExactAutoDeductionReconciliationOptions {
   setMedications: (meds: Medication[] | ((prev: Medication[]) => Medication[])) => void;
   setLogs: (logs: ConsumptionLog[] | ((prev: ConsumptionLog[]) => ConsumptionLog[])) => void;
@@ -37,7 +35,6 @@ export interface UseExactAutoDeductionReconciliationOptions {
   /** Increments at each local-midnight rollover while the app stays open. */
   midnightTick?: number;
 }
-
 export function useExactAutoDeductionReconciliation({
   setMedications,
   setLogs,
@@ -51,24 +48,17 @@ export function useExactAutoDeductionReconciliation({
   const globalRef = useRef(globalAutoDeductEnabled);
   const reconciliationRunningRef = useRef(false);
   const reconciliationQueuedRef = useRef(false);
-
   globalRef.current = globalAutoDeductEnabled;
-
   useEffect(() => {
     if (!hydrated || isFirstRun) return;
-
     let cancelled = false;
-
     const reconcile = async (recoverNativeSchedules = false): Promise<void> => {
       if (cancelled) return;
-
       if (reconciliationRunningRef.current) {
         reconciliationQueuedRef.current = true;
         return;
       }
-
       reconciliationRunningRef.current = true;
-
       try {
         if (recoverNativeSchedules) {
           // Recovery boundary: one native future-schedule + independent-evidence
@@ -90,12 +80,10 @@ export function useExactAutoDeductionReconciliation({
             );
           }
         }
-
         const result = await runAutoDeductionReconciliation({
           globalAutoDeductEnabled: globalRef.current,
         });
         if (cancelled) return;
-
         // React follows durable committed state (not the pre-gate snapshot).
         // The global master switch is stored in the same durable stock domain,
         // so sync it after recovery as well; this prevents a recovered global
@@ -114,17 +102,14 @@ export function useExactAutoDeductionReconciliation({
         console.warn('[App] Exact Auto event-driven reconciliation failed:', err);
       } finally {
         reconciliationRunningRef.current = false;
-
         if (!cancelled && reconciliationQueuedRef.current) {
           reconciliationQueuedRef.current = false;
           void reconcile();
         }
       }
     };
-
     let listenerHandle: { remove: () => Promise<void> } | null = null;
     let listenerCancelled = false;
-
     // Register the native wake-up before the recovery reconciliation. If an
     // alarm fires during listener setup, the durable FIRED row is still picked
     // up by this one-shot recovery once registration completes.
@@ -138,7 +123,6 @@ export function useExactAutoDeductionReconciliation({
         return;
       }
       listenerHandle = handle;
-
       // Recovery boundary: hydrate and every app resume perform one
       // reconciliation after the event listener is armed. This is NOT polling;
       // it covers events that occurred while JS was unavailable or during setup.
@@ -148,7 +132,6 @@ export function useExactAutoDeductionReconciliation({
       // Even if the listener cannot be attached, perform the recovery read once.
       void reconcile(true);
     });
-
     return () => {
       cancelled = true;
       listenerCancelled = true;

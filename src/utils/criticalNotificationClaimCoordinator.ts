@@ -67,7 +67,14 @@ export async function releaseInFlightCriticalNotificationClaim(
       claimed: false,
       alarmTime: null,
     });
-    return saveCriticalNotificationClaims(claims);
+
+    // A transient storage failure must not permanently consume the episode.
+    // Retry the same CAS write a small bounded number of times without
+    // yielding between attempts, so no other JS execution can interleave.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (saveCriticalNotificationClaims(claims)) return true;
+    }
+    return false;
   });
 }
 

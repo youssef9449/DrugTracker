@@ -42,7 +42,7 @@ import java.util.TimeZone;
  * only the current operationVersion contract). It guards
  * concurrent metadata replacement and is NOT a medication-level disable epoch.
  *
- * Recurrence authorization ():
+ * Recurrence authorization:
  *   PREFS_RECURRENCE_AUTH holds a monotonic generation per (medicationId, doseId).
  *   scheduleOccurrence carries the active generation in delivery extras only; new
  *   Shared schedule metadata contains no Auto recurrence-authorization state.
@@ -132,7 +132,7 @@ public final class AutoDeductionScheduler {
                 forceScheduleMetadataRemovalFailureForTest;
         schedulingAdapter.syncTestControls();
     }
-    // ── Recurrence authorization () ─────────────────────────────
+    // ── Recurrence authorization ─────────────────────────────
     private static String recurrenceAuthKey(String medicationId, String doseId) {
         return AutoDeductionContract.RECURRENCE_AUTH_KEY_PREFIX
                 + AutoDeductionContract.scheduleIdentityKey(medicationId, doseId);
@@ -216,7 +216,7 @@ public final class AutoDeductionScheduler {
             Log.i(TAG, "invalidateRecurrenceAuthorization: generation "
                     + prev + " -> " + next + " for " + medicationId + "/" + doseId);
             // Only after durable bump: cancel futures so restore cannot resurrect them.
-            // Fail-closed (): if any durable cancellation step fails, report
+            // Fail-closed: if any durable cancellation step fails, report
             // ok=false WITHOUT rolling back the generation — the bump is durable and
             // must stay monotonic (rollback itself can fail and create authorization
             // ambiguity). The caller retries; retry is idempotent (existing tombstones
@@ -237,7 +237,7 @@ public final class AutoDeductionScheduler {
      * this medication+dose. Caller must hold {@link #SCHEDULE_LOCK}.
      * Also writes occurrence cancellation tombstones so fire cannot promote them.
      *
-     * <p><b>Fail-closed ():</b> returns {@link CancelResult#fail} when any
+     * <p><b>Fail-closed:</b> returns {@link CancelResult#fail} when any
      * durable cancellation step fails (ordering-token allocation, tombstone write
      * commit, metadata removal commit, or AlarmManager unavailable). The caller
      * ({@link #invalidateRecurrenceAuthorization}) must NOT report disable success
@@ -282,7 +282,7 @@ public final class AutoDeductionScheduler {
         }
         return CancelResult.success();
     }
-    /** Result of multi-day catch-up (). FIRED count ≠ future alarms installed. */
+    /** Result of multi-day catch-up. FIRED count ≠ future alarms installed. */
     static final class CatchUpResult {
         final int firedCreated;
         /** True only when a new future AlarmManager schedule was installed. */
@@ -448,7 +448,7 @@ public final class AutoDeductionScheduler {
      */
     /**
      * Authoritative fire transition serialized with cancellation and schedule
-     * ownership validation on {@link #SCHEDULE_LOCK} ().
+     * ownership validation on {@link #SCHEDULE_LOCK}.
      *
      * <p>Under one continuous critical section:
      * <ol>
@@ -2582,7 +2582,7 @@ public final class AutoDeductionScheduler {
     }
     /**
      * Atomic occurrence state snapshot under {@link #SCHEDULE_LOCK} for Manual Take
-     * amount authority (). Linearizes with fireOccurrenceIfNotCancelled and
+     * amount authority. Linearizes with fireOccurrenceIfNotCancelled and
      * cancelOccurrence on the same lock.
      *
      * <ol>

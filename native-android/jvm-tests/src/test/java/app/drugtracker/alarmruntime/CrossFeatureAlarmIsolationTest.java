@@ -27,6 +27,7 @@ import app.drugtracker.autodeduction.AutoDeductionContract;
 import app.drugtracker.autodeduction.AutoDeductionSchedulingAdapter;
 import app.drugtracker.criticalstock.CriticalStockAlarmAdapter;
 import app.drugtracker.dosereminder.DoseReminderAlarmAdapter;
+import app.drugtracker.dosereminder.DoseReminderAlarmReceiver;
 
 /**
  * Phase 9 runtime coexistence proof for the three native exact-alarm features.
@@ -157,7 +158,7 @@ public class CrossFeatureAlarmIsolationTest {
                         MEDICATION_ID,
                         DOSE_ID).toString(),
                 DoseReminderAlarmAdapter.ACTION_DOSE_REMINDER,
-                DoseReminderAlarmAdapter.class);
+                DoseReminderAlarmReceiver.class);
 
         assertTrue(pending.isPending());
 
@@ -169,7 +170,7 @@ public class CrossFeatureAlarmIsolationTest {
                         MEDICATION_ID,
                         DOSE_ID).toString(),
                 DoseReminderAlarmAdapter.ACTION_DOSE_REMINDER,
-                DoseReminderAlarmAdapter.class);
+                DoseReminderAlarmReceiver.class);
 
         assertTrue(absent.status == ExactAlarmRuntime.PendingStateResult.Status.ABSENT);
         assertTrue(
@@ -188,7 +189,7 @@ public class CrossFeatureAlarmIsolationTest {
         ExactAlarmRuntime.PendingStateResult result = runtime.getPendingState(
                 "",
                 DoseReminderAlarmAdapter.ACTION_DOSE_REMINDER,
-                DoseReminderAlarmAdapter.class);
+                DoseReminderAlarmReceiver.class);
 
         assertTrue(result.status == ExactAlarmRuntime.PendingStateResult.Status.FAILED);
     }

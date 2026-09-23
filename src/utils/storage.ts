@@ -2,8 +2,8 @@
  * Shared localStorage helpers.
  *
  * Previously:
- * - `loadJson`/`saveJson` were private to useDoseReminders.ts (silent
- *   variants — return fallback / void on error).
+ * - `loadJson`/`saveJson` were previously private to useDoseReminders.ts;
+ *   the writer silently swallowed failures.
  * - App.tsx had 3 inlined `try { JSON.parse(localStorage.getItem(...)) }`
  *   copies + 4 inlined raw-string reads.
  * - App.tsx also had `persistJson` and `persistString` — near-identical

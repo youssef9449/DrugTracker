@@ -228,7 +228,11 @@ export function useStockAlerts({
             // sure no armed critical alarm for this med survives as a
             // second user-facing notification. Serialized through the
             // per-medication queue; idempotent.
-            void enqueueCriticalAlarmOp(med.id, () => cancelCriticalAlarm(med.id));
+            void enqueueCriticalAlarmOp(
+              med.id,
+              bumpCriticalAlarmGeneration(med.id),
+              () => cancelCriticalAlarm(med.id)
+            );
             return;
           }
           // Send failed → un-claim so the opportunity stays available

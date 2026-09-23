@@ -42,13 +42,13 @@ Do not treat a green `./gradlew test` as device or OEM validation.
 
 The JVM module also owns the repository's native Java static-analysis gate.
 SpotBugs analyzes the synced production runtime classes under `app.drugtracker.*`
-with maximum analysis effort and a high-confidence report threshold. The gate
+with maximum analysis effort and a high-confidence report threshold across the production sources synchronized into the JVM test main source set. The gate
 fails on reported findings; test/Capacitor compile stubs are excluded by the
 analysis scope. Run it with:
 
 ```bash
 cd native-android/jvm-tests
-./gradlew spotbugsStaticAnalysis
+./gradlew spotbugsMain
 ```
 
 Do not add broad suppressions just to make the gate green. If an existing,

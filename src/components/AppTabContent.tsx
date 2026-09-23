@@ -1,14 +1,13 @@
 import type { FC, Dispatch, SetStateAction } from 'react';
 import type { Medication, ConsumptionLog, PharmacySettings } from '../types';
 import type { MedicationSortDirection, MedicationSortField } from '../utils/medicationSorting';
-import { AndroidBottomNav, type ActiveTab } from './AndroidBottomNav';
+import type { ActiveTab } from './AndroidBottomNav';
 import { LowStockBanner } from './LowStockBanner';
 import { MedicationCard } from './MedicationCard';
 import { PharmacyShoppingView } from './PharmacyShoppingView';
 import { PharmacyManagementView } from './PharmacyManagementView';
 import { UserDataManagementView } from './UserDataManagementView';
 import { ConsumptionLogView } from './ConsumptionLogView';
-import { AndroidFab } from './AndroidFab';
 import { EmptyState } from './EmptyState';
 import { MedicationSortControl } from './MedicationSortControl';
 import { Toggle } from './ui/Toggle';

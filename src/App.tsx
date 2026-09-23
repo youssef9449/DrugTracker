@@ -557,12 +557,19 @@ export default function App() {
 
   const handleOpenExactAlarmSettings = () => {
     openExactAlarmSettings()
-      .then((opened) => {
-        if (!opened) {
+      .then((result) => {
+        if (!result.ok) {
+          console.warn(
+            '[App] exact alarm settings failed:',
+            result.error,
+            result.errorCode
+          );
           showToast('إعدادات المنبهات الدقيقة غير متاحة على هذا الجهاز');
         }
       })
-      .catch(() => void 0);
+      .catch((err) => {
+        console.warn('[App] exact alarm settings failed:', err);
+      });
   };
 
   // Consume-pill feature: manually consume a selected explicit dose from the card.

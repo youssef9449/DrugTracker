@@ -36,7 +36,7 @@ vi.mock('@capacitor/local-notifications', () => ({
 import {
   scheduleNotification,
   cancelNotification,
-  getPendingNotification,
+  getPendingNotificationResult,
   postNativeNotification,
 } from '@/utils/notificationRuntime';
 
@@ -63,7 +63,7 @@ beforeEach(() => {
   mocks.getPending.mockResolvedValue({ notifications: [] });
 });
 
-describe('Phase 7 notification logical identity boundary', () => {
+describe('notification logical identity boundary', () => {
   it('Android sends namespace + logical identity to NotificationRuntime with no numeric feature id', async () => {
     await postNativeNotification(baseOptions);
 
@@ -155,14 +155,17 @@ describe('Phase 7 notification logical identity boundary', () => {
       ],
     });
 
-    const pending = await getPendingNotification(
+    const result = await getPendingNotificationResult(
       baseOptions.namespace,
       baseOptions.identity
     );
 
-    expect(pending).not.toBeNull();
-    expect(pending?.schedule?.at).toEqual(
-      new Date('2026-09-21T12:00:00.000Z')
-    );
+    expect(result).toMatchObject({ ok: true });
+    if (result.ok) {
+      expect(result.pending).not.toBeNull();
+      expect(result.pending?.schedule?.at).toEqual(
+        new Date('2026-09-21T12:00:00.000Z')
+      );
+    }
   });
 });

@@ -160,7 +160,7 @@ export function generatePharmacyOrderMessage(
  * Build a WhatsApp deep-link URL in the given format.
  * Consolidates the previous 4 near-identical builders
  * (buildWhatsAppUrl / buildWhatsAppApiUrl / buildWhatsAppAppUrl /
- * buildWhatsAppWebUrl) which differed only in host/scheme ().
+ * buildWhatsAppWebUrl) which differed only in host/scheme.
  * `buildWhatsAppWebUrl` had zero callers and is dropped.
  * @param phone Phone number (will be cleaned via cleanPhoneNumber).
  * @param message Pre-filled message text.

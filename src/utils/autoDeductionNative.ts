@@ -541,7 +541,7 @@ export type OccurrenceSnapshotResult =
  * Atomic native occurrence snapshot under SCHEDULE_LOCK.
  * On non-Android: returns ok:true ABSENT (caller uses durable JS schedule).
  * On native failure: ok:false — never faked as ABSENT.
- * Native fail-closed contract (): when the EventStore cannot durably
+ * Native fail-closed contract: when the EventStore cannot durably
  * read/terminalize a malformed or identity-mismatched FIRED row, the native
  * snapshot reports an explicit failure (ok=false, error
  * 'rejected_persist_failed') through this bridge — the gated Manual Take
@@ -615,9 +615,13 @@ export async function markAutoDeductionEventReconciled(
       doseId: id,
       calendarDate,
     });
-    return result.ok
-      ? result
-      : { ...result, error: 'mark_reconciled_failed', errorCode: 'persistence_failed' };
+    if (result.ok) return result;
+    const message = result.error || 'mark_reconciled_failed';
+    return {
+      ...result,
+      error: message,
+      errorCode: classifyNativeError(message),
+    };
   } catch (e) {
     const boundaryError = toNativeBoundaryError(e, 'persistence_failed');
     return { ok: false, changed: false, error: boundaryError.message, errorCode: boundaryError.code };

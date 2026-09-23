@@ -81,6 +81,23 @@ final class ExactAlarmStore {
                 .commit();
     }
 
+    boolean writeScheduleRawLocked(
+            String featureStorageKey,
+            String rawMetadata) {
+        if (featureStorageKey == null
+                || featureStorageKey.isEmpty()
+                || rawMetadata == null
+                || rawMetadata.isEmpty()) {
+            return false;
+        }
+        return schedules.edit()
+                .putString(
+                        storageKey(featureStorageKey),
+                        rawMetadata)
+                .commit();
+    }
+
+
     boolean removeScheduleLocked(String featureStorageKey) {
         return schedules.edit()
                 .remove(storageKey(featureStorageKey))

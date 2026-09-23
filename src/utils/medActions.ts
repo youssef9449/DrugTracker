@@ -1,6 +1,7 @@
 import { Medication, ConsumptionLog } from '../types';
 import {
   getTodayDateString,
+  getLocalDateString,
   recordDoseConsumed,
   isDoseConsumedOnDate,
   clearDoseSkippedOnDate,
@@ -356,12 +357,7 @@ export function restoreDose(
 
     const slot = med.doseSchedule!.find((d) => d.id === resolvedDoseId);
     // Past-due relative to `now`: prior calendar day, or today after slot time.
-    const nowLocalDate = (() => {
-      const y = now.getFullYear();
-      const m = String(now.getMonth() + 1).padStart(2, '0');
-      const d = String(now.getDate()).padStart(2, '0');
-      return `${y}-${m}-${d}`;
-    })();
+    const nowLocalDate = getLocalDateString(now);
     const restoreDateIsPastDay = todayStr < nowLocalDate;
     const timeElapsedToday =
       slot != null && isDoseTimeElapsedToday(slot.time, now);

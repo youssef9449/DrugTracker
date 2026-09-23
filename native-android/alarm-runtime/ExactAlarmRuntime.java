@@ -296,6 +296,16 @@ public final class ExactAlarmRuntime {
                 return ScheduleResult.fail("ownership_lost");
             }
 
+            // Recovery/re-arm requests are allowed to replace only the exact
+            // schedule version they read. If a newer cancellation tombstone
+            // appeared after the caller's pre-check, do not let recovery
+            // allocate a fresh version that would supersede that cancellation.
+            if (request.expectedExistingOperationVersion != null
+                    && !request.expectedExistingOperationVersion.isEmpty()
+                    && store.isEffectivelyCancelledLocked(request.storageKey)) {
+                return ScheduleResult.fail("ownership_lost");
+            }
+
             String operationVersion =
                     allocateOperationVersionLocked();
             if (operationVersion == null) {

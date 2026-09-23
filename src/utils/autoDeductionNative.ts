@@ -5,6 +5,7 @@
 
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 import type { Medication } from '../types';
+import { classifyNativeError, toNativeBoundaryError, type NativeErrorCode } from './nativeErrors';
 
 export interface AutoDeductionEvent {
   medicationId: string;
@@ -36,6 +37,7 @@ export interface InitializeNativeStockResult {
   ok: boolean;
   stocks: NativeAutoStockMedication[];
   error?: string;
+  errorCode?: NativeErrorCode;
 }
 
 export interface ApplyForegroundStockDeltasResult {
@@ -43,6 +45,7 @@ export interface ApplyForegroundStockDeltasResult {
   alreadyApplied: boolean;
   stocks: NativeAutoStockMedication[];
   error?: string;
+  errorCode?: NativeErrorCode;
 }
 
 export interface ApplyAutoDeductionStockResult {
@@ -53,11 +56,14 @@ export interface ApplyAutoDeductionStockResult {
   actualDeducted: number;
   currentPills: number;
   error?: string;
+  errorCode?: NativeErrorCode;
 }
 
 export interface MarkReconciledResult {
   ok: boolean;
   changed: boolean;
+  error?: string;
+  errorCode?: NativeErrorCode;
 }
 
 export interface ExactAutoDeductionFiredEvent {
@@ -108,6 +114,7 @@ export interface ListScheduledOccurrencesResult {
   ok: boolean;
   schedules: ScheduledOccurrence[];
   error?: string;
+  errorCode?: NativeErrorCode;
 }
 
 export type CancelOccurrenceStatus = "SUCCESS" | "ALREADY_ABSENT" | "FAILED";
@@ -116,6 +123,7 @@ export interface CancelOccurrenceResult {
   ok: boolean;
   status: CancelOccurrenceStatus;
   error?: string;
+  errorCode?: NativeErrorCode;
 }
 
 /**
@@ -207,7 +215,10 @@ export function autoDeductionOccurrenceKey(
 
 export async function initializeAutoDeductionStock(
   medications: Array<{ medicationId: string; currentPills: number }>
-): Promise<{ ok: true; medications: typeof medications } | { ok: false; error: string; medications: typeof medications }> {
+): Promise<
+  | { ok: true; medications: typeof medications }
+  | { ok: false; error: string; errorCode: NativeErrorCode; medications: typeof medications }
+> {
   if (!isNativeAndroid()) {
     return { ok: true, medications };
   }
@@ -230,6 +241,7 @@ export async function initializeAutoDeductionStock(
       return {
         ok: false,
         error: result?.error || 'stock_init_failed',
+        errorCode: classifyNativeError(result?.error || 'stock_init_failed'),
         medications,
       };
     }
@@ -250,6 +262,7 @@ export async function initializeAutoDeductionStock(
     return {
       ok: false,
       error: e instanceof Error ? e.message : 'stock_init_failed',
+      errorCode: toNativeBoundaryError(e, 'persistence_failed').code,
       medications,
     };
   }
@@ -257,7 +270,10 @@ export async function initializeAutoDeductionStock(
 
 export async function convergeAutoDeductionStock(
   medications: Medication[]
-): Promise<{ ok: true; medications: Medication[] } | { ok: false; medications: Medication[]; error: string }> {
+): Promise<
+  | { ok: true; medications: Medication[] }
+  | { ok: false; medications: Medication[]; error: string; errorCode: NativeErrorCode }
+> {
   const result = await initializeAutoDeductionStock(
     medications.map((m) => ({
       medicationId: m.id,
@@ -269,6 +285,7 @@ export async function convergeAutoDeductionStock(
       ok: false,
       medications,
       error: result.error,
+      errorCode: result.errorCode,
     };
   }
   return {
@@ -296,7 +313,7 @@ export async function applyForegroundAutoStockDeltas(
     return { ok: true, alreadyApplied: false, stocks: [] };
   }
   if (!(mutationSeq > 0)) {
-    return { ok: false, alreadyApplied: false, stocks: [], error: 'invalid_mutation_seq' };
+    return { ok: false, alreadyApplied: false, stocks: [], error: 'invalid_mutation_seq', errorCode: 'invalid_argument' };
   }
   if (occurrenceResolutions.some((resolution) =>
     typeof resolution.medicationId !== 'string' ||
@@ -310,6 +327,7 @@ export async function applyForegroundAutoStockDeltas(
       alreadyApplied: false,
       stocks: [],
       error: 'invalid_occurrence_resolution',
+      errorCode: 'invalid_argument',
     };
   }
   try {
@@ -320,7 +338,7 @@ export async function applyForegroundAutoStockDeltas(
         delta: Number(d.delta),
       }));
     if (cleanDeltas.some((d) => !Number.isFinite(d.delta))) {
-      return { ok: false, alreadyApplied: false, stocks: [], error: 'invalid_stock_delta' };
+      return { ok: false, alreadyApplied: false, stocks: [], error: 'invalid_stock_delta', errorCode: 'invalid_argument' };
     }
     return await AutoDeduction.applyForegroundStockDeltas({
       mutationSeq,
@@ -338,6 +356,7 @@ export async function applyForegroundAutoStockDeltas(
       alreadyApplied: false,
       stocks: [],
       error: e instanceof Error ? e.message : 'foreground_stock_failed',
+      errorCode: toNativeBoundaryError(e, 'persistence_failed').code,
     };
   }
 }
@@ -372,6 +391,7 @@ export async function applyAutoDeductionStock(
       actualDeducted: 0,
       currentPills: 0,
       error: 'invalid_auto_stock_args',
+      errorCode: 'invalid_argument',
     };
   }
   try {
@@ -383,6 +403,7 @@ export async function applyAutoDeductionStock(
     });
     return {
       ...result,
+      ...(result.ok === false ? { errorCode: classifyNativeError(result.error) } : {}),
       native: true,
     };
   } catch (e) {
@@ -393,6 +414,7 @@ export async function applyAutoDeductionStock(
       actualDeducted: 0,
       currentPills: 0,
       error: e instanceof Error ? e.message : 'auto_stock_failed',
+      errorCode: toNativeBoundaryError(e, 'persistence_failed').code,
     };
   }
 }
@@ -404,20 +426,24 @@ export async function scheduleAutoDeduction(
     return { ok: false, error: 'not_android' };
   }
   if (!(Number(params.amount) > 0) || !Number.isFinite(Number(params.amount))) {
-    return { ok: false, error: 'invalid_amount' };
+    return { ok: false, error: 'invalid_amount', errorCode: 'invalid_argument' };
   }
   const doseId = typeof params.doseId === 'string' ? params.doseId.trim() : '';
   if (!doseId) {
-    return { ok: false, error: 'missing_dose_id' };
+    return { ok: false, error: 'missing_dose_id', errorCode: 'invalid_argument' };
   }
   try {
-    return await AutoDeduction.scheduleOccurrence({
+    const result = await AutoDeduction.scheduleOccurrence({
       ...params,
       amount: Number(params.amount),
       doseId,
     });
+    return result.ok
+      ? result
+      : { ...result, errorCode: classifyNativeError(result.error) };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : 'schedule_failed' };
+    const boundaryError = toNativeBoundaryError(e);
+    return { ok: false, error: boundaryError.message, errorCode: boundaryError.code };
   }
 }
 
@@ -427,23 +453,27 @@ export async function cancelAutoDeduction(
   calendarDate: string
 ): Promise<CancelOccurrenceResult> {
   if (!isNativeAndroid()) {
-    return { ok: false, status: "FAILED", error: "not_android" };
+    return { ok: false, status: "FAILED", error: "not_android", errorCode: "not_android" };
   }
   const id = typeof doseId === 'string' ? doseId.trim() : '';
   if (!id) {
-    return { ok: false, status: "FAILED", error: "missing_dose_id" };
+    return { ok: false, status: "FAILED", error: "missing_dose_id", errorCode: "invalid_argument" };
   }
   try {
-    return await AutoDeduction.cancelOccurrence({
+    const result = await AutoDeduction.cancelOccurrence({
       medicationId,
       doseId: id,
       calendarDate,
     });
+    return result.ok
+      ? result
+      : { ...result, errorCode: classifyNativeError(result.error) };
   } catch (e) {
     return {
       ok: false,
       status: "FAILED",
       error: e instanceof Error ? e.message : "cancel_failed",
+      errorCode: toNativeBoundaryError(e).code,
     };
   }
 }
@@ -459,23 +489,27 @@ export async function invalidateAutoDeductionRecurrence(
   doseId: string
 ): Promise<{ ok: boolean; error?: string; generation?: number }> {
   if (!isNativeAndroid()) {
-    return { ok: false, error: "not_android" };
+    return { ok: false, error: "not_android", errorCode: "not_android" };
   }
   try {
     // Pass through native ok/error — never coerce a failed generation commit
     // into success (fail-closed for Issue #217 recurrence authorization).
     const id = typeof doseId === 'string' ? doseId.trim() : '';
     if (!id) {
-      return { ok: false, error: "missing_dose_id" };
+      return { ok: false, error: "missing_dose_id", errorCode: "invalid_argument" };
     }
-    return await AutoDeduction.invalidateRecurrenceAuthorization({
+    const result = await AutoDeduction.invalidateRecurrenceAuthorization({
       medicationId,
       doseId: id,
     });
+    return result.ok
+      ? result
+      : { ...result, errorCode: classifyNativeError(result.error) };
   } catch (e) {
     return {
       ok: false,
       error: e instanceof Error ? e.message : "invalidate_failed",
+      errorCode: toNativeBoundaryError(e).code,
     };
   }
 }
@@ -490,6 +524,7 @@ export interface ListFiredEventsResult {
   ok: boolean;
   events: AutoDeductionEvent[];
   error?: string;
+  errorCode?: NativeErrorCode;
 }
 
 export function addExactAutoDeductionFiredListener(
@@ -512,12 +547,13 @@ export async function listFiredAutoDeductionEvents(): Promise<ListFiredEventsRes
         ok: false,
         events: [],
         error: (res && res.error) || 'list_fired_failed',
+        errorCode: classifyNativeError(res?.error || 'list_fired_failed'),
       };
     }
     return { ok: true, events: res.events ?? [] };
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'list_fired_failed';
-    return { ok: false, events: [], error: msg };
+    return { ok: false, events: [], error: msg, errorCode: toNativeBoundaryError(e, 'persistence_failed').code };
   }
 }
 
@@ -526,7 +562,7 @@ export type OccurrenceSnapshotStatus = 'FIRED' | 'SCHEDULED' | 'CANCELLED' | 'AB
 
 export type OccurrenceSnapshotResult =
   | { ok: true; status: OccurrenceSnapshotStatus; amount?: number }
-  | { ok: false; error: string };
+  | { ok: false; error: string; errorCode: NativeErrorCode };
 
 /**
  * Atomic native occurrence snapshot under SCHEDULE_LOCK.
@@ -550,7 +586,7 @@ export async function getOccurrenceSnapshot(
   }
   const id = typeof doseId === 'string' ? doseId.trim() : '';
   if (!id) {
-    return { ok: false, error: 'missing_dose_id' };
+    return { ok: false, error: 'missing_dose_id', errorCode: 'invalid_argument' };
   }
   try {
     const res = await AutoDeduction.getOccurrenceSnapshot({
@@ -562,6 +598,7 @@ export async function getOccurrenceSnapshot(
       return {
         ok: false,
         error: (res && res.error) || 'snapshot_failed',
+        errorCode: classifyNativeError(res?.error || 'snapshot_failed'),
       };
     }
     const statusRaw = String(res.status || '').toUpperCase();
@@ -572,7 +609,7 @@ export async function getOccurrenceSnapshot(
       'ABSENT',
     ];
     if (!allowed.includes(statusRaw as OccurrenceSnapshotStatus)) {
-      return { ok: false, error: 'invalid_snapshot_status' };
+      return { ok: false, error: 'invalid_snapshot_status', errorCode: 'invalid_argument' };
     }
     const status = statusRaw as OccurrenceSnapshotStatus;
     const amount =
@@ -582,7 +619,7 @@ export async function getOccurrenceSnapshot(
     return { ok: true, status, amount };
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'snapshot_failed';
-    return { ok: false, error: msg };
+    return { ok: false, error: msg, errorCode: toNativeBoundaryError(e, 'persistence_failed').code };
   }
 }
 
@@ -592,19 +629,23 @@ export async function markAutoDeductionEventReconciled(
   doseId: string,
   calendarDate: string
 ): Promise<MarkReconciledResult> {
-  if (!isNativeAndroid()) return { ok: false, changed: false };
+  if (!isNativeAndroid()) return { ok: false, changed: false, error: 'not_android', errorCode: 'not_android' };
   const id = typeof doseId === 'string' ? doseId.trim() : '';
   if (!id) {
     return { ok: false, changed: false };
   }
   try {
-    return await AutoDeduction.markReconciled({
+    const result = await AutoDeduction.markReconciled({
       medicationId,
       doseId: id,
       calendarDate,
     });
-  } catch {
-    return { ok: false, changed: false };
+    return result.ok
+      ? result
+      : { ...result, error: 'mark_reconciled_failed', errorCode: 'persistence_failed' };
+  } catch (e) {
+    const boundaryError = toNativeBoundaryError(e, 'persistence_failed');
+    return { ok: false, changed: false, error: boundaryError.message, errorCode: boundaryError.code };
   }
 }
 
@@ -625,10 +666,11 @@ export async function restoreFutureAutoDeductionSchedules(): Promise<RestoreFutu
       restored: Number(res?.restored) || 0,
       failed: Number(res?.failed) || 0,
       error: res?.error,
+      ...(ok ? {} : { errorCode: classifyNativeError(res?.error || 'restore_failed') }),
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'restore_failed';
-    return { ok: false, restored: 0, failed: 0, error: msg };
+    return { ok: false, restored: 0, failed: 0, error: msg, errorCode: toNativeBoundaryError(e, 'recovery_required').code };
   }
 }
 
@@ -650,6 +692,7 @@ export async function listScheduledAutoDeductionOccurrences(): Promise<ListSched
       ok: false,
       schedules: [],
       error: e instanceof Error ? e.message : 'list_schedules_failed',
+      errorCode: toNativeBoundaryError(e, 'persistence_failed').code,
     };
   }
 }

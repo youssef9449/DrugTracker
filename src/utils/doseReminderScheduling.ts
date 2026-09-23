@@ -71,7 +71,7 @@ export async function cancelDoseReminder(
   }
 }
 /**
- * Cancel pending one-shot snooze for an explicit dose row ().
+ * Cancel pending one-shot snooze for an explicit dose row.
  */
 export async function cancelStaleDoseReminderAlarms(
   keepKeys: ReadonlySet<string>
@@ -82,7 +82,7 @@ export async function cancelStaleDoseReminderAlarms(
   }
 }
 /**
- * One-shot snooze notification id for an explicit dose row ().
+ * One-shot snooze notification id for an explicit dose row.
  * Requires non-empty doseId. Returns null when missing.
  */
 export function isDoseReminderTimeStillAhead(

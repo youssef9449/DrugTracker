@@ -11,17 +11,18 @@ vi.mock('@/utils/sound', () => ({
 }));
 
 // Mock the snooze scheduler so tests don't hit Capacitor's native bridge.
-vi.mock('@/utils/notifications', async () => {
-  const actual = await vi.importActual<typeof import('@/utils/notifications')>(
-    '@/utils/notifications'
-  );
+vi.mock('@/utils/notifications/doseReminderNotifications', async () => {
+  const actual =
+    await vi.importActual<
+      typeof import('@/utils/notifications/doseReminderNotifications')
+    >('@/utils/notifications/doseReminderNotifications');
   return {
     ...actual,
     scheduleSnoozedDoseReminder: vi.fn().mockResolvedValue(undefined),
   };
 });
 
-import { scheduleSnoozedDoseReminder } from '@/utils/notifications';
+import { scheduleSnoozedDoseReminder } from '@/utils/notifications/doseReminderNotifications';
 
 /** Build a medication with a reminder enabled at the given time. */
 function makeMed(overrides: Partial<Medication> = {}): Medication {

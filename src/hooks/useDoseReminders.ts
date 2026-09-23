@@ -80,7 +80,6 @@ export function useDoseReminders({
         }
       );
 
-      clearSnoozedDose(current, doseId);
     }
     stopAllSounds();
     alarmingIdRef.current = null;

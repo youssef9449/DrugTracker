@@ -1,10 +1,8 @@
 package app.drugtracker.autodeduction;
-
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.util.Log;
-
 /**
  * Private exact-alarm delivery receiver for ACTION_AUTO_DEDUCTION only.
  * Registered android:exported="false" — targeted solely via explicit
@@ -28,9 +26,7 @@ import android.util.Log;
  * configuration for an existing D+1.
  */
 public class AutoDeductionReceiver extends BroadcastReceiver {
-
     private static final String TAG = "AutoDeductionReceiver";
-
     /**
      * JS is woken only when this delivery produced NEW durable FIRED evidence:
      * a newly-created main FIRED row or a durable pending-fire fallback.
@@ -43,7 +39,6 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 || (result.status == AutoDeductionScheduler.FireResult.Status.FAILED
                 && result.pendingRecorded));
     }
-
     /**
      * Retry gate for a FAILED fire without durable pending evidence: retry while
      * the bounded per-occurrence retry budget is not exhausted. Pure decision —
@@ -56,7 +51,6 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 && !result.pendingRecorded
                 && fireRetryCount < AutoDeductionContract.MAX_FIRE_RETRIES;
     }
-
     static void notifyJavascript(
             Context context,
             String medicationId,
@@ -74,16 +68,13 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
         event.putExtra(AutoDeductionContract.EXTRA_AMOUNT, amount);
         context.sendBroadcast(event);
     }
-
     @Override
     public void onReceive(Context context, Intent intent) {
         if (intent == null) return;
-
         String action = intent.getAction();
         if (!AutoDeductionContract.ACTION_AUTO_DEDUCTION.equals(action)) {
             return;
         }
-
         final String medicationId = intent.getStringExtra(
                 AutoDeductionContract.EXTRA_MEDICATION_ID);
         final String doseId = intent.getStringExtra(AutoDeductionContract.EXTRA_DOSE_ID);
@@ -101,7 +92,6 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
         final String operationVersion = deliveryOperationVersion;
         final int fireRetryCount = intent.getIntExtra(
                 AutoDeductionContract.EXTRA_FIRE_RETRY_COUNT, 0);
-
         if (medicationId == null || medicationId.isEmpty()
                 || doseId == null || doseId.isEmpty()
                 || !AutoDeductionContract.isValidCalendarDate(calendarDate)
@@ -109,7 +99,6 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
             Log.w(TAG, "reject fire: invalid payload");
             return;
         }
-
         // Durable fire work below performs synchronous commit() disk I/O. Move it
         // off the main thread and keep the broadcast alive (goAsync) until the
         // work finishes so the process is not frozen mid-write.
@@ -128,7 +117,6 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
             }
         }, "auto-deduction-fire").start();
     }
-
     /**
      * Full durable fire delivery for one occurrence identity. Package-private
      * static so JVM tests can exercise the exact receiver path synchronously.
@@ -146,13 +134,11 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
             int fireRetryCount
     ) {
         AutoDeductionScheduler scheduler = new AutoDeductionScheduler(context);
-
         boolean hasIndependentEvidence = scheduler.getIndependentFireRetryEvidence(
                 medicationId, doseId, calendarDate) != null;
         // Explicit path: independent recovery vs live authorized fire.
         final boolean independentRecoveryPath =
                 hasIndependentEvidence || fireRetryCount > 0;
-
         AutoDeductionScheduler.FireResult result;
         if (independentRecoveryPath) {
             // Complete an already-authorized fire from durable independent evidence.
@@ -179,7 +165,6 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                     timeHhmm, recurrenceGeneration, operationVersion, fireRetryCount);
             return;
         }
-
         // Live authorized alarm delivery — ownership tokens apply.
         result = scheduler.fireOccurrenceIfNotCancelled(
                 medicationId, doseId, calendarDate, scheduledAt, amount,
@@ -189,7 +174,6 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 medicationId, doseId, calendarDate, scheduledAt, amount,
                 timeHhmm, recurrenceGeneration, operationVersion, fireRetryCount);
     }
-
     /** Independent evidence recovery: FIRED/pending only — never scheduleNext. */
     private static void handleIndependentRecoveryResult(
             Context context,
@@ -209,11 +193,9 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
             notifyJavascript(
                     context, medicationId, doseId, calendarDate, scheduledAt, amount);
         }
-
         // recoverFireFromIndependentEvidence() completes both the durable FIRED
         // transition and the Native stock mutation. The Receiver only interprets
         // the resulting status and never repeats the stock operation.
-
         switch (result.status) {
             case CANCELLED:
                 Log.i(TAG, "independent recovery cancelled (no prior evidence): "
@@ -249,7 +231,6 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 break;
         }
     }
-
     /** Live authorized fire — may advance recurrence when fire is durable. */
     private static void handleLiveFireResult(
             Context context,
@@ -273,7 +254,6 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
             notifyJavascript(
                     context, medicationId, doseId, calendarDate, scheduledAt, amount);
         }
-
         switch (result.status) {
             case CANCELLED:
                 Log.i(TAG, "stale fire ignored (cancel linearized first): "
@@ -322,7 +302,6 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
                 break;
         }
     }
-
     private static void scheduleNextIfPossible(
             Context context,
             String medicationId,
@@ -337,7 +316,7 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
         }
         // Create-if-absent: duplicate/stale D payload must not overwrite an
         // already-correct D+1 (amount/time) that durable schedule metadata holds.
-        // Issue #217: pass firing generation so disable/cancel after FIRED cannot
+        // pass firing generation so disable/cancel after FIRED cannot
         // create a successor for an invalidated recurrence chain.
         AutoDeductionScheduler scheduler = new AutoDeductionScheduler(context);
         AutoDeductionScheduler.ScheduleResult next = scheduler.scheduleNextOccurrenceIfAbsent(

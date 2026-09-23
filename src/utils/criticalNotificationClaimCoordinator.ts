@@ -36,12 +36,15 @@ async function withClaimLock<T>(
 }
 
 export async function tryClaimCriticalNotification(
-  medId: string
+  medId: string,
+  allowExistingScheduledClaim = false
 ): Promise<boolean> {
   return withClaimLock(medId, () => {
     const claims = loadCriticalNotificationClaims();
     const current = getCriticalNotificationClaim(claims, medId);
-    if (current?.claimed) return false;
+    if (current?.claimed && !(allowExistingScheduledClaim && current.alarmTime !== null)) {
+      return false;
+    }
 
     setCriticalNotificationClaim(claims, medId, {
       claimed: true,

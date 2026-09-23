@@ -106,8 +106,7 @@ describe('scheduleCriticalAlarm (web path)', () => {
   });
 
   it('reports Web scheduling failure when durable storage rejects the schedule', async () => {
-    const originalSetItem = Storage.prototype.setItem;
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('quota', 'QuotaExceededError');
     });
 
@@ -119,7 +118,7 @@ describe('scheduleCriticalAlarm (web path)', () => {
       errorCode: 'platform_failure',
     });
 
-    Storage.prototype.setItem = originalSetItem;
+    setItemSpy.mockRestore();
   });
 });
 

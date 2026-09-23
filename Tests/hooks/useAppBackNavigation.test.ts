@@ -70,6 +70,17 @@ describe('useAppBackNavigation', () => {
     expect(backHandler?.()).toBe(false);
   });
 
+  it('clears contextual history when selecting a tab directly', () => {
+    const { result } = renderHook(() => useHarness());
+
+    act(() => result.current.navigateToTab('shopping'));
+    act(() => result.current.selectTab('logs'));
+
+    expect(result.current.activeTab).toBe('logs');
+    expect(backHandler?.()).toBe(false);
+    expect(result.current.activeTab).toBe('logs');
+  });
+
   it('does not grow history when selecting the current tab repeatedly', () => {
     const { result } = renderHook(() => useHarness());
 

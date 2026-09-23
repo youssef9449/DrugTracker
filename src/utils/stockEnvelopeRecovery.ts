@@ -25,7 +25,7 @@ import { applyForegroundAutoStockDeltas } from './autoDeductionNative';
 export const STORAGE_MANUAL_ENVELOPE_KEY =
   'android_med_tracker_manual_stock_envelope_v1';
 
-/** Same key as Phase 3 Exact Auto envelope (shared recovery). */
+/** Shared Exact Auto envelope key. */
 export const STORAGE_EXACT_AUTO_ENVELOPE_KEY =
   'android_med_tracker_exact_auto_envelope_v1';
 
@@ -59,7 +59,7 @@ export function __setExactAutoEnvelopeStorageTestHooks(hooks: {
   testSaveExact = hooks?.save ?? null;
 }
 
-function isValidPhase4ExactEnvelope(
+function isValidExactAutoEnvelope(
   raw: ExactAutoEnvelopeStored | null | undefined
 ): raw is ExactAutoEnvelopeStored {
   if (!raw || raw.version !== 1 || raw.status !== 'js_ready') return false;
@@ -83,7 +83,7 @@ export function loadExactAutoStockEnvelope(): ExactAutoEnvelopeStored | null {
   const raw = testLoadExact
     ? testLoadExact()
     : loadJson<ExactAutoEnvelopeStored | null>(STORAGE_EXACT_AUTO_ENVELOPE_KEY, null);
-  if (!isValidPhase4ExactEnvelope(raw)) return null;
+  if (!isValidExactAutoEnvelope(raw)) return null
   return raw;
 }
 
@@ -230,16 +230,11 @@ export function durableMatchesEnvelopeSnapshot(
   envelope: {
     medications: Medication[];
     logs: ConsumptionLog[];
-    globalAutoDeductEnabled?: boolean;
+    globalAutoDeductEnabled: boolean;
   },
   durable: AutoStockDurableState
 ): boolean {
-  // The global master switch is part of the current durable snapshot contract.
-  if (
-    envelope.globalAutoDeductEnabled !== undefined &&
-    durable.globalAutoDeductEnabled !== undefined &&
-    envelope.globalAutoDeductEnabled !== durable.globalAutoDeductEnabled
-  ) {
+  if (envelope.globalAutoDeductEnabled !== durable.globalAutoDeductEnabled) {
     return false;
   }
   // Medications: same count, order-aware deep equality per index.

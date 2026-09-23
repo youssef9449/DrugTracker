@@ -2,21 +2,18 @@ import type { FC } from 'react';
 import { Layers, Box, PauseCircle, Bell, BellOff, AlertTriangle } from 'lucide-react';
 import { Medication } from '../types';
 import { AUTO_DEDUCT_PAUSED_NOTE } from '../lib/styles';
-
 /**
- * Shared presentational sub-components for MedicationCard (audit #82).
+ * Shared presentational sub-components for MedicationCard.
  *
  * These blocks were duplicated 3× across the alerts/sufficient/all view
  * branches. Extracted here as small components that accept a `className`
  * prop for per-view color/size variation while sharing the content
  * (icon + text).
  */
-
 interface StripsBadgeProps {
   medication: Medication;
   className: string;
 }
-
 /** "العلبة: {stripsPerBox} أشرطة × {pillsPerStrip} {unit}" badge. */
 export const StripsBadge: FC<StripsBadgeProps> = ({ medication, className }) => (
   <span className={`flex items-center gap-0.5 font-medium ${className}`}>
@@ -24,12 +21,10 @@ export const StripsBadge: FC<StripsBadgeProps> = ({ medication, className }) => 
     <span>العلبة: {medication.stripsPerBox} أشرطة × {medication.pillsPerStrip} {medication.unit}</span>
   </span>
 );
-
 interface PackageSizeBadgeProps {
   medication: Medication;
   className: string;
 }
-
 /** "سعة العبوة: {packageSize} {unit}" badge. */
 export const PackageSizeBadge: FC<PackageSizeBadgeProps> = ({ medication, className }) => (
   <span className={`flex items-center gap-0.5 font-medium ${className}`}>
@@ -37,7 +32,6 @@ export const PackageSizeBadge: FC<PackageSizeBadgeProps> = ({ medication, classN
     <span>سعة العبوة: {medication.packageSize} {medication.unit}</span>
   </span>
 );
-
 /**
  * Note shown when effective auto-deduction is inactive (!isAutoActive).
  * Describes only that auto-deduct is stopped — never that manual Take is
@@ -49,7 +43,6 @@ export const AutoDeductPausedNote: FC = () => (
     <span>الخصم التلقائي متوقف حاليًا — يمكنك تسجيل الجرعة يدويًا.</span>
   </div>
 );
-
 interface AutoDeductStatusBadgeProps {
   isAutoActive: boolean;
   onToggle?: () => void;
@@ -57,7 +50,6 @@ interface AutoDeductStatusBadgeProps {
   medicationId?: string;
   className?: string;
 }
-
 /**
  * Status card / badge indicating the medication's Auto-Deduction state.
  * Rendered alongside the category badge in "All Medications" view.
@@ -74,7 +66,6 @@ export const AutoDeductStatusBadge: FC<AutoDeductStatusBadgeProps> = ({
   const title = isAutoActive
     ? 'الخصم التلقائي مفعّل (انقر للتعطيل)'
     : 'الخصم التلقائي متوقف (انقر للتفعيل)';
-
   return (
     <button
       type="button"
@@ -111,7 +102,6 @@ interface MedicationNotificationStatusBadgeProps {
   size?: 'xs' | 'sm';
   medicationId?: string;
 }
-
 /**
  * Per-medication notification control rendered as an icon-only pill button.
  * The full state remains available through aria-label/title; visible text is
@@ -136,7 +126,6 @@ export const MedicationNotificationStatusBadge: FC<MedicationNotificationStatusB
   const title = enabled
     ? `${isDose ? 'إشعار موعد الجرعة' : 'إشعار المخزون الحرج'} مفعّل (انقر للتعطيل)`
     : `${isDose ? 'إشعار موعد الجرعة' : 'إشعار المخزون الحرج'} متوقف (انقر للتفعيل)`;
-
   return (
     <button
       type="button"
@@ -177,7 +166,6 @@ export interface UndoRefillBannerProps {
   unit: string;
   onUndoRefill: () => void;
 }
-
 /**
  * Undo refill bar — preserved for future standalone / modal usage.
  */
@@ -197,4 +185,3 @@ export const UndoRefillBanner: FC<UndoRefillBannerProps> = ({
     </button>
   </div>
 );
-

@@ -141,6 +141,14 @@ public final class NotificationRuntimePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void retryPersistedNotificationDeliveries(PluginCall call) {
+        int retried = new NotificationRuntime(getContext()).retryPersistedFailures();
+        JSObject ret = new JSObject();
+        ret.put("retried", retried);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
     public void checkChannel(PluginCall call) {
         String channelId = call.getString("channelId", "");
         boolean enabled = new NotificationRuntime(getContext())

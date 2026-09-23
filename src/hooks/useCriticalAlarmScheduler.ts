@@ -450,9 +450,17 @@ export function useCriticalAlarmScheduler({
     enqueueCriticalAlarmOp(
       '__stale_critical_alarm_cleanup__',
       async () => {
-        const nativeIds = await listScheduledCriticalMedicationIdsNative();
+        const listed = await listScheduledCriticalMedicationIdsNative();
+        if (!listed.ok) {
+          console.warn(
+            '[critical-alarm] native schedule listing failed:',
+            listed.error,
+            listed.errorCode
+          );
+          return;
+        }
         await Promise.all(
-          nativeIds
+          listed.ids
             .filter((medId) => !stillScheduled.has(medId))
             .map((medId) => {
               const cleanupGeneration = generationGuardRef.current.current(medId);

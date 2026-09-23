@@ -30,6 +30,12 @@ const web = read('src/utils/notifications/webNotifications.ts');
 const criticalScheduling = read('src/utils/criticalAlarmScheduling.ts');
 
 assert(
+  adapter.includes('deliveryState')
+    && adapter.includes('completeOneShot(medicationId, operationVersion)')
+    && adapter.includes('continue;'),
+  'restore must not re-arm an already accepted one-shot delivery'
+);
+assert(
   receiver.indexOf('adapter.ownsActiveSchedule(') < receiver.indexOf('new NotificationRuntime(appContext).post('),
   'stale Critical Stock delivery must be rejected before notification posting'
 );

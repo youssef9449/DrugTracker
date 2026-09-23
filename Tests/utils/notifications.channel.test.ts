@@ -10,7 +10,6 @@ const mocks = vi.hoisted(() => ({
   changeExactNotificationSetting: vi.fn(),
   nativeSchedule: vi.fn(),
   nativeCancel: vi.fn(),
-  notificationCancel: vi.fn(),
   nativeCheckChannel: vi.fn(),
   nativeSnooze: vi.fn(),
   nativeCancelSnooze: vi.fn(),
@@ -77,7 +76,6 @@ beforeEach(() => {
   mocks.nativePost.mockResolvedValue({ ok: true });
   mocks.nativeSchedule.mockResolvedValue({ ok: true });
   mocks.nativeCancel.mockResolvedValue({ ok: true, status: 'SUCCESS' });
-  mocks.notificationCancel.mockResolvedValue(true);
   mocks.nativeCheckChannel.mockResolvedValue({ enabled: true });
   mocks.nativeSnooze.mockResolvedValue({ ok: true });
   mocks.nativeCancelSnooze.mockResolvedValue({ ok: true });
@@ -549,16 +547,15 @@ describe('Group 4 acceptance — cancellation and pending-state contracts', () =
   it('#366 cancels both the native alarm and the displayed notification', async () => {
     mocks.platform.mockReturnValue('android');
     mocks.nativeCancel.mockResolvedValue({ ok: true, status: 'SUCCESS' });
-    mocks.notificationCancel.mockResolvedValue(true);
 
     const { cancelDoseReminder } = await import('@/utils/doseReminderScheduling');
     await cancelDoseReminder('med-cancel', 'dose-1');
 
-    expect(mocks.nativeCancel).toHaveBeenCalledWith({
+    expect(mocks.nativeCancel).toHaveBeenNthCalledWith(1, {
       medicationId: 'med-cancel',
       doseId: 'dose-1',
     });
-    expect(mocks.notificationCancel).toHaveBeenCalledWith({
+    expect(mocks.nativeCancel).toHaveBeenNthCalledWith(2, {
       namespace: 'dose-reminder',
       identity: 'med-cancel::dose-1',
     });
@@ -566,8 +563,11 @@ describe('Group 4 acceptance — cancellation and pending-state contracts', () =
 
   it('#366 surfaces notification-cancellation failure instead of silently succeeding', async () => {
     mocks.platform.mockReturnValue('android');
-    mocks.nativeCancel.mockResolvedValue({ ok: true, status: 'SUCCESS' });
-    mocks.notificationCancel.mockResolvedValue(false);
+    mocks.nativeCancel.mockImplementation(async (options: Record<string, unknown>) =>
+      'namespace' in options
+        ? { ok: false, error: 'notification_cancel_failed' }
+        : { ok: true, status: 'SUCCESS' }
+    );
 
     const { cancelDoseReminder } = await import('@/utils/doseReminderScheduling');
     await expect(cancelDoseReminder('med-fail', 'dose-1')).rejects.toThrow(

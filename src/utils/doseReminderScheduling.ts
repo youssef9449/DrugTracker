@@ -5,6 +5,7 @@ import {
   cancelDoseReminderNative,
   isDoseReminderScheduledNative,
   cancelStaleDoseReminderAlarmsNative,
+  listDoseReminderScheduledKeysNative,
   type CancelStaleDoseReminderResult,
 } from './doseReminderNative';
 import { getNativePlatform, isNativePlatform } from './notifications/notificationPlatform';
@@ -116,7 +117,29 @@ export async function cancelStaleDoseReminderAlarms(
   keepKeys: ReadonlySet<string>
 ): Promise<CancelStaleDoseReminderResult> {
   if (getNativePlatform() === 'android') {
-    return cancelStaleDoseReminderAlarmsNative(keepKeys);
+    const scheduled = await listDoseReminderScheduledKeysNative();
+    if (!scheduled.ok) return scheduled;
+    const staleKeys = scheduled.keys.filter((key) => !keepKeys.has(key));
+    const nativeResult = await cancelStaleDoseReminderAlarmsNative(keepKeys);
+    if (!nativeResult.ok) return nativeResult;
+    for (const key of staleKeys) {
+      const separator = key.indexOf('::');
+      if (separator <= 0) continue;
+      const medId = key.slice(0, separator);
+      const doseId = key.slice(separator + 2);
+      const cancelled = await cancelNotification(
+        'dose-reminder',
+        medId + '::' + doseId
+      );
+      if (!cancelled) {
+        return {
+          ok: false,
+          error: 'dose_reminder_notification_cancel_failed',
+          errorCode: 'platform_failure',
+        };
+      }
+    }
+    return { ok: true };
   }
   return { ok: true };
 }

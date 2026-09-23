@@ -20,7 +20,7 @@ public final class CriticalStockAlarmReceiver extends BroadcastReceiver {
             return;
         }
 
-        PendingResult pendingResult = goAsync();
+        BroadcastReceiver.PendingResult pendingResult = goAsync();
         Context appContext = context.getApplicationContext();
         new Thread(() -> {
             try {

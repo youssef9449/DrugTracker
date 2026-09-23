@@ -90,6 +90,7 @@ interface PharmacyShoppingViewProps {
   onUpdateSettings: (newSettings: PharmacySettings) => void;
   showToast: (message: string) => void;
   onOpenUserContactsSettings?: () => void;
+  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void;
 }
 export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   medications,
@@ -97,6 +98,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   onUpdateSettings,
   showToast,
   onOpenUserContactsSettings = () => {},
+  onRegisterBackHandler,
 }) => {
   type PeriodUnit = 'day' | 'month';
   type MedicationPeriod = { value: number | ''; unit: PeriodUnit };
@@ -104,6 +106,10 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   const [medicationPeriods, setMedicationPeriods] = useState<Record<string, MedicationPeriod>>({});
   const [quantityModes, setQuantityModes] = useState<Record<string, QuantityMode>>({});
   const [customOrderQuantities, setCustomOrderQuantities] = useState<CustomOrderQuantities>({});
+  useEffect(() => {
+    if (!isSendModalOpen || !onRegisterBackHandler) return;
+    return onRegisterBackHandler('shopping-send-order', () => setIsSendModalOpen(false), 100);
+  }, [isSendModalOpen, onRegisterBackHandler]);
   const pharmacies = settings.pharmacies || [];
   const selectedPharmacy = pharmacies.find((pharmacy) => pharmacy.id === settings.selectedPharmacyId)
     || pharmacies[0];

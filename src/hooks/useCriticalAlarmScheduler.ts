@@ -246,6 +246,56 @@ export function useCriticalAlarmScheduler({
     // existing notification scheduling behavior.
     if (exactAlarmPermission === null) return;
 
+    // Exact-alarm permission loss is a cleanup state, not an empty state.
+    // Android removes exact alarms when permission is revoked, but durable
+    // feature metadata still needs deterministic reconciliation before a
+    // later permission grant can restore only the currently desired alarms.
+    if (exactAlarmPermission === 'denied') {
+      const ids = new Set([
+        ...scheduledCriticalIdsRef.current,
+        ...Object.keys(loadCriticalNotificationClaims()),
+      ]);
+      for (const id of ids) {
+        const generation = bumpCriticalAlarmGeneration(id);
+        enqueueCriticalAlarmOpGuarded(id, generation, async () => {
+          await cancelCriticalAlarm(id);
+        });
+      }
+      const staleGeneration = bumpCriticalAlarmGeneration(
+        '__stale_critical_alarm_cleanup__'
+      );
+      enqueueCriticalAlarmOpGuarded(
+        '__stale_critical_alarm_cleanup__',
+        staleGeneration,
+        async () => {
+          const listed = await listScheduledCriticalMedicationIdsNative();
+          if (!listed.ok) {
+            console.warn(
+              '[critical-alarm] native schedule listing failed during permission cleanup:',
+              listed.error,
+              listed.errorCode
+            );
+            return;
+          }
+          await Promise.all(
+            listed.ids.map((medId) => {
+              const cleanupGeneration = currentCriticalAlarmGeneration(medId);
+              return enqueueCriticalAlarmOpGuarded(
+                medId,
+                cleanupGeneration,
+                async () => {
+                  if (!isCurrentCriticalAlarmGeneration(medId, cleanupGeneration)) return;
+                  await cancelCriticalAlarm(medId);
+                }
+              );
+            })
+          );
+        }
+      );
+      scheduledCriticalIdsRef.current.clear();
+      return;
+    }
+
     // ── Flags disabled: cancel every possibly-armed alarm ──
     // ── (claim writes belong to the foreground hook) ──
     // Gated only by critical-stock preference (independent of dose reminders).

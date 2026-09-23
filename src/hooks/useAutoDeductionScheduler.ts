@@ -7,10 +7,6 @@ import type { Medication } from '../types';
 import type { ExactAlarmPermission } from '../utils/exactAlarm';
 import { getTodayDateString, tomorrowDateString, localEpochMs } from '../utils/dateCalculations';
 import {
-  getMedicationTreatmentEndDate,
-  isMedicationTreatmentActiveOnDate,
-} from '../utils/medicationTreatment';
-import {
   getAutoDeductionDefinitionForDate,
   getAutoDeductionDefinitionSignature,
 } from '../utils/autoDeductionDefinition';
@@ -57,9 +53,7 @@ export function getAutoDeductionSlotsForDate(
   med: Medication,
   calendarDate: string
 ): AutoDeductionSlot[] {
-  return getAutoDeductionDefinitionForDate(med, calendarDate).map((slot) => ({
-    ...slot,
-  }));
+  return getAutoDeductionDefinitionForDate(med, calendarDate);
 }
 
 type GuardedCancelResult = {

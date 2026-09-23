@@ -201,8 +201,6 @@ export default function App() {
   }, [alarmingMedication, selectDoseMed, historyMedication, isAutoDeductPromptOpen, isAddModalOpen, refillMedication, isSettingsModalOpen, dismissAlarm]);
 
   // Remove native listeners on unmount so duplicate handlers cannot accumulate.
-  //
-  //  // listeners don't accumulate across HMR re-initializations. Also
   // Clear any pending toast auto-dismiss timer.
   useEffect(() => {
     return () => {

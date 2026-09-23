@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   bumpCriticalAlarmGeneration,
   enqueueCriticalAlarmOp,
+  enqueueCriticalAlarmOpGuarded,
 } from '@/utils/criticalAlarmOperations';
 
 describe('criticalAlarmOperations', () => {
@@ -9,8 +10,7 @@ describe('criticalAlarmOperations', () => {
     const events: string[] = [];
     let releaseFirst!: () => void;
 
-    const generation = bumpCriticalAlarmGeneration('med-1');
-    const first = enqueueCriticalAlarmOp('med-1', generation, async () => {
+    const first = enqueueCriticalAlarmOp('med-1', async () => {
       events.push('first:start');
       await new Promise<void>((resolve) => {
         releaseFirst = resolve;
@@ -18,7 +18,7 @@ describe('criticalAlarmOperations', () => {
       events.push('first:end');
     });
 
-    const second = enqueueCriticalAlarmOp('med-1', generation, async () => {
+    const second = enqueueCriticalAlarmOp('med-1', async () => {
       events.push('second');
     });
 
@@ -34,18 +34,14 @@ describe('criticalAlarmOperations', () => {
   it('keeps different medication keys independent', async () => {
     const events: string[] = [];
 
-    const firstGeneration = bumpCriticalAlarmGeneration('med-1');
     const first = enqueueCriticalAlarmOp(
       'med-1',
-      firstGeneration,
       async () => {
         events.push('med-1');
       }
     );
-    const secondGeneration = bumpCriticalAlarmGeneration('med-2');
     const second = enqueueCriticalAlarmOp(
       'med-2',
-      secondGeneration,
       async () => {
         events.push('med-2');
       }
@@ -59,7 +55,7 @@ describe('criticalAlarmOperations', () => {
     const events: string[] = [];
     const firstGeneration = bumpCriticalAlarmGeneration('med-stale');
 
-    const first = enqueueCriticalAlarmOp(
+    const first = enqueueCriticalAlarmOpGuarded(
       'med-stale',
       firstGeneration,
       async () => {

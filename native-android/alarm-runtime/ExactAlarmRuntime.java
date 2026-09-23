@@ -212,6 +212,58 @@ public final class ExactAlarmRuntime {
     }
 
     /**
+     * Record that a durable one-shot delivery was accepted while preserving
+     * the operation-version ownership boundary. Feature adapters may use this
+     * as idempotent delivery evidence when completion persistence fails.
+     */
+    public boolean markOneShotDelivered(
+            String storageKey,
+            String expectedOperationVersion) {
+        if (storageKey == null || storageKey.isEmpty()
+                || expectedOperationVersion == null
+                || expectedOperationVersion.isEmpty()) {
+            return false;
+        }
+        synchronized (ExactAlarmOperationLock.LOCK) {
+            String raw = store.getScheduleRaw(storageKey);
+            if (!ExactAlarmContract.isMetadataOwnedByOperationVersion(
+                    raw,
+                    expectedOperationVersion)) {
+                return false;
+            }
+            try {
+                JSONObject metadata = new JSONObject(raw);
+                metadata.put("deliveryState", "accepted");
+                return store.writeScheduleRawLocked(
+                        storageKey,
+                        metadata.toString());
+            } catch (JSONException | RuntimeException e) {
+                return false;
+            }
+        }
+    }
+
+    /**
+     * Check durable one-shot delivery evidence without treating missing or
+     * malformed metadata as delivered.
+     */
+    public boolean isOneShotDelivered(String storageKey) {
+        if (storageKey == null || storageKey.isEmpty()) return false;
+        synchronized (ExactAlarmOperationLock.LOCK) {
+            String raw = store.getScheduleRaw(storageKey);
+            if (raw == null || raw.isEmpty()) return false;
+            try {
+                return "accepted".equals(
+                        new JSONObject(raw).optString(
+                                "deliveryState",
+                                ""));
+            } catch (JSONException | RuntimeException e) {
+                return false;
+            }
+        }
+    }
+
+    /**
      * Query the real AlarmManager PendingIntent state.
      *
      * <p>ABSENT means the OS has no matching alarm. FAILED means the state

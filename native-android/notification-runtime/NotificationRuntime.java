@@ -73,6 +73,11 @@ public final class NotificationRuntime {
                     request.channelImportance,
                     request.channelVisibility);
 
+            if (!isChannelEnabled(request.channelId)) {
+                persistRetry(request);
+                return PostResult.failed("notification_channel_disabled");
+            }
+
             Notification notification = buildNotification(request);
             NotificationManager manager = notificationManager();
             if (manager == null) {
@@ -157,6 +162,9 @@ public final class NotificationRuntime {
         try {
             ensureChannel(request.channelId, request.channelName,
                     request.channelImportance, request.channelVisibility);
+            if (!isChannelEnabled(request.channelId)) {
+                return PostResult.failed("notification_channel_disabled");
+            }
             NotificationManager manager = notificationManager();
             if (manager == null) return PostResult.failed("notification_manager_unavailable");
             manager.notify(tagFor(request.namespace, request.identity), NOTIFICATION_ID,

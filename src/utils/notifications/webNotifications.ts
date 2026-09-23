@@ -2,6 +2,7 @@ import { isWebNotificationSupported } from './notificationPlatform';
 
 const WEB_SCHEDULE_KEY = 'drugtracker_web_scheduled_notifications_v1';
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
+const persistentTriggerOperations = new Map<string, Promise<boolean>>();
 
 type WebScheduledEntry = {
   namespace: string;
@@ -25,11 +26,12 @@ function readEntries(): Record<string, WebScheduledEntry> {
   }
 }
 
-function writeEntries(entries: Record<string, WebScheduledEntry>): void {
+function writeEntries(entries: Record<string, WebScheduledEntry>): boolean {
   try {
     localStorage.setItem(WEB_SCHEDULE_KEY, JSON.stringify(entries));
+    return true;
   } catch {
-    // Scheduling still works for the current page when storage is unavailable.
+    return false;
   }
 }
 
@@ -51,6 +53,27 @@ async function showScheduledNotification(entry: WebScheduledEntry): Promise<bool
   }
   try {
     new Notification(entry.title, options);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function armPersistentNotification(entry: WebScheduledEntry): Promise<boolean> {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return false;
+  const Trigger = (globalThis as typeof globalThis & {
+    TimestampTrigger?: new (timestamp: number) => unknown;
+  }).TimestampTrigger;
+  if (typeof Trigger !== 'function') return false;
+
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    await reg.showNotification(entry.title, {
+      body: entry.body,
+      icon: '/assets/icons/icon.svg',
+      tag: storageKey(entry.namespace, entry.identity),
+      showTrigger: new Trigger(entry.fireAt),
+    } as NotificationOptions & { showTrigger: unknown });
     return true;
   } catch {
     return false;
@@ -95,7 +118,14 @@ export async function scheduleWebNotification(
   const existing = entries[key];
 
   if (existing && existing.fireAt > Date.now() + 1000) {
-    armTimer(existing);
+    const operation = armPersistentNotification(existing);
+    persistentTriggerOperations.set(key, operation);
+    void operation.then((persisted) => {
+      if (!persisted) armTimer(existing);
+      if (persistentTriggerOperations.get(key) === operation) {
+        persistentTriggerOperations.delete(key);
+      }
+    });
     return true;
   }
 
@@ -108,15 +138,41 @@ export async function scheduleWebNotification(
   };
 
   entries[key] = entry;
-  writeEntries(entries);
+  if (!writeEntries(entries)) {
+    delete entries[key];
+    return false;
+  }
 
   if (fireAt <= Date.now()) {
     delete entries[key];
-    writeEntries(entries);
+    if (!writeEntries(entries)) {
+      return false;
+    }
     return showScheduledNotification(entry);
   }
 
-  armTimer(entry);
+  const operation = armPersistentNotification(entry);
+  persistentTriggerOperations.set(key, operation);
+  void operation.then((persisted) => {
+    if (persisted) {
+      const current = readEntries()[key];
+      if (current?.fireAt === entry.fireAt) {
+        const entries = readEntries();
+        delete entries[key];
+        writeEntries(entries);
+      }
+      const timer = timers.get(key);
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timers.delete(key);
+      }
+    } else {
+      armTimer(entry);
+    }
+    if (persistentTriggerOperations.get(key) === operation) {
+      persistentTriggerOperations.delete(key);
+    }
+  });
   return true;
 }
 
@@ -147,10 +203,13 @@ export async function cancelScheduledWebNotification(
     clearTimeout(timer);
     timers.delete(key);
   }
+  const pendingTrigger = persistentTriggerOperations.get(key);
+  if (pendingTrigger) await pendingTrigger;
+
   const entries = readEntries();
   const existed = Boolean(entries[key]);
   delete entries[key];
-  writeEntries(entries);
+  const persisted = writeEntries(entries);
 
   if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     try {
@@ -165,7 +224,7 @@ export async function cancelScheduledWebNotification(
       // No browser-level cancellation API is guaranteed.
     }
   }
-  return existed;
+  return persisted && existed;
 }
 
 export function openBrowserNotificationSettings(): void {

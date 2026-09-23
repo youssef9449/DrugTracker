@@ -14,7 +14,7 @@
  */
 
 import type { CriticalNotificationClaim } from '../types';
-import { loadJson, saveJson } from './storage';
+import { loadJson, persist } from './storage';
 export const CRITICAL_CLAIMS_STORAGE_KEY = 'android_med_tracker_critical_claims_v3';
 
 function isValidClaimsMap(value: unknown): value is Record<string, CriticalNotificationClaim> {
@@ -41,8 +41,14 @@ export function loadCriticalNotificationClaims(): Record<string, CriticalNotific
   return { ...raw };
 }
 
-export function saveCriticalNotificationClaims(claims: Record<string, CriticalNotificationClaim>): void {
-  saveJson(CRITICAL_CLAIMS_STORAGE_KEY, claims);
+export function saveCriticalNotificationClaims(claims: Record<string, CriticalNotificationClaim>): boolean {
+  if (persist(CRITICAL_CLAIMS_STORAGE_KEY, claims) !== null) return false;
+  try {
+    if (typeof localStorage === 'undefined') return false;
+    return localStorage.getItem(CRITICAL_CLAIMS_STORAGE_KEY) === JSON.stringify(claims);
+  } catch {
+    return false;
+  }
 }
 
 /** Read one medication's claim from a loaded map (null when absent). */

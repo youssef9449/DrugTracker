@@ -5,6 +5,14 @@ import {
   registerAppResumeHandler,
 } from '../native';
 import { getExactAlarmPermission, type ExactAlarmPermission } from '../utils/exactAlarm';
+import { getNotificationPermission } from '../utils/notifications/notificationPermissions';
+import { NOTIFICATIONS_KEY } from '../constants/storageKeys';
+import { isNotificationChannelEnabled, retryPersistedNotificationDeliveries } from '../utils/notificationRuntime';
+import { isDoseReminderOccurrenceOwned } from '../utils/doseReminderNative';
+import {
+  DOSE_REMINDER_CHANNEL_ID,
+  DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
+} from '../utils/notifications/doseReminderNotifications';
 import { playSuccessChime } from '../utils/sound';
 /**
  * Registers native notification-action, dose-received, and app-resume
@@ -20,6 +28,7 @@ export function useNativeActionHandlers(opts: {
   setCriticalAlarmResumeTick: Dispatch<SetStateAction<number>>;
   setDoseAlarmResumeTick: Dispatch<SetStateAction<number>>;
   setExactAlarmPermission: Dispatch<SetStateAction<ExactAlarmPermission | null>>;
+  setNotificationsEnabled: Dispatch<SetStateAction<boolean>>;
 }): void {
   const {
     allowManualTakeActionByMedicationId,
@@ -30,10 +39,27 @@ export function useNativeActionHandlers(opts: {
     setCriticalAlarmResumeTick,
     setDoseAlarmResumeTick,
     setExactAlarmPermission,
+    setNotificationsEnabled,
   } = opts;
   useEffect(() => {
     registerNotificationActionHandler((actionId, medicationId, doseId) => {
-      if (actionId !== 'take_dose') return;
+      const separator = actionId.indexOf('|');
+      const baseActionId = separator >= 0 ? actionId.slice(0, separator) : actionId;
+      const operationVersion = separator >= 0 ? actionId.slice(separator + 1) : '';
+      if (baseActionId !== 'take_dose') return;
+      // Android Dose Reminder actions carry the exact operation version that
+      // created the displayed occurrence. Reject stale actions after a
+      // schedule replacement/cancellation before any durable Take mutation.
+      if (operationVersion) {
+        void isDoseReminderOccurrenceOwned(
+          medicationId,
+          doseId ?? '',
+          operationVersion
+        ).then((owned) => {
+          if (owned) handleTakeDoseFromAlarmById(medicationId, doseId);
+        });
+        return;
+      }
       // Notification actions carry durable identity. Never require the React
       // medication list to be present/correct before starting the gated Take.
       handleTakeDoseFromAlarmById(medicationId, doseId);
@@ -91,6 +117,7 @@ export function useNativeActionHandlers(opts: {
       // the right channel when the scheduler re-schedules.
       setDoseLifecycleTick((tick) => tick + 1);
       if (isActive) {
+        void retryPersistedNotificationDeliveries();
         setCriticalAlarmResumeTick((tick) => tick + 1);
         setDoseAlarmResumeTick((tick) => tick + 1);
         getExactAlarmPermission()
@@ -100,6 +127,24 @@ export function useNativeActionHandlers(opts: {
           .catch((err) => {
             console.warn('[App] Resume exact-alarm re-check failed:', err);
           });
+        Promise.all([
+          getNotificationPermission(),
+          isNotificationChannelEnabled(DOSE_REMINDER_CHANNEL_ID),
+          isNotificationChannelEnabled(DOSE_REMINDER_FOREGROUND_CHANNEL_ID),
+        ])
+          .then(([permission, backgroundChannel, foregroundChannel]) => {
+            const storedPreference = localStorage.getItem(NOTIFICATIONS_KEY);
+            const desired = storedPreference === null || storedPreference === 'true';
+            setNotificationsEnabled(
+              desired
+                && permission === 'granted'
+                && backgroundChannel
+                && foregroundChannel
+            );
+          })
+          .catch((err) => {
+            console.warn('[App] Resume notification capability re-check failed:', err);
+          });
       }
     });
     return () => registerAppResumeHandler(null);
@@ -108,5 +153,6 @@ export function useNativeActionHandlers(opts: {
     setCriticalAlarmResumeTick,
     setDoseAlarmResumeTick,
     setExactAlarmPermission,
+    setNotificationsEnabled,
   ]);
 }

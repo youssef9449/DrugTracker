@@ -49,6 +49,11 @@ interface DoseReminderPlugin {
     doseId: string;
   }): Promise<{ scheduled: boolean; triggerAtEpochMs?: number }>;
   listScheduled(): Promise<{ keys: string[] }>;
+  checkOccurrenceOwnership(options: {
+    medicationId: string;
+    doseId: string;
+    operationVersion: string;
+  }): Promise<{ owned: boolean }>;
 }
 
 const DoseReminder = registerPlugin<DoseReminderPlugin>('DoseReminder');
@@ -207,10 +212,7 @@ export async function isDoseReminderScheduledNative(
         errorCode: 'platform_failure',
       };
     }
-    const scheduled =
-      result.scheduled === true &&
-      (result.triggerAtEpochMs == null ||
-        result.triggerAtEpochMs > Date.now() - 60_000);
+    const scheduled = result.scheduled === true;
     return {
       ok: true,
       scheduled,
@@ -276,5 +278,23 @@ export async function cancelStaleDoseReminderAlarmsNative(
       error: boundaryError.message,
       errorCode: boundaryError.code,
     };
+  }
+}
+
+export async function isDoseReminderOccurrenceOwned(
+  medicationId: string,
+  doseId: string,
+  operationVersion: string
+): Promise<boolean> {
+  if (!isAndroid() || !operationVersion) return false;
+  try {
+    const result = await DoseReminder.checkOccurrenceOwnership({
+      medicationId,
+      doseId,
+      operationVersion,
+    });
+    return result?.owned === true;
+  } catch {
+    return false;
   }
 }

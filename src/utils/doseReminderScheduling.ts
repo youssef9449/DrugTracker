@@ -5,6 +5,7 @@ import {
   cancelDoseReminderNative,
   isDoseReminderScheduledNative,
   cancelStaleDoseReminderAlarmsNative,
+  listDoseReminderScheduledKeysNative,
   type CancelStaleDoseReminderResult,
 } from './doseReminderNative';
 import { getNativePlatform, isNativePlatform } from './notifications/notificationPlatform';
@@ -38,16 +39,9 @@ export async function isDoseReminderPending(
     if (!pendingResult.ok) return pendingResult;
     const entry = pendingResult.pending;
     if (!entry) return { ok: true, pending: false };
-    const at = (entry.schedule as { at?: unknown } | undefined)?.at;
-    if (at == null) return { ok: true, pending: true };
-    const atMs =
-      typeof at === 'number'
-        ? at
-        : at instanceof Date
-          ? at.getTime()
-          : Date.parse(String(at));
-    if (Number.isNaN(atMs)) return { ok: true, pending: true };
-    return { ok: true, pending: atMs > Date.now() - 60_000 };
+    // Presence in the platform pending store is authoritative. Do not add a
+    // time-based grace/expiry window; delivery state owns its own lifecycle.
+    return { ok: true, pending: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'dose_pending_lookup_failed';
     return {
@@ -85,6 +79,13 @@ export async function cancelDoseReminder(
 ): Promise<void> {
   if (getNativePlatform() === 'android') {
     await cancelDoseReminderNative(medId, doseId);
+    const notificationCancelled = await cancelNotification(
+      'dose-reminder',
+      `${medId}::${doseId}`
+    );
+    if (!notificationCancelled) {
+      throw new Error('dose_reminder_notification_cancel_failed');
+    }
     return;
   }
   if (!isNativePlatform()) return;
@@ -109,7 +110,29 @@ export async function cancelStaleDoseReminderAlarms(
   keepKeys: ReadonlySet<string>
 ): Promise<CancelStaleDoseReminderResult> {
   if (getNativePlatform() === 'android') {
-    return cancelStaleDoseReminderAlarmsNative(keepKeys);
+    const scheduled = await listDoseReminderScheduledKeysNative();
+    if (!scheduled.ok) return scheduled;
+    const staleKeys = scheduled.keys.filter((key) => !keepKeys.has(key));
+    const nativeResult = await cancelStaleDoseReminderAlarmsNative(keepKeys);
+    if (!nativeResult.ok) return nativeResult;
+    for (const key of staleKeys) {
+      const separator = key.indexOf('::');
+      if (separator <= 0) continue;
+      const medId = key.slice(0, separator);
+      const doseId = key.slice(separator + 2);
+      const cancelled = await cancelNotification(
+        'dose-reminder',
+        medId + '::' + doseId
+      );
+      if (!cancelled) {
+        return {
+          ok: false,
+          error: 'dose_reminder_notification_cancel_failed',
+          errorCode: 'platform_failure',
+        };
+      }
+    }
+    return { ok: true };
   }
   return { ok: true };
 }
@@ -245,9 +268,11 @@ export async function scheduleDoseReminder(
     }
     return;
   }
-  if (options?.skipToday !== true) {
-    scheduleWebNotification(title, body);
-  }
+  await scheduleWebNotification(title, body, {
+    namespace: 'dose-reminder',
+    identity: `${medId}::${id}`,
+    at: fireToday,
+  });
 }
 /**
  * Open the OS / browser notification settings page where the user

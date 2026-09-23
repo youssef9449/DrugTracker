@@ -123,6 +123,18 @@ public final class DoseReminderPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void checkOccurrenceOwnership(PluginCall call) {
+        String medicationId = call.getString("medicationId", "");
+        String doseId = call.getString("doseId", "");
+        String operationVersion = call.getString("operationVersion", "");
+        boolean owned = new DoseReminderAlarmAdapter(getContext())
+                .ownsActiveOccurrence(medicationId, doseId, operationVersion);
+        JSObject ret = new JSObject();
+        ret.put("owned", owned);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
     public void isScheduled(PluginCall call) {
         String medicationId = call.getString("medicationId");
         String doseId = call.getString("doseId");

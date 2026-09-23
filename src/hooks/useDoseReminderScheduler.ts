@@ -592,7 +592,15 @@ export function useDoseReminderScheduler({
             // notification. Only slots still ahead need cancel +
             // skipToday re-arm.
             if (!isDoseReminderTimeStillAhead(time)) {
-              return;
+              const pendingResult = await isDoseReminderPending(medId, doseId);
+              if (!pendingResult.ok) {
+                throw new Error(
+                  pendingResult.error || 'dose_reminder_pending_lookup_failed'
+                );
+              }
+              if (!pendingResult.pending) {
+                return;
+              }
             }
             if (!isCurrentDoseReminderScheduleGeneration(key, gen)) return;
             await cancelDoseReminder(medId, doseId);

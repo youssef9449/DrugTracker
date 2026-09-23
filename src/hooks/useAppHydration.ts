@@ -11,6 +11,11 @@ import {
 } from '../utils/notifications/notificationPermissions';
 import { getExactAlarmPermission, type ExactAlarmPermission } from '../utils/exactAlarm';
 import { initNativeBridge } from '../native';
+import { isNotificationChannelEnabled, retryPersistedNotificationDeliveries } from '../utils/notificationRuntime';
+import {
+  DOSE_REMINDER_CHANNEL_ID,
+  DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
+} from '../utils/notifications/doseReminderNotifications';
 import { loadJson, loadString, persist } from '../utils/storage';
 import { convergeAutoDeductionStock } from '../utils/autoDeductionNativeStock';
 import {
@@ -179,7 +184,16 @@ export function useAppHydration(setters: AppHydrationSetters): void {
     Promise.all([
       getNotificationPermission()
         .then((perm) => {
-          if (localStorage.getItem(NOTIFICATIONS_KEY) === null) {
+          const savedPreference = localStorage.getItem(NOTIFICATIONS_KEY);
+          if (savedPreference === 'true' && perm !== 'granted') {
+            setNotificationsEnabled(false);
+            return;
+          }
+          if (savedPreference === 'true') {
+            setNotificationsEnabled(true);
+            return;
+          }
+          if (savedPreference === null) {
             setNotificationsEnabled(perm === 'granted');
 
             // Auto-request notification permission on the FIRST app open
@@ -225,9 +239,21 @@ export function useAppHydration(setters: AppHydrationSetters): void {
       // Native bridge: status bar, back button, notification channels,
       // and listeners. No-op on web — see src/native.ts. Included in
       // Promise.all so setHydrated cannot race ahead of channel setup.
-      initNativeBridge().catch((err) => {
-        console.warn('[App] Native bridge init failed:', err);
-      }),
+      initNativeBridge()
+        .then(async () => {
+          void retryPersistedNotificationDeliveries();
+          const [backgroundChannel, foregroundChannel] = await Promise.all([
+            isNotificationChannelEnabled(DOSE_REMINDER_CHANNEL_ID),
+            isNotificationChannelEnabled(DOSE_REMINDER_FOREGROUND_CHANNEL_ID),
+          ]);
+          if (localStorage.getItem(NOTIFICATIONS_KEY) === 'true'
+              && (!backgroundChannel || !foregroundChannel)) {
+            setNotificationsEnabled(false);
+          }
+        })
+        .catch((err) => {
+          console.warn('[App] Native bridge init failed:', err);
+        }),
     ]).then(async () => {
       // Native Auto owns the live stock balance on Android. Existing Native
       // balances win; localStorage currentPills seeds only medications that

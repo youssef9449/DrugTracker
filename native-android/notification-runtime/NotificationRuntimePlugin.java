@@ -50,7 +50,7 @@ public final class NotificationRuntimePlugin extends Plugin {
                 event.put(
                         "identity",
                         intent.getStringExtra(NotificationRuntime.EXTRA_IDENTITY));
-                notifyListeners("notificationReceived", event);
+                notifyListeners("notificationReceived", event, true);
             }
         };
 
@@ -141,6 +141,24 @@ public final class NotificationRuntimePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void retryPersistedNotificationDeliveries(PluginCall call) {
+        int retried = new NotificationRuntime(getContext()).retryPersistedFailures();
+        JSObject ret = new JSObject();
+        ret.put("retried", retried);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void checkChannel(PluginCall call) {
+        String channelId = call.getString("channelId", "");
+        boolean enabled = new NotificationRuntime(getContext())
+                .isChannelEnabled(channelId);
+        JSObject ret = new JSObject();
+        ret.put("enabled", enabled);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
     public void checkPermission(PluginCall call) {
         boolean enabled = new NotificationRuntime(getContext())
                 .areNotificationsEnabled();
@@ -194,6 +212,6 @@ public final class NotificationRuntimePlugin extends Plugin {
         event.put("namespace", namespace);
         event.put("identity", identity);
         event.put("actionId", actionId);
-        plugin.notifyListeners("notificationActionPerformed", event);
+        plugin.notifyListeners("notificationActionPerformed", event, true);
     }
 }

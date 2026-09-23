@@ -7,6 +7,12 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
+import android.content.SharedPreferences;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import androidx.core.app.NotificationManagerCompat;
 /**
  * Shared Android notification-delivery runtime.
  *
@@ -23,6 +29,8 @@ public final class NotificationRuntime {
     public static final String EXTRA_ACTION_ID = "notificationActionId";
 
     private static final int NOTIFICATION_ID = 1;
+    private static final String RETRY_PREFS = "drugtracker_notification_delivery_retry_v1";
+    private static final String RETRY_KEY = "entries";
 
     private final Context appContext;
 
@@ -31,11 +39,17 @@ public final class NotificationRuntime {
     }
 
     public boolean areNotificationsEnabled() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
-            return true;
-        }
+        return NotificationManagerCompat.from(appContext).areNotificationsEnabled();
+    }
+
+    public boolean isChannelEnabled(String channelId) {
+        if (channelId == null || channelId.isEmpty()) return false;
+        if (!areNotificationsEnabled()) return false;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true;
         NotificationManager manager = notificationManager();
-        return manager != null && manager.areNotificationsEnabled();
+        if (manager == null) return false;
+        NotificationChannel channel = manager.getNotificationChannel(channelId);
+        return channel != null && channel.getImportance() != NotificationManager.IMPORTANCE_NONE;
     }
 
     public PostResult post(Request request) {
@@ -48,6 +62,7 @@ public final class NotificationRuntime {
             return PostResult.failed("invalid_request");
         }
         if (!areNotificationsEnabled()) {
+            persistRetry(request);
             return PostResult.failed("notifications_disabled");
         }
 
@@ -61,6 +76,7 @@ public final class NotificationRuntime {
             Notification notification = buildNotification(request);
             NotificationManager manager = notificationManager();
             if (manager == null) {
+                persistRetry(request);
                 return PostResult.failed("notification_manager_unavailable");
             }
 
@@ -74,11 +90,151 @@ public final class NotificationRuntime {
             event.putExtra(EXTRA_NAMESPACE, request.namespace);
             event.putExtra(EXTRA_IDENTITY, request.identity);
             appContext.sendBroadcast(event);
+            clearRetry(request.namespace, request.identity);
             return PostResult.accepted();
         } catch (SecurityException e) {
+            persistRetry(request);
             return PostResult.failed("notification_security_exception");
         } catch (Exception e) {
+            persistRetry(request);
             return PostResult.failed("notification_post_failed");
+        }
+    }
+
+    public void persistRetry(Request request) {
+        if (request == null || request.namespace == null || request.namespace.isEmpty()
+                || request.identity == null || request.identity.isEmpty()) return;
+        try {
+            SharedPreferences prefs = appContext.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
+            JSONArray entries = new JSONArray(prefs.getString(RETRY_KEY, "[]"));
+            JSONArray next = new JSONArray();
+            boolean replaced = false;
+            for (int i = 0; i < entries.length(); i++) {
+                JSONObject item = entries.optJSONObject(i);
+                if (item == null) continue;
+                if (request.namespace.equals(item.optString("namespace"))
+                        && request.identity.equals(item.optString("identity"))) {
+                    if (!replaced) {
+                        next.put(serializeRequest(request));
+                        replaced = true;
+                    }
+                } else {
+                    next.put(item);
+                }
+            }
+            if (!replaced) next.put(serializeRequest(request));
+            prefs.edit().putString(RETRY_KEY, next.toString()).apply();
+        } catch (JSONException ignored) {
+        }
+    }
+
+    public int retryPersistedFailures() {
+        SharedPreferences prefs = appContext.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
+        JSONArray entries;
+        try {
+            entries = new JSONArray(prefs.getString(RETRY_KEY, "[]"));
+        } catch (JSONException e) {
+            return 0;
+        }
+        int accepted = 0;
+        for (int i = 0; i < entries.length(); i++) {
+            JSONObject item = entries.optJSONObject(i);
+            Request request = deserializeRequest(item);
+            if (request == null) continue;
+            PostResult result = postWithoutPersistingRetry(request);
+            if (result.accepted) {
+                clearRetry(request.namespace, request.identity);
+                accepted++;
+            }
+        }
+        return accepted;
+    }
+
+    private PostResult postWithoutPersistingRetry(Request request) {
+        if (request == null || !areNotificationsEnabled()) {
+            return PostResult.failed("notifications_disabled");
+        }
+        try {
+            ensureChannel(request.channelId, request.channelName,
+                    request.channelImportance, request.channelVisibility);
+            NotificationManager manager = notificationManager();
+            if (manager == null) return PostResult.failed("notification_manager_unavailable");
+            manager.notify(tagFor(request.namespace, request.identity), NOTIFICATION_ID,
+                    buildNotification(request));
+            Intent event = new Intent(ACTION_NOTIFICATION_POSTED);
+            event.setPackage(appContext.getPackageName());
+            event.putExtra(EXTRA_NAMESPACE, request.namespace);
+            event.putExtra(EXTRA_IDENTITY, request.identity);
+            appContext.sendBroadcast(event);
+            return PostResult.accepted();
+        } catch (Exception e) {
+            return PostResult.failed("notification_post_failed");
+        }
+    }
+
+    private JSONObject serializeRequest(Request request) throws JSONException {
+        JSONObject item = new JSONObject();
+        item.put("namespace", request.namespace);
+        item.put("identity", request.identity);
+        item.put("title", request.title);
+        item.put("body", request.body);
+        item.put("channelId", request.channelId);
+        item.put("channelName", request.channelName);
+        item.put("channelImportance", request.channelImportance);
+        item.put("channelVisibility", request.channelVisibility);
+        item.put("smallIcon", request.smallIcon);
+        item.put("autoCancel", request.autoCancel);
+        item.put("ongoing", request.ongoing);
+        if (request.action != null) {
+            JSONObject action = new JSONObject();
+            action.put("id", request.action.id);
+            action.put("title", request.action.title);
+            action.put("foreground", request.action.foreground);
+            item.put("action", action);
+        }
+        return item;
+    }
+
+    private Request deserializeRequest(JSONObject item) {
+        if (item == null) return null;
+        try {
+            JSONObject actionJson = item.optJSONObject("action");
+            Action action = actionJson == null ? null : new Action(
+                    actionJson.optString("id", ""),
+                    actionJson.optString("title", ""),
+                    actionJson.optBoolean("foreground", false));
+            return new Request(
+                    item.getString("namespace"),
+                    item.getString("identity"),
+                    item.getString("title"),
+                    item.getString("body"),
+                    item.getString("channelId"),
+                    item.optString("channelName", ""),
+                    item.optInt("channelImportance", 4),
+                    item.optInt("channelVisibility", 1),
+                    item.optString("smallIcon", "ic_launcher"),
+                    item.optBoolean("autoCancel", true),
+                    item.optBoolean("ongoing", false),
+                    action);
+        } catch (JSONException e) {
+            return null;
+        }
+    }
+
+    private void clearRetry(String namespace, String identity) {
+        try {
+            SharedPreferences prefs = appContext.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
+            JSONArray entries = new JSONArray(prefs.getString(RETRY_KEY, "[]"));
+            JSONArray next = new JSONArray();
+            for (int i = 0; i < entries.length(); i++) {
+                JSONObject item = entries.optJSONObject(i);
+                if (item == null) continue;
+                if (namespace.equals(item.optString("namespace"))
+                        && identity.equals(item.optString("identity"))) continue;
+                next.put(item);
+            }
+            prefs.edit().putString(RETRY_KEY, next.toString()).apply();
+        } catch (JSONException ignored) {
         }
     }
 
@@ -139,7 +295,12 @@ public final class NotificationRuntime {
                         .setContentText(request.body)
                         .setAutoCancel(request.autoCancel)
                         .setOngoing(request.ongoing)
-                        .setDefaults(Notification.DEFAULT_ALL)
+                        .setDefaults(request.channelImportance <= 2
+                                ? 0
+                                : Notification.DEFAULT_ALL)
+                        .setPriority(request.channelImportance <= 2
+                                ? Notification.PRIORITY_LOW
+                                : Notification.PRIORITY_HIGH)
                         .setContentIntent(contentIntent);
 
         if (request.action != null) {

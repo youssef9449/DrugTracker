@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   changeExactNotificationSetting: vi.fn(),
   nativeSchedule: vi.fn(),
   nativeCancel: vi.fn(),
+  nativeCheckChannel: vi.fn(),
   nativeSnooze: vi.fn(),
   nativeCancelSnooze: vi.fn(),
   nativeIsScheduled: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock('@capacitor/core', () => ({
   registerPlugin: () => ({
     schedule: mocks.nativeSchedule,
     cancel: mocks.nativeCancel,
+    checkChannel: mocks.nativeCheckChannel,
     scheduleSnooze: mocks.nativeSnooze,
     cancelSnooze: mocks.nativeCancelSnooze,
     isScheduled: mocks.nativeIsScheduled,
@@ -51,6 +53,8 @@ vi.mock('@capacitor/local-notifications', () => ({
   },
 }));
 
+import { getPendingNotificationResult } from '@/utils/notificationRuntime';
+
 import {
   DOSE_REMINDER_CHANNEL_ID,
   DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
@@ -72,6 +76,7 @@ beforeEach(() => {
   mocks.nativePost.mockResolvedValue({ ok: true });
   mocks.nativeSchedule.mockResolvedValue({ ok: true });
   mocks.nativeCancel.mockResolvedValue({ ok: true, status: 'SUCCESS' });
+  mocks.nativeCheckChannel.mockResolvedValue({ enabled: true });
   mocks.nativeSnooze.mockResolvedValue({ ok: true });
   mocks.nativeCancelSnooze.mockResolvedValue({ ok: true });
   mocks.nativeIsScheduled.mockResolvedValue({
@@ -413,6 +418,99 @@ describe('lifecycle transition race — channel selector is synchronous', () => 
 //   MainActivity onResume/onPause owns the live foreground flag.
 // ---------------------------------------------------------------------------
 
+describe('Web/PWA future Dose Reminder delivery', () => {
+  const shown: Array<{ title: string; options: NotificationOptions }> = [];
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2024-09-10T12:00:00'));
+    shown.length = 0;
+    class MockNotification {
+      static permission = 'granted';
+      constructor(title: string, options: NotificationOptions) {
+        shown.push({ title, options });
+      }
+    }
+    vi.stubGlobal('Notification', MockNotification);
+    mocks.platform.mockReturnValue('web');
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('delivers a future reminder at its scheduled wall-clock time, not immediately', async () => {
+    await scheduleDoseReminder('web-future', 'Test', '20:00', 1, 'قرص', 'd1');
+
+    expect(shown).toHaveLength(0);
+    const pending = await getPendingNotificationResult('dose-reminder', 'web-future::d1');
+    expect(pending).toEqual({
+      ok: true,
+      pending: { schedule: { at: new Date('2024-09-10T20:00:00').getTime() } },
+    });
+
+    await vi.advanceTimersByTimeAsync(7 * 60 * 60 * 1000 - 1);
+    expect(shown).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(shown).toHaveLength(1);
+    expect(shown[0].title).toContain('Test');
+  });
+
+  it('uses the next calendar occurrence when the configured time has already passed', async () => {
+    vi.setSystemTime(new Date('2024-09-10T21:00:00'));
+
+    await scheduleDoseReminder('web-next-day', 'Test', '20:00', 1, 'قرص', 'd1');
+
+    expect(shown).toHaveLength(0);
+    const pending = await getPendingNotificationResult('dose-reminder', 'web-next-day::d1');
+    expect(pending).toEqual({
+      ok: true,
+      pending: { schedule: { at: new Date('2024-09-11T20:00:00').getTime() } },
+    });
+  });
+
+  it('delivers Web/PWA snooze only after the requested delay', async () => {
+    await scheduleSnoozedDoseReminder(
+      'web-snooze', 'Test', 1, 'قرص', '20:00', 10, 'd1', true
+    );
+
+    expect(shown).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(10 * 60 * 1000 - 1);
+    expect(shown).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(shown).toHaveLength(1);
+  });
+
+  it('keeps one logical future reminder across duplicate scheduling/reconciliation', async () => {
+    await scheduleDoseReminder('web-duplicate', 'Test', '20:00', 1, 'قرص', 'd1');
+    await scheduleDoseReminder('web-duplicate', 'Test', '20:00', 1, 'قرص', 'd1');
+
+    const pending = await getPendingNotificationResult('dose-reminder', 'web-duplicate::d1');
+    expect(pending).toEqual({
+      ok: true,
+      pending: { schedule: { at: new Date('2024-09-10T20:00:00').getTime() } },
+    });
+
+    await vi.advanceTimersByTimeAsync(8 * 60 * 60 * 1000);
+    expect(shown).toHaveLength(1);
+  });
+
+  it('re-arms a persisted future reminder when pending state is queried after timer loss', async () => {
+    await scheduleDoseReminder('web-reload', 'Test', '20:00', 1, 'قرص', 'd1');
+    vi.clearAllTimers();
+
+    const pending = await getPendingNotificationResult('dose-reminder', 'web-reload::d1');
+    expect(pending).toEqual({
+      ok: true,
+      pending: { schedule: { at: new Date('2024-09-10T20:00:00').getTime() } },
+    });
+
+    await vi.advanceTimersByTimeAsync(8 * 60 * 60 * 1000);
+    expect(shown).toHaveLength(1);
+  });
+});
+
 describe('lifecycle race — rapid transitions converge on latest state', () => {
   it('rapid foreground↔background transitions: last schedule uses latest channel', async () => {
     setAppInForeground(true);
@@ -435,5 +533,112 @@ describe('lifecycle race — rapid transitions converge on latest state', () => 
     // Drift would break native delivery.
     expect(DOSE_REMINDER_CHANNEL_ID).toBe('dose-reminder-v3');
     expect(DOSE_REMINDER_FOREGROUND_CHANNEL_ID).toBe('dose-reminder-foreground-v1');
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// Group 4 acceptance — cancellation and pending-state contracts.
+// These tests exercise the feature boundary directly so the reliability
+// fixes are protected independently of the hook/UI implementation.
+// ---------------------------------------------------------------------------
+
+describe('Group 4 acceptance — cancellation and pending-state contracts', () => {
+  it('#366 cancels both the native alarm and the displayed notification', async () => {
+    mocks.platform.mockReturnValue('android');
+    mocks.nativeCancel.mockResolvedValue({ ok: true, status: 'SUCCESS' });
+
+    const { cancelDoseReminder } = await import('@/utils/doseReminderScheduling');
+    await cancelDoseReminder('med-cancel', 'dose-1');
+
+    expect(mocks.nativeCancel).toHaveBeenNthCalledWith(1, {
+      medicationId: 'med-cancel',
+      doseId: 'dose-1',
+    });
+    expect(mocks.nativeCancel).toHaveBeenNthCalledWith(2, {
+      namespace: 'dose-reminder',
+      identity: 'med-cancel::dose-1',
+    });
+  });
+
+  it('#366 surfaces notification-cancellation failure instead of silently succeeding', async () => {
+    mocks.platform.mockReturnValue('android');
+    mocks.nativeCancel.mockImplementation(async (options: Record<string, unknown>) =>
+      'namespace' in options
+        ? { ok: false, error: 'notification_cancel_failed' }
+        : { ok: true, status: 'SUCCESS' }
+    );
+
+    const { cancelDoseReminder } = await import('@/utils/doseReminderScheduling');
+    await expect(cancelDoseReminder('med-fail', 'dose-1')).rejects.toThrow(
+      'dose_reminder_notification_cancel_failed'
+    );
+  });
+
+  it('#371/#388 distinguishes blocked notification channels from app permission', async () => {
+    mocks.platform.mockReturnValue('android');
+    mocks.nativeCheckChannel
+      .mockResolvedValueOnce({ enabled: false })
+      .mockResolvedValueOnce({ enabled: true });
+
+    const { isNotificationChannelEnabled } = await import('@/utils/notificationRuntime');
+    await expect(isNotificationChannelEnabled(DOSE_REMINDER_CHANNEL_ID)).resolves.toBe(false);
+    await expect(isNotificationChannelEnabled(DOSE_REMINDER_FOREGROUND_CHANNEL_ID)).resolves.toBe(true);
+    expect(mocks.nativeCheckChannel).toHaveBeenNthCalledWith(1, {
+      channelId: DOSE_REMINDER_CHANNEL_ID,
+    });
+    expect(mocks.nativeCheckChannel).toHaveBeenNthCalledWith(2, {
+      channelId: DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
+    });
+  });
+
+  it('#376 keeps an actually scheduled alarm pending even when its trigger is older than 60 seconds', async () => {
+    mocks.platform.mockReturnValue('android');
+    mocks.nativeIsScheduled.mockResolvedValue({
+      scheduled: true,
+      triggerAtEpochMs: Date.now() - 10 * 60_000,
+    });
+
+    const { isDoseReminderPending } = await import('@/utils/doseReminderScheduling');
+    await expect(isDoseReminderPending('med-pending', 'dose-1')).resolves.toEqual({
+      ok: true,
+      pending: true,
+    });
+  });
+
+  it('#376 reports a truly absent alarm as absent', async () => {
+    mocks.platform.mockReturnValue('android');
+    mocks.nativeIsScheduled.mockResolvedValue({ scheduled: false });
+
+    const { isDoseReminderPending } = await import('@/utils/doseReminderScheduling');
+    await expect(isDoseReminderPending('med-absent', 'dose-1')).resolves.toEqual({
+      ok: true,
+      pending: false,
+    });
+  });
+
+  it('#384 Web cancellation removes the durable future reminder and prevents delivery', async () => {
+    mocks.platform.mockReturnValue('web');
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2024-09-10T12:00:00'));
+    const shown: string[] = [];
+    class MockNotification {
+      static permission = 'granted';
+      constructor(title: string) {
+        shown.push(title);
+      }
+    }
+    vi.stubGlobal('Notification', MockNotification);
+
+    try {
+      const { scheduleDoseReminder, cancelDoseReminder } = await import('@/utils/doseReminderScheduling');
+      await scheduleDoseReminder('web-cancel', 'Test', '20:00', 1, 'قرص', 'd1');
+      await cancelDoseReminder('web-cancel', 'd1');
+      await vi.advanceTimersByTimeAsync(8 * 60 * 60 * 1000);
+      expect(shown).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
   });
 });

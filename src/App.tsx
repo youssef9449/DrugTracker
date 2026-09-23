@@ -553,6 +553,7 @@ export default function App() {
     setCriticalAlarmResumeTick,
     setDoseAlarmResumeTick,
     setExactAlarmPermission,
+    setNotificationsEnabled,
   });
 
   const handleOpenExactAlarmSettings = () => {

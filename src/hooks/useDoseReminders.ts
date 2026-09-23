@@ -51,10 +51,27 @@ export function useDoseReminders({
   const alarmingIdRef = useRef<string | null>(null);
   const alarmingDoseIdRef = useRef<string | null>(null);
   const isTestAlarmRef = useRef(false);
+  const queuedAlarmRef = useRef<Array<{ medicationId: string; doseId: string }>>([]);
   const medicationsRef = useRef(medications);
   useEffect(() => {
     medicationsRef.current = medications;
   }, [medications]);
+  const dequeueNextValidAlarm = useCallback((): { medicationId: string; doseId: string } | null => {
+    const today = getTodayDateString();
+    const fired = loadJson<Record<string, boolean>>(FIRED_KEY, {});
+    while (queuedAlarmRef.current.length > 0) {
+      const next = queuedAlarmRef.current.shift()!;
+      const med = medicationsRef.current.find((m) => m.id === next.medicationId);
+      if (!med || !findDoseRow(med, next.doseId)) continue;
+      if (isDoseConsumedOnDate(med, next.doseId, today)) continue;
+      if (fired[firedKey(next.medicationId, today, next.doseId)]) continue;
+      if (isSnoozeActive(next.medicationId, next.doseId)) continue;
+      if (allowManualTakeActionByMedicationId.get(next.medicationId) === false) continue;
+      return next;
+    }
+    return null;
+  }, [allowManualTakeActionByMedicationId]);
+
   const dismissAlarm = useCallback(() => {
     const current = alarmingIdRef.current;
     const doseId = alarmingDoseIdRef.current;
@@ -82,12 +99,22 @@ export function useDoseReminders({
 
     }
     stopAllSounds();
-    alarmingIdRef.current = null;
-    alarmingDoseIdRef.current = null;
-    isTestAlarmRef.current = false;
-    setAlarmingMedication(null);
-    setAlarmingDoseId(null);
-  }, []);
+    const next = dequeueNextValidAlarm();
+    if (next) {
+      const nextMed = medicationsRef.current.find((m) => m.id === next.medicationId)!;
+      alarmingIdRef.current = next.medicationId;
+      alarmingDoseIdRef.current = next.doseId;
+      isTestAlarmRef.current = false;
+      setAlarmingMedication(nextMed);
+      setAlarmingDoseId(next.doseId);
+    } else {
+      alarmingIdRef.current = null;
+      alarmingDoseIdRef.current = null;
+      isTestAlarmRef.current = false;
+      setAlarmingMedication(null);
+      setAlarmingDoseId(null);
+    }
+  }, [dequeueNextValidAlarm]);
   const snoozeAlarm = useCallback((minutes: number = DEFAULT_SNOOZE_MINUTES) => {
     const medication = alarmingMedication;
     const doseId = alarmingDoseIdRef.current;
@@ -154,17 +181,27 @@ export function useDoseReminders({
         }
 
         setSnoozeUntil(medication.id, snoozeUntil, doseId);
-        alarmingIdRef.current = null;
-        alarmingDoseIdRef.current = null;
-        isTestAlarmRef.current = false;
-        setAlarmingMedication(null);
-        setAlarmingDoseId(null);
+        const next = dequeueNextValidAlarm();
+        if (next) {
+          const nextMed = medicationsRef.current.find((m) => m.id === next.medicationId)!;
+          alarmingIdRef.current = next.medicationId;
+          alarmingDoseIdRef.current = next.doseId;
+          isTestAlarmRef.current = false;
+          setAlarmingMedication(nextMed);
+          setAlarmingDoseId(next.doseId);
+        } else {
+          alarmingIdRef.current = null;
+          alarmingDoseIdRef.current = null;
+          isTestAlarmRef.current = false;
+          setAlarmingMedication(null);
+          setAlarmingDoseId(null);
+        }
       }
     ).catch(() => {
       // Keep the alarm UI open so a transient native failure can be retried.
       // No snooze marker is persisted on failure.
     });
-  }, [alarmingMedication, allowManualTakeActionByMedicationId]);
+  }, [alarmingMedication, allowManualTakeActionByMedicationId, dequeueNextValidAlarm]);
   /**
    * Open the in-app alarm for an explicit doseSchedule occurrence.
    * Requires non-empty doseId present on med.doseSchedule.
@@ -181,6 +218,15 @@ export function useDoseReminders({
     const today = getTodayDateString();
     if (isDoseConsumedOnDate(med, id, today)) return;
     if (alarmingIdRef.current === med.id && alarmingDoseIdRef.current === id) {
+      return;
+    }
+    if (alarmingIdRef.current) {
+      const alreadyQueued = queuedAlarmRef.current.some(
+        (queued) => queued.medicationId === med.id && queued.doseId === id
+      );
+      if (!alreadyQueued) {
+        queuedAlarmRef.current.push({ medicationId: med.id, doseId: id });
+      }
       return;
     }
     const fired = loadJson<Record<string, boolean>>(FIRED_KEY, {});

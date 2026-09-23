@@ -30,6 +30,10 @@ public final class NotificationRuntimeActionReceiver extends BroadcastReceiver {
 
         boolean foreground = intent.getBooleanExtra(EXTRA_FOREGROUND, false);
 
+        // An action tap settles the displayed notification immediately. The
+        // feature-level Take path still performs the durable idempotency gate.
+        new NotificationRuntime(context).cancel(namespace, identity);
+
         if (foreground || actionId == null || actionId.isEmpty()) {
             Intent launch = context.getPackageManager()
                     .getLaunchIntentForPackage(context.getPackageName());

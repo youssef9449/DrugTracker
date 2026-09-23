@@ -43,7 +43,7 @@ interface DoseReminderPlugin {
   cancelSnooze(options: {
     medicationId: string;
     doseId: string;
-  }): Promise<{ ok: boolean }>;
+  }): Promise<{ ok: boolean; status?: string; error?: string }>;
   isScheduled(options: {
     medicationId: string;
     doseId: string;
@@ -169,7 +169,12 @@ export async function cancelDoseSnoozeNative(
     doseId: doseId.trim(),
   });
   if (result?.ok !== true) {
-    throw new NativeBoundaryError('platform_failure', 'dose_snooze_cancel_failed');
+    const message =
+      result?.error || 'dose_snooze_cancel_failed';
+    throw new NativeBoundaryError(
+      classifyNativeError(message),
+      message
+    );
   }
 }
 

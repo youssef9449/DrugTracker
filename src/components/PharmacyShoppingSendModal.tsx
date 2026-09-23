@@ -1,6 +1,6 @@
 import type { FC } from 'react';
 import { MessageCircle, ExternalLink, X } from 'lucide-react';
-import type { Medication, PharmacySettings } from '../types';
+import type { Pharmacy, PharmacySettings } from '../types';
 import { describeOrderInBoxes, isSolidUnit } from '../utils/medicationPackaging';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { describeOrderQuantityBreakdown, type OrderItem } from '../utils/whatsapp';
@@ -10,8 +10,8 @@ interface PharmacyShoppingSendModalProps {
   isOpen: boolean;
   settings: PharmacySettings;
   onUpdateSettings: (settings: PharmacySettings) => void;
-  pharmacies: PharmacySettings['pharmacies'];
-  selectedPharmacy: PharmacySettings['pharmacies'][number] | undefined;
+  pharmacies: Pharmacy[];
+  selectedPharmacy: Pharmacy | undefined;
   whatsappContacts: NonNullable<PharmacySettings['whatsappContacts']>;
   whatsappAddresses: NonNullable<PharmacySettings['whatsappAddresses']>;
   selectedWhatsappContactIds: string[];
@@ -69,7 +69,7 @@ export const PharmacyShoppingSendModal: FC<PharmacyShoppingSendModalProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => setIsSendModalOpen(false)}
+                onClick={() => onClose()}
                 className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center"
               >
                 <X className="w-4 h-4" />

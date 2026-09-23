@@ -99,7 +99,6 @@ assert(
   'Auto business scheduler facade must not own SharedPreferences stores after collaborator decomposition'
 );
 
-const recurrence = read('native-android/auto-deduction/AutoDeductionRecurrence.java');
 const retryEvidenceStore =
   read('native-android/auto-deduction/AutoDeductionRetryEvidenceStore.java');
 
@@ -114,17 +113,21 @@ assert(
   'fire-retry persistence must be owned by AutoDeductionRetryEvidenceStore'
 );
 
+const recurrence = read('native-android/auto-deduction/AutoDeductionRecurrence.java');
+const cancellation = read('native-android/auto-deduction/AutoDeductionCancellation.java');
+const retry = read('native-android/auto-deduction/AutoDeductionRetry.java');
+
 assert(
-  scheduler.includes('schedulingAdapter.scheduleOccurrence('),
-  'occurrence scheduling must cross the Auto scheduling adapter'
+  recurrence.includes('scheduler.schedulingAdapter().scheduleOccurrence('),
+  'occurrence scheduling must cross the Auto scheduling adapter from the recurrence collaborator'
 );
 assert(
-  scheduler.includes('schedulingAdapter.cancelOccurrence('),
-  'occurrence cancellation must cross the Auto scheduling adapter'
+  cancellation.includes('scheduler.schedulingAdapter().cancelOccurrence('),
+  'occurrence cancellation must cross the Auto scheduling adapter from the cancellation collaborator'
 );
 assert(
-  scheduler.includes('schedulingAdapter.scheduleFireRetry('),
-  'retry alarm installation must cross the Auto scheduling adapter'
+  retry.includes('scheduler.schedulingAdapter().scheduleFireRetry('),
+  'retry alarm installation must cross the Auto scheduling adapter from the retry collaborator'
 );
 assert(
   scheduler.includes('AutoDeductionSchedulingAdapter.extractOperationVersion('),

@@ -53,7 +53,7 @@ vi.mock('@/utils/notifications', async () => {
   };
 });
 
-function makeMed(overrides: Partial<Medication> = {}): Medication {
+): Medication {
   const reminderTime = overrides.reminderTime ?? '09:00';
   const dailyDose = overrides.dailyDose ?? 1;
   return {
@@ -74,13 +74,9 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
   };
 }
 
-function capabilityMap(medications: Medication[]): ReadonlyMap<string, boolean> {
-  return new Map(
-    medications.map((med) => [med.id, med.autoDeductEnabled === false])
-  );
-}
 
-function defaultOpts(overrides: Record<string, unknown> = {}) {
+
+) {
   const medications =
     (overrides.medications as Medication[] | undefined) ?? [];
   return {
@@ -119,12 +115,7 @@ afterEach(() => {
   cleanup();
 });
 
-async function flushUntil(predicate: () => boolean, maxIterations = 20): Promise<void> {
-  for (let i = 0; i < maxIterations; i++) {
-    if (predicate()) return;
-    await Promise.resolve();
-  }
-}
+
 
 
 describe('useDoseReminderScheduler — native state lookup failures', () => {

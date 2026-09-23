@@ -34,7 +34,7 @@ import { getInitialTab } from './lib/initialTab';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(getInitialTab);
-  const { navigateToTab, registerBackOverlay } = useAppBackNavigation(activeTab, setActiveTab);
+  const { navigateToTab, selectTab, registerBackOverlay } = useAppBackNavigation(activeTab, setActiveTab);
 
   // Start from empty in-memory state and hydrate persisted application data
   // after mount. Runtime schedulers and alerts are gated on `hydrated` so
@@ -397,7 +397,7 @@ export default function App() {
         />
 
         {activeTab === 'stock' && <AndroidFab onClick={openAdd} />}
-        <AndroidBottomNav activeTab={activeTab} onTabChange={navigateToTab} alertsCount={alertsCount} />
+        <AndroidBottomNav activeTab={activeTab} onTabChange={selectTab} alertsCount={alertsCount} />
 
         {toast && (
           <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[60] max-w-[90%] px-4 py-2.5 bg-slate-900 text-white text-xs font-bold rounded-2xl shadow-xl text-center">

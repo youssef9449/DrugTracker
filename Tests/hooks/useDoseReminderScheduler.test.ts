@@ -227,6 +227,46 @@ describe('useDoseReminderScheduler — gating', () => {
   });
 });
 
+describe('useDoseReminderScheduler — native state lookup failures', () => {
+  it('does not schedule a repair alarm when pending-state lookup fails', async () => {
+    const med = makeMed({ id: 'med-pending-failure', reminderTime: '20:00' });
+    mocks.isPending.mockResolvedValueOnce({
+      ok: false,
+      error: 'pending_lookup_failed',
+      errorCode: 'platform_failure',
+    });
+
+    renderHook(() =>
+      useDoseReminderScheduler(defaultOpts({ medications: [med] }))
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mocks.schedule).not.toHaveBeenCalled();
+  });
+
+  it('does not schedule a repair alarm when re-arm lookup fails', async () => {
+    const med = makeMed({ id: 'med-rearm-failure', reminderTime: '20:00' });
+    mocks.isPending.mockResolvedValueOnce({ ok: true, pending: false });
+    mocks.isNativeReArmed.mockResolvedValueOnce({
+      ok: false,
+      error: 'rearm_lookup_failed',
+      errorCode: 'platform_failure',
+    });
+
+    renderHook(() =>
+      useDoseReminderScheduler(defaultOpts({ medications: [med] }))
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mocks.schedule).not.toHaveBeenCalled();
+  });
+});
+
 describe('useDoseReminderScheduler — exact-alarm gating', () => {
   it('cancels previously-scheduled alarms when exactAlarmPermission turns denied', async () => {
     const med = makeMed({ id: 'med-exact-off', reminderTime: '09:00' });

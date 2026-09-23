@@ -141,7 +141,7 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
         NotificationRuntime.Action notificationAction = null;
         if (allowManualTakeAction) {
             notificationAction = new NotificationRuntime.Action(
-                    "take_dose",
+                    "take_dose|" + operationVersion,
                     "تم أخذ الجرعة",
                     true);
         }

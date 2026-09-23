@@ -30,6 +30,18 @@ export function isCurrentCriticalAlarmGeneration(
 
 export function enqueueCriticalAlarmOp(
   medId: string,
+  operation: () => Promise<unknown>
+): Promise<void> {
+  return criticalAlarmCoordinator.enqueueSerialized(
+    medId,
+    async () => {
+      await operation();
+    }
+  );
+}
+
+export function enqueueCriticalAlarmOpGuarded(
+  medId: string,
   generation: number,
   operation: () => Promise<unknown>
 ): Promise<void> {

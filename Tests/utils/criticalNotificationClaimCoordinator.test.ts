@@ -58,8 +58,6 @@ describe('critical notification claim coordinator', () => {
 
     expect(loadCriticalNotificationClaims()['med-1']?.alarmTime).toBeGreaterThan(Date.now());
   });
-});
-
 
   it('holds cross-tab ownership until foreground delivery work resolves', async () => {
     let releaseWork!: () => void;
@@ -67,16 +65,23 @@ describe('critical notification claim coordinator', () => {
       releaseWork = () => resolve(true);
     });
 
-    const first = runWithCriticalNotificationClaim('med-lock', true, () => work);
+    const first = runWithCriticalNotificationClaim(
+      'med-lock',
+      true,
+      () => work
+    );
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     await expect(tryClaimCriticalNotification('med-lock')).resolves.toBe(false);
 
     releaseWork();
-    await expect(first).resolves.toMatchObject({ acquired: true, result: true });
+    await expect(first).resolves.toMatchObject({
+      acquired: true,
+      result: true,
+    });
   });
 
-  it('does not leave a claim consumed when delivery work fails', async () => {
+  it('keeps ownership on failed delivery until the caller explicitly releases it', async () => {
     await expect(
       runWithCriticalNotificationClaim('med-fail', false, async () => false)
     ).resolves.toMatchObject({ acquired: true, result: false });
@@ -86,3 +91,4 @@ describe('critical notification claim coordinator', () => {
       alarmTime: null,
     });
   });
+});

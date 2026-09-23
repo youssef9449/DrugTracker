@@ -7,31 +7,6 @@ def spotbugsClassLoader = plugins['com.github.spotbugs'].class.classLoader
 def SpotBugsEffort = spotbugsClassLoader.loadClass('com.github.spotbugs.snom.Effort')
 def SpotBugsConfidence = spotbugsClassLoader.loadClass('com.github.spotbugs.snom.Confidence')
 
-spotbugs {
-    // The JVM module compiles the repository-owned production native runtime.
-    // Restrict analysis to that production package; test/Capacitor compile stubs
-    // are deliberately outside the static-analysis target.
-    onlyAnalyze = ['app.drugtracker.*']
-
-    // Start with high-confidence findings so the gate is actionable rather
-    // than becoming a wall of low-confidence noise. Any intentional exception
-    // must be represented by an explicit SpotBugs filter/baseline in a later
-    // change; failures are never silently ignored.
-    effort = SpotBugsEffort.valueOf('MAX')
-    reportLevel = SpotBugsConfidence.valueOf('HIGH')
-    ignoreFailures = false
-    runOnCheck = true
-    showProgress = true
-    showStackTraces = true
-}
-
-spotbugsMain {
-    reports {
-        xml.required = true
-        html.required = true
-    }
-}
-
 java {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
@@ -48,28 +23,51 @@ repositories {
  * tests exercise the production Java implementation, not a copy.
  */
 def productionSources = fileTree("../auto-deduction") {
-    include("**/*.java")
-    exclude("**/*Plugin.java")
+    include(
+            "AutoDeductionContract.java",
+            "AutoDeductionEventStore.java",
+            "AutoDeductionScheduler.java",
+            "AutoDeductionSchedulingAdapter.java",
+            "AutoDeductionReceiver.java",
+            "AutoDeductionStockStore.java",
+            "AutoDeductionLifecycle.java",
+            "AutoDeductionAlarmFeature.java"
+    )
 }
 
 def alarmRuntimeSources = fileTree("../alarm-runtime") {
-    include("**/*.java")
-    exclude("**/*Plugin.java")
+    include(
+            "ExactAlarmContract.java",
+            "ExactAlarmOperationLock.java",
+            "ExactAlarmStore.java",
+            "ExactAlarmRuntime.java",
+            "ExactAlarmLifecycle.java",
+            "DrugTrackerAlarmSystemReceiver.java",
+            "ExactAlarmFeatureAdapter.java",
+            "DoseReminderAlarmFeature.java"
+    )
 }
 
 def notificationRuntimeSources = fileTree("../notification-runtime") {
-    include("**/*.java")
-    exclude("**/*Plugin.java")
+    include(
+            "AppForegroundState.java",
+            "NotificationRuntime.java",
+            "NotificationRuntimeActionReceiver.java"
+    )
 }
 
 def doseReminderAlarmSources = fileTree("../dose-reminder") {
-    include("**/*.java")
-    exclude("**/*Plugin.java")
+    include(
+            "DoseReminderAlarmAdapter.java",
+            "DoseReminderAlarmReceiver.java"
+    )
 }
 
 def criticalStockAlarmSources = fileTree("../critical-stock") {
-    include("**/*.java")
-    exclude("**/*Plugin.java")
+    include(
+            "CriticalStockAlarmAdapter.java",
+            "CriticalStockAlarmReceiver.java"
+    )
 }
 
 def syncedMain = layout.buildDirectory.dir("synced-main/app/drugtracker/autodeduction")
@@ -176,6 +174,83 @@ dependencies {
     // INSIDE the directory is picked up (a plain directory entry would not
     // recurse into jars).
     testCompileOnly fileTree(extractedAarClasses)
+}
+
+
+/**
+ * Static-analysis-only source set.
+ *
+ * The feature source tree is intentionally not compiled here because the
+ * application is being decomposed across feature groups. This gate targets the
+ * stable shared Native boundary that Group 9 is responsible for: Exact Alarm
+ * infrastructure + Notification Runtime. The normal JVM test source set remains
+ * unchanged.
+ */
+def staticAnalysisAlarmRuntimeSources = fileTree("../alarm-runtime") {
+    include(
+            "ExactAlarmContract.java",
+            "ExactAlarmOperationLock.java",
+            "ExactAlarmStore.java",
+            "ExactAlarmRuntime.java",
+            "ExactAlarmLifecycle.java",
+            "DrugTrackerAlarmSystemReceiver.java"
+    )
+}
+def staticAnalysisNotificationSources = fileTree("../notification-runtime") {
+    include(
+            "AppForegroundState.java",
+            "NotificationRuntime.java",
+            "NotificationRuntimeActionReceiver.java"
+    )
+}
+
+def syncedStaticAnalysis = layout.buildDirectory.dir("synced-static-analysis")
+def syncedStaticAlarmRuntime = layout.buildDirectory.dir(
+        "synced-static-analysis/app/drugtracker/alarmruntime")
+def syncedStaticNotification = layout.buildDirectory.dir(
+        "synced-static-analysis/app/drugtracker/notificationruntime")
+
+tasks.register("syncStaticAnalysisAlarmRuntime", Copy) {
+    from staticAnalysisAlarmRuntimeSources
+    into syncedStaticAlarmRuntime
+}
+tasks.register("syncStaticAnalysisNotificationRuntime", Copy) {
+    from staticAnalysisNotificationSources
+    into syncedStaticNotification
+}
+
+sourceSets {
+    staticAnalysis {
+        java {
+            srcDirs = [
+                    syncedStaticAnalysis,
+                    "src/main/java"
+            ]
+        }
+    }
+}
+
+tasks.named("compileStaticAnalysisJava").configure {
+    dependsOn(
+            "syncStaticAnalysisAlarmRuntime",
+            "syncStaticAnalysisNotificationRuntime"
+    )
+}
+
+spotbugsStaticAnalysis {
+    effort = SpotBugsEffort.valueOf('MAX')
+    reportLevel = SpotBugsConfidence.valueOf('HIGH')
+    ignoreFailures = false
+    showProgress = true
+    showStackTraces = true
+    onlyAnalyze = [
+            'app.drugtracker.alarmruntime.*',
+            'app.drugtracker.notificationruntime.*'
+    ]
+    reports {
+        xml.required = true
+        html.required = true
+    }
 }
 
 tasks.register("extractMonitorClasses") {

@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react';
 import { persist } from '../utils/storage';
-
 interface UsePersistentEffectOptions {
   /** Storage key. */
   storageKey: string;
@@ -17,10 +16,9 @@ interface UsePersistentEffectOptions {
   /** Gate: skip persistence until this is true (e.g. the `hydrated` flag). */
   enabled: boolean;
 }
-
 /**
  * Persist a value to localStorage on every change, surfacing quota failures
- * via a one-shot toast (audit #76).
+ * via a one-shot toast.
  *
  * Collapses the 6 near-identical "warned-ref + persist + toast" effects that
  * lived inline in App.tsx into a single hook. The pattern:
@@ -45,10 +43,8 @@ export function usePersistentEffect({
   enabled,
 }: UsePersistentEffectOptions): void {
   const warnedRef = useRef(false);
-
   useEffect(() => {
     if (!enabled) return;
-
     const doWrite = () => {
       const err = persist(storageKey, value, { json });
       if (err && !warnedRef.current) {
@@ -62,7 +58,6 @@ export function usePersistentEffect({
         warnedRef.current = false;
       }
     };
-
     if (debounceMs > 0) {
       const handle = window.setTimeout(doWrite, debounceMs);
       return () => window.clearTimeout(handle);

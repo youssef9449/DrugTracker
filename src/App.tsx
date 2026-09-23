@@ -44,12 +44,12 @@ import { usePersistentEffect } from './hooks/usePersistentEffect';
 import { useStockAlerts } from './hooks/useStockAlerts';
 import { useAppHydration } from './hooks/useAppHydration';
 import { useStartupAutoDeduction } from './hooks/useStartupAutoDeduction';
+import { useAppBackNavigation } from './hooks/useAppBackNavigation';
 import { useMedicationHandlers } from './hooks/useMedicationHandlers';
 import { usePharmacyUserHandlers } from './hooks/usePharmacyUserHandlers';
 import { useNativeActionHandlers } from './hooks/useNativeActionHandlers';
 import { useDerivedMedications } from './hooks/useDerivedMedications';
 import {
-  registerBackButtonHandler,
   cleanupNativeListeners,
 } from './native';
 import { getInitialTab } from './lib/initialTab';
@@ -67,6 +67,7 @@ import { TOAST_DURATION_MS, PHARMACY_PERSIST_DEBOUNCE_MS } from './utils/time';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(getInitialTab);
+  const { navigateToTab, registerBackOverlay } = useAppBackNavigation(activeTab, setActiveTab);
 
   // Start from empty in-memory state and hydrate persisted application data
   // after mount. Runtime schedulers and alerts are gated on `hydrated` so
@@ -159,38 +160,53 @@ export default function App() {
   const [selectDoseMode, setSelectDoseMode] = useState<'take' | 'restore' | 'manage'>('take');
   const [historyMedication, setHistoryMedication] = useState<Medication | null>(null);
 
-  // Register a back-button handler that closes the top modal
-  // instead of exiting the app. The handler returns true (modal was
-  // closed, don't exit) or false (no modal open, exit). Re-registers
-  // whenever any modal state changes so the handler always reads the
-  // latest values.
+  // All Android Back behavior is registered with one authoritative dispatcher.
+  // App-owned overlays use explicit priorities; child-owned overlays register
+  // through the same dispatcher and therefore never install native listeners.
   useEffect(() => {
-    registerBackButtonHandler(() => {
-      // Top-most interactive overlay first.
-      if (alarmingMedication) { dismissAlarm(); return true; }
-      // Explicit dose selector must dismiss on Android Back
-      // without exiting the app.
-      if (selectDoseMed) {
-        setSelectDoseMed(null);
-        setSelectDoseMode('take');
-        return true;
-      }
-      if (historyMedication) {
-        setHistoryMedication(null);
-        return true;
-      }
-      if (isAutoDeductPromptOpen) {
-        // Same durable decision path as choosing "لا" — never mark prompted
-        // without a successful global Auto policy mutation.
-        handleConfirmAutoDeductPromptRef.current(false);
-        return true;
-      }
-      if (isAddModalOpen) { setIsAddModalOpen(false); setEditingMedication(null); return true; }
-      if (refillMedication) { setRefillMedication(null); return true; }
-      if (isSettingsModalOpen) { setIsSettingsModalOpen(false); return true; }
-      return false;
-    });
-  }, [alarmingMedication, selectDoseMed, historyMedication, isAutoDeductPromptOpen, isAddModalOpen, refillMedication, isSettingsModalOpen, dismissAlarm]);
+    const registrations = [
+      alarmingMedication
+        ? registerBackOverlay('dose-alarm', dismissAlarm, 100)
+        : undefined,
+      selectDoseMed
+        ? registerBackOverlay('select-dose', () => {
+            setSelectDoseMed(null);
+            setSelectDoseMode('take');
+          }, 90)
+        : undefined,
+      historyMedication
+        ? registerBackOverlay('medication-history', () => setHistoryMedication(null), 80)
+        : undefined,
+      isAutoDeductPromptOpen
+        ? registerBackOverlay('auto-deduct-prompt', () => {
+            handleConfirmAutoDeductPromptRef.current(false);
+          }, 70)
+        : undefined,
+      isAddModalOpen
+        ? registerBackOverlay('add-medication', () => {
+            setIsAddModalOpen(false);
+            setEditingMedication(null);
+          }, 60)
+        : undefined,
+      refillMedication
+        ? registerBackOverlay('refill', () => setRefillMedication(null), 50)
+        : undefined,
+      isSettingsModalOpen
+        ? registerBackOverlay('settings', () => setIsSettingsModalOpen(false), 40)
+        : undefined,
+    ];
+    return () => registrations.forEach((unregister) => unregister?.());
+  }, [
+    alarmingMedication,
+    dismissAlarm,
+    selectDoseMed,
+    historyMedication,
+    isAutoDeductPromptOpen,
+    isAddModalOpen,
+    refillMedication,
+    isSettingsModalOpen,
+    registerBackOverlay,
+  ]);
 
   // Remove native listeners on unmount so duplicate handlers cannot accumulate.
   // Clear any pending toast auto-dismiss timer.
@@ -229,8 +245,10 @@ export default function App() {
   // every catch was empty and a quota-exceeded write silently dropped
   // data). Stabilizing it via useCallback also keeps the persistence
   // effects from re-subscribing on every render.
+  const toastIdRef = useRef(0);
+
   const showToast = useCallback((message: string) => {
-    const id = Date.now();
+    const id = ++toastIdRef.current;
     setToast({ id, message });
     if (toastTimerRef.current) {
       clearTimeout(toastTimerRef.current);
@@ -696,7 +714,7 @@ export default function App() {
               )}
 
               {filter === 'alerts' && (
-                <LowStockBanner medicationsWithStatus={medicationsWithStatus} onNavigateToShopping={() => setActiveTab('shopping')} />
+                <LowStockBanner medicationsWithStatus={medicationsWithStatus} onNavigateToShopping={() => navigateToTab('shopping')} />
               )}
 
               <div
@@ -733,7 +751,7 @@ export default function App() {
                       onToggleAutoDeduct={handleToggleAutoDeduct}
                       onToggleMedicationReminder={handleToggleMedicationReminder}
                       onToggleMedicationCriticalStockAlerts={handleToggleMedicationCriticalStockAlerts}
-                      onNavigateToShopping={() => setActiveTab('shopping')}
+                      onNavigateToShopping={() => navigateToTab('shopping')}
                       onTriggerAlarm={testAlarm}
                       onConsumeDose={handleConsumeDose}
                       onRestoreDose={handleCardRestoreDose}
@@ -756,7 +774,7 @@ export default function App() {
               settings={pharmacySettings}
               onUpdateSettings={setPharmacySettings}
               showToast={showToast}
-              onOpenUserContactsSettings={() => setActiveTab('user-data')}
+              onOpenUserContactsSettings={() => navigateToTab('user-data')}
             />
           )}
 
@@ -791,7 +809,7 @@ export default function App() {
         </main>
 
         {activeTab === 'stock' && <AndroidFab onClick={openAdd} />}
-        <AndroidBottomNav activeTab={activeTab} onTabChange={setActiveTab} alertsCount={alertsCount} />
+        <AndroidBottomNav activeTab={activeTab} onTabChange={navigateToTab} alertsCount={alertsCount} />
 
         {toast && (
           <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[60] max-w-[90%] px-4 py-2.5 bg-slate-900 text-white text-xs font-bold rounded-2xl shadow-xl text-center">

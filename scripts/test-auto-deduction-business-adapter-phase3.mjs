@@ -92,6 +92,10 @@ assert(
   'Auto business scheduler must not know the shared schedule-key prefix'
 );
 
+const recurrence = read('native-android/auto-deduction/AutoDeductionRecurrence.java');
+const cancellation = read('native-android/auto-deduction/AutoDeductionCancellation.java');
+const retry = read('native-android/auto-deduction/AutoDeductionRetry.java');
+
 const getSharedPrefsCount =
   (scheduler.match(/getSharedPreferences\(/g) || []).length;
 assert(
@@ -112,10 +116,6 @@ assert(
     && retryEvidenceStore.includes('AutoDeductionContract.PREFS_FIRE_RETRY'),
   'fire-retry persistence must be owned by AutoDeductionRetryEvidenceStore'
 );
-
-const recurrence = read('native-android/auto-deduction/AutoDeductionRecurrence.java');
-const cancellation = read('native-android/auto-deduction/AutoDeductionCancellation.java');
-const retry = read('native-android/auto-deduction/AutoDeductionRetry.java');
 
 assert(
   recurrence.includes('scheduler.schedulingAdapter().scheduleOccurrence('),

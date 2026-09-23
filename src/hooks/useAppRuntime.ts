@@ -39,6 +39,8 @@ export interface AppRuntimeDeps {
   hydrated: boolean;
   isFirstRun: boolean;
   soundEnabled: boolean;
+  fontScale: 'normal' | 'large';
+  isCompactView: boolean;
   notificationsEnabled: boolean;
   criticalStockAlertsEnabled: boolean;
   exactAlarmPermission: ExactAlarmPermission | null;
@@ -77,7 +79,7 @@ export interface AppRuntimeDeps {
 export function useAppRuntime(deps: AppRuntimeDeps) {
   const {
     medications, logs, pharmacySettings, hydrated, isFirstRun, soundEnabled,
-    notificationsEnabled, criticalStockAlertsEnabled, exactAlarmPermission,
+    fontScale, isCompactView, notificationsEnabled, criticalStockAlertsEnabled, exactAlarmPermission,
     criticalAlarmResumeTick, doseAlarmResumeTick, doseLifecycleTick,
     globalAutoDeductEnabled, selectDoseMode, settingsModalMode,
     allowManualTakeActionByMedicationId, setMedications, setLogs,

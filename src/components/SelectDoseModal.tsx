@@ -23,16 +23,14 @@ import {
   isUiConsumedRestoreEligible,
 } from '../utils/medActions';
 import { Modal } from './ui/Modal';
-
 export type SelectDoseMode = 'take' | 'restore' | 'manage';
-
 export interface SelectDoseModalProps {
   isOpen: boolean;
   medication: Medication | null;
   /**
    * take = single-purpose dose selection.
    * restore = single-purpose restore selection.
-   * manage = unified multi-dose management (preferred for Card).
+   * manage = unified multi-dose management.
    */
   mode?: SelectDoseMode;
   /** Used by take/restore modes and as take action in manage mode. */
@@ -45,7 +43,6 @@ export interface SelectDoseModalProps {
   logs?: ConsumptionLog[];
   onClose: () => void;
 }
-
 /**
  * Multi-dose selection / management UI.
  * Does not guess a dose — the user must pick a specific doseId.
@@ -66,7 +63,6 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
   onClose,
 }) => {
   if (!medication) return null;
-
   const today = getTodayDateString();
   const now = new Date();
   const schedule: MedicationDose[] = Array.isArray(medication.doseSchedule)
@@ -79,7 +75,6 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
   const isManage = mode === 'manage';
   const isRestore = mode === 'restore';
   const isAutoActive = isMedicationAutoDeductActive(medication);
-
   const title =
     isManage
       ? 'إدارة الجرعات'
@@ -91,7 +86,6 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
     : isRestore
       ? 'اختر الجرعة المراد استرجاعها'
       : 'اختر الجرعة التي تناولتها';
-
   // Empty state only for pure take/restore modes.
   // Restore mode: allDone when no dose has a valid Restore action
   // (consumed+evidence OR pure-auto projection). Not merely "completed".
@@ -114,11 +108,9 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
       const canRestoreThis = isUiConsumedRestoreEligible(consumed, skipped, evidence);
       return !canRestoreThis;
     });
-
   const emptyMessage = isRestore
     ? 'لا توجد جرعات قابلة للاسترجاع اليوم'
     : 'تم تناول جميع جرعات اليوم';
-
   return (
     <Modal isOpen={isOpen} onClose={onClose} label={title} variant="center">
       <div className="bg-white rounded-[28px] shadow-xl w-full max-w-sm mx-auto overflow-hidden border border-slate-200/80">
@@ -143,7 +135,6 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
             <X className="w-5 h-5" />
           </button>
         </div>
-
         <div className="p-3 space-y-2">
           {allDone ? (
             <div className="text-center py-6 px-4">
@@ -190,7 +181,6 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
               const whenLabel = dose.description
                 ? `${dayLabel} • ${timeLabel} (${dose.description})`
                 : `${dayLabel} • ${timeLabel}`;
-
               if (isManage) {
                 // Effective Auto-Deduction state = isAutoActive (single source:
                 // isMedicationAutoDeductActive). Auto OFF = manual mode; restored
@@ -209,7 +199,6 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                 let statusText: string;
                 let action: 'take' | 'restore' | null;
                 let actionLabel: string;
-
                 if (isAutoConsumed) {
                   // Exact Auto with active exact_auto evidence → historical Restore.
                   statusText = 'تم الخصم تلقائيًا';
@@ -245,7 +234,6 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                   action = 'take';
                   actionLabel = 'تناول الجرعة';
                 }
-
                 // Restore display amount only from evidence; Take uses schedule.
                 const amountLabel =
                   action === 'restore'
@@ -258,7 +246,6 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                 } else if (action === 'take' && scheduleAmount > 0) {
                   actionLabel = `تناول الجرعة (-${scheduleAmount})`;
                 }
-
                 return (
                   <div
                     key={dose.id}
@@ -322,7 +309,6 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                   </div>
                 );
               }
-
               // Single-purpose take / restore list.
               // Restore list: evidence-only amount; take list: schedule amount.
               const amountLabel = isRestore
@@ -337,7 +323,6 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                 ? isUiConsumedRestoreEligible(consumed, skipped, historicalAmount)
                 : !completed;
               const isDone = !isSelectable;
-
               let ariaLabel: string;
               let statusLabel: string | null = null;
               if (isRestore) {
@@ -363,7 +348,6 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                 ariaLabel = `تناول ${whenLabel} — ${amountLabel}`;
                 statusLabel = 'اختيار';
               }
-
               return (
                 <button
                   key={dose.id}

@@ -9,8 +9,7 @@ import {
   loadCriticalNotificationClaims,
 } from '../utils/criticalNotificationClaims';
 import {
-  releaseInFlightCriticalNotificationClaim,
-  tryClaimCriticalNotification,
+  runWithCriticalNotificationClaim,
   updateCriticalNotificationClaim,
 } from '../utils/criticalNotificationClaimCoordinator';
 import {
@@ -103,45 +102,49 @@ export function useStockAlerts({
       // foreground notification when the medication has already crossed.
       // Do NOT cancel the future alarm before foreground delivery succeeds:
       // it is the recovery fallback if delivery fails (#419).
-      void (async () => {
-        const acquired = await tryClaimCriticalNotification(med.id, true);
-        if (!acquired) return;
-
-        let sent = false;
-        try {
-          const currentPills = Number(med.currentPills) || 0;
-          const unit = med.unit || 'قرص';
-          sent = await Promise.resolve(
-            sendCriticalStockAlert(
-              med.id,
-              med.name,
-              daysLeft,
-              currentPills,
-              unit
-            )
-          );
-        } catch {
-          sent = false;
-        }
-
-        if (!sent) {
-          const released = await releaseInFlightCriticalNotificationClaim(med.id);
-          if (!released) {
-            console.warn('[critical-stock] failed to release failed foreground claim');
+      void runWithCriticalNotificationClaim(
+        med.id,
+        true,
+        async () => {
+          let sent = false;
+          try {
+            const currentPills = Number(med.currentPills) || 0;
+            const unit = med.unit || 'قرص';
+            sent = await Promise.resolve(
+              sendCriticalStockAlert(
+                med.id,
+                med.name,
+                daysLeft,
+                currentPills,
+                unit
+              )
+            );
+          } catch {
+            sent = false;
           }
-          return;
-        }
 
-        // The notification is accepted first. Only now invalidate and cancel
-        // the future scheduled fallback. A cancellation failure remains
-        // protected by the native operation-version/tombstone boundary and
-        // will be retried by reconciliation.
-        bumpCriticalAlarmGeneration(med.id);
-        await enqueueCriticalAlarmOp(
-          med.id,
-          () => cancelCriticalAlarm(med.id)
-        );
-      })();
+          if (!sent) {
+            const released = await updateCriticalNotificationClaim(
+              med.id,
+              (current) =>
+                current?.claimed && current.alarmTime === null
+                  ? { claimed: false, alarmTime: null }
+                  : current
+            );
+            if (!released.ok) {
+              console.warn('[critical-stock] failed to release failed foreground claim');
+            }
+            return false;
+          }
+
+          bumpCriticalAlarmGeneration(med.id);
+          await enqueueCriticalAlarmOp(
+            med.id,
+            () => cancelCriticalAlarm(med.id)
+          );
+          return true;
+        }
+      );
     }
   }, [medications, criticalStockAlertsEnabled, hydrated, isFirstRun]);
 }

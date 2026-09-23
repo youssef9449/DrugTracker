@@ -74,10 +74,10 @@ export function MedicationOverflowMenu({
   useEffect(() => {
     if (!onRegisterBackHandler) return;
     const unregister = overflowOpen
-      ? onRegisterBackHandler('medication-overflow', () => setOverflowOpen(false), 100)
+      ? onRegisterBackHandler(`medication-overflow:${medication.id}`, () => setOverflowOpen(false), 100)
       : undefined;
     const unregisterDelete = deleteConfirmOpen
-      ? onRegisterBackHandler('medication-delete-confirm', () => setDeleteConfirmOpen(false), 110)
+      ? onRegisterBackHandler(`medication-delete-confirm:${medication.id}`, () => setDeleteConfirmOpen(false), 110)
       : undefined;
     return () => {
       unregister?.();

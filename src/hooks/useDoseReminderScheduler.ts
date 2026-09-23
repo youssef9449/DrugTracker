@@ -24,6 +24,13 @@ import {
   getDoseReminderSlots,
   type DoseReminderSlot,
 } from '../utils/doseReminderDefinitions';
+export {
+  doseScheduleKey,
+  parseDoseScheduleKey,
+  getDoseReminderSlots,
+};
+export type { DoseReminderSlot };
+
 /**
  * Options for {@link useDoseReminderScheduler}.
  */

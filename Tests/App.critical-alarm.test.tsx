@@ -1,9 +1,4 @@
-import {
-  __setStockMutationOrderingTestHooks,
-  __setManualEnvelopeTestHooks,
-  __setAutoStockGateTestHooks,
-  __setExactAutoEnvelopeTestHooks,
-} from '../utils/autoStockTestHooks';
+import { __setExactAutoEnvelopeTestHooks } from '../utils/autoStockTestHooks';
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
@@ -64,13 +59,11 @@ vi.mock('@/utils/runAutoDeductionReconciliation', () => ({
 
 import App from '@/App';
 import { getTodayDateString } from '@/utils/dateCalculations';
-import { runAutoDeductionReconciliation } from '@/utils/runAutoDeductionReconciliation';
 
-import { getInitialMedications } from './fixtures/initialData';
-import {
-  scheduleCriticalAlarm,
-  cancelCriticalAlarm } from '@/utils/notifications';
-import { initNativeBridge } from '@/native';
+
+
+import { scheduleCriticalAlarm, cancelCriticalAlarm } from '@/utils/notifications';
+
 
 const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 

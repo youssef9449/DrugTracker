@@ -10,7 +10,6 @@ import {
 import { listScheduledCriticalMedicationIdsNative } from '../utils/criticalAlarmNative';
 import {
   loadCriticalNotificationClaims,
-  saveCriticalNotificationClaims,
   getCriticalNotificationClaim,
 } from '../utils/criticalNotificationClaims';
 import type { ExactAlarmPermission } from '../utils/exactAlarm';

@@ -38,6 +38,7 @@ interface NotificationRuntimePlugin {
   cancel(options: { namespace: string; identity: string }): Promise<{ ok: boolean; error?: string }>;
   checkPermission(): Promise<{ enabled: boolean }>;
   checkChannel(options: { channelId: string }): Promise<{ enabled: boolean }>;
+  retryPersistedNotificationDeliveries(): Promise<{ retried: number }>;
   addListener(
     eventName: 'notificationReceived' | 'notificationActionPerformed',
     listener: (event: Record<string, unknown>) => void
@@ -243,6 +244,17 @@ export async function getPendingNotificationResult(
       error: boundaryError.message,
       errorCode: boundaryError.code,
     };
+  }
+}
+
+export async function retryPersistedNotificationDeliveries(): Promise<number> {
+  if (!isAndroidNotificationRuntime()) return 0;
+  try {
+    const result = await NotificationRuntime.retryPersistedNotificationDeliveries();
+    return Number.isFinite(result?.retried) ? result.retried : 0;
+  } catch (error) {
+    console.warn('[notification-runtime] persisted delivery retry failed:', error);
+    return 0;
   }
 }
 

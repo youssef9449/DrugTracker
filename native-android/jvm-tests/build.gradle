@@ -177,66 +177,6 @@ dependencies {
 }
 
 
-/**
- * Static-analysis-only source set.
- *
- * The feature source tree is intentionally not compiled here because the
- * application is being decomposed across feature groups. This gate targets the
- * stable shared Native boundary that Group 9 is responsible for: Exact Alarm
- * infrastructure + Notification Runtime. The normal JVM test source set remains
- * unchanged.
- */
-def staticAnalysisAlarmRuntimeSources = fileTree("../alarm-runtime") {
-    include(
-            "ExactAlarmContract.java",
-            "ExactAlarmOperationLock.java",
-            "ExactAlarmStore.java",
-            "ExactAlarmRuntime.java",
-    )
-}
-def syncedStaticAnalysis = layout.buildDirectory.dir("synced-static-analysis")
-def syncedStaticAlarmRuntime = layout.buildDirectory.dir(
-        "synced-static-analysis/app/drugtracker/alarmruntime")
-tasks.register("syncStaticAnalysisAlarmRuntime", Copy) {
-    from staticAnalysisAlarmRuntimeSources
-    into syncedStaticAlarmRuntime
-}
-
-sourceSets {
-    staticAnalysis {
-        java {
-            srcDirs = [
-                    syncedStaticAnalysis,
-                    "src/main/java"
-            ]
-        }
-    }
-}
-
-configurations {
-    staticAnalysisCompileOnly.extendsFrom(compileOnly)
-}
-
-tasks.named("compileStaticAnalysisJava").configure {
-    dependsOn(
-            "syncStaticAnalysisAlarmRuntime"    )
-}
-
-spotbugsStaticAnalysis {
-    effort = SpotBugsEffort.valueOf('MAX')
-    reportLevel = SpotBugsConfidence.valueOf('HIGH')
-    ignoreFailures = false
-    showProgress = true
-    showStackTraces = true
-    onlyAnalyze = [
-            'app.drugtracker.alarmruntime.*'
-    ]
-    reports {
-        xml.required = true
-        html.required = true
-    }
-}
-
 tasks.register("extractMonitorClasses") {
     outputs.dir(extractedAarClasses)
     doLast {

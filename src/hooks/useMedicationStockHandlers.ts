@@ -19,7 +19,6 @@ export function useMedicationStockHandlers(
 ) {
   const {
     soundEnabled,
-    selectDoseMode,
     setMedications,
     setLogs,
     setSelectDoseMed,

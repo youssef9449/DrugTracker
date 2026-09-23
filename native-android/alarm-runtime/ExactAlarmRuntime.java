@@ -354,7 +354,8 @@ public final class ExactAlarmRuntime {
             if (manager == null) {
                 rollbackScheduleLocked(
                         request.storageKey,
-                        operationVersion);
+                        operationVersion,
+                        previousScheduleRaw);
                 return ScheduleResult.fail(
                         "alarm_manager_unavailable");
             }
@@ -370,7 +371,8 @@ public final class ExactAlarmRuntime {
                 if (pendingIntent == null) {
                     rollbackScheduleLocked(
                             request.storageKey,
-                            operationVersion);
+                            operationVersion,
+                            previousScheduleRaw);
                     return ScheduleResult.fail(
                             "pending_intent_build_failed");
                 }
@@ -390,14 +392,16 @@ public final class ExactAlarmRuntime {
                 Log.w(TAG, "exact alarm install denied", e);
                 rollbackScheduleLocked(
                         request.storageKey,
-                        operationVersion);
+                        operationVersion,
+                        previousScheduleRaw);
                 return ScheduleResult.fail(
                         "exact_alarm_permission_denied");
             } catch (Exception e) {
                 Log.e(TAG, "exact alarm install failed", e);
                 rollbackScheduleLocked(
                         request.storageKey,
-                        operationVersion);
+                        operationVersion,
+                        previousScheduleRaw);
                 return ScheduleResult.fail("schedule_failed");
             }
 

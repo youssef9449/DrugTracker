@@ -126,5 +126,9 @@ export async function scheduleSnoozedDoseReminder(
     }
     return;
   }
-  scheduleWebNotification(title, body);
+  await scheduleWebNotification(title, body, {
+    namespace: 'dose-reminder-snooze',
+    identity: `${medId}::${id}`,
+    at: new Date(Date.now() + minutes * 60_000),
+  });
 }

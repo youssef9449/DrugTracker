@@ -1,7 +1,6 @@
 /**
  * Reconciliation orchestrator — runs inside withAutoStockMutationGate so it always
  * mutates FRESH durable state (not a React snapshot captured before the gate).
- *
  * Durability (Option B for partial native ack):
  *   Once meds + logs are successfully written, exact markers + deterministic
  *   log ids are the JS recovery source. Native remaining FIRED events are
@@ -9,7 +8,6 @@
  *   Envelope is cleared after successful meds+logs commit even if some native
  *   marks fail — those marks retry via listFired + already_applied.
  */
-
 import type { ConsumptionLog, Medication } from '../types';
 import {
   listFiredAutoDeductionEvents,
@@ -42,7 +40,6 @@ import {
 } from './stockEnvelopeRecovery';
 import { allocateMutationSeq } from './stockMutationOrdering';
 import { persist } from './storage';
-
 export interface ExactAutoEnvelope {
   version: 1;
   status: 'js_ready';
@@ -59,7 +56,6 @@ export interface ExactAutoEnvelope {
   /** Shared causal order with Manual envelopes — required (no legacy seq). */
   mutationSeq: number;
 }
-
 export interface RunReconciliationInput {
   globalAutoDeductEnabled: boolean;
   /** Prefer omit — gate loads durable state. Kept for tests that inject. */
@@ -81,7 +77,6 @@ export interface RunReconciliationInput {
   durableState?: AutoStockDurableState;
   now?: Date;
 }
-
 export interface RunReconciliationOutput extends ReconcileFiredResult {
   markedCount: number;
   recoveredEnvelope: boolean;
@@ -96,12 +91,10 @@ export interface RunReconciliationOutput extends ReconcileFiredResult {
   nativeStockSyncFailed?: boolean;
   nativeStockSyncError?: string;
 }
-
 /** @internal test-only envelope injectors. */
 let testLoadEnvelope: (() => ExactAutoEnvelope | null) | null = null;
 let testSaveEnvelope: ((env: ExactAutoEnvelope | null) => string | null) | null =
   null;
-
 /** @internal test-only */
 export function __setExactAutoEnvelopeTestHooks(hooks: {
   load?: () => ExactAutoEnvelope | null;
@@ -110,17 +103,14 @@ export function __setExactAutoEnvelopeTestHooks(hooks: {
   testLoadEnvelope = hooks?.load ?? null;
   testSaveEnvelope = hooks?.save ?? null;
 }
-
 export function defaultLoadEnvelope(): ExactAutoEnvelope | null {
   if (testLoadEnvelope) return testLoadEnvelope();
   return loadExactAutoStockEnvelope() as ExactAutoEnvelope | null;
 }
-
 export function defaultSaveEnvelope(env: ExactAutoEnvelope | null): string | null {
   if (testSaveEnvelope) return testSaveEnvelope(env);
   return saveExactAutoStockEnvelope(env);
 }
-
 export function runAutoDeductionReconciliation(
   input: RunReconciliationInput
 ): Promise<RunReconciliationOutput> {
@@ -135,7 +125,6 @@ export function runAutoDeductionReconciliation(
   }
   return withAutoStockMutationGate((fresh) => runOnce(input, fresh));
 }
-
 async function markAll(
   acks: Array<{ medicationId: string; doseId: string; calendarDate: string }>,
   mark: (
@@ -162,7 +151,6 @@ async function markAll(
   }
   return { markedCount, failed };
 }
-
 async function runOnce(
   input: RunReconciliationInput,
   fresh: AutoStockDurableState
@@ -174,12 +162,10 @@ async function runOnce(
       markAutoDeductionEventReconciled(medicationId, doseId, calendarDate));
   const loadEnvelope = input.loadEnvelope ?? defaultLoadEnvelope;
   const saveEnvelope = input.saveEnvelope ?? defaultSaveEnvelope;
-
   // Prefer explicit inject for tests; otherwise durable gate state.
   let baseMeds = input.medications ?? fresh.medications;
   let baseLogs = input.logs ?? fresh.logs;
   const preNativeConvergenceMeds = baseMeds;
-
   // Auto owns the live stock balance in Native. Seed only missing rows and
   // mirror authoritative Native currentPills into the JS durable snapshot.
   const initialStockConvergence = await convergeAutoDeductionStock(baseMeds);
@@ -204,7 +190,6 @@ async function runOnce(
     const before = preNativeConvergenceMeds.find((x) => x.id === m.id);
     return before != null && Number(before.currentPills) !== Number(m.currentPills);
   });
-
   // Unified Manual + Exact Auto envelope recovery (mutationSeq causal order).
   // Highest seq above lastApplied is recovered first (full snapshot). Lower
   // pending envelopes never overwrite while higher is unresolved. Manual path
@@ -225,8 +210,7 @@ async function runOnce(
         clear: () => saveManualStockEnvelope(null),
       });
     }
-
-    // Only current Phase 4 envelopes are valid; the application has not
+    // Only current envelopes are valid; the application has not
     // shipped any older envelope format.
     const existingExact = loadEnvelope();
     if (existingExact) {
@@ -240,7 +224,6 @@ async function runOnce(
         clear: () => saveEnvelope(null),
       });
     }
-
     if (pending.length > 0) {
       const commit = (
         state: AutoStockDurableState,
@@ -256,7 +239,6 @@ async function runOnce(
         }
         return commitDurableAutoStockState(state, { appliedMutationSeq });
       };
-
       const unified = await recoverAllPendingStockEnvelopes(
         {
           medications: baseMeds,
@@ -266,10 +248,8 @@ async function runOnce(
         pending,
         commit
       );
-
       baseMeds = unified.state.medications;
       baseLogs = unified.state.logs;
-
       // A recovered foreground envelope may contain a snapshot captured before
       // a later Native Auto deduction. Re-read Native stock after replay so the
       // returned JS mirror can never overwrite a newer background deduction.
@@ -291,7 +271,6 @@ async function runOnce(
         };
       }
       baseMeds = postEnvelopeConvergence.medications;
-
       if (unified.exactToAcknowledge.length > 0) {
         const { markedCount, failed } = await markAll(unified.exactToAcknowledge, mark);
         return {
@@ -314,7 +293,6 @@ async function runOnce(
           durabilityBlocked: unified.durabilityBlocked,
         };
       }
-
       if (unified.durabilityBlocked) {
         return {
           medications: baseMeds,
@@ -369,7 +347,6 @@ async function runOnce(
       nativeListError: e instanceof Error ? e.message : 'list_fired_failed',
     } as RunReconciliationOutput;
   }
-
   if (!events.length) {
     if (nativeStockChanged) {
       // Native is the Android authority; persist only the JS mirror here.
@@ -394,7 +371,6 @@ async function runOnce(
       partialNativeAck: false,
     };
   }
-
   // Every FIRED occurrence is applied/verified against the Native stock
   // authority before JS creates its log/history evidence.
   const repairedEvents: AutoDeductionEvent[] = [];
@@ -406,7 +382,6 @@ async function runOnce(
       repairedEvents.push(event);
       continue;
     }
-
     const stockResult = await applyAutoDeductionStock(
       event.medicationId,
       event.doseId,
@@ -437,7 +412,6 @@ async function runOnce(
         : {}),
     });
   }
-
   const postRepairConvergence = await convergeAutoDeductionStock(baseMeds);
   if (!postRepairConvergence.ok) {
     return {
@@ -460,17 +434,14 @@ async function runOnce(
     const before = preNativeConvergenceMeds.find((x) => x.id === m.id);
     return before != null && Number(before.currentPills) !== Number(m.currentPills);
   });
-
   // Recovery may have durably changed the global master switch while the
   // original `fresh` snapshot is now stale. Re-read it after envelope recovery
   // and before creating/committing any new Exact-Auto mutation envelope.
   const durableGlobalAutoDeductEnabled = loadDurableGlobalAutoDeductEnabled();
-
   const result = reconcileFiredEvents(baseMeds, baseLogs, repairedEvents, {
     globalAutoDeductEnabled: durableGlobalAutoDeductEnabled,
     now: input.now,
   });
-
   if (!result.mutated && result.toAcknowledge.length === 0) {
     return {
       ...result,
@@ -481,7 +452,6 @@ async function runOnce(
       partialNativeAck: false,
     };
   }
-
   // Acknowledge-only: markers already durable in baseMeds. If Native changed
   // the balance while JS was unavailable, expose that mirror update to React;
   // the normal application persistence path will store it in localStorage.
@@ -495,7 +465,6 @@ async function runOnce(
       partialNativeAck: failed.length > 0,
     };
   }
-
   // Mutating path: envelope → meds+logs → mark → clear (Option B)
   const alloc = allocateMutationSeq();
   if (!alloc.ok) {
@@ -523,7 +492,6 @@ async function runOnce(
     createdAt: new Date().toISOString(),
     mutationSeq,
   };
-
   const envErr = saveEnvelope(envelope);
   if (envErr) {
     return {
@@ -539,7 +507,6 @@ async function runOnce(
       durabilityBlocked: true,
     };
   }
-
   let writeOk = true;
   if (input.persistMeds || input.persistLogs) {
     const medErr = input.persistMeds
@@ -558,7 +525,6 @@ async function runOnce(
     );
     if (err) writeOk = false;
   }
-
   if (!writeOk) {
     // Keep envelope for recovery; do not mark native
     return {
@@ -574,12 +540,10 @@ async function runOnce(
       durabilityBlocked: true,
     };
   }
-
   const { markedCount, failed } = await markAll(result.toAcknowledge, mark);
   // Option B: JS durable → clear envelope even if some marks failed.
   // Remaining FIRED + markers + deterministic logs recover on next run.
   saveEnvelope(null);
-
   return {
     ...result,
     markedCount,
@@ -587,5 +551,3 @@ async function runOnce(
     partialNativeAck: failed.length > 0,
   };
 }
-
-

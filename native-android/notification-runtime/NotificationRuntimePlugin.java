@@ -149,6 +149,18 @@ public final class NotificationRuntimePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void checkDoseOccurrenceOwnership(PluginCall call) {
+        String medicationId = call.getString("medicationId", "");
+        String doseId = call.getString("doseId", "");
+        String operationVersion = call.getString("operationVersion", "");
+        boolean owned = new app.drugtracker.dosereminder.DoseReminderAlarmAdapter(getContext())
+                .ownsActiveOccurrence(medicationId, doseId, operationVersion);
+        JSObject ret = new JSObject();
+        ret.put("owned", owned);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
     public void checkChannel(PluginCall call) {
         String channelId = call.getString("channelId", "");
         boolean enabled = new NotificationRuntime(getContext())

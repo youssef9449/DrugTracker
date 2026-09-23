@@ -1,11 +1,6 @@
 import { useState, useMemo, useEffect, type FC } from 'react';
 import {
   MessageCircle,
-  CheckSquare,
-  Square,
-  Layers,
-  Box,
-  Pill,
   ExternalLink,
   X,
 } from 'lucide-react';
@@ -27,6 +22,7 @@ import { getMedSizes } from '../utils/medicationPackaging';
 import { Checkbox } from './ui/Checkbox';
 import { SegmentedButton } from './ui/SegmentedButton';
 import { PharmacyShoppingSendModal } from './PharmacyShoppingSendModal';
+import { PharmacyShoppingMedicationRow } from './PharmacyShoppingMedicationRow';
 function shoppingDurationDays(
   med: Medication,
   medicationPeriods: Record<string, { value: number | ''; unit: 'day' | 'month' }>,
@@ -542,126 +538,32 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
           const { status } = calculateMedicationStatus(med);
           const { quantity: suggestedPills } = getRequestedAmount(med);
           const requestedPills = getRequestedPills(med, suggestedPills);
-          const depletion = getDepletionDate(med);
-          const isSelected = selectedMedIds.has(med.id);
-          const availableUnits = getAvailableUnits(med);
-          const selectedUnits = getSelectedUnits(med);
           return (
-            <div
+            <PharmacyShoppingMedicationRow
               key={med.id}
-              className={`bg-white rounded-2xl border p-2.5 sm:p-3 shadow-xs transition-colors ${
-                isSelected ? 'border-teal-300 ring-1 ring-teal-100' : 'border-slate-200/80 opacity-75'
-              }`}
-            >
-              {/* Header: Select Checkbox, Name, Status Badge, Remaining/Depletion & Remove Button */}
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-start gap-2 min-w-0">
-                  <button
-                    type="button"
-                    onClick={() => handleToggleSelect(med.id)}
-                    className="mt-0.5 text-teal-700 shrink-0 transition hover:scale-105 active:scale-95"
-                  >
-                    {isSelected ? <CheckSquare className="w-4.5 h-4.5 text-teal-700" /> : <Square className="w-4.5 h-4.5 text-slate-300" />}
-                  </button>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <h4 className="font-bold text-slate-900 text-xs sm:text-sm leading-tight">{med.name}</h4>
-                      <span
-                        className={`inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded border leading-none ${
-                          status === 'out_of_stock'
-                            ? 'bg-red-50 text-red-700 border-red-200'
-                            : status === 'critical'
-                            ? 'bg-rose-50 text-rose-700 border-rose-200'
-                            : status === 'warning'
-                            ? 'bg-amber-50 text-amber-700 border-amber-200'
-                            : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                        }`}
-                      >
-                        {status === 'out_of_stock' ? 'نفد' : status === 'critical' ? 'حرج' : status === 'warning' ? 'تنبيه' : 'آمن'}
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-slate-500 mt-0.5 leading-tight">
-                      المتبقي: <strong className="font-mono text-slate-700">{med.currentPills}</strong> • ينفد {formatDepletionDate(depletion.dateStr, depletion.daysLeft, Number(med.currentPills) || 0)}
-                    </div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleRemoveFromShopping(med.id)}
-                  aria-label={`إزالة ${med.name} من قائمة الشراء`}
-                  title="إزالة من قائمة الشراء"
-                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 active:scale-95"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-              {/* Unit selector + quantity controls */}
-              <div className="mt-2 pt-2 border-t border-slate-100 space-y-1.5">
-                {/* Toolbar: keep the quantity-mode switch on the right and
-                    the unit controls in a fixed left column. In custom mode,
-                    each quantity input is rendered directly under its unit toggle. */}
-                <div className="flex items-start justify-between gap-1.5">
-                  <div className="shrink-0">
-                    <SegmentedButton<'period' | 'custom'>
-                      className="w-[180px] shrink-0"
-                      size="sm"
-                      value={getQuantityMode(med)}
-                      onChange={(val) => handleToggleQuantityMode(med, val, suggestedPills)}
-                      options={[
-                        { value: 'period', label: 'حسب الفترة' },
-                        { value: 'custom', label: 'كمية محددة' },
-                      ]}
-                      aria-label={`طريقة حساب كمية طلب ${med.name}`}
-                    />
-                  </div>
-                  {availableUnits.length > 1 ? (
-                    <div className="flex items-start gap-1 shrink-0">
-                      {availableUnits.map((u) => {
-                        const isActive = selectedUnits.includes(u);
-                        const icon =
-                          u === 'pills' ? (
-                            <Pill className="w-2.5 h-2.5" />
-                          ) : u === 'boxes' ? (
-                            <Box className="w-2.5 h-2.5" />
-                          ) : (
-                            <Layers className="w-2.5 h-2.5" />
-                          );
-                        const boxLabel = med.unit === 'مل' ? 'عبوة' : 'علبة';
-                        const label = u === 'pills' ? med.unit : u === 'boxes' ? boxLabel : 'شريط';
-                        const inputValue = getCustomQuantityInputValue(med, u, suggestedPills);
-                        return (
-                          <div
-                            key={u}
-                            className="flex flex-col items-stretch gap-1 w-[3.75rem] shrink-0"
-                          >
-                            <button
-                              type="button"
-                              onClick={() => handleToggleOrderUnit(med, u, suggestedPills)}
-                              aria-pressed={isActive}
-                              className={`w-full h-[28px] px-1.5 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition cursor-pointer border select-none ${
-                                isActive
-                                  ? 'bg-teal-100 text-teal-950 border-teal-300 shadow-2xs'
-                                  : 'bg-slate-50/80 text-slate-600 border-slate-200/90 hover:bg-slate-100'
-                              }`}
-                            >
-                              {icon}
-                              <span className="whitespace-nowrap">{label}</span>
-                            </button>
-                            {getQuantityMode(med) === 'custom' && isActive && (
-                              <input
-                                type="number"
-                                min="1"
-                                value={inputValue}
-                                onChange={(event) =>
-                                  handleCustomQuantityChange(med, u, event.target.value)
-                                }
-                                className="w-full min-w-0 box-border rounded-md border border-slate-300 bg-white px-1 py-0.5 text-center font-mono font-bold text-xs focus:ring-1 focus:ring-teal-500"
-                                aria-label={`كمية ${med.name} ${label}`}
-                              />
-                            )}
-                          </div>
-                        );
-                      })}
+              medication={med}
+              status={status}
+              suggestedPills={suggestedPills}
+              requestedPills={requestedPills}
+              isSelected={selectedMedIds.has(med.id)}
+              availableUnits={getAvailableUnits(med)}
+              selectedUnits={getSelectedUnits(med)}
+              getQuantityMode={getQuantityMode}
+              getCustomQuantityInputValue={getCustomQuantityInputValue}
+              getMedicationPeriod={getMedicationPeriod}
+              getUnitQuantity={getUnitQuantity}
+              getOrderBreakdown={getOrderBreakdown}
+              unitLabel={unitLabel}
+              describeOrderQuantityBreakdown={describeOrderQuantityBreakdown}
+              onToggleSelect={handleToggleSelect}
+              onRemoveFromShopping={handleRemoveFromShopping}
+              onToggleQuantityMode={handleToggleQuantityMode}
+              onToggleOrderUnit={handleToggleOrderUnit}
+              onCustomQuantityChange={handleCustomQuantityChange}
+              onMedicationPeriodChange={handleMedicationPeriodChange}
+            />
+          );
+        })}}
                     </div>
                   ) : (
                     getQuantityMode(med) === 'custom' &&

@@ -12,10 +12,7 @@ import {
   clearCriticalNotificationClaim,
   claimsEqual,
 } from '../utils/criticalNotificationClaims';
-import {
-  bumpCriticalAlarmGeneration,
-  enqueueCriticalAlarmOp,
-} from '../utils/criticalAlarmOperations';
+import { enqueueCriticalAlarmOp } from '../utils/criticalAlarmOperations';
 
 interface UseStockAlertsOptions {
   medications: Medication[];
@@ -176,7 +173,6 @@ export function useStockAlerts({
             if (claim.claimed && claim.alarmTime !== null && claim.alarmTime > Date.now()) {
               void enqueueCriticalAlarmOp(
                 med.id,
-                bumpCriticalAlarmGeneration(med.id),
                 () => cancelCriticalAlarm(med.id)
               );
             }
@@ -204,7 +200,6 @@ export function useStockAlerts({
       if (claim?.claimed && claim.alarmTime !== null) {
         void enqueueCriticalAlarmOp(
           med.id,
-          bumpCriticalAlarmGeneration(med.id),
           () => cancelCriticalAlarm(med.id)
         );
       }
@@ -230,7 +225,6 @@ export function useStockAlerts({
             // per-medication queue; idempotent.
             void enqueueCriticalAlarmOp(
               med.id,
-              bumpCriticalAlarmGeneration(med.id),
               () => cancelCriticalAlarm(med.id)
             );
             return;

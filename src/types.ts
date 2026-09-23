@@ -13,16 +13,15 @@ export interface ConsumptionLog {
   relatedLogId?: string;
   /**
    * Stable MedicationDose.id when this log is for a specific dose slot
-   * (Phase 3). Older dose_taken logs may omit it.
+   * (). Older dose_taken logs may omit it.
    */
   doseId?: string;
 }
-
 export interface Medication {
   id: string;
   name: string;
   /**
-   * Durable application-facing live stock balance (Issue #266).
+   * Durable application-facing live stock balance ().
    * On Android, the value is mirrored from the Auto-owned Native stock
    * authority, which can mutate while the WebView is unavailable. UI and
    * status use this value directly; there is no second projected/effective
@@ -93,8 +92,7 @@ export interface Medication {
    */
   doseSkippedHistory?: Record<string, string[]>;
 }
-
-/** One individual dose event within a day (Phase 1 multi-dose model). */
+/** One individual dose event within a day (multi-dose model). */
 export interface MedicationDose {
   id: string;
   /** Amount taken at this dose event (must be > 0). */
@@ -104,17 +102,13 @@ export interface MedicationDose {
   /** Optional clarification / instruction for this dose (e.g. "بعد الإفطار", "قبل النوم"). */
   description?: string;
 }
-
 // ─────────────────────────────────────────────────────────────────────
 // Critical-stock notification claim (the ONE business state model).
-//
 // For each medication, during one continuous Critical/Out-of-Stock
 // episode, the user receives AT MOST ONE critical-stock notification.
 // This tiny persistent record answers exactly one question:
-//
 //     "Has this medication's current critical episode already claimed
 //      its critical notification?"
-//
 // Episode semantics:
 //   - Sufficient → Critical/OutOfStock starts an episode.
 //   - Critical → Critical / → OutOfStock is the SAME episode (a day
@@ -124,7 +118,6 @@ export interface MedicationDose {
 //   - Critical → Sufficient ends it (useStockAlerts clears the claim
 //     synchronously on that render → a later critical episode gets a
 //     fresh notification opportunity).
-//
 // `claimed === true` means the episode's single notification
 // opportunity has been consumed:
 //   - `alarmTime: number` — a native one-shot alarm was successfully
@@ -135,14 +128,12 @@ export interface MedicationDose {
 //     state after the fact).
 //   - `alarmTime: null` — the foreground fallback sent the notification
 //     directly.
-//
 // A failed schedule or a failed foreground send leaves
 // `claimed === false`, so the remaining path (scheduled alarm or
 // foreground fallback) stays available. Disabling notifications never
 // consumes the opportunity: while disabled nothing is sent and nothing
 // is marked claimed.
 // ─────────────────────────────────────────────────────────────────────
-
 export interface CriticalNotificationClaim {
   /**
    * True once this episode's notification opportunity has been taken:
@@ -162,18 +153,14 @@ export interface CriticalNotificationClaim {
    */
   alarmTime: number | null;
 }
-
 /**
  * The user-configured stock notification threshold (in days).
- *
  * This is the ONLY threshold. There is no derived "critical" sub-threshold.
  * The user sets `warningThresholdDays` from the Medication Card, and that
  * value is used directly:
- *
  *   daysLeft >  warningThresholdDays  → 'sufficient' (no notification)
  *   daysLeft <= warningThresholdDays  → 'critical'   (ONE notification)
  *   effPills  <= 0                    → 'out_of_stock' (ONE notification)
- *
  * A single state transition (sufficient→critical, or sufficient→out_of_stock)
  * produces exactly ONE notification. The same critical state persisting
  * across app restarts / re-renders / days does NOT produce duplicates.
@@ -184,19 +171,16 @@ export interface Pharmacy {
   phone: string;
   customerCode: string;
 }
-
 export interface UserContact {
   id: string;
   label: string;
   phone: string;
 }
-
 export interface UserAddress {
   id: string;
   label: string;
   address: string;
 }
-
 export interface PharmacySettings {
   defaultDurationDays: 30 | 60;
   pharmacies: Pharmacy[];
@@ -206,7 +190,6 @@ export interface PharmacySettings {
   selectedWhatsappContactIds?: string[];
   selectedWhatsappAddressIds?: string[];
 }
-
 export const DEFAULT_PHARMACY_SETTINGS: PharmacySettings = {
   defaultDurationDays: 30,
   pharmacies: [],
@@ -216,14 +199,11 @@ export const DEFAULT_PHARMACY_SETTINGS: PharmacySettings = {
   selectedWhatsappContactIds: [],
   selectedWhatsappAddressIds: [],
 };
-
 export type MedicationStatus = 'out_of_stock' | 'critical' | 'warning' | 'sufficient';
-
 export interface MedicationStatusInfo {
   daysLeft: number;
   status: MedicationStatus;
 }
-
 export interface MedicationWithStatus {
   med: Medication;
   statusInfo: MedicationStatusInfo;

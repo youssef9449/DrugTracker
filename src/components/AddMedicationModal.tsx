@@ -50,7 +50,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
   // String-typed mirror of `currentPills`, used ONLY by the
   // "المتوفر حالياً" number input so the field can be cleared mid-edit
   // (select-all → delete) without the old `Math.max(0, parseInt || 0)`
-  // snapping it back to 0. Same pattern as packageSizeStr ().
+  // snapping it back to 0. Same pattern as packageSizeStr.
   const [currentPillsStr, setCurrentPillsStr] = useState<string>('30');
   // The UI uses the explicit multi-dose schedule instead of the legacy single-field rate.
   // schedule. dailyDose is still computed as the sum of schedule amounts
@@ -191,7 +191,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
     // the parent passes a new initialData object reference while the
     // modal is already open, we must NOT reset the form (that would
     // blow away in-progress edits). The latest initialData is read from
-    // the closure at the moment the modal opens ().
+    // the closure at the moment the modal opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
   if (!isOpen) return null;

@@ -226,9 +226,8 @@ export function useDoseReminderScheduler({
       const key = doseScheduleKey(medId, doseId);
       const gen = bumpDoseReminderScheduleGeneration(key);
       appliedSignatureRef.current.delete(key);
-      clearRetry(key);
-      // Native cancellation is authoritative. Clear the JS snooze marker only
-      // after the native recurring + snooze cancellation chain succeeds.
+      clearRetry('schedule:' + key);
+
       enqueueRetryable(
         'schedule:' + key,
         key,
@@ -236,10 +235,24 @@ export function useDoseReminderScheduler({
         enqueueDoseReminderScheduleOpGuarded,
         isCurrentDoseReminderScheduleGeneration,
         async () => {
-        await cancelDoseReminder(medId, doseId);
-        await cancelSnoozedDoseReminder(medId, doseId);
-        clearSnoozedDose(medId, doseId);
-      });
+          await cancelDoseReminder(medId, doseId);
+        }
+      );
+
+      const snoozeOperationKey = doseReminderSnoozeKey(medId, doseId);
+      const snoozeGeneration =
+        bumpDoseReminderSnoozeGeneration(snoozeOperationKey);
+      enqueueRetryable(
+        'snooze:' + key,
+        snoozeOperationKey,
+        snoozeGeneration,
+        enqueueDoseReminderSnoozeOpGuarded,
+        isCurrentDoseReminderSnoozeGeneration,
+        async () => {
+          await cancelSnoozedDoseReminder(medId, doseId);
+          clearSnoozedDose(medId, doseId);
+        }
+      );
     };
     // User disabled notifications OR exact-alarm permission is missing →
     // cancel all previously-scheduled dose reminders and clear the tracker.
@@ -556,15 +569,30 @@ export function useDoseReminderScheduler({
           if (!newlyConsumed && !resumeChanged) {
             continue;
           }
+          const snoozeOperationKey =
+            doseReminderSnoozeKey(medId, doseId);
+          const snoozeGeneration =
+            bumpDoseReminderSnoozeGeneration(snoozeOperationKey);
+          enqueueRetryable(
+            'snooze:' + key,
+            snoozeOperationKey,
+            snoozeGeneration,
+            enqueueDoseReminderSnoozeOpGuarded,
+            isCurrentDoseReminderSnoozeGeneration,
+            async () => {
+              await cancelSnoozedDoseReminder(medId, doseId);
+              clearSnoozedDose(medId, doseId);
+            }
+          );
+
           const gen = bumpDoseReminderScheduleGeneration(key);
           enqueueRetryable(
-        'schedule:' + key,
-        key,
-        gen,
-        enqueueDoseReminderScheduleOpGuarded,
-        isCurrentDoseReminderScheduleGeneration,
-        async () => {
-            await cancelSnoozedDoseReminder(medId, doseId);
+            'schedule:' + key,
+            key,
+            gen,
+            enqueueDoseReminderScheduleOpGuarded,
+            isCurrentDoseReminderScheduleGeneration,
+            async () => {
             // After today's reminder time the recurring alarm has already
             // fired (or was suppressed): never retract a fired
             // notification. Only slots still ahead need cancel +

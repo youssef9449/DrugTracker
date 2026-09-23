@@ -207,10 +207,7 @@ export async function isDoseReminderScheduledNative(
         errorCode: 'platform_failure',
       };
     }
-    const scheduled =
-      result.scheduled === true &&
-      (result.triggerAtEpochMs == null ||
-        result.triggerAtEpochMs > Date.now() - 60_000);
+    const scheduled = result.scheduled === true;
     return {
       ok: true,
       scheduled,

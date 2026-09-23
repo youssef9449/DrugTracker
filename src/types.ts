@@ -13,7 +13,7 @@ export interface ConsumptionLog {
   relatedLogId?: string;
   /**
    * Stable MedicationDose.id when this log is for a specific dose slot
-   * (). Older dose_taken logs may omit it.
+   * Stable MedicationDose.id. Older dose_taken logs may omit it.
    */
   doseId?: string;
 }
@@ -21,7 +21,7 @@ export interface Medication {
   id: string;
   name: string;
   /**
-   * Durable application-facing live stock balance ().
+   * Durable application-facing live stock balance.
    * On Android, the value is mirrored from the Auto-owned Native stock
    * authority, which can mutate while the WebView is unavailable. UI and
    * status use this value directly; there is no second projected/effective

@@ -1,4 +1,5 @@
 import type { Medication, ConsumptionLog } from '../../src/types';
+import type { ExactAlarmPermission } from '../../src/utils/exactAlarm';
 import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNativeTypes';
 import { exactAutoLogId } from '../../src/utils/autoDeductionReconciliation';
 
@@ -133,4 +134,20 @@ export async function flushTestMicrotasks(
     if (predicate()) return;
     await Promise.resolve();
   }
+}
+
+export function makeDoseReminderOptions(
+  medications: Medication[] = [],
+  overrides: Record<string, unknown> = {}
+) {
+  return {
+    medications,
+    allowManualTakeActionByMedicationId: makeDoseReminderCapabilityMap(medications),
+    notificationsEnabled: true,
+    hydrated: true,
+    isFirstRun: false,
+    exactAlarmPermission: 'granted' as ExactAlarmPermission | null,
+    resumeTick: 0 as number | undefined,
+    ...overrides,
+  };
 }

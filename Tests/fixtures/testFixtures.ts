@@ -151,3 +151,33 @@ export function makeDoseReminderOptions(
     ...overrides,
   };
 }
+
+export function seedTestMedication(overrides: Partial<Medication> = {}): void {
+  localStorage.setItem(
+    'android_med_tracker_items_v2',
+    JSON.stringify([
+      makeMedication({
+        id: 'med-toggle',
+        name: 'Toggle Med',
+        currentPills: 60,
+        dailyDose: 2,
+        reminderEnabled: false,
+        createdAt: '2024-01-01T00:00:00.000Z',
+        ...overrides,
+      }),
+    ])
+  );
+  localStorage.setItem('android_med_tracker_logs_v2', JSON.stringify([]));
+}
+
+export function readDurableMedication(id = 'med-toggle'): Record<string, unknown> | undefined {
+  const raw = localStorage.getItem('android_med_tracker_items_v2');
+  if (!raw) return undefined;
+  const medications = JSON.parse(raw) as Record<string, unknown>[];
+  return medications.find((medication) => medication.id === id);
+}
+
+export function readDurableLogs(): Record<string, unknown>[] {
+  const raw = localStorage.getItem('android_med_tracker_logs_v2');
+  return raw ? JSON.parse(raw) as Record<string, unknown>[] : [];
+}

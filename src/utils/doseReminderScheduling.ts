@@ -89,9 +89,17 @@ export async function cancelDoseReminder(
   }
   if (!isNativePlatform()) return;
   try {
-    await cancelNotification('dose-reminder', `${medId}::${doseId}`);
+    const cancelled = await cancelNotification(
+      'dose-reminder',
+      `${medId}::${doseId}`
+    );
+    if (!cancelled) {
+      throw new Error('dose_reminder_cancel_failed');
+    }
   } catch (err) {
-    console.warn('[notifications] cancelDoseReminder failed:', err);
+    throw err instanceof Error
+      ? err
+      : new Error('dose_reminder_cancel_failed');
   }
 }
 /**

@@ -1,5 +1,6 @@
 import type { Medication, ConsumptionLog } from '../../src/types';
 import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNativeTypes';
+import { exactAutoLogId } from '../../src/utils/autoDeductionReconciliation';
 
 export function makeMedication(overrides: Partial<Medication> = {}): Medication {
   return {
@@ -68,7 +69,7 @@ export function makeExactAutoLog(
   timestamp = `${date}T08:00:00.000Z`
 ): ConsumptionLog {
   return {
-    id: `exact_auto_${medId}_${doseId}_${date}`,
+    id: exactAutoLogId(medId, doseId, date),
     medicationId: medId,
     medicationName: medName,
     type: 'exact_auto',

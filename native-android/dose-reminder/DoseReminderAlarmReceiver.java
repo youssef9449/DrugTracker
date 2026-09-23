@@ -165,7 +165,7 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
         }
         body += ".";
 
-        new NotificationRuntime(context).post(
+        NotificationRuntime.Request request =
                 new NotificationRuntime.Request(
                         NAMESPACE,
                         medicationId + "::" + doseId,
@@ -178,7 +178,27 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
                         "ic_launcher",
                         true,
                         false,
-                        notificationAction));
+                        notificationAction);
+        NotificationRuntime runtime = new NotificationRuntime(context);
+        NotificationRuntime.PostResult result = runtime.post(request);
+        if (!result.accepted && !"notifications_disabled".equals(result.error)) {
+            try {
+                Thread.sleep(1000L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            result = runtime.post(request);
+            if (!result.accepted && !"notifications_disabled".equals(result.error)) {
+                try {
+                    Thread.sleep(4000L);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                runtime.post(request);
+            }
+        }
     }
 
     private void scheduleNextDay(

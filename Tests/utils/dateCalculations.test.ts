@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   getTodayDateString,
-  getDepletionDate } from '@/utils/dateCalculations';
+  getLocalDateString,
+  nextLocalMidnightEpochMs,
+  getDepletionDate,
+  localEpochMs,
+} from '@/utils/dateCalculations';
 import { NEVER_DEPLETES_DAYS } from '@/utils/time';
 import { formatDepletionDate } from '@/utils/medicationPresentation';
 import type { Medication } from '@/types';
@@ -42,6 +46,24 @@ describe('getTodayDateString', () => {
 });
 
 
+describe('canonical local date/time primitives', () => {
+  it('formats an explicit Date using the device-local calendar date', () => {
+    const input = new Date(2024, 8, 10, 12, 34, 56);
+    expect(getLocalDateString(input)).toBe('2024-09-10');
+  });
+
+  it('calculates the next local midnight from the current wall clock', () => {
+    const input = new Date(2024, 8, 10, 23, 59, 59, 999);
+    expect(nextLocalMidnightEpochMs(input)).toBe(
+      new Date(2024, 8, 11, 0, 0, 0, 0).getTime()
+    );
+  });
+
+  it('rejects an invalid calendar date instead of normalizing it', () => {
+    expect(localEpochMs('2024-02-31', '09:00')).toBeNull();
+  });
+});
+
 describe('getDepletionDate', () => {
   it('returns "ينفد اليوم" when daysLeft is 0', () => {
     const r = getDepletionDate(makeMed({ currentPills: 0, dailyDose: 1 }));
@@ -73,4 +95,3 @@ describe('getDepletionDate', () => {
     expect(r.daysLeft).toBe(NEVER_DEPLETES_DAYS);
   });
 });
-

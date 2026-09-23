@@ -1,6 +1,6 @@
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { AddMedicationModal } from '@/components/AddMedicationModal';
 import type { Medication } from '@/types';
 
@@ -395,5 +395,25 @@ describe('AddMedicationModal — stock helper fields allow empty mid-edit', () =
       fireEvent.change(input, { target: { value: '2' } });
       expect(input.value).toBe('2');
     }
+  });
+});
+
+
+describe('AddMedicationModal — durable failure stays retryable', () => {
+  afterEach(() => cleanup());
+
+  it('does not close after a failed durable save', async () => {
+    const onClose = vi.fn();
+    const onSave = vi.fn().mockResolvedValue(false);
+    render(
+      <AddMedicationModal
+        {...baseProps({ onClose, onSave, initialData: makeMed() })}
+      />
+    );
+
+    fireEvent.click(screen.getByText('حفظ التعديلات'));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

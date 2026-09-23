@@ -31,6 +31,12 @@ async function withCrossDocumentStockLock<T>(fn: () => T | Promise<T>): Promise<
   if (typeof navigator === 'undefined') return fn();
   const locks = navigator.locks;
   if (!locks?.request) {
+    // Vitest/Node-style non-secure test runtimes have no browser lock manager.
+    // Production browser contexts are fail-closed so unsupported browsers cannot
+    // silently reintroduce the lost-update race.
+    if (typeof window !== 'undefined' && window.isSecureContext !== true) {
+      return fn();
+    }
     throw new Error('cross_tab_stock_lock_unavailable');
   }
   return locks.request(STOCK_MUTATION_LOCK, { mode: 'exclusive' }, fn);

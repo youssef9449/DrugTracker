@@ -353,6 +353,9 @@ final class AutoDeductionPersistenceCodec {
         obj.put("timeHhmm", record.timeHhmm);
         obj.put("amount", record.amount);
         obj.put("treatmentEndDate", record.treatmentEndDate == null ? "" : record.treatmentEndDate);
+        // Empty operationVersion is valid only for historical/overdue source
+        // occurrences whose one-shot schedule row has already been consumed.
+        // Active/future obligations still carry the owning operationVersion.
         obj.put("operationVersion", record.operationVersion == null ? "" : record.operationVersion);
         obj.put("recurrenceGeneration", record.recurrenceGeneration);
         obj.put("stockApplied", record.stockApplied);
@@ -386,7 +389,6 @@ final class AutoDeductionPersistenceCodec {
                 || (!treatmentEndDate.isEmpty()
                     && !AutoDeductionContract.isValidCalendarDate(treatmentEndDate))
                 || operationVersion == null
-                || operationVersion.isEmpty()
                 || generation <= 0L
                 || createdAt <= 0L) {
             throw new JSONException("invalid_successor_obligation");

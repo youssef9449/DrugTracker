@@ -410,3 +410,83 @@ describe('useDoseReminders — manual Take capability', () => {
     expect(result.current.alarmingMedication?.id).toBe('med-manual');
   });
 });
+
+
+describe('useDoseReminders — concurrent foreground alarm queue (#386)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('retains a second distinct alarm and presents it after the first is dismissed', () => {
+    const medA = makeMed({ id: 'med-queue-a', name: 'Queue A' });
+    const medB = makeMed({ id: 'med-queue-b', name: 'Queue B' });
+    const { result } = renderHook(() =>
+      useDoseReminders(defaultOpts({ medications: [medA, medB] }))
+    );
+
+    act(() => {
+      result.current.openAlarm('med-queue-a', 'd1');
+      result.current.openAlarm('med-queue-b', 'd1');
+    });
+
+    expect(result.current.alarmingMedication?.id).toBe('med-queue-a');
+
+    act(() => {
+      result.current.dismissAlarm();
+    });
+
+    expect(result.current.alarmingMedication?.id).toBe('med-queue-b');
+    expect(result.current.alarmingDoseId).toBe('d1');
+  });
+
+  it('does not queue the same medication+dose occurrence more than once', () => {
+    const medA = makeMed({ id: 'med-queue-duplicate' });
+    const { result } = renderHook(() =>
+      useDoseReminders(defaultOpts({ medications: [medA] }))
+    );
+
+    act(() => {
+      result.current.openAlarm('med-queue-duplicate', 'd1');
+      result.current.openAlarm('med-queue-duplicate', 'd1');
+    });
+
+    act(() => {
+      result.current.dismissAlarm();
+    });
+
+    expect(result.current.alarmingMedication).toBeNull();
+  });
+
+  it('skips a queued occurrence that becomes consumed before it is displayed', () => {
+    const medA = makeMed({ id: 'med-queue-a', name: 'Queue A' });
+    const medB = makeMed({ id: 'med-queue-b', name: 'Queue B' });
+    const { result, rerender } = renderHook(
+      ({ medications }: { medications: Medication[] }) =>
+        useDoseReminders(defaultOpts({ medications })),
+      { initialProps: { medications: [medA, medB] } }
+    );
+
+    act(() => {
+      result.current.openAlarm('med-queue-a', 'd1');
+      result.current.openAlarm('med-queue-b', 'd1');
+    });
+
+    const consumedB = {
+      ...medB,
+      doseConsumptionHistory: { d1: [getTodayDateString()] },
+    };
+
+    rerender([medA, consumedB]);
+
+    act(() => {
+      result.current.dismissAlarm();
+    });
+
+    expect(result.current.alarmingMedication).toBeNull();
+  });
+});

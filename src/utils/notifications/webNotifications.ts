@@ -152,7 +152,17 @@ export function getWebScheduledNotification(
   namespace: string,
   identity: string
 ): WebScheduledEntry | null {
-  return readEntries()[storageKey(namespace, identity)] ?? null;
+  const entries = readEntries();
+  const key = storageKey(namespace, identity);
+  const entry = entries[key];
+  if (!entry) return null;
+  if (entry.fireAt <= Date.now()) {
+    delete entries[key];
+    writeEntries(entries);
+    return null;
+  }
+  armTimer(entry);
+  return entry;
 }
 
 export async function cancelScheduledWebNotification(

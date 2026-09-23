@@ -37,6 +37,7 @@ interface NotificationRuntimePlugin {
   ): Promise<{ ok: boolean; error?: string }>;
   cancel(options: { namespace: string; identity: string }): Promise<{ ok: boolean; error?: string }>;
   checkPermission(): Promise<{ enabled: boolean }>;
+  checkChannel(options: { channelId: string }): Promise<{ enabled: boolean }>;
   addListener(
     eventName: 'notificationReceived' | 'notificationActionPerformed',
     listener: (event: Record<string, unknown>) => void
@@ -229,6 +230,17 @@ export async function getPendingNotificationResult(
       error: boundaryError.message,
       errorCode: boundaryError.code,
     };
+  }
+}
+
+export async function isNotificationChannelEnabled(channelId: string): Promise<boolean> {
+  if (!isAndroidNotificationRuntime()) return true;
+  try {
+    const result = await NotificationRuntime.checkChannel({ channelId });
+    return result?.enabled === true;
+  } catch (error) {
+    console.warn('[notification-runtime] channel capability check failed:', error);
+    return false;
   }
 }
 

@@ -26,7 +26,7 @@ jobs:
         run: node scripts/verify-architecture.mjs
 
   javascript:
-    name: JavaScript dependency lock
+    name: JavaScript dependency lock and verification
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -40,6 +40,15 @@ jobs:
 
       - name: Install exactly the committed dependency graph
         run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
 
   native:
     name: Native JVM tests and static analysis
@@ -57,4 +66,4 @@ jobs:
 
       - name: Run JVM tests and SpotBugs
         working-directory: native-android/jvm-tests
-        run: bash ./gradlew spotbugsStaticAnalysis --no-daemon
+        run: bash ./gradlew test spotbugsMain --no-daemon

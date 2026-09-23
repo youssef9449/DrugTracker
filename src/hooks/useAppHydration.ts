@@ -11,6 +11,11 @@ import {
 } from '../utils/notifications/notificationPermissions';
 import { getExactAlarmPermission, type ExactAlarmPermission } from '../utils/exactAlarm';
 import { initNativeBridge } from '../native';
+import { isNotificationChannelEnabled } from '../utils/notificationRuntime';
+import {
+  DOSE_REMINDER_CHANNEL_ID,
+  DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
+} from '../utils/notifications/doseReminderNotifications';
 import { loadJson, loadString, persist } from '../utils/storage';
 import { convergeAutoDeductionStock } from '../utils/autoDeductionNativeStock';
 import {
@@ -234,9 +239,20 @@ export function useAppHydration(setters: AppHydrationSetters): void {
       // Native bridge: status bar, back button, notification channels,
       // and listeners. No-op on web — see src/native.ts. Included in
       // Promise.all so setHydrated cannot race ahead of channel setup.
-      initNativeBridge().catch((err) => {
-        console.warn('[App] Native bridge init failed:', err);
-      }),
+      initNativeBridge()
+        .then(async () => {
+          const [backgroundChannel, foregroundChannel] = await Promise.all([
+            isNotificationChannelEnabled(DOSE_REMINDER_CHANNEL_ID),
+            isNotificationChannelEnabled(DOSE_REMINDER_FOREGROUND_CHANNEL_ID),
+          ]);
+          if (localStorage.getItem(NOTIFICATIONS_KEY) === 'true'
+              && (!backgroundChannel || !foregroundChannel)) {
+            setNotificationsEnabled(false);
+          }
+        })
+        .catch((err) => {
+          console.warn('[App] Native bridge init failed:', err);
+        }),
     ]).then(async () => {
       // Native Auto owns the live stock balance on Android. Existing Native
       // balances win; localStorage currentPills seeds only medications that

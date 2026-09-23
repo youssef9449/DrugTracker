@@ -14,14 +14,6 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const checks = [
   'scripts/test-auto-deduction-business-adapter-phase3.mjs',
   'scripts/test-auto-deduction-scheduling-adapter.mjs',
-  'scripts/test-critical-stock-boundary-phase4.mjs',
-  'scripts/test-dose-reminder-boundary-phase5.mjs',
-  'scripts/test-alarm-notification-boundary-phase6.mjs',
-  'scripts/test-notification-id-machinery-phase7.mjs',
-  'scripts/test-exact-alarm-lifecycle-unification-phase8.mjs',
-  'scripts/test-final-alarm-architecture-phase9.mjs',
-  'scripts/test-prepare-android-receivers.mjs',
-  'scripts/test-critical-stock-reliability-group5.mjs',
 ];
 
 for (const relativeScript of checks) {

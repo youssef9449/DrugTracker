@@ -156,6 +156,7 @@ def extractedAarClasses = layout.buildDirectory.dir("extracted-aar-classes")
 dependencies {
     def androidAll = "org.robolectric:android-all:13-robolectric-9030017"
     compileOnly androidAll
+    staticAnalysisCompileOnly androidAll
     testImplementation androidAll
 
     testImplementation "org.robolectric:robolectric:4.11.1"
@@ -192,8 +193,6 @@ def staticAnalysisAlarmRuntimeSources = fileTree("../alarm-runtime") {
             "ExactAlarmOperationLock.java",
             "ExactAlarmStore.java",
             "ExactAlarmRuntime.java",
-            "ExactAlarmLifecycle.java",
-            "DrugTrackerAlarmSystemReceiver.java"
     )
 }
 def staticAnalysisNotificationSources = fileTree("../notification-runtime") {

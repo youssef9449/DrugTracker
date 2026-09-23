@@ -20,7 +20,7 @@ public final class CriticalStockAlarmReceiver extends BroadcastReceiver {
             return;
         }
 
-        PendingResult pendingResult = goAsync();
+        BroadcastReceiver.PendingResult pendingResult = goAsync();
         Context appContext = context.getApplicationContext();
         new Thread(() -> {
             try {
@@ -34,28 +34,77 @@ public final class CriticalStockAlarmReceiver extends BroadcastReceiver {
 
                 if (medicationId == null || medicationId.isEmpty()
                         || notificationTitle == null
-                        || notificationBody == null) {
+                        || notificationBody == null
+                        || operationVersion == null
+                        || operationVersion.isEmpty()) {
                     return;
                 }
 
-                new NotificationRuntime(appContext).post(
-                        new NotificationRuntime.Request(
-                                "critical-stock",
-                                medicationId,
-                                notificationTitle,
-                                notificationBody,
-                                "low-stock",
-                                "تنبيهات النفاذ",
-                                4,
-                                1,
-                                "ic_launcher",
-                                true,
-                                false,
-                                null));
+                CriticalStockAlarmAdapter adapter =
+                        new CriticalStockAlarmAdapter(appContext);
 
-                if (operationVersion != null && !operationVersion.isEmpty()) {
-                    new CriticalStockAlarmAdapter(appContext)
-                            .completeOneShot(medicationId, operationVersion);
+                // Delivery ownership is checked BEFORE any user-facing side
+                // effect. A cancelled/replaced/tombstoned operation can never
+                // leak a stale notification.
+                if (!adapter.ownsActiveSchedule(
+                        medicationId,
+                        operationVersion)) {
+                    return;
+                }
+
+                // If notification delivery succeeded but durable one-shot
+                // completion failed, recovery may re-fire this same operation.
+                // Durable delivery evidence makes that replay idempotent.
+                if (adapter.isOneShotDelivered(medicationId)) {
+                    adapter.completeOneShot(medicationId, operationVersion);
+                    return;
+                }
+
+                NotificationRuntime.PostResult postResult =
+                        new NotificationRuntime(appContext).post(
+                                new NotificationRuntime.Request(
+                                        "critical-stock",
+                                        medicationId,
+                                        notificationTitle,
+                                        notificationBody,
+                                        "low-stock",
+                                        "تنبيهات النفاذ",
+                                        4,
+                                        1,
+                                        "ic_launcher",
+                                        true,
+                                        false,
+                                        null));
+
+                if (!postResult.accepted) {
+                    // Keep the durable one-shot intact. Lifecycle recovery can
+                    // re-arm it, and NotificationRuntime retains its own
+                    // delivery retry evidence.
+                    return;
+                }
+
+                // Delivery is accepted before the durable schedule can be
+                // consumed. If this persistence step fails, completion is not
+                // attempted, leaving a recoverable schedule instead of
+                // silently losing evidence.
+                if (!adapter.markOneShotDelivered(
+                        medicationId,
+                        operationVersion)) {
+                    android.util.Log.w(
+                            "CriticalStockAlarmReceiver",
+                            "delivery evidence persistence failed for "
+                                    + medicationId);
+                    return;
+                }
+
+                boolean completed = adapter.completeOneShot(
+                        medicationId,
+                        operationVersion);
+                if (!completed) {
+                    android.util.Log.w(
+                            "CriticalStockAlarmReceiver",
+                            "one-shot completion failed for "
+                                    + medicationId);
                 }
             } finally {
                 pendingResult.finish();

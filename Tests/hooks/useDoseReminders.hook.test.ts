@@ -299,7 +299,8 @@ describe('useDoseReminders', () => {
         '09:00',
         15,
         'd1',
-        false
+        false,
+        undefined
       );
     });
 

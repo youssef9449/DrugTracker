@@ -25,7 +25,6 @@ import {
   getOccurrenceSnapshot,
   type OccurrenceSnapshotResult,
 } from './autoDeductionNativeEvents';
-import { applyForegroundAutoStockDeltas } from './autoDeductionNativeStock';
 import {
   invalidateAutoDeductionRecurrence,
   scheduleAutoDeduction,
@@ -45,16 +44,11 @@ import {
   isMedicationTreatmentActiveOnDate,
 } from './medicationTreatment';
 import {
-  commitDurableAutoStockState,
-  loadStockGeneration,
   loadDurableGlobalAutoDeductEnabled,
   type AutoStockDurableState,
 } from './autoDeductionStockGate';
-import { allocateMutationSeq } from './stockMutationOrdering';
 import {
-  recoverManualEnvelopeInto,
   saveManualStockEnvelope,
-  type ManualStockEnvelope,
 } from './stockEnvelopeRecovery';
 import {
   cancelDoseReminderNative,
@@ -70,7 +64,7 @@ import {
   isSnoozeActive,
 } from './doseReminderStorage';
 import { doseReminderDefinitionChanged } from './doseReminderDefinitions';
-import { runManualStockTransaction } from './manualStockTransaction';
+import { runManualStockTransaction, commitWithManualEnvelope } from './manualStockTransaction';
 export type {
   ManualStockEnvelope,
 } from './stockEnvelopeRecovery';
@@ -349,108 +343,6 @@ async function invalidateMedicationRecurrences(
  * Safe to call from an already-held withAutoStockMutationGate, including
  * startup manual mutation; callers must NOT wrap it in another gate.
  */
-function buildNativeStockDeltas(
-  baseMedications: Medication[],
-  nextMedications: Medication[]
-): Array<{ medicationId: string; delta: number }> {
-  const baseById = new Map(baseMedications.map((m) => [m.id, m.currentPills]));
-  const deltas: Array<{ medicationId: string; delta: number }> = [];
-  for (const medication of nextMedications) {
-    const before = baseById.get(medication.id);
-    const after = Number(medication.currentPills);
-    if (!Number.isFinite(after) || after < 0) continue;
-    if (before == null) {
-      // A newly-added medication with zero stock still needs a Native row so
-      // an exact Auto occurrence can be recorded as a zero-unit deduction
-      // instead of failing with stock_not_initialized.
-      deltas.push({ medicationId: medication.id, delta: after });
-      continue;
-    }
-    const delta = after - Number(before);
-    if (Number.isFinite(delta) && delta !== 0) {
-      deltas.push({ medicationId: medication.id, delta });
-    }
-  }
-  return deltas;
-}
-export async function commitWithManualEnvelope(
-  state: AutoStockDurableState,
-  baseMedications: Medication[],
-  globalOverride?: boolean,
-  occurrenceResolutions: Array<{
-    medicationId: string;
-    doseId: string;
-    calendarDate: string;
-    type: 'CONSUMED' | 'SKIPPED';
-  }> = []
-): Promise<string | null> {
-  const durableState: AutoStockDurableState = {
-    ...state,
-    globalAutoDeductEnabled:
-      globalOverride ?? state.globalAutoDeductEnabled ?? loadDurableGlobalAutoDeductEnabled(),
-  };
-  const alloc = allocateMutationSeq();
-  if (!alloc.ok) return alloc.error;
-  const mutationSeq = alloc.seq;
-  const baseGeneration = loadStockGeneration();
-  const stockDeltas = buildNativeStockDeltas(baseMedications, durableState.medications);
-  const envelope: ManualStockEnvelope = {
-    version: 1,
-    status: 'manual_js_ready',
-    medications: durableState.medications,
-    logs: durableState.logs,
-    globalAutoDeductEnabled: durableState.globalAutoDeductEnabled,
-    createdAt: new Date().toISOString(),
-    baseGeneration,
-    mutationSeq,
-    stockDeltas,
-    occurrenceResolutions,
-  };
-  const envErr = saveManualStockEnvelope(envelope);
-  if (envErr) return envErr;
-  const nativeResult = await applyForegroundAutoStockDeltas(
-    mutationSeq,
-    stockDeltas,
-    occurrenceResolutions
-  );
-  if (!nativeResult.ok) {
-    return nativeResult.error ?? 'foreground_stock_failed';
-  }
-  // The Native result is authoritative for currentPills. Merge that snapshot
-  // back into the JS state before writing the durable envelope so a foreground
-  // mutation cannot persist the pre-Auto absolute balance it started from.
-  if (nativeResult.stocks.length > 0) {
-    const nativeById = new Map(
-      nativeResult.stocks.map((stock) => [
-        stock.medicationId,
-        Number(stock.currentPills),
-      ])
-    );
-    durableState.medications = durableState.medications.map((medication) => {
-      const nativePills = nativeById.get(medication.id);
-      return nativePills != null && Number.isFinite(nativePills) && nativePills >= 0
-        ? { ...medication, currentPills: nativePills }
-        : medication;
-    });
-  }
-  // Refresh the recovery envelope after Native execution. A crash before the
-  // JS commit must recover from this newer Native-aligned snapshot, not the
-  // pre-mutation absolute currentPills value captured before the delta ran.
-  envelope.medications = durableState.medications;
-  envelope.occurrenceResolutions = occurrenceResolutions;
-  const refreshedEnvelopeErr = saveManualStockEnvelope(envelope);
-  if (refreshedEnvelopeErr) {
-    return refreshedEnvelopeErr;
-  }
-  const commitErr = commitDurableAutoStockState(durableState, {
-    appliedMutationSeq: mutationSeq,
-  });
-  if (commitErr) {
-    return commitErr;
-  }
-  saveManualStockEnvelope(null);
-  return null;
-}
 export function runGatedManualConsume(opts: {
   medicationId: string;
   doseId?: string;

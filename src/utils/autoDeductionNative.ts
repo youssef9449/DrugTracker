@@ -342,7 +342,7 @@ export async function applyForegroundAutoStockDeltas(
     if (cleanDeltas.some((d) => !Number.isFinite(d.delta))) {
       return { ok: false, alreadyApplied: false, stocks: [], error: 'invalid_stock_delta', errorCode: 'invalid_argument' };
     }
-    return await AutoDeduction.applyForegroundStockDeltas({
+    const result = await AutoDeduction.applyForegroundStockDeltas({
       mutationSeq,
       deltas: cleanDeltas,
       occurrenceResolutions: occurrenceResolutions.map((resolution) => ({
@@ -352,6 +352,12 @@ export async function applyForegroundAutoStockDeltas(
         type: resolution.type,
       })),
     });
+    return result.ok
+      ? result
+      : {
+          ...result,
+          errorCode: classifyNativeError(result.error || 'foreground_stock_failed'),
+        };
   } catch (e) {
     return {
       ok: false,
@@ -425,7 +431,7 @@ export async function scheduleAutoDeduction(
   params: ScheduleOccurrenceParams
 ): Promise<ScheduleOccurrenceResult> {
   if (!isNativeAndroid()) {
-    return { ok: false, error: 'not_android' };
+    return { ok: false, error: 'not_android', errorCode: 'not_android' };
   }
   if (!(Number(params.amount) > 0) || !Number.isFinite(Number(params.amount))) {
     return { ok: false, error: 'invalid_amount', errorCode: 'invalid_argument' };
@@ -489,7 +495,7 @@ export async function cancelAutoDeduction(
 export async function invalidateAutoDeductionRecurrence(
   medicationId: string,
   doseId: string
-): Promise<{ ok: boolean; error?: string; generation?: number }> {
+): Promise<{ ok: boolean; error?: string; errorCode?: NativeErrorCode; generation?: number }> {
   if (!isNativeAndroid()) {
     return { ok: false, error: "not_android", errorCode: "not_android" };
   }
@@ -634,7 +640,12 @@ export async function markAutoDeductionEventReconciled(
   if (!isNativeAndroid()) return { ok: false, changed: false, error: 'not_android', errorCode: 'not_android' };
   const id = typeof doseId === 'string' ? doseId.trim() : '';
   if (!id) {
-    return { ok: false, changed: false };
+    return {
+      ok: false,
+      changed: false,
+      error: 'missing_dose_id',
+      errorCode: 'invalid_argument',
+    };
   }
   try {
     const result = await AutoDeduction.markReconciled({

@@ -123,7 +123,6 @@ export function useNativeActionHandlers(opts: {
                 && backgroundChannel
                 && foregroundChannel
             );
-            setDoseLifecycleTick((tick) => tick + 1);
           })
           .catch((err) => {
             console.warn('[App] Resume notification capability re-check failed:', err);

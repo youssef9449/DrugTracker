@@ -128,9 +128,9 @@ final class ExactAlarmStore {
             Log.e(TAG, "durable ordering sequence commit failed");
             return null;
         }
-        return System.currentTimeMillis()
+        return next
                 + "-"
-                + next
+                + System.currentTimeMillis()
                 + "-"
                 + UUID.randomUUID();
     }

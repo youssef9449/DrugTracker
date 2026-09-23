@@ -1,6 +1,6 @@
 import { scheduleCriticalAlarmNative, cancelCriticalAlarmNative, verifyCriticalAlarmPendingNative } from './criticalAlarmNative';
 import { getNativePlatform, isNativePlatform } from './notifications/notificationPlatform';
-import { cancelNotification, getPendingNotification, scheduleNotification } from './notificationRuntime';
+import { cancelNotification, getNotificationPermissionResult, getPendingNotificationResult, scheduleNotification } from './notificationRuntime';
 import { scheduleWebNotification } from './notifications/webNotifications';
 import { classifyNativeError, type NativeErrorCode } from './nativeErrors';
 
@@ -73,11 +73,12 @@ export async function verifyCriticalAlarmPending(
       return { ok: true, pending: result.pending };
     }
 
-    const pending = await getPendingNotification('critical-stock', medId);
+    const pendingResult = await getPendingNotificationResult('critical-stock', medId);
+    if (!pendingResult.ok) return pendingResult;
     return {
       ok: true,
-      pending: !!pending && pendingAtMatchesAlarmTime(
-        pending.schedule?.at,
+      pending: !!pendingResult.pending && pendingAtMatchesAlarmTime(
+        pendingResult.pending.schedule?.at,
         alarmTimeMs
       ),
     };

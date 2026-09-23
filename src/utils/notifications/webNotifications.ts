@@ -38,6 +38,7 @@ async function showScheduledNotification(entry: WebScheduledEntry): Promise<bool
   const options: NotificationOptions = {
     body: entry.body,
     icon: '/assets/icons/icon.svg',
+    tag: storageKey(entry.namespace, entry.identity),
   };
   if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     try {
@@ -156,7 +157,9 @@ export async function cancelScheduledWebNotification(
       const reg = await navigator.serviceWorker.ready;
       const notifications = await reg.getNotifications();
       for (const notification of notifications) {
-        await notification.close();
+        if (notification.tag === key) {
+          notification.close();
+        }
       }
     } catch {
       // No browser-level cancellation API is guaranteed.

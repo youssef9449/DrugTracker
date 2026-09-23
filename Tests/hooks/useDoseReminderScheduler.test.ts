@@ -228,41 +228,72 @@ describe('useDoseReminderScheduler — gating', () => {
 });
 
 describe('useDoseReminderScheduler — native state lookup failures', () => {
-  it('does not schedule a repair alarm when pending-state lookup fails', async () => {
+  it('retries a pending-state lookup failure without scheduling before the retry', async () => {
     const med = makeMed({ id: 'med-pending-failure', reminderTime: '20:00' });
+    const { rerender } = renderHook(
+      ({ lifecycleTick }: { lifecycleTick: number }) =>
+        useDoseReminderScheduler(
+          defaultOpts({ medications: [med], lifecycleTick })
+        ),
+      { initialProps: { lifecycleTick: 0 } }
+    );
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+
+    mocks.schedule.mockClear();
     mocks.isPending.mockResolvedValueOnce({
       ok: false,
       error: 'pending_lookup_failed',
       errorCode: 'platform_failure',
     });
+    mocks.isPending.mockResolvedValue({
+      ok: true,
+      pending: true,
+    });
 
-    renderHook(() =>
-      useDoseReminderScheduler(defaultOpts({ medications: [med] }))
-    );
-
+    rerender({ lifecycleTick: 1 });
     await Promise.resolve();
     await Promise.resolve();
 
     expect(mocks.schedule).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.schedule).not.toHaveBeenCalled();
   });
 
-  it('does not schedule a repair alarm when re-arm lookup fails', async () => {
+  it('retries a re-arm lookup failure without requiring a medication edit', async () => {
     const med = makeMed({ id: 'med-rearm-failure', reminderTime: '20:00' });
-    mocks.isPending.mockResolvedValueOnce({ ok: true, pending: false });
+    const { rerender } = renderHook(
+      ({ lifecycleTick }: { lifecycleTick: number }) =>
+        useDoseReminderScheduler(
+          defaultOpts({ medications: [med], lifecycleTick })
+        ),
+      { initialProps: { lifecycleTick: 0 } }
+    );
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    mocks.schedule.mockClear();
+
+    mocks.isPending.mockResolvedValue({ ok: true, pending: false });
     mocks.isNativeReArmed.mockResolvedValueOnce({
       ok: false,
       error: 'rearm_lookup_failed',
       errorCode: 'platform_failure',
     });
+    mocks.isNativeReArmed.mockResolvedValue({
+      ok: true,
+      scheduled: true,
+    });
 
-    renderHook(() =>
-      useDoseReminderScheduler(defaultOpts({ medications: [med] }))
-    );
-
+    rerender({ lifecycleTick: 1 });
     await Promise.resolve();
     await Promise.resolve();
-    await Promise.resolve();
 
+    expect(mocks.schedule).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await Promise.resolve();
+    await Promise.resolve();
     expect(mocks.schedule).not.toHaveBeenCalled();
   });
 });
@@ -341,6 +372,62 @@ describe('useDoseReminderScheduler — cancellation', () => {
 
     expect(mocks.cancel).toHaveBeenCalledWith('med-off1', 'd1');
     expect(mocks.cancel).toHaveBeenCalledWith('med-off2', 'd1');
+  });
+});
+
+describe('useDoseReminderScheduler — operation retries', () => {
+  it('retries a transient schedule failure without a medication edit', async () => {
+    const initial = makeMed({
+      id: 'med-schedule-retry',
+      reminderTime: '20:00',
+    });
+    const { rerender } = renderHook(
+      ({ medication }: { medication: Medication }) =>
+        useDoseReminderScheduler(
+          defaultOpts({ medications: [medication] })
+        ),
+      { initialProps: { medication: initial } }
+    );
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    mocks.schedule.mockClear();
+
+    mocks.schedule.mockRejectedValueOnce(new Error('transient schedule failure'));
+    mocks.schedule.mockResolvedValue(undefined);
+    const replacement = {
+      ...initial,
+      reminderTime: '21:00',
+      doseSchedule: [{ id: 'd1', amount: 1, time: '21:00' }],
+    };
+    rerender({ medication: replacement });
+
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+    expect(mocks.schedule).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
+    expect(mocks.schedule).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a transient cancellation failure and keeps the removal discoverable', async () => {
+    const med = makeMed({ id: 'med-cancel-retry', reminderTime: '20:00' });
+    const { rerender } = renderHook(
+      ({ medications }: { medications: Medication[] }) =>
+        useDoseReminderScheduler(defaultOpts({ medications })),
+      { initialProps: { medications: [med] } }
+    );
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
+
+    mocks.cancel.mockClear();
+    mocks.cancel.mockRejectedValueOnce(new Error('transient cancel failure'));
+    mocks.cancel.mockResolvedValue(undefined);
+
+    rerender({ medications: [] });
+    await flushUntil(() => mocks.cancel.mock.calls.length >= 1);
+    expect(mocks.cancel).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushUntil(() => mocks.cancel.mock.calls.length >= 2);
+    expect(mocks.cancel).toHaveBeenCalledTimes(2);
   });
 });
 

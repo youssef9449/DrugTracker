@@ -199,6 +199,10 @@ export async function cancelNotification(
       return false;
     }
   }
+  if (!isIOS()) {
+    const { cancelScheduledWebNotification } = await import('./notifications/webNotifications');
+    return cancelScheduledWebNotification(namespace, identity);
+  }
   return false;
 }
 
@@ -211,7 +215,16 @@ export async function getPendingNotificationResult(
   identity: string
 ): Promise<NotificationPendingResult> {
   if (!isIOS()) {
-    return { ok: true, pending: null };
+    try {
+      const { getWebScheduledNotification } = await import('./notifications/webNotifications');
+      const entry = getWebScheduledNotification(namespace, identity);
+      return {
+        ok: true,
+        pending: entry ? { schedule: { at: entry.fireAt } } : null,
+      };
+    } catch {
+      return { ok: true, pending: null };
+    }
   }
   try {
     const pending = await LocalNotifications.getPending();

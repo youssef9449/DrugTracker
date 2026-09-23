@@ -1,5 +1,6 @@
 import { Bell } from 'lucide-react';
-import { Medication, formatTimeArabic } from '../types';
+import type { Medication } from '../types';
+import { formatTimeArabic } from '../utils/medicationPresentation';
 
 /**
  * The "daily reminder" row shared by the three MedicationCard render

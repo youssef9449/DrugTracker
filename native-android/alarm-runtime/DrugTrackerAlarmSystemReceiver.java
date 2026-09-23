@@ -41,8 +41,7 @@ public final class DrugTrackerAlarmSystemReceiver
             reason = ExactAlarmLifecycle.REASON_BOOT;
         } else if (Intent.ACTION_TIMEZONE_CHANGED.equals(action)) {
             reason = ExactAlarmLifecycle.REASON_TIMEZONE_CHANGED;
-        } else if (Intent.ACTION_TIME_CHANGED.equals(action)
-                || "android.intent.action.TIME_SET".equals(action)) {
+        } else if (Intent.ACTION_TIME_CHANGED.equals(action)) {
             reason = ExactAlarmLifecycle.REASON_TIME_CHANGED;
         } else if (Build.VERSION.SDK_INT >= 37
                 && ACTION_TIMEZONE_OFFSET_CHANGED.equals(action)) {

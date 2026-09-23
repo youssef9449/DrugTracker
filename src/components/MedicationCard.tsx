@@ -27,7 +27,7 @@ import {
 import { getHistoricalRestoreDisplayAmount } from '../utils/medActions';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { VISUAL_RANGE_MULTIPLIER, MIN_VISUAL_RANGE_DAYS, DAYS_PER_MONTH } from '../utils/time';
-import { MedicationMenu } from './MedicationMenu';
+import { MedicationMenu, MedicationOverflowMenu } from './MedicationMenu';
 import { ReminderBadge } from './ReminderBadge';
 import {
   StripsBadge,
@@ -226,10 +226,19 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             : 'bg-amber-50/30 border-amber-200'
         }`}
       >
-        {/* Row 1: Name — alone on its own full-width line */}
-        <h3 className="text-base font-bold text-slate-900 leading-snug tracking-tight truncate mb-1.5 block w-full" title={medication.name}>
-          {medication.name}
-        </h3>
+        {/* Row 1: Name + Top-Left Overflow Menu */}
+        <div className="flex items-center justify-between gap-2 mb-1.5 min-w-0">
+          <h3 className="text-base font-bold text-slate-900 leading-snug tracking-tight truncate min-w-0 flex-1" title={medication.name}>
+            {medication.name}
+          </h3>
+          <MedicationOverflowMenu
+            medication={medication}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onOpenHistory={onOpenHistory}
+            size="sm"
+          />
+        </div>
         {/* Row 2: Badges (Status, Category, Strips) + Quick Menu */}
         <div className="flex items-center justify-between gap-2 min-w-0">
           <div className="flex items-center gap-1.5 text-xs text-slate-500 flex-wrap min-w-0">
@@ -365,10 +374,19 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         id={`med-card-${medication.id}`}
         className="bg-white rounded-2xl border border-emerald-200/80 p-4 shadow-xs hover:shadow-md transition relative overflow-hidden"
       >
-        {/* Row 1: Name — alone on its own full-width line */}
-        <h3 className="text-base font-bold text-slate-900 leading-snug tracking-tight truncate mb-1.5 block w-full" title={medication.name}>
-          {medication.name}
-        </h3>
+        {/* Row 1: Name + Top-Left Overflow Menu */}
+        <div className="flex items-center justify-between gap-2 mb-1.5 min-w-0">
+          <h3 className="text-base font-bold text-slate-900 leading-snug tracking-tight truncate min-w-0 flex-1" title={medication.name}>
+            {medication.name}
+          </h3>
+          <MedicationOverflowMenu
+            medication={medication}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onOpenHistory={onOpenHistory}
+            size="sm"
+          />
+        </div>
         {/* Row 2: Badges (Safety, Category, Strips) + Options Menu */}
         <div className="flex items-center justify-between gap-2 min-w-0">
           <div className="flex items-center gap-1.5 text-xs text-slate-500 flex-wrap min-w-0">
@@ -501,10 +519,19 @@ export const MedicationCard: FC<MedicationCardProps> = ({
           isOut ? 'bg-red-50/25' : isCrit ? 'bg-rose-50/20' : isWarn ? 'bg-amber-50/10' : ''
         }`}
       >
-        {/* Row 1: name — alone on its own full-width line */}
-        <h3 className="block w-full text-[11px] font-bold text-slate-900 leading-tight tracking-tight truncate mb-1" title={medication.name}>
-          {medication.name}
-        </h3>
+        {/* Row 1: name + Top-Left Overflow Menu */}
+        <div className="flex items-center justify-between gap-1.5 mb-1 min-w-0">
+          <h3 className="block flex-1 min-w-0 text-[11px] font-bold text-slate-900 leading-tight tracking-tight truncate" title={medication.name}>
+            {medication.name}
+          </h3>
+          <MedicationOverflowMenu
+            medication={medication}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onOpenHistory={onOpenHistory}
+            size="xs"
+          />
+        </div>
         {/* Row 2: Category + Auto-Deduct Status + Stock Status (independent of name and actions) */}
         <div className="flex items-center gap-1 flex-wrap min-w-0 mb-1">
           {medication.category && (
@@ -695,10 +722,19 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             : ''
         }`}
       >
-        {/* Row 1: Name — alone on its own full-width line */}
-        <h3 className="text-xs font-bold text-slate-900 leading-tight tracking-tight truncate" title={medication.name}>
-          {medication.name}
-        </h3>
+        {/* Row 1: Name + Top-Left Overflow Menu */}
+        <div className="flex items-center justify-between gap-2 mb-1 min-w-0">
+          <h3 className="text-xs font-bold text-slate-900 leading-tight tracking-tight truncate min-w-0 flex-1" title={medication.name}>
+            {medication.name}
+          </h3>
+          <MedicationOverflowMenu
+            medication={medication}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onOpenHistory={onOpenHistory}
+            size="sm"
+          />
+        </div>
         {/* Row 2: Category + Auto-Deduct Status + Stock Status (independent of name and actions) */}
         <div className="flex items-center gap-1.5 flex-wrap min-w-0 mt-1">
           {medication.category && (

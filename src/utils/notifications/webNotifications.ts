@@ -1,4 +1,3 @@
-import { SW_READY_TIMEOUT_MS } from '../time';
 import { isWebNotificationSupported } from './notificationPlatform';
 
 const WEB_SCHEDULE_KEY = 'drugtracker_web_scheduled_notifications_v1';

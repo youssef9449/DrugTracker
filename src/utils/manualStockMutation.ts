@@ -52,6 +52,7 @@ import {
 } from './autoDeductionStockGate';
 import { allocateMutationSeq } from './stockMutationOrdering';
 import {
+  recoverManualEnvelopeInto,
   saveManualStockEnvelope,
   type ManualStockEnvelope,
 } from './stockEnvelopeRecovery';
@@ -125,14 +126,6 @@ function resolveConsumeDoseId(med: Medication, doseId?: string): string | undefi
   if (doseId != null && doseId !== '') return doseId;
   if (schedule.length === 1) return schedule[0].id;
   return undefined;
-}
-function preSettlementBlockReason(pre: {
-  nativeListFailed: boolean;
-  durabilityBlocked?: boolean;
-}): string | null {
-  if (pre.durabilityBlocked === true) return 'exact_reconciliation_blocked';
-  if (pre.nativeListFailed) return 'native_list_failed';
-  return null;
 }
 /**
  * Invalidate every native recurrence chain belonging to one medication.

@@ -201,21 +201,43 @@ export async function cancelNotification(
   return false;
 }
 
-export async function getPendingNotification(
+export type NotificationPendingResult =
+  | { ok: true; pending: { schedule?: { at?: unknown } } | null }
+  | NativeBoundaryFailure;
+
+export async function getPendingNotificationResult(
   namespace: string,
   identity: string
-): Promise<{ schedule?: { at?: unknown } } | null> {
-  if (!isIOS()) return null;
+): Promise<NotificationPendingResult> {
+  if (!isIOS()) {
+    return { ok: true, pending: null };
+  }
   try {
     const pending = await LocalNotifications.getPending();
     const id = iosPlatformNotificationId(namespace, identity);
     const entry = pending.notifications.find((notification) => notification.id === id);
-    if (!entry) return null;
-    return { schedule: entry.schedule as { at?: unknown } | undefined };
+    if (!entry) return { ok: true, pending: null };
+    return {
+      ok: true,
+      pending: { schedule: entry.schedule as { at?: unknown } | undefined },
+    };
   } catch (error) {
-    console.warn('[notification-runtime] iOS pending lookup failed:', error);
-    return null;
+    const boundaryError = toNativeBoundaryError(error, 'platform_failure');
+    console.warn('[notification-runtime] iOS pending lookup failed:', boundaryError.message);
+    return {
+      ok: false,
+      error: boundaryError.message,
+      errorCode: boundaryError.code,
+    };
   }
+}
+
+export async function getPendingNotification(
+  namespace: string,
+  identity: string
+): Promise<{ schedule?: { at?: unknown } } | null> {
+  const result = await getPendingNotificationResult(namespace, identity);
+  return result.ok ? result.pending : null;
 }
 
 export async function areNotificationsEnabled(): Promise<boolean> {

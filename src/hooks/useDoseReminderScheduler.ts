@@ -380,12 +380,9 @@ export function useDoseReminderScheduler({
           const pendingResult = await isDoseReminderPending(medId, doseId);
           if (!operationCoordinatorRef.current.isCurrent(key, gen)) return;
           if (!pendingResult.ok) {
-            console.warn(
-              '[dose-reminder] pending-state lookup failed:',
-              pendingResult.error,
-              pendingResult.errorCode
+            throw new Error(
+              pendingResult.error || 'dose_reminder_pending_lookup_failed'
             );
-            return;
           }
           if (pendingResult.pending) return;
           const nativeReArmed = await isNativeDoseReminderReArmed(
@@ -395,12 +392,9 @@ export function useDoseReminderScheduler({
           );
           if (!operationCoordinatorRef.current.isCurrent(key, gen)) return;
           if (!nativeReArmed.ok) {
-            console.warn(
-              '[dose-reminder] native re-arm lookup failed:',
-              nativeReArmed.error,
-              nativeReArmed.errorCode
+            throw new Error(
+              nativeReArmed.error || 'dose_reminder_rearm_lookup_failed'
             );
-            return;
           }
           if (nativeReArmed.scheduled) return;
           const opts = {

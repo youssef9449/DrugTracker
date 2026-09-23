@@ -20,10 +20,10 @@ vi.mock('@/utils/notifications', () => ({
   openNotificationSettings: vi.fn(),
   getNotificationPermission: vi.fn(() => Promise.resolve('granted')),
   getExactAlarmPermission: vi.fn(() => Promise.resolve('granted')),
-  openExactAlarmSettings: vi.fn(() => Promise.resolve(true)),
-  scheduleCriticalAlarm: vi.fn(() => Promise.resolve()),
-  cancelCriticalAlarm: vi.fn(() => Promise.resolve()),
-  verifyCriticalAlarmPending: vi.fn(() => Promise.resolve(false)),
+  openExactAlarmSettings: vi.fn(() => Promise.resolve({ ok: true })),
+  scheduleCriticalAlarm: vi.fn(() => Promise.resolve({ ok: true })),
+  cancelCriticalAlarm: vi.fn(() => Promise.resolve({ ok: true })),
+  verifyCriticalAlarmPending: vi.fn(() => Promise.resolve({ ok: true, pending: false })),
   criticalAlarmId: vi.fn((id: string) => id.length),
 
 }));
@@ -60,7 +60,7 @@ import App from '@/App';
 import { getTodayDateString } from '@/utils/dateCalculations';
 import { runAutoDeductionReconciliation } from '@/utils/runAutoDeductionReconciliation';
 
-import { getInitialMedications } from '@/fixtures/initialData';
+import { getInitialMedications } from './fixtures/initialData';
 import {
   scheduleCriticalAlarm,
   cancelCriticalAlarm } from '@/utils/notifications';

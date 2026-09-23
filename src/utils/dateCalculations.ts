@@ -11,12 +11,15 @@ import { MS_PER_DAY, NEVER_DEPLETES_DAYS } from './time';
  * access) simply so it can be safely called during module init and
  * from the seed-data file without side effects.
  */
-export function getTodayDateString(): string {
-  const d = new Date();
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
+export function getLocalDateString(date: Date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+export function getTodayDateString(): string {
+  return getLocalDateString();
 }
 
 export function addCalendarDays(dateStr: string, days: number): string {

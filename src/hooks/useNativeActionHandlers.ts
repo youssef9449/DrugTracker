@@ -7,7 +7,8 @@ import {
 import { getExactAlarmPermission, type ExactAlarmPermission } from '../utils/exactAlarm';
 import { getNotificationPermission } from '../utils/notifications/notificationPermissions';
 import { NOTIFICATIONS_KEY } from '../constants/storageKeys';
-import { isNotificationChannelEnabled, retryPersistedNotificationDeliveries, isDoseNotificationOccurrenceOwned } from '../utils/notificationRuntime';
+import { isNotificationChannelEnabled, retryPersistedNotificationDeliveries } from '../utils/notificationRuntime';
+import { isDoseReminderOccurrenceOwned } from '../utils/doseReminderNative';
 import {
   DOSE_REMINDER_CHANNEL_ID,
   DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
@@ -50,7 +51,7 @@ export function useNativeActionHandlers(opts: {
       // created the displayed occurrence. Reject stale actions after a
       // schedule replacement/cancellation before any durable Take mutation.
       if (operationVersion) {
-        void isDoseNotificationOccurrenceOwned(
+        void isDoseReminderOccurrenceOwned(
           medicationId,
           doseId ?? '',
           operationVersion

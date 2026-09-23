@@ -687,6 +687,7 @@ export default function App() {
                         direction={medicationSortDirection}
                         onFieldChange={setMedicationSortField}
                         onDirectionChange={setMedicationSortDirection}
+                        onRegisterBackHandler={registerBackOverlay}
                       />
                     </div>
 
@@ -752,6 +753,7 @@ export default function App() {
                       onToggleMedicationReminder={handleToggleMedicationReminder}
                       onToggleMedicationCriticalStockAlerts={handleToggleMedicationCriticalStockAlerts}
                       onNavigateToShopping={() => navigateToTab('shopping')}
+                      onRegisterBackHandler={registerBackOverlay}
                       onTriggerAlarm={testAlarm}
                       onConsumeDose={handleConsumeDose}
                       onRestoreDose={handleCardRestoreDose}
@@ -761,6 +763,7 @@ export default function App() {
                         return lastRefill && lastRefill.amount > 0 ? lastRefill.amount : undefined;
                       })()}
                       onUndoRefill={() => handleUndoRefill(med.id)}
+                      onRegisterBackHandler={registerBackOverlay}
                     />
                   ))
                 )}
@@ -775,6 +778,7 @@ export default function App() {
               onUpdateSettings={setPharmacySettings}
               showToast={showToast}
               onOpenUserContactsSettings={() => navigateToTab('user-data')}
+              onRegisterBackHandler={registerBackOverlay}
             />
           )}
 
@@ -784,6 +788,7 @@ export default function App() {
               onSave={handleSavePharmacy}
               onDelete={handleDeletePharmacy}
               showToast={showToast}
+              onRegisterBackHandler={registerBackOverlay}
             />
           )}
 
@@ -796,6 +801,7 @@ export default function App() {
               onSaveAddress={handleSaveUserAddress}
               onDeleteAddress={handleDeleteUserAddress}
               showToast={showToast}
+              onRegisterBackHandler={registerBackOverlay}
             />
           )}
 

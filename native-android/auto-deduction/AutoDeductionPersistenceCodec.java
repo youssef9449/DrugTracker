@@ -376,7 +376,11 @@ final class AutoDeductionPersistenceCodec {
         String timeHhmm = obj.optString("timeHhmm", "").trim();
         double amount = obj.optDouble("amount", Double.NaN);
         String treatmentEndDate = obj.optString("treatmentEndDate", "");
-        String operationVersion = obj.optString("operationVersion", "");
+        // The field must exist explicitly. Empty is a valid historical value;
+        // missing is malformed and must not silently become recovery authority.
+        String operationVersion = obj.has("operationVersion")
+                ? obj.optString("operationVersion", "")
+                : null;
         long generation = obj.optLong("recurrenceGeneration", 0L);
         boolean stockApplied = obj.optBoolean("stockApplied", false);
         long createdAt = obj.optLong("createdAtEpochMs", 0L);

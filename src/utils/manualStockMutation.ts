@@ -34,6 +34,7 @@ import {
 } from './autoDeductionNativeScheduling';
 import {
   isDoseSkippedOnDate,
+  isDoseConsumedOnDate,
   getTodayDateString,
   tomorrowDateString,
   localEpochMs,
@@ -58,6 +59,20 @@ import {
   type ManualStockEnvelope,
 } from './stockEnvelopeRecovery';
 import { reconcileExactBeforeManualMutation } from './reconcileExactBeforeManualMutation';
+import {
+  cancelDoseReminderNative,
+  cancelDoseSnoozeNative,
+} from './doseReminderNative';
+import {
+  scheduleDoseReminder,
+  getDoseReminderSlots,
+} from './doseReminderScheduling';
+import { scheduleSnoozedDoseReminder } from './notifications/doseReminderNotifications';
+import {
+  getSnoozeUntil,
+  isSnoozeActive,
+} from './doseReminderStorage';
+import { doseReminderDefinitionChanged } from './doseReminderDefinitions';
 export type {
   ManualStockEnvelope,
 } from './stockEnvelopeRecovery';
@@ -183,6 +198,108 @@ async function restoreInvalidatedRecurrences(
   }
   return { ok: true };
 }
+interface DoseReminderInvalidationResult {
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * Invalidate the native Dose Reminder schedules represented by the current
+ * durable medication before the durable medication mutation commits.
+ *
+ * This is the JS/native ordering barrier for reminder-defining edits. Native
+ * tombstones are written by the shared ExactAlarmRuntime, so a later lifecycle
+ * restore cannot resurrect the old schedule after process death.
+ */
+async function invalidateMedicationDoseReminders(
+  med: Medication
+): Promise<DoseReminderInvalidationResult> {
+  try {
+    for (const slot of getDoseReminderSlots(med)) {
+      await cancelDoseReminderNative(med.id, slot.doseId);
+      await cancelDoseSnoozeNative(med.id, slot.doseId);
+    }
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error
+        ? error.message
+        : 'dose_reminder_invalidation_failed',
+    };
+  }
+}
+
+/**
+ * Compensation for a failed durable medication commit after Dose Reminder
+ * invalidation. Rebuilds exactly the reminder state represented by the old
+ * durable medication, including an active snooze when one was persisted.
+ */
+async function restoreInvalidatedDoseReminders(
+  med: Medication
+): Promise<DoseReminderInvalidationResult> {
+  try {
+    if (!med.reminderEnabled) {
+      return { ok: true };
+    }
+
+    const today = getTodayDateString();
+    if (!isMedicationTreatmentActiveOnDate(med, today)) {
+      return { ok: true };
+    }
+
+    const treatmentEndDate = getMedicationTreatmentEndDate(med);
+    const allowManualTakeAction = med.autoDeductEnabled === false;
+
+    for (const slot of getDoseReminderSlots(med)) {
+      const shouldSkipToday =
+        isDoseConsumedOnDate(med, slot.doseId, today)
+        || isDoseSkippedOnDate(med, slot.doseId, today);
+
+      await scheduleDoseReminder(
+        med.id,
+        med.name,
+        slot.time,
+        slot.amount,
+        slot.unit,
+        slot.doseId,
+        {
+          ...(shouldSkipToday ? { skipToday: true as const } : {}),
+          allowManualTakeAction,
+          ...(slot.description ? { doseDescription: slot.description } : {}),
+          ...(treatmentEndDate ? { treatmentEndDate } : {}),
+        }
+      );
+
+      const snoozeUntil = getSnoozeUntil(med.id, slot.doseId);
+      if (snoozeUntil != null && snoozeUntil > Date.now() && isSnoozeActive(med.id, slot.doseId)) {
+        const remainingMinutes =
+          Math.max(0.001, (snoozeUntil - Date.now()) / 60_000);
+        await scheduleSnoozedDoseReminder(
+          med.id,
+          med.name,
+          slot.amount,
+          slot.unit,
+          slot.time,
+          remainingMinutes,
+          slot.doseId,
+          allowManualTakeAction,
+          slot.description
+        );
+      }
+    }
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error
+        ? error.message
+        : 'dose_reminder_restore_failed',
+    };
+  }
+}
+
 interface RecurrenceInvalidationResult {
   ok: boolean;
   error?: string;

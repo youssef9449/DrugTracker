@@ -75,7 +75,7 @@ export function isValidExactCalendarDate(calendarDate: string): boolean {
 /**
  * Occurrence identity for Exact Auto is medicationId + doseId + calendarDate.
  * All three components are required and non-empty. Empty/missing doseId is
- * invalid (not a legacy sentinel) — Issue #268. Malformed identity cannot
+ * invalid (not a legacy sentinel) — malformed identity cannot
  * be repaired by a later amount fix and must not remain FIRED forever (#262 F3).
  */
 export function isValidExactOccurrenceIdentity(
@@ -200,7 +200,7 @@ export function applyExactAutoEventToMedication(
   event: AutoDeductionEvent,
   now: Date = new Date()
 ): { ok: true; updatedMed: Medication; log: ConsumptionLog } | { ok: false; reason: string } {
-  // Issue #265 / #268 — a FIRED Exact occurrence is durable: the native
+  // A FIRED Exact occurrence is durable: the native
   // AlarmManager created and persisted it at schedule time with identity
   // (medicationId + doseId + calendarDate) and `event.amount`. Editing or
   // removing the dose from the Medication's CURRENT `doseSchedule` AFTER the
@@ -216,7 +216,7 @@ export function applyExactAutoEventToMedication(
   // A single FIRED event charges its own amount only; past calendar days are
   // not auto-settled by this path.
   //
-  // Apply validation (no Legacy Single-Dose fallback): positive finite
+  // Apply validation: positive finite
   // amount, non-empty doseId, valid YYYY-MM-DD calendarDate, occurrence not
   // already applied.
   if (!isValidEventAmount(event.amount)) {
@@ -266,7 +266,7 @@ export function applyExactAutoEventToMedication(
   // consumed. A med whose schedule was removed (or edited so this slot is no
   // longer a member) still gets its FIRED occurrence applied via event.amount,
   // but with no schedule to test all-slots-consumed it does NOT write
-  // lastConsumedDate — there is no Legacy Single-Dose doseId-only write.
+  // lastConsumedDate is not used as a dose-specific write target.
   // #268 / PR #271.
   if (Array.isArray(med.doseSchedule) && med.doseSchedule.length > 0) {
     const allConsumed = med.doseSchedule.every((d) =>
@@ -355,7 +355,7 @@ export function reconcileFiredEvents(
       occurrenceKey,
     };
 
-    // Validation order (#262 Finding 3 / Issue #268):
+    // Validation order:
     //   1) occurrence identity (medicationId + doseId + calendarDate) —
     //      terminal ACK if any component is missing/invalid
     //   2) amount — no ACK (retryable when identity is valid)

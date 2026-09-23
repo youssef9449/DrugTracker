@@ -83,13 +83,9 @@ function colorTagClasses(colorTag: string | undefined): { bg: string; border: st
   }
 }
 /**
- * A SHORT depletion label for the tight "جميع الأدوية" card rows
- * (compact + detailed). `getDepletionDate().formattedArabic` includes
- * the full weekday name for far-future dates (e.g. "الأربعاء، ٣٠
- * سبتمبر"), which is too long for the small pill in these rows and
- * overlaps neighboring content. Here we drop the weekday and only
- * keep "يوم شهر" (e.g. "٣٠ سبتمبر"), while keeping the near-term
- * wording ("اليوم"/"غداً"/"بعد غد"/"نفد المخزون") unchanged.
+ * A short depletion label for the tight "جميع الأدوية" card rows.
+ * Far-future dates omit the weekday so the label stays compact, while
+ * near-term states keep their dedicated wording.
  */
 function shortDepletionLabel(
   depletion: { dateStr: string; daysLeft: number },

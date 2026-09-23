@@ -10,8 +10,10 @@ import {
   getMedicationTreatmentEndDate,
   isMedicationTreatmentActiveOnDate,
 } from '../utils/medicationTreatment';
-import { isValidDoseTime, normalizeTimeString } from '../utils/doseSchedule';
-import { getAutoDeductionDefinitionSignature } from '../utils/autoDeductionDefinition';
+import {
+  getAutoDeductionDefinitionForDate,
+  getAutoDeductionDefinitionSignature,
+} from '../utils/autoDeductionDefinition';
 import {
   cancelAutoDeduction,
   invalidateAutoDeductionRecurrence,
@@ -55,32 +57,11 @@ export function getAutoDeductionSlotsForDate(
   med: Medication,
   calendarDate: string
 ): AutoDeductionSlot[] {
-  if (med.autoDeductEnabled === false) return [];
-  if (!isMedicationTreatmentActiveOnDate(med, calendarDate)) return [];
-  const treatmentEndDate = getMedicationTreatmentEndDate(med);
-  // Exact slots come only from explicit doseSchedule rows.
-  if (!Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0) {
-    return [];
-  }
-  const seen = new Set<string>();
-  const slots: AutoDeductionSlot[] = [];
-  for (const d of med.doseSchedule) {
-    if (!d || !isValidDoseTime(d.time) || !(Number(d.amount) > 0)) continue;
-    const doseId = typeof d.id === 'string' ? d.id.trim() : '';
-    if (!doseId) continue;
-    if (seen.has(doseId)) continue;
-    seen.add(doseId);
-    slots.push({
-      medId: med.id,
-      doseId,
-      time: normalizeTimeString(d.time),
-      amount: Number(d.amount),
-      calendarDate,
-      treatmentEndDate: treatmentEndDate ?? undefined,
-    });
-  }
-  return slots;
+  return getAutoDeductionDefinitionForDate(med, calendarDate).map((slot) => ({
+    ...slot,
+  }));
 }
+
 type GuardedCancelResult = {
   ok: boolean;
   skipped?: boolean;

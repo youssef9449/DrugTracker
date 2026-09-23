@@ -31,7 +31,7 @@ public class MetadataOwnershipTest {
     }
 
     @Test
-    public void isMetadataOwnedByVersion_matchesExactScheduleVersion() {
+    public void isMetadataOwnedByVersion_matchesExactOperationVersion() {
         String json = "{\"operationVersion\":\"1000-1-aaa\",\"amount\":1}";
         assertTrue(AutoDeductionScheduler.isMetadataOwnedByVersion(json, "1000-1-aaa"));
         assertFalse(AutoDeductionScheduler.isMetadataOwnedByVersion(json, "1000-2-bbb"));
@@ -43,7 +43,7 @@ public class MetadataOwnershipTest {
     @Test
     public void legacyScheduleVersionIsRejected() {
         String json = "{\"scheduleVersion\":\"1000-7-legacy\",\"amount\":1}";
-        assertTrue(AutoDeductionScheduler.isMetadataOwnedByVersion(
+        assertFalse(AutoDeductionScheduler.isMetadataOwnedByVersion(
                 json, "1000-7-legacy"));
     }
 

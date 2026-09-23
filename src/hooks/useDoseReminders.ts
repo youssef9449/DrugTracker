@@ -91,7 +91,10 @@ export function useDoseReminders({
     const description = typeof row.description === 'string' && row.description.trim()
       ? row.description.trim()
       : undefined;
-    setSnoozeUntil(medication.id, Date.now() + minutes * MS_PER_MINUTE, doseId);
+    const snoozeUntil = Date.now() + minutes * MS_PER_MINUTE;
+    // The durable JS marker follows the native scheduling result. A failed
+    // schedule therefore cannot leave a phantom snooze that suppresses a
+    // future reminder without a native one-shot behind it.
     scheduleSnoozedDoseReminder(
       medication.id,
       medication.name,
@@ -102,12 +105,17 @@ export function useDoseReminders({
       doseId,
       allowManualTakeActionByMedicationId.get(medication.id) ?? true,
       description
-    ).catch(() => void 0);
-    alarmingIdRef.current = null;
-    alarmingDoseIdRef.current = null;
-    isTestAlarmRef.current = false;
-    setAlarmingMedication(null);
-    setAlarmingDoseId(null);
+    ).then(() => {
+      setSnoozeUntil(medication.id, snoozeUntil, doseId);
+      alarmingIdRef.current = null;
+      alarmingDoseIdRef.current = null;
+      isTestAlarmRef.current = false;
+      setAlarmingMedication(null);
+      setAlarmingDoseId(null);
+    }).catch(() => {
+      // Keep the alarm UI open so the user can retry after a transient
+      // native scheduling failure. No snooze marker is persisted.
+    });
   }, [alarmingMedication, allowManualTakeActionByMedicationId]);
   /**
    * Open the in-app alarm for an explicit doseSchedule occurrence.

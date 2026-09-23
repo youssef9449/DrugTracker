@@ -43,9 +43,20 @@ public final class CriticalStockAlarmAdapter
             Context context,
             String reason,
             boolean exactAlarmPermissionGranted) {
-        if (!exactAlarmPermissionGranted) return;
         CriticalStockAlarmAdapter adapter =
                 new CriticalStockAlarmAdapter(context);
+        if (!exactAlarmPermissionGranted) {
+            for (String medicationId : adapter.listScheduledMedicationIds()) {
+                CancelResult result = adapter.cancel(medicationId);
+                if (!result.isOk()) {
+                    android.util.Log.w(
+                            "CriticalStockAlarmAdapter",
+                            reason + ": failed to clean denied-permission alarm "
+                                    + medicationId + " (" + result.error + ")");
+                }
+            }
+            return;
+        }
         for (String medicationId : adapter.listScheduledMedicationIds()) {
             JSONObject metadata =
                     adapter.getScheduleMetadata(medicationId);

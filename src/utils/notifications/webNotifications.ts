@@ -151,7 +151,9 @@ export async function scheduleWebNotification(
     return showScheduledNotification(entry);
   }
 
-  void armPersistentNotification(entry).then((persisted) => {
+  const operation = armPersistentNotification(entry);
+  persistentTriggerOperations.set(key, operation);
+  void operation.then((persisted) => {
     if (persisted) {
       const current = readEntries()[key];
       if (current?.fireAt === entry.fireAt) {

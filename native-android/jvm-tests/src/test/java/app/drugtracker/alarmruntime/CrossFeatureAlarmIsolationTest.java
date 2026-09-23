@@ -257,6 +257,42 @@ public class CrossFeatureAlarmIsolationTest {
     }
 
     @Test
+    public void newScheduleCanLegitimatelySupersedeCancellationTombstone() {
+        String key = DoseReminderAlarmAdapter.occurrenceKey(
+                MEDICATION_ID,
+                DOSE_ID);
+        context().getSharedPreferences(
+                DoseReminderAlarmAdapter.PREFS_CANCELLED,
+                Context.MODE_PRIVATE)
+                .edit()
+                .putString(
+                        ExactAlarmContract.CANCEL_KEY_PREFIX + key,
+                        "10-1-cancel")
+                .commit();
+
+        assertTrue(doseAdapter().scheduleOccurrence(
+                MEDICATION_ID,
+                DOSE_ID,
+                "08:00",
+                1.0,
+                "Phase 9 Medicine",
+                "قرص",
+                null,
+                true,
+                TRIGGER_AT,
+                null).ok);
+
+        assertTrue(doseAdapter().ownsActiveOccurrence(
+                MEDICATION_ID,
+                DOSE_ID,
+                doseAdapter().getScheduleMetadata(
+                        MEDICATION_ID,
+                        DOSE_ID).optString(
+                                ExactAlarmContract.FIELD_OPERATION_VERSION,
+                                "")));
+    }
+
+    @Test
     public void cancelledSnoozeLosesDeliveryOwnership() {
         DoseReminderAlarmAdapter dose = doseAdapter();
         assertTrue(dose.scheduleSnooze(

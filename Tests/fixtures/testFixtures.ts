@@ -26,7 +26,7 @@ export function makeMedication(overrides: Partial<Medication> = {}): Medication 
 
 export function makeAutoDeductionEvent(
   overrides: Partial<AutoDeductionEvent> &
-    Pick<AutoDeductionEvent, 'medicationId' | 'doseId' | 'calendarDate' | 'amount'>
+    Pick<AutoDeductionEvent, 'doseId' | 'calendarDate' | 'amount'>
 ): AutoDeductionEvent {
   return {
     medicationId: 'med-1',

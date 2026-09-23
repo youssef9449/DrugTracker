@@ -240,24 +240,50 @@ export async function getPendingNotification(
   return result.ok ? result.pending : null;
 }
 
-export async function areNotificationsEnabled(): Promise<boolean> {
+export type NotificationPermissionResult =
+  | { ok: true; enabled: boolean }
+  | NativeBoundaryFailure;
+
+export async function getNotificationPermissionResult(): Promise<NotificationPermissionResult> {
   if (isAndroidNotificationRuntime()) {
     try {
       const result = await NotificationRuntime.checkPermission();
-      return result?.enabled === true;
-    } catch {
-      return false;
+      if (!result || typeof result.enabled !== 'boolean') {
+        return {
+          ok: false,
+          error: 'notification_permission_state_invalid',
+          errorCode: 'platform_failure',
+        };
+      }
+      return { ok: true, enabled: result.enabled };
+    } catch (error) {
+      const boundaryError = toNativeBoundaryError(error, 'platform_failure');
+      return {
+        ok: false,
+        error: boundaryError.message,
+        errorCode: boundaryError.code,
+      };
     }
   }
   if (isIOS()) {
     try {
       const result = await LocalNotifications.checkPermissions();
-      return result.display === 'granted';
-    } catch {
-      return false;
+      return { ok: true, enabled: result.display === 'granted' };
+    } catch (error) {
+      const boundaryError = toNativeBoundaryError(error, 'platform_failure');
+      return {
+        ok: false,
+        error: boundaryError.message,
+        errorCode: boundaryError.code,
+      };
     }
   }
-  return false;
+  return { ok: true, enabled: false };
+}
+
+export async function areNotificationsEnabled(): Promise<boolean> {
+  const result = await getNotificationPermissionResult();
+  return result.ok ? result.enabled : false;
 }
 
 export async function areNativeNotificationsEnabled(): Promise<boolean> {

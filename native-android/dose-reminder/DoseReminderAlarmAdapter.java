@@ -165,7 +165,7 @@ public final class DoseReminderAlarmAdapter {
         return CancelResult.success();
     }
 
-    public boolean scheduleSnooze(
+    public ScheduleResult scheduleSnooze(
             String medicationId,
             String doseId,
             String reminderTime,
@@ -175,6 +175,27 @@ public final class DoseReminderAlarmAdapter {
             long triggerAtEpochMs,
             boolean allowManualTakeAction,
             String doseDescription) {
+        if (medicationId == null || medicationId.isEmpty()
+                || doseId == null || doseId.isEmpty()
+                || triggerAtEpochMs <= 0L
+                || amount <= 0d) {
+            return ScheduleResult.failure("invalid_snooze_request");
+        }
+
+        JSONObject metadata = new JSONObject();
+        try {
+            metadata.put("medicationId", medicationId);
+            metadata.put("doseId", doseId);
+            metadata.put("reminderTime", reminderTime == null ? "" : reminderTime);
+            metadata.put("amount", amount);
+            metadata.put("medicationName", medicationName == null ? "" : medicationName);
+            metadata.put("unit", unit == null ? "" : unit);
+            metadata.put("doseDescription", doseDescription == null ? "" : doseDescription.trim());
+            metadata.put("allowManualTakeAction", allowManualTakeAction);
+        } catch (JSONException e) {
+            return ScheduleResult.failure("metadata_build_failed");
+        }
+
         Bundle extras = new Bundle();
         extras.putString("medicationId", medicationId);
         extras.putString("doseId", doseId);
@@ -185,27 +206,52 @@ public final class DoseReminderAlarmAdapter {
         extras.putString("doseDescription", doseDescription == null ? "" : doseDescription.trim());
         extras.putBoolean("allowManualTakeAction", allowManualTakeAction);
 
-        return runtime.scheduleOneShot(
-                snoozeUri(medicationId, doseId),
-                ACTION_DOSE_SNOOZE,
-                DoseReminderAlarmReceiver.class,
-                extras,
-                triggerAtEpochMs,
-                false);
+        ExactAlarmRuntime.ScheduleResult result = runtime.schedule(
+                new ExactAlarmRuntime.ScheduleRequest(
+                        snoozeUri(medicationId, doseId),
+                        snoozeKey(medicationId, doseId),
+                        ACTION_DOSE_SNOOZE,
+                        DoseReminderAlarmReceiver.class,
+                        triggerAtEpochMs,
+                        metadata,
+                        extras,
+                        null));
+        return result.ok
+                ? ScheduleResult.success(result.operationVersion)
+                : ScheduleResult.failure(result.error);
     }
 
-    public boolean cancelSnooze(String medicationId, String doseId) {
-        return runtime.cancelOneShot(
+    public CancelResult cancelSnooze(String medicationId, String doseId) {
+        ExactAlarmRuntime.CancelResult result = runtime.cancel(
                 snoozeUri(medicationId, doseId),
+                snoozeKey(medicationId, doseId),
                 ACTION_DOSE_SNOOZE,
                 DoseReminderAlarmReceiver.class);
+        if (result.status == ExactAlarmRuntime.CancelResult.Status.ALREADY_ABSENT) {
+            return CancelResult.alreadyAbsent();
+        }
+        if (!result.isOk()) {
+            return CancelResult.failure(result.error);
+        }
+        return CancelResult.success();
     }
 
-    public boolean isScheduled(String medicationId, String doseId) {
-        return runtime.isPending(
+    public ExactAlarmRuntime.PendingStateResult getPendingState(
+            String medicationId,
+            String doseId) {
+        return runtime.getPendingState(
                 occurrenceUri(medicationId, doseId),
                 ACTION_DOSE_REMINDER,
                 DoseReminderAlarmReceiver.class);
+    }
+
+    public boolean ownsActiveOccurrence(
+            String medicationId,
+            String doseId,
+            String operationVersion) {
+        return runtime.ownsActiveSchedule(
+                occurrenceKey(medicationId, doseId),
+                operationVersion);
     }
 
     public List<String> listScheduledKeys() {
@@ -243,6 +289,45 @@ public final class DoseReminderAlarmAdapter {
                 "dose-reminder",
                 medicationId == null ? "" : medicationId,
                 doseId == null ? "" : doseId).toString();
+    }
+
+    public static String snoozeKey(String medicationId, String doseId) {
+        return "snooze:" + (medicationId == null ? "" : medicationId)
+                + "::"
+                + (doseId == null ? "" : doseId);
+    }
+
+    public List<String> listScheduledSnoozeKeys() {
+        List<String> keys = runtime.listScheduledStorageKeys();
+        List<String> result = new ArrayList<>();
+        for (String key : keys) {
+            if (key != null && key.startsWith("snooze:")) {
+                result.add(key.substring("snooze:".length()));
+            }
+        }
+        return result;
+    }
+
+    public JSONObject getSnoozeMetadata(String medicationId, String doseId) {
+        return runtime.getScheduleMetadata(snoozeKey(medicationId, doseId));
+    }
+
+    public boolean ownsActiveSnooze(
+            String medicationId,
+            String doseId,
+            String operationVersion) {
+        return runtime.ownsActiveSchedule(
+                snoozeKey(medicationId, doseId),
+                operationVersion);
+    }
+
+    public boolean completeSnooze(
+            String medicationId,
+            String doseId,
+            String operationVersion) {
+        return runtime.completeOneShot(
+                snoozeKey(medicationId, doseId),
+                operationVersion);
     }
 
     public static String snoozeUri(String medicationId, String doseId) {

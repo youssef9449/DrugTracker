@@ -9,10 +9,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: quality-gates-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   architecture:
     name: Architecture invariants

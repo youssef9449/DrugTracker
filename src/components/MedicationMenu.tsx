@@ -433,6 +433,7 @@ export function MedicationMenu({
           onEdit={onEdit}
           onDelete={onDelete}
           onOpenHistory={onOpenHistory}
+          onRegisterBackHandler={onRegisterBackHandler}
           size={size}
         />
       )}

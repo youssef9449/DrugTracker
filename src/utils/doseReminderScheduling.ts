@@ -48,7 +48,10 @@ export async function isDoseReminderPending(
           ? at.getTime()
           : Date.parse(String(at));
     if (Number.isNaN(atMs)) return { ok: true, pending: true };
-    return { ok: true, pending: atMs > Date.now() - 60_000 };
+    // Presence in the platform pending store is authoritative. Do not add a
+    // time-based grace/expiry window; delivery state owns its own lifecycle.
+    void atMs;
+    return { ok: true, pending: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'dose_pending_lookup_failed';
     return {

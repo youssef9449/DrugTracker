@@ -6,6 +6,12 @@ import { loadJson, saveJson } from '../utils/storage';
 import { DEFAULT_SNOOZE_MINUTES, MS_PER_MINUTE } from '../utils/time';
 import { scheduleSnoozedDoseReminder } from '../utils/notifications/doseReminderNotifications';
 import {
+  bumpDoseReminderSnoozeGeneration,
+  isCurrentDoseReminderSnoozeGeneration,
+  enqueueDoseReminderSnoozeOpGuarded,
+  doseReminderSnoozeKey,
+} from '../utils/doseReminderOperations';
+import {
   isSnoozeActive,
   setSnoozeUntil,
   clearSnoozedDose,
@@ -92,29 +98,55 @@ export function useDoseReminders({
       ? row.description.trim()
       : undefined;
     const snoozeUntil = Date.now() + minutes * MS_PER_MINUTE;
-    // The durable JS marker follows the native scheduling result. A failed
-    // schedule therefore cannot leave a phantom snooze that suppresses a
-    // future reminder without a native one-shot behind it.
-    scheduleSnoozedDoseReminder(
+    const operationKey = doseReminderSnoozeKey(
       medication.id,
-      medication.name,
-      amount,
-      medication.unit || 'قرص',
-      time,
-      minutes,
-      doseId,
-      allowManualTakeActionByMedicationId.get(medication.id) ?? true,
-      description
-    ).then(() => {
-      setSnoozeUntil(medication.id, snoozeUntil, doseId);
-      alarmingIdRef.current = null;
-      alarmingDoseIdRef.current = null;
-      isTestAlarmRef.current = false;
-      setAlarmingMedication(null);
-      setAlarmingDoseId(null);
-    }).catch(() => {
-      // Keep the alarm UI open so the user can retry after a transient
-      // native scheduling failure. No snooze marker is persisted.
+      doseId
+    );
+    const generation = bumpDoseReminderSnoozeGeneration(operationKey);
+
+    void enqueueDoseReminderSnoozeOpGuarded(
+      operationKey,
+      generation,
+      async () => {
+        // The durable JS marker follows the native scheduling result. A
+        // failed schedule therefore cannot leave a phantom snooze.
+        await scheduleSnoozedDoseReminder(
+          medication.id,
+          medication.name,
+          amount,
+          medication.unit || 'قرص',
+          time,
+          minutes,
+          doseId,
+          allowManualTakeActionByMedicationId.get(medication.id) ?? true,
+          description
+        );
+
+        if (
+          !isCurrentDoseReminderSnoozeGeneration(
+            operationKey,
+            generation
+          )
+        ) {
+          // A Take/dismiss/disable action superseded this request while the
+          // native schedule was in flight. Remove the stale realization.
+          await cancelSnoozedDoseReminder(
+            medication.id,
+            doseId
+          );
+          return;
+        }
+
+        setSnoozeUntil(medication.id, snoozeUntil, doseId);
+        alarmingIdRef.current = null;
+        alarmingDoseIdRef.current = null;
+        isTestAlarmRef.current = false;
+        setAlarmingMedication(null);
+        setAlarmingDoseId(null);
+      }
+    ).catch(() => {
+      // Keep the alarm UI open so a transient native failure can be retried.
+      // No snooze marker is persisted on failure.
     });
   }, [alarmingMedication, allowManualTakeActionByMedicationId]);
   /**

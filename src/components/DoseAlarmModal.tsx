@@ -1,6 +1,7 @@
 import type { FC } from 'react';
 import { Bell, Check, Clock, X } from 'lucide-react';
-import { Medication, formatTimeArabic } from '../types';
+import type { Medication } from '../types';
+import { formatTimeArabic } from '../utils/medicationPresentation';
 import { Modal } from './ui/Modal';
 
 interface DoseAlarmModalProps {

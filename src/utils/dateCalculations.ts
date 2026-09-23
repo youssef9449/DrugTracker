@@ -6,10 +6,7 @@ import { MS_PER_DAY, NEVER_DEPLETES_DAYS } from './time';
  * Returns today's date as a deterministic YYYY-MM-DD string, using
  * the client's local timezone.
  *
- * This is a client-side Vite SPA (no SSR), so there is no server/client
- * hydration concern. The function is kept pure (no window/localStorage
- * access) simply so it can be safely called during module init and
- * from the seed-data file without side effects.
+ * Pure calendar-date formatting helper.
  */
 export function getLocalDateString(date: Date = new Date()): string {
   const year = date.getFullYear();
@@ -41,13 +38,30 @@ export function tomorrowDateString(dateStr: string = getTodayDateString()): stri
 }
 
 export function localEpochMs(calendarDate: string, timeHhmm: string): number | null {
-  if (!calendarDate || !timeHhmm) return null;
-  const parts = calendarDate.split('-').map((n) => parseInt(n, 10));
-  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(calendarDate)) return null;
   const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(timeHhmm);
   if (!match) return null;
-  const [y, m, d] = parts;
-  const dt = new Date(y, m - 1, d, Number(match[1]), Number(match[2]), 0, 0);
+
+  const [year, month, day] = calendarDate.split('-').map(Number);
+  const utcDate = parseUtcDate(calendarDate);
+  if (
+    !utcDate ||
+    utcDate.getUTCFullYear() !== year ||
+    utcDate.getUTCMonth() !== month - 1 ||
+    utcDate.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  const dt = new Date(
+    year,
+    month - 1,
+    day,
+    Number(match[1]),
+    Number(match[2]),
+    0,
+    0
+  );
   const ms = dt.getTime();
   return Number.isFinite(ms) ? ms : null;
 }

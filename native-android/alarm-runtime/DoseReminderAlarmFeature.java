@@ -45,6 +45,11 @@ public final class DoseReminderAlarmFeature
             if (meta == null) {
                 continue;
             }
+            if (adapter.isOccurrenceEffectivelyCancelled(
+                    medicationId,
+                    doseId)) {
+                continue;
+            }
 
             String reminderTime = meta.optString("reminderTime", "");
             if (reminderTime.isEmpty()) {
@@ -62,7 +67,7 @@ public final class DoseReminderAlarmFeature
                     "calendarDate", "");
             String operationVersion = meta.optString(
                     ExactAlarmContract.FIELD_OPERATION_VERSION,
-                    ExactAlarmContract.LEGACY_FIELD_SCHEDULE_VERSION);
+                    "");
 
             long trigger = ExactAlarmContract.resolveLocalDateTimeEpochMs(calendarDate, reminderTime, false);
             long now = System.currentTimeMillis();
@@ -120,6 +125,81 @@ public final class DoseReminderAlarmFeature
                         TAG,
                         reason
                                 + ": failed to restore "
+                                + key
+                                + " ("
+                                + result.error
+                                + ")");
+            }
+        }
+
+        restoreSnoozes(
+                context,
+                reason,
+                exactAlarmPermissionGranted);
+    }
+
+    private void restoreSnoozes(
+            Context context,
+            String reason,
+            boolean exactAlarmPermissionGranted) {
+        if (!exactAlarmPermissionGranted) return;
+
+        DoseReminderAlarmAdapter adapter =
+                new DoseReminderAlarmAdapter(context);
+        for (String key : adapter.listScheduledSnoozeKeys()) {
+            String[] parts = key.split("::", 2);
+            if (parts.length != 2
+                    || parts[0].isEmpty()
+                    || parts[1].isEmpty()) {
+                continue;
+            }
+
+            String medicationId = parts[0];
+            String doseId = parts[1];
+            JSONObject meta =
+                    adapter.getSnoozeMetadata(medicationId, doseId);
+            if (meta == null
+                    || adapter.isSnoozeEffectivelyCancelled(
+                            medicationId,
+                            doseId)) {
+                continue;
+            }
+
+            String operationVersion = meta.optString(
+                    ExactAlarmContract.FIELD_OPERATION_VERSION,
+                    "");
+            if (operationVersion.isEmpty()) continue;
+
+            double amount = meta.optDouble("amount", 0d);
+            long triggerAt = meta.optLong(
+                    ExactAlarmContract.FIELD_TRIGGER_AT_EPOCH_MS,
+                    -1L);
+            if (amount <= 0d || triggerAt <= 0L) continue;
+
+            long now = System.currentTimeMillis();
+            if (triggerAt <= now) {
+                triggerAt = now + 1_000L;
+            }
+
+            DoseReminderAlarmAdapter.ScheduleResult result =
+                    adapter.scheduleSnooze(
+                            medicationId,
+                            doseId,
+                            meta.optString("reminderTime", ""),
+                            amount,
+                            meta.optString("medicationName", ""),
+                            meta.optString("unit", "قرص"),
+                            triggerAt,
+                            meta.optBoolean(
+                                    "allowManualTakeAction",
+                                    true),
+                            meta.optString("doseDescription", ""),
+                            operationVersion);
+            if (!result.ok) {
+                Log.w(
+                        TAG,
+                        reason
+                                + ": failed to restore snooze "
                                 + key
                                 + " ("
                                 + result.error

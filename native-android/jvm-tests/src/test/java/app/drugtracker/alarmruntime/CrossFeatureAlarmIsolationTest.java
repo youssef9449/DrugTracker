@@ -131,6 +131,69 @@ public class CrossFeatureAlarmIsolationTest {
     }
 
     @Test
+    public void pendingStateReflectsAlarmManagerAndNotDurableMetadataPresence() {
+        DoseReminderAlarmAdapter dose = doseAdapter();
+
+        assertTrue(dose.scheduleOccurrence(
+                MEDICATION_ID,
+                DOSE_ID,
+                "08:00",
+                1.0,
+                "Phase 9 Medicine",
+                "قرص",
+                true,
+                TRIGGER_AT,
+                null).ok);
+
+        ExactAlarmRuntime runtime = new ExactAlarmRuntime(
+                context(),
+                DoseReminderAlarmAdapter.PREFS_SCHEDULES,
+                DoseReminderAlarmAdapter.PREFS_CANCELLED,
+                DoseReminderAlarmAdapter.PREFS_ORDERING,
+                DoseReminderAlarmAdapter.REQUEST_CODE_BASE);
+
+        ExactAlarmRuntime.PendingStateResult pending = runtime.getPendingState(
+                DoseReminderAlarmAdapter.occurrenceUri(
+                        MEDICATION_ID,
+                        DOSE_ID).toString(),
+                DoseReminderAlarmAdapter.ACTION_DOSE_REMINDER,
+                DoseReminderAlarmAdapter.class);
+
+        assertTrue(pending.isPending());
+
+        ShadowAlarmManager.ScheduledAlarm scheduled = scheduledAlarms().get(0);
+        alarmManager().cancel(scheduled.operation);
+
+        ExactAlarmRuntime.PendingStateResult absent = runtime.getPendingState(
+                DoseReminderAlarmAdapter.occurrenceUri(
+                        MEDICATION_ID,
+                        DOSE_ID).toString(),
+                DoseReminderAlarmAdapter.ACTION_DOSE_REMINDER,
+                DoseReminderAlarmAdapter.class);
+
+        assertTrue(absent.status == ExactAlarmRuntime.PendingStateResult.Status.ABSENT);
+        assertTrue(
+                dose.getScheduleMetadata(MEDICATION_ID, DOSE_ID) != null);
+    }
+
+    @Test
+    public void pendingStateRejectsInvalidRequestAsFailure() {
+        ExactAlarmRuntime runtime = new ExactAlarmRuntime(
+                context(),
+                DoseReminderAlarmAdapter.PREFS_SCHEDULES,
+                DoseReminderAlarmAdapter.PREFS_CANCELLED,
+                DoseReminderAlarmAdapter.PREFS_ORDERING,
+                DoseReminderAlarmAdapter.REQUEST_CODE_BASE);
+
+        ExactAlarmRuntime.PendingStateResult result = runtime.getPendingState(
+                "",
+                DoseReminderAlarmAdapter.ACTION_DOSE_REMINDER,
+                DoseReminderAlarmAdapter.class);
+
+        assertTrue(result.status == ExactAlarmRuntime.PendingStateResult.Status.FAILED);
+    }
+
+    @Test
     public void cancellingDoseLeavesAutoAndCriticalArmed() {
         scheduleAllThree();
 

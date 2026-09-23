@@ -12,7 +12,7 @@ import { isDoseTimeElapsedToday } from './doseSchedule';
 import { generateId } from './id';
 import { exactAutoLogId } from './autoDeductionReconciliation';
 /**
- * Shared medication-action helpers ().
+ * Shared medication-action helpers.
  * Manual stock mutations use `applyDurableStockDelta` — a simple helper that
  * applies a signed delta to `med.currentPills` with a zero clamp. There is NO
  * elapsed-day settlement and NO read-time stock projection inside manual
@@ -24,7 +24,7 @@ import { exactAutoLogId } from './autoDeductionReconciliation';
  * - base = `Math.max(0, med.currentPills)` (never negative).
  * - positive delta increases the balance; negative delta decreases it.
  * - result clamped at zero.
- * - No elapsed-day settlement is performed as part of the manual mutation ().
+ * - No elapsed-day settlement is performed as part of the manual mutation.
  * @param med The medication to adjust.
  * @param delta The signed pill delta (positive for restore/refill, negative
  *   for consume).
@@ -53,7 +53,7 @@ export function resolveRestoreDoseId(
   | { ok: false; reason: 'missing_dose_id' | 'invalid_dose_id' | 'no_dose' } {
   const schedule = med.doseSchedule;
   if (!Array.isArray(schedule) || schedule.length === 0) {
-    // No doseSchedule: cannot restore an occurrence ().
+    // No doseSchedule: cannot restore an occurrence.
     // A stale explicit doseId is invalid_dose_id; otherwise no_dose.
     if (doseId != null && doseId !== '') {
       return { ok: false, reason: 'invalid_dose_id' };
@@ -191,7 +191,7 @@ export function getHistoricalRestoreDisplayAmount(
 }
 /**
  * Whether a log represents Exact Auto deduction evidence for the requested
- * occurrence ().
+ * occurrence.
  * Decision table:
  *   exact_auto  → valid only when log.id === exactAutoLogId(...)
  *   other types → invalid
@@ -391,7 +391,7 @@ export function restoreDose(
       reversedLogId,
     };
   }
-  // No explicit doseSchedule: cannot restore ().
+  // No explicit doseSchedule: cannot restore.
   return { ok: false, reason: 'no_dose' };
 }
 /**

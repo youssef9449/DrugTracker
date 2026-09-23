@@ -42,18 +42,6 @@ async function showScheduledNotification(entry: WebScheduledEntry): Promise<bool
   if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     try {
       const reg = await navigator.serviceWorker.ready;
-      const Trigger = (globalThis as unknown as { TimestampTrigger?: new (time: number) => unknown }).TimestampTrigger;
-      if (Trigger && typeof (reg as ServiceWorkerRegistration & {
-        showNotification: (title: string, options?: NotificationOptions & { showTrigger?: unknown }) => Promise<void>;
-      }).showNotification === 'function') {
-        await (reg as ServiceWorkerRegistration & {
-          showNotification: (title: string, options?: NotificationOptions & { showTrigger?: unknown }) => Promise<void>;
-        }).showNotification(entry.title, {
-          ...options,
-          showTrigger: new Trigger(entry.fireAt),
-        });
-        return true;
-      }
       await reg.showNotification(entry.title, options);
       return true;
     } catch {
@@ -125,23 +113,6 @@ export async function scheduleWebNotification(
     delete entries[key];
     writeEntries(entries);
     return showScheduledNotification(entry);
-  }
-
-  const Trigger = (globalThis as unknown as { TimestampTrigger?: new (time: number) => unknown }).TimestampTrigger;
-  if (Trigger && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      await (reg as ServiceWorkerRegistration & {
-        showNotification: (title: string, options?: NotificationOptions & { showTrigger?: unknown }) => Promise<void>;
-      }).showNotification(title, {
-        body,
-        icon: '/assets/icons/icon.svg',
-        showTrigger: new Trigger(fireAt),
-      });
-      return true;
-    } catch {
-      // Use the durable page-side schedule below.
-    }
   }
 
   armTimer(entry);

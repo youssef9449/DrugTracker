@@ -33,7 +33,6 @@ import {
   getNotificationPermission,
 } from '../utils/notifications/notificationPermissions';
 import { DEFAULT_SNOOZE_MINUTES } from '../utils/time';
-
 export interface MedicationHandlersDeps {
   medications: Medication[];
   logs: ConsumptionLog[];
@@ -57,7 +56,6 @@ export interface MedicationHandlersDeps {
   /** Matches useDoseReminders.snoozeAlarm(minutes?). */
   snoozeAlarm: (minutes?: number) => void;
 }
-
 /**
  * Medication mutation handlers extracted from App.tsx.
  * Preserves guards, in-flight refs, toasts, and state update ordering.
@@ -82,7 +80,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     dismissAlarm,
     snoozeAlarm,
   } = deps;
-
   const restoreInFlightRef = useRef<Set<string>>(new Set());
   const refillUndoInFlightRef = useRef<Set<string>>(new Set());
   // Always-current snapshots so card/modal handlers never open SelectDoseModal
@@ -93,7 +90,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
   selectDoseModeRef.current = selectDoseMode;
   const globalAutoDeductEnabledRef = useRef(globalAutoDeductEnabled);
   globalAutoDeductEnabledRef.current = globalAutoDeductEnabled;
-
   const handleRestoreDose = async (
     medicationId: string,
     reason: string,
@@ -109,12 +105,10 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       doseId != null && doseId !== ''
         ? `${medicationId}:${doseId}:${today}`
         : `${medicationId}:${today}`;
-
     if (restoreInFlightRef.current.has(restoreKey)) {
       return { medication: null, result: null };
     }
     restoreInFlightRef.current.add(restoreKey);
-
     try {
       const result = await runGatedManualRestore({
         medicationId,
@@ -149,7 +143,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         medicationsRef.current = result.medications;
         setLogs(result.logs);
       }
-
       // Map durable outcomes to UI messages; never claim success on failure.
       if (result.outcome === 'already_restored' || result.reason === 'already_restored') {
         if (displayName) showToast(TOAST_MESSAGES.doseAlreadyRestored(displayName));
@@ -166,7 +159,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       restoreInFlightRef.current.delete(restoreKey);
     }
   };
-
   const handleConfirmRefill = (medicationId: string, addedPills: number) => {
     // Input validation only — no React medication lookup. Settlement, stock,
     // and log creation all happen inside runGatedRefill on fresh durable state.
@@ -189,14 +181,12 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       }
     })();
   };
-
   const handleUndoRefill = (medicationId: string) => {
     // In-flight guard only. Medication existence, refill selection, and
     // stock math are decided exclusively inside runGatedUndoRefill against
     // fresh durable medications + logs (not React snapshot).
     if (refillUndoInFlightRef.current.has(medicationId)) return;
     refillUndoInFlightRef.current.add(medicationId);
-
     void (async () => {
       try {
         const result = await runGatedUndoRefill({ medicationId });
@@ -215,7 +205,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       }
     })();
   };
-
   const handleToggleAutoDeduct = (medicationId: string) => {
     // Durable gate: settlement from React snapshot is forbidden.
     // Exact FIRED reconciliation runs inside the gate before the current toggle mutation.
@@ -255,7 +244,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       if (soundEnabled) playSuccessChime();
     })();
   };
-
   const handleToggleGlobalAutoDeduct = () => {
     // Eagerly update the request ref so consecutive clicks before React
     // renders alternate OFF/ON instead of reading the same stale closure.
@@ -295,7 +283,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       if (soundEnabled) playSuccessChime();
     })();
   };
-
   const handleConfirmAutoDeductPrompt = (enable: boolean) => {
     // First-run preference uses the same durable global mutation gate as every
     // later global toggle. Do not create a second durable writer for the
@@ -309,7 +296,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
         setIsAutoDeductPromptOpen(true);
         return;
       }
-
       persist(STORAGE_AUTO_DEDUCT_PROMPTED_KEY, 'true', { json: false });
       setGlobalAutoDeductEnabled(result.enable);
       setMedications(result.medications);
@@ -326,9 +312,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       );
     })();
   };
-
-
-
   const handleSaveMedication = (medData: Omit<Medication, 'id' | 'createdAt'>, editId?: string) => {
     if (editId) {
       // Durable gate: stock/settlement uses fresh durable medication state, not React.
@@ -389,8 +372,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       setEditingMedication(null);
     })();
   };
-
-
   const handleDeleteMedication = (id: string) => {
     void (async () => {
       const result = await runGatedDeleteMedication({ medicationId: id });
@@ -405,8 +386,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       }
     })();
   };
-
-
   const runAlarmTake = useCallback(async (
     medicationId: string,
     doseId: string | undefined,
@@ -447,27 +426,21 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       dismissAlarm();
     }
   }, [dismissAlarm, soundEnabled, setMedications, setLogs, showToast]);
-
   const handleTakeDoseFromAlarm = useCallback((med: Medication, doseId?: string) => {
     void runAlarmTake(med.id, doseId, med);
   }, [runAlarmTake]);
-
   /** Notification action entry point: identity only, never a React snapshot. */
   const handleTakeDoseFromAlarmById = useCallback((medicationId: string, doseId?: string) => {
     void runAlarmTake(medicationId, doseId);
   }, [runAlarmTake]);
-
-
   const handleSnoozeFromAlarm = (med: Medication) => {
     snoozeAlarm(DEFAULT_SNOOZE_MINUTES);
     showToast(TOAST_MESSAGES.doseSnoozed(med.name));
   };
-
   // Open the Android exact-alarm settings screen so the user can grant
   // SCHEDULE_EXACT_ALARM. On web this is a no-op. After the user returns
   // to the app, the appStateChange listener re-checks the permission
   // and updates exactAlarmEnabled → the scheduler reschedules.
-
   const handleConsumeDose = (medicationId: string, doseId?: string) => {
     // Outside the gate: only request inputs. All business decisions
     // (med existence, schedule, single/multi resolution, already_consumed,
@@ -526,7 +499,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       // missing_med / rejected / other — no success or already-taken toast.
     })();
   };
-
   /**
    * Card toggle restore.
    * Multi-dose without doseId → SelectDoseModal (restore mode), same UX as Take.
@@ -582,7 +554,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       }
     })();
   };
-
   const handleSelectDoseFromModal = (medicationId: string, doseId: string) => {
     // Prefer ref so selection uses the mode that opened the modal, not a
     // stale closure if the callback identity lagged one render.
@@ -594,7 +565,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       handleConsumeDose(medicationId, doseId);
     }
   };
-
   const handleToggleMedicationNotification = useCallback(
     (medicationId: string, field: 'reminderEnabled' | 'criticalStockAlertsEnabled') => {
       void (async () => {
@@ -602,12 +572,10 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
           medicationId,
           field,
         });
-
         if (result.outcome === 'applied') {
           setMedications(result.medications);
           medicationsRef.current = result.medications;
           setLogs(result.logs);
-
           const label =
             field === 'reminderEnabled'
               ? 'تذكير موعد الجرعة'
@@ -620,7 +588,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
           if (soundEnabled) playSuccessChime();
           return;
         }
-
         if (result.outcome === 'missing_med') {
           showToast('تعذر العثور على الدواء المطلوب.');
         } else if (
@@ -633,7 +600,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
     },
     [setMedications, setLogs, showToast, soundEnabled]
   );
-
   // #79: extracted from two byte-identical inline handlers passed to
   // AppHeader and AppSettingsModal. useCallback so both props get the
   // same stable reference.
@@ -648,7 +614,6 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       showToast(TOAST_MESSAGES.criticalAlertsOff);
       return;
     }
-
     // Turning ON — ensure OS notification permission is granted.
     // On denial/error, do NOT activate the toggle. Never mutate
     // notificationsEnabled here (dose reminders stay independent).
@@ -667,17 +632,14 @@ export function useMedicationHandlers(deps: MedicationHandlersDeps) {
       showToast(TOAST_MESSAGES.notificationsPermissionDenied);
       return;
     }
-
     setCriticalStockAlertsEnabled(true);
     if (soundEnabled) playSuccessChime();
     showToast(TOAST_MESSAGES.criticalAlertsOn);
   }, [criticalStockAlertsEnabled, soundEnabled, showToast, setCriticalStockAlertsEnabled]);
-
   // #88: Single memoized medications-with-status array. Previously
   // calculateMedicationStatus(med) was recomputed in 4 separate memos
   // (filteredMedications, alertsCount, sufficientCount, totalStockByUnit)
   // + inside LowStockBanner (3x per med). Now all derive from this one.
-
   return {
     handleRestoreDose,
     handleConfirmRefill,

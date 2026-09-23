@@ -1,18 +1,15 @@
 /**
  * Manual Take / Restore use the same durable stock gate as
  * exact auto-deduction reconciliation.
- *
  * Crash consistency — dedicated Manual JS envelope (NOT Exact Auto envelope):
  *   1. Allocate mutationSeq + write the complete current envelope, including
  *      signed Native stock deltas and occurrence resolutions
  *   2. Apply the Native stock mutation idempotently and commit the JS snapshot
  *      with appliedMutationSeq
  *   3. Clear the Manual envelope on full success
- *
  * Shared causal order with Exact Auto via mutationSeq / lastAppliedMutationSeq.
  * Manual envelope never carries toAcknowledge; never calls markReconciled.
  */
-
 import type { ConsumptionLog, Medication } from '../types';
 import {
   consumeDose,
@@ -54,7 +51,6 @@ import {
   type ManualStockEnvelope,
 } from './stockEnvelopeRecovery';
 import { reconcileExactBeforeManualMutation } from './reconcileExactBeforeManualMutation';
-
 export type {
   ManualStockEnvelope,
 } from './stockEnvelopeRecovery';
@@ -65,7 +61,6 @@ export {
   STORAGE_MANUAL_ENVELOPE_KEY,
   __setManualEnvelopeTestHooks,
 } from './stockEnvelopeRecovery';
-
 export type GatedManualOutcome =
   | 'applied'
   | 'already_consumed'
@@ -74,7 +69,6 @@ export type GatedManualOutcome =
   | 'missing_dose_id'
   | 'persist_failed'
   | 'rejected';
-
 export interface GatedManualConsumeResult {
   outcome: GatedManualOutcome;
   medications: Medication[];
@@ -86,7 +80,6 @@ export interface GatedManualConsumeResult {
   medicationName?: string;
   unit?: string;
 }
-
 export interface GatedManualRestoreResult {
   outcome: GatedManualOutcome;
   medications: Medication[];
@@ -99,7 +92,6 @@ export interface GatedManualRestoreResult {
   /** Fresh durable unit for UI log descriptions. */
   unit?: string;
 }
-
 /**
  * Alarm UI dismiss contract after Manual Take from notification/alarm:
  * only after durable success (applied) or occurrence already settled
@@ -110,14 +102,12 @@ export function shouldDismissAlarmAfterManualTake(
 ): boolean {
   return outcome === 'applied' || outcome === 'already_consumed';
 }
-
 function resolveConsumeDoseId(med: Medication, doseId?: string): string | undefined {
   const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
   if (doseId != null && doseId !== '') return doseId;
   if (schedule.length === 1) return schedule[0].id;
   return undefined;
 }
-
 function preSettlementBlockReason(pre: {
   nativeListFailed: boolean;
   durabilityBlocked?: boolean;
@@ -126,7 +116,6 @@ function preSettlementBlockReason(pre: {
   if (pre.nativeListFailed) return 'native_list_failed';
   return null;
 }
-
 /** Native recurrence chains affected by an auto-deduction configuration change. */
 function recurrenceDoseIds(med: Medication): string[] {
   const ids = new Set<string>();
@@ -138,7 +127,6 @@ function recurrenceDoseIds(med: Medication): string[] {
   }
   return [...ids];
 }
-
 function autoDeductionDefinitionSignature(med: {
   autoDeductEnabled?: boolean;
   reminderEnabled?: boolean;
@@ -166,7 +154,6 @@ function autoDeductionDefinitionSignature(med: {
     schedulePart,
   ].join('|');
 }
-
 function autoDeductionDefinitionChanged(
   oldMed: Medication,
   nextMed: Omit<Medication, 'id' | 'createdAt'>
@@ -174,7 +161,6 @@ function autoDeductionDefinitionChanged(
   return autoDeductionDefinitionSignature(oldMed) !==
     autoDeductionDefinitionSignature(nextMed);
 }
-
 /**
  * Invalidate every native recurrence chain belonging to one medication.
  * On web `not_android` is a successful no-op. Real native failure blocks
@@ -182,14 +168,12 @@ function autoDeductionDefinitionChanged(
  */
 let manualRecurrenceInvalidationTestHook:
   ((medicationId: string, doseId: string) => Promise<{ ok: boolean; error?: string }>) | null = null;
-
 /** @internal test-only */
 export function __setManualRecurrenceInvalidationTestHook(
   hook: typeof manualRecurrenceInvalidationTestHook
 ): void {
   manualRecurrenceInvalidationTestHook = hook;
 }
-
 function recurrenceDefinition(
   med: Medication,
   doseId: string
@@ -207,7 +191,6 @@ function recurrenceDefinition(
     amount: Number(dose.amount),
   };
 }
-
 async function restoreInvalidatedRecurrences(
   med: Medication,
   doseIds: string[],
@@ -217,7 +200,6 @@ async function restoreInvalidatedRecurrences(
   const tomorrow = tomorrowDateString(today);
   if (!tomorrow) return { ok: false, error: 'invalid_next_date' };
   const treatmentEndDate = getMedicationTreatmentEndDate(med);
-
   for (const doseId of doseIds) {
     const def = recurrenceDefinition(med, doseId);
     if (!def) continue;
@@ -242,13 +224,11 @@ async function restoreInvalidatedRecurrences(
   }
   return { ok: true };
 }
-
 interface RecurrenceInvalidationResult {
   ok: boolean;
   error?: string;
   invalidatedDoseIds: string[];
 }
-
 async function invalidateMedicationRecurrences(
   med: Medication
 ): Promise<RecurrenceInvalidationResult> {
@@ -282,8 +262,6 @@ async function invalidateMedicationRecurrences(
   }
   return { ok: true, invalidatedDoseIds };
 }
-
-
 /**
  * Hand Exact Auto toAcknowledge to the existing native ACK path.
  * Manual does not own ACK semantics — only forwards finalized recovery ACKs.
@@ -309,7 +287,6 @@ async function acknowledgeExactAutoEvents(
     }
   }
 }
-
 /**
  * Shared JS-stock durability: recovery envelope → meds+logs+global → completion marker → clear.
  * Safe to call from an already-held withAutoStockMutationGate, including
@@ -321,12 +298,10 @@ function buildNativeStockDeltas(
 ): Array<{ medicationId: string; delta: number }> {
   const baseById = new Map(baseMedications.map((m) => [m.id, m.currentPills]));
   const deltas: Array<{ medicationId: string; delta: number }> = [];
-
   for (const medication of nextMedications) {
     const before = baseById.get(medication.id);
     const after = Number(medication.currentPills);
     if (!Number.isFinite(after) || after < 0) continue;
-
     if (before == null) {
       // A newly-added medication with zero stock still needs a Native row so
       // an exact Auto occurrence can be recorded as a zero-unit deduction
@@ -334,16 +309,13 @@ function buildNativeStockDeltas(
       deltas.push({ medicationId: medication.id, delta: after });
       continue;
     }
-
     const delta = after - Number(before);
     if (Number.isFinite(delta) && delta !== 0) {
       deltas.push({ medicationId: medication.id, delta });
     }
   }
-
   return deltas;
 }
-
 export async function commitWithManualEnvelope(
   state: AutoStockDurableState,
   baseMedications: Medication[],
@@ -379,7 +351,6 @@ export async function commitWithManualEnvelope(
   };
   const envErr = saveManualStockEnvelope(envelope);
   if (envErr) return envErr;
-
   const nativeResult = await applyForegroundAutoStockDeltas(
     mutationSeq,
     stockDeltas,
@@ -388,7 +359,6 @@ export async function commitWithManualEnvelope(
   if (!nativeResult.ok) {
     return nativeResult.error ?? 'foreground_stock_failed';
   }
-
   // The Native result is authoritative for currentPills. Merge that snapshot
   // back into the JS state before writing the durable envelope so a foreground
   // mutation cannot persist the pre-Auto absolute balance it started from.
@@ -406,7 +376,6 @@ export async function commitWithManualEnvelope(
         : medication;
     });
   }
-
   // Refresh the recovery envelope after Native execution. A crash before the
   // JS commit must recover from this newer Native-aligned snapshot, not the
   // pre-mutation absolute currentPills value captured before the delta ran.
@@ -416,18 +385,15 @@ export async function commitWithManualEnvelope(
   if (refreshedEnvelopeErr) {
     return refreshedEnvelopeErr;
   }
-
   const commitErr = commitDurableAutoStockState(durableState, {
     appliedMutationSeq: mutationSeq,
   });
   if (commitErr) {
     return commitErr;
   }
-
   saveManualStockEnvelope(null);
   return null;
 }
-
 export function runGatedManualConsume(opts: {
   medicationId: string;
   doseId?: string;
@@ -449,7 +415,6 @@ export function runGatedManualConsume(opts: {
     // on the gate still uses the clock at execution time (not call time).
     const todayStr = opts.todayStr ?? getTodayDateString();
     const now = opts.now ?? new Date();
-
     const recovered = await recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
@@ -480,7 +445,6 @@ export function runGatedManualConsume(opts: {
       };
     }
     const fresh = pre.state;
-
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
       return {
@@ -492,7 +456,6 @@ export function runGatedManualConsume(opts: {
         reason: 'missing_med',
       };
     }
-
     // Resolve dose identity once from durable med (never React). Multi-dose
     // without doseId cannot proceed; single-dose maps to the sole slot id.
     const resolvedDoseId = resolveConsumeDoseId(med, opts.doseId);
@@ -508,7 +471,6 @@ export function runGatedManualConsume(opts: {
         unit: med.unit,
       };
     }
-
     // Authoritative amount: native occurrence snapshot under SCHEDULE_LOCK.
     // FIRED → immutable native event amount; SCHEDULED / ABSENT / CANCELLED
     // → fresh durable JS schedule amount; native failure → no mutation.
@@ -548,7 +510,6 @@ export function runGatedManualConsume(opts: {
       amountOverride = n;
     }
     // SCHEDULED / ABSENT / CANCELLED: consumeDose uses fresh durable JS schedule.
-
     const result = consumeDose(
       med,
       opts.source,
@@ -557,7 +518,6 @@ export function runGatedManualConsume(opts: {
       resolvedDoseId,
       amountOverride !== undefined ? { amountOverride } : undefined
     );
-
     if (!result.updatedMed || !result.log || result.doseAmount <= 0) {
       const reason = result.reason ?? 'rejected';
       if (reason === 'missing_dose_id') {
@@ -586,7 +546,6 @@ export function runGatedManualConsume(opts: {
         unit: med.unit,
       };
     }
-
     const medications = fresh.medications.map((m) =>
       m.id === med.id ? result.updatedMed! : m
     );
@@ -614,7 +573,6 @@ export function runGatedManualConsume(opts: {
         unit: med.unit,
       };
     }
-
     return {
       outcome: 'applied' as const,
       medications,
@@ -626,7 +584,6 @@ export function runGatedManualConsume(opts: {
     };
   });
 }
-
 export function runGatedManualRestore(opts: {
   medicationId: string;
   doseId?: string;
@@ -638,7 +595,6 @@ export function runGatedManualRestore(opts: {
     // Capture date/time inside the critical section (not at call time).
     const todayStr = opts.todayStr ?? getTodayDateString();
     const now = opts.now ?? new Date();
-
     const recovered = await recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
@@ -669,7 +625,6 @@ export function runGatedManualRestore(opts: {
       };
     }
     const fresh = pre.state;
-
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
       return {
@@ -681,7 +636,6 @@ export function runGatedManualRestore(opts: {
         reason: 'missing_med',
       };
     }
-
     const result = restoreDose(med, opts.doseId, todayStr, now, fresh.logs);
     if (!result.ok) {
       // restoreDose rejects a future unconsumed occurrence (no durable
@@ -703,7 +657,7 @@ export function runGatedManualRestore(opts: {
           unit: med.unit,
         };
       }
-      // Issue #267: missing_deduction_evidence after a prior Restore set a
+      // missing_deduction_evidence after a prior Restore set a
       // skip marker is already_restored (idempotent — the occurrence was
       // already handled). This happens when the first Restore cleared the
       // consume marker and set a skip; the second Restore finds no active
@@ -734,7 +688,6 @@ export function runGatedManualRestore(opts: {
         unit: med.unit,
       };
     }
-
     // Idempotency: a projection-only restore (auto-elapsed, no consume
     // marker) sets a durable skip marker the FIRST time so projection/Exact
     // Auto don't re-deduct. A SECOND restore for the same occurrence (skip
@@ -758,11 +711,9 @@ export function runGatedManualRestore(opts: {
         unit: med.unit,
       };
     }
-
     const medications = fresh.medications.map((m) =>
       m.id === opts.medicationId ? result.updatedMed : m
     );
-
     // Mark the ACTIVE deduction log (exact_auto / dose_taken) that this
     // Restore reverses as `reversedAt`, and link the restore (skipped_day)
     // log to it via `relatedLogId`. This mirrors the refill/refill_undo
@@ -795,7 +746,6 @@ export function runGatedManualRestore(opts: {
           : l
       ),
     ];
-
     const err = await commitWithManualEnvelope(
       { medications, logs },
       fresh.medications,
@@ -821,7 +771,6 @@ export function runGatedManualRestore(opts: {
         unit: med.unit,
       };
     }
-
     return {
       outcome: 'applied' as const,
       medications,
@@ -833,7 +782,6 @@ export function runGatedManualRestore(opts: {
     };
   });
 }
-
 export interface GatedAddMedicationResult {
   outcome: 'applied' | 'duplicate_med_id' | 'persist_failed';
   medications: Medication[];
@@ -842,7 +790,6 @@ export interface GatedAddMedicationResult {
   unit?: string;
   reason?: string;
 }
-
 /**
  * Add a medication through the same durable stock gate as every other
  * post-hydration medication/stock mutation. The caller provides a complete
@@ -863,7 +810,6 @@ export function runGatedAddMedication(opts: {
       };
     }
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-
     const pre = await reconcileExactBeforeManualMutation({
       fresh: recovered.state,
       globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
@@ -876,7 +822,6 @@ export function runGatedAddMedication(opts: {
         reason: preSettlementBlockReason(pre) ?? 'native_list_failed',
       };
     }
-
     if (pre.state.medications.some((m) => m.id === opts.medication.id)) {
       return {
         outcome: 'duplicate_med_id' as const,
@@ -887,7 +832,6 @@ export function runGatedAddMedication(opts: {
         reason: 'duplicate_med_id',
       };
     }
-
     const durableGlobal =
       pre.state.globalAutoDeductEnabled ??
       loadDurableGlobalAutoDeductEnabled();
@@ -902,7 +846,6 @@ export function runGatedAddMedication(opts: {
     };
     const medications = [medication, ...pre.state.medications];
     const logs = pre.state.logs;
-
     const err = await commitWithManualEnvelope({
       medications,
       logs,
@@ -918,7 +861,6 @@ export function runGatedAddMedication(opts: {
         unit: medication.unit,
       };
     }
-
     return {
       outcome: 'applied' as const,
       medications,
@@ -928,13 +870,11 @@ export function runGatedAddMedication(opts: {
     };
   });
 }
-
 export type GatedRefillOutcome =
   | 'applied'
   | 'missing_med'
   | 'persist_failed'
   | 'rejected';
-
 export interface GatedRefillResult {
   outcome: GatedRefillOutcome;
   medications: Medication[];
@@ -946,13 +886,11 @@ export interface GatedRefillResult {
   medicationName?: string;
   unit?: string;
 }
-
 /**
  * Route a stock refill (handleConfirmRefill) through the same durable stock
  * mutation gate as Manual Take/Restore and Exact Auto reconciliation. This
  * serializes refills with concurrent deductions so a refill can never write
  * a stale snapshot over a just-committed deduction (and vice versa).
- *
  * Behavior preserved:  at the effective balance + add the
  * refill amount, prepend a refill log. The only
  * change is that the settle + commit happen inside the gate against FRESH
@@ -971,7 +909,6 @@ export function runGatedRefill(opts: {
     // Capture date/time inside the critical section (not at call time).
     const todayStr = opts.todayStr ?? getTodayDateString();
     const now = opts.now ?? new Date();
-
     const recovered = await recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
@@ -1002,7 +939,6 @@ export function runGatedRefill(opts: {
       };
     }
     const fresh = pre.state;
-
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
       return {
@@ -1014,7 +950,6 @@ export function runGatedRefill(opts: {
         reason: 'missing_med',
       };
     }
-
     if (!(opts.addedPills > 0)) {
       return {
         outcome: 'rejected' as const,
@@ -1025,8 +960,7 @@ export function runGatedRefill(opts: {
         reason: 'rejected',
       };
     }
-
-    // Issue #267: refill adds user-entered amount to durable currentPills only.
+    // refill adds user-entered amount to durable currentPills only.
     const updatedMed = applyDurableStockDelta(med, opts.addedPills);
     const medications = fresh.medications.map((m) =>
       m.id === opts.medicationId ? updatedMed : m
@@ -1045,7 +979,6 @@ export function runGatedRefill(opts: {
           : `تراجع عن تعبئة مخزون (${Math.abs(opts.addedPills)} ${med.unit})`,
     };
     const logs = [log, ...fresh.logs];
-
     const err = await commitWithManualEnvelope({ medications, logs }, fresh.medications);
     if (err) {
       return {
@@ -1057,7 +990,6 @@ export function runGatedRefill(opts: {
         reason: 'persist_failed',
       };
     }
-
     return {
       outcome: 'applied' as const,
       medications,
@@ -1069,7 +1001,6 @@ export function runGatedRefill(opts: {
     };
   });
 }
-
 /**
  * Route a refill undo (handleUndoRefill) through the same durable stock
  * mutation gate. Reverses the most recent un-reversed refill log for the
@@ -1086,7 +1017,6 @@ export function runGatedUndoRefill(opts: {
     // Capture date/time inside the critical section (not at call time).
     const todayStr = opts.todayStr ?? getTodayDateString();
     const now = opts.now ?? new Date();
-
     const recovered = await recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
@@ -1117,7 +1047,6 @@ export function runGatedUndoRefill(opts: {
       };
     }
     const fresh = pre.state;
-
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
       return {
@@ -1129,7 +1058,6 @@ export function runGatedUndoRefill(opts: {
         reason: 'missing_med',
       };
     }
-
     // Most recent un-reversed refill by durable contract: highest timestamp,
     // then highest id (stable, independent of array position / React snapshot).
     const candidates = fresh.logs.filter(
@@ -1161,10 +1089,8 @@ export function runGatedUndoRefill(opts: {
         unit: med.unit,
       };
     }
-
     const reverseTimestamp = new Date(now).toISOString();
-
-    // Issue #267: refill undo reverses from durable currentPills only.
+    // refill undo reverses from durable currentPills only.
     // reversedAmount = min(refill.amount, max(0, currentPills)).
     // No read-time projection and no elapsed-day settlement.
     const reversedAmount = Math.min(
@@ -1192,7 +1118,6 @@ export function runGatedUndoRefill(opts: {
         l.id === refill.id ? { ...l, reversedAt: reverseTimestamp } : l
       ),
     ];
-
     const err = await commitWithManualEnvelope({ medications, logs }, fresh.medications);
     if (err) {
       return {
@@ -1204,7 +1129,6 @@ export function runGatedUndoRefill(opts: {
         reason: 'persist_failed',
       };
     }
-
     return {
       outcome: 'applied' as const,
       medications,
@@ -1216,15 +1140,12 @@ export function runGatedUndoRefill(opts: {
     };
   });
 }
-
-
 export type GatedToggleOutcome =
   | 'applied'
   | 'missing_med'
   | 'persist_failed'
   | 'native_list_failed'
   | 'native_invalidation_failed';
-
 export interface GatedAutoDeductToggleResult {
   outcome: GatedToggleOutcome;
   medications: Medication[];
@@ -1235,7 +1156,6 @@ export interface GatedAutoDeductToggleResult {
   unit?: string;
   reason?: string;
 }
-
 /**
  * Per-med auto-deduct toggle inside the stock gate.
  * Ordering: recover → exact FIRED reconciliation →  on durable med.
@@ -1248,7 +1168,6 @@ export function runGatedAutoDeductToggle(opts: {
 }): Promise<GatedAutoDeductToggleResult> {
   return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
     const now = opts.now ?? new Date();
-
     const recovered = await recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
@@ -1261,7 +1180,6 @@ export function runGatedAutoDeductToggle(opts: {
       };
     }
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-
     const pre = await reconcileExactBeforeManualMutation({
       fresh: recovered.state,
       // The durable recovered global policy is the authority; React's copy is
@@ -1280,7 +1198,6 @@ export function runGatedAutoDeductToggle(opts: {
       };
     }
     const fresh = pre.state;
-
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
       return {
@@ -1292,17 +1209,14 @@ export function runGatedAutoDeductToggle(opts: {
         reason: 'missing_med',
       };
     }
-
-    // Issue #267: per-med Auto ON/OFF changes configuration only.
+    // per-med Auto ON/OFF changes configuration only.
     const newState = med.autoDeductEnabled === false;
     const updatedMed: Medication = { ...med, autoDeductEnabled: newState };
     const settleLog: ConsumptionLog | null = null;
-
     const medications = fresh.medications.map((m) =>
       m.id === opts.medicationId ? updatedMed : m
     );
     const logs = fresh.logs;
-
     // Native recurrence invalidation is the cross-domain ordering barrier.
     const invalidation = await invalidateMedicationRecurrences(med);
     if (!invalidation.ok) {
@@ -1317,7 +1231,6 @@ export function runGatedAutoDeductToggle(opts: {
         unit: med.unit,
       };
     }
-
     const err = await commitWithManualEnvelope({ medications, logs }, fresh.medications);
     if (err) {
       // Native invalidation already linearized the old schedule chain. Restore
@@ -1337,7 +1250,6 @@ export function runGatedAutoDeductToggle(opts: {
         unit: med.unit,
       };
     }
-
     return {
       outcome: 'applied' as const,
       medications,
@@ -1349,7 +1261,6 @@ export function runGatedAutoDeductToggle(opts: {
     };
   });
 }
-
 export interface GatedGlobalAutoDeductToggleResult {
   outcome:
     | 'applied'
@@ -1362,7 +1273,6 @@ export interface GatedGlobalAutoDeductToggleResult {
   settleLogs: ConsumptionLog[];
   reason?: string;
 }
-
 /**
  * Global auto-deduct toggle inside the stock gate.
  * Exact FIRED reconciliation runs before any per-med manual mutation.
@@ -1374,7 +1284,6 @@ export function runGatedGlobalAutoDeductToggle(opts: {
 }): Promise<GatedGlobalAutoDeductToggleResult> {
   return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
     const now = opts.now ?? new Date();
-
     const recovered = await recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
@@ -1387,7 +1296,6 @@ export function runGatedGlobalAutoDeductToggle(opts: {
       };
     }
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-
     const pre = await reconcileExactBeforeManualMutation({
       fresh: recovered.state,
       globalAutoDeductEnabled: opts.enable,
@@ -1404,12 +1312,10 @@ export function runGatedGlobalAutoDeductToggle(opts: {
       };
     }
     const fresh = pre.state;
-
     // Global is a bulk state setter for ALL existing medications AND the
     // default for newly added ones. Flip autoDeductEnabled only — do not
     // settle stock, invent consumption logs, or mutate currentPills here.
     // Schedulers/reminders react to the resulting medication-level flags.
-    //
     // Global OFF: invalidate ALL native recurrences BEFORE the durable bulk
     // commit (same ordering barrier as per-med toggle) so a near-fire
     // occurrence cannot FIRE after OFF is durable but before the scheduler
@@ -1443,13 +1349,11 @@ export function runGatedGlobalAutoDeductToggle(opts: {
         });
       }
     }
-
     const medications = fresh.medications.map((med) =>
       med.autoDeductEnabled === opts.enable
         ? med
         : { ...med, autoDeductEnabled: opts.enable }
     );
-
     const err = await commitWithManualEnvelope({
       medications,
       logs: fresh.logs,
@@ -1474,7 +1378,6 @@ export function runGatedGlobalAutoDeductToggle(opts: {
         reason: 'persist_failed',
       };
     }
-
     return {
       outcome: 'applied' as const,
       medications,
@@ -1484,14 +1387,12 @@ export function runGatedGlobalAutoDeductToggle(opts: {
     };
   });
 }
-
 export type GatedDeleteMedicationOutcome =
   | 'applied'
   | 'missing_med'
   | 'persist_failed'
   | 'native_list_failed'
   | 'native_invalidation_failed';
-
 export interface GatedDeleteMedicationResult {
   outcome: GatedDeleteMedicationOutcome;
   medications: Medication[];
@@ -1500,10 +1401,8 @@ export interface GatedDeleteMedicationResult {
   unit?: string;
   reason?: string;
 }
-
 /**
  * Delete a medication from the durable stock state.
- *
  * Native FIRED events for a deleted medication remain harmless: the existing
  * Exact Auto reconciler ACKs missing-med occurrences without mutating stock.
  * Native schedule cleanup is handled by the normal desired-state scheduler
@@ -1522,7 +1421,6 @@ export function runGatedDeleteMedication(opts: {
         reason: 'persist_failed',
       };
     }
-
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
     const pre = await reconcileExactBeforeManualMutation({
       fresh: recovered.state,
@@ -1536,7 +1434,6 @@ export function runGatedDeleteMedication(opts: {
         reason: preSettlementBlockReason(pre) ?? 'native_list_failed',
       };
     }
-
     const med = pre.state.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
       return {
@@ -1546,7 +1443,6 @@ export function runGatedDeleteMedication(opts: {
         reason: 'missing_med',
       };
     }
-
     // Invalidate the deleted medication's old native recurrence before the
     // deletion is committed. This closes the same cross-domain race as edit/
     // toggle: a queued old alarm cannot create a new FIRED occurrence after
@@ -1562,7 +1458,6 @@ export function runGatedDeleteMedication(opts: {
         unit: med.unit,
       };
     }
-
     const medications = pre.state.medications.filter((m) => m.id !== opts.medicationId);
     const err = await commitWithManualEnvelope({
       medications,
@@ -1581,7 +1476,6 @@ export function runGatedDeleteMedication(opts: {
         unit: med.unit,
       };
     }
-
     return {
       outcome: 'applied' as const,
       medications,
@@ -1591,14 +1485,12 @@ export function runGatedDeleteMedication(opts: {
     };
   });
 }
-
 export type GatedMedicationUpdateOutcome =
   | 'applied'
   | 'missing_med'
   | 'persist_failed'
   | 'native_list_failed'
   | 'native_invalidation_failed';
-
 export interface GatedMedicationUpdateResult {
   outcome: GatedMedicationUpdateOutcome;
   medications: Medication[];
@@ -1608,7 +1500,6 @@ export interface GatedMedicationUpdateResult {
   unit?: string;
   reason?: string;
 }
-
 /**
  * Medication edit inside the stock gate.
  * Uses durable medication for settlement; form data cannot overwrite stock-owned fields.
@@ -1617,7 +1508,6 @@ export interface GatedMedicationUpdateResult {
  * Toggle a per-medication notification preference against FRESH durable
  * medication state. The current value is read inside the stock gate so
  * repeated/rapid card clicks cannot overwrite a newer durable snapshot.
- *
  * criticalStockAlertsEnabled treats undefined as enabled for existing data;
  * reminderEnabled treats undefined as disabled, matching the scheduler.
  */
@@ -1634,7 +1524,6 @@ export function runGatedMedicationNotificationToggle(opts: {
 }> {
   return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
     const now = opts.now ?? new Date();
-
     const recovered = await recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
@@ -1644,7 +1533,6 @@ export function runGatedMedicationNotificationToggle(opts: {
       };
     }
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-
     const pre = await reconcileExactBeforeManualMutation({
       fresh: recovered.state,
       globalAutoDeductEnabled: recovered.state.globalAutoDeductEnabled !== false,
@@ -1657,7 +1545,6 @@ export function runGatedMedicationNotificationToggle(opts: {
         logs: pre.state.logs,
       };
     }
-
     const fresh = pre.state;
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
@@ -1667,13 +1554,11 @@ export function runGatedMedicationNotificationToggle(opts: {
         logs: fresh.logs,
       };
     }
-
     const currentEnabled =
       opts.field === 'criticalStockAlertsEnabled'
         ? med.criticalStockAlertsEnabled !== false
         : med.reminderEnabled === true;
     const enabled = !currentEnabled;
-
     const updatedMed: Medication = {
       ...med,
       [opts.field]: enabled,
@@ -1681,7 +1566,6 @@ export function runGatedMedicationNotificationToggle(opts: {
     const medications = fresh.medications.map((m) =>
       m.id === opts.medicationId ? updatedMed : m
     );
-
     const err = await commitWithManualEnvelope(
       { medications, logs: fresh.logs },
       fresh.medications
@@ -1694,7 +1578,6 @@ export function runGatedMedicationNotificationToggle(opts: {
         medicationName: med.name,
       };
     }
-
     return {
       outcome: 'applied' as const,
       medications,
@@ -1704,7 +1587,6 @@ export function runGatedMedicationNotificationToggle(opts: {
     };
   });
 }
-
 export function runGatedMedicationUpdate(opts: {
   editId: string;
   medData: Omit<Medication, 'id' | 'createdAt'>;
@@ -1714,7 +1596,6 @@ export function runGatedMedicationUpdate(opts: {
 }): Promise<GatedMedicationUpdateResult> {
   return withAutoStockMutationGate(async (freshIn: AutoStockDurableState) => {
     const now = opts.now ?? new Date();
-
     const recovered = await recoverManualEnvelopeInto(freshIn);
     if (!recovered.ok) {
       return {
@@ -1726,7 +1607,6 @@ export function runGatedMedicationUpdate(opts: {
       };
     }
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
-
     const pre = await reconcileExactBeforeManualMutation({
       fresh: recovered.state,
       // The durable recovered global policy is authoritative; the React value
@@ -1744,7 +1624,6 @@ export function runGatedMedicationUpdate(opts: {
       };
     }
     const fresh = pre.state;
-
     const freshMed = fresh.medications.find((m) => m.id === opts.editId);
     if (!freshMed) {
       return {
@@ -1755,7 +1634,6 @@ export function runGatedMedicationUpdate(opts: {
         reason: 'missing_med',
       };
     }
-
     let invalidation: RecurrenceInvalidationResult = {
       ok: true,
       invalidatedDoseIds: [],
@@ -1776,12 +1654,10 @@ export function runGatedMedicationUpdate(opts: {
         };
       }
     }
-
-    // Issue #267: dose edit changes configuration only. No stock settlement,
+    // dose edit changes configuration only. No stock settlement,
     // by a dose edit.
     const stockBase = freshMed;
     const settleLog: ConsumptionLog | null = null;
-
     // Prune from durable/settled history + NEW schedule — never from React form history.
     // Authority: fresh durable state → settlement result → prune using final schedule.
     const forPrune: Omit<Medication, 'id' | 'createdAt'> = {
@@ -1791,7 +1667,6 @@ export function runGatedMedicationUpdate(opts: {
       doseSkippedHistory: stockBase.doseSkippedHistory,
     };
     const pruned = pruneDoseConsumption(forPrune, stockBase);
-
     // Build final med: user-editable fields from medData/pruned; stock/history from
     // stockBase then pruned schedule (pruned doseConsumptionHistory wins over stockBase).
     const finalMed: Medication = {
@@ -1815,12 +1690,10 @@ export function runGatedMedicationUpdate(opts: {
       doseSkippedHistory:
         pruned.doseSkippedHistory ?? stockBase.doseSkippedHistory,
     };
-
     const medications = fresh.medications.map((m) =>
       m.id === opts.editId ? finalMed : m
     );
     const logs = settleLog ? [settleLog, ...fresh.logs] : fresh.logs;
-
     const err = await commitWithManualEnvelope({ medications, logs }, fresh.medications);
     if (err) {
       // Only configuration-changing edits invalidate native recurrences.
@@ -1845,7 +1718,6 @@ export function runGatedMedicationUpdate(opts: {
         unit: freshMed.unit,
       };
     }
-
     return {
       outcome: 'applied' as const,
       medications,

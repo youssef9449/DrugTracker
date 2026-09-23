@@ -27,8 +27,6 @@ import {
 import { getMedSizes } from '../utils/medicationPackaging';
 import { Checkbox } from './ui/Checkbox';
 import { SegmentedButton } from './ui/SegmentedButton';
-
-
 function shoppingDurationDays(
   med: Medication,
   medicationPeriods: Record<string, { value: number | ''; unit: 'day' | 'month' }>,
@@ -41,41 +39,32 @@ function shoppingDurationDays(
   const rawValue = period.value === '' ? 1 : period.value;
   return Math.max(1, rawValue || 1) * (period.unit === 'month' ? 30 : 1);
 }
-
 type OrderUnit = 'pills' | 'boxes' | 'strips';
 type CustomOrderQuantities = Record<string, Partial<Record<OrderUnit, number | ''>>>;
-
 function getShoppingAvailableUnits(med: Medication): OrderUnit[] {
   const { boxSize, stripSize, hasStrips } = getMedSizes(med);
-
   // Solid medications with configured strips can be ordered as strips and/or boxes.
   if (hasStrips && stripSize > 0) {
     return boxSize > 0 ? ['strips', 'boxes'] : ['strips'];
   }
-
   // Sachets/doses may be ordered as loose units and/or full boxes.
   if ((med.unit === 'كيس' || med.unit === 'جرعة') && boxSize > 0) {
     return ['pills', 'boxes'];
   }
-
   return ['boxes'];
 }
-
 function getShoppingDefaultUnits(med: Medication): OrderUnit[] {
   return [getShoppingAvailableUnits(med)[0]];
 }
-
 function getShoppingUnitSize(med: Medication, unit: OrderUnit): number {
   const { boxSize, stripSize } = getMedSizes(med);
   if (unit === 'boxes') return boxSize > 0 ? boxSize : 1;
   if (unit === 'strips') return stripSize > 0 ? stripSize : 1;
   return 1;
 }
-
 function shoppingUnitToPills(med: Medication, unit: OrderUnit, quantity: number): number {
   return quantity * getShoppingUnitSize(med, unit);
 }
-
 function shoppingRequestedPills(
   med: Medication,
   suggestedPills: number,
@@ -85,7 +74,6 @@ function shoppingRequestedPills(
 ): number {
   const mode = quantityModes[med.id] || 'period';
   if (mode !== 'custom') return suggestedPills;
-
   const selectedUnits = orderUnits[med.id] || getShoppingDefaultUnits(med);
   return selectedUnits.reduce((total, unit) => {
     const stored = customOrderQuantities[med.id]?.[unit];
@@ -97,7 +85,6 @@ function shoppingRequestedPills(
     return total + shoppingUnitToPills(med, unit, unitQty);
   }, 0);
 }
-
 interface PharmacyShoppingViewProps {
   medications: Medication[];
   settings: PharmacySettings;
@@ -105,7 +92,6 @@ interface PharmacyShoppingViewProps {
   showToast: (message: string) => void;
   onOpenUserContactsSettings?: () => void;
 }
-
 export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   medications,
   settings,
@@ -134,7 +120,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     ?? whatsappContacts.map((contact) => contact.id);
   const selectedWhatsappAddressIds = settings.selectedWhatsappAddressIds
     ?? whatsappAddresses.map((item) => item.id);
-
   const [showAllForPlanning, setShowAllForPlanning] = useState(false);
   // Multiple order units may be selected together in "كمية محددة".
   const [orderUnits, setOrderUnits] = useState<Record<string, OrderUnit[]>>({});
@@ -144,22 +129,18 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   // `displayList` changes. Cleared for a med when it leaves
   // `displayList` (so it starts fresh if it returns).
   const [deselectedIds, setDeselectedIds] = useState<Set<string>>(new Set());
-
   const urgentMeds = useMemo(() => {
     return medications.filter((m) => {
       const { status } = calculateMedicationStatus(m);
       return status === 'out_of_stock' || status === 'critical' || status === 'warning';
     });
   }, [medications]);
-
   const effectiveShowAll = showAllForPlanning;
   const displayList = (effectiveShowAll ? medications : urgentMeds)
     .filter((medication) => !removedFromShoppingIds.has(medication.id));
-
   const [selectedMedIds, setSelectedMedIds] = useState<Set<string>>(() => {
     return new Set(urgentMeds.map((m) => m.id));
   });
-
   // #20 + #34: reconcile the selection and deselectedIds
   // against the displayed list. This effect:
   //   - Auto-selects any displayed med not yet selected AND not in
@@ -171,7 +152,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   // `deselectedIds` is in the deps array).
   useEffect(() => {
     const displayedIds = new Set(displayList.map((m) => m.id));
-
     setSelectedMedIds((prev) => {
       let changed = false;
       const next = new Set(prev);
@@ -183,7 +163,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       }
       return changed ? next : prev;
     });
-
     setDeselectedIds((prev) => {
       let changed = false;
       const next = new Set(prev);
@@ -193,13 +172,12 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       return changed ? next : prev;
     });
   }, [displayList, deselectedIds]);
-
   const handleToggleSelect = (id: string) => {
     // Read current values from the closure (not from setState updaters) and
     // compute both next states, then call both setters sequentially. The
     // previous version called setDeselectedIds from inside the
     // setSelectedMedIds updater — unsafe under React 18+ concurrent
-    // rendering / StrictMode because updaters must be pure (audit #70).
+    // rendering / StrictMode because updaters must be pure ().
     const nextSelected = new Set(selectedMedIds);
     const nextDeselected = new Set(deselectedIds);
     if (nextSelected.has(id)) {
@@ -214,7 +192,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     setSelectedMedIds(nextSelected);
     setDeselectedIds(nextDeselected);
   };
-
   const handleRemoveFromShopping = (id: string) => {
     setRemovedFromShoppingIds((prev) => new Set(prev).add(id));
     setSelectedMedIds((prev) => {
@@ -228,26 +205,20 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       return next;
     });
   };
-
   const getMedicationPeriod = (med: Medication): MedicationPeriod => medicationPeriods[med.id] || {
     value: settings.defaultDurationDays === 60 ? 2 : 30,
     unit: settings.defaultDurationDays === 60 ? 'month' : 'day',
   };
-
   const getDurationDays = (med: Medication) => {
     const period = getMedicationPeriod(med);
     const rawValue = period.value === '' ? 1 : period.value;
     return Math.max(1, rawValue || 1) * (period.unit === 'month' ? 30 : 1);
   };
-
   const getQuantityMode = (med: Medication): QuantityMode => quantityModes[med.id] || 'period';
-
   const handleMedicationPeriodChange = (medId: string, field: keyof MedicationPeriod, value: string) => {
     const med = medications.find((item) => item.id === medId);
     if (!med) return;
-
     const currentPeriod = getMedicationPeriod(med);
-
     if (field === 'unit') {
       const nextUnit = value as PeriodUnit;
       const currentValue = currentPeriod.value === '' ? 1 : currentPeriod.value;
@@ -255,7 +226,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       const nextValue = nextUnit === 'month'
         ? Math.max(1, Math.ceil(currentDays / 30))
         : Math.max(1, currentDays);
-
       setMedicationPeriods((prev) => ({
         ...prev,
         [medId]: {
@@ -265,7 +235,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       }));
       return;
     }
-
     const nextValue = value === '' ? '' : Math.max(1, parseInt(value, 10) || 1);
     setMedicationPeriods((prev) => ({
       ...prev,
@@ -275,34 +244,27 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       },
     }));
   };
-
   const getRequestedAmount = (med: Medication) =>
     calculateMedicationOrderQuantity(med, getDurationDays(med));
-
   // ── Unit display helpers ─────────────────────────────────────
   // The selected unit only changes how the calculated quantity is shown.
   // It must never change the quantity required for the selected period.
-
   /** Available order units; custom mode can select more than one simultaneously. */
   function getAvailableUnits(med: Medication): OrderUnit[] {
     return getShoppingAvailableUnits(med);
   }
-
   function getSelectedUnits(med: Medication): OrderUnit[] {
     return orderUnits[med.id] || getShoppingDefaultUnits(med);
   }
-
   function getUnitQuantity(med: Medication, unit: OrderUnit, suggestedPills: number): number {
     if (getQuantityMode(med) === 'custom') {
       const stored = customOrderQuantities[med.id]?.[unit];
       if (stored === '') return 0;
       if (stored !== undefined) return stored;
     }
-
     const unitSize = getShoppingUnitSize(med, unit);
     return Math.max(1, Math.ceil(suggestedPills / unitSize));
   }
-
   /** Display value for each custom-unit input. */
   function getCustomQuantityInputValue(
     med: Medication,
@@ -313,7 +275,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     if (stored !== undefined) return stored;
     return getUnitQuantity(med, unit, suggestedPills);
   }
-
   function getRequestedPills(med: Medication, suggestedPills: number): number {
     return shoppingRequestedPills(
       med,
@@ -323,12 +284,9 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       orderUnits
     );
   }
-
   const handleToggleQuantityMode = (med: Medication, mode: QuantityMode, suggestedPills: number) => {
     setQuantityModes((prev) => ({ ...prev, [med.id]: mode }));
-
     if (mode !== 'custom') return;
-
     const selectedUnits = getSelectedUnits(med);
     setCustomOrderQuantities((prev) => {
       const current = prev[med.id] || {};
@@ -346,10 +304,8 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       };
     });
   };
-
   const handleToggleOrderUnit = (med: Medication, unit: OrderUnit, suggestedPills: number) => {
     const selected = getSelectedUnits(med);
-
     if (getQuantityMode(med) !== 'custom') {
       // "حسب الفترة" keeps the existing single-unit display selection.
       setOrderUnits((prev) => ({
@@ -358,7 +314,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       }));
       return;
     }
-
     if (selected.includes(unit)) {
       // Keep at least one unit active in custom mode.
       if (selected.length <= 1) return;
@@ -368,12 +323,10 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       }));
       return;
     }
-
     setOrderUnits((prev) => ({
       ...prev,
       [med.id]: [...selected, unit],
     }));
-
     setCustomOrderQuantities((prev) => ({
       ...prev,
       [med.id]: {
@@ -382,7 +335,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       },
     }));
   };
-
   const handleCustomQuantityChange = (med: Medication, unit: OrderUnit, raw: string) => {
     if (raw === '') {
       setCustomOrderQuantities((prev) => ({
@@ -394,7 +346,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       }));
       return;
     }
-
     const parsed = parseInt(raw, 10);
     setCustomOrderQuantities((prev) => ({
       ...prev,
@@ -404,7 +355,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       },
     }));
   };
-
   /** Display label for a unit. */
   function unitLabel(unit: OrderUnit, med: Medication, count: number): string {
     if (unit === 'pills') return pluralizeArabic(count, med.unit);
@@ -414,7 +364,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     }
     return pluralizeArabic(count, 'شريط');
   }
-
   function getOrderBreakdown(med: Medication, suggestedPills: number) {
     if (getQuantityMode(med) !== 'custom') return undefined;
     return getSelectedUnits(med)
@@ -424,7 +373,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       }))
       .filter((item) => item.quantity > 0);
   }
-
   const activeOrderItems = useMemo((): OrderItem[] => {
     return displayList
       .filter((med) => selectedMedIds.has(med.id))
@@ -450,7 +398,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
         };
       });
   }, [displayList, selectedMedIds, medicationPeriods, quantityModes, customOrderQuantities, orderUnits, settings.defaultDurationDays]);
-
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
   const orderItemsForMessage = useMemo((): OrderItem[] => {
     if (activeOrderItems.length > 0) return activeOrderItems;
@@ -476,7 +423,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       };
     });
   }, [activeOrderItems, medications, medicationPeriods, quantityModes, customOrderQuantities, orderUnits, settings.defaultDurationDays]);
-
   const currentWhatsAppMessage = useMemo(() => {
     return generatePharmacyOrderMessage(
       orderItemsForMessage,
@@ -491,7 +437,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
         .map((contact) => contact.phone)
     );
   }, [orderItemsForMessage, selectedPharmacy?.customerCode, whatsappAddresses, whatsappContacts, selectedWhatsappAddressIds, selectedWhatsappContactIds]);
-
   const toggleWhatsappContact = (id: string) => {
     const nextIds = selectedWhatsappContactIds.includes(id)
       ? selectedWhatsappContactIds.filter((selectedId) => selectedId !== id)
@@ -504,7 +449,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       selectedWhatsappAddressIds,
     });
   };
-
   const toggleWhatsappAddress = (id: string) => {
     const nextIds = selectedWhatsappAddressIds.includes(id)
       ? selectedWhatsappAddressIds.filter((selectedId) => selectedId !== id)
@@ -517,15 +461,12 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       selectedWhatsappAddressIds: nextIds,
     });
   };
-
   const hasPharmacyPhone = Boolean(selectedPharmacy?.phone?.trim());
   const displayPhone = selectedPharmacy?.phone ? cleanPhoneNumber(selectedPharmacy.phone) : '';
   const selectedCount = activeOrderItems.length;
-
   const targetWaUrl = useMemo(() => {
     return buildWhatsAppUrl(selectedPharmacy?.phone || '', currentWhatsAppMessage);
   }, [selectedPharmacy?.phone, currentWhatsAppMessage]);
-
   const handleSendToWhatsApp = () => {
     if (selectedCount === 0) {
       showToast('يرجى تحديد دواء واحد على الأقل لإرسال الطلب.');
@@ -541,7 +482,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     setIsSendModalOpen(true);
     showToast('اختر الصيدلية ثم افتح واتساب لإرسال الطلب.');
   };
-
   return (
     <div className="p-4 space-y-4">
       <div className="flex items-center justify-between text-xs px-1">
@@ -591,7 +531,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
           </button>
         </div>
       </div>
-
       <div className="space-y-2">
         {displayList.map((med) => {
           const { status } = calculateMedicationStatus(med);
@@ -650,7 +589,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>
-
               {/* Unit selector + quantity controls */}
               <div className="mt-2 pt-2 border-t border-slate-100 space-y-1.5">
                 {/* Toolbar: keep the quantity-mode switch on the right and
@@ -670,7 +608,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                       aria-label={`طريقة حساب كمية طلب ${med.name}`}
                     />
                   </div>
-
                   {availableUnits.length > 1 ? (
                     <div className="flex items-start gap-1 shrink-0">
                       {availableUnits.map((u) => {
@@ -751,7 +688,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                     })
                   )}
                 </div>
-
                 {/* Period duration row (custom quantities already sit under toggles) */}
                 {getQuantityMode(med) === 'period' && (
                   <div className="flex items-center justify-between gap-2 rounded-lg border border-teal-100/90 bg-teal-50/40 px-2.5 py-1">
@@ -781,7 +717,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                         </select>
                       </div>
                     </div>
-
                     {selectedUnits.map((unit) => {
                       const unitQty = getUnitQuantity(med, unit, suggestedPills);
                       return (
@@ -795,7 +730,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                     })}
                   </div>
                 )}
-
                 {/* Total order description */}
                 <div className="text-[10.5px] text-teal-800 text-left font-medium px-0.5">
                   الإجمالي:{' '}
@@ -811,7 +745,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
           );
         })}
       </div>
-
       <button
         type="button"
         onClick={handleSendToWhatsApp}
@@ -821,7 +754,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
         <MessageCircle className="w-5 h-5" />
         <span>إرسال طلبية بالواتساب</span>
       </button>
-
       {/* WhatsApp Send Confirmation & Direct Links Modal */}
       {isSendModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
@@ -845,7 +777,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                 <X className="w-4 h-4" />
               </button>
             </div>
-
             {/* Selected pharmacy summary */}
             <div className="bg-slate-50 rounded-2xl p-3.5 border border-slate-200/80 space-y-2">
               <label className="block text-xs font-bold text-slate-700">
@@ -872,7 +803,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                 </span>
               </div>
             </div>
-
             <div className="bg-teal-50/60 rounded-2xl p-3.5 border border-teal-200/80 space-y-3">
                 <div>
                   <div className="flex items-center justify-between gap-2">
@@ -931,7 +861,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                   </p>
                 )}
               </div>
-
             {/* Direct Send Action Buttons */}
             {hasPharmacyPhone && (
               <div className="space-y-2">
@@ -948,10 +877,8 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                   <span>فتح محادثة واتساب الآن</span>
                   <ExternalLink className="w-4 h-4 opacity-80 shrink-0" />
                 </a>
-
               </div>
             )}
-
             {/* Live WhatsApp message preview, matching AppSettingsModal. */}
             <div className="bg-white text-slate-700 rounded-2xl p-3.5 text-xs space-y-2 font-mono border border-slate-200 shadow-sm">
               <div className="flex items-center justify-between text-[11px] text-teal-800 font-bold">
@@ -967,7 +894,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                 {currentWhatsAppMessage || 'يرجى تحديد أدوية لمعاينة نص الرسالة.'}
               </div>
             </div>
-
             {/* Analyzed Items Breakdown */}
             <div className="space-y-1.5 pt-1">
               <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
@@ -991,7 +917,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
                 })}
               </div>
             </div>
-
           </div>
         </div>
       )}

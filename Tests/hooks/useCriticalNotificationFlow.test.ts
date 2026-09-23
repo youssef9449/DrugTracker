@@ -6,6 +6,7 @@ import { getTodayDateString, getCriticalAlarmDate } from '@/utils/dateCalculatio
 import { CRITICAL_CLAIMS_STORAGE_KEY } from '@/utils/criticalNotificationClaims';
 import { useStockAlerts } from '@/hooks/useStockAlerts';
 import { useCriticalAlarmScheduler } from '@/hooks/useCriticalAlarmScheduler';
+import { cancelCriticalAlarm, scheduleCriticalAlarm, verifyCriticalAlarmPending } from '@/utils/criticalAlarmScheduling';
 
 // Integration tests: both hooks mounted together, exactly like App.tsx
 // wires them (useStockAlerts first, then useCriticalAlarmScheduler).
@@ -121,10 +122,10 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
   platformMock.mockReturnValue('web');
   sendMock.mockResolvedValue(true);
-  scheduleMock.mockResolvedValue(true);
-  cancelMock.mockResolvedValue(undefined);
+  scheduleMock.mockResolvedValue({ ok: true });
+  cancelMock.mockResolvedValue({ ok: true });
   verifyMock.mockReset();
-  verifyMock.mockResolvedValue(false);
+  verifyMock.mockResolvedValue({ ok: true, pending: false });
 });
 
 afterEach(() => {
@@ -230,7 +231,7 @@ describe('critical notification flow — both hooks integrated', () => {
     let resolveSchedule: (v: boolean) => void = () => undefined;
     scheduleMock.mockImplementationOnce(
       () =>
-        new Promise<boolean>((resolve) => {
+        new Promise<Awaited<ReturnType<typeof scheduleCriticalAlarm>>>((resolve) => {
           resolveSchedule = resolve;
         })
     );
@@ -252,7 +253,7 @@ describe('critical notification flow — both hooks integrated', () => {
 
     // The in-flight schedule now resolves — stale. The scheduler must
     // not overwrite the foreground's claim.
-    resolveSchedule(true);
+    resolveSchedule({ ok: true });
     await flush();
 
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
@@ -281,7 +282,7 @@ describe('critical notification flow — both hooks integrated', () => {
     let resolveSchedule: (v: boolean) => void = () => undefined;
     scheduleMock.mockImplementationOnce(
       () =>
-        new Promise<boolean>((resolve) => {
+        new Promise<Awaited<ReturnType<typeof scheduleCriticalAlarm>>>((resolve) => {
           resolveSchedule = resolve;
         })
     );
@@ -305,7 +306,7 @@ describe('critical notification flow — both hooks integrated', () => {
 
     // 5. Resolve the old async operation. It must NOT remove the new
     // claim, flip it to claimed=false, or write any stale state.
-    resolveSchedule(true);
+    resolveSchedule({ ok: true });
     await flush();
 
     // 6. Final expected claim: episode B's, untouched.
@@ -333,8 +334,8 @@ describe('critical notification flow — both hooks integrated', () => {
     let resolveCancel: () => void = () => undefined;
     cancelMock.mockImplementationOnce(
       () =>
-        new Promise<void>((resolve) => {
-          resolveCancel = resolve;
+        new Promise<Awaited<ReturnType<typeof cancelCriticalAlarm>>>((resolve) => {
+          resolveCancel = () => resolve({ ok: true });
         })
     );
 
@@ -381,7 +382,7 @@ describe('critical notification flow — both hooks integrated', () => {
     // removed, …). The app reopens: the claim must NOT be treated as
     // proof that the alarm exists.
     platformMock.mockReturnValue('android');
-    verifyMock.mockResolvedValue(false); // getPending has no alarm at T
+    verifyMock.mockResolvedValue({ ok: true, pending: false }); // getPending has no alarm at T
     const sufficient = makeMed({ currentPills: 40, warningThresholdDays: 5 });
     const projectedT = getCriticalAlarmDate(sufficient, getTodayDateString()) as number;
     localStorage.setItem(
@@ -426,7 +427,7 @@ describe('critical notification flow — both hooks integrated', () => {
     expect(sendMock).not.toHaveBeenCalled();
 
     // The alarm disappeared while the app was backgrounded.
-    verifyMock.mockResolvedValue(false);
+    verifyMock.mockResolvedValue({ ok: true, pending: false });
 
     // Resume: App.tsx bumps the tick → reconciliation runs. The alarm
     // is missing → repaired at the same T, silently.
@@ -446,8 +447,8 @@ describe('critical notification flow — both hooks integrated', () => {
     // crosses, the foreground (not a phantom alarm) delivers the ONE
     // episode notification.
     platformMock.mockReturnValue('android');
-    verifyMock.mockResolvedValue(false);
-    scheduleMock.mockResolvedValue(false); // repair fails (e.g. permission revoked)
+    verifyMock.mockResolvedValue({ ok: true, pending: false });
+    scheduleMock.mockResolvedValue({ ok: false, error: 'schedule_failed', errorCode: 'platform_failure' }); // repair fails (e.g. permission revoked)
     const sufficient = makeMed({ currentPills: 40, warningThresholdDays: 5 });
     const projectedT = getCriticalAlarmDate(sufficient, getTodayDateString()) as number;
     localStorage.setItem(

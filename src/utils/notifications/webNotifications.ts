@@ -149,6 +149,13 @@ export async function scheduleWebNotification(
   return true;
 }
 
+export function getWebScheduledNotification(
+  namespace: string,
+  identity: string
+): WebScheduledEntry | null {
+  return readEntries()[storageKey(namespace, identity)] ?? null;
+}
+
 export async function cancelScheduledWebNotification(
   namespace: string,
   identity: string

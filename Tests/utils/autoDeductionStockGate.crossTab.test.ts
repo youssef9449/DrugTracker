@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { withAutoStockMutationGate } from '../../src/utils/autoDeductionStockGate';
 
 describe('withAutoStockMutationGate cross-document locking', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
   it('requests the shared exclusive Web Lock around the durable mutation', async () => {
     const request = vi.fn(async (_name: string, options: { mode: string }, callback: () => Promise<string>) => {
       expect(options.mode).toBe('exclusive');

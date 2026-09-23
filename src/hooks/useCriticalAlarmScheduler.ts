@@ -14,9 +14,13 @@ import {
   getCriticalNotificationClaim,
   setCriticalNotificationClaim,
 } from '../utils/criticalNotificationClaims';
-import { GenerationGuard } from '../utils/async/GenerationGuard';
 import type { ExactAlarmPermission } from '../utils/exactAlarm';
-import { enqueueCriticalAlarmOp } from '../utils/criticalAlarmOperations';
+import {
+  bumpCriticalAlarmGeneration,
+  currentCriticalAlarmGeneration,
+  isCurrentCriticalAlarmGeneration,
+  enqueueCriticalAlarmOp,
+} from '../utils/criticalAlarmOperations';
 
 /**
  * Options for {@link useCriticalAlarmScheduler}.
@@ -159,10 +163,8 @@ export function useCriticalAlarmScheduler({
   // Meds this session armed (or kept) an alarm for — used to cancel
   // alarms for meds that are deleted or whose projection disappears.
   const scheduledCriticalIdsRef = useRef<Set<string>>(new Set());
-  // Shared feature-owned queue + generation guard; both are in-memory async hygiene only.
-  // The queue is shared with the foreground critical-stock hook so every native
-  // critical-alarm operation for the same medication serializes through one chain.
-  const generationGuardRef = useRef(new GenerationGuard<string>());
+  // Queue + generation mechanics are centralized in the generic scheduling
+  // coordinator; Critical Stock retains its business ownership here.
 
   // Keep the latest medications in a ref so chained async operations can
   // re-read the CURRENT array without depending on unstable references.
@@ -254,13 +256,17 @@ export function useCriticalAlarmScheduler({
         ...Object.keys(loadCriticalNotificationClaims()),
       ]);
       for (const id of ids) {
-        generationGuardRef.current.bump(id);
-        enqueueCriticalAlarmOp(id, async () => {
+        const generation = bumpCriticalAlarmGeneration(id);
+        enqueueCriticalAlarmOp(id, generation, async () => {
           await cancelCriticalAlarm(id);
         });
       }
+      const staleGeneration = bumpCriticalAlarmGeneration(
+        '__stale_critical_alarm_cleanup__'
+      );
       enqueueCriticalAlarmOp(
         '__stale_critical_alarm_cleanup__',
+        staleGeneration,
         async () => {
           const listed = await listScheduledCriticalMedicationIdsNative();
           if (!listed.ok) {
@@ -269,9 +275,12 @@ export function useCriticalAlarmScheduler({
           }
           await Promise.all(
             listed.ids.map((medId) => {
-              const cleanupGeneration = generationGuardRef.current.current(medId);
-              return enqueueCriticalAlarmOp(medId, async () => {
-                if (!generationGuardRef.current.isCurrent(medId, cleanupGeneration)) return;
+              const cleanupGeneration = currentCriticalAlarmGeneration(medId);
+              return enqueueCriticalAlarmOp(
+                medId,
+                cleanupGeneration,
+                async () => {
+                if (!isCurrentCriticalAlarmGeneration(medId, cleanupGeneration)) return;
                 await cancelCriticalAlarm(medId);
               });
             })
@@ -299,7 +308,7 @@ export function useCriticalAlarmScheduler({
       gen: number
     ): Promise<void> => {
       await cancelCriticalAlarm(medId);
-      if (!generationGuardRef.current.isCurrent(medId, gen)) return; // a newer run superseded this one
+      if (!isCurrentCriticalAlarmGeneration(medId, gen)) return; // a newer run superseded this one
 
       let scheduled = false;
       try {
@@ -316,7 +325,7 @@ export function useCriticalAlarmScheduler({
       // Post-schedule verification + claim write — one synchronous
       // block (no awaits between the checks and the write), so no
       // other JS code can interleave.
-      if (!generationGuardRef.current.isCurrent(medId, gen)) {
+      if (!isCurrentCriticalAlarmGeneration(medId, gen)) {
         // A newer run superseded this operation while it awaited the
         // bridge: undo ONLY this operation's own alarm and write
         // nothing. The newer run owns the claim now.
@@ -360,7 +369,7 @@ export function useCriticalAlarmScheduler({
     };
 
     for (const med of medicationsRef.current) {
-      const gen = generationGuardRef.current.bump(med.id);
+      const gen = bumpCriticalAlarmGeneration(med.id);
       const { status } = calculateMedicationStatus(med);
       const isCriticalish = status === 'critical' || status === 'out_of_stock';
       const criticalDateMs = getCriticalAlarmDate(med, today);
@@ -384,8 +393,8 @@ export function useCriticalAlarmScheduler({
         const hadAlarm = scheduledCriticalIdsRef.current.has(med.id);
         if (hadAlarm) {
           const medId = med.id;
-          enqueueCriticalAlarmOp(medId, async () => {
-            if (!generationGuardRef.current.isCurrent(medId, gen)) return;
+          enqueueCriticalAlarmOp(medId, gen, async () => {
+            if (!isCurrentCriticalAlarmGeneration(medId, gen)) return;
             await cancelCriticalAlarm(medId);
           });
         }
@@ -409,12 +418,12 @@ export function useCriticalAlarmScheduler({
         // verified → keep it (no re-arm, no duplicate); unverifiable or
         // missing → run the repair chain (cancel + re-schedule) whose
         // outcome writes the claim exactly like any fresh schedule.
-        enqueueCriticalAlarmOp(medId, async () => {
-          if (!generationGuardRef.current.isCurrent(medId, gen)) return;
+        enqueueCriticalAlarmOp(medId, gen, async () => {
+          if (!isCurrentCriticalAlarmGeneration(medId, gen)) return;
           const verification = await verifyCriticalAlarmPending(medId, criticalDateMs);
           if (
             (verification.ok && verification.pending) ||
-            !generationGuardRef.current.isCurrent(medId, gen)
+            !isCurrentCriticalAlarmGeneration(medId, gen)
           ) return;
           if (!verification.ok) {
             console.warn(
@@ -428,7 +437,7 @@ export function useCriticalAlarmScheduler({
         continue;
       }
 
-      enqueueCriticalAlarmOp(medId, () =>
+      enqueueCriticalAlarmOp(medId, gen, () =>
         runScheduleChain(medId, medName, criticalDateMs, unit, gen)
       );
     }
@@ -436,8 +445,8 @@ export function useCriticalAlarmScheduler({
     // Cancel alarms for meds that are no longer present (deleted).
     for (const prevId of scheduledCriticalIdsRef.current) {
       if (!stillScheduled.has(prevId)) {
-        generationGuardRef.current.bump(prevId);
-        enqueueCriticalAlarmOp(prevId, async () => {
+        const generation = bumpCriticalAlarmGeneration(prevId);
+        enqueueCriticalAlarmOp(prevId, generation, async () => {
           await cancelCriticalAlarm(prevId);
         });
       }
@@ -447,8 +456,12 @@ export function useCriticalAlarmScheduler({
     // Native durable schedule state is also reconciled so a critical alarm
     // left behind after medication deletion or process death cannot survive
     // merely because its old business claim is absent.
+    const staleGeneration = bumpCriticalAlarmGeneration(
+      '__stale_critical_alarm_cleanup__'
+    );
     enqueueCriticalAlarmOp(
       '__stale_critical_alarm_cleanup__',
+      staleGeneration,
       async () => {
         const listed = await listScheduledCriticalMedicationIdsNative();
         if (!listed.ok) {
@@ -463,9 +476,12 @@ export function useCriticalAlarmScheduler({
           listed.ids
             .filter((medId) => !stillScheduled.has(medId))
             .map((medId) => {
-              const cleanupGeneration = generationGuardRef.current.current(medId);
-              return enqueueCriticalAlarmOp(medId, async () => {
-                if (!generationGuardRef.current.isCurrent(medId, cleanupGeneration)) return;
+              const cleanupGeneration = currentCriticalAlarmGeneration(medId);
+              return enqueueCriticalAlarmOp(
+                medId,
+                cleanupGeneration,
+                async () => {
+                if (!isCurrentCriticalAlarmGeneration(medId, cleanupGeneration)) return;
                 await cancelCriticalAlarm(medId);
               });
             })

@@ -123,6 +123,7 @@ interface MedicationCardProps {
   logs?: ConsumptionLog[];
   lastRefillQuantity?: number;
   onUndoRefill?: () => void;
+  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void;
 }
 export const MedicationCard: FC<MedicationCardProps> = ({
   medication,
@@ -141,6 +142,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   logs = [],
   lastRefillQuantity,
   onUndoRefill,
+  onRegisterBackHandler,
 }) => {
   const isAutoActive = isMedicationAutoDeductActive(medication);
   // Durable currentPills is the sole live stock balance.
@@ -236,6 +238,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             onEdit={onEdit}
             onDelete={onDelete}
             onOpenHistory={onOpenHistory}
+            onRegisterBackHandler={onRegisterBackHandler}
             size="sm"
           />
         </div>
@@ -288,6 +291,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             onDelete={onDelete}
             onToggleAutoDeduct={onToggleAutoDeduct}
             onOpenHistory={onOpenHistory}
+            onRegisterBackHandler={onRegisterBackHandler}
           />
         </div>
         {/* Urgency Highlight Card: Days left countdown + Exact depletion date */}
@@ -384,6 +388,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             onEdit={onEdit}
             onDelete={onDelete}
             onOpenHistory={onOpenHistory}
+            onRegisterBackHandler={onRegisterBackHandler}
             size="sm"
           />
         </div>
@@ -420,6 +425,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             onDelete={onDelete}
             onToggleAutoDeduct={onToggleAutoDeduct}
             onOpenHistory={onOpenHistory}
+            onRegisterBackHandler={onRegisterBackHandler}
           />
         </div>
         {/* Coverage & Stability metrics */}
@@ -529,6 +535,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             onEdit={onEdit}
             onDelete={onDelete}
             onOpenHistory={onOpenHistory}
+            onRegisterBackHandler={onRegisterBackHandler}
             size="xs"
           />
         </div>
@@ -732,6 +739,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
             onEdit={onEdit}
             onDelete={onDelete}
             onOpenHistory={onOpenHistory}
+            onRegisterBackHandler={onRegisterBackHandler}
             size="sm"
           />
         </div>

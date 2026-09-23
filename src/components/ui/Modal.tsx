@@ -5,7 +5,6 @@ import {
   useRef,
   useCallback,
 } from 'react';
-
 interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -21,13 +20,11 @@ interface ModalProps {
   /** Close when the backdrop is clicked. Defaults to false (match existing behavior). */
   closeOnBackdropClick?: boolean;
 }
-
 // Selectors for all focusable element types, for the focus trap.
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
 /**
- * Reusable modal wrapper (audit issue #67).
+ * Reusable modal wrapper.
  *
  * Provides the overlay + the a11y/keyboard contract that all 5 modals in
  * the app were missing:
@@ -73,7 +70,6 @@ export const Modal: FC<ModalProps> = ({
   // without being re-created when the parent passes an inline closure.
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
-
   // Trap focus + handle ESC. Stable identity (empty deps) — reads the
   // latest `onClose` from the ref at call time.
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -104,14 +100,11 @@ export const Modal: FC<ModalProps> = ({
       }
     }
   }, []);
-
   useEffect(() => {
     if (!isOpen) return;
-
     // Capture the element that had focus before the modal opened, so we
     // can restore it on close.
     previouslyFocusedRef.current = document.activeElement as HTMLElement | null;
-
     document.addEventListener('keydown', handleKeyDown);
     // Move focus into the dialog. Defer one tick so the dialog's inputs
     // have rendered (some modals early-return null before children mount).
@@ -127,7 +120,6 @@ export const Modal: FC<ModalProps> = ({
         dialog.focus();
       }
     }, 0);
-
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
       window.clearTimeout(focusTimer);
@@ -139,14 +131,11 @@ export const Modal: FC<ModalProps> = ({
     // per open and cleans up ONCE per close — no more teardown-on-keystroke
     // that was dismissing the soft keyboard.
   }, [isOpen, handleKeyDown]);
-
   if (!isOpen) return null;
-
   const overlayClass =
     variant === 'center'
       ? 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs'
       : 'fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-xs';
-
   return (
     <div
       className={overlayClass}

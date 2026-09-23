@@ -48,7 +48,7 @@ export interface ExactAutoEnvelope {
   status: 'js_ready';
   medications: Medication[];
   logs: ConsumptionLog[];
-  /** Phase 4 durable global master switch (required). */
+  /** Durable global master switch required by the current envelope contract. */
   globalAutoDeductEnabled: boolean;
   toAcknowledge: Array<{
     medicationId: string;
@@ -97,7 +97,7 @@ export interface RunReconciliationOutput extends ReconcileFiredResult {
   nativeStockSyncError?: string;
 }
 
-/** @internal test-only envelope injectors (shared with Phase 4 manual gate). */
+/** @internal test-only envelope injectors. */
 let testLoadEnvelope: (() => ExactAutoEnvelope | null) | null = null;
 let testSaveEnvelope: ((env: ExactAutoEnvelope | null) => string | null) | null =
   null;

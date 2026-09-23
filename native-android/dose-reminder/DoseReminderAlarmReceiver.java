@@ -134,7 +134,8 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
                     reminderTime,
                     amount,
                     allowManualTakeAction,
-                    operationVersion);
+                    operationVersion,
+                    scheduledCalendarDate);
         }
 
         boolean foreground = app.drugtracker.notificationruntime.AppForegroundState.isForeground();
@@ -190,7 +191,8 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
             String reminderTime,
             double amount,
             boolean allowManualTakeAction,
-            String expectedOperationVersion) {
+            String expectedOperationVersion,
+            String firedCalendarDate) {
         if (reminderTime == null || reminderTime.length() < 4) return;
         String[] parts = reminderTime.split(":");
         if (parts.length < 2) return;
@@ -205,6 +207,24 @@ public final class DoseReminderAlarmReceiver extends BroadcastReceiver {
         if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return;
 
         java.util.Calendar next = java.util.Calendar.getInstance();
+        if (firedCalendarDate != null
+                && app.drugtracker.alarmruntime.ExactAlarmContract
+                        .isValidCalendarDate(firedCalendarDate)) {
+            try {
+                String[] dateParts = firedCalendarDate.split("-");
+                next.clear();
+                next.set(
+                        Integer.parseInt(dateParts[0]),
+                        Integer.parseInt(dateParts[1]) - 1,
+                        Integer.parseInt(dateParts[2]),
+                        0,
+                        0,
+                        0);
+                next.set(java.util.Calendar.MILLISECOND, 0);
+            } catch (RuntimeException ignored) {
+                return;
+            }
+        }
         next.add(java.util.Calendar.DAY_OF_MONTH, 1);
         next.set(java.util.Calendar.HOUR_OF_DAY, hour);
         next.set(java.util.Calendar.MINUTE, minute);

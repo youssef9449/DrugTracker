@@ -3,6 +3,7 @@ import { Calendar, Clock } from 'lucide-react';
 import type { MedicationDose } from '../types';
 import { formatTimeArabic } from '../utils/medicationPresentation';
 import { MAX_DOSES_PER_DAY, resizeDoseSchedule, totalDailyAmount } from '../utils/doseSchedule';
+import { getTodayDateString } from '../utils/dateCalculations';
 import { CustomTimePicker } from './CustomTimePicker';
 import { Toggle } from './ui/Toggle';
 
@@ -18,15 +19,15 @@ interface MedicationCourseAndScheduleProps {
   unit: string;
   reminderEnabled: boolean;
   setReminderEnabled: Dispatch<SetStateAction<boolean>>;
-  error: string;
   setError: Dispatch<SetStateAction<string>>;
+  setTreatmentStartDateStr: Dispatch<SetStateAction<string>>;
   previewDays: number;
 }
 
 export const MedicationCourseAndSchedule: FC<MedicationCourseAndScheduleProps> = ({
   isChronic, setIsChronic, durationDaysStr, setDurationDaysStr, doseSchedule,
   setDoseSchedule, dosesPerDay, setDosesPerDay, unit, reminderEnabled,
-  setReminderEnabled, error, setError, previewDays,
+  setReminderEnabled, setError, setTreatmentStartDateStr, previewDays,
 }) => (
   <section className="space-y-3">
           {/* طبيعة استعمال الدواء (مزمن vs مدة محددة) */}

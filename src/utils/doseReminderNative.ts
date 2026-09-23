@@ -1,5 +1,6 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { NativeBoundaryError, classifyNativeError } from './nativeErrors';
+import { getTodayDateString, tomorrowDateString, localEpochMs } from './dateCalculations';
 
 
 interface DoseReminderPlugin {
@@ -61,27 +62,17 @@ function nextOccurrence(
   reminderTime: string,
   skipToday: boolean
 ): Date | null {
-  const [hour, minute] = reminderTime.split(':').map((value) =>
-    Number.parseInt(value, 10)
-  );
-  if (
-    !Number.isInteger(hour) ||
-    !Number.isInteger(minute) ||
-    hour < 0 ||
-    hour > 23 ||
-    minute < 0 ||
-    minute > 59
-  ) {
-    return null;
-  }
+  const today = getTodayDateString();
+  const todayEpoch = localEpochMs(today, reminderTime);
+  if (todayEpoch == null) return null;
 
   const now = new Date();
-  const fire = new Date(now);
-  fire.setHours(hour, minute, 0, 0);
-  if (skipToday || fire.getTime() <= now.getTime()) {
-    fire.setDate(fire.getDate() + 1);
-  }
-  return fire;
+  const fireEpoch =
+    !skipToday && todayEpoch > now.getTime()
+      ? todayEpoch
+      : localEpochMs(tomorrowDateString(today), reminderTime);
+
+  return fireEpoch == null ? null : new Date(fireEpoch);
 }
 
 export async function scheduleDoseReminderNative(

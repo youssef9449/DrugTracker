@@ -279,7 +279,7 @@ describe('critical notification flow — both hooks integrated', () => {
     // gated, so no async operation can COMPLETE before episode B starts.
     // (The flush lets the enqueued operation START — capturing the real
     // promise resolver — while the schedule itself stays pending.)
-    let resolveSchedule: (v: boolean) => void = () => undefined;
+    let resolveSchedule: (v: CriticalAlarmOperationResult) => void = () => undefined;
     scheduleMock.mockImplementationOnce(
       () =>
         new Promise<Awaited<ReturnType<typeof scheduleCriticalAlarm>>>((resolve) => {

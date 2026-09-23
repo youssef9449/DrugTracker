@@ -564,8 +564,7 @@ public final class AutoDeductionScheduler {
                     return FireResult.cancelled();
                 }
                 String activeVersion = AutoDeductionSchedulingAdapter.extractOperationVersion(meta);
-                long activeGen = getEffectiveRecurrenceGenerationLocked(
-                        medicationId, doseId, meta);
+                long activeGen = getRecurrenceGenerationLocked(medicationId, doseId);
                 if (deliveryOperationVersion == null || deliveryOperationVersion.isEmpty()
                         || deliveryRecurrenceGeneration <= 0L) {
                     Log.i(TAG, "fire linearization: STALE (delivery partially missing version/generation) for "
@@ -620,8 +619,7 @@ public final class AutoDeductionScheduler {
                                     AutoDeductionSchedulingAdapter.extractOperationVersion(meta);
                         }
                         if (gen <= 0L) {
-                            gen = getEffectiveRecurrenceGenerationLocked(
-                                    medicationId, doseId, meta);
+                            gen = getRecurrenceGenerationLocked(medicationId, doseId);
                         }
                     } catch (JSONException ignored) {
                     }
@@ -657,8 +655,7 @@ public final class AutoDeductionScheduler {
                                 AutoDeductionSchedulingAdapter.extractOperationVersion(meta);
                     }
                     if (gen <= 0L) {
-                        gen = getEffectiveRecurrenceGenerationLocked(
-                                medicationId, doseId, meta);
+                        gen = getRecurrenceGenerationLocked(medicationId, doseId);
                     }
                 } catch (JSONException ignored) {
                 }
@@ -1094,8 +1091,7 @@ public final class AutoDeductionScheduler {
                     String activeVersion =
                             AutoDeductionSchedulingAdapter.extractOperationVersion(current);
                     long activeGen =
-                            getEffectiveRecurrenceGenerationLocked(
-                                    medicationId, doseId, current);
+                            getRecurrenceGenerationLocked(medicationId, doseId);
                     if (operationVersion == null || operationVersion.isEmpty()
                             || recurrenceGeneration <= 0L
                             || !operationVersion.equals(activeVersion)
@@ -1349,7 +1345,7 @@ public final class AutoDeductionScheduler {
             String activeVersion =
                     AutoDeductionSchedulingAdapter.extractOperationVersion(current);
             long activeGeneration =
-                    getEffectiveRecurrenceGenerationLocked(medicationId, doseId, current);
+                    getRecurrenceGenerationLocked(medicationId, doseId);
             String activeTime = current.optString("timeHhmm", "");
             double activeAmount = current.optDouble("amount", Double.NaN);
 
@@ -1877,29 +1873,6 @@ public final class AutoDeductionScheduler {
         }
     }
 
-    private static long[] parseOrderingToken(String raw) {
-        return AutoDeductionSchedulingAdapter.parseOrdering(raw);
-    }
-
-    private static long[] parseScheduleVersionOrdering(String scheduleRaw) {
-        return AutoDeductionSchedulingAdapter.parseOrdering(
-                AutoDeductionSchedulingAdapter.extractOperationVersion(scheduleRaw));
-    }
-
-    private static boolean isOrderingNewer(
-            long aMillis, long aSeq, long bMillis, long bSeq) {
-        return AutoDeductionSchedulingAdapter.isOrderingNewer(
-                aMillis, aSeq, bMillis, bSeq);
-    }
-
-    private static long parseScheduleVersionEpochMs(String scheduleRaw) {
-        return parseScheduleVersionOrdering(scheduleRaw)[0];
-    }
-
-    private static long parseCancelEpochMs(String cancelRaw) {
-        return parseOrderingToken(cancelRaw)[0];
-    }
-
     private boolean clearCancellationTombstoneLocked(String occurrenceKey) {
         if (occurrenceKey == null || occurrenceKey.isEmpty()) return true;
         return clearCancellationTombstoneStored(occurrenceKey);
@@ -2226,10 +2199,7 @@ public final class AutoDeductionScheduler {
             long snapGen = 0L;
             try {
                 if (currentPast != null) {
-                    snapGen = getEffectiveRecurrenceGenerationLocked(
-                            medicationId,
-                            doseId,
-                            new JSONObject(currentPast));
+                    snapGen = getRecurrenceGenerationLocked(medicationId, doseId);
                 }
             } catch (JSONException ignored) { /* treat as 0 */ }
             if (!isRecurrenceGenerationAuthorizedLocked(medicationId, doseId, snapGen)) {
@@ -2444,8 +2414,7 @@ public final class AutoDeductionScheduler {
                     }
                     long snapGen;
                     synchronized (SCHEDULE_LOCK) {
-                        snapGen = getEffectiveRecurrenceGenerationLocked(
-                                medId, doseId, o);
+                        snapGen = getRecurrenceGenerationLocked(medId, doseId);
                     }
                     CatchUpResult catchUp = catchUpMissedOccurrencesAndScheduleNext(
                             medId, doseId, date, time, amount, snapGen,
@@ -2507,8 +2476,7 @@ public final class AutoDeductionScheduler {
                     }
                     long snapGenTz;
                     synchronized (SCHEDULE_LOCK) {
-                        snapGenTz = getEffectiveRecurrenceGenerationLocked(
-                                medId, doseId, o);
+                        snapGenTz = getRecurrenceGenerationLocked(medId, doseId);
                     }
                     CatchUpResult catchUp = catchUpMissedOccurrencesAndScheduleNext(
                             medId, doseId, date, time, amount, snapGenTz,
@@ -2550,8 +2518,7 @@ public final class AutoDeductionScheduler {
                 }
                 synchronized (SCHEDULE_LOCK) {
                     // Issue #217: drop future schedules whose generation was invalidated.
-                    long metaGen = getEffectiveRecurrenceGenerationLocked(
-                            medId, doseId, o);
+                    long metaGen = getRecurrenceGenerationLocked(medId, doseId);
                     if (metaGen > 0L
                             && !isRecurrenceGenerationAuthorizedLocked(medId, doseId, metaGen)) {
                         Log.i(TAG, "restore skip (recurrence generation invalid): " + prefKey);

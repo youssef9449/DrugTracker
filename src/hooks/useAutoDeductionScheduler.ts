@@ -63,7 +63,7 @@ export function getAutoDeductionSlotsForDate(
   if (!isMedicationTreatmentActiveOnDate(med, calendarDate)) return [];
   const treatmentEndDate = getMedicationTreatmentEndDate(med);
 
-  // Issue #268: Exact slots come only from explicit doseSchedule rows.
+  // Exact slots come only from explicit doseSchedule rows.
   if (!Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0) {
     return [];
   }
@@ -340,7 +340,7 @@ export function useAutoDeductionScheduler({
       // System boot / permission re-grant restore is handled by
       // Shared system lifecycle recovery is handled natively; this normal desired-state pass
       // remains limited to reconciling the current desired schedule state.
-      // Issue #242: native list is authoritative for durable-schedule discovery.
+      // The native list is authoritative for durable-schedule discovery.
       // Distinguish success+empty from read failure — never treat failure as [].
       const listResult = await listScheduledAutoDeductionOccurrences();
       if (listResult.ok) {
@@ -371,7 +371,7 @@ export function useAutoDeductionScheduler({
               continue;
             }
 
-            // Issue #217: durable generation bump MUST succeed before any
+            // The durable generation bump MUST succeed before any
             // occurrence cancel. Cancel-without-invalidate leaves the old
             // generation active so a concurrent receiver can still create D+1.
             const res = await cancelUndesiredExactOccurrence(
@@ -405,7 +405,7 @@ export function useAutoDeductionScheduler({
           }
         }
       } else {
-        // Fail closed (Issue #242): list failure ≠ empty native set.
+        // Fail closed: a native list failure is never treated as an empty set.
         // No invalidate/cancel from native absence or trackedRef in this pass.
         // trackedRef is left unchanged for a later successful reconciliation.
       }

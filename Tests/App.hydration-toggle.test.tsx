@@ -67,6 +67,7 @@ import { getTodayDateString } from '@/utils/dateCalculations';
 import { runAutoDeductionReconciliation } from '@/utils/runAutoDeductionReconciliation';
 
 import { getInitialMedications } from './fixtures/initialData';
+import { seedTestMedication as seedMed, readDurableMedication as getDurableMed, readDurableLogs as getDurableLogs } from './fixtures/testFixtures';
 import {
   scheduleCriticalAlarm,
   cancelCriticalAlarm } from '@/utils/notifications';
@@ -214,7 +215,7 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
   }
 
   /** Seed a single med in localStorage so App renders one MedicationCard. */
-  function seedMed(overrides: Record<string, unknown> = {}): void {
+): void {
     localStorage.setItem(
       'android_med_tracker_items_v2',
       JSON.stringify([
@@ -238,19 +239,10 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
   }
 
   /** Read the durable med from localStorage after a mutation. */
-  function getDurableMed(): Record<string, unknown> | undefined {
-    const raw = localStorage.getItem('android_med_tracker_items_v2');
-    if (!raw) return undefined;
-    const meds = JSON.parse(raw) as Record<string, unknown>[];
-    return meds.find((m) => m.id === 'med-toggle');
-  }
+
 
   /** Read the durable logs from localStorage after a mutation. */
-  function getDurableLogs(): Record<string, unknown>[] {
-    const raw = localStorage.getItem('android_med_tracker_logs_v2');
-    if (!raw) return [];
-    return JSON.parse(raw) as Record<string, unknown>[];
-  }
+
 
   it('Test A — ON → OFF: changes autoDeductEnabled only; currentPills unchanged; no exact_auto log', async () => {
     seedMed({ autoDeductEnabled: true });

@@ -115,8 +115,28 @@ export async function scheduleCriticalAlarm(
   }
 
   if (getNativePlatform() !== 'ios') {
-    scheduleWebNotification(title, body);
-    return { ok: false, error: 'unsupported_platform', errorCode: 'platform_failure' };
+    try {
+      const scheduled = await scheduleWebNotification(title, body, {
+        namespace: 'critical-stock',
+        identity: medId,
+        at: fireAt,
+      });
+      return scheduled
+        ? { ok: true }
+        : {
+            ok: false,
+            error: 'critical_web_schedule_failed',
+            errorCode: 'platform_failure',
+          };
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'critical_web_schedule_failed';
+      return {
+        ok: false,
+        error: message,
+        errorCode: classifyNativeError(message),
+      };
+    }
   }
 
   try {

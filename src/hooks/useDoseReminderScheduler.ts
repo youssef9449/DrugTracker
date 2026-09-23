@@ -222,6 +222,24 @@ export function useDoseReminderScheduler({
   );
   useEffect(() => {
     if (!hydrated || isFirstRun) return;
+    const cancelSnoozeSlot = (medId: string, doseId: string): void => {
+      const scheduleKey = doseScheduleKey(medId, doseId);
+      const operationKey = doseReminderSnoozeKey(medId, doseId);
+      const generation =
+        bumpDoseReminderSnoozeGeneration(operationKey);
+      enqueueRetryable(
+        'snooze:' + scheduleKey,
+        operationKey,
+        generation,
+        enqueueDoseReminderSnoozeOpGuarded,
+        isCurrentDoseReminderSnoozeGeneration,
+        async () => {
+          await cancelSnoozedDoseReminder(medId, doseId);
+          clearSnoozedDose(medId, doseId);
+        }
+      );
+    };
+
     const cancelSlot = (medId: string, doseId: string): void => {
       const key = doseScheduleKey(medId, doseId);
       const gen = bumpDoseReminderScheduleGeneration(key);
@@ -239,20 +257,7 @@ export function useDoseReminderScheduler({
         }
       );
 
-      const snoozeOperationKey = doseReminderSnoozeKey(medId, doseId);
-      const snoozeGeneration =
-        bumpDoseReminderSnoozeGeneration(snoozeOperationKey);
-      enqueueRetryable(
-        'snooze:' + key,
-        snoozeOperationKey,
-        snoozeGeneration,
-        enqueueDoseReminderSnoozeOpGuarded,
-        isCurrentDoseReminderSnoozeGeneration,
-        async () => {
-          await cancelSnoozedDoseReminder(medId, doseId);
-          clearSnoozedDose(medId, doseId);
-        }
-      );
+      cancelSnoozeSlot(medId, doseId);
     };
     // User disabled notifications OR exact-alarm permission is missing →
     // cancel all previously-scheduled dose reminders and clear the tracker.
@@ -455,6 +460,8 @@ export function useDoseReminderScheduler({
         });
         continue;
       }
+      cancelSnoozeSlot(medId, doseId);
+
       const gen = bumpDoseReminderScheduleGeneration(key);
       enqueueRetryable(
         'schedule:' + key,
@@ -569,21 +576,7 @@ export function useDoseReminderScheduler({
           if (!newlyConsumed && !resumeChanged) {
             continue;
           }
-          const snoozeOperationKey =
-            doseReminderSnoozeKey(medId, doseId);
-          const snoozeGeneration =
-            bumpDoseReminderSnoozeGeneration(snoozeOperationKey);
-          enqueueRetryable(
-            'snooze:' + key,
-            snoozeOperationKey,
-            snoozeGeneration,
-            enqueueDoseReminderSnoozeOpGuarded,
-            isCurrentDoseReminderSnoozeGeneration,
-            async () => {
-              await cancelSnoozedDoseReminder(medId, doseId);
-              clearSnoozedDose(medId, doseId);
-            }
-          );
+          cancelSnoozeSlot(medId, doseId);
 
           const gen = bumpDoseReminderScheduleGeneration(key);
           enqueueRetryable(
@@ -598,7 +591,6 @@ export function useDoseReminderScheduler({
             // notification. Only slots still ahead need cancel +
             // skipToday re-arm.
             if (!isDoseReminderTimeStillAhead(time)) {
-              clearSnoozedDose(medId, doseId);
               return;
             }
             if (!isCurrentDoseReminderScheduleGeneration(key, gen)) return;
@@ -616,7 +608,6 @@ export function useDoseReminderScheduler({
               await cancelDoseReminder(medId, doseId);
               return;
             }
-            clearSnoozedDose(medId, doseId);
           });
         } else if (wasConsumed && isDoseReminderTimeStillAhead(time)) {
           // Restore transition: this slot was consumed on the previous
@@ -625,6 +616,8 @@ export function useDoseReminderScheduler({
           // Past-due restored slots are intentionally skipped (no fabricated
           // past reminder). Cold start / never-consumed slots are left to
           // the main config effect.
+          cancelSnoozeSlot(medId, doseId);
+
           const gen = bumpDoseReminderScheduleGeneration(key);
           enqueueRetryable(
         'schedule:' + key,

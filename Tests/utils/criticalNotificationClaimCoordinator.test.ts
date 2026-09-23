@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { loadCriticalNotificationClaims } from '@/utils/criticalNotificationClaims';
 import {
+  runWithCriticalNotificationClaim,
   releaseInFlightCriticalNotificationClaim,
   tryClaimCriticalNotification,
   updateCriticalNotificationClaim,
@@ -58,3 +59,30 @@ describe('critical notification claim coordinator', () => {
     expect(loadCriticalNotificationClaims()['med-1']?.alarmTime).toBeGreaterThan(Date.now());
   });
 });
+
+
+  it('holds cross-tab ownership until foreground delivery work resolves', async () => {
+    let releaseWork!: () => void;
+    const work = new Promise<boolean>((resolve) => {
+      releaseWork = () => resolve(true);
+    });
+
+    const first = runWithCriticalNotificationClaim('med-lock', true, () => work);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await expect(tryClaimCriticalNotification('med-lock')).resolves.toBe(false);
+
+    releaseWork();
+    await expect(first).resolves.toMatchObject({ acquired: true, result: true });
+  });
+
+  it('does not leave a claim consumed when delivery work fails', async () => {
+    await expect(
+      runWithCriticalNotificationClaim('med-fail', false, async () => false)
+    ).resolves.toMatchObject({ acquired: true, result: false });
+
+    expect(loadCriticalNotificationClaims()['med-fail']).toEqual({
+      claimed: true,
+      alarmTime: null,
+    });
+  });

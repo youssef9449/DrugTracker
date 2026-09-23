@@ -19,7 +19,11 @@ describe('withAutoStockMutationGate cross-document locking', () => {
     expect(request.mock.calls[0][0]).toBe('drugtracker:durable-stock-mutation');
   });
 
-  it('fails closed in a browser context when cross-tab locking is unavailable', async () => {
+  it('fails closed in a secure browser context when cross-tab locking is unavailable', async () => {
+    Object.defineProperty(window, 'isSecureContext', {
+      configurable: true,
+      value: true,
+    });
     Object.defineProperty(navigator, 'locks', {
       configurable: true,
       value: undefined,

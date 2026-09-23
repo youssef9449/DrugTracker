@@ -26,7 +26,7 @@ final class AutoDeductionOccurrenceState {
     }
 
     boolean compactTerminalState() {
-        String cutoff = currentLocalCalendarDate();
+        String cutoff = terminalOccurrenceCutoffDate();
         if (cutoff == null) return false;
 
         synchronized (scheduler.scheduleLock()) {
@@ -170,6 +170,21 @@ final class AutoDeductionOccurrenceState {
         Calendar cal = Calendar.getInstance(
                 TimeZone.getDefault(),
                 Locale.US);
+        return String.format(
+                Locale.US,
+                "%04d-%02d-%02d",
+                cal.get(Calendar.YEAR),
+                cal.get(Calendar.MONTH) + 1,
+                cal.get(Calendar.DAY_OF_MONTH));
+    }
+
+    private static String terminalOccurrenceCutoffDate() {
+        Calendar cal = Calendar.getInstance(
+                TimeZone.getDefault(),
+                Locale.US);
+        cal.add(
+                Calendar.DAY_OF_MONTH,
+                -AutoDeductionContract.TERMINAL_OCCURRENCE_MAX_AGE_DAYS);
         return String.format(
                 Locale.US,
                 "%04d-%02d-%02d",

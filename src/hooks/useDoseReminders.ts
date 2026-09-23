@@ -181,17 +181,27 @@ export function useDoseReminders({
         }
 
         setSnoozeUntil(medication.id, snoozeUntil, doseId);
-        alarmingIdRef.current = null;
-        alarmingDoseIdRef.current = null;
-        isTestAlarmRef.current = false;
-        setAlarmingMedication(null);
-        setAlarmingDoseId(null);
+        const next = dequeueNextValidAlarm();
+        if (next) {
+          const nextMed = medicationsRef.current.find((m) => m.id === next.medicationId)!;
+          alarmingIdRef.current = next.medicationId;
+          alarmingDoseIdRef.current = next.doseId;
+          isTestAlarmRef.current = false;
+          setAlarmingMedication(nextMed);
+          setAlarmingDoseId(next.doseId);
+        } else {
+          alarmingIdRef.current = null;
+          alarmingDoseIdRef.current = null;
+          isTestAlarmRef.current = false;
+          setAlarmingMedication(null);
+          setAlarmingDoseId(null);
+        }
       }
     ).catch(() => {
       // Keep the alarm UI open so a transient native failure can be retried.
       // No snooze marker is persisted on failure.
     });
-  }, [alarmingMedication, allowManualTakeActionByMedicationId]);
+  }, [alarmingMedication, allowManualTakeActionByMedicationId, dequeueNextValidAlarm]);
   /**
    * Open the in-app alarm for an explicit doseSchedule occurrence.
    * Requires non-empty doseId present on med.doseSchedule.

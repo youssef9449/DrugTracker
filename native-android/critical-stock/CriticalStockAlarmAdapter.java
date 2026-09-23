@@ -210,6 +210,20 @@ public final class CriticalStockAlarmAdapter
                 operationVersion);
     }
 
+    boolean beginOneShotDelivery(String medicationId, String operationVersion) {
+        return runtime.beginOneShotDelivery(
+                occurrenceKey(medicationId),
+                operationVersion);
+    }
+
+    boolean clearOneShotDeliveryInProgress(
+            String medicationId,
+            String operationVersion) {
+        return runtime.clearOneShotDeliveryInProgress(
+                occurrenceKey(medicationId),
+                operationVersion);
+    }
+
     boolean markOneShotDelivered(String medicationId, String operationVersion) {
         return runtime.markOneShotDelivered(
                 occurrenceKey(medicationId),

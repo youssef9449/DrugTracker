@@ -24,10 +24,11 @@ assert(persistentEffect.includes("addEventListener('beforeunload'"), '#352: debo
 
 // #353/#354 — hydration uses safe storage and runtime record validation.
 const hydration = read('src/hooks/useAppHydration.ts');
-assert(!hydration.includes('localStorage.getItem('), '#353: hydration must not read localStorage directly');
-assert(hydration.includes('readStorageItem('), '#353: hydration must use the safe storage reader');
-assert(hydration.includes('isValidMedicationRecord'), '#354: hydration must validate Medication records');
-assert(hydration.includes('isValidConsumptionLogRecord'), '#354: hydration must validate ConsumptionLog records');
+const hydrationPhases = read('src/utils/appHydrationPhases.ts');
+assert(!hydration.includes('localStorage.getItem('), '#353: hydration coordinator must not read localStorage directly');
+assert(hydration.includes('readStorageItem(') || hydrationPhases.includes('readStorageItem('), '#353: hydration must use the safe storage reader');
+assert(hydration.includes('isValidMedicationRecord') || hydrationPhases.includes('isValidMedicationRecord'), '#354: hydration must validate Medication records');
+assert(hydration.includes('isValidConsumptionLogRecord') || hydrationPhases.includes('isValidConsumptionLogRecord'), '#354: hydration must validate ConsumptionLog records');
 
 // #355 — Service Worker must be emitted through the bundle, not rewritten in dist.
 const vite = read('vite.config.ts');

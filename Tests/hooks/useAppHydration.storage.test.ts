@@ -1,9 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
+import { NOTIFICATIONS_KEY } from '@/constants/storageKeys';
+
+const permissionMocks = vi.hoisted(() => ({
+  get: vi.fn(),
+  request: vi.fn(),
+}));
 
 vi.mock('@/utils/notifications/notificationPermissions', () => ({
-  getNotificationPermission: vi.fn(() => Promise.resolve('unsupported')),
-  requestNotificationPermission: vi.fn(() => Promise.resolve(false)),
+  getNotificationPermission: permissionMocks.get,
+  requestNotificationPermission: permissionMocks.request,
 }));
 vi.mock('@/utils/exactAlarm', () => ({
   getExactAlarmPermission: vi.fn(() => Promise.resolve(true)),
@@ -24,6 +30,10 @@ vi.mock('@/utils/autoDeductionNativeStock', () => ({
 }));
 
 import { useAppHydration } from '@/hooks/useAppHydration';
+import {
+  applyNotificationPermissionResultIfUnset,
+  initializeAppPermissions,
+} from '@/utils/appHydrationPhases';
 
 function makeSetters() {
   return {
@@ -45,6 +55,8 @@ function makeSetters() {
 
 beforeEach(() => {
   localStorage.clear();
+  permissionMocks.get.mockResolvedValue('unsupported');
+  permissionMocks.request.mockResolvedValue(false);
 });
 
 afterEach(() => {
@@ -79,5 +91,75 @@ describe('useAppHydration — storage failures', () => {
       expect(setters.setHydrated).toHaveBeenCalledWith(true);
     });
     expect(setters.setIsFirstRun).not.toHaveBeenCalledWith(true);
+  });
+});
+
+describe('notification permission result application', () => {
+  it('applies a first-open grant while the persisted preference is unset', () => {
+    const setNotificationsEnabled = vi.fn();
+
+    applyNotificationPermissionResultIfUnset(true, setNotificationsEnabled);
+
+    expect(setNotificationsEnabled).toHaveBeenCalledWith(true);
+  });
+
+  it('applies a first-open denial while the persisted preference is unset', () => {
+    const setNotificationsEnabled = vi.fn();
+
+    applyNotificationPermissionResultIfUnset(false, setNotificationsEnabled);
+
+    expect(setNotificationsEnabled).toHaveBeenCalledWith(false);
+  });
+
+  it('never overwrites an explicit persisted preference', () => {
+    localStorage.setItem(NOTIFICATIONS_KEY, 'true');
+    const setNotificationsEnabled = vi.fn();
+
+    applyNotificationPermissionResultIfUnset(false, setNotificationsEnabled);
+
+    expect(setNotificationsEnabled).not.toHaveBeenCalled();
+
+    localStorage.setItem(NOTIFICATIONS_KEY, 'false');
+    applyNotificationPermissionResultIfUnset(true, setNotificationsEnabled);
+
+    expect(setNotificationsEnabled).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite state when the preference read itself fails', () => {
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('storage blocked');
+    });
+    const setNotificationsEnabled = vi.fn();
+
+    try {
+      applyNotificationPermissionResultIfUnset(true, setNotificationsEnabled);
+      expect(setNotificationsEnabled).not.toHaveBeenCalled();
+    } finally {
+      getItem.mockRestore();
+    }
+  });
+
+  it('waits for a first-open OS decision before permission initialization resolves', async () => {
+    permissionMocks.get.mockResolvedValue('default');
+    let resolveRequest!: (granted: boolean) => void;
+    permissionMocks.request.mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        resolveRequest = resolve;
+      })
+    );
+
+    const setNotificationsEnabled = vi.fn();
+    const initialization = initializeAppPermissions({
+      setNotificationsEnabled,
+      setExactAlarmPermission: vi.fn(),
+    });
+
+    await Promise.resolve();
+    expect(setNotificationsEnabled).not.toHaveBeenCalled();
+
+    resolveRequest(true);
+    await initialization;
+
+    expect(setNotificationsEnabled).toHaveBeenCalledWith(true);
   });
 });

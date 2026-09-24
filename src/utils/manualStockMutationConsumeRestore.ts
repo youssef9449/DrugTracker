@@ -8,7 +8,21 @@ import { consumeDose, restoreDose } from './medActions';
 import { getOccurrenceSnapshot, type OccurrenceSnapshotResult } from './autoDeductionNativeEvents';
 import { isDoseSkippedOnDate } from './dateCalculations';
 import { generateId } from './id';
-import { resolveConsumeDoseId } from './manualStockMutationShared';
+export function shouldDismissAlarmAfterManualTake(
+  outcome: import('./manualStockMutationTypes').GatedManualOutcome
+): boolean {
+  return outcome === 'applied' || outcome === 'already_consumed';
+}
+
+export function resolveConsumeDoseId(
+  med: import('../types').Medication,
+  doseId?: string
+): string | undefined {
+  const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
+  if (doseId != null && doseId !== '') return doseId;
+  if (schedule.length === 1) return schedule[0].id;
+  return undefined;
+}
 
 export function runGatedManualConsume(opts: {
   medicationId: string;

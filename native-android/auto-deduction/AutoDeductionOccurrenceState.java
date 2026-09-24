@@ -27,7 +27,6 @@ final class AutoDeductionOccurrenceState {
 
     boolean compactTerminalState() {
         String cutoff = terminalOccurrenceCutoffDate();
-        if (cutoff == null) return false;
 
         synchronized (scheduler.scheduleLock()) {
             Set<String> protectedKeys = new HashSet<String>();

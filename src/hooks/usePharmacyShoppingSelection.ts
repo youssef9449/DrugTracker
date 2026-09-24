@@ -15,6 +15,9 @@ export function usePharmacyShoppingSelection({
       return status === 'out_of_stock' || status === 'critical' || status === 'warning';
     });
   }, [medications]);
+  const [showAllForPlanning, setShowAllForPlanning] = useState(false);
+  const [removedFromShoppingIds, setRemovedFromShoppingIds] = useState<Set<string>>(new Set());
+  const [deselectedIds, setDeselectedIds] = useState<Set<string>>(new Set());
   const effectiveShowAll = showAllForPlanning;
   const displayList = (effectiveShowAll ? medications : urgentMeds)
     .filter((medication) => !removedFromShoppingIds.has(medication.id));

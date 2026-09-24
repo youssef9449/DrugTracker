@@ -26,18 +26,6 @@ import { scheduleDoseReminder } from './doseReminderScheduling';
 import { scheduleSnoozedDoseReminder } from './notifications/doseReminderNotifications';
 import { getSnoozeUntil, isSnoozeActive } from './doseReminderStorage';
 import { getDoseReminderSlots } from './doseReminderDefinitions';
-import type { GatedManualOutcome } from './manualStockMutationTypes';
-
-export function shouldDismissAlarmAfterManualTake(outcome: GatedManualOutcome): boolean {
-  return outcome === 'applied' || outcome === 'already_consumed';
-}
-
-export function resolveConsumeDoseId(med: Medication, doseId?: string): string | undefined {
-  const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
-  if (doseId != null && doseId !== '') return doseId;
-  if (schedule.length === 1) return schedule[0].id;
-  return undefined;
-}
 
 export interface DoseReminderInvalidationResult {
   ok: boolean;

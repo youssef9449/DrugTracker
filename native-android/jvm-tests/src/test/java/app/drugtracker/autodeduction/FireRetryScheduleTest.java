@@ -672,15 +672,16 @@ public class FireRetryScheduleTest {
         AutoDeductionScheduler.FireResult fr =
                 s.recoverFireFromIndependentEvidence("med", "dose", date);
 
-        assertTrue(
-                "stale retry evidence may still recover the already-authorized D stock mutation",
-                fr.status == AutoDeductionScheduler.FireResult.Status.CREATED
-                        || fr.status == AutoDeductionScheduler.FireResult.Status.ALREADY_EXISTS);
+        assertEquals(
+                "stale retry evidence must not recover an occurrence after schedule replacement",
+                AutoDeductionScheduler.FireResult.Status.CANCELLED,
+                fr.status);
         AutoDeductionStockStore.SnapshotResult stock =
                 new AutoDeductionStockStore(appContext()).readAll();
-        assertEquals(9.0, stock.stocks.get("med"), 0.0001);
+        assertEquals(10.0, stock.stocks.get("med"), 0.0001);
 
-        // The replacement schedule is the current owner; old evidence must not create D+1.
+        // The replacement schedule is the current owner; old evidence must not
+        // mutate stock or create a successor.
         assertEquals(0, alarmCount());
         assertNull(s.getIndependentFireRetryEvidence("med", "dose", date));
     }

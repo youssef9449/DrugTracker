@@ -23,16 +23,47 @@ export type AppHydrationSetters = AppHydrationPhaseSetters;
  * Each phase owns one responsibility; this hook only coordinates their order.
  */
 export function useAppHydration(setters: AppHydrationSetters): void {
+  const {
+    setMedications,
+    setLogs,
+    setPharmacySettings,
+    setHydrated,
+    setIsFirstRun,
+    setIsAutoDeductPromptOpen,
+    setSoundEnabled,
+    setNotificationsEnabled,
+    setCriticalStockAlertsEnabled,
+    setExactAlarmPermission,
+    setGlobalAutoDeductEnabled,
+    setFontScale,
+    setIsCompactView,
+  } = setters;
+
   useEffect(() => {
-    const persistedState = loadPersistedAppState(setters);
+    const persistedState = loadPersistedAppState({
+      setMedications,
+      setLogs,
+      setPharmacySettings,
+      setIsFirstRun,
+      setIsAutoDeductPromptOpen,
+      setSoundEnabled,
+      setNotificationsEnabled,
+      setCriticalStockAlertsEnabled,
+      setGlobalAutoDeductEnabled,
+      setFontScale,
+      setIsCompactView,
+    });
 
     Promise.all([
-      initializeAppPermissions(setters),
-      initializeNativeRuntime(setters.setNotificationsEnabled).catch((err) => {
+      initializeAppPermissions({
+        setNotificationsEnabled,
+        setExactAlarmPermission,
+      }),
+      initializeNativeRuntime(setNotificationsEnabled).catch((err) => {
         console.warn('[App] Native bridge init failed:', err);
       }),
     ])
-      .then(() => convergeHydratedStock(persistedState, setters.setMedications))
+      .then(() => convergeHydratedStock(persistedState, setMedications))
       .catch((err) => {
         // Keep the coordinator fault-tolerant if a future phase ever adds an
         // uncaught failure; readiness still follows the existing contract.
@@ -40,10 +71,24 @@ export function useAppHydration(setters: AppHydrationSetters): void {
       })
       .finally(() => {
         publishHydrationReadiness(
-          setters.setHydrated,
+          setHydrated,
           persistedState.shouldShowAutoDeductPrompt,
-          setters.setIsAutoDeductPromptOpen
+          setIsAutoDeductPromptOpen
         );
       });
-  }, [setters]);
+  }, [
+    setMedications,
+    setLogs,
+    setPharmacySettings,
+    setHydrated,
+    setIsFirstRun,
+    setIsAutoDeductPromptOpen,
+    setSoundEnabled,
+    setNotificationsEnabled,
+    setCriticalStockAlertsEnabled,
+    setExactAlarmPermission,
+    setGlobalAutoDeductEnabled,
+    setFontScale,
+    setIsCompactView,
+  ]);
 }

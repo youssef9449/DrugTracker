@@ -679,10 +679,6 @@ boolean quarantineMalformedScheduleMetadata(
             if (expectedRaw != null && !expectedRaw.equals(currentRaw)) return true;
             ScheduleStorageIdentity identity = parseScheduleStorageKey(prefKey);
             if (identity == null) return false;
-            String occurrenceKey = AutoDeductionContract.occurrenceKey(
-                    identity.medicationId,
-                    identity.doseId,
-                    identity.calendarDate);
                         AutoDeductionSchedulingAdapter.CancelResult result =
                     scheduler.schedulingAdapter().cancelOccurrence(
                             identity.medicationId,

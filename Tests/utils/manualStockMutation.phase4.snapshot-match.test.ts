@@ -137,5 +137,4 @@ describe('Phase 4 — durableMatchesEnvelopeSnapshot pure contract', () => {
     };
     expect(durableMatchesEnvelopeSnapshot(env, durableReorderedLogs)).toBe(false);
   });
-
-  
+});

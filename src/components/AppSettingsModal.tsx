@@ -12,7 +12,6 @@ import {
   Bell,
   BellOff,
   AlertTriangle,
-  ,
 } from 'lucide-react';
 import { Medication, PharmacySettings } from '../types';
 import { Toggle } from './ui/Toggle';

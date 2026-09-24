@@ -2119,3 +2119,4 @@ describe('Phase 4 — durable global preference and add-medication ordering', ()
     expect(durable.globalAutoDeductEnabled).toBe(false);
   });
 });
+}

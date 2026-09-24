@@ -512,7 +512,7 @@ export const MedicationCardProgress: FC<MedicationCardProgressProps> = ({
   >
     <div
       className={`h-full rounded-full ${density === 'compact' ? 'transition-all duration-300' : 'transition-all duration-500'} ${progressColor}`}
-      style={{ width: \`${percentLeft}%\` }}
+      style={{ width: `${percentLeft}%` }}
     />
   </div>
 );

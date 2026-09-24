@@ -1,7 +1,6 @@
 import { __setStockMutationOrderingTestHooks, __resetStockMutationOrderingForTests, __setManualEnvelopeTestHooks, __setAutoStockGateTestHooks } from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
-import type { ManualStockEnvelope } from '../../src/utils/stockEnvelopeRecovery';
 
 
 import { makeScheduledMedication as med } from '../fixtures/testFixtures';
@@ -36,8 +35,6 @@ beforeEach(() => {
 });
 // findPending used indirectly via runGatedManualConsume
 
-type TestManualStockEnvelope = Omit<ManualStockEnvelope, 'globalAutoDeductEnabled'> & {
-  globalAutoDeductEnabled?: boolean;
 };
 
 const TODAY = '2026-09-16';

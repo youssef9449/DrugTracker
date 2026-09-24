@@ -35,11 +35,8 @@ beforeEach(() => {
 });
 // findPending used indirectly via runGatedManualConsume
 
-type TestManualStockEnvelope = Omit<ManualStockEnvelope, 'globalAutoDeductEnabled'> & {
-  globalAutoDeductEnabled?: boolean;
 };
 
-const TODAY = '2026-09-16';
 
 
 

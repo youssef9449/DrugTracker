@@ -50,7 +50,13 @@ import java.util.Map;
  *
  * Does not use polling, WorkManager periodic, or foreground services.
  */
-public final class AutoDeductionScheduler {
+public final class AutoDeductionScheduler
+        implements AutoDeductionRecurrence.Host,
+                AutoDeductionRecovery.Host,
+                AutoDeductionFireService.Host,
+                AutoDeductionCancellation.Host,
+                AutoDeductionOccurrenceState.Host,
+                AutoDeductionRetry.Host {
     private static final String TAG = "AutoDeductionScheduler";
     /** JSON/Intent field: medication+dose recurrence authorization generation. */
     public static final String FIELD_RECURRENCE_GENERATION = "recurrenceGeneration";

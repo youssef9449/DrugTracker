@@ -85,7 +85,7 @@ export function getOrderBreakdown(customOrderQuantities: CustomOrderQuantities, 
   if (getQuantityMode(quantityModes, med) !== 'custom') return [];
   return getSelectedUnits(orderUnits, med).map((unit) => ({
     unit,
-    quantity: getUnitQuantity(customOrderQuantities, orderUnits, quantityModes, med, unit, suggestedPills),
+    quantity: getUnitQuantity(customOrderQuantities, quantityModes, med, unit, suggestedPills),
   })).filter((item) => item.quantity > 0);
 }
 

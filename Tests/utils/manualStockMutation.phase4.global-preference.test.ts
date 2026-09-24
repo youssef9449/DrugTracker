@@ -35,12 +35,6 @@ beforeEach(() => {
 });
 // findPending used indirectly via runGatedManualConsume
 
-};
-
-
-
-
-
 describe('Phase 4 — durable global preference and add-medication ordering', () => {
   let durable: AutoStockDurableState;
   let manualEnvelope: ManualStockEnvelope | null;

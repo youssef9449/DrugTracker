@@ -35,8 +35,6 @@ beforeEach(() => {
 });
 // findPending used indirectly via runGatedManualConsume
 
-};
-
 const TODAY = '2026-09-16';
 
 

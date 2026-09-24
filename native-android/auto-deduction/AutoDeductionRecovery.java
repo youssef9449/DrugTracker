@@ -92,7 +92,7 @@ CatchUpResult catchUpMissedOccurrencesAndScheduleNext(
                 || timeHhmm == null) {
             return new CatchUpResult(0, false);
         }
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             if (!scheduler.isRecurrenceGenerationAuthorizedLocked(
                     medicationId, doseId, expectedRecurrenceGeneration)) {
                 Log.i("AutoDeductionScheduler", "catchUp: generation unauthorized — dropping snapshot "
@@ -103,7 +103,7 @@ CatchUpResult catchUpMissedOccurrencesAndScheduleNext(
         }
         final long nowMs = scheduler.recoveryNowForService();
         String treatmentEndDate = "";
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             AutoDeductionPersistenceModels.ScheduleRecord current =
                     scheduler.schedulingAdapter().getScheduleRecord(pastPrefKey);
             String raw = scheduler.schedulingAdapter().getScheduleRaw(pastPrefKey);
@@ -146,7 +146,7 @@ CatchUpResult catchUpMissedOccurrencesAndScheduleNext(
                     return new CatchUpResult(created, false, false);
                 }
 
-                // First future occurrence — gen check + install under one scheduler.scheduleLock().
+                // First future occurrence — gen check + install under one AutoDeductionScheduler.class.
                 ScheduleResult sr = scheduler.installFutureSuccessorIfGenerationHolds(
                         medicationId, doseId, walkDate, timeHhmm, amount,
                         epoch, expectedRecurrenceGeneration,
@@ -176,7 +176,7 @@ CatchUpResult catchUpMissedOccurrencesAndScheduleNext(
                     treatmentEndDate,
                     timeHhmm);
             if (fr.isCancelled()) {
-                synchronized (scheduler.scheduleLock()) {
+                synchronized (AutoDeductionScheduler.class) {
                     if (!scheduler.isRecurrenceGenerationAuthorizedLocked(
                             medicationId, doseId, expectedRecurrenceGeneration)) {
                         Log.i("AutoDeductionScheduler", "catchUp: generation invalidated mid-walk — stop");
@@ -429,7 +429,7 @@ public RestoreResult restoreFutureSchedules() {
             return RestoreResult.failure(0, 0, "forced_restore_failure");
         }
         List<ScheduleSnapshot> snapshot = new ArrayList<>();
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             Map<String, String> all = scheduler.getAllScheduleMetadata();
             for (Map.Entry<String, String> e : all.entrySet()) {
                 AutoDeductionPersistenceModels.ScheduleRecord record = null;
@@ -499,7 +499,7 @@ public RestoreResult restoreFutureSchedules() {
             String occurrenceKey = AutoDeductionContract.occurrenceKey(medId, doseId, date);
                 if (!treatmentEndDate.isEmpty()
                         && date.compareTo(treatmentEndDate) > 0) {
-                    synchronized (scheduler.scheduleLock()) {
+                    synchronized (AutoDeductionScheduler.class) {
                         if (!scheduler.schedulingAdapter()
                                 .isScheduleOwnedByOperationVersion(prefKey, observedVersion)) {
                             continue;
@@ -535,7 +535,7 @@ public RestoreResult restoreFutureSchedules() {
                         continue;
                     }
                     long snapGen;
-                    synchronized (scheduler.scheduleLock()) {
+                    synchronized (AutoDeductionScheduler.class) {
                         snapGen = scheduler.getRecurrenceGenerationLocked(medId, doseId);
                     }
                     CatchUpResult catchUp = catchUpMissedOccurrencesAndScheduleNext(
@@ -566,7 +566,7 @@ public RestoreResult restoreFutureSchedules() {
                 }
                 // Leftover tombstone under a superseding schedule: best-effort cleanup.
                 if (scheduler.hasCancellationTombstone(occurrenceKey)) {
-                    synchronized (scheduler.scheduleLock()) {
+                    synchronized (AutoDeductionScheduler.class) {
                         scheduler.clearCancellationTombstoneLocked(occurrenceKey);
                     }
                 }
@@ -594,7 +594,7 @@ public RestoreResult restoreFutureSchedules() {
                         continue;
                     }
                     long snapGenTz;
-                    synchronized (scheduler.scheduleLock()) {
+                    synchronized (AutoDeductionScheduler.class) {
                         snapGenTz = scheduler.getRecurrenceGenerationLocked(medId, doseId);
                     }
                     CatchUpResult catchUp = catchUpMissedOccurrencesAndScheduleNext(
@@ -613,7 +613,7 @@ public RestoreResult restoreFutureSchedules() {
                 epoch = recomputed;
                 // Future: atomic ownership check + schedule under one lock.
                 // operationVersion is assigned inside scheduleOccurrenceLocked (under
-                // scheduler.scheduleLock()) so ordering vs concurrent cancel is correct.
+                // AutoDeductionScheduler.class) so ordering vs concurrent cancel is correct.
                 String key = occurrenceKey;
                 AutoDeductionPersistenceModels.ScheduleRecord restoredRecord =
                         new AutoDeductionPersistenceModels.ScheduleRecord(
@@ -624,7 +624,7 @@ public RestoreResult restoreFutureSchedules() {
                                 epoch,
                                 treatmentEndDate,
                                 "");
-                synchronized (scheduler.scheduleLock()) {
+                synchronized (AutoDeductionScheduler.class) {
                     // drop future schedules whose generation was invalidated.
                     long metaGen = scheduler.getRecurrenceGenerationLocked(medId, doseId);
                     if (metaGen > 0L
@@ -673,7 +673,7 @@ boolean quarantineMalformedScheduleMetadata(
             String expectedRaw,
             String reason
     ) {
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             String currentRaw = scheduler.schedulingAdapter().getScheduleRaw(prefKey);
             if (currentRaw == null) return true;
             if (expectedRaw != null && !expectedRaw.equals(currentRaw)) return true;
@@ -695,7 +695,7 @@ public List<AutoDeductionPersistenceModels.ScheduledOccurrenceRecord>
         listScheduledOccurrences() {
         List<AutoDeductionPersistenceModels.ScheduledOccurrenceRecord> out =
                 new ArrayList<>();
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             Map<String, String> all = scheduler.getAllScheduleMetadata();
             for (Map.Entry<String, String> e : all.entrySet()) {
                 try {

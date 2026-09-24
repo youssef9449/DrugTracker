@@ -14,18 +14,6 @@ import {
 import { getMedSizes } from '../utils/medicationPackaging';
 import { PharmacyShoppingSendModal } from './PharmacyShoppingSendModal';
 import { PharmacyShoppingMedicationRow } from './PharmacyShoppingMedicationRow';
-function shoppingDurationDays(
-  med: Medication,
-  medicationPeriods: Record<string, { value: number | ''; unit: 'day' | 'month' }>,
-  defaultDurationDays: number
-): number {
-  const period = medicationPeriods[med.id] || {
-    value: defaultDurationDays === 60 ? 2 : 30,
-    unit: (defaultDurationDays === 60 ? 'month' : 'day') as 'day' | 'month',
-  };
-  const rawValue = period.value === '' ? 1 : period.value;
-  return Math.max(1, rawValue || 1) * (period.unit === 'month' ? 30 : 1);
-}
 type OrderUnit = 'pills' | 'boxes' | 'strips';
 type CustomOrderQuantities = Record<string, Partial<Record<OrderUnit, number | ''>>>;
 function getShoppingAvailableUnits(med: Medication): OrderUnit[] {

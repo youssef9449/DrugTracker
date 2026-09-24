@@ -1,11 +1,6 @@
-import type { ConsumptionLog, Medication } from '../types';
+import type { ConsumptionLog } from '../types';
 import { runManualStockTransaction, commitWithManualEnvelope } from './manualStockTransaction';
-import {
-  type GatedManualConsumeResult, type GatedManualRestoreResult,
-  type GatedAddMedicationResult, type GatedRefillResult,
-  type GatedAutoDeductToggleResult, type GatedGlobalAutoDeductToggleResult,
-  type GatedDeleteMedicationResult, type GatedMedicationUpdateResult,
-} from './manualStockMutationTypes';
+import type { GatedRefillResult } from './manualStockMutationTypes';
 import { applyDurableStockDelta } from './medActions';
 import { generateId } from './id';
 

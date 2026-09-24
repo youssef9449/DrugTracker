@@ -2,6 +2,7 @@ import { persist } from '../utils/storage';
 import { STORAGE_ERRORS } from '../constants/uiStrings';
 import { STORAGE_AUTO_DEDUCT_PROMPTED_KEY } from '../constants/storageKeys';
 import { playSuccessChime } from '../utils/sound';
+import { runAsyncCommand } from '../utils/async/runAsyncCommand';
 import {
   runGatedAutoDeductToggle,
   runGatedGlobalAutoDeductToggle,
@@ -21,7 +22,9 @@ export function useMedicationAutoHandlers(deps: MedicationHandlersDeps, state: M
   const { medicationsRef, globalAutoDeductEnabledRef } = state;
 
   const handleToggleAutoDeduct = (medicationId: string) => {
-    void (async () => {
+    runAsyncCommand(
+      'auto-deduct.medication-toggle',
+      async () => {
       const result = await runGatedAutoDeductToggle({
         medicationId,
         globalAutoDeductEnabled: globalAutoDeductEnabledRef.current,
@@ -53,14 +56,20 @@ export function useMedicationAutoHandlers(deps: MedicationHandlersDeps, state: M
           : `تم إيقاف الخصم التلقائي مؤقتاً لـ "${name}"`
       );
       if (soundEnabled) playSuccessChime();
-    })();
+      },
+      () => {
+        showToast(STORAGE_ERRORS.generic);
+      }
+    );
   };
 
   const handleToggleGlobalAutoDeduct = () => {
     const previous = globalAutoDeductEnabledRef.current;
     const next = !previous;
     globalAutoDeductEnabledRef.current = next;
-    void (async () => {
+    runAsyncCommand(
+      'auto-deduct.global-toggle',
+      async () => {
       const result = await runGatedGlobalAutoDeductToggle({ enable: next });
       if (result.outcome !== 'applied') {
         globalAutoDeductEnabledRef.current = previous;
@@ -88,11 +97,18 @@ export function useMedicationAutoHandlers(deps: MedicationHandlersDeps, state: M
         showToast('تم تفعيل الخصم التلقائي لجميع الأدوية ⚡');
       }
       if (soundEnabled) playSuccessChime();
-    })();
+      },
+      () => {
+        globalAutoDeductEnabledRef.current = previous;
+        showToast(STORAGE_ERRORS.generic);
+      }
+    );
   };
 
   const handleConfirmAutoDeductPrompt = (enable: boolean) => {
-    void (async () => {
+    runAsyncCommand(
+      'auto-deduct.first-run-confirm',
+      async () => {
       const result = await runGatedGlobalAutoDeductToggle({ enable });
       if (result.outcome !== 'applied') {
         setIsAutoDeductPromptOpen(true);
@@ -111,7 +127,12 @@ export function useMedicationAutoHandlers(deps: MedicationHandlersDeps, state: M
           ? 'تم تفعيل الخصم التلقائي لمخزون الأدوية ⚡'
           : 'تم إيقاف الخصم التلقائي ⏸️ (المخزون ثابت حتى تسجل الجرعة يدوياً)'
       );
-    })();
+      },
+      () => {
+        setIsAutoDeductPromptOpen(true);
+        showToast(STORAGE_ERRORS.generic);
+      }
+    );
   };
 
   return { handleToggleAutoDeduct, handleToggleGlobalAutoDeduct, handleConfirmAutoDeductPrompt };

@@ -316,11 +316,7 @@ export function runGatedGlobalAutoDeductToggle(opts: {
   });
 }
 
-export function runGatedMedicationNotificationToggle(opts: {
-  medicationId: string;
-  field: 'reminderEnabled' | 'criticalStockAlertsEnabled';
-  now?: Date;
-}): Promise<{
+): Promise<{
   outcome:
     | 'applied'
     | 'missing_med'

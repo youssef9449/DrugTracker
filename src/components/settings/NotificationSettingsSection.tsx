@@ -153,4 +153,6 @@ export const NotificationSettingsSection: FC<NotificationSettingsSectionProps> =
                     <span>المنبهات الدقيقة مفعّلة — تذكيرات الجرعات مضمونة في موعدها</span>
                   </div>
                 )}
+
+              </div>
 );

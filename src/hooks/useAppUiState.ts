@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import type { Medication } from '../types';
 import type { OrderItem } from '../utils/whatsapp';
 import { TOAST_DURATION_MS } from '../utils/time';
@@ -63,6 +63,15 @@ export function useAppUiState(): AppUiState {
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastIdRef = useRef(0);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const showToast = useCallback((message: string) => {
     const id = ++toastIdRef.current;

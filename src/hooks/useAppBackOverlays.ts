@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import { cleanupNativeListeners } from '../native';
 import type { Medication } from '../types';
 
@@ -7,19 +7,19 @@ interface UseAppBackOverlaysOptions {
   alarmingMedication: Medication | null;
   dismissAlarm: () => boolean;
   selectDoseMed: Medication | null;
-  setSelectDoseMed: React.Dispatch<React.SetStateAction<Medication | null>>;
-  setSelectDoseMode: React.Dispatch<React.SetStateAction<'take' | 'restore' | 'manage'>>;
+  setSelectDoseMed: Dispatch<SetStateAction<Medication | null>>;
+  setSelectDoseMode: Dispatch<SetStateAction<'take' | 'restore' | 'manage'>>;
   historyMedication: Medication | null;
-  setHistoryMedication: React.Dispatch<React.SetStateAction<Medication | null>>;
+  setHistoryMedication: Dispatch<SetStateAction<Medication | null>>;
   isAutoDeductPromptOpen: boolean;
   handleConfirmAutoDeductPrompt: (enable: boolean) => void;
   isAddModalOpen: boolean;
-  setIsAddModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  setEditingMedication: React.Dispatch<React.SetStateAction<Medication | null>>;
+  setIsAddModalOpen: Dispatch<SetStateAction<boolean>>;
+  setEditingMedication: Dispatch<SetStateAction<Medication | null>>;
   refillMedication: Medication | null;
-  setRefillMedication: React.Dispatch<React.SetStateAction<Medication | null>>;
+  setRefillMedication: Dispatch<SetStateAction<Medication | null>>;
   isSettingsModalOpen: boolean;
-  setIsSettingsModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  setIsSettingsModalOpen: Dispatch<SetStateAction<boolean>>;
 }
 
 export function useAppBackOverlays(options: UseAppBackOverlaysOptions) {

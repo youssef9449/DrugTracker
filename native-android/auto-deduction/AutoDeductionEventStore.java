@@ -542,13 +542,11 @@ public final class AutoDeductionEventStore {
                         // A valid FIRED payload stored under another medication's
                         // key is specifically an identity corruption.
                         rejectionReason = "identity_mismatch";
-                    } else if (decoded.isSuccess()
-                            && AutoDeductionContract.STATUS_FIRED.equals(decoded.record.status)
-                            && !storageIdentityMatchesPayload(storageIdentity, decoded.record)) {
-                        // Dose/date mismatch under the same medication is malformed
-                        // record data for this lookup/storage row, not a new identity.
-                        rejectionReason = "malformed_fields";
                     } else {
+                        // Any well-formed FIRED row that reaches this branch has
+                        // either a malformed field set or a dose/date mismatch under
+                        // the same medication. Only a medication identity mismatch
+                        // is classified separately above.
                         rejectionReason = "malformed_fields";
                     }
                     String rejected = AutoDeductionPersistenceCodec.encodeRejected(

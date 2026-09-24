@@ -227,11 +227,9 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
     >
       <div
         className={
-          'w-full sm:max-w-lg bg-white rounded-t-[28px] sm:rounded-[28px] shadow-xl border'
-        className={
-          'w-full sm:max-w-lg bg-white rounded-t-[28px] sm:rounded-[28px] shadow-xl border'
-          + 'border-slate-200/80 overflow-hidden max-h-[92vh] flex flex-col animate-in'
-          + 'slide-in-from-bottom duration-200'
+          'w-full sm:max-w-lg bg-white rounded-t-[28px] sm:rounded-[28px] shadow-xl '
+          + 'border border-slate-200/80 overflow-hidden max-h-[92vh] flex flex-col '
+          + 'animate-in slide-in-from-bottom duration-200'
         }
         dir="rtl"
       >
@@ -260,7 +258,8 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
             onClick={onClose}
             className={
               'w-10 h-10 rounded-full text-teal-200 hover:text-white '
-              + 'hover:bg-teal-700/80 transition flex items-center justify-center cursor-pointer'
+              + 'hover:bg-teal-700/80 transition flex items-center justify-center '
+              + 'cursor-pointer'
             }
             title="إغلاق"
             aria-label="إغلاق"

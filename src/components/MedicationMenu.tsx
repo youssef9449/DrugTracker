@@ -13,7 +13,6 @@ export interface MedicationMenuProps {
   medication: Medication;
   /** Effective Auto-Deduct (global ∧ medication). Used for runtime state only. */
   isAutoActive: boolean;
-  onOpenRefill?: (medication: Medication) => void;
   onEdit: (medication: Medication) => void;
   onDelete: (id: string) => void;
   onToggleAutoDeduct: (id: string) => void;

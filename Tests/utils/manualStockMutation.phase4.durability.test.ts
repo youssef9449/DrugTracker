@@ -929,7 +929,6 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
   });
 
   it('crash after persistence before finalization → restart finalizes without double mutation', async () => {
-  it('crash after persistence before finalization → restart finalizes without double mutation', async () => {
     // Simulate: envelope seq=5, durable already reflects the snapshot (commit
     // succeeded), but lastApplied did NOT advance (finalize crashed). Restart
     // must finalize + clear WITHOUT re-applying the snapshot.
@@ -2119,4 +2118,3 @@ describe('Phase 4 — durable global preference and add-medication ordering', ()
     expect(durable.globalAutoDeductEnabled).toBe(false);
   });
 });
-}

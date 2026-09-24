@@ -1,5 +1,5 @@
 import type { FC } from 'react';
-import { Layers, Box, PauseCircle, Bell, BellOff, AlertTriangle, AlertCircle, CheckCircle, CheckCircle2, Clock, ListChecks, RotateCcw, Calendar } from 'lucide-react';
+import { Layers, Box, PauseCircle, Bell, BellOff, AlertTriangle, AlertCircle, CheckCircle, CheckCircle2, Clock, ListChecks, RotateCcw, Calendar, ShoppingCart } from 'lucide-react';
 import type { ConsumptionLog, Medication, MedicationStatusInfo } from '../types';
 import { getCardDoseToggleTarget } from '../utils/doseSchedule';
 import { getHistoricalRestoreDisplayAmount } from '../utils/medActions';
@@ -515,4 +515,38 @@ export const MedicationCardProgress: FC<MedicationCardProgressProps> = ({
       style={{ width: `${percentLeft}%` }}
     />
   </div>
+);
+
+
+export interface MedicationCardRefillButtonProps {
+  medicationId: string;
+  medicationName: string;
+  density: 'compact' | 'detailed';
+  onOpenRefill: () => void;
+  className?: string;
+}
+
+/** Shared refill control for compact and detailed medication cards. */
+export const MedicationCardRefillButton: FC<MedicationCardRefillButtonProps> = ({
+  medicationId,
+  medicationName,
+  density,
+  onOpenRefill,
+  className = '',
+}) => (
+  <button
+    type="button"
+    onClick={onOpenRefill}
+    className={
+      className ||
+      (density === 'compact'
+        ? 'inline-flex h-7 items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-2 text-[10px] font-semibold text-teal-800 hover:bg-teal-100 active:scale-95 transition cursor-pointer'
+        : 'inline-flex h-8 items-center gap-1.5 rounded-full border border-teal-200 bg-teal-50 px-2.5 text-[11px] font-semibold text-teal-800 hover:bg-teal-100 active:scale-95 transition cursor-pointer')
+    }
+    aria-label={`إعادة تعبئة ${medicationName}`}
+    data-testid={`medication-refill-${medicationId}`}
+  >
+    <ShoppingCart className={density === 'compact' ? 'w-3.5 h-3.5 text-teal-700' : 'w-4 h-4 text-teal-700'} />
+    <span>تعبئة</span>
+  </button>
 );

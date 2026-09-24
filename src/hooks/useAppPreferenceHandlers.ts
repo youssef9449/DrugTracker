@@ -1,7 +1,4 @@
-import {
-  requestNotificationPermission,
-  getNotificationPermission,
-} from '../utils/notifications/notificationPermissions';
+import { ensureNotificationCapability } from './ensureNotificationCapability';
 import { sendTestAlertNotification } from '../utils/notifications/doseReminderNotifications';
 import { openExactAlarmSettings } from '../utils/exactAlarm';
 import { playSuccessChime } from '../utils/sound';
@@ -72,14 +69,8 @@ export function useAppPreferenceHandlers(deps: AppPreferenceHandlersDeps) {
 
   const handleToggleNotifications = async () => {
     if (!notificationsEnabled) {
-      let pushAllowed = false;
-      try {
-        const currentPerm = await getNotificationPermission();
-        if (currentPerm === 'granted') pushAllowed = true;
-        else if (currentPerm === 'default') pushAllowed = await requestNotificationPermission();
-      } catch (err) {
-        console.warn('[AppPreferenceHandlers] Notification permission error:', err);
-      }
+      const capability = await ensureNotificationCapability('app-preferences');
+      const pushAllowed = capability.allowed;
       if (!pushAllowed) {
         showToast(TOAST_MESSAGES.notificationsPermissionDenied);
         return;

@@ -25,3 +25,7 @@ export function createDeferred<T>(): {
   });
   return { promise, resolve, reject };
 }
+
+export async function flushUntil(predicate: () => boolean): Promise<void> {
+  await vi.waitFor(predicate, { timeout: 1000, interval: 0 });
+}

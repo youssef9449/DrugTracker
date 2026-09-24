@@ -60,7 +60,24 @@ function shortDepletionLabel(depletion: { dateStr: string; daysLeft: number }, i
 }
 
 export const MedicationCardAlertsView: FC<MedicationCardViewProps> = (props) => {
-  const { medication, isAutoActive, statusInfo, depletion, isSolid, hasStrips, currentPills, stripsDesc, tag, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onNavigateToShopping, onOpenHistory, onRegisterBackHandler } = props;
+  const {
+    medication,
+    isAutoActive,
+    statusInfo,
+    depletion,
+    isSolid,
+    hasStrips,
+    currentPills,
+    stripsDesc,
+    tag,
+    onOpenRefill,
+    onEdit,
+    onDelete,
+    onToggleAutoDeduct,
+    onNavigateToShopping,
+    onOpenHistory,
+    onRegisterBackHandler,
+  } = props;
   const isOut = statusInfo.status === 'out_of_stock';
   const isCrit = statusInfo.status === 'critical';
   return (
@@ -214,7 +231,23 @@ export const MedicationCardAlertsView: FC<MedicationCardViewProps> = (props) => 
 };
 
 export const MedicationCardSufficientView: FC<MedicationCardViewProps> = (props) => {
-  const { medication, isAutoActive, statusInfo, depletion, isSolid, hasStrips, currentPills, stripsDesc, tag, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onOpenHistory, onRegisterBackHandler } = props;
+  const {
+    medication,
+    isAutoActive,
+    statusInfo,
+    depletion,
+    isSolid,
+    hasStrips,
+    currentPills,
+    stripsDesc,
+    tag,
+    onOpenRefill,
+    onEdit,
+    onDelete,
+    onToggleAutoDeduct,
+    onOpenHistory,
+    onRegisterBackHandler,
+  } = props;
   const safeDays = statusInfo.daysLeft;
   const monthlyUsage = medication.dailyDose * DAYS_PER_MONTH;
   return (

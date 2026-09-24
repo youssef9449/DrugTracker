@@ -28,8 +28,7 @@ export const NotificationSettingsSection: FC<NotificationSettingsSectionProps> =
   onOpenExactAlarmSettings,
   onSendTestNotification,
 }) => (
-              {/* Notifications & Alerts Management Section */}
-              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 space-y-3">
+  <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div

@@ -4,14 +4,11 @@ import {
   X,
   Settings,
   Phone,
-  UserCheck,
   Check,
 } from 'lucide-react';
 import { Medication, PharmacySettings } from '../types';
-import { Toggle } from './ui/Toggle';
 import { AppPreferencesSection } from './settings/AppPreferencesSection';
 import { NotificationSettingsSection } from './settings/NotificationSettingsSection';
-import { WhatsAppPreviewSection } from './settings/WhatsAppPreviewSection';
 import { Modal } from './ui/Modal';
 import {
   cleanPhoneNumber,
@@ -20,11 +17,9 @@ import {
   OrderItem,
   buildWhatsAppUrl,
 } from '../utils/whatsapp';
-import {
-  getNotificationPermission,
-  requestNotificationPermission,
-} from '../utils/notifications/notificationPermissions';
 import { TOAST_MESSAGES } from '../constants/uiStrings';
+import { ensureNotificationCapability } from '../hooks/ensureNotificationCapability';
+import { PharmacySettingsSection } from './settings/PharmacySettingsSection';
 export interface AppSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -108,17 +103,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
    * Shared by dose-reminder and critical-stock draft toggles (#473).
    * Does not mutate draft state; callers flip only on success.
    */
-  const ensureNotificationPermission = async (logLabel: string): Promise<boolean> => {
-    try {
-      const currentPerm = await getNotificationPermission();
-      if (currentPerm === 'granted') return true;
-      if (currentPerm === 'default') return await requestNotificationPermission();
-      return false;
-    } catch (err) {
-      console.warn(`[AppSettingsModal] Notification permission error (${logLabel}):`, err);
-      return false;
-    }
-  };
 
   /**
    * OFF → ON for phone notifications: require OS notification permission
@@ -130,7 +114,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
       setDraftNotifications(false);
       return;
     }
-    const pushAllowed = await ensureNotificationPermission('notifications');
+    const pushAllowed = await ensureNotificationCapability('notifications').then((r) => r.allowed);
     if (!pushAllowed) {
       showToast?.(TOAST_MESSAGES.notificationsPermissionDenied);
       return;
@@ -147,7 +131,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
       setDraftCritical(false);
       return;
     }
-    const pushAllowed = await ensureNotificationPermission('critical');
+    const pushAllowed = await ensureNotificationCapability('critical').then((r) => r.allowed);
     if (!pushAllowed) {
       showToast?.(TOAST_MESSAGES.notificationsPermissionDenied);
       return;
@@ -294,113 +278,22 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                 onOpenExactAlarmSettings={onOpenExactAlarmSettings}
                 onSendTestNotification={onSendTestNotification}
               />
-          {/* Pharmacy and WhatsApp Configuration Section */}
-          {isPharmacyOnly && <div className="space-y-3 pt-1">
-            {/* Pharmacy Phone Number */}
-            <div className="bg-teal-50/70 border border-teal-200/80 rounded-2xl p-3.5 space-y-2">
-              <label className="block text-xs font-bold text-teal-950 flex items-center gap-1.5">
-                <Phone className="w-4 h-4 text-teal-700" />
-                <span>رقم هاتف الصيدلية (واتساب) <span className="text-red-500">*</span></span>
-              </label>
-              <input
-                type="tel"
-                value={pharmacyPhone}
-                readOnly
-                placeholder="اختر صيدلية من إدارة الصيدليات"
-                className="w-full px-3.5 py-2.5 rounded-xl border border-teal-300 text-sm font-mono bg-slate-50 text-slate-700"
-              />
-              <div className="text-[11px] text-teal-800 flex items-center justify-between">
-                <span>سيتم إرسال الطلب لهذا الرقم مباشرة عبر واتساب.</span>
-                {formattedPhone && (
-                  <span className="font-mono text-teal-900 bg-teal-200/60 px-2 py-0.5 rounded-md">
-                    +{formattedPhone}
-                  </span>
-                )}
-              </div>
-            </div>
-            {/* Customer Code & Pharmacy Name */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {/* Customer Code */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
-                  <UserCheck className="w-4 h-4 text-teal-600" />
-                  <span>كود العميل في الصيدلية (اختياري)</span>
-                </label>
-                <input
-                  type="text"
-                  value={customerCode}
-                  readOnly
-                  placeholder="اكتب كود العميل إن وجد (اختياري)"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono font-bold focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
-                />
-                {customerCode.trim() ? (
-                  <span className="text-[10px] text-teal-700 font-medium mt-1 block">
-                    يظهر في نهاية الرسالة: (كود العميل {customerCode.trim()})
-                  </span>
-                ) : (
-                  <span className="text-[10px] text-slate-400 mt-1 block">
-                    اختياري — لن يظهر سطر كود العميل في الرسالة إذا تُرك فارغاً
-                  </span>
-                )}
-              </div>
-              {/* Pharmacy Name */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  اسم الصيدلية (اختياري)
-                </label>
-                <input
-                  type="text"
-                  value={pharmacyName}
-                  readOnly
-                  placeholder="اكتب اسم الصيدلية (اختياري)"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
-                />
-                <span className="text-[10px] text-slate-500 mt-1 block">
-                  لتنظيم اسم الجهة في التطبيق
-                </span>
-              </div>
-              {/* Delivery Address */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  عنوان التوصيل (اختياري)
-                </label>
-                <textarea
-                  value={address}
-                  readOnly
-                  placeholder="مثال: شارع 15، عمارة 20، الدور الثالث، شقة 8 — مدينة نصر"
-                  rows={2}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white resize-none"
-                />
-                <span className="text-[10px] text-slate-500 mt-1 block">
-                  يظهر في رسالة الواتساب {customerCode.trim() ? 'تحت كود العميل' : 'في نهاية الرسالة'}
-                </span>
-              </div>
-              {/* Contact Phone */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  رقم التواصل (اختياري)
-                </label>
-                <input
-                  type="tel"
-                  inputMode="tel"
-                  value={contactPhone}
-                  readOnly
-                  placeholder="مثال: 01012345678"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono font-bold focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
-                />
-                <span className="text-[10px] text-slate-500 mt-1 block">
-                  رقمك الشخصي ليتصلوا بك للتأكيد — يظهر في رسالة الواتساب
-                </span>
-              </div>
-            </div>
-            <WhatsAppPreviewSection
+            </>
+          )}
+          {isPharmacyOnly && (
+            <PharmacySettingsSection
+              pharmacyPhone={pharmacyPhone}
+              formattedPhone={formattedPhone}
+              customerCode={customerCode}
+              pharmacyName={pharmacyName}
+              address={address}
+              contactPhone={contactPhone}
               previewMsg={previewMsg}
               waUrl={waUrl}
               appUrl={appUrl}
-              pharmacyPhone={pharmacyPhone}
-              formattedPhone={formattedPhone}
               hasActiveOrderItems={Boolean(activeOrderItems && activeOrderItems.length > 0)}
             />
+          )}
           {/* Submit Button */}
           <div className="pt-2">
             <button

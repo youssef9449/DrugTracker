@@ -217,6 +217,7 @@ export function useAddMedicationForm({
     return saved;
   };
 
+
   const previewDoseNum = totalDailyAmount(dosage.doseSchedule);
   const previewDays =
     previewDoseNum > 0 ? Math.floor(stock.currentPills / previewDoseNum) : 0;

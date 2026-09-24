@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import type { Medication } from '../types';
-import { calculateMedicationStatus } from '../utils/medicationStatus';
-import { getCriticalAlarmDate, getTodayDateString } from '../utils/dateCalculations';
+import { getTodayDateString } from '../utils/dateCalculations';
+import { evaluateCriticalStockPolicy } from '../utils/criticalStockPolicy';
 import { sendCriticalStockAlert } from '../utils/notifications/criticalStockNotifications';
 import { cancelCriticalAlarm } from '../utils/criticalAlarmScheduling';
 import {
@@ -56,25 +56,21 @@ export function useStockAlerts({
       }
     }
 
+    const today = getTodayDateString();
+    const nowMs = Date.now();
+
     for (const med of medications) {
-      const { status, daysLeft } = calculateMedicationStatus(med);
-      const isCriticalish = status === 'critical' || status === 'out_of_stock';
-      const canNotify =
-        criticalStockAlertsEnabled && med.criticalStockAlertsEnabled === true;
+      const claim = getCriticalNotificationClaim(claims, med.id);
+      const decision = evaluateCriticalStockPolicy({
+        medication: med,
+        criticalStockAlertsEnabled,
+        claim,
+        todayStr: today,
+        nowMs,
+      });
 
-      if (!isCriticalish) {
-        const claim = getCriticalNotificationClaim(claims, med.id);
-        const projection = canNotify
-          ? getCriticalAlarmDate(med, getTodayDateString())
-          : null;
-        const isLiveArmedRecord =
-          claim?.claimed === true &&
-          claim.alarmTime !== null &&
-          projection !== null &&
-          claim.alarmTime === projection &&
-          claim.alarmTime > Date.now();
-
-        if (claim && !isLiveArmedRecord) {
+      if (!decision.isCriticalEpisode) {
+        if (claim && decision.shouldClearClaim) {
           void updateCriticalNotificationClaim(med.id, () => null).then((result) => {
             if (!result.ok) {
               console.warn('[critical-stock] failed to clear ended-episode claim');
@@ -89,17 +85,12 @@ export function useStockAlerts({
         continue;
       }
 
-      // Disabling Critical Stock notifications never consumes the episode's
-      // notification opportunity.
-      if (!canNotify) continue;
+      // The same policy owns foreground eligibility for an active episode.
+      // A future scheduled claim remains only a recovery fallback and does
+      // not suppress the foreground opportunity; an in-flight/already-sent
+      // foreground claim does.
+      if (!decision.foregroundEligible) continue;
 
-      const claim = getCriticalNotificationClaim(claims, med.id);
-      if (claim?.claimed && (claim.alarmTime === null || claim.alarmTime <= Date.now())) {
-        continue;
-      }
-
-      // A still-future scheduled claim is not allowed to suppress the
-      // foreground notification when the medication has already crossed.
       // Do NOT cancel the future alarm before foreground delivery succeeds:
       // it is the recovery fallback if delivery fails (#419).
       void runWithCriticalNotificationClaim(
@@ -114,7 +105,7 @@ export function useStockAlerts({
               sendCriticalStockAlert(
                 med.id,
                 med.name,
-                daysLeft,
+                decision.daysLeft,
                 currentPills,
                 unit
               )

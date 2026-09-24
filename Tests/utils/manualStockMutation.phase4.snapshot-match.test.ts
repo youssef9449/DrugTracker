@@ -12,7 +12,7 @@ function durableMatchesEnvelopeSnapshot(
   },
   durable: AutoStockDurableState
 ): boolean {
-  return matchesDurableEnvelope(envelope as any, durable);
+  return matchesDurableEnvelope({ ...envelope, globalAutoDeductEnabled: envelope.globalAutoDeductEnabled ?? false }, durable);
 }
 
 const TODAY = '2026-09-16';

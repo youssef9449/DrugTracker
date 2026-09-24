@@ -111,7 +111,7 @@ describe('usePharmacyShoppingModel — order message memoization (#550)', () => 
     expect(callsAfterFirst).toBeGreaterThan(0);
 
     // Genuine dependency: default duration affects order quantities / message.
-    settings = { ...settings, defaultDurationDays: 14 };
+    settings = { ...settings, defaultDurationDays: 60 };
     rerender({ meds: medications, prefs: settings });
 
     expect(generateSpy.mock.calls.length).toBeGreaterThan(callsAfterFirst);

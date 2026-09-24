@@ -330,7 +330,12 @@ export const MedicationCardSufficientView: FC<MedicationCardViewProps> = (props)
 };
 
 export const MedicationCardCompactView: FC<MedicationCardViewProps> = (props) => {
-  const { medication, isAutoActive, statusInfo, depletion, currentPills, tag, percentLeft, progressColor, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onToggleMedicationReminder, onToggleMedicationCriticalStockAlerts, onConsumeDose, onRestoreDose, onOpenHistory, logs, onRegisterBackHandler } = props;
+  const {
+    medication, isAutoActive, statusInfo, depletion, currentPills, tag, percentLeft,
+    progressColor, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct,
+    onToggleMedicationReminder, onToggleMedicationCriticalStockAlerts,
+    onConsumeDose, onRestoreDose, onOpenHistory, logs, onRegisterBackHandler,
+  } = props;
   const isOut = statusInfo.status === 'out_of_stock';
   const isCrit = statusInfo.status === 'critical';
   const isTemporaryCourse = medication.isChronic === false;
@@ -515,7 +520,13 @@ export const MedicationCardCompactView: FC<MedicationCardViewProps> = (props) =>
 };
 
 export const MedicationCardDetailedView: FC<MedicationCardViewProps> = (props) => {
-  const { medication, isAutoActive, statusInfo, depletion, currentPills, stripsDesc, nonSolidPackageDesc, tag, percentLeft, progressColor, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onToggleMedicationReminder, onToggleMedicationCriticalStockAlerts, onConsumeDose, onRestoreDose, onOpenHistory, logs, onRegisterBackHandler } = props;
+  const {
+    medication, isAutoActive, statusInfo, depletion, currentPills, stripsDesc,
+    nonSolidPackageDesc, tag, percentLeft, progressColor, onOpenRefill, onEdit,
+    onDelete, onToggleAutoDeduct, onToggleMedicationReminder,
+    onToggleMedicationCriticalStockAlerts, onConsumeDose, onRestoreDose,
+    onOpenHistory, logs, onRegisterBackHandler,
+  } = props;
   const isOut = statusInfo.status === 'out_of_stock';
   const isCrit = statusInfo.status === 'critical';
   const isTemporaryCourse = medication.isChronic === false;

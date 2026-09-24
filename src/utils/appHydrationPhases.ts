@@ -120,7 +120,7 @@ export function loadPersistedAppState(
       loadedMedications = medsOutcome.value;
     } else if (medsOutcome.status === 'invalid' || medsOutcome.status === 'read_failed') {
       console.warn(
-        `[App] Persisted medication state unusable (${medsOutcome.status}: ${medsOutcome.status === 'missing' ? '' : medsOutcome.reason}); starting fail-safe.`
+        `[App] Persisted medication state unusable (${medsOutcome.status}: ${medsOutcome.reason}); starting fail-safe.`
       );
     }
   }
@@ -132,7 +132,7 @@ export function loadPersistedAppState(
     setters.setLogs(logsOutcome.value);
   } else if (logsOutcome.status === 'invalid' || logsOutcome.status === 'read_failed') {
     console.warn(
-      `[App] Persisted consumption-log state unusable (${logsOutcome.status}: ${logsOutcome.status === 'missing' ? '' : logsOutcome.reason}); starting fail-safe.`
+      `[App] Persisted consumption-log state unusable (${logsOutcome.status}: ${logsOutcome.reason}); starting fail-safe.`
     );
   }
 

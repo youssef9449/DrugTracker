@@ -556,14 +556,14 @@ export async function recoverManualEnvelopeInto(
   const manualOutcome = readManualStockEnvelopeOutcome();
   if (manualOutcome.status === 'invalid' || manualOutcome.status === 'read_failed') {
     console.warn(
-      `[stock-recovery] manual stock envelope unusable (${manualOutcome.status}: ${manualOutcome.status === 'missing' ? '' : manualOutcome.reason}); blocking mutations until repaired.`
+      `[stock-recovery] manual stock envelope unusable (${manualOutcome.status}: ${manualOutcome.reason}); blocking mutations until repaired.`
     );
     return { ok: false, state: fresh, exactToAcknowledge: [] };
   }
   const exactOutcome = readExactAutoStockEnvelopeOutcome();
   if (exactOutcome.status === 'invalid' || exactOutcome.status === 'read_failed') {
     console.warn(
-      `[stock-recovery] exact-auto stock envelope unusable (${exactOutcome.status}: ${exactOutcome.status === 'missing' ? '' : exactOutcome.reason}); blocking mutations until repaired.`
+      `[stock-recovery] exact-auto stock envelope unusable (${exactOutcome.status}: ${exactOutcome.reason}); blocking mutations until repaired.`
     );
     return { ok: false, state: fresh, exactToAcknowledge: [] };
   }

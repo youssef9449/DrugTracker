@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   isValidConsumptionLogRecord,
   isValidMedicationRecord,
-  isValidCalendarDateString,
 } from '@/utils/storage';
+import { isValidCalendarDateString } from '@/utils/date/calendarPrimitives';
 import { isValidTimeHhmm } from '@/utils/time';
 
 /**

@@ -4,7 +4,7 @@ import { cancelNotification, getNotificationPermissionResult, getPendingNotifica
 import { scheduleWebNotification } from './notifications/webNotifications';
 import {
   classifyNativeError,
-  nativeFailureErrorCode, type NativeErrorCode } from './nativeErrors';
+  type NativeErrorCode } from './nativeErrors';
 
 export interface CriticalAlarmOperationResult {
   ok: boolean;

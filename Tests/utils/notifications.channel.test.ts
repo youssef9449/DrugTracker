@@ -581,9 +581,9 @@ describe('Group 4 acceptance — cancellation and pending-state contracts', () =
       .mockResolvedValueOnce({ enabled: false })
       .mockResolvedValueOnce({ enabled: true });
 
-    const { isNotificationChannelEnabled } = await import('@/utils/notificationRuntime');
-    await expect(isNotificationChannelEnabled(DOSE_REMINDER_CHANNEL_ID)).resolves.toBe(false);
-    await expect(isNotificationChannelEnabled(DOSE_REMINDER_FOREGROUND_CHANNEL_ID)).resolves.toBe(true);
+    const { getNotificationChannelState } = await import('@/utils/notificationRuntime');
+    await expect(getNotificationChannelState(DOSE_REMINDER_CHANNEL_ID)).resolves.toBe('disabled');
+    await expect(getNotificationChannelState(DOSE_REMINDER_FOREGROUND_CHANNEL_ID)).resolves.toBe('enabled');
     expect(mocks.nativeCheckChannel).toHaveBeenNthCalledWith(1, {
       channelId: DOSE_REMINDER_CHANNEL_ID,
     });

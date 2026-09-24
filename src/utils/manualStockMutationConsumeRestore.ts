@@ -1,4 +1,4 @@
-import type { ConsumptionLog, Medication } from '../types';
+import type { ConsumptionLog } from '../types';
 import { runManualStockTransaction, commitWithManualEnvelope } from './manualStockTransaction';
 import type {
   GatedManualConsumeResult,

@@ -12,7 +12,7 @@ import { getNativePlatform, isNativePlatform } from './notifications/notificatio
 import { cancelNotification, getPendingNotificationResult, scheduleNotification } from './notificationRuntime';
 import {
   classifyNativeError,
-  nativeFailureErrorCode, type NativeBoundaryFailure } from './nativeErrors';
+  type NativeBoundaryFailure } from './nativeErrors';
 import {
   scheduleWebNotification,
   listWebScheduledNotificationIdentities,

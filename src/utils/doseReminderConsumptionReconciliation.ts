@@ -11,7 +11,10 @@ import {
   getTodayDateString,
   isDoseConsumedOnDate,
 } from './dateCalculations';
-import { isMedicationTreatmentActiveOnDate } from './medicationTreatment';
+import {
+  getMedicationTreatmentEndDate,
+  isMedicationTreatmentActiveOnDate,
+} from './medicationTreatment';
 import {
   scheduleDoseReminder,
   cancelDoseReminder,

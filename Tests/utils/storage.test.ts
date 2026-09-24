@@ -33,7 +33,7 @@ describe('readJsonOutcome / loadValidatedJson (runtime-validated reads)', () => 
     localStorage.setItem('k', 'not-json{');
     const outcome = readJsonOutcome('k', passthrough);
     expect(outcome.status).toBe('invalid');
-    expect(loadValidatedJson('k', passthrough, 'fallback')).toBe('fallback');
+    expect(loadValidatedJson('k', passthrough, { a: 0 })).toEqual({ a: 0 });
   });
 
   it('reports invalid when the runtime validator rejects the shape', () => {

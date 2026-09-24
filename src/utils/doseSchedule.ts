@@ -14,7 +14,6 @@ import type { Medication, MedicationDose } from '../types';
 import { generateId } from './id';
 import { timeToMinutes, isValidTimeHhmm } from './time';
 import {
-  validateMedicationDose,
   normalizeDoseId,
   normalizeDoseDescription,
   normalizeDoseTimeValue,

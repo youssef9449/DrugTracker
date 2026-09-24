@@ -423,7 +423,7 @@ export function consumeDose(
       updatedMed: null,
       doseAmount: 0,
       log: null,
-      reason: resolved.reason,
+      reason: 'no_dose',
     };
   }
   const targetDoseId = resolved.doseId;

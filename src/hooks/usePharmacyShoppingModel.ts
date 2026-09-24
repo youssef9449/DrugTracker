@@ -13,9 +13,16 @@ export interface UsePharmacyShoppingModelOptions {
   settings: PharmacySettings;
   onUpdateSettings: (newSettings: PharmacySettings) => void;
   showToast: (message: string) => void;
+  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void;
 }
 
-export function usePharmacyShoppingModel({ medications, settings, onUpdateSettings, showToast }: UsePharmacyShoppingModelOptions) {
+export function usePharmacyShoppingModel({
+  medications,
+  settings,
+  onUpdateSettings,
+  showToast,
+  onRegisterBackHandler,
+}: UsePharmacyShoppingModelOptions) {
   const [medicationPeriods, setMedicationPeriods] = useState<Record<string, MedicationPeriod>>({});
   const [quantityModes, setQuantityModes] = useState<Record<string, QuantityMode>>({});
   const [customOrderQuantities, setCustomOrderQuantities] = useState<CustomOrderQuantities>({});

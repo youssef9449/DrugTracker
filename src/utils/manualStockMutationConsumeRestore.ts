@@ -7,7 +7,6 @@ import type {
 import { consumeDose, restoreDose } from './medActions';
 import { getOccurrenceSnapshot, type OccurrenceSnapshotResult } from './autoDeductionNativeEvents';
 import { isDoseSkippedOnDate } from './dateCalculations';
-import { getSnoozeUntil, isSnoozeActive } from './doseReminderStorage';
 import { generateId } from './id';
 import { resolveConsumeDoseId } from './manualStockMutationShared';
 

@@ -18,6 +18,7 @@ import {
   readJsonOutcome,
 } from './storage';
 import { persistLastAppliedMutationSeq } from './stockMutationOrdering';
+import { pruneConsumptionLogs } from './pruneDoseConsumption';
 
 export const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 export const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
@@ -120,9 +121,12 @@ export function commitDurableAutoStockState(
   state: AutoStockDurableState,
   opts?: CommitDurableOptions
 ): string | null {
+  // Centralized durable-history retention (#507): every meds+logs commit
+  // prunes the consumption log to its documented bounded window.
+  const logs = pruneConsumptionLogs(state.logs);
   const medErr = persist(STORAGE_MEDS_KEY, state.medications, { json: true });
   if (medErr) return medErr;
-  const logErr = persist(STORAGE_LOGS_KEY, state.logs, { json: true });
+  const logErr = persist(STORAGE_LOGS_KEY, logs, { json: true });
   if (logErr) return logErr;
   if (state.globalAutoDeductEnabled != null) {
     const globalErr = persist(

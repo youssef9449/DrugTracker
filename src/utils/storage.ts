@@ -24,6 +24,7 @@ import { STORAGE_ERRORS } from '../constants/uiStrings';
 import type { ConsumptionLog, Medication } from '../types';
 import { validateMedicationDose } from './doseIdentity';
 import { isValidTimeHhmm } from './time';
+import { isValidCalendarDateString } from './date/calendarPrimitives';
 export type StorageReadResult =
   | { ok: true; value: string | null }
   | { ok: false; value: null };
@@ -122,23 +123,6 @@ export function isValidConsumptionLogRecord(value: unknown): value is Consumptio
     isOptionalString(log.relatedLogId) &&
     isOptionalString(log.doseId)
   );
-}
-
-/**
- * Canonical calendar-date validation for persisted YYYY-MM-DD values.
- * Shape + real calendar semantics (month range, day-of-month per month,
- * leap years). Shared with the scheduling domain so persisted state and
- * runtime boundaries accept exactly the same dates.
- */
-const CALENDAR_DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
-export function isValidCalendarDateString(value: unknown): value is string {
-  if (typeof value !== 'string' || !CALENDAR_DATE_SHAPE.test(value)) return false;
-  const year = Number(value.slice(0, 4));
-  const month = Number(value.slice(5, 7));
-  const day = Number(value.slice(8, 10));
-  if (month < 1 || month > 12) return false;
-  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  return day >= 1 && day <= daysInMonth;
 }
 
 /**

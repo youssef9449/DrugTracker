@@ -1,3 +1,11 @@
+/**
+ * User-visible medication activity log (STORAGE_LOGS_KEY).
+ *
+ * Retention (#507): bounded to CONSUMPTION_LOG_RETENTION_DAYS (see
+ * pruneDoseConsumption.ts). Pruning is centralized and applied at the
+ * durable meds+logs commit boundary; crash/recovery evidence (envelopes,
+ * mutation ordering, native FIRED events) is NOT pruned here.
+ */
 export interface ConsumptionLog {
   id: string;
   medicationId: string;
@@ -82,6 +90,9 @@ export interface Medication {
   /**
    * Per-dose consumption history: doseId → YYYY-MM-DD dates (append-only).
    * Source of truth for whether a dose occurrence was consumed on a date.
+   * Retention (#507): bounded to DOSE_HISTORY_RETENTION_DAYS (see
+   * pruneDoseConsumption.ts); runtime correctness only needs today's
+   * markers, so older dates are pruned deterministically at mutation time.
    */
   doseConsumptionHistory?: Record<string, string[]>;
   /**
@@ -89,6 +100,7 @@ export interface Medication {
    * that slot was restored after auto-deduct (or after manual consume).
    * Skipped slots are not auto-due again for that date and remain
    * available for a later manual Take (idempotent Auto-Deduct → Restore).
+   * Retention (#507): same bounded window as doseConsumptionHistory.
    */
   doseSkippedHistory?: Record<string, string[]>;
 }

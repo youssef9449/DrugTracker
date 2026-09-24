@@ -240,12 +240,8 @@ public class FireRetryScheduleTest {
         assertNotNull(afterFire);
         assertFalse("successful durable fire must leave shared metadata free of retry state",
                 afterFire.has("fireRetryCount"));
-        assertNotNull(
-                "FIRED alone must not clear retry evidence before Native stock succeeds",
-                s.getIndependentFireRetryEvidence("med", "dose", date));
-        s.clearIndependentFireRetryEvidenceAfterStock("med", "dose", date);
         assertNull(
-                "retry evidence clears only after Native stock succeeds",
+                "successful fire plus durable Native stock clears retry evidence",
                 s.getIndependentFireRetryEvidence("med", "dose", date));
     }
 

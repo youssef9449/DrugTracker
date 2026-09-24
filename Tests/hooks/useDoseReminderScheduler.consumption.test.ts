@@ -4,7 +4,7 @@ import { flushUntil } from '../helpers/asyncTestUtils';
 import { renderHook, cleanup } from '@testing-library/react';
 import type { Medication } from '@/types';
 import { getTodayDateString } from '@/utils/dateCalculations';
-import { useDoseReminderScheduler, getDoseReminderSlots } from '@/hooks/useDoseReminderScheduler';
+import { useDoseReminderScheduler } from '@/hooks/useDoseReminderScheduler';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import type { ExactAlarmPermission } from '@/utils/exactAlarm';
 

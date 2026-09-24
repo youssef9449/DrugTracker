@@ -2,13 +2,10 @@ import { __setStockMutationOrderingTestHooks, __resetStockMutationOrderingForTes
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
 import type { ManualStockEnvelope } from '../../src/utils/stockEnvelopeRecovery';
-import type { ExactAutoEnvelope } from '../../src/utils/runAutoDeductionReconciliation';
 
 
 import { makeScheduledMedication as med, makeAutoDeductionEvent as fired } from '../fixtures/testFixtures';
-import { runGatedManualConsume, runGatedManualRestore, runGatedAddMedication, runGatedRefill, runGatedUndoRefill, runGatedAutoDeductToggle, runGatedGlobalAutoDeductToggle, runGatedDeleteMedication } from '../../src/utils/manualStockMutation';
-import { loadExactAutoStockEnvelope } from '../../src/utils/stockEnvelopeRecovery';
-import { allocateMutationSeq, persistLastAppliedMutationSeq, loadLastAppliedMutationSeq } from '../../src/utils/stockMutationOrdering';
+import { runGatedManualConsume, runGatedManualRestore } from '../../src/utils/manualStockMutation';
 import { runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
 
 

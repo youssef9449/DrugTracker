@@ -1,10 +1,8 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { Medication, ConsumptionLog } from '../../src/types';
 import { makeMedication as baseMed, makeAutoDeductionEvent as fired } from '../fixtures/testFixtures';
-import { reconcileFiredEvents, isExactAutoOccurrenceApplied, exactAutoLogId } from '../../src/utils/autoDeductionReconciliation';
+import { reconcileFiredEvents, isExactAutoOccurrenceApplied } from '../../src/utils/autoDeductionReconciliation';
 
-import { runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
 
 
 

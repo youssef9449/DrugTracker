@@ -1,19 +1,13 @@
-import { __setStockMutationOrderingTestHooks, __resetStockMutationOrderingForTests, __setManualEnvelopeTestHooks, __setExactAutoEnvelopeStorageTestHooks, __setAutoStockGateTestHooks } from './autoStockTestHooks';
+import { __setManualEnvelopeTestHooks, __setAutoStockGateTestHooks } from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
 import type { ManualStockEnvelope } from '../../src/utils/stockEnvelopeRecovery';
-import type { ExactAutoEnvelope } from '../../src/utils/runAutoDeductionReconciliation';
 
 
-import { makeScheduledMedication as med, makeAutoDeductionEvent as fired } from '../fixtures/testFixtures';
-import { runGatedManualConsume, runGatedManualRestore, runGatedAddMedication, runGatedRefill, runGatedUndoRefill, runGatedAutoDeductToggle, runGatedGlobalAutoDeductToggle, runGatedDeleteMedication } from '../../src/utils/manualStockMutation';
-import { loadExactAutoStockEnvelope } from '../../src/utils/stockEnvelopeRecovery';
-import { allocateMutationSeq, persistLastAppliedMutationSeq, loadLastAppliedMutationSeq } from '../../src/utils/stockMutationOrdering';
-import { runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
+import { makeScheduledMedication as med } from '../fixtures/testFixtures';
+import { runGatedManualConsume, runGatedAddMedication, runGatedAutoDeductToggle, runGatedGlobalAutoDeductToggle } from '../../src/utils/manualStockMutation';
 
 
-import { isDoseConsumedOnDate } from '../../src/utils/dateCalculations';
-import { exactAutoLogId } from '../../src/utils/autoDeductionReconciliation';
 
 const autoSchedulingMocks = vi.hoisted(() => ({
   invalidateAutoDeductionRecurrence: vi.fn(),

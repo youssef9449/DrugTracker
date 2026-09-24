@@ -3,9 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, cleanup } from '@testing-library/react';
 import type { Medication } from '@/types';
 import { getTodayDateString, getCriticalAlarmDate } from '@/utils/dateCalculations';
-import {
-  useCriticalAlarmScheduler,
-  type UseCriticalAlarmSchedulerOptions } from '@/hooks/useCriticalAlarmScheduler';
+import { useCriticalAlarmScheduler } from '@/hooks/useCriticalAlarmScheduler';
 
 // Mutable platform mock so tests can switch between the web and the
 // native (android) code paths.
@@ -49,8 +47,8 @@ vi.mock('../utils/notificationTestFacade', async () => {
   };
 });
 
-import { scheduleCriticalAlarm, cancelCriticalAlarm, verifyCriticalAlarmPending } from '../utils/notificationTestFacade';
-import { readCriticalClaims as readClaims, writeCriticalClaims as writeClaims } from '../helpers/criticalStockClaims';
+import { scheduleCriticalAlarm, cancelCriticalAlarm } from '../utils/notificationTestFacade';
+import { readCriticalClaims as readClaims } from '../helpers/criticalStockClaims';
 
 const scheduleMock = vi.mocked(scheduleCriticalAlarm);
 const cancelMock = vi.mocked(cancelCriticalAlarm);

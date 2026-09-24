@@ -22,6 +22,73 @@ import {
 } from '../utils/criticalAlarmOperations';
 
 /**
+ * Pure Critical Stock × Exact Alarm scheduling decision (#504).
+ *
+ * Precedence matches the runtime effect exactly: hydration/first-run gates,
+ * then the shared exact-alarm capability, then the feature preference. The
+ * shared exact-alarm capability layer is the ONLY platform probe — this
+ * decision is pure and contains no Android permission implementation.
+ */
+export type CriticalStockSchedulingDecision =
+  | { action: 'schedule' }
+  | {
+      /** Cancel every possibly-armed alarm, keep the feature preference. */
+      action: 'cancel_armed_and_wait';
+      reason:
+        | 'exact_alarm_permission_denied'
+        | 'critical_stock_alerts_disabled';
+    }
+  | {
+      /** Transiently not schedulable; no destructive action. */
+      action: 'wait';
+      reason:
+        | 'not_hydrated'
+        | 'first_run'
+        | 'exact_alarm_capability_unknown';
+    };
+
+export function resolveCriticalStockSchedulingDecision(input: {
+  hydrated: boolean;
+  isFirstRun: boolean;
+  criticalStockAlertsEnabled: boolean;
+  exactAlarmPermission: ExactAlarmPermission | null;
+}): CriticalStockSchedulingDecision {
+  if (!input.hydrated) {
+    return { action: 'wait', reason: 'not_hydrated' };
+  }
+  if (input.isFirstRun) {
+    return { action: 'wait', reason: 'first_run' };
+  }
+  if (input.exactAlarmPermission === null) {
+    return { action: 'wait', reason: 'exact_alarm_capability_unknown' };
+  }
+  if (input.exactAlarmPermission === 'denied') {
+    return {
+      action: 'cancel_armed_and_wait',
+      reason: 'exact_alarm_permission_denied',
+    };
+  }
+  if (!input.criticalStockAlertsEnabled) {
+    return {
+      action: 'cancel_armed_and_wait',
+      reason: 'critical_stock_alerts_disabled',
+    };
+  }
+  return { action: 'schedule' };
+}
+
+/** Explicit hook status for the UI layer (#504). */
+export interface UseCriticalAlarmSchedulerStatus {
+  /**
+   * True when Android Exact Alarm permission is DENIED: the Critical Stock
+   * preference stays intact, no future alarm is armed, foreground delivery
+   * remains available, and the UI should surface the actionable
+   * "grant Exact Alarms" prerequisite.
+   */
+  schedulingBlockedByExactAlarmPermission: boolean;
+}
+
+/**
  * Options for {@link useCriticalAlarmScheduler}.
  */
 export interface UseCriticalAlarmSchedulerOptions {
@@ -158,12 +225,63 @@ export function useCriticalAlarmScheduler({
   isFirstRun,
   exactAlarmPermission,
   resumeTick = 0,
-}: UseCriticalAlarmSchedulerOptions): void {
+}: UseCriticalAlarmSchedulerOptions): UseCriticalAlarmSchedulerStatus {
   // Meds this session armed (or kept) an alarm for — used to cancel
   // alarms for meds that are deleted or whose projection disappears.
   const scheduledCriticalIdsRef = useRef<Set<string>>(new Set());
   // Queue + generation mechanics are centralized in the generic scheduling
   // coordinator; Critical Stock retains its business ownership here.
+
+  /**
+   * Shared cleanup for every cancel-state (#504): permission denial and
+   * preference-disabled are both "no armed alarm may survive" states — the
+   * session's tracked alarms, durable claims, and native-listed schedules
+   * are all cancelled; feature preferences remain untouched.
+   */
+  const cancelAllArmedCriticalAlarms = () => {
+    const ids = new Set([
+      ...scheduledCriticalIdsRef.current,
+      ...Object.keys(loadCriticalNotificationClaims()),
+    ]);
+    for (const id of ids) {
+      const generation = bumpCriticalAlarmGeneration(id);
+      enqueueCriticalAlarmOpGuarded(id, generation, async () => {
+        await cancelCriticalAlarm(id);
+      });
+    }
+    const staleGeneration = bumpCriticalAlarmGeneration(
+      '__stale_critical_alarm_cleanup__'
+    );
+    enqueueCriticalAlarmOpGuarded(
+      '__stale_critical_alarm_cleanup__',
+      staleGeneration,
+      async () => {
+        const listed = await listScheduledCriticalMedicationIdsNative();
+        if (!listed.ok) {
+          console.warn(
+            '[critical-alarm] native schedule listing failed during cleanup:',
+            listed.error,
+            listed.errorCode
+          );
+          return;
+        }
+        await Promise.all(
+          listed.ids.map((medId) => {
+            const cleanupGeneration = currentCriticalAlarmGeneration(medId);
+            return enqueueCriticalAlarmOpGuarded(
+              medId,
+              cleanupGeneration,
+              async () => {
+                if (!isCurrentCriticalAlarmGeneration(medId, cleanupGeneration)) return;
+                await cancelCriticalAlarm(medId);
+              }
+            );
+          })
+        );
+      }
+    );
+    scheduledCriticalIdsRef.current.clear();
+  };
 
   // Keep the latest medications in a ref so chained async operations can
   // re-read the CURRENT array without depending on unstable references.
@@ -175,7 +293,17 @@ export function useCriticalAlarmScheduler({
   // Stable signature of every field that can change getCriticalAlarmDate()
   // (stock, threshold, auto, explicit schedule rows, consume/skip history).
   // Deterministic serialization avoids false churn from object key order.
+  //
+  // #494: history serialization is restricted to the scheduling-relevant
+  // window (dates >= today). The critical projection reads consume/skip
+  // markers only for TODAY (suppression) and FUTURE dates (exception days);
+  // older history rows cannot affect scheduling, so they are excluded and
+  // large long-lived histories no longer require full serialization/sorting
+  // on every medication change. All cheap scheduling fields (stock, rate,
+  // threshold, auto, per-med flag, schedule rows) keep exact fidelity —
+  // correctness (no missed reconciliation) takes precedence over cost.
   const criticalSignature = useMemo(() => {
+    const recentCutoff = getTodayDateString();
     const serializeHistory = (
       hist: Record<string, string[]> | undefined,
       doseIds: string[]
@@ -185,8 +313,12 @@ export function useCriticalAlarmScheduler({
         .map((id) => {
           const dates = hist[id];
           if (!Array.isArray(dates) || dates.length === 0) return `${id}:`;
-          // Sort dates so insertion order does not affect the signature.
-          const sorted = [...dates].filter((d) => typeof d === 'string' && d).sort();
+          // Scheduling-relevant markers only: today (suppression) and future
+          // (projected exception days). Sorted so insertion order does not
+          // affect the signature.
+          const sorted = [...dates]
+            .filter((d) => typeof d === 'string' && d && d >= recentCutoff)
+            .sort();
           return `${id}:${sorted.join(',')}`;
         })
         .join(';');
@@ -239,104 +371,20 @@ export function useCriticalAlarmScheduler({
   }, [medications]);
 
   useEffect(() => {
-    if (!hydrated || isFirstRun) return;
-    // Android exact-alarm scheduling is fail-closed when the shared permission
-    // service reports denied. `unsupported` means the Android permission model
-    // is not applicable (for example iOS/web), so those platforms keep their
-    // existing notification scheduling behavior.
-    if (exactAlarmPermission === null) return;
-
-    // Exact-alarm permission loss is a cleanup state, not an empty state.
-    // Android removes exact alarms when permission is revoked, but durable
-    // feature metadata still needs deterministic reconciliation before a
-    // later permission grant can restore only the currently desired alarms.
-    if (exactAlarmPermission === 'denied') {
-      const ids = new Set([
-        ...scheduledCriticalIdsRef.current,
-        ...Object.keys(loadCriticalNotificationClaims()),
-      ]);
-      for (const id of ids) {
-        const generation = bumpCriticalAlarmGeneration(id);
-        enqueueCriticalAlarmOpGuarded(id, generation, async () => {
-          await cancelCriticalAlarm(id);
-        });
+    // One shared decision point for the Critical Stock × Exact Alarm
+    // prerequisite (#504). The shared getExactAlarmPermission() service is
+    // the ONLY platform probe; this hook never implements its own Android
+    // permission check.
+    const decision = resolveCriticalStockSchedulingDecision({
+      hydrated,
+      isFirstRun,
+      criticalStockAlertsEnabled,
+      exactAlarmPermission,
+    });
+    if (decision.action !== 'schedule') {
+      if (decision.action === 'cancel_armed_and_wait') {
+        cancelAllArmedCriticalAlarms();
       }
-      const staleGeneration = bumpCriticalAlarmGeneration(
-        '__stale_critical_alarm_cleanup__'
-      );
-      enqueueCriticalAlarmOpGuarded(
-        '__stale_critical_alarm_cleanup__',
-        staleGeneration,
-        async () => {
-          const listed = await listScheduledCriticalMedicationIdsNative();
-          if (!listed.ok) {
-            console.warn(
-              '[critical-alarm] native schedule listing failed during permission cleanup:',
-              listed.error,
-              listed.errorCode
-            );
-            return;
-          }
-          await Promise.all(
-            listed.ids.map((medId) => {
-              const cleanupGeneration = currentCriticalAlarmGeneration(medId);
-              return enqueueCriticalAlarmOpGuarded(
-                medId,
-                cleanupGeneration,
-                async () => {
-                  if (!isCurrentCriticalAlarmGeneration(medId, cleanupGeneration)) return;
-                  await cancelCriticalAlarm(medId);
-                }
-              );
-            })
-          );
-        }
-      );
-      scheduledCriticalIdsRef.current.clear();
-      return;
-    }
-
-    // ── Flags disabled: cancel every possibly-armed alarm ──
-    // ── (claim writes belong to the foreground hook) ──
-    // Gated only by critical-stock preference (independent of dose reminders).
-    if (!criticalStockAlertsEnabled) {
-      const ids = new Set([
-        ...scheduledCriticalIdsRef.current,
-        ...Object.keys(loadCriticalNotificationClaims()),
-      ]);
-      for (const id of ids) {
-        const generation = bumpCriticalAlarmGeneration(id);
-        enqueueCriticalAlarmOpGuarded(id, generation, async () => {
-          await cancelCriticalAlarm(id);
-        });
-      }
-      const staleGeneration = bumpCriticalAlarmGeneration(
-        '__stale_critical_alarm_cleanup__'
-      );
-      enqueueCriticalAlarmOpGuarded(
-        '__stale_critical_alarm_cleanup__',
-        staleGeneration,
-        async () => {
-          const listed = await listScheduledCriticalMedicationIdsNative();
-          if (!listed.ok) {
-            console.warn('[critical-alarm] native schedule listing failed:', listed.error, listed.errorCode);
-            return;
-          }
-          await Promise.all(
-            listed.ids.map((medId) => {
-              const cleanupGeneration = currentCriticalAlarmGeneration(medId);
-              return enqueueCriticalAlarmOpGuarded(
-                medId,
-                cleanupGeneration,
-                async () => {
-                if (!isCurrentCriticalAlarmGeneration(medId, cleanupGeneration)) return;
-                await cancelCriticalAlarm(medId);
-              });
-            })
-          );
-        }
-      );
-      scheduledCriticalIdsRef.current.clear();
       return;
     }
 
@@ -574,4 +622,9 @@ export function useCriticalAlarmScheduler({
     resumeTick,
     exactAlarmPermission,
   ]);
+
+  return {
+    schedulingBlockedByExactAlarmPermission:
+      exactAlarmPermission === 'denied',
+  };
 }

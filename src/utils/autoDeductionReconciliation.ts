@@ -116,26 +116,60 @@ export function findExactAutoLog(
   const id = exactAutoLogId(medicationId, doseId, calendarDate);
   return logs.find((l) => l.id === id);
 }
+
 /**
- * Whether this occurrence is already reflected in JS stock semantics.
- * Sources (any one is enough):
- * 1. dose consume / skip history (Take, prior exact apply, Restore skip)
- * 2. existing exact auto log for this occurrence (deterministic id)
- * NOT prevent a FIRED event from being applied. Idempotency relies solely
- * on durable occurrence-specific evidence (consume/skip markers + the
- * deterministic exact log id), not on a global date-based settlement
- * horizon.
+ * THE canonical exact-occurrence settlement decision (#532).
+ *
+ * Every caller (reconciliation, defensive apply gate, UI evidence lookups)
+ * branches on this ONE typed result instead of independently re-deriving
+ * whether an occurrence is already applied:
+ * - `logged`   — the deterministic exact-auto log row exists.
+ * - `consumed` — a durable per-dose consume marker exists.
+ * - `skipped`  — a durable per-dose skip/restore marker exists.
+ * - `unsettled` — no durable evidence; the occurrence may be applied.
+ *
+ * Duplicate settlement stays impossible under retries/replay/concurrency:
+ * every settlement path consults the same durable evidence through here.
+ */
+export type ExactOccurrenceSettlement =
+  | { state: 'unsettled' }
+  | { state: 'logged'; source: 'exact_log' }
+  | { state: 'consumed'; source: 'consume_marker' }
+  | { state: 'skipped'; source: 'skip_marker' };
+
+export function getExactOccurrenceSettlementState(
+  logs: ConsumptionLog[],
+  med: Medication,
+  doseId: string,
+  calendarDate: string
+): ExactOccurrenceSettlement {
+  const id = normalizeExactDoseId(doseId);
+  if (!id) return { state: 'unsettled' };
+  if (findExactAutoLog(logs, med.id, id, calendarDate)) {
+    return { state: 'logged', source: 'exact_log' };
+  }
+  if (isDoseConsumedOnDate(med, id, calendarDate)) {
+    return { state: 'consumed', source: 'consume_marker' };
+  }
+  if (isDoseSkippedOnDate(med, id, calendarDate)) {
+    return { state: 'skipped', source: 'skip_marker' };
+  }
+  return { state: 'unsettled' };
+}
+
+/**
+ * Boolean convenience over {@link getExactOccurrenceSettlementState} —
+ * whether the occurrence is already reflected in JS stock semantics.
+ * Kept as the named evidence-consumption API for callers/tests that only
+ * need the boolean; the typed decision is canonical.
  */
 export function isExactAutoOccurrenceApplied(
   med: Medication,
   doseId: string,
   calendarDate: string
 ): boolean {
-  const id = normalizeExactDoseId(doseId);
-  if (!id) return false;
-  if (isDoseConsumedOnDate(med, id, calendarDate)) return true;
-  if (isDoseSkippedOnDate(med, id, calendarDate)) return true;
-  return false;
+  const settlement = getExactOccurrenceSettlementState([], med, doseId, calendarDate);
+  return settlement.state !== 'unsettled';
 }
 /**
  * Locate a native Exact Auto occurrence that is FIRED and not yet reconciled
@@ -204,7 +238,9 @@ export function applyExactAutoEventToMedication(
   if (!doseId) {
     return { ok: false, reason: 'invalid_dose_id' };
   }
-  if (isExactAutoOccurrenceApplied(med, doseId, calendarDate)) {
+  if (
+    getExactOccurrenceSettlementState([], med, doseId, calendarDate).state !== 'unsettled'
+  ) {
     return { ok: false, reason: 'already_applied' };
   }
   // Native Auto is the stock authority for normal reconciliation. When the
@@ -216,9 +252,24 @@ export function applyExactAutoEventToMedication(
   let actualDeducted = Math.min(Math.max(0, requested), settleBase);
   let newPills = settleBase - actualDeducted;
   if (event.nativeStockApplied === true) {
+    // #524: the native result is validated against the operation contract
+    // BEFORE it may mutate JS state or write the settlement log:
+    //   0 <= actualDeducted <= requested  AND  actualDeducted <= settleBase.
+    // nativeStockApplied=true with a missing/invalid amount is a contract
+    // violation — observable (warn) and unreconciled (fail-closed), never
+    // an oversized or fabricated settlement.
     const nativeActual = Number(event.actualDeducted);
-    if (!Number.isFinite(nativeActual) || nativeActual < 0) {
-      return { ok: false, reason: 'invalid_native_stock_result' };
+    const violatesContract =
+      !Number.isFinite(nativeActual) ||
+      nativeActual < 0 ||
+      nativeActual > requested ||
+      nativeActual > settleBase;
+    if (violatesContract) {
+      console.warn(
+        '[exact-auto] native stock result violates the operation contract:',
+        { requested, settleBase, nativeActual, medicationId: med.id, doseId, calendarDate }
+      );
+      return { ok: false, reason: 'native_stock_result_contract_violation' };
     }
     actualDeducted = nativeActual;
     newPills = settleBase;
@@ -340,13 +391,16 @@ export function reconcileFiredEvents(
     // Current global/per-med enabled flags must NOT turn it into a no-op;
     // disabled state only prevents future scheduling/recurrence.
     // (skipped_disabled is never applied to a valid FIRED occurrence.)
-    // Durable log already present for this occurrence → stock marker path
-    if (findExactAutoLog(workingLogs, medicationId, doseId, calendarDate)) {
-      details.push({ ...baseDetail, outcome: 'already_applied' });
-      toAcknowledge.push({ medicationId, doseId, calendarDate });
-      continue;
-    }
-    if (isExactAutoOccurrenceApplied(med, doseId, calendarDate)) {
+    // Durable settlement evidence already present for this occurrence →
+    // branch on the ONE canonical settlement decision (#532) instead of
+    // independently re-deriving already-applied policy per layer.
+    const settlement = getExactOccurrenceSettlementState(
+      workingLogs,
+      med,
+      doseId,
+      calendarDate
+    );
+    if (settlement.state !== 'unsettled') {
       details.push({ ...baseDetail, outcome: 'already_applied' });
       toAcknowledge.push({ medicationId, doseId, calendarDate });
       continue;
@@ -367,6 +421,13 @@ export function reconcileFiredEvents(
         // the contract airtight if amount/date were valid but doseId empty.
         details.push({ ...baseDetail, outcome: 'skipped_invalid' });
         toAcknowledge.push({ medicationId, doseId, calendarDate });
+      } else if (
+        applied.reason === 'invalid_native_stock_result' ||
+        applied.reason === 'native_stock_result_contract_violation'
+      ) {
+        // #524: malformed/oversized native result — no stock mutation, no
+        // log, NO ACK. Stays unreconciled and observable for diagnosis.
+        details.push({ ...baseDetail, outcome: 'skipped_invalid' });
       } else if (applied.reason === 'invalid_amount') {
         // Valid identity, invalid amount → no stock mutation, no log, NO ACK.
         // Stays unreconciled for a later pass with a corrected valid amount.

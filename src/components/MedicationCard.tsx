@@ -17,7 +17,7 @@ import {
  * Map a medication's `colorTag` (the user-selected card color from the
  * AddMedicationModal color picker) to Tailwind classes used for the card's
  * icon box + left border accent + category badge. The status-based color
- * (red/rose/amber for out-of-stock/critical/warning) still takes priority
+ * (red/rose/amber for out-of-stock/critical) still takes priority
  * for the icon box in the alerts view, but the left border and category
  * badge always show the user's chosen color so the selection has a visible effect.
  *
@@ -70,15 +70,12 @@ interface MedicationCardProps {
   onToggleMedicationReminder?: (id: string) => void;
   onToggleMedicationCriticalStockAlerts?: (id: string) => void;
   onNavigateToShopping?: () => void;
-  onTriggerAlarm?: (medication: Medication) => void;
   onConsumeDose?: (medicationId: string, doseId?: string) => void;
   /** Restore a manually consumed dose via the same App path as logs. */
   onRestoreDose?: (medicationId: string, doseId?: string) => void;
   onOpenHistory?: (medication: Medication) => void;
   /** Durable stock logs used to display the exact historical Restore amount. */
   logs?: ConsumptionLog[];
-  lastRefillQuantity?: number;
-  onUndoRefill?: () => void;
   onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void;
 }
 export const MedicationCard: FC<MedicationCardProps> = ({
@@ -96,8 +93,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   onRestoreDose,
   onOpenHistory,
   logs = [],
-  lastRefillQuantity,
-  onUndoRefill,
   onRegisterBackHandler,
 }) => {
   const isAutoActive = isMedicationAutoDeductActive(medication);
@@ -158,9 +153,6 @@ export const MedicationCard: FC<MedicationCardProps> = ({
       : statusInfo.status === 'critical'
         ? 'bg-rose-500'
         : 'bg-teal-600';
-  // Retained for future use (per user instruction, not rendered inside cards):
-  void lastRefillQuantity;
-  void onUndoRefill;
   // -------------------------------------------------------------
   // VIEW 1: "قارب على النفاذ" (ALERTS) - Focus on Urgency & Refill
   // -------------------------------------------------------------

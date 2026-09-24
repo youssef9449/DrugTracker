@@ -175,15 +175,9 @@ export const AppTabContent: FC<AppTabContentProps> = (props) => {
                         onToggleMedicationCriticalStockAlerts={handleToggleMedicationCriticalStockAlerts}
                         onNavigateToShopping={() => navigateToTab('shopping')}
                         onRegisterBackHandler={registerBackOverlay}
-                        onTriggerAlarm={testAlarm}
                         onConsumeDose={handleConsumeDose}
                         onRestoreDose={handleCardRestoreDose}
                         onOpenHistory={(m) => setHistoryMedication(m)}
-                        lastRefillQuantity={(() => {
-                          const lastRefill = lastRefillByMed.get(med.id);
-                          return lastRefill && lastRefill.amount > 0 ? lastRefill.amount : undefined;
-                        })()}
-                        onUndoRefill={() => handleUndoRefill(med.id)}
                       />
                     ))
                   )}

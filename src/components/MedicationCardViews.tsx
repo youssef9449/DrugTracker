@@ -333,7 +333,6 @@ export const MedicationCardCompactView: FC<MedicationCardViewProps> = (props) =>
   const { medication, isAutoActive, statusInfo, depletion, currentPills, tag, percentLeft, progressColor, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onToggleMedicationReminder, onToggleMedicationCriticalStockAlerts, onConsumeDose, onRestoreDose, onOpenHistory, logs, onRegisterBackHandler } = props;
   const isOut = statusInfo.status === 'out_of_stock';
   const isCrit = statusInfo.status === 'critical';
-  const isWarn = false;
   const isTemporaryCourse = medication.isChronic === false;
   const doseToggle = getCardDoseToggleTarget(medication, new Date(), getTodayDateString());
   const todayStr = getTodayDateString();
@@ -343,7 +342,7 @@ export const MedicationCardCompactView: FC<MedicationCardViewProps> = (props) =>
     <div
       id={`med-card-${medication.id}`}
       className={`bg-white rounded-2xl border border-slate-200 p-2 shadow-sm hover:shadow-md transition-shadow duration-200 relative overflow-hidden border-r-[3px] ${tag.border} ${
-        isOut ? 'bg-red-50/25' : isCrit ? 'bg-rose-50/20' : isWarn ? 'bg-amber-50/10' : ''
+        isOut ? 'bg-red-50/25' : isCrit ? 'bg-rose-50/20' : ''
       }`}
     >
       {/* Row 1: name + Top-Left Overflow Menu */}
@@ -385,11 +384,6 @@ export const MedicationCardCompactView: FC<MedicationCardViewProps> = (props) =>
           <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800 flex items-center gap-0.5 shrink-0 w-fit">
             <Clock className="w-2 h-2" />
             <span>حرج ({statusInfo.daysLeft}ي)</span>
-          </span>
-        ) : isWarn ? (
-          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 flex items-center gap-0.5 shrink-0 w-fit">
-            <Clock className="w-2 h-2" />
-            <span>تنبيه ({statusInfo.daysLeft}ي)</span>
           </span>
         ) : (
           <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 flex items-center gap-0.5 shrink-0 w-fit">
@@ -524,7 +518,6 @@ export const MedicationCardDetailedView: FC<MedicationCardViewProps> = (props) =
   const { medication, isAutoActive, statusInfo, depletion, currentPills, stripsDesc, nonSolidPackageDesc, tag, percentLeft, progressColor, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onToggleMedicationReminder, onToggleMedicationCriticalStockAlerts, onConsumeDose, onRestoreDose, onOpenHistory, logs, onRegisterBackHandler } = props;
   const isOut = statusInfo.status === 'out_of_stock';
   const isCrit = statusInfo.status === 'critical';
-  const isWarn = false;
   const isTemporaryCourse = medication.isChronic === false;
   const doseToggle = getCardDoseToggleTarget(medication, new Date(), getTodayDateString());
   const todayStr = getTodayDateString();
@@ -538,8 +531,6 @@ export const MedicationCardDetailedView: FC<MedicationCardViewProps> = (props) =
           ? 'bg-red-50/20'
           : isCrit
           ? 'bg-rose-50/20'
-          : isWarn
-          ? 'bg-amber-50/15'
           : ''
       }`}
     >
@@ -582,11 +573,6 @@ export const MedicationCardDetailedView: FC<MedicationCardViewProps> = (props) =
           <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800 flex items-center gap-0.5 shrink-0">
             <Clock className="w-2.5 h-2.5" />
             <span>حرج ({statusInfo.daysLeft}ي)</span>
-          </span>
-        ) : isWarn ? (
-          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 flex items-center gap-0.5 shrink-0">
-            <Clock className="w-2.5 h-2.5" />
-            <span>تنبيه ({statusInfo.daysLeft}ي)</span>
           </span>
         ) : (
           <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 flex items-center gap-0.5 shrink-0">

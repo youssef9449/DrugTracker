@@ -12,7 +12,7 @@ export function usePharmacyShoppingSelection({
   const urgentMeds = useMemo(() => {
     return medications.filter((m) => {
       const { status } = calculateMedicationStatus(m);
-      return status === 'out_of_stock' || status === 'critical' || status === 'warning';
+      return status === 'out_of_stock' || status === 'critical';
     });
   }, [medications]);
   const [showAllForPlanning, setShowAllForPlanning] = useState(false);

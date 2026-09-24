@@ -16,6 +16,7 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
     autoDeductEnabled: true,
+    criticalStockAlertsEnabled: true,
     doseSchedule: [{ id: 'dose-1', amount: 1, time: '20:00' }],
     ...overrides,
   };

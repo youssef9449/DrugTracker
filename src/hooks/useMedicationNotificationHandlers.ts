@@ -6,6 +6,7 @@ import {
 import { playSuccessChime } from '../utils/sound';
 import { TOAST_MESSAGES, STORAGE_ERRORS } from '../constants/uiStrings';
 import { runGatedMedicationNotificationToggle } from '../utils/manualStockMutation';
+import { runAsyncCommand } from '../utils/async/runAsyncCommand';
 import type { MedicationHandlerState, MedicationHandlersDeps } from './medicationHandlerTypes';
 
 export function useMedicationNotificationHandlers(deps: MedicationHandlersDeps, state: MedicationHandlerState) {
@@ -20,7 +21,9 @@ export function useMedicationNotificationHandlers(deps: MedicationHandlersDeps, 
 
   const handleToggleMedicationNotification = useCallback(
     (medicationId: string, field: 'reminderEnabled' | 'criticalStockAlertsEnabled') => {
-      void (async () => {
+      runAsyncCommand(
+        'medication-notification.toggle',
+        async () => {
         const result = await runGatedMedicationNotificationToggle({ medicationId, field });
         if (result.outcome === 'applied') {
           setMedications(result.medications);
@@ -40,7 +43,12 @@ export function useMedicationNotificationHandlers(deps: MedicationHandlersDeps, 
         } else if (result.outcome === 'persist_failed' || result.outcome === 'native_list_failed') {
           showToast(STORAGE_ERRORS.generic);
         }
-      })();
+          }
+        },
+        () => {
+          showToast(STORAGE_ERRORS.generic);
+        }
+      );
     },
     [setMedications, setLogs, showToast, soundEnabled, state.medicationsRef]
   );

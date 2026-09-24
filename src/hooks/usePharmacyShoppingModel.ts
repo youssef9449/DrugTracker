@@ -1,7 +1,7 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import type { Medication, PharmacySettings } from '../types';
-import { calculateMedicationStatus } from '../utils/medicationStatus';
-import { cleanPhoneNumber, generatePharmacyOrderMessage, calculateMedicationOrderQuantity, buildWhatsAppUrl, type OrderItem } from '../utils/whatsapp';
+import { usePharmacyShoppingSelection } from './usePharmacyShoppingSelection';
+import { generatePharmacyOrderMessage, calculateMedicationOrderQuantity, type OrderItem } from '../utils/whatsapp';
 import {
   getShoppingAvailableUnits, getShoppingUnitSize,
   shoppingRequestedPills, getMedicationPeriod as resolveMedicationPeriod,
@@ -30,6 +30,18 @@ export function usePharmacyShoppingModel({
   const [medicationPeriods, setMedicationPeriods] = useState<Record<string, MedicationPeriod>>({});
   const [quantityModes, setQuantityModes] = useState<Record<string, QuantityMode>>({});
   const [customOrderQuantities, setCustomOrderQuantities] = useState<CustomOrderQuantities>({});
+  const selection = usePharmacyShoppingSelection({ medications });
+  const {
+    showAllForPlanning,
+    setShowAllForPlanning,
+    displayList,
+    selectedMedIds,
+    handleToggleSelect,
+    handleRemoveFromShopping,
+    selectAllDisplayedMeds,
+    deselectAllDisplayedMeds,
+    restoreAllMedicationsToShopping,
+  } = selection;
   const pharmacies = settings.pharmacies || [];
   const selectedPharmacy = pharmacies.find((pharmacy) => pharmacy.id === settings.selectedPharmacyId)
     || pharmacies[0];
@@ -143,82 +155,6 @@ export function usePharmacyShoppingModel({
     resolveOrderBreakdown(customOrderQuantities, orderUnits, quantityModes, med, suggestedPills);
   const getAvailableUnits = (med: Medication): OrderUnit[] => getShoppingAvailableUnits(med);
 
-  const urgentMeds = useMemo(() => {
-    return medications.filter((m) => {
-      const { status } = calculateMedicationStatus(m);
-      return status === 'out_of_stock' || status === 'critical' || status === 'warning';
-    });
-  }, [medications]);
-  const effectiveShowAll = showAllForPlanning;
-  const displayList = (effectiveShowAll ? medications : urgentMeds)
-    .filter((medication) => !removedFromShoppingIds.has(medication.id));
-  const [selectedMedIds, setSelectedMedIds] = useState<Set<string>>(() => {
-    return new Set(urgentMeds.map((m) => m.id));
-  });
-  // #20 + #34: reconcile the selection and deselectedIds
-  // against the displayed list. This effect:
-  //   - Auto-selects any displayed med not yet selected AND not in
-  //     `deselectedIds` (so manual deselects are preserved — #20).
-  //   - Prunes ids that are no longer displayed from `selectedMedIds` and
-  //     `deselectedIds`.
-  // Each updater returns the SAME Set reference when nothing changed
-  // so React skips the re-render (avoids an infinite loop since
-  // `deselectedIds` is in the deps array).
-  useEffect(() => {
-    const displayedIds = new Set(displayList.map((m) => m.id));
-    setSelectedMedIds((prev) => {
-      let changed = false;
-      const next = new Set(prev);
-      for (const m of displayList) {
-        if (!next.has(m.id) && !deselectedIds.has(m.id)) { next.add(m.id); changed = true; }
-      }
-      for (const id of next) {
-        if (!displayedIds.has(id)) { next.delete(id); changed = true; }
-      }
-      return changed ? next : prev;
-    });
-    setDeselectedIds((prev) => {
-      let changed = false;
-      const next = new Set(prev);
-      for (const id of next) {
-        if (!displayedIds.has(id)) { next.delete(id); changed = true; }
-      }
-      return changed ? next : prev;
-    });
-  }, [displayList, deselectedIds]);
-  const handleToggleSelect = (id: string) => {
-    // Read current values from the closure (not from setState updaters) and
-    // compute both next states, then call both setters sequentially. The
-    // previous version called setDeselectedIds from inside the
-    // setSelectedMedIds updater — unsafe under React 18+ concurrent
-    // rendering / StrictMode because updaters must be pure.
-    const nextSelected = new Set(selectedMedIds);
-    const nextDeselected = new Set(deselectedIds);
-    if (nextSelected.has(id)) {
-      nextSelected.delete(id);
-      // #20: record the explicit deselect.
-      nextDeselected.add(id);
-    } else {
-      nextSelected.add(id);
-      // #20: clear the deselect record on re-select.
-      nextDeselected.delete(id);
-    }
-    setSelectedMedIds(nextSelected);
-    setDeselectedIds(nextDeselected);
-  };
-  const handleRemoveFromShopping = (id: string) => {
-    setRemovedFromShoppingIds((prev) => new Set(prev).add(id));
-    setSelectedMedIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-    setDeselectedIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-  };
   const handleMedicationPeriodChange = (medId: string, field: keyof MedicationPeriod, value: string) => {
     const med = medications.find((item) => item.id === medId);
     if (!med) return;
@@ -275,99 +211,40 @@ export function usePharmacyShoppingModel({
         };
       });
   }, [displayList, selectedMedIds, medicationPeriods, quantityModes, customOrderQuantities, orderUnits, settings.defaultDurationDays]);
-  const [isSendModalOpen, setIsSendModalOpen] = useState(false);
-  useEffect(() => {
-    if (!isSendModalOpen || !onRegisterBackHandler) return;
-    return onRegisterBackHandler('shopping-send-order', () => setIsSendModalOpen(false), 100);
-  }, [isSendModalOpen, onRegisterBackHandler]);
-  const orderItemsForMessage = useMemo((): OrderItem[] => {
-    if (activeOrderItems.length > 0) return activeOrderItems;
-    return medications.map((med) => {
-      const { quantity: suggestedPills } = calculateMedicationOrderQuantity(
-        med,
-        getDurationDays(med)
-      );
-      return {
-        name: med.name,
-        quantity: shoppingRequestedPills(
-          med,
-          suggestedPills,
-          quantityModes,
-          customOrderQuantities,
-          orderUnits
-        ),
-        unit: med.unit,
-        stripsPerBox: med.stripsPerBox,
-        pillsPerStrip: med.pillsPerStrip,
-        packageSize: med.packageSize,
-        orderBreakdown: getOrderBreakdown(med, suggestedPills),
-      };
-    });
-  }, [activeOrderItems, medications, medicationPeriods, quantityModes, customOrderQuantities, orderUnits, settings.defaultDurationDays]);
-  const currentWhatsAppMessage = useMemo(() => {
-    return generatePharmacyOrderMessage(
-      orderItemsForMessage,
-      selectedPharmacy?.customerCode || '',
-      '',
-      '',
-      whatsappAddresses
-        .filter((item) => selectedWhatsappAddressIds.includes(item.id))
-        .map((item) => item.address),
-      whatsappContacts
-        .filter((contact) => selectedWhatsappContactIds.includes(contact.id))
-        .map((contact) => contact.phone)
-    );
-  }, [orderItemsForMessage, selectedPharmacy?.customerCode, whatsappAddresses, whatsappContacts, selectedWhatsappAddressIds, selectedWhatsappContactIds]);
-  const toggleWhatsappContact = (id: string) => {
-    const nextIds = selectedWhatsappContactIds.includes(id)
-      ? selectedWhatsappContactIds.filter((selectedId) => selectedId !== id)
-      : [...selectedWhatsappContactIds, id];
-    onUpdateSettings({
-      ...settings,
-      whatsappContacts,
-      whatsappAddresses,
-      selectedWhatsappContactIds: nextIds,
-      selectedWhatsappAddressIds,
-    });
-  };
-  const toggleWhatsappAddress = (id: string) => {
-    const nextIds = selectedWhatsappAddressIds.includes(id)
-      ? selectedWhatsappAddressIds.filter((selectedId) => selectedId !== id)
-      : [...selectedWhatsappAddressIds, id];
-    onUpdateSettings({
-      ...settings,
-      whatsappContacts,
-      whatsappAddresses,
-      selectedWhatsappContactIds,
-      selectedWhatsappAddressIds: nextIds,
-    });
-  };
-  const hasPharmacyPhone = Boolean(selectedPharmacy?.phone?.trim());
-  const displayPhone = selectedPharmacy?.phone ? cleanPhoneNumber(selectedPharmacy.phone) : '';
-  const selectedCount = activeOrderItems.length;
-  const targetWaUrl = useMemo(() => {
-    return buildWhatsAppUrl(selectedPharmacy?.phone || '', currentWhatsAppMessage);
-  }, [selectedPharmacy?.phone, currentWhatsAppMessage]);
-  const handleSendToWhatsApp = () => {
-    if (selectedCount === 0) {
-      showToast('يرجى تحديد دواء واحد على الأقل لإرسال الطلب.');
-      return;
-    }
-    if (!selectedPharmacy?.phone?.trim()) {
-      setIsSendModalOpen(true);
-      showToast('أضف صيدلية من تبويب الصيدليات أولًا.');
-      return;
-    }
-    // Let the user choose the destination pharmacy in the confirmation modal
-    // before opening WhatsApp.
-    setIsSendModalOpen(true);
-    showToast('اختر الصيدلية ثم افتح واتساب لإرسال الطلب.');
-  };
+  const {
+    pharmacies,
+    selectedPharmacy,
+    whatsappContacts,
+    whatsappAddresses,
+    selectedWhatsappContactIds,
+    selectedWhatsappAddressIds,
+    currentWhatsAppMessage,
+    isSendModalOpen,
+    setIsSendModalOpen,
+    hasPharmacyPhone,
+    displayPhone,
+    selectedCount,
+    targetWaUrl,
+    handleSendToWhatsApp,
+    toggleWhatsappContact,
+    toggleWhatsappAddress,
+  } = usePharmacyShoppingWhatsApp({
+    medications,
+    activeOrderItems,
+    quantityModes,
+    customOrderQuantities,
+    orderUnits,
+    getDurationDays,
+    settings,
+    onUpdateSettings,
+    showToast,
+    onRegisterBackHandler,
+  });
 
   return {
     pharmacies, selectedPharmacy, whatsappContacts, whatsappAddresses,
     selectedWhatsappContactIds, selectedWhatsappAddressIds, showAllForPlanning,
-    setShowAllForPlanning, removedFromShoppingIds, displayList, selectedMedIds,
+    setShowAllForPlanning, displayList, selectedMedIds,
     activeOrderItems, currentWhatsAppMessage, isSendModalOpen, setIsSendModalOpen,
     hasPharmacyPhone, displayPhone, selectedCount, targetWaUrl,
     handleToggleSelect, handleRemoveFromShopping,

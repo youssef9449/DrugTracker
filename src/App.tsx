@@ -10,9 +10,6 @@ import { SelectDoseModal } from './components/SelectDoseModal';
 import { MedicationHistoryModal } from './components/MedicationHistoryModal';
 import { AutoDeductPromptModal } from './components/AutoDeductPromptModal';
 import { UpdatePrompt } from './components/UpdatePrompt';
-import { TOAST_MESSAGES } from './constants/uiStrings';
-import { playSuccessChime } from './utils/sound';
-
 import { useDoseReminders } from './hooks/useDoseReminders';
 import { useAppRuntimeState } from './hooks/useAppRuntimeState';
 import { useAppUiState } from './hooks/useAppUiState';
@@ -50,9 +47,6 @@ export default function App() {
     fontScale,
     isCompactView,
     setPharmacySettings,
-    setSoundEnabled,
-    setNotificationsEnabled,
-    setCriticalStockAlertsEnabled,
     setFontScale,
     setIsCompactView,
   } = runtimeState;
@@ -117,8 +111,7 @@ export default function App() {
     refillMedication,
     setRefillMedication,
     isSettingsModalOpen,
-    setIsSettingsModalOpen,
-  });
+    setIsSettingsModalOpen,  });
 
 
   // Consume-pill feature: manually consume a selected explicit dose from the card.
@@ -237,8 +230,7 @@ export default function App() {
         <AndroidBottomNav activeTab={activeTab} onTabChange={selectTab} alertsCount={alertsCount} />
 
         {toast && (
-          <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[60] max-w-[90%] px-4 py-2.5 bg-slate-900 text-white text-xs font-bold rounded-2xl shadow-xl text-center">
-            {toast.message}
+          <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[60] max-w-[90%] px-4 py-2.5 bg-slate-900 text-white text-xs font-bold rounded-2xl shadow-xl text-center">            {toast.message}
           </div>
         )}
 

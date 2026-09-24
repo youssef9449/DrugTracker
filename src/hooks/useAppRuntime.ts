@@ -1,95 +1,36 @@
-import { useEffect, type Dispatch, type SetStateAction } from 'react';
-import type { Medication, ConsumptionLog, PharmacySettings } from '../types';
-import type { ExactAlarmPermission } from '../utils/exactAlarm';
-import {
-  requestNotificationPermission,
-  getNotificationPermission,
-} from '../utils/notifications/notificationPermissions';
-import { sendTestAlertNotification } from '../utils/notifications/doseReminderNotifications';
-import { openExactAlarmSettings } from '../utils/exactAlarm';
-import { playSuccessChime } from '../utils/sound';
-import { persist } from '../utils/storage';
-import { PERSIST_FAILURE_MESSAGES, TOAST_MESSAGES } from '../constants/uiStrings';
-import {
-  STORAGE_PHARMACY_KEY,
-  SOUND_KEY,
-  NOTIFICATIONS_KEY,
-  FONT_SIZE_KEY,
-  CRITICAL_STOCK_ALERTS_KEY,
-  COMPACT_VIEW_KEY,
-} from '../constants/storageKeys';
-import { PHARMACY_PERSIST_DEBOUNCE_MS } from '../utils/time';
-import { usePersistentEffect } from './usePersistentEffect';
-import { useStartupAutoDeduction } from './useStartupAutoDeduction';
-import { useStockAlerts } from './useStockAlerts';
-import { useCriticalAlarmScheduler } from './useCriticalAlarmScheduler';
-import { useDoseReminderScheduler } from './useDoseReminderScheduler';
-import { useMidnightTick } from './useMidnightTick';
-import { useAutoDeductionScheduler } from './useAutoDeductionScheduler';
-import { useExactAutoDeductionReconciliation } from './useExactAutoDeductionReconciliation';
-import { useMedicationHandlers } from './useMedicationHandlers';
-import { usePharmacyUserHandlers } from './usePharmacyUserHandlers';
-import { useNativeActionHandlers } from './useNativeActionHandlers';
-import { useAppHydration } from './useAppHydration';
+import { useEffect } from 'react';
+import type { AppRuntimeState } from './useAppRuntimeState';
+import type { AppUiState } from './useAppUiState';
+
 
 export interface AppRuntimeDeps {
-  medications: Medication[];
-  logs: ConsumptionLog[];
-  pharmacySettings: PharmacySettings;
-  hydrated: boolean;
-  isFirstRun: boolean;
-  soundEnabled: boolean;
-  fontScale: 'normal' | 'large';
-  isCompactView: boolean;
-  notificationsEnabled: boolean;
-  criticalStockAlertsEnabled: boolean;
-  exactAlarmPermission: ExactAlarmPermission | null;
-  criticalAlarmResumeTick: number;
-  doseAlarmResumeTick: number;
-  doseLifecycleTick: number;
-  globalAutoDeductEnabled: boolean;
-  selectDoseMode: 'take' | 'restore' | 'manage';
-  settingsModalMode: 'all' | 'pharmacy';
-  allowManualTakeActionByMedicationId: Map<string, boolean>;
-  setMedications: Dispatch<SetStateAction<Medication[]>>;
-  setLogs: Dispatch<SetStateAction<ConsumptionLog[]>>;
-  setPharmacySettings: Dispatch<SetStateAction<PharmacySettings>>;
-  setHydrated: Dispatch<SetStateAction<boolean>>;
-  setIsFirstRun: Dispatch<SetStateAction<boolean>>;
-  setIsAutoDeductPromptOpen: Dispatch<SetStateAction<boolean>>;
-  setSoundEnabled: Dispatch<SetStateAction<boolean>>;
-  setNotificationsEnabled: Dispatch<SetStateAction<boolean>>;
-  setCriticalStockAlertsEnabled: Dispatch<SetStateAction<boolean>>;
-  setExactAlarmPermission: Dispatch<SetStateAction<ExactAlarmPermission | null>>;
-  setGlobalAutoDeductEnabled: Dispatch<SetStateAction<boolean>>;
-  setFontScale: Dispatch<SetStateAction<'normal' | 'large'>>;
-  setIsCompactView: Dispatch<SetStateAction<boolean>>;
-  setSelectDoseMed: Dispatch<SetStateAction<Medication | null>>;
-  setSelectDoseMode: Dispatch<SetStateAction<'take' | 'restore' | 'manage'>>;
-  setEditingMedication: Dispatch<SetStateAction<Medication | null>>;
-  setDoseLifecycleTick: Dispatch<SetStateAction<number>>;
-  setCriticalAlarmResumeTick: Dispatch<SetStateAction<number>>;
-  setDoseAlarmResumeTick: Dispatch<SetStateAction<number>>;
-  showToast: (message: string) => void;
-  dismissAlarm: () => void;
-  snoozeAlarm: (minutes?: number) => void;
-  openAlarm: (medId: string, doseId: string) => void;
+  state: AppRuntimeState;
+  ui: Pick<AppUiState, 'selectDoseMode' | 'settingsModalMode'>;
+  uiActions: Pick<AppUiState, 'setSelectDoseMed' | 'setSelectDoseMode' | 'setEditingMedication'>;
+  services: {
+    showToast: (message: string) => void;
+    dismissAlarm: () => boolean;
+    snoozeAlarm: (minutes?: number) => void;
+    openAlarm: (medId: string, doseId: string) => void;
+  };
 }
 
 export function useAppRuntime(deps: AppRuntimeDeps) {
+  const { state, ui, uiActions, services } = deps;
   const {
     medications, logs, pharmacySettings, hydrated, isFirstRun, soundEnabled,
     fontScale, isCompactView, notificationsEnabled, criticalStockAlertsEnabled, exactAlarmPermission,
     criticalAlarmResumeTick, doseAlarmResumeTick, doseLifecycleTick,
-    globalAutoDeductEnabled, selectDoseMode, settingsModalMode,
-    allowManualTakeActionByMedicationId, setMedications, setLogs,
-    setPharmacySettings, setHydrated, setIsFirstRun, setIsAutoDeductPromptOpen,
-    setSoundEnabled, setNotificationsEnabled, setCriticalStockAlertsEnabled,
-    setExactAlarmPermission, setGlobalAutoDeductEnabled, setFontScale,
-    setIsCompactView, setSelectDoseMed, setSelectDoseMode, setEditingMedication,
-    setDoseLifecycleTick, setCriticalAlarmResumeTick, setDoseAlarmResumeTick,
-    showToast, dismissAlarm, snoozeAlarm, openAlarm,
-  } = deps;
+    globalAutoDeductEnabled, allowManualTakeActionByMedicationId,
+    setMedications, setLogs, setPharmacySettings, setHydrated, setIsFirstRun,
+    setIsAutoDeductPromptOpen, setSoundEnabled, setNotificationsEnabled,
+    setCriticalStockAlertsEnabled, setExactAlarmPermission, setGlobalAutoDeductEnabled,
+    setFontScale, setIsCompactView, setDoseLifecycleTick, setCriticalAlarmResumeTick,
+    setDoseAlarmResumeTick,
+  } = state;
+  const { selectDoseMode, settingsModalMode } = ui;
+  const { setSelectDoseMed, setSelectDoseMode, setEditingMedication } = uiActions;
+  const { showToast, dismissAlarm, snoozeAlarm, openAlarm } = services;
 
   useAppHydration({
     setMedications, setLogs, setPharmacySettings, setHydrated, setIsFirstRun,

@@ -7,6 +7,7 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
+import android.util.Log;
 import android.content.SharedPreferences;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -29,6 +30,7 @@ import java.util.UUID;
  * Dose Reminder / Critical Stock / Auto Deduction business policy.</p>
  */
 public final class NotificationRuntime {
+    private static final String TAG = "NotificationRuntime";
     public static final String ACTION_NOTIFICATION_POSTED =
             "app.drugtracker.notificationruntime.NOTIFICATION_POSTED";
     public static final String ACTION_ACTION_PERFORMED =
@@ -67,6 +69,21 @@ public final class NotificationRuntime {
     }
 
     public PostResult post(Request request) {
+        return postInternal(request, true);
+    }
+
+    /**
+     * Common delivery implementation (#533): permission checks, channel
+     * setup/validation, manager lookup, notify(), and the delivery broadcast
+     * exist in exactly ONE path. The only parameterized difference is the
+     * retry-persistence policy: the public post() persists failed deliveries
+     * for later retry; the retry replay path must not re-persist.
+     *
+     * #511: when delivery fails AND the retry evidence itself cannot be
+     * stored, the result carries that distinction explicitly
+     * ({@code retryEvidence == FAILED}) instead of swallowing it.
+     */
+    private PostResult postInternal(Request request, boolean persistRetryOnFailure) {
         if (request == null
                 || request.namespace == null || request.namespace.isEmpty()
                 || request.identity == null || request.identity.isEmpty()
@@ -76,8 +93,7 @@ public final class NotificationRuntime {
             return PostResult.failed("invalid_request");
         }
         if (!areNotificationsEnabled()) {
-            persistRetry(request);
-            return PostResult.failed("notifications_disabled");
+            return failedWithRetryPolicy(request, "notifications_disabled", persistRetryOnFailure);
         }
 
         try {
@@ -88,15 +104,13 @@ public final class NotificationRuntime {
                     request.channelVisibility);
 
             if (!isChannelEnabled(request.channelId)) {
-                persistRetry(request);
-                return PostResult.failed("notification_channel_disabled");
+                return failedWithRetryPolicy(request, "notification_channel_disabled", persistRetryOnFailure);
             }
 
             Notification notification = buildNotification(request);
             NotificationManager manager = notificationManager();
             if (manager == null) {
-                persistRetry(request);
-                return PostResult.failed("notification_manager_unavailable");
+                return failedWithRetryPolicy(request, "notification_manager_unavailable", persistRetryOnFailure);
             }
 
             manager.notify(
@@ -112,17 +126,48 @@ public final class NotificationRuntime {
             clearRetry(request.namespace, request.identity);
             return PostResult.accepted();
         } catch (SecurityException e) {
-            persistRetry(request);
-            return PostResult.failed("notification_security_exception");
+            return failedWithRetryPolicy(request, "notification_security_exception", persistRetryOnFailure);
         } catch (Exception e) {
-            persistRetry(request);
-            return PostResult.failed("notification_post_failed");
+            return failedWithRetryPolicy(request, "notification_post_failed", persistRetryOnFailure);
         }
     }
 
-    public void persistRetry(Request request) {
+    /** Fail a delivery, applying the caller's retry-persistence policy (#533). */
+    private PostResult failedWithRetryPolicy(
+            Request request,
+            String error,
+            boolean persistRetryOnFailure) {
+        if (!persistRetryOnFailure) {
+            return PostResult.failed(error);
+        }
+        RetryPersistResult persisted = persistRetry(request);
+        return PostResult.failed(error, persisted.ok
+                ? PostResult.RetryEvidenceState.STORED
+                : PostResult.RetryEvidenceState.FAILED);
+    }
+
+    /**
+     * Persist a failed delivery for a later retry.
+     *
+     * #511: serialization/persistence failures are NOT silently discarded —
+     * the structured outcome lets the caller distinguish "retry scheduled"
+     * from "delivery failed and retry evidence could not be stored".
+     *
+     * #520 privacy boundary: the retry record stores the MINIMUM fields
+     * needed for native reconstruction (namespace+identity routing, channel
+     * id/importance, presentation title/body, action routing). Notification
+     * text may contain health-related content; it cannot be reconstructed
+     * natively after process death, so the presentation is retained here
+     * under the app's private storage. No extras or redundant metadata
+     * (channel display name is not persisted — the channel already exists at
+     * OS level and is reused during replay). Retention: bounded by
+     * MAX_RETRY_ENTRIES + MAX_RETRY_AGE_MS eviction.
+     */
+    public RetryPersistResult persistRetry(Request request) {
         if (request == null || request.namespace == null || request.namespace.isEmpty()
-                || request.identity == null || request.identity.isEmpty()) return;
+                || request.identity == null || request.identity.isEmpty()) {
+            return RetryPersistResult.failed("invalid_retry_request");
+        }
 
         final long now = System.currentTimeMillis();
         final String entryKey = retryEntryKey(request.namespace, request.identity);
@@ -172,7 +217,11 @@ public final class NotificationRuntime {
 
                 editor.putString(entryKey, serialized).apply();
             }
-        } catch (JSONException ignored) {
+            return RetryPersistResult.stored();
+        } catch (JSONException e) {
+            // #511: observable persistence failure — never silently ignored.
+            Log.e(TAG, "retry persistence failed", e);
+            return RetryPersistResult.failed("retry_persist_failed");
         }
     }
 
@@ -220,38 +269,18 @@ public final class NotificationRuntime {
     }
 
     private PostResult postWithoutPersistingRetry(Request request) {
-        if (request == null || !areNotificationsEnabled()) {
-            return PostResult.failed("notifications_disabled");
-        }
-        try {
-            ensureChannel(request.channelId, request.channelName,
-                    request.channelImportance, request.channelVisibility);
-            if (!isChannelEnabled(request.channelId)) {
-                return PostResult.failed("notification_channel_disabled");
-            }
-            NotificationManager manager = notificationManager();
-            if (manager == null) return PostResult.failed("notification_manager_unavailable");
-            manager.notify(tagFor(request.namespace, request.identity), NOTIFICATION_ID,
-                    buildNotification(request));
-            Intent event = new Intent(ACTION_NOTIFICATION_POSTED);
-            event.setPackage(appContext.getPackageName());
-            event.putExtra(EXTRA_NAMESPACE, request.namespace);
-            event.putExtra(EXTRA_IDENTITY, request.identity);
-            appContext.sendBroadcast(event);
-            return PostResult.accepted();
-        } catch (Exception e) {
-            return PostResult.failed("notification_post_failed");
-        }
+        return postInternal(request, false);
     }
 
     private JSONObject serializeRequest(Request request) throws JSONException {
+        // #520: minimum durable fields for reconstruction; the channel display
+        // name is NOT persisted (the OS channel already exists and is reused).
         JSONObject item = new JSONObject();
         item.put("namespace", request.namespace);
         item.put("identity", request.identity);
         item.put("title", request.title);
         item.put("body", request.body);
         item.put("channelId", request.channelId);
-        item.put("channelName", request.channelName);
         item.put("channelImportance", request.channelImportance);
         item.put("channelVisibility", request.channelVisibility);
         item.put("smallIcon", request.smallIcon);
@@ -281,7 +310,9 @@ public final class NotificationRuntime {
                     item.getString("title"),
                     item.getString("body"),
                     item.getString("channelId"),
-                    item.optString("channelName", ""),
+                    // #520: channelName is not persisted; replay reuses the
+                    // existing OS channel (display name unchanged after creation).
+                    item.optString("channelId", ""),
                     item.optInt("channelImportance", 4),
                     item.optInt("channelVisibility", 1),
                     item.optString("smallIcon", "ic_launcher"),
@@ -643,20 +674,48 @@ public final class NotificationRuntime {
     }
 
     public static final class PostResult {
+        /** Distinguishes delivery-failure outcomes with persisted retry evidence (#511). */
+        public enum RetryEvidenceState { NOT_ATTEMPTED, STORED, FAILED }
+
         public final boolean accepted;
         public final String error;
+        public final RetryEvidenceState retryEvidence;
 
-        private PostResult(boolean accepted, String error) {
+        private PostResult(boolean accepted, String error, RetryEvidenceState retryEvidence) {
             this.accepted = accepted;
             this.error = error;
+            this.retryEvidence = retryEvidence;
         }
 
         public static PostResult accepted() {
-            return new PostResult(true, null);
+            return new PostResult(true, null, RetryEvidenceState.NOT_ATTEMPTED);
         }
 
         public static PostResult failed(String error) {
-            return new PostResult(false, error);
+            return new PostResult(false, error, RetryEvidenceState.NOT_ATTEMPTED);
+        }
+
+        public static PostResult failed(String error, RetryEvidenceState retryEvidence) {
+            return new PostResult(false, error, retryEvidence);
+        }
+    }
+
+    /** Structured outcome of a retry-persistence attempt (#511). */
+    public static final class RetryPersistResult {
+        public final boolean ok;
+        public final String error;
+
+        private RetryPersistResult(boolean ok, String error) {
+            this.ok = ok;
+            this.error = error;
+        }
+
+        static RetryPersistResult stored() {
+            return new RetryPersistResult(true, null);
+        }
+
+        static RetryPersistResult failed(String error) {
+            return new RetryPersistResult(false, error);
         }
     }
 }

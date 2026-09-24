@@ -123,6 +123,12 @@ public final class NotificationRuntimePlugin extends Plugin {
         if (result.error != null) {
             ret.put("error", result.error);
             ret.put("code", result.error);
+            // #511: distinguish "delivery failed, retry evidence stored" from
+            // "delivery failed AND retry evidence could not be stored".
+            if (result.retryEvidence == NotificationRuntime.PostResult.RetryEvidenceState.FAILED) {
+                ret.put("code", "retry_persist_failed");
+                ret.put("retryPersistFailed", true);
+            }
         }
         call.resolve(ret);
     }
@@ -138,6 +144,12 @@ public final class NotificationRuntimePlugin extends Plugin {
         if (result.error != null) {
             ret.put("error", result.error);
             ret.put("code", result.error);
+            // #511: distinguish "delivery failed, retry evidence stored" from
+            // "delivery failed AND retry evidence could not be stored".
+            if (result.retryEvidence == NotificationRuntime.PostResult.RetryEvidenceState.FAILED) {
+                ret.put("code", "retry_persist_failed");
+                ret.put("retryPersistFailed", true);
+            }
         }
         call.resolve(ret);
     }

@@ -63,7 +63,7 @@ export function useDerivedMedications(
         if (!matchName && !matchCat && !matchNotes) return false;
       }
       const { status } = statusInfo;
-      if (filter === 'alerts') return status === 'out_of_stock' || status === 'critical' || status === 'warning';
+      if (filter === 'alerts') return status === 'out_of_stock' || status === 'critical';
       if (filter === 'sufficient') return status === 'sufficient';
       return true;
     }).map(({ med }) => med);
@@ -77,8 +77,7 @@ export function useDerivedMedications(
   const alertsCount = useMemo(
     () => medicationsWithStatus.filter(({ statusInfo }) =>
       statusInfo.status === 'out_of_stock' ||
-      statusInfo.status === 'critical' ||
-      statusInfo.status === 'warning'
+      statusInfo.status === 'critical'
     ).length,
     [medicationsWithStatus]
   );

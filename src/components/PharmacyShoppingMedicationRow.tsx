@@ -1,6 +1,6 @@
 import type { FC } from 'react';
 import { CheckSquare, Square, Layers, Box, Pill, X } from 'lucide-react';
-import type { Medication } from '../types';
+import type { Medication, MedicationStatus } from '../types';
 import type { OrderQuantitySelection } from '../utils/whatsapp';
 import { getDepletionDate } from '../utils/dateCalculations';
 import { formatDepletionDate } from '../utils/medicationPresentation';
@@ -14,7 +14,7 @@ type MedicationPeriod = { value: number | ''; unit: 'day' | 'month' };
 
 interface Props {
   medication: Medication;
-  status: 'out_of_stock' | 'critical' | 'warning' | 'sufficient';
+  status: MedicationStatus;
   suggestedPills: number;
   requestedPills: number;
   isSelected: boolean;
@@ -55,9 +55,8 @@ export const PharmacyShoppingMedicationRow: FC<Props> = ({
               <span className={`inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded border leading-none ${
                 status === 'out_of_stock' ? 'bg-red-50 text-red-700 border-red-200' :
                 status === 'critical' ? 'bg-rose-50 text-rose-700 border-rose-200' :
-                status === 'warning' ? 'bg-amber-50 text-amber-700 border-amber-200' :
                 'bg-emerald-50 text-emerald-700 border-emerald-200'
-              }`}>{status === 'out_of_stock' ? 'نفد' : status === 'critical' ? 'حرج' : status === 'warning' ? 'تنبيه' : 'آمن'}</span>
+              }`}>{status === 'out_of_stock' ? 'نفد' : status === 'critical' ? 'حرج' : 'آمن'}</span>
             </div>
             <div className="text-[11px] text-slate-500 mt-0.5 leading-tight">
               المتبقي: <strong className="font-mono text-slate-700">{med.currentPills}</strong> • ينفد {formatDepletionDate(depletion.dateStr, depletion.daysLeft, Number(med.currentPills) || 0)}

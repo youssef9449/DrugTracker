@@ -211,7 +211,7 @@ export const DEFAULT_PHARMACY_SETTINGS: PharmacySettings = {
   selectedWhatsappContactIds: [],
   selectedWhatsappAddressIds: [],
 };
-export type MedicationStatus = 'out_of_stock' | 'critical' | 'warning' | 'sufficient';
+export type MedicationStatus = 'out_of_stock' | 'critical' | 'sufficient';
 export interface MedicationStatusInfo {
   daysLeft: number;
   status: MedicationStatus;

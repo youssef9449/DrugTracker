@@ -15,7 +15,7 @@ export const LowStockBanner: FC<LowStockBannerProps> = ({
   const lowStockMeds = medicationsWithStatus.filter(({ statusInfo }) =>
     statusInfo.status === 'out_of_stock' ||
     statusInfo.status === 'critical' ||
-    statusInfo.status === 'warning'
+    false
   );
 
   if (lowStockMeds.length === 0) {

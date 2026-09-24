@@ -11,6 +11,7 @@
  * sibling isolation; single-dose still direct.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { readPersistedMedications } from '../helpers/persistedMedications';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 
 vi.mock('@/native', () => ({
@@ -57,9 +58,6 @@ const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
 const TEST_DATE = '2024-09-10';
 const MED_ID = 'med-restore-select';
 
-function readMeds(): Medication[] {
-  return JSON.parse(localStorage.getItem(STORAGE_MEDS_KEY) || '[]');
-}
 
 function readLogs(): ConsumptionLog[] {
   return JSON.parse(localStorage.getItem(STORAGE_LOGS_KEY) || '[]');
@@ -161,8 +159,8 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
       expect(screen.getByText('Restore Select Med')).toBeInTheDocument();
     });
 
-    const pillsBefore = readMeds()[0].currentPills;
-    const consumptionBefore = { ...readMeds()[0].doseConsumptionHistory };
+    const pillsBefore = readPersistedMedications()[0].currentPills;
+    const consumptionBefore = { ...readPersistedMedications()[0].doseConsumptionHistory };
 
     await clickCardManage();
 
@@ -171,8 +169,8 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
     });
 
     // No mutation until a dose is selected.
-    expect(readMeds()[0].currentPills).toBe(pillsBefore);
-    expect(readMeds()[0].doseConsumptionHistory).toEqual(consumptionBefore);
+    expect(readPersistedMedications()[0].currentPills).toBe(pillsBefore);
+    expect(readPersistedMedications()[0].doseConsumptionHistory).toEqual(consumptionBefore);
     expect(readLogs().filter((l) => l.type === 'skipped_day')).toHaveLength(0);
   });
 
@@ -185,13 +183,13 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
       expect(screen.getByText('Restore Select Med')).toBeInTheDocument();
     });
 
-    const pillsBefore = readMeds()[0].currentPills;
+    const pillsBefore = readPersistedMedications()[0].currentPills;
 
     await clickCardManage();
     await selectDoseInModal('d2');
 
     await waitFor(() => {
-      const med = readMeds()[0];
+      const med = readPersistedMedications()[0];
       const restores = readLogs().filter(
         (l) => l.type === 'skipped_day' && l.doseId === 'd2'
       );
@@ -218,7 +216,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
     await selectDoseInModal('d2');
 
     await waitFor(() => {
-      const med = readMeds()[0];
+      const med = readPersistedMedications()[0];
       expect(med.doseConsumptionHistory?.d1).toBe(TEST_DATE);
       expect(med.doseSkippedHistory?.d1).toBeUndefined();
       expect(med.doseConsumptionHistory?.d2).toBeUndefined();
@@ -238,13 +236,13 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
       expect(screen.getByText('Restore Select Med')).toBeInTheDocument();
     });
 
-    const pillsBefore = readMeds()[0].currentPills;
+    const pillsBefore = readPersistedMedications()[0].currentPills;
 
     await clickCardManage();
     await selectDoseInModal('d1');
 
     await waitFor(() => {
-      const med = readMeds()[0];
+      const med = readPersistedMedications()[0];
       expect(med.doseConsumptionHistory?.d1).toBeUndefined();
       expect(med.doseSkippedHistory?.d1).toEqual([getTodayDateString()]);
       expect(med.doseConsumptionHistory?.d2).toBe(TEST_DATE);
@@ -332,7 +330,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
     await waitFor(() => {
       expect(screen.queryByText('اختر الإجراء المناسب لكل جرعة')).not.toBeInTheDocument();
       expect(screen.queryByText(/اختر الجرعة التي تناولتها/)).not.toBeInTheDocument();
-      const med = readMeds().find((m) => m.id === 'med-single')!;
+      const med = readPersistedMedications().find((m) => m.id === 'med-single')!;
       expect(med.doseConsumptionHistory?.only).toBeUndefined();
       const restores = readLogs().filter(
         (l) => l.type === 'skipped_day' && l.medicationId === 'med-single'
@@ -365,7 +363,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
       expect(screen.getByText('Restore Select Med')).toBeInTheDocument();
     });
 
-    const before = readMeds()[0].currentPills;
+    const before = readPersistedMedications()[0].currentPills;
 
     await clickCardManage();
     await selectDoseInModal('d2');
@@ -377,9 +375,9 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
       expect(restores).toHaveLength(1);
       expect(restores[0].amount).toBe(2);
       expect(restores[0].amount).not.toBe(3);
-      expect(readMeds()[0].currentPills).toBe(before + 2);
+      expect(readPersistedMedications()[0].currentPills).toBe(before + 2);
       // siblings unchanged
-      expect(readMeds()[0].doseConsumptionHistory?.d1).toBe(TEST_DATE);
+      expect(readPersistedMedications()[0].doseConsumptionHistory?.d1).toBe(TEST_DATE);
     });
 
   });
@@ -393,7 +391,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
       expect(screen.getByText('Restore Select Med')).toBeInTheDocument();
     });
 
-    const before = JSON.stringify(readMeds()[0]);
+    const before = JSON.stringify(readPersistedMedications()[0]);
 
     await clickCardManage();
     await waitFor(() => {
@@ -404,7 +402,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
     await waitFor(() => {
       expect(screen.queryByText('اختر الإجراء المناسب لكل جرعة')).not.toBeInTheDocument();
     });
-    expect(JSON.stringify(readMeds()[0])).toBe(before);
+    expect(JSON.stringify(readPersistedMedications()[0])).toBe(before);
     expect(readLogs()).toHaveLength(0);
   });
 });

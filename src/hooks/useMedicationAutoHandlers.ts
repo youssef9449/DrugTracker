@@ -114,11 +114,18 @@ export function useMedicationAutoHandlers(deps: MedicationHandlersDeps, state: M
         setIsAutoDeductPromptOpen(true);
         return;
       }
-      persist(STORAGE_AUTO_DEDUCT_PROMPTED_KEY, 'true', { json: false });
+      // Apply successful Auto state first; do not roll it back on marker failure.
       setGlobalAutoDeductEnabled(result.enable);
       setMedications(result.medications);
       medicationsRef.current = result.medications;
       setLogs(result.logs);
+      const markerError = persist(STORAGE_AUTO_DEDUCT_PROMPTED_KEY, 'true', { json: false });
+      if (markerError) {
+        // Marker failed: keep Auto state, keep prompt recoverable, surface error.
+        setIsAutoDeductPromptOpen(true);
+        showToast(markerError);
+        return;
+      }
       setIsAutoDeductPromptOpen(false);
       setIsFirstRun(false);
       if (soundEnabled) playSuccessChime();

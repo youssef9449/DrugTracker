@@ -1,5 +1,6 @@
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { flushUntil } from '../helpers/asyncTestUtils';
 import { renderHook, cleanup } from '@testing-library/react';
 import type { Medication } from '@/types';
 
@@ -80,9 +81,6 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
 }
 
 
-async function flushUntil(predicate: () => boolean): Promise<void> {
-  await vi.waitFor(predicate, { timeout: 1000, interval: 0 });
-}
 
 function capabilityMap(medications: Medication[]): ReadonlyMap<string, boolean> {
   return new Map(medications.map((medication) => [

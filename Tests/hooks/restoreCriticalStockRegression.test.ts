@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import type { Medication, ConsumptionLog } from '@/types';
 import { useStockAlerts } from '@/hooks/useStockAlerts';
-import { CRITICAL_CLAIMS_STORAGE_KEY } from '@/utils/criticalNotificationClaims';
 import { restoreDose, resolveRestoreDoseId } from '@/utils/medActions';
 
 vi.mock('../utils/notificationTestFacade', () => ({
@@ -12,6 +11,7 @@ vi.mock('../utils/notificationTestFacade', () => ({
 }));
 
 import { sendCriticalStockAlert, cancelCriticalAlarm } from '../utils/notificationTestFacade';
+import { readCriticalClaims as readClaims } from '../helpers/criticalStockClaims';
 
 const sendMock = vi.mocked(sendCriticalStockAlert);
 const cancelMock = vi.mocked(cancelCriticalAlarm);
@@ -86,10 +86,6 @@ function useAlerts(medications: Medication[]) {
     hydrated: true,
     isFirstRun: false,
   });
-}
-
-function readClaims(): Record<string, { claimed: boolean; alarmTime: number | null }> {
-  return JSON.parse(localStorage.getItem(CRITICAL_CLAIMS_STORAGE_KEY) || '{}');
 }
 
 beforeEach(() => {

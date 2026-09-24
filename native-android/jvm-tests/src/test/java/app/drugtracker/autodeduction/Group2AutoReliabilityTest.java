@@ -111,7 +111,10 @@ public class Group2AutoReliabilityTest {
         assertTrue(events.insertFiredIfAbsent(
                 med, dose, date, epoch(date, time), 2.0).isCreated());
 
-        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        // Recovery is modeled after today's 23:59 slot, so the next occurrence
+        // is deterministically tomorrow rather than depending on wall-clock time.
+        long recoveryNow = epoch(localDateOffset(0), "23:59") + 1_000L;
+        AutoDeductionScheduler scheduler = Phase2TestSupport.newSchedulerAt(recoveryNow);
         AutoDeductionScheduler.RestoreResult stockRecovery =
                 scheduler.recoverFiredStockPass();
         assertTrue(stockRecovery.ok);
@@ -126,10 +129,17 @@ public class Group2AutoReliabilityTest {
         assertTrue("successor recovery must be idempotent",
                 scheduler.recoverSuccessorObligations());
         assertTrue(
+                "expected future successor, actual schedule keys="
+                        + schedulePrefs().getAll().keySet(),
                 schedulePrefs().contains(
                         schKey(occurrenceKey(med, dose, localDateOffset(1)))));
-        assertEquals("successor recovery must not deduct the same occurrence twice",
-                98.0,
+        assertTrue("today's overdue successor must be recorded during catch-up",
+                eventPrefs().contains(
+                        evtKey(occurrenceKey(med, dose, localDateOffset(0)))));
+        assertEquals(
+                "recovery must not deduct the original FIRED occurrence twice; actual stock="
+                        + stock.readAll().stocks.get(med),
+                96.0,
                 stock.readAll().stocks.get(med),
                 0.001);
     }
@@ -574,6 +584,7 @@ public class Group2AutoReliabilityTest {
                     epoch(date, "08:00"),
                     2.0,
                     "08:00",
+                    "",
                     1L,
                     "retry-v1",
                     1));
@@ -849,6 +860,11 @@ public class Group2AutoReliabilityTest {
                         new AutoDeductionStockStore.StockSeed(med, 100.0))).ok);
 
         AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        assertTrue("source occurrence must be durably FIRED before successor scheduling",
+                new AutoDeductionEventStore(appContext()).insertFiredIfAbsent(
+                        med, dose, start, epoch(start, time), 1.0).isCreated());
+        assertTrue(new AutoDeductionStockStore(appContext())
+                .applyAutoDeductionForRecovery(med, dose, start, 1.0).ok);
         AutoDeductionScheduler.ScheduleResult first =
                 scheduler.scheduleNextOccurrenceIfAbsent(
                         med, dose, start, time, 1.0, generation);
@@ -877,7 +893,9 @@ public class Group2AutoReliabilityTest {
         AutoDeductionScheduler.ScheduleResult second =
                 scheduler.scheduleNextOccurrenceIfAbsent(
                         med, dose, start, time, 1.0, generation);
-        assertTrue(second.ok);
+        assertTrue(
+                "re-running overdue catch-up failed: " + second.error,
+                second.ok);
         assertEquals("re-running overdue catch-up must not deduct twice",
                 afterFirstPass,
                 stock.readAll().stocks.get(med),
@@ -941,7 +959,7 @@ public class Group2AutoReliabilityTest {
         String med = "med-408-overdue-death";
         String dose = "dose-408-overdue-death";
         String sourceDate = localDateOffset(-2);
-        String time = "00:01";
+        String time = "23:59";
         long generation = 1L;
         seedGeneration(med, dose, generation);
 
@@ -1020,10 +1038,11 @@ public class Group2AutoReliabilityTest {
     public void overdueCatchUp_alreadyFiredOccurrence_isIdempotent() throws Exception {
         String med = "med-411-idempotent";
         String dose = "dose-411-idempotent";
-        String start = localDateOffset(-3);
-        String time = "00:01";
-        seedGeneration(med, dose, 1L);
-        putSchedule(med, dose, start, time, 2.0, "v-idempotent", 1L);
+        String start = localDateOffset(-2);
+        String time = "23:59";
+        long generation = 1L;
+        seedGeneration(med, dose, generation);
+        putSchedule(med, dose, start, time, 2.0, "v-idempotent", generation);
 
         AutoDeductionStockStore stock = new AutoDeductionStockStore(appContext());
         assertTrue(stock.ensureMissingAndRead(
@@ -1039,18 +1058,16 @@ public class Group2AutoReliabilityTest {
 
         AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
         assertTrue(scheduler.scheduleNextOccurrenceIfAbsent(
-                med, dose, start, time, 2.0, 1L).ok);
+                med, dose, start, time, 2.0, generation).ok);
 
         assertEquals(
                 "existing FIRED occurrence must not deduct twice",
                 before,
                 stock.readAll().stocks.get(med),
                 0.001);
+        String expectedFuture = AutoDeductionScheduler.nextCalendarDate(firstDue);
         assertTrue(schedulePrefs().contains(
-                schKey(occurrenceKey(
-                        med, dose, AutoDeductionScheduler.nextCalendarDate(
-                                AutoDeductionScheduler.nextCalendarDate(
-                                        AutoDeductionScheduler.nextCalendarDate(start)))))));
+                schKey(occurrenceKey(med, dose, expectedFuture))));
     }
 
     @Test

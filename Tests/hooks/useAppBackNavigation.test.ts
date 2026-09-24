@@ -17,7 +17,7 @@ describe('useAppBackNavigation', () => {
   });
 
   function useHarness() {
-    const [activeTab, setActiveTab] = useState<'stock' | 'shopping' | 'user-data' | 'logs'>('stock');
+    const [activeTab, setActiveTab] = useState<import('../../src/components/AndroidBottomNav').ActiveTab>('stock');
     return {
       activeTab,
       ...useAppBackNavigation(activeTab, setActiveTab),

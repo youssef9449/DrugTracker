@@ -31,12 +31,12 @@ export interface ManualStockTransactionFailure {
   reason: string;
 }
 
-export interface ManualStockTransactionOptions<T> {
+export interface ManualStockTransactionOptions<TFailure, TResult> {
   todayStr?: string;
   now?: Date;
   globalAutoDeductEnabled?: boolean;
-  onFailure: (failure: ManualStockTransactionFailure) => T;
-  operation: (context: ManualStockTransactionContext) => T | Promise<T>;
+  onFailure: (failure: ManualStockTransactionFailure) => TFailure;
+  operation: (context: ManualStockTransactionContext) => TResult | Promise<TResult>;
 }
 
 async function acknowledgeExactAutoEvents(
@@ -69,9 +69,9 @@ async function acknowledgeExactAutoEvents(
  * Business operations receive only fresh durable state and transaction time.
  * They must use commitWithManualEnvelope for finalization.
  */
-export function runManualStockTransaction<T>(
-  options: ManualStockTransactionOptions<T>
-): Promise<T> {
+export function runManualStockTransaction<TFailure, TResult>(
+  options: ManualStockTransactionOptions<TFailure, TResult>
+): Promise<TFailure | TResult> {
   return withAutoStockMutationGate(async (freshIn) => {
     const todayStr = options.todayStr ?? getTodayDateString();
     const now = options.now ?? new Date();
@@ -164,7 +164,7 @@ export async function commitWithManualEnvelope(
     status: 'manual_js_ready',
     medications: durableState.medications,
     logs: durableState.logs,
-    globalAutoDeductEnabled: durableState.globalAutoDeductEnabled,
+    globalAutoDeductEnabled: durableState.globalAutoDeductEnabled ?? false,
     createdAt: new Date().toISOString(),
     baseGeneration,
     mutationSeq,

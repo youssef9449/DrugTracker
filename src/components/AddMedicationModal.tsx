@@ -8,7 +8,6 @@ import {
   totalDailyAmount,
   validateAndNormalizeDoseSchedule,
 } from '../utils/doseSchedule';
-import { CustomTimePicker } from './CustomTimePicker';
 import { Modal } from './ui/Modal';
 import { MedicationCourseAndSchedule } from './MedicationCourseAndSchedule';
 import { AddMedicationAutoDeductToggle } from './AddMedicationAutoDeductToggle';
@@ -45,8 +44,8 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
   // (select-all → delete) without the old `Math.max(0, parseInt || 0)`
   // snapping it back to 0. Same pattern as packageSizeStr.
   const [currentPillsStr, setCurrentPillsStr] = useState<string>('30');
-  // The UI uses the explicit multi-dose schedule instead of the legacy single-field rate.
-  // schedule. dailyDose is still computed as the sum of schedule amounts
+  // The UI uses the explicit multi-dose schedule.
+  // dailyDose is computed as the sum of schedule amounts
   // at save time so the existing auto-deduction engine is unchanged.
   const [dosesPerDay, setDosesPerDay] = useState<number>(1);
   const [doseSchedule, setDoseSchedule] = useState<MedicationDose[]>(() =>
@@ -108,7 +107,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
       setCurrentPills(initialData.currentPills);
       setCurrentPillsStr(String(initialData.currentPills));
       // Editing uses persisted doseSchedule only (explicit-schedule model).
-      // Missing/empty schedule → no synthetic dose from dailyDose/reminderTime.
+      // Missing/empty schedule → no synthetic dose.
       const schedule = getDoseScheduleForUI(initialData);
       setDoseSchedule(schedule);
       setDosesPerDay(schedule.length);
@@ -142,14 +141,13 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
         setPackageSizeStr(String(pkg));
       }
       setReminderEnabled(Boolean(initialData.reminderEnabled));
-      setAutoDeductEnabled(initialData.autoDeductEnabled !== false);
+      setAutoDeductEnabled(initialData.autoDeductEnabled === true);
       if (initialData.isChronic === false) {
         setIsChronic(false);
         setDurationDaysStr(initialData.durationDays ? String(initialData.durationDays) : '');
         setTreatmentStartDateStr(initialData.treatmentStartDate ?? '');
       } else {
-        // Records without an explicit bounded-course flag are treated as chronic by default.
-        setIsChronic(true);
+        setIsChronic(initialData.isChronic === true);
         setDurationDaysStr('');
         setTreatmentStartDateStr('');
       }
@@ -274,7 +272,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
     }
     const doseNum = scheduleResult.dailyDose!;
     const normalizedSchedule = scheduleResult.schedule;
-    const savedReminderTime = scheduleResult.reminderTime || '09:00';
     // Calculate packaging — for non-solid types (e.g. liquid / مل),
     // strips and per-strip counts are completely irrelevant.
     // For solid types (pills/capsules), handle "no strips" (loose pills)
@@ -344,9 +341,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
         pillsPerStrip: pillsPerStripNum,
         packageSize: calculatedPkgSize,
         reminderEnabled,
-        // Phase-1 compat: single reminderTime remains the earliest dose
-        // so existing notification scheduling is unchanged.
-        reminderTime: savedReminderTime,
         dosesPerDay: normalizedSchedule.length,
         doseSchedule: normalizedSchedule,
       },

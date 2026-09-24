@@ -16,7 +16,6 @@ import {
   type MarkReconciledResult,
 } from './autoDeductionNativeEvents';
 import {
-  applyAutoDeductionStock,
   convergeAutoDeductionStock,
   recoverAutoDeductionStock,
 } from './autoDeductionNativeStock';
@@ -56,7 +55,7 @@ export interface ExactAutoEnvelope {
     calendarDate: string;
   }>;
   createdAt: string;
-  /** Shared causal order with Manual envelopes — required (no legacy seq). */
+  /** Shared causal order with Manual envelopes — required. */
   mutationSeq: number;
 }
 export interface RunReconciliationInput {

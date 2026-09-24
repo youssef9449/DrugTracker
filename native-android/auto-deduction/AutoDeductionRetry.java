@@ -22,7 +22,7 @@ boolean scheduleFireRetry(
             long scheduledAtEpochMs,
             double amount,
             String timeHhmm,
-            String treatmentEndDate,
+            String requestedTreatmentEndDate,
             long recurrenceGeneration,
             String operationVersion,
             int nextRetryCount
@@ -54,7 +54,11 @@ boolean scheduleFireRetry(
                     nextRetryCount);
             String treatmentEndDate = current != null
                     ? current.treatmentEndDate
-                    : (existingEvidence == null ? "" : existingEvidence.treatmentEndDate);
+                    : (requestedTreatmentEndDate == null ? "" : requestedTreatmentEndDate);
+            if (current == null && (treatmentEndDate == null || treatmentEndDate.isEmpty())
+                    && existingEvidence != null) {
+                treatmentEndDate = existingEvidence.treatmentEndDate;
+            }
             if (current != null) {
                 long activeGen =
                         scheduler.getRecurrenceGenerationLocked(medicationId, doseId);
@@ -130,6 +134,7 @@ boolean recordIndependentFireRetryEvidenceLocked(
                             scheduledAtEpochMs,
                             amount,
                             timeHhmm,
+                            treatmentEndDate,
                             recurrenceGeneration,
                             operationVersion,
                             count,

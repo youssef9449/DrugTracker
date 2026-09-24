@@ -6,12 +6,12 @@ import { useStockAlerts } from '@/hooks/useStockAlerts';
 import { CRITICAL_CLAIMS_STORAGE_KEY } from '@/utils/criticalNotificationClaims';
 import { restoreDose, resolveRestoreDoseId } from '@/utils/medActions';
 
-vi.mock('@/utils/notifications', () => ({
+vi.mock('../utils/notificationTestFacade', () => ({
   sendCriticalStockAlert: vi.fn(() => Promise.resolve(true)),
   cancelCriticalAlarm: vi.fn(() => Promise.resolve()),
 }));
 
-import { sendCriticalStockAlert, cancelCriticalAlarm } from '@/utils/notifications';
+import { sendCriticalStockAlert, cancelCriticalAlarm } from '../utils/notificationTestFacade';
 
 const sendMock = vi.mocked(sendCriticalStockAlert);
 const cancelMock = vi.mocked(cancelCriticalAlarm);
@@ -98,7 +98,7 @@ beforeEach(() => {
   vi.setSystemTime(TEST_NOW);
   localStorage.clear();
   sendMock.mockResolvedValue(true);
-  cancelMock.mockResolvedValue(undefined);
+  cancelMock.mockResolvedValue({ ok: true });
 });
 
 afterEach(() => {

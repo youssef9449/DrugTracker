@@ -2,6 +2,8 @@ package app.drugtracker.autodeduction;
 
 import android.content.Context;
 import android.util.Log;
+import app.drugtracker.alarmruntime.ExactAlarmRuntime;
+import app.drugtracker.alarmruntime.ExactAlarmContract;
 import org.json.JSONException;
 import java.util.Map;
 import java.util.ArrayList;
@@ -131,6 +133,19 @@ CatchUpResult catchUpMissedOccurrencesAndScheduleNext(
                 break;
             }
             if (epoch > nowMs) {
+                // The source snapshot itself can still be today's live future schedule.
+                // It is already armed and must survive recovery unchanged; no new
+                // successor needs to be installed and no cleanup may remove this row.
+                String sourceKey = AutoDeductionContract.occurrenceKey(
+                        medicationId, doseId, walkDate);
+                if (pastPrefKey != null
+                        && pastPrefKey.equals(
+                                ExactAlarmContract.SCHEDULE_KEY_PREFIX + sourceKey)) {
+                    Log.i("AutoDeductionScheduler", "catchUp: source is already a live future occurrence "
+                            + medicationId + "/" + doseId + "/" + walkDate);
+                    return new CatchUpResult(created, false, false);
+                }
+
                 // First future occurrence — gen check + install under one scheduler.scheduleLock().
                 ScheduleResult sr = scheduler.installFutureSuccessorIfGenerationHolds(
                         medicationId, doseId, walkDate, timeHhmm, amount,
@@ -146,7 +161,6 @@ CatchUpResult catchUpMissedOccurrencesAndScheduleNext(
                         preserveSnapshotForRetry = true;
                     }
                 } else if (sr.error == null) {
-                    // Newly installed AlarmManager schedule for the first future date.
                     futureInstalled = true;
                     Log.i("AutoDeductionScheduler", "catchUp: scheduled next future "
                             + medicationId + "/" + doseId + "/" + walkDate);
@@ -399,7 +413,7 @@ RestoreResult recoverIndependentFireRetryEvidencePass() {
     }
 
 public RestoreResult restoreFutureSchedules() {
-        if (!scheduler.canScheduleExactAlarms()) {
+        if (!ExactAlarmRuntime.canScheduleExactAlarms(scheduler.appContext())) {
             Log.w("AutoDeductionScheduler", "restoreFutureSchedules: exact alarm permission denied");
             // Still attempt past-schedule promotion to FIRED.
         }
@@ -556,7 +570,7 @@ public RestoreResult restoreFutureSchedules() {
                         scheduler.clearCancellationTombstoneLocked(occurrenceKey);
                     }
                 }
-                if (!scheduler.canScheduleExactAlarms()) {
+                if (!ExactAlarmRuntime.canScheduleExactAlarms(scheduler.appContext())) {
                     // Future schedule requires AlarmManager — cannot complete recovery.
                     Log.w("AutoDeductionScheduler", "restore: exact alarm permission denied for future " + prefKey);
                     failed++;

@@ -45,6 +45,37 @@ public final class ExactAlarmContract {
                 && expectedOperationVersion.equals(
                         extractOperationVersion(currentJson));
     }
+    public static boolean isMetadataOwnedByOperationVersion(
+            JSONObject metadata,
+            String expectedOperationVersion) {
+        return expectedOperationVersion != null
+                && !expectedOperationVersion.isEmpty()
+                && expectedOperationVersion.equals(extractOperationVersion(metadata));
+    }
+    public static boolean isValidCalendarDate(String value) {
+        if (value == null || value.length() != 10
+                || value.charAt(4) != '-' || value.charAt(7) != '-') {
+            return false;
+        }
+        for (int i = 0; i < value.length(); i++) {
+            if (i == 4 || i == 7) continue;
+            char c = value.charAt(i);
+            if (c < '0' || c > '9') return false;
+        }
+        try {
+            int year = Integer.parseInt(value.substring(0, 4));
+            int month = Integer.parseInt(value.substring(5, 7));
+            int day = Integer.parseInt(value.substring(8, 10));
+            Calendar calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.US);
+            calendar.clear();
+            calendar.setLenient(false);
+            calendar.set(year, month - 1, day, 0, 0, 0);
+            calendar.getTimeInMillis();
+            return true;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
     /**
      * Parse the monotonic operation token as [sequence, wallClockMillis].
      *

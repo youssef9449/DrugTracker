@@ -1,5 +1,5 @@
 /// <reference types="@testing-library/jest-dom/vitest" />
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Use vi.hoisted so the mocks are available inside vi.mock factories.
 const mocks = vi.hoisted(() => ({
@@ -64,7 +64,7 @@ import {
   scheduleDoseReminder,
   scheduleSnoozedDoseReminder,
   sendMedicineAlert,
-  cancelDoseReminder } from '@/utils/notifications';
+  cancelDoseReminder } from './notificationTestFacade';
 
 beforeEach(() => {
   vi.clearAllMocks();

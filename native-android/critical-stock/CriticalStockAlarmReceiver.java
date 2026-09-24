@@ -5,7 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 
 import app.drugtracker.alarmruntime.ExactAlarmContract;
-import app.drugtracker.alarmruntime.ExactAlarmOperationLock;
+import app.drugtracker.alarmruntime.ExactAlarmRuntime;
 import app.drugtracker.notificationruntime.NotificationRuntime;
 
 /**
@@ -44,7 +44,7 @@ public final class CriticalStockAlarmReceiver extends BroadcastReceiver {
                 CriticalStockAlarmAdapter adapter =
                         new CriticalStockAlarmAdapter(appContext);
 
-                synchronized (ExactAlarmOperationLock.LOCK) {
+                ExactAlarmRuntime.runWithOperationLock(() -> {
                     // Delivery ownership is checked BEFORE any user-facing side
                 // effect. A cancelled/replaced/tombstoned operation can never
                 // leak a stale notification.
@@ -108,7 +108,7 @@ public final class CriticalStockAlarmReceiver extends BroadcastReceiver {
                             "one-shot completion failed for "
                                     + medicationId);
                 }
-                }
+                });
             } finally {
                 pendingResult.finish();
             }

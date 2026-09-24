@@ -38,6 +38,8 @@ export async function sendCriticalStockAlert(
     title,
     body,
     channelId: 'low-stock',
+    channelName: 'تنبيهات النفاذ',
+    channelImportance: 4,
     smallIcon: 'ic_launcher',
   });
 }

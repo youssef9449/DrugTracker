@@ -15,7 +15,7 @@ vi.mock('@/native', () => ({
   cleanupNativeListeners: vi.fn(),
 }));
 
-vi.mock('@/utils/notifications', () => ({
+vi.mock('../utils/notificationTestFacade', () => ({
   requestNotificationPermission: vi.fn(() => Promise.resolve(true)),
   sendMedicineAlert: vi.fn(),
   sendCriticalStockAlert: vi.fn(() => Promise.resolve(true)),

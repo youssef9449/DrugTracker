@@ -77,6 +77,14 @@ public final class ExactAlarmRuntime {
     }
 
 
+    /** Execute a caller-owned delivery transaction under the shared runtime lock. */
+    public static void runWithOperationLock(Runnable action) {
+        if (action == null) return;
+        synchronized (ExactAlarmOperationLock.LOCK) {
+            action.run();
+        }
+    }
+
     /**
      * Single native source of truth for Android exact-alarm capability.
      * Feature adapters and lifecycle/bridge code must delegate here rather

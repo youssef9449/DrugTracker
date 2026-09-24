@@ -11,9 +11,9 @@ const notifMocks = vi.hoisted(() => ({
   requestPermission: vi.fn(),
 }));
 
-vi.mock('@/utils/notifications', async () => {
-  const actual = await vi.importActual<typeof import('@/utils/notifications')>(
-    '@/utils/notifications'
+vi.mock('../utils/notificationTestFacade', async () => {
+  const actual = await vi.importActual<typeof import('../utils/notificationTestFacade')>(
+    '../utils/notificationTestFacade'
   );
   return {
     ...actual,

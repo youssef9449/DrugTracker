@@ -187,10 +187,6 @@ public final class AutoDeductionSchedulingAdapter {
         return key == null || alarmRuntime.clearCancellationTombstone(key);
     }
 
-    public boolean canScheduleExactAlarms() {
-        return alarmRuntime.canScheduleExactAlarms();
-    }
-
     /**
      * Schedule one Auto Deduction occurrence through the shared runtime.
      *

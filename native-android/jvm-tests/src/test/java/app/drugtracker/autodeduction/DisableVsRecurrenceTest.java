@@ -32,7 +32,7 @@ public class DisableVsRecurrenceTest {
         return Phase2TestSupport.futureCalendarDate(days);
     }
 
-    private long readGen(String med, String dose) {
+    private static long readGen(String med, String dose) {
         SharedPreferences p = Phase2TestSupport.appContext().getSharedPreferences(
                 AutoDeductionContract.PREFS_RECURRENCE_AUTH, 0);
         return p.getLong(

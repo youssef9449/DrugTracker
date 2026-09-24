@@ -25,6 +25,7 @@ import { __setStockMutationOrderingTestHooks, __resetStockMutationOrderingForTes
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Medication } from '../../src/types';
+import type { AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
 import { makeScheduledMedication as med, makeExactAutoLog, makeRefillLog } from '../fixtures/testFixtures';
 
 import { consumeDose, applyDurableStockDelta } from '../../src/utils/medActions';

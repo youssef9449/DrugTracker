@@ -27,6 +27,8 @@ export async function sendMedicineAlert(
     title,
     body,
     channelId: 'low-stock',
+    channelName: 'تنبيهات المخزون',
+    channelImportance: 4,
     smallIcon: 'ic_launcher',
   });
 }

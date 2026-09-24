@@ -64,8 +64,8 @@ describe('treatment duration scheduling', () => {
     expect(getAutoDeductionSlotsForDate(medication, '2026-09-24')).toEqual([]);
   });
 
-  it('treats legacy records without isChronic as chronic for duration sorting', () => {
-    const legacy = med({ isChronic: undefined, durationDays: undefined });
+  it('does not treat an unspecified treatment mode as chronic for duration sorting', () => {
+    const unspecified = med({ isChronic: undefined, durationDays: undefined });
     const course = med({
       id: 'med-2',
       isChronic: false,
@@ -73,10 +73,10 @@ describe('treatment duration scheduling', () => {
       treatmentStartDate: '2026-09-22',
     });
 
-    const asc = sortMedications([legacy, course], 'duration', 'asc');
-    const desc = sortMedications([legacy, course], 'duration', 'desc');
+    const asc = sortMedications([unspecified, course], 'duration', 'asc');
+    const desc = sortMedications([unspecified, course], 'duration', 'desc');
 
-    expect(asc.map((m) => m.id)).toEqual(['med-2', 'med-1']);
-    expect(desc.map((m) => m.id)).toEqual(['med-1', 'med-2']);
+    expect(asc.map((m) => m.id)).toEqual(['med-1', 'med-2']);
+    expect(desc.map((m) => m.id)).toEqual(['med-2', 'med-1']);
   });
 });

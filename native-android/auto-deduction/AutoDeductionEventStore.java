@@ -486,11 +486,20 @@ public final class AutoDeductionEventStore {
                 }
 
                 try {
+                    String rejectionReason;
+                    if (decoded.isSuccess()
+                            && AutoDeductionContract.STATUS_FIRED.equals(decoded.record.status)
+                            && !storageIdentityMatchesPayload(
+                                    parseStorageKeyIdentity(prefKey), decoded.record)) {
+                        rejectionReason = "identity_mismatch";
+                    } else if ("invalid_json".equals(decoded.error)) {
+                        rejectionReason = "invalid_json";
+                    } else {
+                        rejectionReason = "malformed_fields";
+                    }
                     String rejected = AutoDeductionPersistenceCodec.encodeRejected(
                             prefKey,
-                            decoded.error == null
-                                    ? "malformed_fields"
-                                    : decoded.error,
+                            rejectionReason,
                             System.currentTimeMillis());
                     if (editor == null) editor = persistence.eventEditor();
                     editor.putString(prefKey, rejected);
@@ -565,7 +574,7 @@ public final class AutoDeductionEventStore {
 
                 if (AutoDeductionContract.STATUS_REJECTED.equals(decoded.status)) {
                     Long rejectedAt = AutoDeductionPersistenceCodec.rejectedAtEpochMs(raw);
-                    // REJECTED is irrecoverable. Legacy/malformed REJECTED rows that
+                    // REJECTED is irrecoverable. Malformed REJECTED rows that
                     // lack a timestamp are therefore safe to discard on a compaction
                     // pass instead of becoming immortal terminal garbage.
                     if (rejectedAt == null || rejectedAt.longValue() < rejectedCutoffEpochMs) {
@@ -625,9 +634,17 @@ public final class AutoDeductionEventStore {
                 return EventLookupResult.absent();
             }
             if (!decoded.isSuccess()) {
+                if (decoded.status != null
+                        && !decoded.status.isEmpty()
+                        && !AutoDeductionContract.STATUS_FIRED.equals(decoded.status)
+                        && !AutoDeductionContract.STATUS_RECONCILED.equals(decoded.status)) {
+                    return EventLookupResult.absent();
+                }
                 return terminalizeRejectedLocked(
                         prefKey,
-                        decoded.error == null ? "malformed_fields" : decoded.error);
+                        "invalid_json".equals(decoded.error)
+                                ? "invalid_json"
+                                : "malformed_fields");
             }
 
             AutoDeductionPersistenceModels.EventRecord record = decoded.record;
@@ -643,12 +660,14 @@ public final class AutoDeductionEventStore {
                 return terminalizeRejectedLocked(prefKey, "identity_mismatch");
             }
 
-            try {
-                return EventLookupResult.found(record);
-            } catch (JSONException e) {
-                return EventLookupResult.failure("event_encode_failed");
-            }
+            return EventLookupResult.found(record);
         }
+    }
+
+    private boolean commitEditor(SharedPreferences.Editor editor) {
+        return editor != null
+                && failurePolicy.allowEventCommit()
+                && editor.commit();
     }
 
     private boolean commitEvent(String key, String value) {

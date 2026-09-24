@@ -6,12 +6,12 @@ import { useStockAlerts } from '@/hooks/useStockAlerts';
 import { getTodayDateString, getCriticalAlarmDate } from '@/utils/dateCalculations';
 import { CRITICAL_CLAIMS_STORAGE_KEY } from '@/utils/criticalNotificationClaims';
 
-vi.mock('@/utils/notifications', () => ({
+vi.mock('../utils/notificationTestFacade', () => ({
   sendCriticalStockAlert: vi.fn(() => Promise.resolve(true)),
   cancelCriticalAlarm: vi.fn(() => Promise.resolve()),
 }));
 
-import { sendCriticalStockAlert, cancelCriticalAlarm } from '@/utils/notifications';
+import { sendCriticalStockAlert, cancelCriticalAlarm } from '../utils/notificationTestFacade';
 
 const sendMock = vi.mocked(sendCriticalStockAlert);
 const cancelMock = vi.mocked(cancelCriticalAlarm);
@@ -61,7 +61,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
   localStorage.clear();
   sendMock.mockResolvedValue(true);
-  cancelMock.mockResolvedValue(undefined);
+  cancelMock.mockResolvedValue({ ok: true });
 });
 
 afterEach(() => {

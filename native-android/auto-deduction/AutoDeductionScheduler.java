@@ -646,9 +646,6 @@ public final class AutoDeductionScheduler {
         return occurrenceState.compactTerminalState();
     }
 
-    public boolean canScheduleExactAlarms() {
-        return schedulingAdapter.canScheduleExactAlarms();
-    }
     public static Long computeEpochMs(String calendarDate, String timeHhmm) {
         return AutoDeductionDateTime.computeEpochMs(calendarDate, timeHhmm);
     }
@@ -793,7 +790,50 @@ public final class AutoDeductionScheduler {
                 treatmentEndDate,
                 fallbackTimeHhmm);
     }
-    boolean scheduleFireRetry(String medicationId,String doseId,String calendarDate,long scheduledAt,double amount,String timeHhmm,long generation,String operationVersion,int nextRetryCount) { return retryService.scheduleFireRetry(medicationId,doseId,calendarDate,scheduledAt,amount,timeHhmm,generation,operationVersion,nextRetryCount); }
+    boolean scheduleFireRetry(
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            long scheduledAt,
+            double amount,
+            String timeHhmm,
+            long generation,
+            String operationVersion,
+            int nextRetryCount) {
+        AutoDeductionPersistenceModels.ScheduleRecord current =
+                schedulingAdapter.getScheduleRecord(
+                        AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate));
+        String treatmentEndDate = current == null ? "" : current.treatmentEndDate;
+        return retryService.scheduleFireRetry(
+                medicationId, doseId, calendarDate, scheduledAt, amount, timeHhmm,
+                treatmentEndDate, generation, operationVersion, nextRetryCount);
+    }
+    ScheduleResult scheduleOccurrenceLocked(
+            String occurrenceKey,
+            AutoDeductionPersistenceModels.ScheduleRecord record,
+            String expectedOperationVersion) {
+        if (record == null || record.occurrence == null) {
+            return ScheduleResult.fail("invalid_schedule_record");
+        }
+        long generation = getRecurrenceGenerationLocked(
+                record.occurrence.medicationId,
+                record.occurrence.doseId);
+        AutoDeductionSchedulingAdapter.ScheduleResult result =
+                schedulingAdapter.scheduleOccurrence(
+                        occurrenceKey,
+                        record.occurrence.medicationId,
+                        record.occurrence.doseId,
+                        record.occurrence.calendarDate,
+                        record.timeHhmm,
+                        record.amount,
+                        record.scheduledAtEpochMs,
+                        record.treatmentEndDate,
+                        generation,
+                        expectedOperationVersion);
+        return result.ok
+                ? ScheduleResult.success(result.occurrenceKey)
+                : ScheduleResult.fail(result.error);
+    }
     boolean recordIndependentFireRetryEvidenceLocked(
             String medicationId,
             String doseId,

@@ -66,7 +66,7 @@ export function isValidExactCalendarDate(calendarDate: string): boolean {
 /**
  * Occurrence identity for Exact Auto is medicationId + doseId + calendarDate.
  * All three components are required and non-empty. Empty/missing doseId is
- * invalid (not a legacy sentinel) — malformed identity cannot
+ * invalid — malformed identity cannot
  * be repaired by a later amount fix and must not remain FIRED forever (#262 F3).
  */
 export function isValidExactOccurrenceIdentity(
@@ -92,7 +92,7 @@ export function normalizeExactDoseId(doseId: string | undefined | null): string 
 }
 /**
  * Deterministic log id for one exact auto occurrence (retry-safe).
- * The obsolete day-based settlement path is not part of current reconciliation.
+ * Reconciliation is occurrence-based.
  * Issue current occurrence-identity contract: this id MUST never be built with an empty doseId.
  * `applyExactAutoEventToMedication` rejects any event whose `doseId` is empty
  * (malformed identity → terminal ACK at the runner level, before apply).

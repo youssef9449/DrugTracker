@@ -77,6 +77,10 @@ function containsSystemAction(content, action) {
 const nativeFiles = listFilesRecursive('native-android')
   .filter((rel) => rel.endsWith('.java'));
 
+const productionNativeFiles = nativeFiles.filter(
+  (rel) => !rel.startsWith('native-android/jvm-tests/')
+);
+
 for (const rel of nativeFiles) {
   const content = read(rel);
   for (const action of systemActions) {
@@ -161,7 +165,7 @@ assert(
 );
 
 // Only ExactAlarmRuntime may touch the Android AlarmManager permission API directly.
-for (const rel of nativeFiles) {
+for (const rel of productionNativeFiles) {
   const content = read(rel);
   if (content.includes('AlarmManager')
       && content.includes('canScheduleExactAlarms()')) {

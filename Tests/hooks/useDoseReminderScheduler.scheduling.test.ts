@@ -2,11 +2,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, cleanup } from '@testing-library/react';
 import type { Medication } from '@/types';
-import { makeDoseReminderMedication as makeMed, makeDoseReminderCapabilityMap as capabilityMap, makeDoseReminderOptions as defaultOpts, flushTestMicrotasks as flushUntil } from '../fixtures/testFixtures';
 import { getTodayDateString } from '@/utils/dateCalculations';
 import { useDoseReminderScheduler } from '@/hooks/useDoseReminderScheduler';
 
-import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import type { ExactAlarmPermission } from '@/utils/exactAlarm';
 
@@ -36,9 +34,9 @@ const mocks = vi.hoisted(() => ({
   cancelStale: vi.fn(),
 }));
 
-vi.mock('@/utils/notifications', async () => {
-  const actual = await vi.importActual<typeof import('@/utils/notifications')>(
-    '@/utils/notifications'
+vi.mock('../utils/notificationTestFacade', async () => {
+  const actual = await vi.importActual<typeof import('../utils/notificationTestFacade')>(
+    '../utils/notificationTestFacade'
   );
   return {
     ...actual,
@@ -52,7 +50,7 @@ vi.mock('@/utils/notifications', async () => {
   };
 });
 
-): Medication {
+function makeMed(overrides: Partial<Medication> = {}): Medication {
   const reminderTime = overrides.reminderTime ?? '09:00';
   const dailyDose = overrides.dailyDose ?? 1;
   return {
@@ -74,8 +72,18 @@ vi.mock('@/utils/notifications', async () => {
 }
 
 
+async function flushUntil(predicate: () => boolean): Promise<void> {
+  await vi.waitFor(predicate, { timeout: 1000, interval: 0 });
+}
 
-) {
+function capabilityMap(medications: Medication[]): ReadonlyMap<string, boolean> {
+  return new Map(medications.map((medication) => [
+    medication.id,
+    medication.autoDeductEnabled === false,
+  ]));
+}
+
+function defaultOpts(overrides: Record<string, unknown> = {}) {
   const medications =
     (overrides.medications as Medication[] | undefined) ?? [];
   return {

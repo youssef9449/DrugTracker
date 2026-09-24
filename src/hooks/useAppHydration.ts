@@ -16,7 +16,14 @@ import {
   DOSE_REMINDER_CHANNEL_ID,
   DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
 } from '../utils/notifications/doseReminderNotifications';
-import { loadJson, loadString, persist } from '../utils/storage';
+import {
+  isValidConsumptionLogRecord,
+  isValidMedicationRecord,
+  loadJson,
+  loadString,
+  persist,
+  readStorageItem,
+} from '../utils/storage';
 import { convergeAutoDeductionStock } from '../utils/autoDeductionNativeStock';
 import {
   STORAGE_MEDS_KEY,
@@ -76,15 +83,21 @@ export function useAppHydration(setters: AppHydrationSetters): void {
     // Medications — use loadJson (silent fallback). The "first run"
     // detection distinguishes "no key set" (null) from "empty array
     // explicitly saved" (loadJson returns []).
-    const savedMedsRaw = localStorage.getItem(STORAGE_MEDS_KEY);
-    const autoDeductPromptedRaw = localStorage.getItem(STORAGE_AUTO_DEDUCT_PROMPTED_KEY);
+    const savedMedsStorage = readStorageItem(STORAGE_MEDS_KEY);
+    const autoDeductPromptedStorage = readStorageItem(STORAGE_AUTO_DEDUCT_PROMPTED_KEY);
+    if (!savedMedsStorage.ok) {
+      console.warn('[App] Medication storage read failed; starting with empty state.');
+    }
+    if (!autoDeductPromptedStorage.ok) {
+      console.warn('[App] Auto-deduct prompt storage read failed; skipping first-run prompt.');
+    }
     // First-ever open: no saved meds. Flag isFirstRun so scheduler effects
     // stay gated until the user completes the Auto-Deduct decision.
     // Do NOT open the prompt here — wait until hydrated=true (see finally).
-    const isFirstEverOpen = savedMedsRaw === null;
+    const isFirstEverOpen = savedMedsStorage.ok && savedMedsStorage.value === null;
     let loadedMedications: Medication[] = [];
     const shouldShowAutoDeductPrompt =
-      isFirstEverOpen && autoDeductPromptedRaw === null;
+      isFirstEverOpen && autoDeductPromptedStorage.ok && autoDeductPromptedStorage.value === null;
     if (isFirstEverOpen) {
       setIsFirstRun(true);
     } else {
@@ -93,16 +106,25 @@ export function useAppHydration(setters: AppHydrationSetters): void {
       // "[]" is ignored on next launch, the seed INITIAL_MEDICATIONS
       // stays in state, and the hydration-gated persistence effect
       // overwrites the user's "[]" with the seed meds.
-      const parsed = loadJson<Medication[] | null>(STORAGE_MEDS_KEY, null);
+      const parsed = loadJson<unknown>(STORAGE_MEDS_KEY, null);
       if (Array.isArray(parsed)) {
-        loadedMedications = parsed;
+        const validMedications = parsed.filter(isValidMedicationRecord);
+        if (validMedications.length !== parsed.length) {
+          console.warn('[App] Ignored malformed persisted medication records during hydration.');
+        }
+        loadedMedications = validMedications;
       }
     }
 
     // Logs
-    const savedLogs = loadJson<ConsumptionLog[] | null>(STORAGE_LOGS_KEY, null);
-    const loadedLogs: ConsumptionLog[] = Array.isArray(savedLogs) ? savedLogs : [];
-    if (Array.isArray(savedLogs)) setLogs(savedLogs);
+    const savedLogs = loadJson<unknown>(STORAGE_LOGS_KEY, null);
+    if (Array.isArray(savedLogs)) {
+      const validLogs = savedLogs.filter(isValidConsumptionLogRecord);
+      if (validLogs.length !== savedLogs.length) {
+        console.warn('[App] Ignored malformed persisted consumption-log records during hydration.');
+      }
+      setLogs(validLogs);
+    }
 
     // Pharmacy settings — explicit current schema only (no unknown-key pass-through).
     const parsed = loadJson<Partial<PharmacySettings> | null>(
@@ -184,7 +206,7 @@ export function useAppHydration(setters: AppHydrationSetters): void {
     Promise.all([
       getNotificationPermission()
         .then((perm) => {
-          const savedPreference = localStorage.getItem(NOTIFICATIONS_KEY);
+          const savedPreference = loadString(NOTIFICATIONS_KEY, '');
           if (savedPreference === 'true' && perm !== 'granted') {
             setNotificationsEnabled(false);
             return;
@@ -193,7 +215,7 @@ export function useAppHydration(setters: AppHydrationSetters): void {
             setNotificationsEnabled(true);
             return;
           }
-          if (savedPreference === null) {
+          if (savedPreference === '') {
             setNotificationsEnabled(perm === 'granted');
 
             // Auto-request notification permission on the FIRST app open
@@ -216,7 +238,7 @@ export function useAppHydration(setters: AppHydrationSetters): void {
             if (perm === 'default') {
               requestNotificationPermission()
                 .then((granted) => {
-                  if (localStorage.getItem(NOTIFICATIONS_KEY) === null) {
+                  if (loadString(NOTIFICATIONS_KEY, '') === null) {
                     setNotificationsEnabled(granted);
                   }
                 })
@@ -246,7 +268,7 @@ export function useAppHydration(setters: AppHydrationSetters): void {
             isNotificationChannelEnabled(DOSE_REMINDER_CHANNEL_ID),
             isNotificationChannelEnabled(DOSE_REMINDER_FOREGROUND_CHANNEL_ID),
           ]);
-          if (localStorage.getItem(NOTIFICATIONS_KEY) === 'true'
+          if (loadString(NOTIFICATIONS_KEY, '') === 'true'
               && (!backgroundChannel || !foregroundChannel)) {
             setNotificationsEnabled(false);
           }

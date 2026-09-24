@@ -154,9 +154,9 @@ public class AutoDeductionStockStoreTest {
                         new AutoDeductionStockStore.StockDelta("med-1", 5.0));
 
         AutoDeductionStockStore.ForegroundApplyResult first =
-                store.applyForegroundDeltas(10L, refill);
+                store.applyForegroundDeltas(10L, refill, java.util.Collections.emptyList());
         AutoDeductionStockStore.ForegroundApplyResult second =
-                store.applyForegroundDeltas(10L, refill);
+                store.applyForegroundDeltas(10L, refill, java.util.Collections.emptyList());
 
         assertTrue(first.ok);
         assertFalse(first.alreadyApplied);
@@ -242,7 +242,8 @@ public class AutoDeductionStockStoreTest {
                 store.applyForegroundDeltas(
                         21L,
                         java.util.Collections.singletonList(
-                                new AutoDeductionStockStore.StockDelta("new-med", 0.0)));
+                                new AutoDeductionStockStore.StockDelta("new-med", 0.0)),
+                        java.util.Collections.emptyList());
 
         assertTrue(result.ok);
         assertFalse(result.alreadyApplied);
@@ -263,7 +264,8 @@ public class AutoDeductionStockStoreTest {
                 store.applyForegroundDeltas(
                         20L,
                         java.util.Collections.singletonList(
-                                new AutoDeductionStockStore.StockDelta("missing", -1.0)));
+                                new AutoDeductionStockStore.StockDelta("missing", -1.0)),
+                        java.util.Collections.emptyList());
 
         assertFalse(result.ok);
         assertFalse(result.alreadyApplied);
@@ -279,12 +281,14 @@ public class AutoDeductionStockStoreTest {
                 store.applyForegroundDeltas(
                         30L,
                         java.util.Collections.singletonList(
-                                new AutoDeductionStockStore.StockDelta("med-1", -3.0)));
+                                new AutoDeductionStockStore.StockDelta("med-1", -3.0)),
+                        java.util.Collections.emptyList());
         AutoDeductionStockStore.ForegroundApplyResult second =
                 store.applyForegroundDeltas(
                         31L,
                         java.util.Collections.singletonList(
-                                new AutoDeductionStockStore.StockDelta("med-1", 4.0)));
+                                new AutoDeductionStockStore.StockDelta("med-1", 4.0)),
+                        java.util.Collections.emptyList());
 
         assertTrue(first.ok);
         assertTrue(second.ok);

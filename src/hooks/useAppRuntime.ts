@@ -73,7 +73,7 @@ export interface AppRuntimeDeps {
   showToast: (message: string) => void;
   dismissAlarm: () => void;
   snoozeAlarm: (minutes?: number) => void;
-  openAlarm: (medication: Medication, doseId?: string) => void;
+  openAlarm: (medId: string, doseId: string) => void;
 }
 
 export function useAppRuntime(deps: AppRuntimeDeps) {
@@ -153,7 +153,7 @@ export function useAppRuntime(deps: AppRuntimeDeps) {
     criticalStockAlertsEnabled, selectDoseMode, setMedications, setLogs,
     setGlobalAutoDeductEnabled, setIsAutoDeductPromptOpen, setIsFirstRun,
     setNotificationsEnabled, setCriticalStockAlertsEnabled, setSelectDoseMed,
-    setSelectDoseMode, setEditingMedication, showToast, dismissAlarm, snoozeAlarm,
+    setSelectDoseMode, setEditingMedication, showToast, dismissAlarm: () => { dismissAlarm(); return true; }, snoozeAlarm,
   });
   const pharmacyHandlers = usePharmacyUserHandlers({
     soundEnabled, settingsModalMode, pharmacySettings, setPharmacySettings, showToast,

@@ -7,6 +7,7 @@ import {
 import { generateId } from '../utils/id';
 import { playSuccessChime } from '../utils/sound';
 import { STORAGE_ERRORS } from '../constants/uiStrings';
+import { getDoseScheduleForUI } from '../utils/doseSchedule';
 import type { MedicationHandlerState, MedicationHandlersDeps } from './medicationHandlerTypes';
 
 export function useMedicationCrudHandlers(deps: MedicationHandlersDeps, state: MedicationHandlerState) {
@@ -41,9 +42,10 @@ export function useMedicationCrudHandlers(deps: MedicationHandlersDeps, state: M
       setMedications(result.medications);
       medicationsRef.current = result.medications;
       setLogs(result.logs);
+      const firstDoseTime = getDoseScheduleForUI(medData)[0]?.time;
       showToast(
-        medData.reminderEnabled
-          ? 'تم حفظ "' + medData.name + '" مع تذكير يومي الساعة ' + medData.reminderTime
+        medData.reminderEnabled && firstDoseTime
+          ? 'تم حفظ "' + medData.name + '" مع تذكير يومي الساعة ' + firstDoseTime
           : 'تم تعديل بيانات "' + medData.name + '" بنجاح'
       );
       if (soundEnabled) playSuccessChime();
@@ -61,6 +63,7 @@ export function useMedicationCrudHandlers(deps: MedicationHandlersDeps, state: M
           : globalAutoDeductEnabledRef.current,
       criticalStockAlertsEnabled: medData.criticalStockAlertsEnabled !== false,
     };
+    const firstDoseTime = getDoseScheduleForUI(newMed)[0]?.time;
     const result = await runGatedAddMedication({ medication: newMed });
     if (result.outcome !== 'applied') {
       showToast(STORAGE_ERRORS.generic);
@@ -70,8 +73,8 @@ export function useMedicationCrudHandlers(deps: MedicationHandlersDeps, state: M
     medicationsRef.current = result.medications;
     setLogs(result.logs);
     showToast(
-      newMed.reminderEnabled
-        ? 'تمت إضافة "' + newMed.name + '" مع تنبيه الساعة ' + newMed.reminderTime
+      newMed.reminderEnabled && firstDoseTime
+        ? 'تمت إضافة "' + newMed.name + '" مع تنبيه الساعة ' + firstDoseTime
         : newMed.autoDeductEnabled
           ? 'تمت إضافة "' + newMed.name + '"، وستخصم كل جرعة تلقائياً في موعدها'
           : 'تمت إضافة "' + newMed.name + '" بنجاح'

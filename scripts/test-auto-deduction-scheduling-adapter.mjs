@@ -173,8 +173,10 @@ assert(
   'Android preparation must copy the scheduling adapter source'
 );
 assert(
-  gradle.includes('"AutoDeductionSchedulingAdapter.java"'),
-  'JVM test source set must compile the scheduling adapter'
+  gradle.includes('fileTree("../auto-deduction")') &&
+    gradle.includes('include("*.java")') &&
+    gradle.includes('synced-main/app/drugtracker/autodeduction'),
+  'JVM test source set must compile repository-owned Auto Deduction Java sources, including the scheduling adapter'
 );
 
 console.log('PASS: Auto Deduction scheduling adapter boundary checks');

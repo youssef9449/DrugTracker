@@ -1,16 +1,16 @@
 import { __setStockMutationOrderingTestHooks, __resetStockMutationOrderingForTests, __setManualEnvelopeTestHooks, __setAutoStockGateTestHooks } from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { ConsumptionLog } from '../../src/types';
+import type { AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
+import type { ManualStockEnvelope } from '../../src/utils/stockEnvelopeRecovery';
 import { makeScheduledMedication as med, makeAutoDeductionEvent as fired } from '../fixtures/testFixtures';
 import { runGatedManualConsume, runGatedManualRestore, runGatedUndoRefill } from '../../src/utils/manualStockMutation';
 
-import { allocateMutationSeq } from '../../src/utils/stockMutationOrdering';
 import { runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
 
 
 import { isDoseConsumedOnDate } from '../../src/utils/dateCalculations';
 import { exactAutoLogId } from '../../src/utils/autoDeductionReconciliation';
-import * as preSettleModule from '../../src/utils/reconcileExactBeforeManualMutation';
 
 const autoSchedulingMocks = vi.hoisted(() => ({
   invalidateAutoDeductionRecurrence: vi.fn(),
@@ -34,7 +34,7 @@ beforeEach(() => {
     generation: 1,
   });
   autoSchedulingMocks.scheduleAutoDeduction.mockResolvedValue({ ok: true });
-  autoSchedulingMocks.recoverAutoDeductionOccurrence.mockResolvedValue({ ok: true });
+  autoSchedulingMocks.recoverAutoDeductionOccurrenceForCompensation.mockResolvedValue({ ok: true });
 });
 // findPending used indirectly via runGatedManualConsume
 import { findActiveDeductionForOccurrence, consumeDose, restoreDose } from '../../src/utils/medActions';

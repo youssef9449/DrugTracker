@@ -1,4 +1,4 @@
-import { __setExactAutoEnvelopeTestHooks } from '../utils/autoStockTestHooks';
+import { __setExactAutoEnvelopeTestHooks } from './utils/autoStockTestHooks';
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
@@ -13,7 +13,7 @@ vi.mock('@/native', () => ({
   registerAppResumeHandler: vi.fn(),
   cleanupNativeListeners: vi.fn(),
 }));
-vi.mock('@/utils/notifications', () => ({
+vi.mock('./utils/notificationTestFacade', () => ({
   requestNotificationPermission: vi.fn(() => Promise.resolve(true)),
   sendMedicineAlert: vi.fn(),
   sendCriticalStockAlert: vi.fn(() => Promise.resolve(true)),
@@ -62,10 +62,9 @@ import { getTodayDateString } from '@/utils/dateCalculations';
 
 
 
-import { scheduleCriticalAlarm, cancelCriticalAlarm } from '@/utils/notifications';
+import { scheduleCriticalAlarm, cancelCriticalAlarm } from './utils/notificationTestFacade';
 
 
-const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 
 // Wave 13 #123: pin system time so the many `new Date().toISOString()`
 // known date (2024-09-10T12:00:00Z). Prevents midnight-UTC flake risk

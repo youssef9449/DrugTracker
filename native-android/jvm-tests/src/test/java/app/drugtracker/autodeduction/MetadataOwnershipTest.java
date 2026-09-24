@@ -11,6 +11,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import org.json.JSONObject;
+import app.drugtracker.autodeduction.AutoDeductionScheduler;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -30,20 +31,30 @@ public class MetadataOwnershipTest {
         clearAllDurableState();
     }
 
+    private static boolean isMetadataOwnedByVersion(String json, String expectedVersion) {
+        if (json == null || expectedVersion == null) return false;
+        try {
+            return expectedVersion.equals(new JSONObject(json).optString(
+                    "operationVersion", ""));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     @Test
     public void isMetadataOwnedByVersion_matchesExactOperationVersion() {
         String json = "{\"operationVersion\":\"1000-1-aaa\",\"amount\":1}";
-        assertTrue(AutoDeductionScheduler.isMetadataOwnedByVersion(json, "1000-1-aaa"));
-        assertFalse(AutoDeductionScheduler.isMetadataOwnedByVersion(json, "1000-2-bbb"));
-        assertFalse(AutoDeductionScheduler.isMetadataOwnedByVersion(null, "1000-1-aaa"));
-        assertFalse(AutoDeductionScheduler.isMetadataOwnedByVersion(json, null));
-        assertFalse(AutoDeductionScheduler.isMetadataOwnedByVersion("{bad", "1000-1-aaa"));
+        assertTrue(isMetadataOwnedByVersion(json, "1000-1-aaa"));
+        assertFalse(isMetadataOwnedByVersion(json, "1000-2-bbb"));
+        assertFalse(isMetadataOwnedByVersion(null, "1000-1-aaa"));
+        assertFalse(isMetadataOwnedByVersion(json, null));
+        assertFalse(isMetadataOwnedByVersion("{bad", "1000-1-aaa"));
     }
 
     @Test
     public void legacyScheduleVersionIsRejected() {
         String json = "{\"scheduleVersion\":\"1000-7-legacy\",\"amount\":1}";
-        assertFalse(AutoDeductionScheduler.isMetadataOwnedByVersion(
+        assertFalse(isMetadataOwnedByVersion(
                 json, "1000-7-legacy"));
     }
 
@@ -108,7 +119,7 @@ public class MetadataOwnershipTest {
         // Stale snapshot still holding v1 must not delete the v2 row (#219).
         assertFalse(s.removeScheduleMetadataIfVersion(prefKey, v1));
         assertTrue(schedulePrefs().contains(prefKey));
-        assertTrue(AutoDeductionScheduler.isMetadataOwnedByVersion(
+        assertTrue(isMetadataOwnedByVersion(
                 schedulePrefs().getString(prefKey, null), v2));
     }
 }

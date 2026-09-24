@@ -91,6 +91,7 @@ public class CrossFeatureAlarmIsolationTest {
                 1.0,
                 "Phase 9 Medicine",
                 "قرص",
+                null,
                 true,
                 TRIGGER_AT,
                 null).ok);
@@ -114,6 +115,11 @@ public class CrossFeatureAlarmIsolationTest {
                 "three independent PendingIntent identity tuples must be armed",
                 3,
                 pendingIntentIdentities.size());
+
+        Set<String> actions = scheduledPendingIntentActions();
+        assertTrue(actions.contains(AutoDeductionContract.ACTION_AUTO_DEDUCTION));
+        assertTrue(actions.contains(DoseReminderAlarmAdapter.ACTION_DOSE_REMINDER));
+        assertTrue(actions.contains(CriticalStockAlarmAdapter.ACTION_CRITICAL_STOCK));
 
         Set<Integer> requestCodes = scheduledPendingIntentRequestCodes();
         assertEquals(
@@ -142,6 +148,7 @@ public class CrossFeatureAlarmIsolationTest {
                 1.0,
                 "Phase 9 Medicine",
                 "قرص",
+                null,
                 true,
                 TRIGGER_AT,
                 null).ok);
@@ -456,7 +463,7 @@ public class CrossFeatureAlarmIsolationTest {
                 TRIGGER_AT, 1L, null).ok);
         assertTrue(doseAdapter().scheduleOccurrence(
                 MEDICATION_ID, DOSE_ID, "08:00", 1.0,
-                "Phase 9 Medicine", "قرص", true,
+                "Phase 9 Medicine", "قرص", null, true,
                 TRIGGER_AT, null).ok);
         assertTrue(criticalAdapter().schedule(
                 MEDICATION_ID, "Phase 9 Medicine", TRIGGER_AT, "قرص",
@@ -517,6 +524,20 @@ public class CrossFeatureAlarmIsolationTest {
                             + saved.getComponent().getClassName()
                             + "|"
                             + saved.getData().toString());
+        }
+        return result;
+    }
+
+    private static Set<String> scheduledPendingIntentActions() {
+        Set<String> result = new HashSet<>();
+        for (ShadowAlarmManager.ScheduledAlarm alarm : scheduledAlarms()) {
+            if (alarm.operation == null) continue;
+            ShadowPendingIntent pending =
+                    Shadows.shadowOf(alarm.operation);
+            Intent saved = pending.getSavedIntent();
+            if (saved != null && saved.getAction() != null) {
+                result.add(saved.getAction());
+            }
         }
         return result;
     }

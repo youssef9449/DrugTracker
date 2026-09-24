@@ -45,6 +45,10 @@ import java.util.List;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 33)
 public class FireRetryScheduleTest {
+    private static String localDateOffset(int days) {
+        return Phase2TestSupport.futureCalendarDate(days);
+    }
+
 
     @Before
     public void setUp() {
@@ -107,7 +111,7 @@ public class FireRetryScheduleTest {
         JSONObject metadata = new JSONObject(raw);
         assertFalse(
                 "Shared alarm metadata must not persist Auto recurrence authorization",
-                metadata.has(AutoDeductionContract.FIELD_RECURRENCE_GENERATION));
+                metadata.has(AutoDeductionScheduler.FIELD_RECURRENCE_GENERATION));
         String operationVersion = metadata.optString(
                 ExactAlarmContract.FIELD_OPERATION_VERSION, "");
         assertFalse("schedule must contain operationVersion",
@@ -169,7 +173,6 @@ public class FireRetryScheduleTest {
 
         assertTrue(s.scheduleFireRetry(
                 "med", "dose", date, epoch, 1.0, "12:00",
-                "",
                      Long.parseLong(vg[1]), vg[0], 1));
 
         ShadowAlarmManager.ScheduledAlarm alarm = firstAlarm();
@@ -216,7 +219,6 @@ public class FireRetryScheduleTest {
         drainAlarms();
         assertTrue(s.scheduleFireRetry(
                 "med", "dose", date, epoch, 1.0, "12:00",
-                "",
                      Long.parseLong(vg[1]), vg[0], 1));
 
         JSONObject retryMeta = readAnyScheduleMetadata();
@@ -349,7 +351,7 @@ public class FireRetryScheduleTest {
                         1000L,
                         2.0);
         assertEquals(
-                AutoDeductionEventStore.InsertFiredStatus.CREATED,
+                AutoDeductionEventStore.InsertFiredResult.Status.CREATED,
                 inserted.status);
 
         AutoDeductionScheduler.RestoreResult result = s.recoverFiredStockPass();
@@ -420,7 +422,7 @@ public class FireRetryScheduleTest {
 
         // Retry can still be scheduled from independent evidence
         assertTrue(s.scheduleFireRetry(
-                "med", "dose", date, epoch, 2.0, "10:00", "", 1L, "v1", 2));
+                "med", "dose", date, epoch, 2.0, "10:00", 1L, "v1", 2));
         evidence = s.getIndependentFireRetryEvidence("med", "dose", date);
         assertNotNull(evidence);
         assertEquals(2, evidence.retryCount);
@@ -512,7 +514,7 @@ public class FireRetryScheduleTest {
                 new AutoDeductionEventStore(appContext()).insertFiredIfAbsent(
                         "med", "dose", date, 1000L, 2.0);
         assertEquals(
-                AutoDeductionEventStore.InsertFiredStatus.CREATED,
+                AutoDeductionEventStore.InsertFiredResult.Status.CREATED,
                 inserted.status);
 
         AutoDeductionScheduler.RestoreResult recovery =
@@ -675,7 +677,7 @@ public class FireRetryScheduleTest {
     }
 
     @Test
-    public void handleIndependentRecovery_created_doesNotScheduleSuccessor() {
+    public void handleIndependentRecovery_created_doesNotScheduleSuccessor() throws Exception {
         // Independent recovery CREATED path must not install a next-day alarm.
         // Use handleFireDelivery with pre-seeded evidence and no sch: metadata.
         String date = "2026-09-12";
@@ -745,7 +747,7 @@ public class FireRetryScheduleTest {
         long epoch = futureEpochMs(date, "10:00");
         AutoDeductionScheduler s = newScheduler();
         assertFalse(s.scheduleFireRetry(
-                "med", "dose", date, epoch, 1.0, "10:00", "", 1L, "v1", 1));
+                "med", "dose", date, epoch, 1.0, "10:00", 1L, "v1", 1));
         assertNull(s.getIndependentFireRetryEvidence("med", "dose", date));
     }
 
@@ -783,7 +785,7 @@ public class FireRetryScheduleTest {
         assertNotNull(raw);
         JSONObject meta = new JSONObject(raw);
         String ver = meta.optString(ExactAlarmContract.FIELD_OPERATION_VERSION, "");
-        long gen = readAuthGeneration("med", "dose", date);
+        long gen = readAuthGeneration("med", "dose");
 
         int alarmsBefore = alarmCount();
         AutoDeductionFailurePolicy denyRetryEvidence =

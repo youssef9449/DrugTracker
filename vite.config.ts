@@ -2,36 +2,60 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { defineConfig, type PluginOption } from 'vite';
 
 /**
- * #117: Inline Vite plugin that injects a build-time cache version into
- * the service worker. `public/sw.js` is served as-is (not processed by
- * Vite), so `define` / `import.meta.env` don't work for it. This plugin
- * hooks into `generateBundle` and rewrites the hardcoded
- * `CACHE_NAME = 'drug-tracker-v5'` in dist/sw.js with a timestamp-based
- * version so every deploy busts the old SW cache automatically — no
- * developer needs to remember to bump the version string.
+ * Generate the production Service Worker from the repository template.
+ * The Rollup output hook injects a content-derived cache identity and the
+ * complete emitted JS/CSS asset list, so the SW never reads or writes dist/
+ * directly and dynamic-import chunks are included in the offline cache.
  */
 function swCacheVersionPlugin(): PluginOption {
+  const swTemplatePath = path.resolve(__dirname, 'public', 'sw.js');
+  let swTemplate = '';
+
   return {
     name: 'sw-cache-version',
     apply: 'build',
-    generateBundle() {
-      const swPath = path.resolve(__dirname, 'dist', 'sw.js');
-      try {
-        let swContent = readFileSync(swPath, 'utf-8');
-        const buildVersion = `drug-tracker-${Date.now()}`;
-        swContent = swContent.replace(
-          /const CACHE_NAME = 'drug-tracker-v\d+'/,
-          `const CACHE_NAME = '${buildVersion}'`
+    buildStart() {
+      // Read the source template before Rollup output exists. The generated
+      // Service Worker itself is emitted through Rollup in generateBundle.
+      swTemplate = readFileSync(swTemplatePath, 'utf-8');
+      this.addWatchFile(swTemplatePath);
+    },
+    generateBundle(_, bundle) {
+      const productionAssets = Object.values(bundle)
+        .filter((item) => {
+          const fileName = item.fileName.toLowerCase();
+          return fileName.endsWith('.js') || fileName.endsWith('.css');
+        })
+        .map((item) => item.fileName)
+        .sort();
+
+      const cacheVersion = createHash('sha256')
+        .update(swTemplate)
+        .update('\n')
+        .update(productionAssets.join('\n'))
+        .digest('hex')
+        .slice(0, 12);
+
+      const source = swTemplate
+        .replace(
+          "const CACHE_NAME = 'drug-tracker-v5';",
+          `const CACHE_NAME = 'drug-tracker-${cacheVersion}';`
+        )
+        .replace(
+          'const PRECACHE_ASSETS = [];',
+          `const PRECACHE_ASSETS = ${JSON.stringify(productionAssets)};`
         );
-        writeFileSync(swPath, swContent, 'utf-8');
-        console.log(`[sw-cache-version] Injected cache name: ${buildVersion}`);
-      } catch {
-        console.warn('[sw-cache-version] Could not read/write dist/sw.js — skipping cache version injection');
-      }
+
+      this.emitFile({
+        type: 'asset',
+        fileName: 'sw.js',
+        source,
+      });
     },
   };
 }
@@ -61,8 +85,8 @@ export default defineConfig(() => {
     build: {
       // Target ES2022 to match the tsconfig target. The build produces
       // multiple chunks (entry + dynamic imports) with content-hashed
-      // names; the service worker parses /index.html on install to
-      // pre-cache them (see public/sw.js #23).
+      // names; the Vite SW plugin injects every emitted JS/CSS file into
+      // the Service Worker's precache list.
       target: 'es2022',
     },
     test: {

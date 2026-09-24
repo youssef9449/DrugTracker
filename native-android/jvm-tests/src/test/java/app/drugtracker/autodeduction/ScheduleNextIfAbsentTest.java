@@ -42,8 +42,12 @@ public class ScheduleNextIfAbsentTest {
         assertNotNull(d1);
 
         AutoDeductionScheduler s = newScheduler();
+        assertTrue(s.scheduleOccurrence(
+                "med", "dose", d, "08:00", 1.5, futureEpochMs(d, "08:00")).ok);
         AutoDeductionScheduler.ScheduleResult r =
-                s.scheduleNextOccurrenceIfAbsent("med", "dose", d, "08:00", 1.5, 1L);
+                s.scheduleNextOccurrenceIfAbsent(
+                        "med", "dose", d, "08:00", 1.5,
+                        readAuthGeneration("med", "dose"));
         assertTrue("expected create ok, got " + r.error, r.ok);
 
         String d1Key = AutoDeductionContract.occurrenceKey("med", "dose", d1);
@@ -96,9 +100,12 @@ public class ScheduleNextIfAbsentTest {
 
         AutoDeductionScheduler s = newScheduler();
         assertTrue(s.scheduleOccurrence(
+                "med", "dose", d, "01:00", 9.9, futureEpochMs(d, "01:00")).ok);
+        assertTrue(s.scheduleOccurrence(
                 "med", "dose", d1, "09:30", 3.0, futureEpochMs(d1, "09:30")).ok);
 
-        // Stale D delivery carries different amount/time — must not rewrite D+1.
+        // D+1 is already present with a newer payload — a stale duplicate D
+        // delivery must not rewrite it.
         AutoDeductionScheduler.ScheduleResult r =
                 s.scheduleNextOccurrenceIfAbsent("med", "dose", d, "01:00", 9.9,
                         readAuthGeneration("med", "dose"));
@@ -117,6 +124,8 @@ public class ScheduleNextIfAbsentTest {
         assertNotNull(d1);
 
         AutoDeductionScheduler s = newScheduler();
+        assertTrue(s.scheduleOccurrence(
+                "med", "dose", d, "10:00", 2.0, futureEpochMs(d, "10:00")).ok);
         assertTrue(s.scheduleOccurrence(
                 "med", "dose", d1, "10:00", 2.0, futureEpochMs(d1, "10:00")).ok);
 
@@ -146,6 +155,10 @@ public class ScheduleNextIfAbsentTest {
 
         AutoDeductionScheduler s = newScheduler();
         assertTrue(s.scheduleOccurrence(
+                "med", "am", d, "08:00", 1.0, futureEpochMs(d, "08:00")).ok);
+        assertTrue(s.scheduleOccurrence(
+                "med", "pm", d, "20:00", 1.0, futureEpochMs(d, "20:00")).ok);
+        assertTrue(s.scheduleOccurrence(
                 "med", "am", d1, "08:00", 1.0, futureEpochMs(d1, "08:00")).ok);
         assertTrue(s.scheduleOccurrence(
                 "med", "pm", d1, "20:00", 1.0, futureEpochMs(d1, "20:00")).ok);
@@ -171,7 +184,12 @@ public class ScheduleNextIfAbsentTest {
         assertNotNull(d1);
 
         AutoDeductionScheduler s = newScheduler();
-        assertTrue(s.scheduleNextOccurrenceIfAbsent("med", "dose", d, "07:00", 1.0, 1L).ok);
+        assertTrue(s.scheduleOccurrence(
+                "med", "dose", d, "07:00", 1.0, futureEpochMs(d, "07:00")).ok);
+        long generation = readAuthGeneration("med", "dose");
+        assertTrue(generation > 0L);
+        assertTrue(s.scheduleNextOccurrenceIfAbsent(
+                "med", "dose", d, "07:00", 1.0, generation).ok);
         String d1Key = AutoDeductionContract.occurrenceKey("med", "dose", d1);
         String firstRaw = schedulePrefs().getString(schKey(d1Key), null);
         assertNotNull(firstRaw);

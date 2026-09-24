@@ -1,6 +1,7 @@
 import { __setStockMutationOrderingTestHooks, __resetStockMutationOrderingForTests, __setManualEnvelopeTestHooks, __setAutoStockGateTestHooks } from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Medication } from '../../src/types';
+import type { AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
 import { makeScheduledMedication as med } from '../fixtures/testFixtures';
 import { runGatedManualConsume, runGatedManualRestore, runGatedAutoDeductToggle, runGatedMedicationUpdate, shouldDismissAlarmAfterManualTake } from '../../src/utils/manualStockMutation';
 
@@ -34,7 +35,7 @@ beforeEach(() => {
     generation: 1,
   });
   autoSchedulingMocks.scheduleAutoDeduction.mockResolvedValue({ ok: true });
-  autoSchedulingMocks.recoverAutoDeductionOccurrence.mockResolvedValue({ ok: true });
+  autoSchedulingMocks.recoverAutoDeductionOccurrenceForCompensation.mockResolvedValue({ ok: true });
 });
 // findPending used indirectly via runGatedManualConsume
 
@@ -449,6 +450,7 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
       todayStr: TODAY,
       getOccurrenceSnapshot: async () => ({
         ok: false,
+        errorCode: 'platform_failure',
         error: 'native_read_failed',
       }),
     });
@@ -481,6 +483,7 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
       todayStr: TODAY,
       getOccurrenceSnapshot: async () => ({
         ok: false,
+        errorCode: 'platform_failure',
         error: 'rejected_persist_failed',
       }),
     });
@@ -694,13 +697,15 @@ describe('Phase 4 — treatment-boundary-safe recurrence compensation', () => {
     });
 
     expect(result.outcome).toBe('persist_failed');
-    expect(autoSchedulingMocks.recoverAutoDeductionOccurrence).toHaveBeenCalledWith(
+    expect(autoSchedulingMocks.recoverAutoDeductionOccurrenceForCompensation).toHaveBeenCalledWith(
       id,
       'd1',
       '2026-09-23',
       expect.any(Number),
       1,
-      1
+      1,
+      '2026-09-28',
+      '20:00'
     );
     expect(scheduleCalls).toEqual([
       {

@@ -3,7 +3,7 @@
  *
  * Causal rule: envelopes store full post-mutation snapshots. When several are
  * pending above lastAppliedMutationSeq, recover the highest seq first; lower
- * seqs become obsolete once lastApplied advances past them.
+ * Earlier sequence values become irrelevant once lastApplied advances past them.
  *
  * lastAppliedMutationSeq is required finalization proof — not best-effort.
  * Log IDs are only used to avoid duplicate log insertion, not as sole proof
@@ -510,7 +510,7 @@ export async function recoverManualEnvelopeInto(
     persistMeds?: (meds: Medication[]) => string | null;
     persistLogs?: (logs: ConsumptionLog[]) => string | null;
   }
-): {
+): Promise<{
   ok: true;
   state: AutoStockDurableState;
   exactToAcknowledge: UnifiedRecoveryResult['exactToAcknowledge'];
@@ -518,7 +518,7 @@ export async function recoverManualEnvelopeInto(
   ok: false;
   state: AutoStockDurableState;
   exactToAcknowledge: UnifiedRecoveryResult['exactToAcknowledge'];
-} {
+}> {
   const pending: PendingEnvelopeRef[] = [];
   const manual = loadManualStockEnvelope();
   if (manual) {

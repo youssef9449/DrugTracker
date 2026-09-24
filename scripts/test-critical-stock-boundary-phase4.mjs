@@ -159,8 +159,10 @@ assert(
 );
 
 assert(
-  criticalScheduler.includes('criticalNotificationClaims')
-    && criticalScheduler.includes('GenerationGuard'),
+  criticalScheduler.includes('loadCriticalNotificationClaims')
+    && criticalScheduler.includes('getCriticalNotificationClaim')
+    && criticalScheduler.includes('bumpCriticalAlarmGeneration')
+    && criticalScheduler.includes('currentCriticalAlarmGeneration'),
   'Critical business scheduler must own claim/generation semantics'
 );
 

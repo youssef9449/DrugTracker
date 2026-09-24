@@ -55,7 +55,7 @@ public final class NotificationRuntimeActionReceiver extends BroadcastReceiver {
             }
         } else {
             Intent event = new Intent(
-                    NotificationRuntimePlugin.ACTION_ACTION_PERFORMED);
+                    NotificationRuntime.ACTION_ACTION_PERFORMED);
             event.setPackage(context.getPackageName());
             event.putExtra(
                     NotificationRuntime.EXTRA_NAMESPACE,

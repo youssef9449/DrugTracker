@@ -1,10 +1,8 @@
 /**
  * Multi-dose schedule helpers.
  *
- * These helpers prepare and validate doseSchedule / dosesPerDay without
- * changing auto-deduction or notification scheduling. The existing
- * engine continues to use `dailyDose` (total units per day) and a single
- * `reminderTime`.
+ * These helpers prepare and validate the explicit doseSchedule / dosesPerDay
+ * model without introducing a second persisted source for dose timing.
  *
  * Source of truth:
  *   When a non-empty `doseSchedule` is present, `doseSchedule.length` is
@@ -23,7 +21,7 @@ import { isDoseConsumedOnDate, isDoseSkippedOnDate, getTodayDateString } from '.
 export function isMedicationAutoDeductActive(
   medication: Medication
 ): boolean {
-  return medication.autoDeductEnabled !== false;
+  return medication.autoDeductEnabled === true;
 }
 /** Sensible UI maximum for doses per day (compact mobile form). */
 export const MAX_DOSES_PER_DAY = 12;
@@ -81,7 +79,7 @@ export function totalDailyAmount(schedule: MedicationDose[]): number {
 /**
  * Map a medication to a UI-ready schedule from explicit `doseSchedule` only.
  *
- * No synthetic rows from dailyDose/reminderTime. Empty/missing schedule → [].
+ * No synthetic rows from dailyDose or any medication-level time field. Empty/missing schedule → [].
  * Existing ids/amounts/times are preserved (ids still generated only when a
  * stored row is missing id — not a whole-schedule invention).
  */
@@ -176,8 +174,6 @@ export interface DoseScheduleValidationResult {
   schedule?: MedicationDose[];
   dailyDose?: number;
   dosesPerDay?: number;
-  /** Earliest time — kept as reminderTime for Phase-1 single-reminder compat. */
-  reminderTime?: string;
 }
 /**
  * Validate and normalize a working schedule before save.
@@ -254,7 +250,6 @@ export function validateAndNormalizeDoseSchedule(
     schedule: sorted,
     dailyDose,
     dosesPerDay: sorted.length,
-    reminderTime: sorted[0]?.time ?? '09:00',
   };
 }
 /**
@@ -296,7 +291,7 @@ export function isDoseCompletedToday(
   const autoActive =
     autoDeductActive !== undefined
       ? autoDeductActive
-      : med.autoDeductEnabled !== false;
+      : med.autoDeductEnabled === true;
   if (autoActive && isDoseTimeElapsedToday(dose.time, now)) {
     return true;
   }

@@ -1,4 +1,4 @@
-import { __setStockMutationOrderingTestHooks, __setManualEnvelopeTestHooks, __setAutoStockGateTestHooks, __setExactAutoEnvelopeTestHooks } from '../utils/autoStockTestHooks';
+import { __setStockMutationOrderingTestHooks, __setManualEnvelopeTestHooks, __setAutoStockGateTestHooks, __setExactAutoEnvelopeTestHooks } from './utils/autoStockTestHooks';
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
@@ -13,7 +13,7 @@ vi.mock('@/native', () => ({
   registerAppResumeHandler: vi.fn(),
   cleanupNativeListeners: vi.fn(),
 }));
-vi.mock('@/utils/notifications', () => ({
+vi.mock('./utils/notificationTestFacade', () => ({
   requestNotificationPermission: vi.fn(() => Promise.resolve(true)),
   sendMedicineAlert: vi.fn(),
   sendCriticalStockAlert: vi.fn(() => Promise.resolve(true)),
@@ -62,7 +62,6 @@ import App from '@/App';
 import { runAutoDeductionReconciliation } from '@/utils/runAutoDeductionReconciliation';
 
 import { getInitialMedications } from './fixtures/initialData';
-import { seedTestMedication as seedMed, readDurableMedication as getDurableMed, readDurableLogs as getDurableLogs } from './fixtures/testFixtures';
 
 import { initNativeBridge } from '@/native';
 
@@ -208,7 +207,7 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
   }
 
   /** Seed a single med in localStorage so App renders one MedicationCard. */
-): void {
+function seedMed(overrides: Record<string, unknown> = {}): void {
     localStorage.setItem(
       'android_med_tracker_items_v2',
       JSON.stringify([
@@ -232,9 +231,19 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
   }
 
   /** Read the durable med from localStorage after a mutation. */
-
+  function getDurableMed(): Record<string, unknown> | undefined {
+    const raw = localStorage.getItem('android_med_tracker_items_v2');
+    if (!raw) return undefined;
+    const meds = JSON.parse(raw) as Record<string, unknown>[];
+    return meds.find((m) => m.id === 'med-toggle');
+  }
 
   /** Read the durable logs from localStorage after a mutation. */
+  function getDurableLogs(): Record<string, unknown>[] {
+    const raw = localStorage.getItem('android_med_tracker_logs_v2');
+    if (!raw) return [];
+    return JSON.parse(raw) as Record<string, unknown>[];
+  }
 
 
   it('Test A — ON → OFF: changes autoDeductEnabled only; currentPills unchanged; no exact_auto log', async () => {
@@ -288,10 +297,10 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
     // durable storage, called by commitWithManualEnvelope inside the
     // gated handler. It is NOT a UI callback or React render.
     let toggleCommitCount = 0;
-    const { __setAutoStockGateTestHooks } = await import('../utils/autoStockTestHooks');
-    const { __setManualEnvelopeTestHooks } = await import('../utils/autoStockTestHooks');
-    const { __setExactAutoEnvelopeTestHooks } = await import('../utils/autoStockTestHooks');
-    const { __setStockMutationOrderingTestHooks } = await import('../utils/autoStockTestHooks');
+    const { __setAutoStockGateTestHooks } = await import('./utils/autoStockTestHooks');
+    const { __setManualEnvelopeTestHooks } = await import('./utils/autoStockTestHooks');
+    const { __setExactAutoEnvelopeTestHooks } = await import('./utils/autoStockTestHooks');
+    const { __setStockMutationOrderingTestHooks } = await import('./utils/autoStockTestHooks');
 
     // Install gate hooks: load from real localStorage, commit to real
     // localStorage (so the app reads the updated state), but also count

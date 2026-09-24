@@ -45,25 +45,20 @@ import {
 } from './medicationTreatment';
 import {
   loadDurableGlobalAutoDeductEnabled,
-  type AutoStockDurableState,
 } from './autoDeductionStockGate';
-import {
-  saveManualStockEnvelope,
-} from './stockEnvelopeRecovery';
 import {
   cancelDoseReminderNative,
   cancelDoseSnoozeNative,
 } from './doseReminderNative';
 import {
   scheduleDoseReminder,
-  getDoseReminderSlots,
 } from './doseReminderScheduling';
 import { scheduleSnoozedDoseReminder } from './notifications/doseReminderNotifications';
 import {
   getSnoozeUntil,
   isSnoozeActive,
 } from './doseReminderStorage';
-import { doseReminderDefinitionChanged } from './doseReminderDefinitions';
+import { doseReminderDefinitionChanged, getDoseReminderSlots } from './doseReminderDefinitions';
 import { runManualStockTransaction, commitWithManualEnvelope } from './manualStockTransaction';
 export type {
   ManualStockEnvelope,
@@ -148,16 +143,17 @@ async function restoreInvalidatedRecurrences(
       if (epoch <= Date.now() - 2000) {
         // The old schedule was already due when compensation started.
         // Reuse native Auto catch-up/stock idempotency instead of silently skipping it.
-        if (entry.generation <= 0) {
+        const generation = entry.generation ?? 0;
+        if (generation <= 0) {
           return { ok: false, error: 'missing_compensation_generation' };
         }
         const recovery = await recoverAutoDeductionOccurrenceForCompensation(
           med.id,
-          def.doseId,
+          def.id,
           calendarDate,
           epoch,
           def.amount,
-          entry.generation,
+          generation,
           treatmentEndDate ?? undefined,
           def.time
         );
@@ -168,7 +164,7 @@ async function restoreInvalidatedRecurrences(
       }
       const result = await scheduleAutoDeduction({
         medicationId: med.id,
-        doseId: def.doseId,
+        doseId: def.id,
         calendarDate,
         timeHhmm: def.time,
         amount: def.amount,
@@ -300,11 +296,11 @@ async function invalidateMedicationRecurrences(
       // A cancel-first invalidation can fail after successfully canceling this
       // dose's native schedules (generation persistence failed). Include that
       // dose in compensation so the old JS state can be restored completely.
-      if (result.schedulesCancelled && result.generation > 0) {
+      if (result.schedulesCancelled && (result.generation ?? 0) > 0) {
         invalidatedDoseIds.push(doseId);
         invalidated.push({
           doseId,
-          generation: result.generation,
+          generation: result.generation ?? 0,
         });
       }
       let compensationError: string | undefined;
@@ -314,7 +310,7 @@ async function invalidateMedicationRecurrences(
           invalidated
         );
         if (!compensation.ok) {
-          compensationError = compensation.error;
+          compensationError = compensation.error ?? null;
         }
       }
       return {
@@ -507,6 +503,7 @@ export function runGatedManualConsume(opts: {
       medicationName: med.name,
       unit: med.unit,
     };
+  }
   });
 }
 export function runGatedManualRestore(opts: {
@@ -554,7 +551,7 @@ export function runGatedManualRestore(opts: {
           logs: fresh.logs,
           restoredAmount: 0,
           log: null,
-          reason: result.reason,
+          reason: result.reason ?? 'mutation_failed',
           medicationName: med.name,
           unit: med.unit,
         };
@@ -585,7 +582,7 @@ export function runGatedManualRestore(opts: {
         logs: fresh.logs,
         restoredAmount: 0,
         log: null,
-        reason: result.reason,
+        reason: result.reason ?? 'mutation_failed',
         medicationName: med.name,
         unit: med.unit,
       };
@@ -682,6 +679,7 @@ export function runGatedManualRestore(opts: {
       medicationName: med.name,
       unit: med.unit,
     };
+  }
   });
 }
 export interface GatedAddMedicationResult {
@@ -708,7 +706,7 @@ export function runGatedAddMedication(opts: {
         logs: failure.state.logs,
         reason: failure.reason,
       }),
-      operation: async ({ fresh, todayStr, now }) => {    if (fresh.medications.some((m) => m.id === opts.medication.id)) {
+      operation: async ({ fresh }) => {    if (fresh.medications.some((m) => m.id === opts.medication.id)) {
       return {
         outcome: 'duplicate_med_id' as const,
         medications: fresh.medications,
@@ -754,6 +752,7 @@ export function runGatedAddMedication(opts: {
       medicationName: medication.name,
       unit: medication.unit,
     };
+  }
   });
 }
 export type GatedRefillOutcome =
@@ -862,6 +861,7 @@ export function runGatedRefill(opts: {
       medicationName: med.name,
       unit: med.unit,
     };
+  }
   });
 }
 /**
@@ -978,6 +978,7 @@ export function runGatedUndoRefill(opts: {
       medicationName: med.name,
       unit: med.unit,
     };
+  }
   });
 }
 export type GatedToggleOutcome =
@@ -1016,7 +1017,7 @@ export function runGatedAutoDeductToggle(opts: {
         settleLog: null,
         reason: failure.reason,
       }),
-      operation: async ({ fresh, todayStr, now }) => {
+      operation: async ({ fresh }) => {
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
       return {
@@ -1045,7 +1046,7 @@ export function runGatedAutoDeductToggle(opts: {
         logs: fresh.logs,
         newState,
         settleLog: null,
-        reason: invalidation.error,
+        reason: invalidation.error ?? 'native_invalidation_failed',
         medicationName: med.name,
         unit: med.unit,
       };
@@ -1058,7 +1059,7 @@ export function runGatedAutoDeductToggle(opts: {
           med,
           invalidation.invalidated
         );
-        if (!compensation.ok) compensationError = compensation.error;
+        if (!compensation.ok && compensation.error) compensationError = compensation.error;
       }
       return {
         outcome: 'native_invalidation_failed' as const,
@@ -1068,7 +1069,7 @@ export function runGatedAutoDeductToggle(opts: {
         settleLog: null,
         reason: compensationError
           ? doseInvalidation.error + ';compensation:' + compensationError
-          : doseInvalidation.error,
+          : doseInvalidation.error ?? 'native_invalidation_failed',
         medicationName: med.name,
         unit: med.unit,
       };
@@ -1085,7 +1086,7 @@ export function runGatedAutoDeductToggle(opts: {
           invalidation.invalidated
         );
         if (!compensation.ok) {
-          compensationError = compensation.error;
+          compensationError = compensation.error ?? null;
         }
       }
       const doseCompensation = await restoreInvalidatedDoseReminders(med);
@@ -1114,6 +1115,7 @@ export function runGatedAutoDeductToggle(opts: {
       medicationName: updatedMed.name,
       unit: updatedMed.unit,
     };
+  }
   });
 }
 export interface GatedGlobalAutoDeductToggleResult {
@@ -1147,7 +1149,7 @@ export function runGatedGlobalAutoDeductToggle(opts: {
         settleLogs: [],
         reason: failure.reason,
       }),
-      operation: async ({ fresh, todayStr, now }) => {
+      operation: async ({ fresh }) => {
     // Global is a bulk state setter for ALL existing medications AND the
     // default for newly added ones. Flip autoDeductEnabled only — do not
     // settle stock, invent consumption logs, or mutate currentPills here.
@@ -1182,7 +1184,7 @@ export function runGatedGlobalAutoDeductToggle(opts: {
               completed.invalidated
             );
             if (!compensation.ok && compensationError == null) {
-              compensationError = compensation.error;
+              compensationError = compensation.error ?? null;
             }
           }
 
@@ -1194,7 +1196,7 @@ export function runGatedGlobalAutoDeductToggle(opts: {
             settleLogs: [],
             reason: compensationError
               ? invalidation.error + ';compensation:' + compensationError
-              : invalidation.error,
+              : invalidation.error ?? 'native_invalidation_failed',
           };
         }
 
@@ -1219,7 +1221,7 @@ export function runGatedGlobalAutoDeductToggle(opts: {
             autoInvalidation.invalidated
           );
           if (!compensation.ok) {
-            compensationError = compensation.error;
+            compensationError = compensation.error ?? null;
           }
         }
 
@@ -1230,7 +1232,7 @@ export function runGatedGlobalAutoDeductToggle(opts: {
             completed.invalidated
           );
           if (!compensation.ok && compensationError == null) {
-            compensationError = compensation.error;
+            compensationError = compensation.error ?? null;
           }
         }
 
@@ -1239,7 +1241,7 @@ export function runGatedGlobalAutoDeductToggle(opts: {
             completed
           );
           if (!compensation.ok && compensationError == null) {
-            compensationError = compensation.error;
+            compensationError = compensation.error ?? null;
           }
         }
 
@@ -1248,7 +1250,7 @@ export function runGatedGlobalAutoDeductToggle(opts: {
         const currentDoseCompensation =
           await restoreInvalidatedDoseReminders(med);
         if (!currentDoseCompensation.ok && compensationError == null) {
-          compensationError = currentDoseCompensation.error;
+          if (currentDoseCompensation.error) compensationError = currentDoseCompensation.error;
         }
 
         return {
@@ -1259,7 +1261,7 @@ export function runGatedGlobalAutoDeductToggle(opts: {
           settleLogs: [],
           reason: compensationError
             ? doseInvalidation.error + ';compensation:' + compensationError
-            : doseInvalidation.error,
+            : doseInvalidation.error ?? 'native_invalidation_failed',
         };
       }
 
@@ -1284,7 +1286,7 @@ export function runGatedGlobalAutoDeductToggle(opts: {
             completed.invalidated
           );
           if (!compensation.ok && compensationError == null) {
-            compensationError = compensation.error;
+            compensationError = compensation.error ?? null;
           }
         }
       }
@@ -1293,7 +1295,7 @@ export function runGatedGlobalAutoDeductToggle(opts: {
           completed
         );
         if (!compensation.ok && compensationError == null) {
-          compensationError = compensation.error;
+          compensationError = compensation.error ?? null;
         }
       }
       return {
@@ -1314,6 +1316,7 @@ export function runGatedGlobalAutoDeductToggle(opts: {
       enable: opts.enable,
       settleLogs: [],
     };
+  }
   });
 }
 export type GatedDeleteMedicationOutcome =
@@ -1347,7 +1350,7 @@ export function runGatedDeleteMedication(opts: {
         logs: failure.state.logs,
         reason: failure.reason,
       }),
-      operation: async ({ fresh, todayStr, now }) => {    const med = fresh.medications.find((m) => m.id === opts.medicationId);
+      operation: async ({ fresh }) => {    const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
       return {
         outcome: 'missing_med' as const,
@@ -1366,7 +1369,7 @@ export function runGatedDeleteMedication(opts: {
         outcome: 'native_invalidation_failed' as const,
         medications: fresh.medications,
         logs: fresh.logs,
-        reason: invalidation.error,
+        reason: invalidation.error ?? 'native_invalidation_failed',
         medicationName: med.name,
         unit: med.unit,
       };
@@ -1379,11 +1382,11 @@ export function runGatedDeleteMedication(opts: {
           med,
           invalidation.invalidated
         );
-        if (!compensation.ok) compensationError = compensation.error;
+        if (!compensation.ok && compensation.error) compensationError = compensation.error;
       }
       const doseCompensation = await restoreInvalidatedDoseReminders(med);
       if (!doseCompensation.ok && compensationError == null) {
-        compensationError = doseCompensation.error;
+        if (doseCompensation.error) compensationError = doseCompensation.error;
       }
       return {
         outcome: 'native_invalidation_failed' as const,
@@ -1391,7 +1394,7 @@ export function runGatedDeleteMedication(opts: {
         logs: fresh.logs,
         reason: compensationError
           ? doseInvalidation.error + ';compensation:' + compensationError
-          : doseInvalidation.error,
+          : doseInvalidation.error ?? 'native_invalidation_failed',
         medicationName: med.name,
         unit: med.unit,
       };
@@ -1409,12 +1412,12 @@ export function runGatedDeleteMedication(opts: {
           invalidation.invalidated
         );
         if (!compensation.ok) {
-          compensationError = compensation.error;
+          compensationError = compensation.error ?? null;
         }
       }
       const doseCompensation = await restoreInvalidatedDoseReminders(med);
       if (!doseCompensation.ok && compensationError == null) {
-        compensationError = doseCompensation.error;
+        if (doseCompensation.error) compensationError = doseCompensation.error;
       }
       return {
         outcome: 'persist_failed' as const,
@@ -1434,6 +1437,7 @@ export function runGatedDeleteMedication(opts: {
       medicationName: med.name,
       unit: med.unit,
     };
+  }
   });
 }
 export type GatedMedicationUpdateOutcome =
@@ -1485,7 +1489,7 @@ export function runGatedMedicationNotificationToggle(opts: {
         medications: failure.state.medications,
         logs: failure.state.logs,
       }),
-      operation: async ({ fresh, todayStr, now }) => {
+      operation: async ({ fresh }) => {
     const med = fresh.medications.find((m) => m.id === opts.medicationId);
     if (!med) {
       return {
@@ -1496,7 +1500,7 @@ export function runGatedMedicationNotificationToggle(opts: {
     }
     const currentEnabled =
       opts.field === 'criticalStockAlertsEnabled'
-        ? med.criticalStockAlertsEnabled !== false
+        ? med.criticalStockAlertsEnabled === true
         : med.reminderEnabled === true;
     const enabled = !currentEnabled;
     const updatedMed: Medication = {
@@ -1517,7 +1521,7 @@ export function runGatedMedicationNotificationToggle(opts: {
         medications: fresh.medications,
         logs: fresh.logs,
         medicationName: med.name,
-        reason: doseInvalidation.error,
+        reason: doseInvalidation.error ?? 'native_invalidation_failed',
       };
     }
 
@@ -1529,7 +1533,7 @@ export function runGatedMedicationNotificationToggle(opts: {
       let compensationError: string | undefined;
       if (opts.field === 'reminderEnabled') {
         const compensation = await restoreInvalidatedDoseReminders(med);
-        if (!compensation.ok) compensationError = compensation.error;
+        if (!compensation.ok && compensation.error) compensationError = compensation.error;
       }
       return {
         outcome: 'persist_failed' as const,
@@ -1548,6 +1552,7 @@ export function runGatedMedicationNotificationToggle(opts: {
       medicationName: med.name,
       enabled,
     };
+  }
   });
 }
 export function runGatedMedicationUpdate(opts: {
@@ -1566,7 +1571,7 @@ export function runGatedMedicationUpdate(opts: {
         settleLog: null,
         reason: failure.reason,
       }),
-      operation: async ({ fresh, todayStr, now }) => {
+      operation: async ({ fresh }) => {
     const freshMed = fresh.medications.find((m) => m.id === opts.editId);
     if (!freshMed) {
       return {
@@ -1598,7 +1603,7 @@ export function runGatedMedicationUpdate(opts: {
           medications: fresh.medications,
           logs: fresh.logs,
           settleLog: null,
-          reason: invalidation.error,
+          reason: invalidation.error ?? 'native_invalidation_failed',
           medicationName: freshMed.name,
           unit: freshMed.unit,
         };
@@ -1617,7 +1622,7 @@ export function runGatedMedicationUpdate(opts: {
             freshMed,
             invalidation.invalidated
           );
-          if (!compensation.ok) compensationError = compensation.error;
+          if (!compensation.ok && compensation.error) compensationError = compensation.error;
         }
         const doseCompensation =
           await restoreInvalidatedDoseReminders(freshMed);
@@ -1631,7 +1636,7 @@ export function runGatedMedicationUpdate(opts: {
           settleLog: null,
           reason: compensationError
             ? doseInvalidation.error + ';compensation:' + compensationError
-            : doseInvalidation.error,
+            : doseInvalidation.error ?? 'native_invalidation_failed',
           medicationName: freshMed.name,
           unit: freshMed.unit,
         };
@@ -1688,14 +1693,14 @@ export function runGatedMedicationUpdate(opts: {
           invalidation.invalidated
         );
         if (!compensation.ok) {
-          compensationError = compensation.error;
+          compensationError = compensation.error ?? null;
         }
       }
       if (doseChanged) {
         const doseCompensation =
           await restoreInvalidatedDoseReminders(freshMed);
         if (!doseCompensation.ok && compensationError == null) {
-          compensationError = doseCompensation.error;
+          compensationError = doseCompensation.error ?? null;
         }
       }
       return {
@@ -1718,5 +1723,6 @@ export function runGatedMedicationUpdate(opts: {
       medicationName: finalMed.name,
       unit: finalMed.unit,
     };
+  }
   });
 }

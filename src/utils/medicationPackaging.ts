@@ -12,7 +12,7 @@ export function normalizeDisplayQuantity(value: number): number {
 
   const nearest = Math.round(value);
   const scale = Math.max(Math.abs(value), Math.abs(nearest), 1);
-  const intEps = Number.EPSILON * scale * 8;
+  const intEps = Number.EPSILON * scale * 2048;
   if (Math.abs(value - nearest) <= intEps) return nearest;
 
   const abs = Math.abs(value);

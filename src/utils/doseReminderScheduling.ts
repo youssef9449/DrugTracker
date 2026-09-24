@@ -1,5 +1,5 @@
 import { formatReminderTime12h } from './time';
-import { getTodayDateString, tomorrowDateString, localEpochMs } from './dateCalculations';
+import { getTodayDateString, getLocalDateString, tomorrowDateString, localEpochMs } from './dateCalculations';
 import {
   scheduleDoseReminderNative,
   cancelDoseReminderNative,
@@ -144,7 +144,7 @@ export function isDoseReminderTimeStillAhead(
   reminderTime: string,
   now: Date = new Date()
 ): boolean {
-  const today = getTodayDateString(now);
+  const today = getLocalDateString(now);
   const todayEpoch = localEpochMs(today, reminderTime);
   return todayEpoch != null && todayEpoch > now.getTime();
 }

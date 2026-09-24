@@ -1,17 +1,21 @@
 /** Persistent per-dose snooze marker with failure-aware accessors. */
-import { loadValidatedJson, saveJson } from './storage';
+import { loadValidatedJson, saveJson, type JsonParserVerdict } from './storage';
 
 export const SNOOZE_KEY = 'android_med_tracker_snooze_v1';
 
 /** Runtime validator for the persisted snooze map (doseKey → epoch ms). */
-function parseSnoozeMap(raw: unknown): Record<string, number> | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+function parseSnoozeMap(raw: unknown): JsonParserVerdict<Record<string, number>> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, reason: 'snooze_map_shape_invalid' };
+  }
   const map: Record<string, number> = {};
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return { ok: false, reason: 'snooze_map_value_invalid' };
+    }
     map[key] = value;
   }
-  return map;
+  return { ok: true, value: map };
 }
 
 export function snoozeStorageKey(medId: string, doseId: string): string | null {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Medication } from '../types';
 import { getTodayDateString, isDoseConsumedOnDate } from '../utils/dateCalculations';
 import { stopAllSounds } from '../utils/sound';
-import { loadValidatedJson, saveJson } from '../utils/storage';
+import { loadValidatedJson, saveJson, type JsonParserVerdict } from '../utils/storage';
 import { DEFAULT_SNOOZE_MINUTES, MS_PER_MINUTE } from '../utils/time';
 import { validateMedicationDose, normalizeDoseId } from '../utils/doseIdentity';
 import { scheduleSnoozedDoseReminder, cancelSnoozedDoseReminder } from '../utils/notifications/doseReminderNotifications';
@@ -19,14 +19,18 @@ import {
 } from '../utils/doseReminderStorage';
 const FIRED_KEY = 'android_med_tracker_fired_reminders_v1';
 /** Runtime validator for the persisted fired-reminder dedup map. */
-function parseFiredMap(raw: unknown): Record<string, boolean> | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+function parseFiredMap(raw: unknown): JsonParserVerdict<Record<string, boolean>> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, reason: 'fired_map_shape_invalid' };
+  }
   const map: Record<string, boolean> = {};
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof value !== 'boolean') return null;
+    if (typeof value !== 'boolean') {
+      return { ok: false, reason: 'fired_map_value_invalid' };
+    }
     map[key] = value;
   }
-  return map;
+  return { ok: true, value: map };
 }
 /** Fired-dedup key: medicationId + doseId + calendarDate. */
 function firedKey(medId: string, dateStr: string, doseId: string) {

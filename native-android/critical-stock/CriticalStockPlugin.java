@@ -7,6 +7,8 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import app.drugtracker.alarmruntime.NativeErrorCodes;
+
 /** Thin Capacitor bridge; scheduling remains entirely in CriticalStockAlarmAdapter. */
 @CapacitorPlugin(name = "CriticalStock")
 public final class CriticalStockPlugin extends Plugin {
@@ -40,7 +42,11 @@ public final class CriticalStockPlugin extends Plugin {
 
                 JSObject ret = new JSObject();
                 ret.put("ok", result.ok);
-                if (result.error != null) ret.put("error", result.error); ret.put("code", result.error);
+                // #534: structured machine code; the raw message stays in `error`.
+                if (result.error != null) {
+                    ret.put("error", result.error);
+                    ret.put("code", NativeErrorCodes.structuredCode(result.error, "platform_failure"));
+                }
                 call.resolve(ret);
             } catch (Exception e) {
                 call.reject("critical_stock_schedule_failed");
@@ -60,7 +66,11 @@ public final class CriticalStockPlugin extends Plugin {
                 JSObject ret = new JSObject();
                 ret.put("ok", result.isOk());
                 ret.put("status", result.status.name());
-                if (result.error != null) ret.put("error", result.error); ret.put("code", result.error);
+                // #534: structured machine code; the raw message stays in `error`.
+                if (result.error != null) {
+                    ret.put("error", result.error);
+                    ret.put("code", NativeErrorCodes.structuredCode(result.error, "platform_failure"));
+                }
                 call.resolve(ret);
             } catch (Exception e) {
                 call.reject("critical_stock_cancel_failed");

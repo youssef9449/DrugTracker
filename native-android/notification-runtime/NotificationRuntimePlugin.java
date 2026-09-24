@@ -1,5 +1,6 @@
 package app.drugtracker.notificationruntime;
 
+import app.drugtracker.alarmruntime.NativeErrorCodes;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -122,7 +123,8 @@ public final class NotificationRuntimePlugin extends Plugin {
         ret.put("ok", result.accepted);
         if (result.error != null) {
             ret.put("error", result.error);
-            ret.put("code", result.error);
+            // #534: structured machine code; the raw message stays in `error`.
+            ret.put("code", NativeErrorCodes.structuredCode(result.error, "platform_failure"));
             // #511: distinguish "delivery failed, retry evidence stored" from
             // "delivery failed AND retry evidence could not be stored".
             if (result.retryEvidence == NotificationRuntime.PostResult.RetryEvidenceState.FAILED) {
@@ -143,7 +145,8 @@ public final class NotificationRuntimePlugin extends Plugin {
         ret.put("ok", result.accepted);
         if (result.error != null) {
             ret.put("error", result.error);
-            ret.put("code", result.error);
+            // #534: structured machine code; the raw message stays in `error`.
+            ret.put("code", NativeErrorCodes.structuredCode(result.error, "platform_failure"));
             // #511: distinguish "delivery failed, retry evidence stored" from
             // "delivery failed AND retry evidence could not be stored".
             if (result.retryEvidence == NotificationRuntime.PostResult.RetryEvidenceState.FAILED) {

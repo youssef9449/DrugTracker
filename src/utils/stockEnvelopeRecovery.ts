@@ -19,7 +19,12 @@ import {
   loadLastAppliedMutationSeq,
   persistLastAppliedMutationSeq,
 } from './stockMutationOrdering';
-import { persist, readJsonOutcome, type StorageJsonOutcome } from './storage';
+import {
+  persist,
+  readJsonOutcome,
+  type JsonParserVerdict,
+  type StorageJsonOutcome,
+} from './storage';
 import { applyForegroundAutoStockDeltas } from './autoDeductionNativeStock';
 
 export const STORAGE_MANUAL_ENVELOPE_KEY =
@@ -72,10 +77,12 @@ function isValidExactAutoEnvelope(
  * recovery never treats corruption as "nothing pending".
  */
 export function readExactAutoStockEnvelopeOutcome(): StorageJsonOutcome<ExactAutoEnvelopeStored> {
-  return readJsonOutcome(STORAGE_EXACT_AUTO_ENVELOPE_KEY, (raw) =>
-    isValidExactAutoEnvelope(raw as ExactAutoEnvelopeStored | null | undefined)
-      ? (raw as ExactAutoEnvelopeStored)
-      : null
+  return readJsonOutcome(
+    STORAGE_EXACT_AUTO_ENVELOPE_KEY,
+    (raw): JsonParserVerdict<ExactAutoEnvelopeStored> =>
+      isValidExactAutoEnvelope(raw as ExactAutoEnvelopeStored | null | undefined)
+        ? { ok: true, value: raw as ExactAutoEnvelopeStored }
+        : { ok: false, reason: 'exact_auto_envelope_shape_invalid' }
   );
 }
 
@@ -148,7 +155,9 @@ export interface PendingEnvelopeRef {
 /** Outcome-aware Manual envelope read (missing vs invalid distinction). */
 export function readManualStockEnvelopeOutcome(): StorageJsonOutcome<ManualStockEnvelope> {
   return readJsonOutcome(STORAGE_MANUAL_ENVELOPE_KEY, (raw) => {
-    if (!raw || typeof raw !== 'object') return null;
+    if (!raw || typeof raw !== 'object') {
+      return { ok: false, reason: 'manual_envelope_shape_invalid' } as const;
+    }
     const candidate = raw as Partial<ManualStockEnvelope>;
     if (
       candidate.version !== 1 ||
@@ -165,9 +174,9 @@ export function readManualStockEnvelopeOutcome(): StorageJsonOutcome<ManualStock
       candidate.createdAt.length === 0 ||
       typeof candidate.baseGeneration !== 'number'
     ) {
-      return null;
+      return { ok: false, reason: 'manual_envelope_fields_invalid' } as const;
     }
-    return raw as ManualStockEnvelope;
+    return { ok: true, value: raw as ManualStockEnvelope } as const;
   });
 }
 

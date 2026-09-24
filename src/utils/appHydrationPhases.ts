@@ -27,6 +27,7 @@ import {
   persist,
   readJsonOutcome,
   readStorageItem,
+  type JsonParserVerdict,
 } from './storage';
 import { convergeAutoDeductionStock } from './autoDeductionNativeStock';
 import {
@@ -64,12 +65,38 @@ export interface PersistedAppHydrationState {
   shouldShowAutoDeductPrompt: boolean;
 }
 
-/** Runtime-validated pharmacy-settings parser for durable reads. */
+/**
+ * Runtime-validated pharmacy-settings parser for durable reads (#477).
+ * Validates the persisted object shape explicitly — the boundary never
+ * hands back a bare generic cast of unvalidated durable data.
+ */
 function parsePharmacySettings(
   raw: unknown
-): Partial<PharmacySettings> | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  return raw as Partial<PharmacySettings>;
+): JsonParserVerdict<Partial<PharmacySettings>> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, reason: 'pharmacy_settings_shape_invalid' };
+  }
+  const candidate = raw as Record<string, unknown>;
+  const arrayFields = [
+    'pharmacies',
+    'whatsappContacts',
+    'whatsappAddresses',
+    'selectedWhatsappContactIds',
+    'selectedWhatsappAddressIds',
+  ] as const;
+  for (const field of arrayFields) {
+    const value = candidate[field];
+    if (value !== undefined && !Array.isArray(value)) {
+      return { ok: false, reason: `pharmacy_${field}_not_array` };
+    }
+  }
+  if (
+    candidate.defaultDurationDays !== undefined &&
+    candidate.defaultDurationDays !== 60
+  ) {
+    return { ok: false, reason: 'pharmacy_default_duration_invalid' };
+  }
+  return { ok: true, value: raw as Partial<PharmacySettings> };
 }
 
 /**
@@ -114,7 +141,9 @@ export function loadPersistedAppState(
     // A corrupt medication snapshot is never treated as an authoritative
     // empty list — startup proceeds fail-safe with a loud diagnostic.
     const medsOutcome = readJsonOutcome(STORAGE_MEDS_KEY, (raw) =>
-      Array.isArray(raw) && raw.every(isValidMedicationRecord) ? raw : null
+      Array.isArray(raw) && raw.every(isValidMedicationRecord)
+        ? { ok: true, value: raw }
+        : { ok: false, reason: 'medication_snapshot_shape_invalid' }
     );
     if (medsOutcome.status === 'ok') {
       loadedMedications = medsOutcome.value;
@@ -126,7 +155,9 @@ export function loadPersistedAppState(
   }
 
   const logsOutcome = readJsonOutcome(STORAGE_LOGS_KEY, (raw) =>
-    Array.isArray(raw) && raw.every(isValidConsumptionLogRecord) ? raw : null
+    Array.isArray(raw) && raw.every(isValidConsumptionLogRecord)
+      ? { ok: true, value: raw }
+      : { ok: false, reason: 'consumption_log_shape_invalid' }
   );
   if (logsOutcome.status === 'ok') {
     setters.setLogs(logsOutcome.value);

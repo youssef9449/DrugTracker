@@ -57,6 +57,13 @@ const NATIVE_CODE_CATEGORIES: Readonly<Record<string, NativeErrorCode>> = {
   invalid_retry_evidence: 'invalid_argument',
   invalid_successor_obligation: 'invalid_argument',
   invalid_args_or_state: 'invalid_argument',
+  invalid_snooze_request: 'invalid_argument',
+  invalid_calendarDate: 'invalid_argument',
+  invalid_time: 'invalid_argument',
+  invalid_amount: 'invalid_argument',
+  invalid_datetime: 'invalid_argument',
+  missing_medicationId: 'invalid_argument',
+  missing_doseId: 'invalid_argument',
 
   // Permission / capability.
   permission_denied: 'permission_denied',
@@ -97,6 +104,8 @@ const NATIVE_CODE_CATEGORIES: Readonly<Record<string, NativeErrorCode>> = {
   recovery_required: 'recovery_required',
   recover_required: 'recovery_required',
   successor_catchup_failed: 'recovery_required',
+  restore_failed: 'recovery_required',
+  recovery_failed: 'recovery_required',
 
   // Platform-level delivery.
   notification_post_failed: 'platform_failure',
@@ -105,6 +114,8 @@ const NATIVE_CODE_CATEGORIES: Readonly<Record<string, NativeErrorCode>> = {
   notification_security_exception: 'platform_failure',
   stock_not_initialized: 'platform_failure',
   trigger_in_past: 'platform_failure',
+  open_settings_failed: 'platform_failure',
+  channel_bootstrap_failed: 'platform_failure',
 };
 
 /** Shape of a structured native failure crossing the bridge. */

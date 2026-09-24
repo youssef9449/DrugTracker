@@ -126,7 +126,9 @@ const alarmRuntimeDestDir = path.join(
   'alarmruntime'
 );
 const alarmRuntimeFiles = [
+  'NativeErrorCodes.java',
   'ExactAlarmContract.java',
+  'ExactAlarmPendingIntents.java',
   'ExactAlarmOperationLock.java',
   'ExactAlarmStore.java',
   'ExactAlarmRuntime.java',

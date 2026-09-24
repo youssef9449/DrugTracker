@@ -34,6 +34,14 @@ const WEB_SCHEDULE_KEY = 'drugtracker_web_scheduled_notifications_v1';
 export const MAX_WEB_TIMER_DELAY_MS = 2_000_000_000;
 
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
+/**
+ * Definition (fireAt/title/body) each live page timer was armed for (#483).
+ * Replacement of a same-identity schedule must be able to tell whether the
+ * running timer already realizes the NEW definition; without this, an old
+ * timer blocks re-arming and the replacement can be left with NO active
+ * timer after the stale hop exits on its fireAt mismatch check.
+ */
+const armedDefinitions = new Map<string, WebScheduledEntry>();
 
 type WebScheduledEntry = {
   namespace: string;
@@ -156,17 +164,41 @@ async function armPersistentNotification(entry: WebScheduledEntry): Promise<bool
 }
 
 /**
+ * Invalidate the page timer for a key (#483). Clears BOTH the pending
+ * timeout handle and the armed-definition marker so the old realization
+ * can never be mistaken for an armed new one.
+ */
+function clearPageTimer(key: string): void {
+  const existing = timers.get(key);
+  if (existing !== undefined) {
+    clearTimeout(existing);
+    timers.delete(key);
+  }
+  armedDefinitions.delete(key);
+}
+
+/**
  * Arm the BEST-EFFORT page timer for an entry (#525). The delay is bounded
  * and chained (#548): every wake-up re-validates the durable record
  * (identity + fireAt unchanged — cancellation/replacement respected), then
  * either schedules the next bounded hop or performs the final delivery.
+ *
+ * Arming invalidates any previously-armed timer for the same identity
+ * FIRST (#483) — even if that timer was already dequeued and is mid-hop —
+ * so exactly one timer chain can ever be alive per logical identity.
  */
 function armTimer(entry: WebScheduledEntry): void {
   const key = storageKey(entry.namespace, entry.identity);
-  const existing = timers.get(key);
-  if (existing !== undefined) clearTimeout(existing);
+  clearPageTimer(key);
   const fireAt = entry.fireAt;
+  // Identity of THIS chain: the hop proceeds only while the timers map
+  // still holds the handle it last scheduled. A replacement/ cancellation
+  // that swaps the map entry (or a stale hop already dequeued when the
+  // replacement happened) fails this check and exits without touching
+  // state or delivering.
+  let handle: ReturnType<typeof setTimeout> | undefined;
   const hop = (): void => {
+    if (timers.get(key) !== handle) return;
     timers.delete(key);
     // Re-validate against the durable record on every hop: the occurrence
     // may have been cancelled or replaced while this timer waited.
@@ -181,11 +213,13 @@ function armTimer(entry: WebScheduledEntry): void {
     if (remaining > MAX_WEB_TIMER_DELAY_MS) {
       // Intermediate bounded wake-up; recompute the remaining duration.
       const timer = setTimeout(hop, MAX_WEB_TIMER_DELAY_MS);
+      handle = timer;
       timers.set(key, timer);
       return;
     }
     if (remaining > 0) {
       const timer = setTimeout(hop, remaining);
+      handle = timer;
       timers.set(key, timer);
       return;
     }
@@ -193,28 +227,52 @@ function armTimer(entry: WebScheduledEntry): void {
     const nextEntries = read.value;
     delete nextEntries[key];
     writeEntries(nextEntries);
+    armedDefinitions.delete(key);
     void showScheduledNotification(current);
   };
   const initialDelay = Math.min(
     Math.max(0, fireAt - Date.now()),
     MAX_WEB_TIMER_DELAY_MS
   );
-  const timer = setTimeout(hop, initialDelay);
-  timers.set(key, timer);
+  handle = setTimeout(hop, initialDelay);
+  timers.set(key, handle);
+  armedDefinitions.set(key, { ...entry });
 }
 
 /**
  * Explicit arming operation (#495): reconciliation and scheduling control
  * WHEN an entry is armed; reads never do. Prefers the durable SW trigger;
  * falls back to the best-effort page timer when unavailable/failed.
+ *
+ * Same-identity replacement (#483): if a page timer is already running for
+ * this identity, it is kept ONLY when it was armed for EXACTLY this
+ * definition. Otherwise the stale timer is invalidated BEFORE the new
+ * definition is armed, so the replaced realization can never deliver and
+ * the new one always ends up armed (the old timer would otherwise wake,
+ * observe a foreign fireAt, exit, and leave the replacement unarmed).
  */
 async function ensureWebScheduledNotificationArmed(
   entry: WebScheduledEntry
 ): Promise<void> {
   const key = storageKey(entry.namespace, entry.identity);
-  if (timers.has(key)) {
-    // Best-effort timer already running; leave it (it re-validates per hop).
-    return;
+  const armed = armedDefinitions.get(key);
+  if (timers.has(key) && armed !== undefined) {
+    const identical =
+      armed.fireAt === entry.fireAt &&
+      armed.title === entry.title &&
+      armed.body === entry.body;
+    if (identical) {
+      // Best-effort timer already running for THIS definition; leave it
+      // (it re-validates identity + fireAt on every hop).
+      return;
+    }
+  }
+  if (timers.has(key) || armedDefinitions.has(key)) {
+    // #483: the durable definition was replaced (same identity, new
+    // fireAt/title/body). Invalidate the old realization first — the old
+    // timer must never deliver the replaced notification, and arming the
+    // new definition must not be skipped just because a stale timer exists.
+    clearPageTimer(key);
   }
   const persisted = await armPersistentNotification(entry);
   if (!persisted) {
@@ -368,11 +426,7 @@ export async function cancelScheduledWebNotification(
   identity: string
 ): Promise<boolean> {
   const key = storageKey(namespace, identity);
-  const timer = timers.get(key);
-  if (timer !== undefined) {
-    clearTimeout(timer);
-    timers.delete(key);
-  }
+  clearPageTimer(key);
   const read = readEntriesOutcome();
   let existed = false;
   let persisted = false;

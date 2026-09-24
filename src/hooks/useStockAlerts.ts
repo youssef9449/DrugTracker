@@ -66,6 +66,25 @@ export function useStockAlerts({
     enabledRef.current = criticalStockAlertsEnabled;
   }, [medications, criticalStockAlertsEnabled]);
 
+  /**
+   * Release ONLY an in-flight claim ({ claimed: true, alarmTime: null }) via
+   * a compare-and-set update (#539). A newer operation that has already
+   * converted the claim (e.g. to a scheduled claim) is never released or
+   * overwritten by stale work.
+   */
+  const releaseInFlightClaimIfOwned = async (medId: string): Promise<void> => {
+    const released = await updateCriticalNotificationClaim(
+      medId,
+      (current) =>
+        current?.claimed && current.alarmTime === null
+          ? { claimed: false, alarmTime: null }
+          : current
+    );
+    if (!released.ok) {
+      console.warn('[critical-stock] failed to release superseded foreground claim');
+    }
+  };
+
   useEffect(() => {
     if (!hydrated || isFirstRun) return;
 
@@ -148,17 +167,49 @@ export function useStockAlerts({
         med.id,
         true,
         async () => {
+          // ── PRE-DELIVERY REVALIDATION (#539) ──
+          // The effect snapshot (med/decision) may already be stale by the
+          // time the claim is acquired. Delivery must start from the LATEST
+          // durable application state, never the old render snapshot.
+          //
+          // The in-flight claim is owned by THIS operation while it runs:
+          // acquisition + work execute inside the cross-document claim lock,
+          // and same-document newer operations are gated by the generation
+          // checks below.
+          const latestMed = medicationsRef.current.find((m) => m.id === med.id);
+          if (!latestMed || !isCurrentCriticalAlarmGeneration(med.id, generationAtStart)) {
+            // Deleted, superseded, or a newer operation owns this pass.
+            // Release ONLY the in-flight claim this operation still owns
+            // (CAS) — never overwrite a newer claim shape.
+            await releaseInFlightClaimIfOwned(med.id);
+            return false;
+          }
+          const latestDecision = evaluateCriticalStockPolicy({
+            medication: latestMed,
+            criticalStockAlertsEnabled: enabledRef.current,
+            claim: { claimed: true, alarmTime: null },
+            todayStr: getTodayDateString(),
+            nowMs: Date.now(),
+          });
+          if (!latestDecision.isCriticalEpisode || !latestDecision.canNotify) {
+            // Refill/edit/threshold change/disable landed between the
+            // render and delivery start: the episode this pass was for no
+            // longer exists under the latest state. Do not deliver stale
+            // content.
+            await releaseInFlightClaimIfOwned(med.id);
+            return false;
+          }
+
+          // Only NOW start delivery — with the LATEST medication values.
           let sent = false;
           try {
-            const currentPills = Number(med.currentPills) || 0;
-            const unit = med.unit || 'قرص';
             sent = await Promise.resolve(
               sendCriticalStockAlert(
                 med.id,
-                med.name,
-                decision.daysLeft,
-                currentPills,
-                unit
+                latestMed.name,
+                latestDecision.daysLeft,
+                Number(latestMed.currentPills) || 0,
+                latestMed.unit || 'قرص'
               )
             );
           } catch {
@@ -179,11 +230,12 @@ export function useStockAlerts({
             return false;
           }
 
-          // Freshness revalidation after the await (#539): a stale foreground
-          // operation must neither deliver post-send side effects nor cancel
-          // the alarm desired by NEWER state. Refill/edit/delete/threshold
-          // change/disable during delivery all invalidate this pass via the
-          // latest-state refs and the per-medication generation.
+          // ── POST-SEND REVALIDATION (#539) ──
+          // A stale foreground operation must neither keep side effects of
+          // newer state nor cancel a fallback alarm created for newer
+          // state. Refill/edit/delete/threshold change/disable during
+          // delivery all invalidate this pass via the latest-state refs and
+          // the per-medication generation.
           const freshMed = medicationsRef.current.find((m) => m.id === med.id);
           if (!isCurrentCriticalAlarmGeneration(med.id, generationAtStart) || !freshMed) {
             return true;
@@ -205,10 +257,19 @@ export function useStockAlerts({
             return true;
           }
 
+          // Cancel the now-redundant scheduled fallback. The generation is
+          // re-checked INSIDE the enqueued operation as well: a newer
+          // operation that bumps the generation after our post-send check
+          // must never have its freshly created alarm cancelled by this
+          // stale work (#539 requirement 7).
           bumpCriticalAlarmGeneration(med.id);
+          const cancelGeneration = currentCriticalAlarmGeneration(med.id);
           await enqueueCriticalAlarmOp(
             med.id,
-            () => cancelCriticalAlarm(med.id)
+            async () => {
+              if (!isCurrentCriticalAlarmGeneration(med.id, cancelGeneration)) return;
+              await cancelCriticalAlarm(med.id);
+            }
           );
           return true;
         }

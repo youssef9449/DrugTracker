@@ -44,8 +44,8 @@ assert(runtimeInterface.includes('namespace: string;') && runtimeInterface.inclu
   'Notification Runtime API must require logical namespace + identity');
 assert(!/\bid:\s*number\b/.test(runtimeInterface),
   'Notification Runtime feature contract must not expose numeric ids');
-assert((runtime.match(/function iosPlatformNotificationId\(/g) || []).length === 1,
-  'iOS platform numeric conversion must have exactly one private implementation');
+assert((runtime.match(/function resolveIosPlatformNotificationId\(/g) || []).length === 1,
+  'iOS platform numeric conversion must have exactly one private implementation (durable mapping resolver)');
 assert(!runtime.includes('DOSE_REMINDER_CHANNEL_ID')
   && !runtime.includes('DOSE_REMINDER_FOREGROUND_CHANNEL_ID')
   && !runtime.includes('LOW_STOCK_CHANNEL_ID'),

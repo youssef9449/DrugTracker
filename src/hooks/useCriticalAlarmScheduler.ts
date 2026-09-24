@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import type { Medication } from '../types';
-import { getTodayDateString, dailyScheduleAmount } from '../utils/dateCalculations';
+import { getTodayDateString } from '../utils/dateCalculations';
 import { evaluateCriticalStockPolicy } from '../utils/criticalStockPolicy';
+import {
+  createCriticalSchedulingSignatureMemoizer,
+} from '../utils/criticalSchedulingSignature';
 import {
   scheduleCriticalAlarm,
   cancelCriticalAlarm,
@@ -222,84 +225,29 @@ export function useCriticalAlarmScheduler({
   }, [medications]);
 
   // Stable signature of every field that can change getCriticalAlarmDate()
-  // (stock, threshold, auto, explicit schedule rows, consume/skip history).
-  // Deterministic serialization avoids false churn from object key order.
+  // (stock, rate, threshold, auto, per-med flag, schedule rows, consume/skip
+  // history within the scheduling-relevant window) plus notification
+  // metadata (name, unit).
   //
-  // #494: history serialization is restricted to the scheduling-relevant
-  // window (dates >= today). The critical projection reads consume/skip
-  // markers only for TODAY (suppression) and FUTURE dates (exception days);
-  // older history rows cannot affect scheduling, so they are excluded and
-  // large long-lived histories no longer require full serialization/sorting
-  // on every medication change. All cheap scheduling fields (stock, rate,
-  // threshold, auto, per-med flag, schedule rows) keep exact fidelity —
-  // correctness (no missed reconciliation) takes precedence over cost.
-  const criticalSignature = useMemo(() => {
-    const recentCutoff = getTodayDateString();
-    const serializeHistory = (
-      hist: Record<string, string[]> | undefined,
-      doseIds: string[]
-    ): string => {
-      if (!hist || doseIds.length === 0) return '';
-      return doseIds
-        .map((id) => {
-          const dates = hist[id];
-          if (!Array.isArray(dates) || dates.length === 0) return `${id}:`;
-          // Scheduling-relevant markers only: today (suppression) and future
-          // (projected exception days). Sorted so insertion order does not
-          // affect the signature.
-          const sorted = [...dates]
-            .filter((d) => typeof d === 'string' && d && d >= recentCutoff)
-            .sort();
-          return `${id}:${sorted.join(',')}`;
-        })
-        .join(';');
-    };
-
-    const serializeSchedule = (
-      schedule: Medication['doseSchedule']
-    ): { schedulePart: string; doseIds: string[] } => {
-      if (!Array.isArray(schedule) || schedule.length === 0) {
-        return { schedulePart: '', doseIds: [] };
-      }
-      const rows = schedule
-        .map((d) => ({
-          id: d?.id != null ? String(d.id) : '',
-          amount: Number(d?.amount) || 0,
-          time: typeof d?.time === 'string' ? d.time : '',
-        }))
-        // Deterministic order by time then id (not array index).
-        .sort((a, b) => {
-          const t = a.time.localeCompare(b.time);
-          return t !== 0 ? t : a.id.localeCompare(b.id);
-        });
-      const doseIds = rows.map((r) => r.id).filter(Boolean);
-      const schedulePart = rows
-        .map((r) => `${r.id}@${r.time}=${r.amount}`)
-        .join(',');
-      return { schedulePart, doseIds };
-    };
-
-    return medications
-      .map((m) => {
-        const { schedulePart, doseIds } = serializeSchedule(m.doseSchedule);
-        return [
-          m.id,
-          m.currentPills,
-          m.dailyDose,
-          dailyScheduleAmount(m),
-          m.warningThresholdDays,
-          m.autoDeductEnabled === false ? 0 : 1,
-          m.criticalStockAlertsEnabled === true ? 1 : 0,
-          m.name,
-          m.unit ?? '',
-          schedulePart,
-          serializeHistory(m.doseConsumptionHistory, doseIds),
-          serializeHistory(m.doseSkippedHistory, doseIds),
-        ].join('|');
-      })
-      .sort()
-      .join('\n');
-  }, [medications]);
+  // #494: signatures are memoized PER MEDICATION. A change to one medication
+  // invalidates (recomputes) only that medication's fragment; unchanged
+  // medications reuse their cached fragment instead of re-serializing and
+  // re-sorting their entire history representation on every change. The
+  // memoizer's fast path uses immutable-writer reference equality plus a
+  // shallow compare of all scheduling-relevant scalars — no field that can
+  // affect the projection can be skipped, and no probabilistic hashing is
+  // involved. The memoizer lives in a ref so it persists across renders
+  // without being a dependency of the scheduling effect.
+  const signatureMemoizerRef = useRef<
+    ReturnType<typeof createCriticalSchedulingSignatureMemoizer> | null
+  >(null);
+  if (signatureMemoizerRef.current === null) {
+    signatureMemoizerRef.current = createCriticalSchedulingSignatureMemoizer();
+  }
+  const criticalSignature = signatureMemoizerRef.current.signature(
+    medications,
+    getTodayDateString()
+  );
 
   useEffect(() => {
     // One shared decision point for the Critical Stock × Exact Alarm

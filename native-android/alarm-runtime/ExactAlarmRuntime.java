@@ -4,7 +4,6 @@ import android.app.AlarmManager;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
-import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
@@ -71,6 +70,8 @@ public final class ExactAlarmRuntime {
     private final ExactAlarmStore store;
     private final int pendingIntentRequestCode;
     private final FailurePolicy failurePolicy;
+    /** Platform pending-intent identity mechanics (#489 extraction). */
+    private final ExactAlarmPendingIntents pendingIntents;
 
     public interface FailurePolicy {
         FailurePolicy ALLOW_ALL = new FailurePolicy() {};
@@ -111,6 +112,8 @@ public final class ExactAlarmRuntime {
         this.failurePolicy = failurePolicy == null
                 ? FailurePolicy.ALLOW_ALL
                 : failurePolicy;
+        this.pendingIntents = new ExactAlarmPendingIntents(
+                appContext, pendingIntentRequestCode, OperationLock.class);
     }
 
 
@@ -319,35 +322,7 @@ public final class ExactAlarmRuntime {
             String identityUri,
             String action,
             Class<? extends BroadcastReceiver> receiverClass) {
-        if (!ExactAlarmContract.isValidIdentityUri(identityUri)
-                || action == null
-                || action.isEmpty()
-                || receiverClass == null) {
-            return PendingStateResult.failed("invalid_pending_request");
-        }
-        synchronized (OperationLock.class) {
-            try {
-                Intent intent = new Intent(appContext, receiverClass);
-                intent.setAction(action);
-                intent.setData(android.net.Uri.parse(identityUri));
-
-                int flags = PendingIntent.FLAG_NO_CREATE;
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    flags |= PendingIntent.FLAG_IMMUTABLE;
-                }
-                PendingIntent pendingIntent = PendingIntent.getBroadcast(
-                        appContext,
-                        pendingIntentRequestCode,
-                        intent,
-                        flags);
-                return pendingIntent == null
-                        ? PendingStateResult.absent()
-                        : PendingStateResult.pending();
-            } catch (Exception e) {
-                Log.e(TAG, "pending-state lookup failed", e);
-                return PendingStateResult.failed("pending_state_lookup_failed");
-            }
-        }
+        return pendingIntents.queryPendingState(identityUri, action, receiverClass);
     }
 
     /**
@@ -511,7 +486,7 @@ public final class ExactAlarmRuntime {
             ScheduleRequest request,
             String operationVersion,
             String previousScheduleRaw) {
-        AlarmManager manager = alarmManager();
+        AlarmManager manager = pendingIntents.alarmManager(appContext);
         if (manager == null) {
             rollbackScheduleLocked(
                     request.storageKey,
@@ -522,7 +497,7 @@ public final class ExactAlarmRuntime {
 
         try {
             PendingIntent pendingIntent =
-                    buildPendingIntent(
+                    pendingIntents.build(
                             request.identityUri,
                             request.action,
                             request.receiverClass,
@@ -629,7 +604,7 @@ public final class ExactAlarmRuntime {
                 }
             }
 
-            AlarmManager manager = alarmManager();
+            AlarmManager manager = pendingIntents.alarmManager(appContext);
             if (manager == null) {
                 return CancelResult.fail(
                         "alarm_manager_unavailable");
@@ -637,7 +612,7 @@ public final class ExactAlarmRuntime {
 
             try {
                 PendingIntent pendingIntent =
-                        buildPendingIntent(
+                        pendingIntents.build(
                                 identityUri,
                                 action,
                                 receiverClass,
@@ -692,10 +667,10 @@ public final class ExactAlarmRuntime {
         }
 
         synchronized (OperationLock.class) {
-            AlarmManager manager = alarmManager();
+            AlarmManager manager = pendingIntents.alarmManager(appContext);
             if (manager == null) return false;
 
-            PendingIntent pendingIntent = buildPendingIntent(
+            PendingIntent pendingIntent = pendingIntents.build(
                     identityUri,
                     action,
                     receiverClass,
@@ -749,10 +724,10 @@ public final class ExactAlarmRuntime {
         }
 
         synchronized (OperationLock.class) {
-            AlarmManager manager = alarmManager();
+            AlarmManager manager = pendingIntents.alarmManager(appContext);
             if (manager == null) return false;
             try {
-                PendingIntent pendingIntent = buildPendingIntent(
+                PendingIntent pendingIntent = pendingIntents.build(
                         identityUri,
                         action,
                         receiverClass,
@@ -811,51 +786,6 @@ public final class ExactAlarmRuntime {
             return null;
         }
         return store.allocateOperationVersionLocked();
-    }
-
-    private AlarmManager alarmManager() {
-        return (AlarmManager) appContext.getSystemService(
-                Context.ALARM_SERVICE);
-    }
-
-    private PendingIntent buildPendingIntent(
-            String identityUri,
-            String action,
-            Class<? extends BroadcastReceiver> receiverClass,
-            Bundle deliveryExtras,
-            String operationVersion) {
-        if (!ExactAlarmContract.isValidIdentityUri(
-                identityUri)) {
-            return null;
-        }
-
-        Intent intent = new Intent(
-                appContext,
-                receiverClass);
-        intent.setAction(action);
-        intent.setData(android.net.Uri.parse(identityUri));
-
-        if (deliveryExtras != null) {
-            intent.putExtras(new Bundle(deliveryExtras));
-        }
-        if (operationVersion != null
-                && !operationVersion.isEmpty()) {
-            intent.putExtra(
-                    ExactAlarmContract.EXTRA_OPERATION_VERSION,
-                    operationVersion);
-        }
-
-        int flags =
-                PendingIntent.FLAG_UPDATE_CURRENT;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            flags |= PendingIntent.FLAG_IMMUTABLE;
-        }
-
-        return PendingIntent.getBroadcast(
-                appContext,
-                pendingIntentRequestCode,
-                intent,
-                flags);
     }
 
     private boolean isValidScheduleRequest(

@@ -9,6 +9,7 @@ import {
   saveJson,
   saveString,
   persist,
+  type JsonParserVerdict,
   type StorageJsonOutcome,
 } from '@/utils/storage';
 
@@ -17,7 +18,10 @@ beforeEach(() => {
 });
 
 describe('readJsonOutcome / loadValidatedJson (runtime-validated reads)', () => {
-  const passthrough = (raw: unknown) => raw as { a: number } | null;
+  const passthrough = (raw: unknown): JsonParserVerdict<{ a: number }> =>
+    raw !== null && raw !== undefined
+      ? { ok: true, value: raw as { a: number } }
+      : { ok: false, reason: 'test_shape_invalid' };
 
   it('returns the parsed value when the key exists', () => {
     localStorage.setItem('k', JSON.stringify({ a: 1 }));
@@ -40,15 +44,49 @@ describe('readJsonOutcome / loadValidatedJson (runtime-validated reads)', () => 
     localStorage.setItem('k', JSON.stringify({ wrong: 'shape' }));
     const outcome = readJsonOutcome<{ a: number }>(
       'k',
-      (raw) => (raw && typeof raw === 'object' && (raw as { a?: unknown }).a === 1 ? (raw as { a: number }) : null)
+      (raw) => (raw && typeof raw === 'object' && (raw as { a?: unknown }).a === 1
+        ? { ok: true, value: raw as { a: number } }
+        : { ok: false, reason: 'test_shape_invalid' })
     );
     expect(outcome.status).toBe('invalid');
   });
 
-  it('treats null as a valid JSON value distinct from missing', () => {
+  it('reports invalid with the parser reason on an explicit rejection', () => {
+    localStorage.setItem('k', JSON.stringify({ wrong: 'shape' }));
+    const outcome = readJsonOutcome<unknown>(
+      'k',
+      () => ({ ok: false, reason: 'custom_shape_reason' })
+    );
+    expect(outcome).toEqual({ status: 'invalid', reason: 'custom_shape_reason' });
+  });
+
+  it('preserves a VALID null as ok (#477) — distinct from missing and invalid', () => {
     localStorage.setItem('k', 'null');
-    const outcome = readJsonOutcome<string | null>('k', (raw) => raw as string | null);
+    const outcome = readJsonOutcome<string | null>('k', (raw) =>
+      raw === null
+        ? { ok: true, value: null as string | null }
+        : typeof raw === 'string'
+          ? { ok: true, value: raw }
+          : { ok: false, reason: 'test_shape_invalid' }
+    );
     expect(outcome).toEqual({ status: 'ok', value: null });
+    // The convenience wrapper also returns the valid null, not the fallback.
+    expect(loadValidatedJson<string | null>('k', (raw) =>
+      raw === null || typeof raw === 'string'
+        ? { ok: true, value: (raw as string | null) }
+        : { ok: false, reason: 'test_shape_invalid' }
+    , 'fallback')).toBeNull();
+  });
+
+  it('treats a null-returning parser (contract violation) as invalid, never valid data', () => {
+    localStorage.setItem('k', 'null');
+    // A parser that ignores the verdict contract must NOT smuggle data through.
+    const outcome = readJsonOutcome<unknown>(
+      'k',
+      // @ts-expect-error — deliberately violates the verdict contract
+      (raw) => raw
+    );
+    expect(outcome.status).toBe('invalid');
   });
 
   it('reports read_failed when storage itself throws', () => {

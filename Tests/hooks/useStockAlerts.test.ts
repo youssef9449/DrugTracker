@@ -12,6 +12,11 @@ vi.mock('../utils/notificationTestFacade', () => ({
 
 import { sendCriticalStockAlert, cancelCriticalAlarm } from '../utils/notificationTestFacade';
 import { readCriticalClaims as readClaims, writeCriticalClaim as writeClaim } from '../helpers/criticalStockClaims';
+import { installWebLocksShim, type WebLocksShimHandle } from '../helpers/webLocksShim';
+
+// #484: foreground claim acquisition requires the cross-document Web Lock;
+// tests install an explicit Web Locks test double (fail-closed without it).
+let locksShim: WebLocksShimHandle | null = null;
 
 const sendMock = vi.mocked(sendCriticalStockAlert);
 const cancelMock = vi.mocked(cancelCriticalAlarm);
@@ -47,6 +52,7 @@ function useAlerts(props: {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  locksShim = installWebLocksShim();
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2024-09-10T12:00:00Z'));
   localStorage.clear();
@@ -55,6 +61,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  locksShim?.uninstall();
+  locksShim = null;
   vi.useRealTimers();
 });
 

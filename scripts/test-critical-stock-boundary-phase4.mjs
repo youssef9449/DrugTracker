@@ -29,6 +29,7 @@ const criticalJavaFiles = fs
 const adapter = read('native-android/critical-stock/CriticalStockAlarmAdapter.java');
 const receiver = read('native-android/critical-stock/CriticalStockAlarmReceiver.java');
 const plugin = read('native-android/critical-stock/CriticalStockPlugin.java');
+const criticalProjection = read('src/utils/date/criticalProjection.ts');
 const dateCalculations = read('src/utils/dateCalculations.ts');
 const criticalScheduler = read('src/hooks/useCriticalAlarmScheduler.ts');
 const criticalScheduling = read('src/utils/criticalAlarmScheduling.ts');
@@ -101,9 +102,24 @@ assert(
   'Critical receiver must not depend on Auto business/recovery state'
 );
 
+// #488: the canonical Critical crossing calculation lives in the dedicated
+// Critical business module (src/utils/date/criticalProjection.ts) after the
+// PR #554 split — the gate asserts the REAL location, not the old mixed
+// dateCalculations.ts file. The old file may still re-export it for
+// import compatibility, but the DEFINITION must live in the canonical
+// module only.
 assert(
-  dateCalculations.includes('export function getCriticalAlarmDate('),
-  'getCriticalAlarmDate must remain in the Critical business calculation layer'
+  criticalProjection.includes('export function getCriticalAlarmDate('),
+  'getCriticalAlarmDate must be defined in the canonical Critical business calculation module (src/utils/date/criticalProjection.ts)'
+);
+assert(
+  !/export function getCriticalAlarmDate\(/.test(dateCalculations),
+  'dateCalculations.ts must not re-implement getCriticalAlarmDate (single canonical definition)'
+);
+assert(
+  criticalProjection.includes("from '../medicationDomain'")
+    || criticalProjection.includes("from './medicationDomain'"),
+  'criticalProjection must consume the shared medication-domain primitives'
 );
 assert(
   criticalScheduler.includes('getCriticalAlarmDate('),
@@ -115,7 +131,6 @@ assert(
     && !alarmRuntime.includes('warningThresholdDays'),
   'Shared exact-alarm runtime must not contain Critical crossing/projection logic'
 );
-
 assert(
   criticalScheduling.includes('scheduleCriticalAlarmNative(')
     && criticalScheduling.includes('cancelCriticalAlarmNative(')

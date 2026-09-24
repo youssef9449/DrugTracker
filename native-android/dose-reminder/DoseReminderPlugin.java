@@ -7,6 +7,7 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import app.drugtracker.alarmruntime.ExactAlarmRuntime;
+import app.drugtracker.alarmruntime.NativeErrorCodes;
 
 /**
  * Capacitor bridge for Dose Reminder's exact-alarm boundary.
@@ -53,7 +54,11 @@ public final class DoseReminderPlugin extends Plugin {
 
                 JSObject ret = new JSObject();
                 ret.put("ok", result.ok);
-                if (result.error != null) ret.put("error", result.error); ret.put("code", result.error);
+                // #534: structured machine code; the raw message stays in `error`.
+                if (result.error != null) {
+                    ret.put("error", result.error);
+                    ret.put("code", NativeErrorCodes.structuredCode(result.error, "platform_failure"));
+                }
                 call.resolve(ret);
             } catch (Exception e) {
                 call.reject("dose_reminder_schedule_failed");
@@ -75,7 +80,11 @@ public final class DoseReminderPlugin extends Plugin {
                 JSObject ret = new JSObject();
                 ret.put("ok", result.isOk());
                 ret.put("status", result.status.name());
-                if (result.error != null) ret.put("error", result.error); ret.put("code", result.error);
+                // #534: structured machine code; the raw message stays in `error`.
+                if (result.error != null) {
+                    ret.put("error", result.error);
+                    ret.put("code", NativeErrorCodes.structuredCode(result.error, "platform_failure"));
+                }
                 call.resolve(ret);
             } catch (Exception e) {
                 call.reject("dose_reminder_cancel_failed");
@@ -119,7 +128,11 @@ public final class DoseReminderPlugin extends Plugin {
                 if (result.operationVersion != null) {
                     ret.put("operationVersion", result.operationVersion);
                 }
-                if (result.error != null) ret.put("error", result.error); ret.put("code", result.error);
+                // #534: structured machine code; the raw message stays in `error`.
+                if (result.error != null) {
+                    ret.put("error", result.error);
+                    ret.put("code", NativeErrorCodes.structuredCode(result.error, "platform_failure"));
+                }
                 call.resolve(ret);
             } catch (Exception e) {
                 call.reject("dose_reminder_snooze_schedule_failed");
@@ -140,7 +153,11 @@ public final class DoseReminderPlugin extends Plugin {
                 JSObject ret = new JSObject();
                 ret.put("ok", result.isOk());
                 ret.put("status", result.status.name());
-                if (result.error != null) ret.put("error", result.error); ret.put("code", result.error);
+                // #534: structured machine code; the raw message stays in `error`.
+                if (result.error != null) {
+                    ret.put("error", result.error);
+                    ret.put("code", NativeErrorCodes.structuredCode(result.error, "platform_failure"));
+                }
                 call.resolve(ret);
             } catch (Exception e) {
                 call.reject("dose_reminder_snooze_cancel_failed");

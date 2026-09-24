@@ -1,4 +1,6 @@
 package app.drugtracker.autodeduction;
+
+import app.drugtracker.alarmruntime.NativeErrorCodes;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -254,7 +256,8 @@ public class AutoDeductionPlugin extends Plugin {
                 ret.put("failed", result.failed);
                 if (result.error != null) {
                     ret.put("error", result.error);
-                    ret.put("code", result.error);
+                    // #534: structured machine code; the raw message stays in `error`.
+                    ret.put("code", NativeErrorCodes.structuredCode(result.error, "recovery_required"));
                 }
                 call.resolve(ret);
             } catch (Exception e) {

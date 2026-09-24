@@ -140,14 +140,40 @@ export type StorageJsonOutcome<T> =
   | { status: 'read_failed'; reason: string };
 
 /**
+ * Explicit parser verdict for the validated-read boundary (#477).
+ *
+ * The parser — not a null sentinel — owns the validity decision:
+ * - `{ ok: true, value }` is a VALIDATED value. `value` may be `null` when
+ *   the reader's contract accepts a stored null as legitimate data; the
+ *   storage boundary preserves it as `{ status: 'ok', value: null }`.
+ * - `{ ok: false, reason }` is an explicit shape rejection with a
+ *   machine-readable reason surfaced on the `invalid` outcome.
+ *
+ * Returning `null`/`undefined` from a parser is a CONTRACT ERROR and is
+ * treated as a shape rejection (never as valid data) — this keeps a generic
+ * TypeScript cast from smuggling unvalidated durable values through the
+ * boundary.
+ */
+export type JsonParserVerdict<T> =
+  | { ok: true; value: T }
+  | { ok: false; reason: string };
+
+/**
  * Read + JSON.parse + runtime-validate a localStorage value.
  * The parser is the ONLY way a caller obtains a typed value: persisted data
  * is validated at the storage boundary instead of trusting a TypeScript
  * generic. Never throws.
+ *
+ * Outcome contract (#477):
+ * - missing key → `missing`;
+ * - malformed JSON → `invalid` (json_parse_failed);
+ * - rejected shape → `invalid` (parser's reason);
+ * - storage read failure → `read_failed`;
+ * - validated value — INCLUDING a legitimate null — → `ok`.
  */
 export function readJsonOutcome<T>(
   key: string,
-  parse: (raw: unknown) => T | null
+  parse: (raw: unknown) => JsonParserVerdict<T>
 ): StorageJsonOutcome<T> {
   const result = readStorageItem(key);
   if (!result.ok) {
@@ -161,10 +187,14 @@ export function readJsonOutcome<T>(
     return { status: 'invalid', reason: 'json_parse_failed' };
   }
   const parsed = parse(raw);
-  if (parsed === null || parsed === undefined) {
+  if (parsed == null || typeof parsed !== 'object') {
+    // A parser that ignores the verdict contract (returns null/undefined or
+    // a bare value) is a caller bug: fail closed instead of trusting it.
     return { status: 'invalid', reason: 'shape_validation_failed' };
   }
-  return { status: 'ok', value: parsed };
+  return parsed.ok
+    ? { status: 'ok', value: parsed.value }
+    : { status: 'invalid', reason: parsed.reason || 'shape_validation_failed' };
 }
 
 /**
@@ -175,7 +205,7 @@ export function readJsonOutcome<T>(
  */
 export function loadValidatedJson<T>(
   key: string,
-  parse: (raw: unknown) => T | null,
+  parse: (raw: unknown) => JsonParserVerdict<T>,
   fallback: T
 ): T {
   const outcome = readJsonOutcome(key, parse);

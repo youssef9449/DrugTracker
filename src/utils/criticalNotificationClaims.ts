@@ -14,7 +14,7 @@
  */
 
 import type { CriticalNotificationClaim } from '../types';
-import { persist, readJsonOutcome } from './storage';
+import { persist, readJsonOutcome, type JsonParserVerdict } from './storage';
 export const CRITICAL_CLAIMS_STORAGE_KEY = 'android_med_tracker_critical_claims_v3';
 
 function isValidClaimsMap(value: unknown): value is Record<string, CriticalNotificationClaim> {
@@ -43,8 +43,12 @@ export type CriticalClaimsRead =
   | { status: 'read_failed' };
 
 export function readCriticalNotificationClaimsOutcome(): CriticalClaimsRead {
-  const outcome = readJsonOutcome(CRITICAL_CLAIMS_STORAGE_KEY, (raw) =>
-    isValidClaimsMap(raw) ? (raw as Record<string, CriticalNotificationClaim>) : null
+  const outcome = readJsonOutcome(
+    CRITICAL_CLAIMS_STORAGE_KEY,
+    (raw): JsonParserVerdict<Record<string, CriticalNotificationClaim>> =>
+      isValidClaimsMap(raw)
+        ? { ok: true, value: raw as Record<string, CriticalNotificationClaim> }
+        : { ok: false, reason: 'critical_claims_shape_invalid' }
   );
   switch (outcome.status) {
     case 'ok':

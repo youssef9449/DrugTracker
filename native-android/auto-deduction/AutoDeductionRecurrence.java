@@ -1,7 +1,5 @@
 package app.drugtracker.autodeduction;
 
-import android.content.Context;
-import android.content.SharedPreferences;
 import android.util.Log;
 import app.drugtracker.autodeduction.AutoDeductionScheduler.ScheduleResult;
 import app.drugtracker.autodeduction.AutoDeductionScheduler.FireResult;
@@ -31,23 +29,17 @@ final class AutoDeductionRecurrence {
     }
 
     private final Host host;
-    private final SharedPreferences recurrenceAuthPrefs;
+    /** Recurrence authorization generation persistence (#489 extraction). */
+    private final AutoDeductionRecurrenceGenerationStore generationStore;
 
     AutoDeductionRecurrence(Host host) {
         this.host = host;
-        Context context = host.appContext();
-        this.recurrenceAuthPrefs = context.getSharedPreferences(
-                AutoDeductionContract.PREFS_RECURRENCE_AUTH,
-                Context.MODE_PRIVATE);
-    }
-
-private static String recurrenceAuthKey(String medicationId, String doseId) {
-        return AutoDeductionContract.RECURRENCE_AUTH_KEY_PREFIX
-                + AutoDeductionContract.scheduleIdentityKey(medicationId, doseId);
+        this.generationStore = new AutoDeductionRecurrenceGenerationStore(
+                host.appContext());
     }
 
 long getRecurrenceGenerationLocked(String medicationId, String doseId) {
-        return recurrenceAuthPrefs.getLong(recurrenceAuthKey(medicationId, doseId), 0L);
+        return generationStore.getLocked(medicationId, doseId);
     }
 
 boolean isRecurrenceGenerationAuthorizedLocked(
@@ -55,23 +47,11 @@ boolean isRecurrenceGenerationAuthorizedLocked(
             String doseId,
             long expectedGeneration
     ) {
-        long active = getRecurrenceGenerationLocked(medicationId, doseId);
-        return expectedGeneration > 0L && expectedGeneration == active;
+        return generationStore.isAuthorizedLocked(medicationId, doseId, expectedGeneration);
     }
 
 long ensureRecurrenceGenerationLocked(String medicationId, String doseId) {
-        String key = recurrenceAuthKey(medicationId, doseId);
-        long g = recurrenceAuthPrefs.getLong(key, 0L);
-        if (g > 0L) {
-            return g;
-        }
-        g = 1L;
-        if (!recurrenceAuthPrefs.edit().putLong(key, g).commit()) {
-            Log.e("AutoDeductionScheduler",
-                    "ensureRecurrenceGenerationLocked: commit failed for " + key);
-            return 0L;
-        }
-        return g;
+        return generationStore.ensureLocked(medicationId, doseId);
     }
 
     boolean persistSuccessorObligation(
@@ -114,8 +94,7 @@ public InvalidateResult invalidateRecurrenceAuthorization(
             return InvalidateResult.fail("invalid_args");
         }
         synchronized (AutoDeductionScheduler.class) {
-            String authKey = recurrenceAuthKey(medicationId, doseId);
-            long prev = recurrenceAuthPrefs.getLong(authKey, 0L);
+            long prev = generationStore.getLocked(medicationId, doseId);
 
             // Cancellation linearizes first. If any durable cancellation step fails,
             // the recurrence generation is intentionally left unchanged so the
@@ -136,7 +115,7 @@ public InvalidateResult invalidateRecurrenceAuthorization(
 
             long next = prev <= 0L ? 1L : prev + 1L;
             boolean committed = host.failurePolicy().allowRecurrenceAuthCommit()
-                    && recurrenceAuthPrefs.edit().putLong(authKey, next).commit();
+                    && generationStore.commitLocked(medicationId, doseId, next);
             if (!committed) {
                 Log.e("AutoDeductionScheduler",
                         "invalidateRecurrenceAuthorization: generation commit failed after "

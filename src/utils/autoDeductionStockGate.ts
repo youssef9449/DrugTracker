@@ -16,6 +16,7 @@ import {
   loadString,
   persist,
   readJsonOutcome,
+  type JsonParserVerdict,
 } from './storage';
 import { persistLastAppliedMutationSeq } from './stockMutationOrdering';
 import { pruneConsumptionLogs } from './pruneDoseConsumption';
@@ -64,16 +65,18 @@ export function loadDurableGlobalAutoDeductEnabled(): boolean {
   return loadString(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'true') !== 'false';
 }
 
-/** Runtime-validated medication-list parser for durable stock reads. */
-function parseMedicationList(raw: unknown): Medication[] | null {
-  if (!Array.isArray(raw) || !raw.every(isValidMedicationRecord)) return null;
-  return raw;
+/** Runtime-validated medication-list parser for durable stock reads (#477). */
+function parseMedicationList(raw: unknown): JsonParserVerdict<Medication[]> {
+  return Array.isArray(raw) && raw.every(isValidMedicationRecord)
+    ? { ok: true, value: raw }
+    : { ok: false, reason: 'medication_list_shape_invalid' };
 }
 
-/** Runtime-validated consumption-log parser for durable stock reads. */
-function parseConsumptionLogs(raw: unknown): ConsumptionLog[] | null {
-  if (!Array.isArray(raw) || !raw.every(isValidConsumptionLogRecord)) return null;
-  return raw;
+/** Runtime-validated consumption-log parser for durable stock reads (#477). */
+function parseConsumptionLogs(raw: unknown): JsonParserVerdict<ConsumptionLog[]> {
+  return Array.isArray(raw) && raw.every(isValidConsumptionLogRecord)
+    ? { ok: true, value: raw }
+    : { ok: false, reason: 'consumption_log_shape_invalid' };
 }
 
 export function loadDurableAutoStockState(): AutoStockDurableState {

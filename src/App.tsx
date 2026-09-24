@@ -90,6 +90,7 @@ export default function App() {
     userContacts,
     userAddresses,
     handleToggleNotifications,
+    handleApplyAppPreferences,
     handleSendTestNotification,
     handleOpenExactAlarmSettings,
   } = useAppRuntime({
@@ -282,38 +283,7 @@ export default function App() {
         exactAlarmPermission={exactAlarmPermission}
         onOpenExactAlarmSettings={handleOpenExactAlarmSettings}
         showToast={showToast}
-        onApplyAppPreferences={async (prefs) => {
-          // Final prefs from Settings drafts — apply independently.
-          // Do NOT use handleToggleNotifications / handleToggleCriticalStockAlerts:
-          // those read committed state and can force notifications back ON when
-          // critical is enabled (or invert based on stale closures).
-          if (prefs.soundEnabled !== soundEnabled) {
-            setSoundEnabled(prefs.soundEnabled);
-          }
-          if (prefs.autoDeductEnabled !== globalAutoDeductEnabled) {
-            handleToggleGlobalAutoDeduct();
-          }
-          if (prefs.notificationsEnabled !== notificationsEnabled) {
-            setNotificationsEnabled(prefs.notificationsEnabled);
-            showToast(
-              prefs.notificationsEnabled
-                ? TOAST_MESSAGES.notificationsOn
-                : TOAST_MESSAGES.notificationsOff
-            );
-          }
-          if (prefs.criticalStockAlertsEnabled !== criticalStockAlertsEnabled) {
-            setCriticalStockAlertsEnabled(prefs.criticalStockAlertsEnabled);
-            showToast(
-              prefs.criticalStockAlertsEnabled
-                ? TOAST_MESSAGES.criticalAlertsOn
-                : TOAST_MESSAGES.criticalAlertsOff
-            );
-          }
-          // Confirm feedback only when the committed preference leaves sound on.
-          if (prefs.soundEnabled) {
-            playSuccessChime();
-          }
-        }}
+        onApplyAppPreferences={handleApplyAppPreferences}
       />
       <DoseAlarmModal
         isOpen={Boolean(alarmingMedication) && Boolean(alarmingDoseId)}

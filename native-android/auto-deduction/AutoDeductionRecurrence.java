@@ -22,7 +22,8 @@ final class AutoDeductionRecurrence {
         long recoveryNowForService();
         FireResult recoverMissedOccurrence(
                 String medicationId, String doseId, String calendarDate,
-                long scheduledAt, double amount, long generation);
+                long scheduledAt, double amount, long generation,
+                String treatmentEndDate, String fallbackTimeHhmm);
         boolean markSuccessorObligationStockApplied(
                 String medicationId, String doseId, String calendarDate);
     }
